@@ -51,6 +51,23 @@ function Write-ServiceLog {
     Write-Host $logLine
 }
 
+function Test-WmiHealth {
+    param([int]$TimeoutSeconds = 5)
+    try {
+        $testProc = Start-Process -FilePath "python" `
+            -ArgumentList '-c', 'import platform; platform.machine()' `
+            -NoNewWindow -PassThru -ErrorAction SilentlyContinue
+        $finished = $testProc.WaitForExit($TimeoutSeconds * 1000)
+        if (-not $finished) {
+            Stop-Process -Id $testProc.Id -Force -ErrorAction SilentlyContinue
+            return $false
+        }
+        return ($testProc.ExitCode -eq 0)
+    } catch {
+        return $false
+    }
+}
+
 Write-ServiceLog "=========================================="
 Write-ServiceLog "Monitor Page Service Starting"
 Write-ServiceLog "Mode: $AppMode"
@@ -420,6 +437,26 @@ $env:WORKER_AUTO_START = "false"
 
 # Set API_PORT for programmatic uvicorn (app/main.py __main__ block)
 $env:API_PORT = $ApiPort
+
+# WMI 헬스체크: API 시작 전 WMI 상태 확인 및 자동 복구
+Write-ServiceLog "Checking WMI health before API start..."
+if (-not (Test-WmiHealth -TimeoutSeconds 5)) {
+    Write-ServiceLog "WMI health check FAILED — attempting recovery: Restart-Service winmgmt -Force"
+    try {
+        Restart-Service winmgmt -Force -ErrorAction Stop
+        Write-ServiceLog "winmgmt restarted, waiting 5 seconds..."
+        Start-Sleep -Seconds 5
+        if (Test-WmiHealth -TimeoutSeconds 5) {
+            Write-ServiceLog "WMI health check PASSED after recovery."
+        } else {
+            Write-ServiceLog "WARNING: WMI still unhealthy after recovery — proceeding with API start (best-effort)."
+        }
+    } catch {
+        Write-ServiceLog "WARNING: Failed to restart winmgmt: $_ — proceeding with API start (best-effort)."
+    }
+} else {
+    Write-ServiceLog "WMI health check PASSED."
+}
 
 try {
     # Programmatic uvicorn: python -m app.main
