@@ -457,7 +457,7 @@
 									}}
 									class="w-full rounded border border-white/20 bg-black/50 px-1 py-0.5 text-[9px] text-white focus:outline-none"
 								>
-									<option value="">??변�???/option>
+									<option value="">카테고리 변경</option>
 									{#each flatCategories as cat}
 										<option value={cat.id}>{cat.full_path}</option>
 									{/each}
