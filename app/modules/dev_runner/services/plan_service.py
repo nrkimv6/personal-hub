@@ -1219,15 +1219,14 @@ class PlanService:
 
     def sync_plans(self) -> dict:
         """plan 동기화 — 이전 상태와 비교하여 변경 요약 반환"""
-        # 이전 상태 스냅샷 (path → {status, done, total})
-        old_plans = {p.path: p for p in self.list_plans(include_ignored=True)}
+        # 이전 상태 스냅샷 (활성 plan만 — archive는 sync 대상 아님)
+        old_plans = {p.path: p for p in self.list_plans()}
         old_keys = set(old_plans.keys())
 
-        # 디스크에서 다시 스캔 (캐시 + archive 캐시 모두 무효화)
+        # 디스크에서 다시 스캔 (캐시 무효화)
         self._load_registered_paths()
         self.invalidate_plans_cache()
-        self._archive_cache.clear()
-        new_plans_list = self.list_plans(include_ignored=True)
+        new_plans_list = self.list_plans()
         new_plans = {p.path: p for p in new_plans_list}
         new_keys = set(new_plans.keys())
 
