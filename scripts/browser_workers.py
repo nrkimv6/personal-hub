@@ -292,12 +292,55 @@ class BrowserWorkerManager:
         time.sleep(2)
         self.start()
 
+    # ── WMI 헬스체크 ─────────────────────────────────────────────
+    def _check_wmi_health(self) -> bool:
+        """WMI 서비스 정상 여부 확인. platform.machine() 호출이 5초 내 완료되면 True."""
+        try:
+            result = subprocess.run(
+                ["python", "-c", "import platform; platform.machine()"],
+                timeout=5,
+                capture_output=True,
+            )
+            return result.returncode == 0
+        except subprocess.TimeoutExpired:
+            return False
+        except Exception:
+            return False
+
+    def _fix_wmi(self) -> bool:
+        """WMI 서비스(winmgmt) 재시작. 성공 시 True."""
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command", "Restart-Service winmgmt -Force"],
+                timeout=15,
+                capture_output=True,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     # ── restart-api ──────────────────────────────────────────────
     def restart_api(self):
         print(f"\n{YELLOW}{'=' * 40}")
         print(f"  Restarting API Server")
         print(f"  (Hot reload disabled - manual restart){RESET}")
         print(f"{YELLOW}{'=' * 40}{RESET}\n")
+
+        # WMI 사전 체크
+        cprint("Checking WMI health...", YELLOW)
+        if not self._check_wmi_health():
+            cprint("WMI is unresponsive. Attempting to restart winmgmt service...", YELLOW)
+            if self._fix_wmi():
+                cprint("winmgmt restarted. Waiting 5s...", YELLOW)
+                time.sleep(5)
+                if self._check_wmi_health():
+                    cprint("WMI recovered successfully.", GREEN)
+                else:
+                    cprint("WMI still unresponsive after restart. Proceeding anyway.", YELLOW)
+            else:
+                cprint("Failed to restart winmgmt (may need admin rights). Proceeding anyway.", YELLOW)
+        else:
+            cprint("WMI OK", GREEN)
 
         url = f"http://localhost:{self.api_port}/api/v1/system/self-restart?delay=2&reason=browser_workers_py"
 
