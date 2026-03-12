@@ -756,6 +756,8 @@ class PlanService:
     def _update_plan_headers(content: str, total: int) -> str:
         """상태→구현완료, 진행률→100%, [→ID]→[x] 치환, 푸터 갱신"""
         content = re.sub(r'^(>\s*상태:\s*).*$', r'\1구현완료', content, flags=re.MULTILINE)
+        # branch/worktree 헤더 제거 — 잔존 시 /done 스킬 2.5단계에서 차단됨 (post-merge 이후이므로 삭제 안전)
+        content = re.sub(r'^>\s*(branch|worktree):.*\n?', '', content, flags=re.MULTILINE)
         content = re.sub(
             r'^(>\s*진행률:\s*)[\d/\s()%]+$',
             f'> 진행률: {total}/{total} (100%)',
