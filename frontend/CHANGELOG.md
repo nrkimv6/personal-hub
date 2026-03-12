@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.86.0] - 2026-03-13
+### Added
+- `/recovery` 서버 라우트 추가: WMI 상태 조회(GET) + WMI 재시작(POST), Admin dev 서버 전용
+
 ## [2.85.1] - 2026-03-11
 ### Fixed
 - cleanup_stale_runners Phase 1 루프에서 정리된 runner ID를 cleaned_active_ids에 수집 (중복 카운트 방지)
