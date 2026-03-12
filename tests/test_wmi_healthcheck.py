@@ -35,3 +35,12 @@ class TestCheckWmiHealth:
             timeout=5,
             capture_output=True,
         )
+
+    def test_check_wmi_health_timeout(self):
+        """subprocess.TimeoutExpired 발생 시 False 반환."""
+        mgr = _make_manager()
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="python", timeout=5)):
+            result = mgr._check_wmi_health()
+
+        assert result is False
