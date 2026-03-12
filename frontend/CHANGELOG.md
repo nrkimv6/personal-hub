@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.87.0] - 2026-03-13
+### Added
+- `/recovery` 긴급 복구 UI 페이지: WMI/API 상태 표시, WMI 재시작 버튼, 5초 폴링 자동 갱신 (Admin dev 서버 전용)
+
 ## [2.86.0] - 2026-03-13
 ### Added
 - `/recovery` 서버 라우트 추가: WMI 상태 조회(GET) + WMI 재시작(POST), Admin dev 서버 전용
