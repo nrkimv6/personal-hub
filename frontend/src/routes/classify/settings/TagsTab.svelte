@@ -326,10 +326,11 @@
             {#if editingFolderRule}
               <div class="space-y-3">
                 <div>
-                  <label class="mb-1 block text-xs font-medium text-muted-foreground">
+                  <label for="folder-template" class="mb-1 block text-xs font-medium text-muted-foreground">
                     폴더 경로 템플릿
                   </label>
                   <input
+                    id="folder-template"
                     type="text"
                     bind:value={folderRuleForm.folder_template}
                     placeholder="{category}/{year}/{tag}"
@@ -340,9 +341,9 @@
                   </p>
                 </div>
                 <div>
-                  <label class="mb-1 block text-xs font-medium text-muted-foreground">
+                  <span class="mb-1 block text-xs font-medium text-muted-foreground">
                     파일 처리 방식
-                  </label>
+                  </span>
                   <div class="flex gap-1">
                     {#each [['move', '이동'], ['copy', '복사'], ['link', '링크']] as [val, label]}
                       <button
