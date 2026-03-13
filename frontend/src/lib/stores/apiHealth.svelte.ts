@@ -9,11 +9,12 @@
 
 const API_BASE = '/api/v1';
 
-type ApiHealthState = 'connected' | 'disconnected' | 'reconnecting';
+type ApiHealthState = 'connected' | 'disconnected' | 'reconnecting' | 'dead';
 
 function createApiHealthStore() {
 	let state = $state<ApiHealthState>('connected');
 	let disconnectedAt = $state<number | null>(null);
+	let lastDeath = $state<{ timestamp: string; cause: string; details: string } | null>(null);
 
 	let errorCount = 0;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -28,7 +29,21 @@ function createApiHealthStore() {
 					reportConnectionSuccess();
 				}
 			} catch {
-				// 아직 연결 안 됨 — 계속 폴링
+				// API 연결 실패 — death_log 확인
+				try {
+					const statusRes = await fetch('/__local/server-status');
+					if (statusRes.ok) {
+						const status = await statusRes.json();
+						if (status.alive === false) {
+							// 폴링은 유지 — API 복귀 시 자동으로 connected로 전환되어야 함
+							state = 'dead';
+							lastDeath = status.lastEvent ?? null;
+						}
+						// alive === true: 재시작 중으로 판단, reconnecting 유지
+					}
+				} catch {
+					// server-status 엔드포인트 오류 무시 — reconnecting 유지
+				}
 			}
 		}, 2000);
 	}
@@ -51,9 +66,10 @@ function createApiHealthStore() {
 
 	function reportConnectionSuccess() {
 		errorCount = 0;
-		if (state === 'disconnected' || state === 'reconnecting') {
+		if (state === 'disconnected' || state === 'reconnecting' || state === 'dead') {
 			stopReconnectPolling();
 			state = 'connected';
+			lastDeath = null;
 			if (typeof window !== 'undefined') {
 				window.dispatchEvent(new Event('api:reconnected'));
 			}
@@ -67,6 +83,9 @@ function createApiHealthStore() {
 		},
 		get disconnectedAt() {
 			return disconnectedAt;
+		},
+		get lastDeath() {
+			return lastDeath;
 		},
 		reportConnectionError,
 		reportConnectionSuccess
