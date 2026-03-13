@@ -13,6 +13,7 @@
   type="button"
   role="switch"
   aria-checked={checked}
+  aria-label="toggle"
   {disabled}
   class="relative inline-flex shrink-0 cursor-pointer rounded-full transition-colors
          ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
@@ -26,5 +27,5 @@
            {checked ? sizes[size].translate : 'translate-x-0.5'}
            {sizes[size].thumb}"
     style="margin-top: 0.125rem;"
-  />
+  ></span>
 </button>

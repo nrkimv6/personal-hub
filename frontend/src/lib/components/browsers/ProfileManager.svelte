@@ -488,7 +488,7 @@
 <!-- 서비스 계정 추가 모달 -->
 {#if showAddAccountModal}
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={closeAddAccountModal} onkeydown={(e) => e.key === 'Escape' && closeAddAccountModal()} role="dialog" aria-modal="true" tabindex="-1">
-    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="document">
+    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
       <h2 class="text-xl font-bold mb-4">서비스 계정 추가</h2>
 
       <form onsubmit={(e) => { e.preventDefault(); handleAddAccount(); }} class="space-y-4">
