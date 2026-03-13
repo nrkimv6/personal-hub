@@ -27,7 +27,7 @@
     <div
       class="{sizes[size].height} {variants[variant]} rounded-full transition-all duration-300"
       style="width: {percentage}%"
-    />
+    ></div>
   </div>
   {#if showLabel}
     <span class="{sizes[size].text} text-muted-foreground font-medium">
