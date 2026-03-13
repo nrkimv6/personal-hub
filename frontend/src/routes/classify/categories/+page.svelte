@@ -627,17 +627,17 @@
 													</select>
 												</div>
 												<div>
-													<label class="block text-[11px] text-muted-foreground mb-1">조건 값</label>
+													<label for="rule-condition-value" class="block text-[11px] text-muted-foreground mb-1">조건 값</label>
 													<input type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={editRuleForm.condition_value} placeholder=".jpg,.png | >10MB" />
 												</div>
 											</div>
 											<div class="grid grid-cols-2 gap-2">
 												<div>
-													<label class="block text-[11px] text-muted-foreground mb-1">폴더 템플릿 *</label>
+													<label for="rule-folder-template" class="block text-[11px] text-muted-foreground mb-1">폴더 템플릿 *</label>
 													<input type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={editRuleForm.folder_template} placeholder="{'{'}category{'}'}/{'{'}year{'}'}" />
 												</div>
 												<div>
-													<label class="block text-[11px] text-muted-foreground mb-1">우선순위</label>
+													<label for="rule-priority" class="block text-[11px] text-muted-foreground mb-1">우선순위</label>
 													<input type="number" class="w-full text-xs border rounded px-2 py-1.5 bg-background" bind:value={editRuleForm.priority} />
 												</div>
 											</div>
@@ -688,18 +688,18 @@
 										</select>
 									</div>
 									<div>
-										<label class="block text-[11px] text-muted-foreground mb-1">조건 값</label>
-										<input type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={newRuleForm.condition_value} placeholder=".jpg,.png | >10MB" />
+										<label for="rule-condition-value" class="block text-[11px] text-muted-foreground mb-1">조건 값</label>
+										<input id="rule-condition-value" type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={newRuleForm.condition_value} placeholder=".jpg,.png | >10MB" />
 									</div>
 								</div>
 								<div class="grid grid-cols-2 gap-2">
 									<div>
-										<label class="block text-[11px] text-muted-foreground mb-1">폴더 템플릿 *</label>
-										<input type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={newRuleForm.folder_template} placeholder="{'{'}category{'}'}/{'{'}year{'}'}" />
+										<label for="rule-folder-template" class="block text-[11px] text-muted-foreground mb-1">폴더 템플릿 *</label>
+										<input id="rule-folder-template" type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={newRuleForm.folder_template} placeholder="{'{'}category{'}'}/{'{'}year{'}'}" />
 									</div>
 									<div>
-										<label class="block text-[11px] text-muted-foreground mb-1">우선순위</label>
-										<input type="number" class="w-full text-xs border rounded px-2 py-1.5 bg-background" bind:value={newRuleForm.priority} />
+										<label for="rule-priority" class="block text-[11px] text-muted-foreground mb-1">우선순위</label>
+										<input id="rule-priority" type="number" class="w-full text-xs border rounded px-2 py-1.5 bg-background" bind:value={newRuleForm.priority} />
 									</div>
 								</div>
 								<div class="flex gap-2 justify-end">
