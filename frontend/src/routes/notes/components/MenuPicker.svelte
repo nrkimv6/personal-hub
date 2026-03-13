@@ -118,7 +118,6 @@
 
       <!-- 목록 -->
       <ul class="item-list">
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
         <li
           class="item item--clear"
           class:focused={focusedIndex === 0}
@@ -137,7 +136,6 @@
           {/if}
           {#each group.items as item}
             {@const flatIdx = flatList.indexOf(item.id)}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
             <li
               class="item"
               class:item--selected={selectedMenuId === item.id}
@@ -182,7 +180,6 @@
 
     <ul class="item-list">
       <!-- 연결 해제 옵션 -->
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
       <li
         class="item item--clear"
         class:focused={focusedIndex === 0}
@@ -202,7 +199,6 @@
         {/if}
         {#each group.items as item}
           {@const flatIdx = flatList.indexOf(item.id)}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
           <li
             class="item"
             class:item--selected={selectedMenuId === item.id}
