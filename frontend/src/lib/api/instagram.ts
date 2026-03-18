@@ -638,7 +638,7 @@ export const collectApi = {
 
   // 복수 URL 배치 크롤링 (모든 URL 타입 지원)
   crawlByUrls: (urls: string[], options?: { serviceAccountId?: number; autoAnalyze?: boolean; priority?: number }) =>
-    request<{ created: number; skipped: number; errors: string[]; request_ids: number[] }>(`/v2/crawl/urls`, {
+    requestV2<{ created: number; skipped: number; errors: string[]; request_ids: number[] }>(`/crawl/urls`, {
       method: 'POST',
       body: JSON.stringify({
         urls,

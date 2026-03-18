@@ -5,6 +5,7 @@ RIGHT-BICEP, CORRECT 원칙 적용
 """
 
 import pytest
+from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from datetime import datetime
 
@@ -273,3 +274,132 @@ class TestCrawlRunRoutes:
         assert "items" in data
         assert "total" in data
         assert "pages" in data
+
+
+class TestUrlCrawlRoutes:
+    """URL 크롤링 API 라우트 테스트 (await 버그 수정 검증)."""
+
+    def _make_mock_request(self, url: str = "https://example.com/test", url_type: str = "generic") -> MagicMock:
+        """테스트용 CrawlRequest mock 객체 생성."""
+        mock_req = MagicMock()
+        mock_req.id = 1
+        mock_req.url = url
+        mock_req.url_type = url_type
+        mock_req.status = "pending"
+        return mock_req
+
+    def test_create_url_crawl_right(self, client):
+        """[Right] 정상 URL POST → 200 + CrawlUrlResponse 반환."""
+        mock_req = self._make_mock_request()
+        with patch(
+            "app.routes.crawl.universal_crawl_service.create_request",
+            new=AsyncMock(return_value=(mock_req, "크롤링 요청이 등록되었습니다. (ID: 1)"))
+        ):
+            response = client.post("/api/v2/crawl/url", json={
+                "url": "https://example.com/test",
+                "auto_analyze": True,
+                "priority": 0,
+            })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["request_id"] == 1
+        assert data["url"] == "https://example.com/test"
+        assert data["url_type"] == "generic"
+        assert data["status"] == "pending"
+        assert "message" in data
+
+    def test_create_url_crawl_error_valueerror(self, client):
+        """[Error] service가 ValueError raise → 400 반환."""
+        with patch(
+            "app.routes.crawl.universal_crawl_service.create_request",
+            new=AsyncMock(side_effect=ValueError("Instagram URL은 지원하지 않습니다."))
+        ):
+            response = client.post("/api/v2/crawl/url", json={
+                "url": "https://www.instagram.com/p/test/",
+                "auto_analyze": True,
+                "priority": 0,
+            })
+
+        assert response.status_code == 400
+
+    def test_create_url_crawl_error_generic(self, client):
+        """[Error] service가 Exception raise → 500 + '크롤링 요청 생성에 실패했습니다.' 메시지."""
+        with patch(
+            "app.routes.crawl.universal_crawl_service.create_request",
+            new=AsyncMock(side_effect=Exception("DB 연결 실패"))
+        ):
+            response = client.post("/api/v2/crawl/url", json={
+                "url": "https://example.com/test",
+                "auto_analyze": True,
+                "priority": 0,
+            })
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "크롤링 요청 생성에 실패했습니다."
+
+    def test_create_batch_url_crawl_right(self, client):
+        """[Right] 2개 URL POST → 200 + created=2."""
+        call_count = 0
+
+        async def mock_create(db, url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            mock_req = MagicMock()
+            mock_req.id = call_count
+            return mock_req, f"등록됨 (ID: {call_count})"
+
+        with patch("app.routes.crawl.universal_crawl_service.create_request", side_effect=mock_create):
+            response = client.post("/api/v2/crawl/urls", json={
+                "urls": ["https://example.com/1", "https://example.com/2"],
+                "auto_analyze": True,
+                "priority": 0,
+            })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["created"] == 2
+        assert data["skipped"] == 0
+        assert data["errors"] == []
+
+    def test_create_batch_url_crawl_boundary_max(self, client):
+        """[Boundary] 21개 URL → 400/422 에러 (Pydantic max_length 또는 route 검증)."""
+        response = client.post("/api/v2/crawl/urls", json={
+            "urls": [f"https://example.com/{i}" for i in range(21)],
+            "auto_analyze": True,
+            "priority": 0,
+        })
+
+        # Pydantic 스키마 max_length=20 제약으로 422, 또는 route에서 400
+        assert response.status_code in (400, 422)
+
+    def test_create_batch_url_crawl_error_partial(self, client):
+        """[Error] 3개 URL 중 1개에서 Exception → 200 + created=2, errors 배열에 에러 URL."""
+        call_count = 0
+
+        async def mock_create(db, url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise Exception("2번째 URL 처리 실패")
+            mock_req = MagicMock()
+            mock_req.id = call_count
+            return mock_req, f"등록됨 (ID: {call_count})"
+
+        with patch("app.routes.crawl.universal_crawl_service.create_request", side_effect=mock_create):
+            response = client.post("/api/v2/crawl/urls", json={
+                "urls": [
+                    "https://example.com/1",
+                    "https://example.com/2",
+                    "https://example.com/3",
+                ],
+                "auto_analyze": True,
+                "priority": 0,
+            })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["created"] == 2
+        assert len(data["errors"]) == 1
+        assert "example.com/2" in data["errors"][0]

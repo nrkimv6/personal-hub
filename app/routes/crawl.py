@@ -193,7 +193,7 @@ async def create_url_crawl_request(
     - 요청은 pending 상태로 생성되며, 워커가 처리
     """
     try:
-        request, message = universal_crawl_service.create_request(
+        request, message = await universal_crawl_service.create_request(
             db=db,
             url=body.url,
             service_account_id=body.service_account_id,
@@ -260,7 +260,7 @@ async def create_batch_url_crawl_request(
                 continue
 
             # 크롤링 요청 생성
-            request, _ = universal_crawl_service.create_request(
+            request, _ = await universal_crawl_service.create_request(
                 db=db,
                 url=url,
                 service_account_id=body.service_account_id,

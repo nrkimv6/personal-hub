@@ -531,3 +531,57 @@ class TestUniversalCrawlAnalyzerService:
         assert "total" in stats
         assert "pending" in stats
         assert "completed" in stats
+
+
+class TestUrlCrawlIntegrationNoMock:
+    """T3: await 누락 버그 재현/통합 TC — mock 없이 실제 서비스 경로 검증."""
+
+    def test_url_crawl_integration_no_mock(self, client, test_db_session):
+        """mock 없이 POST /api/v2/crawl/url → 200 + DB에 CrawlRequest 레코드 실제 생성.
+        await 누락 시 coroutine unpacking 실패로 500 반환되므로 200 확인이 핵심.
+        """
+        response = client.post("/api/v2/crawl/url", json={
+            "url": "https://www.jayang.or.kr/main/sub.html?boardID=www27&num=10598&Mode=view",
+            "auto_analyze": True,
+            "priority": 0,
+        })
+
+        assert response.status_code == 200, f"await 누락 시 500, 수정 후 200 기대. 응답: {response.text}"
+        data = response.json()
+        assert data["success"] is True
+        assert data["request_id"] is not None
+
+        # DB에 실제 레코드 생성 확인
+        db_record = test_db_session.query(CrawlRequest).filter(
+            CrawlRequest.id == data["request_id"]
+        ).first()
+        assert db_record is not None
+        # Redis 모드: 'queued', SQLite 폴링 모드: 'pending'
+        assert db_record.status in ("pending", "queued")
+
+    def test_batch_url_crawl_integration_no_mock(self, client, test_db_session):
+        """mock 없이 POST /api/v2/crawl/urls 2개 URL → 200 + DB에 2건 생성.
+        배치 엔드포인트의 await 누락도 동일하게 수정됐는지 검증.
+        """
+        urls = [
+            "https://www.jayang.or.kr/main/sub.html?boardID=www27&num=10598&Mode=view",
+            "https://example.com/test-batch-integration-unique",
+        ]
+        response = client.post("/api/v2/crawl/urls", json={
+            "urls": urls,
+            "auto_analyze": True,
+            "priority": 0,
+        })
+
+        assert response.status_code == 200, f"await 누락 시 500, 수정 후 200 기대. 응답: {response.text}"
+        data = response.json()
+        assert data["created"] == 2
+        assert data["errors"] == []
+
+        # DB에 2건 생성 확인
+        for request_id in data["request_ids"]:
+            db_record = test_db_session.query(CrawlRequest).filter(
+                CrawlRequest.id == request_id
+            ).first()
+            assert db_record is not None
+            assert db_record.status in ("pending", "queued")
