@@ -11,7 +11,7 @@ from typing import Optional, Literal
 UrlType = Literal["google_form", "naver_form", "naver_blog", "generic", "other", "instagram", "instagram_post"]
 
 # 요청 상태 정의
-CrawlStatus = Literal["pending", "processing", "completed", "failed"]
+CrawlStatus = Literal["pending", "queued", "picked", "processing", "completed", "failed", "cancelled"]
 
 # 요청 출처 정의
 RequestedBy = Literal["manual", "pwa_share", "api"]
