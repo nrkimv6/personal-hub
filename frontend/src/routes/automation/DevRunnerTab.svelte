@@ -244,6 +244,8 @@
 			try {
 				const parsed = JSON.parse(data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null }[] };
 				const runners = parsed.runners ?? [];
+				// runner 종료 감지를 위해 업데이트 전 running 상태 캡처
+				const prevRunningIds = new Set(runnerTabs.filter(t => t.running).map(t => t.id));
 				const runningRunner = runners.find(r => r.status === 'running');
 				const anyRunner = runners[0];
 				const r = runningRunner ?? anyRunner;
@@ -259,6 +261,11 @@
 					} as DevRunnerRunStatusResponse;
 				} else if (runners.length === 0 && runStatus) {
 					runStatus = { ...runStatus, running: false };
+					// runner 목록이 완전히 사라진 경우 (프로세스 종료 + Redis 정리 완료)
+					if (prevRunningIds.size > 0) {
+						void fetchPlans();
+						taskListRefreshTick++;
+					}
 				}
 				if (runners.length > 0) {
 					const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
@@ -273,6 +280,15 @@
 					}
 					if (!activeTabId && runnerTabs.length > 0) {
 						activeTabId = runnerTabs[runnerTabs.length - 1].id;
+					}
+					// running → stopped 전이 감지: 이전에 running이었던 runner가 stopped이거나 사라진 경우
+					const anyBecameStopped = [...prevRunningIds].some(id => {
+						const tab = runnerTabs.find(t => t.id === id);
+						return !tab || !tab.running;
+					});
+					if (anyBecameStopped) {
+						void fetchPlans();
+						taskListRefreshTick++;
 					}
 				}
 			} catch {
