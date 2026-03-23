@@ -228,14 +228,7 @@
 				{killing ? '종료 중...' : '강제 종료'}
 			</button>
 		{/if}
-
-		<button
-			class="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
-			onclick={onClose}
-			title="탭 닫기"
-		>
-			×
-		</button>
+
 	</div>
 
 	{#if stopError}

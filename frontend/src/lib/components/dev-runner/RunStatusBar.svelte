@@ -27,6 +27,12 @@
 		onExecute?: () => void;
 		onStopRunner?: (id: string) => void;
 		onKillRunner?: (id: string) => void;
+		collapsed?: boolean;
+		onToggleCollapse?: () => void;
+		onSelectRunner?: (id: string) => void;
+		onCloseAllTerminated?: () => void;
+		activeRunnerId?: string | null;
+		onShowLogs?: () => void;
 	}
 
 	let {
@@ -41,6 +47,7 @@
 		onExecute,
 		onStopRunner,
 		onKillRunner,
+		collapsed = false, onToggleCollapse, onSelectRunner, onCloseAllTerminated, activeRunnerId = null, onShowLogs,
 	}: Props = $props();
 
 	let runningCount = $derived(runners.filter(r => r.running).length);
@@ -74,6 +81,19 @@
 						{/if}
 					{/each}
 				</div>
+			{/if}
+
+			{#if runners.some(r => !r.running) && onCloseAllTerminated}
+				<button
+					onclick={onCloseAllTerminated}
+					class="h-5 w-5 flex items-center justify-center rounded hover:bg-secondary transition-colors text-muted-foreground hover:text-destructive"
+					title="종료된 runner 탭 모두 닫기"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
+						<path d="M10 11v6"/><path d="M14 11v6"/>
+					</svg>
+				</button>
 			{/if}
 
 			<!-- Zap 아이콘 + runner count + elapsed -->
@@ -165,7 +185,31 @@
 				{/if}
 			</div>
 
-			{#if onExecute}
+			{#if onShowLogs}
+				<button
+					onclick={onShowLogs}
+					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors text-muted-foreground"
+					title="통합 로그"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+				</button>
+			{/if}
+
+			{#if runners.length > 0 && onToggleCollapse}
+				<button
+					onclick={onToggleCollapse}
+					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors text-muted-foreground"
+					title={collapsed ? '펼치기' : '접기'}
+				>
+					{#if collapsed}
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+					{:else}
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+					{/if}
+				</button>
+			{/if}
+
+		{#if onExecute}
 				<button
 					onclick={onExecute}
 					class="px-2.5 py-1 text-[11px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
@@ -178,10 +222,16 @@
 	</div>
 
 	<!-- Runner 목록 행 (runner가 1개 이상일 때) -->
-	{#if runners.length > 0}
-		<div class="divide-y divide-border">
+	{#if runners.length > 0 && !collapsed}
+		<div class="divide-y divide-border overflow-y-auto" style="max-height: 5.25rem;">
 			{#each runners as runner (runner.id)}
-				<div class="flex items-center gap-2 px-3 py-1.5 text-xs group hover:bg-secondary/50">
+				<div
+				class="flex items-center gap-2 px-3 py-1.5 text-xs group hover:bg-secondary/50 cursor-pointer {activeRunnerId === runner.id ? 'bg-primary/10' : ''}"
+				onclick={() => onSelectRunner?.(runner.id)}
+				role="button"
+				tabindex="0"
+				onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelectRunner?.(runner.id); }}
+			>
 					<!-- 상태 dot -->
 					{#if runner.running}
 						<div class="pulse-dot bg-status-running shrink-0"></div>
