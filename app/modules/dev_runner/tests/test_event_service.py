@@ -11,7 +11,11 @@ import fakeredis.aioredis
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.modules.dev_runner.services.event_service import EventService, RUNNER_KEY_PREFIX, REDIS_STATE_KEY
+from app.modules.dev_runner.services.event_service import (
+    EventService, RUNNER_KEY_PREFIX, REDIS_STATE_KEY,
+    LOG_CHANNEL_PATTERN, MERGE_LOG_CHANNEL_PATTERN,
+    _LOG_COMPLETED_SENTINEL, _MERGE_LOG_COMPLETED_SENTINEL,
+)
 
 
 # ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -219,3 +223,323 @@ class TestStreamEventsIntegration:
             pass  # 정상 — 알 수 없는 키는 무시됨
 
         await gen.aclose()
+
+
+# ─── _extract_runner_id_from_channel 테스트 ──────────────────────────────────
+
+class TestExtractRunnerIdFromChannel:
+    def test_extract_runner_id_from_channel_right(self, event_service):
+        """R: 정상 로그 채널 → runner_id 반환"""
+        result = event_service._extract_runner_id_from_channel("plan-runner:logs:abc123")
+        assert result == "abc123"
+
+    def test_extract_runner_id_from_channel_merge(self, event_service):
+        """R: 머지 로그 채널 → runner_id 반환"""
+        result = event_service._extract_runner_id_from_channel("plan-runner:merge-log:def456")
+        assert result == "def456"
+
+    def test_extract_runner_id_from_channel_boundary_empty(self, event_service):
+        """B: 빈 문자열 및 콜론 없는 문자열 → None 반환"""
+        assert event_service._extract_runner_id_from_channel("") is None
+        assert event_service._extract_runner_id_from_channel("nocolon") is None
+
+    def test_extract_runner_id_from_channel_boundary_trailing_colon(self, event_service):
+        """B: 콜론으로 끝나는 채널 (runner_id 빈값) → None 반환"""
+        result = event_service._extract_runner_id_from_channel("plan-runner:logs:")
+        assert result is None
+
+
+# ─── stream_events 로그 통합 테스트 ─────────────────────────────────────────
+
+def _make_dual_pubsub_mocks(ks_messages=None, log_messages=None):
+    """keyspace/log pubsub용 별도 mock 쌍 생성 헬퍼."""
+    mock_ks = AsyncMock()
+    mock_ks.psubscribe = AsyncMock()
+    mock_ks.punsubscribe = AsyncMock()
+    mock_ks.aclose = AsyncMock()
+    mock_ks.get_message = AsyncMock(
+        side_effect=(ks_messages + [None] * 100) if ks_messages else None,
+        return_value=None if not ks_messages else None,
+    )
+    if not ks_messages:
+        mock_ks.get_message = AsyncMock(return_value=None)
+
+    mock_log = AsyncMock()
+    mock_log.psubscribe = AsyncMock()
+    mock_log.punsubscribe = AsyncMock()
+    mock_log.aclose = AsyncMock()
+    if not log_messages:
+        mock_log.get_message = AsyncMock(return_value=None)
+    else:
+        mock_log.get_message = AsyncMock(side_effect=log_messages + [None] * 100)
+
+    call_count = 0
+    def pubsub_factory():
+        nonlocal call_count
+        call_count += 1
+        return mock_ks if call_count <= 1 else mock_log
+
+    return mock_ks, mock_log, pubsub_factory
+
+
+async def _collect_events(gen, count: int, timeout: float = 2.0) -> list[str]:
+    """제너레이터에서 최대 count개 이벤트를 수집"""
+    events = []
+    for _ in range(count):
+        try:
+            event = await asyncio.wait_for(gen.__anext__(), timeout=timeout)
+            events.append(event)
+        except (StopAsyncIteration, asyncio.TimeoutError):
+            break
+    return events
+
+
+class TestStreamEventsLogIntegration:
+    @pytest.mark.asyncio
+    async def test_stream_events_log_message_yielded(self, event_service, async_redis):
+        """R: 로그 pubsub 메시지 → event: log + runner_id + line 수신"""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner01",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": "hello world",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        log_events = [e for e in events if e.startswith("event: log\n")]
+        assert len(log_events) >= 1
+        data = json.loads(log_events[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner01"
+        assert data["line"] == "hello world"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_completed_signal(self, event_service, async_redis):
+        """R: __COMPLETED__ → event: log_completed + runner_id"""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner02",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": _LOG_COMPLETED_SENTINEL,
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner02"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_merge_log_message(self, event_service, async_redis):
+        """R: 머지 로그 메시지 → event: merge_log"""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:merge-log:runner03",
+            "pattern": MERGE_LOG_CHANNEL_PATTERN,
+            "data": "Merging branch impl/foo",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        merge_events = [e for e in events if e.startswith("event: merge_log\n")]
+        assert len(merge_events) >= 1
+        data = json.loads(merge_events[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner03"
+        assert data["line"] == "Merging branch impl/foo"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_merge_log_completed_signal(self, event_service, async_redis):
+        """R: __MERGE_COMPLETED__ → event: merge_log_completed"""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:merge-log:runner04",
+            "pattern": MERGE_LOG_CHANNEL_PATTERN,
+            "data": _MERGE_LOG_COMPLETED_SENTINEL,
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: merge_log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner04"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_existing_keyspace_events_still_work(self, event_service, async_redis, sync_redis):
+        """R: 로그 통합 후에도 status 이벤트 정상 동작 회귀 확인"""
+        runner_id = "runner05"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.sadd("plan-runner:active_runners", runner_id)
+
+        ks_msg = {
+            "type": "message",
+            "data": f"{RUNNER_KEY_PREFIX}:{runner_id}:status",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(ks_messages=[ks_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 5)
+        await gen.aclose()
+
+        status_events = [e for e in events if e.startswith("event: status\n")]
+        assert len(status_events) >= 1
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_and_keyspace_concurrent(self, event_service, async_redis, sync_redis):
+        """B: keyspace 이벤트와 로그 이벤트가 동시 도착 → 둘 다 누락 없이 yield"""
+        runner_id = "runner06"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+
+        ks_msg = {"type": "message", "data": f"{RUNNER_KEY_PREFIX}:{runner_id}:status"}
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner06",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": "concurrent log line",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(ks_messages=[ks_msg], log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 6)
+        await gen.aclose()
+
+        event_types = set()
+        for e in events:
+            for etype in ("connected", "status", "log", "tracking"):
+                if e.startswith(f"event: {etype}\n"):
+                    event_types.add(etype)
+        assert "status" in event_types
+        assert "log" in event_types
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_empty_data(self, event_service, async_redis):
+        """E: 로그 데이터가 빈 문자열 → 크래시 없이 무시"""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner07",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": "",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 3)
+        await gen.aclose()
+
+        log_events = [e for e in events if e.startswith("event: log\n")]
+        assert len(log_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_pubsub_redis_disconnect(self, event_service, async_redis):
+        """E: 로그 pubsub Redis 연결 끊김 → redis_disconnected 이벤트 yield"""
+        import redis.asyncio as aioredis
+
+        mock_ks = AsyncMock()
+        mock_ks.psubscribe = AsyncMock()
+        mock_ks.punsubscribe = AsyncMock()
+        mock_ks.aclose = AsyncMock()
+        mock_ks.get_message = AsyncMock(return_value=None)
+
+        log_called = 0
+        async def log_get_message_raise(**kwargs):
+            nonlocal log_called
+            log_called += 1
+            if log_called == 1:
+                raise aioredis.ConnectionError("log redis disconnected")
+            return None
+
+        mock_log = AsyncMock()
+        mock_log.psubscribe = AsyncMock()
+        mock_log.punsubscribe = AsyncMock()
+        mock_log.aclose = AsyncMock()
+        mock_log.get_message = AsyncMock(side_effect=log_get_message_raise)
+
+        pubsub_call = 0
+        def factory():
+            nonlocal pubsub_call
+            pubsub_call += 1
+            return mock_ks if pubsub_call % 2 == 1 else mock_log
+
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 5)
+        await gen.aclose()
+
+        disconnected = [e for e in events if "redis_disconnected" in e]
+        assert len(disconnected) >= 1
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_pubsub_reconnect_after_none(self, event_service, async_redis):
+        """E(Existence): log_pubsub 에러 후 log_pubsub=None 설정 → 다음 루프에서 pubsub() 재호출 확인"""
+        import redis.asyncio as aioredis
+
+        # log_pubsub 에러 후 pubsub()이 추가 호출되는지 추적
+        pubsub_call_count = 0
+
+        mock_ks = AsyncMock()
+        mock_ks.psubscribe = AsyncMock()
+        mock_ks.punsubscribe = AsyncMock()
+        mock_ks.aclose = AsyncMock()
+        mock_ks.get_message = AsyncMock(return_value=None)
+
+        log1_called = 0
+        async def log1_raise(**kwargs):
+            nonlocal log1_called
+            log1_called += 1
+            if log1_called == 1:
+                raise aioredis.ConnectionError("disconnected")
+            return None
+
+        mock_log1 = AsyncMock()
+        mock_log1.psubscribe = AsyncMock()
+        mock_log1.punsubscribe = AsyncMock()
+        mock_log1.aclose = AsyncMock()
+        mock_log1.get_message = AsyncMock(side_effect=log1_raise)
+
+        def factory():
+            nonlocal pubsub_call_count
+            pubsub_call_count += 1
+            # 1: ks, 2: log1(에러 발생), 3+: 재연결 pubsubs
+            if pubsub_call_count == 1:
+                return mock_ks
+            return mock_log1  # 재연결에도 동일한 mock (에러 안 나는 두 번째 호출은 None 반환)
+
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 3)
+        await gen.aclose()
+
+        # ConnectionError 후 redis_disconnected 이벤트 yield + 초기 2개 pubsub 생성 확인
+        assert any("redis_disconnected" in e for e in events)
+        assert pubsub_call_count >= 2  # 최소 ks + log_pubsub 초기 생성
