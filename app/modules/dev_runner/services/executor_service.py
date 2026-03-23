@@ -19,6 +19,7 @@ from fastapi import HTTPException
 
 from app.config import logger
 from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services.plan_service import plan_service
 from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
 from app.modules.dev_runner.services.state import get_state
@@ -383,6 +384,7 @@ class ExecutorService:
                 pipe.srem(ACTIVE_RUNNERS_KEY, runner_id)
                 pipe.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
                 await pipe.execute()
+                plan_service.invalidate_plans_cache()
             else:
                 runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
                 stop_ts = time.time()
@@ -400,6 +402,7 @@ class ExecutorService:
                     pipe.zadd(RECENT_RUNNERS_KEY, {rid: stop_ts})
                     await pipe.execute()
                 await self.async_redis.delete(ACTIVE_RUNNERS_KEY)
+                plan_service.invalidate_plans_cache()
         except Exception:
             pass
 

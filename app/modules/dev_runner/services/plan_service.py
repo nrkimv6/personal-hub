@@ -7,6 +7,7 @@ import re
 import redis
 import shutil
 import subprocess
+import time
 from datetime import date
 from pathlib import Path
 from typing import List, Optional
@@ -62,6 +63,7 @@ class PlanService:
         # plan 전체 목록 캐시 (startup 시 빌드, mutation 시 무효화)
         self._plans_cache: Optional[List[PlanFileResponse]] = None
         self._plans_cache_with_ignored: Optional[List[PlanFileResponse]] = None
+        self._plans_cache_time: float = 0  # 캐시 빌드 시각 (time.monotonic)
         self._migrate_to_registered_paths()
         self._load_registered_paths()
         self._load_ignored_plans()
@@ -216,6 +218,7 @@ class PlanService:
         """plan 목록 캐시 무효화 — mutation 후 호출"""
         self._plans_cache = None
         self._plans_cache_with_ignored = None
+        self._plans_cache_time = 0
 
     def _scan_all_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
         """실제 파일시스템 스캔 (캐시 미스 시 호출)"""
@@ -270,13 +273,19 @@ class PlanService:
 
         모든 경로를 동등하게 취급 (고정/외부 구분 없음)
         """
+        # TTL 만료 시 캐시 무효화 (runner 종료 트리거 없는 경우 fallback)
+        if getattr(self, "_plans_cache", None) is not None and time.monotonic() - getattr(self, "_plans_cache_time", 0) > self._PLANS_CACHE_TTL:
+            self.invalidate_plans_cache()
+
         if include_ignored:
             if self._plans_cache_with_ignored is None:
                 self._plans_cache_with_ignored = self._scan_all_plans(include_ignored=True)
+                self._plans_cache_time = time.monotonic()
             return self._plans_cache_with_ignored
         else:
             if self._plans_cache is None:
                 self._plans_cache = self._scan_all_plans(include_ignored=False)
+                self._plans_cache_time = time.monotonic()
             return self._plans_cache
 
     def list_ignored_plans(self) -> List[PlanFileResponse]:
@@ -397,6 +406,8 @@ class PlanService:
     _IGNORED_STATUSES = {"보류", "가이드"}
     # 완료 계열 상태 (아카이브 허용 + 목록 숨김)
     _DONE_STATUSES = {"구현완료", "완료", "수정 완료", "배포완료", "수정완료"}
+    # plans 캐시 TTL (초) — runner 종료 트리거 없이도 stale 캐시가 자동 갱신됨
+    _PLANS_CACHE_TTL = 60
 
     def _is_ignored_plan(self, path: Path, status: str, progress: Optional[PlanProgressResponse] = None) -> bool:
         """plan이 무시 대상인지 판단"""
