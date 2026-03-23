@@ -18,6 +18,7 @@ export interface RunRequest {
 	parallel?: boolean;
 	projects?: string | null;
 	worktree?: boolean;
+	trigger?: string | null;
 }
 
 export interface RunStatusResponse {
@@ -45,6 +46,7 @@ export interface RunnerListItem {
 	worktree_path: string | null;
 	branch: string | null;
 	merge_status: string | null;
+	trigger?: string | null;
 	visible: boolean;
 	orphan: boolean;
 }
@@ -386,6 +388,7 @@ export interface RunHistoryItem {
 	worktree_path: string | null;
 	branch: string | null;
 	merge_status: string | null;
+	trigger?: string | null;
 }
 
 export interface RunHistoryResponse {

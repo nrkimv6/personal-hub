@@ -39,7 +39,7 @@ COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
-    "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source",
+    "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
 )
 
 
@@ -227,12 +227,19 @@ class ExecutorService:
         # per-command 결과 키 (레이스 컨디션 방지)
         command_id = uuid.uuid4().hex[:8]
 
+        # trigger 판별: test_source 있으면 tc:{name}, 없으면 explicit trigger or "api"
+        if request.test_source:
+            trigger = f"tc:{request.test_source}"
+        else:
+            trigger = request.trigger or "api"
+
         # Redis 명령 생성
         command = {
             "action": "run",
             "runner_id": runner_id,
             "command_id": command_id,
             "source": "monitor-page-api",
+            "trigger": trigger,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -570,6 +577,7 @@ class ExecutorService:
                     worktree_path = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:worktree_path")
                     merge_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
                     branch = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:branch")
+                    trigger = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:trigger")
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
                     start_time = None
@@ -597,6 +605,7 @@ class ExecutorService:
                         worktree_path=worktree_path,
                         branch=branch,
                         merge_status=merge_status,
+                        trigger=trigger,
                         orphan=is_orphan,
                     ))
                 return result

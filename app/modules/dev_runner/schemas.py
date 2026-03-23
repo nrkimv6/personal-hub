@@ -22,6 +22,7 @@ class RunRequest(BaseModel):
     worktree: bool = Field(True, description="worktree 모드 (격리 실행 + 머지 큐)")
     pipeline: Optional[str] = Field(None, description="파이프라인 버전 (v1|v2)")
     test_source: Optional[str] = Field(None, description="테스트 출처 (pytest TC 추적용)")
+    trigger: Optional[str] = Field(None, description="트리거 소스 (user, user:all, tc:{name}, api)")
 
 
 class RunStatusResponse(BaseModel):
@@ -51,6 +52,7 @@ class RunnerListItem(BaseModel):
     worktree_path: Optional[str] = None
     branch: Optional[str] = None
     merge_status: Optional[str] = None
+    trigger: Optional[str] = None
     visible: bool = True  # 탭 표시 여부 (dismiss 전까지 True)
     orphan: bool = False  # Workflow DB에 running/merge_pending이지만 Redis에 없는 runner
 
@@ -211,6 +213,7 @@ class RunHistoryItem(BaseModel):
     worktree_path: Optional[str] = None
     branch: Optional[str] = None
     merge_status: Optional[str] = None
+    trigger: Optional[str] = None
 
 
 class RunHistoryResponse(BaseModel):

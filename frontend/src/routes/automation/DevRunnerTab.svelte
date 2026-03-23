@@ -110,6 +110,7 @@
 		running: boolean;
 		start_time: string | null;
 		branch?: string | null;
+		trigger?: string | null;
 		orphan?: boolean;
 	}
 
@@ -121,6 +122,7 @@
 		status?: string;
 		start_time?: string | null;
 		branch?: string | null;
+		trigger?: string | null;
 		orphan?: boolean;
 	}
 
@@ -132,6 +134,7 @@
 			running: runner.running ?? runner.status === 'running',
 			start_time: runner.start_time ? new Date(runner.start_time).toISOString() : null,
 			branch: runner.branch ?? null,
+			trigger: runner.trigger ?? null,
 			orphan: runner.orphan ?? false,
 		};
 	}
@@ -767,6 +770,7 @@
 										running={tab.running}
 										engine={tab.engine}
 										startTime={tab.start_time}
+										trigger={tab.trigger}
 										orphan={tab.orphan}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
