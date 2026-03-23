@@ -1671,6 +1671,8 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
     try:
         # subprocess 실행 및 stdout을 PIPE로 받아 스레드에서 파일+Redis 동시 기록
         log_handle = open(log_file, "w", encoding="utf-8")
+        log_handle.write(f"[TRIGGER] {command.get('trigger', 'unknown')} | plan={plan_file} | engine={engine} | runner_id={runner_id}\n")
+        log_handle.flush()
 
         # UTF-8 강제
         import os
@@ -1731,6 +1733,8 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+        trigger = command.get("trigger", "unknown")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", trigger)
 
         logger.info(f"plan-runner started (PID: {process.pid}, log: {log_file})")
 

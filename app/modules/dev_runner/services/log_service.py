@@ -270,6 +270,20 @@ class LogService:
             log_dir = config.WTOOLS_BASE_DIR / log_dir
         return log_dir
 
+    @staticmethod
+    def _parse_trigger_from_log(log_file_path: str) -> Optional[str]:
+        """로그 파일 첫 줄에서 [TRIGGER] 메타데이터 파싱. 없으면 None 반환."""
+        try:
+            with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
+                first_line = f.readline().rstrip("\n")
+            if first_line.startswith("[TRIGGER] "):
+                # "[TRIGGER] user | plan=..." → "user"
+                rest = first_line[len("[TRIGGER] "):]
+                return rest.split(" | ")[0]
+        except (OSError, IOError):
+            pass
+        return None
+
     def get_run_history(self, limit: int = 20, offset: int = 0) -> RunHistoryResponse:
         """실행 이력 조회: Redis active_runners + 로그 파일 스캔 병합, start_time DESC 정렬"""
         runs: dict[str, RunHistoryItem] = {}
@@ -287,6 +301,7 @@ class LogService:
                 log_file_path = stream_log or self.redis_client.get(f"{prefix}:log_file_path")
                 worktree_path = self.redis_client.get(f"{prefix}:worktree_path")
                 merge_status = self.redis_client.get(f"{prefix}:merge_status")
+                trigger = self.redis_client.get(f"{prefix}:trigger")
 
                 start_time = None
                 if start_time_str:
@@ -304,6 +319,8 @@ class LogService:
 
                 has_log = bool(log_file_path and Path(log_file_path).exists())
                 branch = f"runner/{runner_id}" if worktree_path else None
+                if trigger is None and log_file_path:
+                    trigger = self._parse_trigger_from_log(log_file_path)
                 runs[runner_id] = RunHistoryItem(
                     runner_id=runner_id,
                     plan_file=plan_file,
@@ -317,6 +334,7 @@ class LogService:
                     worktree_path=worktree_path,
                     branch=branch,
                     merge_status=merge_status,
+                    trigger=trigger,
                 )
         except redis.ConnectionError:
             pass
@@ -359,6 +377,7 @@ class LogService:
                     end_time=None,
                     log_file=str(path),
                     has_log=True,
+                    trigger=self._parse_trigger_from_log(str(path)),
                 )
 
         # 3. start_time DESC 정렬

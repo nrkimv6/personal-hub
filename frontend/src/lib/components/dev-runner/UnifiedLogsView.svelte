@@ -132,6 +132,13 @@
 					<span class="text-[11px] font-mono font-semibold {idx === 0 ? 'text-gray-200' : 'text-gray-500'}">
 						{item.run.plan_file ? item.run.plan_file.split(/[\\/]/).pop() : '전체 실행'}
 					</span>
+					<!-- trigger 배지 -->
+					{#if item.run.trigger}
+						{@const t = item.run.trigger}
+						<span class="text-[9px] px-1.5 py-0.5 rounded font-mono {t === 'user' ? 'bg-blue-500/20 text-blue-300' : t === 'user:all' ? 'bg-green-500/20 text-green-300' : t.startsWith('tc:') ? 'bg-orange-500/20 text-orange-300' : 'bg-gray-500/20 text-gray-400'}">
+							{t}
+						</span>
+					{/if}
 					<!-- 시간 -->
 					{#if item.run.start_time}
 						<span class="text-[10px] {idx === 0 ? 'text-gray-400' : 'text-gray-600'} ml-1">

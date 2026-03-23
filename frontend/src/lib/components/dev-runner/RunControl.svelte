@@ -112,7 +112,8 @@
 				dry_run: dryRun,
 				parallel: mode === 'all' ? true : parallel,
 				projects: projects || null,
-			worktree
+				worktree,
+				trigger: mode === 'all' ? 'user:all' : 'user',
 			});
 			onStatusChange();
 			onStart?.(response);

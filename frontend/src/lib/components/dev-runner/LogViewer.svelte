@@ -8,10 +8,11 @@
 		currentPlanName?: string;
 		running?: boolean;
 		mergeStatus?: string | null;
+		trigger?: string | null;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 	}
 
-	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, onBatchPlansChange }: Props = $props();
+	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, onBatchPlansChange }: Props = $props();
 
 	// 머지 진행 중 상태 판별
 	let isMerging = $derived(
@@ -422,6 +423,13 @@
 	<div class="flex items-center justify-between px-3 py-2 border-b border-border shrink-0 bg-gray-900">
 		<div class="flex items-center gap-2">
 			<span class="text-xs font-medium uppercase tracking-wider text-gray-300">Live Logs</span>
+			<!-- trigger 배지 -->
+			{#if trigger}
+				{@const t = trigger}
+				<span class="text-[9px] px-1.5 py-0.5 rounded font-mono {t === 'user' ? 'bg-blue-500/20 text-blue-300' : t === 'user:all' ? 'bg-green-500/20 text-green-300' : t.startsWith('tc:') ? 'bg-orange-500/20 text-orange-300' : 'bg-gray-500/20 text-gray-400'}">
+					{t}
+				</span>
+			{/if}
 			<div class="flex items-center gap-1">
 				<!-- SSE 상태 원 -->
 				<div
