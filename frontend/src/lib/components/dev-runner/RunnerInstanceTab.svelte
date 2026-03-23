@@ -4,6 +4,12 @@
 	import type { DevRunnerRunStatusResponse } from '$lib/api';
 	import LogViewer from './LogViewer.svelte';
 
+	interface LogViewerRef {
+		injectLine: (text: string) => void;
+		injectCompleted: () => void;
+		injectMergeCompleted: () => void;
+	}
+
 	interface Props {
 		runnerId: string;
 		planFile: string | null;
@@ -18,10 +24,12 @@
 		onStop: () => void;
 		onClose: () => void;
 		onBatchPlansChange?: (plans: { name: string; status: 'pending' | 'running' | 'done' }[]) => void;
+		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, onStop, onClose, onBatchPlansChange }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, onStop, onClose, onBatchPlansChange, logRef }: Props = $props();
 
+	let logViewer: { injectLine: (t: string) => void; injectCompleted: () => void; injectMergeCompleted: () => void } | undefined;
 	let elapsed = $state('');
 	let stopping = $state(false);
 	let killing = $state(false);
@@ -67,6 +75,9 @@
 		intervalId = setInterval(() => {
 			elapsed = formatElapsed(startTime);
 		}, 1000);
+		if (logViewer && logRef) {
+			logRef({ injectLine: logViewer.injectLine, injectCompleted: logViewer.injectCompleted, injectMergeCompleted: logViewer.injectMergeCompleted });
+		}
 	});
 
 	onDestroy(() => {
@@ -297,6 +308,6 @@
 
 	<!-- 로그 뷰어 -->
 	<div class="flex-1 min-h-0">
-		<LogViewer {runnerId} planFile={planFile ?? undefined} {running} {mergeStatus} {trigger} {onBatchPlansChange} />
+		<LogViewer bind:this={logViewer} {runnerId} planFile={planFile ?? undefined} {running} {mergeStatus} {trigger} mode="managed" {onBatchPlansChange} />
 	</div>
 </div>

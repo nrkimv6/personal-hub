@@ -9,10 +9,12 @@
 		running?: boolean;
 		mergeStatus?: string | null;
 		trigger?: string | null;
+		mode?: 'standalone' | 'managed';
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
+		onMergeCompleted?: () => void;
 	}
 
-	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, onBatchPlansChange }: Props = $props();
+	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', onBatchPlansChange, onMergeCompleted }: Props = $props();
 
 	// 머지 진행 중 상태 판별
 	let isMerging = $derived(
@@ -40,13 +42,13 @@
 	let expandedNoiseIndices = $state<number[]>([]);
         let showNoiseIndicator = $state(false);
         let noiseTimer: ReturnType<typeof setTimeout> | null = null;
-	let connected = $state<'connected' | 'disconnected'>('disconnected');
+	let connected = $state<'connected' | 'disconnected'>(mode === 'managed' ? 'connected' : 'disconnected');
 	let autoScroll = $state(true);
 	let paused = $state(false);
 	let pauseBuffer = $state<ParsedLine[]>([]);
 	let logContainer: HTMLDivElement;
 	let eventSource: EventSource | null = null;
-	let sseStarted = $state(false);
+	let sseStarted = $state(mode === 'managed');
 	let reconnectCount = $state(0);
 	let consecutiveErrors = $state(0);
 	let redisAvailable = $state(true);
@@ -381,11 +383,11 @@
 		await loadRecent();
 		// 초기 로드 후 스크롤을 맨 아래로 이동
 		requestAnimationFrame(() => scrollToBottom());
-		connectSSE();
+		if (mode === 'standalone') connectSSE();
 	});
 
 	onDestroy(() => {
-		if (eventSource) {
+		if (mode === 'standalone' && eventSource) {
 			eventSource.close();
                         if (noiseTimer) clearTimeout(noiseTimer);
 			eventSource = null;
@@ -405,16 +407,33 @@
 		onBatchPlansChange?.(batchPlans);
 	});
 
-	// mergeStatus 전환 시 SSE 재연결 (runner → merge stream 또는 반대)
+	// mergeStatus 전환 시 SSE 재연결 (standalone 모드에서만, runner → merge stream 또는 반대)
 	let prevMerging: boolean | undefined;
 	$effect(() => {
 		const cur = isMerging;
-		if (prevMerging !== undefined && prevMerging !== cur) {
+		if (mode === 'standalone' && prevMerging !== undefined && prevMerging !== cur) {
 			addLine(cur ? '[MERGE] 머지 로그 스트림으로 전환...' : '[MERGE] 러너 로그 스트림으로 복귀...', false);
 			connectSSE();
 		}
 		prevMerging = cur;
 	});
+
+	// ── managed 모드 공개 API ───────────────────────────────────────────────────
+
+	export function injectLine(text: string) {
+		addLine(text, false);
+	}
+
+	export function injectCompleted() {
+		completedBanner = true;
+		eventSource?.close();
+		eventSource = null;
+		connected = 'disconnected';
+	}
+
+	export function injectMergeCompleted() {
+		onMergeCompleted?.();
+	}
 
 </script>
 
