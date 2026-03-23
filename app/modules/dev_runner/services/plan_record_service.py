@@ -158,8 +158,17 @@ class PlanRecordService:
         skip: int = 0,
         limit: int = 50,
     ) -> List[PlanEvent]:
-        """이벤트 목록 조회 (타임라인 뷰용)"""
-        q = self.db.query(PlanEvent)
+        """이벤트 목록 조회 (타임라인 뷰용)
+
+        pytest 통합테스트 실행 시 생성되는 임시 경로 레코드를 제외한다.
+        제외 패턴: \\Temp\\pytest- (Windows) 또는 /tmp/pytest- (Linux/Mac)
+        """
+        q = self.db.query(PlanEvent).join(PlanRecord, PlanEvent.plan_record_id == PlanRecord.id)
+        # pytest 임시 경로 필터 (대소문자 무시)
+        q = q.filter(
+            ~PlanRecord.file_path.ilike(r"%\Temp\pytest-%"),
+            ~PlanRecord.file_path.ilike("%/tmp/pytest-%"),
+        )
         if event_type:
             q = q.filter(PlanEvent.event_type == event_type)
         if date_from:
