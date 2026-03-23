@@ -753,6 +753,23 @@
 								</button>
 							</div>
 						{/each}
+						<!-- 종료된 탭 전체 닫기 버튼 -->
+						{#if runnerTabs.some(t => !t.running)}
+							<button
+								class="flex items-center justify-center w-6 h-6 rounded hover:bg-red-100 text-muted-foreground hover:text-red-500 transition-colors shrink-0"
+								onclick={() => {
+									for (const t of runnerTabs.filter(r => !r.running)) {
+										handleCloseTab(t.id);
+									}
+								}}
+								title="종료된 runner 탭 모두 닫기"
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
+									<path d="M10 11v6"/><path d="M14 11v6"/>
+								</svg>
+							</button>
+						{/if}
 						<!-- 고정 Logs 버튼 -->
 						<!-- svelte-ignore a11y_interactive_supports_focus -->
 						<div
