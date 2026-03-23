@@ -75,6 +75,14 @@
 	// Phase 4: 종료 시 상태 보존
 	let lastPlanFile = $state<string | null>(null);
 
+	// SSE 로그 이벤트 라우팅용 LogViewer ref Map
+	interface LogViewerRef {
+		injectLine: (text: string) => void;
+		injectCompleted: () => void;
+		injectMergeCompleted: () => void;
+	}
+	const logRefs = new Map<string, LogViewerRef>();
+
 	function handlePlanModalOpen(plan: DevRunnerPlanFileResponse) {
 		modalPlan = plan;
 		modalSelectedPlan = plan.path;
@@ -307,6 +315,26 @@
 		} else if (eventName === 'plan_changed') {
 			void fetchPlans();
 			taskListRefreshTick++;
+		} else if (eventName === 'log') {
+			try {
+				const { runner_id, line } = JSON.parse(data) as { runner_id: string; line: string };
+				logRefs.get(runner_id)?.injectLine(line);
+			} catch { /* 무시 */ }
+		} else if (eventName === 'log_completed') {
+			try {
+				const { runner_id } = JSON.parse(data) as { runner_id: string };
+				logRefs.get(runner_id)?.injectCompleted();
+			} catch { /* 무시 */ }
+		} else if (eventName === 'merge_log') {
+			try {
+				const { runner_id, line } = JSON.parse(data) as { runner_id: string; line: string };
+				logRefs.get(runner_id)?.injectLine(line);
+			} catch { /* 무시 */ }
+		} else if (eventName === 'merge_log_completed') {
+			try {
+				const { runner_id } = JSON.parse(data) as { runner_id: string };
+				logRefs.get(runner_id)?.injectMergeCompleted();
+			} catch { /* 무시 */ }
 		}
 	}
 
@@ -352,6 +380,7 @@
 				// dismiss 실패해도 로컬 탭은 닫음
 			});
 		}
+		logRefs.delete(runnerId);
 		runnerTabs = runnerTabs.filter(t => t.id !== runnerId);
 		if (activeTabId === runnerId) {
 			activeTabId = runnerTabs.length > 0 ? runnerTabs[runnerTabs.length - 1].id : null;
@@ -776,6 +805,7 @@
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
 										onBatchPlansChange={(plans) => { batchPlans = plans; }}
+										logRef={(ref) => logRefs.set(tab.id, ref)}
 									/>
 								</div>
 							{/each}
