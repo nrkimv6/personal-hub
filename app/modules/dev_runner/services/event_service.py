@@ -4,9 +4,13 @@ plan-runner 실행 상태 변화를 Redis keyspace notifications로 감지하여
 SSE 포맷으로 실시간 전달한다.
 
 이벤트 타입:
-  - status       : runner 상태 변경 (status, pid, current_cycle, start_time, plan_file)
-  - tracking     : 현재 추적 중인 태스크 변경 (current_task_text)
-  - plan_changed : 추적 중인 plan_file 변경 (current_task_plan_file)
+  - status              : runner 상태 변경 (status, pid, current_cycle, start_time, plan_file)
+  - tracking            : 현재 추적 중인 태스크 변경 (current_task_text)
+  - plan_changed        : 추적 중인 plan_file 변경 (current_task_plan_file)
+  - log                 : 로그 한 줄 (runner_id, line)
+  - log_completed       : 로그 스트리밍 완료 (runner_id)
+  - merge_log           : 머지 로그 한 줄 (runner_id, line)
+  - merge_log_completed : 머지 로그 스트리밍 완료 (runner_id)
 """
 
 import asyncio
@@ -29,6 +33,14 @@ _LEGACY_ALL = "ALL"  # 하위 호환
 
 # keyspace notification 채널 (DB 0)
 KEYEVENT_CHANNEL = "__keyevent@0__:set"
+
+# 로그 채널 패턴 (plan-runner:logs:{runner_id}, plan-runner:merge-log:{runner_id})
+LOG_CHANNEL_PATTERN = "plan-runner:logs:*"
+MERGE_LOG_CHANNEL_PATTERN = "plan-runner:merge-log:*"
+
+# 완료 신호 sentinel
+_LOG_COMPLETED_SENTINEL = "__COMPLETED__"
+_MERGE_LOG_COMPLETED_SENTINEL = "__MERGE_COMPLETED__"
 
 # 감시할 키 접두사 → 이벤트 타입 매핑
 # 키가 이 접두사로 시작하면 해당 이벤트를 발행한다.
@@ -153,6 +165,18 @@ class EventService:
             return parts[2]
         return None
 
+    def _extract_runner_id_from_channel(self, channel: str) -> Optional[str]:
+        """로그 채널명에서 runner_id 추출.
+
+        Examples:
+            "plan-runner:logs:abc123"      → "abc123"
+            "plan-runner:merge-log:def456" → "def456"
+        """
+        if not channel or ":" not in channel:
+            return None
+        runner_id = channel.split(":")[-1]
+        return runner_id if runner_id else None
+
     # ── SSE 포맷 헬퍼 ────────────────────────────────────────────────────────
 
     @staticmethod
@@ -186,6 +210,7 @@ class EventService:
             yield self._sse("tracking", tracking)
 
         pubsub: Optional[aioredis.client.PubSub] = None
+        log_pubsub: Optional[aioredis.client.PubSub] = None
         last_heartbeat = time.monotonic()
         consecutive_errors = 0
         MAX_CONSECUTIVE_ERRORS = 5
@@ -197,8 +222,13 @@ class EventService:
                     pubsub = self._async.pubsub()
                     await pubsub.psubscribe(KEYEVENT_CHANNEL)
 
+                if log_pubsub is None:
+                    log_pubsub = self._async.pubsub()
+                    await log_pubsub.psubscribe(LOG_CHANNEL_PATTERN, MERGE_LOG_CHANNEL_PATTERN)
+
+                # ── keyspace 메시지 폴링
                 message = await pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=0.5
+                    ignore_subscribe_messages=True, timeout=0.25
                 )
 
                 if message and message["type"] in ("message", "pmessage"):
@@ -222,17 +252,46 @@ class EventService:
                     last_heartbeat = time.monotonic()
                     consecutive_errors = 0
 
-                else:
+                # ── 로그 채널 메시지 폴링
+                log_message = await log_pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=0.25
+                )
+
+                if log_message and log_message["type"] in ("message", "pmessage"):
+                    channel = log_message.get("channel") or log_message.get("pattern", "")
+                    data = log_message.get("data")
+
+                    if not data:
+                        pass  # 빈 데이터 무시
+                    else:
+                        runner_id = self._extract_runner_id_from_channel(channel)
+                        if runner_id:
+                            is_merge = channel.startswith("plan-runner:merge-log:")
+                            if data == _MERGE_LOG_COMPLETED_SENTINEL:
+                                yield self._sse("merge_log_completed", {"runner_id": runner_id})
+                            elif data == _LOG_COMPLETED_SENTINEL:
+                                yield self._sse("log_completed", {"runner_id": runner_id})
+                            elif is_merge:
+                                yield self._sse("merge_log", {"runner_id": runner_id, "line": data})
+                            else:
+                                yield self._sse("log", {"runner_id": runner_id, "line": data})
+
+                    last_heartbeat = time.monotonic()
+                    consecutive_errors = 0
+
+                if not message and not log_message:
                     now = time.monotonic()
                     if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                         yield ": heartbeat\n\n"
                         last_heartbeat = now
-                    await asyncio.sleep(0.3)
+                    await asyncio.sleep(0.1)
 
             except (redis_sync.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
                 # ── Redis 연결 실패 → 정리 후 재시도
                 await _safe_close_pubsub(pubsub)
                 pubsub = None
+                await _safe_close_pubsub(log_pubsub)
+                log_pubsub = None
                 yield "event: redis_disconnected\ndata: Redis not available\n\n"
                 last_heartbeat = time.monotonic()
                 await asyncio.sleep(5)
@@ -241,6 +300,8 @@ class EventService:
                 consecutive_errors += 1
                 await _safe_close_pubsub(pubsub)
                 pubsub = None
+                await _safe_close_pubsub(log_pubsub)
+                log_pubsub = None
                 last_heartbeat = time.monotonic()
 
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
