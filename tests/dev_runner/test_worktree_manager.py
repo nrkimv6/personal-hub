@@ -13,14 +13,17 @@ from worktree_manager import WorktreeManager, WorktreeError, MergeResult, ensure
 @pytest.fixture
 def tmp_git_repo(tmp_path):
     """임시 git 저장소 생성 (main 브랜치)"""
-    subprocess.run(["git", "init", str(tmp_path)], capture_output=True)
+    # -b main: git init 시 초기 브랜치를 main으로 지정 (git 2.28+)
+    # defaultBranch 설정 차이로 인한 'main' 미존재 오류 방지
+    subprocess.run(["git", "init", "-b", "main", str(tmp_path)], capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(tmp_path))
     (tmp_path / "README.md").write_text("test")
+    # .worktrees/를 gitignore에 추가: merge_to_main이 dirty state로 감지하여 emergency commit 생성하는 것 방지
+    (tmp_path / ".gitignore").write_text(".worktrees/\n")
     subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
-    subprocess.run(["git", "branch", "-m", "main"], capture_output=True, cwd=str(tmp_path))
     return tmp_path
 
 
@@ -403,14 +406,13 @@ class TestMergeToMainStash:
     @pytest.fixture
     def git_repo_with_main(self, tmp_path):
         """main 브랜치를 가진 임시 git 저장소"""
-        subprocess.run(["git", "init", str(tmp_path)], capture_output=True)
+        subprocess.run(["git", "init", "-b", "main", str(tmp_path)], capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
         subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
         subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(tmp_path))
         (tmp_path / "README.md").write_text("init")
         subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
         subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
-        subprocess.run(["git", "branch", "-m", "main"], capture_output=True, cwd=str(tmp_path))
         return tmp_path
 
     def _make_feature_branch(self, repo: Path, branch: str, filename: str, content: str) -> None:
@@ -650,14 +652,13 @@ class TestEnsureMainBranch:
     @pytest.fixture
     def git_repo_main(self, tmp_path):
         """main 브랜치를 가진 임시 git 저장소"""
-        subprocess.run(["git", "init", str(tmp_path)], capture_output=True)
+        subprocess.run(["git", "init", "-b", "main", str(tmp_path)], capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
         subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
         subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(tmp_path))
         (tmp_path / "README.md").write_text("init")
         subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
         subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
-        subprocess.run(["git", "branch", "-m", "main"], capture_output=True, cwd=str(tmp_path))
         return tmp_path
 
     def test_ensure_main_branch_on_plan_branch(self, git_repo_main):
