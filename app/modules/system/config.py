@@ -60,8 +60,26 @@ MANAGED_PROJECTS = {
     "sleep-now": {
         "path": "D:\\work\\project\\tools\\sleep-now",
         "nssm_prefix": "SleepNow",
-        "startup_prefix": None,
+        "startup_prefix": "SleepNow-",
         "task_folder": "SleepNow",
+        "workers": {
+            "pid_dir": ".pids",
+            "items": [
+                {
+                    "name": "session_worker",
+                    "label": "세션 워커",
+                    "tier": "worker",
+                    "watchdog_pid_file": None,
+                    "worker_pid_file": "session_worker.pid",
+                },
+            ]
+        }
+    },
+    "ollama": {
+        "path": None,
+        "nssm_prefix": None,
+        "startup_prefix": "Ollama",
+        "task_folder": None,
         "workers": None
     },
     "system": {
