@@ -133,16 +133,22 @@
   }
 
   function workerVariant(w: WorkerProcess): 'success' | 'warning' | 'error' | 'gray' {
+    const hasWatchdog = w.watchdog !== null && w.watchdog !== undefined;
     const wd = w.watchdog?.running ?? false;
     const wk = w.worker?.running ?? false;
+    // watchdog이 없는 워커(sleep-now 세션 워커 등): worker 상태만으로 판단
+    if (!hasWatchdog) return wk ? 'success' : 'gray';
     if (wd && wk) return 'success';
     if (wd && !wk) return 'warning';
     return 'error';
   }
 
   function workerStatusText(w: WorkerProcess): { text: string; variant: 'success' | 'warning' | 'error' } {
+    const hasWatchdog = w.watchdog !== null && w.watchdog !== undefined;
     const wd = w.watchdog?.running ?? false;
     const wk = w.worker?.running ?? false;
+    // watchdog이 없는 워커: worker 상태만으로 판단
+    if (!hasWatchdog) return wk ? { text: '정상', variant: 'success' } : { text: '중지됨', variant: 'error' };
     if (wd && wk) return { text: '정상', variant: 'success' };
     if (wd && !wk) return { text: '워커 중지', variant: 'warning' };
     if (!wd && wk) return { text: 'WD 없음', variant: 'warning' };
