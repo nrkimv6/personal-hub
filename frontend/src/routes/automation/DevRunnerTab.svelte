@@ -186,7 +186,8 @@
 
 			// runner 탭 running 상태 동기화 + 신규 runner 추가
 			try {
-				const runners = await devRunnerRunnerApi.runners();
+				const allRunners = await devRunnerRunnerApi.runners();
+				const runners = allRunners.filter(r => r.visible !== false);
 				const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
 				// 기존 탭 상태 갱신
 				runnerTabs = runnerTabs.map(tab => {
