@@ -4,7 +4,7 @@
 
 import { request } from './client';
 
-const BASE = '/api/v1/kakao-monitor';
+const BASE = '/kakao-monitor';
 
 // ========== Types ==========
 
