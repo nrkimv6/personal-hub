@@ -71,7 +71,7 @@ class TextDiffDetector:
         if not curr_lines:
             return []
         if not prev_lines:
-            return list(curr_lines)
+            return [line for line in curr_lines if line.strip()]
 
         prev_set = set(prev_lines)
         new_lines = [line for line in curr_lines if line not in prev_set and line.strip()]

@@ -167,8 +167,8 @@ class KakaoMonitorWorker(BaseWorker):
     ) -> None:
         """Redis 큐에 수집 요청 push."""
         try:
-            from app.shared.redis import get_redis_client
-            redis_client = get_redis_client()
+            from app.shared.redis import get_redis
+            redis_client = await get_redis()
             if redis_client is None:
                 logger.warning("Redis 클라이언트 없음 — 수집 요청 드롭")
                 return

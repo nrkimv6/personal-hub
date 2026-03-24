@@ -8,9 +8,8 @@ from unittest.mock import MagicMock, patch
 
 @pytest.fixture(autouse=True)
 def clear_cache():
-    for k in list(sys.modules.keys()):
-        if "kakao_monitor_worker" in k or "kakao_monitor" in k:
-            del sys.modules[k]
+    # 워커 모듈만 제거 (models/utils는 SQLAlchemy MetaData 충돌 방지를 위해 보존)
+    sys.modules.pop("app.worker.kakao_monitor_worker", None)
     yield
 
 
@@ -24,13 +23,21 @@ def _make_keyword(id: int, keyword: str, action_type: str = "collect", is_active
 
 
 def _get_worker():
-    """KakaoMonitorWorker 인스턴스 반환 (win32 모듈 mock)."""
-    with patch.dict(sys.modules, {
+    """KakaoMonitorWorker 인스턴스 반환 (win32/worker chain 모두 mock)."""
+    # app.worker.__init__이 scheduled_worker → writing_worker → llm_request 체인을
+    # 다시 임포트하면 SQLAlchemy 클래스 중복 등록 에러가 발생함.
+    # app.worker 서브모듈을 미리 mock하여 __init__ 체인 실행을 차단.
+    _mocks = {
         "psutil": MagicMock(), "win32gui": MagicMock(),
         "win32con": MagicMock(), "win32clipboard": MagicMock(),
         "pyautogui": MagicMock(), "paddleocr": MagicMock(),
         "imagehash": MagicMock(), "win32ui": MagicMock(),
-    }):
+        "app.worker.crawl_worker_base": MagicMock(),
+        "app.worker.scheduled_worker": MagicMock(),
+        "app.worker.ondemand_worker": MagicMock(),
+    }
+    sys.modules.pop("app.worker.kakao_monitor_worker", None)
+    with patch.dict(sys.modules, _mocks):
         from app.worker.kakao_monitor_worker import KakaoMonitorWorker
         return KakaoMonitorWorker()
 

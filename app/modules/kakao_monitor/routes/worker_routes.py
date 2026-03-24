@@ -61,8 +61,8 @@ def get_status(db: Session = Depends(get_db)):
 async def trigger_scan():
     """수동 1회 스캔 트리거 — Redis 큐에 scan 명령 push."""
     try:
-        from app.shared.redis import get_redis_client
-        redis_client = get_redis_client()
+        from app.shared.redis import get_redis
+        redis_client = await get_redis()
         if redis_client is None:
             return ScanTriggerResponse(queued=False, message="Redis 클라이언트 없음")
         payload = json.dumps({"action": "scan"})

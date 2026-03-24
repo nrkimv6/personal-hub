@@ -110,11 +110,19 @@ def test_db_engine():
         except PermissionError:
             pass
 
+    from sqlalchemy import event as sa_event
+
     # 테스트 DB 엔진 생성
     engine = create_engine(
         f"sqlite:///{TEST_DB_PATH}",
         connect_args={"check_same_thread": False}
     )
+
+    @sa_event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_conn, _record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
     # 1. SQLAlchemy 모델로 기본 테이블 생성
     Base.metadata.create_all(bind=engine)

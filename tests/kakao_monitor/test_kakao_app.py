@@ -115,9 +115,9 @@ def _make_pyautogui():
 
 @pytest.fixture(autouse=True)
 def clear_module_cache():
-    """kakao_app 모듈 캐시 초기화."""
+    """kakao_app 유틸 모듈 캐시만 초기화 (models/routes 제외 — SQLAlchemy MetaData 충돌 방지)."""
     for key in list(sys.modules.keys()):
-        if "kakao_app" in key or "kakao_monitor" in key:
+        if "kakao_app" in key:
             del sys.modules[key]
     yield
 

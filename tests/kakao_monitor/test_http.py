@@ -212,9 +212,7 @@ def test_get_windows_200(client):
 
 
 def test_post_scan_200(client):
-    """POST /scan — 200 또는 202"""
-    with patch("app.modules.kakao_monitor.routes.worker_routes.get_redis_client",
-               return_value=None):
-        res = client.post("/api/v1/kakao-monitor/scan")
+    """POST /scan — 200 (Redis 없으면 queued=False로 200 반환)"""
+    res = client.post("/api/v1/kakao-monitor/scan")
     assert res.status_code == 200
     assert "queued" in res.json()

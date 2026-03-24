@@ -167,5 +167,7 @@ def test_config_delete_cascades_keywords_and_posts(app_client, test_db_session: 
     res = app_client.delete(f"/api/v1/kakao-monitor/configs/{config_id}")
     assert res.status_code == 204
 
+    # HTTP DELETE 후 세션 캐시 만료 → DB에서 재조회
+    test_db_session.expire_all()
     assert test_db_session.get(KakaoKeyword, kw_id) is None
     assert test_db_session.get(KakaoCollectedPost, post_id) is None
