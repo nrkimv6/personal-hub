@@ -28,6 +28,7 @@
 		onExecute?: () => void;
 		onStopRunner?: (id: string) => void;
 		onKillRunner?: (id: string) => void;
+		onCloseRunner?: (id: string) => void;
 		collapsed?: boolean;
 		onToggleCollapse?: () => void;
 		onSelectRunner?: (id: string) => void;
@@ -49,6 +50,7 @@
 		onExecute,
 		onStopRunner,
 		onKillRunner,
+		onCloseRunner,
 		collapsed = false, onToggleCollapse, onSelectRunner, onCloseAllTerminated, activeRunnerId = null, onShowLogs,
 	}: Props = $props();
 
@@ -273,34 +275,63 @@
 						<span class="hidden md:block text-[10px] text-muted-foreground shrink-0 font-mono truncate max-w-[120px]" title={runner.branch}>{runner.branch}</span>
 					{/if}
 
-					<!-- Stop/Kill 아이콘 버튼 (hover 시 표시) -->
-					<div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-						{#if runner.running && onStopRunner}
-							<button
-								onclick={() => onStopRunner?.(runner.id)}
-								class="h-5 w-5 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
-								title="정지"
-							>
-								<!-- Square icon -->
-								<svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-								</svg>
-							</button>
-						{/if}
-						{#if onKillRunner}
-							<button
-								onclick={() => onKillRunner?.(runner.id)}
-								class="h-5 w-5 flex items-center justify-center rounded-md hover:bg-secondary transition-colors text-destructive"
-								title="강제 종료"
-							>
-								<!-- Power icon -->
-								<svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
-									<line x1="12" y1="2" x2="12" y2="12"/>
-								</svg>
-							</button>
-						{/if}
-					</div>
+					<!-- Stop/Kill/Close 아이콘 버튼 -->
+					{#if runner.running}
+						<!-- 실행 중: hover 시만 표시 -->
+						<div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+							{#if onStopRunner}
+								<button
+									onclick={(e) => { e.stopPropagation(); onStopRunner?.(runner.id); }}
+									class="h-5 w-5 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
+									title="정지"
+								>
+									<!-- Square icon -->
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+									</svg>
+								</button>
+							{/if}
+							{#if onKillRunner}
+								<button
+									onclick={(e) => { e.stopPropagation(); onKillRunner?.(runner.id); }}
+									class="h-5 w-5 flex items-center justify-center rounded-md hover:bg-secondary transition-colors text-destructive"
+									title="강제 종료"
+								>
+									<!-- Power icon -->
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+										<line x1="12" y1="2" x2="12" y2="12"/>
+									</svg>
+								</button>
+							{/if}
+							{#if onCloseRunner}
+								<button
+									onclick={(e) => { e.stopPropagation(); onCloseRunner?.(runner.id); }}
+									class="h-5 w-5 flex items-center justify-center rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-destructive"
+									title="닫기"
+								>
+									<!-- X icon -->
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<line x1="18" y1="6" x2="6" y2="18"/>
+										<line x1="6" y1="6" x2="18" y2="18"/>
+									</svg>
+								</button>
+							{/if}
+						</div>
+					{:else if onCloseRunner}
+						<!-- 종료된 러너: 닫기 버튼 항상 표시 (모바일 대응) -->
+						<button
+							onclick={(e) => { e.stopPropagation(); onCloseRunner?.(runner.id); }}
+							class="h-5 w-5 flex items-center justify-center rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-destructive shrink-0"
+							title="닫기"
+						>
+							<!-- X icon -->
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<line x1="18" y1="6" x2="6" y2="18"/>
+								<line x1="6" y1="6" x2="18" y2="18"/>
+							</svg>
+						</button>
+					{/if}
 				</div>
 			{/each}
 		</div>

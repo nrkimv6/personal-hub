@@ -601,6 +601,7 @@
 			onSelectRunner={(id) => { activeTabId = id; }}
 			onCloseAllTerminated={() => { for (const t of runnerTabs.filter(r => !r.running)) { handleCloseTab(t.id); } }}
 			onShowLogs={() => { activeTabId = '__logs__'; }}
+			onCloseRunner={handleCloseTab}
 			/>
 
 			<!-- 실행 모달 -->
