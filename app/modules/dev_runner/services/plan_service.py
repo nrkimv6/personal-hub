@@ -244,7 +244,8 @@ class PlanService:
                 if str(p) not in seen:
                     seen.add(str(p))
                     status = self.get_plan_status(p)
-                    is_ignored = self._is_ignored_plan(p, status)
+                    progress = self.get_plan_progress(p)
+                    is_ignored = self._is_ignored_plan(p, status, progress)
                     if include_ignored or not is_ignored:
                         try:
                             content = p.read_text(encoding="utf-8")
@@ -256,7 +257,7 @@ class PlanService:
                                 path=str(p),
                                 filename=p.name,
                                 status=status,
-                                progress=None,
+                                progress=progress,
                                 source=self._resolve_source(p.parent),
                                 ignored=is_ignored,
                                 path_type="file",
@@ -372,7 +373,8 @@ class PlanService:
             seen.add(key)
 
             status = self.get_plan_status(plan_file)
-            is_ignored = self._is_ignored_plan(plan_file, status)
+            progress = self.get_plan_progress(plan_file)
+            is_ignored = self._is_ignored_plan(plan_file, status, progress)
 
             try:
                 content = plan_file.read_text(encoding="utf-8")
@@ -384,7 +386,7 @@ class PlanService:
                 path=str(plan_file),
                 filename=plan_file.name,
                 status=status,
-                progress=None,
+                progress=progress,
                 source=source,
                 ignored=is_ignored,
                 path_type=path_type,
