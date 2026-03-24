@@ -65,7 +65,7 @@ class TestRight:
         await async_r.set(STATE_KEY + ":plan_file", "test.md")
         await async_r.set(STATE_KEY + ":start_time", now)
 
-        req = RunRequest(plan_file="test.md", engine="gemini")
+        req = RunRequest(plan_file="test.md", engine="gemini", test_source="gemini_field_final")
         resp = await svc.start_dev_runner(req)
 
         assert resp.engine == "gemini"
@@ -105,7 +105,7 @@ class TestBoundary:
         await async_r.set(STATE_KEY + ":pid", "1")
         await async_r.set(STATE_KEY + ":start_time", now)
 
-        req = RunRequest(plan_file="test.md", engine="")
+        req = RunRequest(plan_file="test.md", engine="", test_source="gemini_field_final")
         resp = await svc.start_dev_runner(req)
 
         # 빈 문자열은 falsy → engine 필드가 세팅되지 않으므로 request.engine(빈 문자열) 그대로 반환
@@ -124,7 +124,7 @@ class TestBoundary:
         await async_r.set(STATE_KEY + ":pid", "2")
         await async_r.set(STATE_KEY + ":start_time", now)
 
-        req = RunRequest(plan_file="test.md", engine=None)
+        req = RunRequest(plan_file="test.md", engine=None, test_source="gemini_field_final")
         resp = await svc.start_dev_runner(req)
 
         # engine=None이면 command에 engine 키가 없음 → RunStatusResponse(engine=None)
@@ -150,7 +150,7 @@ class TestInverse:
         await async_r.set(STATE_KEY + ":pid", "3")
         await async_r.set(STATE_KEY + ":start_time", now)
 
-        req = RunRequest(plan_file="test.md", engine="claude")
+        req = RunRequest(plan_file="test.md", engine="claude", test_source="gemini_field_final")
         resp = await svc.start_dev_runner(req)
 
         assert resp.engine != "gemini"
@@ -177,7 +177,7 @@ class TestCrossCheck:
         await async_r.set(STATE_KEY + ":pid", "9999")
         await async_r.set(STATE_KEY + ":start_time", now)
 
-        req = RunRequest(plan_file="test.md", engine="gemini")
+        req = RunRequest(plan_file="test.md", engine="gemini", test_source="gemini_field_final")
         start_resp = await svc.start_dev_runner(req)
 
         # status 조회를 위한 Redis 상태 세팅 (listener가 저장한다고 가정)
@@ -212,7 +212,7 @@ class TestError:
         await async_r.set(STATE_KEY + ":status", "running")
         await async_r.set(STATE_KEY + ":pid", "55555")
 
-        req = RunRequest(plan_file="test.md", engine="gemini")
+        req = RunRequest(plan_file="test.md", engine="gemini", test_source="gemini_field_final")
         with pytest.raises(HTTPException) as exc_info:
             await svc.start_dev_runner(req)
 
@@ -237,7 +237,7 @@ class TestPerformance:
         await async_r.set(STATE_KEY + ":pid", "77777")
         await async_r.set(STATE_KEY + ":start_time", now)
 
-        req = RunRequest(plan_file="plan.md", engine="gemini")
+        req = RunRequest(plan_file="plan.md", engine="gemini", test_source="gemini_field_final")
         resp = await svc.start_dev_runner(req)
 
         # Redis 폴링 없이 즉시 request.engine 값으로 반환
