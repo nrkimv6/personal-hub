@@ -107,6 +107,70 @@ class TestHeartbeatRestoreWhenOtherStatus:
         assert set_call_count == 0, "status='running'일 때 불필요한 재set 발생"
 
 
+class TestHeartbeatStreamThreadGuard:
+    """TC: heartbeat dead-process 분기에서 _stream_output 스레드 alive 가드 검증 (Phase 1 fix)"""
+
+    def _run_heartbeat_dead_process_branch(
+        self,
+        rid: str,
+        proc_mock: MagicMock,
+        stream_threads: dict,
+        cleanup_fn: MagicMock,
+    ):
+        """heartbeat else 분기 (proc.poll() is not None, 머지 없음) 로직 복제"""
+        # merge 없는 것으로 가정
+        _hb_mr, _hb_ms = None, None
+        if _hb_mr or _hb_ms:
+            return  # 머지 진행중 → skip
+        _t = stream_threads.get(rid)
+        if _t and _t.is_alive():
+            pass  # cleanup 위임 → 미호출
+        else:
+            cleanup_fn(rid, reason="heartbeat_dead_process")
+
+    def test_heartbeat_skips_cleanup_when_stream_thread_alive(self):
+        """R: _stream_threads[rid].is_alive()=True → _cleanup_process_state 미호출"""
+        rid = "runner-alive"
+        proc = MagicMock()
+        proc.poll.return_value = 0  # 종료됨
+
+        thread_mock = MagicMock()
+        thread_mock.is_alive.return_value = True
+        stream_threads = {rid: thread_mock}
+
+        cleanup_fn = MagicMock()
+        self._run_heartbeat_dead_process_branch(rid, proc, stream_threads, cleanup_fn)
+
+        cleanup_fn.assert_not_called()
+
+    def test_heartbeat_calls_cleanup_when_no_stream_thread(self):
+        """R: _stream_threads에 rid 없음 → _cleanup_process_state 호출됨"""
+        rid = "runner-no-thread"
+        proc = MagicMock()
+        proc.poll.return_value = 1
+
+        stream_threads = {}  # rid 없음
+        cleanup_fn = MagicMock()
+        self._run_heartbeat_dead_process_branch(rid, proc, stream_threads, cleanup_fn)
+
+        cleanup_fn.assert_called_once_with(rid, reason="heartbeat_dead_process")
+
+    def test_heartbeat_calls_cleanup_when_stream_thread_dead(self):
+        """B: 스레드 있지만 is_alive()=False → _cleanup_process_state 호출됨"""
+        rid = "runner-dead-thread"
+        proc = MagicMock()
+        proc.poll.return_value = 0
+
+        thread_mock = MagicMock()
+        thread_mock.is_alive.return_value = False
+        stream_threads = {rid: thread_mock}
+
+        cleanup_fn = MagicMock()
+        self._run_heartbeat_dead_process_branch(rid, proc, stream_threads, cleanup_fn)
+
+        cleanup_fn.assert_called_once_with(rid, reason="heartbeat_dead_process")
+
+
 class TestHeartbeatPidAlive:
     """TC-C: _is_pid_alive가 False 반환 시 복원 없음"""
 

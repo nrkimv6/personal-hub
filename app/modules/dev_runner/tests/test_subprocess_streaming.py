@@ -213,3 +213,64 @@ class TestRunSubprocessStreaming:
 
         assert result["success"] is False
         assert "timeout" in result["message"].lower()
+
+
+# ── _stream_output finally: process.wait() TimeoutExpired 처리 TC ────────────
+
+def _run_wait_timeout_logic(process: MagicMock):
+    """_stream_output finally의 process.wait() 타임아웃 처리 로직 복제 (Phase 2 fix)"""
+    import subprocess
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        if process.returncode is None:
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except Exception:
+                pass
+
+
+class TestStreamOutputWaitTimeout:
+    """Phase 2 fix: process.wait(timeout=10) TimeoutExpired 처리 TC"""
+
+    def test_wait_timeout_triggers_terminate(self):
+        """R: process.wait()가 TimeoutExpired 발생 시 terminate() 호출됨"""
+        import subprocess
+        proc = MagicMock()
+        proc.wait.side_effect = [subprocess.TimeoutExpired("cmd", 10), None]
+        proc.returncode = 0  # terminate 후 종료됨
+
+        _run_wait_timeout_logic(proc)
+
+        proc.terminate.assert_called_once()
+
+    def test_wait_timeout_then_kill_if_still_alive(self):
+        """R: terminate 후 1초 wait도 TimeoutExpired → returncode=None → kill() 호출됨"""
+        import subprocess
+        proc = MagicMock()
+        # 첫 wait(10) → TimeoutExpired, 두번째 wait(1) → TimeoutExpired, kill 후 wait(5) → None
+        proc.wait.side_effect = [
+            subprocess.TimeoutExpired("cmd", 10),
+            subprocess.TimeoutExpired("cmd", 1),
+            None,
+        ]
+        proc.returncode = None  # terminate 후에도 미종료
+
+        _run_wait_timeout_logic(proc)
+
+        proc.kill.assert_called_once()
+
+    def test_wait_other_exception_propagated(self):
+        """E: TimeoutExpired 외 예외(OSError)는 잡히지 않고 전파됨"""
+        import subprocess
+        proc = MagicMock()
+        proc.wait.side_effect = OSError("broken pipe")
+
+        with pytest.raises(OSError):
+            _run_wait_timeout_logic(proc)

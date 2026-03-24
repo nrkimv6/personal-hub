@@ -1253,6 +1253,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
     - rate-limiter: 동일 라인 0.5초 내 10회 이상 반복 시 burst 억제
     """
     suppressed_count = 0
+    _last_flushed_pos: int = 0  # 파이프 루프에서 마지막으로 flush한 파일 위치 (drain 중복 방지용)
     # rate-limiter 상태
     last_line = ""
     repeat_count = 0
@@ -1267,6 +1268,10 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             # 1. 파일 기록 (노이즈 포함 전체 보존)
             log_handle.write(line)
             log_handle.flush()
+            try:
+                _last_flushed_pos = log_handle.tell()
+            except Exception:
+                pass
 
             # 2. 노이즈 필터: 억제 대상이면 카운트 후 skip
             if _is_noise_line(stripped):
@@ -1337,8 +1342,21 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
         # 프로세스 종료 대기 + 전역 상태 정리
         try:
             process.wait(timeout=10)
-        except Exception:
-            pass
+        except subprocess.TimeoutExpired:
+            # stdout EOF 이후 10초 내 미종료 → terminate → kill 순서로 강제 종료
+            logger.warning(f"[_stream_output] process.wait(10s) 타임아웃 (runner_id={runner_id!r}) → terminate")
+            process.terminate()
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+            if process.returncode is None:
+                logger.warning(f"[_stream_output] terminate 후 미종료 (runner_id={runner_id!r}) → kill")
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except Exception:
+                    pass
         exit_code = process.returncode
         logger.info(f"Output streaming thread finished (exit code: {exit_code})")
         logger.info(f"[_stream_output] finally 분기 시작 (runner_id={runner_id!r}, exit_code={exit_code})")
@@ -1346,28 +1364,31 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
         # 이중 큐잉 방지: runner 내부 _publish_merge_request()가 이미 큐잉하므로
         # command-listener에서는 큐잉하지 않음
 
-        # stdout 버퍼 drain: 로그 파일에 기록된 잔여 라인을 publish
-        # (process.stdout 루프 종료 후 파일에 기록되었지만 아직 publish되지 않은 내용)
+        # stdout 버퍼 drain: 파이프 루프 종료 후 파일에 추가된 미발행 라인만 publish
+        # (_last_flushed_pos 이후 내용만 대상으로 중복 발행 방지)
         log_file_path = _running_log_files.get(runner_id) if runner_id else None
         if log_file_path and runner_id:
             log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
             try:
                 with open(str(log_file_path), "r", encoding="utf-8", errors="replace") as _drain_f:
-                    # 파일 끝으로 이동한 뒤 마지막 2KB만 확인 (종료 직전 로그가 주 대상)
                     _drain_f.seek(0, 2)
                     end_pos = _drain_f.tell()
-                    # 최대 8KB 역방향으로 재읽기
-                    start_pos = max(0, end_pos - 8192)
-                    _drain_f.seek(start_pos)
-                    tail_lines = _drain_f.readlines()
-                    # 마지막 50줄만 대상
-                    for _tail_line in tail_lines[-50:]:
-                        _stripped = _tail_line.rstrip('\n')
-                        if _stripped:
-                            try:
-                                redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', _stripped))
-                            except redis.ConnectionError:
-                                pass
+                    # 파이프 루프에서 이미 발행된 위치까지는 skip (중복 방지)
+                    if _last_flushed_pos >= end_pos:
+                        pass  # 이미 모두 발행됨 → drain 전체 skip
+                    else:
+                        # _last_flushed_pos 이후 내용만 읽기 (최대 8KB 역방향 한도)
+                        start_pos = max(_last_flushed_pos, end_pos - 8192)
+                        _drain_f.seek(start_pos)
+                        tail_lines = _drain_f.readlines()
+                        # 마지막 50줄만 대상
+                        for _tail_line in tail_lines[-50:]:
+                            _stripped = _tail_line.rstrip('\n')
+                            if _stripped:
+                                try:
+                                    redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', _stripped))
+                                except redis.ConnectionError:
+                                    pass
             except Exception as _drain_err:
                 logger.debug(f"[_stream_output] stdout drain 실패 (무시): {_drain_err}")
 
@@ -2433,8 +2454,17 @@ def main():
                                     f"(merge_requested={bool(_hb_mr)}, merge_status={_hb_ms}) → cleanup 스킵"
                                 )
                             else:
-                                logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}, merge_status={_hb_ms}), 상태 정리")
-                                _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
+                                # _stream_output 스레드가 아직 finally 블록 실행 중이면 cleanup 위임
+                                # (스레드가 finally에서 직접 _cleanup_process_state를 호출하므로 중복 호출 방지)
+                                _t = _stream_threads.get(rid)
+                                if _t and _t.is_alive():
+                                    logger.debug(
+                                        f"heartbeat: runner {rid} _stream_output 스레드 alive → cleanup 위임 "
+                                        f"(exit code: {proc.returncode})"
+                                    )
+                                else:
+                                    logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}, merge_status={_hb_ms}), 상태 정리")
+                                    _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
                     # MergeOrchestrator health check 제거됨 — 인라인 merge로 대체
 
                     last_heartbeat = now
