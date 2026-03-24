@@ -187,6 +187,7 @@ def _wait_until_not_running(isolated_redis, runner_id: str, timeout: int = 600) 
 
 
 @pytest.mark.timeout(600)
+@pytest.mark.skip(reason="서버 실행 필요 — /merge-test에서 실행")
 class TestFullE2E:
     """Level 3: 실제 LLM 1 cycle 실행 → merge까지 전체 파이프라인"""
 

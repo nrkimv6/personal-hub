@@ -14,11 +14,20 @@ Phase T3 (E2E 순서 검증):
 - test_retry_merge_e2e_lock_lifecycle: retry acquire → subprocess → release 순서 확인
 """
 import sys
+import types
 import importlib.util
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+
+# plan_runner.core.stages mock (모듈이 없는 환경 대비)
+_mock_stages = types.ModuleType("plan_runner.core.stages")
+_mock_stages.pre_merge_gate = MagicMock(return_value=(True, "OK"))
+_mock_stages.auto_commit_stage = MagicMock(return_value=True)
+sys.modules.setdefault("plan_runner.core.stages", _mock_stages)
+sys.modules.setdefault("plan_runner", types.ModuleType("plan_runner"))
+sys.modules.setdefault("plan_runner.core", types.ModuleType("plan_runner.core"))
 
 SCRIPTS_DIR = Path(__file__).parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:

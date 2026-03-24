@@ -7,6 +7,22 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def restore_listener_noise_filter():
+    """listener_noise_filter 모듈을 테스트 전후로 격리.
+
+    8개 테스트 파일이 sys.modules["listener_noise_filter"]를 mock으로 교체하고
+    cleanup하지 않아 test_noise_filter_76.py의 is_noise_line이 mock을 import하게 됨.
+    각 테스트 전 원본 모듈 상태를 스냅샷하고 테스트 후 복원한다.
+    """
+    original = sys.modules.get("listener_noise_filter")
+    yield
+    if original is None:
+        sys.modules.pop("listener_noise_filter", None)
+    else:
+        sys.modules["listener_noise_filter"] = original
+
+
 def _try_connect_redis():
     """Redis 연결 시도. 실패 시 None 반환."""
     try:

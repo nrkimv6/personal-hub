@@ -86,9 +86,9 @@ class TestLogServiceFindCurrentLog:
     """_find_current_log() 테스트"""
 
     def test_stream_log_path_priority(self, tmp_path):
-        """stream_log_path 우선 탐색"""
+        """stream_log_path 우선 탐색 (크기 > 200 bytes 조건 충족 필요)"""
         stream_log = tmp_path / "stream.log"
-        stream_log.write_text("stream", encoding="utf-8")
+        stream_log.write_text("x" * 300, encoding="utf-8")  # _STREAM_LOG_MIN_BYTES(200) 초과
         fallback_log = tmp_path / "fallback.log"
         fallback_log.write_text("fallback", encoding="utf-8")
 

@@ -198,7 +198,7 @@ class ExecutorService:
         if cleaned_active or cleaned_recent:
             logger.info(f"[dev-runner] cleanup_stale_runners: active={cleaned_active}, recent={cleaned_recent}, bugs={bugs}")
 
-        return {"cleaned_active": cleaned_active, "cleaned_recent": cleaned_recent, "bugs": bugs}
+        return {"cleaned_active": cleaned_active, "cleaned_recent": cleaned_recent, "bugs": bugs, "total": cleaned_active + cleaned_recent}
 
     async def start_dev_runner(self, request: RunRequest) -> RunStatusResponse:
         """plan-runner 실행 시작 - Redis 명령 전송 (비동기, 멀티 runner 지원)"""
@@ -452,6 +452,7 @@ class ExecutorService:
         cleaned_active = 0
         cleaned_recent = 0
         bugs = 0
+        cleaned_active_ids: set = set()
 
         # 1. active_runners 정리 (기존 _cleanup_stale_runners 로직)
         try:
@@ -474,6 +475,7 @@ class ExecutorService:
 
             if should_clean:
                 await self._force_cleanup_state(rid)
+                cleaned_active_ids.add(rid)
                 cleaned_active += 1
 
         # 2. recent_runners 정리
@@ -486,6 +488,8 @@ class ExecutorService:
         GRACE_SECONDS = 600  # 10분
 
         for rid in recent_ids:
+            if rid in cleaned_active_ids:
+                continue
             plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
 
             # plan_file 있으면 스킵

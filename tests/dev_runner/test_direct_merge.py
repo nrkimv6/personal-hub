@@ -162,20 +162,13 @@ class TestInlineMergeBranchFromRedis:
 
         captured = {}
 
-        def mock_workflow_run(self_, runner_id=None, worktree_path=None, base_dir=None, plan_file=None, branch=None, auto_resolve=True):
-            captured["branch"] = branch
-            return WorkflowResult(merged=True, tests_passed=True, conflict=False, message="ok")
+        def mock_execute_merge(runner_id_, redis_client, action_name="inline-merge"):
+            captured["branch"] = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id_}:branch")
+            return {"success": True, "message": "mocked", "merge_status": "merged", "action": action_name}
 
-        # merge_lock 모듈 모킹
-        mock_merge_lock = types.ModuleType("merge_lock")
-        mock_merge_lock.acquire_merge_lock = MagicMock(return_value=True)
-        mock_merge_lock.release_merge_lock = MagicMock(return_value=True)
-
-        with patch.dict(sys.modules, {"merge_lock": mock_merge_lock}):
-            with patch.object(mw.MergeWorkflow, "run", mock_workflow_run):
-                with patch.object(cl, "_cleanup_process_state", MagicMock()):
-                    with patch.object(cl, "_post_merge_pipeline", return_value=True):
-                        cl._do_inline_merge(runner_id, redis)
+        with patch.object(cl, "_execute_merge_with_lock", side_effect=mock_execute_merge):
+            with patch.object(cl, "_cleanup_process_state", MagicMock()):
+                cl._do_inline_merge(runner_id, redis)
 
         return captured
 

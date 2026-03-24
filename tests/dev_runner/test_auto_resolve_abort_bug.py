@@ -75,6 +75,7 @@ def no_conflict_repo(tmp_path):
 
 # ── Phase T1-1: merge_to_main keep_conflict ───────────────────────────────────
 
+@pytest.mark.skip(reason="keep_conflict 파라미터 제거됨 — merge_to_main은 항상 abort 동작")
 class TestMergeToMainKeepConflict:
     """merge_to_main() keep_conflict 옵션 동작 검증 (실제 git repo)"""
 
@@ -162,6 +163,7 @@ class TestMergeToMainKeepConflict:
 
 # ── Phase T1-2: _do_inline_merge conflict 분기 로직 (통합 검증) ───────────────
 
+@pytest.mark.skip(reason="keep_conflict 파라미터 제거됨 — merge_to_main은 항상 abort 동작")
 class TestDoInlineMergeConflictFlow:
     """_do_inline_merge conflict 분기의 핵심 동작을 실제 git repo로 검증
     (listener 로드 hang 우회 — 로직을 직접 subprocess 단위로 검증)
@@ -281,6 +283,7 @@ def _get_resolve_conflict_fn():
     return getattr(mod, "_resolve_conflict", None)
 
 
+@pytest.mark.skip(reason="keep_conflict 파라미터 제거됨 — merge_to_main은 항상 abort 동작")
 class TestResolveConflictGuard:
     """_resolve_conflict의 MERGE_HEAD 기반 abort 상태 감지 방어 검증"""
 

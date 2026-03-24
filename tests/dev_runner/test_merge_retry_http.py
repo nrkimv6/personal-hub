@@ -112,5 +112,5 @@ class TestNormalRunnerPlanFileAllRegression:
 
         payload = svc._build_status_payload("normal-runner-01")
         assert payload is not None
-        assert payload["plan_file"] == "ALL", \
-            f"일반 runner의 plan_file이 'ALL'이 아님: {payload['plan_file']}"
+        assert payload["plan_file"] == "__ALL_PLANS__", \
+            f"일반 runner의 plan_file이 '__ALL_PLANS__'이 아님: {payload['plan_file']}"

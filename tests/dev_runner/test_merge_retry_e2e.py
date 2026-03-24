@@ -11,6 +11,14 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+# plan_runner.core.stages mock (모듈이 없는 환경 대비)
+_mock_stages_mod = types.ModuleType("plan_runner.core.stages")
+_mock_stages_mod.pre_merge_gate = MagicMock(return_value=(True, "OK"))
+_mock_stages_mod.auto_commit_stage = MagicMock(return_value=True)
+sys.modules.setdefault("plan_runner.core.stages", _mock_stages_mod)
+sys.modules.setdefault("plan_runner", types.ModuleType("plan_runner"))
+sys.modules.setdefault("plan_runner.core", types.ModuleType("plan_runner.core"))
+
 _SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
 
 _mock_noise = types.ModuleType("listener_noise_filter")
@@ -101,6 +109,7 @@ class TestRetryMergeFullFlow:
         """
         E2E: _do_retry_merge() 직접 → merge_status 전이 + cleanup 확인
         queued → merging → merged
+        (_execute_merge_with_lock 내 subprocess.run을 mock하여 exit_code=0 반환)
         """
         cl = _load_listener()
 
@@ -108,7 +117,6 @@ class TestRetryMergeFullFlow:
         worktree.mkdir()
         runner_id = "t-mretry-e2e02"
         redis = make_redis_mock(worktree_path=str(worktree))
-        merge_result = make_merge_result(merged=True, tests_passed=True)
 
         merge_status_sequence = []
 
@@ -120,14 +128,14 @@ class TestRetryMergeFullFlow:
         redis.set.side_effect = track_set
 
         import merge_lock as ml
+
+        proc_mock = MagicMock()
+        proc_mock.returncode = 0  # exit_code=0 → merged
+
         with patch.object(ml, "acquire_merge_lock", return_value=True), \
              patch.object(ml, "release_merge_lock"), \
-             patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
+             patch("subprocess.run", return_value=proc_mock), \
              patch.object(cl, "_cleanup_process_state") as mock_cleanup:
-            mock_wf = MagicMock()
-            mock_wf.run.return_value = merge_result
-            mock_wf_cls.return_value = mock_wf
-
             cl._do_retry_merge(runner_id, redis, "cmd-e2e-002")
 
         # merge_status 전이: queued → merging → merged
@@ -234,18 +242,11 @@ class TestDirectMergeConflictResolverCrashSafe:
         mock_merge_lock.acquire_merge_lock = MagicMock(return_value=True)
         mock_merge_lock.release_merge_lock = MagicMock(return_value=True)
 
-        # MergeWorkflow → conflict 반환
-        conflict_result = make_merge_result(merged=False, tests_passed=False, conflict=True, message="conflict")
-
         with patch.dict(sys.modules, {"merge_lock": mock_merge_lock}), \
-             patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
+             patch("subprocess.run", return_value=MagicMock(returncode=3)), \
              patch.object(cl, "_launch_conflict_resolver_process",
                           return_value={"success": False, "message": "resolve 실패 시뮬레이션"}), \
              patch.object(cl, "_cleanup_process_state", MagicMock()):
-
-            mock_wf = MagicMock()
-            mock_wf.run.return_value = conflict_result
-            mock_wf_cls.return_value = mock_wf
 
             # 크래시 없이 실행 완료되어야 함
             cl._do_inline_merge("dm-crash-test", redis)

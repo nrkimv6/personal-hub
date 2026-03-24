@@ -24,6 +24,16 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from listener_noise_filter import NOISE_BLOCK_MARKERS, is_noise_line
 
 
+@pytest.fixture(autouse=True)
+def _real_is_noise_line(monkeypatch):
+    """모듈 레벨에서 is_noise_line이 mock에 바인딩된 경우에도 실제 함수를 사용한다."""
+    import importlib
+    import tests.dev_runner.test_noise_filter_76 as _this_module
+    sys.modules.pop("listener_noise_filter", None)
+    real = importlib.import_module("listener_noise_filter")
+    monkeypatch.setattr(_this_module, "is_noise_line", real.is_noise_line)
+
+
 def _make_process_stub(lines: list):
     proc = MagicMock()
     proc.stdout = iter(line + "\n" for line in lines)

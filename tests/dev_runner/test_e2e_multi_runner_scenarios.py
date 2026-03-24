@@ -91,9 +91,9 @@ class TestE2EScenario1:
 
         # 서로 다른 runner_id 확인
         assert result1.runner_id != result2.runner_id
-        # 각 runner_id는 8자리 hex
-        assert len(result1.runner_id) == 8
-        assert len(result2.runner_id) == 8
+        # test_source 있으면 t-{src}-{4hex} 형식 (가변 길이), 없으면 8자리 hex
+        assert len(result1.runner_id) >= 8
+        assert len(result2.runner_id) >= 8
         # get_all_runners()가 두 항목을 반환하는 시나리오 시뮬레이션
         runners_mock = [
             _make_runner_item(result1.runner_id, running=True),

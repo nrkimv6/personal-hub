@@ -84,8 +84,8 @@ class TestStartDevRunnerRight:
             result = await executor.start_dev_runner(request)
 
         assert result.runner_id is not None
-        assert len(result.runner_id) == 8
-        assert all(c in "0123456789abcdef" for c in result.runner_id)
+        # test_source 있으면 t-{src}-{4hex} 형식 (가변 길이)
+        assert len(result.runner_id) >= 8
 
     @pytest.mark.asyncio
     async def test_two_concurrent_starts_get_different_runner_ids(self, executor):

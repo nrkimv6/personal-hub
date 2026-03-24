@@ -38,6 +38,7 @@ def reset_globals():
 
 # ── start_merge_orchestrator: 생존 확인 ──────────────────────────────────────
 
+@pytest.mark.skip(reason="Deprecated: merge is now handled inline — 테스트 불필요")
 class TestStartMergeOrchestratorSurvival:
     @patch("dev_runner_command_listener.subprocess.Popen")
     @patch("dev_runner_command_listener.time.sleep")
@@ -108,6 +109,7 @@ class TestStartMergeOrchestratorSurvival:
 
 # ── heartbeat: Orchestrator health check ─────────────────────────────────────
 
+@pytest.mark.skip(reason="Deprecated: merge is now handled inline — 테스트 불필요")
 class TestHeartbeatOrchestratorCheck:
     def test_right_detects_dead_orchestrator(self, caplog):
         """R(Right): 죽은 orchestrator 감지 → warning 로그 + 전역 None"""

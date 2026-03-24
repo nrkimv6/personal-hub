@@ -1108,6 +1108,10 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
                 result = {"success": True, "message": "conflict resolved", "merge_status": "merged", "action": action_name}
             else:
                 _pub(f"conflict resolver 실패: {_resolve_result['message']}")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+                except Exception:
+                    pass
                 result = {"success": False, "message": "conflict", "conflict": True, "merge_status": "conflict", "action": action_name}
         else:
             try:

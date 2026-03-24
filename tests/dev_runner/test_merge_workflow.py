@@ -181,8 +181,10 @@ class TestMergeToMainPlanFile:
         """TC-Right: plan_file 전달 시 plan/{stem} 브랜치로 git merge 실행"""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0),  # git checkout main
-                MagicMock(returncode=1),  # git merge-base --is-ancestor (not ancestor, proceed)
+                MagicMock(returncode=0, stdout=""),       # git status --porcelain (no dirty)
+                MagicMock(returncode=0, stdout="main\n"), # git rev-parse --abbrev-ref HEAD (on main)
+                MagicMock(returncode=1),                  # git merge-base --is-ancestor (not ancestor)
+                MagicMock(returncode=0, stdout=""),       # git status --porcelain (pre-stash, no dirty)
                 MagicMock(returncode=0, stdout="", stderr=""),  # git merge (success)
             ]
             WorktreeManager.merge_to_main(
@@ -197,8 +199,10 @@ class TestMergeToMainPlanFile:
         """TC-Right: plan_file 미지정 시 runner/{id} 브랜치로 git merge 실행 (기존 동작 유지)"""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0),  # git checkout main
-                MagicMock(returncode=1),  # git merge-base --is-ancestor (not ancestor, proceed)
+                MagicMock(returncode=0, stdout=""),       # git status --porcelain (no dirty)
+                MagicMock(returncode=0, stdout="main\n"), # git rev-parse --abbrev-ref HEAD (on main)
+                MagicMock(returncode=1),                  # git merge-base --is-ancestor (not ancestor)
+                MagicMock(returncode=0, stdout=""),       # git status --porcelain (pre-stash)
                 MagicMock(returncode=0, stdout="", stderr=""),  # git merge (success)
             ]
             WorktreeManager.merge_to_main("abc123", tmp_path / ".worktrees", tmp_path)
@@ -210,8 +214,10 @@ class TestMergeToMainPlanFile:
         """TC-Boundary: plan_file='' 전달 시 falsy → runner/{id} fallback"""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0),  # git checkout main
-                MagicMock(returncode=1),  # git merge-base --is-ancestor (not ancestor, proceed)
+                MagicMock(returncode=0, stdout=""),       # git status --porcelain (no dirty)
+                MagicMock(returncode=0, stdout="main\n"), # git rev-parse --abbrev-ref HEAD (on main)
+                MagicMock(returncode=1),                  # git merge-base --is-ancestor (not ancestor)
+                MagicMock(returncode=0, stdout=""),       # git status --porcelain (pre-stash)
                 MagicMock(returncode=0, stdout="", stderr=""),  # git merge (success)
             ]
             WorktreeManager.merge_to_main("abc123", tmp_path / ".worktrees", tmp_path, plan_file="")
@@ -223,10 +229,12 @@ class TestMergeToMainPlanFile:
         """TC-Error: git merge returncode=1 → MergeResult(success=False, conflict=True) + abort 호출"""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0),  # git checkout main
-                MagicMock(returncode=1),  # git merge-base --is-ancestor (not ancestor, proceed)
+                MagicMock(returncode=0, stdout=""),       # git status --porcelain (no dirty)
+                MagicMock(returncode=0, stdout="main\n"), # git rev-parse --abbrev-ref HEAD (on main)
+                MagicMock(returncode=1),                  # git merge-base --is-ancestor (not ancestor)
+                MagicMock(returncode=0, stdout=""),       # git status --porcelain (pre-stash)
                 MagicMock(returncode=1, stdout="", stderr="CONFLICT"),  # git merge (conflict)
-                MagicMock(returncode=0),  # git merge --abort
+                MagicMock(returncode=0),                  # git merge --abort
             ]
             result = WorktreeManager.merge_to_main("abc123", tmp_path / ".worktrees", tmp_path)
         assert result.success is False
@@ -337,7 +345,8 @@ class TestMergeWorkflowE2E:
         base_dir.mkdir()
 
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            # git log에 커밋이 있음을 시뮬레이션해야 merge skip 방지 (stdout 비면 변경사항 없음으로 early return)
+            mock_run.return_value = MagicMock(returncode=0, stdout="abc123 feat: commit\n", stderr="")
             import worktree_manager as wm
             with patch.object(wm.WorktreeManager, "merge_to_main",
                                return_value=MergeResult(success=True, conflict=False, message="ok")) as mock_merge, \
