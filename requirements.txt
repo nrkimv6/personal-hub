@@ -39,3 +39,11 @@ pefile>=2023.2.7      # PE 헤더 분석 (Windows 설치파일, Windows 전용)
 # 키워드 분석 API (/api/writing/keywords/analyze)를 사용하려면 설치 필요
 # 미설치 시 다른 writing 기능은 정상 작동하며, 해당 엔드포인트만 503 반환
 kiwipiepy>=0.17.0
+
+# KakaoTalk Monitor (optional - 카카오톡 채팅방 모니터링)
+# pip install paddleocr paddlepaddle mss pyautogui pyperclip
+paddleocr>=2.7.0
+paddlepaddle>=2.5.0   # CPU 버전; GPU 사용 시: paddlepaddle-gpu
+mss>=9.0.0
+pyautogui>=0.9.54
+pyperclip>=1.8.2
