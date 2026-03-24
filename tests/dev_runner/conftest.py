@@ -21,34 +21,62 @@ def _try_connect_redis():
 
 @pytest.fixture(autouse=True, scope="session")
 def runner_cleanup_report():
-    """세션 종료 시 잔류 러너 리포트를 콘솔에 출력.
+    """세션 종료 시 잔류 러너 정리 + 리포트 출력.
 
-    - 세션 시작 전 active_runners 스냅샷 저장
-    - 세션 종료 후 신규 잔류 러너 목록 출력
+    - 세션 시작 전 active_runners + recent_runners 스냅샷 저장
+    - 세션 종료 후 신규 잔류 러너 목록 출력 및 삭제
     - test_source가 없는 러너 = (unknown) 표시 → 미수정 TC 식별 단서
     """
+    import os as _os, signal as _signal, time as _time, sys as _sys, subprocess as _subprocess
+
     r = _try_connect_redis()
     if r is None:
         yield
         return
 
     before_active = r.smembers("plan-runner:active_runners") or set()
+    before_recent = set(r.zrange("plan-runner:recent_runners", 0, -1) or [])
     yield
 
     try:
         after_active = r.smembers("plan-runner:active_runners") or set()
-        remaining = after_active - before_active
+        after_recent = set(r.zrange("plan-runner:recent_runners", 0, -1) or [])
+        remaining_active = after_active - before_active
+        remaining_recent = after_recent - before_recent
+        remaining = remaining_active | remaining_recent
+
         sep = "=" * 43
         if not remaining:
             sys.stderr.write(f"\n{sep}\n[CLEAN] 잔류 러너 0건\n{sep}\n")
         else:
-            lines = [f"\n{sep}", f"[DIRTY] 잔류 러너 {len(remaining)}건:"]
+            lines = [f"\n{sep}", f"[DIRTY] 잔류 러너 {len(remaining)}건 — 자동 정리 시작:"]
             for rid in sorted(remaining):
                 plan_file = r.get(f"plan-runner:runners:{rid}:plan_file") or "(none)"
                 engine    = r.get(f"plan-runner:runners:{rid}:engine")    or "(none)"
                 pid       = r.get(f"plan-runner:runners:{rid}:pid")       or "(none)"
                 source    = r.get(f"plan-runner:runners:{rid}:test_source") or "(unknown)"
                 lines.append(f"  - {rid:<22} | plan: {plan_file:<30} | engine: {engine:<8} | pid: {pid:<8} | source: {source}")
+
+                # PID kill
+                if pid and pid != "(none)":
+                    try:
+                        _os.kill(int(pid), _signal.SIGTERM)
+                        _time.sleep(0.5)
+                        if _sys.platform == "win32":
+                            _subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+                        else:
+                            _os.kill(int(pid), _signal.SIGKILL)
+                    except (ProcessLookupError, ValueError, OSError):
+                        pass
+
+                # Redis 키 전체 삭제
+                r.srem("plan-runner:active_runners", rid)
+                r.zrem("plan-runner:recent_runners", rid)
+                keys = r.keys(f"plan-runner:runners:{rid}:*")
+                if keys:
+                    r.delete(*keys)
+
+            lines.append(f"[DONE] {len(remaining)}건 정리 완료")
             lines.append(sep)
             sys.stderr.write("\n".join(lines) + "\n")
         sys.stderr.flush()
@@ -105,9 +133,14 @@ def redis_cleanup():
             keys = r.keys(f"plan-runner:runners:{runner_id}:*")
             if keys:
                 r.delete(*keys)
-            # 재확인: active_runners에 아직 남아있으면 재삭제
-            if r.sismember("plan-runner:active_runners", runner_id):
-                r.srem("plan-runner:active_runners", runner_id)
+            # race condition 대응: PID kill 후 listener가 recent_runners에 재등록할 수 있음
+            # 2초 대기 후 재확인 + 재삭제
+            _time.sleep(2)
+            r.srem("plan-runner:active_runners", runner_id)
+            r.zrem("plan-runner:recent_runners", runner_id)
+            stale_keys = r.keys(f"plan-runner:runners:{runner_id}:*")
+            if stale_keys:
+                r.delete(*stale_keys)
     except Exception:
         pass
 
