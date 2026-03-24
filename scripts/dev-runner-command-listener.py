@@ -242,6 +242,8 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         for suffix in RUNNER_KEY_SUFFIXES:
             if _preserve_worktree and suffix == "worktree_path":
                 continue  # 워크트리 보존 시 worktree_path는 TTL 설정 스킵
+            if suffix in ("plan_file", "branch"):
+                continue  # 불변 속성: TTL 없이 영구 보존 (종료 후에도 탭 표시용)
             key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
             redis_client.expire(key, RECENT_RUNNERS_TTL)
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)

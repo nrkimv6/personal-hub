@@ -24,7 +24,8 @@
 	// 실행 중인 plan 표시 정보
 	let runningPlanName = $derived(
 		!status?.running ? '' :
-		(!status.plan_file || status.plan_file === ALL_PLANS_SENTINEL || status.plan_file === 'ALL') ? '전체 실행' :
+		!status.plan_file ? '(알 수 없음)' :
+		(status.plan_file === ALL_PLANS_SENTINEL || status.plan_file === 'ALL') ? '전체 실행' :
 		status.plan_file.split(/[\\/]/).pop() ?? ''
 	);
 	let runningEngine = $derived(status?.engine ?? 'claude');

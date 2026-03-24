@@ -148,13 +148,13 @@
 	}
 
 	const isAllPlansSentinel = (f: string | null | undefined) =>
-		!f || f === '__ALL_PLANS__' || f === 'ALL';
+		f === '__ALL_PLANS__' || f === 'ALL';
 
 	function updateRunnerTab(tab: RunnerTab, runner: RunnerSource): RunnerTab {
 		return {
 			...tab,
 			running: runner.running ?? runner.status === 'running',
-			plan_file: isAllPlansSentinel(runner.plan_file) ? tab.plan_file : (runner.plan_file ?? null),
+			plan_file: (!runner.plan_file || isAllPlansSentinel(runner.plan_file)) ? tab.plan_file : runner.plan_file,
 			engine: (runner.engine ?? tab.engine) ?? null,
 			start_time: (runner.start_time ?? tab.start_time) ?? null,
 			orphan: runner.orphan ?? tab.orphan ?? false,
@@ -254,8 +254,8 @@
 	function handleSSEEvent(eventName: string, data: string) {
 		if (eventName === 'status') {
 			try {
-				const parsed = JSON.parse(data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null }[] };
-				const runners = parsed.runners ?? [];
+				const parsed = JSON.parse(data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null; trigger?: string | null }[] };
+				const runners = (parsed.runners ?? []).filter(r => !r.trigger?.startsWith('tc:'));
 				// runner 종료 감지를 위해 업데이트 전 running 상태 캡처
 				const prevRunningIds = new Set(runnerTabs.filter(t => t.running).map(t => t.id));
 				const runningRunner = runners.find(r => r.status === 'running');

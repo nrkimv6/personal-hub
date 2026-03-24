@@ -159,10 +159,10 @@
 	}
 
 	const isAllPlans = (f: string | null | undefined) =>
-		!f || f === '__ALL_PLANS__' || f === 'ALL';
+		f === '__ALL_PLANS__' || f === 'ALL';
 
 	let planBasename = $derived(
-		isAllPlans(planFile) ? '전체 실행' : planFile!.split(/[\\/]/).pop() ?? planFile!
+		!planFile ? '(알 수 없음)' : isAllPlans(planFile) ? '전체 실행' : planFile.split(/[\\/]/).pop() ?? planFile
 	);
 
 	let statusIcon = $derived(running ? '실행중' : '완료');

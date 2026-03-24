@@ -91,17 +91,14 @@ class EventService:
     def _build_status_payload(self, runner_id: str) -> Optional[dict]:
         """특정 runner의 현재 상태를 Redis에서 읽어 dict로 반환"""
         try:
-            fields = ["status", "pid", "current_cycle", "start_time", "plan_file", "engine", "branch"]
+            fields = ["status", "pid", "current_cycle", "start_time", "plan_file", "engine", "branch", "trigger"]
             values = self._sync.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
             data = dict(zip(fields, values))
             data["runner_id"] = runner_id
-            # plan_file이 None(Redis 키 미설정)이면 branch 또는 PLAN_FILE_ALL fallback
-            # 단, 정지 runner는 sentinel 반환 억제 (프론트엔드 제목 덮어씌움 방지)
+            # plan_file이 None(Redis 키 미설정)이면 None 반환 — sentinel fallback 제거
+            # (프론트엔드에서 null과 sentinel을 구분하여 처리)
             if not data.get("plan_file"):
-                if data.get("status") == "stopped":
-                    data["plan_file"] = None
-                else:
-                    data["plan_file"] = data.get("branch") or PLAN_FILE_ALL
+                data["plan_file"] = None
             return data
         except Exception:
             return None
@@ -114,6 +111,9 @@ class EventService:
             for rid in runner_ids:
                 payload = self._build_status_payload(rid)
                 if payload:
+                    trigger = payload.get("trigger") or ""
+                    if trigger.startswith("tc:"):
+                        continue  # tc: 트리거 러너는 프론트엔드에 노출하지 않음
                     result.append(payload)
             return result
         except Exception:

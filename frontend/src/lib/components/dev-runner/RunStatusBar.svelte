@@ -79,9 +79,9 @@
 				<div class="flex items-center gap-1 shrink-0">
 					{#each runners as runner (runner.id)}
 						{#if runner.running}
-							<div class="pulse-dot bg-status-running" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '전체 실행'} - 실행 중"></div>
+							<div class="pulse-dot bg-status-running" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '(알 수 없음)'} - 실행 중"></div>
 						{:else}
-							<div class="w-2 h-2 rounded-full bg-muted-foreground/30" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '전체 실행'} - 중지"></div>
+							<div class="w-2 h-2 rounded-full bg-muted-foreground/30" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '(알 수 없음)'} - 중지"></div>
 						{/if}
 					{/each}
 				</div>
@@ -262,7 +262,7 @@
 
 					<!-- plan 파일명 -->
 					<span class="truncate flex-1 min-w-0 font-mono text-[11px] text-foreground" title={runner.plan_file ?? ''}>
-						{runner.plan_file ? runner.plan_file.split(/[/\\]/).pop() : '전체 실행'}
+						{runner.plan_file === '__ALL_PLANS__' || runner.plan_file === 'ALL' ? '전체 실행' : runner.plan_file ? runner.plan_file.split(/[/\\]/).pop() : '(알 수 없음)'}
 					</span>
 
 					<!-- engine (sm 이상) -->

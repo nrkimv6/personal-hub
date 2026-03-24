@@ -102,14 +102,32 @@ class TestBuildStatusPayload:
         assert payload is not None
         assert payload["plan_file"] is None
 
-    def test_build_status_payload_running_runner_plan_file_none_returns_sentinel(self, event_service, sync_redis):
-        """R: status=running + plan_file 키 없음 → PLAN_FILE_ALL 반환"""
-        from app.modules.dev_runner.services.event_service import PLAN_FILE_ALL
+    def test_build_status_payload_running_runner_plan_file_none_returns_none(self, event_service, sync_redis):
+        """R: status=running + plan_file 키 없음 → None 반환 (sentinel fallback 제거)"""
         runner_id = "running01"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         payload = event_service._build_status_payload(runner_id)
         assert payload is not None
+        assert payload["plan_file"] is None
+
+    def test_build_status_payload_running_with_explicit_sentinel(self, event_service, sync_redis):
+        """R: plan_file에 __ALL_PLANS__ 명시 → 그대로 전달"""
+        from app.modules.dev_runner.services.event_service import PLAN_FILE_ALL
+        runner_id = "running01b"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", PLAN_FILE_ALL)
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
         assert payload["plan_file"] == PLAN_FILE_ALL
+
+    def test_build_status_payload_plan_file_empty_string_returns_none(self, event_service, sync_redis):
+        """B: plan_file="" (falsy) → None 반환"""
+        runner_id = "running01c"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "")
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["plan_file"] is None
 
     def test_build_status_payload_running_runner_plan_file_set_returns_value(self, event_service, sync_redis):
         """R: status=running + plan_file 정상값 → 그대로 반환"""
@@ -128,6 +146,78 @@ class TestBuildStatusPayload:
         payload = event_service._build_status_payload(runner_id)
         assert payload is not None
         assert payload["plan_file"] is None
+
+    def test_build_status_payload_includes_trigger_field(self, event_service, sync_redis):
+        """R: trigger 키 있는 runner → payload에 trigger 필드 포함"""
+        runner_id = "triggered01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "manual")
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["trigger"] == "manual"
+
+    def test_build_status_payload_trigger_none_when_key_missing(self, event_service, sync_redis):
+        """B: trigger Redis 키 없음 → payload["trigger"] is None"""
+        runner_id = "triggered02"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        # trigger 키 미설정
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["trigger"] is None
+
+
+# ─── _build_all_runners_status 필터링 테스트 ─────────────────────────────────
+
+class TestBuildAllRunnersStatus:
+    def _register_runner(self, redis, runner_id: str, trigger: str | None = None, status: str = "running"):
+        redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", status)
+        if trigger is not None:
+            redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", trigger)
+        redis.sadd("plan-runner:active_runners", runner_id)
+
+    def test_build_all_runners_excludes_tc_trigger(self, event_service, sync_redis):
+        """R: trigger="tc:test" runner 등록 → _build_all_runners_status() 결과에 미포함"""
+        self._register_runner(sync_redis, "tc_runner01", trigger="tc:test")
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        assert "tc_runner01" not in ids
+
+    def test_build_all_runners_includes_normal_trigger(self, event_service, sync_redis):
+        """R: trigger="manual" runner → 결과에 포함"""
+        self._register_runner(sync_redis, "manual_runner01", trigger="manual")
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        assert "manual_runner01" in ids
+
+    def test_build_all_runners_includes_trigger_none(self, event_service, sync_redis):
+        """B: trigger 키 없음(None) → runner 포함 (tc: 아니므로 필터 안 됨)"""
+        self._register_runner(sync_redis, "notrigger_runner01", trigger=None)
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        assert "notrigger_runner01" in ids
+
+    def test_build_all_runners_includes_trigger_empty(self, event_service, sync_redis):
+        """B: trigger="" → runner 포함"""
+        self._register_runner(sync_redis, "emptytrigger_runner01", trigger="")
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        assert "emptytrigger_runner01" in ids
+
+    def test_build_all_runners_excludes_trigger_tc_prefix_only(self, event_service, sync_redis):
+        """B: trigger="tc:" (접두사만, 값 없음) → 필터링됨"""
+        self._register_runner(sync_redis, "tconly_runner01", trigger="tc:")
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        assert "tconly_runner01" not in ids
+
+    def test_build_all_runners_mixed(self, event_service, sync_redis):
+        """R: tc: runner + 일반 runner 혼재 → 일반 runner만 반환"""
+        self._register_runner(sync_redis, "vis_runner01", trigger="user")
+        self._register_runner(sync_redis, "invis_runner01", trigger="tc:pytest")
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        assert "vis_runner01" in ids
+        assert "invis_runner01" not in ids
 
 
 # ─── _build_tracking_payload 테스트 ─────────────────────────────────────────
