@@ -67,6 +67,7 @@ try:
     from app.worker.file_search_worker import FileSearchWorker
     from app.worker.plan_archive_listener import PlanArchiveListener
     from app.modules.git_repos.worker import GitRepoWorker
+    from app.worker.kakao_monitor_worker import KakaoMonitorWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -224,6 +225,21 @@ async def run_with_orchestrator(
             plan_archive_listener = PlanArchiveListener()
             orchestrator.register_worker("plan_archive_listener", plan_archive_listener)
             logger.info("PlanArchiveListener 등록됨")
+
+        # 카카오 모니터 워커 (활성 설정이 있을 때만)
+        try:
+            from app.database import get_db_session
+            from app.models.kakao_monitor import KakaoWatchConfig
+            with get_db_session() as _db:
+                has_kakao_config = _db.query(KakaoWatchConfig).filter(
+                    KakaoWatchConfig.is_active.is_(True)
+                ).count() > 0
+            if has_kakao_config:
+                kakao_worker = KakaoMonitorWorker(browser_manager)
+                orchestrator.register_worker("kakao_monitor", kakao_worker)
+                logger.info("KakaoMonitorWorker 등록됨")
+        except Exception as _e:
+            logger.warning("KakaoMonitorWorker 등록 실패 (무시): %s", _e)
 
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
