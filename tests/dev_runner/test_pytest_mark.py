@@ -45,6 +45,30 @@ class TestPytestMarkInfra:
         # 이 파일 자체는 http mark 없으므로 수집되어야 함
         assert result.returncode == 0
 
+    def test_right_http_live_marker_registered(self):
+        """TC-Right: pytest.ini에 http_live marker 등록 → --markers 출력에 http_live 표시"""
+        result = subprocess.run(
+            [PYTHON, "-m", "pytest", "--markers"],
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=str(PROJECT_ROOT)
+        )
+        assert "http_live" in result.stdout, f"http_live marker not found in: {result.stdout[:500]}"
+
+    def test_right_http_live_tests_have_pytestmark(self):
+        """TC-Right: test_live_server_http.py 파일이 pytestmark = pytest.mark.http_live 설정됨"""
+        live_file = PROJECT_ROOT / "tests" / "dev_runner" / "test_live_server_http.py"
+        assert live_file.exists(), "test_live_server_http.py 파일이 존재하지 않음"
+        content = live_file.read_text(encoding="utf-8")
+        assert "pytestmark = pytest.mark.http_live" in content, \
+            "test_live_server_http.py에 pytestmark = pytest.mark.http_live 가 없음"
+
+    def test_boundary_http_live_excluded_from_default(self):
+        """TC-Boundary: addopts에 'not http_live' 포함 → 기본 pytest 실행 시 http_live 제외"""
+        ini_file = PROJECT_ROOT / "pytest.ini"
+        content = ini_file.read_text(encoding="utf-8")
+        assert "not http_live" in content, \
+            "pytest.ini addopts에 'not http_live' 가 없음 — 기본 실행 시 실서버 TC가 포함됨"
+
 
 class TestDbDirEnvVar:
     def test_right_test_db_dir_env_var_used(self, tmp_path):
