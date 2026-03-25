@@ -235,13 +235,6 @@
 		activeTab = 'settings';
 	}
 
-	const tabList: { key: Tab; label: string }[] = [
-		{ key: 'dashboard', label: '대시보드' },
-		{ key: 'settings', label: '감시 설정' },
-		{ key: 'history', label: '수집 이력' },
-		{ key: 'windows', label: '카카오 창' },
-	];
-
 	function configName(id: number | null) {
 		if (id == null) return '-';
 		return configs.find(c => c.id === id)?.chat_name ?? String(id);
@@ -252,20 +245,7 @@
 <PageHeader title="카카오 모니터" subtitle="카카오톡 채팅방 자동 감시 및 게시물 수집" />
 
 <!-- 탭 네비게이션 -->
-<div class="border-b border-gray-200 mb-6">
-	<nav class="-mb-px flex space-x-4">
-		{#each tabList as { key, label }}
-			<button
-				class="py-2 px-4 text-sm font-medium border-b-2 transition-colors {activeTab === key
-					? 'border-blue-500 text-blue-600'
-					: 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
-				onclick={() => onTabChange(key)}
-			>
-				{label}
-			</button>
-		{/each}
-	</nav>
-</div>
+<TabNav tabs={tabList} bind:activeTab variant="primary" />
 
 <!-- ========== 대시보드 탭 ========== -->
 {#if activeTab === 'dashboard'}
