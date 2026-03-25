@@ -16,6 +16,10 @@ plan_service가 /done 처리 후 `plan:archived` 채널에 파일 경로를 publ
 
 import asyncio
 import logging
+import re
+import subprocess
+from datetime import date, datetime
+from pathlib import Path
 from typing import Optional
 
 from app.shared.worker.base_worker import BaseWorker
@@ -31,6 +35,63 @@ logger = logging.getLogger(__name__)
 
 # Redis pub/sub 채널명
 PLAN_ARCHIVED_CHANNEL = "plan:archived"
+
+# monitor-page 레포 루트 (plan_archive_listener.py → worker → app → monitor-page)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def get_git_first_commit_date(file_path: str) -> "date | None":
+    """git 히스토리에서 파일의 최초 커밋 날짜를 반환.
+
+    Args:
+        file_path: 파일 경로 (절대 또는 상대)
+
+    Returns:
+        date 객체 또는 None (미추적/오류 시)
+    """
+    try:
+        result = subprocess.run(
+            ["git", "log", "--follow", "--diff-filter=A", "--format=%ai", "--", file_path],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO_ROOT),
+        )
+        stdout = result.stdout.strip()
+        if not stdout:
+            return None
+        first_line = stdout.splitlines()[0].strip()
+        # "2026-01-15 13:52:00 +0900" 형식에서 날짜 파싱
+        date_part = first_line.split(" ")[0]
+        parts = date_part.split("-")
+        return date(int(parts[0]), int(parts[1]), int(parts[2]))
+    except Exception:
+        return None
+
+
+def parse_applied_at(content: str) -> "datetime | None":
+    """plan 파일 내용에서 > 반영일: 헤더를 파싱.
+
+    Args:
+        content: plan 파일 전체 내용
+
+    Returns:
+        datetime 객체 또는 None (헤더 없으면)
+    """
+    match = re.search(
+        r'>\s*반영일:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)',
+        content,
+    )
+    if not match:
+        return None
+    value = match.group(1).strip()
+    if len(value) == 10:  # "YYYY-MM-DD"
+        parts = value.split("-")
+        return datetime(int(parts[0]), int(parts[1]), int(parts[2]), 0, 0)
+    else:  # "YYYY-MM-DD HH:MM"
+        date_part, time_part = value.split(" ", 1)
+        d = date_part.split("-")
+        t = time_part.split(":")
+        return datetime(int(d[0]), int(d[1]), int(d[2]), int(t[0]), int(t[1]))
 
 
 class PlanArchiveListener(BaseWorker):
@@ -158,6 +219,17 @@ class PlanArchiveListener(BaseWorker):
             # 1. PlanRecord get_or_create
             svc = PlanRecordService(db)
             record = svc.get_or_create(file_path=filename)
+
+            # plan_date: git 첫 커밋 날짜
+            if record.plan_date is None:
+                record.plan_date = get_git_first_commit_date(filename)
+            # applied_at: > 반영일: 헤더 파싱
+            if record.applied_at is None:
+                try:
+                    content = Path(filename).read_text(encoding="utf-8", errors="replace")
+                    record.applied_at = parse_applied_at(content)
+                except Exception:
+                    pass
 
             # filename_hash로 중복 LLMRequest 체크
             filename_hash = _compute_filename_hash(filename)

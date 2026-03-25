@@ -1,7 +1,8 @@
 """Dev Runner Pydantic Schemas"""
 
-from pydantic import BaseModel, Field
-from datetime import datetime
+import json as _json
+from pydantic import BaseModel, Field, field_validator
+from datetime import date, datetime
 from typing import Optional, List
 
 
@@ -177,9 +178,29 @@ class PlanRecordResponse(BaseModel):
     tags: Optional[list] = None
     summary: Optional[str] = None
     superseded_by: Optional[str] = None
+    intent: Optional[str] = None
+    trigger: Optional[str] = None
+    scope: Optional[list] = None
+    plan_date: Optional[date] = None
+    applied_at: Optional[datetime] = None
     llm_processed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def deserialize_scope(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                parsed = _json.loads(v)
+                return parsed if isinstance(parsed, list) else [parsed]
+            except Exception:
+                return [v]
+        return v
 
 
 class PlanRecordWithEventsResponse(PlanRecordResponse):

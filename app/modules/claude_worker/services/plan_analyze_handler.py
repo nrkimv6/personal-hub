@@ -57,6 +57,16 @@ def save_plan_archive_result(db: Session, request, result: dict) -> None:
         if superseded_by:
             record.superseded_by = superseded_by
 
+        intent = llm_result.get("intent")
+        trigger_val = llm_result.get("trigger")
+        scope = llm_result.get("scope")
+        if intent:
+            record.intent = intent
+        if trigger_val:
+            record.trigger = trigger_val
+        if scope is not None:
+            record.scope = json.dumps(scope, ensure_ascii=False) if isinstance(scope, list) else scope
+
         record.llm_processed_at = datetime.now()
         record.updated_at = datetime.now()
         db.commit()
@@ -143,7 +153,10 @@ def build_plan_analyze_prompt(
   "category": "모듈 카테고리 (다음 중 하나: {categories_str}, 또는 적절한 새 카테고리)",
   "tags": ["feat", "fix", "refactor", "chore", "docs", "test"] 중 해당하는 것들,
   "summary": "이 plan의 핵심 내용을 2-3문장으로 요약",
-  "superseded_by": "이 plan을 대체하는 더 최신 plan 파일명 (없으면 null)"
+  "superseded_by": "이 plan을 대체하는 더 최신 plan 파일명 (없으면 null)",
+  "intent": "이 plan이 해결하려는 핵심 문제 (1-2문장)",
+  "trigger": "bug_recurrence|new_feature|refactor|ux_improvement|infra|unknown 중 하나",
+  "scope": ["영향받는 모듈/파일/기능을 배열로 추출, 예: \"naver-booking\", \"plan_service.py\""]
 }}
 
 JSON만 출력하세요. 다른 설명은 불필요합니다."""
