@@ -33,22 +33,17 @@
 		initialPlan = $page.url.searchParams.get('plan') ?? '';
 	});
 
-	function setPlansSubTab(sub: PlansSubTab) {
-		const url = new URL($page.url);
-		url.searchParams.set('tab', 'plans');
-		if (sub === 'plans') {
-			url.searchParams.delete('subtab');
-		} else {
-			url.searchParams.set('subtab', sub);
-		}
-		goto(url.toString(), { replaceState: true, keepFocus: true });
-	}
-
 	const autoTabs = [
 		{ id: 'dev-runner', label: 'Dev Runner' },
 		{ id: 'sleep-now', label: 'Sleep Now' },
 		{ id: 'git-repos', label: 'Git 관리' },
 		{ id: 'plans', label: '계획서' },
+	];
+
+	const plansSubTabs = [
+		{ id: 'plans', label: '계획' },
+		{ id: 'archive', label: '아카이브' },
+		{ id: 'history', label: '이력' },
 	];
 
 	function setMainTab(tab: MainTab) {
@@ -70,7 +65,7 @@
 
 <div class="flex flex-col h-full overflow-hidden">
 	<div class="flex items-center gap-4 px-4 lg:px-6 h-12 border-b shrink-0">
-		<h1 class="text-base font-bold tracking-tight text-foreground">시스템 자동화</h1>
+		<h1 class="text-lg font-bold tracking-tight text-foreground">시스템 자동화</h1>
 		<TabNav tabs={autoTabs} bind:activeTab={mainTab} variant="primary" size="compact" queryParam="tab" />
 	</div>
 
@@ -88,31 +83,8 @@
 		{:else if mainTab === 'plans'}
 			<div class="flex flex-col h-full overflow-hidden">
 				<!-- 계획서 서브탭 -->
-				<div class="flex gap-1 px-4 pt-3 pb-2 border-b border-border shrink-0">
-					<button
-						onclick={() => setPlansSubTab('plans')}
-						class="px-3 py-1 text-xs font-medium rounded transition-colors {plansSubTab === 'plans'
-							? 'bg-primary/10 text-primary'
-							: 'text-muted-foreground hover:bg-muted/40'}"
-					>
-						계획
-					</button>
-					<button
-						onclick={() => setPlansSubTab('archive')}
-						class="px-3 py-1 text-xs font-medium rounded transition-colors {plansSubTab === 'archive'
-							? 'bg-primary/10 text-primary'
-							: 'text-muted-foreground hover:bg-muted/40'}"
-					>
-						아카이브
-					</button>
-					<button
-						onclick={() => setPlansSubTab('history')}
-						class="px-3 py-1 text-xs font-medium rounded transition-colors {plansSubTab === 'history'
-							? 'bg-primary/10 text-primary'
-							: 'text-muted-foreground hover:bg-muted/40'}"
-					>
-						이력
-					</button>
+				<div class="px-4 pt-3 pb-2 border-b border-border shrink-0">
+					<TabNav tabs={plansSubTabs} bind:activeTab={plansSubTab} variant="secondary" size="compact" queryParam="subtab" />
 				</div>
 				<div class="flex-1 overflow-auto p-4">
 					{#if plansSubTab === 'plans'}
