@@ -513,5 +513,63 @@ class TestGoogleSearchWorkerProcessing:
         assert saved.last_result_count == 10
 
 
+class TestBuildUrlSiteRestriction:
+    """_build_url()의 site: 연산자 변환 TC (Phase T1)."""
+
+    def setup_method(self):
+        from unittest.mock import MagicMock, AsyncMock
+        from app.modules.google_search.services.crawler import GoogleSearchCrawler
+
+        page_mock = MagicMock()
+        page_mock.goto = AsyncMock()
+        self.crawler = GoogleSearchCrawler.__new__(GoogleSearchCrawler)
+        self.crawler.page = page_mock
+
+    def test_build_url_site_restriction_right(self):
+        """R(Right): as_sitesearch → site: 쿼리 prepend, URL 파라미터 미포함."""
+        url = self.crawler._build_url(
+            query="신발",
+            search_params={"as_sitesearch": "instagram.com"},
+        )
+        assert "site%3Ainstagram.com" in url or "site:" in url
+        assert "as_sitesearch" not in url
+        assert "instagram.com" in url
+
+    def test_build_url_site_restriction_boundary_empty(self):
+        """B(Boundary): as_sitesearch="" → site: 연산자 미삽입, 원본 쿼리 그대로."""
+        url = self.crawler._build_url(
+            query="신발",
+            search_params={"as_sitesearch": ""},
+        )
+        assert "site:" not in url
+        assert "%EC%8B%A0%EB%B0%9C" in url or "신발" in url
+
+    def test_build_url_site_restriction_boundary_none(self):
+        """B(Boundary): search_params=None → 원본 쿼리 그대로."""
+        url = self.crawler._build_url(query="신발", search_params=None)
+        assert "site:" not in url
+        assert "as_sitesearch" not in url
+
+    def test_build_url_site_restriction_with_other_params(self):
+        """R(Right): as_sitesearch + lr → site는 쿼리에, lr은 URL 파라미터에."""
+        url = self.crawler._build_url(
+            query="신발",
+            search_params={"as_sitesearch": "instagram.com", "lr": "lang_ko"},
+        )
+        assert "instagram.com" in url
+        assert "as_sitesearch" not in url
+        assert "lr=lang_ko" in url
+
+    def test_build_url_no_site_restriction(self):
+        """E(Edge): as_sitesearch 키 없음 → 원본 쿼리 그대로."""
+        url = self.crawler._build_url(
+            query="신발",
+            search_params={"lr": "lang_ko"},
+        )
+        assert "site:" not in url
+        assert "as_sitesearch" not in url
+        assert "lr=lang_ko" in url
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
