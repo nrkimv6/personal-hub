@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import TabNav from '$lib/components/layout/TabNav.svelte';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
   let { children }: { children: Snippet } = $props();
 
@@ -11,8 +12,8 @@
   ];
 </script>
 
-<div class="p-4">
-  <h1 class="text-2xl font-bold mb-4 dark:text-white">Instagram</h1>
+<div class="p-4 lg:p-6">
+  <PageHeader title="Instagram" />
 
   <TabNav tabs={navTabs} variant="primary" urlBased />
 

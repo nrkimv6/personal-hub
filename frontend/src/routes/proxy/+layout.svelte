@@ -1,5 +1,6 @@
 <script lang="ts">
   import TabNav from '$lib/components/layout/TabNav.svelte';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
   const navTabs = [
     { id: 'dashboard', label: '대시보드', href: '/proxy', exact: true },
@@ -8,11 +9,8 @@
   ];
 </script>
 
-<div class="p-6">
-  <div class="mb-6">
-    <h1 class="text-2xl font-bold text-foreground">프록시 관리</h1>
-    <p class="text-muted-foreground mt-1">프록시 수집 현황 및 품질 모니터링</p>
-  </div>
+<div class="p-4 lg:p-6">
+  <PageHeader title="프록시 관리" subtitle="프록시 수집 현황 및 품질 모니터링" />
 
   <TabNav tabs={navTabs} variant="primary" urlBased />
 

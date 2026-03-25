@@ -72,7 +72,7 @@
   <title>시스템 / 설정 | Monitor Page</title>
 </svelte:head>
 
-<div class="p-6 space-y-6">
+<div class="p-4 lg:p-6 space-y-6">
   <!-- 헤더 -->
   <PageHeader title="시스템 / 설정" subtitle="서비스 상태, 오류 로그, 시스템 설정을 관리합니다" />
 

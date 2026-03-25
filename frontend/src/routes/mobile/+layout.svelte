@@ -1,6 +1,10 @@
-<script>
+<script lang="ts">
+	import type { Snippet } from 'svelte';
 	import MobileServerStatus from '$lib/components/MobileServerStatus.svelte';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+
+	let { children: pageContent }: { children: Snippet } = $props();
 
 	const navTabs = [
 		{ id: 'targets', label: '크롤링 대상', href: '/mobile/targets' },
@@ -11,13 +15,14 @@
 	];
 </script>
 
-<div class="mb-4 border-b pb-4">
-	<div class="flex justify-between items-center mb-4">
-		<h1 class="text-3xl font-bold">모바일 크롤링</h1>
-		<MobileServerStatus />
+<div class="p-4 lg:p-6">
+	<div class="mb-4 border-b pb-4">
+		<PageHeader title="모바일 크롤링">
+			{#snippet children()}<MobileServerStatus />{/snippet}
+		</PageHeader>
+
+		<TabNav tabs={navTabs} variant="primary" urlBased />
 	</div>
 
-	<TabNav tabs={navTabs} variant="primary" urlBased />
+	{@render pageContent()}
 </div>
-
-<slot />
