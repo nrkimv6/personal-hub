@@ -34,14 +34,17 @@ class TestGetStatus:
         assert data["pid"] is None
 
     async def test_get_status_running(self, client, mock_executor_redis):
-        fake_sync = mock_executor_redis["sync"]
-        fake_sync.set("plan-runner:state:status", "running")
-        fake_sync.set("plan-runner:state:pid", "12345")
-        fake_sync.set("plan-runner:state:plan_file", "test.md")
-        fake_sync.set("plan-runner:state:start_time", "2026-02-18T10:00:00")
-        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-18T10:00:00")
+        fake_async = mock_executor_redis["async"]
+        rid = "test-runner-running"
+        await fake_async.set("plan-runner:listener:heartbeat", "2026-02-18T10:00:00")
+        await fake_async.sadd("plan-runner:active_runners", rid)
+        await fake_async.set(f"plan-runner:runners:{rid}:status", "running")
+        await fake_async.set(f"plan-runner:runners:{rid}:pid", "12345")
+        await fake_async.set(f"plan-runner:runners:{rid}:plan_file", "test.md")
 
-        response = await client.get("/api/v1/dev-runner/status")
+        from app.modules.dev_runner.services.executor_service import executor_service as svc
+        with patch.object(svc, "_is_pid_alive", return_value=True):
+            response = await client.get("/api/v1/dev-runner/status")
 
         assert response.status_code == 200
         data = response.json()
@@ -69,14 +72,14 @@ class TestGetStatus:
 
     async def test_get_status_running_with_valid_pid(self, client, mock_executor_redis):
         """HTTP-2: PID 살아있음 mock → running=True, pid!=None"""
-        fake_sync = mock_executor_redis["sync"]
+        fake_async = mock_executor_redis["async"]
         RUNNER_KEY_PREFIX = "plan-runner:runners"
         ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
         rid = "test-runner-pid"
-        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-27T10:00:00")
-        fake_sync.sadd(ACTIVE_RUNNERS_KEY, rid)
-        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
-        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "55555")
+        await fake_async.set("plan-runner:listener:heartbeat", "2026-02-27T10:00:00")
+        await fake_async.sadd(ACTIVE_RUNNERS_KEY, rid)
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "55555")
 
         from app.modules.dev_runner.services.executor_service import executor_service as svc
         with patch.object(svc, "_is_pid_alive", return_value=True):
@@ -109,8 +112,8 @@ class TestGetStatusListenerAlive:
     """listener_alive 필드 테스트"""
 
     async def test_listener_alive_true_when_heartbeat_exists(self, client, mock_executor_redis):
-        fake_sync = mock_executor_redis["sync"]
-        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-19T10:00:00")
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", "2026-02-19T10:00:00")
         # running=False이지만 listener는 살아있음
 
         response = await client.get("/api/v1/dev-runner/status")
@@ -129,13 +132,16 @@ class TestGetStatusListenerAlive:
         assert data["running"] is False
 
     async def test_running_true_with_heartbeat(self, client, mock_executor_redis):
-        fake_sync = mock_executor_redis["sync"]
-        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-19T10:00:00")
-        fake_sync.set("plan-runner:state:status", "running")
-        fake_sync.set("plan-runner:state:pid", "12345")
-        fake_sync.set("plan-runner:state:start_time", "2026-02-19T10:00:00")
+        fake_async = mock_executor_redis["async"]
+        rid = "test-runner-heartbeat"
+        await fake_async.set("plan-runner:listener:heartbeat", "2026-02-19T10:00:00")
+        await fake_async.sadd("plan-runner:active_runners", rid)
+        await fake_async.set(f"plan-runner:runners:{rid}:status", "running")
+        await fake_async.set(f"plan-runner:runners:{rid}:pid", "12345")
 
-        response = await client.get("/api/v1/dev-runner/status")
+        from app.modules.dev_runner.services.executor_service import executor_service as svc
+        with patch.object(svc, "_is_pid_alive", return_value=True):
+            response = await client.get("/api/v1/dev-runner/status")
         assert response.status_code == 200
         data = response.json()
         assert data["listener_alive"] is True
@@ -159,14 +165,14 @@ class TestGetStatusListenerAlive:
 
     async def test_status_stopped_during_heartbeat_window(self, client, mock_executor_redis):
         """TC-B (Boundary): heartbeat 살아있어도 status=stopped이면 running=False"""
-        fake_sync = mock_executor_redis["sync"]
+        fake_async = mock_executor_redis["async"]
         RUNNER_KEY_PREFIX = "plan-runner:runners"
         ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
         rid = "test-runner-1"
-        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-27T10:00:00")
-        fake_sync.sadd(ACTIVE_RUNNERS_KEY, rid)
-        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
-        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "12345")
+        await fake_async.set("plan-runner:listener:heartbeat", "2026-02-27T10:00:00")
+        await fake_async.sadd(ACTIVE_RUNNERS_KEY, rid)
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "12345")
 
         response = await client.get("/api/v1/dev-runner/status")
         assert response.status_code == 200
@@ -218,16 +224,22 @@ class TestStartRun:
         assert data["plan_file"] == "docs/plan/2026-02-27_test.md"
 
     async def test_double_start_returns_409(self, client, mock_executor_redis):
+        """max_concurrent_runners(3) 초과 시 429 반환 — 실질적 duplicate-start 방지"""
+        from app.modules.dev_runner.services.executor_service import ACTIVE_RUNNERS_KEY, RUNNER_KEY_PREFIX
         fake_async = mock_executor_redis["async"]
-        # listener heartbeat 세팅
         await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
-        await fake_async.set("plan-runner:state:status", "running")
-        await fake_async.set("plan-runner:state:pid", "99999")
+        # 3개 runner 추가 (max_concurrent_runners=3 초과 → 429)
+        for i in range(3):
+            rid = f"existing-runner-{i}"
+            await fake_async.sadd(ACTIVE_RUNNERS_KEY, rid)
+            await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+            await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", str(10000 + i))
 
-        response = await client.post("/api/v1/dev-runner/run", json={
-            "plan_file": "test-plan.md"
-        })
-        assert response.status_code == 409
+        with patch.object(executor_service, '_is_pid_alive', return_value=True):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md"
+            })
+        assert response.status_code == 429
 
     async def test_start_redis_down_503(self, client, mock_executor_redis):
         # ConnectionError 테스트: ping에서 실패하도록 mock
@@ -304,11 +316,18 @@ class TestStopRun:
         assert response.status_code == 404
 
     async def test_stop_running_process(self, client, mock_executor_redis):
+        from app.modules.dev_runner.services.executor_service import ACTIVE_RUNNERS_KEY, RUNNER_KEY_PREFIX
         fake_async = mock_executor_redis["async"]
-        await fake_async.set("plan-runner:state:status", "running")
-        await fake_async.rpush(RESULTS_KEY, json.dumps({"success": True, "message": "Stopped"}))
+        rid = "stop-test-runner"
+        await fake_async.set("plan-runner:listener:heartbeat", "2026-02-19T10:00:00")
+        await fake_async.sadd(ACTIVE_RUNNERS_KEY, rid)
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "55555")
 
-        response = await client.post("/api/v1/dev-runner/stop")
+        brpop_result = (f"plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Stopped"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)), \
+             patch.object(executor_service, '_is_pid_alive', return_value=True):
+            response = await client.post("/api/v1/dev-runner/stop")
         assert response.status_code == 200
 
     async def test_stop_redis_down_503(self, client, mock_executor_redis):

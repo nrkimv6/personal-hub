@@ -112,8 +112,8 @@ class EventService:
                 payload = self._build_status_payload(rid)
                 if payload:
                     trigger = payload.get("trigger") or ""
-                    if trigger not in ("user", "user:all"):
-                        continue  # 화이트리스트: user/user:all 트리거만 프론트엔드에 노출 (fail-closed)
+                    if trigger and trigger.startswith("tc:"):
+                        continue  # tc: prefix 트리거만 제외 (테스트 자동화 실행 필터)
                     result.append(payload)
             return result
         except Exception:
