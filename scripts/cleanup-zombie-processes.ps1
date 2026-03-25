@@ -100,6 +100,45 @@ $pythonProcs = Get-CimInstance Win32_Process | Where-Object {
 }
 if ($pythonProcs) { $AllTargets += @($pythonProcs) }
 
+# --- 4. Orphan python (parent dead) ---
+Write-Host "[4] Scanning orphan python (parent dead)..." -ForegroundColor Cyan
+$alreadyTargeted = [System.Collections.Generic.HashSet[int]]::new()
+$AllTargets | ForEach-Object { [void]$alreadyTargeted.Add($_.PID) }
+
+$orphanPythonProcs = Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' } | ForEach-Object {
+    $pid_ = $_.ProcessId
+    $cmd  = $_.CommandLine
+
+    # 이미 다른 섹션에서 수집됐으면 스킵
+    if ($alreadyTargeted.Contains($pid_)) { return }
+
+    # monitorpage-* exe 또는 monitor-page 관련이면 스킵 (섹션 [3] 영역)
+    if ($_.Name -like 'monitorpage-*') { return }
+    if ($cmd -like '*monitor-page*') { return }
+
+    # 부모가 살아있으면 정상 프로세스 → 스킵
+    $ppid = $_.ParentProcessId
+    if ($ppid -and $ppid -gt 0) {
+        $parentAlive = Get-Process -Id $ppid -ErrorAction SilentlyContinue
+        if ($parentAlive) { return }
+    }
+
+    # MaxAgeHours 미만이면 스킵
+    $proc = Get-Process -Id $pid_ -ErrorAction SilentlyContinue
+    if (-not $proc -or -not $proc.StartTime) { return }
+    if ($proc.StartTime -ge $Cutoff) { return }
+
+    [PSCustomObject]@{
+        Type      = 'orphan-python'
+        PID       = $pid_
+        MemMB     = [math]::Round($_.WorkingSetSize / 1MB)
+        StartTime = $proc.StartTime
+        Age       = Get-AgeString $proc.StartTime
+        Command   = Get-TruncatedCmd $cmd
+    }
+}
+if ($orphanPythonProcs) { $AllTargets += @($orphanPythonProcs) }
+
 # --- Results ---
 Write-Host ""
 if ($AllTargets.Count -eq 0) {
