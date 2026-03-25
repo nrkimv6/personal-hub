@@ -710,8 +710,8 @@ class ExecutorService:
                         ).first()
                         if orphan_wf:
                             is_orphan = True
-                    # pytest(tc:*) 트리거 runner는 UI에 표시하지 않음
-                    is_test = bool(trigger and trigger.startswith("tc:"))
+                    # 화이트리스트: user/user:all 트리거만 UI에 표시 (fail-closed)
+                    is_user = bool(trigger and trigger in ("user", "user:all"))
                     result.append(RunnerListItem(
                         runner_id=rid,
                         running=status == "running",
@@ -723,7 +723,7 @@ class ExecutorService:
                         branch=branch,
                         merge_status=merge_status,
                         trigger=trigger,
-                        visible=not is_test,
+                        visible=is_user,
                         orphan=is_orphan,
                     ))
                 return result
