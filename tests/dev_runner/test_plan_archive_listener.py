@@ -214,6 +214,9 @@ from app.models.plan_record import PlanRecord as PlanRecordModel
 
 def _make_in_memory_db():
     """테스트용 in-memory SQLite DB + 세션 반환."""
+    # LLMRequest 모델을 먼저 임포트하여 Base.metadata에 llm_requests 테이블 등록
+    # (generated_writings가 llm_requests FK 참조하므로 create_all 전 필수)
+    from app.modules.claude_worker.models.llm_request import LLMRequest  # noqa: F401
     engine = create_engine("sqlite:///:memory:", echo=False)
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
