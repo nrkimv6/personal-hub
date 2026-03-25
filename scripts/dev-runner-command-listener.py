@@ -79,7 +79,7 @@ HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 # merge 활성 상태 — cleanup 보호 가드 및 reconnect 복구 조건에 사용
 MERGE_ACTIVE_STATUSES = ("pre_merge", "queued", "merging", "pending_merge", "resolving", "testing", "fixing")
 
-QUOTA_ERROR_MARKERS = ["TerminalQuotaError", "exhausted your capacity", "[QUOTA]"]
+QUOTA_ERROR_MARKERS = ["TerminalQuotaError", "exhausted your capacity"]
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
