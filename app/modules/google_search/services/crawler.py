@@ -227,8 +227,14 @@ class GoogleSearchCrawler:
         """
         from app.modules.google_search.utils.selectors import ALLOWED_SEARCH_PARAMS
 
+        # as_sitesearch가 있으면 site: 연산자를 쿼리에 prepend (URL 파라미터보다 엄격하게 필터됨)
+        effective_query = query
+        if search_params and search_params.get("as_sitesearch"):
+            site = search_params["as_sitesearch"]
+            effective_query = f"site:{site} {query}"
+
         # hl=ko로 한국어 결과 요청
-        url = f"https://www.google.com/search?q={quote(query)}&hl=ko"
+        url = f"https://www.google.com/search?q={quote(effective_query)}&hl=ko"
 
         if start > 0:
             url += f"&start={start}"
@@ -236,9 +242,11 @@ class GoogleSearchCrawler:
         if tbs:
             url += f"&tbs={tbs}"
 
-        # 추가 검색 파라미터 (허용 키만)
+        # 추가 검색 파라미터 (허용 키만, as_sitesearch는 쿼리에 반영됐으므로 스킵)
         if search_params:
             for key, value in search_params.items():
+                if key == "as_sitesearch":
+                    continue
                 if key in ALLOWED_SEARCH_PARAMS and value:
                     url += f"&{quote(str(key))}={quote(str(value))}"
 
