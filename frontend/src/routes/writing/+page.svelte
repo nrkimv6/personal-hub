@@ -31,7 +31,7 @@
 	<title>AI / 글쓰기 | Monitor Page</title>
 </svelte:head>
 
-<div class="space-y-4">
+<div class="p-4 lg:p-6 space-y-4">
 	<PageHeader title="AI / 글쓰기" subtitle="글쓰기 태스크와 보고서를 관리합니다" />
 
 	<TabNav tabs={writingTabs} bind:activeTab={mainTab} variant="primary" queryParam="tab" />
