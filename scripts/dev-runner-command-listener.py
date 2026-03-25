@@ -79,7 +79,11 @@ HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 # merge 활성 상태 — cleanup 보호 가드 및 reconnect 복구 조건에 사용
 MERGE_ACTIVE_STATUSES = ("pre_merge", "queued", "merging", "pending_merge", "resolving", "testing", "fixing")
 
-QUOTA_ERROR_MARKERS = ["TerminalQuotaError", "exhausted your capacity"]
+# NOTE: stdout 기반 quota 감지 제거 (2026-03-25)
+# 이유: Claude가 quota 관련 소스코드를 읽으면 stdout에 "exhausted your capacity" 등이
+# 코드 내용으로 출력되어 오탐 → plan-runner 강제 종료됨.
+# plan-runner 내부에서 이미 stderr 기반 quota 감지 + 자체 종료 처리하므로
+# command-listener에서 중복 감지 불필요.
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -1307,18 +1311,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                     pass
                 suppressed_count = 0
 
-            # 5. Quota 에러 감지 → 자동 종료
-            if any(marker in stripped for marker in QUOTA_ERROR_MARKERS):
-                logger.warning("[DEV-RUNNER] quota 에러 감지, plan-runner 자동 종료")
-                try:
-                    redis_client.publish(log_channel, "[DEV-RUNNER] quota 에러 감지. 자동 종료.")
-                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped", "1", ex=3600)
-                except redis.ConnectionError:
-                    pass
-                process.terminate()
-                break
-
-            # 6. 정상 라인 publish (ANSI 이스케이프 코드 제거)
+            # 5. 정상 라인 publish (ANSI 이스케이프 코드 제거)
             try:
                 redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', stripped))
             except redis.ConnectionError:
