@@ -301,6 +301,6 @@
 
 	<!-- 로그 뷰어 -->
 	<div class="flex-1 min-h-0">
-		<LogViewer bind:this={logViewer} {runnerId} planFile={planFile ?? undefined} {running} {mergeStatus} {trigger} mode="managed" {onBatchPlansChange} />
+		<LogViewer bind:this={logViewer} {runnerId} planFile={planFile ?? undefined} {running} {mergeStatus} {trigger} {engine} {worktreePath} {branch} mode="managed" {onBatchPlansChange} />
 	</div>
 </div>

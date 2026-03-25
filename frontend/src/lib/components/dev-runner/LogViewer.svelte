@@ -10,11 +10,14 @@
 		mergeStatus?: string | null;
 		trigger?: string | null;
 		mode?: 'standalone' | 'managed';
+		engine?: string | null;
+		worktreePath?: string | null;
+		branch?: string | null;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 		onMergeCompleted?: () => void;
 	}
 
-	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', onBatchPlansChange, onMergeCompleted }: Props = $props();
+	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
 
 	// 머지 진행 중 상태 판별
 	let isMerging = $derived(
@@ -58,6 +61,9 @@
 	let resultQueue: ParsedLine[] = [];
 	let resultDrainInterval: ReturnType<typeof setInterval> | null = null;
 	const SEPARATOR_PATTERN = '════════════════';
+
+	let copied = $state(false);
+	let expandedLongLines = $state<Set<number>>(new Set());
 
 	const BASE_DELAY = 3000;
 
@@ -123,6 +129,48 @@
 
 	function extractSeparatorText(text: string): string {
 		return text.replace(/[═=\s]+/g, ' ').trim() || '새 세션';
+	}
+
+	function isLongLine(msg: string): boolean {
+		return msg.length > 300 || (msg.match(/\n/g)?.length ?? 0) >= 3;
+	}
+
+	function truncateToLines(msg: string, maxLines: number): string {
+		const parts = msg.split('\n');
+		if (parts.length > maxLines) {
+			return parts.slice(0, maxLines).join('\n');
+		}
+		return msg.slice(0, 300);
+	}
+
+	async function copyLog() {
+		const headerLines: string[] = [];
+		headerLines.push(`[Runner] ${runnerId}`);
+		if (planFile) {
+			const basename = planFile.split(/[\\/]/).pop() ?? planFile;
+			headerLines.push(`[Plan] ${basename}`);
+		}
+		if (engine) headerLines.push(`[Engine] ${engine}`);
+		if (branch) headerLines.push(`[Branch] ${branch}`);
+		if (worktreePath) headerLines.push(`[Worktree] ${worktreePath}`);
+		if (trigger) headerLines.push(`[Trigger] ${trigger}`);
+		headerLines.push('---');
+
+		const logLines = lines
+			.filter(l => !l.isStale && l.tag !== 'NOISE')
+			.map(l => {
+				const raw = l.raw;
+				return raw.length > 200 ? raw.slice(0, 200) + '…' : raw;
+			});
+
+		const text = [...headerLines, ...logLines].join('\n');
+		try {
+			await navigator.clipboard.writeText(text);
+			copied = true;
+			setTimeout(() => { copied = false; }, 1500);
+		} catch {
+			// 클립보드 접근 실패
+		}
 	}
 
 	function addLine(text: string, isStale: boolean) {
@@ -474,6 +522,20 @@
 					<svg class="h-3 w-3 text-status-failed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
 				</button>
 			{/if}
+			<!-- 로그 복사 버튼 -->
+			<button
+				class="h-6 w-6 rounded transition-colors inline-flex items-center justify-center {copied ? 'text-green-400' : 'text-gray-400'} hover:bg-gray-700"
+				title="로그 복사 (러너 정보 + 현재 세션 로그)"
+				onclick={copyLog}
+			>
+				{#if copied}
+					<!-- Check icon -->
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+				{:else}
+					<!-- Clipboard icon -->
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+				{/if}
+			</button>
 			<button
 				class="relative h-6 w-6 rounded transition-colors inline-flex items-center justify-center {autoScroll ? 'text-primary' : 'text-muted-foreground'} hover:bg-gray-700"
 				title={autoScroll ? 'Pin (auto-scroll on)' : 'Unpin (auto-scroll off)'}
@@ -578,7 +640,15 @@
 							<span class="flex-1 min-w-0 flex items-baseline bg-gray-900/60 rounded px-1 font-mono">
 								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch[1]}</span>
 								<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
-								<span class="flex-1 min-w-0 break-all text-emerald-300/80 text-[11px]">{resultMatch[2]}</span>
+								{#if isLongLine(resultMatch[2]) && !expandedLongLines.has(i)}
+							<span class="flex-1 min-w-0 break-all text-emerald-300/80 text-[11px]">{truncateToLines(resultMatch[2], 3)}</span>
+							<button class="shrink-0 text-[10px] text-gray-500 hover:text-gray-300 ml-1 whitespace-nowrap" onclick={() => { expandedLongLines.add(i); expandedLongLines = expandedLongLines; }}>… 더보기</button>
+						{:else if isLongLine(resultMatch[2])}
+							<span class="flex-1 min-w-0 break-all text-emerald-300/80 text-[11px]">{resultMatch[2]}</span>
+							<button class="shrink-0 text-[10px] text-gray-500 hover:text-gray-300 ml-1 whitespace-nowrap" onclick={() => { expandedLongLines.delete(i); expandedLongLines = expandedLongLines; }}>접기</button>
+						{:else}
+							<span class="flex-1 min-w-0 break-all text-emerald-300/80 text-[11px]">{resultMatch[2]}</span>
+						{/if}
 							</span>
 						{:else}
 							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
@@ -595,13 +665,27 @@
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 						</span>
-						<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">
-							{line.message}
-						</span>
+						{#if isLongLine(line.message) && !expandedLongLines.has(i)}
+							<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">{truncateToLines(line.message, 3)}</span>
+							<button class="shrink-0 text-[10px] text-gray-500 hover:text-gray-300 ml-1 whitespace-nowrap" onclick={() => { expandedLongLines.add(i); expandedLongLines = expandedLongLines; }}>… 더보기</button>
+						{:else if isLongLine(line.message)}
+							<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">{line.message}</span>
+							<button class="shrink-0 text-[10px] text-gray-500 hover:text-gray-300 ml-1 whitespace-nowrap" onclick={() => { expandedLongLines.delete(i); expandedLongLines = expandedLongLines; }}>접기</button>
+						{:else}
+							<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">{line.message}</span>
+						{/if}
 					</div>
 				{:else}
-					<div class="py-0.5 leading-5 text-gray-400 break-all whitespace-pre-wrap max-h-[120px] overflow-y-auto">
-						{line.raw}
+					<div class="py-0.5 leading-5 text-gray-400 break-all whitespace-pre-wrap">
+						{#if isLongLine(line.raw) && !expandedLongLines.has(i)}
+							{truncateToLines(line.raw, 3)}
+							<button class="text-[10px] text-gray-500 hover:text-gray-300 ml-1" onclick={() => { expandedLongLines.add(i); expandedLongLines = expandedLongLines; }}>… 더보기</button>
+						{:else if isLongLine(line.raw)}
+							{line.raw}
+							<button class="text-[10px] text-gray-500 hover:text-gray-300 ml-1" onclick={() => { expandedLongLines.delete(i); expandedLongLines = expandedLongLines; }}>접기</button>
+						{:else}
+							{line.raw}
+						{/if}
 					</div>
 				{/if}
 			{/each}
