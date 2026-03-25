@@ -8,10 +8,11 @@ TC 목록:
 """
 
 import time
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 import fakeredis
+import fakeredis.aioredis
 
 from app.modules.dev_runner.services.executor_service import (
     executor_service,
@@ -24,16 +25,28 @@ from app.modules.dev_runner.services.executor_service import (
 
 @pytest.fixture(autouse=True)
 def mock_executor_redis_sync():
-    """executor_service의 redis_client를 fakeredis로 교체"""
-    fake_sync = fakeredis.FakeRedis(decode_responses=True)
-    with patch.object(executor_service, 'redis_client', fake_sync):
+    """executor_service의 redis_client와 async_redis를 fakeredis로 교체 (FakeServer 공유)
+    + DB 쿼리(orphan 판별) mock — get_all_runners() 내부 SessionLocal 호출 격리
+    """
+    server = fakeredis.FakeServer()
+    fake_sync = fakeredis.FakeRedis(server=server, decode_responses=True)
+    fake_async = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None  # orphan 없음
+    mock_session_local = MagicMock(return_value=mock_db)
+
+    with patch.object(executor_service, 'redis_client', fake_sync), \
+         patch.object(executor_service, 'async_redis', fake_async), \
+         patch('app.database.SessionLocal', mock_session_local):
         yield fake_sync
 
 
 class TestStoppedRunnerRemainsInRecent:
     """test_stopped_runner_remains_in_recent — runner 종료 후 RECENT_RUNNERS_KEY에 존재 확인"""
 
-    def test_stopped_runner_remains_in_recent(self, mock_executor_redis_sync):
+    @pytest.mark.asyncio
+    async def test_stopped_runner_remains_in_recent(self, mock_executor_redis_sync):
         """_force_cleanup_state() 후 runner가 RECENT_RUNNERS_KEY에 보존되는지 확인"""
         fake = mock_executor_redis_sync
         rid = "test-runner-abc1"
@@ -45,7 +58,7 @@ class TestStoppedRunnerRemainsInRecent:
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "12345")
 
         # 강제 정리 (runner 종료 시뮬레이션)
-        executor_service._force_cleanup_state(rid)
+        await executor_service._force_cleanup_state(rid)
 
         # ACTIVE_RUNNERS_KEY에서 제거됐는지 확인
         assert not fake.sismember(ACTIVE_RUNNERS_KEY, rid)
@@ -58,7 +71,8 @@ class TestStoppedRunnerRemainsInRecent:
         status = fake.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
         assert status == "stopped"
 
-    def test_force_cleanup_all_runners_remain_in_recent(self, mock_executor_redis_sync):
+    @pytest.mark.asyncio
+    async def test_force_cleanup_all_runners_remain_in_recent(self, mock_executor_redis_sync):
         """전체 정리 시 모든 runner가 RECENT_RUNNERS_KEY에 보존되는지 확인"""
         fake = mock_executor_redis_sync
         rids = ["runner-001", "runner-002"]
@@ -68,7 +82,7 @@ class TestStoppedRunnerRemainsInRecent:
             fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
 
         # runner_id 없이 호출 = 전체 정리
-        executor_service._force_cleanup_state()
+        await executor_service._force_cleanup_state()
 
         recent_ids = fake.zrange(RECENT_RUNNERS_KEY, 0, -1)
         for rid in rids:
@@ -78,7 +92,8 @@ class TestStoppedRunnerRemainsInRecent:
 class TestGetAllRunnersIncludesRecent:
     """test_get_all_runners_includes_recent — 종료된 runner가 목록에 포함되는지 확인"""
 
-    def test_get_all_runners_includes_recent(self, mock_executor_redis_sync):
+    @pytest.mark.asyncio
+    async def test_get_all_runners_includes_recent(self, mock_executor_redis_sync):
         """RECENT_RUNNERS_KEY에 있는 종료 runner가 get_all_runners()에 포함되는지 확인"""
         fake = mock_executor_redis_sync
         rid = "test-runner-def2"
@@ -88,7 +103,7 @@ class TestGetAllRunnersIncludesRecent:
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", "stopped-plan.md")
 
-        runners = executor_service.get_all_runners()
+        runners = await executor_service.get_all_runners()
         runner_ids = [r.runner_id for r in runners]
 
         assert rid in runner_ids
@@ -96,7 +111,8 @@ class TestGetAllRunnersIncludesRecent:
         runner = next(r for r in runners if r.runner_id == rid)
         assert runner.running is False
 
-    def test_get_all_runners_includes_both_active_and_recent(self, mock_executor_redis_sync):
+    @pytest.mark.asyncio
+    async def test_get_all_runners_includes_both_active_and_recent(self, mock_executor_redis_sync):
         """활성 runner + 최근 종료 runner 모두 포함되는지 확인"""
         fake = mock_executor_redis_sync
         active_rid = "active-runner-001"
@@ -110,7 +126,7 @@ class TestGetAllRunnersIncludesRecent:
         fake.zadd(RECENT_RUNNERS_KEY, {stopped_rid: time.time()})
         fake.set(f"{RUNNER_KEY_PREFIX}:{stopped_rid}:status", "stopped")
 
-        runners = executor_service.get_all_runners()
+        runners = await executor_service.get_all_runners()
         runner_ids = [r.runner_id for r in runners]
 
         assert active_rid in runner_ids
@@ -120,7 +136,8 @@ class TestGetAllRunnersIncludesRecent:
 class TestDismissRunnerRemovesFromRecent:
     """test_dismiss_runner_removes_from_recent — dismiss 후 목록에서 사라지는지 확인"""
 
-    def test_dismiss_runner_removes_from_recent(self, mock_executor_redis_sync):
+    @pytest.mark.asyncio
+    async def test_dismiss_runner_removes_from_recent(self, mock_executor_redis_sync):
         """dismiss_runner() 후 RECENT_RUNNERS_KEY에서 제거 확인"""
         fake = mock_executor_redis_sync
         rid = "test-runner-ghi3"
@@ -129,7 +146,7 @@ class TestDismissRunnerRemovesFromRecent:
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", "old-plan.md")
 
-        result = executor_service.dismiss_runner(rid)
+        result = await executor_service.dismiss_runner(rid)
 
         assert result is True
         # RECENT_RUNNERS_KEY에서 제거됐는지 확인
@@ -139,7 +156,8 @@ class TestDismissRunnerRemovesFromRecent:
         assert fake.get(f"{RUNNER_KEY_PREFIX}:{rid}:status") is None
         assert fake.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file") is None
 
-    def test_dismiss_removes_from_get_all_runners(self, mock_executor_redis_sync):
+    @pytest.mark.asyncio
+    async def test_dismiss_removes_from_get_all_runners(self, mock_executor_redis_sync):
         """dismiss 후 get_all_runners()에서 사라지는지 확인"""
         fake = mock_executor_redis_sync
         rid = "test-runner-jkl4"
@@ -148,20 +166,21 @@ class TestDismissRunnerRemovesFromRecent:
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
 
         # dismiss 전 목록에 있는지 확인
-        runners_before = executor_service.get_all_runners()
+        runners_before = await executor_service.get_all_runners()
         assert rid in [r.runner_id for r in runners_before]
 
-        executor_service.dismiss_runner(rid)
+        await executor_service.dismiss_runner(rid)
 
         # dismiss 후 목록에서 사라졌는지 확인
-        runners_after = executor_service.get_all_runners()
+        runners_after = await executor_service.get_all_runners()
         assert rid not in [r.runner_id for r in runners_after]
 
 
 class TestOldRunnersAutoCleaned:
     """test_old_runners_auto_cleaned — 24h 이상 된 runner가 자동 정리되는지 확인"""
 
-    def test_old_runners_auto_cleaned(self, mock_executor_redis_sync):
+    @pytest.mark.asyncio
+    async def test_old_runners_auto_cleaned(self, mock_executor_redis_sync):
         """get_all_runners() 호출 시 24h 이상 된 runner가 RECENT_RUNNERS_KEY에서 자동 정리"""
         fake = mock_executor_redis_sync
         old_rid = "old-runner-mno5"
@@ -172,12 +191,12 @@ class TestOldRunnersAutoCleaned:
         fake.zadd(RECENT_RUNNERS_KEY, {old_rid: old_ts})
         fake.set(f"{RUNNER_KEY_PREFIX}:{old_rid}:status", "stopped")
 
-        # 1시간 전에 종료된 runner (보존 대상)
-        recent_ts = time.time() - 3600  # 1시간 전
+        # 30분 전에 종료된 runner (보존 대상, TTL 내)
+        recent_ts = time.time() - 1800  # 30분 전
         fake.zadd(RECENT_RUNNERS_KEY, {recent_rid: recent_ts})
         fake.set(f"{RUNNER_KEY_PREFIX}:{recent_rid}:status", "stopped")
 
-        runners = executor_service.get_all_runners()
+        runners = await executor_service.get_all_runners()
         runner_ids = [r.runner_id for r in runners]
 
         # 오래된 runner는 목록에서 사라져야 함
@@ -185,7 +204,8 @@ class TestOldRunnersAutoCleaned:
         # 최근 runner는 목록에 있어야 함
         assert recent_rid in runner_ids
 
-    def test_old_runners_removed_from_recent_key(self, mock_executor_redis_sync):
+    @pytest.mark.asyncio
+    async def test_old_runners_removed_from_recent_key(self, mock_executor_redis_sync):
         """get_all_runners() 후 RECENT_RUNNERS_KEY에서도 실제로 제거됐는지 확인"""
         fake = mock_executor_redis_sync
         old_rid = "stale-runner-stu7"
@@ -194,7 +214,7 @@ class TestOldRunnersAutoCleaned:
         fake.zadd(RECENT_RUNNERS_KEY, {old_rid: old_ts})
         fake.set(f"{RUNNER_KEY_PREFIX}:{old_rid}:status", "stopped")
 
-        executor_service.get_all_runners()
+        await executor_service.get_all_runners()
 
         # RECENT_RUNNERS_KEY에서도 제거됐는지 확인
         recent_ids = fake.zrange(RECENT_RUNNERS_KEY, 0, -1)

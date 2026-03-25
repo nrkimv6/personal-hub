@@ -39,9 +39,13 @@ async def stop_all_runners():
 @router.post("/stop")
 async def stop_run():
     """plan-runner 실행 중지 (하위호환 — 첫 번째 active runner 종료)"""
+    try:
+        await executor_service.async_redis.ping()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
     runners = await executor_service.get_all_runners()
     if not runners:
-        return {"message": "Not running"}
+        raise HTTPException(status_code=404, detail="Not running")
     return await executor_service.stop_dev_runner(runners[0].runner_id)
 
 

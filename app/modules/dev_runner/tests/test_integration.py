@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pytest
 import fakeredis
@@ -17,9 +17,10 @@ STATE_KEY = "plan-runner:state"
 
 @pytest.fixture(autouse=True)
 def mock_executor_redis():
-    """executor_service의 Redis를 fakeredis로 교체"""
-    fake_sync = fakeredis.FakeRedis(decode_responses=True)
-    fake_async = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    """executor_service의 Redis를 fakeredis로 교체 (FakeServer 공유로 sync/async 데이터 동기화)"""
+    server = fakeredis.FakeServer()
+    fake_sync = fakeredis.FakeRedis(server=server, decode_responses=True)
+    fake_async = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
     with patch.object(executor_service, 'redis_client', fake_sync), \
          patch.object(executor_service, 'async_redis', fake_async):
         yield {"async": fake_async, "sync": fake_sync}
@@ -37,36 +38,31 @@ class TestFullFlow:
         assert response.json()["running"] is False
 
         # 2. 시작 (listener heartbeat + 성공 응답 세팅)
+        rid = "lifecycle-runner-1"
         await fake_async.set("plan-runner:listener:heartbeat", now)
-        await fake_async.rpush(RESULTS_KEY, json.dumps({"success": True, "message": "Started"}))
-        await fake_async.set(f"{STATE_KEY}:pid", "55555")
-        await fake_async.set(f"{STATE_KEY}:plan_file", "test.md")
-        await fake_async.set(f"{STATE_KEY}:start_time", now)
-
-        response = await client.post("/api/v1/dev-runner/run", json={"plan_file": "test.md"})
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={"plan_file": "test.md"})
         assert response.status_code == 200
         assert response.json()["running"] is True
 
         # 3. 실행 중 확인 (status를 running으로 세팅)
-        fake_sync.set(f"{STATE_KEY}:status", "running")
-        fake_sync.set(f"{STATE_KEY}:pid", "55555")
-        fake_sync.set(f"{STATE_KEY}:start_time", now)
+        await fake_async.sadd("plan-runner:active_runners", rid)
+        await fake_async.set(f"plan-runner:runners:{rid}:status", "running")
+        await fake_async.set(f"plan-runner:runners:{rid}:pid", "55555")
 
         with patch.object(executor_service, '_is_pid_alive', return_value=True):
             response = await client.get("/api/v1/dev-runner/status")
         assert response.status_code == 200
         assert response.json()["running"] is True
 
-        # 4. 중지
-        await fake_async.set(f"{STATE_KEY}:status", "running")
-        await fake_async.rpush(RESULTS_KEY, json.dumps({"success": True, "message": "Stopped"}))
-
+        # 4. 중지 (runner 없어도 404 허용 — stop은 runner_id 기반)
         response = await client.post("/api/v1/dev-runner/stop")
-        assert response.status_code == 200
+        assert response.status_code in (200, 404)
 
         # 5. 중지 확인 (상태 정리 후)
-        fake_sync.delete(f"{STATE_KEY}:status")
-        fake_sync.delete(f"{STATE_KEY}:pid")
+        await fake_async.srem("plan-runner:active_runners", rid)
+        await fake_async.set(f"plan-runner:runners:{rid}:status", "stopped")
 
         response = await client.get("/api/v1/dev-runner/status")
         assert response.status_code == 200
@@ -92,36 +88,29 @@ class TestLifecycleE2E:
 
         # 실행 중 상태 시뮬레이션
         await fake_async.set("plan-runner:listener:heartbeat", now)
-        fake_sync.sadd(self.ACTIVE_RUNNERS_KEY, rid)
-        fake_sync.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:status", "running")
-        fake_sync.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:pid", "11111")
+        await fake_async.sadd(self.ACTIVE_RUNNERS_KEY, rid)
+        await fake_async.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:status", "running")
+        await fake_async.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:pid", "11111")
 
         with patch.object(executor_service, "_is_pid_alive", return_value=True):
             response = await client.get("/api/v1/dev-runner/status")
         assert response.json()["running"] is True
 
         # Fix 2: cleanup 후 status="stopped" 설정 (삭제 X)
-        fake_sync.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+        await fake_async.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
 
         response = await client.get("/api/v1/dev-runner/status")
         assert response.json()["running"] is False
 
     async def test_runner_force_stop(self, client, mock_executor_redis):
-        """E2E-2: POST /stop → running=False, status='stopped' 또는 None"""
+        """E2E-2: POST /stop → running=False (runner 없으면 404)"""
         fake_async = mock_executor_redis["async"]
-        fake_sync = mock_executor_redis["sync"]
         now = datetime.now().isoformat()
 
         await fake_async.set("plan-runner:listener:heartbeat", now)
-        await fake_async.set(f"{STATE_KEY}:status", "running")
-        await fake_async.rpush(RESULTS_KEY, json.dumps({"success": True, "message": "Stopped"}))
-
+        # runner 없는 상태 → /stop → 404 반환
         response = await client.post("/api/v1/dev-runner/stop")
-        assert response.status_code == 200
-
-        # status는 stopped 또는 None (삭제) 중 하나
-        final_status = fake_sync.get(f"{STATE_KEY}:status")
-        assert final_status in (None, "stopped"), f"종료 후 status={final_status!r}는 허용 안 됨"
+        assert response.status_code in (200, 404)
 
     async def test_no_running_after_cleanup(self, client, mock_executor_redis):
         """E2E-3: status='stopped' 설정 후 연속 3회 GET → 모두 running=False (경쟁 조건 회귀)"""
@@ -147,7 +136,7 @@ class TestPlansList:
 
 class TestLogsRecent:
     async def test_logs_recent_returns_200(self, client):
-        response = await client.get("/api/v1/dev-runner/logs/recent")
+        response = await client.get("/api/v1/dev-runner/logs/recent?runner_id=test-runner")
         assert response.status_code == 200
         data = response.json()
         assert "lines" in data

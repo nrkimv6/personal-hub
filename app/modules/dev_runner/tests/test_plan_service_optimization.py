@@ -63,12 +63,12 @@ def test_scan_all_plans_include_archive_when_ignored(tmp_plan_dir):
     assert any("archive" in p for p in paths), f"archive가 미포함: {paths}"
 
 
-def test_list_plans_no_progress(tmp_plan_dir):
-    """R: list_plans() 반환 시 progress는 None"""
+def test_list_plans_always_has_progress(tmp_plan_dir):
+    """R: list_plans() 반환 시 progress는 항상 계산됨 (체크박스 있는 파일)"""
     svc = _make_service(tmp_plan_dir)
     plans = svc.list_plans()
     for p in plans:
-        assert p.progress is None, f"{p.path}의 progress가 None이 아님: {p.progress}"
+        assert p.progress is not None, f"{p.path}의 progress가 None임"
 
 
 def test_list_plans_status_only_io(tmp_plan_dir):
