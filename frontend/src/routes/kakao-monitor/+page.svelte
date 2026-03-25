@@ -29,6 +29,12 @@
 	// ========== 탭 ==========
 	type Tab = 'dashboard' | 'settings' | 'history' | 'windows';
 	let activeTab = $state<Tab>('dashboard');
+	const tabList = [
+		{ id: 'dashboard', label: '대시보드' },
+		{ id: 'settings', label: '설정' },
+		{ id: 'history', label: '수집 이력' },
+		{ id: 'windows', label: '창 목록' },
+	];
 
 	// ========== 공통 상태 ==========
 	let loading = $state(false);
