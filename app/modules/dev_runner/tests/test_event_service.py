@@ -633,3 +633,68 @@ class TestStreamEventsLogIntegration:
         # ConnectionError 후 redis_disconnected 이벤트 yield + 초기 2개 pubsub 생성 확인
         assert any("redis_disconnected" in e for e in events)
         assert pubsub_call_count >= 2  # 최소 ks + log_pubsub 초기 생성
+
+
+# ─── MERGE 라인 이중 경로 검증 ───────────────────────────────────────────────
+
+class TestMergeLineChannelRouting:
+    @pytest.mark.asyncio
+    async def test_merge_line_in_log_channel_yields_log_event(self, event_service, async_redis):
+        """R: plan-runner:logs:{id}에 [MERGE] 라인 도착 시 event: log 로 전달됨 (백엔드는 필터링 안 함)."""
+        merge_line = "[12:34:56] [MERGE] [INFO] execute_merge: project_dir=D:/foo, branch=impl/bar"
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:r1",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": merge_line,
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        log_events = [e for e in events if e.startswith("event: log\n")]
+        assert len(log_events) >= 1
+        data = json.loads(log_events[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "r1"
+        assert "[MERGE]" in data["line"]
+
+    @pytest.mark.asyncio
+    async def test_merge_line_separate_events_from_two_channels(self, event_service, async_redis):
+        """R: 동일 MERGE 라인이 logs:{id}와 merge-log:{id} 양쪽에 도착 시 각각 log, merge_log 이벤트로 분리됨."""
+        merge_line = "[12:34:56] [MERGE] [INFO] execute_merge: project_dir=D:/foo"
+        msg_log = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:r2",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": merge_line,
+        }
+        msg_merge = {
+            "type": "pmessage",
+            "channel": "plan-runner:merge-log:r2",
+            "pattern": MERGE_LOG_CHANNEL_PATTERN,
+            "data": merge_line,
+        }
+        # 두 메시지를 순서대로 log pubsub 에서 반환
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[msg_log, msg_merge])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 6)
+        await gen.aclose()
+
+        log_events = [e for e in events if e.startswith("event: log\n")]
+        merge_events = [e for e in events if e.startswith("event: merge_log\n")]
+
+        # 백엔드는 두 채널 모두 그대로 전달 (필터링은 프론트에서)
+        assert len(log_events) >= 1
+        assert len(merge_events) >= 1
+
+        log_data = json.loads(log_events[0].split("data: ")[1].split("\n")[0])
+        merge_data = json.loads(merge_events[0].split("data: ")[1].split("\n")[0])
+        assert log_data["line"] == merge_line
+        assert merge_data["line"] == merge_line

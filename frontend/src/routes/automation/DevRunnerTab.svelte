@@ -318,6 +318,8 @@
 		} else if (eventName === 'log') {
 			try {
 				const { runner_id, line } = JSON.parse(data) as { runner_id: string; line: string };
+				// MERGE 로그는 merge_log 이벤트가 동일 라인을 전달하므로 중복 방지를 위해 skip
+				if (line.includes('[MERGE]')) return;
 				logRefs.get(runner_id)?.injectLine(line);
 			} catch { /* 무시 */ }
 		} else if (eventName === 'log_completed') {
