@@ -53,7 +53,7 @@ class RunnerListItem(BaseModel):
     branch: Optional[str] = None
     merge_status: Optional[str] = None
     trigger: Optional[str] = None
-    visible: bool = True  # 탭 표시 여부 (dismiss 전까지 True)
+    visible: bool = False  # 탭 표시 여부 (user/user:all 트리거만 True, 기본 숨김)
     orphan: bool = False  # Workflow DB에 running/merge_pending이지만 Redis에 없는 runner
 
 

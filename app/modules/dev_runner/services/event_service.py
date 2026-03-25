@@ -112,8 +112,8 @@ class EventService:
                 payload = self._build_status_payload(rid)
                 if payload:
                     trigger = payload.get("trigger") or ""
-                    if trigger.startswith("tc:"):
-                        continue  # tc: 트리거 러너는 프론트엔드에 노출하지 않음
+                    if trigger not in ("user", "user:all"):
+                        continue  # 화이트리스트: user/user:all 트리거만 프론트엔드에 노출 (fail-closed)
                     result.append(payload)
             return result
         except Exception:
