@@ -10,7 +10,7 @@ import sys
 import types
 import importlib
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 
 import pytest
 
@@ -45,6 +45,7 @@ def _prepare_listener_imports():
                         pass
                 mod.WorktreeManager = _WM
                 mod.WorktreeError = Exception
+                mod.ensure_main_branch = lambda *a, **kw: None
     # Ensure scripts dir is on path
     if str(_SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(_SCRIPTS_DIR))
@@ -166,7 +167,7 @@ class TestReconnectSurvivingRunners:
             patch.object(_listener, "_cleanup_process_state") as mock_cleanup,
         ):
             _reconnect_surviving_runners(r)
-            mock_cleanup.assert_called_once_with(runner_id, r)
+            mock_cleanup.assert_called_once_with(runner_id, r, reason="reconnect_orphan")
 
     def test_right_no_pid_key_calls_cleanup(self):
         """Missing PID key should trigger cleanup."""
@@ -175,7 +176,7 @@ class TestReconnectSurvivingRunners:
 
         with patch.object(_listener, "_cleanup_process_state") as mock_cleanup:
             _reconnect_surviving_runners(r)
-            mock_cleanup.assert_called_once_with(runner_id, r)
+            mock_cleanup.assert_called_once_with(runner_id, r, reason="reconnect_orphan")
 
     def test_right_already_in_running_processes_skips(self):
         """Runner already in _running_processes should be skipped."""
@@ -206,7 +207,7 @@ class TestAttachToRunningProcess:
 
         with patch.object(_listener, "_cleanup_process_state") as mock_cleanup:
             _attach_to_running_process(runner_id, pid, r)
-            mock_cleanup.assert_called_once_with(runner_id, r)
+            mock_cleanup.assert_called_once_with(runner_id, r, reason="no_log_file")
 
     def test_right_valid_log_file_registers_dummy(self, tmp_path):
         """Valid log file should register _DummyProcess and start threads."""
@@ -254,7 +255,7 @@ class TestCleanupStaleRunners:
         executor.async_redis.smembers = MagicMock(return_value={runner_id})
         executor.async_redis.get = MagicMock(return_value="9999")
         executor._is_pid_alive = MagicMock(return_value=False)
-        executor._force_cleanup_state = MagicMock()
+        executor._force_cleanup_state = AsyncMock()
 
         # Make async_redis.smembers / get awaitable
         import asyncio
@@ -287,8 +288,97 @@ class TestCleanupStaleRunners:
         executor.async_redis.smembers = _smembers
         executor.async_redis.get = _get
         executor._is_pid_alive = MagicMock(return_value=True)
-        executor._force_cleanup_state = MagicMock()
+        executor._force_cleanup_state = AsyncMock()
 
         n = await executor._cleanup_stale_runners()
         assert n == 0
         executor._force_cleanup_state.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TestPrepareListenerImports: _prepare_listener_imports() stub 검증
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareListenerImports:
+    """_prepare_listener_imports()가 fake worktree_manager를 올바르게 등록하는지 검증"""
+
+    def setup_method(self):
+        # 매 테스트 전 worktree_manager와 listener를 sys.modules에서 제거
+        sys.modules.pop("worktree_manager", None)
+        sys.modules.pop("dev_runner_listener", None)
+
+    def test_prepare_listener_imports_right_ensure_main_branch_exists(self):
+        """R: _prepare_listener_imports 후 sys.modules['worktree_manager'].ensure_main_branch가 callable"""
+        _prepare_listener_imports()
+        wm = sys.modules.get("worktree_manager")
+        assert wm is not None, "worktree_manager가 sys.modules에 없음"
+        assert callable(getattr(wm, "ensure_main_branch", None)), \
+            "ensure_main_branch가 callable이 아님"
+
+    def test_prepare_listener_imports_right_worktree_manager_stub_complete(self):
+        """R: stub에 WorktreeManager, WorktreeError, ensure_main_branch 3개 모두 존재"""
+        _prepare_listener_imports()
+        wm = sys.modules.get("worktree_manager")
+        assert hasattr(wm, "WorktreeManager"), "WorktreeManager 없음"
+        assert hasattr(wm, "WorktreeError"), "WorktreeError 없음"
+        assert hasattr(wm, "ensure_main_branch"), "ensure_main_branch 없음"
+
+    def test_prepare_listener_imports_boundary_idempotent(self):
+        """B: 2회 연속 호출 시 worktree_manager 모듈 객체가 동일 (if name not in sys.modules 가드 검증)"""
+        _prepare_listener_imports()
+        first = sys.modules.get("worktree_manager")
+        _prepare_listener_imports()
+        second = sys.modules.get("worktree_manager")
+        assert first is second, "2회 호출 시 다른 모듈 객체가 등록됨"
+
+    def test_missing_ensure_main_branch_causes_import_error(self):
+        """T3: ensure_main_branch 없는 stub 주입 시 listener import에서 ImportError 발생,
+        수정 후(stub 있음)에는 오류 없음을 함께 검증 — 근본 원인 재현 TC"""
+        import importlib.util
+        import types
+
+        _SCRIPTS_DIR = Path(__file__).parents[4] / "scripts"
+        _LISTENER_FILE = _SCRIPTS_DIR / "dev-runner-command-listener.py"
+
+        def _inject_incomplete_stub():
+            """ensure_main_branch 없는 minimal fake worktree_manager 주입"""
+            sys.modules.pop("dev_runner_listener", None)
+            sys.modules.pop("worktree_manager", None)
+            mod = types.ModuleType("worktree_manager")
+
+            class _WM:
+                @staticmethod
+                def create(*a, **kw):
+                    return Path("/tmp/wt"), "branch"
+
+                @staticmethod
+                def remove(*a, **kw):
+                    pass
+
+            mod.WorktreeManager = _WM
+            mod.WorktreeError = Exception
+            # ensure_main_branch 의도적으로 누락
+            sys.modules["worktree_manager"] = mod
+
+        def _load_listener():
+            spec = importlib.util.spec_from_file_location(
+                "dev_runner_listener", _LISTENER_FILE
+            )
+            m = importlib.util.module_from_spec(spec)
+            sys.modules["dev_runner_listener"] = m
+            spec.loader.exec_module(m)
+
+        # 1) incomplete stub → ImportError 재현
+        _inject_incomplete_stub()
+        with pytest.raises((ImportError, AttributeError)):
+            _load_listener()
+
+        # 2) _prepare_listener_imports()으로 올바른 stub 주입 → 오류 없음
+        sys.modules.pop("dev_runner_listener", None)
+        sys.modules.pop("worktree_manager", None)
+        _prepare_listener_imports()
+        try:
+            _load_listener()
+        except (ImportError, AttributeError) as e:
+            pytest.fail(f"수정 후에도 import 오류: {e}")
