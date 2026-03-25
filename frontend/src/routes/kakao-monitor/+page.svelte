@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { toast } from '$lib/stores/toast';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import {
 		getConfigs,
 		createConfig,
