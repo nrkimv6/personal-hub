@@ -127,6 +127,7 @@
   }
 
   function serviceVariant(svc: NssmService): 'success' | 'warning' | 'error' | 'gray' {
+    if (svc.status === 'Unregistered') return 'error';
     if (svc.status === 'Running') return 'success';
     if (svc.status === 'StartPending' || svc.status === 'StopPending') return 'warning';
     return 'error';
@@ -703,7 +704,7 @@
                 <span class="font-medium text-sm text-foreground truncate">{svc.display_name}</span>
                 <span class="font-mono text-[11px] text-muted-foreground truncate hidden sm:inline">{svc.name}</span>
                 <div class="ml-auto flex items-center gap-2 shrink-0">
-                  <StatusBadge variant={serviceVariant(svc)} size="sm">{svc.status}</StatusBadge>
+                  <StatusBadge variant={serviceVariant(svc)} size="sm">{svc.status === 'Unregistered' ? '미등록' : svc.status}</StatusBadge>
                   <span class="text-[10px] text-muted-foreground">{svc.start_type}</span>
                   {#if svc.status === 'Running'}
                     <button

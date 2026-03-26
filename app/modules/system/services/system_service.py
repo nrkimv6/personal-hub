@@ -47,8 +47,7 @@ class SystemService:
             nssm_services = config.get("nssm_services", [])
             for svc_name in nssm_services:
                 service = await self._query_service_by_name(svc_name, project_name)
-                if service:
-                    result.append(service)
+                result.append(service)
 
         return result
 
@@ -64,24 +63,28 @@ class SystemService:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
 
         if not stdout:
-            return []
+            return [self._unregistered_sentinel(prefix, project_name)]
 
         try:
             data = json.loads(stdout.decode('utf-8'))
             if isinstance(data, dict):
                 data = [data]
 
-            return [{
+            result = [{
                 "name": svc.get("Name", ""),
                 "project": project_name,
                 "status": self._normalize_status(svc.get("Status")),
                 "start_type": str(svc.get("StartType", "Unknown")),
                 "display_name": svc.get("DisplayName", "")
             } for svc in data]
-        except json.JSONDecodeError:
-            return []
 
-    async def _query_service_by_name(self, name: str, project_name: str) -> Optional[dict]:
+            if not result:
+                return [self._unregistered_sentinel(prefix, project_name)]
+            return result
+        except json.JSONDecodeError:
+            return [self._unregistered_sentinel(prefix, project_name)]
+
+    async def _query_service_by_name(self, name: str, project_name: str) -> dict:
         """Query a specific Windows service by name"""
         ps_cmd = f"Get-Service -Name '{name}' -ErrorAction SilentlyContinue | Select-Object Name, Status, StartType, DisplayName | ConvertTo-Json -Compress"
 
@@ -93,7 +96,7 @@ class SystemService:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
 
         if not stdout:
-            return None
+            return self._unregistered_sentinel(name, project_name)
 
         try:
             svc = json.loads(stdout.decode('utf-8'))
@@ -105,7 +108,7 @@ class SystemService:
                 "display_name": svc.get("DisplayName", "")
             }
         except json.JSONDecodeError:
-            return None
+            return self._unregistered_sentinel(name, project_name)
 
     def _normalize_status(self, status) -> str:
         """Normalize service status to string"""
@@ -113,6 +116,16 @@ class SystemService:
             status_map = {1: "Stopped", 2: "StartPending", 3: "StopPending", 4: "Running"}
             return status_map.get(status, "Unknown")
         return str(status) if status else "Unknown"
+
+    def _unregistered_sentinel(self, name: str, project_name: str) -> dict:
+        """Return a sentinel dict for an unregistered service"""
+        return {
+            "name": name,
+            "project": project_name,
+            "status": "Unregistered",
+            "start_type": "N/A",
+            "display_name": f"{name} (미등록)",
+        }
 
     async def get_startup_programs(self) -> list:
         """Query startup programs by prefix"""
