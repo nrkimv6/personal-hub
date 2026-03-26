@@ -391,9 +391,29 @@ class GoogleSearchWorker(BaseWorker):
             db, queue_item.saved_search_id, query, search_id
         )
 
+        # exclude_keywords 추출
+        exclude_keywords = []
+        if options.search_params:
+            exclude_keywords = options.search_params.get("exclude_keywords") or []
+
         # 결과 저장 (신규 여부 및 순위 변화 계산)
         new_result_count = 0
+        filtered_count = 0
         for result in all_results:
+            # 후처리 필터링: exclude_keywords 포함 항목 제거
+            if self._should_exclude(result, exclude_keywords):
+                matched = next(
+                    (kw for kw in exclude_keywords if kw and kw.lower() in (
+                        (result.title or "") + " " + (result.snippet or "")
+                    ).lower()),
+                    None,
+                )
+                logger.info(
+                    f"[{self.name}] Excluded: '{result.title}' (keyword: {matched})"
+                )
+                continue
+
+            filtered_count += 1
             is_new = result.url not in prev_url_rank_map
             rank_change = None
             prev_rank = None
@@ -421,6 +441,9 @@ class GoogleSearchWorker(BaseWorker):
                 prev_rank=prev_rank,
             )
             db.add(record)
+
+        # 필터링 후 실제 저장 개수를 queue_item에 반영
+        queue_item.result_count = filtered_count
 
         db.commit()
 
@@ -527,6 +550,21 @@ class GoogleSearchWorker(BaseWorker):
         except Exception as e:
             logger.warning(f"[{self.name}] Failed to get previous run results: {e}")
             return {}
+
+    def _should_exclude(self, result, exclude_keywords) -> bool:
+        """결과를 제외 키워드 기준으로 필터링할지 판단.
+
+        Args:
+            result: SearchResultData 인스턴스
+            exclude_keywords: 제외 키워드 목록 (None 또는 빈 리스트면 항상 False)
+
+        Returns:
+            True면 이 결과를 제외
+        """
+        if not exclude_keywords:
+            return False
+        text = ((result.title or "") + " " + (result.snippet or "")).lower()
+        return any(kw and kw.lower() in text for kw in exclude_keywords)
 
     def _send_new_result_notification(
         self,

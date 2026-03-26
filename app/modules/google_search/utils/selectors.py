@@ -56,7 +56,7 @@ NUM_OPTIONS = {
 }
 
 # 추가 검색 파라미터 허용 키 목록
-ALLOWED_SEARCH_PARAMS = {"lr", "cr", "as_sitesearch", "num"}
+ALLOWED_SEARCH_PARAMS = {"lr", "cr", "as_sitesearch", "num", "exclude_keywords"}
 
 # 검색 결과 파싱용 JavaScript 코드
 SCRAPE_RESULTS_JS = """

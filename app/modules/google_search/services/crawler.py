@@ -233,6 +233,12 @@ class GoogleSearchCrawler:
             site = search_params["as_sitesearch"]
             effective_query = f"site:{site} {query}"
 
+        # exclude_keywords가 있으면 - 연산자로 쿼리에 append
+        if search_params and search_params.get("exclude_keywords"):
+            for kw in search_params["exclude_keywords"]:
+                if kw and kw.strip():
+                    effective_query += f" -{kw.strip()}"
+
         # hl=ko로 한국어 결과 요청
         url = f"https://www.google.com/search?q={quote(effective_query)}&hl=ko"
 
@@ -242,10 +248,10 @@ class GoogleSearchCrawler:
         if tbs:
             url += f"&tbs={tbs}"
 
-        # 추가 검색 파라미터 (허용 키만, as_sitesearch는 쿼리에 반영됐으므로 스킵)
+        # 추가 검색 파라미터 (허용 키만, as_sitesearch/exclude_keywords는 쿼리에 반영됐으므로 스킵)
         if search_params:
             for key, value in search_params.items():
-                if key == "as_sitesearch":
+                if key in ("as_sitesearch", "exclude_keywords"):
                     continue
                 if key in ALLOWED_SEARCH_PARAMS and value:
                     url += f"&{quote(str(key))}={quote(str(value))}"

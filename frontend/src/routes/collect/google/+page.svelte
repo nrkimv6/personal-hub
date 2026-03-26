@@ -161,6 +161,7 @@
 	let searchCountry = $state('');
 	let searchSite = $state('');
 	let searchNum = $state(10);
+	let excludeKeywords = $state('');
 
 	const languageOptions = [
 		{ value: '', label: '전체' },
@@ -180,12 +181,15 @@
 	let pendingSearchId: string | null = $state(null);
 
 	// search_params 헬퍼: 현재 고급 옵션 값을 객체로 구성
-	function buildSearchParams(): Record<string, string | number> | undefined {
-		const params: Record<string, string | number> = {};
+	function buildSearchParams(): Record<string, string | number | string[]> | undefined {
+		const params: Record<string, string | number | string[]> = {};
 		if (searchLang) params.lr = searchLang;
 		if (searchCountry) params.cr = searchCountry;
 		if (searchSite) params.as_sitesearch = searchSite;
 		if (searchNum !== 10) params.num = searchNum;
+		if (excludeKeywords.trim()) {
+			params.exclude_keywords = excludeKeywords.split(',').map(k => k.trim()).filter(Boolean);
+		}
 		return Object.keys(params).length > 0 ? params : undefined;
 	}
 
@@ -404,12 +408,14 @@
 			searchCountry = saved.search_params.cr || '';
 			searchSite = saved.search_params.as_sitesearch || '';
 			searchNum = saved.search_params.num || 10;
+			excludeKeywords = (saved.search_params.exclude_keywords || []).join(', ');
 			showAdvancedOptions = true;
 		} else {
 			searchLang = '';
 			searchCountry = '';
 			searchSite = '';
 			searchNum = 10;
+			excludeKeywords = '';
 			showAdvancedOptions = false;
 		}
 		showSaveModal = true;
@@ -762,6 +768,15 @@
 							<option value={n}>{n}개</option>
 						{/each}
 					</select>
+				</div>
+				<div class="w-full">
+					<label class="mb-1 block text-xs text-muted-foreground">제외 키워드</label>
+					<input
+						type="text"
+						bind:value={excludeKeywords}
+						placeholder="콤마로 구분 (예: 구매, 판매, 광고)"
+						class="w-full rounded-lg border px-3 py-1.5 text-sm"
+					/>
 				</div>
 			</div>
 		{/if}
@@ -1187,6 +1202,15 @@
 										<option value={n}>{n}개</option>
 									{/each}
 								</select>
+							</div>
+							<div class="w-full">
+								<label class="mb-1 block text-xs text-muted-foreground">제외 키워드</label>
+								<input
+									type="text"
+									bind:value={excludeKeywords}
+									placeholder="콤마로 구분 (예: 구매, 판매, 광고)"
+									class="w-full rounded-lg border px-2 py-1.5 text-sm"
+								/>
 							</div>
 						</div>
 					{/if}

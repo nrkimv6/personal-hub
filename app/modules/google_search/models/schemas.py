@@ -31,6 +31,7 @@ class SearchParams(BaseModel):
     cr: Optional[str] = Field(None, description="국가 제한 (countryKR 등)")
     as_sitesearch: Optional[str] = Field(None, description="사이트 내 검색")
     num: Optional[int] = Field(None, ge=10, le=100, description="페이지당 결과 수")
+    exclude_keywords: Optional[List[str]] = Field(None, description="제외 키워드 목록")
 
 
 class SearchResult(BaseModel):
