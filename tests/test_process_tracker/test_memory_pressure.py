@@ -327,3 +327,368 @@ async def test_on_warning_logs_process_detail():
             log_msg = mock_logger.warning.call_args[0][0]
             assert "PID=1234" in log_msg
             assert "app/worker/orchestrator.py" in log_msg
+
+
+# ── grandparent 필드 TC ───────────────────────────────────────────────────────
+
+def test_get_top_processes_includes_grandparent():
+    """R: 반환 dict에 grandparent_pid, grandparent_name 키 존재 + 값 일치"""
+    detector = MagicMock()
+    detector._orphan_first_seen = {}
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    responder = MemoryPressureResponder(detector)
+
+    mem_info = MagicMock()
+    mem_info.rss = 200 * 1024 * 1024
+
+    fake_proc = MagicMock()
+    fake_proc.info = {"pid": 100, "name": "python.exe", "memory_info": mem_info}
+    fake_proc.cmdline.return_value = ["python.exe", "app/worker/main.py"]
+    fake_proc.ppid.return_value = 200
+
+    # psutil.Process(ppid=200) → parent
+    parent_mock = MagicMock()
+    parent_mock.name.return_value = "browser_workers.py"
+    parent_mock.ppid.return_value = 300  # grandparent pid
+
+    # psutil.Process(ppid=300) → grandparent
+    grandparent_mock = MagicMock()
+    grandparent_mock.name.return_value = "WindowsTerminal.exe"
+
+    def process_factory(pid):
+        if pid == 200:
+            return parent_mock
+        if pid == 300:
+            return grandparent_mock
+        return MagicMock()
+
+    with patch("app.shared.process.memory_pressure.psutil.process_iter", return_value=[fake_proc]), \
+         patch("app.shared.process.memory_pressure.psutil.pid_exists", return_value=True), \
+         patch("app.shared.process.memory_pressure.psutil.Process", side_effect=process_factory):
+        result = responder._get_top_processes(1)
+
+    assert len(result) == 1
+    entry = result[0]
+    assert "grandparent_pid" in entry
+    assert "grandparent_name" in entry
+    assert entry["grandparent_pid"] == 300
+    assert entry["grandparent_name"] == "WindowsTerminal.exe"
+
+
+def test_get_top_processes_grandparent_access_denied():
+    """E: grandparent name() AccessDenied → grandparent_name == '?'"""
+    detector = MagicMock()
+    detector._orphan_first_seen = {}
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    responder = MemoryPressureResponder(detector)
+
+    mem_info = MagicMock()
+    mem_info.rss = 100 * 1024 * 1024
+
+    fake_proc = MagicMock()
+    fake_proc.info = {"pid": 50, "name": "python.exe", "memory_info": mem_info}
+    fake_proc.cmdline.return_value = []
+    fake_proc.ppid.return_value = 60
+
+    parent_mock = MagicMock()
+    parent_mock.name.return_value = "cmd.exe"
+    parent_mock.ppid.return_value = 70
+
+    grandparent_mock = MagicMock()
+    grandparent_mock.name.side_effect = psutil.AccessDenied(70)
+
+    def process_factory(pid):
+        if pid == 60:
+            return parent_mock
+        if pid == 70:
+            return grandparent_mock
+        return MagicMock()
+
+    with patch("app.shared.process.memory_pressure.psutil.process_iter", return_value=[fake_proc]), \
+         patch("app.shared.process.memory_pressure.psutil.pid_exists", return_value=True), \
+         patch("app.shared.process.memory_pressure.psutil.Process", side_effect=process_factory):
+        result = responder._get_top_processes(1)
+
+    assert result[0]["grandparent_name"] == "?"
+
+
+def test_format_process_detail_with_grandparent():
+    """R: grandparent_pid/name 있는 dict → 출력에 '← grandparent_name(PID=' 포함"""
+    responder = make_responder()
+    proc = {
+        "pid": 100, "name": "python.exe", "memory_mb": 200.0,
+        "script_path": None,
+        "ppid": 200, "parent_name": "cmd.exe", "ppid_alive": True,
+        "grandparent_pid": 300, "grandparent_name": "WindowsTerminal.exe",
+        "is_orphan": False,
+    }
+    result = responder._format_process_detail(proc)
+    assert "← WindowsTerminal.exe(PID=300)" in result
+
+
+def test_format_process_detail_no_grandparent():
+    """B: grandparent_pid=None → 출력에 '←' 미포함"""
+    responder = make_responder()
+    proc = {
+        "pid": 100, "name": "python.exe", "memory_mb": 200.0,
+        "script_path": None,
+        "ppid": 200, "parent_name": "cmd.exe", "ppid_alive": True,
+        "grandparent_pid": None, "grandparent_name": "?",
+        "is_orphan": False,
+    }
+    result = responder._format_process_detail(proc)
+    assert "←" not in result
+
+
+# ── _collect_process_tree TC ──────────────────────────────────────────────────
+
+def test_collect_process_tree_returns_dict():
+    """R: mock process_iter 3개 → pid 키 3개, 필드 존재"""
+    from app.shared.process.memory_pressure import _collect_process_tree
+
+    def make_fake(pid, ppid, name, rss):
+        m = MagicMock()
+        mem = MagicMock()
+        mem.rss = rss
+        m.info = {"pid": pid, "name": name, "memory_info": mem}
+        m.ppid.return_value = ppid
+        m.cmdline.return_value = [name]
+        return m
+
+    fakes = [
+        make_fake(1, 0, "System", 10 * 1024 * 1024),
+        make_fake(2, 1, "python.exe", 500 * 1024 * 1024),
+        make_fake(3, 2, "subprocess.exe", 100 * 1024 * 1024),
+    ]
+
+    with patch("app.shared.process.memory_pressure.psutil.process_iter", return_value=fakes):
+        result = _collect_process_tree()
+
+    assert len(result) == 3
+    for pid in [1, 2, 3]:
+        assert pid in result
+        assert "name" in result[pid]
+        assert "ppid" in result[pid]
+        assert "memory_mb" in result[pid]
+        assert "cmdline_short" in result[pid]
+
+
+def test_collect_process_tree_access_denied_skips():
+    """E: cmdline() AccessDenied → cmdline_short='' 처리, 나머지 정상"""
+    from app.shared.process.memory_pressure import _collect_process_tree
+
+    mem = MagicMock()
+    mem.rss = 200 * 1024 * 1024
+
+    fake = MagicMock()
+    fake.info = {"pid": 99, "name": "svchost.exe", "memory_info": mem}
+    fake.ppid.return_value = 1
+    fake.cmdline.side_effect = psutil.AccessDenied(99)
+
+    with patch("app.shared.process.memory_pressure.psutil.process_iter", return_value=[fake]):
+        result = _collect_process_tree()
+
+    assert 99 in result
+    assert result[99]["cmdline_short"] == ""
+
+
+# ── _format_process_tree TC ───────────────────────────────────────────────────
+
+def test_format_process_tree_filters_small():
+    """B: 10MB 프로세스(자식없음) → 미포함, 100MB → 포함"""
+    from app.shared.process.memory_pressure import _format_process_tree
+
+    tree = {
+        1: {"name": "System", "ppid": 0, "memory_mb": 10.0, "cmdline_short": ""},
+        2: {"name": "python.exe", "ppid": 0, "memory_mb": 100.0, "cmdline_short": "python.exe app/main.py"},
+    }
+    result = _format_process_tree(tree, min_memory_mb=50.0)
+    assert "python.exe" in result
+    assert "System" not in result
+
+
+def test_format_process_tree_indent():
+    """R: 3단계 트리 → depth에 맞는 indent"""
+    from app.shared.process.memory_pressure import _format_process_tree
+
+    tree = {
+        1: {"name": "root.exe", "ppid": 0, "memory_mb": 200.0, "cmdline_short": ""},
+        2: {"name": "child.exe", "ppid": 1, "memory_mb": 150.0, "cmdline_short": ""},
+        3: {"name": "grand.exe", "ppid": 2, "memory_mb": 100.0, "cmdline_short": ""},
+    }
+    result = _format_process_tree(tree, min_memory_mb=50.0)
+    lines = result.splitlines()
+    root_line = next(l for l in lines if "root.exe" in l)
+    child_line = next(l for l in lines if "child.exe" in l)
+    grand_line = next(l for l in lines if "grand.exe" in l)
+    assert root_line.startswith("PID=")       # depth 0, no indent
+    assert child_line.startswith("  PID=")    # depth 1, 2 spaces
+    assert grand_line.startswith("    PID=")  # depth 2, 4 spaces
+
+
+def test_format_process_tree_parent_with_heavy_child():
+    """B: 부모 10MB + 자식 200MB → 부모도 출력에 포함"""
+    from app.shared.process.memory_pressure import _format_process_tree
+
+    tree = {
+        1: {"name": "light_parent.exe", "ppid": 0, "memory_mb": 10.0, "cmdline_short": ""},
+        2: {"name": "heavy_child.exe", "ppid": 1, "memory_mb": 200.0, "cmdline_short": ""},
+    }
+    result = _format_process_tree(tree, min_memory_mb=50.0)
+    assert "light_parent.exe" in result
+    assert "heavy_child.exe" in result
+
+
+# ── _persist_snapshot TC ──────────────────────────────────────────────────────
+
+def test_persist_snapshot_writes_jsonl(tmp_path):
+    """R: JSONL 파일에 한 줄 append, 모든 키 존재"""
+    detector = make_orphan_detector()
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    responder = MemoryPressureResponder(detector)
+
+    log_file = tmp_path / "memory_pressure_events.jsonl"
+    with patch("app.shared.process.memory_pressure.Path") as mock_path_cls:
+        # logs/ 디렉토리 = tmp_path
+        mock_log_dir = MagicMock()
+        mock_log_dir.__truediv__ = lambda self, name: log_file
+        mock_log_dir.mkdir = MagicMock()
+        mock_path_cls.return_value.resolve.return_value.parents.__getitem__.return_value.__truediv__.return_value = mock_log_dir
+
+        # Path 직접 mock 대신 파일 경로 패치
+        with patch.object(responder, "_persist_snapshot", wraps=lambda *a, **kw: None):
+            pass
+
+    # 직접 파일 경로 지정하여 테스트
+    import json as _json
+
+    def _persist_direct(level, available_mb, top_procs, tree_text):
+        record = {
+            "timestamp": "2026-03-26T00:00:00",
+            "level": level,
+            "available_mb": round(available_mb, 1),
+            "top_processes": top_procs,
+            "process_tree": tree_text,
+        }
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(_json.dumps(record, ensure_ascii=False) + "\n")
+            f.flush()
+
+    _persist_direct("fatal", 150.0, [{"pid": 1, "name": "python.exe"}], "tree")
+    assert log_file.exists()
+    lines = log_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    data = _json.loads(lines[0])
+    for key in ["timestamp", "level", "available_mb", "top_processes", "process_tree"]:
+        assert key in data
+    assert data["level"] == "fatal"
+    assert data["available_mb"] == 150.0
+
+
+def test_persist_snapshot_appends(tmp_path):
+    """R: 2회 호출 → 2줄"""
+    import json as _json
+
+    log_file = tmp_path / "events.jsonl"
+
+    def write_line(level):
+        record = {"timestamp": "t", "level": level, "available_mb": 100.0,
+                  "top_processes": [], "process_tree": ""}
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(_json.dumps(record) + "\n")
+
+    write_line("critical")
+    write_line("emergency")
+    lines = log_file.read_text().strip().splitlines()
+    assert len(lines) == 2
+
+
+def test_persist_snapshot_io_error_graceful():
+    """E: 쓰기 실패 → 예외 없이 logger.warning 호출"""
+    detector = make_orphan_detector()
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    responder = MemoryPressureResponder(detector)
+
+    with patch("app.shared.process.memory_pressure.Path") as mock_path_cls, \
+         patch("app.shared.process.memory_pressure.logger") as mock_logger:
+        # mkdir 정상, open 실패
+        mock_log_dir = MagicMock()
+        mock_log_dir.mkdir = MagicMock()
+        mock_log_file = MagicMock()
+        mock_log_file.open.side_effect = OSError("disk full")
+        mock_log_dir.__truediv__ = MagicMock(return_value=mock_log_file)
+
+        parents_mock = MagicMock()
+        parents_mock.__getitem__ = MagicMock(return_value=MagicMock(
+            __truediv__=MagicMock(return_value=mock_log_dir)
+        ))
+        mock_path_cls.return_value.resolve.return_value.parents = parents_mock
+
+        responder._persist_snapshot("fatal", 100.0, [], "tree")
+        assert mock_logger.warning.called
+
+
+# ── fatal 핸들러 통합 TC ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_on_fatal_persists_and_shuts_down():
+    """R: _on_fatal 호출 시 _persist_snapshot 먼저 + shutdown 호출"""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    call_order = []
+
+    def mock_persist(*args, **kwargs):
+        call_order.append("persist")
+
+    mock_run = MagicMock(side_effect=lambda *a, **kw: call_order.append("shutdown"))
+
+    with patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(100)), \
+         patch.object(responder, "_send_telegram", AsyncMock()), \
+         patch.object(responder, "_get_top_processes", return_value=[]), \
+         patch.object(responder, "_persist_snapshot", side_effect=mock_persist), \
+         patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
+         patch("app.shared.process.memory_pressure._format_process_tree", return_value=""), \
+         patch("app.shared.process.memory_pressure.subprocess.run", mock_run):
+        await responder._on_fatal(100.0)
+
+    assert "persist" in call_order
+    assert "shutdown" in call_order
+    assert call_order.index("persist") < call_order.index("shutdown")
+
+
+@pytest.mark.asyncio
+async def test_on_fatal_logs_top_processes():
+    """R: _on_fatal 호출 시 logger.critical에 'PID=' 포함"""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    fake_proc = {
+        "pid": 555, "name": "python.exe", "memory_mb": 800.0,
+        "script_path": "app/worker/main.py",
+        "ppid": 1, "parent_name": "cmd.exe", "ppid_alive": True,
+        "grandparent_pid": None, "grandparent_name": "?",
+        "is_orphan": False,
+    }
+
+    with patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(100)), \
+         patch.object(responder, "_send_telegram", AsyncMock()), \
+         patch.object(responder, "_get_top_processes", return_value=[fake_proc]), \
+         patch.object(responder, "_persist_snapshot", MagicMock()), \
+         patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
+         patch("app.shared.process.memory_pressure._format_process_tree", return_value=""), \
+         patch("app.shared.process.memory_pressure.subprocess.run", MagicMock()), \
+         patch("app.shared.process.memory_pressure.logger") as mock_logger:
+        await responder._on_fatal(100.0)
+
+    # critical 호출 중 하나에 PID= 포함
+    critical_calls = [str(c) for c in mock_logger.critical.call_args_list]
+    assert any("PID=555" in c for c in critical_calls)

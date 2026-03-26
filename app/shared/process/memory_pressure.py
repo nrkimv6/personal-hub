@@ -10,9 +10,11 @@
     emergency : >= MEMORY_FATAL_MB (256 MB)
     fatal     : < MEMORY_FATAL_MB
 """
+import json
 import logging
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -51,6 +53,95 @@ def _extract_script_path(cmdline: list[str]) -> str | None:
         except (ValueError, TypeError):
             continue
     return None
+
+
+def _collect_process_tree() -> dict[int, dict]:
+    """시스템 전체 프로세스 정보를 수집한다.
+
+    Returns:
+        {pid: {"name", "ppid", "memory_mb", "cmdline_short"}} dict
+    """
+    tree: dict[int, dict] = {}
+    for proc in psutil.process_iter(["pid", "name", "memory_info"]):
+        try:
+            pid = proc.info["pid"]
+            rss = proc.info["memory_info"].rss if proc.info["memory_info"] else 0
+            memory_mb = round(rss / (1024 * 1024), 1)
+
+            try:
+                ppid = proc.ppid()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                ppid = 0
+
+            try:
+                cmdline = proc.cmdline()
+                cmdline_short = " ".join(cmdline)[:120]
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                cmdline_short = ""
+
+            tree[pid] = {
+                "name": proc.info["name"] or "",
+                "ppid": ppid,
+                "memory_mb": memory_mb,
+                "cmdline_short": cmdline_short,
+            }
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return tree
+
+
+def _format_process_tree(tree: dict[int, dict], min_memory_mb: float = 50.0) -> str:
+    """프로세스 트리를 indent 텍스트로 포맷한다.
+
+    메모리 min_memory_mb 미만이고 자식 중 해당 임계값 이상인 것이 없으면 생략.
+
+    Args:
+        tree: _collect_process_tree() 반환값
+        min_memory_mb: 표시 최소 메모리 임계값 (MB)
+
+    Returns:
+        indent 기반 트리 문자열
+    """
+    if not tree:
+        return "(프로세스 정보 없음)"
+
+    # children 매핑 구성
+    children: dict[int, list[int]] = {}
+    for pid, info in tree.items():
+        ppid = info["ppid"]
+        children.setdefault(ppid, []).append(pid)
+
+    # 서브트리 내 최대 메모리 캐시 (부모 표시 여부 결정용)
+    def max_subtree_memory(pid: int) -> float:
+        mem = tree.get(pid, {}).get("memory_mb", 0.0)
+        for child_pid in children.get(pid, []):
+            mem = max(mem, max_subtree_memory(child_pid))
+        return mem
+
+    lines: list[str] = []
+
+    def visit(pid: int, depth: int) -> None:
+        info = tree.get(pid)
+        if info is None:
+            return
+        # 서브트리 최대 메모리가 임계값 미만이면 생략
+        if max_subtree_memory(pid) < min_memory_mb:
+            return
+        indent = "  " * depth
+        name = info["name"]
+        mem = info["memory_mb"]
+        cmd = info["cmdline_short"]
+        cmd_part = f" {cmd}" if cmd and cmd != name else ""
+        lines.append(f"{indent}PID={pid} {name} {mem}MB{cmd_part}")
+        for child_pid in sorted(children.get(pid, [])):
+            visit(child_pid, depth + 1)
+
+    # 루트: ppid가 tree에 없는 프로세스
+    roots = [pid for pid, info in tree.items() if info["ppid"] not in tree]
+    for root_pid in sorted(roots):
+        visit(root_pid, 0)
+
+    return "\n".join(lines) if lines else "(50MB 이상 프로세스 없음)"
 
 
 class MemoryPressureResponder:
@@ -108,7 +199,8 @@ class MemoryPressureResponder:
         """메모리 사용량 상위 n개 프로세스를 반환한다.
 
         반환 dict 필드:
-            pid, name, memory_mb, script_path, ppid, parent_name, ppid_alive, is_orphan
+            pid, name, memory_mb, script_path, ppid, parent_name, ppid_alive,
+            grandparent_pid, grandparent_name, is_orphan
         """
         orphan_pids: set[int] = set(self.orphan_detector._orphan_first_seen.keys())
 
@@ -139,6 +231,19 @@ class MemoryPressureResponder:
                     ppid_alive = False
                     parent_name = "?"
 
+                # 조부모 프로세스 정보
+                grandparent_pid: int | None = None
+                grandparent_name: str = "?"
+                if ppid is not None:
+                    try:
+                        grandparent_pid = psutil.Process(ppid).ppid()
+                        try:
+                            grandparent_name = psutil.Process(grandparent_pid).name()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            grandparent_name = "?"
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        grandparent_pid = None
+
                 is_orphan = pid in orphan_pids or (ppid is not None and not ppid_alive)
 
                 procs.append({
@@ -149,6 +254,8 @@ class MemoryPressureResponder:
                     "ppid": ppid,
                     "parent_name": parent_name,
                     "ppid_alive": ppid_alive,
+                    "grandparent_pid": grandparent_pid,
+                    "grandparent_name": grandparent_name,
                     "is_orphan": is_orphan,
                 })
             except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -160,7 +267,7 @@ class MemoryPressureResponder:
         """프로세스 정보를 한 줄 문자열로 포맷한다.
 
         예시:
-            PID=1234 python.exe [app\\worker\\orchestrator.py] 512.0MB | parent: browser_workers.py(PID=5678, alive) | orphan: NO
+            PID=1234 python.exe [app\\worker\\orchestrator.py] 512.0MB | parent: browser_workers.py(PID=5678, alive) ← WindowsTerminal(PID=100) | orphan: NO
         """
         name = proc.get("name", "?")
         pid = proc.get("pid", "?")
@@ -169,15 +276,21 @@ class MemoryPressureResponder:
         ppid = proc.get("ppid", "?")
         parent_name = proc.get("parent_name", "?")
         ppid_alive = proc.get("ppid_alive", False)
+        grandparent_pid = proc.get("grandparent_pid")
+        grandparent_name = proc.get("grandparent_name", "?")
         is_orphan = proc.get("is_orphan", False)
 
         name_part = f"{name} [{script_path}]" if script_path else name
         parent_alive_str = "alive" if ppid_alive else "dead"
         orphan_str = "YES" if is_orphan else "NO"
 
+        grandparent_str = ""
+        if grandparent_pid is not None:
+            grandparent_str = f" ← {grandparent_name}(PID={grandparent_pid})"
+
         return (
             f"  PID={pid} {name_part} {memory_mb}MB"
-            f" | parent: {parent_name}(PID={ppid}, {parent_alive_str})"
+            f" | parent: {parent_name}(PID={ppid}, {parent_alive_str}){grandparent_str}"
             f" | orphan: {orphan_str}"
         )
 
@@ -185,6 +298,36 @@ class MemoryPressureResponder:
         """상위 n개 프로세스의 상세 정보를 줄바꿈으로 연결하여 반환한다."""
         procs = self._get_top_processes(n)
         return "\n".join(self._format_process_detail(p) for p in procs)
+
+    def _persist_snapshot(
+        self,
+        level: str,
+        available_mb: float,
+        top_procs: list[dict],
+        tree_text: str,
+    ) -> None:
+        """메모리 압박 스냅샷을 재부팅에도 유실되지 않는 영속 파일에 기록한다.
+
+        파일: logs/memory_pressure_events.jsonl (JSONL append)
+        예외 발생 시 경고 로그만 출력하고 절대 전파하지 않는다.
+        """
+        try:
+            log_dir = Path(__file__).resolve().parents[3] / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = log_dir / "memory_pressure_events.jsonl"
+
+            record = {
+                "timestamp": datetime.now().isoformat(),
+                "level": level,
+                "available_mb": round(available_mb, 1),
+                "top_processes": top_procs,
+                "process_tree": tree_text,
+            }
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                f.flush()
+        except Exception as exc:
+            logger.warning("영속 스냅샷 기록 실패: %s", exc)
 
     async def _send_telegram(self, message: str) -> None:
         """Telegram 알림을 전송한다. 실패 시 경고 로그."""
@@ -237,6 +380,10 @@ class MemoryPressureResponder:
         await self._send_telegram(msg)
         self._record_alert("critical")
 
+        top5 = self._get_top_processes(5)
+        tree_text = _format_process_tree(_collect_process_tree())
+        self._persist_snapshot("critical", available_mb, top5, tree_text)
+
         orphans = await self.orphan_detector.scan()
         await self.orphan_detector.cleanup(orphans, force=True)
         logger.error("메모리 위험 — 워커 재시작이 필요할 수 있습니다.")
@@ -253,6 +400,10 @@ class MemoryPressureResponder:
         logger.critical(msg)
         await self._send_telegram(msg)
         self._record_alert("emergency")
+
+        top5 = self._get_top_processes(5)
+        tree_text = _format_process_tree(_collect_process_tree())
+        self._persist_snapshot("emergency", available_mb, top5, tree_text)
 
         orphans = await self.orphan_detector.scan()
         await self.orphan_detector.cleanup(orphans, force=True)
@@ -273,10 +424,23 @@ class MemoryPressureResponder:
             logger.warning("데스크톱 알림 실패: %s", exc)
 
     async def _on_fatal(self, available_mb: float) -> None:
-        """치명 단계 대응 — Telegram 알림 후 강제 재부팅 (1회만)."""
+        """치명 단계 대응 — 프로세스 트리 기록 후 Telegram 알림 + 강제 재부팅 (1회만)."""
         if not self._should_alert("fatal"):
             return
-        msg = f"🔴 강제 재부팅: 메모리 {available_mb:.0f}MB 미만 — 30초 후 재부팅"
+
+        # 재부팅 전 프로세스 트리 수집 + 영속 기록 (먼저 실행)
+        top10 = self._get_top_processes(10)
+        detail = "\n".join(self._format_process_detail(p) for p in top10)
+        tree = _collect_process_tree()
+        tree_text = _format_process_tree(tree)
+        self._persist_snapshot("fatal", available_mb, top10, tree_text)
+        logger.critical("재부팅 전 상위 프로세스:\n%s", detail)
+        logger.critical("프로세스 트리:\n%s", tree_text)
+
+        msg = (
+            f"🔴 강제 재부팅: 메모리 {available_mb:.0f}MB 미만 — 30초 후 재부팅\n"
+            f"상위 프로세스:\n{detail}"
+        )
         logger.critical(msg)
         await self._send_telegram(msg)
         self._fatal_triggered = True
