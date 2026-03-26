@@ -77,3 +77,34 @@ class TestSleepNowPidDetectionIntegration:
             f"startup 디렉토리의 SleepNow- lnk 파일 수({len(expected_lnks)})와 "
             f"get_startup_programs() 결과({len(sleepnow_startups)})가 일치해야 함"
         )
+
+
+class TestGetNssmServicesUnregisteredIntegration:
+    """get_nssm_services() 미등록 sentinel 통합 테스트"""
+
+    def _run(self, coro):
+        return asyncio.get_event_loop().run_until_complete(coro)
+
+    def test_get_nssm_services_includes_sentinel_for_unregistered(self):
+        """
+        T3: subprocess mock으로 빈 stdout 주입 → get_nssm_services()가
+        sentinel(status=="Unregistered") 항목을 포함한 리스트를 반환하는지 검증.
+        """
+        from unittest.mock import AsyncMock, patch as mock_patch
+
+        svc = SystemService()
+
+        async def fake_wait_for(coro, timeout):
+            return (b"", b"")
+
+        with mock_patch("asyncio.wait_for", side_effect=fake_wait_for):
+            result = self._run(svc.get_nssm_services())
+
+        # 미등록 sentinel이 반드시 포함되어야 함
+        unregistered = [s for s in result if s.get("status") == "Unregistered"]
+        assert len(unregistered) >= 1, "미등록 sentinel이 결과에 없음"
+        for s in unregistered:
+            assert "project" in s
+            assert "name" in s
+            assert "display_name" in s
+            assert "미등록" in s["display_name"]
