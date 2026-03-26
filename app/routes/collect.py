@@ -601,6 +601,7 @@ async def trigger_schedule_run(
             query=saved_search.query,
             date_filter=saved_search.date_filter,
             max_pages=saved_search.max_pages,
+            search_params=saved_search.search_params,
             saved_search_id=saved_search_id,
             schedule_id=schedule.id,  # 스케줄 ID 저장
             status="queued"  # Redis에 푸시할 예정이므로 queued
@@ -619,6 +620,7 @@ async def trigger_schedule_run(
                 "query": queue_item.query,
                 "date_filter": queue_item.date_filter,
                 "max_pages": queue_item.max_pages,
+                "search_params": queue_item.search_params,
                 "created_at": queue_item.created_at.isoformat() if queue_item.created_at else None,
             })
 

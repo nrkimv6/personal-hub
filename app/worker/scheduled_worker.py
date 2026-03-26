@@ -798,6 +798,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 date_filter=saved_search.date_filter,
                 max_pages=saved_search.max_pages or 1,
                 service_account_id=saved_search.service_account_id,
+                search_params=saved_search.search_params,
                 saved_search_id=saved_search_id,
                 schedule_id=schedule_id,
                 status="pending"
