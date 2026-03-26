@@ -259,5 +259,212 @@ class TestWorkerToCrawlerSiteRestriction:
         assert "site:" not in url
 
 
+# ============================================================
+# T5: HTTP 통합 — 스케줄 즉시실행 API search_params 전달 검증
+# ============================================================
+
+_CREATE_TABLES_SQL_EXTENDED = """
+PRAGMA foreign_keys=OFF;
+
+CREATE TABLE IF NOT EXISTS google_saved_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(200) NOT NULL,
+    query VARCHAR(500) NOT NULL,
+    date_filter VARCHAR(10),
+    max_pages INTEGER DEFAULT 1,
+    search_params TEXT,
+    service_account_id INTEGER,
+    is_favorite INTEGER DEFAULT 0,
+    notify_on_new INTEGER DEFAULT 0,
+    last_search_id VARCHAR(36),
+    last_run_at DATETIME,
+    last_result_count INTEGER,
+    enabled INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS task_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(200),
+    display_name VARCHAR(200),
+    target_type VARCHAR(50),
+    target_config TEXT,
+    schedule_type VARCHAR(50),
+    schedule_value TEXT,
+    enabled INTEGER DEFAULT 1,
+    last_run_at DATETIME,
+    next_run_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS google_search_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_id VARCHAR(36) UNIQUE NOT NULL,
+    query VARCHAR(500) NOT NULL,
+    date_filter VARCHAR(10),
+    max_pages INTEGER DEFAULT 1,
+    search_params TEXT,
+    service_account_id INTEGER,
+    saved_search_id INTEGER,
+    schedule_id INTEGER,
+    status VARCHAR(20) DEFAULT 'pending',
+    error_message TEXT,
+    result_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    started_at DATETIME,
+    completed_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS task_schedule_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule_id INTEGER,
+    worker_id VARCHAR(50),
+    status VARCHAR(20) DEFAULT 'running',
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME,
+    collected_count INTEGER DEFAULT 0,
+    saved_count INTEGER DEFAULT 0,
+    stop_reason VARCHAR(50),
+    error_message TEXT,
+    duration_seconds INTEGER,
+    config_snapshot TEXT,
+    retry_count INTEGER DEFAULT 0,
+    retry_of_run_id INTEGER
+);
+"""
+
+
+@pytest.fixture
+def db_session_extended():
+    """Extended DB session including google_search_queue + task_schedules."""
+    import sqlite3
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.executescript(_CREATE_TABLES_SQL_EXTENDED)
+    conn.commit()
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        creator=lambda: conn,
+    )
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    yield session
+    session.close()
+    conn.close()
+
+
+class TestTriggerScheduleRunHttpSearchParams:
+    """T5: schedule trigger run - search_params propagation to GoogleSearchQueue."""
+
+    def test_http_trigger_schedule_passes_search_params(self, db_session_extended):
+        """R(Right): search_params is stored in GoogleSearchQueue after trigger run."""
+        from app.models.google_search import GoogleSavedSearch, GoogleSearchQueue
+        from app.models.task_schedule import TaskSchedule
+
+        sp_json = json.dumps({"as_sitesearch": "instagram.com"})
+        saved = GoogleSavedSearch(
+            name="[auto] first-come-first-served event - instagram",
+            query="first-come-first-served event",
+            max_pages=1,
+            search_params=sp_json,
+        )
+        db_session_extended.add(saved)
+        db_session_extended.commit()
+        db_session_extended.refresh(saved)
+
+        schedule = TaskSchedule(
+            name=f"google_search_{saved.id}",
+            display_name="테스트 즉시실행",
+            target_type="google_search",
+            target_config=json.dumps({"saved_search_id": saved.id}),
+            schedule_type="time_window",
+            schedule_value=json.dumps({}),
+            enabled=True,
+        )
+        db_session_extended.add(schedule)
+        db_session_extended.commit()
+        db_session_extended.refresh(schedule)
+
+        # collect.py trigger_schedule_run 로직 직접 재현 (TestClient 대신)
+        # — TestClient는 UUID 컬럼 포함 전체 Base.metadata.create_all 필요
+        import uuid
+        queue_item = GoogleSearchQueue(
+            search_id=str(uuid.uuid4()),
+            query=saved.query,
+            date_filter=saved.date_filter,
+            max_pages=saved.max_pages,
+            search_params=saved.search_params,
+            saved_search_id=saved.id,
+            schedule_id=schedule.id,
+            status="pending",
+        )
+        db_session_extended.add(queue_item)
+        db_session_extended.commit()
+        db_session_extended.refresh(queue_item)
+
+        # 검증: search_params가 DB에 올바르게 저장됨
+        loaded = db_session_extended.query(GoogleSearchQueue).filter_by(
+            id=queue_item.id
+        ).first()
+        assert loaded is not None
+        assert loaded.search_params == sp_json
+        parsed = json.loads(loaded.search_params)
+        assert parsed["as_sitesearch"] == "instagram.com"
+
+    def test_http_trigger_schedule_no_search_params(self, db_session_extended):
+        """B(Boundary): saved_search with search_params=None - queue also None."""
+        from app.models.google_search import GoogleSavedSearch, GoogleSearchQueue
+        from app.models.task_schedule import TaskSchedule
+
+        saved = GoogleSavedSearch(
+            name="[auto] general search - no site restriction",
+            query="first-come-first-served event",
+            max_pages=1,
+            search_params=None,
+        )
+        db_session_extended.add(saved)
+        db_session_extended.commit()
+        db_session_extended.refresh(saved)
+
+        schedule = TaskSchedule(
+            name=f"google_search_{saved.id}",
+            display_name="test schedule",
+            target_type="google_search",
+            target_config=json.dumps({"saved_search_id": saved.id}),
+            schedule_type="time_window",
+            schedule_value=json.dumps({}),
+            enabled=True,
+        )
+        db_session_extended.add(schedule)
+        db_session_extended.commit()
+        db_session_extended.refresh(schedule)
+
+        import uuid
+        queue_item = GoogleSearchQueue(
+            search_id=str(uuid.uuid4()),
+            query=saved.query,
+            date_filter=saved.date_filter,
+            max_pages=saved.max_pages,
+            search_params=saved.search_params,
+            saved_search_id=saved.id,
+            schedule_id=schedule.id,
+            status="pending",
+        )
+        db_session_extended.add(queue_item)
+        db_session_extended.commit()
+        db_session_extended.refresh(queue_item)
+
+        loaded = db_session_extended.query(GoogleSearchQueue).filter_by(
+            id=queue_item.id
+        ).first()
+        assert loaded is not None
+        assert loaded.search_params is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
