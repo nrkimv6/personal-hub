@@ -307,3 +307,67 @@ class TestImportArchived:
         assert resp.status_code == 200
         data = resp.json()
         assert any(item.get("tags") and "feat" in item["tags"] for item in data)
+
+
+# ========== Phase T5: 신규 intent/scope 필드 응답 검증 ==========
+
+class TestIntentFieldsInResponse:
+    """Phase 8 T5: API 응답에 intent/trigger/scope/plan_date/applied_at 포함 확인"""
+
+    def test_records_api_right_new_fields_in_response(self, client, test_db_session):
+        """record에 intent/trigger/scope/plan_date/applied_at 데이터 있을 때 API 응답에 5개 필드 포함"""
+        import json
+        from datetime import date, datetime
+        from app.models.plan_record import PlanRecord
+
+        r = PlanRecord(
+            filename_hash="t5_intent_fields_001",
+            file_path="/archive/monitor/2026-03-20_t5-intent.md",
+            project="monitor-t5",
+            status="archived",
+            archived_at=datetime(2026, 3, 20, 12, 0),
+            intent="네이버 예약 스나이핑 재시도 로직 버그를 수정한다.",
+            trigger="bug_recurrence",
+            scope=json.dumps(["naver_booking", "worker/orchestrator.py"], ensure_ascii=False),
+            plan_date=date(2026, 3, 15),
+            applied_at=datetime(2026, 3, 20, 13, 52),
+        )
+        test_db_session.add(r)
+        test_db_session.commit()
+
+        # 단건 조회로 5개 필드 확인
+        resp = client.get(f"/api/v1/plans/records/{r.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["intent"] == "네이버 예약 스나이핑 재시도 로직 버그를 수정한다."
+        assert data["trigger"] == "bug_recurrence"
+        assert data["scope"] == ["naver_booking", "worker/orchestrator.py"]
+        assert data["plan_date"] == "2026-03-15"
+        assert data["applied_at"] is not None and "2026-03-20" in data["applied_at"]
+
+    def test_records_api_boundary_null_fields_returned_as_none(self, client, test_db_session):
+        """값 없는 레코드 조회 → 5개 신규 필드 모두 null로 반환 (500 아님)"""
+        from datetime import datetime
+        from app.models.plan_record import PlanRecord
+
+        r = PlanRecord(
+            filename_hash="t5_null_fields_001",
+            file_path="/archive/monitor/2026-03-21_t5-null.md",
+            project="monitor-t5-null",
+            status="archived",
+            archived_at=datetime(2026, 3, 21, 9, 0),
+            # intent, trigger, scope, plan_date, applied_at 모두 미설정
+        )
+        test_db_session.add(r)
+        test_db_session.commit()
+
+        resp = client.get(f"/api/v1/plans/records/{r.id}")
+        assert resp.status_code == 200, f"500이 아닌 200이어야 함: {resp.text}"
+        data = resp.json()
+
+        assert data["intent"] is None
+        assert data["trigger"] is None
+        assert data["scope"] is None
+        assert data["plan_date"] is None
+        assert data["applied_at"] is None

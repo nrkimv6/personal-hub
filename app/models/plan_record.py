@@ -3,7 +3,7 @@
 계획서 메타데이터(메모, 이력)를 DB로 관리
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Index, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Index, ForeignKey, Date
 from sqlalchemy.orm import relationship
 from app.models.base import Base
 
@@ -26,6 +26,11 @@ class PlanRecord(Base):
     tags = Column(JSON)                                          # 태그 목록 (feat, fix 등)
     summary = Column(Text)                                       # LLM 생성 요약
     superseded_by = Column(String)                               # 대체한 plan의 filename_hash
+    intent = Column(Text, nullable=True)                         # 핵심 수정 의도 (LLM 추출)
+    trigger = Column(String(50), nullable=True)                  # 작성 배경 (bug_recurrence|new_feature|refactor|ux_improvement|infra|unknown)
+    scope = Column(Text, nullable=True)                          # 영향 범위 (JSON 직렬화 리스트)
+    plan_date = Column(Date, nullable=True)                      # git 첫 커밋 날짜
+    applied_at = Column(DateTime, nullable=True)                 # > 반영일: 헤더 파싱
     llm_processed_at = Column(DateTime)                          # LLM 분석 완료 시각
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

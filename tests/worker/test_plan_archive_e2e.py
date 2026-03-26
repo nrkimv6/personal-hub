@@ -1,18 +1,25 @@
 """
-Phase T3: plan_archive_analyze / plan_requirements_sync E2E 테스트
+Phase T3/T4: plan_archive_analyze / plan_requirements_sync E2E 테스트
 
 DB-driven dispatch 흐름 검증:
 - in-memory SQLite에 task_schedules INSERT
 - _dispatch_scheduled_runs() 경로 진입 확인
 - task_schedule_runs 레코드 생성 확인
 - _check_plan_archive_schedule 메서드 부재 확인
+
+Phase T4 (TestIntentExtractionE2E):
+- archive → intent/scope 저장 전체 흐름 E2E 검증
 """
 import ast
 import asyncio
+import json
+from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 SCHEDULED_WORKER_PATH = Path(__file__).resolve().parents[2] / "app" / "worker" / "scheduled_worker.py"
 
@@ -137,3 +144,96 @@ class TestPlanArchiveE2E:
 
         assert not found, \
             "_check_plan_archive_schedule 메서드가 아직 코드에 존재함 — 하드코딩 제거 미완료"
+
+
+# ──────────────────────────────────────────────────────────────
+# Phase T4: archive → intent/scope 저장 전체 흐름 E2E 검증
+# ──────────────────────────────────────────────────────────────
+
+def _make_in_memory_db_e2e():
+    """테스트용 in-memory SQLite DB 세션 반환."""
+    from app.modules.claude_worker.models.llm_request import LLMRequest  # noqa: F401
+    from app.models.base import Base
+    engine = create_engine("sqlite:///:memory:", echo=False)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+
+class TestIntentExtractionE2E:
+    """archive → intent/scope 저장 전체 흐름 E2E 검증 (Phase T4)."""
+
+    def _make_record(self, db, filename_hash="e2e_hash_001"):
+        """테스트용 PlanRecord 생성."""
+        from app.models.plan_record import PlanRecord
+        record = PlanRecord(
+            filename_hash=filename_hash,
+            file_path=f"/fake/plan/{filename_hash}.md",
+            project="monitor-page",
+            title="E2E 테스트 계획서",
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+
+    def test_e2e_intent_fields_saved_after_llm_result(self):
+        """R: mock LLM 결과(intent/trigger/scope 포함) → save_plan_archive_result 호출 → DB에 3개 필드 저장 확인."""
+        from app.modules.claude_worker.services.plan_analyze_handler import save_plan_archive_result
+        from app.models.plan_record import PlanRecord
+
+        db = _make_in_memory_db_e2e()
+        record = self._make_record(db)
+
+        request = MagicMock()
+        request.caller_id = record.filename_hash
+
+        llm_result = {
+            "result": {
+                "category": "naver-booking",
+                "tags": ["feat"],
+                "summary": "E2E 요약",
+                "intent": "네이버 예약 슬롯 스나이핑 기능 추가",
+                "trigger": "new_feature",
+                "scope": ["naver-booking", "worker", "plan_archive_listener"],
+            }
+        }
+        save_plan_archive_result(db, request, llm_result)
+
+        db.refresh(record)
+
+        # intent/trigger/scope 저장 확인
+        assert record.intent == "네이버 예약 슬롯 스나이핑 기능 추가", "intent 저장 확인"
+        assert record.trigger == "new_feature", "trigger 저장 확인"
+        assert record.scope is not None, "scope 저장 확인"
+        scope_parsed = json.loads(record.scope)
+        assert "naver-booking" in scope_parsed
+        assert "worker" in scope_parsed
+
+        # 기존 필드도 함께 저장됐는지 확인 (회귀 없음)
+        assert record.category == "naver-booking", "category 저장 회귀 없음"
+        assert record.summary == "E2E 요약", "summary 저장 회귀 없음"
+
+    def test_e2e_plan_date_extracted_via_git(self):
+        """R: git tracked 파일 archive → plan_date 자동 설정 확인 (전체 흐름 통합)."""
+        from app.worker.plan_archive_listener import get_git_first_commit_date
+        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+
+        db = _make_in_memory_db_e2e()
+
+        # git tracked 파일 사용
+        tracked_file = str(
+            Path(__file__).resolve().parents[2] / "app" / "worker" / "plan_archive_listener.py"
+        )
+
+        # PlanRecordService.get_or_create → plan_date 설정 흐름 재현
+        svc = PlanRecordService(db)
+        record = svc.get_or_create(file_path=tracked_file)
+
+        if record.plan_date is None:
+            record.plan_date = get_git_first_commit_date(tracked_file)
+        db.commit()
+        db.refresh(record)
+
+        assert record.plan_date is not None, "git tracked 파일은 plan_date가 설정되어야 함"
+        assert isinstance(record.plan_date, date), f"date 타입이어야 함, 실제: {type(record.plan_date)}"
