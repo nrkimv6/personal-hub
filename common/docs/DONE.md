@@ -1,5 +1,6 @@
 # DONE
 
+- [x] 2026-03-26: Dev-Runner Plan 모달 통합 + 요약생성 버튼 복구
 - [x] 2026-03-26: dev-runner: Redis 잔존 상태 정리 버튼 + pull-sync 자동 정리
 - [x] 2026-03-26: 페이지 UI 일관성 통일 — TODO
 - [x] 2026-03-25: Claude Code 고아 Python 프로세스 정리
