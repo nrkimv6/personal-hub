@@ -701,20 +701,57 @@ class ExecutorService:
                             start_time = datetime.fromisoformat(start_time_str)
                         except ValueError:
                             pass
+                    # PID 기반 양방향 보정: Redis status와 실제 프로세스 상태 불일치 교정
+                    running = status == "running"
+                    if pid_str:
+                        try:
+                            pid_int = int(pid_str)
+                            pid_alive = self._is_pid_alive(pid_int)
+                            if running and not pid_alive:
+                                # Bug 2 방향: status="running" 인데 PID dead → 강제 정리
+                                logger.warning(
+                                    f"[dev-runner] get_all_runners: runner {rid} PID {pid_str} stale → cleanup"
+                                )
+                                await self._force_cleanup_state(rid)
+                                running = False
+                            elif not running and pid_alive:
+                                # Bug 1 방향: status≠"running" 인데 PID alive → premature cleanup 복원
+                                logger.warning(
+                                    f"[dev-runner] get_all_runners: runner {rid} PID alive but status={status!r} → 복원"
+                                )
+                                await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+                                await self.async_redis.sadd(ACTIVE_RUNNERS_KEY, rid)
+                                running = True
+                        except (ValueError, Exception) as _pid_err:
+                            logger.debug(f"[dev-runner] get_all_runners: PID 보정 실패 (무시, rid={rid}): {_pid_err}")
+
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
                     is_orphan = False
-                    if status != "running":
+                    if not running:
                         orphan_wf = db.query(Workflow).filter(
                             Workflow.runner_id == rid,
                             Workflow.status.in_(["running", "merge_pending"])
                         ).first()
                         if orphan_wf:
                             is_orphan = True
+                            # orphan 워크플로우 자동 정리: cleanup 스킵 시에도 DB 정합성 유지
+                            try:
+                                orphan_wf.status = "failed"
+                                orphan_wf.error_message = (
+                                    f"orphan auto-fix: runner {rid} status={status!r}"
+                                )
+                                db.commit()
+                                logger.warning(
+                                    f"[dev-runner] orphan workflow {orphan_wf.id} (runner={rid}) → failed 자동 전이"
+                                )
+                            except Exception as _wf_err:
+                                logger.warning(f"[dev-runner] orphan workflow 자동 정리 실패 (무시): {_wf_err}")
+                                db.rollback()
                     # 화이트리스트: user/user:all 트리거만 UI에 표시 (fail-closed)
                     is_user = bool(trigger and trigger in ("user", "user:all"))
                     result.append(RunnerListItem(
                         runner_id=rid,
-                        running=status == "running",
+                        running=running,
                         plan_file=plan_file,
                         engine=engine,
                         start_time=start_time,
