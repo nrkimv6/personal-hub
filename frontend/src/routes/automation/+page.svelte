@@ -3,13 +3,12 @@
 	import { goto } from '$app/navigation';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import DevRunnerTab from './DevRunnerTab.svelte';
-	import SleepNowTab from './SleepNowTab.svelte';
 	import GitReposTab from './GitReposTab.svelte';
 	import PlanListTab from '../plans/PlanListTab.svelte';
 	import ArchiveTab from '../plans/ArchiveTab.svelte';
 	import HistoryTab from '../plans/HistoryTab.svelte';
 
-	type MainTab = 'dev-runner' | 'sleep-now' | 'git-repos' | 'plans';
+	type MainTab = 'dev-runner' | 'git-repos' | 'plans';
 	let mainTab: MainTab = $state('dev-runner');
 	let initialPlan = $state('');
 
@@ -19,9 +18,7 @@
 
 	$effect(() => {
 		const tabParam = $page.url.searchParams.get('tab');
-		if (tabParam === 'sleep-now') {
-			mainTab = 'sleep-now';
-		} else if (tabParam === 'git-repos') {
+		if (tabParam === 'git-repos') {
 			mainTab = 'git-repos';
 		} else if (tabParam === 'plans') {
 			mainTab = 'plans';
@@ -35,7 +32,6 @@
 
 	const autoTabs = [
 		{ id: 'dev-runner', label: 'Dev Runner' },
-		{ id: 'sleep-now', label: 'Sleep Now' },
 		{ id: 'git-repos', label: 'Git 관리' },
 		{ id: 'plans', label: '계획서' },
 	];
@@ -60,22 +56,18 @@
 </script>
 
 <svelte:head>
-	<title>{mainTab === 'git-repos' ? 'Git 관리' : mainTab === 'plans' ? '계획서 관리' : '시스템 자동화'} | Monitor Page</title>
+	<title>{mainTab === 'git-repos' ? 'Git 관리' : mainTab === 'plans' ? '계획서 관리' : '개발 파이프라인'} | Monitor Page</title>
 </svelte:head>
 
 <div class="flex flex-col h-full overflow-hidden">
 	<div class="flex items-center gap-4 px-4 lg:px-6 h-12 border-b shrink-0">
-		<h1 class="text-lg font-bold tracking-tight text-foreground">시스템 자동화</h1>
+		<h1 class="text-lg font-bold tracking-tight text-foreground">개발 파이프라인</h1>
 		<TabNav tabs={autoTabs} bind:activeTab={mainTab} variant="primary" size="compact" queryParam="tab" />
 	</div>
 
 	<div class="flex-1 overflow-hidden">
 		{#if mainTab === 'dev-runner'}
 			<DevRunnerTab {initialPlan} />
-		{:else if mainTab === 'sleep-now'}
-			<div class="p-6 overflow-auto h-full">
-				<SleepNowTab />
-			</div>
 		{:else if mainTab === 'git-repos'}
 			<div class="overflow-auto h-full">
 				<GitReposTab />
