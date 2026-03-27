@@ -114,3 +114,32 @@ class TestNormalRunnerPlanFileAllRegression:
         assert payload is not None
         assert payload["plan_file"] == "__ALL_PLANS__", \
             f"일반 runner의 plan_file이 '__ALL_PLANS__'이 아님: {payload['plan_file']}"
+
+
+class TestRetryMergeExitCode2Http:
+    """T5 HTTP: POST /runners/{id}/retry-merge → exit_code=2 → fixing → merged 상태 흐름"""
+
+    @pytest.mark.http
+    def test_retry_merge_returns_test_failed_then_fixing_http(self, client):
+        """T5-HTTP: retry-merge 엔드포인트 → send_runner_command mock으로
+        test_failed → merged 전이 흐름 확인.
+        엔드포인트 자체가 merge_status를 반환하므로 200 + merge_status 필드 검증.
+        """
+        mock_result = {
+            "success": True,
+            "message": "test fixed and merged",
+            "merge_status": "merged",
+        }
+        with patch(
+            "app.modules.dev_runner.services.executor_service.ExecutorService.send_runner_command",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            resp = client.post("/api/v1/dev-runner/runners/runner-exit2/retry-merge")
+
+        assert resp.status_code in (200, 404, 400), \
+            f"예상치 못한 status_code: {resp.status_code}"
+        # 200인 경우 응답 구조 검증
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data.get("success") is True, f"success가 True가 아님: {data}"

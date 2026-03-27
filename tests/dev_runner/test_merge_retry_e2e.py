@@ -255,3 +255,51 @@ class TestDirectMergeConflictResolverCrashSafe:
         assert "conflict" in merge_status_sequence, \
             f"merge_status에 'conflict' 없음: {merge_status_sequence}"
         # 크래시 없이 여기까지 도달 = success
+
+
+class TestRetryMergeExitCode2AutoFix:
+    """E2E: retry-merge → exit_code=2 → _launch_auto_impl_post_merge_process 자동 트리거"""
+
+    @pytest.mark.e2e
+    def test_retry_merge_exit_code_2_triggers_auto_fix_e2e(self, tmp_path):
+        """E2E: _do_retry_merge → _execute_merge_with_lock(exit_code=2) →
+        _launch_auto_impl_post_merge_process 호출 → success=True → merge_status='merged'
+        """
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        plan_file = "docs/plan/test.md"
+
+        redis = make_redis_mock(worktree_path=str(worktree), plan_file=plan_file)
+
+        merge_status_sequence = []
+
+        def track_set(key, value, *args, **kwargs):
+            if "merge_status" in key:
+                merge_status_sequence.append(value)
+            return True
+
+        redis.set.side_effect = track_set
+
+        mock_lock_mod = types.ModuleType("merge_lock")
+        mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_lock = MagicMock()
+
+        with patch.dict(sys.modules, {"merge_lock": mock_lock_mod}), \
+             patch("subprocess.run", return_value=MagicMock(returncode=2)), \
+             patch.object(cl, "_launch_auto_impl_post_merge_process",
+                          return_value={"success": True, "message": "fixed"}) as mock_fix, \
+             patch.object(cl, "_handle_post_merge_done"), \
+             patch.object(cl, "_cleanup_process_state", MagicMock()):
+
+            cl._do_retry_merge("r-e2e-exit2", redis, "cmd-e2e-exit2")
+
+        # _launch_auto_impl_post_merge_process 호출 확인
+        mock_fix.assert_called_once()
+
+        # merge_status 전이: merging → fixing → merged
+        assert "fixing" in merge_status_sequence, \
+            f"merge_status에 'fixing' 없음: {merge_status_sequence}"
+        assert "merged" in merge_status_sequence, \
+            f"merge_status에 'merged' 없음: {merge_status_sequence}"
