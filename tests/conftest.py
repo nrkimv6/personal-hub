@@ -26,6 +26,7 @@ if sys.platform == 'win32':
 
 
 import pytest
+import redis
 
 
 from pathlib import Path
@@ -81,6 +82,65 @@ def apply_migrations(db_path: Path) -> None:
 
     conn.commit()
     conn.close()
+
+
+RUNNER_KEY_PREFIX = "plan-runner:runners"
+ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
+
+
+@pytest.fixture(autouse=True)
+def redis_runner_cleanup():
+    """테스트 전/후 Redis runner 키 자동 정리 fixture.
+
+    테스트 시작 전 현재 ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RUNNER_KEY_PREFIX:* 키의
+    스냅샷을 찍고, 테스트 후 새로 추가된 키만 삭제한다. 운영 runner는 보호된다.
+
+    Redis 연결 실패 시 조용히 스킵(테스트 환경에 Redis가 없을 수 있음).
+    """
+    try:
+        r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        r.ping()
+    except Exception:
+        yield
+        return
+
+    def _scan_runner_keys():
+        keys = set()
+        cursor = 0
+        while True:
+            cursor, batch = r.scan(cursor, match=f"{RUNNER_KEY_PREFIX}:*", count=100)
+            keys.update(batch)
+            if cursor == 0:
+                break
+        return keys
+
+    # 테스트 시작 전 스냅샷
+    before_runner_keys = _scan_runner_keys()
+    before_active = r.smembers(ACTIVE_RUNNERS_KEY) or set()
+    before_recent = r.zrange(RECENT_RUNNERS_KEY, 0, -1)
+    before_recent_set = set(before_recent)
+
+    yield
+
+    # 테스트 후 새로 추가된 키 정리
+    try:
+        after_runner_keys = _scan_runner_keys()
+        new_runner_keys = after_runner_keys - before_runner_keys
+        if new_runner_keys:
+            r.delete(*new_runner_keys)
+
+        after_active = r.smembers(ACTIVE_RUNNERS_KEY) or set()
+        new_active = after_active - before_active
+        if new_active:
+            r.srem(ACTIVE_RUNNERS_KEY, *new_active)
+
+        after_recent = set(r.zrange(RECENT_RUNNERS_KEY, 0, -1))
+        new_recent = after_recent - before_recent_set
+        if new_recent:
+            r.zrem(RECENT_RUNNERS_KEY, *new_recent)
+    except Exception:
+        pass  # cleanup 실패는 조용히 무시 (테스트 결과에 영향 주지 않음)
 
 
 @pytest.fixture(autouse=True)
