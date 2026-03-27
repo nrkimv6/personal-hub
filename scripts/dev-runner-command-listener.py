@@ -70,7 +70,7 @@ ADMIN_API_BASE = f"http://localhost:{ADMIN_API_PORT}/api"
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
-    "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
+    "current_cycle", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
 )
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
