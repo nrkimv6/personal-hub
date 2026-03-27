@@ -217,6 +217,79 @@ class TestGuardNewInstance:
             f"오류 메시지에 'test_source' 포함 기대. 실제: {exc_info.value}"
         )
 
+    # ---------------------------------------------------------------------------
+    # T1-8: guard — trigger="user" 차단 검증
+    # ---------------------------------------------------------------------------
+
+
+class TestGuardUserTriggerBlocked:
+    """force_test_source_on_start_dev_runner fixture가 trigger="user" 또는
+    "user:all" 전달 시 pytest.fail()을 호출하는지 검증한다."""
+
+    def test_guard_user_trigger_blocked(self):
+        """guard fixture가 trigger="user" 전달 시 pytest.fail 발생 검증.
+
+        시나리오:
+        1. ExecutorService() 새 인스턴스 생성
+        2. test_source는 유효하게 설정하되, trigger="user"로 RunRequest 구성
+        3. start_dev_runner 호출 시 pytest.fail() → _pytest.outcomes.Failed 예외 발생 확인
+        4. 오류 메시지에 "trigger" 포함 확인
+        """
+        import asyncio
+        from _pytest.outcomes import Failed
+
+        try:
+            from app.modules.dev_runner.services.executor_service import ExecutorService
+            from app.modules.dev_runner.schemas import RunRequest
+        except Exception as e:
+            pytest.skip(f"Import 실패 — 환경 문제: {e}")
+
+        # 새 인스턴스 생성 (conftest patch가 __init__을 통해 guard 적용)
+        svc = ExecutorService()
+
+        # test_source는 있지만 trigger="user" → guard가 두 번째 조건에서 차단
+        req = RunRequest(plan_file="some/plan.md", test_source="test_guard_user_trigger_blocked", trigger="user")
+        assert req.test_source is not None, "전제 조건: test_source가 설정되어야 함"
+        assert req.trigger == "user", "전제 조건: trigger가 'user'이어야 함"
+
+        # guard가 pytest.fail()을 호출하면 Failed 예외가 발생함
+        with pytest.raises(Failed) as exc_info:
+            asyncio.get_event_loop().run_until_complete(svc.start_dev_runner(req))
+
+        assert "trigger" in str(exc_info.value), (
+            f"오류 메시지에 'trigger' 포함 기대. 실제: {exc_info.value}"
+        )
+
+    def test_guard_user_all_trigger_blocked(self):
+        """guard fixture가 trigger="user:all" 전달 시에도 pytest.fail 발생 검증.
+
+        "user"와 "user:all" 두 가지 모두 차단됨을 확인한다.
+        """
+        import asyncio
+        from _pytest.outcomes import Failed
+
+        try:
+            from app.modules.dev_runner.services.executor_service import ExecutorService
+            from app.modules.dev_runner.schemas import RunRequest
+        except Exception as e:
+            pytest.skip(f"Import 실패 — 환경 문제: {e}")
+
+        svc = ExecutorService()
+
+        req = RunRequest(plan_file="some/plan.md", test_source="test_guard_user_all_trigger_blocked", trigger="user:all")
+        assert req.trigger == "user:all", "전제 조건: trigger가 'user:all'이어야 함"
+
+        with pytest.raises(Failed) as exc_info:
+            asyncio.get_event_loop().run_until_complete(svc.start_dev_runner(req))
+
+        assert "trigger" in str(exc_info.value), (
+            f"오류 메시지에 'trigger' 포함 기대. 실제: {exc_info.value}"
+        )
+
+
+class TestGuardPreexistingKeys:
+    """cleanup 관련 추가 검증."""
+
     def test_cleanup_only_deletes_new_keys_not_preexisting(self):
         """cleanup은 before 스냅샷에 있던 키는 삭제하지 않는다."""
         r = _make_redis()
