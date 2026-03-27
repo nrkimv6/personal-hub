@@ -656,8 +656,8 @@
       </div>
       <form onsubmit={(e) => { e.preventDefault(); handleUpdateBusiness(); }} class="p-4 space-y-4">
         <div>
-          <label class="block text-sm font-medium text-foreground mb-1">Business ID</label>
-          <input type="text" class="input bg-muted" value={editBusiness.business_id} disabled />
+          <label for="edit-business-id" class="block text-sm font-medium text-foreground mb-1">Business ID</label>
+          <input id="edit-business-id" type="text" class="input bg-muted" value={editBusiness.business_id} disabled />
         </div>
         <div>
           <label for="edit-name" class="block text-sm font-medium text-foreground mb-1">업체명</label>
@@ -745,8 +745,8 @@
       </div>
       <form onsubmit={(e) => { e.preventDefault(); handleUpdateItem(); }} class="p-4 space-y-4">
         <div>
-          <label class="block text-sm font-medium text-foreground mb-1">Biz Item ID</label>
-          <input type="text" class="input bg-muted" value={editItem.biz_item_id} disabled />
+          <label for="edit-biz-item-id" class="block text-sm font-medium text-foreground mb-1">Biz Item ID</label>
+          <input id="edit-biz-item-id" type="text" class="input bg-muted" value={editItem.biz_item_id} disabled />
         </div>
         <div>
           <label for="edit-item-name" class="block text-sm font-medium text-foreground mb-1">아이템명</label>

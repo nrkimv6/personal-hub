@@ -282,10 +282,11 @@
     <form onsubmit={(e) => { e.preventDefault(); handleFilterTest(); }} class="space-y-4">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-foreground mb-1">
+          <label for="booking-filter-slots" class="block text-sm font-medium text-foreground mb-1">
             슬롯 목록 (한 줄에 하나씩)
           </label>
           <textarea
+            id="booking-filter-slots"
             class="input h-32"
             bind:value={filterTest.slots}
             required
@@ -293,8 +294,9 @@
           ></textarea>
         </div>
         <div>
-          <label class="block text-sm font-medium text-foreground mb-1">시간 범위</label>
+          <label for="booking-filter-time-range" class="block text-sm font-medium text-foreground mb-1">시간 범위</label>
           <input
+            id="booking-filter-time-range"
             type="text"
             class="input"
             bind:value={filterTest.time_range}
