@@ -143,6 +143,10 @@ LOG_CHANNEL_PREFIX = "plan-runner:logs"
 _running_processes: dict = {}
 _running_log_files: dict = {}
 _stream_threads: dict = {}
+# cleanup 완료 플래그: rid → cleanup 완료 timestamp (dict). 이중 cleanup 방지 + TTL 기반 자동 소거 (5분 후 heartbeat에서 제거)
+_cleanup_done: dict = {}
+# 프로세스 종료 최초 감지 시각: heartbeat stale merge flag / stream thread 타임아웃 추적용
+_dead_process_first_seen: dict = {}
 # MergeOrchestrator 전역변수 — 인라인 merge로 대체됨 (Phase 3에서 제거)
 # (제거됨: _merge_orchestrator_process, _merge_orchestrator_log_path, _merge_orchestrator_attached_pid)
 
@@ -204,6 +208,8 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
     _running_processes.pop(runner_id, None)
     _running_log_files.pop(runner_id, None)
+    _dead_process_first_seen.pop(runner_id, None)
+    _cleanup_done[runner_id] = time.time()
     if runner_id in _stream_threads:
         t = _stream_threads.pop(runner_id)
         if t.is_alive():
@@ -337,9 +343,26 @@ def _monitor_pid_until_exit(runner_id: str, pid: int, redis_client: redis.Redis)
     """PID 종료를 1초 간격으로 감지하여 _cleanup_process_state()를 호출하는 스레드."""
     while True:
         # 이미 cleanup됐으면 즉시 종료 (중복 cleanup 방지)
-        if runner_id not in _running_processes:
+        if runner_id not in _running_processes or runner_id in _cleanup_done:
             break
         if not _is_pid_alive(pid):
+            # proc.poll()과 교차검증 — _is_pid_alive 단독 판정으로 인한 premature cleanup 방지
+            proc = _running_processes.get(runner_id)
+            if proc is not None and proc.poll() is None:
+                # _is_pid_alive는 dead 신호, poll()은 alive — 일시적 불일치, 3초 후 재확인
+                logger.info(
+                    f"[monitor_pid] runner {runner_id} PID API dead but poll alive → 3초 재확인"
+                )
+                time.sleep(3)
+                # 재확인 후 _running_processes에 없으면 다른 스레드가 정리함 → 종료
+                if runner_id not in _running_processes or runner_id in _cleanup_done:
+                    break
+                if _running_processes.get(runner_id, proc).poll() is None:
+                    time.sleep(1)
+                    continue  # 다음 루프에서 재판정
+            # _cleanup_done 재확인 (교차검증 대기 사이에 다른 스레드가 cleanup했을 수 있음)
+            if runner_id in _cleanup_done:
+                break
             logger.info(f"[monitor_pid] runner {runner_id} PID {pid} 종료 감지 → tail 스레드 완료 대기")
             # tail 스레드가 파일 끝까지 drain 하도록 최대 5초 대기
             # (plan-runner 종료 직전 _log("FAIL", ...) 등 마지막 로그가 publish된 후
@@ -347,6 +370,8 @@ def _monitor_pid_until_exit(runner_id: str, pid: int, redis_client: redis.Redis)
             tail_thread = _stream_threads.get(runner_id)
             if tail_thread and tail_thread.is_alive():
                 tail_thread.join(timeout=5)
+            if runner_id in _cleanup_done:
+                break
             logger.info(f"[monitor_pid] runner {runner_id} → cleanup")
             _cleanup_process_state(runner_id, redis_client, reason="heartbeat_pid_exit")
             break
@@ -1058,24 +1083,8 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             _pub("merge 성공 (exit_code=0)")
             result = {"success": True, "message": "merged", "merge_status": "merged", "action": action_name}
 
-            # plan 헤더에서 branch/worktree 필드 제거 — 잔존 시 auto-done 에이전트가 /done 2.5단계에서 차단됨
-            if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
-                _remove_plan_header_fields(plan_file)
-
-            # 5. 자동 done 분기: 완료율 체크 → done API 호출 or main 추가 사이클 예약
-            if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
-                done_count, total_count = _get_plan_completion(plan_file)
-                if total_count > 0 and done_count == total_count:
-                    _pub(f"완료율 100% ({done_count}/{total_count}) — 자동 done 처리 시작")
-                    _call_done_api(plan_file, runner_id, _pub)
-                else:
-                    _pub(f"미완료 태스크 있음 ({done_count}/{total_count}) — main 추가 사이클 예약")
-                    try:
-                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
-                    except Exception:
-                        pass
-            else:
-                _pub("plan_file 없음(--all 모드) — done 스킵")
+            # 5. 자동 done 분기: 헤더 필드 제거 + 완료율 체크 → done API 호출 or main 추가 사이클 예약
+            _handle_post_merge_done(plan_file, runner_id, _pub, redis_client)
         elif exit_code == 2:
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
@@ -1112,6 +1121,9 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
                 except Exception:
                     pass
                 result = {"success": True, "message": "conflict resolved", "merge_status": "merged", "action": action_name}
+
+                # 자동 done 분기: 헤더 필드 제거 + 완료율 체크 → done API 호출 or main 추가 사이클 예약
+                _handle_post_merge_done(plan_file, runner_id, _pub, redis_client)
             else:
                 _pub(f"conflict resolver 실패: {_resolve_result['message']}")
                 try:
@@ -1177,6 +1189,39 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             logger.debug(f"[_execute_merge_with_lock] merge-results push 실패 (무시): {_mr_err}")
 
     return result
+
+
+def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client) -> None:
+    """머지 성공 후 done flow를 실행한다.
+
+    plan_file에서 branch/worktree 헤더 필드를 제거하고,
+    완료율을 체크하여 100%이면 done API를 호출하고,
+    미완료 태스크가 있으면 main 추가 사이클을 예약한다.
+
+    Args:
+        plan_file: plan 파일 절대 경로 (None 또는 ALL 모드이면 스킵)
+        runner_id: 로깅용 runner ID
+        pub_fn: 로그 publish 함수 (msg: str) -> None
+        redis_client: Redis 클라이언트
+    """
+    if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
+        pub_fn("plan_file 없음(--all 모드) — done 스킵")
+        return
+
+    # plan 헤더에서 branch/worktree 필드 제거 — 잔존 시 auto-done 에이전트가 /done 2.5단계에서 차단됨
+    _remove_plan_header_fields(plan_file)
+
+    # 자동 done 분기: 완료율 체크 → done API 호출 or main 추가 사이클 예약
+    done_count, total_count = _get_plan_completion(plan_file)
+    if total_count > 0 and done_count == total_count:
+        pub_fn(f"완료율 100% ({done_count}/{total_count}) — 자동 done 처리 시작")
+        _call_done_api(plan_file, runner_id, pub_fn)
+    else:
+        pub_fn(f"미완료 태스크 있음 ({done_count}/{total_count}) — main 추가 사이클 예약")
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
+        except Exception:
+            pass
 
 
 def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
@@ -2426,9 +2471,19 @@ def main():
                 now = time.time()
                 if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                     r.set(HEARTBEAT_KEY, datetime.now().isoformat(), ex=HEARTBEAT_TTL)
+                    # _cleanup_done TTL 소거: 5분 이상 된 항목 제거 (메모리 누수 방지)
+                    _cd_now = time.time()
+                    _cd_expired = [rid for rid, ts in list(_cleanup_done.items()) if _cd_now - ts > 300]
+                    if _cd_expired:
+                        logger.debug(f"heartbeat: _cleanup_done TTL 소거 {len(_cd_expired)}개: {_cd_expired}")
+                        for _rid in _cd_expired:
+                            _cleanup_done.pop(_rid, None)
                     # 각 runner 상태 동기화
                     # (Redis 키 만료 또는 재시작으로 날아갈 경우 10초마다 복원)
                     for rid, proc in list(_running_processes.items()):
+                        if rid in _cleanup_done:
+                            _running_processes.pop(rid, None)
+                            continue
                         if proc.poll() is None:
                             current_status = r.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
                             if current_status not in (None, "stopped") and current_status != "running":
@@ -2438,25 +2493,78 @@ def main():
                                 logger.info(f"heartbeat: Redis 상태 복원 (runner_id: {rid}, PID: {proc.pid})")
                         else:
                             # 프로세스가 종료되었는데 전역변수가 남아있는 경우 — 머지 진행 중 여부 확인 후 cleanup
+                            # 최초 종료 감지 시각 기록 (stale merge flag / stream thread 타임아웃 추적용)
+                            if rid not in _dead_process_first_seen:
+                                _dead_process_first_seen[rid] = time.time()
+                            _dead_elapsed = time.time() - _dead_process_first_seen.get(rid, time.time())
                             try:
                                 _hb_mr = r.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_requested")
                                 _hb_ms = r.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
                             except Exception:
                                 _hb_mr, _hb_ms = None, None
                             if _hb_mr or _hb_ms in MERGE_ACTIVE_STATUSES:
-                                logger.info(
-                                    f"heartbeat: runner {rid} 프로세스 종료 but 머지 진행중 "
-                                    f"(merge_requested={bool(_hb_mr)}, merge_status={_hb_ms}) → cleanup 스킵"
-                                )
+                                if _dead_elapsed >= 60:
+                                    # 60초 경과: stale merge flag → 강제 cleanup
+                                    logger.warning(
+                                        f"heartbeat: runner {rid} merge stale {_dead_elapsed:.0f}초 → 강제 cleanup "
+                                        f"(merge_requested={bool(_hb_mr)}, merge_status={_hb_ms})"
+                                    )
+                                    # merge 키 삭제 후 cleanup (머지 가드 자연 통과)
+                                    try:
+                                        r.delete(f"{RUNNER_KEY_PREFIX}:{rid}:merge_requested")
+                                        r.delete(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
+                                    except Exception:
+                                        pass
+                                    # heartbeat_stale_merge는 머지 가드 대상 아님 — 직접 호출
+                                    _running_processes.pop(rid, None)
+                                    _dead_process_first_seen.pop(rid, None)
+                                    _cleanup_done[rid] = time.time()
+                                    _cleanup_process_state(rid, r, reason="process_cleanup")
+                                    # Workflow DB 보정: running 상태면 failed로
+                                    try:
+                                        if _wf_manager:
+                                            wf = _wf_manager.get_by_runner_id(rid)
+                                            if wf and wf["status"] == "running":
+                                                _wf_manager.update_status(wf["id"], "failed", error_message="heartbeat: stale merge flag timeout")
+                                    except Exception:
+                                        pass
+                                else:
+                                    logger.info(
+                                        f"heartbeat: runner {rid} 프로세스 종료 but 머지 진행중 "
+                                        f"(merge_requested={bool(_hb_mr)}, merge_status={_hb_ms}, elapsed={_dead_elapsed:.0f}s) → cleanup 스킵"
+                                    )
+                                    # Workflow DB 보정: running 상태면 failed로 (merge_pending/merging은 보존)
+                                    try:
+                                        if _wf_manager:
+                                            wf = _wf_manager.get_by_runner_id(rid)
+                                            if wf and wf["status"] == "running":
+                                                _wf_manager.update_status(wf["id"], "failed", error_message="heartbeat: process dead, merge flag set")
+                                    except Exception:
+                                        pass
                             else:
                                 # _stream_output 스레드가 아직 finally 블록 실행 중이면 cleanup 위임
                                 # (스레드가 finally에서 직접 _cleanup_process_state를 호출하므로 중복 호출 방지)
                                 _t = _stream_threads.get(rid)
                                 if _t and _t.is_alive():
-                                    logger.debug(
-                                        f"heartbeat: runner {rid} _stream_output 스레드 alive → cleanup 위임 "
-                                        f"(exit code: {proc.returncode})"
-                                    )
+                                    if _dead_elapsed >= 30:
+                                        # 30초 경과: stream thread hang → 강제 cleanup
+                                        logger.warning(
+                                            f"heartbeat: runner {rid} stream thread hang {_dead_elapsed:.0f}초 → 강제 cleanup"
+                                        )
+                                        _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
+                                    else:
+                                        logger.debug(
+                                            f"heartbeat: runner {rid} _stream_output 스레드 alive → cleanup 위임 "
+                                            f"(exit code: {proc.returncode}, elapsed={_dead_elapsed:.0f}s)"
+                                        )
+                                        # Workflow DB 보정: running 상태면 failed로
+                                        try:
+                                            if _wf_manager:
+                                                wf = _wf_manager.get_by_runner_id(rid)
+                                                if wf and wf["status"] == "running":
+                                                    _wf_manager.update_status(wf["id"], "failed", error_message="heartbeat: process dead, stream thread alive")
+                                        except Exception:
+                                            pass
                                 else:
                                     logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}, merge_status={_hb_ms}), 상태 정리")
                                     _cleanup_process_state(rid, r, reason="heartbeat_dead_process")

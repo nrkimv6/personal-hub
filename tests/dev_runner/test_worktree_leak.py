@@ -18,6 +18,7 @@ import fakeredis
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "_deprecated"))
 
 LISTENER_SCRIPT = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
 
@@ -152,6 +153,7 @@ class TestCleanupScriptTestBranches:
 
 # ── MergeWorkflow.run() 예외 시 cleanup ──────────────────────────────────────
 
+@pytest.mark.skip(reason="MergeWorkflow deprecated — workflow_manager.WorkflowManager로 대체됨")
 class TestMergeWorkflowExceptionCleanup:
     @pytest.fixture
     def fake_redis(self):

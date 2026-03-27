@@ -8,9 +8,12 @@ import logging
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "_deprecated"))
 
 from merge_workflow import MergeWorkflow, WorkflowResult, TestResult
 from worktree_manager import MergeResult, WorktreeManager
+
+pytestmark = pytest.mark.skip(reason="MergeWorkflow deprecated — workflow_manager.WorkflowManager로 대체됨. 별도 리라이트 필요")
 
 
 @pytest.fixture
