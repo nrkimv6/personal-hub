@@ -6,7 +6,10 @@ Phase T3: fakeredis로 실제 get_all_runners() 호출.
 
 import pytest
 import asyncio
+import uuid
 import fakeredis.aioredis
+import redis as sync_redis
+import redis.asyncio as aioredis
 from unittest.mock import patch, MagicMock
 
 from app.modules.dev_runner.services.executor_service import ExecutorService
@@ -92,6 +95,67 @@ async def test_reproduce_visible_leak_trigger_none():
     assert runner.visible is False, (
         f"trigger=None runner가 visible=True! "
         f"화이트리스트 전환이 제대로 적용되지 않았습니다. visible={runner.visible!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_reproduce_5th_visible_leak():
+    """T3 재현: 실제 Redis에 tc-pytest- prefix + trigger="user" 직접 기록 → visible=False 확인
+
+    5차 재발 시나리오 재현:
+      pytest가 운영 Redis(localhost:6379 db=0)에 trigger="user" 키를 직접 기록.
+      화이트리스트 단독 방어면 visible=True가 반환되는 것이 버그.
+
+    이중 방어 검증:
+      1) 화이트리스트: trigger="user" → is_user=True (화이트리스트는 통과)
+      2) tc-pytest- prefix 이중 방어: is_user=False 강제 → visible=False
+
+    실제 Redis 사용 (mock 없음). cleanup은 redis_runner_cleanup autouse fixture가 보장.
+    """
+    # 실제 Redis 연결 확인
+    try:
+        r = sync_redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        r.ping()
+    except Exception:
+        pytest.skip("Redis 연결 불가 — 실제 Redis 필요 (로컬 개발 환경에서 실행)")
+
+    runner_id = f"tc-pytest-5th-leak-{uuid.uuid4().hex[:8]}"
+
+    # 실제 Redis에 trigger="user" 직접 기록 (5차 재발 시나리오)
+    r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+    r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+    r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+    r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+
+    # ExecutorService 인스턴스에 실제 Redis 클라이언트 주입
+    # (__new__를 사용해 force_test_source fixture의 __init__ patch 우회)
+    svc = ExecutorService.__new__(ExecutorService)
+    svc.async_redis = aioredis.Redis(
+        host="localhost", port=6379, db=0, decode_responses=True
+    )
+
+    # DB 세션 mock (orphan 판별용 — 테스트 DB 불필요)
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+    with patch("app.database.SessionLocal", return_value=mock_db):
+        runners = await svc.get_all_runners()
+
+    # tc-pytest- runner가 목록에 존재해야 함
+    tc_runners = [item for item in runners if item.runner_id == runner_id]
+    assert len(tc_runners) == 1, (
+        f"tc-pytest- runner가 get_all_runners() 결과에 없음: "
+        f"{[item.runner_id for item in runners]}"
+    )
+
+    tc_runner = tc_runners[0]
+    assert tc_runner.trigger == "user", (
+        f"trigger 값이 예상과 다름: {tc_runner.trigger!r} (expected 'user')"
+    )
+    assert tc_runner.visible is False, (
+        f"5차 재발 재현! tc-pytest- prefix runner가 trigger='user'임에도 visible=True!\n"
+        f"  runner_id={runner_id}\n"
+        f"  tc-pytest- prefix 이중 방어(executor_service.py L764)가 작동하지 않습니다.\n"
+        f"  visible={tc_runner.visible!r}"
     )
 
 
