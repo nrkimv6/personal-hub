@@ -157,6 +157,45 @@ class TestLaunchPlanRunnerProcess:
         assert fr.get(f"{RKP}:{RUNNER_ID}:pid") == "12345"
         assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "test.md"
 
+    @pytest.mark.xfail(
+        reason=(
+            "이 테스트는 메인 스크립트(main branch) 로드 기준이므로 Phase 4 머지 전까지 실패. "
+            "worktree 버전 검증은 tests/dev_runner/test_stream_log_path_t3.py::TestStreamLogPathT3 참조."
+        ),
+        strict=True,
+    )
+    def test_launch_sets_stream_log_path_in_redis(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """T3: stream_log_path가 Redis에 실제 로그 파일 경로로 저장되는지 확인 (nil 아님)
+
+        Phase 4 수정 검증: _launch_plan_runner_process 실행 후
+        'plan-runner:runners:{id}:stream_log_path' 키가 실제 파일 경로를 가져야 함.
+
+        NOTE: 메인 스크립트는 Phase 4 머지 후 이 테스트가 통과됨.
+              머지 전에는 xfail(strict)로 표시하여 예상된 실패임을 명시.
+              worktree 버전 통과 확인: test_stream_log_path_t3.py::TestStreamLogPathT3
+        """
+        RKP = listener_mod.RUNNER_KEY_PREFIX
+        command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
+
+        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
+             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
+             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, "test.md", None)
+
+        stream_log_path = fr.get(f"{RKP}:{RUNNER_ID}:stream_log_path")
+
+        # T3 핵심 검증: "(nil)" 이 아닌 실제 경로가 저장되어야 함
+        assert stream_log_path is not None, "stream_log_path가 Redis에 설정되지 않음 (nil)"
+        assert stream_log_path != "(nil)", "stream_log_path에 '(nil)' 문자열이 저장됨"
+        assert stream_log_path != "", "stream_log_path가 빈 문자열임"
+        # log_file_path와 동일한 경로가 저장되어야 함 (Phase 4 fix)
+        log_file_path = fr.get(f"{RKP}:{RUNNER_ID}:log_file_path")
+        assert stream_log_path == log_file_path, (
+            f"stream_log_path({stream_log_path!r})가 "
+            f"log_file_path({log_file_path!r})와 다름"
+        )
+
     def test_launch_plan_file_none_saves_sentinel(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """plan_file=None → Redis에 '__ALL_PLANS__' sentinel 저장 (Right)"""
         RKP = listener_mod.RUNNER_KEY_PREFIX
