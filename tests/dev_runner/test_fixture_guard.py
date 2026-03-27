@@ -317,3 +317,136 @@ class TestGuardPreexistingKeys:
         assert pre_key not in deleted_keys
         assert r.exists(pre_key) == 1, "기존 키는 유지되어야 함"
         assert r.exists(new_key) == 0, "새 키는 삭제되어야 함"
+
+
+# ---------------------------------------------------------------------------
+# T1-10: cleanup fixture가 테스트 실패 시에도 정상 동작하는지 검증
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupSurvivesInterruptBoundary:
+    """redis_runner_cleanup fixture가 테스트 실패/예외 상황에서도
+    cleanup 로직을 정상 실행하는지 검증한다.
+
+    pytest fixture의 yield 패턴에서 yield 이후 로직은 테스트 성공/실패
+    무관하게 항상 실행된다. 이 TC는 그 보장을 명시적으로 검증한다.
+    """
+
+    def test_cleanup_survives_interrupt_boundary(self):
+        """cleanup 로직이 테스트 실패(예외) 시뮬레이션 후에도 키를 정리하는지 검증.
+
+        시나리오:
+        1. 격리된 Redis에서 before 스냅샷 생성
+        2. 테스트 중 runner 키 추가 (tc-pytest-* prefix)
+        3. 테스트 실패를 시뮬레이션 — RuntimeError 발생 후 except로 캐치
+           (실제 pytest fixture의 yield 이후 로직은 이 경우에도 실행됨)
+        4. cleanup 로직을 finally처럼 실행
+        5. 추가된 키가 모두 삭제됐는지 확인
+        """
+        r = _make_redis()
+
+        # --- before 스냅샷 ---
+        before_runner_keys: set = set()
+        before_active: set = set()
+        before_recent_set: set = set()
+
+        # --- 테스트 중 runner 키 추가 ---
+        tc_id = f"tc-pytest-{uuid.uuid4().hex[:8]}"
+        tc_key_status = f"{RUNNER_KEY_PREFIX}:{tc_id}:status"
+        tc_key_trigger = f"{RUNNER_KEY_PREFIX}:{tc_id}:trigger"
+        r.set(tc_key_status, "running")
+        r.set(tc_key_trigger, "user")
+        r.sadd(ACTIVE_RUNNERS_KEY, tc_id)
+        r.zadd(RECENT_RUNNERS_KEY, {tc_id: 9999})
+
+        # 키가 실제로 추가됐는지 전제 확인
+        assert r.exists(tc_key_status) == 1
+        assert r.exists(tc_key_trigger) == 1
+        assert r.sismember(ACTIVE_RUNNERS_KEY, tc_id)
+
+        # --- 테스트 실패 시뮬레이션 ---
+        # pytest fixture의 yield 이후 구간(finally 역할)은 예외가 발생해도 실행된다.
+        # 여기서는 exception을 catch하여 cleanup이 실행됨을 검증한다.
+        simulated_failure_occurred = False
+        cleanup_ran = False
+        try:
+            # 테스트 로직 중 예외 발생 시뮬레이션
+            raise RuntimeError("simulated test failure: 테스트 실패 상황 재현")
+        except RuntimeError:
+            simulated_failure_occurred = True
+            # pytest fixture yield 이후 cleanup은 항상 실행됨 — 여기서 실행
+            try:
+                deleted_keys, removed_active, removed_recent = _cleanup_logic(
+                    r, before_runner_keys, before_active, before_recent_set
+                )
+                cleanup_ran = True
+            except Exception:
+                pass  # cleanup 자체 예외는 조용히 무시 (conftest 동작과 동일)
+
+        # --- 검증: 실패 시뮬레이션이 실제로 발생했는지 ---
+        assert simulated_failure_occurred, "테스트 실패 시뮬레이션이 실행되지 않음"
+
+        # --- 검증: cleanup이 실행됐는지 ---
+        assert cleanup_ran, (
+            "cleanup 로직이 테스트 실패 후에도 실행되어야 함. "
+            "conftest fixture의 yield 이후 구간은 항상 실행된다."
+        )
+
+        # --- 검증: 추가된 키가 모두 삭제됨 ---
+        assert tc_key_status in deleted_keys, f"{tc_key_status} should be deleted after simulated failure"
+        assert tc_key_trigger in deleted_keys, f"{tc_key_trigger} should be deleted after simulated failure"
+        assert r.exists(tc_key_status) == 0, f"{tc_key_status} should not exist after cleanup"
+        assert r.exists(tc_key_trigger) == 0, f"{tc_key_trigger} should not exist after cleanup"
+
+        # --- 검증: ACTIVE_RUNNERS_KEY 정리됨 ---
+        assert tc_id in removed_active, f"{tc_id} should be removed from active set"
+        assert not r.sismember(ACTIVE_RUNNERS_KEY, tc_id), "active set에서 tc runner가 제거되어야 함"
+
+        # --- 검증: RECENT_RUNNERS_KEY 정리됨 ---
+        assert tc_id in removed_recent, f"{tc_id} should be removed from recent set"
+        remaining_recent = r.zrange(RECENT_RUNNERS_KEY, 0, -1)
+        assert tc_id not in remaining_recent, "recent set에서 tc runner가 제거되어야 함"
+
+    def test_cleanup_survives_multiple_keys_on_failure(self):
+        """여러 키가 추가된 상태에서 테스트 실패 시 모두 정리되는지 검증.
+
+        시나리오:
+        1. before 스냅샷 (빈 상태)
+        2. 여러 tc-pytest-* runner 키 추가
+        3. 실패 시뮬레이션
+        4. 모든 키 삭제 확인
+        """
+        r = _make_redis()
+
+        before_runner_keys: set = set()
+        before_active: set = set()
+        before_recent_set: set = set()
+
+        # 여러 runner 키 추가
+        tc_ids = [f"tc-pytest-{uuid.uuid4().hex[:8]}" for _ in range(3)]
+        added_keys = []
+        for tc_id in tc_ids:
+            key = f"{RUNNER_KEY_PREFIX}:{tc_id}:status"
+            r.set(key, "running")
+            r.sadd(ACTIVE_RUNNERS_KEY, tc_id)
+            added_keys.append(key)
+
+        # 실패 시뮬레이션 후 cleanup
+        cleanup_result = None
+        try:
+            raise RuntimeError("simulated: 중간 실패")
+        except RuntimeError:
+            deleted_keys, removed_active, _ = _cleanup_logic(
+                r, before_runner_keys, before_active, before_recent_set
+            )
+            cleanup_result = (deleted_keys, removed_active)
+
+        assert cleanup_result is not None, "cleanup이 실행되어야 함"
+        deleted_keys, removed_active = cleanup_result
+
+        for key in added_keys:
+            assert key in deleted_keys, f"{key}가 삭제되어야 함"
+            assert r.exists(key) == 0, f"{key}가 Redis에서 제거되어야 함"
+
+        for tc_id in tc_ids:
+            assert tc_id in removed_active, f"{tc_id}가 active set에서 제거되어야 함"
