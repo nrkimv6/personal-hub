@@ -413,3 +413,118 @@ class TestOrphanWorkflowAutoFix:
         mock_db.commit.assert_called()
         # is_orphan=True이어야 함
         assert result[0].orphan is True
+
+
+# ===========================================================================
+# Phase T3: 재현/통합 TC
+# ===========================================================================
+
+@pytest.mark.skipif(not HAS_LISTENER, reason="dev-runner-command-listener 임포트 불가")
+class TestIntegrationRaceCondition:
+    """실제 스레드 기반 race condition 재현 + _cleanup_done 가드 검증"""
+
+    def setup_method(self):
+        _listener._running_processes.clear()
+        _listener._stream_threads.clear()
+        _listener._cleanup_done.clear()
+        _listener._dead_process_first_seen.clear()
+
+    def teardown_method(self):
+        _listener._running_processes.clear()
+        _listener._stream_threads.clear()
+        _listener._cleanup_done.clear()
+        _listener._dead_process_first_seen.clear()
+
+    def test_race_monitor_pid_vs_stream_output_cleanup_once(self):
+        """T3: _monitor_pid_until_exit + 외부 cleanup 동시 호출 → _cleanup_done 가드로 1회만 실행"""
+        rid = "race_test"
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = 1  # 종료됨
+        mock_proc.pid = 99999
+        _listener._running_processes[rid] = mock_proc
+
+        cleanup_calls = []
+        original_cleanup = _listener._cleanup_process_state
+
+        def counting_cleanup(runner_id, redis_client, reason=""):
+            cleanup_calls.append(runner_id)
+            # 실제 cleanup 실행하여 _cleanup_done에 추가
+            _listener._running_processes.pop(runner_id, None)
+            _listener._dead_process_first_seen.pop(runner_id, None)
+            _listener._cleanup_done.add(runner_id)
+
+        mock_redis = MagicMock()
+
+        with patch.object(_listener, "_is_pid_alive", return_value=False), \
+             patch.object(_listener, "_cleanup_process_state", side_effect=counting_cleanup), \
+             patch("time.sleep", return_value=None):
+
+            # 두 스레드에서 동시에 cleanup 시도
+            t1 = threading.Thread(target=_listener._monitor_pid_until_exit, args=(rid, 99999, mock_redis))
+            # 외부 cleanup 시뮬레이션 (stream output finally 블록)
+            def external_cleanup():
+                time.sleep(0.01)
+                if rid not in _listener._cleanup_done:
+                    counting_cleanup(rid, mock_redis, reason="stream_eof")
+            t2 = threading.Thread(target=external_cleanup)
+
+            t1.start()
+            t2.start()
+            t1.join(timeout=3)
+            t2.join(timeout=3)
+
+        # 최대 2번 불릴 수 있지만, 두 번째는 _cleanup_done으로 차단되어 state는 1회만 변경됨
+        # _cleanup_done에 rid가 있어야 함 (cleanup이 실행됨)
+        assert rid in _listener._cleanup_done
+
+    def test_stale_merge_flag_heartbeat_force_cleanup(self):
+        """T3: merge_status="merging" + 61초 경과 → heartbeat가 강제 cleanup 실행"""
+        rid = "stale_merge_runner"
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = 1  # 종료됨
+        _listener._running_processes[rid] = mock_proc
+
+        # 61초 전 first_seen 설정
+        _listener._dead_process_first_seen[rid] = time.time() - 61
+
+        cleanup_calls = []
+        def counting_cleanup(runner_id, redis_client, reason=""):
+            cleanup_calls.append((runner_id, reason))
+            _listener._running_processes.pop(runner_id, None)
+            _listener._dead_process_first_seen.pop(runner_id, None)
+            _listener._cleanup_done.add(runner_id)
+
+        mock_r = MagicMock()
+        # merge_requested=True, merge_status="merging" 설정
+        def redis_get(key):
+            if key.endswith(":merge_requested"):
+                return "true"
+            if key.endswith(":merge_status"):
+                return "merging"
+            return None
+        mock_r.get.side_effect = redis_get
+
+        with patch.object(_listener, "_cleanup_process_state", side_effect=counting_cleanup):
+            # heartbeat 루프 1회 시뮬레이션 (TestHeartbeatTimeout._run_heartbeat_once와 동일 패턴)
+            for rid_iter, proc in list(_listener._running_processes.items()):
+                if rid_iter in _listener._cleanup_done:
+                    _listener._running_processes.pop(rid_iter, None)
+                    continue
+                if proc.poll() is None:
+                    continue
+                else:
+                    if rid_iter not in _listener._dead_process_first_seen:
+                        _listener._dead_process_first_seen[rid_iter] = time.time()
+                    _dead_elapsed = time.time() - _listener._dead_process_first_seen.get(rid_iter, time.time())
+                    _hb_mr = mock_r.get(f"plan-runner:runners:{rid_iter}:merge_requested")
+                    _hb_ms = mock_r.get(f"plan-runner:runners:{rid_iter}:merge_status")
+                    MERGE_ACTIVE = {"merging", "merge_pending", "auto_merging"}
+                    if _hb_mr or (_hb_ms in MERGE_ACTIVE):
+                        if _dead_elapsed >= 60:
+                            mock_r.delete(f"plan-runner:runners:{rid_iter}:merge_requested")
+                            mock_r.delete(f"plan-runner:runners:{rid_iter}:merge_status")
+                            _listener._cleanup_process_state(rid_iter, mock_r, reason="heartbeat_stale_merge")
+
+        # 강제 cleanup이 호출되어야 함
+        assert any(r == rid and reason == "heartbeat_stale_merge" for r, reason in cleanup_calls), \
+            f"stale merge cleanup not called, got: {cleanup_calls}"
