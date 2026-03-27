@@ -203,3 +203,117 @@ class TestPlanArchiveE2E:
                 worker._check_requirements_sync_schedule()
                 # 갯수 그대로 1개여야 함
                 assert db.query(LLMRequest).filter_by(caller_id="double-cat").count() == 1
+
+
+class TestRecurrenceDetectionE2E:
+    """반복 감지 전체 흐름 E2E 테스트"""
+
+    def test_e2e_right_two_plans_same_scope_triggers_recurrence_check(self, db):
+        """R: scope 겹치는 plan 2개 archive mock → detect_recurrence 호출 확인 + LLM 큐 등록 확인"""
+        from app.modules.claude_worker.services.plan_analyze_handler import detect_recurrence
+        import json
+
+        # Arrange: 기존 plan (scope 겹침)
+        existing = PlanRecord(
+            filename_hash="existing_e2e_hash",
+            file_path="/path/existing.md",
+            category="naver-booking",
+            scope=json.dumps(["plan_service.py", "routes.py"]),
+            applied_at=datetime.now() - timedelta(days=30),
+            intent="기존 버그 수정",
+            plan_date=(datetime.now() - timedelta(days=30)).date(),
+        )
+        db.add(existing)
+        db.commit()
+
+        # 현재 plan
+        current = PlanRecord(
+            filename_hash="current_e2e_hash",
+            file_path="/path/current.md",
+            category="naver-booking",
+            scope=json.dumps(["plan_service.py", "new_feature.py"]),
+            intent="동일 모듈 재수정",
+            plan_date=datetime.now().date(),
+        )
+        db.add(current)
+        db.commit()
+
+        # Act
+        result = detect_recurrence(db, current)
+
+        # Assert: LLM 큐 등록됨
+        assert result is True
+        req = db.query(LLMRequest).filter_by(
+            caller_type="plan_recurrence_check",
+            caller_id="current_e2e_hash"
+        ).first()
+        assert req is not None
+        assert "plan_service.py" in req.prompt
+
+    def test_e2e_right_second_plan_linked_after_llm_result(self, db):
+        """R: save_recurrence_check_result 호출 → record.superseded_by + recurrence_count=2 설정 확인"""
+        from app.modules.claude_worker.services.plan_analyze_handler import save_recurrence_check_result
+
+        # Arrange
+        first_plan = PlanRecord(
+            filename_hash="first_e2e_plan",
+            file_path="/path/first.md",
+            category="naver-booking",
+            recurrence_count=1,
+        )
+        second_plan = PlanRecord(
+            filename_hash="second_e2e_plan",
+            file_path="/path/second.md",
+            category="naver-booking",
+            recurrence_count=1,
+        )
+        db.add(first_plan)
+        db.add(second_plan)
+        db.commit()
+
+        # LLM 결과 mock
+        req = MagicMock()
+        req.caller_id = "second_e2e_plan"
+        result = {"result": {
+            "is_recurrence": True,
+            "matched_hash": "first_e2e_plan",
+            "confidence": "high",
+            "reason": "same bug pattern"
+        }}
+
+        # Act
+        save_recurrence_check_result(db, req, result)
+
+        # Assert
+        db.expire_all()
+        updated = db.query(PlanRecord).filter_by(filename_hash="second_e2e_plan").first()
+        assert updated.superseded_by == "first_e2e_plan"
+        assert updated.recurrence_count == 2
+
+    def test_e2e_boundary_no_scope_skips_detection(self, db):
+        """B: scope=None인 plan archive → detect_recurrence 호출 안 됨"""
+        from app.modules.claude_worker.services.plan_analyze_handler import detect_recurrence
+
+        # scope=None인 plan
+        no_scope_plan = PlanRecord(
+            filename_hash="no_scope_e2e",
+            file_path="/path/no_scope.md",
+            category="naver-booking",
+            scope=None,
+            intent="some intent",
+        )
+        db.add(no_scope_plan)
+        db.commit()
+
+        # Act: save_plan_archive_result 내부 로직 중 "intent and scope" 조건 검증
+        # detect_recurrence는 scope가 None이면 candidates=[] → False 반환
+        result = detect_recurrence(db, no_scope_plan)
+
+        # Assert: scope=None → 빈 scope로 처리 → candidates 없음 → False
+        assert result is False
+        # LLM 큐 미등록
+        req = db.query(LLMRequest).filter_by(
+            caller_type="plan_recurrence_check",
+            caller_id="no_scope_e2e"
+        ).first()
+        assert req is None

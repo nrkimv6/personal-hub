@@ -31,6 +31,9 @@ class PlanRecord(Base):
     scope = Column(Text, nullable=True)                          # 영향 범위 (JSON 직렬화 리스트)
     plan_date = Column(Date, nullable=True)                      # git 첫 커밋 날짜
     applied_at = Column(DateTime, nullable=True)                 # > 반영일: 헤더 파싱
+    recurrence_count = Column(Integer, default=1, nullable=False)  # 체인 내 순서 (1=최초, 2=첫 재발, ...)
+    chain_root_hash = Column(String(64), nullable=True)            # 체인 첫 번째 plan의 filename_hash
+    recurrence_suggestion = Column(Text, nullable=True)            # LLM 생성 근본원인/개선 제안 (JSON)
     llm_processed_at = Column(DateTime)                          # LLM 분석 완료 시각
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
