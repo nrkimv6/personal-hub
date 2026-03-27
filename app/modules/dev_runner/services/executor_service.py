@@ -363,6 +363,50 @@ class ExecutorService:
             logger.error(f"[dev-runner] start 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
 
+    async def _correct_pid_state(
+        self, rid: str, status: str, pid_str: str | None, caller: str = ""
+    ) -> tuple[bool, str | None]:
+        """PID 기반 양방향 보정 공통 메서드.
+
+        Bug 2: status="running" 인데 PID dead → _force_cleanup_state 호출 + (False, None)
+        Bug 1: status≠"running" 인데 PID alive → Redis 복원 + (True, pid_str)
+        completed 가드: status="completed" + PID alive → 오보정 방지, 그대로 반환
+
+        Returns:
+            (running, pid_str): 보정된 값. caller는 로컬 변수에 덮어쓴다.
+        """
+        if not pid_str:
+            return (status == "running", pid_str)
+        running = status == "running"
+        try:
+            pid_int = int(pid_str)
+            pid_alive = self._is_pid_alive(pid_int)
+            if running and not pid_alive:
+                # Bug 2: status=running + PID dead → stale 정리
+                logger.warning(
+                    f"[dev-runner] {caller}: runner {rid} PID {pid_str} 종료됨 → stale 정리"
+                )
+                await self._force_cleanup_state(rid)
+                return (False, None)
+            elif not running and pid_alive:
+                # Bug 1: status≠running + PID alive → premature cleanup 복원
+                if status == "completed":
+                    # completed 가드: 정상 종료 후 PID 재사용 시 오보정 방지
+                    return (running, pid_str)
+                logger.warning(
+                    f"[dev-runner] {caller}: runner {rid} PID {pid_str} alive but status={status!r} → 복원"
+                )
+                await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+                await self.async_redis.sadd(ACTIVE_RUNNERS_KEY, rid)
+                return (True, pid_str)
+            # 정상 일치
+            return (running, pid_str)
+        except (ValueError, Exception) as e:
+            logger.debug(
+                f"[dev-runner] {caller}: PID 보정 실패 (무시, rid={rid}): {e}"
+            )
+            return (running, pid_str)
+
     async def _force_cleanup_state(self, runner_id: str = ""):
         """Redis 상태 강제 정리 (listener 무응답 시 fallback)
 
@@ -645,21 +689,7 @@ class ExecutorService:
         engine = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine") or "claude"
         running = status == "running"
 
-        # PID stale 감지 (Bug 2: status=running + PID dead → 정리)
-        if running and pid_str and not self._is_pid_alive(int(pid_str)):
-            logger.warning(f"[dev-runner] runner {runner_id} PID {pid_str} 종료됨 → stale 정리")
-            await self._force_cleanup_state(runner_id)
-            running = False
-            pid_str = None
-        # PID alive 복원 (Bug 1: status≠running + PID alive → running 복원)
-        elif not running and pid_str and self._is_pid_alive(int(pid_str)):
-            logger.warning(
-                f"[dev-runner] get_runner_status: runner {runner_id} "
-                f"PID {pid_str} alive but status={status!r} → 복원"
-            )
-            await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
-            await self.async_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
-            running = True
+        running, pid_str = await self._correct_pid_state(runner_id, status, pid_str, caller="get_runner_status")
 
         current_cycle_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:current_cycle")
         current_cycle = int(current_cycle_str) if current_cycle_str is not None else None
@@ -716,27 +746,7 @@ class ExecutorService:
                             pass
                     # PID 기반 양방향 보정: Redis status와 실제 프로세스 상태 불일치 교정
                     running = status == "running"
-                    if pid_str:
-                        try:
-                            pid_int = int(pid_str)
-                            pid_alive = self._is_pid_alive(pid_int)
-                            if running and not pid_alive:
-                                # Bug 2 방향: status="running" 인데 PID dead → 강제 정리
-                                logger.warning(
-                                    f"[dev-runner] get_all_runners: runner {rid} PID {pid_str} stale → cleanup"
-                                )
-                                await self._force_cleanup_state(rid)
-                                running = False
-                            elif not running and pid_alive:
-                                # Bug 1 방향: status≠"running" 인데 PID alive → premature cleanup 복원
-                                logger.warning(
-                                    f"[dev-runner] get_all_runners: runner {rid} PID alive but status={status!r} → 복원"
-                                )
-                                await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
-                                await self.async_redis.sadd(ACTIVE_RUNNERS_KEY, rid)
-                                running = True
-                        except (ValueError, Exception) as _pid_err:
-                            logger.debug(f"[dev-runner] get_all_runners: PID 보정 실패 (무시, rid={rid}): {_pid_err}")
+                    running, pid_str = await self._correct_pid_state(rid, status, pid_str, caller="get_all_runners")
 
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
                     # 원자적 UPDATE로 동시 요청 시 lost-update 방지 (rowcount=0이면 이미 처리됨)

@@ -337,3 +337,228 @@ class TestIntegrationCleanupDone:
         all_item = next((r for r in all_result if r.runner_id == rid), None)
         assert all_item is not None
         assert status_result.running == all_item.running == True
+
+
+# ============================================================
+# Phase T1: _correct_pid_state() TC (TestCorrectPidState)
+# ============================================================
+
+class TestCorrectPidState:
+    """_correct_pid_state() 공통 메서드 TC"""
+
+    def _make_svc(self):
+        from app.modules.dev_runner.services.executor_service import ExecutorService
+        svc = ExecutorService.__new__(ExecutorService)
+        svc.async_redis = AsyncMock()
+        svc.async_redis.set = AsyncMock()
+        svc.async_redis.sadd = AsyncMock()
+        svc._force_cleanup_state = AsyncMock()
+        return svc
+
+    @pytest.mark.asyncio
+    async def test_correct_pid_state_running_pid_dead(self):
+        """RIGHT: status=running + PID dead → _force_cleanup_state 호출 + (False, None)"""
+        svc = self._make_svc()
+        with patch.object(type(svc), "_is_pid_alive", return_value=False):
+            result = await svc._correct_pid_state("rid1", "running", "1234", caller="test")
+        assert result == (False, None)
+        svc._force_cleanup_state.assert_called_once_with("rid1")
+        svc.async_redis.set.assert_not_called()
+        svc.async_redis.sadd.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_correct_pid_state_stopped_pid_alive(self):
+        """RIGHT: status=stopped + PID alive → Redis set/sadd + (True, pid_str)"""
+        from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
+        svc = self._make_svc()
+        with patch.object(type(svc), "_is_pid_alive", return_value=True):
+            result = await svc._correct_pid_state("rid2", "stopped", "1234", caller="test")
+        assert result == (True, "1234")
+        svc.async_redis.set.assert_called_once_with(f"{RUNNER_KEY_PREFIX}:rid2:status", "running")
+        svc.async_redis.sadd.assert_called_once_with(ACTIVE_RUNNERS_KEY, "rid2")
+        svc._force_cleanup_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_correct_pid_state_completed_pid_alive(self):
+        """BOUNDARY: status=completed + PID alive → completed 가드 → set/sadd 호출 안 됨 + (False, pid_str)"""
+        svc = self._make_svc()
+        with patch.object(type(svc), "_is_pid_alive", return_value=True):
+            result = await svc._correct_pid_state("rid3", "completed", "1234", caller="test")
+        # completed는 running=False, pid_str 유지
+        assert result == (False, "1234")
+        svc.async_redis.set.assert_not_called()
+        svc.async_redis.sadd.assert_not_called()
+        svc._force_cleanup_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_correct_pid_state_running_pid_alive(self):
+        """BOUNDARY: status=running + PID alive → 아무 side effect 없음 + (True, pid_str)"""
+        svc = self._make_svc()
+        with patch.object(type(svc), "_is_pid_alive", return_value=True):
+            result = await svc._correct_pid_state("rid4", "running", "1234", caller="test")
+        assert result == (True, "1234")
+        svc.async_redis.set.assert_not_called()
+        svc.async_redis.sadd.assert_not_called()
+        svc._force_cleanup_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_correct_pid_state_no_pid(self):
+        """BOUNDARY: pid_str=None → _is_pid_alive 호출 안 됨"""
+        svc = self._make_svc()
+        with patch.object(type(svc), "_is_pid_alive") as mock_alive:
+            result_running = await svc._correct_pid_state("rid5", "running", None, caller="test")
+            result_stopped = await svc._correct_pid_state("rid6", "stopped", None, caller="test")
+        assert result_running == (True, None)
+        assert result_stopped == (False, None)
+        mock_alive.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_correct_pid_state_invalid_pid(self):
+        """ERROR: pid_str='abc' → ValueError catch + logger.debug + (running, 'abc') 반환"""
+        svc = self._make_svc()
+        with patch("app.modules.dev_runner.services.executor_service.logger") as mock_logger:
+            result = await svc._correct_pid_state("rid7", "running", "abc", caller="test")
+        # running=True (status="running"), pid_str 원본 유지
+        assert result == (True, "abc")
+        mock_logger.debug.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_correct_pid_state_caller_in_log(self):
+        """RIGHT: caller="test_caller" → logger.warning 메시지에 'test_caller' 포함"""
+        svc = self._make_svc()
+        with patch.object(type(svc), "_is_pid_alive", return_value=False), \
+             patch("app.modules.dev_runner.services.executor_service.logger") as mock_logger:
+            await svc._correct_pid_state("rid8", "running", "1234", caller="test_caller")
+        assert any("test_caller" in str(call) for call in mock_logger.warning.call_args_list)
+
+
+# ============================================================
+# Phase T1: TTL 소거 헬퍼 TC (TestEvictStaleHelpers)
+# ============================================================
+
+class TestEvictStaleHelpers:
+    """_evict_stale_cleanup_done / _evict_stale_dead_process TC"""
+
+    def _get_helpers(self):
+        listener = _load_listener()
+        return listener._evict_stale_cleanup_done, listener._evict_stale_dead_process, listener
+
+    def test_evict_stale_cleanup_done_removes_expired(self):
+        """RIGHT: now-301초 항목 → 제거됨, now-10초 항목 → 유지"""
+        evict_fn, _, listener = self._get_helpers()
+        original = dict(listener._cleanup_done)
+        try:
+            now = time.time()
+            listener._cleanup_done["r1"] = now - 301
+            listener._cleanup_done["r2"] = now - 10
+            evict_fn()
+            assert "r1" not in listener._cleanup_done
+            assert "r2" in listener._cleanup_done
+        finally:
+            listener._cleanup_done.clear()
+            listener._cleanup_done.update(original)
+
+    def test_evict_stale_cleanup_done_empty_dict(self):
+        """BOUNDARY: _cleanup_done = {} → 에러 없이 반환"""
+        evict_fn, _, listener = self._get_helpers()
+        original = dict(listener._cleanup_done)
+        try:
+            listener._cleanup_done.clear()
+            evict_fn()  # 에러 없어야 함
+            assert len(listener._cleanup_done) == 0
+        finally:
+            listener._cleanup_done.clear()
+            listener._cleanup_done.update(original)
+
+    def test_evict_stale_dead_process_removes_expired(self):
+        """RIGHT: now-301초 항목 → 제거됨, now-10초 항목 → 유지"""
+        _, evict_fn, listener = self._get_helpers()
+        original = dict(listener._dead_process_first_seen)
+        try:
+            now = time.time()
+            listener._dead_process_first_seen["r1"] = now - 301
+            listener._dead_process_first_seen["r2"] = now - 10
+            evict_fn()
+            assert "r1" not in listener._dead_process_first_seen
+            assert "r2" in listener._dead_process_first_seen
+        finally:
+            listener._dead_process_first_seen.clear()
+            listener._dead_process_first_seen.update(original)
+
+    def test_evict_stale_dead_process_empty_dict(self):
+        """BOUNDARY: _dead_process_first_seen = {} → 에러 없이 반환"""
+        _, evict_fn, listener = self._get_helpers()
+        original = dict(listener._dead_process_first_seen)
+        try:
+            listener._dead_process_first_seen.clear()
+            evict_fn()  # 에러 없어야 함
+            assert len(listener._dead_process_first_seen) == 0
+        finally:
+            listener._dead_process_first_seen.clear()
+            listener._dead_process_first_seen.update(original)
+
+
+# ============================================================
+# Phase T3: 통합 TC (TestIntegrationCorrectPidState)
+# ============================================================
+
+class TestIntegrationCorrectPidState:
+    """get_runner_status()와 get_all_runners()가 _correct_pid_state 경유, 동일 결과 반환"""
+
+    @pytest.mark.asyncio
+    async def test_integration_correct_pid_state_same_result_both_callers(self):
+        """동일 runner·동일 Redis 상태에서 두 함수 모두 _correct_pid_state 경유 + 동일 running 값"""
+        from app.modules.dev_runner.services.executor_service import (
+            ExecutorService, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
+        )
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        rid = "integration_rid2"
+
+        async def _get(key):
+            data = {
+                f"{RUNNER_KEY_PREFIX}:{rid}:status": "stopped",
+                f"{RUNNER_KEY_PREFIX}:{rid}:pid": "55555",
+                f"{RUNNER_KEY_PREFIX}:{rid}:plan_file": "/test.md",
+                f"{RUNNER_KEY_PREFIX}:{rid}:start_time": None,
+                f"{RUNNER_KEY_PREFIX}:{rid}:engine": "claude",
+                f"{RUNNER_KEY_PREFIX}:{rid}:trigger": "user",
+                f"{RUNNER_KEY_PREFIX}:{rid}:current_cycle": None,
+            }
+            return data.get(key)
+
+        svc = ExecutorService.__new__(ExecutorService)
+        svc.async_redis = AsyncMock()
+        svc.async_redis.get = _get
+        svc.async_redis.set = AsyncMock()
+        svc.async_redis.sadd = AsyncMock()
+        svc.async_redis.zrange = AsyncMock(return_value=[rid])
+        svc.async_redis.zremrangebyscore = AsyncMock()
+        svc.async_redis.smembers = AsyncMock(return_value=set())
+        svc._force_cleanup_state = AsyncMock()
+
+        mock_db = MagicMock()
+        mock_result = MagicMock()
+        mock_result.rowcount = 0
+        mock_db.execute.return_value = mock_result
+
+        calls = []
+        original_correct = svc._correct_pid_state if hasattr(svc, "_correct_pid_state") else None
+
+        # spy on _correct_pid_state
+        async def spy_correct(*args, **kwargs):
+            calls.append(kwargs.get("caller", args[3] if len(args) > 3 else ""))
+            return await ExecutorService._correct_pid_state(svc, *args, **kwargs)
+
+        with patch.object(type(svc), "_is_pid_alive", return_value=True), \
+             patch("app.database.SessionLocal", return_value=mock_db), \
+             patch.object(svc, "_correct_pid_state", side_effect=spy_correct):
+            status_result = await svc.get_runner_status(rid)
+            all_result = await svc.get_all_runners()
+
+        all_item = next((r for r in all_result if r.runner_id == rid), None)
+        assert all_item is not None
+        # 두 함수 모두 _correct_pid_state 호출됨
+        assert len(calls) >= 2
+        # 동일 running 값
+        assert status_result.running == all_item.running

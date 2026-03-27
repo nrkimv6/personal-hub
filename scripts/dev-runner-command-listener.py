@@ -150,6 +150,26 @@ _dead_process_first_seen: dict = {}
 # MergeOrchestrator 전역변수 — 인라인 merge로 대체됨 (Phase 3에서 제거)
 # (제거됨: _merge_orchestrator_process, _merge_orchestrator_log_path, _merge_orchestrator_attached_pid)
 
+def _evict_stale_cleanup_done(max_age: int = 300) -> None:
+    """_cleanup_done에서 max_age초 이상 된 항목 제거 (메모리 누수 방지)"""
+    now = time.time()
+    expired = [rid for rid, ts in list(_cleanup_done.items()) if now - ts > max_age]
+    if expired:
+        logger.debug(f"heartbeat: _cleanup_done TTL 소거 {len(expired)}개: {expired}")
+        for rid in expired:
+            _cleanup_done.pop(rid, None)
+
+
+def _evict_stale_dead_process(max_age: int = 300) -> None:
+    """_dead_process_first_seen에서 max_age초 이상 된 항목 제거 (메모리 누수 방지)"""
+    now = time.time()
+    expired = [rid for rid, ts in list(_dead_process_first_seen.items()) if now - ts > max_age]
+    if expired:
+        logger.debug(f"heartbeat: _dead_process_first_seen TTL 소거 {len(expired)}개: {expired}")
+        for rid in expired:
+            _dead_process_first_seen.pop(rid, None)
+
+
 # WorkflowManager (main()에서 초기화)
 _wf_manager: Optional[WorkflowManager] = None
 
@@ -2472,13 +2492,8 @@ def main():
                 now = time.time()
                 if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                     r.set(HEARTBEAT_KEY, datetime.now().isoformat(), ex=HEARTBEAT_TTL)
-                    # _cleanup_done TTL 소거: 5분 이상 된 항목 제거 (메모리 누수 방지)
-                    _cd_now = time.time()
-                    _cd_expired = [rid for rid, ts in list(_cleanup_done.items()) if _cd_now - ts > 300]
-                    if _cd_expired:
-                        logger.debug(f"heartbeat: _cleanup_done TTL 소거 {len(_cd_expired)}개: {_cd_expired}")
-                        for _rid in _cd_expired:
-                            _cleanup_done.pop(_rid, None)
+                    _evict_stale_cleanup_done()
+                    _evict_stale_dead_process()
                     # 각 runner 상태 동기화
                     # (Redis 키 만료 또는 재시작으로 날아갈 경우 10초마다 복원)
                     for rid, proc in list(_running_processes.items()):
