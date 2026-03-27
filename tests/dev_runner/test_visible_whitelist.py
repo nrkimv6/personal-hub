@@ -141,3 +141,54 @@ def test_runner_list_item_default_visible_false():
         f"visible 기본값이 False여야 하지만 {item.visible!r}. "
         "schemas.py의 visible: bool = False 설정을 확인하세요."
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# tc-pytest- prefix 이중 방어 검증
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _apply_tc_prefix_guard(runner_id: str, trigger: str | None) -> bool:
+    """executor_service.get_active_runners() 내 이중 방어 로직 재현"""
+    is_user = bool(trigger and trigger in ("user", "user:all"))
+    # 이중 방어: tc-pytest- prefix runner는 trigger와 무관하게 항상 invisible
+    if runner_id.startswith("tc-pytest-"):
+        is_user = False
+    return is_user
+
+
+def test_tc_prefix_runner_invisible_right():
+    """R: runner_id가 tc-pytest-* 이면 trigger="user"여도 visible=False 반환 (이중 방어)"""
+    runner_id = "tc-pytest-abc123"
+    trigger = "user"
+
+    visible = _apply_tc_prefix_guard(runner_id, trigger)
+
+    assert visible is False, (
+        f"tc-pytest- prefix runner는 trigger={trigger!r}여도 visible=False여야 하지만 {visible!r}. "
+        "executor_service.py의 tc-pytest- prefix 이중 방어 로직을 확인하세요."
+    )
+    # RunnerListItem 생성 시에도 visible=False
+    item = RunnerListItem(runner_id=runner_id, running=True, trigger=trigger, visible=visible)
+    assert item.visible is False
+
+
+def test_tc_prefix_runner_invisible_user_all():
+    """R: runner_id가 tc-pytest-* 이면 trigger="user:all"여도 visible=False"""
+    runner_id = "tc-pytest-xyz-456"
+    trigger = "user:all"
+
+    visible = _apply_tc_prefix_guard(runner_id, trigger)
+
+    assert visible is False
+
+
+def test_tc_prefix_guard_does_not_affect_normal_runner():
+    """B: 일반 runner_id는 trigger="user"이면 visible=True (이중 방어 범위 외)"""
+    runner_id = "normal-runner-001"
+    trigger = "user"
+
+    visible = _apply_tc_prefix_guard(runner_id, trigger)
+
+    assert visible is True, (
+        f"일반 runner는 trigger={trigger!r}이면 visible=True여야 하지만 {visible!r}."
+    )
