@@ -1083,24 +1083,8 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             _pub("merge 성공 (exit_code=0)")
             result = {"success": True, "message": "merged", "merge_status": "merged", "action": action_name}
 
-            # plan 헤더에서 branch/worktree 필드 제거 — 잔존 시 auto-done 에이전트가 /done 2.5단계에서 차단됨
-            if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
-                _remove_plan_header_fields(plan_file)
-
-            # 5. 자동 done 분기: 완료율 체크 → done API 호출 or main 추가 사이클 예약
-            if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
-                done_count, total_count = _get_plan_completion(plan_file)
-                if total_count > 0 and done_count == total_count:
-                    _pub(f"완료율 100% ({done_count}/{total_count}) — 자동 done 처리 시작")
-                    _call_done_api(plan_file, runner_id, _pub)
-                else:
-                    _pub(f"미완료 태스크 있음 ({done_count}/{total_count}) — main 추가 사이클 예약")
-                    try:
-                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
-                    except Exception:
-                        pass
-            else:
-                _pub("plan_file 없음(--all 모드) — done 스킵")
+            # 5. 자동 done 분기: 헤더 필드 제거 + 완료율 체크 → done API 호출 or main 추가 사이클 예약
+            _handle_post_merge_done(plan_file, runner_id, _pub, redis_client)
         elif exit_code == 2:
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
@@ -1138,24 +1122,8 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
                     pass
                 result = {"success": True, "message": "conflict resolved", "merge_status": "merged", "action": action_name}
 
-                # plan 헤더에서 branch/worktree 필드 제거 — 잔존 시 auto-done 에이전트가 /done 2.5단계에서 차단됨
-                if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
-                    _remove_plan_header_fields(plan_file)
-
-                # 자동 done 분기: 완료율 체크 → done API 호출 or main 추가 사이클 예약
-                if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
-                    done_count, total_count = _get_plan_completion(plan_file)
-                    if total_count > 0 and done_count == total_count:
-                        _pub(f"완료율 100% ({done_count}/{total_count}) — 자동 done 처리 시작")
-                        _call_done_api(plan_file, runner_id, _pub)
-                    else:
-                        _pub(f"미완료 태스크 있음 ({done_count}/{total_count}) — main 추가 사이클 예약")
-                        try:
-                            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
-                        except Exception:
-                            pass
-                else:
-                    _pub("plan_file 없음(--all 모드) — done 스킵")
+                # 자동 done 분기: 헤더 필드 제거 + 완료율 체크 → done API 호출 or main 추가 사이클 예약
+                _handle_post_merge_done(plan_file, runner_id, _pub, redis_client)
             else:
                 _pub(f"conflict resolver 실패: {_resolve_result['message']}")
                 try:
@@ -1221,6 +1189,39 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             logger.debug(f"[_execute_merge_with_lock] merge-results push 실패 (무시): {_mr_err}")
 
     return result
+
+
+def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client) -> None:
+    """머지 성공 후 done flow를 실행한다.
+
+    plan_file에서 branch/worktree 헤더 필드를 제거하고,
+    완료율을 체크하여 100%이면 done API를 호출하고,
+    미완료 태스크가 있으면 main 추가 사이클을 예약한다.
+
+    Args:
+        plan_file: plan 파일 절대 경로 (None 또는 ALL 모드이면 스킵)
+        runner_id: 로깅용 runner ID
+        pub_fn: 로그 publish 함수 (msg: str) -> None
+        redis_client: Redis 클라이언트
+    """
+    if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
+        pub_fn("plan_file 없음(--all 모드) — done 스킵")
+        return
+
+    # plan 헤더에서 branch/worktree 필드 제거 — 잔존 시 auto-done 에이전트가 /done 2.5단계에서 차단됨
+    _remove_plan_header_fields(plan_file)
+
+    # 자동 done 분기: 완료율 체크 → done API 호출 or main 추가 사이클 예약
+    done_count, total_count = _get_plan_completion(plan_file)
+    if total_count > 0 and done_count == total_count:
+        pub_fn(f"완료율 100% ({done_count}/{total_count}) — 자동 done 처리 시작")
+        _call_done_api(plan_file, runner_id, pub_fn)
+    else:
+        pub_fn(f"미완료 태스크 있음 ({done_count}/{total_count}) — main 추가 사이클 예약")
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
+        except Exception:
+            pass
 
 
 def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
