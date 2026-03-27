@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
+from sqlalchemy import text
+
 import redis
 import redis.asyncio as aioredis
 from fastapi import HTTPException
@@ -642,12 +644,21 @@ class ExecutorService:
         engine = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine") or "claude"
         running = status == "running"
 
-        # PID stale 감지
+        # PID stale 감지 (Bug 2: status=running + PID dead → 정리)
         if running and pid_str and not self._is_pid_alive(int(pid_str)):
             logger.warning(f"[dev-runner] runner {runner_id} PID {pid_str} 종료됨 → stale 정리")
             await self._force_cleanup_state(runner_id)
             running = False
             pid_str = None
+        # PID alive 복원 (Bug 1: status≠running + PID alive → running 복원)
+        elif not running and pid_str and self._is_pid_alive(int(pid_str)):
+            logger.warning(
+                f"[dev-runner] get_runner_status: runner {runner_id} "
+                f"PID {pid_str} alive but status={status!r} → 복원"
+            )
+            await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+            await self.async_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+            running = True
 
         current_cycle_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:current_cycle")
         current_cycle = int(current_cycle_str) if current_cycle_str is not None else None
@@ -726,27 +737,27 @@ class ExecutorService:
                             logger.debug(f"[dev-runner] get_all_runners: PID 보정 실패 (무시, rid={rid}): {_pid_err}")
 
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
+                    # 원자적 UPDATE로 동시 요청 시 lost-update 방지 (rowcount=0이면 이미 처리됨)
                     is_orphan = False
                     if not running:
-                        orphan_wf = db.query(Workflow).filter(
-                            Workflow.runner_id == rid,
-                            Workflow.status.in_(["running", "merge_pending"])
-                        ).first()
-                        if orphan_wf:
-                            is_orphan = True
-                            # orphan 워크플로우 자동 정리: cleanup 스킵 시에도 DB 정합성 유지
-                            try:
-                                orphan_wf.status = "failed"
-                                orphan_wf.error_message = (
-                                    f"orphan auto-fix: runner {rid} status={status!r}"
-                                )
-                                db.commit()
+                        try:
+                            _orphan_result = db.execute(
+                                text(
+                                    "UPDATE workflows SET status='failed', error_message=:msg "
+                                    "WHERE runner_id=:rid AND status IN ('running', 'merge_pending')"
+                                ),
+                                {"msg": f"orphan auto-fix: runner {rid} status={status!r}", "rid": rid},
+                            )
+                            db.commit()
+                            is_orphan = _orphan_result.rowcount > 0
+                            if is_orphan:
                                 logger.warning(
-                                    f"[dev-runner] orphan workflow {orphan_wf.id} (runner={rid}) → failed 자동 전이"
+                                    f"[dev-runner] orphan workflow 자동 정리: runner {rid} "
+                                    f"({_orphan_result.rowcount}건 → failed)"
                                 )
-                            except Exception as _wf_err:
-                                logger.warning(f"[dev-runner] orphan workflow 자동 정리 실패 (무시): {_wf_err}")
-                                db.rollback()
+                        except Exception as _wf_err:
+                            logger.warning(f"[dev-runner] orphan workflow 자동 정리 실패 (무시): {_wf_err}")
+                            db.rollback()
                     # 화이트리스트: user/user:all 트리거만 UI에 표시 (fail-closed)
                     is_user = bool(trigger and trigger in ("user", "user:all"))
                     result.append(RunnerListItem(

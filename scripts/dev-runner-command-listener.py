@@ -143,8 +143,8 @@ LOG_CHANNEL_PREFIX = "plan-runner:logs"
 _running_processes: dict = {}
 _running_log_files: dict = {}
 _stream_threads: dict = {}
-# cleanup 완료 플래그: _cleanup_process_state()가 실행된 runner_id 집합 (이중 cleanup 방지)
-_cleanup_done: set = set()
+# cleanup 완료 플래그: rid → cleanup 완료 timestamp (dict). 이중 cleanup 방지 + TTL 기반 자동 소거 (5분 후 heartbeat에서 제거)
+_cleanup_done: dict = {}
 # 프로세스 종료 최초 감지 시각: heartbeat stale merge flag / stream thread 타임아웃 추적용
 _dead_process_first_seen: dict = {}
 # MergeOrchestrator 전역변수 — 인라인 merge로 대체됨 (Phase 3에서 제거)
@@ -209,7 +209,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     _running_processes.pop(runner_id, None)
     _running_log_files.pop(runner_id, None)
     _dead_process_first_seen.pop(runner_id, None)
-    _cleanup_done.add(runner_id)
+    _cleanup_done[runner_id] = time.time()
     if runner_id in _stream_threads:
         t = _stream_threads.pop(runner_id)
         if t.is_alive():
@@ -2471,6 +2471,13 @@ def main():
                 now = time.time()
                 if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                     r.set(HEARTBEAT_KEY, datetime.now().isoformat(), ex=HEARTBEAT_TTL)
+                    # _cleanup_done TTL 소거: 5분 이상 된 항목 제거 (메모리 누수 방지)
+                    _cd_now = time.time()
+                    _cd_expired = [rid for rid, ts in list(_cleanup_done.items()) if _cd_now - ts > 300]
+                    if _cd_expired:
+                        logger.debug(f"heartbeat: _cleanup_done TTL 소거 {len(_cd_expired)}개: {_cd_expired}")
+                        for _rid in _cd_expired:
+                            _cleanup_done.pop(_rid, None)
                     # 각 runner 상태 동기화
                     # (Redis 키 만료 또는 재시작으로 날아갈 경우 10초마다 복원)
                     for rid, proc in list(_running_processes.items()):
@@ -2511,7 +2518,7 @@ def main():
                                     # heartbeat_stale_merge는 머지 가드 대상 아님 — 직접 호출
                                     _running_processes.pop(rid, None)
                                     _dead_process_first_seen.pop(rid, None)
-                                    _cleanup_done.add(rid)
+                                    _cleanup_done[rid] = time.time()
                                     _cleanup_process_state(rid, r, reason="process_cleanup")
                                     # Workflow DB 보정: running 상태면 failed로
                                     try:
