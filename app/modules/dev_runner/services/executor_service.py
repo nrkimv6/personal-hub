@@ -760,6 +760,9 @@ class ExecutorService:
                             db.rollback()
                     # 화이트리스트: user/user:all 트리거만 UI에 표시 (fail-closed)
                     is_user = bool(trigger and trigger in ("user", "user:all"))
+                    # 이중 방어: tc-pytest- prefix runner는 trigger와 무관하게 항상 invisible
+                    if rid.startswith("tc-pytest-"):
+                        is_user = False
                     result.append(RunnerListItem(
                         runner_id=rid,
                         running=running,

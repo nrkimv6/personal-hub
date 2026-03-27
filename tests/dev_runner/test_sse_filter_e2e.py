@@ -12,6 +12,7 @@ tc: 트리거 runner 필터링 및 plan_file null 반환을 검증한다.
 
 import json
 import time
+import uuid
 
 import pytest
 import redis as redis_lib
@@ -66,7 +67,7 @@ def _is_api_available() -> bool:
 class TestSseFilterE2E:
     def test_sse_initial_status_excludes_tc_trigger_runner(self, redis_client):
         """Redis에 trigger="tc:test" runner 등록 → SSE /events initial status에 미포함"""
-        runner_id = "e2e_tc_filter_test_01"
+        runner_id = f"tc-pytest-{uuid.uuid4().hex[:8]}"
         try:
             # runner 등록
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
@@ -84,10 +85,16 @@ class TestSseFilterE2E:
             redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
             for suffix in ("status", "trigger"):
                 redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}")
+            # cleanup 확인: 키 잔류 0건 보장
+            remaining = redis_client.keys(f"{RUNNER_KEY_PREFIX}:{runner_id}:*")
+            assert remaining == [], f"cleanup 후 키 잔류: {remaining}"
+            assert not redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id), (
+                f"cleanup 후 {runner_id!r}이 {ACTIVE_RUNNERS_KEY}에 잔류"
+            )
 
     def test_sse_initial_status_plan_file_none_not_sentinel(self, redis_client):
         """plan_file 키 없는 running runner 등록 → SSE initial status에서 plan_file=null (not __ALL_PLANS__)"""
-        runner_id = "e2e_pf_null_test_01"
+        runner_id = f"tc-pytest-{uuid.uuid4().hex[:8]}"
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
@@ -107,10 +114,16 @@ class TestSseFilterE2E:
             redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
             for suffix in ("status", "trigger"):
                 redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}")
+            # cleanup 확인: 키 잔류 0건 보장
+            remaining = redis_client.keys(f"{RUNNER_KEY_PREFIX}:{runner_id}:*")
+            assert remaining == [], f"cleanup 후 키 잔류: {remaining}"
+            assert not redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id), (
+                f"cleanup 후 {runner_id!r}이 {ACTIVE_RUNNERS_KEY}에 잔류"
+            )
 
     def test_sse_status_event_after_tc_runner_start(self, redis_client):
         """tc:test runner를 active_runners에 추가해도 SSE status 이벤트에 tc: runner 미포함"""
-        runner_id = "e2e_tc_ks_test_01"
+        runner_id = f"tc-pytest-{uuid.uuid4().hex[:8]}"
         try:
             # tc: runner 등록
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
@@ -128,3 +141,9 @@ class TestSseFilterE2E:
             redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
             for suffix in ("status", "trigger"):
                 redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}")
+            # cleanup 확인: 키 잔류 0건 보장
+            remaining = redis_client.keys(f"{RUNNER_KEY_PREFIX}:{runner_id}:*")
+            assert remaining == [], f"cleanup 후 키 잔류: {remaining}"
+            assert not redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id), (
+                f"cleanup 후 {runner_id!r}이 {ACTIVE_RUNNERS_KEY}에 잔류"
+            )
