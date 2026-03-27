@@ -1807,9 +1807,9 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
     if engine:
         cmd.extend(["--engine", engine])
 
-    # 옵션 추가
-    if command.get("max_cycles") is not None:
-        cmd.extend(["--max-cycles", str(command["max_cycles"])])
+    # 옵션 추가 (기본값: 무제한)
+    max_cycles = command.get("max_cycles") if command.get("max_cycles") is not None else 0
+    cmd.extend(["--max-cycles", str(max_cycles)])
 
     if command.get("max_tokens") is not None:
         cmd.extend(["--max-tokens", str(command["max_tokens"])])
