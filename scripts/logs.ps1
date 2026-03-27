@@ -1143,67 +1143,27 @@ if ($Follow) {
         }
     }
 } else {
-    # Static log display
-    switch ($Target) {
-        "api" {
-            Show-LogContent -FilePath $apiLogFile -Label "API Server" -Color Cyan -TailLines $Lines
-        }
-        "worker" {
-            if (-not $Admin) {
-                Write-Host "[!] Worker 로그는 Admin 모드에서만 사용 가능합니다. (-Admin 스위치를 추가하세요)" -ForegroundColor Red
-            } else {
-                Show-LogContent -FilePath $workerLogFile -Label "Worker" -Color Magenta -TailLines $Lines
-            }
-        }
-        "frontend" {
-            Show-LogContent -FilePath $frontendLogFile -Label "Frontend" -Color Green -TailLines $Lines
-        }
-        "watchdog" {
-            if (-not $Admin) {
-                Write-Host "[!] Watchdog 로그는 Admin 모드에서만 사용 가능합니다. (-Admin 스위치를 추가하세요)" -ForegroundColor Red
-            } else {
-                Show-LogContent -FilePath $watchdogLogFile            -Label "WATCHDOG"  -Color DarkYellow -TailLines $Lines
-                Show-LogContent -FilePath $claudeWatchdogLogFile      -Label "CLAUDE-WD" -Color DarkYellow -TailLines $Lines
-                Show-LogContent -FilePath $videoDownloadWatchdogLogFile -Label "VIDEO-DL-WD" -Color DarkYellow -TailLines $Lines
-                Show-LogContent -FilePath $crawlWatchdogLogFile       -Label "CRAWL-WD"  -Color DarkYellow -TailLines $Lines
-                Show-LogContent -FilePath $commandListenerWatchdogLogFile -Label "CMD-WD" -Color DarkYellow -TailLines $Lines
-                Show-LogContent -FilePath $apiWatchdogLogFile         -Label "API-WD"    -Color DarkYellow -TailLines $Lines
-            }
-        }
-        default {
-            # stdout_api_: 레거시 (NSSM stdout→service_*.log 전환됨)
-            $apiLogFiles = Get-LatestLogFilesMultiPattern @("stdout_api_", "api_")
-            Show-LogContent -FilePaths $apiLogFiles -Label "API Server" -Color Cyan -TailLines $Lines
-            if ($Admin) {
-                # stdout_worker_: 레거시 (구형 watchdog, dev/에만 존재)
-                # stdout_unified_worker_: 활성 (unified-worker-watchdog.ps1이 stdout 캡처)
-                $workerLogFiles = Get-LatestLogFilesMultiPattern @("stdout_unified_worker_", "stdout_worker_", "worker_", "unified_worker_")
-                Show-LogContent -FilePaths $workerLogFiles -Label "Worker" -Color Magenta -TailLines $Lines
-                $claudeWorkerLogFiles = Get-LatestLogFilesMultiPattern @("llm_worker_")
-                Show-LogContent -FilePaths $claudeWorkerLogFiles -Label "LLM (Claude Worker)" -Color Blue -TailLines $Lines
-                # Plan-runner 로그: Redis 활성 runner 또는 오늘 날짜 파일 최대 5개 표시
-                if ($useRedis) {
-                    $activeRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
-                    if ($activeRunners.Count -gt 0) {
-                        foreach ($runner in $activeRunners) {
-                            $label = "PR:$($runner.DisplayName)#$($runner.ShortId)"
-                            Show-LogContent -FilePath $runner.LogPath -Label $label -Color White -TailLines $Lines
-                            if ($runner.StreamPath) {
-                                Show-LogContent -FilePath $runner.StreamPath -Label "PS:$($runner.DisplayName)#$($runner.ShortId)" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
-                            }
-                        }
-                    } else {
-                        # 활성 runner 없음 — 오늘 날짜 파일 최대 5개 표시
-                        Show-TodayPlanRunnerLogs -TailLines $Lines
-                    }
-                } else {
-                    # Redis 미연결 — 오늘 날짜 파일 최대 5개 표시
-                    Show-TodayPlanRunnerLogs -TailLines $Lines
-                }
-            }
-            $frontendLogFiles = Get-LatestLogFilesMultiPattern @("frontend_2")
-            Show-LogContent -FilePaths $frontendLogFiles -Label "Frontend" -Color Green -TailLines $Lines
-        }
+    # Static log display — Python log_viewer에 위임
+    $pyExe = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+    $pyArgs = @("-m", "app.log_viewer")
+
+    # "all" → target 생략 (Python cli에서 None = 전체 소스 표시)
+    if ($Target -ne "all") {
+        $pyArgs += $Target.ToLower()
+    }
+
+    $pyArgs += "--lines"
+    $pyArgs += "$Lines"
+
+    if ($Admin) {
+        $pyArgs += "--admin"
+    }
+
+    Push-Location $ProjectRoot
+    try {
+        & $pyExe @pyArgs
+    } finally {
+        Pop-Location
     }
 }
 
