@@ -47,8 +47,6 @@
         let noiseTimer: ReturnType<typeof setTimeout> | null = null;
 	let connected = $state<'connected' | 'disconnected'>(mode === 'managed' ? 'connected' : 'disconnected');
 	let autoScroll = $state(true);
-	let paused = $state(false);
-	let pauseBuffer = $state<ParsedLine[]>([]);
 	let logContainer: HTMLDivElement;
 	let eventSource: EventSource | null = null;
 	let sseStarted = $state(mode === 'managed');
@@ -222,11 +220,6 @@
 			batchPlans = [];
 		}
 
-		if (paused && !isStale) {
-			pauseBuffer.push(parsed);
-			return;
-		}
-
 		// RESULT 라인(실시간)은 큐에 넣고 순차 출력
 		if (parsed.tag === 'RESULT' && !isStale) {
 			resultQueue.push(parsed);
@@ -260,21 +253,8 @@
 	}
 
 	function resumeLog() {
-		paused = false;
-		if (pauseBuffer.length > 0) {
-			for (const line of pauseBuffer) {
-				lines.push(line);
-			}
-			pauseBuffer = [];
-			if (lines.length > MAX_LINES) {
-				lines = lines.slice(lines.length - MAX_LINES);
-			}
-			if (autoScroll && logContainer) {
-				requestAnimationFrame(() => {
-					if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
-				});
-			}
-		}
+		autoScroll = true;
+		scrollToBottom();
 	}
 
 	function scrollToBottom() {
@@ -285,7 +265,12 @@
 	}
 
 	function handleScroll() {
-		// 스크롤 위치는 추적하지만, autoScroll 해제는 Pause 버튼으로만
+		if (!logContainer) return;
+		const { scrollTop, clientHeight, scrollHeight } = logContainer;
+		const atBottom = scrollHeight - scrollTop - clientHeight < 30;
+		if (atBottom && !autoScroll) {
+			autoScroll = true;
+		}
 	}
 
 	function getReconnectDelay() {
@@ -450,6 +435,22 @@
 		return tagColors[tag] ?? tagColors.INFO;
 	}
 
+	// 탭 전환 시 (hidden→visible) autoScroll=true이면 맨 아래로 복원
+	$effect(() => {
+		if (!logContainer) return;
+		const observer = new MutationObserver(() => {
+			if (logContainer.offsetParent !== null && autoScroll) {
+				logContainer.scrollTop = logContainer.scrollHeight;
+			}
+		});
+		// 부모 요소의 class(hidden) 변경 감지
+		const parent = logContainer.parentElement;
+		if (parent) {
+			observer.observe(parent, { attributes: true, attributeFilter: ['class'] });
+		}
+		return () => observer.disconnect();
+	});
+
 	// batchPlans 변경 시 부모에 알림
 	$effect(() => {
 		onBatchPlansChange?.(batchPlans);
@@ -542,9 +543,8 @@
 				onclick={() => {
 					if (autoScroll) {
 						autoScroll = false;
-						paused = true;
 					} else {
-						resumeLog();
+						autoScroll = true;
 						scrollToBottom();
 					}
 				}}
@@ -555,11 +555,6 @@
 				{:else}
 					<!-- PinOff icon -->
 					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h12"/><path d="M15 9.34V6h1a2 2 0 0 0 0-4H7.89"/></svg>
-					{#if pauseBuffer.length > 0}
-						<span class="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5 leading-none">
-							{pauseBuffer.length}
-						</span>
-					{/if}
 				{/if}
 			</button>
 		</div>
