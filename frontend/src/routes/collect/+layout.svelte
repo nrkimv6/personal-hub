@@ -8,8 +8,7 @@
   const navTabs = [
     { id: 'posts', label: '게시물', href: '/collect', exact: true },
     { id: 'rules', label: '분류 규칙', href: '/collect/rules' },
-    { id: 'history', label: '크롤링 이력', href: '/collect/history' },
-    { id: 'schedule', label: '스케줄 설정', href: '/collect/schedule' },
+    { id: 'history', label: '수집 이력', href: '/collect/history' },
     { id: 'google', label: '구글 검색', href: '/collect/google' }
   ];
 </script>

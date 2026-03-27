@@ -1,4 +1,4 @@
-import { LayoutDashboard, Satellite, Download, Wrench, Settings, Check, X, AlertTriangle, AlertCircle, Info } from 'lucide-svelte';
+import { LayoutDashboard, Satellite, Download, Wrench, Settings, Code, Check, X, AlertTriangle, AlertCircle, Info } from 'lucide-svelte';
 
 export const iconMap = {
 	LayoutDashboard,
@@ -6,6 +6,7 @@ export const iconMap = {
 	Download,
 	Wrench,
 	Settings,
+	Code,
 	Check,
 	X,
 	AlertTriangle,

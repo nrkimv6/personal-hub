@@ -8,9 +8,10 @@
   import SettingsTab from './SettingsTab.svelte';
   import DiagnosticTab from './DiagnosticTab.svelte';
   import MemoryTab from './MemoryTab.svelte';
+  import SleepNowTab from './SleepNowTab.svelte';
 
   // 탭 정의
-  type TabId = 'status' | 'errors' | 'integrity' | 'browsers' | 'settings' | 'memory' | 'diagnostic';
+  type TabId = 'status' | 'errors' | 'integrity' | 'browsers' | 'settings' | 'memory' | 'diagnostic' | 'sleep-now';
 
   // 탭 상태
   let activeTab: TabId = $state('status');
@@ -48,6 +49,7 @@
       countVariant: memoryDangerLevel === 'critical' ? ('error' as const) : memoryDangerLevel === 'warning' ? ('warning' as const) : undefined,
     },
     { id: 'diagnostic', label: '진단' },
+    { id: 'sleep-now', label: 'Sleep Now' },
   ]);
 
   // 콜백 함수들
@@ -95,6 +97,8 @@
       <MemoryTab onDangerChange={handleMemoryDangerChange} />
     {:else if activeTab === 'diagnostic'}
       <DiagnosticTab />
+    {:else if activeTab === 'sleep-now'}
+      <SleepNowTab />
     {/if}
   </div>
 </div>
