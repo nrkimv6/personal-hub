@@ -220,7 +220,12 @@ class LogService:
                 if message and message["type"] == "message":
                     data = message["data"]
                     if "__MERGE_COMPLETED__" in data:
-                        yield "event: completed\ndata: done\n\n"
+                        # sentinel 접미사 파싱: __MERGE_COMPLETED__:SUCCESS / :FAILED
+                        # 하위호환: 접미사 없으면 SUCCESS 기본값
+                        suffix = data.split("__MERGE_COMPLETED__", 1)[1]
+                        suffix = suffix.lstrip(":")
+                        reason = "completed" if (not suffix or suffix == "SUCCESS") else "merge_failed"
+                        yield f"event: completed\ndata: {reason}\n\n"
                         if pubsub:
                             try:
                                 await pubsub.unsubscribe(log_channel)
