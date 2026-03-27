@@ -143,21 +143,8 @@ def redis_runner_cleanup():
         pass  # cleanup 실패는 조용히 무시 (테스트 결과에 영향 주지 않음)
 
 
-@pytest.fixture(autouse=True)
-def force_test_source_on_start_dev_runner():
-    """전체 테스트에서 start_dev_runner 호출 시 test_source 누락을 즉시 실패시킨다.
-
-    test_source가 없으면 trigger="api" → visible=True → 프론트엔드에 테스트 러너가 노출된다.
-    이 guard는 tests/ 루트에 위치하여 모든 하위 디렉토리에 적용된다.
-    """
-    try:
-        from app.modules.dev_runner.services.executor_service import executor_service
-    except Exception:
-        yield
-        return
-
-    original = executor_service.start_dev_runner
-
+def _make_guarded_start_dev_runner(original):
+    """start_dev_runner를 wrapping하여 test_source 누락 및 visible trigger를 즉시 실패시키는 guard를 반환한다."""
     async def _patched(request, *args, **kwargs):
         if not getattr(request, "test_source", None):
             pytest.fail(
@@ -165,9 +152,50 @@ def force_test_source_on_start_dev_runner():
                 f"  request={request}\n"
                 f"  RunRequest(plan_file=..., test_source='<tc_name>') 형태로 전달하세요."
             )
+        trigger = getattr(request, "trigger", None)
+        if trigger in ("user", "user:all"):
+            pytest.fail(
+                f"start_dev_runner() 호출 시 trigger='user' 또는 'user:all' 사용 금지.\n"
+                f"  request={request}\n"
+                f"  테스트에서 visible trigger 사용은 프론트엔드에 테스트 러너를 노출시킵니다.\n"
+                f"  test_source를 설정하면 trigger가 자동으로 tc:{{test_source}}로 설정됩니다."
+            )
         return await original(request, *args, **kwargs)
+    return _patched
 
-    with patch.object(executor_service, "start_dev_runner", side_effect=_patched):
+
+@pytest.fixture(autouse=True)
+def force_test_source_on_start_dev_runner():
+    """전체 테스트에서 start_dev_runner 호출 시 test_source 누락 및 visible trigger를 즉시 실패시킨다.
+
+    - test_source가 없으면 trigger="api" → visible=True → 프론트엔드에 테스트 러너가 노출된다.
+    - trigger="user" 또는 "user:all" 직접 전달 시에도 guard가 차단한다.
+    - 싱글톤 executor_service 뿐 아니라, 새로 생성된 ExecutorService() 인스턴스에도 자동 적용된다.
+    - 이 guard는 tests/ 루트에 위치하여 모든 하위 디렉토리에 적용된다.
+    """
+    try:
+        from app.modules.dev_runner.services import executor_service as es_module
+        from app.modules.dev_runner.services.executor_service import ExecutorService, executor_service
+    except Exception:
+        yield
+        return
+
+    # 싱글톤 인스턴스 guard
+    original_singleton = executor_service.start_dev_runner
+
+    # 새 인스턴스 guard: __init__ 후 start_dev_runner를 자동으로 wrap
+    original_init = ExecutorService.__init__
+
+    def _patched_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        original_method = self.start_dev_runner
+        # bound method를 guard로 교체
+        import functools
+        guarded = _make_guarded_start_dev_runner(original_method)
+        self.start_dev_runner = guarded
+
+    with patch.object(executor_service, "start_dev_runner", side_effect=_make_guarded_start_dev_runner(original_singleton)), \
+         patch.object(ExecutorService, "__init__", _patched_init):
         yield
 
 
