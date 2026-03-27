@@ -76,8 +76,9 @@
 	<div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
 		<!-- 검색어 필터 -->
 		<div>
-			<label class="block text-xs text-muted-foreground mb-1">검색어</label>
+			<label class="block text-xs text-muted-foreground mb-1" for="query">검색어</label>
 			<input
+				id="query"
 				type="text"
 				value={query}
 				oninput={(e) => onQueryChange(e.currentTarget.value)}
@@ -88,8 +89,9 @@
 
 		<!-- 텍스트 검색 -->
 		<div>
-			<label class="block text-xs text-muted-foreground mb-1">제목/URL/스니펫</label>
+			<label for="search" class="block text-xs text-muted-foreground mb-1">제목/URL/스니펫</label>
 			<input
+				id="search"
 				type="text"
 				value={search}
 				oninput={(e) => onSearchChange(e.currentTarget.value)}
@@ -100,9 +102,10 @@
 
 		<!-- 정렬 -->
 		<div>
-			<label class="block text-xs text-muted-foreground mb-1">정렬</label>
+			<label for="sort-by" class="block text-xs text-muted-foreground mb-1">정렬</label>
 			<div class="flex gap-1">
 				<select
+					id="sort-by"
 					value={sortBy}
 					onchange={(e) => onSortByChange(e.currentTarget.value)}
 					class="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
@@ -123,8 +126,9 @@
 
 		<!-- 페이지 크기 -->
 		<div>
-			<label class="block text-xs text-muted-foreground mb-1">표시 개수</label>
+			<label for="page-size" class="block text-xs text-muted-foreground mb-1">표시 개수</label>
 			<select
+				id="page-size"
 				value={pageSize}
 				onchange={(e) => onPageSizeChange(Number(e.currentTarget.value))}
 				class="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
@@ -149,8 +153,9 @@
 		<div class="grid grid-cols-1 md:grid-cols-4 gap-3 pt-3 border-t border-border">
 			<!-- 기간 필터 -->
 			<div>
-				<label class="block text-xs text-muted-foreground mb-1">수집 시작일</label>
+				<label for="date-from" class="block text-xs text-muted-foreground mb-1">수집 시작일</label>
 				<input
+					id="date-from"
 					type="date"
 					value={dateFrom}
 					oninput={(e) => onDateFromChange(e.currentTarget.value)}
@@ -158,8 +163,9 @@
 				/>
 			</div>
 			<div>
-				<label class="block text-xs text-muted-foreground mb-1">수집 종료일</label>
+				<label for="date-to" class="block text-xs text-muted-foreground mb-1">수집 종료일</label>
 				<input
+					id="date-to"
 					type="date"
 					value={dateTo}
 					oninput={(e) => onDateToChange(e.currentTarget.value)}
@@ -169,8 +175,9 @@
 
 			<!-- 읽음 필터 -->
 			<div>
-				<label class="block text-xs text-muted-foreground mb-1">읽음 상태</label>
+				<label for="is-read" class="block text-xs text-muted-foreground mb-1">읽음 상태</label>
 				<select
+					id="is-read"
 					value={isRead}
 					onchange={(e) => onReadChange(e.currentTarget.value)}
 					class="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
