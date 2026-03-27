@@ -1,0 +1,632 @@
+"""_dr_process_utils.py — dev-runner 프로세스 유틸리티 모듈"""
+import logging
+import time
+import threading
+from pathlib import Path
+from typing import Optional
+
+import redis
+
+from _dr_constants import (
+    RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, PLAN_FILE_ALL, _LEGACY_ALL,
+    LOG_CHANNEL_PREFIX, MERGE_ACTIVE_STATUSES, WORKTREE_BASE_DIR,
+    RECENT_RUNNERS_TTL, RUNNER_KEY_SUFFIXES, PROJECT_ROOT,
+)
+from _dr_state import (
+    get_running_processes, get_running_log_files, get_stream_threads,
+    get_cleanup_done, get_dead_process_first_seen, get_wf_manager,
+)
+from _dr_subprocess import _ANSI_ESCAPE
+
+logger = logging.getLogger(__name__)
+
+
+def _evict_stale_cleanup_done(max_age: int = 300) -> None:
+    """_cleanup_done에서 max_age초 이상 된 항목 제거 (메모리 누수 방지)"""
+    _cleanup_done = get_cleanup_done()
+    now = time.time()
+    expired = [rid for rid, ts in list(_cleanup_done.items()) if now - ts > max_age]
+    if expired:
+        logger.debug(f"heartbeat: _cleanup_done TTL 소거 {len(expired)}개: {expired}")
+        for rid in expired:
+            _cleanup_done.pop(rid, None)
+
+
+def _evict_stale_dead_process(max_age: int = 300) -> None:
+    """_dead_process_first_seen에서 max_age초 이상 된 항목 제거 (메모리 누수 방지)"""
+    _dead_process_first_seen = get_dead_process_first_seen()
+    now = time.time()
+    expired = [rid for rid, ts in list(_dead_process_first_seen.items()) if now - ts > max_age]
+    if expired:
+        logger.debug(f"heartbeat: _dead_process_first_seen TTL 소거 {len(expired)}개: {expired}")
+        for rid in expired:
+            _dead_process_first_seen.pop(rid, None)
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """PID가 실제로 살아있는지 OS 레벨 확인 (Windows)"""
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        STILL_ACTIVE = 259
+        exit_code = ctypes.c_ulong()
+        kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+        kernel32.CloseHandle(handle)
+        return exit_code.value == STILL_ACTIVE
+    except Exception:
+        return False
+
+
+def get_plan_git_root(plan_file: str) -> Path:
+    """plan 파일의 git root를 동적으로 감지한다."""
+    import subprocess
+    try:
+        plan_path = Path(plan_file)
+        cwd = str(plan_path.parent) if plan_path.parent.is_dir() else str(plan_path.parent.parent)
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=cwd, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return Path(result.stdout.strip())
+    except Exception as e:
+        logger.warning(f"get_plan_git_root: git rev-parse 실패 (plan={plan_file}): {e}")
+    logger.warning(f"get_plan_git_root: fallback to PROJECT_ROOT (plan={plan_file})")
+    return PROJECT_ROOT
+
+
+def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: str = "process_cleanup"):
+    """전역 프로세스 변수 + Redis 상태 정리 (per-runner) + Workflow DB 갱신"""
+    _running_processes = get_running_processes()
+    _running_log_files = get_running_log_files()
+    _stream_threads = get_stream_threads()
+    _cleanup_done = get_cleanup_done()
+    _dead_process_first_seen = get_dead_process_first_seen()
+    _wf_manager = get_wf_manager()
+
+    # 🔴 머지 보호 가드: reconnect_* / heartbeat_* 계열 reason이면 머지 진행 중 cleanup 거부
+    if reason and reason.startswith(("reconnect_", "heartbeat_")):
+        try:
+            merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            if merge_status in MERGE_ACTIVE_STATUSES:
+                logger.warning(
+                    f"[cleanup] 머지 진행중 runner {runner_id} cleanup 거부 "
+                    f"(reason={reason}, merge_status={merge_status})"
+                )
+                return
+        except Exception as _guard_err:
+            logger.debug(f"[cleanup] 머지 가드 조회 실패 (무시): {_guard_err}")
+
+    # 대기 큐에서 이 runner 제거 (crash/정상종료 모두, 고아 엔트리 방지)
+    try:
+        redis_client.lrem("plan-runner:merge-wait-queue", 0, runner_id)
+    except Exception:
+        pass
+
+    # cleanup 직전 SSE 클라이언트에 완료 신호 publish (exit_reason 포함)
+    try:
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+        exit_reason = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason") or "completed"
+        redis_client.publish(log_channel, f"__COMPLETED::{exit_reason}__")
+    except Exception:
+        pass
+
+    _running_processes.pop(runner_id, None)
+    _running_log_files.pop(runner_id, None)
+    _dead_process_first_seen.pop(runner_id, None)
+    _cleanup_done[runner_id] = time.time()
+    if runner_id in _stream_threads:
+        t = _stream_threads.pop(runner_id)
+        if t.is_alive():
+            t.join(timeout=3)
+
+    try:
+        from worktree_manager import WorktreeManager
+        from plan_worktree_helpers import is_plan_in_progress as _is_plan_in_progress
+
+        # worktree 정리 (머지 완료 또는 실패로 정리 필요한 경우)
+        merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
+            plan_file_val = None
+        # plan 파일의 git root 결정 (wtools 등 외부 레포 워크트리 정리 지원)
+        _cleanup_worktree_base = (get_plan_git_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
+
+        # 구현중 plan은 워크트리 보존 (재실행 시 이어서 작업 가능)
+        _preserve_worktree = False
+        if plan_file_val and _is_plan_in_progress(plan_file_val):
+            _preserve_worktree = True
+            logger.info(f"워크트리 보존 (plan 구현중): {runner_id}")
+
+        # merge_status가 없거나 "merged"가 아닌 경우에만 worktree 정리 시도
+        # (머지 워크플로가 별도로 관리하는 경우 스킵)
+        if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
+            try:
+                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+            except Exception as wt_e:
+                logger.warning(f"worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
+        elif not _preserve_worktree and merge_status in ("merging", "testing"):
+            # 프로세스가 죽은 상태에서 중간 상태로 남은 경우 — stale worktree 정리
+            try:
+                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+                logger.info(f"stale 중간 상태 worktree 정리: {runner_id} (merge_status={merge_status})")
+            except Exception as wt_e:
+                logger.warning(f"stale worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
+
+        # 종료된 runner를 RECENT_RUNNERS에 등록하여 탭 이력 보존
+        from _dr_constants import RECENT_RUNNERS_KEY
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        for suffix in RUNNER_KEY_SUFFIXES:
+            if _preserve_worktree and suffix == "worktree_path":
+                continue  # 워크트리 보존 시 worktree_path는 TTL 설정 스킵
+            if suffix in ("plan_file", "branch"):
+                continue  # 불변 속성: TTL 없이 영구 보존 (종료 후에도 탭 표시용)
+            key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
+            redis_client.expire(key, RECENT_RUNNERS_TTL)
+        redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
+        redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
+    except Exception:
+        pass
+
+    # Workflow DB: running 상태인 경우 failed로 전이
+    try:
+        if _wf_manager:
+            wf = _wf_manager.get_by_runner_id(runner_id)
+            if wf and wf["status"] in ("running", "merge_pending", "merging"):
+                _wf_manager.update_status(wf["id"], "failed", error_message=f"Cleanup: {reason}")
+                logger.info(f"[cleanup] workflow {wf['id']} → failed (reason: {reason})")
+    except Exception as e:
+        logger.warning(f"[cleanup] workflow DB 갱신 실패 (무시): {e}")
+
+
+class _DummyProcess:
+    """재연결된 plan-runner 프로세스를 위한 래퍼.
+
+    기존 코드의 ``proc.poll()`` 호출과 호환되도록 poll() / wait() 인터페이스를 제공한다.
+    실제 stdout pipe는 없으므로 로그 tailing은 별도 스레드(_tail_log_and_publish)가 담당한다.
+    """
+
+    def __init__(self, pid: int):
+        self.pid = pid
+        self.returncode: Optional[int] = None
+
+    def poll(self) -> Optional[int]:
+        """프로세스가 살아있으면 None, 종료되었으면 -1 반환."""
+        if self.returncode is not None:
+            return self.returncode
+        if not _is_pid_alive(self.pid):
+            self.returncode = -1
+        return self.returncode
+
+
+def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Redis):
+    """로그 파일 끝(EOF)부터 새 줄을 읽어 Redis log channel에 publish하는 스레드.
+
+    재연결된 runner에서 pipe가 없을 때 파일 tailing으로 대체 스트리밍한다.
+    PID 종료 + 더 이상 새 줄 없음 → 스레드 종료.
+    """
+    _running_processes = get_running_processes()
+    log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            # 파일 끝으로 이동 (재연결 전 기존 내용은 재발행하지 않음)
+            f.seek(0, 2)
+            while True:
+                # runner가 이미 cleanup됐으면 스레드 종료
+                if runner_id not in _running_processes:
+                    break
+                line = f.readline()
+                if line:
+                    stripped = line.rstrip('\n')
+                    try:
+                        redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', stripped))
+                    except redis.ConnectionError:
+                        pass
+                else:
+                    # 더 읽을 내용 없음 — PID가 죽었는지 확인
+                    proc = _running_processes.get(runner_id)
+                    if proc is not None and proc.poll() is not None:
+                        # 프로세스 종료 후 파일에 추가된 잔여 라인을 한 번 더 드레인
+                        # (plan-runner가 종료 직전 _log()로 기록한 FAIL 로그 등)
+                        time.sleep(0.3)  # 파일 flush 대기
+                        while True:
+                            remaining = f.readline()
+                            if not remaining:
+                                break
+                            _stripped = remaining.rstrip('\n')
+                            if _stripped:
+                                try:
+                                    redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', _stripped))
+                                except redis.ConnectionError:
+                                    pass
+                        break
+                    time.sleep(0.2)
+    except FileNotFoundError:
+        logger.warning(f"[tail_log] 로그 파일 없음: {log_path}")
+    except Exception as e:
+        logger.error(f"[tail_log] 스레드 오류 (runner_id={runner_id}): {e}")
+
+
+def _monitor_pid_until_exit(runner_id: str, pid: int, redis_client: redis.Redis):
+    """PID 종료를 1초 간격으로 감지하여 _cleanup_process_state()를 호출하는 스레드."""
+    _running_processes = get_running_processes()
+    _cleanup_done = get_cleanup_done()
+    _stream_threads = get_stream_threads()
+    while True:
+        # 이미 cleanup됐으면 즉시 종료 (중복 cleanup 방지)
+        if runner_id not in _running_processes or runner_id in _cleanup_done:
+            break
+        if not _is_pid_alive(pid):
+            # proc.poll()과 교차검증 — _is_pid_alive 단독 판정으로 인한 premature cleanup 방지
+            proc = _running_processes.get(runner_id)
+            if proc is not None and proc.poll() is None:
+                # _is_pid_alive는 dead 신호, poll()은 alive — 일시적 불일치, 3초 후 재확인
+                logger.info(
+                    f"[monitor_pid] runner {runner_id} PID API dead but poll alive → 3초 재확인"
+                )
+                time.sleep(3)
+                # 재확인 후 _running_processes에 없으면 다른 스레드가 정리함 → 종료
+                if runner_id not in _running_processes or runner_id in _cleanup_done:
+                    break
+                if _running_processes.get(runner_id, proc).poll() is None:
+                    time.sleep(1)
+                    continue  # 다음 루프에서 재판정
+            # _cleanup_done 재확인 (교차검증 대기 사이에 다른 스레드가 cleanup했을 수 있음)
+            if runner_id in _cleanup_done:
+                break
+            logger.info(f"[monitor_pid] runner {runner_id} PID {pid} 종료 감지 → tail 스레드 완료 대기")
+            # tail 스레드가 파일 끝까지 drain 하도록 최대 5초 대기
+            tail_thread = _stream_threads.get(runner_id)
+            if tail_thread and tail_thread.is_alive():
+                tail_thread.join(timeout=5)
+            if runner_id in _cleanup_done:
+                break
+            logger.info(f"[monitor_pid] runner {runner_id} → cleanup")
+            _cleanup_process_state(runner_id, redis_client, reason="heartbeat_pid_exit")
+            break
+        time.sleep(1)
+
+
+def _attach_to_running_process(runner_id: str, pid: int, redis_client: redis.Redis):
+    """listener 재시작 시 이미 살아있는 plan-runner에 재연결.
+
+    pipe가 없으므로 로그 파일 tailing + PID 모니터 스레드로 대체 연결한다.
+    """
+    _running_processes = get_running_processes()
+    _running_log_files = get_running_log_files()
+    _stream_threads = get_stream_threads()
+
+    # 로그 파일 경로 조회
+    log_file_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
+    if not log_file_path:
+        log_file_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+    if not log_file_path or not Path(log_file_path).exists():
+        logger.warning(f"[attach] runner {runner_id} 로그 파일 없음 → cleanup")
+        _cleanup_process_state(runner_id, redis_client, reason="no_log_file")
+        return
+
+    # _DummyProcess 등록 (기존 heartbeat 루프의 proc.poll() 호환)
+    dummy = _DummyProcess(pid)
+    _running_processes[runner_id] = dummy
+    _running_log_files[runner_id] = Path(log_file_path)
+
+    # tailing 스레드 시작
+    tail_thread = threading.Thread(
+        target=_tail_log_and_publish,
+        args=(runner_id, log_file_path, redis_client),
+        daemon=True,
+    )
+    tail_thread.start()
+    _stream_threads[runner_id] = tail_thread
+
+    # PID 모니터 스레드 시작
+    monitor_thread = threading.Thread(
+        target=_monitor_pid_until_exit,
+        args=(runner_id, pid, redis_client),
+        daemon=True,
+    )
+    monitor_thread.start()
+
+    logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 생존 → 재연결")
+
+
+def _recover_pending_merge(runner_id: str, redis_client: redis.Redis, merge_status) -> None:
+    """리스너 재시작 시 미완료 머지 복구."""
+    from merge_lock import acquire_merge_lock, release_merge_lock  # noqa: F401
+
+    logger.info(f"[recover_merge] runner {runner_id} 머지 복구 시작 (merge_status={merge_status})")
+
+    try:
+        if merge_status in ("merging", "resolving"):
+            # stale lock 해제 후 queued로 재설정
+            try:
+                release_merge_lock(redis_client, runner_id)
+                logger.info(f"[recover_merge] runner {runner_id} stale merge lock 해제 (merge_status={merge_status})")
+            except Exception as _e:
+                logger.debug(f"[recover_merge] lock 해제 실패 (무시): {_e}")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+            # merge_requested 플래그가 없으면 새로 설정 (재진입 용)
+            _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            if not _mr:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+
+        elif merge_status in ("queued", "pending_merge") or merge_status is None:
+            # merge_requested가 있으면 그대로 _do_inline_merge 호출
+            _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            if not _mr:
+                # merge_requested 없으면 새로 설정
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+        else:
+            logger.info(f"[recover_merge] runner {runner_id} merge_status={merge_status} → 복구 불필요")
+            return
+
+        from _dr_plan_runner import _do_inline_merge
+        _do_inline_merge(runner_id, redis_client)
+
+    except Exception as e:
+        logger.warning(f"[recover_merge] runner {runner_id} 머지 복구 실패: {e}")
+
+
+def _reconnect_surviving_runners(redis_client: redis.Redis):
+    """listener 시작(또는 재시작) 시 한 번 호출."""
+    _running_processes = get_running_processes()
+    _stream_threads = get_stream_threads()
+    try:
+        runner_ids = redis_client.smembers(ACTIVE_RUNNERS_KEY)
+    except Exception as e:
+        logger.warning(f"[reconnect] active_runners 조회 실패: {e}")
+        return
+
+    for runner_id in runner_ids:
+        pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+        if not pid_str:
+            try:
+                _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+                _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            except Exception:
+                _mr, _ms = None, None
+            if _mr or _ms in MERGE_ACTIVE_STATUSES:
+                logger.warning(
+                    f"[reconnect] runner {runner_id} PID 없으나 머지 대기중 "
+                    f"(merge_requested={bool(_mr)}, merge_status={_ms}) → _recover_pending_merge"
+                )
+                if not (runner_id in _stream_threads and _stream_threads[runner_id].is_alive()):
+                    t = threading.Thread(
+                        target=_recover_pending_merge,
+                        args=(runner_id, redis_client, _ms),
+                        daemon=True,
+                    )
+                    t.start()
+            else:
+                logger.info(f"[listener] runner {runner_id} PID 정보 없음 → cleanup")
+                _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
+            continue
+        try:
+            pid = int(pid_str)
+        except ValueError:
+            logger.warning(f"[reconnect] runner {runner_id} 잘못된 PID 값: {pid_str!r} → cleanup")
+            _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
+            continue
+
+        # 이미 _running_processes에 등록된 경우(Redis 재연결 상황) 스킵
+        if runner_id in _running_processes:
+            continue
+
+        if _is_pid_alive(pid):
+            _attach_to_running_process(runner_id, pid, redis_client)
+        else:
+            try:
+                _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+                _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            except Exception:
+                _mr, _ms = None, None
+
+            if _mr or _ms in MERGE_ACTIVE_STATUSES:
+                logger.warning(
+                    f"[reconnect] runner {runner_id} PID {pid} 죽었으나 머지 대기중 "
+                    f"(merge_requested={bool(_mr)}, merge_status={_ms}) → cleanup 스킵"
+                )
+                if not (runner_id in _stream_threads and _stream_threads[runner_id].is_alive()):
+                    t = threading.Thread(
+                        target=_recover_pending_merge,
+                        args=(runner_id, redis_client, _ms),
+                        daemon=True,
+                    )
+                    t.start()
+            else:
+                logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 종료됨 → cleanup")
+                _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
+
+    # --- 고아 키 탐색: active_runners set에 없지만 runners:*:status 키가 존재하는 경우 ---
+    try:
+        for key in redis_client.scan_iter(f"{RUNNER_KEY_PREFIX}:*:status"):
+            prefix = f"{RUNNER_KEY_PREFIX}:"
+            suffix = ":status"
+            if not (key.startswith(prefix) and key.endswith(suffix)):
+                continue
+            orphan_id = key[len(prefix):-len(suffix)]
+            if not orphan_id:
+                continue
+            if orphan_id in runner_ids:
+                continue  # active_runners에 이미 있음 → 위에서 처리됨
+            logger.info(f"[reconnect] orphan key found (not in active_runners): {orphan_id}")
+            pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:pid")
+            if not pid_str:
+                try:
+                    _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_requested")
+                    _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_status")
+                except Exception:
+                    _mr, _ms = None, None
+                if _mr or _ms in MERGE_ACTIVE_STATUSES:
+                    logger.warning(
+                        f"[reconnect] orphan {orphan_id} PID 없으나 머지 대기중 "
+                        f"(merge_requested={bool(_mr)}, merge_status={_ms}) → _recover_pending_merge"
+                    )
+                    if not (orphan_id in _stream_threads and _stream_threads[orphan_id].is_alive()):
+                        t = threading.Thread(
+                            target=_recover_pending_merge,
+                            args=(orphan_id, redis_client, _ms),
+                            daemon=True,
+                        )
+                        t.start()
+                else:
+                    logger.info(f"[reconnect] orphan {orphan_id} PID 없음 → cleanup")
+                    _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
+                continue
+            try:
+                pid = int(pid_str)
+            except ValueError:
+                logger.warning(f"[reconnect] orphan {orphan_id} 잘못된 PID: {pid_str!r} → cleanup")
+                _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
+                continue
+            if _is_pid_alive(pid):
+                logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 생존 → 재연결")
+                _attach_to_running_process(orphan_id, pid, redis_client)
+            else:
+                try:
+                    _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_requested")
+                    _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_status")
+                except Exception:
+                    _mr, _ms = None, None
+
+                if _mr or _ms in MERGE_ACTIVE_STATUSES:
+                    logger.warning(
+                        f"[reconnect] orphan {orphan_id} PID {pid} 죽었으나 머지 대기중 "
+                        f"(merge_requested={bool(_mr)}, merge_status={_ms}) → cleanup 스킵"
+                    )
+                    if not (orphan_id in _stream_threads and _stream_threads[orphan_id].is_alive()):
+                        t = threading.Thread(
+                            target=_recover_pending_merge,
+                            args=(orphan_id, redis_client, _ms),
+                            daemon=True,
+                        )
+                        t.start()
+                else:
+                    logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 종료됨 → cleanup")
+                    _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
+    except Exception as e:
+        logger.warning(f"[reconnect] orphan scan 실패: {e}")
+
+
+def _detect_orphan_workflows(redis_client: redis.Redis) -> int:
+    """listener 시작 시 DB↔Redis 교차검증: running/merge_pending 워크플로우 중 active_runners에 없는 것을 failed로 전이"""
+    _wf_manager = get_wf_manager()
+    if _wf_manager is None:
+        return 0
+    cleaned = 0
+    try:
+        for status in ("running", "merge_pending"):
+            workflows = _wf_manager.list_workflows(status=status)
+            for wf in workflows:
+                runner_id = wf.get("runner_id")
+                if not runner_id:
+                    continue
+                if redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id):
+                    continue
+                # 머지 대기중인 러너는 failed 전이 스킵
+                try:
+                    _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+                    _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+                except Exception:
+                    _mr, _ms = None, None
+                if _mr or _ms in MERGE_ACTIVE_STATUSES:
+                    logger.info(
+                        f"[orphan] workflow {wf['id']} slug={wf.get('slug', '?')} (runner={runner_id}) "
+                        f"머지 대기중 (merge_requested={bool(_mr)}, merge_status={_ms}) → failed 전이 스킵"
+                    )
+                    continue
+                _wf_manager.update_status(
+                    wf["id"], "failed",
+                    error_message="orphan: listener 재시작 시 active_runners에 없음"
+                )
+                logger.warning(f"[orphan] workflow {wf['id']} slug={wf.get('slug', '?')} (runner={runner_id}) → failed")
+                cleaned += 1
+    except Exception as e:
+        logger.warning(f"[orphan] workflow 고아 탐지 실패: {e}")
+    return cleaned
+
+
+def _cleanup_orphan_plans(redis_client: redis.Redis) -> int:
+    """plan 파일 교차검증: Workflow DB에 running 레코드 없으면 경고 + 독자 커밋 없는 worktree/branch 자동 삭제"""
+    import re as _re
+    import subprocess as _sp
+    from plan_worktree_helpers import is_worktree_active, has_unmerged_commits
+    from worktree_manager import WorktreeManager
+    from plan_worktree_helpers import remove_plan_header_fields as _remove_plan_header_fields
+
+    _wf_manager = get_wf_manager()
+    if _wf_manager is None:
+        return 0
+    cleaned_count = 0
+    scan_dirs = []
+    plan_dir = PROJECT_ROOT / "docs" / "plan"
+    archive_dir = PROJECT_ROOT / "docs" / "archive"
+    if plan_dir.is_dir():
+        scan_dirs.append(plan_dir)
+    if archive_dir.is_dir():
+        scan_dirs.append(archive_dir)
+    if not scan_dirs:
+        return 0
+    try:
+        all_workflows = _wf_manager.list_workflows()
+        for scan_dir in scan_dirs:
+            for plan_file in scan_dir.glob("*.md"):
+                try:
+                    with open(plan_file, "r", encoding="utf-8") as f:
+                        head_lines = [f.readline() for _ in range(20)]
+                except Exception:
+                    continue
+                is_impl = any(_re.search(r">\s*상태:\s*(구현중|구현완료)", line) for line in head_lines if line)
+                if not is_impl:
+                    continue
+                filename = plan_file.name
+                # Workflow DB에서 이 plan에 대한 running 레코드 찾기
+                matching = [
+                    w for w in all_workflows
+                    if w.get("plan_file") and filename in w["plan_file"] and w.get("status") == "running"
+                ]
+                is_orphan = False
+                if not matching:
+                    logger.warning(f"[orphan-plan] {filename}: 상태=구현중/완료이지만 Workflow DB에 running 레코드 없음")
+                    is_orphan = True
+                else:
+                    for w in matching:
+                        rid = w.get("runner_id")
+                        if rid and not redis_client.sismember(ACTIVE_RUNNERS_KEY, rid):
+                            logger.warning(f"[orphan-plan] {filename}: runner {rid}가 active_runners에 없음")
+                            is_orphan = True
+
+                # orphan이면 worktree/branch 정리 시도
+                if is_orphan:
+                    try:
+                        active, branch, wt_abs = is_worktree_active(str(plan_file), PROJECT_ROOT)
+                        if active and branch:
+                            if has_unmerged_commits(branch, PROJECT_ROOT):
+                                r = _sp.run(
+                                    ["git", "log", f"main..{branch}", "--oneline"],
+                                    capture_output=True, text=True, cwd=str(PROJECT_ROOT)
+                                )
+                                n = len(r.stdout.strip().splitlines()) if r.stdout.strip() else "?"
+                                logger.warning(
+                                    f"[orphan-plan] {filename}: 독자 커밋 {n}개 존재 — 수동 확인 필요 (branch={branch})"
+                                )
+                            else:
+                                # 독자 커밋 없음 → 안전하게 정리
+                                try:
+                                    _orphan_base = get_plan_git_root(str(plan_file)) / ".worktrees"
+                                    WorktreeManager.remove("", _orphan_base, plan_file=str(plan_file))
+                                    _remove_plan_header_fields(str(plan_file))
+                                    logger.info(f"[orphan-plan] {filename}: worktree/branch 정리 완료 (branch={branch})")
+                                    cleaned_count += 1
+                                except Exception as rm_err:
+                                    logger.warning(f"[orphan-plan] {filename}: 정리 실패 — {rm_err}")
+                    except Exception as check_err:
+                        logger.warning(f"[orphan-plan] {filename}: worktree 확인 중 오류 — {check_err}")
+    except Exception as e:
+        logger.warning(f"[orphan-plan] plan 고아 탐지 실패: {e}")
+    return cleaned_count
