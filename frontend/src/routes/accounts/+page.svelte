@@ -636,7 +636,7 @@
 <!-- 생성/수정 모달 -->
 {#if showCreateModal}
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={closeModal} role="presentation">
-    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()}>
+    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" role="presentation" onclick={(e) => e.stopPropagation()}>
       <h2 class="text-xl font-bold mb-4">
         {editingAccount ? '계정 수정' : '계정 추가'}
       </h2>
