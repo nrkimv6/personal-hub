@@ -21,7 +21,6 @@ class RunRequest(BaseModel):
     parallel: bool = Field(False, description="병렬 실행 모드")
     projects: Optional[str] = Field(None, description="프로젝트 목록 (쉼표 구분)")
     worktree: bool = Field(True, description="worktree 모드 (격리 실행 + 머지 큐)")
-    pipeline: Optional[str] = Field(None, description="파이프라인 버전 (v1|v2)")
     test_source: Optional[str] = Field(None, description="테스트 출처 (pytest TC 추적용)")
     trigger: Optional[str] = Field(None, description="트리거 소스 (user, user:all, tc:{name}, api)")
 

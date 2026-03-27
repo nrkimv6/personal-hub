@@ -285,9 +285,6 @@ class ExecutorService:
         if request.worktree:
             command["worktree"] = True
 
-        if request.pipeline:
-            command["pipeline"] = request.pipeline
-
         if request.test_source:
             command["test_source"] = request.test_source
 
