@@ -201,7 +201,7 @@ class TestWorktreeHTTP:
                      patch.object(type(fake_async), "get", side_effect=fake_get):
                     response = client.post(
                         "/api/v1/dev-runner/run",
-                        json={"plan_file": "test-branch.md", "test_source": "tc_worktree_http"}
+                        json={"plan_file": "test-branch.md"}
                     )
 
         assert response.status_code == 200
