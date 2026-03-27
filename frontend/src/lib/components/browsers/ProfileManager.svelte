@@ -405,8 +405,8 @@
 
 <!-- 프로필 생성/수정 모달 -->
 {#if showCreateModal}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={closeModal} role="dialog" aria-modal="true">
-    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()} role="document">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={closeModal} onkeydown={(e) => e.key === 'Escape' && closeModal()} role="dialog" aria-modal="true" tabindex="-1">
+    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="presentation">
       <h2 class="text-xl font-bold mb-4">
         {editingProfile ? '프로필 수정' : '프로필 추가'}
       </h2>
@@ -488,7 +488,7 @@
 <!-- 서비스 계정 추가 모달 -->
 {#if showAddAccountModal}
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={closeAddAccountModal} onkeydown={(e) => e.key === 'Escape' && closeAddAccountModal()} role="dialog" aria-modal="true" tabindex="-1">
-    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="presentation">
       <h2 class="text-xl font-bold mb-4">서비스 계정 추가</h2>
 
       <form onsubmit={(e) => { e.preventDefault(); handleAddAccount(); }} class="space-y-4">
