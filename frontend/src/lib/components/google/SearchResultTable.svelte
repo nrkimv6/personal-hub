@@ -145,7 +145,7 @@
 
 					<!-- 관리 -->
 					<td class="px-3 py-2">
-						<div class="flex items-center justify-center gap-1" onclick={(e) => e.stopPropagation()}>
+						<div role="presentation" class="flex items-center justify-center gap-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 							<button
 								onclick={(e) => onBookmarkToggle(result, e)}
 								class="p-1 rounded transition-colors {result.is_bookmarked

@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
 import type { RequestHandler } from './$types';
 
 const WMI_CHECK_TIMEOUT_MS = 5000;

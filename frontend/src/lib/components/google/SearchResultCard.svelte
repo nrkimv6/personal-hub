@@ -43,7 +43,7 @@
 					<span class="text-sm font-bold text-gray-700">#{result.rank}</span>
 				</div>
 				<!-- 북마크/읽음 버튼 -->
-				<div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()}>
+				<div role="presentation" class="flex items-center gap-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 					<button
 						onclick={(e) => onBookmarkToggle(result, e)}
 						class="p-1.5 rounded-lg transition-colors {result.is_bookmarked
