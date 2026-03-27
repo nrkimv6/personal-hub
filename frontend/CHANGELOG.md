@@ -4,10 +4,12 @@
 ### Added
 - apiHealth 스토어: `ApiHealthState`에 `'dead'` 추가, `lastDeath` 상태 필드 및 getter 추가
 - **RunStatusBar에 onCleanup prop 추가** — Trash2 아이콘 버튼으로 Redis 잔존 상태 정리 기능
+- `/recovery` 긴급 복구 UI 페이지: WMI/API 상태 표시, WMI 재시작 버튼, 5초 폴링 자동 갱신 (Admin dev 서버 전용)
 
 ## [2.86.0] - 2026-03-12
 ### Added
 - vite.config.ts에 serverStatusPlugin 추가: `/__local/server-status` 미들웨어로 death_log.json 파싱 및 API 서버 사망 감지 엔드포인트 제공
+- `/recovery` 서버 라우트 추가: WMI 상태 조회(GET) + WMI 재시작(POST), Admin dev 서버 전용
 
 ### Fixed
 - GoogleResultsTab: onMount에서 URL searchParams → 필터 상태 복원 (새로고침 시 필터 유지)
