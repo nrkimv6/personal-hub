@@ -174,6 +174,49 @@ class TestRedisCleanupFixture:
         assert removed_active == set()
         assert removed_recent == set()
 
+    # ---------------------------------------------------------------------------
+    # T1-7: guard — 새 ExecutorService() 인스턴스 검증
+    # ---------------------------------------------------------------------------
+
+
+class TestGuardNewInstance:
+    """force_test_source_on_start_dev_runner fixture가 새 ExecutorService()
+    인스턴스의 start_dev_runner에도 guard를 적용하는지 검증한다."""
+
+    def test_guard_new_instance_right(self):
+        """ExecutorService() 새 인스턴스에서 test_source 없이 start_dev_runner 호출 시
+        pytest.fail 발생 검증.
+
+        시나리오:
+        1. ExecutorService() 새 인스턴스 생성
+        2. test_source=None인 RunRequest로 start_dev_runner 호출
+        3. pytest.fail() → _pytest.outcomes.Failed 예외 발생 확인
+        4. 오류 메시지에 "test_source" 포함 확인
+        """
+        import asyncio
+        from _pytest.outcomes import Failed
+
+        try:
+            from app.modules.dev_runner.services.executor_service import ExecutorService
+            from app.modules.dev_runner.schemas import RunRequest
+        except Exception as e:
+            pytest.skip(f"Import 실패 — 환경 문제: {e}")
+
+        # 새 인스턴스 생성 (conftest patch가 __init__을 통해 guard 적용)
+        svc = ExecutorService()
+
+        # test_source 없는 요청
+        req = RunRequest(plan_file="some/plan.md")
+        assert req.test_source is None, "전제 조건: test_source가 None이어야 함"
+
+        # guard가 pytest.fail()을 호출하면 Failed 예외가 발생함
+        with pytest.raises(Failed) as exc_info:
+            asyncio.get_event_loop().run_until_complete(svc.start_dev_runner(req))
+
+        assert "test_source" in str(exc_info.value), (
+            f"오류 메시지에 'test_source' 포함 기대. 실제: {exc_info.value}"
+        )
+
     def test_cleanup_only_deletes_new_keys_not_preexisting(self):
         """cleanup은 before 스냅샷에 있던 키는 삭제하지 않는다."""
         r = _make_redis()
