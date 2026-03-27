@@ -20,7 +20,13 @@ import fakeredis
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
 from worktree_manager import MergeResult, WorktreeManager
-from merge_workflow import MergeWorkflow, WorkflowResult
+
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "_deprecated"))
+    from merge_workflow import MergeWorkflow, WorkflowResult
+except ImportError:
+    MergeWorkflow = None
+    WorkflowResult = None
 
 
 # ─── fixtures ────────────────────────────────────────────────────────────────
@@ -32,6 +38,8 @@ def fake_redis():
 
 @pytest.fixture
 def workflow(fake_redis, tmp_path):
+    if MergeWorkflow is None:
+        pytest.skip("merge_workflow deprecated")
     return MergeWorkflow(project_root=tmp_path, redis_client=fake_redis, python_path="python")
 
 
@@ -88,6 +96,7 @@ class TestMergeToMainStderrStdoutBoth:
 
 # ─── Phase 3: MergeWorkflow.run() ─────────────────────────────────────────────
 
+@pytest.mark.skip(reason="MergeWorkflow deprecated — workflow_manager.WorkflowManager로 대체됨")
 class TestWorkflowRunNoCommitsSkip:
     """TC 20: worktree에 커밋 0개 + diff 없음 → skip (변경사항 없음)"""
 
@@ -118,6 +127,7 @@ class TestWorkflowRunNoCommitsSkip:
         assert "변경사항 없음" in result.message
 
 
+@pytest.mark.skip(reason="MergeWorkflow deprecated — workflow_manager.WorkflowManager로 대체됨")
 class TestWorkflowRunWithCommitsMerge:
     """TC 21: 커밋 있을 때 merge_to_main 호출 (회귀)"""
 

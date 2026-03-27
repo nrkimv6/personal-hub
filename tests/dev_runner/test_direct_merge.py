@@ -140,13 +140,11 @@ class TestDoDirectMerge:
 
 class TestInlineMergeBranchFromRedis:
     def _run_inline_merge_with_mock(self, tmp_path, runner_id, branch_value=None):
-        """_do_inline_merge 호출 헬퍼 — merge_lock/MergeWorkflow 모킹"""
+        """_do_inline_merge 호출 헬퍼 — _execute_merge_with_lock 모킹"""
         import fakeredis
         import sys
         import types
-        import merge_workflow as mw
         from unittest.mock import patch, MagicMock
-        from merge_workflow import WorkflowResult
 
         cl = _load_listener()
 
@@ -224,34 +222,14 @@ class TestDirectMergeEndpoint:
 
 class TestPubWritesToLogList:
     def test_pub_writes_to_log_list_R(self):
-        """R(Right): _pub() 호출 시 redis.rpush(log_list_key, ...) 호출 확인"""
+        """R(Right): _pub_and_log() 호출 시 redis.rpush(log_list_key, ...) 호출 확인"""
         cl = _load_listener()
         redis = make_redis_mock()
         runner_id = "t-dmerge-test123"
 
-        # _do_inline_merge 내부의 _pub을 직접 테스트할 수 없으므로
-        # 실제 _do_inline_merge를 호출하되 merge 단계 전에 _pub이 실행되는지 확인
-        # → _pub은 closure이므로 _do_inline_merge 호출 시 rpush 호출 여부로 검증
-
-        # merge_requested 삭제 + merge_lock 등을 mock
-        import types
-        mock_merge_lock = types.ModuleType("merge_lock")
-        mock_merge_lock.acquire_merge_lock = MagicMock(return_value=True)
-        mock_merge_lock.release_merge_lock = MagicMock(return_value=True)
-
-        redis.get.side_effect = lambda key: {
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path": "/tmp/wt",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:branch": "plan/test",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status": "queued",
-        }.get(key)
-
-        with patch.dict(sys.modules, {"merge_lock": mock_merge_lock}):
-            with patch("merge_workflow.MergeWorkflow") as mock_wf_cls:
-                mock_wf = MagicMock()
-                mock_wf.run.return_value = MagicMock(merged=True, tests_passed=True, conflict=False, message="ok")
-                mock_wf_cls.return_value = mock_wf
-                with patch.object(cl, "_cleanup_process_state", MagicMock()):
-                    cl._do_inline_merge(runner_id, redis)
+        # _pub_and_log를 직접 호출하여 rpush가 log_list_key로 발생하는지 검증
+        # (_pub 클로저는 _execute_merge_with_lock 내부에 있어 외부에서 직접 접근 불가)
+        cl._pub_and_log(runner_id, "test log message", redis, "MERGE")
 
         # rpush가 log_list_key로 호출되었는지 확인
         rpush_calls = redis.rpush.call_args_list
