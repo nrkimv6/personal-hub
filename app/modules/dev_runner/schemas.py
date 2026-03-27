@@ -178,6 +178,9 @@ class PlanRecordResponse(BaseModel):
     tags: Optional[list] = None
     summary: Optional[str] = None
     superseded_by: Optional[str] = None
+    recurrence_count: int = 1
+    chain_root_hash: Optional[str] = None
+    recurrence_suggestion: Optional[str] = None
     intent: Optional[str] = None
     trigger: Optional[str] = None
     scope: Optional[list] = None

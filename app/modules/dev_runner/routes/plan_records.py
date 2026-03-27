@@ -111,6 +111,68 @@ def sync_records(db: Session = Depends(get_db)):
     return svc.sync_all(paths)
 
 
+@router.get("/records/{record_id}/chain", response_model=list[PlanRecordResponse])
+def get_record_chain(record_id: int, db: Session = Depends(get_db)):
+    """체인 조회 — chain_root_hash 기준으로 연결된 반복 계획서 목록 반환 (recurrence_count 오름차순)"""
+    from app.models.plan_record import PlanRecord
+    from sqlalchemy import and_
+
+    record = db.query(PlanRecord).filter(PlanRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    if not record.chain_root_hash:
+        # 자기 자신만 반환 (단일 plan)
+        return [record]
+
+    chain = db.query(PlanRecord).filter(
+        and_(
+            PlanRecord.chain_root_hash == record.chain_root_hash,
+        )
+    ).order_by(PlanRecord.recurrence_count.asc()).all()
+
+    # chain root 자체도 포함
+    root = db.query(PlanRecord).filter_by(filename_hash=record.chain_root_hash).first()
+    if root and root not in chain:
+        chain = [root] + chain
+
+    return chain
+
+
+@router.get("/statistics/recurrence")
+def get_recurrence_statistics(db: Session = Depends(get_db)):
+    """반복 수정 통계 — recurrence_count >= 2 plan만 집계"""
+    from app.models.plan_record import PlanRecord
+    from sqlalchemy import and_, func
+    from collections import Counter
+
+    recurring = db.query(PlanRecord).filter(
+        PlanRecord.recurrence_count >= 2
+    ).all()
+
+    by_category: dict = {}
+    scope_counter: Counter = Counter()
+
+    for r in recurring:
+        cat = r.category or "unknown"
+        by_category[cat] = by_category.get(cat, 0) + 1
+        try:
+            import json
+            scopes = json.loads(r.scope or "[]") if r.scope else []
+            for s in scopes:
+                scope_counter[s] += 1
+        except Exception:
+            pass
+
+    top_scopes = [s for s, _ in scope_counter.most_common(10)]
+
+    return {
+        "by_category": by_category,
+        "top_scopes": top_scopes,
+        "total_recurrences": len(recurring),
+    }
+
+
 @router.get("/events", response_model=list[PlanEventResponse])
 def list_events(
     event_type: Optional[str] = None,

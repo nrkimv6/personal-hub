@@ -10,6 +10,9 @@
   let hasMore = false;
   let filterType = '';
 
+  // 반복 뱃지용: filename_hash → recurrence_count 맵 (count >= 2인 것만)
+  let recurrenceMap = new Map<string, number>();
+
   const EVENT_TYPES = ['created', 'archived', 'memo_updated', 'path_changed', 'missing'];
 
   const typeIcon: Record<string, string> = {
@@ -46,16 +49,30 @@
     loading = true;
     error = '';
     try {
-      const data = await planRecordsApi.listEvents({
-        event_type: filterType || undefined,
-        skip: append ? skip : 0,
-        limit
-      });
+      const [data, records] = await Promise.all([
+        planRecordsApi.listEvents({
+          event_type: filterType || undefined,
+          skip: append ? skip : 0,
+          limit
+        }),
+        append ? Promise.resolve(null) : planRecordsApi.listRecords({ skip: 0, limit: 200 })
+      ]);
       const allEvents = append ? [...events, ...data] : data;
       events = allEvents;
       skip = append ? skip + data.length : data.length;
       hasMore = data.length === limit;
       monthGroups = groupByMonth(events);
+
+      // 반복 맵 갱신 (초기 로드 시만)
+      if (records) {
+        const map = new Map<string, number>();
+        for (const r of records) {
+          if ((r.recurrence_count ?? 1) >= 2) {
+            map.set(r.filename_hash, r.recurrence_count);
+          }
+        }
+        recurrenceMap = map;
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : '이벤트 로드 실패';
     } finally {
@@ -123,9 +140,14 @@
                 <div class="flex items-start gap-3 text-xs">
                   <span class="mt-0.5">{typeIcon[event.event_type] ?? '·'}</span>
                   <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-2 flex-wrap">
                       <span class="text-foreground font-medium">{typeLabel[event.event_type] ?? event.event_type}</span>
                       <span class="text-muted-foreground">{formatTime(event.created_at)}</span>
+                      {#if event.event_type === 'archived' && event.detail?.filename_hash && recurrenceMap.has(String(event.detail.filename_hash))}
+                        <span class="text-xs bg-red-100 text-red-600 rounded px-1">
+                          {recurrenceMap.get(String(event.detail.filename_hash))}번째 반복
+                        </span>
+                      {/if}
                     </div>
                     {#if event.detail}
                       <p class="text-muted-foreground font-mono truncate mt-0.5" title={JSON.stringify(event.detail)}>

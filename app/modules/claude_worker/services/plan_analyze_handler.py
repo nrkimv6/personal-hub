@@ -75,6 +75,10 @@ def save_plan_archive_result(db: Session, request, result: dict) -> None:
         # requirements_sync 트리거 판단
         if category:
             _maybe_queue_requirements_sync(db, category)
+
+        # 반복 감지 트리거
+        if record.intent and record.scope:
+            detect_recurrence(db, record)
     except Exception as e:
         logger.error(f"save_plan_archive_result error: {e}", exc_info=True)
 
@@ -270,3 +274,341 @@ def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
     except Exception as e:
         logger.error(f"_maybe_queue_requirements_sync error: {e}", exc_info=True)
         return False
+
+
+# ──────────────────────────────────────────────
+# Phase 2: 반복 감지 로직
+# ──────────────────────────────────────────────
+
+def _get_scope_overlap_candidates(db: Session, record: PlanRecord) -> list:
+    """scope 겹침 후보 레코드 반환 (최대 20개)
+
+    같은 category + scope IS NOT NULL + applied_at IS NOT NULL + 자기 자신 제외
+    → Python set 교집합으로 필터 → applied_at 기준 plan_date와 가까운 순 정렬
+    """
+    try:
+        from sqlalchemy import and_
+
+        record_scope = set(json.loads(record.scope or "[]"))
+        if not record_scope:
+            return []
+
+        candidates = db.query(PlanRecord).filter(
+            and_(
+                PlanRecord.category == record.category,
+                PlanRecord.scope.isnot(None),
+                PlanRecord.applied_at.isnot(None),
+                PlanRecord.filename_hash != record.filename_hash,
+            )
+        ).limit(50).all()
+
+        # Python 레벨 set 교집합 필터
+        overlapping = [
+            c for c in candidates
+            if set(json.loads(c.scope or "[]")) & record_scope
+        ]
+
+        # applied_at 기준 record.plan_date와 가까운 순 정렬, 180일 이내 우선
+        from datetime import date, timedelta
+
+        def sort_key(c):
+            if record.plan_date and c.applied_at:
+                delta = abs((c.applied_at.date() - record.plan_date).days)
+                return (0 if delta <= 180 else 1, delta)
+            return (2, 0)
+
+        overlapping.sort(key=sort_key)
+        return overlapping[:20]
+    except Exception as e:
+        logger.error(f"_get_scope_overlap_candidates error: {e}", exc_info=True)
+        return []
+
+
+def detect_recurrence(db: Session, record: PlanRecord) -> bool:
+    """반복 감지: scope 겹침 후보 있으면 LLM 큐 등록
+
+    Returns:
+        True if LLM 큐 등록됨, False otherwise
+    """
+    try:
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+        from sqlalchemy import and_
+
+        candidates = _get_scope_overlap_candidates(db, record)
+        if not candidates:
+            return False
+
+        # 중복 방지: 같은 caller_id + status in (pending, processing)
+        existing = db.query(LLMRequest).filter(
+            and_(
+                LLMRequest.caller_type == "plan_recurrence_check",
+                LLMRequest.caller_id == record.filename_hash,
+                LLMRequest.status.in_(["pending", "processing"]),
+            )
+        ).first()
+        if existing:
+            logger.info(f"detect_recurrence: 이미 pending/processing 요청 있음 hash={record.filename_hash[:8]}")
+            return False
+
+        prompt = build_recurrence_check_prompt(record, candidates)
+        llm_req = LLMRequest(
+            caller_type="plan_recurrence_check",
+            caller_id=record.filename_hash,
+            prompt=prompt,
+            queue_name="utility",
+            requested_by="scheduler",
+        )
+        db.add(llm_req)
+        db.commit()
+        logger.info(f"detect_recurrence: LLM 큐 등록 hash={record.filename_hash[:8]}")
+        return True
+    except Exception as e:
+        logger.error(f"detect_recurrence error: {e}", exc_info=True)
+        return False
+
+
+def build_recurrence_check_prompt(record: PlanRecord, candidates: list) -> str:
+    """반복 감지 LLM 프롬프트 생성
+
+    Returns:
+        JSON 출력 스키마: {"is_recurrence": bool, "matched_hash": str|null,
+                          "confidence": "high"|"medium"|"low", "reason": str}
+    """
+    from datetime import date
+
+    current_scope = json.loads(record.scope or "[]") if record.scope else []
+    plan_date_str = str(record.plan_date) if record.plan_date else "unknown"
+
+    candidates_text = ""
+    for c in candidates[:10]:  # 최대 10개만
+        c_scope = json.loads(c.scope or "[]") if c.scope else []
+        applied_str = c.applied_at.strftime("%Y-%m-%d") if c.applied_at else "unknown"
+        delta_days = ""
+        if record.plan_date and c.applied_at:
+            delta_days = f" ({abs((c.applied_at.date() - record.plan_date).days)}일 전)"
+        candidates_text += f"""
+- hash: {c.filename_hash}
+  intent: {c.intent or '(없음)'}
+  scope: {c_scope}
+  applied_at: {applied_str}{delta_days}
+"""
+
+    prompt = f"""다음 두 개발 계획을 비교하여 반복 수정 여부를 판단하세요.
+
+## 현재 계획
+- plan_date: {plan_date_str}
+- intent: {record.intent}
+- scope: {current_scope}
+
+## 이전 관련 계획 후보
+{candidates_text}
+
+반복 수정이란: 동일하거나 매우 유사한 문제를 다시 수정하는 것을 의미합니다.
+scope 겹침이 있더라도 intent가 완전히 다른 문제라면 is_recurrence=false입니다.
+
+**출력 JSON 스키마 (JSON만 출력):**
+{{
+  "is_recurrence": true | false,
+  "matched_hash": "가장 유사한 이전 계획의 filename_hash (없으면 null)",
+  "confidence": "high" | "medium" | "low",
+  "reason": "판단 근거 1-2문장"
+}}"""
+    return prompt
+
+
+def save_recurrence_check_result(db: Session, request, result: dict) -> None:
+    """plan_recurrence_check caller_type 결과 저장
+
+    is_recurrence=True 시 superseded_by, chain_root_hash, recurrence_count 설정
+    """
+    try:
+        filename_hash = request.caller_id
+        record = db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
+        if not record:
+            logger.error(f"save_recurrence_check_result: record not found hash={filename_hash}")
+            return
+
+        llm_result = result.get("result") or {}
+        if isinstance(llm_result, str):
+            try:
+                llm_result = json.loads(llm_result)
+            except Exception:
+                llm_result = {}
+
+        is_recurrence = llm_result.get("is_recurrence", False)
+        matched_hash = llm_result.get("matched_hash")
+
+        if is_recurrence and matched_hash:
+            matched_record = db.query(PlanRecord).filter_by(filename_hash=matched_hash).first()
+            if matched_record:
+                record.superseded_by = matched_hash
+
+                # chain_root_hash 전파
+                if matched_record.chain_root_hash:
+                    record.chain_root_hash = matched_record.chain_root_hash
+                else:
+                    record.chain_root_hash = matched_hash
+
+                # recurrence_count 증가
+                matched_count = matched_record.recurrence_count or 1
+                record.recurrence_count = matched_count + 1
+
+                record.updated_at = datetime.now()
+                db.commit()
+                logger.info(
+                    f"save_recurrence_check_result: linked hash={filename_hash[:8]} "
+                    f"→ matched={matched_hash[:8]}, count={record.recurrence_count}"
+                )
+
+                # AI 제안 큐 등록 시도
+                maybe_queue_recurrence_suggest(db, record)
+            else:
+                logger.warning(f"save_recurrence_check_result: matched_record not found hash={matched_hash}")
+        else:
+            logger.info(f"save_recurrence_check_result: no recurrence detected hash={filename_hash[:8]}")
+    except Exception as e:
+        logger.error(f"save_recurrence_check_result error: {e}", exc_info=True)
+
+
+# ──────────────────────────────────────────────
+# Phase 3: AI 제안 생성
+# ──────────────────────────────────────────────
+
+def maybe_queue_recurrence_suggest(db: Session, record: PlanRecord) -> bool:
+    """recurrence_count >= 2 조건 시 AI 제안 LLM 큐 등록
+
+    Returns:
+        True if LLM 큐 등록됨, False otherwise
+    """
+    try:
+        if (record.recurrence_count or 1) < 2:
+            return False
+
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+        from sqlalchemy import and_
+        from datetime import timedelta
+
+        chain_root = record.chain_root_hash
+        if not chain_root:
+            return False
+
+        # 24시간 내 중복 요청 확인
+        cutoff = datetime.now() - timedelta(hours=24)
+        existing = db.query(LLMRequest).filter(
+            and_(
+                LLMRequest.caller_type == "plan_recurrence_suggest",
+                LLMRequest.caller_id == chain_root,
+                LLMRequest.requested_at > cutoff,
+                LLMRequest.status.in_(["pending", "processing"]),
+            )
+        ).first()
+        if existing:
+            logger.info(f"maybe_queue_recurrence_suggest: 24h 내 중복 스킵 root={chain_root[:8]}")
+            return False
+
+        # 체인 전체 조회 (recurrence_count 오름차순)
+        chain_records = db.query(PlanRecord).filter(
+            and_(
+                PlanRecord.chain_root_hash == chain_root,
+            )
+        ).order_by(PlanRecord.recurrence_count.asc()).all()
+
+        # chain root 자체도 포함
+        root_record = db.query(PlanRecord).filter_by(filename_hash=chain_root).first()
+        if root_record and root_record not in chain_records:
+            chain_records = [root_record] + chain_records
+
+        prompt = build_recurrence_suggest_prompt(chain_records)
+        llm_req = LLMRequest(
+            caller_type="plan_recurrence_suggest",
+            caller_id=chain_root,
+            prompt=prompt,
+            queue_name="utility",
+            requested_by="scheduler",
+        )
+        db.add(llm_req)
+        db.commit()
+        logger.info(f"maybe_queue_recurrence_suggest: LLM 큐 등록 root={chain_root[:8]}")
+        return True
+    except Exception as e:
+        logger.error(f"maybe_queue_recurrence_suggest error: {e}", exc_info=True)
+        return False
+
+
+def build_recurrence_suggest_prompt(chain_records: list) -> str:
+    """반복 수정 근본원인 분석 + 개선 제안 프롬프트 생성
+
+    Returns:
+        JSON 출력 스키마: {"root_cause": str, "pattern": str, "suggestion": str, "recurrence_count": int}
+    """
+    records_text = ""
+    for r in chain_records:
+        scope_list = json.loads(r.scope or "[]") if r.scope else []
+        plan_date_str = str(r.plan_date) if r.plan_date else "unknown"
+        applied_str = r.applied_at.strftime("%Y-%m-%d") if r.applied_at else "미완료"
+        records_text += f"""
+- 반복 {r.recurrence_count}회: plan_date={plan_date_str}, applied_at={applied_str}
+  intent: {r.intent or '(없음)'}
+  scope: {scope_list}
+  trigger: {r.trigger or 'unknown'}
+"""
+
+    prompt = f"""다음은 동일한 모듈/기능을 반복 수정한 개발 이력입니다. (총 {len(chain_records)}회)
+
+{records_text}
+
+이 반복 수정 패턴을 분석하여 근본 원인과 개선 방향을 제시해주세요.
+
+**출력 JSON 스키마 (JSON만 출력):**
+{{
+  "root_cause": "반복 수정의 근본 원인 (2-3문장)",
+  "pattern": "반복되는 패턴 설명 (1-2문장)",
+  "suggestion": "재발 방지를 위한 구체적 개선 방향 (2-3문장)",
+  "recurrence_count": {len(chain_records)}
+}}"""
+    return prompt
+
+
+def save_recurrence_suggest_result(db: Session, request, result: dict) -> None:
+    """plan_recurrence_suggest caller_type 결과 저장
+
+    chain_root_hash 기준으로 recurrence_count 가장 높은 record에 저장
+    """
+    try:
+        chain_root = request.caller_id
+
+        # recurrence_count 가장 높은 record 조회
+        from sqlalchemy import and_
+
+        latest_record = db.query(PlanRecord).filter(
+            and_(
+                PlanRecord.chain_root_hash == chain_root,
+            )
+        ).order_by(PlanRecord.recurrence_count.desc()).first()
+
+        if not latest_record:
+            # chain root 자체를 대상으로
+            latest_record = db.query(PlanRecord).filter_by(filename_hash=chain_root).first()
+
+        if not latest_record:
+            logger.error(f"save_recurrence_suggest_result: no record found for root={chain_root}")
+            return
+
+        llm_result = result.get("result") or {}
+        if isinstance(llm_result, str):
+            try:
+                llm_result = json.loads(llm_result)
+            except Exception:
+                llm_result = {}
+
+        suggestion_data = {
+            "root_cause": llm_result.get("root_cause", ""),
+            "pattern": llm_result.get("pattern", ""),
+            "suggestion": llm_result.get("suggestion", ""),
+        }
+        latest_record.recurrence_suggestion = json.dumps(suggestion_data, ensure_ascii=False)
+        latest_record.updated_at = datetime.now()
+        db.commit()
+        logger.info(f"save_recurrence_suggest_result: saved for record id={latest_record.id}")
+    except Exception as e:
+        logger.error(f"save_recurrence_suggest_result error: {e}", exc_info=True)

@@ -28,6 +28,9 @@ export interface PlanRecord {
 	tags: string[] | null;
 	summary: string | null;
 	superseded_by: string | null;
+	recurrence_count: number;
+	chain_root_hash: string | null;
+	recurrence_suggestion: string | null;
 	llm_processed_at: string | null;
 	created_at: string;
 	updated_at: string;
@@ -149,6 +152,33 @@ export const planRecordsApi = {
 		if (params?.limit != null) q.set('limit', String(params.limit));
 		const qs = q.toString();
 		return planRecordsRequest<PlanEvent[]>(`/events${qs ? '?' + qs : ''}`);
+	},
+
+	/**
+	 * 체인 조회 — chain_root_hash 기준 반복 이력 목록
+	 */
+	getChain: (recordId: number) =>
+		planRecordsRequest<PlanRecord[]>(`/records/${recordId}/chain`),
+
+	/**
+	 * 반복 수정 통계
+	 */
+	getRecurrenceStatistics: () =>
+		planRecordsRequest<{
+			by_category: Record<string, number>;
+			top_scopes: string[];
+			total_recurrences: number;
+		}>('/statistics/recurrence'),
+
+	/**
+	 * 레코드 목록 (recurrence_count 필터용, listRecords alias)
+	 */
+	listRecords: (params?: { skip?: number; limit?: number }) => {
+		const q = new URLSearchParams();
+		if (params?.skip != null) q.set('skip', String(params.skip));
+		if (params?.limit != null) q.set('limit', String(params.limit));
+		const qs = q.toString();
+		return planRecordsRequest<PlanRecord[]>(`/records${qs ? '?' + qs : ''}`);
 	}
 };
 
