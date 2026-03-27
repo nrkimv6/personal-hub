@@ -71,6 +71,7 @@ from _dr_commands import (
 )
 
 from workflow_manager import WorkflowManager
+from worktree_manager import WorktreeManager
 
 # 로깅 설정
 log_dir = PROJECT_ROOT / "logs" / "admin"
@@ -86,6 +87,13 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+# 하위 호환 별칭 — 테스트/외부 코드에서 직접 접근 지원 (리팩토링 후 _dr_state로 이동됨)
+_running_processes = get_running_processes()
+_running_log_files = get_running_log_files()
+_stream_threads = get_stream_threads()
+_cleanup_done = get_cleanup_done()
+_dead_process_first_seen = get_dead_process_first_seen()
 
 
 def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
