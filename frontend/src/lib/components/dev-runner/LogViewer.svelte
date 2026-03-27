@@ -472,8 +472,8 @@
 		addLine(text, false);
 	}
 
-	export function injectCompleted() {
-		exitBanner = { show: true, reason: 'completed' };
+	export function injectCompleted(reason: string = 'completed') {
+		exitBanner = { show: true, reason };
 		eventSource?.close();
 		eventSource = null;
 		connected = 'disconnected';
@@ -577,6 +577,10 @@
 				{:else}
 					<span>Rate limit으로 중단</span>
 				{/if}
+			</div>
+		{:else if exitBanner.reason === 'merge_failed'}
+			<div class="px-3 py-1.5 bg-red-900/40 border-b border-red-700/50 text-xs text-red-300 shrink-0 flex items-center gap-2">
+				<span>머지 실패 — 로그를 확인하세요</span>
 			</div>
 		{:else if exitBanner.reason === 'error'}
 			<div class="px-3 py-1.5 bg-red-900/40 border-b border-red-700/50 text-xs text-red-300 shrink-0 flex items-center gap-2">
