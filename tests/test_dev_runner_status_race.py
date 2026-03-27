@@ -207,7 +207,7 @@ class TestMonitorPidUntilExit:
         call_count = {"n": 0}
         def mock_cleanup(runner_id, redis_client, reason="process_cleanup"):
             call_count["n"] += 1
-            _listener._cleanup_done.add(runner_id)
+            _listener._cleanup_done[runner_id] = time.time()
             _listener._running_processes.pop(runner_id, None)
 
         mock_redis = MagicMock()
@@ -229,7 +229,7 @@ class TestMonitorPidUntilExit:
         mock_proc = MagicMock()
         mock_proc.poll.return_value = 0
         _listener._running_processes[rid] = mock_proc
-        _listener._cleanup_done.add(rid)  # 이미 cleanup 완료
+        _listener._cleanup_done[rid] = time.time()  # 이미 cleanup 완료
 
         call_count = {"n": 0}
         def mock_cleanup(runner_id, redis_client, reason="process_cleanup"):
@@ -290,7 +290,7 @@ class TestHeartbeatTimeout:
                         pass
                     _listener._running_processes.pop(rid, None)
                     _listener._dead_process_first_seen.pop(rid, None)
-                    _listener._cleanup_done.add(rid)
+                    _listener._cleanup_done[rid] = time.time()
                     _listener._cleanup_process_state(rid, mock_r, reason="process_cleanup")
                     return "force_cleanup"
                 return "merge_skip"
@@ -391,25 +391,22 @@ class TestOrphanWorkflowAutoFix:
 
     @pytest.mark.asyncio
     async def test_orphan_workflow_auto_fix_on_list(self):
-        """RIGHT: get_all_runners() 호출 시 orphan workflow → status "failed" 자동 전이"""
+        """RIGHT: get_all_runners() 호출 시 orphan workflow → 원자적 UPDATE로 자동 전이 (rowcount=1 → is_orphan=True)"""
         svc = self._make_service()
         rid = "orphan_runner"
         self._mock_redis_get(svc, {rid: {"status": "stopped", "pid": "99999", "trigger": "user"}})
 
-        # orphan workflow mock
-        mock_wf = MagicMock()
-        mock_wf.id = 42
-        mock_wf.status = "running"
-
+        # 원자적 UPDATE mock: rowcount=1 → is_orphan=True
+        mock_result = MagicMock()
+        mock_result.rowcount = 1
         mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = mock_wf
+        mock_db.execute.return_value = mock_result
 
         with patch("app.database.SessionLocal", return_value=mock_db):
             result = await svc.get_all_runners()
 
-        # workflow status를 "failed"로 변경했는지 확인
-        assert mock_wf.status == "failed"
-        assert mock_wf.error_message is not None
+        # db.execute() 호출 + commit 확인
+        mock_db.execute.assert_called()
         mock_db.commit.assert_called()
         # is_orphan=True이어야 함
         assert result[0].orphan is True
@@ -451,7 +448,7 @@ class TestIntegrationRaceCondition:
             # 실제 cleanup 실행하여 _cleanup_done에 추가
             _listener._running_processes.pop(runner_id, None)
             _listener._dead_process_first_seen.pop(runner_id, None)
-            _listener._cleanup_done.add(runner_id)
+            _listener._cleanup_done[runner_id] = time.time()
 
         mock_redis = MagicMock()
 
@@ -492,7 +489,7 @@ class TestIntegrationRaceCondition:
             cleanup_calls.append((runner_id, reason))
             _listener._running_processes.pop(runner_id, None)
             _listener._dead_process_first_seen.pop(runner_id, None)
-            _listener._cleanup_done.add(runner_id)
+            _listener._cleanup_done[runner_id] = time.time()
 
         mock_r = MagicMock()
         # merge_requested=True, merge_status="merging" 설정
