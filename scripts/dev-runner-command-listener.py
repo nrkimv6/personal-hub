@@ -1137,6 +1137,25 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
                 except Exception:
                     pass
                 result = {"success": True, "message": "conflict resolved", "merge_status": "merged", "action": action_name}
+
+                # plan 헤더에서 branch/worktree 필드 제거 — 잔존 시 auto-done 에이전트가 /done 2.5단계에서 차단됨
+                if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
+                    _remove_plan_header_fields(plan_file)
+
+                # 자동 done 분기: 완료율 체크 → done API 호출 or main 추가 사이클 예약
+                if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
+                    done_count, total_count = _get_plan_completion(plan_file)
+                    if total_count > 0 and done_count == total_count:
+                        _pub(f"완료율 100% ({done_count}/{total_count}) — 자동 done 처리 시작")
+                        _call_done_api(plan_file, runner_id, _pub)
+                    else:
+                        _pub(f"미완료 태스크 있음 ({done_count}/{total_count}) — main 추가 사이클 예약")
+                        try:
+                            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
+                        except Exception:
+                            pass
+                else:
+                    _pub("plan_file 없음(--all 모드) — done 스킵")
             else:
                 _pub(f"conflict resolver 실패: {_resolve_result['message']}")
                 try:
