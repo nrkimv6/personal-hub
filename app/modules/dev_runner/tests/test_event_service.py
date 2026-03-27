@@ -639,6 +639,52 @@ class TestStreamEventsLogIntegration:
 
 class TestMergeLineChannelRouting:
     @pytest.mark.asyncio
+    async def test_stream_events_merge_completed_with_status(self, event_service, async_redis):
+        """R: __MERGE_COMPLETED__:FAILED → merge_log_completed 이벤트에 status='failed' 포함"""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:merge-log:runner10",
+            "pattern": MERGE_LOG_CHANNEL_PATTERN,
+            "data": _MERGE_LOG_COMPLETED_SENTINEL + ":FAILED",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: merge_log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner10"
+        assert data["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_completed_with_status(self, event_service, async_redis):
+        """R: __COMPLETED__:FAILED → log_completed 이벤트에 status='failed' 포함"""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner11",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": _LOG_COMPLETED_SENTINEL + ":FAILED",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner11"
+        assert data["status"] == "failed"
+
+    @pytest.mark.asyncio
     async def test_merge_line_in_log_channel_yields_log_event(self, event_service, async_redis):
         """R: plan-runner:logs:{id}에 [MERGE] 라인 도착 시 event: log 로 전달됨 (백엔드는 필터링 안 함)."""
         merge_line = "[12:34:56] [MERGE] [INFO] execute_merge: project_dir=D:/foo, branch=impl/bar"
