@@ -422,9 +422,8 @@ class PlanService:
         # 완료 계열 상태
         if status in self._DONE_STATUSES:
             return True
-        # 모든 체크박스 완료 (progress가 제공된 경우에만 확인)
-        if progress is not None and progress.total > 0 and progress.done == progress.total:
-            return True
+        # 체크박스 완료 여부는 visibility에 영향 주지 않음
+        # — /done 또는 수동 아카이브를 통해서만 목록에서 제거됨
         return False
 
     # ========== plan 파싱 ==========
