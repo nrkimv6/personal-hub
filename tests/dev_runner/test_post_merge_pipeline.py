@@ -394,3 +394,151 @@ class TestInlineMergeE2ESubprocessFlow:
         assert len(pushed) > 0
         pushed_data = json.loads(pushed[0])
         assert pushed_data["success"] is True
+
+
+# ── Phase T1 (exit_code=2): auto-impl-post-merge 자동 복구 TC ─────────────────
+
+class TestExitCode2AutoImplPostMerge:
+    def test_exit_code_2_triggers_auto_impl_post_merge_R(self, cl, tmp_path):
+        """R(Right): exit_code=2 → _launch_auto_impl_post_merge_process 호출됨"""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file="docs/plan/test.md")
+        proc_result = MagicMock()
+        proc_result.returncode = 2
+
+        with _merge_lock_patch(), \
+             patch.object(cl, "_cleanup_process_state"), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(cl, "_launch_auto_impl_post_merge_process", return_value={"success": False, "message": "fail"}) as mock_fix:
+            cl._execute_merge_with_lock("r_exit2", redis)
+
+        mock_fix.assert_called_once()
+        call_kwargs = mock_fix.call_args
+        assert call_kwargs[1].get("runner_id") == "r_exit2" or call_kwargs[0][0] == "r_exit2"
+
+    def test_exit_code_2_success_after_fix_calls_post_merge_done_R(self, cl, tmp_path):
+        """R(Right): _launch_auto_impl_post_merge_process → success=True → _handle_post_merge_done 호출 + merge_status='merged'"""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file="docs/plan/test.md")
+        proc_result = MagicMock()
+        proc_result.returncode = 2
+
+        with _merge_lock_patch(), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(cl, "_launch_auto_impl_post_merge_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(cl, "_handle_post_merge_done") as mock_done:
+            result = cl._execute_merge_with_lock("r_exit2_ok", redis)
+
+        assert result["success"] is True
+        assert result["merge_status"] == "merged"
+        mock_done.assert_called_once()
+
+    def test_exit_code_2_no_plan_file_skips_auto_fix_B(self, cl, tmp_path):
+        """B(Boundary): plan_file=None → _launch_auto_impl_post_merge_process 호출 없이 merge_status='test_failed'"""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file=None)
+        proc_result = MagicMock()
+        proc_result.returncode = 2
+
+        with _merge_lock_patch(), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(cl, "_launch_auto_impl_post_merge_process") as mock_fix:
+            result = cl._execute_merge_with_lock("r_exit2_noplan", redis)
+
+        mock_fix.assert_not_called()
+        assert result["success"] is False
+        assert result["merge_status"] == "test_failed"
+
+    def test_exit_code_2_fix_failure_sets_test_failed_status_E(self, cl, tmp_path):
+        """E(Error): _launch_auto_impl_post_merge_process → success=False → merge_status='test_failed'"""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file="docs/plan/test.md")
+        proc_result = MagicMock()
+        proc_result.returncode = 2
+
+        with _merge_lock_patch(), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(cl, "_launch_auto_impl_post_merge_process", return_value={"success": False, "message": "fix failed"}):
+            result = cl._execute_merge_with_lock("r_exit2_fail", redis)
+
+        assert result["success"] is False
+        assert result["merge_status"] == "test_failed"
+
+    def test_exit_code_2_retry_limit_prevents_infinite_loop_B(self, cl, tmp_path):
+        """B(Boundary): _test_fix_attempt=2 → _launch_auto_impl_post_merge_process 호출 없이 즉시 test_failed"""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file="docs/plan/test.md")
+        proc_result = MagicMock()
+        proc_result.returncode = 2
+
+        with _merge_lock_patch(), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(cl, "_launch_auto_impl_post_merge_process") as mock_fix:
+            result = cl._execute_merge_with_lock("r_exit2_limit", redis, _test_fix_attempt=2)
+
+        mock_fix.assert_not_called()
+        assert result["success"] is False
+        assert result["merge_status"] == "test_failed"
+
+    def test_exit_code_2_merge_status_transitions_Co(self, cl, tmp_path):
+        """Co(Conformance): exit_code=2 처리 중 merge_status 전이: merging → fixing → test_failed(실패 시)"""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file="docs/plan/test.md")
+        proc_result = MagicMock()
+        proc_result.returncode = 2
+        set_calls = []
+        redis.set.side_effect = lambda k, v: set_calls.append((k, v))
+
+        with _merge_lock_patch(), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(cl, "_launch_auto_impl_post_merge_process", return_value={"success": False, "message": "fail"}):
+            cl._execute_merge_with_lock("r_co", redis)
+
+        merge_status_calls = [(k, v) for k, v in set_calls if "merge_status" in k]
+        statuses = [v for _, v in merge_status_calls]
+        assert "merging" in statuses
+        assert "fixing" in statuses
+        assert "test_failed" in statuses
+        # 순서 검증: merging → fixing → test_failed
+        idx_merging = next(i for i, v in enumerate(statuses) if v == "merging")
+        idx_fixing = next(i for i, v in enumerate(statuses) if v == "fixing")
+        idx_failed = next(i for i, v in enumerate(statuses) if v == "test_failed")
+        assert idx_merging < idx_fixing < idx_failed
+
+
+# ── Phase T3 (exit_code=2): fakeredis 통합 TC ─────────────────────────────────
+
+class TestExitCode2IntegrationFakeRedis:
+    def test_exit_code_2_integration_with_fakeredis(self, cl):
+        """T3(통합): fakeredis로 _execute_merge_with_lock exit_code=2 시나리오 검증.
+
+        Redis merge_status 전이: merging → fixing → test_failed
+        """
+        import fakeredis as _fakeredis
+        import types as _types
+
+        fake_r = _fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "e2e-exit2-01"
+        prefix = cl.RUNNER_KEY_PREFIX
+
+        fake_r.set(f"{prefix}:{runner_id}:worktree_path", "D:/tmp/wt_exit2")
+        fake_r.set(f"{prefix}:{runner_id}:plan_file", "docs/plan/test.md")
+        fake_r.set(f"{prefix}:{runner_id}:branch", "impl/test")
+
+        mock_lock_mod = _types.ModuleType("merge_lock")
+        mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_lock = MagicMock()
+
+        proc_result = MagicMock()
+        proc_result.returncode = 2
+
+        with patch.dict("sys.modules", {"merge_lock": mock_lock_mod}), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(cl, "_launch_auto_impl_post_merge_process", return_value={"success": False, "message": "fail"}):
+            result = cl._execute_merge_with_lock(runner_id, fake_r)
+
+        # 최종 merge_status = "test_failed"
+        assert fake_r.get(f"{prefix}:{runner_id}:merge_status") == "test_failed"
+        assert result["success"] is False
+        assert result["merge_status"] == "test_failed"
+
+        # merge-results push 확인
+        results = fake_r.lrange("plan-runner:merge-results", 0, 0)
+        assert len(results) > 0
+        result_data = json.loads(results[0])
+        assert result_data["runner_id"] == runner_id
+        assert result_data["success"] is False

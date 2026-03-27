@@ -951,6 +951,61 @@ def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, re
     return {"success": result["success"], "message": result["message"]}
 
 
+def _launch_auto_impl_post_merge_process(runner_id: str, plan_file: str, redis_client, pub_fn=None, engine: str = "claude") -> dict:
+    """plan-runner run 서브커맨드로 auto-impl-post-merge 에이전트를 실행한다.
+
+    post-merge 테스트 실패(exit_code=2) 시 호출되어 테스트 수정을 시도한다.
+
+    Args:
+        runner_id: runner ID
+        plan_file: plan 파일 절대 경로
+        redis_client: Redis 클라이언트
+        pub_fn: 로그 publish 함수
+        engine: 사용할 AI 엔진
+
+    Returns:
+        {"success": bool, "message": str}
+    """
+    import os
+    cmd = [
+        str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "run",
+        "--plan-file", plan_file,
+        "--engine", engine,
+        "--skip-plan",
+        "--max-cycles", "1",
+    ]
+
+    worktree_path_str = ""
+    try:
+        worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path") or ""
+    except Exception:
+        pass
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    env.pop("CLAUDECODE", None)
+    env["PLAN_RUNNER_RUNNER_ID"] = runner_id
+    env["REDIS_DB"] = str(REDIS_DB)
+    env["PLAN_RUNNER_PROJECT_ROOT"] = str(PROJECT_ROOT)
+    env["PLAN_RUNNER_WORK_DIR"] = worktree_path_str or str(PROJECT_ROOT)
+
+    result = _run_subprocess_streaming(
+        cmd=cmd,
+        env=env,
+        cwd=str(PLAN_RUNNER_MODULE_PATH),
+        pub_fn=pub_fn,
+        tag="AUTO-IMPL-POST-MERGE",
+        timeout=600,
+    )
+    if result["success"]:
+        logger.info(f"[auto-impl-post-merge] 성공 (runner_id={runner_id})")
+    else:
+        logger.warning(f"[auto-impl-post-merge] 실패 (runner_id={runner_id}): {result['message']}")
+    return {"success": result["success"], "message": result["message"]}
+
+
 def _launch_general_merge_resolver_process(runner_id: str, branch: str, error_msg: str, redis_client, pub_fn=None, engine: str = "claude") -> dict:
     """plan-runner resolve --mode=general-merge-error 서브커맨드로 일반 머지 실패를 자동 복구한다.
 
@@ -1033,12 +1088,15 @@ def _pub_and_log(runner_id: str, msg: str, redis_client: redis.Redis, tag: str =
         logger.debug(f"[_pub_and_log] 파일 기록 실패 (무시): {_e}")
 
 
-def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_name: str = "inline-merge") -> dict:
+def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_name: str = "inline-merge", _test_fix_attempt: int = 0) -> dict:
     """lock acquire → plan-runner post-merge subprocess → exit code 분기 → merge-results push 공통 헬퍼.
 
     _do_inline_merge, _do_retry_merge에서 공유하는 lock+subprocess+결과 패턴을 통합한다.
 
     exit code 규약: 0=merged, 1=error, 2=test_failed, 3=conflict
+
+    Args:
+        _test_fix_attempt: exit_code=2 자동 복구 시도 횟수 (무한루프 방지, 최대 2회)
 
     Returns:
         dict: {"success": bool, "message": str, "merge_status": str, "action": action_name}
@@ -1107,12 +1165,45 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             # 5. 자동 done 분기: 헤더 필드 제거 + 완료율 체크 → done API 호출 or main 추가 사이클 예약
             _handle_post_merge_done(plan_file, runner_id, _pub, redis_client)
         elif exit_code == 2:
-            try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
-            except Exception:
-                pass
-            _pub(f"post-merge 테스트 실패 (exit_code={exit_code})")
-            result = {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
+            if _test_fix_attempt >= 2 or not plan_file:
+                # 재시도 한도 초과 또는 plan_file 없음 → test_failed 상태 유지
+                if _test_fix_attempt >= 2:
+                    _pub(f"auto-impl-post-merge 재시도 한도(2회) 초과 — test_failed 상태 유지")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
+                except Exception:
+                    pass
+                _pub(f"post-merge 테스트 실패 (exit_code={exit_code})")
+                result = {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
+            else:
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "fixing")
+                except Exception:
+                    pass
+                _pub("post-merge 테스트 실패 — auto-impl-post-merge 자동 실행")
+                engine = _get_fix_engine(redis_client, runner_id)
+                _fix_result = _launch_auto_impl_post_merge_process(
+                    runner_id=runner_id,
+                    plan_file=plan_file,
+                    redis_client=redis_client,
+                    pub_fn=_pub,
+                    engine=engine,
+                )
+                if _fix_result["success"]:
+                    _pub("auto-impl-post-merge 성공 — merge 완료")
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                    except Exception:
+                        pass
+                    result = {"success": True, "message": "test fixed and merged", "merge_status": "merged", "action": action_name}
+                    _handle_post_merge_done(plan_file, runner_id, _pub, redis_client)
+                else:
+                    _pub(f"auto-impl-post-merge 실패: {_fix_result['message']}")
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
+                    except Exception:
+                        pass
+                    result = {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
         elif exit_code == 3:
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")

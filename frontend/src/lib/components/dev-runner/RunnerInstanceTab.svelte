@@ -213,6 +213,8 @@
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700">테스트 실패</span>
 		{:else if mergeStatus === 'error'}
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">머지 오류</span>
+		{:else if mergeStatus === 'fixing'}
+			<span class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700 animate-pulse">자동 수정 중</span>
 		{:else if mergeStatus === 'resolving'}
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
 		{/if}
@@ -261,6 +263,14 @@
 			</svg>
 			<span class="text-yellow-700 font-medium">충돌 자동 해결 중...</span>
 		</div>
+	{:else if mergeStatus === 'fixing'}
+		<div class="flex items-center gap-2 px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-xs">
+			<svg class="animate-spin h-3 w-3 text-yellow-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+				<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+			</svg>
+			<span class="text-yellow-700 font-medium">테스트 실패 자동 수정 중...</span>
+		</div>
 	{:else if ['conflict', 'test_failed', 'error'].includes(mergeStatus ?? '')}
 		<div class="flex items-center gap-2 px-3 py-2 bg-red-50 border-b border-red-200 text-xs">
 			<span class="text-red-700 font-medium">
@@ -293,7 +303,7 @@
 		</div>
 	{/if}
 
-	{#if !running && branch && worktreePath && !['conflict', 'test_failed', 'error', 'resolving'].includes(mergeStatus ?? '')}
+	{#if !running && branch && worktreePath && !['conflict', 'test_failed', 'error', 'resolving', 'fixing'].includes(mergeStatus ?? '')}
 		<div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-xs">
 			<button
 				class="px-2 py-0.5 rounded border border-purple-300 text-purple-700 hover:bg-purple-100 disabled:opacity-50 transition-colors"
