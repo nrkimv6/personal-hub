@@ -269,7 +269,7 @@ class EventService:
                             is_merge = channel.startswith("plan-runner:merge-log:")
                             if data == _MERGE_LOG_COMPLETED_SENTINEL:
                                 yield self._sse("merge_log_completed", {"runner_id": runner_id})
-                            elif data == _LOG_COMPLETED_SENTINEL:
+                            elif data.startswith("__COMPLETED"):
                                 yield self._sse("log_completed", {"runner_id": runner_id})
                             elif is_merge:
                                 yield self._sse("merge_log", {"runner_id": runner_id, "line": data})

@@ -56,6 +56,7 @@ class RunnerListItem(BaseModel):
     trigger: Optional[str] = None
     visible: bool = False  # 탭 표시 여부 (user/user:all 트리거만 True, 기본 숨김)
     orphan: bool = False  # Workflow DB에 running/merge_pending이지만 Redis에 없는 runner
+    exit_reason: Optional[str] = None  # 종료 사유 (completed/no_progress/rate_limit/error 등)
 
 
 class PlanProgressResponse(BaseModel):

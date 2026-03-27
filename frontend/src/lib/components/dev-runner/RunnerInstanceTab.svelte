@@ -21,13 +21,15 @@
 		mergeStatus?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
+		exitReason?: string | null;
 		onStop: () => void;
 		onClose: () => void;
+		onRestart?: () => void;
 		onBatchPlansChange?: (plans: { name: string; status: 'pending' | 'running' | 'done' }[]) => void;
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, onStop, onClose, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, exitReason = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer: { injectLine: (t: string) => void; injectCompleted: () => void; injectMergeCompleted: () => void } | undefined;
 	let elapsed = $state('');
@@ -165,7 +167,15 @@
 		!planFile ? '(알 수 없음)' : isAllPlans(planFile) ? '전체 실행' : planFile.split(/[\\/]/).pop() ?? planFile
 	);
 
-	let statusIcon = $derived(running ? '실행중' : '완료');
+	let statusIcon = $derived(
+		running ? '실행중'
+		: exitReason === 'completed' || !exitReason ? '완료'
+		: exitReason === 'no_progress' ? '⏸️ 중단'
+		: exitReason === 'rate_limit' ? '⚠️ 제한'
+		: exitReason === 'quota_exhausted' ? '⚠️ Quota'
+		: exitReason === 'error' ? '❌ 에러'
+		: '중지'
+	);
 </script>
 
 <div class="flex flex-col h-full">
@@ -227,8 +237,16 @@
 			>
 				{killing ? '종료 중...' : '강제 종료'}
 			</button>
+		{:else if exitReason && !['completed', 'stopped', 'archived'].includes(exitReason) && onRestart}
+			<button
+				class="shrink-0 px-2 py-0.5 rounded border border-blue-300 text-blue-700 hover:bg-blue-100 transition-colors text-[10px] font-bold"
+				onclick={onRestart}
+				title="동일 plan으로 재실행"
+			>
+				재실행
+			</button>
 		{/if}
-
+
 	</div>
 
 	{#if stopError}

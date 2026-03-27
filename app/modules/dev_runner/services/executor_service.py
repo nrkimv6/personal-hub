@@ -43,6 +43,7 @@ RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
     "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
+    "exit_reason",
 )
 
 
@@ -704,6 +705,7 @@ class ExecutorService:
                     merge_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
                     branch = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:branch")
                     trigger = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:trigger")
+                    exit_reason = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:exit_reason")
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
                     start_time = None
@@ -776,6 +778,7 @@ class ExecutorService:
                         trigger=trigger,
                         visible=is_user,
                         orphan=is_orphan,
+                        exit_reason=exit_reason,
                     ))
                 return result
             finally:

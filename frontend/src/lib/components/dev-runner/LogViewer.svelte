@@ -56,7 +56,7 @@
 	let consecutiveErrors = $state(0);
 	let redisAvailable = $state(true);
 	let pendingStale = $state(false);
-	let completedBanner = $state(false); // runner 정상 완료 배너
+	let exitBanner = $state<{ show: boolean; reason: string }>({ show: false, reason: 'completed' }); // runner 종료 배너
 	const MAX_LINES = 500;
 	let resultQueue: ParsedLine[] = [];
 	let resultDrainInterval: ReturnType<typeof setInterval> | null = null;
@@ -343,16 +343,16 @@
 		eventSource.addEventListener('connected', () => {
 			redisAvailable = true;
 		});
-		// runner 정상 완료 신호 — 배너 표시 후 재연결 중지
-		eventSource.addEventListener('completed', () => {
-			completedBanner = true;
+		// runner 종료 신호 — 배너 표시 후 재연결 중지
+		eventSource.addEventListener('completed', (event: MessageEvent) => {
+			exitBanner = { show: true, reason: (event as MessageEvent).data || 'completed' };
 			eventSource?.close();
 			eventSource = null;
 			connected = 'disconnected';
 		});
 		eventSource.onerror = async () => {
 			// completed 후 eventSource가 닫혀서 발생한 error면 재연결 중지
-			if (completedBanner) return;
+			if (exitBanner.show) return;
 			consecutiveErrors++;
 			eventSource?.close();
 			eventSource = null;
@@ -473,7 +473,7 @@
 	}
 
 	export function injectCompleted() {
-		completedBanner = true;
+		exitBanner = { show: true, reason: 'completed' };
 		eventSource?.close();
 		eventSource = null;
 		connected = 'disconnected';
@@ -565,10 +565,38 @@
 		</div>
 	</div>
 
-	{#if completedBanner}
-		<div class="px-3 py-1.5 bg-green-900/40 border-b border-green-700/50 text-xs text-green-300 shrink-0 flex items-center gap-2">
-			<span>실행 완료 — 로그 파일에서 계속 볼 수 있습니다</span>
-		</div>
+	{#if exitBanner.show}
+		{#if exitBanner.reason === 'completed'}
+			<div class="px-3 py-1.5 bg-green-900/40 border-b border-green-700/50 text-xs text-green-300 shrink-0 flex items-center gap-2">
+				<span>실행 완료 — 로그 파일에서 계속 볼 수 있습니다</span>
+			</div>
+		{:else if exitBanner.reason === 'no_progress' || exitBanner.reason === 'rate_limit'}
+			<div class="px-3 py-1.5 bg-yellow-900/40 border-b border-yellow-700/50 text-xs text-yellow-300 shrink-0 flex items-center gap-2">
+				{#if exitBanner.reason === 'no_progress'}
+					<span>진전 없음으로 중단</span>
+				{:else}
+					<span>Rate limit으로 중단</span>
+				{/if}
+			</div>
+		{:else if exitBanner.reason === 'error'}
+			<div class="px-3 py-1.5 bg-red-900/40 border-b border-red-700/50 text-xs text-red-300 shrink-0 flex items-center gap-2">
+				<span>에러로 중단</span>
+			</div>
+		{:else}
+			<div class="px-3 py-1.5 bg-gray-900/40 border-b border-gray-700/50 text-xs text-gray-300 shrink-0 flex items-center gap-2">
+				{#if exitBanner.reason === 'stopped'}
+					<span>사용자에 의해 중지됨</span>
+				{:else if exitBanner.reason === 'on_hold'}
+					<span>보류 상태 — 종료</span>
+				{:else if exitBanner.reason === 'archived'}
+					<span>Plan 아카이브됨</span>
+				{:else if exitBanner.reason === 'quota_exhausted'}
+					<span>Quota 소진으로 중단</span>
+				{:else}
+					<span>종료됨 ({exitBanner.reason})</span>
+				{/if}
+			</div>
+		{/if}
 	{/if}
 
 	<!-- Log Content (Phase 2: text-sm for body) -->

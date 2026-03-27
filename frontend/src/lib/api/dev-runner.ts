@@ -49,6 +49,7 @@ export interface RunnerListItem {
 	trigger?: string | null;
 	visible: boolean;
 	orphan: boolean;
+	exit_reason?: string | null;
 }
 
 export interface PlanProgressResponse {

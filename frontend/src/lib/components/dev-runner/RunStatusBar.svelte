@@ -8,6 +8,7 @@
 		running: boolean;
 		start_time: string | null;
 		branch?: string | null;
+		exit_reason?: string | null;
 	}
 
 	interface RunStatus {
@@ -256,6 +257,12 @@
 					<!-- 상태 dot -->
 					{#if runner.running}
 						<div class="pulse-dot bg-status-running shrink-0"></div>
+					{:else if runner.exit_reason === 'completed' || !runner.exit_reason}
+						<div class="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"></div>
+					{:else if runner.exit_reason === 'no_progress' || runner.exit_reason === 'rate_limit' || runner.exit_reason === 'quota_exhausted'}
+						<div class="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0"></div>
+					{:else if runner.exit_reason === 'error'}
+						<div class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></div>
 					{:else}
 						<div class="w-1.5 h-1.5 rounded-full bg-muted-foreground shrink-0"></div>
 					{/if}

@@ -120,6 +120,7 @@
 		branch?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
+		exit_reason?: string | null;
 	}
 
 	interface RunnerSource {
@@ -144,6 +145,7 @@
 			branch: runner.branch ?? null,
 			trigger: runner.trigger ?? null,
 			orphan: runner.orphan ?? false,
+			exit_reason: (runner as { exit_reason?: string | null }).exit_reason ?? undefined,
 		};
 	}
 
@@ -158,6 +160,7 @@
 			engine: (runner.engine ?? tab.engine) ?? null,
 			start_time: (runner.start_time ?? tab.start_time) ?? null,
 			orphan: runner.orphan ?? tab.orphan ?? false,
+			exit_reason: (runner as { exit_reason?: string | null }).exit_reason ?? tab.exit_reason ?? undefined,
 		};
 	}
 
@@ -392,6 +395,15 @@
 	function handleTabStop(runnerId: string) {
 		runnerTabs = runnerTabs.map(t => t.id === runnerId ? { ...t, running: false } : t);
 		void pollStatus();
+	}
+
+	async function handleRestart(tab: RunnerTab) {
+		try {
+			const response = await devRunnerRunnerApi.start({ plan_file: tab.plan_file, engine: tab.engine ?? undefined, trigger: 'user' });
+			handleRunSuccess(response);
+		} catch (e) {
+			console.error('[DevRunner] 재실행 실패', e);
+		}
 	}
 
 	async function fetchPlans() {
@@ -790,8 +802,10 @@
 										startTime={tab.start_time}
 										trigger={tab.trigger}
 										orphan={tab.orphan}
+										exitReason={tab.exit_reason}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
+										onRestart={() => handleRestart(tab)}
 										onBatchPlansChange={(plans) => { batchPlans = plans; }}
 										logRef={(ref) => logRefs.set(tab.id, ref)}
 									/>

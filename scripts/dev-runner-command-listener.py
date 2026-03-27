@@ -199,10 +199,11 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     except Exception:
         pass
 
-    # cleanup 직전 SSE 클라이언트에 완료 신호 publish
+    # cleanup 직전 SSE 클라이언트에 완료 신호 publish (exit_reason 포함)
     try:
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
-        redis_client.publish(log_channel, "__COMPLETED__")
+        exit_reason = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason") or "completed"
+        redis_client.publish(log_channel, f"__COMPLETED::{exit_reason}__")
     except Exception:
         pass
 

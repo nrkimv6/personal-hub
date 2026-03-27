@@ -131,9 +131,14 @@ class LogService:
                 )
                 if message and message["type"] == "message":
                     data = message["data"]
-                    if data == "__COMPLETED__":
-                        # runner 정상 종료 신호 — completed 이벤트 전송 후 스트림 종료
-                        yield "event: completed\ndata: done\n\n"
+                    if data.startswith("__COMPLETED"):
+                        # runner 종료 신호 — exit_reason 파싱 후 completed 이벤트 전송
+                        if data == "__COMPLETED__":
+                            reason = "completed"
+                        else:
+                            # __COMPLETED::{reason}__ 형태에서 reason 추출
+                            reason = data[len("__COMPLETED::"):].rstrip("_") or "completed"
+                        yield f"event: completed\ndata: {reason}\n\n"
                         if pubsub:
                             try:
                                 await pubsub.unsubscribe(log_channel)
