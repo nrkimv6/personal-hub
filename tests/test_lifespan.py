@@ -16,8 +16,8 @@ class TestLifespanSkipInTesting:
         """TESTING=1 설정 시 init_extra_tables 및 서비스 초기화 미호출 확인"""
         assert os.environ.get("TESTING") == "1", "conftest.py의 _set_testing_env가 TESTING=1 설정해야 함"
 
-        with patch("app.main.init_extra_tables") as mock_init, \
-             patch("app.main.cleanup_api_stale_resources", new_callable=AsyncMock) as mock_cleanup:
+        with patch("app.lifespan.init_extra_tables") as mock_init, \
+             patch("app.lifespan.cleanup_api_stale_resources", new_callable=AsyncMock) as mock_cleanup:
             from app.main import app
             with TestClient(app):
                 pass
