@@ -344,6 +344,13 @@
 
 			connected = 'disconnected';
 			reconnectCount++;
+
+			// Redis 미연결 시 재연결 시도 중단 (서버에서 pubsub 누수 가속 방지)
+			const maxRetries = 5;
+			if (!redisAvailable && reconnectCount > maxRetries) {
+				return; // 수동 새로고침 유도 (배너가 표시됨)
+			}
+
 			await fetchStatus();
 			setTimeout(connectSSE, getReconnectDelay());
 		};
