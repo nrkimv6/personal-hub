@@ -110,6 +110,13 @@ class LogService:
         """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)"""
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
 
+        # 초기 Redis 연결 확인
+        try:
+            await self.async_redis.ping()
+        except Exception:
+            yield "event: error\ndata: Redis 연결 불가\n\n"
+            return
+
         # 초기 연결 이벤트 — EventSource가 MIME type 검증을 통과하도록 보장
         yield "event: connected\ndata: ok\n\n"
 
@@ -481,14 +488,24 @@ class LogService:
             steps.append({"step": 1, "name": "Redis 연결", "ok": False, "detail": "연결 실패"})
             return {"steps": steps}
 
-        # 2. Listener heartbeat
+        # 1.5. Redis 연결 수 확인
+        try:
+            info = self.redis_client.info("clients")
+            clients = info.get("connected_clients", 0)
+            ok = clients < 100
+            steps.append({"step": 2, "name": "Redis 연결 수", "ok": ok,
+                "detail": f"{clients}개 연결" + ("" if ok else " — 좀비 연결 의심 (redis-cleanup 실행 권장)")})
+        except Exception:
+            steps.append({"step": 2, "name": "Redis 연결 수", "ok": False, "detail": "조회 실패"})
+
+        # 3. Listener heartbeat
         hb = self.redis_client.get("plan-runner:listener:heartbeat")
         steps.append({
-            "step": 2, "name": "Listener heartbeat", "ok": hb is not None,
+            "step": 3, "name": "Listener heartbeat", "ok": hb is not None,
             "detail": "활성" if hb else "heartbeat 키 없음 (리스너 꺼짐)"
         })
 
-        # 3. 로그 파일 — 첫 번째 active runner 기준
+        # 4. 로그 파일 — 첫 번째 active runner 기준
         log_path = None
         runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
         if runner_ids:
@@ -500,26 +517,26 @@ class LogService:
         if log_path and Path(log_path).exists():
             size = Path(log_path).stat().st_size
             steps.append({
-                "step": 3, "name": "로그 파일", "ok": True,
+                "step": 4, "name": "로그 파일", "ok": True,
                 "detail": f"{Path(log_path).name} ({size:,}B)"
             })
         elif log_path:
             steps.append({
-                "step": 3, "name": "로그 파일", "ok": False,
+                "step": 4, "name": "로그 파일", "ok": False,
                 "detail": f"경로 있으나 파일 없음: {log_path}"
             })
         else:
             steps.append({
-                "step": 3, "name": "로그 파일", "ok": False,
+                "step": 4, "name": "로그 파일", "ok": False,
                 "detail": "stream_log_path / log_file_path 키 없음"
             })
 
-        # 4. CLI 프로세스 — active runners 수 기준
+        # 5. CLI 프로세스 — active runners 수 기준
         if runner_ids:
-            steps.append({"step": 4, "name": "CLI 프로세스", "ok": True, "detail": f"{len(runner_ids)} runner(s) active"})
+            steps.append({"step": 5, "name": "CLI 프로세스", "ok": True, "detail": f"{len(runner_ids)} runner(s) active"})
         else:
             steps.append({
-                "step": 4, "name": "CLI 프로세스", "ok": False,
+                "step": 5, "name": "CLI 프로세스", "ok": False,
                 "detail": "미실행"
             })
 

@@ -560,6 +560,12 @@
 		</div>
 	</div>
 
+	{#if !redisAvailable && connected === 'connected'}
+		<div class="px-3 py-1.5 bg-red-900/40 border-b border-red-700/50 text-xs text-red-300 shrink-0 flex items-center gap-2">
+			<span>Redis 연결 불가 — 관리자 도구에서 redis-restart 실행</span>
+		</div>
+	{/if}
+
 	{#if exitBanner.show}
 		{#if exitBanner.reason === 'completed'}
 			<div class="px-3 py-1.5 bg-green-900/40 border-b border-green-700/50 text-xs text-green-300 shrink-0 flex items-center gap-2">

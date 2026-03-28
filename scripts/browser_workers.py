@@ -547,7 +547,10 @@ class BrowserWorkerManager:
             print(f"      Memory: {used_mb}MB")
 
             clients = r.info(section="clients").get("connected_clients", 0)
-            print(f"      Clients: {clients}")
+            # pubsub 연결 수 확인
+            client_list = r.client_list()
+            pubsub_count = sum(1 for c in client_list if c.get("flags", "").startswith("S") or c.get("cmd") == "subscribe")
+            print(f"      Clients: {clients} (pubsub: {pubsub_count})")
             r.close()
         except Exception as e:
             print(f"  {RED}[-] Redis connection: FAILED ({e}){RESET}")
@@ -607,6 +610,56 @@ class BrowserWorkerManager:
         except Exception as e:
             cprint(f"Failed to restart Redis: {e}", RED)
 
+    def redis_cleanup(self):
+        """Redis 좀비 연결 정리 (idle pubsub 연결 탐지 + 제거)"""
+        print(f"\n{YELLOW}{'=' * 40}")
+        print(f"  Redis Zombie Connection Cleanup")
+        print(f"{'=' * 40}{RESET}\n")
+
+        force = "--force" in sys.argv
+
+        try:
+            import redis as redis_lib
+            r = redis_lib.Redis(host="localhost", port=6379, socket_connect_timeout=3, decode_responses=True)
+            r.ping()
+        except Exception as e:
+            cprint(f"Redis 연결 실패: {e}", RED)
+            return
+
+        client_list = r.client_list()
+        zombies = []
+        for c in client_list:
+            idle = int(c.get("idle", 0))
+            flags = c.get("flags", "")
+            cmd = c.get("cmd", "")
+            cid = c.get("id", "")
+            if idle > 300 and ("S" in flags or cmd in ("subscribe", "psubscribe")):
+                zombies.append({"id": cid, "idle": idle, "flags": flags, "cmd": cmd, "addr": c.get("addr", "?")})
+
+        if not zombies:
+            cprint("좀비 연결 없음", GREEN)
+            r.close()
+            return
+
+        print(f"  {YELLOW}좀비 연결 {len(zombies)}개 감지:{RESET}")
+        for z in zombies:
+            print(f"    id={z['id']}  idle={z['idle']}s  flags={z['flags']}  cmd={z['cmd']}  addr={z['addr']}")
+
+        if not force:
+            print(f"\n  {YELLOW}정리하려면 --force 플래그를 추가하세요{RESET}")
+            r.close()
+            return
+
+        killed = 0
+        for z in zombies:
+            try:
+                r.client_kill_filter(_id=int(z["id"]))
+                killed += 1
+            except Exception as e:
+                print(f"    {RED}id={z['id']} kill 실패: {e}{RESET}")
+        cprint(f"{killed}/{len(zombies)}개 좀비 연결 정리 완료", GREEN)
+        r.close()
+
     # ── legacy cleanup ───────────────────────────────────────────
     def _cleanup_legacy(self):
         for pf in self.legacy_pid_files:
@@ -622,7 +675,7 @@ def main():
     parser = argparse.ArgumentParser(description="Browser Workers Management")
     parser.add_argument(
         "action",
-        choices=["start", "stop", "restart", "status", "restart-api", "restart-frontend", "redis-status", "redis-restart"],
+        choices=["start", "stop", "restart", "status", "restart-api", "restart-frontend", "redis-status", "redis-restart", "redis-cleanup"],
         help="Action to perform",
     )
     args = parser.parse_args()
@@ -637,6 +690,7 @@ def main():
         "restart-frontend": mgr.restart_frontend,
         "redis-status": mgr.redis_status,
         "redis-restart": mgr.redis_restart,
+        "redis-cleanup": mgr.redis_cleanup,
     }
     action_map[args.action]()
 
