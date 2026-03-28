@@ -110,6 +110,31 @@ class ExecutorService:
                 detail="dev-runner command listener가 실행 중이지 않습니다. 워커를 시작하세요."
             )
 
+    def _fix_orphan_workflows(self, db, rid: str, running: bool, status: str) -> bool:
+        """실행 중이 아닌 runner의 DB 워크플로우를 failed로 원자 업데이트. orphan 발견 시 True 반환."""
+        if running:
+            return False
+        try:
+            result = db.execute(
+                text(
+                    "UPDATE workflows SET status='failed', error_message=:msg "
+                    "WHERE runner_id=:rid AND status IN ('running', 'merge_pending')"
+                ),
+                {"msg": f"orphan auto-fix: runner {rid} status={status!r}", "rid": rid},
+            )
+            db.commit()
+            is_orphan = result.rowcount > 0
+            if is_orphan:
+                logger.warning(
+                    f"[dev-runner] orphan workflow 자동 정리: runner {rid} "
+                    f"({result.rowcount}건 → failed)"
+                )
+            return is_orphan
+        except Exception as e:
+            logger.warning(f"[dev-runner] orphan workflow 자동 정리 실패 (무시): {e}")
+            db.rollback()
+            return False
+
     def _runner_key(self, rid: str, suffix: str) -> str:
         """Runner 단일 필드 Redis 키 조립."""
         return f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}"
@@ -645,27 +670,7 @@ class ExecutorService:
                     running, pid_str = await self._correct_pid_state(rid, status, pid_str, caller="get_all_runners")
 
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
-                    # 원자적 UPDATE로 동시 요청 시 lost-update 방지 (rowcount=0이면 이미 처리됨)
-                    is_orphan = False
-                    if not running:
-                        try:
-                            _orphan_result = db.execute(
-                                text(
-                                    "UPDATE workflows SET status='failed', error_message=:msg "
-                                    "WHERE runner_id=:rid AND status IN ('running', 'merge_pending')"
-                                ),
-                                {"msg": f"orphan auto-fix: runner {rid} status={status!r}", "rid": rid},
-                            )
-                            db.commit()
-                            is_orphan = _orphan_result.rowcount > 0
-                            if is_orphan:
-                                logger.warning(
-                                    f"[dev-runner] orphan workflow 자동 정리: runner {rid} "
-                                    f"({_orphan_result.rowcount}건 → failed)"
-                                )
-                        except Exception as _wf_err:
-                            logger.warning(f"[dev-runner] orphan workflow 자동 정리 실패 (무시): {_wf_err}")
-                            db.rollback()
+                    is_orphan = self._fix_orphan_workflows(db, rid, running, status)
                     # 화이트리스트: user/user:all 트리거만 UI에 표시 (fail-closed)
                     is_user = bool(trigger and trigger in ("user", "user:all"))
                     # 이중 방어: tc-pytest- prefix runner는 trigger와 무관하게 항상 invisible
