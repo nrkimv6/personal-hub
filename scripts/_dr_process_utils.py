@@ -125,53 +125,52 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         if t.is_alive():
             t.join(timeout=3)
 
+    # 1) 종료된 runner를 RECENT_RUNNERS에 등록하여 탭 이력 보존 (worktree 정리보다 먼저)
     try:
-        from worktree_manager import WorktreeManager
-        from plan_worktree_helpers import is_plan_in_progress as _is_plan_in_progress
-
-        # worktree 정리 (머지 완료 또는 실패로 정리 필요한 경우)
-        merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-        plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-        if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
-            plan_file_val = None
-        # plan 파일의 git root 결정 (wtools 등 외부 레포 워크트리 정리 지원)
-        _cleanup_worktree_base = (get_plan_git_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
-
-        # 구현중 plan은 워크트리 보존 (재실행 시 이어서 작업 가능)
-        _preserve_worktree = False
-        if plan_file_val and _is_plan_in_progress(plan_file_val):
-            _preserve_worktree = True
-            logger.info(f"워크트리 보존 (plan 구현중): {runner_id}")
-
-        # merge_status가 없거나 "merged"가 아닌 경우에만 worktree 정리 시도
-        # (머지 워크플로가 별도로 관리하는 경우 스킵)
-        if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
-            try:
-                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
-            except Exception as wt_e:
-                logger.warning(f"worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
-        elif not _preserve_worktree and merge_status in ("merging", "testing"):
-            # 프로세스가 죽은 상태에서 중간 상태로 남은 경우 — stale worktree 정리
-            try:
-                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
-                logger.info(f"stale 중간 상태 worktree 정리: {runner_id} (merge_status={merge_status})")
-            except Exception as wt_e:
-                logger.warning(f"stale worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
-
-        # 종료된 runner를 RECENT_RUNNERS에 등록하여 탭 이력 보존
         from _dr_constants import RECENT_RUNNERS_KEY
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
         for suffix in RUNNER_KEY_SUFFIXES:
-            if _preserve_worktree and suffix == "worktree_path":
-                continue  # 워크트리 보존 시 worktree_path는 TTL 설정 스킵
             if suffix in ("plan_file", "branch"):
                 continue  # 불변 속성: TTL 없이 영구 보존 (종료 후에도 탭 표시용)
             key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
             redis_client.expire(key, RECENT_RUNNERS_TTL)
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
         redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
-    except Exception:
-        pass
+        logger.info(f"[cleanup] RECENT 등록 완료: {runner_id}")
+    except Exception as e:
+        logger.warning(f"[cleanup] RECENT 등록 실패 (runner_id={runner_id}): {e}")
+
+    # 2) worktree 정리 (RECENT 등록과 분리하여 worktree 실패가 탭 보존을 깨지 않도록)
+    try:
+        from worktree_manager import WorktreeManager
+        from plan_worktree_helpers import is_plan_in_progress as _is_plan_in_progress
+
+        merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
+            plan_file_val = None
+        _cleanup_worktree_base = (get_plan_git_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
+
+        _preserve_worktree = False
+        if plan_file_val and _is_plan_in_progress(plan_file_val):
+            _preserve_worktree = True
+            logger.info(f"워크트리 보존 (plan 구현중): {runner_id}")
+            # 워크트리 보존 시 worktree_path TTL 제거 (영구 보존)
+            redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+
+        if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
+            try:
+                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+            except Exception as wt_e:
+                logger.warning(f"worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
+        elif not _preserve_worktree and merge_status in ("merging", "testing"):
+            try:
+                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+                logger.info(f"stale 중간 상태 worktree 정리: {runner_id} (merge_status={merge_status})")
+            except Exception as wt_e:
+                logger.warning(f"stale worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
+    except Exception as e:
+        logger.warning(f"[cleanup] worktree 정리 중 오류 (무시, runner_id={runner_id}): {e}")
 
     # Workflow DB: running 상태인 경우 failed로 전이
     try:

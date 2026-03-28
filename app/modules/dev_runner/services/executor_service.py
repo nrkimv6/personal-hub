@@ -35,7 +35,7 @@ RESULTS_KEY = "plan-runner:command_results"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
-RECENT_RUNNERS_TTL = 3600  # 1시간 (초) — cleanup 후 분석용 보관 (변경: 86400→3600)
+RECENT_RUNNERS_TTL = 86400  # 24시간 (초) — 완료된 runner 탭 보존
 COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생성 시간 고려
 # per-runner 키 suffix 전체 목록 (listener와 공유되는 단일 진실 원천)
 # scripts/dev-runner-command-listener.py도 동일 상수를 별도 정의하여 참조
