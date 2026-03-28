@@ -51,14 +51,16 @@ class ExecutorService:
         self.conn = RedisConnection()
         self.redis_client = self.conn.redis_client
         self.async_redis = self.conn.async_redis
-        self.state = RunnerState(self.async_redis, self._runner_key, self._is_pid_alive)
+        self.state = RunnerState(self.async_redis, self._runner_key,
+                                  self._is_pid_alive, self._force_cleanup_state)
 
     def reconnect(self):
         """환경변수를 반영하여 Redis 클라이언트를 재연결합니다."""
         self.conn.reconnect()
         self.redis_client = self.conn.redis_client
         self.async_redis = self.conn.async_redis
-        self.state = RunnerState(self.async_redis, self._runner_key, self._is_pid_alive)
+        self.state = RunnerState(self.async_redis, self._runner_key,
+                                  self._is_pid_alive, self._force_cleanup_state)
 
     async def _check_redis_and_listener(self):
         """Redis 연결 + command listener 존재 여부 사전 확인"""
@@ -270,13 +272,15 @@ class ExecutorService:
             raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
 
     def _sync_state(self):
-        """state를 on-demand 생성하고 async_redis/pid_fn을 현재 값으로 동기화 (테스트 mock 지원)."""
+        """state를 on-demand 생성하고 async_redis/fn들을 현재 값으로 동기화 (테스트 mock 지원)."""
         if not hasattr(self, 'state') or self.state is None:
-            self.state = RunnerState(self.async_redis, self._runner_key, self._is_pid_alive)
+            self.state = RunnerState(self.async_redis, self._runner_key,
+                                     self._is_pid_alive, self._force_cleanup_state)
         else:
             if self.state.async_redis is not self.async_redis:
                 self.state.async_redis = self.async_redis
             self.state._is_pid_alive_fn = self._is_pid_alive
+            self.state._force_cleanup_fn = self._force_cleanup_state
 
     async def _correct_pid_state(
         self, rid: str, status: str, pid_str: str | None, caller: str = ""

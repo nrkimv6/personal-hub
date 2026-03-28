@@ -16,11 +16,12 @@ from app.modules.dev_runner.services.redis_connection import (
 class RunnerState:
     """Runner Redis 상태 관리 (PID 보정, stale/force cleanup, dismiss)."""
 
-    def __init__(self, async_redis, runner_key_fn, is_pid_alive_fn=None):
+    def __init__(self, async_redis, runner_key_fn, is_pid_alive_fn=None, force_cleanup_fn=None):
         """async_redis: aioredis 클라이언트, runner_key_fn: (rid, suffix) -> str 함수."""
         self.async_redis = async_redis
         self._runner_key = runner_key_fn
         self._is_pid_alive_fn = is_pid_alive_fn or self._is_pid_alive
+        self._force_cleanup_fn = force_cleanup_fn or self._force_cleanup_state
 
     def _is_pid_alive(self, pid: int) -> bool:
         """PID가 실제로 살아있는지 확인 (Windows: GetExitCodeProcess로 검증)"""
@@ -58,7 +59,7 @@ class RunnerState:
                 logger.warning(
                     f"[dev-runner] {caller}: runner {rid} PID {pid_str} 종료됨 → stale 정리"
                 )
-                await self._force_cleanup_state(rid)
+                await self._force_cleanup_fn(rid)
                 return (False, None)
             elif not running and pid_alive:
                 if status == "completed":
