@@ -32,6 +32,7 @@ from app.modules.dev_runner.services.redis_connection import (
     ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL,
     COMMAND_TIMEOUT, RUNNER_KEY_SUFFIXES,
 )
+from app.modules.dev_runner.services.runner_state import RunnerState
 
 # re-export: 기존 ~70개 테스트 파일의 from ...executor_service import ACTIVE_RUNNERS_KEY 경로 유지
 __all__ = [
@@ -50,12 +51,14 @@ class ExecutorService:
         self.conn = RedisConnection()
         self.redis_client = self.conn.redis_client
         self.async_redis = self.conn.async_redis
+        self.state = RunnerState(self.async_redis, self._runner_key, self._is_pid_alive)
 
     def reconnect(self):
         """환경변수를 반영하여 Redis 클라이언트를 재연결합니다."""
         self.conn.reconnect()
         self.redis_client = self.conn.redis_client
         self.async_redis = self.conn.async_redis
+        self.state = RunnerState(self.async_redis, self._runner_key, self._is_pid_alive)
 
     async def _check_redis_and_listener(self):
         """Redis 연결 + command listener 존재 여부 사전 확인"""
@@ -266,93 +269,24 @@ class ExecutorService:
             logger.error(f"[dev-runner] start 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
 
+    def _sync_state(self):
+        """state를 on-demand 생성하고 async_redis/pid_fn을 현재 값으로 동기화 (테스트 mock 지원)."""
+        if not hasattr(self, 'state') or self.state is None:
+            self.state = RunnerState(self.async_redis, self._runner_key, self._is_pid_alive)
+        else:
+            if self.state.async_redis is not self.async_redis:
+                self.state.async_redis = self.async_redis
+            self.state._is_pid_alive_fn = self._is_pid_alive
+
     async def _correct_pid_state(
         self, rid: str, status: str, pid_str: str | None, caller: str = ""
     ) -> tuple[bool, str | None]:
-        """PID 기반 양방향 보정 공통 메서드.
-
-        Bug 2: status="running" 인데 PID dead → _force_cleanup_state 호출 + (False, None)
-        Bug 1: status≠"running" 인데 PID alive → Redis 복원 + (True, pid_str)
-        completed 가드: status="completed" + PID alive → 오보정 방지, 그대로 반환
-
-        Returns:
-            (running, pid_str): 보정된 값. caller는 로컬 변수에 덮어쓴다.
-        """
-        if not pid_str:
-            return (status == "running", pid_str)
-        running = status == "running"
-        try:
-            pid_int = int(pid_str)
-            pid_alive = self._is_pid_alive(pid_int)
-            if running and not pid_alive:
-                # Bug 2: status=running + PID dead → stale 정리
-                logger.warning(
-                    f"[dev-runner] {caller}: runner {rid} PID {pid_str} 종료됨 → stale 정리"
-                )
-                await self._force_cleanup_state(rid)
-                return (False, None)
-            elif not running and pid_alive:
-                # Bug 1: status≠running + PID alive → premature cleanup 복원
-                if status == "completed":
-                    # completed 가드: 정상 종료 후 PID 재사용 시 오보정 방지
-                    return (running, pid_str)
-                logger.warning(
-                    f"[dev-runner] {caller}: runner {rid} PID {pid_str} alive but status={status!r} → 복원"
-                )
-                await self.async_redis.set(self._runner_key(rid, "status"), "running")
-                await self.async_redis.sadd(ACTIVE_RUNNERS_KEY, rid)
-                return (True, pid_str)
-            # 정상 일치
-            return (running, pid_str)
-        except (ValueError, Exception) as e:
-            logger.debug(
-                f"[dev-runner] {caller}: PID 보정 실패 (무시, rid={rid}): {e}"
-            )
-            return (running, pid_str)
+        self._sync_state()
+        return await self.state._correct_pid_state(rid, status, pid_str, caller)
 
     async def _force_cleanup_state(self, runner_id: str = ""):
-        """Redis 상태 강제 정리 (listener 무응답 시 fallback)
-
-        종료된 runner는 즉시 삭제하지 않고 RECENT_RUNNERS_KEY에 보존하여
-        다른 클라이언트에서도 탭을 복원할 수 있도록 한다.
-
-        방어 로직: status 키가 없는 runner (listener가 이미 정리 완료)는 RECENT에 등록하지 않는다.
-        이를 통해 listener cleanup 후 API cleanup이 중복 호출될 때 plan_file=None 유령 탭 생성을 방지.
-        """
-        try:
-            if runner_id:
-                existing_status = await self.async_redis.get(self._runner_key(runner_id, "status"))
-                if existing_status is None:
-                    # listener가 이미 cleanup 완료 (키 삭제됨) → RECENT 등록 스킵
-                    await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
-                    return
-                await self.async_redis.set(self._runner_key(runner_id, "status"), "stopped")
-                pipe = self.async_redis.pipeline()
-                for key_suffix in RUNNER_KEY_SUFFIXES:
-                    pipe.expire(self._runner_key(runner_id, key_suffix), RECENT_RUNNERS_TTL)
-                pipe.srem(ACTIVE_RUNNERS_KEY, runner_id)
-                pipe.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
-                await pipe.execute()
-                plan_service.invalidate_plans_cache()
-            else:
-                runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
-                stop_ts = time.time()
-                for rid in runner_ids:
-                    existing_status = await self.async_redis.get(self._runner_key(rid, "status"))
-                    if existing_status is None:
-                        # listener가 이미 cleanup 완료 → RECENT 등록 스킵, ACTIVE만 정리
-                        await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
-                        continue
-                    await self.async_redis.set(self._runner_key(rid, "status"), "stopped")
-                    pipe = self.async_redis.pipeline()
-                    for key_suffix in RUNNER_KEY_SUFFIXES:
-                        pipe.expire(self._runner_key(rid, key_suffix), RECENT_RUNNERS_TTL)
-                    pipe.zadd(RECENT_RUNNERS_KEY, {rid: stop_ts})
-                    await pipe.execute()
-                await self.async_redis.delete(ACTIVE_RUNNERS_KEY)
-                plan_service.invalidate_plans_cache()
-        except Exception:
-            pass
+        self._sync_state()
+        await self.state._force_cleanup_state(runner_id)
 
     async def _send_force_stop(self, runner_id: str = ""):
         """listener에 force-stop 명령 전송 (_running_processes 변수까지 정리)"""
@@ -375,116 +309,9 @@ class ExecutorService:
             return False
 
     async def cleanup_stale_runners(self) -> Dict:
-        """active_runners + recent_runners 중 stale 항목을 정리하는 public 메서드.
-
-        stale 판단 기준:
-        - active_runners: PID 없거나 죽어있음 → 기존 _cleanup_stale_runners() 로직 재활용
-        - recent_runners: plan_file 없음 + (archive 있음 or stopped or running+10분+) → 정리
-          - plan_file 있음 → 스킵
-          - plan_file 없음 + archive 있음 → stale (정상완료, reason=archived)
-          - plan_file 없음 + archive 없음 + stopped → stale (파일소실, reason=file_lost)
-          - plan_file 없음 + archive 없음 + running + 10분+ → stale (좀비+파일소실, reason=file_lost)
-          - plan_file 없음 + archive 없음 + running + 10분 미만 → 유예 (방금 시작, 스킵)
-
-        Returns:
-            {"cleaned_active": int, "cleaned_recent": int, "bugs": int, "total": int}
-        """
-        cleaned_active = 0
-        cleaned_recent = 0
-        bugs = 0
-        cleaned_active_ids: set = set()
-
-        # 1. active_runners 정리 (기존 _cleanup_stale_runners 로직)
-        try:
-            runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
-        except Exception:
-            runner_ids = set()
-
-        for rid in runner_ids:
-            pid_str = await self.async_redis.get(self._runner_key(rid, "pid"))
-            should_clean = False
-            if not pid_str:
-                should_clean = True
-            else:
-                try:
-                    pid = int(pid_str)
-                    if not self._is_pid_alive(pid):
-                        should_clean = True
-                except ValueError:
-                    should_clean = True
-
-            if should_clean:
-                await self._force_cleanup_state(rid)
-                cleaned_active_ids.add(rid)
-                cleaned_active += 1
-
-        # 2. recent_runners 정리
-        try:
-            recent_ids = await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
-        except Exception:
-            recent_ids = []
-
-        now = datetime.now()
-        GRACE_SECONDS = 600  # 10분
-
-        for rid in recent_ids:
-            if rid in cleaned_active_ids:
-                continue
-            plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))
-
-            # plan_file 있으면 스킵
-            if plan_file and Path(plan_file).exists():
-                continue
-
-            # plan_file 없는 경우: archive 확인
-            reason = None
-            if plan_file:
-                # archive 경로 계산: docs/plan/ → docs/archive/
-                archive_path = plan_file.replace("docs/plan/", "docs/archive/").replace("docs\\plan\\", "docs\\archive\\")
-                if Path(archive_path).exists():
-                    reason = "archived"
-                else:
-                    reason = "file_lost"
-            else:
-                reason = "file_lost"
-
-            # status + start_time 기반 판단
-            status = await self.async_redis.get(self._runner_key(rid, "status"))
-            start_time_str = await self.async_redis.get(self._runner_key(rid, "start_time"))
-
-            if status == "running" and reason == "file_lost":
-                # 10분 유예 확인
-                if start_time_str:
-                    try:
-                        start_time = datetime.fromisoformat(start_time_str)
-                        elapsed = (now - start_time).total_seconds()
-                        if elapsed < GRACE_SECONDS:
-                            # 방금 시작한 runner, 유예
-                            continue
-                    except ValueError:
-                        pass
-
-            # 정리 실행: per-runner 키 삭제 + zrem
-            for key_suffix in RUNNER_KEY_SUFFIXES:
-                await self.async_redis.delete(self._runner_key(rid, key_suffix))
-            await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
-            await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
-            cleaned_recent += 1
-
-            if reason == "file_lost":
-                bugs += 1
-                logger.warning(f"[dev-runner] cleanup: runner {rid} plan 파일 소실 (file_lost)")
-
-        total = cleaned_active + cleaned_recent
-        if total:
-            logger.info(f"[dev-runner] cleanup_stale_runners: active={cleaned_active}, recent={cleaned_recent}, bugs={bugs}")
-
-        return {
-            "cleaned_active": cleaned_active,
-            "cleaned_recent": cleaned_recent,
-            "bugs": bugs,
-            "total": total,
-        }
+        """active_runners + recent_runners 중 stale 항목을 정리 (RunnerState 위임)."""
+        self._sync_state()
+        return await self.state.cleanup_stale_runners()
 
     async def reset_running_state(self, full_reset: bool = False) -> Dict:
         """RUNNING 상태 강제 초기화 - Redis 정리만 수행"""
@@ -659,37 +486,11 @@ class ExecutorService:
             return []
 
     async def dismiss_runner(self, runner_id: str) -> bool:
-        """종료된 runner를 탭에서 제거 (RECENT_RUNNERS_KEY에서 삭제 + per-runner 키 즉시 삭제)"""
-        try:
-            # RECENT_RUNNERS_KEY에서 제거
-            await self.async_redis.zrem(RECENT_RUNNERS_KEY, runner_id)
-            # per-runner 키 즉시 삭제
-            for key_suffix in RUNNER_KEY_SUFFIXES:
-                await self.async_redis.delete(self._runner_key(runner_id, key_suffix))
-            # ACTIVE_RUNNERS_KEY에서도 제거 (혹시 남아있다면)
-            await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
-            return True
-        except Exception:
-            return False
+        self._sync_state()
+        return await self.state.dismiss_runner(runner_id)
 
     def _is_pid_alive(self, pid: int) -> bool:
-        """PID가 실제로 살아있는지 확인 (Windows: GetExitCodeProcess로 검증)"""
-        try:
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-            if not handle:
-                return False
-            # OpenProcess는 종료된 프로세스도 핸들을 반환할 수 있으므로
-            # GetExitCodeProcess로 실제 생존 여부 확인
-            STILL_ACTIVE = 259
-            exit_code = ctypes.c_ulong()
-            kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
-            kernel32.CloseHandle(handle)
-            return exit_code.value == STILL_ACTIVE
-        except Exception:
-            return False
+        return self.state._is_pid_alive(pid)
 
     async def get_process_status(self) -> RunStatusResponse:
         """프로세스 상태 조회 - 하위호환 (첫 번째 active runner 반환)"""
