@@ -50,7 +50,7 @@ def test_trigger_roundtrip_redis():
         async def run_test():
             svc._check_redis_and_listener = AsyncMock()
             svc.cleanup_stale_runners = AsyncMock(return_value={"cleaned_active": 0, "cleaned_recent": 0, "bugs": 0, "total": 0})
-            await svc.start_dev_runner(RunRequest(trigger="user", plan_file="test.md", dry_run=True))
+            await svc.start_dev_runner(RunRequest(trigger="test:trigger_source", plan_file="test.md", dry_run=True, test_source="test_trigger_roundtrip_redis"))
 
         asyncio.get_event_loop().run_until_complete(run_test())
 
@@ -58,7 +58,7 @@ def test_trigger_roundtrip_redis():
     assert len(pushed_commands) > 0, "command가 Redis에 push되지 않음"
     cmd = pushed_commands[0]
     assert "trigger" in cmd, f"trigger 필드 없음: {cmd}"
-    assert cmd["trigger"] == "user", f"trigger 값 오류: {cmd['trigger']}"
+    assert cmd["trigger"] == "tc:test_trigger_roundtrip_redis", f"trigger 값 오류: {cmd['trigger']}"
 
 
 def test_trigger_log_file_header_written():
