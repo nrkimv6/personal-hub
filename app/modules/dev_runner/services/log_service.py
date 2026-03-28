@@ -16,6 +16,7 @@ import redis
 import redis.asyncio as aioredis
 
 from app.modules.dev_runner.config import config
+from app.shared.redis.client import RedisClient
 from app.modules.dev_runner.schemas import LogResponse, RunHistoryItem, RunHistoryResponse, FullLogResponse
 from app.modules.dev_runner.services.state import get_state
 # Redis 설정
@@ -33,21 +34,18 @@ class LogService:
     """로그 스트리밍 서비스 - Redis Pub/Sub 기반"""
 
     def __init__(self):
-        """Redis 클라이언트 초기화"""
+        """Redis 클라이언트 초기화 (ConnectionPool 기반)"""
         # 동기 클라이언트 (tail_log_file, _find_current_log 용)
-        self.redis_client = redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            decode_responses=True,
-            socket_connect_timeout=5,
+        sync_client = RedisClient.get_sync_client()
+        self.redis_client = sync_client if sync_client is not None else redis.Redis(
+            host=REDIS_HOST, port=REDIS_PORT, decode_responses=True, socket_connect_timeout=5,
         )
-        # 비동기 클라이언트 (stream_log_file 용 — 이벤트 루프 블로킹 방지)
-        self.async_redis = aioredis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            decode_responses=True,
-            socket_connect_timeout=5,
+        # 비동기 클라이언트 (stream_log_file 용 — ConnectionPool로 연결 수 제한)
+        self._async_pool = aioredis.ConnectionPool(
+            host=REDIS_HOST, port=REDIS_PORT, decode_responses=True,
+            socket_connect_timeout=5, max_connections=50,
         )
+        self.async_redis = aioredis.Redis(connection_pool=self._async_pool)
 
     # stream_log_path 파일이 이 크기 이하이면 START 마커만 있는 빈 파일로 간주 → log_file_path로 fallback
     _STREAM_LOG_MIN_BYTES = 200
@@ -120,7 +118,8 @@ class LogService:
         consecutive_errors = 0
         MAX_CONSECUTIVE_ERRORS = 5
 
-        while True:
+        try:
+          while True:
             try:
                 if pubsub is None:
                     pubsub = self.async_redis.pubsub()
@@ -139,12 +138,6 @@ class LogService:
                             # __COMPLETED::{reason}__ 형태에서 reason 추출
                             reason = data[len("__COMPLETED::"):].rstrip("_") or "completed"
                         yield f"event: completed\ndata: {reason}\n\n"
-                        if pubsub:
-                            try:
-                                await pubsub.unsubscribe(log_channel)
-                                await pubsub.aclose()
-                            except Exception:
-                                pass
                         return
                     yield f"data: {data}\n\n"
                     last_heartbeat = time.monotonic()
@@ -195,6 +188,13 @@ class LogService:
 
                 yield f"data: [Stream error #{consecutive_errors}: {str(e)}]\n\n"
                 await asyncio.sleep(5)
+        finally:
+            if pubsub:
+                try:
+                    await pubsub.unsubscribe(log_channel)
+                    await pubsub.aclose()
+                except Exception:
+                    pass
 
 
     async def stream_merge_log(self, runner_id: str) -> AsyncGenerator[str, None]:
@@ -208,7 +208,8 @@ class LogService:
         consecutive_errors = 0
         MAX_CONSECUTIVE_ERRORS = 5
 
-        while True:
+        try:
+          while True:
             try:
                 if pubsub is None:
                     pubsub = self.async_redis.pubsub()
@@ -226,12 +227,6 @@ class LogService:
                         suffix = suffix.lstrip(":")
                         reason = "completed" if (not suffix or suffix == "SUCCESS") else "merge_failed"
                         yield f"event: completed\ndata: {reason}\n\n"
-                        if pubsub:
-                            try:
-                                await pubsub.unsubscribe(log_channel)
-                                await pubsub.aclose()
-                            except Exception:
-                                pass
                         return
                     yield f"data: {data}\n\n"
                     last_heartbeat = time.monotonic()
@@ -272,6 +267,13 @@ class LogService:
 
                 yield f"data: [Stream error #{consecutive_errors}: {str(e)}]\n\n"
                 await asyncio.sleep(5)
+        finally:
+            if pubsub:
+                try:
+                    await pubsub.unsubscribe(log_channel)
+                    await pubsub.aclose()
+                except Exception:
+                    pass
 
     def _get_log_dir(self) -> Path:
         """로그 디렉토리 경로 반환 (config.LOG_DIR 기준, wtools 절대경로로 보정)"""

@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import Optional
 
+import redis as redis_sync
 import redis.asyncio as redis
 
 from app.core.config import settings
@@ -30,6 +31,9 @@ class RedisClient:
     _lock: Optional[asyncio.Lock] = None
     _reconnect_attempts: int = 0
     _max_reconnect_attempts: int = 3
+    _async_pool: Optional[redis.ConnectionPool] = None
+    _sync_pool: Optional[redis_sync.ConnectionPool] = None
+    _sync_client: Optional[redis_sync.Redis] = None
 
     @classmethod
     async def _get_lock(cls) -> asyncio.Lock:
@@ -70,13 +74,16 @@ class RedisClient:
 
             # 새 연결 시도
             try:
-                cls._instance = redis.Redis(
-                    host=settings.REDIS_HOST,
-                    port=settings.REDIS_PORT,
-                    decode_responses=True,
-                    socket_connect_timeout=settings.REDIS_CONNECTION_TIMEOUT,
-                    socket_timeout=settings.REDIS_CONNECTION_TIMEOUT,
-                )
+                if cls._async_pool is None:
+                    cls._async_pool = redis.ConnectionPool(
+                        host=settings.REDIS_HOST,
+                        port=settings.REDIS_PORT,
+                        decode_responses=True,
+                        socket_connect_timeout=settings.REDIS_CONNECTION_TIMEOUT,
+                        socket_timeout=settings.REDIS_CONNECTION_TIMEOUT,
+                        max_connections=50,
+                    )
+                cls._instance = redis.Redis(connection_pool=cls._async_pool)
                 await cls._instance.ping()
                 cls._connected = True
                 cls._reconnect_attempts = 0
@@ -98,6 +105,24 @@ class RedisClient:
                 cls._instance = None
                 cls._connected = False
                 return None
+
+    @classmethod
+    def get_sync_client(cls) -> Optional[redis_sync.Redis]:
+        """동기 Redis 클라이언트 반환 (ConnectionPool 기반 싱글톤)."""
+        if not settings.REDIS_ENABLED:
+            return None
+        if cls._sync_client is None:
+            if cls._sync_pool is None:
+                cls._sync_pool = redis_sync.ConnectionPool(
+                    host=settings.REDIS_HOST,
+                    port=settings.REDIS_PORT,
+                    decode_responses=True,
+                    socket_connect_timeout=settings.REDIS_CONNECTION_TIMEOUT,
+                    socket_timeout=settings.REDIS_CONNECTION_TIMEOUT,
+                    max_connections=20,
+                )
+            cls._sync_client = redis_sync.Redis(connection_pool=cls._sync_pool)
+        return cls._sync_client
 
     @classmethod
     async def close(cls) -> None:
