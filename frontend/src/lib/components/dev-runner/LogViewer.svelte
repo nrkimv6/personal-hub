@@ -52,7 +52,7 @@
 	let sseStarted = $state(mode === 'managed');
 	let reconnectCount = $state(0);
 	let consecutiveErrors = $state(0);
-	let redisAvailable = $state(true);
+	let redisAvailable = $state(false);
 	let pendingStale = $state(false);
 	let exitBanner = $state<{ show: boolean; reason: string }>({ show: false, reason: 'completed' }); // runner 종료 배너
 	const MAX_LINES = 500;
@@ -289,8 +289,8 @@
 		try {
 			const statusRes = await fetch('/api/v1/dev-runner/status');
 			if (statusRes.ok) {
-				redisAvailable = true;
-				await statusRes.json();
+				const data = await statusRes.json();
+				redisAvailable = data.redis_connected ?? false;
 			} else {
 				redisAvailable = false;
 			}
