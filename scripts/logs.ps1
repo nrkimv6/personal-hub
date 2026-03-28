@@ -3,7 +3,7 @@
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("all", "api", "worker", "frontend", "list", "watchdog")]
+    [ValidateSet("all", "api", "worker", "frontend", "list", "watchdog", "devrunner")]
     [string]$Target = "all",
 
     [Parameter()]
@@ -17,6 +17,9 @@ param(
 
     [Parameter()]
     [switch]$Admin,  # Use admin log directory (logs/admin/)
+
+    [Parameter()]
+    [switch]$Cleanup,  # Filter output to show only runner cleanup events
 
     [Parameter()]
     [switch]$Help
@@ -48,25 +51,29 @@ Monitor Page Log Viewer
 =======================
 
 Usage:
-    .\logs.ps1 [target] [-Lines N] [-Follow] [-Help]
+    .\logs.ps1 [target] [-Lines N] [-Follow] [-Cleanup] [-Help]
 
 Targets:
-    all      Show API, Worker, and Frontend logs together (default)
-    api      Show API server logs only
-    worker   Show Worker logs only
-    frontend Show Frontend logs only
-    list     List available log files
+    all       Show API, Worker, Frontend, and Dev-Runner logs together (default)
+    api       Show API server logs only
+    worker    Show Worker logs only
+    frontend  Show Frontend logs only
+    devrunner Show Dev-Runner listener logs only
+    list      List available log files
 
 Options:
     -Lines N    Number of lines to show (default: 50)
     -Follow     Follow logs in real-time (like tail -f)
+    -Cleanup    Filter output to show only runner cleanup/정리 events
     -Help       Show this help message
 
 Examples:
-    .\logs.ps1                  # Show last 50 lines of all logs
-    .\logs.ps1 api              # Show API logs only
-    .\logs.ps1 worker -Lines 100  # Show last 100 lines of worker logs
-    .\logs.ps1 all -Follow      # Follow all logs in real-time
+    .\logs.ps1                           # Show last 50 lines of all logs
+    .\logs.ps1 api                       # Show API logs only
+    .\logs.ps1 devrunner -Follow         # Follow dev-runner logs in real-time
+    .\logs.ps1 devrunner -Follow -Cleanup  # Show only cleanup events in real-time
+    .\logs.ps1 worker -Lines 100         # Show last 100 lines of worker logs
+    .\logs.ps1 all -Follow               # Follow all logs in real-time
 
 "@
     exit 0
@@ -632,6 +639,10 @@ function Start-LogTail {
     # Use PowerShell Get-Content -Wait
     Get-Content $FilePath -Wait -Tail 10 -Encoding UTF8 | ForEach-Object {
         $line = $_
+        # -Cleanup 필터: cleanup/정리 관련 라인만 표시
+        if ($Cleanup -and $line -notmatch '\[cleanup\]|heartbeat.*cleanup|stale.*runner|force_cleanup|_cleanup_process') {
+            return
+        }
         $lineColor = "White"
         if ($line -match "ERROR|CRITICAL") {
             $lineColor = "Red"
@@ -1121,6 +1132,16 @@ if ($Follow) {
                     -StartupBrowserWorkersLog $startupBrowserWorkersLogFile
             }
         }
+        "devrunner" {
+            if (-not $devRunnerLogFile) {
+                Write-Host "[!] Dev-Runner 로그 파일을 찾을 수 없습니다. -Admin 스위치를 추가하거나 logs/admin/ 디렉토리를 확인하세요." -ForegroundColor Red
+            } else {
+                if ($Cleanup) {
+                    Write-Host "  [Cleanup 필터 활성: [cleanup]|heartbeat.*cleanup|stale.*runner 포함 라인만 표시]" -ForegroundColor Yellow
+                }
+                Start-LogTail -FilePath $devRunnerLogFile -Prefix "DevRunner"
+            }
+        }
         default {
             Start-CombinedLogTail `
                 -ApiLog $apiLogFile `
@@ -1170,6 +1191,27 @@ if ($Follow) {
                 Show-LogContent -FilePath $apiWatchdogLogFile         -Label "API-WD"    -Color DarkYellow -TailLines $Lines
             }
         }
+        "devrunner" {
+            if (-not $devRunnerLogFile) {
+                Write-Host "[!] Dev-Runner 로그 파일을 찾을 수 없습니다. -Admin 스위치를 추가하거나 logs/admin/ 디렉토리를 확인하세요." -ForegroundColor Red
+            } else {
+                if ($Cleanup) {
+                    Write-Host "  [Cleanup 필터 활성: [cleanup]|heartbeat.*cleanup|stale.*runner 포함 라인만 표시]" -ForegroundColor Yellow
+                    $content = Get-Content $devRunnerLogFile -Encoding UTF8 -Tail ($Lines * 5) | Where-Object {
+                        $_ -match '\[cleanup\]|heartbeat.*cleanup|stale.*runner|force_cleanup|_cleanup_process'
+                    } | Select-Object -Last $Lines
+                    foreach ($line in $content) {
+                        $lineColor = if ($line -match "ERROR|CRITICAL") { "Red" }
+                                     elseif ($line -match "WARNING") { "Yellow" }
+                                     elseif ($line -match "INFO") { "Green" }
+                                     else { "Gray" }
+                        Write-Host $line -ForegroundColor $lineColor
+                    }
+                } else {
+                    Show-LogContent -FilePath $devRunnerLogFile -Label "DevRunner" -Color Yellow -TailLines $Lines
+                }
+            }
+        }
         default {
             # stdout_api_: 레거시 (NSSM stdout→service_*.log 전환됨)
             $apiLogFiles = Get-LatestLogFilesMultiPattern @("stdout_api_", "api_")
@@ -1203,6 +1245,10 @@ if ($Follow) {
             }
             $frontendLogFiles = Get-LatestLogFilesMultiPattern @("frontend_2")
             Show-LogContent -FilePaths $frontendLogFiles -Label "Frontend" -Color Green -TailLines $Lines
+            # Dev-Runner 로그 (admin 디렉토리에 있으므로 항상 표시)
+            if ($devRunnerLogFile) {
+                Show-LogContent -FilePath $devRunnerLogFile -Label "DevRunner" -Color Yellow -TailLines ([Math]::Min($Lines, 30))
+            }
         }
     }
 }

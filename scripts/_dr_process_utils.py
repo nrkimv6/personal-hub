@@ -96,7 +96,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             if merge_status in MERGE_ACTIVE_STATUSES:
                 logger.warning(
                     f"[cleanup] 머지 진행중 runner {runner_id} cleanup 거부 "
-                    f"(reason={reason}, merge_status={merge_status})"
+                    f"(reason={reason}, merge_status={merge_status}, elapsed=확인불가)"
                 )
                 return
         except Exception as _guard_err:
@@ -182,6 +182,8 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                 logger.info(f"[cleanup] workflow {wf['id']} → failed (reason: {reason})")
     except Exception as e:
         logger.warning(f"[cleanup] workflow DB 갱신 실패 (무시): {e}")
+
+    logger.info(f"[cleanup] _cleanup_process_state 완료: {runner_id} (reason={reason})")
 
 
 class _DummyProcess:

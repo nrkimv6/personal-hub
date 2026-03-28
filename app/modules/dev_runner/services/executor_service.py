@@ -129,16 +129,19 @@ class ExecutorService:
             pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
             if not pid_str:
                 # PID 정보 없음 → stale
+                logger.warning(f"[cleanup] stale active runner 발견: {rid} (PID 없음) → force_cleanup_state 호출")
                 await self._force_cleanup_state(rid)
                 cleaned += 1
                 continue
             try:
                 pid = int(pid_str)
             except ValueError:
+                logger.warning(f"[cleanup] stale active runner 발견: {rid} (PID={pid_str!r} 파싱 실패) → force_cleanup_state 호출")
                 await self._force_cleanup_state(rid)
                 cleaned += 1
                 continue
             if not self._is_pid_alive(pid):
+                logger.warning(f"[cleanup] stale active runner 발견: {rid} (PID={pid} dead) → force_cleanup_state 호출")
                 await self._force_cleanup_state(rid)
                 cleaned += 1
 
@@ -428,9 +431,11 @@ class ExecutorService:
         """
         try:
             if runner_id:
+                logger.info(f"[cleanup] force_cleanup_state 시작: {runner_id}")
                 existing_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
                 if existing_status is None:
                     # listener가 이미 cleanup 완료 (키 삭제됨) → RECENT 등록 스킵
+                    logger.debug(f"[cleanup] {runner_id} status 키 없음 → listener가 이미 정리 완료, 스킵")
                     await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
                     return
                 await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
@@ -442,13 +447,16 @@ class ExecutorService:
                 pipe.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
                 await pipe.execute()
                 plan_service.invalidate_plans_cache()
+                logger.info(f"[cleanup] force_cleanup_state 완료: {runner_id} → RECENT 이동")
             else:
                 runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
+                logger.info(f"[cleanup] force_cleanup_state 전체: active runner {len(runner_ids)}개 정리 시작")
                 stop_ts = time.time()
                 for rid in runner_ids:
                     existing_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
                     if existing_status is None:
                         # listener가 이미 cleanup 완료 → RECENT 등록 스킵, ACTIVE만 정리
+                        logger.debug(f"[cleanup] {rid} status 키 없음 → listener가 이미 정리 완료, 스킵")
                         await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
                         continue
                     await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
@@ -458,6 +466,7 @@ class ExecutorService:
                         pipe.expire(full_key, RECENT_RUNNERS_TTL)
                     pipe.zadd(RECENT_RUNNERS_KEY, {rid: stop_ts})
                     await pipe.execute()
+                    logger.info(f"[cleanup] force_cleanup_state 완료: {rid} → RECENT 이동")
                 await self.async_redis.delete(ACTIVE_RUNNERS_KEY)
                 plan_service.invalidate_plans_cache()
         except Exception:
@@ -577,6 +586,7 @@ class ExecutorService:
                         elapsed = (now - start_time).total_seconds()
                         if elapsed < GRACE_SECONDS:
                             # 방금 시작한 runner, 유예
+                            logger.debug(f"[cleanup] recent runner 유예 스킵: {rid} (running, {elapsed:.0f}s < {GRACE_SECONDS}s)")
                             continue
                     except ValueError:
                         pass
@@ -587,6 +597,7 @@ class ExecutorService:
             await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
             await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
             cleaned_recent += 1
+            logger.info(f"[cleanup] recent runner 정리: {rid} (reason={reason})")
 
             if reason == "file_lost":
                 bugs += 1

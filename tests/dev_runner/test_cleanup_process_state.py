@@ -268,6 +268,114 @@ class TestForceCleanupStateDefense:
 
 
 # ──────────────────────────────────────────────
+# _force_cleanup_state 로그 검증 테스트
+# ──────────────────────────────────────────────
+
+class TestForceCleanupStateLogs:
+    """_force_cleanup_state() 로그 발생 검증"""
+
+    @pytest.fixture
+    def svc_with_fake_redis(self):
+        import fakeredis.aioredis as fake_aioredis
+        from app.modules.dev_runner.services.executor_service import ExecutorService
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        svc = ExecutorService.__new__(ExecutorService)
+        svc.async_redis = fake_r
+        svc.redis_client = fakeredis.FakeRedis(decode_responses=True)
+        return svc, fake_r
+
+    @pytest.mark.asyncio
+    async def test_force_cleanup_state_logs_on_entry(self, svc_with_fake_redis, caplog):
+        """R: force_cleanup_state 시작 시 INFO 로그가 발생해야 한다"""
+        import logging
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        svc, fake_r = svc_with_fake_redis
+        runner_id = "t-log-entry-001"
+        await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        with caplog.at_level(logging.INFO, logger="app.modules.dev_runner.services.executor_service"):
+            await svc._force_cleanup_state(runner_id)
+
+        assert any("force_cleanup_state 시작" in r.message and runner_id in r.message for r in caplog.records), \
+            "force_cleanup_state 진입 로그 없음"
+
+    @pytest.mark.asyncio
+    async def test_force_cleanup_state_logs_skip_when_no_status_key(self, svc_with_fake_redis, caplog):
+        """B: status 키 없는 경우 debug 스킵 로그가 발생해야 한다"""
+        import logging
+        from app.modules.dev_runner.services.executor_service import ACTIVE_RUNNERS_KEY
+        svc, fake_r = svc_with_fake_redis
+        runner_id = "t-log-skip-001"
+        await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        with caplog.at_level(logging.DEBUG, logger="app.modules.dev_runner.services.executor_service"):
+            await svc._force_cleanup_state(runner_id)
+
+        assert any("status 키 없음" in r.message and runner_id in r.message for r in caplog.records), \
+            "status 키 없음 스킵 로그 없음"
+
+    @pytest.mark.asyncio
+    async def test_force_cleanup_state_logs_completion(self, svc_with_fake_redis, caplog):
+        """R: status 키 있는 경우 완료 로그가 발생해야 한다"""
+        import logging
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        svc, fake_r = svc_with_fake_redis
+        runner_id = "t-log-done-001"
+        await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        with caplog.at_level(logging.INFO, logger="app.modules.dev_runner.services.executor_service"):
+            await svc._force_cleanup_state(runner_id)
+
+        assert any("force_cleanup_state 완료" in r.message and "RECENT 이동" in r.message for r in caplog.records), \
+            "force_cleanup_state 완료 로그 없음"
+
+
+# ──────────────────────────────────────────────
+# cleanup_stale_runners 로그 검증 테스트
+# ──────────────────────────────────────────────
+
+class TestCleanupStaleRunnersLogs:
+    """_cleanup_stale_runners() runner별 사유 로그 검증"""
+
+    @pytest.fixture
+    def svc_with_fake_redis(self):
+        import fakeredis.aioredis as fake_aioredis
+        from app.modules.dev_runner.services.executor_service import ExecutorService
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        svc = ExecutorService.__new__(ExecutorService)
+        svc.async_redis = fake_r
+        svc.redis_client = fakeredis.FakeRedis(decode_responses=True)
+        return svc, fake_r
+
+    @pytest.mark.asyncio
+    async def test_cleanup_stale_runners_logs_per_runner_reason(self, svc_with_fake_redis, caplog):
+        """R: PID dead stale runner 발견 시 runner ID가 포함된 WARNING 로그가 발생해야 한다"""
+        import logging
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        svc, fake_r = svc_with_fake_redis
+        runner_id = "t-stale-001"
+        await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", "999999999")
+        await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        # _is_pid_alive를 항상 False 반환으로 mock
+        with patch.object(svc, "_is_pid_alive", return_value=False):
+            with caplog.at_level(logging.WARNING, logger="app.modules.dev_runner.services.executor_service"):
+                await svc._cleanup_stale_runners()
+
+        assert any("stale active runner" in r.message and runner_id in r.message for r in caplog.records), \
+            f"stale runner {runner_id}에 대한 WARNING 로그 없음"
+
+
+# ──────────────────────────────────────────────
 # 키 상수 동기화 테스트
 # ──────────────────────────────────────────────
 
