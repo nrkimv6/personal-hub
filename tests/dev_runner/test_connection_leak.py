@@ -10,7 +10,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_stream_events_cleanup_on_client_disconnect():
     """R: stream_events() generator aclose 시 _safe_close_pubsub이 pubsub, log_pubsub 모두에 호출되는지 확인."""
-    from app.modules.dev_runner.services.event_service import EventService, _safe_close_pubsub
+    from app.modules.dev_runner.services.event_service import EventService
 
     svc = EventService()
 
@@ -246,9 +246,9 @@ def test_redis_pool_max_connections():
 
 def test_diagnostics_reports_high_connection_count():
     """R: INFO clients가 connected_clients: 150 반환 시 diagnostics에 WARNING 포함."""
-    from app.modules.dev_runner.services.log_service import LogService
+    from app.modules.dev_runner.services.diagnostics_service import DiagnosticsService
 
-    svc = LogService()
+    svc = DiagnosticsService()
     svc.redis_client = MagicMock()
     svc.redis_client.ping = MagicMock()
     svc.redis_client.info = MagicMock(return_value={"connected_clients": 150})
@@ -266,9 +266,9 @@ def test_diagnostics_reports_high_connection_count():
 
 def test_diagnostics_normal_connection_count():
     """B: connected_clients: 5 반환 시 ok=True."""
-    from app.modules.dev_runner.services.log_service import LogService
+    from app.modules.dev_runner.services.diagnostics_service import DiagnosticsService
 
-    svc = LogService()
+    svc = DiagnosticsService()
     svc.redis_client = MagicMock()
     svc.redis_client.ping = MagicMock()
     svc.redis_client.info = MagicMock(return_value={"connected_clients": 5})

@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from app.modules.dev_runner.schemas import LogResponse, RunHistoryResponse, FullLogResponse
 from app.modules.dev_runner.services.log_service import log_service
+from app.modules.dev_runner.services.diagnostics_service import diagnostics_service
 
 router = APIRouter()
 
@@ -36,7 +37,7 @@ async def stream_logs(
 @router.get("/logs/diagnostics")
 async def get_diagnostics():
     """파이프라인 진단 (1회성) — LogViewer 시작 시 호출"""
-    return log_service.run_diagnostics()
+    return diagnostics_service.run_diagnostics()
 
 
 @router.get("/logs/history", response_model=RunHistoryResponse)

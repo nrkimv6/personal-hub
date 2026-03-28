@@ -1,1 +1,3 @@
-"""Dev Runner Services - 빈 파일"""
+"""Dev Runner Services"""
+
+from .diagnostics_service import diagnostics_service

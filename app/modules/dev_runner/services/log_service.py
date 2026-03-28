@@ -17,6 +17,7 @@ import redis.asyncio as aioredis
 
 from app.modules.dev_runner.config import config
 from app.shared.redis.client import RedisClient
+from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 from app.modules.dev_runner.schemas import LogResponse, RunHistoryItem, RunHistoryResponse, FullLogResponse
 from app.modules.dev_runner.services.state import get_state
 # Redis 설정
@@ -126,82 +127,57 @@ class LogService:
         MAX_CONSECUTIVE_ERRORS = 5
 
         try:
-          while True:
-            try:
-                if pubsub is None:
-                    pubsub = self.async_redis.pubsub()
-                    await pubsub.subscribe(log_channel)
-
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=0.5
-                )
-                if message and message["type"] == "message":
-                    data = message["data"]
-                    if data.startswith("__COMPLETED"):
-                        # runner 종료 신호 — exit_reason 파싱 후 completed 이벤트 전송
-                        if data == "__COMPLETED__":
-                            reason = "completed"
-                        else:
-                            # __COMPLETED::{reason}__ 형태에서 reason 추출
-                            reason = data[len("__COMPLETED::"):].rstrip("_") or "completed"
-                        yield f"event: completed\ndata: {reason}\n\n"
-                        return
-                    yield f"data: {data}\n\n"
-                    last_heartbeat = time.monotonic()
-                    consecutive_errors = 0
-                else:
-                    now = time.monotonic()
-                    if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-                        yield ": heartbeat\n\n"
-                        last_heartbeat = now
-                    await asyncio.sleep(0.3)
-
-            except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
-                if pubsub:
-                    try:
-                        await pubsub.unsubscribe(log_channel)
-                        await pubsub.aclose()
-                    except AttributeError:
-                        try:
-                            await pubsub.close()
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                    pubsub = None
-                yield "event: redis_disconnected\ndata: Redis not available\n\n"
-                last_heartbeat = time.monotonic()
-                await asyncio.sleep(5)
-
-            except Exception as e:
-                consecutive_errors += 1
-                if pubsub:
-                    try:
-                        await pubsub.unsubscribe(log_channel)
-                        await pubsub.aclose()
-                    except AttributeError:
-                        try:
-                            await pubsub.close()
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                    pubsub = None
-                last_heartbeat = time.monotonic()
-
-                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                    yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
-                    return
-
-                yield f"data: [Stream error #{consecutive_errors}: {str(e)}]\n\n"
-                await asyncio.sleep(5)
-        finally:
-            if pubsub:
+            while True:
                 try:
-                    await pubsub.unsubscribe(log_channel)
-                    await pubsub.aclose()
-                except Exception:
-                    pass
+                    if pubsub is None:
+                        pubsub = self.async_redis.pubsub()
+                        await pubsub.subscribe(log_channel)
+
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=0.5
+                    )
+                    if message and message["type"] == "message":
+                        data = message["data"]
+                        if data.startswith("__COMPLETED"):
+                            # runner 종료 신호 — exit_reason 파싱 후 completed 이벤트 전송
+                            if data == "__COMPLETED__":
+                                reason = "completed"
+                            else:
+                                # __COMPLETED::{reason}__ 형태에서 reason 추출
+                                reason = data[len("__COMPLETED::"):].rstrip("_") or "completed"
+                            yield f"event: completed\ndata: {reason}\n\n"
+                            return
+                        yield f"data: {data}\n\n"
+                        last_heartbeat = time.monotonic()
+                        consecutive_errors = 0
+                    else:
+                        now = time.monotonic()
+                        if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                            yield ": heartbeat\n\n"
+                            last_heartbeat = now
+                        await asyncio.sleep(0.3)
+
+                except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
+                    await safe_close_pubsub(pubsub)
+                    pubsub = None
+                    yield "event: redis_disconnected\ndata: Redis not available\n\n"
+                    last_heartbeat = time.monotonic()
+                    await asyncio.sleep(5)
+
+                except Exception as e:
+                    consecutive_errors += 1
+                    await safe_close_pubsub(pubsub)
+                    pubsub = None
+                    last_heartbeat = time.monotonic()
+
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
+                        return
+
+                    yield f"data: [Stream error #{consecutive_errors}: {str(e)}]\n\n"
+                    await asyncio.sleep(5)
+        finally:
+            await safe_close_pubsub(pubsub)
 
 
     async def stream_merge_log(self, runner_id: str) -> AsyncGenerator[str, None]:
@@ -216,71 +192,56 @@ class LogService:
         MAX_CONSECUTIVE_ERRORS = 5
 
         try:
-          while True:
-            try:
-                if pubsub is None:
-                    pubsub = self.async_redis.pubsub()
-                    await pubsub.subscribe(log_channel)
-
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=0.5
-                )
-                if message and message["type"] == "message":
-                    data = message["data"]
-                    if "__MERGE_COMPLETED__" in data:
-                        # sentinel 접미사 파싱: __MERGE_COMPLETED__:SUCCESS / :FAILED
-                        # 하위호환: 접미사 없으면 SUCCESS 기본값
-                        suffix = data.split("__MERGE_COMPLETED__", 1)[1]
-                        suffix = suffix.lstrip(":")
-                        reason = "completed" if (not suffix or suffix == "SUCCESS") else "merge_failed"
-                        yield f"event: completed\ndata: {reason}\n\n"
-                        return
-                    yield f"data: {data}\n\n"
-                    last_heartbeat = time.monotonic()
-                    consecutive_errors = 0
-                else:
-                    now = time.monotonic()
-                    if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-                        yield ": heartbeat\n\n"
-                        last_heartbeat = now
-                    await asyncio.sleep(0.3)
-
-            except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
-                if pubsub:
-                    try:
-                        await pubsub.unsubscribe(log_channel)
-                        await pubsub.aclose()
-                    except Exception:
-                        pass
-                    pubsub = None
-                yield "event: redis_disconnected\ndata: Redis not available\n\n"
-                last_heartbeat = time.monotonic()
-                await asyncio.sleep(5)
-
-            except Exception as e:
-                consecutive_errors += 1
-                if pubsub:
-                    try:
-                        await pubsub.unsubscribe(log_channel)
-                        await pubsub.aclose()
-                    except Exception:
-                        pass
-                    pubsub = None
-                last_heartbeat = time.monotonic()
-
-                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                    yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
-                    return
-
-                yield f"data: [Stream error #{consecutive_errors}: {str(e)}]\n\n"
-                await asyncio.sleep(5)
-        finally:
-            if pubsub:
+            while True:
                 try:
-                    await pubsub.unsubscribe(log_channel)
-                    await pubsub.aclose()
-                except Exception:
-                    pass
+                    if pubsub is None:
+                        pubsub = self.async_redis.pubsub()
+                        await pubsub.subscribe(log_channel)
+
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=0.5
+                    )
+                    if message and message["type"] == "message":
+                        data = message["data"]
+                        if "__MERGE_COMPLETED__" in data:
+                            # sentinel 접미사 파싱: __MERGE_COMPLETED__:SUCCESS / :FAILED
+                            # 하위호환: 접미사 없으면 SUCCESS 기본값
+                            suffix = data.split("__MERGE_COMPLETED__", 1)[1]
+                            suffix = suffix.lstrip(":")
+                            reason = "completed" if (not suffix or suffix == "SUCCESS") else "merge_failed"
+                            yield f"event: completed\ndata: {reason}\n\n"
+                            return
+                        yield f"data: {data}\n\n"
+                        last_heartbeat = time.monotonic()
+                        consecutive_errors = 0
+                    else:
+                        now = time.monotonic()
+                        if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                            yield ": heartbeat\n\n"
+                            last_heartbeat = now
+                        await asyncio.sleep(0.3)
+
+                except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
+                    await safe_close_pubsub(pubsub)
+                    pubsub = None
+                    yield "event: redis_disconnected\ndata: Redis not available\n\n"
+                    last_heartbeat = time.monotonic()
+                    await asyncio.sleep(5)
+
+                except Exception as e:
+                    consecutive_errors += 1
+                    await safe_close_pubsub(pubsub)
+                    pubsub = None
+                    last_heartbeat = time.monotonic()
+
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
+                        return
+
+                    yield f"data: [Stream error #{consecutive_errors}: {str(e)}]\n\n"
+                    await asyncio.sleep(5)
+        finally:
+            await safe_close_pubsub(pubsub)
 
     def _get_log_dir(self) -> Path:
         """로그 디렉토리 경로 반환 (config.LOG_DIR 기준, wtools 절대경로로 보정)"""
@@ -476,71 +437,6 @@ class LogService:
         except Exception as e:
             return LogResponse(lines=[f"Error reading system log: {str(e)}"], total_lines=1)
 
-    def run_diagnostics(self) -> dict:
-        """파이프라인 진단 (1회성) — 4단계 순차 점검"""
-        steps = []
-
-        # 1. Redis 연결
-        try:
-            self.redis_client.ping()
-            steps.append({"step": 1, "name": "Redis 연결", "ok": True, "detail": "연결됨"})
-        except Exception:
-            steps.append({"step": 1, "name": "Redis 연결", "ok": False, "detail": "연결 실패"})
-            return {"steps": steps}
-
-        # 1.5. Redis 연결 수 확인
-        try:
-            info = self.redis_client.info("clients")
-            clients = info.get("connected_clients", 0)
-            ok = clients < 100
-            steps.append({"step": 2, "name": "Redis 연결 수", "ok": ok,
-                "detail": f"{clients}개 연결" + ("" if ok else " — 좀비 연결 의심 (redis-cleanup 실행 권장)")})
-        except Exception:
-            steps.append({"step": 2, "name": "Redis 연결 수", "ok": False, "detail": "조회 실패"})
-
-        # 3. Listener heartbeat
-        hb = self.redis_client.get("plan-runner:listener:heartbeat")
-        steps.append({
-            "step": 3, "name": "Listener heartbeat", "ok": hb is not None,
-            "detail": "활성" if hb else "heartbeat 키 없음 (리스너 꺼짐)"
-        })
-
-        # 4. 로그 파일 — 첫 번째 active runner 기준
-        log_path = None
-        runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
-        if runner_ids:
-            first_id = next(iter(runner_ids))
-            log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:stream_log_path")
-            if not log_path:
-                log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:log_file_path")
-
-        if log_path and Path(log_path).exists():
-            size = Path(log_path).stat().st_size
-            steps.append({
-                "step": 4, "name": "로그 파일", "ok": True,
-                "detail": f"{Path(log_path).name} ({size:,}B)"
-            })
-        elif log_path:
-            steps.append({
-                "step": 4, "name": "로그 파일", "ok": False,
-                "detail": f"경로 있으나 파일 없음: {log_path}"
-            })
-        else:
-            steps.append({
-                "step": 4, "name": "로그 파일", "ok": False,
-                "detail": "stream_log_path / log_file_path 키 없음"
-            })
-
-        # 5. CLI 프로세스 — active runners 수 기준
-        if runner_ids:
-            steps.append({"step": 5, "name": "CLI 프로세스", "ok": True, "detail": f"{len(runner_ids)} runner(s) active"})
-        else:
-            steps.append({
-                "step": 5, "name": "CLI 프로세스", "ok": False,
-                "detail": "미실행"
-            })
-
-        return {"steps": steps}
 
 
 # 싱글톤 인스턴스

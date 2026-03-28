@@ -22,6 +22,7 @@ import redis.asyncio as aioredis
 import redis as redis_sync
 
 from app.shared.redis.client import RedisClient
+from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 
 # ─── Redis 상수 ─────────────────────────────────────────────────────────────
 REDIS_HOST = "localhost"
@@ -215,125 +216,108 @@ class EventService:
         MAX_CONSECUTIVE_ERRORS = 5
 
         try:
-          while True:
-            try:
-                # ── pubsub 연결 (또는 재연결)
-                if pubsub is None:
-                    pubsub = self._async.pubsub()
-                    await pubsub.psubscribe(KEYEVENT_CHANNEL)
+            while True:
+                try:
+                    # ── pubsub 연결 (또는 재연결)
+                    if pubsub is None:
+                        pubsub = self._async.pubsub()
+                        await pubsub.psubscribe(KEYEVENT_CHANNEL)
 
-                if log_pubsub is None:
-                    log_pubsub = self._async.pubsub()
-                    await log_pubsub.psubscribe(LOG_CHANNEL_PATTERN, MERGE_LOG_CHANNEL_PATTERN)
+                    if log_pubsub is None:
+                        log_pubsub = self._async.pubsub()
+                        await log_pubsub.psubscribe(LOG_CHANNEL_PATTERN, MERGE_LOG_CHANNEL_PATTERN)
 
-                # ── keyspace 메시지 폴링
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=0.25
-                )
+                    # ── keyspace 메시지 폴링
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=0.25
+                    )
 
-                if message and message["type"] in ("message", "pmessage"):
-                    changed_key = message["data"]
-                    event_type = self._classify_key(changed_key)
+                    if message and message["type"] in ("message", "pmessage"):
+                        changed_key = message["data"]
+                        event_type = self._classify_key(changed_key)
 
-                    if event_type == "status":
-                        runner_id = self._extract_runner_id(changed_key)
-                        if runner_id:
-                            payload = self._build_status_payload(runner_id)
+                        if event_type == "status":
+                            runner_id = self._extract_runner_id(changed_key)
+                            if runner_id:
+                                payload = self._build_status_payload(runner_id)
+                                if payload:
+                                    yield self._sse("status", {"runners": [payload]})
+                        elif event_type == "tracking":
+                            payload = self._build_tracking_payload()
                             if payload:
-                                yield self._sse("status", {"runners": [payload]})
-                    elif event_type == "tracking":
-                        payload = self._build_tracking_payload()
-                        if payload:
-                            yield self._sse("tracking", payload)
-                    elif event_type == "plan_changed":
-                        payload = self._build_tracking_payload()
-                        yield self._sse("plan_changed", payload or {})
+                                yield self._sse("tracking", payload)
+                        elif event_type == "plan_changed":
+                            payload = self._build_tracking_payload()
+                            yield self._sse("plan_changed", payload or {})
 
+                        last_heartbeat = time.monotonic()
+                        consecutive_errors = 0
+
+                    # ── 로그 채널 메시지 폴링
+                    log_message = await log_pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=0.25
+                    )
+
+                    if log_message and log_message["type"] in ("message", "pmessage"):
+                        channel = log_message.get("channel") or log_message.get("pattern", "")
+                        data = log_message.get("data")
+
+                        if not data:
+                            pass  # 빈 데이터 무시
+                        else:
+                            runner_id = self._extract_runner_id_from_channel(channel)
+                            if runner_id:
+                                is_merge = channel.startswith("plan-runner:merge-log:")
+                                if data.startswith(_MERGE_LOG_COMPLETED_SENTINEL):
+                                    suffix = data[len(_MERGE_LOG_COMPLETED_SENTINEL):]
+                                    status = "failed" if suffix == ":FAILED" else "success"
+                                    yield self._sse("merge_log_completed", {"runner_id": runner_id, "status": status})
+                                elif data.startswith(_LOG_COMPLETED_SENTINEL):
+                                    suffix = data[len(_LOG_COMPLETED_SENTINEL):]
+                                    status = "failed" if suffix == ":FAILED" else "success"
+                                    yield self._sse("log_completed", {"runner_id": runner_id, "status": status})
+                                elif is_merge:
+                                    yield self._sse("merge_log", {"runner_id": runner_id, "line": data})
+                                else:
+                                    yield self._sse("log", {"runner_id": runner_id, "line": data})
+
+                        last_heartbeat = time.monotonic()
+                        consecutive_errors = 0
+
+                    if not message and not log_message:
+                        now = time.monotonic()
+                        if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                            yield ": heartbeat\n\n"
+                            last_heartbeat = now
+                        await asyncio.sleep(0.1)
+
+                except (redis_sync.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
+                    # ── Redis 연결 실패 → 정리 후 재시도
+                    await safe_close_pubsub(pubsub)
+                    pubsub = None
+                    await safe_close_pubsub(log_pubsub)
+                    log_pubsub = None
+                    yield "event: redis_disconnected\ndata: Redis not available\n\n"
                     last_heartbeat = time.monotonic()
-                    consecutive_errors = 0
+                    await asyncio.sleep(5)
 
-                # ── 로그 채널 메시지 폴링
-                log_message = await log_pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=0.25
-                )
-
-                if log_message and log_message["type"] in ("message", "pmessage"):
-                    channel = log_message.get("channel") or log_message.get("pattern", "")
-                    data = log_message.get("data")
-
-                    if not data:
-                        pass  # 빈 데이터 무시
-                    else:
-                        runner_id = self._extract_runner_id_from_channel(channel)
-                        if runner_id:
-                            is_merge = channel.startswith("plan-runner:merge-log:")
-                            if data.startswith(_MERGE_LOG_COMPLETED_SENTINEL):
-                                suffix = data[len(_MERGE_LOG_COMPLETED_SENTINEL):]
-                                status = "failed" if suffix == ":FAILED" else "success"
-                                yield self._sse("merge_log_completed", {"runner_id": runner_id, "status": status})
-                            elif data.startswith(_LOG_COMPLETED_SENTINEL):
-                                suffix = data[len(_LOG_COMPLETED_SENTINEL):]
-                                status = "failed" if suffix == ":FAILED" else "success"
-                                yield self._sse("log_completed", {"runner_id": runner_id, "status": status})
-                            elif is_merge:
-                                yield self._sse("merge_log", {"runner_id": runner_id, "line": data})
-                            else:
-                                yield self._sse("log", {"runner_id": runner_id, "line": data})
-
+                except Exception as e:
+                    consecutive_errors += 1
+                    await safe_close_pubsub(pubsub)
+                    pubsub = None
+                    await safe_close_pubsub(log_pubsub)
+                    log_pubsub = None
                     last_heartbeat = time.monotonic()
-                    consecutive_errors = 0
 
-                if not message and not log_message:
-                    now = time.monotonic()
-                    if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-                        yield ": heartbeat\n\n"
-                        last_heartbeat = now
-                    await asyncio.sleep(0.1)
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
+                        return
 
-            except (redis_sync.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
-                # ── Redis 연결 실패 → 정리 후 재시도
-                await _safe_close_pubsub(pubsub)
-                pubsub = None
-                await _safe_close_pubsub(log_pubsub)
-                log_pubsub = None
-                yield "event: redis_disconnected\ndata: Redis not available\n\n"
-                last_heartbeat = time.monotonic()
-                await asyncio.sleep(5)
-
-            except Exception as e:
-                consecutive_errors += 1
-                await _safe_close_pubsub(pubsub)
-                pubsub = None
-                await _safe_close_pubsub(log_pubsub)
-                log_pubsub = None
-                last_heartbeat = time.monotonic()
-
-                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                    yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
-                    return
-
-                yield f"data: [EventService error #{consecutive_errors}: {str(e)}]\n\n"
-                await asyncio.sleep(5)
+                    yield f"data: [EventService error #{consecutive_errors}: {str(e)}]\n\n"
+                    await asyncio.sleep(5)
         finally:
-            await _safe_close_pubsub(pubsub)
-            await _safe_close_pubsub(log_pubsub)
-
-
-# ── 헬퍼 ─────────────────────────────────────────────────────────────────────
-
-async def _safe_close_pubsub(pubsub) -> None:
-    if pubsub is None:
-        return
-    try:
-        await pubsub.punsubscribe()
-        await pubsub.aclose()
-    except AttributeError:
-        try:
-            await pubsub.close()
-        except Exception:
-            pass
-    except Exception:
-        pass
+            await safe_close_pubsub(pubsub)
+            await safe_close_pubsub(log_pubsub)
 
 
 # ── 모듈 레벨 싱글톤 ─────────────────────────────────────────────────────────
