@@ -110,6 +110,35 @@ class ExecutorService:
                 detail="dev-runner command listener가 실행 중이지 않습니다. 워커를 시작하세요."
             )
 
+    def _runner_key(self, rid: str, suffix: str) -> str:
+        """Runner 단일 필드 Redis 키 조립."""
+        return f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}"
+
+    async def _get_runner_fields(self, rid: str, *fields: str) -> dict:
+        """Runner 필드 여러 개를 개별 GET으로 조회, {field: value_or_None} dict 반환."""
+        result = {}
+        for f in fields:
+            result[f] = await self.async_redis.get(self._runner_key(rid, f))
+        return result
+
+    async def _send_command(self, command: dict, timeout: int = COMMAND_TIMEOUT) -> dict | None:
+        """Redis 명령 전송 공통 메서드 — LPUSH + BRPOP + delete + parse 패턴.
+
+        command에 command_id가 없으면 자동 부여.
+        타임아웃 시 result_key 삭제 후 None 반환.
+        정상 시 JSON 파싱된 dict 반환.
+        """
+        if "command_id" not in command:
+            command = {**command, "command_id": uuid.uuid4().hex[:8]}
+        result_key = f"{RESULTS_KEY}:{command['command_id']}"
+        await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+        result = await self.async_redis.brpop(result_key, timeout=timeout)
+        await self.async_redis.delete(result_key)
+        if result is None:
+            return None
+        _, raw = result
+        return json.loads(raw)
+
     async def start_dev_runner(self, request: RunRequest) -> RunStatusResponse:
         """plan-runner 실행 시작 - Redis 명령 전송 (비동기, 멀티 runner 지원)"""
         # Redis + listener 사전 확인
@@ -135,9 +164,6 @@ class ExecutorService:
         else:
             runner_id = uuid.uuid4().hex[:8]
 
-        # per-command 결과 키 (레이스 컨디션 방지)
-        command_id = uuid.uuid4().hex[:8]
-
         # trigger 판별: test_source 있으면 tc:{name}, 없으면 explicit trigger or "api"
         if request.test_source:
             trigger = f"tc:{request.test_source}"
@@ -148,7 +174,6 @@ class ExecutorService:
         command = {
             "action": "run",
             "runner_id": runner_id,
-            "command_id": command_id,
             "source": "monitor-page-api",
             "trigger": trigger,
             "timestamp": datetime.now().isoformat(),
@@ -206,27 +231,14 @@ class ExecutorService:
             if ignored_paths:
                 command["ignored_plans"] = ",".join(ignored_paths)
 
-        result_key = f"{RESULTS_KEY}:{command_id}"
-
         try:
-            # Redis LPUSH - 명령 전송
-            await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
-
-            # BRPOP으로 결과 대기 (per-command 키, 레이스 컨디션 방지)
-            result = await self.async_redis.brpop(result_key, timeout=COMMAND_TIMEOUT)
-
-            if result is None:
-                # cleanup
-                await self.async_redis.delete(result_key)
+            result_data = await self._send_command(command)
+            if result_data is None:
                 await self._force_cleanup_state(runner_id)
                 raise HTTPException(
                     status_code=504,
                     detail="Command timeout - listener may not be responding"
                 )
-
-            _, raw_result = result
-            await self.async_redis.delete(result_key)
-            result_data = json.loads(raw_result)
 
             if not result_data.get("success"):
                 raise HTTPException(
@@ -235,9 +247,10 @@ class ExecutorService:
                 )
 
             # Redis에서 per-runner 상태 조회
-            pid = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
-            plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-            start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time")
+            fields = await self._get_runner_fields(runner_id, "pid", "plan_file", "start_time")
+            pid = fields["pid"]
+            plan_file = fields["plan_file"]
+            start_time_str = fields["start_time"]
 
             return RunStatusResponse(
                 running=True,
@@ -300,7 +313,7 @@ class ExecutorService:
                 logger.warning(
                     f"[dev-runner] {caller}: runner {rid} PID {pid_str} alive but status={status!r} → 복원"
                 )
-                await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+                await self.async_redis.set(self._runner_key(rid, "status"), "running")
                 await self.async_redis.sadd(ACTIVE_RUNNERS_KEY, rid)
                 return (True, pid_str)
             # 정상 일치
@@ -322,16 +335,15 @@ class ExecutorService:
         """
         try:
             if runner_id:
-                existing_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+                existing_status = await self.async_redis.get(self._runner_key(runner_id, "status"))
                 if existing_status is None:
                     # listener가 이미 cleanup 완료 (키 삭제됨) → RECENT 등록 스킵
                     await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
                     return
-                await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+                await self.async_redis.set(self._runner_key(runner_id, "status"), "stopped")
                 pipe = self.async_redis.pipeline()
                 for key_suffix in RUNNER_KEY_SUFFIXES:
-                    full_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{key_suffix}"
-                    pipe.expire(full_key, RECENT_RUNNERS_TTL)
+                    pipe.expire(self._runner_key(runner_id, key_suffix), RECENT_RUNNERS_TTL)
                 pipe.srem(ACTIVE_RUNNERS_KEY, runner_id)
                 pipe.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
                 await pipe.execute()
@@ -340,16 +352,15 @@ class ExecutorService:
                 runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
                 stop_ts = time.time()
                 for rid in runner_ids:
-                    existing_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
+                    existing_status = await self.async_redis.get(self._runner_key(rid, "status"))
                     if existing_status is None:
                         # listener가 이미 cleanup 완료 → RECENT 등록 스킵, ACTIVE만 정리
                         await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
                         continue
-                    await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+                    await self.async_redis.set(self._runner_key(rid, "status"), "stopped")
                     pipe = self.async_redis.pipeline()
                     for key_suffix in RUNNER_KEY_SUFFIXES:
-                        full_key = f"{RUNNER_KEY_PREFIX}:{rid}:{key_suffix}"
-                        pipe.expire(full_key, RECENT_RUNNERS_TTL)
+                        pipe.expire(self._runner_key(rid, key_suffix), RECENT_RUNNERS_TTL)
                     pipe.zadd(RECENT_RUNNERS_KEY, {rid: stop_ts})
                     await pipe.execute()
                 await self.async_redis.delete(ACTIVE_RUNNERS_KEY)
@@ -360,23 +371,15 @@ class ExecutorService:
     async def _send_force_stop(self, runner_id: str = ""):
         """listener에 force-stop 명령 전송 (_running_processes 변수까지 정리)"""
         try:
-            command_id = uuid.uuid4().hex[:8]
             command = {
                 "action": "force-stop",
                 "runner_id": runner_id,
-                "command_id": command_id,
                 "source": "monitor-page-api-reset",
                 "timestamp": datetime.now().isoformat(),
             }
-            result_key = f"{RESULTS_KEY}:{command_id}"
-            await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
-            # 결과 대기 (짧은 타임아웃)
-            result = await self.async_redis.brpop(result_key, timeout=5)
-            await self.async_redis.delete(result_key)
-            if result:
-                _, raw = result
-                data = json.loads(raw)
-                logger.info(f"[dev-runner] force-stop 결과: {data.get('message', '')}")
+            result = await self._send_command(command, timeout=5)
+            if result is not None:
+                logger.info(f"[dev-runner] force-stop 결과: {result.get('message', '')}")
                 return True
             else:
                 logger.warning("[dev-runner] force-stop 타임아웃 (listener 무응답)")
@@ -412,7 +415,7 @@ class ExecutorService:
             runner_ids = set()
 
         for rid in runner_ids:
-            pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
+            pid_str = await self.async_redis.get(self._runner_key(rid, "pid"))
             should_clean = False
             if not pid_str:
                 should_clean = True
@@ -441,7 +444,7 @@ class ExecutorService:
         for rid in recent_ids:
             if rid in cleaned_active_ids:
                 continue
-            plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
+            plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))
 
             # plan_file 있으면 스킵
             if plan_file and Path(plan_file).exists():
@@ -460,8 +463,8 @@ class ExecutorService:
                 reason = "file_lost"
 
             # status + start_time 기반 판단
-            status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
-            start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time")
+            status = await self.async_redis.get(self._runner_key(rid, "status"))
+            start_time_str = await self.async_redis.get(self._runner_key(rid, "start_time"))
 
             if status == "running" and reason == "file_lost":
                 # 10분 유예 확인
@@ -477,7 +480,7 @@ class ExecutorService:
 
             # 정리 실행: per-runner 키 삭제 + zrem
             for key_suffix in RUNNER_KEY_SUFFIXES:
-                await self.async_redis.delete(f"{RUNNER_KEY_PREFIX}:{rid}:{key_suffix}")
+                await self.async_redis.delete(self._runner_key(rid, key_suffix))
             await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
             await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
             cleaned_recent += 1
@@ -526,41 +529,26 @@ class ExecutorService:
                 )
 
             # Redis를 통해 해당 runner 상태 확인
-            status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+            status = await self.async_redis.get(self._runner_key(runner_id, "status"))
             if status != "running":
                 # stale 상태 정리: active_runners set에서 제거
                 await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
                 raise HTTPException(status_code=404, detail="Not running")
 
-            # per-command 결과 키
-            command_id = uuid.uuid4().hex[:8]
-
             # Redis 명령 생성
             command = {
                 "action": "stop",
                 "runner_id": runner_id,
-                "command_id": command_id,
                 "source": "monitor-page-api",
                 "timestamp": datetime.now().isoformat(),
             }
-            result_key = f"{RESULTS_KEY}:{command_id}"
 
-            # Redis LPUSH - 명령 전송
-            await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
-
-            # BRPOP으로 결과 대기 (per-command 키)
-            result = await self.async_redis.brpop(result_key, timeout=COMMAND_TIMEOUT)
-
-            if result is None:
+            result_data = await self._send_command(command)
+            if result_data is None:
                 # listener 무응답 → 프로세스가 죽었을 가능성 → 상태 강제 정리
                 logger.warning("[dev-runner] listener 무응답, Redis 상태 강제 정리")
-                await self.async_redis.delete(result_key)
                 await self._force_cleanup_state(runner_id)
                 return {"message": "Force cleaned (listener not responding)"}
-
-            _, raw_result = result
-            await self.async_redis.delete(result_key)
-            result_data = json.loads(raw_result)
 
             if not result_data.get("success"):
                 # stop 실패해도 상태 정리
@@ -586,16 +574,17 @@ class ExecutorService:
 
     async def get_runner_status(self, runner_id: str) -> RunStatusResponse:
         """특정 runner 상태 조회 (per-runner Redis 키 기반)"""
-        status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
-        pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
-        plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-        start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time")
-        engine = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine") or "claude"
+        data = await self._get_runner_fields(runner_id, "status", "pid", "plan_file", "start_time", "engine")
+        status = data["status"]
+        pid_str = data["pid"]
+        plan_file = data["plan_file"]
+        start_time_str = data["start_time"]
+        engine = data["engine"] or "claude"
         running = status == "running"
 
         running, pid_str = await self._correct_pid_state(runner_id, status, pid_str, caller="get_runner_status")
 
-        current_cycle_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:current_cycle")
+        current_cycle_str = await self.async_redis.get(self._runner_key(runner_id, "current_cycle"))
         current_cycle = int(current_cycle_str) if current_cycle_str is not None else None
 
         return RunStatusResponse(
@@ -630,16 +619,19 @@ class ExecutorService:
             try:
                 result = []
                 for rid in all_ids:
-                    status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
-                    pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
-                    plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
-                    engine = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:engine")
-                    start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time")
-                    worktree_path = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:worktree_path")
-                    merge_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
-                    branch = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:branch")
-                    trigger = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:trigger")
-                    exit_reason = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:exit_reason")
+                    d = await self._get_runner_fields(rid, "status", "pid", "plan_file", "engine",
+                                                      "start_time", "worktree_path", "merge_status",
+                                                      "branch", "trigger", "exit_reason")
+                    status = d["status"]
+                    pid_str = d["pid"]
+                    plan_file = d["plan_file"]
+                    engine = d["engine"]
+                    start_time_str = d["start_time"]
+                    worktree_path = d["worktree_path"]
+                    merge_status = d["merge_status"]
+                    branch = d["branch"]
+                    trigger = d["trigger"]
+                    exit_reason = d["exit_reason"]
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
                     start_time = None
@@ -707,7 +699,7 @@ class ExecutorService:
             await self.async_redis.zrem(RECENT_RUNNERS_KEY, runner_id)
             # per-runner 키 즉시 삭제
             for key_suffix in RUNNER_KEY_SUFFIXES:
-                await self.async_redis.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{key_suffix}")
+                await self.async_redis.delete(self._runner_key(runner_id, key_suffix))
             # ACTIVE_RUNNERS_KEY에서도 제거 (혹시 남아있다면)
             await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
             return True
@@ -777,10 +769,10 @@ class ExecutorService:
             result = []
             for rid in raw_items:
                 # runner별 Redis 키에서 상세 정보 조회
-                plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file") or ""
-                branch = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:branch") or ""
-                worktree_path = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:worktree_path") or ""
-                start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time") or ""
+                plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file")) or ""
+                branch = await self.async_redis.get(self._runner_key(rid, "branch")) or ""
+                worktree_path = await self.async_redis.get(self._runner_key(rid, "worktree_path")) or ""
+                start_time_str = await self.async_redis.get(self._runner_key(rid, "start_time")) or ""
                 result.append({
                     "runner_id": rid,
                     "branch": branch,
@@ -832,25 +824,18 @@ class ExecutorService:
         except (redis.ConnectionError, ConnectionRefusedError, OSError):
             raise HTTPException(status_code=503, detail="Redis에 연결할 수 없습니다.")
 
-        command_id = uuid.uuid4().hex[:8]
         command = {
             "action": action,
             "runner_id": runner_id,
-            "command_id": command_id,
             "source": "monitor-page-api",
             "timestamp": datetime.now().isoformat(),
         }
         if extra:
             command.update(extra)
-        result_key = f"{RESULTS_KEY}:{command_id}"
-        await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
-        result = await self.async_redis.brpop(result_key, timeout=COMMAND_TIMEOUT)
-        if result is None:
-            await self.async_redis.delete(result_key)
+        result_data = await self._send_command(command)
+        if result_data is None:
             return {"success": False, "message": "Command timeout"}
-        _, raw = result
-        await self.async_redis.delete(result_key)
-        return json.loads(raw)
+        return result_data
 
     async def send_direct_merge_command(self, branch: str, worktree_path: str | None, plan_file: str | None) -> dict:
         """direct-merge 명령 전송 — runner_id 없이 branch/worktree만으로 머지 실행"""
@@ -859,25 +844,18 @@ class ExecutorService:
         except (redis.ConnectionError, ConnectionRefusedError, OSError):
             raise HTTPException(status_code=503, detail="Redis에 연결할 수 없습니다.")
 
-        command_id = uuid.uuid4().hex[:8]
         command = {
             "action": "direct-merge",
             "branch": branch,
             "worktree_path": worktree_path,
             "plan_file": plan_file,
-            "command_id": command_id,
             "source": "monitor-page-api",
             "timestamp": datetime.now().isoformat(),
         }
-        result_key = f"{RESULTS_KEY}:{command_id}"
-        await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
-        result = await self.async_redis.brpop(result_key, timeout=COMMAND_TIMEOUT)
+        result = await self._send_command(command)
         if result is None:
-            await self.async_redis.delete(result_key)
             return {"success": False, "message": "Command timeout"}
-        _, raw = result
-        await self.async_redis.delete(result_key)
-        return json.loads(raw)
+        return result
 
     async def stop_all_runners(self) -> dict:
         """모든 active runner 일괄 중지 - asyncio.gather 병렬 호출"""
