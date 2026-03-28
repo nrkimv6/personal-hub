@@ -1,0 +1,92 @@
+"""RunnerState 단위 TC"""
+
+import os
+import pytest
+import fakeredis.aioredis as fake_aioredis
+from unittest.mock import AsyncMock, patch
+
+from app.modules.dev_runner.services.redis_connection import (
+    RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY
+)
+from app.modules.dev_runner.services.runner_state import RunnerState
+
+
+def runner_key(rid, suffix):
+    return f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}"
+
+
+def make_state(fake_r=None, is_pid_alive_fn=None, force_cleanup_fn=None):
+    if fake_r is None:
+        fake_r = AsyncMock()
+    state = RunnerState(fake_r, runner_key, is_pid_alive_fn, force_cleanup_fn)
+    return state
+
+
+class TestIsPidAlive:
+    def test_runner_state_R_is_pid_alive(self):
+        """R(Right): 현재 프로세스 PID → True"""
+        state = make_state()
+        assert state._is_pid_alive(os.getpid()) is True
+
+    def test_runner_state_B_is_pid_dead(self):
+        """B(Boundary): 존재하지 않는 PID → False"""
+        state = make_state()
+        # PID 99999는 거의 없음
+        assert state._is_pid_alive(99999) is False
+
+
+class TestCorrectPidState:
+    @pytest.mark.asyncio
+    async def test_runner_state_R_correct_pid_running_alive(self):
+        """R(Right): status=running + PID alive → (True, '123')"""
+        state = make_state(is_pid_alive_fn=lambda p: True)
+        result = await state._correct_pid_state("rid1", "running", "123", caller="test")
+        assert result == (True, "123")
+
+    @pytest.mark.asyncio
+    async def test_runner_state_E_correct_pid_running_dead(self):
+        """E(Error): status=running + PID dead → _force_cleanup_fn 호출 + (False, None)"""
+        cleanup_mock = AsyncMock()
+        state = make_state(
+            is_pid_alive_fn=lambda p: False,
+            force_cleanup_fn=cleanup_mock
+        )
+        result = await state._correct_pid_state("rid2", "running", "1234", caller="test")
+        assert result == (False, None)
+        cleanup_mock.assert_called_once_with("rid2")
+
+    @pytest.mark.asyncio
+    async def test_runner_state_R_no_pid(self):
+        """B(Boundary): pid_str=None → _is_pid_alive 불리지 않음"""
+        called = []
+        state = make_state(is_pid_alive_fn=lambda p: called.append(p) or True)
+        result_running = await state._correct_pid_state("r", "running", None)
+        result_stopped = await state._correct_pid_state("r", "stopped", None)
+        assert result_running == (True, None)
+        assert result_stopped == (False, None)
+        assert called == []
+
+
+class TestDismissRunner:
+    @pytest.mark.asyncio
+    async def test_runner_state_R_dismiss_runner(self):
+        """R(Right): 키 세팅 후 dismiss → zrem/srem/delete 호출 + True 반환"""
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        await fake_r.zadd(RECENT_RUNNERS_KEY, {"r1": 1000})
+        await fake_r.sadd(ACTIVE_RUNNERS_KEY, "r1")
+        await fake_r.set(runner_key("r1", "status"), "stopped")
+
+        state = make_state(fake_r)
+        result = await state.dismiss_runner("r1")
+
+        assert result is True
+        assert not await fake_r.zscore(RECENT_RUNNERS_KEY, "r1")
+        assert not await fake_r.sismember(ACTIVE_RUNNERS_KEY, "r1")
+
+    @pytest.mark.asyncio
+    async def test_runner_state_B_dismiss_nonexistent(self):
+        """B(Boundary): 키 없는 runner dismiss → 예외 없이 True"""
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        state = make_state(fake_r)
+        result = await state.dismiss_runner("nonexist_runner")
+        assert result is True
