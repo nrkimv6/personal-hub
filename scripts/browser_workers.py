@@ -549,7 +549,7 @@ class BrowserWorkerManager:
             clients = r.info(section="clients").get("connected_clients", 0)
             # pubsub 연결 수 확인
             client_list = r.client_list()
-            pubsub_count = sum(1 for c in client_list if c.get("flags", "").startswith("S") or c.get("cmd") == "subscribe")
+            pubsub_count = sum(1 for c in client_list if "S" in c.get("flags", "") or c.get("cmd") == "subscribe")
             print(f"      Clients: {clients} (pubsub: {pubsub_count})")
             r.close()
         except Exception as e:
