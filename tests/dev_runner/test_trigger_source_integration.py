@@ -46,10 +46,10 @@ def test_trigger_roundtrip_redis():
 
         svc = ExecutorService()
 
-        # _check_redis_and_listener, _cleanup_stale_runners, brpop을 mock으로 처리
+        # _check_redis_and_listener, cleanup_stale_runners, brpop을 mock으로 처리
         async def run_test():
             svc._check_redis_and_listener = AsyncMock()
-            svc._cleanup_stale_runners = AsyncMock()
+            svc.cleanup_stale_runners = AsyncMock(return_value={"cleaned_active": 0, "cleaned_recent": 0, "bugs": 0, "total": 0})
             await svc.start_dev_runner(RunRequest(trigger="user", plan_file="test.md", dry_run=True))
 
         asyncio.get_event_loop().run_until_complete(run_test())
