@@ -2,29 +2,20 @@
 System dashboard API routes
 Provides endpoints for querying and managing Windows services, startup programs, and scheduled tasks
 """
-from typing import Optional
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from .services.system_service import SystemService
-from .services.system_cache_collector import SystemCacheCollector
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
 
 # Service instance
 _service = SystemService()
-_cache_collector: Optional[SystemCacheCollector] = None
-
-
-def set_cache_collector(collector: SystemCacheCollector):
-    """main.py에서 호출하여 collector 인스턴스 설정"""
-    global _cache_collector
-    _cache_collector = collector
 
 
 # ===== Read Operations (Phase 1) =====
 
 @router.get("/services/status")
-async def get_all_services_status():
+async def get_all_services_status(request: Request):
     """Get all services status grouped by project (cached)
 
     Returns:
@@ -32,14 +23,15 @@ async def get_all_services_status():
         collected_at: 마지막 수집 시각 (ISO 8601)
         collection_duration_ms: 수집 소요 시간 (ms)
     """
-    if _cache_collector:
-        return _cache_collector.get_cached_status()
+    collector = getattr(request.app.state, "system_cache_collector", None)
+    if collector:
+        return collector.get_cached_status()
     # fallback: 캐시 수집기가 없으면 직접 수집 (느림)
     return await _service.get_all_services_status()
 
 
 @router.post("/services/refresh", status_code=202)
-async def refresh_services_status(background_tasks: BackgroundTasks):
+async def refresh_services_status(request: Request, background_tasks: BackgroundTasks):
     """백그라운드에서 상태 수집을 시작하고 즉시 반환 (202 Accepted)
 
     수집 완료 후 GET /services/status가 자동으로 새 캐시를 반환합니다.
@@ -48,11 +40,12 @@ async def refresh_services_status(background_tasks: BackgroundTasks):
         status: "refreshing"
         last_cached: 현재 캐시 수집 시각 (수집 전 마지막 값)
     """
-    if not _cache_collector:
+    collector = getattr(request.app.state, "system_cache_collector", None)
+    if not collector:
         raise HTTPException(status_code=503, detail="Cache collector not initialized")
 
-    cached = _cache_collector.get_cached_status()
-    background_tasks.add_task(_cache_collector.collect_and_cache)
+    cached = collector.get_cached_status()
+    background_tasks.add_task(collector.collect_and_cache)
 
     return {
         "status": "refreshing",

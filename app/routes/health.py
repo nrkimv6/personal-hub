@@ -6,7 +6,7 @@
 - 최근 알림 조회
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import Optional
 from pydantic import BaseModel
 
@@ -16,15 +16,6 @@ router = APIRouter(
     prefix="/health",
     tags=["health"]
 )
-
-# 헬스 모니터 인스턴스 (main.py에서 주입)
-_health_monitor = None
-
-
-def set_health_monitor(monitor):
-    """헬스 모니터 인스턴스를 설정합니다."""
-    global _health_monitor
-    _health_monitor = monitor
 
 
 class ServiceHealthResponse(BaseModel):
@@ -57,7 +48,7 @@ class HealthStatusResponse(BaseModel):
 
 
 @router.get("/status", response_model=HealthStatusResponse)
-async def get_health_status():
+async def get_health_status(request: Request):
     """
     모든 서비스 헬스 상태를 조회합니다.
 
@@ -72,7 +63,8 @@ async def get_health_status():
             recent_alerts=[]
         )
 
-    if not _health_monitor:
+    monitor = getattr(request.app.state, "health_monitor", None)
+    if not monitor:
         return HealthStatusResponse(
             enabled=True,
             services={},
@@ -81,13 +73,13 @@ async def get_health_status():
 
     return HealthStatusResponse(
         enabled=True,
-        services=_health_monitor.get_all_services_status(),
-        recent_alerts=_health_monitor.get_recent_alerts(limit=20)
+        services=monitor.get_all_services_status(),
+        recent_alerts=monitor.get_recent_alerts(limit=20)
     )
 
 
 @router.post("/check")
-async def trigger_health_check():
+async def trigger_health_check(request: Request):
     """
     수동으로 헬스 체크를 트리거합니다.
 
@@ -101,7 +93,8 @@ async def trigger_health_check():
             detail="Health monitor is disabled"
         )
 
-    if not _health_monitor:
+    monitor = getattr(request.app.state, "health_monitor", None)
+    if not monitor:
         raise HTTPException(
             status_code=503,
             detail="Health monitor not initialized"
@@ -109,14 +102,14 @@ async def trigger_health_check():
 
     try:
         # PID+포트 체크
-        pid_results = await _health_monitor.check_all_pid_ports()
+        pid_results = await monitor.check_all_pid_ports()
 
         # HTTP 체크
-        http_results = await _health_monitor.check_all_http_endpoints()
+        http_results = await monitor.check_all_http_endpoints()
 
         # 결과를 서비스 상태에 반영
         for health in pid_results + http_results:
-            _health_monitor.services[health.name] = health
+            monitor.services[health.name] = health
 
         return {
             "status": "success",
@@ -129,7 +122,7 @@ async def trigger_health_check():
 
 
 @router.get("/alerts")
-async def get_recent_alerts(limit: int = 20):
+async def get_recent_alerts(request: Request, limit: int = 20):
     """
     최근 알림 목록을 조회합니다.
 
@@ -141,9 +134,10 @@ async def get_recent_alerts(limit: int = 20):
     if not settings.HEALTH_MONITOR_ENABLED:
         return {"alerts": []}
 
-    if not _health_monitor:
+    monitor = getattr(request.app.state, "health_monitor", None)
+    if not monitor:
         return {"alerts": []}
 
     return {
-        "alerts": _health_monitor.get_recent_alerts(limit=limit)
+        "alerts": monitor.get_recent_alerts(limit=limit)
     }

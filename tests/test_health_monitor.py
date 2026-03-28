@@ -292,6 +292,7 @@ class TestHealthRoutes:
         from fastapi import FastAPI
 
         app = FastAPI()
+        app.state.health_monitor = None
 
         from app.routes.health import router
         app.include_router(router, prefix="/api/v1")
@@ -312,9 +313,7 @@ class TestHealthRoutes:
 
     def test_get_health_status_enabled_no_monitor(self, test_client):
         """헬스 모니터 활성화 but 인스턴스 없음 테스트"""
-        from app.routes.health import set_health_monitor
-
-        set_health_monitor(None)
+        test_client.app.state.health_monitor = None
 
         with patch('app.core.config.settings') as mock_settings:
             mock_settings.HEALTH_MONITOR_ENABLED = True
@@ -328,8 +327,6 @@ class TestHealthRoutes:
 
     def test_get_health_status_with_data(self, test_client):
         """헬스 데이터가 있을 때 상태 조회 테스트"""
-        from app.routes.health import set_health_monitor
-
         mock_monitor = MagicMock()
         mock_monitor.get_all_services_status.return_value = {
             "api": {
@@ -341,7 +338,7 @@ class TestHealthRoutes:
         }
         mock_monitor.get_recent_alerts.return_value = []
 
-        set_health_monitor(mock_monitor)
+        test_client.app.state.health_monitor = mock_monitor
 
         with patch('app.core.config.settings') as mock_settings:
             mock_settings.HEALTH_MONITOR_ENABLED = True
@@ -354,12 +351,10 @@ class TestHealthRoutes:
             assert "api" in data["services"]
 
         # 정리
-        set_health_monitor(None)
+        test_client.app.state.health_monitor = None
 
     def test_get_recent_alerts(self, test_client):
         """최근 알림 조회 테스트"""
-        from app.routes.health import set_health_monitor
-
         mock_monitor = MagicMock()
         mock_monitor.get_recent_alerts.return_value = [
             {
@@ -371,7 +366,7 @@ class TestHealthRoutes:
             }
         ]
 
-        set_health_monitor(mock_monitor)
+        test_client.app.state.health_monitor = mock_monitor
 
         with patch('app.core.config.settings') as mock_settings:
             mock_settings.HEALTH_MONITOR_ENABLED = True
@@ -383,7 +378,7 @@ class TestHealthRoutes:
             assert len(data["alerts"]) == 1
 
         # 정리
-        set_health_monitor(None)
+        test_client.app.state.health_monitor = None
 
     def test_trigger_health_check_disabled(self, test_client):
         """헬스 모니터 비활성화 시 수동 체크 테스트"""
@@ -396,8 +391,7 @@ class TestHealthRoutes:
 
     def test_trigger_health_check_no_monitor(self, test_client):
         """헬스 모니터 인스턴스 없을 때 수동 체크 테스트"""
-        from app.routes.health import set_health_monitor
-        set_health_monitor(None)
+        test_client.app.state.health_monitor = None
 
         with patch('app.core.config.settings') as mock_settings:
             mock_settings.HEALTH_MONITOR_ENABLED = True
