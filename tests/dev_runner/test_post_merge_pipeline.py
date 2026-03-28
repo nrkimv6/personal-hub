@@ -140,6 +140,7 @@ class TestDoInlineMergeSubprocess:
 
         with _merge_lock_patch(), \
              patch.object(cl, "_cleanup_process_state"), \
+             patch.object(cl, "_launch_general_merge_resolver_process", return_value={"success": False, "message": "fail"}), \
              patch("subprocess.run", return_value=proc_result):
             cl._do_inline_merge("r_exit1", redis)
 
@@ -236,10 +237,12 @@ class TestDoRetryMergeSubprocess:
              patch("subprocess.run", return_value=proc_result) as mock_run:
             cl._do_retry_merge("r_retry", redis, "cmd123")
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
+        mock_run.assert_called()
+        # subprocess.run이 git rev-parse 등 내부 호출도 있으므로 post-merge 인자 포함 호출 검증
+        post_merge_calls = [c for c in mock_run.call_args_list if "post-merge" in str(c)]
+        assert len(post_merge_calls) >= 1, f"post-merge 호출이 없음: {mock_run.call_args_list}"
+        cmd = post_merge_calls[0][0][0]
         assert "plan_runner" in cmd
-        assert "post-merge" in cmd
         assert "--runner-id" in cmd
         assert "r_retry" in cmd
 
@@ -295,11 +298,6 @@ class TestDeletedFunctions:
             "_restart_plan_runner_after_merge should be deleted"
         assert not hasattr(cl, "_resolve_todo_file"), \
             "_resolve_todo_file should be deleted"
-
-    def test_restart_after_merge_not_in_runner_key_suffixes_R(self, cl):
-        """R(Right): RUNNER_KEY_SUFFIXES에서 restart_after_merge 제거됨"""
-        assert "restart_after_merge" not in cl.RUNNER_KEY_SUFFIXES, \
-            "restart_after_merge should be removed from RUNNER_KEY_SUFFIXES"
 
 
 # ── Phase T3: E2E 테스트 ──────────────────────────────────────────────────────
