@@ -140,7 +140,7 @@ class TestDoInlineMergeSubprocess:
 
         with _merge_lock_patch(), \
              patch.object(cl, "_cleanup_process_state"), \
-             patch.object(cl, "_launch_general_merge_resolver_process", return_value={"success": False, "message": "fail"}), \
+             patch("_dr_merge._launch_general_merge_resolver_process", return_value={"success": False, "message": "fail"}), \
              patch("subprocess.run", return_value=proc_result):
             cl._do_inline_merge("r_exit1", redis)
 
@@ -238,11 +238,14 @@ class TestDoRetryMergeSubprocess:
             cl._do_retry_merge("r_retry", redis, "cmd123")
 
         mock_run.assert_called()
-        # subprocess.run이 git rev-parse 등 내부 호출도 있으므로 post-merge 인자 포함 호출 검증
-        post_merge_calls = [c for c in mock_run.call_args_list if "post-merge" in str(c)]
-        assert len(post_merge_calls) >= 1, f"post-merge 호출이 없음: {mock_run.call_args_list}"
+        # subprocess.run이 git rev-parse, worktree remove 등 내부 호출도 있으므로
+        # plan_runner + post-merge 인자를 모두 포함한 호출만 필터
+        post_merge_calls = [
+            c for c in mock_run.call_args_list
+            if "plan_runner" in str(c) and "post-merge" in str(c)
+        ]
+        assert len(post_merge_calls) >= 1, f"plan_runner post-merge 호출이 없음: {mock_run.call_args_list}"
         cmd = post_merge_calls[0][0][0]
-        assert "plan_runner" in cmd
         assert "--runner-id" in cmd
         assert "r_retry" in cmd
 
