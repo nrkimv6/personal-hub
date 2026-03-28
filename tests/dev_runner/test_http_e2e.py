@@ -138,7 +138,8 @@ class TestHttpE2EChain:
         payload = {
             "engine": "gemini",
             "plan_file": "docs/plan/test_e2e_plan.md",
-            "dry_run": True
+            "dry_run": True,
+            "test_source": "test_http_start_and_stop_lifecycle"
         }
 
         # 1. Start runner
