@@ -56,27 +56,40 @@ class ExecutorService:
 
     def reconnect(self):
         """환경변수를 반영하여 Redis 클라이언트를 재연결합니다."""
+        # 기존 클라이언트 정리 (연결 누수 방지)
+        if hasattr(self, 'redis_client') and self.redis_client:
+            try:
+                self.redis_client.close()
+            except Exception:
+                pass
+        if hasattr(self, 'async_redis') and self.async_redis:
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self.async_redis.aclose())
+                else:
+                    loop.run_until_complete(self.async_redis.aclose())
+            except Exception:
+                pass
+
         # 상수 재갱신 (테스트에서 os.environ 변경 시 반영을 위함)
         global REDIS_DB
         REDIS_DB = int(os.environ.get("PLAN_RUNNER_REDIS_DB", "0"))
 
-        self.redis_client = redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            db=REDIS_DB,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=10,
+        self._sync_pool = redis.ConnectionPool(
+            host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB,
+            decode_responses=True, socket_connect_timeout=5, socket_timeout=10,
+            max_connections=20,
         )
+        self.redis_client = redis.Redis(connection_pool=self._sync_pool)
         # 비동기 클라이언트 (brpop 등 블로킹 호출용)
-        self.async_redis = aioredis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            db=REDIS_DB,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=COMMAND_TIMEOUT + 5,  # BRPOP 무한 대기 방지
+        self._async_pool = aioredis.ConnectionPool(
+            host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB,
+            decode_responses=True, socket_connect_timeout=5,
+            socket_timeout=COMMAND_TIMEOUT + 5, max_connections=20,
         )
+        self.async_redis = aioredis.Redis(connection_pool=self._async_pool)
         logger.info(f"[executor-service] Redis 재연결 완료 (db={REDIS_DB})")
 
     async def _check_redis_and_listener(self):

@@ -21,6 +21,8 @@ from typing import AsyncGenerator, Optional
 import redis.asyncio as aioredis
 import redis as redis_sync
 
+from app.shared.redis.client import RedisClient
+
 # ─── Redis 상수 ─────────────────────────────────────────────────────────────
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
@@ -58,19 +60,16 @@ class EventService:
 
     def __init__(self):
         # 동기 클라이언트 — 현재 값 조회용 (HGETALL / GET)
-        self._sync = redis_sync.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            decode_responses=True,
-            socket_connect_timeout=5,
+        sync_client = RedisClient.get_sync_client()
+        self._sync = sync_client if sync_client is not None else redis_sync.Redis(
+            host=REDIS_HOST, port=REDIS_PORT, decode_responses=True, socket_connect_timeout=5,
         )
-        # 비동기 클라이언트 — keyspace notification 구독용
-        self._async = aioredis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            decode_responses=True,
-            socket_connect_timeout=5,
+        # 비동기 클라이언트 — keyspace notification 구독용 (ConnectionPool로 연결 수 제한)
+        self._async_pool = aioredis.ConnectionPool(
+            host=REDIS_HOST, port=REDIS_PORT, decode_responses=True,
+            socket_connect_timeout=5, max_connections=50,
         )
+        self._async = aioredis.Redis(connection_pool=self._async_pool)
 
     # ── 초기화 ──────────────────────────────────────────────────────────────
 
@@ -215,7 +214,8 @@ class EventService:
         consecutive_errors = 0
         MAX_CONSECUTIVE_ERRORS = 5
 
-        while True:
+        try:
+          while True:
             try:
                 # ── pubsub 연결 (또는 재연결)
                 if pubsub is None:
@@ -314,6 +314,9 @@ class EventService:
 
                 yield f"data: [EventService error #{consecutive_errors}: {str(e)}]\n\n"
                 await asyncio.sleep(5)
+        finally:
+            await _safe_close_pubsub(pubsub)
+            await _safe_close_pubsub(log_pubsub)
 
 
 # ── 헬퍼 ─────────────────────────────────────────────────────────────────────

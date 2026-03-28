@@ -7,6 +7,8 @@ from collections import deque
 from datetime import date, datetime
 from typing import AsyncGenerator, List, Optional
 
+import redis.asyncio as aioredis
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -18,6 +20,9 @@ from app.modules.claude_worker.services.llm_service import LLMService
 logger = logging.getLogger("claude_worker.api")
 
 router = APIRouter(prefix="/api/v1/llm", tags=["llm"])
+
+# Redis 싱글톤 — SSE 스트리밍용 (매 요청 생성 방지)
+_redis_async = aioredis.Redis(host="localhost", port=6379, decode_responses=True)
 
 
 # ========== Schemas ==========
@@ -515,11 +520,9 @@ def clear_quota_pause(provider: str, db: Session = Depends(get_db)):
 
 async def _chat_sse_generator(request_id: int) -> AsyncGenerator[str, None]:
     """Redis Pub/Sub 구독 -> SSE yield. __COMPLETED__ 수신 시 종료."""
+    channel = f"llm-chat:stream:{request_id}"
+    pubsub = _redis_async.pubsub()
     try:
-        import redis.asyncio as aioredis
-        r = aioredis.Redis(host="localhost", port=6379, decode_responses=True)
-        pubsub = r.pubsub()
-        channel = f"llm-chat:stream:{request_id}"
         await pubsub.subscribe(channel)
 
         heartbeat_interval = 30  # seconds
@@ -543,12 +546,15 @@ async def _chat_sse_generator(request_id: int) -> AsyncGenerator[str, None]:
             else:
                 escaped = data.replace("\n", "\\n")
                 yield f"data: {escaped}\n\n"
-
-        await pubsub.unsubscribe(channel)
-        await r.aclose()
     except Exception as e:
         logger.error(f"SSE stream error request_id={request_id}: {e}")
         yield f"data: [ERROR] {e}\n\n"
+    finally:
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+        except Exception:
+            pass
 
 
 @router.get("/chat/{request_id}/stream")

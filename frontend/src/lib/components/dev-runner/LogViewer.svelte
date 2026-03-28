@@ -344,6 +344,13 @@
 
 			connected = 'disconnected';
 			reconnectCount++;
+
+			// Redis 미연결 시 재연결 시도 중단 (서버에서 pubsub 누수 가속 방지)
+			const maxRetries = 5;
+			if (!redisAvailable && reconnectCount > maxRetries) {
+				return; // 수동 새로고침 유도 (배너가 표시됨)
+			}
+
 			await fetchStatus();
 			setTimeout(connectSSE, getReconnectDelay());
 		};
@@ -559,6 +566,12 @@
 			</button>
 		</div>
 	</div>
+
+	{#if !redisAvailable && connected === 'connected'}
+		<div class="px-3 py-1.5 bg-red-900/40 border-b border-red-700/50 text-xs text-red-300 shrink-0 flex items-center gap-2">
+			<span>Redis 연결 불가 — 관리자 도구에서 redis-restart 실행</span>
+		</div>
+	{/if}
 
 	{#if exitBanner.show}
 		{#if exitBanner.reason === 'completed'}
