@@ -152,7 +152,6 @@ async def lifespan(app: FastAPI):
         if settings.HEALTH_MONITOR_ENABLED and not _IN_SESSION_0:
             try:
                 from app.services.health_monitor_service import HealthMonitorService
-                from app.routes.health import set_health_monitor
 
                 # NotificationService 인스턴스 생성 (알림용)
                 try:
@@ -162,7 +161,6 @@ async def lifespan(app: FastAPI):
                     notif_service = None
 
                 app.state.health_monitor = HealthMonitorService(notification_service=notif_service)
-                set_health_monitor(app.state.health_monitor)
                 app.state.health_monitor_task = asyncio.create_task(app.state.health_monitor.run_monitor_loop())
                 logger.info("헬스 모니터 시작됨")
             except Exception as e:
@@ -171,10 +169,8 @@ async def lifespan(app: FastAPI):
         # 시스템 상태 캐시 수집기 시작
         try:
             from app.modules.system.services.system_cache_collector import SystemCacheCollector
-            from app.modules.system.routes import set_cache_collector
 
             app.state.system_cache_collector = SystemCacheCollector(interval_seconds=60)
-            set_cache_collector(app.state.system_cache_collector)
             app.state.system_cache_task = asyncio.create_task(app.state.system_cache_collector.run_collector_loop())
             logger.info("시스템 상태 캐시 수집기 시작됨")
         except Exception as e:
