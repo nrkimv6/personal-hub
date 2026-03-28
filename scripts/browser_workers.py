@@ -610,55 +610,40 @@ class BrowserWorkerManager:
         except Exception as e:
             cprint(f"Failed to restart Redis: {e}", RED)
 
-    def redis_cleanup(self):
-        """Redis 좀비 연결 정리 (idle pubsub 연결 탐지 + 제거)"""
-        print(f"\n{YELLOW}{'=' * 40}")
-        print(f"  Redis Zombie Connection Cleanup")
+    def redis_cleanup(self, dry_run: bool = False):
+        """Redis 좀비 연결 감지 및 정리"""
+        print(f"\n{CYAN}{'=' * 40}")
+        print(f"  Redis Zombie Cleanup{'  [DRY RUN]' if dry_run else ''}")
         print(f"{'=' * 40}{RESET}\n")
 
-        force = "--force" in sys.argv
-
         try:
-            import redis as redis_lib
-            r = redis_lib.Redis(host="localhost", port=6379, socket_connect_timeout=3, decode_responses=True)
-            r.ping()
+            import sys
+            sys.path.insert(0, str(PROJECT_ROOT))
+            from app.shared.redis.cleanup import kill_zombie_connections_sync
+
+            result = kill_zombie_connections_sync(dry_run=dry_run)
+            found = result.get("found", 0)
+            killed = result.get("killed", 0)
+            errors = result.get("errors", [])
+            connections = result.get("connections", [])
+
+            if found == 0:
+                print(f"  {GREEN}[+] 좀비 연결 없음{RESET}")
+            else:
+                color = YELLOW if dry_run else RED
+                print(f"  {color}[!] 좀비 연결 감지: {found}건{RESET}")
+                for c in connections:
+                    print(f"      id={c['id']} addr={c['addr']} idle={c['idle']}s cmd={c['cmd']} flags={c['flags']}")
+                if dry_run:
+                    print(f"\n  {YELLOW}[DRY RUN] kill 없이 목록만 출력됨{RESET}")
+                else:
+                    print(f"\n  {GREEN}[+] kill 완료: {killed}/{found}건{RESET}")
+            if errors:
+                for err in errors:
+                    print(f"  {RED}[!] 오류: {err}{RESET}")
         except Exception as e:
-            cprint(f"Redis 연결 실패: {e}", RED)
-            return
-
-        client_list = r.client_list()
-        zombies = []
-        for c in client_list:
-            idle = int(c.get("idle", 0))
-            flags = c.get("flags", "")
-            cmd = c.get("cmd", "")
-            cid = c.get("id", "")
-            if idle > 300 and ("S" in flags or cmd in ("subscribe", "psubscribe")):
-                zombies.append({"id": cid, "idle": idle, "flags": flags, "cmd": cmd, "addr": c.get("addr", "?")})
-
-        if not zombies:
-            cprint("좀비 연결 없음", GREEN)
-            r.close()
-            return
-
-        print(f"  {YELLOW}좀비 연결 {len(zombies)}개 감지:{RESET}")
-        for z in zombies:
-            print(f"    id={z['id']}  idle={z['idle']}s  flags={z['flags']}  cmd={z['cmd']}  addr={z['addr']}")
-
-        if not force:
-            print(f"\n  {YELLOW}정리하려면 --force 플래그를 추가하세요{RESET}")
-            r.close()
-            return
-
-        killed = 0
-        for z in zombies:
-            try:
-                r.client_kill_filter(_id=int(z["id"]))
-                killed += 1
-            except Exception as e:
-                print(f"    {RED}id={z['id']} kill 실패: {e}{RESET}")
-        cprint(f"{killed}/{len(zombies)}개 좀비 연결 정리 완료", GREEN)
-        r.close()
+            print(f"  {RED}[-] 좀비 정리 실패: {e}{RESET}")
+        print()
 
     # ── legacy cleanup ───────────────────────────────────────────
     def _cleanup_legacy(self):
