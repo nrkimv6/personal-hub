@@ -547,7 +547,10 @@ class BrowserWorkerManager:
             print(f"      Memory: {used_mb}MB")
 
             clients = r.info(section="clients").get("connected_clients", 0)
-            print(f"      Clients: {clients}")
+            # pubsub 연결 수 확인
+            client_list = r.client_list()
+            pubsub_count = sum(1 for c in client_list if c.get("flags", "").startswith("S") or c.get("cmd") == "subscribe")
+            print(f"      Clients: {clients} (pubsub: {pubsub_count})")
             r.close()
         except Exception as e:
             print(f"  {RED}[-] Redis connection: FAILED ({e}){RESET}")
