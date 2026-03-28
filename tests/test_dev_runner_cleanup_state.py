@@ -416,7 +416,7 @@ class TestCorrectPidState:
     async def test_correct_pid_state_invalid_pid(self):
         """ERROR: pid_str='abc' → ValueError catch + logger.debug + (running, 'abc') 반환"""
         svc = self._make_svc()
-        with patch("app.modules.dev_runner.services.executor_service.logger") as mock_logger:
+        with patch("app.modules.dev_runner.services.runner_state.logger") as mock_logger:
             result = await svc._correct_pid_state("rid7", "running", "abc", caller="test")
         # running=True (status="running"), pid_str 원본 유지
         assert result == (True, "abc")
@@ -427,7 +427,7 @@ class TestCorrectPidState:
         """RIGHT: caller="test_caller" → logger.warning 메시지에 'test_caller' 포함"""
         svc = self._make_svc()
         with patch.object(type(svc), "_is_pid_alive", return_value=False), \
-             patch("app.modules.dev_runner.services.executor_service.logger") as mock_logger:
+             patch("app.modules.dev_runner.services.runner_state.logger") as mock_logger:
             await svc._correct_pid_state("rid8", "running", "1234", caller="test_caller")
         assert any("test_caller" in str(call) for call in mock_logger.warning.call_args_list)
 

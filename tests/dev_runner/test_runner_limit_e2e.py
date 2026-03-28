@@ -51,7 +51,7 @@ class TestRunnerLimitE2E:
         await fake_async.sadd(ACTIVE_RUNNERS_KEY, "r002")
 
         with patch.object(svc, "_check_redis_and_listener", new_callable=AsyncMock), \
-             patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
+             patch.object(svc, "cleanup_stale_runners", new_callable=AsyncMock, return_value={"cleaned_active": 0, "cleaned_recent": 0, "bugs": 0, "total": 0}):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(2)):
                 with pytest.raises(HTTPException) as exc_info:
                     await svc.start_dev_runner(RunRequest(test_source="runner_limit_e2e", ))
