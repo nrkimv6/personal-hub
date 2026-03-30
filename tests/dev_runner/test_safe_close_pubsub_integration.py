@@ -14,7 +14,6 @@ def test_llm_routes_import_safe_close_pubsub():
     )
 
 
-@pytest.mark.skip(reason="plan_archive_listener 교체는 별도 task에서 구현 예정")
 def test_plan_archive_listener_import_safe_close_pubsub():
     """R(Right): plan_archive_listener 모듈이 safe_close_pubsub을 참조 가능"""
     if "app.worker.plan_archive_listener" in sys.modules:

@@ -30,6 +30,7 @@ from app.modules.dev_runner.services.plan_record_service import (
 )
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.services.log_service import REDIS_HOST, REDIS_PORT
+from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 
 logger = logging.getLogger(__name__)
 
@@ -301,10 +302,8 @@ class PlanArchiveListener(BaseWorker):
     async def _disconnect_redis(self):
         """Redis 연결 해제."""
         try:
-            if self._pubsub:
-                await self._pubsub.unsubscribe(PLAN_ARCHIVED_CHANNEL)
-                await self._pubsub.close()
-                self._pubsub = None
+            await safe_close_pubsub(self._pubsub)
+            self._pubsub = None
             if self._redis_client:
                 await self._redis_client.close()
                 self._redis_client = None
