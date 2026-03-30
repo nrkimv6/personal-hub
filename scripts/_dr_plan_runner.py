@@ -20,7 +20,7 @@ from _dr_state import (
 )
 from _dr_subprocess import _ANSI_ESCAPE, _make_plan_runner_env
 from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, _DummyProcess
-from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done
+from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +280,35 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             # merge 흐름 — cleanup은 merge 완료/실패 후 _do_inline_merge 내부에서 호출
             _do_inline_merge(runner_id, redis_client)
         else:
+            # v2 merge fallback: merge_requested 플래그 없이도 merge 후처리 누락 여부 확인
+            _v2_detect = None
+            if runner_id:
+                try:
+                    _v2_detect = detect_merged_but_not_done(runner_id, redis_client)
+                except Exception as _det_err:
+                    logger.debug(f"[_stream_output] v2 detect 실패 (무시): {_det_err}")
+            if _v2_detect:
+                logger.info(
+                    f"[_stream_output] v2 merge 후처리 fallback 실행: "
+                    f"runner_id={runner_id}, plan={_v2_detect['plan_file']}"
+                )
+                try:
+                    def _pub_fallback(msg: str) -> None:
+                        _pub_and_log(runner_id, msg, redis_client, "MERGE-FALLBACK")
+                    _handle_post_merge_done(_v2_detect["plan_file"], runner_id, _pub_fallback, redis_client)
+                    # Workflow 상태 보정: fallback 성공 시 completed로 전이
+                    if _wf_manager and runner_id:
+                        try:
+                            _wf = _wf_manager.get_by_runner_id(runner_id)
+                            if _wf:
+                                _wf_manager.update_status(_wf["id"], "completed")
+                        except Exception as _wf_err:
+                            logger.debug(f"[_stream_output] fallback workflow update 실패 (무시): {_wf_err}")
+                except Exception as _fallback_err:
+                    logger.warning(
+                        f"[_stream_output] v2 merge fallback 실패 (cleanup은 계속): "
+                        f"runner_id={runner_id}, error={_fallback_err}"
+                    )
             _cleanup_process_state(runner_id, redis_client)
 
 
