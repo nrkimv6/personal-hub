@@ -583,6 +583,19 @@ class BrowserWorkerManager:
         else:
             compose_cmd = str(compose_path)
 
+        # Podman 소켓 검증 — 소켓 끊김 시 Machine 재수립
+        socket_check = subprocess.run(["podman", "ps"], capture_output=True, timeout=5)
+        if socket_check.returncode != 0:
+            cprint("Podman socket unreachable — recycling Machine to re-establish SSH tunnel...", YELLOW)
+            subprocess.run(["podman", "machine", "stop"], capture_output=True, timeout=15)
+            time.sleep(3)
+            subprocess.run(["podman", "machine", "start"], capture_output=True, timeout=60)
+            time.sleep(15)
+            recheck = subprocess.run(["podman", "ps"], capture_output=True, timeout=5)
+            if recheck.returncode != 0:
+                cprint("Machine recycle failed — manual intervention required: podman machine stop && podman machine start", RED)
+                return
+
         cprint("Starting Redis container via podman-compose...")
         try:
             result = subprocess.run(

@@ -39,37 +39,24 @@ $redisStarted = $false
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
 try {
-    # Podman machine 상태 확인
-    Write-Log "  Checking Podman machine status..."
-    $machineList = & podman machine list --format json 2>&1
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log "  Podman machine not running, starting..."
-        & podman machine start 2>&1 | ForEach-Object { Write-Log "    $_" }
-        Start-Sleep -Seconds 15  # WSL2 VM 초기화 대기
+    # Podman 소켓 실제 통신 검증 (podman machine list의 "Running"은 SSH 터널 상태를 반영하지 않음)
+    Write-Log "  Verifying Podman socket connectivity..."
+    $null = & podman ps 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log "  Podman socket OK"
     } else {
-        # JSON 파싱하여 실행 중인지 확인
-        try {
-            $machines = $machineList | ConvertFrom-Json
-            $running = $machines | Where-Object { $_.Running -eq $true }
+        Write-Log "  Podman socket unreachable — recycling Machine to re-establish SSH tunnel..."
+        & podman machine stop 2>&1 | ForEach-Object { Write-Log "    $_" }
+        Start-Sleep -Seconds 3
+        & podman machine start 2>&1 | ForEach-Object { Write-Log "    $_" }
+        Start-Sleep -Seconds 15
 
-            if (-not $running) {
-                Write-Log "  Podman machine not running, starting..."
-                & podman machine start 2>&1 | ForEach-Object { Write-Log "    $_" }
-                Start-Sleep -Seconds 15
-            } else {
-                Write-Log "  Podman machine already running"
-            }
-        } catch {
-            # JSON 파싱 실패 시 podman ps로 연결 확인
-            & podman ps 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Log "  Podman machine not connected, starting..."
-                & podman machine start 2>&1 | ForEach-Object { Write-Log "    $_" }
-                Start-Sleep -Seconds 15
-            } else {
-                Write-Log "  Podman machine connected"
-            }
+        # 재검증
+        $null = & podman ps 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "  WARNING: Podman still unreachable after recycle — workers may use SQLite fallback"
+        } else {
+            Write-Log "  Podman socket recovered successfully"
         }
     }
 

@@ -35,6 +35,13 @@ RESULTS_KEY = "worker:command_results"
 DESKTOP_NOTIFICATION_KEY = "monitor:notification:desktop"  # Session 0 → Session 1 Desktop 알림 릴레이
 BRPOP_TIMEOUT = 30  # 초 (0 = 무한 대기, 양수 = 타임아웃 후 루프 재시작)
 
+# Podman 자동 복구 설정
+PODMAN_RECOVERY_THRESHOLD = 3   # Redis 연속 실패 N회 후 Podman 복구 시도
+PODMAN_RECOVERY_COOLDOWN = 600  # 초 (10분) — 쿨다운 내 재시도 방지
+
+# 마지막 Podman 복구 시도 시각 (Unix timestamp, 0 = 미시도)
+_last_podman_recovery_time: float = 0.0
+
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 BROWSER_WORKERS_SCRIPT = SCRIPT_DIR / "browser-workers.ps1"
@@ -153,6 +160,56 @@ def send_desktop_notification(message: str) -> bool:
         return False
 
 
+def attempt_podman_recovery() -> bool:
+    """Podman Machine SSH 터널 재수립 + Redis 컨테이너 복구.
+
+    Redis 연속 실패가 PODMAN_RECOVERY_THRESHOLD 이상일 때 호출된다.
+    Session 1(사용자 세션)에서만 실행 가능 (podman machine stop/start 필요).
+
+    Returns:
+        bool: True = 복구 성공 (Redis ping 확인), False = 복구 불필요 또는 실패
+    """
+    try:
+        # 1. Podman 소켓 연결 확인
+        check = subprocess.run(["podman", "ps"], capture_output=True, timeout=5)
+        if check.returncode == 0:
+            logger.info("Podman socket OK — Redis 문제는 Podman 외 원인")
+            return False
+
+        logger.warning("Podman socket unreachable — recycling Machine to re-establish SSH tunnel...")
+
+        # 2. Machine stop
+        subprocess.run(["podman", "machine", "stop"], capture_output=True, timeout=15)
+        time.sleep(3)
+
+        # 3. Machine start (포트 재할당 포함 최대 60초)
+        start_result = subprocess.run(["podman", "machine", "start"], capture_output=True, timeout=60)
+        if start_result.returncode != 0:
+            logger.error(f"podman machine start 실패: {start_result.stderr.decode('utf-8', errors='replace').strip()}")
+
+        # 4. SSH 터널 수립 + WSL2 VM 초기화 대기
+        time.sleep(15)
+
+        # 5. Redis 컨테이너 시작
+        subprocess.run(["podman", "start", "monitor-redis"], capture_output=True, timeout=10)
+        time.sleep(3)
+
+        # 6. Redis ping 확인
+        try:
+            r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, socket_connect_timeout=5)
+            r.ping()
+            r.close()
+            logger.info("Podman Machine + Redis 복구 완료")
+            return True
+        except Exception:
+            logger.error("Podman Machine 복구했으나 Redis 연결 실패")
+            return False
+
+    except (subprocess.TimeoutExpired, Exception) as e:
+        logger.error(f"Podman 복구 중 예외: {e}")
+        return False
+
+
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
     logger.info("=" * 50)
@@ -165,6 +222,7 @@ def main():
     logger.info("=" * 50)
 
     reconnect_delay = 1
+    consecutive_failures = 0
 
     while True:
         try:
@@ -178,6 +236,7 @@ def main():
             r.ping()
             logger.info("Redis 연결 성공")
             reconnect_delay = 1  # 연결 성공 시 리셋
+            consecutive_failures = 0  # 연결 복구 시 리셋
 
             # BRPOP 루프 (블로킹 대기) — worker:commands + notification:desktop 동시 대기
             while True:
@@ -229,9 +288,31 @@ def main():
                 logger.info(f"명령 결과 반환: {action_result}")
 
         except redis.ConnectionError as e:
-            logger.warning(f"Redis 연결 실패: {e}, {reconnect_delay}초 후 재시도")
+            consecutive_failures += 1
+            logger.warning(f"Redis 연결 실패 ({consecutive_failures}회 연속): {e}, {reconnect_delay}초 후 재시도")
             time.sleep(reconnect_delay)
             reconnect_delay = min(reconnect_delay * 2, 30)
+
+            # Podman 복구 트리거 (연속 N회 실패 + 쿨다운 경과 시)
+            if consecutive_failures >= PODMAN_RECOVERY_THRESHOLD:
+                global _last_podman_recovery_time
+                elapsed = time.time() - _last_podman_recovery_time
+                if elapsed > PODMAN_RECOVERY_COOLDOWN:
+                    _last_podman_recovery_time = time.time()
+                    recovered = attempt_podman_recovery()
+                    if recovered:
+                        logger.info("Podman Machine 복구 완료, Redis 재연결 시도")
+                        reconnect_delay = 1
+                        consecutive_failures = 0
+                    else:
+                        logger.error(
+                            "Podman Machine 복구 실패 — 수동 개입 필요: "
+                            "podman machine stop && podman machine start"
+                        )
+                else:
+                    logger.debug(
+                        f"Podman 복구 쿨다운 중 ({PODMAN_RECOVERY_COOLDOWN - elapsed:.0f}초 남음)"
+                    )
 
         except KeyboardInterrupt:
             logger.info("Ctrl+C로 종료")

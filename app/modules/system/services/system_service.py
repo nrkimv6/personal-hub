@@ -512,6 +512,22 @@ if ($tasks) {{
             compose_path = str(compose_path)
 
         try:
+            # Podman 소켓 검증 — Session 0에서는 Machine 복구 불가, CLI 안내만 반환
+            check_proc = await asyncio.create_subprocess_exec(
+                "podman", "ps",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(check_proc.communicate(), timeout=5)
+            if check_proc.returncode != 0:
+                return {
+                    "success": False,
+                    "message": (
+                        "Podman 소켓 연결 실패 (SSH 터널 끊김). "
+                        "터미널에서 실행: podman machine stop && podman machine start && podman start monitor-redis"
+                    ),
+                }
+
             proc = await asyncio.create_subprocess_exec(
                 compose_path, "up", "-d", "redis",
                 cwd=str(project_root),
