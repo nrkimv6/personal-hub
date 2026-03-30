@@ -8,7 +8,7 @@ TestClient 기반 — 실서버 불필요.
 """
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,9 +43,12 @@ class TestV2VerifyStageDispatch:
         try:
             from plan_runner.core.stages import StageDispatcher
             action = StageDispatcher.dispatch("검증중")
-            assert action is not None, "검증중 → dispatch 결과 None"
-            assert action.agent == "auto-verify", \
-                f"검증중 상태에서 agent가 auto-verify가 아님: {action.agent}"
+            assert action is not None, \
+                "검증중 → dispatch 결과 None (StageDispatcher.dispatch('검증중') 미등록 가능성)"
+            assert action.agent == "auto-verify", (
+                f"검증중 상태에서 agent가 auto-verify가 아님: {action.agent!r} "
+                f"(stages.py의 검증중 dispatch 등록 확인 필요)"
+            )
         except ImportError:
             pytest.skip("plan_runner가 이 환경에서 임포트 불가 (PYTHONPATH 확인 필요)")
 
@@ -95,7 +98,7 @@ class TestV2VerifyInconsistentRetry:
 
         status_updates = []
         with patch("plan_runner.task_queue.sync.PlanParser.update_plan_status",
-                   side_effect=lambda f, s: status_updates.append(s)):
+                   side_effect=lambda f, s: status_updates.append(s)) as mock_update_status:
             import asyncio
 
             async def _run():
@@ -117,8 +120,20 @@ class TestV2VerifyInconsistentRetry:
 
             asyncio.run(_run())
 
-        assert "수정필요" in status_updates, \
-            f"INCONSISTENT max_rounds 초과 후 수정필요 전이 안 됨: {status_updates}"
+        assert "수정필요" in status_updates, (
+            f"INCONSISTENT max_rounds 초과 후 수정필요 전이 안 됨: {status_updates!r} "
+            f"(loop.py의 INCONSISTENT 분기에서 update_plan_status('수정필요') 호출 확인 필요)"
+        )
+        # PlanParser.update_plan_status가 정확히 1회, ("수정필요") 인자로 호출됐는지 검증
+        assert mock_update_status.call_count == 1, (
+            f"update_plan_status 호출 횟수 오류: {mock_update_status.call_count}회 "
+            f"(기대: 1회, 실제 호출 args: {mock_update_status.call_args_list})"
+        )
+        # INCONSISTENT이 max_rounds(=1)만큼 재시도됐는지 확인
+        assert runner_mock._run_auto_verify.call_count == 1, (
+            f"_run_auto_verify 호출 횟수 오류: {runner_mock._run_auto_verify.call_count}회 "
+            f"(max_rounds=1이므로 정확히 1회 호출 기대)"
+        )
 
 
 class TestV2VerifyPassTransition:
@@ -141,7 +156,8 @@ class TestV2VerifyPassTransition:
             round=1, red=0, yellow=0, green=1,
         )
 
-        # loop.py 로직: PASS → next_status = 검토완료
+        # loop.py 로직: PASS → next_status = 검토완료 (StageAction 오버라이드 재현)
+        from plan_runner.core.stages import StageAction
         import asyncio
 
         async def _run():
@@ -152,20 +168,35 @@ class TestV2VerifyPassTransition:
             plan_f = tmp_path / "test-verify-pass.md"
             plan_f.write_text("> 상태: 검증중\n- [ ] task\n", encoding="utf-8")
 
-            action_next_status = "테스트중"  # stages.py 기본값
+            # loop.py와 동일하게 StageAction 객체로 오버라이드 (단순 문자열 변수 아님)
+            action = StageAction(
+                agent="auto-verify", model="opus", env="main",
+                next_status="테스트중", auto_commit=True,
+            )
             max_rounds = getattr(mock_runner.config, "max_verify_rounds", 3)
             for rnd in range(1, max_rounds + 1):
                 result = await mock_runner._run_auto_verify(plan_f)
                 if result is None:
                     break
                 if result.status in ("PASS", "PASS-WITH-NOTES"):
-                    action_next_status = "검토완료"
+                    action = StageAction(
+                        agent="auto-verify", model="opus", env="main",
+                        next_status="검토완료", auto_commit=True,
+                    )
                     break
-            return action_next_status
+            return action, mock_runner._run_auto_verify.call_count
 
-        final_status = asyncio.run(_run())
-        assert final_status == "검토완료", \
-            f"PASS 결과 후 검토완료 전이 안 됨: {final_status}"
+        action, call_count = asyncio.run(_run())
+        assert action.next_status == "검토완료", (
+            f"PASS 결과 후 StageAction.next_status가 검토완료가 아님: {action.next_status!r} "
+            f"(loop.py의 PASS 분기에서 StageAction 오버라이드 확인 필요)"
+        )
+        # PASS이므로 1회 호출 후 즉시 종료돼야 함
+        assert call_count == 1, (
+            f"_run_auto_verify 호출 횟수 오류: {call_count}회 "
+            f"(PASS 결과 시 1회 호출 후 즉시 종료 기대)"
+        )
+        final_status = action.next_status
 
         # GET /status 200 응답 확인
         from app.modules.dev_runner.schemas import RunStatusResponse
@@ -180,4 +211,119 @@ class TestV2VerifyPassTransition:
             new=AsyncMock(return_value=mock_response),
         ):
             r = client.get("/api/v1/dev-runner/status")
-        assert r.status_code == 200, f"GET /status 실패: HTTP {r.status_code}: {r.text}"
+        assert r.status_code == 200, (
+            f"GET /status 실패: HTTP {r.status_code}: {r.text}"
+        )
+        # 응답 body 검증
+        body = r.json()
+        assert "running" in body, f"GET /status 응답에 'running' 필드 없음: {body}"
+        assert body["running"] is False, (
+            f"GET /status running 필드 오류: {body['running']!r} (기대: False)"
+        )
+        assert "listener_alive" in body, f"GET /status 응답에 'listener_alive' 필드 없음: {body}"
+
+
+class TestV2VerifyNeedsAgentTransition:
+    """32. NEEDS_AGENT 결과 시 수정필요 전이 (엣지 케이스)"""
+
+    def test_v2_verify_needs_agent_http(self, client, tmp_path):
+        """R: NEEDS_AGENT 결과 시 loop.py else 블록에서 수정필요로 전이 (상태 누수 방지)"""
+        plan_file = tmp_path / "test-verify-needs-agent.md"
+        plan_file.write_text(
+            "# 테스트\n\n> 상태: 검증중\n\n- [ ] task\n",
+            encoding="utf-8",
+        )
+
+        try:
+            from plan_runner.core.parser import AutoVerifyResult
+        except ImportError:
+            pytest.skip("plan_runner 임포트 불가")
+
+        needs_agent_result = AutoVerifyResult(
+            project="test", task="test", type="",
+            status="NEEDS_AGENT",
+            missing=[], evidence="",
+            round=1, red=0, yellow=0, green=0,
+        )
+
+        runner_mock = MagicMock()
+        runner_mock._run_auto_verify = AsyncMock(return_value=needs_agent_result)
+        runner_mock.config.max_verify_rounds = 3
+
+        status_updates = []
+        with patch("plan_runner.task_queue.sync.PlanParser.update_plan_status",
+                   side_effect=lambda f, s: status_updates.append(s)):
+            import asyncio
+
+            async def _run():
+                plan_f = plan_file
+                max_rounds = getattr(runner_mock.config, "max_verify_rounds", 3)
+                for rnd in range(1, max_rounds + 1):
+                    result = await runner_mock._run_auto_verify(plan_f)
+                    if result is None:
+                        break
+                    if result.status in ("PASS", "PASS-WITH-NOTES"):
+                        break
+                    elif result.status == "INCONSISTENT":
+                        if rnd == max_rounds:
+                            from plan_runner.task_queue.sync import PlanParser
+                            PlanParser.update_plan_status(plan_f, "수정필요")
+                            break
+                    else:  # NEEDS_AGENT 포함 — 수정필요 전이
+                        from plan_runner.task_queue.sync import PlanParser
+                        PlanParser.update_plan_status(plan_f, "수정필요")
+                        break
+
+            asyncio.run(_run())
+
+        assert "수정필요" in status_updates, (
+            f"NEEDS_AGENT 시 수정필요 전이 안 됨: {status_updates!r} "
+            "(loop.py else 블록에서 update_plan_status('수정필요') 호출 확인)"
+        )
+        # 1회만 호출 확인 (루프 break 후 재실행 없음)
+        assert runner_mock._run_auto_verify.call_count == 1
+
+
+class TestV2VerifyModelConfig:
+    """33. engines.json auto-verify 키 존재 + impl.py 참조 검증"""
+
+    def test_v2_verify_model_config_http(self, client):
+        """R: engines.json에 auto-verify 키가 있고 impl.py가 해당 키를 참조하는지 API 환경 검증"""
+        import json
+        from pathlib import Path
+
+        # wtools engines.json 경로 (monitor-page 환경에서 접근)
+        engines_json = Path(__file__).parents[4] / "service" / "wtools" / "common" / "tools" / "plan-runner" / "engines.json"
+        if not engines_json.exists():
+            pytest.skip(f"engines.json 없음: {engines_json}")
+
+        data = json.loads(engines_json.read_text(encoding="utf-8"))
+        claude_models = data.get("claude", {}).get("models", {})
+        assert "auto-verify" in claude_models, \
+            f"engines.json claude.models에 auto-verify 키 없음 (현재 키: {list(claude_models.keys())})"
+        assert claude_models["auto-verify"] == "opus", \
+            f"auto-verify 모델 값 오류: {claude_models['auto-verify']!r} (기대: 'opus')"
+
+
+class TestV2VerifyPromptFormat:
+    """34. auto-verify 프롬프트 STATUS 줄 형식 검증"""
+
+    def test_v2_verify_prompt_format_http(self, client):
+        """R: auto-verify 프롬프트 STATUS 줄이 중괄호 포맷인지 API 환경에서 검증"""
+        from pathlib import Path
+
+        impl_py = Path(__file__).parents[4] / "service" / "wtools" / "common" / "tools" / "plan-runner" / "cli" / "impl.py"
+        if not impl_py.exists():
+            pytest.skip(f"impl.py 없음: {impl_py}")
+
+        content = impl_py.read_text(encoding="utf-8")
+        status_line = None
+        for line in content.splitlines():
+            if "STATUS:" in line and ("PASS" in line or "INCOMPLETE" in line):
+                status_line = line
+                break
+
+        assert status_line is not None, "impl.py에서 STATUS 프롬프트 줄 찾을 수 없음"
+        assert "{" in status_line, f"STATUS 줄에 중괄호 없음: {status_line!r}"
+        assert "PASS | PASS-WITH-NOTES | INCONSISTENT | INCOMPLETE" not in status_line, \
+            f"STATUS 줄이 여전히 파이프 구분자 리터럴 형식: {status_line!r}"
