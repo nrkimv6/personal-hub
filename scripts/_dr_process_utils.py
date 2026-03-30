@@ -122,8 +122,10 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     _cleanup_done[runner_id] = time.time()
     if runner_id in _stream_threads:
         t = _stream_threads.pop(runner_id)
-        if t.is_alive():
+        if t.is_alive() and t != threading.current_thread():
             t.join(timeout=3)
+        elif t == threading.current_thread():
+            logger.debug(f"[cleanup] self-join 스킵 (runner_id={runner_id})")
 
     # 1) 종료된 runner를 RECENT_RUNNERS에 등록하여 탭 이력 보존 (worktree 정리보다 먼저)
     try:
@@ -288,6 +290,20 @@ def _monitor_pid_until_exit(runner_id: str, pid: int, redis_client: redis.Redis)
             if runner_id in _cleanup_done:
                 break
             logger.info(f"[monitor_pid] runner {runner_id} → cleanup")
+            # v2 merge fallback: merge_requested 없어도 merge 후처리 누락 여부 확인
+            try:
+                from _dr_merge import detect_merged_but_not_done as _dmnd, _handle_post_merge_done as _hpmd, _pub_and_log as _pal
+                _mp_detect = _dmnd(runner_id, redis_client)
+                if _mp_detect:
+                    logger.info(f"[monitor_pid] v2 merge fallback 실행 (runner_id={runner_id})")
+                    try:
+                        def _mp_pub(msg: str, _rid=runner_id) -> None:
+                            _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
+                        _hpmd(_mp_detect["plan_file"], runner_id, _mp_pub, redis_client)
+                    except Exception as _mp_fb_err:
+                        logger.warning(f"[monitor_pid] v2 merge fallback 실패 (cleanup 계속): {_mp_fb_err}")
+            except Exception as _mp_det_err:
+                logger.debug(f"[monitor_pid] v2 detect 실패 (무시): {_mp_det_err}")
             _cleanup_process_state(runner_id, redis_client, reason="heartbeat_pid_exit")
             break
         time.sleep(1)
@@ -308,6 +324,20 @@ def _attach_to_running_process(runner_id: str, pid: int, redis_client: redis.Red
         log_file_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
     if not log_file_path or not Path(log_file_path).exists():
         logger.warning(f"[attach] runner {runner_id} 로그 파일 없음 → cleanup")
+        # v2 merge fallback: 로그 없어도 merge 완료 여부 확인
+        try:
+            from _dr_merge import detect_merged_but_not_done as _dmnd, _handle_post_merge_done as _hpmd, _pub_and_log as _pal
+            _nl_detect = _dmnd(runner_id, redis_client)
+            if _nl_detect:
+                logger.info(f"[attach] v2 merge fallback 실행 (runner_id={runner_id})")
+                try:
+                    def _nl_pub(msg: str, _rid=runner_id) -> None:
+                        _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
+                    _hpmd(_nl_detect["plan_file"], runner_id, _nl_pub, redis_client)
+                except Exception as _nl_fb_err:
+                    logger.warning(f"[attach] v2 merge fallback 실패 (cleanup 계속): {_nl_fb_err}")
+        except Exception as _nl_det_err:
+            logger.debug(f"[attach] v2 detect 실패 (무시): {_nl_det_err}")
         _cleanup_process_state(runner_id, redis_client, reason="no_log_file")
         return
 
@@ -405,6 +435,20 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                     t.start()
             else:
                 logger.info(f"[listener] runner {runner_id} PID 정보 없음 → cleanup")
+                # v2 merge fallback: PID 없어도 merge 완료 여부 확인
+                try:
+                    from _dr_merge import detect_merged_but_not_done as _dmnd, _handle_post_merge_done as _hpmd, _pub_and_log as _pal
+                    _np_detect = _dmnd(runner_id, redis_client)
+                    if _np_detect:
+                        logger.info(f"[reconnect] v2 merge fallback 실행 (no-pid, runner_id={runner_id})")
+                        try:
+                            def _np_pub(msg: str, _rid=runner_id) -> None:
+                                _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
+                            _hpmd(_np_detect["plan_file"], runner_id, _np_pub, redis_client)
+                        except Exception as _np_fb_err:
+                            logger.warning(f"[reconnect] v2 merge fallback 실패 (cleanup 계속): {_np_fb_err}")
+                except Exception as _np_det_err:
+                    logger.debug(f"[reconnect] v2 detect 실패 (무시): {_np_det_err}")
                 _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
             continue
         try:
@@ -441,6 +485,20 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                     t.start()
             else:
                 logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 종료됨 → cleanup")
+                # v2 merge fallback: merge_requested 없어도 merge 후처리 누락 여부 확인
+                try:
+                    from _dr_merge import detect_merged_but_not_done as _dmnd, _handle_post_merge_done as _hpmd, _pub_and_log as _pal
+                    _rc_detect = _dmnd(runner_id, redis_client)
+                    if _rc_detect:
+                        logger.info(f"[reconnect] v2 merge fallback 실행 (runner_id={runner_id})")
+                        try:
+                            def _rc_pub(msg: str, _rid=runner_id) -> None:
+                                _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
+                            _hpmd(_rc_detect["plan_file"], runner_id, _rc_pub, redis_client)
+                        except Exception as _rc_fb_err:
+                            logger.warning(f"[reconnect] v2 merge fallback 실패 (cleanup 계속): {_rc_fb_err}")
+                except Exception as _rc_det_err:
+                    logger.debug(f"[reconnect] v2 detect 실패 (무시): {_rc_det_err}")
                 _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
 
     # --- 고아 키 탐색: active_runners set에 없지만 runners:*:status 키가 존재하는 경우 ---
@@ -509,6 +567,20 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                         t.start()
                 else:
                     logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 종료됨 → cleanup")
+                    # v2 merge fallback: merge_requested 없어도 merge 후처리 누락 여부 확인
+                    try:
+                        from _dr_merge import detect_merged_but_not_done as _dmnd2, _handle_post_merge_done as _hpmd2, _pub_and_log as _pal2
+                        _os_detect = _dmnd2(orphan_id, redis_client)
+                        if _os_detect:
+                            logger.info(f"[reconnect] v2 merge fallback 실행 (orphan_id={orphan_id})")
+                            try:
+                                def _os_pub(msg: str, _rid=orphan_id) -> None:
+                                    _pal2(_rid, msg, redis_client, "MERGE-FALLBACK")
+                                _hpmd2(_os_detect["plan_file"], orphan_id, _os_pub, redis_client)
+                            except Exception as _os_fb_err:
+                                logger.warning(f"[reconnect] v2 merge fallback 실패 (cleanup 계속): {_os_fb_err}")
+                    except Exception as _os_det_err:
+                        logger.debug(f"[reconnect] v2 detect 실패 (무시): {_os_det_err}")
                     _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
     except Exception as e:
         logger.warning(f"[reconnect] orphan scan 실패: {e}")

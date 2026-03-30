@@ -59,6 +59,7 @@ from _dr_subprocess import (
 )
 from _dr_merge import (
     _execute_merge_with_lock, _handle_post_merge_done, _call_done_api, _pub_and_log,
+    detect_merged_but_not_done,
 )
 from _dr_plan_runner import (
     _do_inline_merge, _stream_output, _do_start_plan_runner,
@@ -272,6 +273,20 @@ def main():
                                         logger.warning(
                                             f"heartbeat: runner {rid} stream thread hang {_dead_elapsed:.0f}초 → 강제 cleanup"
                                         )
+                                        # v2 merge fallback: stream thread가 hang 중이라 finally 미실행 가능
+                                        _hang_v2_detect = None
+                                        try:
+                                            _hang_v2_detect = detect_merged_but_not_done(rid, r)
+                                        except Exception as _hang_det_err:
+                                            logger.debug(f"heartbeat: v2 detect 실패 (hang 경로, 무시): {_hang_det_err}")
+                                        if _hang_v2_detect:
+                                            logger.info(f"heartbeat: v2 merge fallback 실행 (hang 경로, runner_id={rid})")
+                                            try:
+                                                def _hang_pub(msg: str, _rid=rid) -> None:
+                                                    _pub_and_log(_rid, msg, r, "MERGE-FALLBACK")
+                                                _handle_post_merge_done(_hang_v2_detect["plan_file"], rid, _hang_pub, r)
+                                            except Exception as _hang_fb_err:
+                                                logger.warning(f"heartbeat: v2 merge fallback 실패 (hang, cleanup 계속): {_hang_fb_err}")
                                         _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
                                     else:
                                         logger.debug(
@@ -288,6 +303,20 @@ def main():
                                             pass
                                 else:
                                     logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}, merge_status={_hb_ms}), 상태 정리")
+                                    # v2 merge fallback: merge_requested 없어도 merge 후처리 누락 여부 확인
+                                    _hb_v2_detect = None
+                                    try:
+                                        _hb_v2_detect = detect_merged_but_not_done(rid, r)
+                                    except Exception as _hb_det_err:
+                                        logger.debug(f"heartbeat: v2 detect 실패 (무시): {_hb_det_err}")
+                                    if _hb_v2_detect:
+                                        logger.info(f"heartbeat: v2 merge fallback 실행 (runner_id={rid})")
+                                        try:
+                                            def _hb_pub(msg: str, _rid=rid) -> None:
+                                                _pub_and_log(_rid, msg, r, "MERGE-FALLBACK")
+                                            _handle_post_merge_done(_hb_v2_detect["plan_file"], rid, _hb_pub, r)
+                                        except Exception as _hb_fb_err:
+                                            logger.warning(f"heartbeat: v2 merge fallback 실패 (cleanup 계속): {_hb_fb_err}")
                                     _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
 
                     last_heartbeat = now

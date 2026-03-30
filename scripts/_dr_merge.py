@@ -2,9 +2,11 @@
 import functools
 import json
 import logging
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from urllib.parse import quote as _url_quote
 
 import requests
@@ -17,6 +19,113 @@ from _dr_constants import (
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _launch_auto_impl_post_merge_process, _launch_general_merge_resolver_process, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
+
+
+def detect_merged_but_not_done(runner_id: str, redis_client: redis.Redis) -> Optional[dict]:
+    """v2 merge 성공 후 후처리(done/archive/cleanup)가 누락된 runner를 감지한다.
+
+    v2 파이프라인에서 handle_merge_stage()가 merge 성공 후 plan-runner 프로세스가 죽으면
+    dev-runner가 후처리를 놓치는 버그의 fallback 감지 함수.
+
+    감지 경로:
+    1. Redis merge_status == "merged" (v2에서 세팅 시)
+    2. git log에서 branch merge commit이 main에 존재
+    3. plan 파일이 docs/plan/에 잔존하고 상태가 머지대기/통합테스트중
+
+    Args:
+        runner_id: plan-runner ID
+        redis_client: Redis 클라이언트
+
+    Returns:
+        감지 시 {"plan_file": str, "branch": str}, 미감지 시 None
+    """
+    from plan_worktree_helpers import is_plan_archived
+
+    try:
+        plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        branch = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+    except Exception as e:
+        logger.debug(f"[detect_merged] runner {runner_id}: Redis 조회 실패 (무시) — {e}")
+        return None
+
+    # plan_file 없음 또는 ALL 모드이면 스킵
+    if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
+        logger.debug(f"[detect_merged] runner {runner_id}: plan_file 없음 또는 ALL → 스킵")
+        return None
+
+    # 이미 archive됐으면 중복 방지
+    try:
+        if is_plan_archived(plan_file):
+            logger.debug(f"[detect_merged] runner {runner_id}: plan이 이미 archive됨 → 스킵")
+            return None
+    except Exception:
+        pass
+
+    # plan 파일이 존재하고 상태가 머지대기/통합테스트중인지 확인
+    plan_path = Path(plan_file)
+    if not plan_path.exists():
+        logger.debug(f"[detect_merged] runner {runner_id}: plan 파일 없음 → 스킵")
+        return None
+
+    try:
+        head = plan_path.read_text(encoding="utf-8", errors="replace")[:2000]
+        if not re.search(r">\s*상태:\s*(머지대기|통합테스트중)", head):
+            logger.debug(f"[detect_merged] runner {runner_id}: plan 상태가 머지대기/통합테스트중 아님 → 스킵")
+            return None
+    except Exception as e:
+        logger.debug(f"[detect_merged] runner {runner_id}: plan 상태 확인 실패 (무시) — {e}")
+        return None
+
+    # 감지 경로 1: Redis merge_status == "merged"
+    redis_merged = False
+    try:
+        ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        if ms == "merged":
+            redis_merged = True
+            logger.info(f"[detect_merged] runner {runner_id}: Redis merge_status=merged 감지")
+    except Exception:
+        pass
+
+    # 감지 경로 2: git log에서 branch merge commit이 main에 존재
+    git_merged = False
+    if branch:
+        try:
+            result = subprocess.run(
+                ["git", "log", "--oneline", "--merges",
+                 f"--grep=Merge branch '{branch}'", "main", "-1"],
+                capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=15,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                git_merged = True
+                logger.info(f"[detect_merged] runner {runner_id}: git log merge commit 감지 (branch={branch})")
+            else:
+                # grep 패턴 대안: --grep="plan/{branch-tail}"
+                branch_tail = branch.split("/")[-1] if "/" in branch else branch
+                result2 = subprocess.run(
+                    ["git", "log", "--oneline", "--merges",
+                     f"--grep={branch_tail}", "main", "-3"],
+                    capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=15,
+                )
+                if result2.returncode == 0 and result2.stdout.strip():
+                    git_merged = True
+                    logger.info(
+                        f"[detect_merged] runner {runner_id}: git log merge commit 감지 (branch_tail={branch_tail})"
+                    )
+        except Exception as e:
+            logger.debug(f"[detect_merged] runner {runner_id}: git log 확인 실패 (무시) — {e}")
+
+    if redis_merged or git_merged:
+        logger.info(
+            f"[detect_merged] runner {runner_id}: merge 후 후처리 누락 감지 "
+            f"(redis_merged={redis_merged}, git_merged={git_merged}, plan={plan_file})"
+        )
+        return {"plan_file": plan_file, "branch": branch or ""}
+
+    logger.debug(
+        f"[detect_merged] runner {runner_id}: merge 감지 안됨 "
+        f"(redis_merged={redis_merged}, git_merged={git_merged})"
+    )
+    return None
 
 
 def _pub_and_log(runner_id: str, msg: str, redis_client: redis.Redis, tag: str = "MERGE") -> None:
@@ -327,6 +436,22 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
 
     # plan 헤더에서 branch/worktree 필드 제거 — 잔존 시 auto-done 에이전트가 /done 2.5단계에서 차단됨
     _remove_plan_header_fields(plan_file)
+
+    # fallback 경로: plan 상태가 머지대기/통합테스트중이면 구현완료로 전이
+    # (v2 handle_merge_stage에서 run_loop 상태 전이가 실행 안 됐을 때 보완)
+    try:
+        plan_text = Path(plan_file).read_text(encoding="utf-8", errors="replace")
+        if re.search(r">\s*상태:\s*(머지대기|통합테스트중)", plan_text[:2000]):
+            updated = re.sub(
+                r"(>\s*상태:\s*)(머지대기|통합테스트중)",
+                r"\g<1>구현완료",
+                plan_text[:2000],
+            ) + plan_text[2000:]
+            Path(plan_file).write_text(updated, encoding="utf-8")
+            pub_fn("plan 상태 → 구현완료 전이 (fallback)")
+            logger.info(f"[_handle_post_merge_done] plan 상태 구현완료 전이: {plan_file}")
+    except Exception as _st_err:
+        logger.debug(f"[_handle_post_merge_done] plan 상태 전이 실패 (무시): {_st_err}")
 
     # 자동 done 분기: 완료율 체크 → done API 호출 or main 추가 사이클 예약
     done_count, total_count = _get_plan_completion(plan_file)
