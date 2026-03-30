@@ -251,7 +251,7 @@ if ($tasks) {{
 
         if pid_path.exists():
             try:
-                pid = int(pid_path.read_text().strip())
+                pid = int(pid_path.read_text(encoding='utf-8-sig').strip())
                 running = await self._check_process_exists(pid)
             except (ValueError, IOError):
                 pass

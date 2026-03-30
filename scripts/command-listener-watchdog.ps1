@@ -41,7 +41,7 @@ $script:watchdogLogFile = Join-Path $LogDir "command_listener_watchdog_$(Get-Dat
 
 function Start-CommandListener {
     # 재시작 직전: cmdline 패턴으로 기존 프로세스 정리 (watchdog-utils.ps1 공통 함수 사용)
-    Stop-ExistingProcessesByCmdline -Label "command-listener" -CmdlinePattern 'command-listener'
+    Stop-ExistingProcessesByCmdline -Label "command-listener" -CmdlinePattern 'worker-command-listener\.py|monitorpage-cmdlistener'
 
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $stdoutLogFile = Join-Path $LogDir "stdout_command_listener_$Timestamp.log"
@@ -80,7 +80,7 @@ function Start-CommandListener {
     # PID 검증: conhost 중간 프로세스 생성 여부 확인 후 실제 PID 확정
     $actualPid = Confirm-ProcessPid -ProcessId $proc.Id `
         -NamePattern 'monitorpage-cmdlistener|python' `
-        -CmdlinePattern 'command-listener'
+        -CmdlinePattern 'worker-command-listener\.py|monitorpage-cmdlistener'
 
     $actualPid | Out-File $WorkerPidFile -Encoding ascii
 
