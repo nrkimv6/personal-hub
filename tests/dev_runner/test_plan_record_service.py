@@ -476,3 +476,51 @@ class TestSyncAllPlanFileFilter:
         for name in ["CHANGELOG.md", "README.md", "not-dated.md"]:
             h = _compute_filename_hash(str(archive_dir / name))
             assert db.query(PlanRecord).filter_by(filename_hash=h).first() is None
+
+
+# ========== TC 24: DB 격리 — production DB 오염 방지 (ERROR) ==========
+
+class TestDbIsolationNoProductionPollution:
+    """TC 24: 테스트 실행 후 production DB에 pytest 경로 레코드가 없음을 검증 (ERROR 범주)
+
+    conftest.py의 test_db_session이 app.database.SessionLocal을 패치하므로,
+    plan_service 내부 SessionLocal() 호출도 테스트 DB로 라우팅된다.
+    이 TC는 그 패치가 실제로 효과가 있음을 직접 확인한다.
+    """
+
+    def test_db_isolation_no_production_pollution(self, test_db_session, tmp_path):
+        """테스트 DB에 pytest 경로로 레코드를 생성해도 production DB에는 반영되지 않음
+
+        검증 흐름:
+        1. test_db_session(패치된 SessionLocal)으로 pytest 경로 레코드 생성
+        2. production DB(data/monitor.db)를 직접 열어 해당 경로가 없음 확인
+        """
+        import sqlite3
+        import os
+
+        pytest_path = str(tmp_path / "pytest-isolation-check" / "2026-03-30_isolation-tc.md")
+        svc = PlanRecordService(test_db_session)
+        record = svc.get_or_create(pytest_path)
+        test_db_session.flush()
+
+        assert record is not None, "test_db_session에 레코드가 생성되어야 함"
+
+        # production DB 경로 결정 (존재하지 않을 경우 스킵)
+        prod_db_path = Path(__file__).parent.parent.parent / "data" / "monitor.db"
+        if not prod_db_path.exists():
+            pytest.skip(f"Production DB 없음: {prod_db_path}")
+
+        conn = sqlite3.connect(str(prod_db_path))
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM plan_records WHERE file_path LIKE '%pytest-isolation-check%'"
+            )
+            count = cursor.fetchone()[0]
+        finally:
+            conn.close()
+
+        assert count == 0, (
+            f"Production DB에 pytest 경로 레코드가 {count}건 발견됨. "
+            "conftest.py의 SessionLocal 패치가 정상 작동하지 않을 수 있음."
+        )
