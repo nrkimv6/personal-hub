@@ -21,6 +21,19 @@ from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _
 logger = logging.getLogger(__name__)
 
 
+def is_done_completed(runner_id: str, redis_client: redis.Redis) -> bool:
+    """plan-runner가 이미 done을 완료했는지 확인 (이중 done 방지).
+
+    plan-runner loop의 auto-done 성공 후 설정되는 플래그를 확인한다.
+    (fix: v2-pipeline-transition-safety Phase 2)
+    """
+    try:
+        val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_completed")
+        return val == "1"
+    except Exception:
+        return False
+
+
 def detect_merged_but_not_done(runner_id: str, redis_client: redis.Redis) -> Optional[dict]:
     """v2 merge 성공 후 후처리(done/archive/cleanup)가 누락된 runner를 감지한다.
 
@@ -40,6 +53,12 @@ def detect_merged_but_not_done(runner_id: str, redis_client: redis.Redis) -> Opt
         감지 시 {"plan_file": str, "branch": str}, 미감지 시 None
     """
     from plan_worktree_helpers import is_plan_archived
+
+    # done_completed 플래그 확인 — plan-runner가 이미 done 완료 시 fallback 불필요
+    # (fix: v2-pipeline-transition-safety Phase 2)
+    if is_done_completed(runner_id, redis_client):
+        logger.debug(f"[detect_merged] runner {runner_id}: done_completed=1 → 스킵")
+        return None
 
     try:
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
@@ -64,7 +83,7 @@ def detect_merged_but_not_done(runner_id: str, redis_client: redis.Redis) -> Opt
     # plan 파일이 존재하고 상태가 머지대기/통합테스트중인지 확인
     plan_path = Path(plan_file)
     if not plan_path.exists():
-        logger.debug(f"[detect_merged] runner {runner_id}: plan 파일 없음 → 스킵")
+        logger.info(f"[detect_merged] runner {runner_id}: plan 이미 archive됨 — fallback 불필요")
         return None
 
     try:
@@ -433,6 +452,21 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
     if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
         pub_fn("plan_file 없음(--all 모드) — done 스킵")
         return
+
+    # plan 파일 존재 확인 — 이미 archive됨 (fix: v2-pipeline-transition-safety Phase 2)
+    if not Path(plan_file).exists():
+        pub_fn("plan 이미 처리됨 (파일 없음) — done 스킵")
+        logger.info(f"[_handle_post_merge_done] plan 파일 없음, 이미 처리된 것으로 판단: {plan_file}")
+        return
+
+    # plan 상태 확인 — "완료"이면 이미 done 처리됨
+    try:
+        _head = Path(plan_file).read_text(encoding="utf-8", errors="replace")[:2000]
+        if re.search(r">\s*상태:\s*완료", _head):
+            pub_fn("plan 이미 완료 상태 — done 스킵")
+            return
+    except Exception:
+        pass
 
     # plan 헤더에서 branch/worktree 필드 제거 — 잔존 시 auto-done 에이전트가 /done 2.5단계에서 차단됨
     _remove_plan_header_fields(plan_file)
