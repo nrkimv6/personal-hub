@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 
 logger = logging.getLogger("claude_worker.api")
 
@@ -550,11 +551,7 @@ async def _chat_sse_generator(request_id: int) -> AsyncGenerator[str, None]:
         logger.error(f"SSE stream error request_id={request_id}: {e}")
         yield f"data: [ERROR] {e}\n\n"
     finally:
-        try:
-            await pubsub.unsubscribe(channel)
-            await pubsub.aclose()
-        except Exception:
-            pass
+        await safe_close_pubsub(pubsub)
 
 
 @router.get("/chat/{request_id}/stream")
