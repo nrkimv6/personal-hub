@@ -2,13 +2,16 @@
 Merge Lock 유틸리티 — Redis 기반 분산 lock (SETNX + FIFO 대기 큐)
 
 Redis 키 구조:
-  plan-runner:merge-lock          → lock 보유 runner_id (STRING, TTL 600초)
-  plan-runner:merge-wait-queue    → 대기 중인 runner_id 목록 (LIST, FIFO)
+  plan-runner:merge-lock                  → lock 보유 runner_id (글로벌, 하위 호환)
+  plan-runner:merge-lock:{repo_id}        → lock 보유 runner_id (per-repo)
+  plan-runner:merge-wait-queue            → 대기 중인 runner_id 목록 (글로벌, 하위 호환)
+  plan-runner:merge-wait-queue:{repo_id} → 대기 중인 runner_id 목록 (per-repo)
 """
 
 import os
 import time
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +42,50 @@ _ENQUEUE_LUA = (
 )
 
 
-def acquire_merge_lock(redis_client, runner_id: str, timeout: int = 600, lock_ttl: int = None) -> bool:
+def _get_repo_id(project_root: Path) -> str:
+    """프로젝트 루트 경로를 Redis 키 안전 문자열로 정규화한다.
+
+    Windows 경로 변형(백슬래시/슬래시, 대소문자)을 모두 동일 값으로 매핑한다.
+    예: D:\\work\\project\\tools\\monitor-page → d:-work-project-tools-monitor-page
+
+    Args:
+        project_root: 프로젝트 루트 Path 객체
+
+    Returns:
+        str — Redis 키에 안전하게 사용할 수 있는 소문자 하이픈 구분 문자열
+    """
+    return str(project_root.resolve()).replace("\\", "/").lower().strip("/").replace("/", "-")
+
+
+def get_merge_lock_key(repo_id: str = None) -> str:
+    """per-repo 또는 글로벌 merge lock Redis 키를 반환한다.
+
+    Args:
+        repo_id: _get_repo_id()로 생성한 레포 식별자. None이면 글로벌 키 반환 (하위 호환).
+
+    Returns:
+        str — Redis lock 키
+    """
+    if repo_id is None:
+        return MERGE_LOCK_KEY
+    return f"plan-runner:merge-lock:{repo_id}"
+
+
+def get_merge_wait_queue_key(repo_id: str = None) -> str:
+    """per-repo 또는 글로벌 merge wait queue Redis 키를 반환한다.
+
+    Args:
+        repo_id: _get_repo_id()로 생성한 레포 식별자. None이면 글로벌 키 반환 (하위 호환).
+
+    Returns:
+        str — Redis wait queue 키
+    """
+    if repo_id is None:
+        return MERGE_WAIT_QUEUE_KEY
+    return f"plan-runner:merge-wait-queue:{repo_id}"
+
+
+def acquire_merge_lock(redis_client, runner_id: str, repo_id: str = None, timeout: int = 600, lock_ttl: int = None) -> bool:
     """
     Merge lock을 획득한다 (SETNX + FIFO 대기 큐 조합).
 
@@ -51,6 +97,7 @@ def acquire_merge_lock(redis_client, runner_id: str, timeout: int = 600, lock_tt
     Args:
         redis_client: Redis 클라이언트 인스턴스
         runner_id: 현재 runner의 고유 ID (문자열)
+        repo_id: _get_repo_id()로 생성한 레포 식별자. None이면 글로벌 키 사용 (하위 호환).
         timeout: 최대 대기 시간 (초, 기본 600)
         lock_ttl: lock TTL (초, 기본 MERGE_LOCK_TTL=600). 테스트 시 짧게 지정 가능.
 
@@ -58,50 +105,59 @@ def acquire_merge_lock(redis_client, runner_id: str, timeout: int = 600, lock_tt
         True if lock acquired, False if timed out
     """
     _ttl = lock_ttl if lock_ttl is not None else MERGE_LOCK_TTL
+    _lock_key = get_merge_lock_key(repo_id)
+    _queue_key = get_merge_wait_queue_key(repo_id)
+
     # 대기 큐에 원자적 등록 (Lua: 중복 방지 + RPUSH)
-    enqueued = redis_client.eval(_ENQUEUE_LUA, 1, MERGE_WAIT_QUEUE_KEY, runner_id)
+    enqueued = redis_client.eval(_ENQUEUE_LUA, 1, _queue_key, runner_id)
     if enqueued == 1:
         logger.info(f"[merge-lock] {runner_id} 대기 큐 등록")
     # 큐 LIST 자체에 TTL 설정 (비정상 종료 후 큐 잔류 방지, 활성 runner가 있는 한 갱신됨)
-    redis_client.expire(MERGE_WAIT_QUEUE_KEY, MERGE_LOCK_TTL * 2)
+    redis_client.expire(_queue_key, MERGE_LOCK_TTL * 2)
 
     deadline = time.time() + timeout
     poll_interval = 1.0  # seconds
 
     while time.time() < deadline:
         # 큐 맨 앞이 나인지 확인
-        front_raw = redis_client.lindex(MERGE_WAIT_QUEUE_KEY, 0)
+        front_raw = redis_client.lindex(_queue_key, 0)
         front = front_raw.decode() if isinstance(front_raw, bytes) else front_raw
 
         if front == runner_id:
             # 내 차례 — lock 획득 시도
-            acquired = redis_client.set(MERGE_LOCK_KEY, runner_id, nx=True, ex=_ttl)
+            acquired = redis_client.set(_lock_key, runner_id, nx=True, ex=_ttl)
             if acquired:
                 # 큐에서 제거
-                redis_client.lrem(MERGE_WAIT_QUEUE_KEY, 1, runner_id)
+                redis_client.lrem(_queue_key, 1, runner_id)
                 logger.info(f"[merge-lock] {runner_id} lock 획득 완료")
                 return True
         elif front is not None and front != runner_id:
             # 큐 맨 앞이 다른 runner — stale 여부 확인
-            _remove_if_stale(redis_client, front)
+            _remove_if_stale(redis_client, front, repo_id)
 
         time.sleep(poll_interval)
 
     # timeout — 큐에서 제거
-    redis_client.lrem(MERGE_WAIT_QUEUE_KEY, 1, runner_id)
+    redis_client.lrem(_queue_key, 1, runner_id)
     logger.warning(f"[merge-lock] {runner_id} lock 획득 timeout ({timeout}s)")
     return False
 
 
-def _remove_if_stale(redis_client, front: str) -> bool:
+def _remove_if_stale(redis_client, front: str, repo_id: str = None) -> bool:
     """큐 맨 앞 runner가 죽었으면 대기 큐에서 제거한다.
 
     PID Redis 키 → os.kill(0) 생존 확인 → 죽었으면 LREM.
     PID 키가 없는 경우 status 키로 판단.
 
+    Args:
+        redis_client: Redis 클라이언트 인스턴스
+        front: 큐 맨 앞 runner_id
+        repo_id: per-repo 큐 키 사용 시 레포 식별자. None이면 글로벌 키.
+
     Returns:
         True if removed (stale), False if alive or indeterminate
     """
+    _queue_key = get_merge_wait_queue_key(repo_id)
     pid_raw = redis_client.get(f"{_RUNNER_KEY_PREFIX}:{front}:pid")
     if pid_raw is not None:
         try:
@@ -110,7 +166,7 @@ def _remove_if_stale(redis_client, front: str) -> bool:
             return False  # 살아있음
         except (ProcessLookupError, OSError):
             # 죽은 프로세스
-            redis_client.lrem(MERGE_WAIT_QUEUE_KEY, 1, front)
+            redis_client.lrem(_queue_key, 1, front)
             logger.warning(f"[merge-lock] stale front runner 제거 (pid 없음): {front}")
             return True
         except (ValueError, TypeError):
@@ -120,14 +176,14 @@ def _remove_if_stale(redis_client, front: str) -> bool:
     status_raw = redis_client.get(f"{_RUNNER_KEY_PREFIX}:{front}:status")
     status = status_raw.decode() if isinstance(status_raw, bytes) else status_raw
     if status in (None, "stopped", "error", "failed"):
-        redis_client.lrem(MERGE_WAIT_QUEUE_KEY, 1, front)
+        redis_client.lrem(_queue_key, 1, front)
         logger.warning(f"[merge-lock] stale front runner 제거 (status={status}): {front}")
         return True
 
     return False  # status="running" 등, 살아있는 것으로 간주
 
 
-def release_merge_lock(redis_client, runner_id: str) -> bool:
+def release_merge_lock(redis_client, runner_id: str, repo_id: str = None) -> bool:
     """
     Merge lock을 해제한다 (Lua 원자 스크립트로 소유자 확인 + DEL).
 
@@ -137,11 +193,13 @@ def release_merge_lock(redis_client, runner_id: str) -> bool:
     Args:
         redis_client: Redis 클라이언트 인스턴스
         runner_id: 현재 runner의 고유 ID (문자열)
+        repo_id: _get_repo_id()로 생성한 레포 식별자. None이면 글로벌 키 사용 (하위 호환).
 
     Returns:
         True if lock was released, False if runner_id is not the owner
     """
-    result = redis_client.eval(_RELEASE_LUA, 1, MERGE_LOCK_KEY, runner_id)
+    _lock_key = get_merge_lock_key(repo_id)
+    result = redis_client.eval(_RELEASE_LUA, 1, _lock_key, runner_id)
     if result == 1:
         logger.info(f"[merge-lock] {runner_id} lock 해제 완료")
         return True
@@ -150,15 +208,17 @@ def release_merge_lock(redis_client, runner_id: str) -> bool:
         return False
 
 
-def get_merge_wait_queue(redis_client) -> list[str]:
+def get_merge_wait_queue(redis_client, repo_id: str = None) -> list:
     """
     현재 merge lock 대기 중인 runner ID 목록을 FIFO 순서로 반환한다.
 
     Args:
         redis_client: Redis 클라이언트 인스턴스
+        repo_id: _get_repo_id()로 생성한 레포 식별자. None이면 글로벌 키 사용 (하위 호환).
 
     Returns:
         list[str] — 대기 순서대로 정렬된 runner_id 목록 (비어 있으면 [])
     """
-    raw_list = redis_client.lrange(MERGE_WAIT_QUEUE_KEY, 0, -1)
+    _queue_key = get_merge_wait_queue_key(repo_id)
+    raw_list = redis_client.lrange(_queue_key, 0, -1)
     return [item.decode() if isinstance(item, bytes) else item for item in raw_list]
