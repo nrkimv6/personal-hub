@@ -117,7 +117,7 @@ class TestWorktreeHTTP:
                     return 3
 
                 with patch.object(type(fake_async), "scard", side_effect=fake_scard):
-                    response = client.post("/api/v1/dev-runner/run", json={})
+                    response = client.post("/api/v1/dev-runner/run", json={"test_source": "tc_worktree_http_5_over_limit"})
 
         assert response.status_code == 429
         detail = response.json().get("detail", "")
@@ -156,7 +156,7 @@ class TestWorktreeHTTP:
                      patch.object(type(fake_async), "lpush", side_effect=fake_lpush), \
                      patch.object(type(fake_async), "brpop", side_effect=fake_brpop), \
                      patch.object(type(fake_async), "get", side_effect=fake_get):
-                    response = client.post("/api/v1/dev-runner/run", json={})
+                    response = client.post("/api/v1/dev-runner/run", json={"test_source": "tc_worktree_http_1_runner_id"})
 
         assert response.status_code == 200
         data = response.json()

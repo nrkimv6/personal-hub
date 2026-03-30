@@ -124,14 +124,15 @@ class TestWorktreeResumeHTTP:
             running=True, runner_id="t-wtresume-new01", status="running",
             plan_file=plan_file, current_plan_name=None
         )
-        with patch(
-            "app.modules.dev_runner.services.executor_service.ExecutorService.start_dev_runner",
+        with patch.object(
+            __import__("app.modules.dev_runner.routes.runner", fromlist=["executor_service"]).executor_service,
+            "start_dev_runner",
             new_callable=AsyncMock,
-            return_value=mock_resp
+            return_value=mock_resp,
         ):
             response = client.post(
                 f"{BASE_URL}/run",
-                json={"plan_file": plan_file, "engine": "claude"}
+                json={"plan_file": plan_file, "engine": "claude", "test_source": "tc_t4_3_start_command_accepted"}
             )
 
         assert response.status_code == 200

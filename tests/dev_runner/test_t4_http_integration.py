@@ -1,5 +1,6 @@
 """Phase T4: HTTP 통합 테스트 — merge-queue, merge-log/stream, run with worktree"""
 import pytest
+from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -19,11 +20,22 @@ class TestMergeQueueEndpoint:
         assert isinstance(r.json(), list)
 
     def test_merge_log_stream_content_type(self, client):
-        """GET /api/dev-runner/merge-log/stream?runner_id=... — text/event-stream 응답"""
-        r = client.get(
-            "/api/v1/dev-runner/merge-log/stream?runner_id=test_t4_runner",
-            headers={"Accept": "text/event-stream"},
-        )
+        """GET /api/dev-runner/merge-log/stream?runner_id=... — text/event-stream 응답
+
+        SSE는 무한 스트림이므로 log_service를 mock하여 즉시 종료되는 제너레이터로 교체.
+        TestClient는 스트림 완료를 기다리므로 실제 무한 SSE 스트림은 mock 필수.
+        """
+        async def _quick_stream(runner_id: str):
+            yield "event: connected\ndata: ok\n\n"
+
+        with patch(
+            "app.modules.dev_runner.services.log_service.log_service.stream_merge_log",
+            side_effect=_quick_stream,
+        ):
+            r = client.get(
+                "/api/v1/dev-runner/merge-log/stream?runner_id=test_t4_runner",
+                headers={"Accept": "text/event-stream"},
+            )
         assert r.status_code == 200
         assert "text/event-stream" in r.headers.get("content-type", "")
 

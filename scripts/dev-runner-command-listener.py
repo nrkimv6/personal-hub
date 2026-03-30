@@ -39,6 +39,7 @@ from _dr_constants import (
     HEARTBEAT_KEY, HEARTBEAT_INTERVAL, HEARTBEAT_TTL, MERGE_ACTIVE_STATUSES,
     SCRIPT_DIR, PROJECT_ROOT, WORKTREE_BASE_DIR, WTOOLS_BASE_DIR,
     PLAN_RUNNER_MODULE_PATH, PLAN_RUNNER_PYTHON, LOG_DIR,
+    LOG_CHANNEL_PREFIX,
     get_redis_db, set_redis_db, get_admin_api_base,
 )
 from _dr_state import (
