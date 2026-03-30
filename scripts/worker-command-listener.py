@@ -186,6 +186,7 @@ def attempt_podman_recovery() -> bool:
         start_result = subprocess.run(["podman", "machine", "start"], capture_output=True, timeout=60)
         if start_result.returncode != 0:
             logger.error(f"podman machine start 실패: {start_result.stderr.decode('utf-8', errors='replace').strip()}")
+            return False
 
         # 4. SSH 터널 수립 + WSL2 VM 초기화 대기
         time.sleep(15)

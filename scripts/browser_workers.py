@@ -589,7 +589,10 @@ class BrowserWorkerManager:
             cprint("Podman socket unreachable — recycling Machine to re-establish SSH tunnel...", YELLOW)
             subprocess.run(["podman", "machine", "stop"], capture_output=True, timeout=15)
             time.sleep(3)
-            subprocess.run(["podman", "machine", "start"], capture_output=True, timeout=60)
+            start_result = subprocess.run(["podman", "machine", "start"], capture_output=True, timeout=60)
+            if start_result.returncode != 0:
+                cprint("Machine start failed — manual intervention required: podman machine stop && podman machine start", RED)
+                return
             time.sleep(15)
             recheck = subprocess.run(["podman", "ps"], capture_output=True, timeout=5)
             if recheck.returncode != 0:
