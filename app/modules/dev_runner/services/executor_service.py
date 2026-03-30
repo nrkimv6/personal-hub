@@ -538,28 +538,65 @@ class ExecutorService:
         return {"runner_id": "deprecated", "queued": False, "message": "enqueue_merge is deprecated. Use merge_requested flag on runner instead."}
 
     async def get_merge_queue(self) -> list:
-        """merge 대기 큐 조회 → plan-runner:merge-wait-queue (merge lock 대기 중인 runner 목록)"""
+        """merge 상태 통합 조회 — merging/queued/done 3개 소스 병합"""
         try:
-            raw_items = await self.async_redis.lrange("plan-runner:merge-wait-queue", 0, -1)
             result = []
-            for rid in raw_items:
-                # runner별 Redis 키에서 상세 정보 조회
-                plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file")) or ""
-                branch = await self.async_redis.get(self._runner_key(rid, "branch")) or ""
-                worktree_path = await self.async_redis.get(self._runner_key(rid, "worktree_path")) or ""
-                start_time_str = await self.async_redis.get(self._runner_key(rid, "start_time")) or ""
-                result.append({
-                    "runner_id": rid,
-                    "branch": branch,
-                    "plan_file": plan_file,
-                    "project": "monitor-page",
-                    "status": "waiting",
-                    "timestamp": start_time_str,
-                    "worktree_path": worktree_path,
-                })
+            seen_runners: set[str] = set()
+
+            # 1) merging: SCAN plan-runner:merge-lock:* + 글로벌 키
+            async for key in self.async_redis.scan_iter(match="plan-runner:merge-lock:*"):
+                rid = await self.async_redis.get(key)
+                if rid and rid not in seen_runners:
+                    seen_runners.add(rid)
+                    result.append(await self._merge_queue_item(rid, "merging"))
+
+            global_lock = await self.async_redis.get("plan-runner:merge-lock")
+            if global_lock and global_lock not in seen_runners:
+                seen_runners.add(global_lock)
+                result.append(await self._merge_queue_item(global_lock, "merging"))
+
+            # 2) queued: SCAN plan-runner:merge-wait-queue:* + 글로벌 키
+            queue_keys = [b async for b in self.async_redis.scan_iter(match="plan-runner:merge-wait-queue:*")]
+            queue_keys.append("plan-runner:merge-wait-queue")
+            for qkey in queue_keys:
+                for rid in await self.async_redis.lrange(qkey, 0, -1):
+                    if rid and rid not in seen_runners:
+                        seen_runners.add(rid)
+                        result.append(await self._merge_queue_item(rid, "queued"))
+
+            # 3) done/failed: merge-results 최근 10건
+            for raw in await self.async_redis.lrange("plan-runner:merge-results", 0, 9):
+                try:
+                    item = json.loads(raw)
+                    rid = item.get("runner_id", "")
+                    status = item.get("status", "done")
+                    result.append({
+                        "runner_id": rid,
+                        "branch": item.get("branch", ""),
+                        "plan_file": item.get("plan_file", ""),
+                        "project": "monitor-page",
+                        "status": status,
+                        "timestamp": item.get("timestamp", ""),
+                        "worktree_path": "",
+                    })
+                except Exception:
+                    pass
+
             return result
         except Exception:
             return []
+
+    async def _merge_queue_item(self, runner_id: str, status: str) -> dict:
+        """runner Redis 키에서 상세 정보 조회"""
+        return {
+            "runner_id": runner_id,
+            "branch": await self.async_redis.get(self._runner_key(runner_id, "branch")) or "",
+            "plan_file": await self.async_redis.get(self._runner_key(runner_id, "plan_file")) or "",
+            "project": "monitor-page",
+            "status": status,
+            "timestamp": await self.async_redis.get(self._runner_key(runner_id, "start_time")) or "",
+            "worktree_path": await self.async_redis.get(self._runner_key(runner_id, "worktree_path")) or "",
+        }
 
     async def get_merge_status(self, runner_id: str) -> dict | None:
         """Redis merge:{runner_id}:status 조회"""
