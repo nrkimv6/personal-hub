@@ -75,6 +75,22 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     _cleanup_process_state(runner_id, redis_client)
 
 
+def _publish_with_retry(redis_client: redis.Redis, channel: str, msg: str) -> bool:
+    """Redis publish — 1차 실패 시 ping 후 재시도. 성공 True, 실패 False 반환"""
+    try:
+        redis_client.publish(channel, msg)
+        return True
+    except redis.ConnectionError:
+        pass
+    # 재시도
+    try:
+        redis_client.ping()
+        redis_client.publish(channel, msg)
+        return True
+    except (redis.ConnectionError, Exception):
+        return False
+
+
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
     """프로세스 stdout을 라인별로 읽어 파일 기록 + Redis publish 동시 수행
 
@@ -85,6 +101,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
     - rate-limiter: 동일 라인 0.5초 내 10회 이상 반복 시 burst 억제
     """
     import time
+    logger.info(f"[_stream_output] 시작 runner_id={runner_id!r}")
     _running_log_files = get_running_log_files()
     _wf_manager = get_wf_manager()
 
@@ -96,9 +113,19 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
     repeat_start = 0.0
     BURST_WINDOW = 0.5   # 초
     BURST_LIMIT = 10     # 같은 내용 N회 이상이면 억제
+    # 진단 카운터
+    _line_count = 0
+    publish_ok = 0
+    publish_fail = 0
 
     try:
-        for line in process.stdout:
+        while True:
+            line = process.stdout.readline()
+            if not line:
+                break
+            _line_count += 1
+            if _line_count in (10, 100, 1000) or (_line_count > 1000 and _line_count % 1000 == 0):
+                logger.info(f"[_stream_output] {_line_count}줄 처리됨 runner_id={runner_id!r}")
             stripped = line.rstrip('\n')
 
             # 1. 파일 기록 (노이즈 포함 전체 보존)
@@ -135,29 +162,26 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
 
             # 4. 직전 억제 요약 먼저 publish
             if suppressed_count > 0:
-                try:
-                    redis_client.publish(log_channel, f"[NOISE] {suppressed_count} lines suppressed")
-                except redis.ConnectionError:
-                    pass
+                _publish_with_retry(redis_client, log_channel, f"[NOISE] {suppressed_count} lines suppressed")
                 suppressed_count = 0
 
             # 5. 정상 라인 publish (ANSI 이스케이프 코드 제거)
-            try:
-                redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', stripped))
-            except redis.ConnectionError:
-                pass  # Redis 끊겨도 파일 기록은 계속
+            if _publish_with_retry(redis_client, log_channel, _ANSI_ESCAPE.sub('', stripped)):
+                publish_ok += 1
+            else:
+                publish_fail += 1
+                if publish_fail % 100 == 0:
+                    logger.warning(f"[_stream_output] publish 실패 {publish_fail}건 (runner_id={runner_id!r})")
 
         # 루프 종료 후 잔여 억제 요약
         if suppressed_count > 0:
             log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
-            try:
-                redis_client.publish(log_channel, f"[NOISE] {suppressed_count} lines suppressed")
-            except redis.ConnectionError:
-                pass
+            _publish_with_retry(redis_client, log_channel, f"[NOISE] {suppressed_count} lines suppressed")
 
     except Exception as e:
         logger.error(f"Output streaming error: {e}")
     finally:
+        logger.info(f"[_stream_output] 종료: ok={publish_ok} fail={publish_fail} lines={_line_count} runner_id={runner_id!r}")
         try:
             log_handle.flush()
             log_handle.close()
