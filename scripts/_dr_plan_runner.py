@@ -66,7 +66,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                     "engine": engine,
                 }
                 redis_client.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
-                logger.info(f"[_do_inline_merge] main 추가 사이클 큐잉: runner={new_runner_id}, plan={plan_file}")
+                _pub_and_log(runner_id, f"[_do_inline_merge] main 추가 사이클 큐잉: runner={new_runner_id}, plan={plan_file}", redis_client, "MERGE")
     except redis.ConnectionError:
         logger.warning(f"[_do_inline_merge] restart_after_merge 감지 중 Redis 연결 실패 (무시)")
     except Exception as _re:
@@ -269,9 +269,10 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                             logger.info(f"[_stream_output] exit_code={exit_code}, branch 키 없음 — merge 스킵")
             except Exception as e:
                 logger.warning(f"[_stream_output] merge_requested 플래그 조회 실패 (runner_id={runner_id}): {e}")
-        logger.info(
-            f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, "
-            f"exit_code={exit_code} (runner_id={runner_id})"
+        _pub_and_log(
+            runner_id,
+            f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, exit_code={exit_code}",
+            redis_client, "CLEANUP",
         )
 
         # Workflow 상태 업데이트
@@ -281,10 +282,10 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 if wf:
                     if exit_code == 0:
                         if _merge_requested:
-                            logger.info(f"[_stream_output] merge_requested 플래그 감지 (runner_id={runner_id}) → merge 흐름 진입")
+                            _pub_and_log(runner_id, f"[_stream_output] merge_requested 플래그 감지 → merge 흐름 진입", redis_client, "CLEANUP")
                             _wf_manager.update_status(wf["id"], "merge_pending")
                         else:
-                            logger.info(f"[_stream_output] merge_requested 플래그 없음 (runner_id={runner_id}) → completed 처리")
+                            _pub_and_log(runner_id, f"[_stream_output] merge_requested 플래그 없음 → completed 처리", redis_client, "CLEANUP")
                             _wf_manager.update_status(wf["id"], "completed")
                     elif exit_code is not None and exit_code != 0:
                         _wf_manager.update_status(
