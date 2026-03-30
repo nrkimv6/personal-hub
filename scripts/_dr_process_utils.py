@@ -102,9 +102,21 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         except Exception as _guard_err:
             logger.debug(f"[cleanup] 머지 가드 조회 실패 (무시): {_guard_err}")
 
+    # 프로세스 사망 시 merge lock 안전 해제 (wtools subprocess 사망 fallback)
+    _repo_id = None
+    try:
+        from merge_lock import release_merge_lock, _get_repo_id
+        _repo_id = _get_repo_id(PROJECT_ROOT)
+        release_merge_lock(redis_client, runner_id, repo_id=_repo_id)
+    except Exception:
+        pass
+
     # 대기 큐에서 이 runner 제거 (crash/정상종료 모두, 고아 엔트리 방지)
     try:
-        redis_client.lrem("plan-runner:merge-wait-queue", 0, runner_id)
+        from merge_lock import get_merge_wait_queue_key, _get_repo_id
+        if _repo_id is None:
+            _repo_id = _get_repo_id(PROJECT_ROOT)
+        redis_client.lrem(get_merge_wait_queue_key(_repo_id), 0, runner_id)
     except Exception:
         pass
 
@@ -368,7 +380,7 @@ def _attach_to_running_process(runner_id: str, pid: int, redis_client: redis.Red
 
 def _recover_pending_merge(runner_id: str, redis_client: redis.Redis, merge_status) -> None:
     """리스너 재시작 시 미완료 머지 복구."""
-    from merge_lock import acquire_merge_lock, release_merge_lock  # noqa: F401
+    from merge_lock import acquire_merge_lock, release_merge_lock, _get_repo_id  # noqa: F401
 
     logger.info(f"[recover_merge] runner {runner_id} 머지 복구 시작 (merge_status={merge_status})")
 
@@ -376,7 +388,7 @@ def _recover_pending_merge(runner_id: str, redis_client: redis.Redis, merge_stat
         if merge_status in ("merging", "resolving"):
             # stale lock 해제 후 queued로 재설정
             try:
-                release_merge_lock(redis_client, runner_id)
+                release_merge_lock(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT))
                 logger.info(f"[recover_merge] runner {runner_id} stale merge lock 해제 (merge_status={merge_status})")
             except Exception as _e:
                 logger.debug(f"[recover_merge] lock 해제 실패 (무시): {_e}")

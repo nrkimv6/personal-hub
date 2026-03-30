@@ -69,6 +69,10 @@ def _make_partial_plan(path):
 _mock_merge_lock = types.ModuleType("merge_lock")
 _mock_merge_lock.acquire_merge_lock = lambda *a, **kw: True
 _mock_merge_lock.release_merge_lock = lambda *a, **kw: None
+_mock_merge_lock.get_merge_wait_queue_key = lambda repo_id=None: (
+    "plan-runner:merge-wait-queue" if repo_id is None else f"plan-runner:merge-wait-queue:{repo_id}"
+)
+_mock_merge_lock._get_repo_id = lambda project_root: "mock-repo-id"
 sys.modules["merge_lock"] = _mock_merge_lock
 
 

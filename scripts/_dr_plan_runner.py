@@ -12,7 +12,7 @@ import redis
 from _dr_constants import (
     RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, PLAN_FILE_ALL, _LEGACY_ALL,
     LOG_CHANNEL_PREFIX, COMMANDS_KEY, PLAN_RUNNER_PYTHON, PLAN_RUNNER_MODULE_PATH,
-    LOG_DIR,
+    LOG_DIR, PROJECT_ROOT,
 )
 from _dr_state import (
     get_running_processes, get_running_log_files, get_stream_threads,
@@ -681,7 +681,8 @@ def get_status(redis_client: redis.Redis) -> Dict:
     # stale 정리
     for rid in stale_runners:
         try:
-            redis_client.lrem("plan-runner:merge-wait-queue", 0, rid)
+            from merge_lock import get_merge_wait_queue_key, _get_repo_id
+            redis_client.lrem(get_merge_wait_queue_key(_get_repo_id(PROJECT_ROOT)), 0, rid)
         except Exception:
             pass
         _cleanup_process_state(rid, redis_client)
