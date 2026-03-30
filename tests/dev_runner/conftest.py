@@ -7,6 +7,16 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+# plan_runner.core.stages를 테스트 파일 수집 전에 미리 로드한다.
+# test_merge_lock_ownership.py / test_merge_retry_e2e.py 등이 모듈 수준에서
+# sys.modules.setdefault("plan_runner.core.stages", <빈 mock>) 를 호출한다.
+# conftest는 테스트 파일보다 먼저 import되므로, 여기서 실제 모듈을 로드해두면
+# setdefault 호출이 no-op이 되어 StageResult 누락 ImportError를 방지할 수 있다.
+try:
+    import plan_runner.core.stages  # noqa: F401
+except ImportError:
+    pass
+
 
 @contextmanager
 def mock_merge_queue_turn(repo_id: str):
