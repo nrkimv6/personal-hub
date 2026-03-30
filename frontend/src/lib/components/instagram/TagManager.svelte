@@ -225,8 +225,9 @@
 				<div class="mb-4 p-3 bg-background rounded-lg">
 					<div class="flex flex-wrap gap-2 items-end">
 						<div class="flex-1 min-w-48">
-							<label class="block text-xs text-muted-foreground mb-1">키워드</label>
+							<label for="tm-new-keyword" class="block text-xs text-muted-foreground mb-1">키워드</label>
 							<input
+								id="tm-new-keyword"
 								type="text"
 								bind:value={newKeyword}
 								placeholder="새 키워드 입력"
@@ -322,8 +323,9 @@
 
 				<div class="space-y-4">
 					<div>
-						<label class="block text-sm font-medium text-foreground mb-1">태그 ID (영문)</label>
+						<label for="tm-tag-name" class="block text-sm font-medium text-foreground mb-1">태그 ID (영문)</label>
 						<input
+							id="tm-tag-name"
 							type="text"
 							bind:value={newTagName}
 							placeholder="예: event, popup_store"
@@ -331,8 +333,9 @@
 						/>
 					</div>
 					<div>
-						<label class="block text-sm font-medium text-foreground mb-1">표시 이름</label>
+						<label for="tm-tag-display-name" class="block text-sm font-medium text-foreground mb-1">표시 이름</label>
 						<input
+							id="tm-tag-display-name"
 							type="text"
 							bind:value={newTagDisplayName}
 							placeholder="예: 이벤트, 팝업스토어"
@@ -340,8 +343,9 @@
 						/>
 					</div>
 					<div>
-						<label class="block text-sm font-medium text-foreground mb-1">설명 (선택)</label>
+						<label for="tm-tag-description" class="block text-sm font-medium text-foreground mb-1">설명 (선택)</label>
 						<input
+							id="tm-tag-description"
 							type="text"
 							bind:value={newTagDescription}
 							placeholder="태그 설명"
@@ -349,9 +353,9 @@
 						/>
 					</div>
 					<div>
-						<label class="block text-sm font-medium text-foreground mb-1">색상</label>
+						<label for="tm-tag-color" class="block text-sm font-medium text-foreground mb-1">색상</label>
 						<div class="flex items-center gap-2">
-							<input type="color" bind:value={newTagColor} class="w-10 h-10 rounded" />
+							<input id="tm-tag-color" type="color" bind:value={newTagColor} class="w-10 h-10 rounded" />
 							<span class="text-sm text-muted-foreground">{newTagColor}</span>
 						</div>
 					</div>
