@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 from app.main import app
 import redis
 
+from tests.dev_runner.conftest_e2e import TEST_PLAN_FILE
+
 pytestmark = pytest.mark.http
 
 # Constants
@@ -83,7 +85,17 @@ def background_listener():
     es_module.executor_service.redis_client = new_redis
     es_module.executor_service.async_redis = new_async_redis
 
+    # conftest guard가 PLAN_RUNNER_REDIS_DB 환경변수를 검사하므로 db=15로 설정
+    old_plan_runner_redis_db = os.environ.get("PLAN_RUNNER_REDIS_DB")
+    os.environ["PLAN_RUNNER_REDIS_DB"] = str(REDIS_TEST_DB)
+
     yield process
+
+    # 환경변수 복원
+    if old_plan_runner_redis_db is not None:
+        os.environ["PLAN_RUNNER_REDIS_DB"] = old_plan_runner_redis_db
+    else:
+        os.environ.pop("PLAN_RUNNER_REDIS_DB", None)
 
     # 원래 Redis 클라이언트 복원
     es_module.executor_service.redis_client = old_redis
@@ -137,7 +149,7 @@ class TestHttpE2EChain:
 
         payload = {
             "engine": "gemini",
-            "plan_file": "docs/plan/test_e2e_plan.md",
+            "plan_file": TEST_PLAN_FILE,
             "dry_run": True,
             "test_source": "test_http_start_and_stop_lifecycle"
         }

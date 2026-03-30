@@ -24,6 +24,9 @@ PROJECT_ROOT = Path("D:/work/project/tools/monitor-page")
 WORKTREE_BASE = PROJECT_ROOT / ".worktrees"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 TEST_PLAN_STEMS = ["test_minimal_plan", "test_plan_e2e_mock"]
+TEST_PLAN_FILE = "tests/dev_runner/fixtures/test_minimal_plan.md"
+TEST_PLAN_FILE_A = "tests/dev_runner/fixtures/test_minimal_plan_a.md"
+TEST_PLAN_FILE_B = "tests/dev_runner/fixtures/test_minimal_plan_b.md"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 
 

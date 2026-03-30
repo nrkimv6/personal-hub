@@ -22,6 +22,9 @@ from tests.dev_runner.conftest_e2e import (
     e2e_worktree_cleanup,
     listener_process,
     isolated_redis,
+    TEST_PLAN_FILE,
+    TEST_PLAN_FILE_A,
+    TEST_PLAN_FILE_B,
 )
 
 pytestmark = pytest.mark.integration
@@ -30,7 +33,7 @@ BASE_URL = "http://test/api/v1/dev-runner"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 _config = DevRunnerConfig()
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
-_TEST_BRANCH_SUFFIXES = ["test_e2e_plan_a", "test_e2e_plan_b", "test_e2e_plan"]
+_TEST_BRANCH_SUFFIXES = ["test_minimal_plan_a", "test_minimal_plan_b", "test_minimal_plan"]
 
 
 def _delete_test_branches():
@@ -127,7 +130,7 @@ def _wait_for_redis_key(isolated_redis, key: str, timeout: int = 30) -> str | No
     return None
 
 
-async def _post_dry_run(client: httpx.AsyncClient, plan_file: str = "docs/plan/test_e2e_plan.md") -> str:
+async def _post_dry_run(client: httpx.AsyncClient, plan_file: str = TEST_PLAN_FILE) -> str:
     """dry_run POST 실행 → runner_id 반환."""
     resp = await client.post(
         "/api/v1/dev-runner/run",
@@ -220,8 +223,8 @@ class TestRunnerDryRun:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
-            runner_id_1 = await _post_dry_run(client, plan_file="docs/plan/test_e2e_plan_a.md")
-            runner_id_2 = await _post_dry_run(client, plan_file="docs/plan/test_e2e_plan_b.md")
+            runner_id_1 = await _post_dry_run(client, plan_file=TEST_PLAN_FILE_A)
+            runner_id_2 = await _post_dry_run(client, plan_file=TEST_PLAN_FILE_B)
 
             assert runner_id_1 != runner_id_2, "동시 실행 시 runner_id가 동일하면 안 됨"
 
