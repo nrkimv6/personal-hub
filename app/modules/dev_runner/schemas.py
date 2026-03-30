@@ -269,8 +269,8 @@ class MergeQueueItem(BaseModel):
     branch: str
     plan_file: str
     project: str
-    status: str
-    timestamp: str
+    status: str = ""  # "merging" | "queued" | "done" | "failed" | "test_failed" | "error"
+    timestamp: str = ""
     worktree_path: str = ""
 
 

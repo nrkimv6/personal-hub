@@ -61,7 +61,7 @@ class TestGetMergeQueue:
         assert item["branch"] == "plan/test"
         assert item["plan_file"] == "/work/plan/test.md"
         assert item["project"] == "monitor-page"
-        assert item["status"] == "waiting"
+        assert item["status"] == "queued"  # v2: "waiting" → "queued"
         assert item["timestamp"] == "2026-03-09T17:00:00"
 
     @pytest.mark.asyncio
