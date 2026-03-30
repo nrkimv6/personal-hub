@@ -660,11 +660,11 @@ def _cleanup_orphan_plans(redis_client: redis.Redis) -> int:
     cleaned_count = 0
     scan_dirs = []
     plan_dir = PROJECT_ROOT / "docs" / "plan"
-    archive_dir = PROJECT_ROOT / "docs" / "archive"
+    # archive_dir 스캔 제외: 아카이브된 plan은 이미 완료 처리되어 cleanup 불필요.
+    # archive 파일 수가 많아질수록(722+개) 리스너 시작 시 BRPOP 루프 진입을 수백 ms~수십 초 지연시킴.
+    # 활성 plan(docs/plan/)만 검사하여 리스너 시작 시간을 단축한다.
     if plan_dir.is_dir():
         scan_dirs.append(plan_dir)
-    if archive_dir.is_dir():
-        scan_dirs.append(archive_dir)
     if not scan_dirs:
         return 0
     try:

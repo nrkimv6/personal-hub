@@ -172,14 +172,23 @@ def main():
             last_heartbeat = time.time()
 
             # listener 시작/재시작 시 생존 plan-runner 재연결 (고아 프로세스 처리)
+            # 반드시 BRPOP 루프 전에 동기 실행 — _running_processes에 생존 프로세스를 등록해야 함
             _reconnect_surviving_runners(r)
-            # listener 시작/재시작 시 DB↔Redis 교차검증으로 고아 워크플로우 탐지
-            orphan_wf_count = _detect_orphan_workflows(r)
-            orphan_plan_count = _cleanup_orphan_plans(r)
-            if orphan_wf_count or orphan_plan_count:
-                logger.warning(f"[orphan] 고아 탐지 완료: workflow {orphan_wf_count}개 정리, plan {orphan_plan_count}개 정리")
             # listener 시작/재시작 시 생존 MergeOrchestrator 재연결
             _reconnect_surviving_merge_orchestrator(r)
+
+            # 고아 탐지/정리 작업은 백그라운드 스레드에서 실행 — BRPOP 루프 진입 지연 방지
+            # (archive 포함 plan 파일이 수백~수천 개로 증가하면 수십 초 블로킹 가능)
+            def _bg_orphan_cleanup(_r=r):
+                try:
+                    orphan_wf_count = _detect_orphan_workflows(_r)
+                    orphan_plan_count = _cleanup_orphan_plans(_r)
+                    if orphan_wf_count or orphan_plan_count:
+                        logger.warning(f"[orphan] 고아 탐지 완료: workflow {orphan_wf_count}개 정리, plan {orphan_plan_count}개 정리")
+                except Exception as _bg_err:
+                    logger.warning(f"[orphan] 백그라운드 고아 탐지 실패 (무시): {_bg_err}")
+            import threading as _threading
+            _threading.Thread(target=_bg_orphan_cleanup, daemon=True).start()
 
             # Redis 재연결 시 현재 프로세스 상태 복원
             _running_processes = get_running_processes()
