@@ -6,13 +6,13 @@
   interface Props { compact?: boolean; }
   let { compact = false }: Props = $props();
 
-  let settings: DevRunnerSettings | null = null;
-  let inputValue = 3;
-  let saving = false;
-  let toast = '';
+  let settings: DevRunnerSettings | null = $state(null);
+  let inputValue = $state(3);
+  let saving = $state(false);
+  let toast = $state('');
   let toastTimer: ReturnType<typeof setTimeout>;
-  let activeRunnerCount = 0;
-  let loading = true;
+  let activeRunnerCount = $state(0);
+  let loading = $state(true);
   let error = $state('');
 
   onMount(async () => {

@@ -87,6 +87,7 @@
     role="dialog"
     aria-modal="true"
     aria-label="메뉴 선택"
+    tabindex="-1"
     onkeydown={handleKeydown}
   >
     <!-- backdrop -->
