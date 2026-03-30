@@ -317,6 +317,10 @@ class ExecutorService:
         self._sync_state()
         return await self.state.cleanup_stale_runners()
 
+    async def _cleanup_stale_runners(self) -> Dict:
+        """cleanup_stale_runners 의 내부 alias (테스트 호환용)."""
+        return await self.cleanup_stale_runners()
+
     async def reset_running_state(self, full_reset: bool = False) -> Dict:
         """RUNNING 상태 강제 초기화 - Redis 정리만 수행"""
         try:

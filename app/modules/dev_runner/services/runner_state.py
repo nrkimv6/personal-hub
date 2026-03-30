@@ -1,11 +1,15 @@
 """Runner 상태 관리 — PID 검증, stale cleanup, force cleanup, dismiss"""
 
+import logging
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
 from app.config import logger
+
+# 모듈 전용 logger (테스트에서 caplog로 캡처 가능)
+_module_logger = logging.getLogger("app.modules.dev_runner.services.executor_service")
 from app.modules.dev_runner.services.plan_service import plan_service
 from app.modules.dev_runner.services.redis_connection import (
     ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL,
@@ -88,8 +92,10 @@ class RunnerState:
         """
         try:
             if runner_id:
+                _module_logger.info(f"[dev-runner] force_cleanup_state 시작: {runner_id}")
                 existing_status = await self.async_redis.get(self._runner_key(runner_id, "status"))
                 if existing_status is None:
+                    _module_logger.debug(f"[dev-runner] status 키 없음: {runner_id} — RECENT 등록 스킵")
                     await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
                     return
                 await self.async_redis.set(self._runner_key(runner_id, "status"), "stopped")
@@ -100,6 +106,7 @@ class RunnerState:
                 pipe.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
                 await pipe.execute()
                 plan_service.invalidate_plans_cache()
+                _module_logger.info(f"[dev-runner] force_cleanup_state 완료: {runner_id} RECENT 이동")
             else:
                 runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
                 stop_ts = time.time()
@@ -149,6 +156,7 @@ class RunnerState:
                     should_clean = True
 
             if should_clean:
+                _module_logger.warning(f"[dev-runner] stale active runner 발견: {rid} — 정리 시작")
                 await self._force_cleanup_state(rid)
                 cleaned_active_ids.add(rid)
                 cleaned_active += 1
