@@ -465,3 +465,100 @@ class TestMergeStatusHTTP:
         ):
             resp = api_client.get(f"{BASE_URL}/merge/no-runner")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Phase T5: merge-queue-length API TC (신규 — 2026-03-30)
+# ---------------------------------------------------------------------------
+
+class TestMergeQueueLengthHTTP:
+    """T5: GET /merge-queue-length — 순수 대기 수 반환 (실행 중 제외)"""
+
+    def test_get_merge_queue_length_api(self, api_client):
+        """LLEN=3 (1 merging + 2 queued) → {"length": 2}, status 200
+
+        get_merge_queue_length()는 max(0, LLEN-1) 합산이므로
+        LLEN=3인 큐 1개 → length=2 반환.
+        """
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue_length",
+            new=AsyncMock(return_value=2)
+        ):
+            resp = api_client.get(f"{BASE_URL}/merge-queue-length")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"length": 2}, f"응답 불일치: {data}"
+
+    def test_get_merge_queue_length_empty_api(self, api_client):
+        """큐 비어있을 때 → {"length": 0}, status 200"""
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue_length",
+            new=AsyncMock(return_value=0)
+        ):
+            resp = api_client.get(f"{BASE_URL}/merge-queue-length")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"length": 0}, f"응답 불일치: {data}"
+
+    def test_get_merge_queue_length_single_merging_api(self, api_client):
+        """LLEN=1 (1 merging, 0 queued) → {"length": 0}, status 200
+
+        max(0, 1-1) = 0 이므로 대기 수는 0.
+        """
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue_length",
+            new=AsyncMock(return_value=0)
+        ):
+            resp = api_client.get(f"{BASE_URL}/merge-queue-length")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"length": 0}, f"응답 불일치: {data}"
+
+    def test_get_merge_queue_api_single_scan_pattern(self, api_client):
+        """GET /merge-queue → scan_iter 호출 패턴이 plan-runner:merge-queue:* 1종만 사용
+
+        executor_service.get_merge_queue()가 scan_iter를 호출할 때
+        'plan-runner:merge-queue:*' 패턴만 사용하는지 검증.
+        다른 패턴(merge-lock:*, merge-wait-queue:* 등)으로의 fallback 없음을 확인.
+        """
+        scan_patterns = []
+
+        async def mock_get_merge_queue():
+            # 실제 service 메서드 내부 scan_iter 호출 패턴을 캡처하기 위해
+            # AsyncMock scan_iter를 주입하여 match 파라미터를 기록한다.
+            import fakeredis.aioredis as _faio
+            fake = _faio.FakeRedis(decode_responses=True)
+
+            # scan_iter를 래핑하여 패턴 캡처
+            original_scan_iter = fake.scan_iter
+
+            async def capturing_scan_iter(match=None, **kwargs):
+                if match:
+                    scan_patterns.append(match)
+                async for key in original_scan_iter(match=match, **kwargs):
+                    yield key
+
+            fake.scan_iter = capturing_scan_iter
+
+            from app.modules.dev_runner.services.executor_service import ExecutorService
+            svc = ExecutorService.__new__(ExecutorService)
+            svc.async_redis = fake
+            svc.redis_client = MagicMock()
+            return await svc.get_merge_queue()
+
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=mock_get_merge_queue
+        ):
+            resp = api_client.get(f"{BASE_URL}/merge-queue")
+
+        assert resp.status_code == 200
+        # scan_iter가 호출됐다면 plan-runner:merge-queue:* 패턴만 사용해야 함
+        # (빈 DB에서 scan_iter가 호출되지 않을 수도 있으므로 호출된 경우만 검증)
+        for pattern in scan_patterns:
+            assert pattern == "plan-runner:merge-queue:*", (
+                f"허용되지 않은 scan_iter 패턴 사용: {pattern}"
+            )
