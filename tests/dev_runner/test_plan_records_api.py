@@ -371,3 +371,41 @@ class TestIntentFieldsInResponse:
         assert data["scope"] is None
         assert data["plan_date"] is None
         assert data["applied_at"] is None
+
+
+class TestGetOrCreateDefaultStatus:
+    """Phase 4: get_or_create 기본 status=planned 검증"""
+
+    def test_get_or_create_default_status_planned(self, test_db_session):
+        """신규 생성 시 status='planned' 자동 설정 (RIGHT)"""
+        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+        svc = PlanRecordService(test_db_session)
+        record = svc.get_or_create(
+            "/plan/monitor/2026-03-30_test-default-status.md",
+            title="Default Status Test",
+            project="monitor",
+        )
+        test_db_session.flush()
+        assert record.status == "planned", f"status는 'planned'이어야 함, 실제: {record.status}"
+
+    def test_get_or_create_existing_record_status_unchanged(self, test_db_session):
+        """기존 레코드 조회 시 status 변경 없음 (기존 status 유지)"""
+        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+        from app.models.plan_record import PlanRecord as PlanRecordModel
+        from app.modules.dev_runner.services.plan_record_service import _compute_filename_hash
+
+        path = "/plan/monitor/2026-03-30_test-existing-status.md"
+        # 기존 레코드 직접 삽입 (status='in_progress')
+        existing = PlanRecordModel(
+            filename_hash=_compute_filename_hash(path),
+            file_path=path,
+            title="Existing",
+            project="monitor",
+            status="in_progress",
+        )
+        test_db_session.add(existing)
+        test_db_session.flush()
+
+        svc = PlanRecordService(test_db_session)
+        record = svc.get_or_create(path)
+        assert record.status == "in_progress", "기존 레코드 status는 변경되지 않아야 함"

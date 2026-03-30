@@ -85,6 +85,7 @@ class PlanRecordService:
             file_path=file_path,
             title=title,
             project=project,
+            status="planned",
         )
         self.db.add(record)
         self.db.flush()  # id 생성
