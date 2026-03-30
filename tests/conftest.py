@@ -210,10 +210,16 @@ def force_test_source_on_start_dev_runner():
 
 @pytest.fixture(scope="session", autouse=True)
 def _set_testing_env():
-    """테스트 세션 동안 TESTING=1 환경변수 설정 → lifespan 초기화 스킵으로 QueuePool 고갈 방지"""
+    """테스트 세션 동안 TESTING=1, TEST_DB_PATH 환경변수 설정
+
+    - TESTING=1: lifespan 초기화 스킵으로 QueuePool 고갈 방지
+    - TEST_DB_PATH: 서비스 레이어가 환경변수로 DB 경로를 읽을 경우 이중 방어
+    """
     os.environ["TESTING"] = "1"
+    os.environ["TEST_DB_PATH"] = str(TEST_DB_PATH)
     yield
     os.environ.pop("TESTING", None)
+    os.environ.pop("TEST_DB_PATH", None)
 
 
 @pytest.fixture(scope="session")
@@ -274,11 +280,18 @@ def test_db_session(test_db_engine):
 
     각 테스트 함수마다 새로운 세션을 제공하고,
     테스트 종료 시 롤백하여 격리를 보장합니다.
+
+    **SessionLocal 글로벌 패치 포함**:
+    `app.database.SessionLocal` 및 `app.core.database.SessionLocal`을
+    테스트 세션 팩토리로 교체하여, plan_service 등 내부 호출도
+    테스트 DB를 사용하도록 보장합니다.
     """
     Session = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
     session = Session()
 
-    yield session
+    with patch("app.database.SessionLocal", Session), \
+         patch("app.core.database.SessionLocal", Session):
+        yield session
 
     session.rollback()
     session.close()

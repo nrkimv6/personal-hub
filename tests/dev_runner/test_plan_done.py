@@ -24,7 +24,8 @@ from app.models.plan_record import PlanRecord, PlanEvent
 # ========== Fixtures ==========
 
 @pytest.fixture
-def svc(dev_runner_config_isolation):
+def svc(dev_runner_config_isolation, test_db_session):
+    """PlanService 인스턴스 — test_db_session으로 SessionLocal 글로벌 패치 활성화"""
     return PlanService()
 
 

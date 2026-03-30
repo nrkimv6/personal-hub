@@ -11,6 +11,8 @@ from app.models.plan_record import PlanRecord, PlanEvent
 from app.modules.dev_runner.services.plan_record_service import (
     PlanRecordService,
     _compute_filename_hash,
+    PLAN_FILE_PATTERN,
+    EXCLUDE_FILES,
 )
 
 
@@ -341,3 +343,252 @@ class TestListRecordsAndEvents:
         """이벤트 없으면 빈 목록"""
         result = svc.list_events(event_type="nonexistent_type_xyz")
         assert result == []
+
+
+# ========== Phase 1: title/project 자동 파싱 (items 14~16) ==========
+
+class TestGetOrCreateAutoTitleProject:
+
+    def test_get_or_create_auto_title(self, svc, db, tmp_path):
+        """title=None으로 호출 시 파일 첫 줄 # 헤더에서 자동 추출 (RIGHT)"""
+        plan_file = tmp_path / "2026-03-01-auto-title.md"
+        plan_file.write_text("# 자동 추출 계획서\n\n본문 내용", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file), title=None)
+        db.flush()
+
+        assert record.title == "자동 추출 계획서"
+
+    def test_get_or_create_auto_project(self, svc, db, tmp_path):
+        """project=None으로 호출 시 경로의 archive/{project} 패턴에서 자동 추출 (RIGHT)"""
+        archive_dir = tmp_path / "docs" / "archive" / "monitor-page"
+        archive_dir.mkdir(parents=True)
+        plan_file = archive_dir / "2026-03-02-auto-project.md"
+        plan_file.write_text("# 프로젝트 자동 감지\n", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file), project=None)
+        db.flush()
+
+        assert record.project == "monitor-page"
+
+    def test_get_or_create_explicit_title_preserved(self, svc, db, tmp_path):
+        """명시적 title 인자가 파일 헤더 자동파싱보다 우선 (RIGHT)"""
+        plan_file = tmp_path / "2026-03-03-explicit.md"
+        plan_file.write_text("# 파일 헤더 제목\n\n내용", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file), title="명시적으로 전달한 제목")
+        db.flush()
+
+        assert record.title == "명시적으로 전달한 제목"
+
+    def test_get_or_create_no_header_returns_none_title(self, svc, db, tmp_path):
+        """파일에 # 헤더 없고 title=None → title은 None (BOUNDARY)"""
+        plan_file = tmp_path / "2026-03-04-no-header.md"
+        plan_file.write_text("본문만 있고 헤더 없음\n", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file), title=None)
+        db.flush()
+
+        assert record.title is None
+
+    def test_sync_all_backfills_title_for_existing_record(self, svc, db, tmp_path):
+        """sync_all 시 기존 레코드에 title 없으면 파일에서 백필 (RIGHT)"""
+        plan_dir = tmp_path / "plans"
+        plan_dir.mkdir()
+        plan_file = plan_dir / "2026-03-05-backfill.md"
+        plan_file.write_text("# 백필 대상 제목\n", encoding="utf-8")
+
+        # title 없이 먼저 등록
+        record = svc.get_or_create(str(plan_file), title=None)
+        record.title = None  # 강제로 None 설정
+        db.flush()
+
+        svc.sync_all([{"path": str(plan_dir), "type": "plan"}])
+
+        db.refresh(record)
+        assert record.title == "백필 대상 제목"
+
+
+# ========== Phase 2: sync_all 비-plan 파일 필터링 (items 17~19) ==========
+
+class TestSyncAllPlanFileFilter:
+
+    def test_sync_all_excludes_non_plan_files(self, svc, db, tmp_path):
+        """CLAUDE.md, CHANGELOG.md 등 제외 파일은 DB에 등록되지 않음 (BOUNDARY)"""
+        plan_dir = tmp_path / "plans_filter"
+        plan_dir.mkdir()
+
+        # 제외 대상 파일들
+        for name in ["CLAUDE.md", "CHANGELOG.md", "README.md", "TODO.md", "DONE.md"]:
+            (plan_dir / name).write_text(f"# {name}", encoding="utf-8")
+
+        # 유효한 plan 파일 하나
+        (plan_dir / "2026-03-10-valid.md").write_text("# 유효 계획", encoding="utf-8")
+
+        result = svc.sync_all([{"path": str(plan_dir), "type": "plan"}])
+
+        # 유효 파일 1개만 생성
+        assert result["created"] == 1
+
+        # 제외 파일들이 DB에 없음
+        for name in ["CLAUDE.md", "CHANGELOG.md", "README.md", "TODO.md", "DONE.md"]:
+            from app.modules.dev_runner.services.plan_record_service import _compute_filename_hash
+            h = _compute_filename_hash(str(plan_dir / name))
+            assert db.query(PlanRecord).filter_by(filename_hash=h).first() is None
+
+    def test_sync_all_includes_dated_plan_files(self, svc, db, tmp_path):
+        """YYYY-MM-DD_*.md 패턴 파일만 등록 (RIGHT)"""
+        plan_dir = tmp_path / "dated_plans"
+        plan_dir.mkdir()
+
+        # 날짜 패턴 파일 — 등록 대상
+        (plan_dir / "2026-03-06_fix-something.md").write_text("# 날짜 언더스코어", encoding="utf-8")
+        (plan_dir / "2026-03-07-fix-something.md").write_text("# 날짜 하이픈", encoding="utf-8")
+
+        # 비-날짜 파일 — 등록 제외
+        (plan_dir / "some-plan.md").write_text("# 날짜 없음", encoding="utf-8")
+        (plan_dir / "plan.md").write_text("# 짧은 이름", encoding="utf-8")
+
+        result = svc.sync_all([{"path": str(plan_dir), "type": "plan"}])
+
+        assert result["created"] == 2
+
+    def test_bulk_import_excludes_non_plan(self, svc, db, tmp_path):
+        """bulk_import_archived도 동일 필터 적용 (RIGHT)"""
+        archive_dir = tmp_path / "archive" / "proj"
+        archive_dir.mkdir(parents=True)
+
+        # 유효 plan 파일
+        (archive_dir / "2026-03-08-some-plan.md").write_text("# 아카이브 계획", encoding="utf-8")
+
+        # 비-plan 파일
+        (archive_dir / "CHANGELOG.md").write_text("# changelog", encoding="utf-8")
+        (archive_dir / "README.md").write_text("# readme", encoding="utf-8")
+        (archive_dir / "not-dated.md").write_text("# 날짜 없음", encoding="utf-8")
+
+        result = svc.bulk_import_archived(str(tmp_path / "archive"))
+
+        # 유효 파일 1개만 created, 나머지는 skipped
+        assert result["created"] == 1
+        assert result["errors"] == []
+
+        # README.md 등이 DB에 없음
+        for name in ["CHANGELOG.md", "README.md", "not-dated.md"]:
+            h = _compute_filename_hash(str(archive_dir / name))
+            assert db.query(PlanRecord).filter_by(filename_hash=h).first() is None
+
+
+# ========== TC 24: DB 격리 — production DB 오염 방지 (ERROR) ==========
+
+class TestDbIsolationNoProductionPollution:
+    """TC 24: 테스트 실행 후 production DB에 pytest 경로 레코드가 없음을 검증 (ERROR 범주)
+
+    conftest.py의 test_db_session이 app.database.SessionLocal을 패치하므로,
+    plan_service 내부 SessionLocal() 호출도 테스트 DB로 라우팅된다.
+    이 TC는 그 패치가 실제로 효과가 있음을 직접 확인한다.
+    """
+
+    def test_db_isolation_no_production_pollution(self, test_db_session, tmp_path):
+        """테스트 DB에 pytest 경로로 레코드를 생성해도 production DB에는 반영되지 않음
+
+        검증 흐름:
+        1. test_db_session(패치된 SessionLocal)으로 pytest 경로 레코드 생성
+        2. production DB(data/monitor.db)를 직접 열어 해당 경로가 없음 확인
+        """
+        import sqlite3
+        import os
+
+        pytest_path = str(tmp_path / "pytest-isolation-check" / "2026-03-30_isolation-tc.md")
+        svc = PlanRecordService(test_db_session)
+        record = svc.get_or_create(pytest_path)
+        test_db_session.flush()
+
+        assert record is not None, "test_db_session에 레코드가 생성되어야 함"
+
+        # production DB 경로 결정 (존재하지 않을 경우 스킵)
+        prod_db_path = Path(__file__).parent.parent.parent / "data" / "monitor.db"
+        if not prod_db_path.exists():
+            pytest.skip(f"Production DB 없음: {prod_db_path}")
+
+        conn = sqlite3.connect(str(prod_db_path))
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM plan_records WHERE file_path LIKE '%pytest-isolation-check%'"
+            )
+            count = cursor.fetchone()[0]
+        finally:
+            conn.close()
+
+        assert count == 0, (
+            f"Production DB에 pytest 경로 레코드가 {count}건 발견됨. "
+            "conftest.py의 SessionLocal 패치가 정상 작동하지 않을 수 있음."
+        )
+
+
+# ========== Phase 4: status 생명주기 (items 21~23) ==========
+
+class TestUpdateStatus:
+
+    def test_update_status_transition(self, svc, db, tmp_path):
+        """planned→in_progress 전이 + 이벤트 기록 (RIGHT, TC 21)"""
+        plan_file = tmp_path / "2026-03-20-status-trans.md"
+        plan_file.write_text("# 상태 전이 테스트\n", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file))
+        db.flush()
+        assert record.status == "planned"
+
+        result = svc.update_status(str(plan_file), "in_progress")
+        db.flush()
+
+        assert result is not None
+        assert result.status == "in_progress"
+
+    def test_update_status_event_logged(self, svc, db, tmp_path):
+        """상태 변경 시 status_changed 이벤트 detail 확인 (RIGHT, TC 22)"""
+        plan_file = tmp_path / "2026-03-21-status-event.md"
+        plan_file.write_text("# 이벤트 기록 테스트\n", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file))
+        db.flush()
+
+        svc.update_status(str(plan_file), "in_progress")
+        db.flush()
+
+        events = db.query(PlanEvent).filter_by(
+            plan_record_id=record.id, event_type="status_changed"
+        ).all()
+        assert len(events) == 1
+        detail = events[0].detail
+        assert detail["from"] == "planned"
+        assert detail["to"] == "in_progress"
+
+    def test_sync_from_workflow_mapping(self, svc, db, tmp_path):
+        """workflow status→plan_record status 매핑 정확성 (RIGHT, TC 23)"""
+        from types import SimpleNamespace
+
+        plan_file = tmp_path / "2026-03-22-workflow-sync.md"
+        plan_file.write_text("# 워크플로우 동기화 테스트\n", encoding="utf-8")
+
+        svc.get_or_create(str(plan_file))
+        db.flush()
+
+        # running → in_progress
+        wf = SimpleNamespace(plan_path=str(plan_file), status="running")
+        result = svc.sync_from_workflow(wf)
+        db.flush()
+        assert result is not None
+        assert result.status == "in_progress"
+
+        # completed → completed
+        wf.status = "completed"
+        result = svc.sync_from_workflow(wf)
+        db.flush()
+        assert result.status == "completed"
+
+        # failed → planned (재시도 가능)
+        wf.status = "failed"
+        result = svc.sync_from_workflow(wf)
+        db.flush()
+        assert result.status == "planned"

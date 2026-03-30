@@ -8,6 +8,7 @@ PlanRecordService — 계획서 메타데이터 DB 관리
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -17,6 +18,21 @@ from sqlalchemy.orm import Session
 from app.models.plan_record import PlanRecord, PlanEvent
 
 logger = logging.getLogger(__name__)
+
+# plan 파일 패턴 필터 — YYYY-MM-DD 로 시작하는 .md 파일만 허용
+PLAN_FILE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}[_-].*\.md$")
+
+# 등록 제외 파일 목록 — 문서/설정 파일
+EXCLUDE_FILES = {
+    "CLAUDE.md", "CHANGELOG.md", "README.md", "TODO.md",
+    "MANUAL_TASKS.md", "DONE.md", "REQUIREMENTS.md",
+}
+
+
+def _is_plan_file(file_path) -> bool:
+    """파일이 plan 파일 기준에 맞는지 확인 (PLAN_FILE_PATTERN + EXCLUDE_FILES)"""
+    name = Path(file_path).name
+    return name not in EXCLUDE_FILES and bool(PLAN_FILE_PATTERN.match(name))
 
 
 def _compute_filename_hash(file_path: str) -> str:
@@ -58,11 +74,18 @@ class PlanRecordService:
                 _add_event(self.db, record, "path_changed", {"from": old_path, "to": file_path})
             return record
 
+        # title/project 미제공 시 파일에서 자동 추출
+        if title is None:
+            title = self._extract_title_from_md(file_path)
+        if project is None:
+            project = self._detect_project_from_path(file_path)
+
         record = PlanRecord(
             filename_hash=filename_hash,
             file_path=file_path,
             title=title,
             project=project,
+            status="planned",
         )
         self.db.add(record)
         self.db.flush()  # id 생성
@@ -118,6 +141,46 @@ class PlanRecordService:
         record.updated_at = datetime.now()
         _add_event(self.db, record, "archived", {"archive_path": new_path})
         return record
+
+    def update_status(self, file_path: str, new_status: str) -> Optional[PlanRecord]:
+        """상태 전이: file_path로 레코드 조회 → status 변경 + status_changed 이벤트 기록"""
+        filename_hash = _compute_filename_hash(file_path)
+        record = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
+        if not record:
+            return None
+        old_status = record.status
+        if old_status == new_status:
+            return record
+        record.status = new_status
+        record.updated_at = datetime.now()
+        _add_event(self.db, record, "status_changed", {"from": old_status, "to": new_status})
+        return record
+
+    def sync_from_workflow(self, workflow) -> Optional[PlanRecord]:
+        """workflow 상태를 plan_record 상태로 동기화
+
+        workflow status 매핑:
+          planned    → planned
+          running    → in_progress
+          completed  → completed
+          failed     → planned  (재시도 가능)
+        """
+        STATUS_MAP = {
+            "planned": "planned",
+            "running": "in_progress",
+            "completed": "completed",
+            "failed": "planned",
+        }
+        file_path = getattr(workflow, "plan_path", None) or getattr(workflow, "file_path", None)
+        if not file_path:
+            return None
+        workflow_status = getattr(workflow, "status", None)
+        if not workflow_status:
+            return None
+        new_status = STATUS_MAP.get(workflow_status)
+        if not new_status:
+            return None
+        return self.update_status(file_path, new_status)
 
     def get_record(self, record_id: int) -> Optional[PlanRecord]:
         """개별 레코드 조회 (events 포함)"""
@@ -219,6 +282,9 @@ class PlanRecordService:
 
         for f in md_files:
             try:
+                if not _is_plan_file(f):
+                    skipped += 1
+                    continue
                 file_str = str(f)
                 filename_hash = _compute_filename_hash(file_str)
                 category = self._detect_project_from_path(file_str)
@@ -291,6 +357,8 @@ class PlanRecordService:
             for f in files:
                 if not f.is_file():
                     continue
+                if not _is_plan_file(f):
+                    continue
                 h = _compute_filename_hash(str(f))
                 seen_hashes.add(h)
                 if h not in all_records:
@@ -299,6 +367,20 @@ class PlanRecordService:
                     created += 1
                 else:
                     record = all_records[h]
+                    # title/project 백필 (기존 레코드에 없으면 갱신)
+                    updated_fields = False
+                    if record.title is None:
+                        extracted_title = self._extract_title_from_md(str(f))
+                        if extracted_title:
+                            record.title = extracted_title
+                            updated_fields = True
+                    if record.project is None:
+                        detected_project = self._detect_project_from_path(str(f))
+                        if detected_project:
+                            record.project = detected_project
+                            updated_fields = True
+                    if updated_fields:
+                        record.updated_at = datetime.now()
                     if record.file_path != str(f):
                         # 경로 변경
                         old = record.file_path
