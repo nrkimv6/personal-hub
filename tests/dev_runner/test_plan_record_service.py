@@ -11,6 +11,8 @@ from app.models.plan_record import PlanRecord, PlanEvent
 from app.modules.dev_runner.services.plan_record_service import (
     PlanRecordService,
     _compute_filename_hash,
+    PLAN_FILE_PATTERN,
+    EXCLUDE_FILES,
 )
 
 
@@ -405,3 +407,72 @@ class TestGetOrCreateAutoTitleProject:
 
         db.refresh(record)
         assert record.title == "백필 대상 제목"
+
+
+# ========== Phase 2: sync_all 비-plan 파일 필터링 (items 17~19) ==========
+
+class TestSyncAllPlanFileFilter:
+
+    def test_sync_all_excludes_non_plan_files(self, svc, db, tmp_path):
+        """CLAUDE.md, CHANGELOG.md 등 제외 파일은 DB에 등록되지 않음 (BOUNDARY)"""
+        plan_dir = tmp_path / "plans_filter"
+        plan_dir.mkdir()
+
+        # 제외 대상 파일들
+        for name in ["CLAUDE.md", "CHANGELOG.md", "README.md", "TODO.md", "DONE.md"]:
+            (plan_dir / name).write_text(f"# {name}", encoding="utf-8")
+
+        # 유효한 plan 파일 하나
+        (plan_dir / "2026-03-10-valid.md").write_text("# 유효 계획", encoding="utf-8")
+
+        result = svc.sync_all([{"path": str(plan_dir), "type": "plan"}])
+
+        # 유효 파일 1개만 생성
+        assert result["created"] == 1
+
+        # 제외 파일들이 DB에 없음
+        for name in ["CLAUDE.md", "CHANGELOG.md", "README.md", "TODO.md", "DONE.md"]:
+            from app.modules.dev_runner.services.plan_record_service import _compute_filename_hash
+            h = _compute_filename_hash(str(plan_dir / name))
+            assert db.query(PlanRecord).filter_by(filename_hash=h).first() is None
+
+    def test_sync_all_includes_dated_plan_files(self, svc, db, tmp_path):
+        """YYYY-MM-DD_*.md 패턴 파일만 등록 (RIGHT)"""
+        plan_dir = tmp_path / "dated_plans"
+        plan_dir.mkdir()
+
+        # 날짜 패턴 파일 — 등록 대상
+        (plan_dir / "2026-03-06_fix-something.md").write_text("# 날짜 언더스코어", encoding="utf-8")
+        (plan_dir / "2026-03-07-fix-something.md").write_text("# 날짜 하이픈", encoding="utf-8")
+
+        # 비-날짜 파일 — 등록 제외
+        (plan_dir / "some-plan.md").write_text("# 날짜 없음", encoding="utf-8")
+        (plan_dir / "plan.md").write_text("# 짧은 이름", encoding="utf-8")
+
+        result = svc.sync_all([{"path": str(plan_dir), "type": "plan"}])
+
+        assert result["created"] == 2
+
+    def test_bulk_import_excludes_non_plan(self, svc, db, tmp_path):
+        """bulk_import_archived도 동일 필터 적용 (RIGHT)"""
+        archive_dir = tmp_path / "archive" / "proj"
+        archive_dir.mkdir(parents=True)
+
+        # 유효 plan 파일
+        (archive_dir / "2026-03-08-some-plan.md").write_text("# 아카이브 계획", encoding="utf-8")
+
+        # 비-plan 파일
+        (archive_dir / "CHANGELOG.md").write_text("# changelog", encoding="utf-8")
+        (archive_dir / "README.md").write_text("# readme", encoding="utf-8")
+        (archive_dir / "not-dated.md").write_text("# 날짜 없음", encoding="utf-8")
+
+        result = svc.bulk_import_archived(str(tmp_path / "archive"))
+
+        # 유효 파일 1개만 created, 나머지는 skipped
+        assert result["created"] == 1
+        assert result["errors"] == []
+
+        # README.md 등이 DB에 없음
+        for name in ["CHANGELOG.md", "README.md", "not-dated.md"]:
+            h = _compute_filename_hash(str(archive_dir / name))
+            assert db.query(PlanRecord).filter_by(filename_hash=h).first() is None

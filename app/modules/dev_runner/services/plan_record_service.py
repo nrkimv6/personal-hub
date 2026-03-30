@@ -8,6 +8,7 @@ PlanRecordService — 계획서 메타데이터 DB 관리
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -17,6 +18,21 @@ from sqlalchemy.orm import Session
 from app.models.plan_record import PlanRecord, PlanEvent
 
 logger = logging.getLogger(__name__)
+
+# plan 파일 패턴 필터 — YYYY-MM-DD 로 시작하는 .md 파일만 허용
+PLAN_FILE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}[_-].*\.md$")
+
+# 등록 제외 파일 목록 — 문서/설정 파일
+EXCLUDE_FILES = {
+    "CLAUDE.md", "CHANGELOG.md", "README.md", "TODO.md",
+    "MANUAL_TASKS.md", "DONE.md", "REQUIREMENTS.md",
+}
+
+
+def _is_plan_file(file_path) -> bool:
+    """파일이 plan 파일 기준에 맞는지 확인 (PLAN_FILE_PATTERN + EXCLUDE_FILES)"""
+    name = Path(file_path).name
+    return name not in EXCLUDE_FILES and bool(PLAN_FILE_PATTERN.match(name))
 
 
 def _compute_filename_hash(file_path: str) -> str:
@@ -225,6 +241,9 @@ class PlanRecordService:
 
         for f in md_files:
             try:
+                if not _is_plan_file(f):
+                    skipped += 1
+                    continue
                 file_str = str(f)
                 filename_hash = _compute_filename_hash(file_str)
                 category = self._detect_project_from_path(file_str)
@@ -296,6 +315,8 @@ class PlanRecordService:
                 files = [folder]
             for f in files:
                 if not f.is_file():
+                    continue
+                if not _is_plan_file(f):
                     continue
                 h = _compute_filename_hash(str(f))
                 seen_hashes.add(h)
