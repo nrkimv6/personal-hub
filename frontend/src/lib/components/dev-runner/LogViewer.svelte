@@ -423,7 +423,12 @@
 		await loadRecent();
 		// 초기 로드 후 스크롤을 맨 아래로 이동
 		requestAnimationFrame(() => scrollToBottom());
-		if (mode === 'standalone') connectSSE();
+		if (mode === 'standalone') {
+			connectSSE();
+		} else {
+			// managed 모드: SSE 미연결이므로 fetchStatus()로 redisAvailable 초기화
+			await fetchStatus();
+		}
 	});
 
 	onDestroy(() => {

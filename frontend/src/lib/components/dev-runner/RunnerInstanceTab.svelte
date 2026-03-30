@@ -171,10 +171,13 @@
 		running ? '실행중'
 		: exitReason === 'completed' || !exitReason ? '완료'
 		: exitReason === 'no_progress' ? '⏸️ 중단'
-		: exitReason === 'rate_limit' ? '⚠️ 제한'
+		: exitReason === 'rate_limit' || exitReason === 'rate_limited' ? '⚠️ 제한'
 		: exitReason === 'quota_exhausted' ? '⚠️ Quota'
-		: exitReason === 'error' ? '❌ 에러'
-		: '중지'
+		: exitReason === 'error' || exitReason === 'auto_done_failed' ? '❌ 에러'
+		: exitReason === 'stopped' ? '⏹ 중지'
+		: exitReason === 'archived' ? '📁 아카이브됨'
+		: exitReason === 'on_hold' ? '⏸️ 보류'
+		: '⁉️ 알 수 없음'
 	);
 </script>
 

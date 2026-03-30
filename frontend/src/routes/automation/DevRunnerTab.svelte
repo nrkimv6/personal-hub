@@ -327,8 +327,9 @@
 			} catch { /* 무시 */ }
 		} else if (eventName === 'log_completed') {
 			try {
-				const { runner_id } = JSON.parse(data) as { runner_id: string };
-				logRefs.get(runner_id)?.injectCompleted();
+				const { runner_id, status } = JSON.parse(data) as { runner_id: string; status?: string };
+				const reason = status === 'failed' ? 'error' : 'completed';
+				logRefs.get(runner_id)?.injectCompleted(reason);
 			} catch { /* 무시 */ }
 		} else if (eventName === 'merge_log') {
 			try {
