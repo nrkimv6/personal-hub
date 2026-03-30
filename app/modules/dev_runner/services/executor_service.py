@@ -529,14 +529,6 @@ class ExecutorService:
             raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
 
 
-    async def enqueue_merge(self, branch: str, plan_file: str = "", project: str = "monitor-page", worktree_path: str = "") -> dict:
-        """[DEPRECATED] merge는 이제 _stream_output finally 블록에서 인라인으로 처리됨.
-
-        이 메서드는 호환성 유지용으로 보존되지만 실제 merge 큐에 투입하지 않는다.
-        merge_requested 플래그를 직접 설정하여 runner 완료 시 자동 merge가 트리거되게 한다.
-        """
-        return {"runner_id": "deprecated", "queued": False, "message": "enqueue_merge is deprecated. Use merge_requested flag on runner instead."}
-
     async def get_merge_queue(self) -> list:
         """merge 상태 통합 조회 — merging/queued/done 3개 소스 병합"""
         try:
@@ -599,12 +591,12 @@ class ExecutorService:
         }
 
     async def get_merge_status(self, runner_id: str) -> dict | None:
-        """Redis merge:{runner_id}:status 조회"""
+        """runner Redis 키에서 merge_status 조회"""
         try:
-            status = await self.async_redis.get(f"plan-runner:merge:{runner_id}:status")
+            status = await self.async_redis.get(self._runner_key(runner_id, "merge_status"))
             if status is None:
                 return None
-            return {"runner_id": runner_id, "status": status, "fix_attempts": 0, "message": ""}
+            return {"runner_id": runner_id, "status": status, "test_passed": None, "fix_attempts": 0, "message": ""}
         except Exception:
             return None
 
@@ -707,10 +699,7 @@ class ExecutorService:
         if old_pid_str:
             try:
                 old_pid = int(old_pid_str)
-                if sys.platform == "win32":
-                    os.kill(old_pid, signal.SIGTERM)
-                else:
-                    os.kill(old_pid, signal.SIGTERM)
+                os.kill(old_pid, signal.SIGTERM)
                 self.redis_client.delete(PID_KEY)
             except (ProcessLookupError, PermissionError):
                 pass
