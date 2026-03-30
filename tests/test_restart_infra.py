@@ -111,6 +111,57 @@ class TestRestartInfra:
         assert result["success"] is False
         assert "Redis" in result["message"]
 
+    def test_restart_infra_lpush_exception(self):
+        """E(에러): lpush 예외 발생 → exception handler가 success=False 반환"""
+        redis_mock = AsyncMock()
+        redis_mock.delete = AsyncMock()
+        redis_mock.lpush = AsyncMock(side_effect=RuntimeError("connection broken"))
+
+        with patch("app.shared.redis.client.RedisClient") as mock_client:
+            mock_client.get_client = AsyncMock(return_value=redis_mock)
+            svc = SystemService()
+            result = run(svc.restart_infra("api_watchdog"))
+
+        assert result["success"] is False
+        assert "실패" in result["message"] or "connection broken" in result["message"]
+
+    def test_restart_infra_delete_called_before_lpush(self):
+        """O(순서): delete(infra:command_results) → lpush(infra:commands) 순서 검증"""
+        call_order = []
+        redis_mock = AsyncMock()
+
+        async def track_delete(*a, **kw): call_order.append("delete")
+        async def track_lpush(*a, **kw): call_order.append("lpush")
+
+        redis_mock.delete = track_delete
+        redis_mock.lpush = track_lpush
+        redis_mock.brpop = AsyncMock(return_value=(
+            "infra:command_results",
+            json.dumps({"success": True, "message": "완료"})
+        ))
+
+        with patch("app.shared.redis.client.RedisClient") as mock_client:
+            mock_client.get_client = AsyncMock(return_value=redis_mock)
+            svc = SystemService()
+            run(svc.restart_infra("api_watchdog"))
+
+        assert call_order == ["delete", "lpush"], f"순서 오류: {call_order}"
+
+    def test_restart_infra_infra_command_listener(self):
+        """B(경계): infra_command_listener(watchdog=None) → restart-infra + target 전송"""
+        redis_mock = self._make_redis_mock({"success": True, "message": "완료"})
+
+        with patch("app.shared.redis.client.RedisClient") as mock_client:
+            mock_client.get_client = AsyncMock(return_value=redis_mock)
+            svc = SystemService()
+            result = run(svc.restart_infra("infra_command_listener"))
+
+        assert result["success"] is True
+        call_args = redis_mock.lpush.call_args
+        payload = json.loads(call_args[0][1])
+        assert payload["action"] == "restart-infra"
+        assert payload["target"] == "infra_command_listener"
+
 
 # ─── get_worker_status tier 필드 ─────────────────────────────────────────────
 
