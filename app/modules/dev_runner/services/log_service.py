@@ -122,6 +122,7 @@ class LogService:
         yield "event: connected\ndata: ok\n\n"
 
         pubsub = None
+        was_disconnected = False
         last_heartbeat = time.monotonic()
         consecutive_errors = 0
         MAX_CONSECUTIVE_ERRORS = 5
@@ -132,6 +133,9 @@ class LogService:
                     if pubsub is None:
                         pubsub = self.async_redis.pubsub()
                         await pubsub.subscribe(log_channel)
+                        if was_disconnected:
+                            yield "event: connected\ndata: ok\n\n"
+                            was_disconnected = False
 
                     message = await pubsub.get_message(
                         ignore_subscribe_messages=True, timeout=0.5
@@ -160,6 +164,7 @@ class LogService:
                 except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
                     await safe_close_pubsub(pubsub)
                     pubsub = None
+                    was_disconnected = True
                     yield "event: redis_disconnected\ndata: Redis not available\n\n"
                     last_heartbeat = time.monotonic()
                     await asyncio.sleep(5)
@@ -187,6 +192,7 @@ class LogService:
         yield "event: connected\ndata: ok\n\n"
 
         pubsub = None
+        was_disconnected = False
         last_heartbeat = time.monotonic()
         consecutive_errors = 0
         MAX_CONSECUTIVE_ERRORS = 5
@@ -197,6 +203,9 @@ class LogService:
                     if pubsub is None:
                         pubsub = self.async_redis.pubsub()
                         await pubsub.subscribe(log_channel)
+                        if was_disconnected:
+                            yield "event: connected\ndata: ok\n\n"
+                            was_disconnected = False
 
                     message = await pubsub.get_message(
                         ignore_subscribe_messages=True, timeout=0.5
@@ -224,6 +233,7 @@ class LogService:
                 except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
                     await safe_close_pubsub(pubsub)
                     pubsub = None
+                    was_disconnected = True
                     yield "event: redis_disconnected\ndata: Redis not available\n\n"
                     last_heartbeat = time.monotonic()
                     await asyncio.sleep(5)
