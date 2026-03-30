@@ -101,7 +101,7 @@
 	async function pollMergeQueueCount() {
 		try {
 			const items = await devRunnerMergeApi.queue();
-			mergeQueuedCount = items.length;
+			mergeQueuedCount = items.filter(i => i.status === 'queued').length;
 		} catch {
 			// 폴링 실패 시 무시
 		}

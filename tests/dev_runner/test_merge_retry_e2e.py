@@ -84,9 +84,9 @@ class TestRetryMergeFullFlow:
         redis = make_redis_mock(worktree_path=str(worktree))
         merge_result = make_merge_result(merged=True, tests_passed=True)
 
-        import merge_lock as ml
-        with patch.object(ml, "acquire_merge_lock", return_value=True), \
-             patch.object(ml, "release_merge_lock"), \
+        import merge_queue as mq
+        with patch.object(mq, "acquire_merge_turn", return_value=True), \
+             patch.object(mq, "release_merge_turn"), \
              patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch.object(cl, "_cleanup_process_state") as mock_cleanup:
             mock_wf = MagicMock()
@@ -127,13 +127,13 @@ class TestRetryMergeFullFlow:
 
         redis.set.side_effect = track_set
 
-        import merge_lock as ml
+        import merge_queue as mq
 
         proc_mock = MagicMock()
         proc_mock.returncode = 0  # exit_code=0 → merged
 
-        with patch.object(ml, "acquire_merge_lock", return_value=True), \
-             patch.object(ml, "release_merge_lock"), \
+        with patch.object(mq, "acquire_merge_turn", return_value=True), \
+             patch.object(mq, "release_merge_turn"), \
              patch("subprocess.run", return_value=proc_mock), \
              patch.object(cl, "_cleanup_process_state") as mock_cleanup:
             cl._do_retry_merge(runner_id, redis, "cmd-e2e-002")
@@ -238,11 +238,11 @@ class TestDirectMergeConflictResolverCrashSafe:
 
         redis.get.side_effect = extended_get
 
-        mock_merge_lock = types.ModuleType("merge_lock")
-        mock_merge_lock.acquire_merge_lock = MagicMock(return_value=True)
-        mock_merge_lock.release_merge_lock = MagicMock(return_value=True)
+        mock_merge_lock = types.ModuleType("merge_queue")
+        mock_merge_lock.acquire_merge_turn = MagicMock(return_value=True)
+        mock_merge_lock.release_merge_turn = MagicMock(return_value=True)
 
-        with patch.dict(sys.modules, {"merge_lock": mock_merge_lock}), \
+        with patch.dict(sys.modules, {"merge_queue": mock_merge_lock}), \
              patch("subprocess.run", return_value=MagicMock(returncode=3)), \
              patch.object(cl, "_launch_conflict_resolver_process",
                           return_value={"success": False, "message": "resolve 실패 시뮬레이션"}), \
@@ -282,11 +282,11 @@ class TestRetryMergeExitCode2AutoFix:
 
         redis.set.side_effect = track_set
 
-        mock_lock_mod = types.ModuleType("merge_lock")
-        mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
-        mock_lock_mod.release_merge_lock = MagicMock()
+        mock_lock_mod = types.ModuleType("merge_queue")
+        mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_turn = MagicMock()
 
-        with patch.dict(sys.modules, {"merge_lock": mock_lock_mod}), \
+        with patch.dict(sys.modules, {"merge_queue": mock_lock_mod}), \
              patch("subprocess.run", return_value=MagicMock(returncode=2)), \
              patch.object(cl, "_launch_auto_impl_post_merge_process",
                           return_value={"success": True, "message": "fixed"}) as mock_fix, \

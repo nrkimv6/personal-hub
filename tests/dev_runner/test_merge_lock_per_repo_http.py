@@ -12,7 +12,10 @@ import os
 import pytest
 import requests
 
-pytestmark = pytest.mark.http_live
+pytestmark = [
+    pytest.mark.http_live,
+    pytest.mark.skip(reason="merge_lock deprecated — merge_queue로 대체"),
+]
 
 BASE_URL = os.environ.get("ADMIN_API_BASE", "http://localhost:8001/api/v1/dev-runner")
 

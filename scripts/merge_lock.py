@@ -1,3 +1,4 @@
+# [DEPRECATED] — merge_queue.py로 대체됨. 이 모듈은 더 이상 사용하지 않는다.
 """
 Merge Lock 유틸리티 — Redis 기반 분산 lock (SETNX + FIFO 대기 큐)
 
@@ -11,6 +12,7 @@ Redis 키 구조:
 import os
 import time
 import logging
+import warnings
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -104,6 +106,7 @@ def acquire_merge_lock(redis_client, runner_id: str, repo_id: str = None, timeou
     Returns:
         True if lock acquired, False if timed out
     """
+    warnings.warn("deprecated, use merge_queue.acquire_merge_turn", DeprecationWarning, stacklevel=2)
     _ttl = lock_ttl if lock_ttl is not None else MERGE_LOCK_TTL
     _lock_key = get_merge_lock_key(repo_id)
     _queue_key = get_merge_wait_queue_key(repo_id)

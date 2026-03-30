@@ -267,8 +267,8 @@ class TestDoRetryMergeRedisKeyReissue:
 
         from merge_workflow import WorkflowResult
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("merge_lock.acquire_merge_lock", return_value=True), \
-             patch("merge_lock.release_merge_lock", return_value=None), \
+             patch("merge_queue.acquire_merge_turn", return_value=True), \
+             patch("merge_queue.release_merge_turn", return_value=None), \
              patch.object(_mod, "_cleanup_process_state", return_value=None):
             mock_wf_cls.return_value.run.return_value = WorkflowResult(merged=True, tests_passed=True, conflict=False, message="ok")
             _do_retry_merge("runner1", mock_redis, "cmd1", command=command)
@@ -288,8 +288,8 @@ class TestDoRetryMergeRedisKeyReissue:
 
         from merge_workflow import WorkflowResult
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("merge_lock.acquire_merge_lock", return_value=True), \
-             patch("merge_lock.release_merge_lock", return_value=None), \
+             patch("merge_queue.acquire_merge_turn", return_value=True), \
+             patch("merge_queue.release_merge_turn", return_value=None), \
              patch.object(_mod, "_cleanup_process_state", return_value=None):
             mock_wf_cls.return_value.run.return_value = WorkflowResult(merged=True, tests_passed=True, conflict=False, message="ok")
             _do_retry_merge("runner1", mock_redis, "cmd1", command=command)

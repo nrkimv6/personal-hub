@@ -174,8 +174,8 @@ def test_conflict_resolve_success_triggers_done_flow(cl, tmp_path):
     with patch.object(cl, "_launch_conflict_resolver_process", return_value=resolver_success), \
          patch.object(cl, "_handle_post_merge_done", side_effect=mock_handle), \
          patch("subprocess.run", return_value=merge_result_conflict), \
-         patch("merge_lock.acquire_merge_lock", return_value=True), \
-         patch("merge_lock.release_merge_lock"):
+         patch("merge_queue.acquire_merge_turn", return_value=True), \
+         patch("merge_queue.release_merge_turn"):
         cl._execute_merge_with_lock(
             runner_id="test_runner",
             redis_client=mock_redis,

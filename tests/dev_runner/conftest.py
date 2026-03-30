@@ -157,6 +157,13 @@ def redis_cleanup():
             stale_keys = r.keys(f"plan-runner:runners:{runner_id}:*")
             if stale_keys:
                 r.delete(*stale_keys)
+
+        # merge-queue:* 키 정리
+        for key in r.scan_iter("plan-runner:merge-queue:*"):
+            r.delete(key)
+        # merge-turn:* 키 정리
+        for key in r.scan_iter("plan-runner:merge-turn:*"):
+            r.delete(key)
     except Exception:
         pass
 

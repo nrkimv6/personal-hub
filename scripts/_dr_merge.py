@@ -324,7 +324,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
     Returns:
         dict: {"success": bool, "message": str, "merge_status": str, "action": action_name}
     """
-    from merge_lock import acquire_merge_lock, release_merge_lock, _get_repo_id
+    from merge_queue import acquire_merge_turn, release_merge_turn, _get_repo_id
 
     def _pub(msg: str) -> None:
         _pub_and_log(runner_id, msg, redis_client, "MERGE")
@@ -342,7 +342,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             pass
         _pub("merge lock 대기 중...")
 
-        lock_acquired = acquire_merge_lock(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT), timeout=600)
+        lock_acquired = acquire_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT), timeout=600)
         if not lock_acquired:
             _pub("merge lock 획득 실패 (timeout) — merge 중단")
             try:
@@ -409,7 +409,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
     finally:
         if lock_acquired:
             try:
-                release_merge_lock(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT))
+                release_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT))
             except Exception:
                 pass
         # merge-results Redis list에 결과 push (merge history API 연동)

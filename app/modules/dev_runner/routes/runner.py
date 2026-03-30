@@ -118,6 +118,12 @@ async def get_merge_queue():
     return await executor_service.get_merge_queue()
 
 
+@router.get("/merge-queue-length")
+async def get_merge_queue_length():
+    """순수 대기 수 반환 (실행 중 runner 제외). 외부 소비자용 경량 엔드포인트."""
+    length = await executor_service.get_merge_queue_length()
+    return {"length": length}
+
 
 @router.get("/merge-history", response_model=list[MergeHistoryItem])
 @router.get("/merge/history", response_model=list[MergeHistoryItem])

@@ -4,6 +4,7 @@ TC: ExecutorService.get_merge_queue() / get_merge_status() — fakeredis 기반
 수정 이력:
   2026-03-09: get_merge_queue() 구조 변경 — merge-wait-queue에 runner_id 문자열 저장 +
               per-runner Redis 키에서 상세정보 조회하는 방식으로 전환. 기존 JSON 파싱 TC 제거.
+  2026-03-30: merge-queue 전환 — merge-wait-queue:* + merge-lock:* → merge-queue:{repo_id} 단일 리스트
 """
 import json
 import pytest
@@ -12,7 +13,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
-MERGE_WAIT_QUEUE_KEY = "plan-runner:merge-wait-queue"
+MERGE_QUEUE_KEY = "plan-runner:merge-queue"
 
 
 def make_executor_service(async_redis):
@@ -25,9 +26,9 @@ def make_executor_service(async_redis):
     return svc
 
 
-async def seed_runner(redis, runner_id, plan_file="", branch="", worktree_path="", start_time=""):
-    """merge-wait-queue에 runner_id 추가 + per-runner 키 설정"""
-    await redis.rpush(MERGE_WAIT_QUEUE_KEY, runner_id)
+async def seed_runner(redis, runner_id, plan_file="", branch="", worktree_path="", start_time="", repo_id="monitor-page"):
+    """merge-queue:{repo_id}에 runner_id 추가 + per-runner 키 설정"""
+    await redis.rpush(f"{MERGE_QUEUE_KEY}:{repo_id}", runner_id)
     if plan_file:
         await redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
     if branch:
@@ -89,7 +90,7 @@ class TestGetMergeQueue:
     async def test_boundary_runner_without_per_keys(self):
         """Boundary: per-runner 키 없는 runner_id → 빈 문자열 fallback (에러 아님)"""
         fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        await fake_redis.rpush(MERGE_WAIT_QUEUE_KEY, "orphan_runner")
+        await fake_redis.rpush(f"{MERGE_QUEUE_KEY}:monitor-page", "orphan_runner")
 
         svc = make_executor_service(fake_redis)
         result = await svc.get_merge_queue()
@@ -132,7 +133,7 @@ class TestGetMergeQueue:
     async def test_correct_partial_per_keys(self):
         """Correct: 일부 per-runner 키만 존재 → 있는 것만 반영, 나머지 빈 문자열"""
         fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        await fake_redis.rpush(MERGE_WAIT_QUEUE_KEY, "partial_runner")
+        await fake_redis.rpush(f"{MERGE_QUEUE_KEY}:monitor-page", "partial_runner")
         await fake_redis.set(f"{RUNNER_KEY_PREFIX}:partial_runner:branch", "plan/partial")
         # plan_file, worktree_path, start_time 없음
 

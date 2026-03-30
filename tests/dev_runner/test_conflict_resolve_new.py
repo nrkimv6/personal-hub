@@ -66,8 +66,8 @@ class TestInlineMergeConflictAutoRetry:
         mock_result = WorkflowResult(merged=False, tests_passed=False, conflict=True, message="conflict")
 
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("merge_lock.acquire_merge_lock", return_value=True), \
-             patch("merge_lock.release_merge_lock"), \
+             patch("merge_queue.acquire_merge_turn", return_value=True), \
+             patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": False, "message": "fail"}) as mock_resolve, \
@@ -106,8 +106,8 @@ class TestInlineMergeConflictAutoRetry:
             return m
 
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("merge_lock.acquire_merge_lock", return_value=True), \
-             patch("merge_lock.release_merge_lock"), \
+             patch("merge_queue.acquire_merge_turn", return_value=True), \
+             patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
@@ -142,8 +142,8 @@ class TestInlineMergeConflictAutoRetry:
         mock_result = WorkflowResult(merged=False, tests_passed=False, conflict=True, message="conflict")
 
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("merge_lock.acquire_merge_lock", return_value=True), \
-             patch("merge_lock.release_merge_lock"), \
+             patch("merge_queue.acquire_merge_turn", return_value=True), \
+             patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": False, "message": "markers remain"}), \
@@ -177,8 +177,8 @@ class TestInlineMergeConflictAutoRetry:
             return m
 
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("merge_lock.acquire_merge_lock", return_value=True), \
-             patch("merge_lock.release_merge_lock"), \
+             patch("merge_queue.acquire_merge_turn", return_value=True), \
+             patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
@@ -219,8 +219,8 @@ class TestInlineMergeConflictAutoRetry:
             return m
 
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("merge_lock.acquire_merge_lock", return_value=True), \
-             patch("merge_lock.release_merge_lock"), \
+             patch("merge_queue.acquire_merge_turn", return_value=True), \
+             patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
@@ -253,8 +253,8 @@ class TestInlineMergeConflictAutoRetry:
             return MagicMock(returncode=0, stdout="")
 
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("merge_lock.acquire_merge_lock", return_value=True), \
-             patch("merge_lock.release_merge_lock"), \
+             patch("merge_queue.acquire_merge_turn", return_value=True), \
+             patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \

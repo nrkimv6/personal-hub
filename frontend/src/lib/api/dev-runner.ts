@@ -497,6 +497,9 @@ export const devRunnerMergeApi = {
 	queue: (): Promise<MergeQueueItem[]> =>
 		devRunnerRequest<MergeQueueItem[]>('/merge-queue'),
 
+	queueLength: (): Promise<{ length: number }> =>
+		devRunnerRequest<{ length: number }>('/merge-queue-length'),
+
 	history: (limit?: number): Promise<MergeHistoryItem[]> =>
 		devRunnerRequest<MergeHistoryItem[]>(`/merge-history${limit ? `?limit=${limit}` : ''}`),
 
