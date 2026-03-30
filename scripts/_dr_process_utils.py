@@ -21,6 +21,21 @@ from _dr_subprocess import _ANSI_ESCAPE
 logger = logging.getLogger(__name__)
 
 
+def _publish_with_retry(redis_client: redis.Redis, channel: str, msg: str) -> bool:
+    """Redis publish — 1차 실패 시 ping 후 재시도. 성공 True, 실패 False 반환"""
+    try:
+        redis_client.publish(channel, msg)
+        return True
+    except redis.ConnectionError:
+        pass
+    try:
+        redis_client.ping()
+        redis_client.publish(channel, msg)
+        return True
+    except (redis.ConnectionError, Exception):
+        return False
+
+
 def _evict_stale_cleanup_done(max_age: int = 300) -> None:
     """_cleanup_done에서 max_age초 이상 된 항목 제거 (메모리 누수 방지)"""
     _cleanup_done = get_cleanup_done()
@@ -238,10 +253,7 @@ def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Red
                 line = f.readline()
                 if line:
                     stripped = line.rstrip('\n')
-                    try:
-                        redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', stripped))
-                    except redis.ConnectionError:
-                        pass
+                    _publish_with_retry(redis_client, log_channel, _ANSI_ESCAPE.sub('', stripped))
                 else:
                     # 더 읽을 내용 없음 — PID가 죽었는지 확인
                     proc = _running_processes.get(runner_id)
@@ -255,10 +267,7 @@ def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Red
                                 break
                             _stripped = remaining.rstrip('\n')
                             if _stripped:
-                                try:
-                                    redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', _stripped))
-                                except redis.ConnectionError:
-                                    pass
+                                _publish_with_retry(redis_client, log_channel, _ANSI_ESCAPE.sub('', _stripped))
                         break
                     time.sleep(0.2)
     except FileNotFoundError:

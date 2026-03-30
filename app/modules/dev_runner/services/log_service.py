@@ -110,6 +110,7 @@ class LogService:
     async def stream_log_file(self, runner_id: str) -> AsyncGenerator[str, None]:
         """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)"""
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+        logger.info(f"[SSE] stream_log_file 시작: channel={log_channel}")
 
         # 초기 Redis 연결 확인
         try:
@@ -126,6 +127,12 @@ class LogService:
         last_heartbeat = time.monotonic()
         consecutive_errors = 0
         MAX_CONSECUTIVE_ERRORS = 5
+        # Phase 0: 첫 메시지 수신 진단
+        _first_msg_logged = False
+        # Phase 2: 파일 폴링 fallback
+        _no_msg_since = time.monotonic()
+        _file_pos = 0
+        FILE_POLL_TIMEOUT = 5.0  # pub/sub 미수신 N초 후 파일 폴링 전환
 
         try:
             while True:
@@ -141,6 +148,10 @@ class LogService:
                         ignore_subscribe_messages=True, timeout=0.5
                     )
                     if message and message["type"] == "message":
+                        if not _first_msg_logged:
+                            logger.info(f"[SSE] 첫 메시지 수신: channel={log_channel}")
+                            _first_msg_logged = True
+                        _no_msg_since = time.monotonic()
                         data = message["data"]
                         if data.startswith("__COMPLETED"):
                             # runner 종료 신호 — exit_reason 파싱 후 completed 이벤트 전송
@@ -156,6 +167,26 @@ class LogService:
                         consecutive_errors = 0
                     else:
                         now = time.monotonic()
+                        # Phase 2: pub/sub 메시지 없을 때 파일 폴링 fallback
+                        if now - _no_msg_since >= FILE_POLL_TIMEOUT:
+                            log_file = self._find_current_log(runner_id)
+                            if log_file and log_file.exists():
+                                if _file_pos == 0:
+                                    logger.warning(f"[SSE] pub/sub 미수신 {FILE_POLL_TIMEOUT:.0f}초 → 파일 폴링: {log_channel}")
+                                try:
+                                    with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                                        f.seek(_file_pos)
+                                        new_lines = f.read()
+                                        new_pos = f.tell()
+                                    if new_lines:
+                                        for poll_line in new_lines.splitlines():
+                                            stripped_line = poll_line.strip()
+                                            if stripped_line:
+                                                yield f"data: {stripped_line}\n\n"
+                                        _file_pos = new_pos
+                                        last_heartbeat = time.monotonic()
+                                except Exception as fe:
+                                    logger.debug(f"[SSE] 파일 폴링 실패: {fe}")
                         if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                             yield ": heartbeat\n\n"
                             last_heartbeat = now

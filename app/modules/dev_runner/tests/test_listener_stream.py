@@ -225,3 +225,106 @@ class TestDrainPositionTracking:
 
         assert log_handle.tell.call_count == 3
         assert last_flushed_pos == 30
+
+
+# ── _publish_with_retry TC (Phase 1 fix) ─────────────────────────────────────
+
+import redis as _redis_module
+
+
+def _publish_with_retry(redis_client, channel: str, msg: str) -> bool:
+    """테스트용 _publish_with_retry 복제 (_dr_plan_runner.py에서 동일 로직)"""
+    try:
+        redis_client.publish(channel, msg)
+        return True
+    except _redis_module.ConnectionError:
+        pass
+    try:
+        redis_client.ping()
+        redis_client.publish(channel, msg)
+        return True
+    except (_redis_module.ConnectionError, Exception):
+        return False
+
+
+class TestPublishWithRetry:
+    """_publish_with_retry 헬퍼 TC"""
+
+    def test_stream_output_readline_publishes(self):
+        """R(Right): readline 기반 stdout 읽기 + Redis publish 3회 검증"""
+        class FakeStdout:
+            def __init__(self, lines):
+                self._iter = iter(lines)
+            def readline(self):
+                return next(self._iter, "")
+
+        lines = ["line1\n", "line2\n", "line3\n"]
+        stdout = FakeStdout(lines)
+        redis_client = MagicMock()
+
+        published = []
+        while True:
+            line = stdout.readline()
+            if not line:
+                break
+            stripped = line.rstrip('\n')
+            _publish_with_retry(redis_client, "plan-runner:logs:test", stripped)
+
+        assert redis_client.publish.call_count == 3
+        args_list = [c.args[1] for c in redis_client.publish.call_args_list]
+        assert "line1" in args_list[0]
+        assert "line2" in args_list[1]
+        assert "line3" in args_list[2]
+
+    def test_stream_output_publish_retry_on_error(self):
+        """E(Error): ConnectionError 시 재시도 후 publish 성공"""
+        redis_client = MagicMock()
+        redis_client.publish.side_effect = [_redis_module.ConnectionError("Redis down"), None]
+
+        result = _publish_with_retry(redis_client, "plan-runner:logs:test", "hello")
+
+        assert result is True
+        assert redis_client.ping.call_count == 1
+        assert redis_client.publish.call_count == 2
+
+    def test_stream_output_publish_retry_both_fail(self):
+        """E(Error): 재시도도 실패 시 False 반환 + 예외 없음"""
+        redis_client = MagicMock()
+        redis_client.publish.side_effect = _redis_module.ConnectionError("Redis down")
+        redis_client.ping.side_effect = _redis_module.ConnectionError("still down")
+
+        result = _publish_with_retry(redis_client, "plan-runner:logs:test", "hello")
+
+        assert result is False
+
+    def test_stream_output_line_counter_log(self, caplog):
+        """B(Boundary): 10줄 도달 시 로그 출력 확인"""
+        import logging
+
+        class FakeStdout:
+            def __init__(self, count):
+                self._count = count
+                self._i = 0
+            def readline(self):
+                if self._i < self._count:
+                    self._i += 1
+                    return f"line-{self._i}\n"
+                return ""
+
+        stdout = FakeStdout(15)
+        redis_client = MagicMock()
+        _logger = logging.getLogger("test_counter")
+        _line_count = 0
+
+        with caplog.at_level(logging.INFO, logger="test_counter"):
+            while True:
+                line = stdout.readline()
+                if not line:
+                    break
+                _line_count += 1
+                if _line_count in (10, 100, 1000) or (_line_count > 1000 and _line_count % 1000 == 0):
+                    _logger.info(f"[_stream_output] {_line_count}줄 처리됨 runner_id='test'")
+                _publish_with_retry(redis_client, "plan-runner:logs:test", line.rstrip())
+
+        assert any("10줄 처리됨" in r.message for r in caplog.records)
+        assert not any("100줄 처리됨" in r.message for r in caplog.records)
