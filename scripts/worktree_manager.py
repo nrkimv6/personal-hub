@@ -131,12 +131,24 @@ class WorktreeManager:
         try:
             base_dir.mkdir(parents=True, exist_ok=True)
             ensure_main_branch(base_dir.parent)
-            result = subprocess.run(
-                ["git", "worktree", "add", str(worktree_path), "-b", branch],
+            # 브랜치 존재 여부 사전 확인: 존재 시 -b 없이 재사용
+            branch_check = subprocess.run(
+                ["git", "branch", "--list", branch],
                 capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent)
             )
+            branch_exists = bool(branch_check.stdout.strip())
+            if branch_exists:
+                result = subprocess.run(
+                    ["git", "worktree", "add", str(worktree_path), branch],
+                    capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent)
+                )
+            else:
+                result = subprocess.run(
+                    ["git", "worktree", "add", str(worktree_path), "-b", branch],
+                    capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent)
+                )
             if result.returncode != 0:
-                if "already exists" in result.stderr:
+                if "already exists" in result.stderr or "already checked out" in result.stderr:
                     # 워크트리 디렉토리가 실제로 존재하면 재사용 (커밋 보존)
                     if worktree_path.is_dir():
                         if WorktreeManager.validate(worktree_path):
@@ -167,23 +179,25 @@ class WorktreeManager:
                             capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent),
                         )
                         if result.returncode != 0:
-                            raise WorktreeError(f"git worktree add 실패 (기존 브랜치 재사용 시도): {result.stderr}")
+                            raise WorktreeError(f"git worktree add 실패 (기존 브랜치 재사용 시도): stderr={result.stderr.strip()}, stdout={result.stdout.strip()}")
                         logger.warning(f"[WorktreeManager] 미머지 커밋 보존 — 기존 브랜치 재사용: {branch}")
                     else:
                         # 미머지 커밋 없음(이미 머지됨 or 빈 브랜치): 기존 동작 유지
-                        subprocess.run(
+                        branch_del = subprocess.run(
                             ["git", "branch", "-D", branch],
-                            capture_output=True, cwd=str(base_dir.parent),
+                            capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent),
                         )
+                        if branch_del.returncode != 0:
+                            logger.warning(f"[WorktreeManager] branch -D 실패: {branch} — {branch_del.stderr.strip()}")
                         result = subprocess.run(
                             ["git", "worktree", "add", str(worktree_path), "-b", branch],
                             capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent),
                         )
                         if result.returncode != 0:
-                            raise WorktreeError(f"git worktree add 실패 (재시도 후): {result.stderr}")
+                            raise WorktreeError(f"git worktree add 실패 (재시도 후): stderr={result.stderr.strip()}, stdout={result.stdout.strip()}")
                         logger.warning(f"[WorktreeManager] dangling 브랜치 정리 후 재생성: {branch}")
                 else:
-                    raise WorktreeError(f"git worktree add 실패: {result.stderr}")
+                    raise WorktreeError(f"git worktree add 실패: stderr={result.stderr.strip()}, stdout={result.stdout.strip()}")
             WorktreeManager._apply_sparse_checkout(worktree_path)
             if not WorktreeManager.validate(worktree_path):
                 raise WorktreeError(f"worktree 생성 후 검증 실패 (.git 누락): {worktree_path}")
