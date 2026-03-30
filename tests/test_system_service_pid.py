@@ -86,6 +86,49 @@ class TestReadPidStatus:
 
 
 # ──────────────────────────────────────────────
+# Phase T1: _kill_pid_file BOM 단위 테스트
+# ──────────────────────────────────────────────
+
+class TestKillPidFile:
+    """_kill_pid_file BOM 처리 단위 테스트"""
+
+    def setup_method(self):
+        self.service = SystemService()
+
+    def _run(self, coro):
+        return asyncio.get_event_loop().run_until_complete(coro)
+
+    def test_kill_pid_file_with_bom(self, tmp_path):
+        """R(Right): BOM 포함 PID 파일 → 파싱 성공 (taskkill subprocess mock)"""
+        pid_file = tmp_path / "worker.pid"
+        pid_file.write_bytes(b'\xef\xbb\xbf1234\n')
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.wait = AsyncMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.read = AsyncMock(return_value=b'')
+
+        with patch('asyncio.create_subprocess_exec', new=AsyncMock(return_value=mock_proc)):
+            result = self._run(self.service._kill_pid_file(pid_file, "test_worker"))
+
+        success, msg = result
+        assert success is True
+        assert "1234" in msg
+
+    def test_kill_pid_file_garbage(self, tmp_path):
+        """E(Error): 숫자 아닌 내용 → (False, "...")"""
+        pid_file = tmp_path / "worker.pid"
+        pid_file.write_text("not-a-pid\n", encoding='ascii')
+
+        result = self._run(self.service._kill_pid_file(pid_file, "test_worker"))
+
+        success, msg = result
+        assert success is False
+        assert msg  # 에러 메시지 존재
+
+
+# ──────────────────────────────────────────────
 # Phase T3: 통합 테스트 (실제 파일 I/O)
 # ──────────────────────────────────────────────
 
@@ -110,6 +153,33 @@ class TestReadPidStatusIntegration:
         assert result["pid"] == 1, f"BOM 파싱 실패: pid={result['pid']}"
         # running 여부는 환경 의존 — 파싱 성공 여부만 검증
         assert isinstance(result["running"], bool)
+
+
+class TestKillPidFileIntegration:
+    """_kill_pid_file T3: 실제 파일 I/O, mock 없는 통합 테스트"""
+
+    def setup_method(self):
+        self.service = SystemService()
+
+    def _run(self, coro):
+        return asyncio.get_event_loop().run_until_complete(coro)
+
+    def test_kill_pid_file_bom_real(self, tmp_path):
+        """T3: 실제 tmp 파일에 BOM PID 기록 → _kill_pid_file 파싱 성공 확인 (subprocess mock)"""
+        pid_file = tmp_path / "worker.pid"
+        pid_file.write_bytes(b'\xef\xbb\xbf5678\r\n')
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.wait = AsyncMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.read = AsyncMock(return_value=b'')
+
+        with patch('asyncio.create_subprocess_exec', new=AsyncMock(return_value=mock_proc)):
+            success, msg = self._run(self.service._kill_pid_file(pid_file, "integration_worker"))
+
+        assert success is True, f"BOM PID 파싱 실패: {msg}"
+        assert "5678" in msg
 
 
 # ──────────────────────────────────────────────

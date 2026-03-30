@@ -135,7 +135,7 @@ class HealthMonitorService:
             return None
 
         try:
-            return int(pid_file.read_text().strip())
+            return int(pid_file.read_text(encoding='utf-8-sig').strip())
         except (ValueError, IOError) as e:
             logger.debug(f"PID 파일 읽기 실패 ({service_name}): {e}")
             return None

@@ -321,7 +321,7 @@ if ($tasks) {{
         if not pid_file.exists():
             return False, f"{label}: PID 파일 없음"
         try:
-            pid = int(pid_file.read_text().strip())
+            pid = int(pid_file.read_text(encoding='utf-8-sig').strip())
             proc = await asyncio.create_subprocess_exec(
                 "taskkill", "/PID", str(pid), "/F",
                 stdout=asyncio.subprocess.PIPE,
