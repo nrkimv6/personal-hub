@@ -56,6 +56,9 @@
     return Object.values(status.projects).flatMap(p => p.worker_processes);
   });
 
+  let workerTierProcs = $derived(allWorkers.filter(w => w.tier !== 'infra'));
+  let infraTierProcs = $derived(allWorkers.filter(w => w.tier === 'infra'));
+
   let allTasks = $derived.by(() => {
     if (!status) return [];
     return Object.values(status.projects).flatMap(p => p.scheduled_tasks);
@@ -367,6 +370,16 @@
     actionLoading = `worker-${name}`;
     try {
       await serviceDashboardApi.restartWorker(name);
+      await fetchStatus();
+    } catch (e) {
+      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally { actionLoading = null; }
+  }
+
+  async function restartInfra(name: string, label: string) {
+    actionLoading = `infra-${name}`;
+    try {
+      await serviceDashboardApi.restartInfra(name);
       await fetchStatus();
     } catch (e) {
       alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
@@ -773,7 +786,7 @@
           </div>
         </div>
 
-        {#each allWorkers as proc}
+        {#each workerTierProcs as proc}
           {@const ws = workerStatusText(proc)}
           <div class="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 rounded transition-colors">
             <StatusDot variant={workerVariant(proc)} size="sm" pulse={workerVariant(proc) === 'success'} />
@@ -799,7 +812,7 @@
 
               <span class="text-[11px] font-medium text-{ws.variant}">{ws.text}</span>
 
-              {#if proc.worker && proc.name !== 'api_watchdog'}
+              {#if proc.worker}
                 <button
                   onclick={() => showConfirm('워커 재시작', `"${proc.label}" 워커를 재시작합니다.`, () => restartSingleWorker(proc.name, proc.label))}
                   disabled={actionLoading === `worker-${proc.name}`}
@@ -811,6 +824,47 @@
             </div>
           </div>
         {/each}
+
+        {#if infraTierProcs.length > 0}
+          <div class="border-t border-border mt-2 pt-2">
+            <span class="text-xs text-muted-foreground px-3">인프라</span>
+            {#each infraTierProcs as proc}
+              {@const ws = workerStatusText(proc)}
+              <div class="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 rounded transition-colors">
+                <StatusDot variant={workerVariant(proc)} size="sm" pulse={workerVariant(proc) === 'success'} />
+                <span class="font-medium text-sm text-foreground">{proc.label}</span>
+                <span class="font-mono text-[11px] text-muted-foreground hidden sm:inline">{proc.name}</span>
+
+                <div class="ml-auto flex items-center gap-3 shrink-0">
+                  <span class="flex items-center gap-1">
+                    {#if proc.watchdog}
+                      <span
+                        class="inline-block w-1.5 h-1.5 rounded-full {proc.watchdog.running ? 'bg-success' : 'bg-muted-foreground/30'}"
+                        title="Watchdog: {proc.watchdog.running ? `Running (PID: ${proc.watchdog.pid})` : 'Stopped'}"
+                      ></span>
+                    {/if}
+                    {#if proc.worker}
+                      <span
+                        class="inline-block w-1.5 h-1.5 rounded-full {proc.worker.running ? 'bg-success' : 'bg-muted-foreground/30'}"
+                        title="Worker: {proc.worker.running ? `Running (PID: ${proc.worker.pid})` : 'Stopped'}"
+                      ></span>
+                    {/if}
+                  </span>
+
+                  <span class="text-[11px] font-medium text-{ws.variant}">{ws.text}</span>
+
+                  <button
+                    onclick={() => showConfirm('인프라 재시작', `"${proc.label}" 인프라를 재시작합니다.`, () => restartInfra(proc.name, proc.label))}
+                    disabled={actionLoading === `infra-${proc.name}`}
+                    class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  >
+                    재시작
+                  </button>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
 
         {#if allWorkers.length === 0}
           <p class="text-sm text-muted-foreground py-4 text-center">워커 정보가 없습니다.</p>

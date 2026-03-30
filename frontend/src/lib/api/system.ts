@@ -976,6 +976,7 @@ export interface WorkerProcess {
   name: string;
   label: string;
   project: string;
+  tier: string;
   watchdog: ProcessStatus | null;
   worker: ProcessStatus | null;
 }
@@ -1083,6 +1084,12 @@ export const serviceDashboardApi = {
   // Redis 재시작
   restartRedis: () =>
     request<{ success: boolean; message: string }>('/system/services/redis/restart', {
+      method: 'POST'
+    }),
+
+  // infra 프로세스 개별 재시작 (Redis infra:commands 경유)
+  restartInfra: (name: string) =>
+    request<{ success: boolean; message: string }>(`/system/services/infra/${name}/restart`, {
       method: 'POST'
     }),
 

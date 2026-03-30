@@ -126,6 +126,14 @@ class BrowserWorkerManager:
                 "role": "claude_watchdog",
             },
             {
+                "name": "Infra Command Listener",
+                "pid_file": f"infra_command_listener{self.pid_suffix}.pid",
+                "cmd": [str(self.python_exe),
+                        str(self.scripts_dir / "infra-command-listener.py")],
+                "env": {},
+                "role": "infra_listener",
+            },
+            {
                 "name": "Command Listener Watchdog",
                 "pid_file": f"command_listener_watchdog{self.pid_suffix}.pid",
                 "cmd": [_ps_alias("monitorpage-wdog-cmd.exe"), "-ExecutionPolicy", "Bypass", "-File",
@@ -661,6 +669,105 @@ class BrowserWorkerManager:
             print(f"  {RED}[-] 좀비 정리 실패: {e}{RESET}")
         print()
 
+    # ── restart-listener ─────────────────────────────────────────
+    def restart_listener(self):
+        """command_listener watchdog+worker를 kill 후 재시작한다."""
+        print(f"\n{CYAN}{'=' * 40}")
+        print(f"  Restarting Command Listener")
+        print(f"{'=' * 40}{RESET}\n")
+
+        # watchdog + worker PID kill
+        listener_pids = [
+            self.pid_dir / f"command_listener_watchdog{self.pid_suffix}.pid",
+            self.pid_dir / f"command_listener{self.pid_suffix}.pid",
+        ]
+        for pid_path in listener_pids:
+            pid = read_pid_file(pid_path)
+            if pid and is_process_alive(pid):
+                cprint(f"Stopping {pid_path.name} (PID: {pid})...", YELLOW)
+                kill_pid(pid)
+            remove_pid_file(pid_path)
+
+        time.sleep(1)
+
+        # Command Listener Watchdog만 재시작
+        for w in self.workers:
+            if w["role"] != "listener":
+                continue
+            pid_path = self.pid_dir / w["pid_file"]
+            pid = read_pid_file(pid_path)
+            if pid and is_process_alive(pid):
+                cprint(f"{w['name']}: already running (PID: {pid})", YELLOW)
+                continue
+            cprint(f"Starting {w['name']}...")
+            env = {**os.environ, **w["env"]}
+            proc = tracked_popen_sync(
+                w["cmd"],
+                role=w.get("role", "watchdog"),
+                cwd=str(PROJECT_ROOT),
+                env=env,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            write_pid_file(pid_path, proc.pid)
+            cprint(f"{w['name']} started (PID: {proc.pid})", GREEN)
+
+    # ── restart-infra ─────────────────────────────────────────────
+    def restart_infra(self, target: str):
+        """지정 infra 프로세스(target)의 watchdog+worker를 kill 후 watchdog만 재시작한다."""
+        print(f"\n{CYAN}{'=' * 40}")
+        print(f"  Restarting Infra: {target}")
+        print(f"{'=' * 40}{RESET}\n")
+
+        # config에서 infra workers 로드해 name 매칭
+        try:
+            from app.modules.system.config import MANAGED_PROJECTS
+            proj = MANAGED_PROJECTS.get("monitor-page", {})
+            workers_cfg = proj.get("workers", {}).get("items", [])
+            infra_items = [w for w in workers_cfg if w.get("tier") == "infra" and w["name"] == target]
+        except Exception as e:
+            cprint(f"config 로드 실패: {e}", RED)
+            return
+
+        if not infra_items:
+            cprint(f"infra 항목 없음: {target}", RED)
+            return
+
+        item = infra_items[0]
+        pid_dir = PROJECT_ROOT / proj["workers"]["pid_dir"]
+
+        for pid_key in ("watchdog_pid_file", "worker_pid_file"):
+            pf = item.get(pid_key)
+            if not pf:
+                continue
+            pid_path = pid_dir / pf
+            pid = read_pid_file(pid_path)
+            if pid and is_process_alive(pid):
+                cprint(f"Stopping {pf} (PID: {pid})...", YELLOW)
+                kill_pid(pid)
+            remove_pid_file(pid_path)
+
+        time.sleep(1)
+
+        # watchdog 재시작 (self.workers에서 name 매칭)
+        # command_listener 는 별도 restart_listener 사용; 여기선 나머지 infra 처리
+        for w in self.workers:
+            # pid_file 명으로 매칭 (watchdog_pid_file)
+            wdog_pf = item.get("watchdog_pid_file")
+            if not wdog_pf or w["pid_file"] != wdog_pf:
+                continue
+            pid_path = self.pid_dir / w["pid_file"]
+            cprint(f"Starting {w['name']}...")
+            env = {**os.environ, **w["env"]}
+            proc = tracked_popen_sync(
+                w["cmd"],
+                role=w.get("role", "watchdog"),
+                cwd=str(PROJECT_ROOT),
+                env=env,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            write_pid_file(pid_path, proc.pid)
+            cprint(f"{w['name']} started (PID: {proc.pid})", GREEN)
+
     # ── legacy cleanup ───────────────────────────────────────────
     def _cleanup_legacy(self):
         for pf in self.legacy_pid_files:
@@ -676,9 +783,10 @@ def main():
     parser = argparse.ArgumentParser(description="Browser Workers Management")
     parser.add_argument(
         "action",
-        choices=["start", "stop", "restart", "status", "restart-api", "restart-frontend", "redis-status", "redis-restart", "redis-cleanup"],
+        choices=["start", "stop", "restart", "status", "restart-api", "restart-frontend", "redis-status", "redis-restart", "redis-cleanup", "restart-listener", "restart-infra"],
         help="Action to perform",
     )
+    parser.add_argument("target", nargs="?", default=None, help="Target name for restart-infra")
     args = parser.parse_args()
 
     mgr = BrowserWorkerManager()
@@ -692,6 +800,8 @@ def main():
         "redis-status": mgr.redis_status,
         "redis-restart": mgr.redis_restart,
         "redis-cleanup": mgr.redis_cleanup,
+        "restart-listener": mgr.restart_listener,
+        "restart-infra": lambda: mgr.restart_infra(args.target or ""),
     }
     action_map[args.action]()
 

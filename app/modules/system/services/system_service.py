@@ -228,6 +228,7 @@ if ($tasks) {{
                     "name": worker["name"],
                     "label": worker.get("label", worker["name"]),
                     "project": project_name,
+                    "tier": worker.get("tier", "worker"),
                     "watchdog": None,
                     "worker": None,
                 }
@@ -382,6 +383,55 @@ if ($tasks) {{
             parts.append(f"실패: {', '.join(failed)}")
         parts.append("watchdog가 자동 재시작합니다.")
         return {"success": len(killed) > 0, "message": " | ".join(parts)}
+
+    async def restart_infra(self, name: str) -> dict:
+        """infra tier 프로세스 개별 재시작. Redis infra:commands 경유."""
+        pid_dir, items = self._get_monitor_page_workers()
+        if not items:
+            return {"success": False, "message": "워커 설정을 찾을 수 없습니다."}
+
+        # infra tier 항목 중 name 매칭 확인
+        infra_item = next(
+            (item for item in items if item.get("tier") == "infra" and item["name"] == name),
+            None,
+        )
+        if not infra_item:
+            return {"success": False, "message": f"infra 항목 없음: {name}"}
+
+        from app.shared.redis.client import RedisClient
+
+        redis_client = await RedisClient.get_client()
+        if not redis_client:
+            return {"success": False, "message": "Redis 연결 없음"}
+
+        try:
+            # command_listener 재시작은 restart-listener 액션 사용
+            if name == "command_listener":
+                action = "restart-listener"
+                command = json.dumps({
+                    "action": action,
+                    "source": "system-api",
+                })
+            else:
+                action = "restart-infra"
+                command = json.dumps({
+                    "action": action,
+                    "target": name,
+                    "source": "system-api",
+                })
+
+            await redis_client.delete("infra:command_results")
+            await redis_client.lpush("infra:commands", command)
+
+            result = await redis_client.brpop("infra:command_results", timeout=30)
+            if result:
+                _, result_data = result
+                result_json = json.loads(result_data) if isinstance(result_data, str) else json.loads(result_data.decode())
+                return {"success": result_json.get("success", False), "message": result_json.get("message", "완료")}
+            else:
+                return {"success": False, "message": "Infra Command Listener 응답 타임아웃 (30초)"}
+        except Exception as e:
+            return {"success": False, "message": f"Redis 명령 전송 실패: {str(e)}"}
 
     async def stop_watchdogs(self) -> dict:
         """worker tier watchdog + 워커 프로세스를 kill. infra tier는 유지."""

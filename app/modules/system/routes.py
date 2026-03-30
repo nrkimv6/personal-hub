@@ -151,6 +151,13 @@ async def restart_single_worker(name: str):
     return result
 
 
+@router.post("/services/infra/{name}/restart")
+async def restart_infra(name: str):
+    """Restart an infra tier process by name (via Redis infra:commands)"""
+    result = await _service.restart_infra(name)
+    return result
+
+
 @router.post("/services/watchdogs/stop")
 async def stop_watchdogs():
     """Stop all watchdog processes"""
