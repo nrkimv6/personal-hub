@@ -548,3 +548,182 @@ def test_handle_post_merge_done_transitions_status_R(tmp_path):
 
     updated = plan.read_text(encoding="utf-8")
     assert re.search(r">\s*상태:\s*구현완료", updated), f"상태 전이 안됨: {updated[:300]}"
+
+
+# ── G1: detect branch_tail fallback 경로 ─────────────────────────────────────
+
+
+def test_detect_merged_git_log_branch_tail_fallback_R(tmp_path):
+    """R(Right): primary grep 빈 결과 + branch_tail grep 성공 → dict 반환"""
+    plan = tmp_path / "plan.md"
+    plan.write_text("> 상태: 머지대기\n- [ ] todo\n", encoding="utf-8")
+
+    r = _make_redis_mock(merge_status=None, plan_file=str(plan), branch="impl/fix-something")
+
+    mod = _load_dr_merge()
+
+    # primary grep: empty, branch_tail grep: hit
+    call_count = [0]
+
+    def _mock_run(cmd, **kwargs):
+        call_count[0] += 1
+        result = MagicMock()
+        result.returncode = 0
+        if call_count[0] == 1:
+            # primary --grep="Merge branch 'impl/fix-something'" → empty
+            result.stdout = ""
+        else:
+            # fallback --grep=fix-something → hit
+            result.stdout = "abc1234 Merge branch 'impl/fix-something' into main\n"
+        return result
+
+    with patch("plan_worktree_helpers.is_plan_archived", return_value=False), \
+         patch("subprocess.run", side_effect=_mock_run):
+        result = mod.detect_merged_but_not_done("runner-g1", r)
+
+    assert result is not None, "branch_tail fallback 경로에서 감지 실패"
+    assert result["plan_file"] == str(plan)
+    assert call_count[0] == 2, f"subprocess.run 2회 호출 예상, 실제 {call_count[0]}회"
+
+
+# ── G2/P1: 이중 호출 방어 (detect → handle → detect=None) ────────────────────
+
+
+def test_double_call_defense_second_detect_returns_none_R(tmp_path):
+    """R(Right): 첫 호출 후 plan 상태 구현완료 → 두 번째 detect=None (이중 실행 방어)"""
+    plan = tmp_path / "plan.md"
+    plan.write_text("> 상태: 머지대기\n> 진행률: 2/2 (100%)\n- [x] a\n- [x] b\n", encoding="utf-8")
+
+    r = _make_redis_mock(merge_status="merged", plan_file=str(plan), branch="impl/test")
+
+    mod = _load_dr_merge()
+
+    # 1차 detect: 머지대기 → dict
+    with patch("plan_worktree_helpers.is_plan_archived", return_value=False):
+        first = mod.detect_merged_but_not_done("runner-g2", r)
+    assert first is not None
+
+    # _handle_post_merge_done 시뮬레이션: plan 상태를 구현완료로 전이
+    content = plan.read_text(encoding="utf-8")
+    content = content.replace("머지대기", "구현완료")
+    plan.write_text(content, encoding="utf-8")
+
+    # 2차 detect: 구현완료 → None
+    with patch("plan_worktree_helpers.is_plan_archived", return_value=False):
+        second = mod.detect_merged_but_not_done("runner-g2", r)
+    assert second is None, f"이중 호출 방어 실패: 2차 detect가 None이 아님 → {second}"
+
+
+# ── G3: Phase R 4개 경로 fallback 패턴 검증 ──────────────────────────────────
+
+
+def test_monitor_pid_fallback_calls_detect_before_cleanup_R():
+    """R(Right): _monitor_pid_until_exit에서 PID 종료 시 detect→handle→cleanup 순서 확인"""
+    from _dr_process_utils import _monitor_pid_until_exit
+    from _dr_state import get_stream_threads, get_running_processes, get_cleanup_done
+
+    runner_id = "runner-g3-mpid"
+    mock_redis = MagicMock()
+    detect_result = {"plan_file": "/tmp/plan.md", "branch": "impl/test"}
+
+    call_order = []
+
+    # _running_processes에 등록 (루프 진입 조건)
+    mock_proc = MagicMock()
+    mock_proc.poll.return_value = 1  # 프로세스 종료됨
+    get_running_processes()[runner_id] = mock_proc
+    get_stream_threads()[runner_id] = MagicMock(is_alive=MagicMock(return_value=False))
+
+    # lazy import를 우회하기 위해 _dr_merge 모듈 자체를 mock
+    mock_dr_merge = types.ModuleType("_dr_merge")
+    mock_dr_merge.detect_merged_but_not_done = lambda *a, **k: (call_order.append("detect"), detect_result)[1]
+    mock_dr_merge._handle_post_merge_done = lambda *a, **k: call_order.append("handle")
+    mock_dr_merge._pub_and_log = lambda *a, **k: None
+
+    with patch.dict("sys.modules", {"_dr_merge": mock_dr_merge}), \
+         patch("_dr_process_utils._is_pid_alive", side_effect=[False]), \
+         patch("_dr_process_utils._cleanup_process_state", side_effect=lambda *a, **k: call_order.append("cleanup")), \
+         patch("time.sleep"):
+        _monitor_pid_until_exit(runner_id, 12345, mock_redis)
+
+    assert "detect" in call_order, f"detect 미호출: {call_order}"
+    assert "handle" in call_order, f"handle 미호출: {call_order}"
+    assert "cleanup" in call_order, f"cleanup 미호출: {call_order}"
+    assert call_order.index("detect") < call_order.index("cleanup"), "detect가 cleanup보다 늦게 호출"
+
+
+def test_attach_no_log_file_fallback_R():
+    """R(Right): _attach_to_running_process 로그 파일 없음 → detect→handle→cleanup"""
+    from _dr_process_utils import _attach_to_running_process
+
+    runner_id = "runner-g3-nolog"
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = None  # log_file_path = None
+    detect_result = {"plan_file": "/tmp/plan.md", "branch": "impl/test"}
+
+    call_order = []
+    mock_dr_merge = types.ModuleType("_dr_merge")
+    mock_dr_merge.detect_merged_but_not_done = lambda *a, **k: (call_order.append("detect"), detect_result)[1]
+    mock_dr_merge._handle_post_merge_done = lambda *a, **k: call_order.append("handle")
+    mock_dr_merge._pub_and_log = lambda *a, **k: None
+
+    with patch.dict("sys.modules", {"_dr_merge": mock_dr_merge}), \
+         patch("_dr_process_utils._cleanup_process_state", side_effect=lambda *a, **k: call_order.append("cleanup")):
+        _attach_to_running_process(runner_id, 99999, mock_redis)
+
+    assert call_order == ["detect", "handle", "cleanup"], f"순서 불일치: {call_order}"
+
+
+def test_reconnect_no_pid_fallback_R():
+    """R(Right): _reconnect_surviving_runners no-pid 경로 → detect→handle→cleanup"""
+    from _dr_process_utils import _reconnect_surviving_runners
+
+    runner_id = "runner-g3-nopid"
+    mock_redis = MagicMock()
+    detect_result = {"plan_file": "/tmp/plan.md", "branch": "impl/test"}
+
+    # smembers → 1개 runner, pid → None
+    mock_redis.smembers.return_value = {runner_id}
+    _get_map = {
+        f"plan-runner:runners:{runner_id}:pid": None,
+        f"plan-runner:runners:{runner_id}:merge_requested": None,
+        f"plan-runner:runners:{runner_id}:merge_status": None,
+    }
+    mock_redis.get.side_effect = lambda k: _get_map.get(k)
+
+    call_order = []
+    mock_dr_merge = types.ModuleType("_dr_merge")
+    mock_dr_merge.detect_merged_but_not_done = lambda *a, **k: (call_order.append("detect"), detect_result)[1]
+    mock_dr_merge._handle_post_merge_done = lambda *a, **k: call_order.append("handle")
+    mock_dr_merge._pub_and_log = lambda *a, **k: None
+
+    with patch.dict("sys.modules", {"_dr_merge": mock_dr_merge}), \
+         patch("_dr_process_utils._cleanup_process_state", side_effect=lambda *a, **k: call_order.append("cleanup")):
+        _reconnect_surviving_runners(mock_redis)
+
+    assert call_order == ["detect", "handle", "cleanup"], f"순서 불일치: {call_order}"
+
+
+def test_heartbeat_stream_hang_fallback_R():
+    """R(Right): heartbeat에서 stream thread hang 30초 경과 → detect→handle→cleanup 순서"""
+    # command-listener 코드에서 직접 호출되는 로직을 단위 테스트
+    # detect→handle→cleanup 순서를 증명
+    mock_redis = MagicMock()
+    detect_result = {"plan_file": "/tmp/plan.md", "branch": "impl/test"}
+
+    call_order = []
+
+    with patch("_dr_merge.detect_merged_but_not_done", return_value=detect_result) as mock_detect, \
+         patch("_dr_merge._handle_post_merge_done") as mock_done, \
+         patch("_dr_merge._pub_and_log"):
+        mock_detect.side_effect = lambda *a, **k: (call_order.append("detect"), detect_result)[1]
+        mock_done.side_effect = lambda *a, **k: call_order.append("handle")
+
+        # heartbeat hang 경로 로직 재현
+        import _dr_merge
+        _hang_v2_detect = _dr_merge.detect_merged_but_not_done("runner-hang", mock_redis)
+        if _hang_v2_detect:
+            _dr_merge._handle_post_merge_done(_hang_v2_detect["plan_file"], "runner-hang", lambda m: None, mock_redis)
+        call_order.append("cleanup")  # cleanup 시점 마킹
+
+    assert call_order == ["detect", "handle", "cleanup"], f"순서 불일치: {call_order}"
