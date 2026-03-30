@@ -359,9 +359,10 @@ if (Test-Path $planRunnerLogDir) {
 }
 
 # Plan-runner 표시 이름 추출: "2026-02-25_smart-push-auto-rebase.md" → "smart-push"
+# plan_file이 없는 TC runner는 Fallback(runner_id)을 반환
 function Get-PlanRunnerDisplayName {
-    param([string]$PlanFile)
-    if (-not $PlanFile) { return "unknown" }
+    param([string]$PlanFile, [string]$Fallback = "unknown")
+    if (-not $PlanFile) { return $Fallback }
     $basename = [System.IO.Path]::GetFileNameWithoutExtension($PlanFile)
     # 날짜 prefix 제거 (YYYY-MM-DD_ 패턴)
     $basename = $basename -replace '^\d{4}-\d{2}-\d{2}_', ''
@@ -374,10 +375,13 @@ function Get-PlanRunnerDisplayName {
 }
 
 # plan-runner 로그 파일명에서 식별자 추출
-# plan-runner-{runner_id}-{YYYYMMDD-HHmmss}.log → "{runner_id}" (8자 hex)
-# 구버전 plan-runner-{YYYYMMDD-HHmmss}.log → "{HHmmss}"
+# TC runner:  plan-runner-t-{name}-{YYYYMMDD-HHmmss}.log → "t-{name}" (이름에 하이픈 포함 가능)
+# 신규 형식:  plan-runner-{8자hex}-{YYYYMMDD-HHmmss}.log → "{8자hex}"
+# 구버전:     plan-runner-{YYYYMMDD-HHmmss}.log → "{HHmmss}"
 function Get-PlanRunnerFileId {
     param([string]$FileName)
+    # TC runner 형식: plan-runner-t-{name...}-YYYYMMDD-HHmmss.log (이름에 하이픈 포함 가능)
+    if ($FileName -match 'plan-runner-(t-.+)-\d{8}-\d{6}') { return $Matches[1] }
     # 신규 형식: plan-runner-{8자hex}-YYYYMMDD-HHmmss.log → runner_id 추출
     if ($FileName -match 'plan-runner-([0-9a-f]{8})-\d{8}-\d{6}') { return $Matches[1] }
     # 구버전 형식: plan-runner-YYYYMMDD-HHmmss.log → HHmmss 추출
@@ -421,7 +425,7 @@ except Exception:
 
     $runners = $jsonOut | ConvertFrom-Json
     foreach ($r in $runners) {
-        $displayName = Get-PlanRunnerDisplayName -PlanFile ([System.IO.Path]::GetFileName($r.planFile))
+        $displayName = Get-PlanRunnerDisplayName -PlanFile ([System.IO.Path]::GetFileName($r.planFile)) -Fallback $r.rid
         $shortId = $r.rid.Substring(0, [Math]::Min(4, $r.rid.Length))
         $result += @{
             RunnerId    = $r.rid
