@@ -396,13 +396,13 @@ def _recover_pending_merge(runner_id: str, redis_client: redis.Redis, merge_stat
 
     try:
         if merge_status in ("merging", "resolving"):
-            # stale lock 해제 후 queued로 재설정
+            # stale lock 해제 후 merge_status 삭제. _do_inline_merge가 acquire 시 queued로 재설정
             try:
                 release_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT))
                 logger.info(f"[recover_merge] runner {runner_id} stale merge lock 해제 (merge_status={merge_status})")
             except Exception as _e:
                 logger.debug(f"[recover_merge] lock 해제 실패 (무시): {_e}")
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
             # merge_requested 플래그가 없으면 새로 설정 (재진입 용)
             _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
             if not _mr:

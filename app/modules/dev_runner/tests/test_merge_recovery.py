@@ -43,7 +43,7 @@ def _recover_pending_merge_impl(runner_id, redis_client, merge_status,
             release_fn(redis_client, runner_id)
         except Exception:
             pass
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
         _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
         if not _mr:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
@@ -96,7 +96,7 @@ class TestRecoverPendingMerge:
         _recover_pending_merge_impl("abc", redis_client, "resolving",
                                     MagicMock(), MagicMock())
 
-        assert store.get(f"{RUNNER_KEY_PREFIX}:abc:merge_status") == "queued"
+        assert store.get(f"{RUNNER_KEY_PREFIX}:abc:merge_status") is None
 
     def test_resolving_sets_merge_requested_flag(self):
         """R(Right): resolving 복구 후 merge_requested 플래그 설정"""
