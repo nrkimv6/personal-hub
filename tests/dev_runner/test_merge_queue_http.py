@@ -388,3 +388,80 @@ class TestMergeQueueHTTP:
             resp_status = api_client.get(f"{BASE_URL}/merge/h3_runner")
         assert resp_status.status_code == 200
         assert resp_status.json()["status"] == "merging"
+
+
+# ---------------------------------------------------------------------------
+# Phase T4: get_merge_status E2E + POST /merge-queue route 제거 확인
+# ---------------------------------------------------------------------------
+
+@pytest.mark.e2e
+class TestMergeStatusE2E:
+    """T4: get_merge_status 올바른 키 반환 + enqueue route 제거 E2E"""
+
+    def test_get_merge_status_e2e_returns_status(self, api_client_e2e):
+        """GET /merge/{rid} — get_merge_status mock dict 반환 시 200"""
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_status",
+            new=AsyncMock(return_value={
+                "runner_id": "e2e-rid",
+                "status": "merged",
+                "test_passed": True,
+                "fix_attempts": 0,
+                "message": "",
+            })
+        ):
+            resp = api_client_e2e.get("/api/v1/dev-runner/merge/e2e-rid")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "merged"
+        assert resp.json()["runner_id"] == "e2e-rid"
+
+    def test_get_merge_status_e2e_404_when_missing(self, api_client_e2e):
+        """GET /merge/{rid} — get_merge_status None 반환 시 404"""
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_status",
+            new=AsyncMock(return_value=None)
+        ):
+            resp = api_client_e2e.get("/api/v1/dev-runner/merge/missing-runner")
+        assert resp.status_code == 404
+
+    def test_post_merge_queue_route_removed(self, api_client_e2e):
+        """POST /merge-queue route가 제거되어 404/405 반환"""
+        resp = api_client_e2e.post("/api/v1/dev-runner/merge-queue")
+        assert resp.status_code in (404, 405)
+
+
+# ---------------------------------------------------------------------------
+# Phase T5: get_merge_status HTTP 통합 TC
+# ---------------------------------------------------------------------------
+
+class TestMergeStatusHTTP:
+    """T5: GET /merge/{rid} HTTP 통합 TC (http marker via pytestmark)"""
+
+    def test_merge_status_http_correct_key(self, api_client):
+        """GET /merge/{rid} HTTP — mock dict 반환 시 status 필드 검증"""
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_status",
+            new=AsyncMock(return_value={
+                "runner_id": "http-runner",
+                "status": "merging",
+                "test_passed": None,
+                "fix_attempts": 1,
+                "message": "",
+            })
+        ):
+            resp = api_client.get(f"{BASE_URL}/merge/http-runner")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "merging"
+        assert data["runner_id"] == "http-runner"
+        assert "test_passed" in data
+        assert "fix_attempts" in data
+
+    def test_merge_status_http_not_found(self, api_client):
+        """GET /merge/{rid} HTTP — mock None 반환 시 404"""
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_status",
+            new=AsyncMock(return_value=None)
+        ):
+            resp = api_client.get(f"{BASE_URL}/merge/no-runner")
+        assert resp.status_code == 404
