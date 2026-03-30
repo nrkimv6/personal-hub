@@ -9,7 +9,13 @@ from fastapi.testclient import TestClient
 from app.main import app
 import redis
 
-from tests.dev_runner.conftest_e2e import TEST_PLAN_FILE
+import redis.asyncio as aioredis
+from tests.dev_runner.conftest_e2e import (
+    TEST_PLAN_FILE,
+    isolated_redis,
+    listener_process,
+    REDIS_TEST_DB,
+)
 
 pytestmark = pytest.mark.http
 
@@ -18,98 +24,30 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 BASE_URL = "/api/v1/dev-runner"
 
-@pytest.fixture(scope="module")
-def api_client():
-    return TestClient(app)
 
-def _cleanup_test_worktree():
-    """테스트용 worktree/branch 정리 (중복 실행 방지)"""
-    try:
-        worktree_path = Path(".worktrees/test_e2e_plan")
-        subprocess.run(
-            ["git", "worktree", "remove", str(worktree_path), "--force"],
-            capture_output=True, cwd=str(Path("."))
-        )
-    except Exception:
-        pass
-    try:
-        subprocess.run(
-            ["git", "branch", "-D", "plan/test_e2e_plan"],
-            capture_output=True, cwd=str(Path("."))
-        )
-    except Exception:
-        pass
-
-
-REDIS_TEST_DB = 15
-
-@pytest.fixture(scope="module")
-def background_listener():
-    import redis.asyncio as aioredis
-    from app.modules.dev_runner.services import executor_service as es_module
-
-    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
-    # FORCE CLEANUP
-    r.delete("plan-runner:state:status")
-    r.delete("plan-runner:state:pid")
-    r.delete("plan-runner:listener:heartbeat")
-    # 이전 테스트 실행에서 남은 stale worktree 정리
-    _cleanup_test_worktree()
-
-    script_path = Path("scripts/dev-runner-command-listener.py")
-    process = subprocess.Popen(
-        [sys.executable, str(script_path), "--redis-db", str(REDIS_TEST_DB)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-
-    # Wait for heartbeat (최대 15초)
-    heartbeat_ok = False
-    for _ in range(30):
-        if r.get("plan-runner:listener:heartbeat"):
-            heartbeat_ok = True
-            break
-        time.sleep(0.5)
-    if not heartbeat_ok:
-        process.terminate()
-        pytest.fail("background_listener가 15초 안에 heartbeat를 설정하지 못했습니다.")
-
-    # executor_service의 Redis 클라이언트를 db=15로 교체 (API-Listener 격리 일치)
-    old_redis = es_module.executor_service.redis_client
-    old_async_redis = es_module.executor_service.async_redis
-    new_redis = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True,
-                            socket_connect_timeout=5, socket_timeout=10)
-    new_async_redis = aioredis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True,
-                                     socket_connect_timeout=5, socket_timeout=35)
-    es_module.executor_service.redis_client = new_redis
-    es_module.executor_service.async_redis = new_async_redis
-
-    # conftest guard가 PLAN_RUNNER_REDIS_DB 환경변수를 검사하므로 db=15로 설정
-    old_plan_runner_redis_db = os.environ.get("PLAN_RUNNER_REDIS_DB")
-    os.environ["PLAN_RUNNER_REDIS_DB"] = str(REDIS_TEST_DB)
-
-    yield process
-
-    # 환경변수 복원
-    if old_plan_runner_redis_db is not None:
-        os.environ["PLAN_RUNNER_REDIS_DB"] = old_plan_runner_redis_db
-    else:
-        os.environ.pop("PLAN_RUNNER_REDIS_DB", None)
-
-    # 원래 Redis 클라이언트 복원
-    es_module.executor_service.redis_client = old_redis
-    es_module.executor_service.async_redis = old_async_redis
-
-    if process.poll() is None:
-        process.terminate()
-        process.wait(timeout=5)
-    # 테스트 완료 후 worktree 정리
-    _cleanup_test_worktree()
 
 class TestHttpE2EChain:
+    """T5: TestClient 기반 HTTP E2E — isolated_redis + listener_process(db=15) 격리"""
+
     @pytest.fixture(autouse=True)
-    def cleanup_redis_after_test(self, api_client):
+    def setup_async_redis_db15(self, isolated_redis):
+        """executor_service의 async_redis를 db=15로 교체 (TestClient 이벤트루프 호환)
+
+        isolated_redis.reconnect()는 redis_client를 교체하지만 async_redis는
+        TestClient 이벤트루프 컨텍스트에서 여전히 구버전 연결을 사용할 수 있음.
+        명시적으로 교체하여 listener(db=15)와 동일한 DB를 바라보게 함.
+        """
+        from app.modules.dev_runner.services import executor_service as es_module
+        old_async_redis = es_module.executor_service.async_redis
+        es_module.executor_service.async_redis = aioredis.Redis(
+            host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB,
+            decode_responses=True, socket_connect_timeout=5, socket_timeout=35,
+        )
+        yield
+        es_module.executor_service.async_redis = old_async_redis
+
+    @pytest.fixture(autouse=True)
+    def cleanup_redis_after_test(self, isolated_redis):
         """각 테스트 메서드 종료 후 active runner stop + PID kill + Redis 키 자동 정리."""
         yield
         try:
@@ -117,35 +55,36 @@ class TestHttpE2EChain:
             r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
 
             # 1. active runner_id 목록 조회
-            active = r.smembers(ACTIVE_RUNNERS_KEY)
+            active = isolated_redis.smembers(ACTIVE_RUNNERS_KEY)
 
             # 2. 각 runner에 stop 요청 (API 레벨)
+            _client = TestClient(app)
             for runner_id in active:
                 try:
-                    api_client.post(f"{BASE_URL}/stop/{runner_id}")
+                    _client.post(f"{BASE_URL}/stop/{runner_id}")
                 except Exception:
                     pass
 
             # 3. PID kill (stop이 실패하거나 늦을 경우 안전망)
             for runner_id in active:
-                pid_str = r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+                pid_str = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
                 if pid_str:
                     try:
                         os.kill(int(pid_str), signal.SIGTERM)
                     except (ProcessLookupError, ValueError, OSError):
                         pass
 
-            # 4. Redis 키 전체 삭제
-            stale_keys = r.keys("plan-runner:*")
+            # 4. Redis 키 전체 삭제 (isolated_redis = db=15)
+            stale_keys = isolated_redis.keys("plan-runner:*")
             if stale_keys:
-                r.delete(*stale_keys)
+                isolated_redis.delete(*stale_keys)
         except Exception:
             pass
 
-    def test_http_start_and_stop_lifecycle(self, api_client, background_listener):
+    def test_http_start_and_stop_lifecycle(self, isolated_redis, listener_process):
         """E2E: POST /run → running 확인 → POST /stop → active_runners 비어짐 확인"""
+        client = TestClient(app)
         from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
-        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
 
         payload = {
             "engine": "gemini",
@@ -157,7 +96,7 @@ class TestHttpE2EChain:
         # 1. Start runner
         runner_id = None
         try:
-            response = api_client.post(f"{BASE_URL}/run", json=payload)
+            response = client.post(f"{BASE_URL}/run", json=payload)
             if response.status_code == 200:
                 runner_id = response.json().get("runner_id")
             else:
@@ -170,26 +109,26 @@ class TestHttpE2EChain:
         # 2. running 상태 확인
         executed = False
         for _ in range(20):
-            status = r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
-            pid = r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+            status = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+            pid = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
             if status == "running" and pid:
                 executed = True
                 break
             time.sleep(1)
 
-        assert executed is True, f"E2E Failed: runner {runner_id} status={r.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:status')}"
-        print(f"\n[START OK] runner_id={runner_id}, PID={r.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:pid')}")
+        assert executed is True, f"E2E Failed: runner {runner_id} status={isolated_redis.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:status')}"
+        print(f"\n[START OK] runner_id={runner_id}, PID={isolated_redis.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:pid')}")
 
         # 3. Stop runner
-        resp = api_client.post(f"{BASE_URL}/stop/{runner_id}")
+        resp = client.post(f"{BASE_URL}/stop/{runner_id}")
         if resp.status_code == 404:
             # dry_run이 이미 완료 → active_runners에서 직접 제거
-            r.srem(ACTIVE_RUNNERS_KEY, runner_id)
+            isolated_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
 
         # 4. active_runners 비어짐 확인
         cleaned = False
         for _ in range(10):
-            if not r.smembers(ACTIVE_RUNNERS_KEY):
+            if not isolated_redis.smembers(ACTIVE_RUNNERS_KEY):
                 cleaned = True
                 break
             time.sleep(1)

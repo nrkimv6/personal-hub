@@ -12,6 +12,12 @@ pytestmark = pytest.mark.http
 BASE_URL = "/api/v1/dev-runner"
 
 
+@pytest.fixture(autouse=True)
+def _plan_runner_redis_db_guard(monkeypatch):
+    """fakeredis 주입 테스트에서 conftest Redis db guard를 통과시키기 위한 env var 설정"""
+    monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
+
+
 @pytest.fixture
 def fake_server():
     return fakeredis.FakeServer()

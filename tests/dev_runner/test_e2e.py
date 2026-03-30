@@ -14,14 +14,17 @@ from app.modules.dev_runner.schemas import RunRequest
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 
+REDIS_TEST_DB = 15
+
 @pytest.fixture(scope="module")
 def dev_runner_listener():
-    """Start the listener script as a background process for E2E tests"""
+    """Start the listener script as a background process for E2E tests (db=15 격리)"""
+    import os as _os
     script_path = Path("scripts/dev-runner-command-listener.py")
-    
-    # Ensure Redis is running
+
+    # Ensure Redis is running (db=15 격리)
     try:
-        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
+        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
         r.ping()
         # Clean state before starting
         r.delete("plan-runner:state:status")
@@ -29,9 +32,13 @@ def dev_runner_listener():
     except redis.ConnectionError:
         pytest.skip("Redis not available, skipping E2E tests")
 
-    # Start listener process
+    # guard가 PLAN_RUNNER_REDIS_DB 환경변수를 검사하므로 db=15로 설정
+    old_plan_runner_redis_db = _os.environ.get("PLAN_RUNNER_REDIS_DB")
+    _os.environ["PLAN_RUNNER_REDIS_DB"] = str(REDIS_TEST_DB)
+
+    # Start listener process (db=15)
     process = subprocess.Popen(
-        [sys.executable, str(script_path)],
+        [sys.executable, str(script_path), "--redis-db", str(REDIS_TEST_DB)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
@@ -48,7 +55,13 @@ def dev_runner_listener():
         pytest.fail(f"Listener failed to start. Stdout: {out}, Stderr: {err}")
         
     yield process
-    
+
+    # 환경변수 복원
+    if old_plan_runner_redis_db is not None:
+        _os.environ["PLAN_RUNNER_REDIS_DB"] = old_plan_runner_redis_db
+    else:
+        _os.environ.pop("PLAN_RUNNER_REDIS_DB", None)
+
     # Teardown
     if process.poll() is None:
         process.terminate()
@@ -66,9 +79,9 @@ def dev_runner_listener():
             capture_output=True, cwd=str(_root),
         )
 
-    # Redis plan-runner:* stale 키 정리
+    # Redis plan-runner:* stale 키 정리 (db=15)
     try:
-        r_cleanup = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+        r_cleanup = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
         stale_keys = r_cleanup.keys("plan-runner:*")
         if stale_keys:
             r_cleanup.delete(*stale_keys)
@@ -77,8 +90,11 @@ def dev_runner_listener():
 
 @pytest.fixture
 async def executor_service():
-    """Actual executor service connecting to real local Redis"""
+    """Actual executor service connecting to local Redis db=15 (격리)"""
     svc = ExecutorService()
+    # db=15로 Redis 재연결 (production db=0 오염 방지)
+    svc.redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
+    svc.async_redis = aioredis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
     yield svc
     try:
         await svc.async_redis.aclose()

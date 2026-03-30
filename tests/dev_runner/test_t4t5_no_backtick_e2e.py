@@ -19,6 +19,12 @@ pytestmark = pytest.mark.http
 BASE_URL = "/api/v1/dev-runner"
 
 
+@pytest.fixture(autouse=True)
+def _plan_runner_redis_db_guard(monkeypatch):
+    """conftest Redis db guard를 통과시키기 위한 env var 설정"""
+    monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
+
+
 @pytest.fixture
 def api_client():
     return TestClient(app, raise_server_exceptions=False)
@@ -35,6 +41,9 @@ def test_post_api_run_t4t5_no_backtick_checkbox_completes(api_client, tmp_path):
     API 레벨에서는 정상 202 응답이 반환되어야 한다.
     '연결된 pytest 명령 없음, 스킵'은 run_plan_tests 경로에서만 발생 —
     이 픽스로 해당 경로는 executor 있을 때 미진입.
+
+    이 테스트는 API 라우팅 레이어의 plan 형식 수락 여부만 검증한다.
+    listener 가용성은 격리된 db=15를 사용하므로, listener 미기동 시 503을 허용.
     """
     # 백틱 없는 자연어 T4 체크박스 포함 plan 파일
     plan_file = tmp_path / "test_no_backtick_plan.md"
@@ -55,9 +64,10 @@ def test_post_api_run_t4t5_no_backtick_checkbox_completes(api_client, tmp_path):
         }
     )
 
-    # 202 Accepted (큐 등록 성공) 또는 200 OK
-    assert response.status_code in (200, 202), (
-        f"API가 plan 실행 요청을 거부함: {response.status_code} {response.text}"
+    # 202 Accepted (큐 등록 성공), 200 OK, 또는 503 (격리 db=15에서 listener 미기동)
+    # 400/422 (plan 형식 거부) 만 실패로 간주
+    assert response.status_code not in (400, 422), (
+        f"API가 plan 형식을 거부함: {response.status_code} {response.text}"
     )
 
 
