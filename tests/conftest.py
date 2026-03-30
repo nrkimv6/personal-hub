@@ -160,6 +160,15 @@ def _make_guarded_start_dev_runner(original):
                 f"  테스트에서 visible trigger 사용은 프론트엔드에 테스트 러너를 노출시킵니다.\n"
                 f"  test_source를 설정하면 trigger가 자동으로 tc:{{test_source}}로 설정됩니다."
             )
+        import os as _os
+        _redis_db = _os.environ.get("PLAN_RUNNER_REDIS_DB", "0")
+        if _redis_db == "0":
+            pytest.fail(
+                f"start_dev_runner() 호출 시 production Redis(db=0) 사용 금지.\n"
+                f"  현재 PLAN_RUNNER_REDIS_DB={_redis_db!r} (기본값=production)\n"
+                f"  tests/dev_runner/conftest_e2e.py의 isolated_redis fixture를 사용하세요.\n"
+                f"  isolated_redis는 executor_service를 db=15로 재연결합니다."
+            )
         return await original(request, *args, **kwargs)
     return _patched
 
