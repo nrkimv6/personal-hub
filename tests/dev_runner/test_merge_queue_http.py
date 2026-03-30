@@ -8,6 +8,96 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 pytestmark = pytest.mark.http
 
+# ── v2 3-source merge queue ────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def api_client_e2e():
+    from app.main import app
+    return TestClient(app)
+
+
+@pytest.mark.e2e
+class TestMergeQueueV2E2E:
+    """T4: TestClient + mock Redis → 3-source 통합 반환 E2E"""
+
+    def test_merge_queue_v2_e2e_active_and_done(self, api_client_e2e):
+        """merging/queued/done 항목이 통합 반환되는지 E2E 검증"""
+        merged = [
+            {"runner_id": "r-merging", "branch": "runner/r-merging", "worktree_path": "",
+             "plan_file": "/work/plan.md", "project": "test", "timestamp": "2026-03-30T10:00:00", "status": "merging"},
+            {"runner_id": "r-queued", "branch": "runner/r-queued", "worktree_path": "",
+             "plan_file": "/work/plan.md", "project": "test", "timestamp": "2026-03-30T10:00:00", "status": "queued"},
+            {"runner_id": "r-done", "branch": "runner/r-done", "worktree_path": "",
+             "plan_file": "/work/plan.md", "project": "test", "timestamp": "2026-03-30T09:00:00", "status": "done"},
+        ]
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=AsyncMock(return_value=merged)
+        ):
+            resp = api_client_e2e.get("/api/v1/dev-runner/merge-queue")
+        assert resp.status_code == 200
+        data = resp.json()
+        statuses = [i["status"] for i in data]
+        assert "merging" in statuses
+        assert "queued" in statuses
+        assert "done" in statuses
+
+    def test_merge_queue_v2_e2e_empty(self, api_client_e2e):
+        """Redis에 관련 키 없을 때 빈 배열 반환 E2E 확인"""
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=AsyncMock(return_value=[])
+        ):
+            resp = api_client_e2e.get("/api/v1/dev-runner/merge-queue")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
+class TestMergeQueueHTTPV2:
+    """T5: HTTP 통합 — v2 3-source merge queue 스키마 검증"""
+
+    def test_merge_queue_http_v2_merging_status(self, api_client):
+        """merging runner가 status='merging'으로 반환"""
+        item = make_queue_item_dict("v2-runner-01", status="merging")
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=AsyncMock(return_value=[item])
+        ):
+            resp = api_client.get("/api/v1/dev-runner/merge-queue")
+        assert resp.status_code == 200
+        assert resp.json()[0]["status"] == "merging"
+
+    def test_merge_queue_http_v2_mixed_statuses(self, api_client):
+        """merging + queued + done 혼합 상태에서 HTTP 응답 스키마 검증"""
+        items = [
+            make_queue_item_dict("v2-r1", status="merging"),
+            make_queue_item_dict("v2-r2", status="queued"),
+            make_queue_item_dict("v2-r3", status="done"),
+        ]
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=AsyncMock(return_value=items)
+        ):
+            resp = api_client.get("/api/v1/dev-runner/merge-queue")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 3
+        assert {i["status"] for i in data} == {"merging", "queued", "done"}
+
+    def test_merge_queue_http_v2_backward_compat(self, api_client):
+        """기존 MergeQueueItem 응답 필드 유지 확인"""
+        item = make_queue_item_dict("v2-compat", status="merging")
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=AsyncMock(return_value=[item])
+        ):
+            resp = api_client.get("/api/v1/dev-runner/merge-queue")
+        assert resp.status_code == 200
+        row = resp.json()[0]
+        for field in ("runner_id", "branch", "plan_file", "project", "status", "timestamp"):
+            assert field in row, f"필드 누락: {field}"
+
 BASE_URL = "/api/v1/dev-runner"
 
 
