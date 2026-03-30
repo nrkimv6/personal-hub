@@ -71,14 +71,14 @@
 <!-- 모달 오버레이 -->
 <div
   class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-  onclick={onClose}
+  onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+  onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}
   role="dialog"
   aria-modal="true"
+  tabindex="-1"
 >
   <div
     class="relative w-80 max-h-[70vh] flex flex-col rounded-xl bg-card border border-border shadow-lg overflow-hidden"
-    onclick={(e) => e.stopPropagation()}
-    role="document"
   >
     <!-- 헤더 -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-border">
