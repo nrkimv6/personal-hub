@@ -88,11 +88,11 @@ def _make_redis_mock(worktree_path=None, plan_file=None, branch=None):
 
 
 def _merge_lock_patch():
-    """merge_lock 모듈 전체를 mock (acquire→True, release→None)"""
-    mock_lock_mod = types.ModuleType("merge_lock")
-    mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
-    mock_lock_mod.release_merge_lock = MagicMock()
-    return patch.dict("sys.modules", {"merge_lock": mock_lock_mod})
+    """merge_queue 모듈 전체를 mock (acquire→True, release→None)"""
+    mock_lock_mod = types.ModuleType("merge_queue")
+    mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
+    mock_lock_mod.release_merge_turn = MagicMock()
+    return patch.dict("sys.modules", {"merge_queue": mock_lock_mod})
 
 
 # ── Phase T1: subprocess 교체 패턴 TC ────────────────────────────────────────
@@ -329,14 +329,14 @@ class TestInlineMergeE2ESubprocessFlow:
         fake_r.set(f"{prefix}:{runner_id}:branch", "impl/test")
         fake_r.set(f"{prefix}:{runner_id}:worktree_path", "D:/tmp/wt")
 
-        mock_lock_mod = _types.ModuleType("merge_lock")
-        mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
-        mock_lock_mod.release_merge_lock = MagicMock()
+        mock_lock_mod = _types.ModuleType("merge_queue")
+        mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_turn = MagicMock()
 
         proc_result = MagicMock()
         proc_result.returncode = 0
 
-        with patch.dict("sys.modules", {"merge_lock": mock_lock_mod}), \
+        with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
              patch("subprocess.run", return_value=proc_result), \
              patch.object(cl, "_cleanup_process_state") as mock_cleanup:
             cl._do_inline_merge(runner_id, fake_r)
@@ -370,14 +370,14 @@ class TestInlineMergeE2ESubprocessFlow:
         fake_r.set(f"{prefix}:{runner_id}:plan_file", "docs/plan/test.md")
         fake_r.set(f"{prefix}:{runner_id}:branch", "impl/test")
 
-        mock_lock_mod = _types.ModuleType("merge_lock")
-        mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
-        mock_lock_mod.release_merge_lock = MagicMock()
+        mock_lock_mod = _types.ModuleType("merge_queue")
+        mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_turn = MagicMock()
 
         proc_result = MagicMock()
         proc_result.returncode = 0
 
-        with patch.dict("sys.modules", {"merge_lock": mock_lock_mod}), \
+        with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
              patch("subprocess.run", return_value=proc_result), \
              patch.object(cl, "_cleanup_process_state") as mock_cleanup:
             cl._do_retry_merge(runner_id, fake_r, "cmd_e2e")
@@ -526,14 +526,14 @@ class TestExitCode2IntegrationFakeRedis:
         fake_r.set(f"{prefix}:{runner_id}:plan_file", "docs/plan/test.md")
         fake_r.set(f"{prefix}:{runner_id}:branch", "impl/test")
 
-        mock_lock_mod = _types.ModuleType("merge_lock")
-        mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
-        mock_lock_mod.release_merge_lock = MagicMock()
+        mock_lock_mod = _types.ModuleType("merge_queue")
+        mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_turn = MagicMock()
 
         proc_result = MagicMock()
         proc_result.returncode = 2
 
-        with patch.dict("sys.modules", {"merge_lock": mock_lock_mod}), \
+        with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
              patch("subprocess.run", return_value=proc_result), \
              patch.object(dr_merge_mod, "_launch_auto_impl_post_merge_process", return_value={"success": False, "message": "fail"}):
             result = cl._execute_merge_with_lock(runner_id, fake_r)

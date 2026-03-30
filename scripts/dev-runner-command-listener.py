@@ -234,8 +234,8 @@ def main():
                                     )
                                     # merge lock 해제 (wtools subprocess 사망 fallback)
                                     try:
-                                        from merge_lock import release_merge_lock, _get_repo_id
-                                        release_merge_lock(r, rid, repo_id=_get_repo_id(PROJECT_ROOT))
+                                        from merge_queue import release_merge_turn, _get_repo_id
+                                        release_merge_turn(r, rid, repo_id=_get_repo_id(PROJECT_ROOT))
                                     except Exception:
                                         pass
                                     # merge 키 삭제 후 cleanup (머지 가드 자연 통과)

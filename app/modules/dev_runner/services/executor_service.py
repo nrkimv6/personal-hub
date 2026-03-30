@@ -530,33 +530,25 @@ class ExecutorService:
 
 
     async def get_merge_queue(self) -> list:
-        """merge 상태 통합 조회 — merging/queued/done 3개 소스 병합"""
+        """merge 상태 통합 조회 — merging/queued/done 3개 소스 병합
+
+        merge_queue.py 기반: SCAN plan-runner:merge-queue:* 1패턴만 사용.
+        index 0 = merging 러너, index 1+ = queued 러너.
+        """
         try:
             result = []
             seen_runners: set[str] = set()
 
-            # 1) merging: SCAN plan-runner:merge-lock:* + 글로벌 키
-            async for key in self.async_redis.scan_iter(match="plan-runner:merge-lock:*"):
-                rid = await self.async_redis.get(key)
-                if rid and rid not in seen_runners:
-                    seen_runners.add(rid)
-                    result.append(await self._merge_queue_item(rid, "merging"))
-
-            global_lock = await self.async_redis.get("plan-runner:merge-lock")
-            if global_lock and global_lock not in seen_runners:
-                seen_runners.add(global_lock)
-                result.append(await self._merge_queue_item(global_lock, "merging"))
-
-            # 2) queued: SCAN plan-runner:merge-wait-queue:* + 글로벌 키
-            queue_keys = [b async for b in self.async_redis.scan_iter(match="plan-runner:merge-wait-queue:*")]
-            queue_keys.append("plan-runner:merge-wait-queue")
-            for qkey in queue_keys:
-                for rid in await self.async_redis.lrange(qkey, 0, -1):
+            # 1) merging + queued: SCAN plan-runner:merge-queue:* (1-SCAN)
+            async for key in self.async_redis.scan_iter(match="plan-runner:merge-queue:*"):
+                items = await self.async_redis.lrange(key, 0, -1)
+                for idx, rid in enumerate(items):
                     if rid and rid not in seen_runners:
                         seen_runners.add(rid)
-                        result.append(await self._merge_queue_item(rid, "queued"))
+                        status = "merging" if idx == 0 else "queued"
+                        result.append(await self._merge_queue_item(rid, status))
 
-            # 3) done/failed: merge-results 최근 10건
+            # 2) done/failed: merge-results 최근 10건
             for raw in await self.async_redis.lrange("plan-runner:merge-results", 0, 9):
                 try:
                     item = json.loads(raw)
@@ -577,6 +569,22 @@ class ExecutorService:
             return result
         except Exception:
             return []
+
+    async def get_merge_queue_length(self) -> int:
+        """순수 대기 수 반환 (실행 중 runner 제외).
+
+        SCAN plan-runner:merge-queue:* → 각 키 max(0, LLEN-1) 합산.
+        index 0 = 실행 중 러너이므로 대기 수 = LLEN - 1.
+        외부 소비자(모니터링 스크립트 등)용 경량 엔드포인트.
+        """
+        try:
+            total = 0
+            async for key in self.async_redis.scan_iter(match="plan-runner:merge-queue:*"):
+                length = await self.async_redis.llen(key)
+                total += max(0, length - 1)
+            return total
+        except Exception:
+            return 0
 
     async def _merge_queue_item(self, runner_id: str, status: str) -> dict:
         """runner Redis 키에서 상세 정보 조회"""

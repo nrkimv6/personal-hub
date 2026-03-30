@@ -94,14 +94,14 @@ class TestRetryMergeNonblocking:
         }.get(key)
 
         import types as _types
-        mock_lock_mod = _types.ModuleType("merge_lock")
-        mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
-        mock_lock_mod.release_merge_lock = MagicMock()
+        mock_lock_mod = _types.ModuleType("merge_queue")
+        mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_turn = MagicMock()
 
         proc_result = MagicMock()
         proc_result.returncode = 0
 
-        with patch.dict("sys.modules", {"merge_lock": mock_lock_mod}), \
+        with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
              patch("subprocess.run", return_value=proc_result), \
              patch.object(listener_mod, "_cleanup_process_state"):
             listener_mod._do_retry_merge(RUNNER_ID, mock_redis, COMMAND_ID)
@@ -121,11 +121,11 @@ class TestRetryMergeNonblocking:
         }.get(key)
 
         import types as _types2
-        mock_lock_mod2 = _types2.ModuleType("merge_lock")
-        mock_lock_mod2.acquire_merge_lock = MagicMock(return_value=True)
-        mock_lock_mod2.release_merge_lock = MagicMock()
+        mock_lock_mod2 = _types2.ModuleType("merge_queue")
+        mock_lock_mod2.acquire_merge_turn = MagicMock(return_value=True)
+        mock_lock_mod2.release_merge_turn = MagicMock()
 
-        with patch.dict("sys.modules", {"merge_lock": mock_lock_mod2}), \
+        with patch.dict("sys.modules", {"merge_queue": mock_lock_mod2}), \
              patch("subprocess.run", side_effect=Exception("subprocess explosion")), \
              patch.object(listener_mod, "_cleanup_process_state"):
             listener_mod._do_retry_merge(RUNNER_ID, mock_redis, "cmd_err")

@@ -41,6 +41,8 @@ _listener_spec = importlib.util.spec_from_file_location(
 listener = importlib.util.module_from_spec(_listener_spec)
 _listener_spec.loader.exec_module(listener)
 
+pytestmark = pytest.mark.skip(reason="merge_lock deprecated — merge_queue로 대체")
+
 
 # ---------------------------------------------------------------------------
 # Helpers

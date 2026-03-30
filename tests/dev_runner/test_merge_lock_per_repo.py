@@ -31,6 +31,8 @@ from merge_lock import (
     _get_repo_id,
 )
 
+pytestmark = pytest.mark.skip(reason="merge_lock deprecated — merge_queue로 대체")
+
 REDIS_DB = 15
 
 

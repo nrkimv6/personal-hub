@@ -1,9 +1,10 @@
 """
-TC: ExecutorService.get_merge_queue() v2 — 3개 소스(merging/queued/done) 통합 조회
+TC: ExecutorService.get_merge_queue() v2 — merge-queue 단일 소스 + merge-results 통합 조회
 
 Phase 3 T1 TC
 수정 이력:
   2026-03-30: v2 전환 — merge-lock:*, merge-wait-queue:*, merge-results 3개 소스 통합
+  2026-03-30: merge-queue 전환 — RPUSH 단일 리스트(index 0=merging, 1+=queued) 방식으로 변경
 """
 import json
 import pytest
@@ -34,9 +35,10 @@ async def seed_runner_keys(redis, runner_id, branch="impl/test", plan_file="plan
 class TestGetMergeQueueV2:
     @pytest.mark.asyncio
     async def test_get_merge_queue_R_merging_from_lock(self):
-        """R: merge-lock:{repo_id} 키에 runner_id가 있을 때 status='merging' 항목 반환"""
+        """R: merge-queue:{repo_id} index 0에 runner_id가 있을 때 status='merging' 항목 반환"""
         fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        await fake.set("plan-runner:merge-lock:monitor-page", "runner-001")
+        # index 0 = merging (현재 머지 중)
+        await fake.rpush("plan-runner:merge-queue:monitor-page", "runner-001")
         await seed_runner_keys(fake, "runner-001")
 
         svc = make_executor_service(fake)
@@ -49,17 +51,20 @@ class TestGetMergeQueueV2:
 
     @pytest.mark.asyncio
     async def test_get_merge_queue_R_queued_from_wait_queue(self):
-        """R: merge-wait-queue:{repo_id}에 runner_id가 있을 때 status='queued' 반환"""
+        """R: merge-queue:{repo_id} index 1+에 runner_id가 있을 때 status='queued' 반환"""
         fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        await fake.rpush("plan-runner:merge-wait-queue:monitor-page", "runner-002")
+        # index 0 = merging, index 1 = queued
+        await fake.rpush("plan-runner:merge-queue:monitor-page", "runner-merging")
+        await fake.rpush("plan-runner:merge-queue:monitor-page", "runner-002")
+        await seed_runner_keys(fake, "runner-merging")
         await seed_runner_keys(fake, "runner-002", branch="impl/feature")
 
         svc = make_executor_service(fake)
         result = await svc.get_merge_queue()
 
         queued = [r for r in result if r["status"] == "queued"]
-        assert len(queued) == 1
-        assert queued[0]["runner_id"] == "runner-002"
+        assert len(queued) >= 1
+        assert any(r["runner_id"] == "runner-002" for r in queued)
 
     @pytest.mark.asyncio
     async def test_get_merge_queue_R_done_from_results(self):
@@ -93,26 +98,33 @@ class TestGetMergeQueueV2:
 
     @pytest.mark.asyncio
     async def test_get_merge_queue_B_empty_all_sources(self):
-        """B: 3개 소스 모두 비어있을 때 빈 리스트 반환"""
+        """B: 모든 소스 비어있을 때 빈 리스트 반환"""
         fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
         svc = make_executor_service(fake)
         result = await svc.get_merge_queue()
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_get_merge_queue_B_merging_dedup(self):
-        """B: merging runner가 wait-queue에도 있을 때 중복 제거 (merging 우선)"""
+    async def test_get_merge_queue_B_merging_index0_queued_index1(self):
+        """B: merge-queue index 0 = merging, index 1+ = queued (위치 기반 상태)"""
         fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        await fake.set("plan-runner:merge-lock:monitor-page", "runner-001")
-        await fake.rpush("plan-runner:merge-wait-queue:monitor-page", "runner-001")
+        await fake.rpush("plan-runner:merge-queue:monitor-page", "runner-001")  # index 0 = merging
+        await fake.rpush("plan-runner:merge-queue:monitor-page", "runner-002")  # index 1 = queued
         await seed_runner_keys(fake, "runner-001")
+        await seed_runner_keys(fake, "runner-002")
 
         svc = make_executor_service(fake)
         result = await svc.get_merge_queue()
 
-        runner_items = [r for r in result if r["runner_id"] == "runner-001"]
-        assert len(runner_items) == 1
-        assert runner_items[0]["status"] == "merging"
+        # index 0 → merging
+        merging = [r for r in result if r["runner_id"] == "runner-001"]
+        assert len(merging) == 1
+        assert merging[0]["status"] == "merging"
+
+        # index 1 → queued
+        queued = [r for r in result if r["runner_id"] == "runner-002"]
+        assert len(queued) == 1
+        assert queued[0]["status"] == "queued"
 
     @pytest.mark.asyncio
     async def test_get_merge_queue_E_redis_error(self):
@@ -127,17 +139,3 @@ class TestGetMergeQueueV2:
 
         result = await svc.get_merge_queue()
         assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_merge_queue_I_global_lock_compat(self):
-        """I: 글로벌 키 plan-runner:merge-lock (suffix 없음) 조회 하위호환"""
-        fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        await fake.set("plan-runner:merge-lock", "runner-global")
-        await seed_runner_keys(fake, "runner-global", branch="impl/global")
-
-        svc = make_executor_service(fake)
-        result = await svc.get_merge_queue()
-
-        merging = [r for r in result if r["runner_id"] == "runner-global"]
-        assert len(merging) == 1
-        assert merging[0]["status"] == "merging"

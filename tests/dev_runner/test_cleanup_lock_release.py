@@ -40,16 +40,16 @@ def _load_process_utils():
 @pytest.fixture
 def redis_client():
     r = redis.Redis(host="localhost", port=6379, db=REDIS_DB, decode_responses=True)
-    for key in r.scan_iter("plan-runner:merge-lock*"):
+    for key in r.scan_iter("plan-runner:merge-queue*"):
         r.delete(key)
-    for key in r.scan_iter("plan-runner:merge-wait-queue*"):
+    for key in r.scan_iter("plan-runner:merge-turn*"):
         r.delete(key)
     for key in r.scan_iter("plan-runner:runners*"):
         r.delete(key)
     yield r
-    for key in r.scan_iter("plan-runner:merge-lock*"):
+    for key in r.scan_iter("plan-runner:merge-queue*"):
         r.delete(key)
-    for key in r.scan_iter("plan-runner:merge-wait-queue*"):
+    for key in r.scan_iter("plan-runner:merge-turn*"):
         r.delete(key)
     for key in r.scan_iter("plan-runner:runners*"):
         r.delete(key)
@@ -61,9 +61,9 @@ class TestCleanupLockRelease:
         mock_redis = MagicMock()
         mock_redis.get.return_value = None
 
-        with patch("merge_lock.release_merge_lock") as mock_release, \
-             patch("merge_lock._get_repo_id", return_value="test-repo"), \
-             patch("merge_lock.get_merge_wait_queue_key", return_value="plan-runner:merge-wait-queue:test-repo"):
+        with patch("merge_queue.release_merge_turn") as mock_release, \
+             patch("merge_queue._get_repo_id", return_value="test-repo"), \
+             patch("merge_queue.get_queue_key", return_value="plan-runner:merge-queue:test-repo"):
             pu = _load_process_utils()
             # merge 보호 가드 비활성화 (reason이 reconnect_ 아님)
             pu._cleanup_process_state("runner1", mock_redis, reason="process_exit")
@@ -72,19 +72,19 @@ class TestCleanupLockRelease:
 
     def test_cleanup_release_ignores_non_owner_B(self, redis_client):
         """B(Boundary): runner_a가 lock 보유 → runner_b cleanup → lock은 runner_a 소유 유지"""
-        from merge_lock import acquire_merge_lock, get_merge_lock_key
+        from merge_queue import acquire_merge_turn, get_merge_lock_key
 
         # runner_a가 lock 획득
-        ok = acquire_merge_lock(redis_client, "runner-a", repo_id="test-repo", timeout=3, lock_ttl=30)
+        ok = acquire_merge_turn(redis_client, "runner-a", repo_id="test-repo", timeout=3, lock_ttl=30)
         assert ok is True
         assert redis_client.get(get_merge_lock_key("test-repo")) == "runner-a"
 
         # runner_b cleanup → runner_a lock에 영향 없음
         mock_redis = MagicMock()
         mock_redis.get.return_value = None
-        with patch("merge_lock.release_merge_lock") as mock_release, \
-             patch("merge_lock._get_repo_id", return_value="test-repo"), \
-             patch("merge_lock.get_merge_wait_queue_key", return_value="plan-runner:merge-wait-queue:test-repo"):
+        with patch("merge_queue.release_merge_turn") as mock_release, \
+             patch("merge_queue._get_repo_id", return_value="test-repo"), \
+             patch("merge_queue.get_queue_key", return_value="plan-runner:merge-queue:test-repo"):
             pu = _load_process_utils()
             pu._cleanup_process_state("runner-b", mock_redis, reason="process_exit")
 
@@ -96,9 +96,9 @@ class TestCleanupLockRelease:
         mock_redis = MagicMock()
         mock_redis.get.return_value = None
 
-        with patch("merge_lock.release_merge_lock", side_effect=RuntimeError("redis down")), \
-             patch("merge_lock._get_repo_id", return_value="test-repo"), \
-             patch("merge_lock.get_merge_wait_queue_key", return_value="plan-runner:merge-wait-queue:test-repo"):
+        with patch("merge_queue.release_merge_turn", side_effect=RuntimeError("redis down")), \
+             patch("merge_queue._get_repo_id", return_value="test-repo"), \
+             patch("merge_queue.get_queue_key", return_value="plan-runner:merge-queue:test-repo"):
             pu = _load_process_utils()
             # 예외 없이 완료되어야 함
             pu._cleanup_process_state("runner1", mock_redis, reason="process_exit")
@@ -108,15 +108,15 @@ class TestCleanupLockRelease:
 
     def test_stale_lock_ttl_expiry_E(self, redis_client):
         """E(Error): TTL=2초 lock → cleanup 미실행 → 3초 후 다른 runner acquire 성공"""
-        from merge_lock import acquire_merge_lock
+        from merge_queue import acquire_merge_turn
 
-        ok = acquire_merge_lock(redis_client, "runner-stale", repo_id="test-repo", timeout=3, lock_ttl=2)
+        ok = acquire_merge_turn(redis_client, "runner-stale", repo_id="test-repo", timeout=3, lock_ttl=2)
         assert ok is True
 
         # cleanup 없이 TTL 만료 대기
         time.sleep(3)
 
-        ok2 = acquire_merge_lock(redis_client, "runner-new", repo_id="test-repo", timeout=3, lock_ttl=10)
+        ok2 = acquire_merge_turn(redis_client, "runner-new", repo_id="test-repo", timeout=3, lock_ttl=10)
         assert ok2 is True
 
     def test_cleanup_uses_per_repo_queue_key_R(self):
@@ -130,14 +130,14 @@ class TestCleanupLockRelease:
 
         mock_redis.lrem.side_effect = capture_lrem
 
-        with patch("merge_lock.release_merge_lock"), \
-             patch("merge_lock._get_repo_id", return_value="d:-work-project-tools-monitor-page"), \
-             patch("merge_lock.get_merge_wait_queue_key",
-                   return_value="plan-runner:merge-wait-queue:d:-work-project-tools-monitor-page"):
+        with patch("merge_queue.release_merge_turn"), \
+             patch("merge_queue._get_repo_id", return_value="d:-work-project-tools-monitor-page"), \
+             patch("merge_queue.get_queue_key",
+                   return_value="plan-runner:merge-queue:d:-work-project-tools-monitor-page"):
             pu = _load_process_utils()
             pu._cleanup_process_state("runner1", mock_redis, reason="process_exit")
 
         # per-repo 키가 사용됨
         assert any("d:-work-project-tools-monitor-page" in k for k in captured_keys)
         # 글로벌 키 "plan-runner:merge-wait-queue" (suffix 없음)는 미사용
-        assert "plan-runner:merge-wait-queue" not in captured_keys
+        assert "plan-runner:merge-queue" not in captured_keys

@@ -706,8 +706,8 @@ def get_status(redis_client: redis.Redis) -> Dict:
     # stale 정리
     for rid in stale_runners:
         try:
-            from merge_lock import get_merge_wait_queue_key, _get_repo_id
-            redis_client.lrem(get_merge_wait_queue_key(_get_repo_id(PROJECT_ROOT)), 0, rid)
+            from merge_queue import get_queue_key, _get_repo_id
+            redis_client.lrem(get_queue_key(_get_repo_id(PROJECT_ROOT)), 0, rid)
         except Exception:
             pass
         _cleanup_process_state(rid, redis_client)

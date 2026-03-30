@@ -76,9 +76,9 @@ class TestDoRetryMerge:
         merge_result = make_merge_result(merged=True, tests_passed=True)
 
         # 로컬 임포트(`from merge_lock import ...`)는 merge_lock 모듈 자체를 패치
-        import merge_lock as ml
-        with patch.object(ml, "acquire_merge_lock", return_value=True) as mock_acquire, \
-             patch.object(ml, "release_merge_lock") as mock_release, \
+        import merge_queue as mq
+        with patch.object(mq, "acquire_merge_turn", return_value=True) as mock_acquire, \
+             patch.object(mq, "release_merge_turn") as mock_release, \
              patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch.object(cl, "_cleanup_process_state"):
             mock_wf = MagicMock()
@@ -99,9 +99,9 @@ class TestDoRetryMerge:
         redis = make_redis_mock(worktree_path=str(worktree))
         merge_result = make_merge_result(merged=True, tests_passed=True)
 
-        import merge_lock as ml
-        with patch.object(ml, "acquire_merge_lock", return_value=True), \
-             patch.object(ml, "release_merge_lock"), \
+        import merge_queue as mq
+        with patch.object(mq, "acquire_merge_turn", return_value=True), \
+             patch.object(mq, "release_merge_turn"), \
              patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch.object(cl, "_cleanup_process_state"):
             mock_wf = MagicMock()
@@ -123,9 +123,9 @@ class TestDoRetryMerge:
         redis = make_redis_mock(worktree_path=str(worktree))
         merge_result = make_merge_result(merged=True, tests_passed=True)
 
-        import merge_lock as ml
-        with patch.object(ml, "acquire_merge_lock", return_value=True), \
-             patch.object(ml, "release_merge_lock"), \
+        import merge_queue as mq
+        with patch.object(mq, "acquire_merge_turn", return_value=True), \
+             patch.object(mq, "release_merge_turn"), \
              patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch.object(cl, "_cleanup_process_state") as mock_cleanup:
             mock_wf = MagicMock()
@@ -166,9 +166,9 @@ class TestDoRetryMerge:
         worktree.mkdir()
         redis = make_redis_mock(worktree_path=str(worktree))
 
-        import merge_lock as ml
-        with patch.object(ml, "acquire_merge_lock", return_value=False), \
-             patch.object(ml, "release_merge_lock"), \
+        import merge_queue as mq
+        with patch.object(mq, "acquire_merge_turn", return_value=False), \
+             patch.object(mq, "release_merge_turn"), \
              patch.object(cl, "_cleanup_process_state") as mock_cleanup:
             cl._do_retry_merge("runner05", redis, "cmd005")
 

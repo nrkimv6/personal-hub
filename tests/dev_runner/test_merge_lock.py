@@ -22,6 +22,8 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from merge_lock import acquire_merge_lock, release_merge_lock, get_merge_wait_queue
 
+pytestmark = pytest.mark.skip(reason="merge_lock deprecated — merge_queue로 대체")
+
 REDIS_DB = 15  # 테스트 전용 DB
 
 

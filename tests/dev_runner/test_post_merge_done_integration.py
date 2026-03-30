@@ -65,15 +65,15 @@ def _make_partial_plan(path):
     )
 
 
-# merge_lock 모듈을 mock으로 미리 주입 (함수 내부 from merge_lock import ... 패치용)
-_mock_merge_lock = types.ModuleType("merge_lock")
-_mock_merge_lock.acquire_merge_lock = lambda *a, **kw: True
-_mock_merge_lock.release_merge_lock = lambda *a, **kw: None
-_mock_merge_lock.get_merge_wait_queue_key = lambda repo_id=None: (
-    "plan-runner:merge-wait-queue" if repo_id is None else f"plan-runner:merge-wait-queue:{repo_id}"
+# merge_queue 모듈을 mock으로 미리 주입 (함수 내부 from merge_queue import ... 패치용)
+_mock_merge_lock = types.ModuleType("merge_queue")
+_mock_merge_lock.acquire_merge_turn = lambda *a, **kw: True
+_mock_merge_lock.release_merge_turn = lambda *a, **kw: None
+_mock_merge_lock.get_queue_key = lambda repo_id=None: (
+    "plan-runner:merge-queue" if repo_id is None else f"plan-runner:merge-wait-queue:{repo_id}"
 )
 _mock_merge_lock._get_repo_id = lambda project_root: "mock-repo-id"
-sys.modules["merge_lock"] = _mock_merge_lock
+sys.modules["merge_queue"] = _mock_merge_lock
 
 
 def _run_merge(cl, runner_id, r, exit_code=0):
