@@ -58,6 +58,12 @@ class PlanRecordService:
                 _add_event(self.db, record, "path_changed", {"from": old_path, "to": file_path})
             return record
 
+        # title/project 미제공 시 파일에서 자동 추출
+        if title is None:
+            title = self._extract_title_from_md(file_path)
+        if project is None:
+            project = self._detect_project_from_path(file_path)
+
         record = PlanRecord(
             filename_hash=filename_hash,
             file_path=file_path,
@@ -299,6 +305,20 @@ class PlanRecordService:
                     created += 1
                 else:
                     record = all_records[h]
+                    # title/project 백필 (기존 레코드에 없으면 갱신)
+                    updated_fields = False
+                    if record.title is None:
+                        extracted_title = self._extract_title_from_md(str(f))
+                        if extracted_title:
+                            record.title = extracted_title
+                            updated_fields = True
+                    if record.project is None:
+                        detected_project = self._detect_project_from_path(str(f))
+                        if detected_project:
+                            record.project = detected_project
+                            updated_fields = True
+                    if updated_fields:
+                        record.updated_at = datetime.now()
                     if record.file_path != str(f):
                         # 경로 변경
                         old = record.file_path

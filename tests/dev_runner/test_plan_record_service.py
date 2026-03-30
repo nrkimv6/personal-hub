@@ -341,3 +341,67 @@ class TestListRecordsAndEvents:
         """이벤트 없으면 빈 목록"""
         result = svc.list_events(event_type="nonexistent_type_xyz")
         assert result == []
+
+
+# ========== Phase 1: title/project 자동 파싱 (items 14~16) ==========
+
+class TestGetOrCreateAutoTitleProject:
+
+    def test_get_or_create_auto_title(self, svc, db, tmp_path):
+        """title=None으로 호출 시 파일 첫 줄 # 헤더에서 자동 추출 (RIGHT)"""
+        plan_file = tmp_path / "2026-03-01-auto-title.md"
+        plan_file.write_text("# 자동 추출 계획서\n\n본문 내용", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file), title=None)
+        db.flush()
+
+        assert record.title == "자동 추출 계획서"
+
+    def test_get_or_create_auto_project(self, svc, db, tmp_path):
+        """project=None으로 호출 시 경로의 archive/{project} 패턴에서 자동 추출 (RIGHT)"""
+        archive_dir = tmp_path / "docs" / "archive" / "monitor-page"
+        archive_dir.mkdir(parents=True)
+        plan_file = archive_dir / "2026-03-02-auto-project.md"
+        plan_file.write_text("# 프로젝트 자동 감지\n", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file), project=None)
+        db.flush()
+
+        assert record.project == "monitor-page"
+
+    def test_get_or_create_explicit_title_preserved(self, svc, db, tmp_path):
+        """명시적 title 인자가 파일 헤더 자동파싱보다 우선 (RIGHT)"""
+        plan_file = tmp_path / "2026-03-03-explicit.md"
+        plan_file.write_text("# 파일 헤더 제목\n\n내용", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file), title="명시적으로 전달한 제목")
+        db.flush()
+
+        assert record.title == "명시적으로 전달한 제목"
+
+    def test_get_or_create_no_header_returns_none_title(self, svc, db, tmp_path):
+        """파일에 # 헤더 없고 title=None → title은 None (BOUNDARY)"""
+        plan_file = tmp_path / "2026-03-04-no-header.md"
+        plan_file.write_text("본문만 있고 헤더 없음\n", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file), title=None)
+        db.flush()
+
+        assert record.title is None
+
+    def test_sync_all_backfills_title_for_existing_record(self, svc, db, tmp_path):
+        """sync_all 시 기존 레코드에 title 없으면 파일에서 백필 (RIGHT)"""
+        plan_dir = tmp_path / "plans"
+        plan_dir.mkdir()
+        plan_file = plan_dir / "2026-03-05-backfill.md"
+        plan_file.write_text("# 백필 대상 제목\n", encoding="utf-8")
+
+        # title 없이 먼저 등록
+        record = svc.get_or_create(str(plan_file), title=None)
+        record.title = None  # 강제로 None 설정
+        db.flush()
+
+        svc.sync_all([{"path": str(plan_dir), "type": "plan"}])
+
+        db.refresh(record)
+        assert record.title == "백필 대상 제목"
