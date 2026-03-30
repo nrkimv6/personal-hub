@@ -3,12 +3,12 @@ Tests for SystemService NSSM unregistered sentinel logic
 """
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from app.modules.system.services.system_service import SystemService
+from app.modules.system.services.nssm_service import NssmService
 
 
 @pytest.fixture
 def svc():
-    return SystemService()
+    return NssmService()
 
 
 # === _unregistered_sentinel ===
