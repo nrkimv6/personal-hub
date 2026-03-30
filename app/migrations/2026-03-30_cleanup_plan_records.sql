@@ -25,3 +25,29 @@ SET status = 'planned'
 WHERE (file_path LIKE '%/plan/%' OR file_path LIKE '%\\plan\\%')
   AND status IS NULL
   AND (file_path NOT LIKE '%/archive/%' AND file_path NOT LIKE '%\\archive\\%');
+
+-- 5. 비-plan 파일 레코드 삭제 (YYYY-MM-DD 패턴이 아닌 파일명)
+-- SQLite는 REGEXP 미지원 → 제외 파일 목록 직접 열거
+-- 패턴: 파일명이 숫자 4개-숫자 2개-숫자 2개로 시작하지 않는 것
+DELETE FROM plan_records
+WHERE (
+    -- 길이가 10 미만이거나 날짜 패턴(YYYY-MM-DD) 아닌 것
+    length(file_path) - length(replace(file_path, '/', '')) = 0  -- 경로 구분자 없는 경우 포함
+    OR
+    -- 파일명이 알려진 문서 파일인 경우
+    file_path LIKE '%/CLAUDE.md'
+    OR file_path LIKE '%\\CLAUDE.md'
+    OR file_path LIKE '%/CHANGELOG.md'
+    OR file_path LIKE '%\\CHANGELOG.md'
+    OR file_path LIKE '%/README.md'
+    OR file_path LIKE '%\\README.md'
+    OR file_path LIKE '%/TODO.md'
+    OR file_path LIKE '%\\TODO.md'
+    OR file_path LIKE '%/MANUAL_TASKS.md'
+    OR file_path LIKE '%\\MANUAL_TASKS.md'
+    OR file_path LIKE '%/DONE.md'
+    OR file_path LIKE '%\\DONE.md'
+    OR file_path LIKE '%/REQUIREMENTS.md'
+    OR file_path LIKE '%\\REQUIREMENTS.md'
+)
+AND archived_at IS NULL;

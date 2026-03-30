@@ -524,3 +524,71 @@ class TestDbIsolationNoProductionPollution:
             f"Production DB에 pytest 경로 레코드가 {count}건 발견됨. "
             "conftest.py의 SessionLocal 패치가 정상 작동하지 않을 수 있음."
         )
+
+
+# ========== Phase 4: status 생명주기 (items 21~23) ==========
+
+class TestUpdateStatus:
+
+    def test_update_status_transition(self, svc, db, tmp_path):
+        """planned→in_progress 전이 + 이벤트 기록 (RIGHT, TC 21)"""
+        plan_file = tmp_path / "2026-03-20-status-trans.md"
+        plan_file.write_text("# 상태 전이 테스트\n", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file))
+        db.flush()
+        assert record.status == "planned"
+
+        result = svc.update_status(str(plan_file), "in_progress")
+        db.flush()
+
+        assert result is not None
+        assert result.status == "in_progress"
+
+    def test_update_status_event_logged(self, svc, db, tmp_path):
+        """상태 변경 시 status_changed 이벤트 detail 확인 (RIGHT, TC 22)"""
+        plan_file = tmp_path / "2026-03-21-status-event.md"
+        plan_file.write_text("# 이벤트 기록 테스트\n", encoding="utf-8")
+
+        record = svc.get_or_create(str(plan_file))
+        db.flush()
+
+        svc.update_status(str(plan_file), "in_progress")
+        db.flush()
+
+        events = db.query(PlanEvent).filter_by(
+            plan_record_id=record.id, event_type="status_changed"
+        ).all()
+        assert len(events) == 1
+        detail = events[0].detail
+        assert detail["from"] == "planned"
+        assert detail["to"] == "in_progress"
+
+    def test_sync_from_workflow_mapping(self, svc, db, tmp_path):
+        """workflow status→plan_record status 매핑 정확성 (RIGHT, TC 23)"""
+        from types import SimpleNamespace
+
+        plan_file = tmp_path / "2026-03-22-workflow-sync.md"
+        plan_file.write_text("# 워크플로우 동기화 테스트\n", encoding="utf-8")
+
+        svc.get_or_create(str(plan_file))
+        db.flush()
+
+        # running → in_progress
+        wf = SimpleNamespace(plan_path=str(plan_file), status="running")
+        result = svc.sync_from_workflow(wf)
+        db.flush()
+        assert result is not None
+        assert result.status == "in_progress"
+
+        # completed → completed
+        wf.status = "completed"
+        result = svc.sync_from_workflow(wf)
+        db.flush()
+        assert result.status == "completed"
+
+        # failed → planned (재시도 가능)
+        wf.status = "failed"
+        result = svc.sync_from_workflow(wf)
+        db.flush()
+        assert result.status == "planned"

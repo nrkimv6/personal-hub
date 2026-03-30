@@ -142,6 +142,46 @@ class PlanRecordService:
         _add_event(self.db, record, "archived", {"archive_path": new_path})
         return record
 
+    def update_status(self, file_path: str, new_status: str) -> Optional[PlanRecord]:
+        """상태 전이: file_path로 레코드 조회 → status 변경 + status_changed 이벤트 기록"""
+        filename_hash = _compute_filename_hash(file_path)
+        record = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
+        if not record:
+            return None
+        old_status = record.status
+        if old_status == new_status:
+            return record
+        record.status = new_status
+        record.updated_at = datetime.now()
+        _add_event(self.db, record, "status_changed", {"from": old_status, "to": new_status})
+        return record
+
+    def sync_from_workflow(self, workflow) -> Optional[PlanRecord]:
+        """workflow 상태를 plan_record 상태로 동기화
+
+        workflow status 매핑:
+          planned    → planned
+          running    → in_progress
+          completed  → completed
+          failed     → planned  (재시도 가능)
+        """
+        STATUS_MAP = {
+            "planned": "planned",
+            "running": "in_progress",
+            "completed": "completed",
+            "failed": "planned",
+        }
+        file_path = getattr(workflow, "plan_path", None) or getattr(workflow, "file_path", None)
+        if not file_path:
+            return None
+        workflow_status = getattr(workflow, "status", None)
+        if not workflow_status:
+            return None
+        new_status = STATUS_MAP.get(workflow_status)
+        if not new_status:
+            return None
+        return self.update_status(file_path, new_status)
+
     def get_record(self, record_id: int) -> Optional[PlanRecord]:
         """개별 레코드 조회 (events 포함)"""
         return self.db.query(PlanRecord).filter_by(id=record_id).first()

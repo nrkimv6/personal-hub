@@ -1013,6 +1013,7 @@ class PlanService:
                 from app.modules.dev_runner.services.plan_record_service import PlanRecordService
                 with SessionLocal() as db:
                     svc = PlanRecordService(db)
+                    svc.update_status(plan_path, "completed")
                     svc.mark_archived(plan_path, str(archive_path))
                     db.commit()
             except Exception as db_err:
