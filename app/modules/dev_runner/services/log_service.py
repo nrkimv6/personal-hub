@@ -451,6 +451,18 @@ class LogService:
                 has_more=False,
             )
 
+    def publish_log(self, tag: str, message: str) -> None:
+        """Redis pub/sub으로 로그 publish (LogViewer에 실시간 표시).
+
+        plan_service._publish_log()와 동일 로직 — 외부 서비스에서 호출용 공개 인터페이스.
+        Redis 미연결 시 조용히 무시한다.
+        """
+        try:
+            ts = datetime.now().strftime("%H:%M:%S")
+            self.redis_client.publish(LOG_CHANNEL, f"[{ts}] [{tag}] {message}")
+        except Exception:
+            pass  # Redis 미연결 시 무시
+
     def get_system_log(self, lines: int = 200) -> LogResponse:
         """Listener 시스템 로그 tail 조회 (가장 최신 plan-runner-*.log 파일)"""
         log_dir = self._get_log_dir()
@@ -483,4 +495,10 @@ class LogService:
 # 싱글톤 인스턴스
 log_service = LogService()
 
-__all__ = ['log_service', 'LogService']
+
+def publish_log(tag: str, message: str) -> None:
+    """모듈 레벨 publish_log 헬퍼 — log_service 싱글톤에 위임."""
+    log_service.publish_log(tag, message)
+
+
+__all__ = ['log_service', 'LogService', 'publish_log']
