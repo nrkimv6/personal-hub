@@ -4,12 +4,20 @@ Provides endpoints for querying and managing Windows services, startup programs,
 """
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
+from .services.nssm_service import NssmService
+from .services.worker_service import WorkerService
+from .services.redis_service import RedisService
+from .services.cleanup_stats_service import CleanupStatsService
 from .services.system_service import SystemService
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
 
-# Service instance
-_service = SystemService()
+# Service instances
+_nssm = NssmService()
+_worker = WorkerService()
+_redis = RedisService()
+_cleanup = CleanupStatsService()
+_service = SystemService()  # get_all_services_status 전용
 
 
 # ===== Read Operations (Phase 1) =====
@@ -56,25 +64,25 @@ async def refresh_services_status(request: Request, background_tasks: Background
 @router.get("/services/nssm")
 async def get_nssm_services():
     """Get NSSM services list (filtered by prefix)"""
-    return await _service.get_nssm_services()
+    return await _nssm.get_nssm_services()
 
 
 @router.get("/services/startup")
 async def get_startup_programs():
     """Get startup programs list (filtered by prefix)"""
-    return await _service.get_startup_programs()
+    return await _nssm.get_startup_programs()
 
 
 @router.get("/services/tasks")
 async def get_scheduled_tasks():
     """Get scheduled tasks list (filtered by folder)"""
-    return await _service.get_scheduled_tasks()
+    return await _nssm.get_scheduled_tasks()
 
 
 @router.get("/services/workers")
 async def get_worker_status():
     """Get worker processes status"""
-    return await _service.get_worker_status()
+    return await _worker.get_worker_status()
 
 
 # ===== Management Operations (Phase 2) =====
@@ -82,7 +90,7 @@ async def get_worker_status():
 @router.post("/services/nssm/{name}/restart")
 async def restart_nssm_service(name: str):
     """Restart an NSSM service"""
-    result = await _service.restart_nssm_service(name)
+    result = await _nssm.restart_nssm_service(name)
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
     return result
@@ -91,7 +99,7 @@ async def restart_nssm_service(name: str):
 @router.post("/services/nssm/{name}/stop")
 async def stop_nssm_service(name: str):
     """Stop an NSSM service"""
-    result = await _service.stop_nssm_service(name)
+    result = await _nssm.stop_nssm_service(name)
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
     return result
@@ -100,7 +108,7 @@ async def stop_nssm_service(name: str):
 @router.post("/services/nssm/{name}/start")
 async def start_nssm_service(name: str):
     """Start an NSSM service"""
-    result = await _service.start_nssm_service(name)
+    result = await _nssm.start_nssm_service(name)
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
     return result
@@ -109,7 +117,7 @@ async def start_nssm_service(name: str):
 @router.delete("/services/startup/{name}")
 async def remove_startup_program(name: str):
     """Remove a startup program"""
-    result = await _service.remove_startup_program(name)
+    result = await _nssm.remove_startup_program(name)
     if not result["success"]:
         raise HTTPException(status_code=404, detail=result["message"])
     return result
@@ -118,7 +126,7 @@ async def remove_startup_program(name: str):
 @router.post("/services/tasks/{folder}/{name}/run")
 async def run_scheduled_task(folder: str, name: str):
     """Run a scheduled task manually"""
-    result = await _service.run_scheduled_task(folder, name)
+    result = await _nssm.run_scheduled_task(folder, name)
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
     return result
@@ -127,7 +135,7 @@ async def run_scheduled_task(folder: str, name: str):
 @router.delete("/services/tasks/{folder}/{name}")
 async def unregister_scheduled_task(folder: str, name: str):
     """Unregister a scheduled task (requires admin)"""
-    result = await _service.unregister_scheduled_task(folder, name)
+    result = await _nssm.unregister_scheduled_task(folder, name)
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
     return result
@@ -136,7 +144,7 @@ async def unregister_scheduled_task(folder: str, name: str):
 @router.post("/services/workers/restart")
 async def restart_workers():
     """Restart all worker processes (watchdog가 자동 재시작)"""
-    result = await _service.restart_worker("all")
+    result = await _worker.restart_worker("all")
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
     return result
@@ -145,7 +153,7 @@ async def restart_workers():
 @router.post("/services/workers/{name}/restart")
 async def restart_single_worker(name: str):
     """Restart a single worker process by name"""
-    result = await _service.restart_worker(name)
+    result = await _worker.restart_worker(name)
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
     return result
@@ -154,21 +162,21 @@ async def restart_single_worker(name: str):
 @router.post("/services/infra/{name}/restart")
 async def restart_infra(name: str):
     """Restart an infra tier process by name (via Redis infra:commands)"""
-    result = await _service.restart_infra(name)
+    result = await _worker.restart_infra(name)
     return result
 
 
 @router.post("/services/watchdogs/stop")
 async def stop_watchdogs():
     """Stop all watchdog processes"""
-    result = await _service.stop_watchdogs()
+    result = await _worker.stop_watchdogs()
     return result
 
 
 @router.post("/services/watchdogs/start")
 async def start_watchdogs():
     """Start watchdog processes via Redis Command Listener"""
-    result = await _service.start_watchdogs()
+    result = await _worker.start_watchdogs()
     return result
 
 
@@ -185,7 +193,7 @@ async def get_nightly_cleanup_stats(days: int = 14):
         runs: 실행 이력 (날짜별)
         summary: 전체 요약
     """
-    return await _service.get_nightly_cleanup_stats(days)
+    return await _cleanup.get_nightly_cleanup_stats(days)
 
 
 # ===== Redis Operations =====
@@ -193,7 +201,7 @@ async def get_nightly_cleanup_stats(days: int = 14):
 @router.get("/services/redis")
 async def get_redis_status():
     """Redis 연결 상태 및 info 조회"""
-    return await _service.get_redis_status()
+    return await _redis.get_redis_status()
 
 
 @router.post("/services/redis/restart")
@@ -203,7 +211,7 @@ async def restart_redis():
     Note: Session 0 (NSSM)에서 실행 시 실패할 수 있음.
     실패 시 CLI에서 browser_workers.py redis-restart 사용.
     """
-    result = await _service.restart_redis()
+    result = await _redis.restart_redis()
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
     return result

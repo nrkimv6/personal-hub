@@ -16,7 +16,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.modules.system.services.system_service import SystemService
+from app.modules.system.services.worker_service import WorkerService as SystemService
 
 
 # ──────────────────────────────────────────────
@@ -208,7 +208,7 @@ class TestWorkersStatusHttp:
             return {"pid": None, "running": False}
 
         with patch(
-            'app.modules.system.services.system_service.SystemService.get_worker_status',
+            'app.modules.system.services.worker_service.WorkerService.get_worker_status',
             new=AsyncMock(return_value=[
                 {"name": "session_worker", "label": "세션 워커", "project": "sleep-now",
                  "watchdog": None, "worker": {"pid": 9999, "running": False}}
