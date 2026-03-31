@@ -455,3 +455,57 @@ def test_http_log_recent_legacy_pseudo_id_after_size_removal():
             os.unlink(legacy_path)
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# T5 신규: visible_only 파라미터 + /full 청크 응답 구조 검증
+# ---------------------------------------------------------------------------
+
+@pytest.mark.http_live
+def test_http_logs_history_visible_only_true():
+    """T5-40: GET /logs/history?visible_only=true → 200 + runs 배열 반환"""
+    url = f"{ADMIN_API}/api/v1/dev-runner/logs/history?visible_only=true"
+    try:
+        resp = requests.get(url, timeout=5)
+        assert resp.status_code == 200, f"기대 200, 실제 {resp.status_code}"
+        data = resp.json()
+        assert "runs" in data, f"runs 키 없음: {data.keys()}"
+        assert isinstance(data["runs"], list), "runs가 list가 아님"
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API server not responding")
+    except requests.exceptions.Timeout:
+        pytest.skip("API server timeout")
+
+
+@pytest.mark.http_live
+def test_http_logs_history_visible_only_default_false():
+    """T5-41: GET /logs/history (파라미터 없음) → 200 + runs 배열 반환 (visible_only=False 기본값)"""
+    url = f"{ADMIN_API}/api/v1/dev-runner/logs/history"
+    try:
+        resp = requests.get(url, timeout=5)
+        assert resp.status_code == 200, f"기대 200, 실제 {resp.status_code}"
+        data = resp.json()
+        assert "runs" in data, f"runs 키 없음: {data.keys()}"
+        assert isinstance(data["runs"], list), "runs가 list가 아님"
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API server not responding")
+    except requests.exceptions.Timeout:
+        pytest.skip("API server timeout")
+
+
+@pytest.mark.http_live
+def test_http_logs_full_chunk_response():
+    """T5-42: GET /logs/full?runner_id=test123 → 200 + lines, has_more, total_lines, offset 필드 존재"""
+    url = f"{ADMIN_API}/api/v1/dev-runner/logs/full?runner_id=nonexist-t5-42"
+    try:
+        resp = requests.get(url, timeout=5)
+        assert resp.status_code == 200, f"기대 200, 실제 {resp.status_code}"
+        data = resp.json()
+        assert "lines" in data, f"lines 키 없음: {data.keys()}"
+        assert "has_more" in data, f"has_more 키 없음: {data.keys()}"
+        assert "total_lines" in data, f"total_lines 키 없음: {data.keys()}"
+        assert "offset" in data, f"offset 키 없음: {data.keys()}"
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API server not responding")
+    except requests.exceptions.Timeout:
+        pytest.skip("API server timeout")
