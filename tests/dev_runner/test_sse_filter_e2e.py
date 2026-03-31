@@ -94,7 +94,8 @@ class TestSseFilterE2E:
 
     def test_sse_initial_status_plan_file_none_not_sentinel(self, redis_client):
         """plan_file 키 없는 running runner 등록 → SSE initial status에서 plan_file=null (not __ALL_PLANS__)"""
-        runner_id = f"tc-pytest-{uuid.uuid4().hex[:8]}"
+        # trigger="user" 이므로 화이트리스트 통과해야 함 — tc-pytest- 접두사 사용 금지 (이중 방어로 차단됨)
+        runner_id = f"user-e2e-{uuid.uuid4().hex[:8]}"
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")

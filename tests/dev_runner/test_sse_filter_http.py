@@ -91,7 +91,8 @@ class TestSseFilterHttp:
 
     def test_http_events_plan_file_null_when_key_missing(self, redis_client):
         """GET /events → plan_file 키 없는 running runner → JSON에서 plan_file=null (not __ALL_PLANS__)"""
-        runner_id = f"tc-pytest-{uuid.uuid4().hex[:8]}"
+        # trigger="user" 이므로 화이트리스트 통과해야 함 — tc-pytest- 접두사 사용 금지 (이중 방어로 차단됨)
+        runner_id = f"user-e2e-{uuid.uuid4().hex[:8]}"
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
@@ -120,7 +121,8 @@ class TestSseFilterHttp:
 
     def test_http_events_plan_file_sentinel_when_explicit(self, redis_client):
         """GET /events → plan_file=__ALL_PLANS__ 명시 → 그대로 __ALL_PLANS__ 반환"""
-        runner_id = f"tc-pytest-{uuid.uuid4().hex[:8]}"
+        # trigger="user:all" 이므로 화이트리스트 통과해야 함 — tc-pytest- 접두사 사용 금지 (이중 방어로 차단됨)
+        runner_id = f"user-e2e-{uuid.uuid4().hex[:8]}"
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user:all")
