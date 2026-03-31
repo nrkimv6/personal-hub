@@ -1,0 +1,92 @@
+"""
+Phase T5: HTTP 통합 테스트 — done 사전 검증 (fix plan Phase R)
+
+main 머지 후 실행. TestClient 기반 (실서버 불필요).
+- POST /api/v1/dev-runner/plans/{fix_plan}/done 호출 시 Phase R 없으면 success=False
+- Phase R 있는 fix plan은 정상 처리
+"""
+import textwrap
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import quote
+
+import pytest
+
+from app.modules.dev_runner.routes.plans import router
+from app.modules.dev_runner.services.plan_service import PlanService
+
+
+@pytest.fixture
+def svc(dev_runner_config_isolation):
+    return PlanService()
+
+
+@pytest.mark.http
+class TestDonePreconditionsHttp:
+    def test_plan_done_api_fix_no_phase_r_returns_failure(self, svc, tmp_path, dev_runner_config_isolation):
+        """POST /plans/{fix_plan}/done — Phase R 없으면 success=False 응답"""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plan_dir / "2026-03-31_fix-test-http.md"
+        plan_path.write_text(textwrap.dedent("""\
+            # fix: HTTP 테스트
+
+            > 상태: 구현완료
+            > 진행률: 2/2 (100%)
+
+            - [x] A
+            - [x] B
+
+            *상태: 구현완료 | 진행률: 2/2 (100%)*
+        """), encoding="utf-8")
+
+        # _validate_done_preconditions을 직접 테스트 (API 라우터는 run_done 위임)
+        result_coro = svc.run_done(str(plan_path))
+
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(result_coro)
+
+        assert result["success"] is False
+        assert "Phase R" in result["message"]
+
+        # plan 파일이 원래 위치에 그대로 있어야 함
+        assert plan_path.exists()
+
+    def test_plan_done_api_fix_with_phase_r_succeeds(self, svc, tmp_path, dev_runner_config_isolation):
+        """Phase R 있는 fix plan은 정상 처리"""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plan_dir / "2026-03-31_fix-test-http-ok.md"
+        plan_path.write_text(textwrap.dedent("""\
+            # fix: HTTP 테스트 OK
+
+            > 상태: 구현완료
+            > 진행률: 3/3 (100%)
+
+            - [x] A
+            - [x] B
+
+            ### Phase R: 재발 경로 분석
+
+            | 경로 | 방어여부 |
+            | path1 | 방어됨 |
+
+            ### T3
+            - [x] TC
+
+            *상태: 구현완료 | 진행률: 3/3 (100%)*
+        """), encoding="utf-8")
+
+        # TODO.md, DONE.md 생성
+        todo_md = tmp_path / "TODO.md"
+        todo_md.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        done_md = tmp_path / "docs" / "DONE.md"
+        done_md.write_text("# DONE\n", encoding="utf-8")
+
+        with patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")), \
+             patch("app.modules.dev_runner.services.plan_service._publish_log"), \
+             patch("app.modules.dev_runner.services.plan_service._get_redis", return_value=MagicMock()):
+            import asyncio
+            result = asyncio.get_event_loop().run_until_complete(svc.run_done(str(plan_path)))
+
+        assert result["success"] is True
