@@ -183,25 +183,46 @@ class TestBuildAllRunnersStatus:
         assert "tc_runner01" not in ids
 
     def test_build_all_runners_includes_normal_trigger(self, event_service, sync_redis):
-        """R: trigger="manual" runner → 결과에 포함"""
+        """R: trigger="manual" runner → 화이트리스트에 없으므로 결과에 미포함"""
         self._register_runner(sync_redis, "manual_runner01", trigger="manual")
         result = event_service._build_all_runners_status()
         ids = [r["runner_id"] for r in result]
-        assert "manual_runner01" in ids
+        assert "manual_runner01" not in ids
 
     def test_build_all_runners_includes_trigger_none(self, event_service, sync_redis):
-        """B: trigger 키 없음(None) → runner 포함 (tc: 아니므로 필터 안 됨)"""
+        """B: trigger 키 없음(None) → 화이트리스트에 없으므로 미포함"""
         self._register_runner(sync_redis, "notrigger_runner01", trigger=None)
         result = event_service._build_all_runners_status()
         ids = [r["runner_id"] for r in result]
-        assert "notrigger_runner01" in ids
+        assert "notrigger_runner01" not in ids
 
     def test_build_all_runners_includes_trigger_empty(self, event_service, sync_redis):
-        """B: trigger="" → runner 포함"""
+        """B: trigger="" → 화이트리스트에 없으므로 미포함"""
         self._register_runner(sync_redis, "emptytrigger_runner01", trigger="")
         result = event_service._build_all_runners_status()
         ids = [r["runner_id"] for r in result]
-        assert "emptytrigger_runner01" in ids
+        assert "emptytrigger_runner01" not in ids
+
+    def test_build_all_runners_includes_user_trigger(self, event_service, sync_redis):
+        """R: trigger="user" runner → 결과에 포함"""
+        self._register_runner(sync_redis, "user_runner01", trigger="user")
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        assert "user_runner01" in ids
+
+    def test_build_all_runners_includes_user_all_trigger(self, event_service, sync_redis):
+        """R: trigger="user:all" runner → 결과에 포함"""
+        self._register_runner(sync_redis, "userall_runner01", trigger="user:all")
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        assert "userall_runner01" in ids
+
+    def test_build_all_runners_excludes_api_trigger(self, event_service, sync_redis):
+        """R: trigger="api" runner → 화이트리스트에 없으므로 미포함"""
+        self._register_runner(sync_redis, "api_runner01", trigger="api")
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        assert "api_runner01" not in ids
 
     def test_build_all_runners_excludes_trigger_tc_prefix_only(self, event_service, sync_redis):
         """B: trigger="tc:" (접두사만, 값 없음) → 필터링됨"""
