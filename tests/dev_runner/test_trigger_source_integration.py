@@ -11,11 +11,12 @@ from unittest.mock import AsyncMock, MagicMock, patch, mock_open
 
 # --- T3: roundtrip Redis ---
 
-def test_trigger_roundtrip_redis():
+def test_trigger_roundtrip_redis(monkeypatch):
     """fakeredis로 executor start_dev_runner() → Redis command JSON에 trigger 필드 존재 + 값 검증"""
     import fakeredis
     import fakeredis.aioredis as aioredis_fake
 
+    monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
     pushed_commands = []
 
     # sync fakeredis client (for LPUSH capture)

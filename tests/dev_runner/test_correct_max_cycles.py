@@ -35,7 +35,8 @@ def fake_async_redis():
 
 
 @pytest.fixture
-def executor(fake_redis, fake_async_redis):
+def executor(fake_redis, fake_async_redis, monkeypatch):
+    monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
     svc = ExecutorService()
     svc.redis_client = fake_redis
     svc.async_redis = fake_async_redis
