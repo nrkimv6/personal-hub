@@ -308,7 +308,7 @@
 
 		eventSource = isMerging
 			? devRunnerLogApi.connectMergeStream(runnerId)
-			: devRunnerLogApi.connectStream(runnerId);
+			: devRunnerLogApi.connectStream(runnerId, fromLine + lines.length);
 		eventSource.onopen = () => {
 			connected = 'connected';
 			sseStarted = true;
@@ -367,9 +367,12 @@
 		}
 	}
 
+	let fromLine = 0;
+
 	async function loadRecent() {
 		try {
-			const res = await devRunnerLogApi.recent(runnerId, 100);
+			const res = await devRunnerLogApi.recent(runnerId, 500);
+			fromLine = res.from_line ?? 0;
 			const parsed = res.lines.map((text: string) => parseLine(text, true));
 
 			if (running) {
@@ -389,6 +392,11 @@
 			}
 
 			lines = parsed;
+
+			// running 중 500줄 꽉 찼으면 더 오래된 로그가 있음 → loadFull로 전체 재로드
+			if (running && parsed.length === 500) {
+				await loadFull();
+			}
 
 			// 醫낅즺 runner 濡쒓렇 ?뚯씪 誘명깘吏 ??full ?붾뱶?ъ씤?몃줈 ?꾪솚
 			const allMerge = parsed.length > 0 && parsed.every((l: ParsedLine) => l.tag === 'MERGE');

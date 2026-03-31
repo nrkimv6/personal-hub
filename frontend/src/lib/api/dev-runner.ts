@@ -79,6 +79,7 @@ export interface RegisteredPathResponse {
 export interface LogResponse {
 	lines: string[];
 	total_lines: number;
+	from_line: number;
 }
 
 export interface CurrentTrackingResponse {
@@ -417,8 +418,8 @@ export const devRunnerLogApi = {
 	diagnostics: () =>
 		devRunnerRequest<{ steps: DiagStep[] }>('/logs/diagnostics'),
 
-	connectStream: (runnerId: string): EventSource => {
-		return new EventSource(`${DEV_RUNNER_BASE}/logs/stream?runner_id=${runnerId}`);
+	connectStream: (runnerId: string, sinceLine: number = 0): EventSource => {
+		return new EventSource(`${DEV_RUNNER_BASE}/logs/stream?runner_id=${runnerId}&since_line=${sinceLine}`);
 	},
 
 	connectMergeStream: (runnerId: string): EventSource => {

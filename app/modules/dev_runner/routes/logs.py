@@ -22,10 +22,11 @@ async def get_recent_logs(
 @router.get("/logs/stream")
 async def stream_logs(
     runner_id: str = Query(..., description="runner ID"),
+    since_line: int = Query(0, ge=0, description="마지막 수신 줄 번호"),
 ):
     """로그 실시간 스트리밍 (SSE)"""
     return StreamingResponse(
-        log_service.stream_log_file(runner_id=runner_id),
+        log_service.stream_log_file(runner_id=runner_id, since_line=since_line),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

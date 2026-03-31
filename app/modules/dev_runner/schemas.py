@@ -221,6 +221,7 @@ class LogResponse(BaseModel):
     """로그 응답 스키마"""
     lines: List[str]
     total_lines: int
+    from_line: int = 0  # 파일 내 시작 줄 번호 (since_line 계산용)
 
 
 class RunHistoryItem(BaseModel):

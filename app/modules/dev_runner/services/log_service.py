@@ -49,25 +49,22 @@ class LogService:
         )
         self.async_redis = aioredis.Redis(connection_pool=self._async_pool)
 
-    # stream_log_path 파일이 이 크기 이하이면 START 마커만 있는 빈 파일로 간주 → log_file_path로 fallback
-    _STREAM_LOG_MIN_BYTES = 200
     # 레거시 파일명(runner_id 없음) pseudo_id → Path 역매핑 캐시
     _legacy_map: dict[str, "Path"] = {}
 
     def _find_current_log(self, runner_id: str) -> Optional[Path]:
         """특정 runner의 stream 로그 파일 (Redis에서 조회)
 
-        stream_log_path 우선 조회하되, 파일이 너무 작으면(START 마커만 있는 경우)
-        실제 로그가 담긴 log_file_path로 fallback한다.
+        stream_log_path 존재 시 즉시 반환. 없거나 파일 미존재 시 log_file_path로 fallback.
         """
         try:
             stream_path_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
             log_path_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
 
-            # stream_log_path 유효성 검증: 존재 + 의미있는 크기여야 사용
+            # stream_log_path 존재 시 즉시 반환 (크기 무관)
             if stream_path_str:
                 stream_path = Path(stream_path_str)
-                if stream_path.exists() and stream_path.stat().st_size > self._STREAM_LOG_MIN_BYTES:
+                if stream_path.exists():
                     return stream_path
 
             # fallback: 실제 로그가 기록된 log_file_path
@@ -124,12 +121,16 @@ class LogService:
         if log_file and log_file.exists():
             try:
                 with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                    lines = deque(f, maxlen=n_lines)
-                    if lines:
-                        return LogResponse(
-                            lines=[line.rstrip('\n') for line in lines],
-                            total_lines=len(lines)
-                        )
+                    all_lines = f.readlines()
+                total = len(all_lines)
+                sliced = all_lines[-n_lines:] if total > n_lines else all_lines
+                from_line = max(0, total - n_lines)
+                if sliced:
+                    return LogResponse(
+                        lines=[line.rstrip('\n') for line in sliced],
+                        total_lines=len(sliced),
+                        from_line=from_line,
+                    )
             except Exception as e:
                 return LogResponse(
                     lines=[f"Error reading log: {str(e)}"],
@@ -148,7 +149,7 @@ class LogService:
 
         return LogResponse(lines=[], total_lines=0)
 
-    async def stream_log_file(self, runner_id: str) -> AsyncGenerator[str, None]:
+    async def stream_log_file(self, runner_id: str, since_line: int = 0) -> AsyncGenerator[str, None]:
         """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)"""
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
         logger.info(f"[SSE] stream_log_file 시작: channel={log_channel}")
@@ -163,6 +164,23 @@ class LogService:
         # 초기 연결 이벤트 — EventSource가 MIME type 검증을 통과하도록 보장
         yield "event: connected\ndata: ok\n\n"
 
+        # since_line > 0 이면 파일에서 해당 줄 이후 내용을 먼저 전송 (gap 해소)
+        _file_pos_init = 0
+        if since_line > 0:
+            gap_file = self._find_current_log(runner_id)
+            if gap_file and gap_file.exists():
+                try:
+                    with open(gap_file, "r", encoding="utf-8", errors="replace") as gf:
+                        gap_lines = gf.readlines()
+                        _file_pos_init = gf.tell()
+                    buffered = gap_lines[since_line:]
+                    for bl in buffered:
+                        stripped = bl.rstrip('\n')
+                        if stripped:
+                            yield f"data: {stripped}\n\n"
+                except Exception as ge:
+                    logger.debug(f"[SSE] since_line gap fill 실패: {ge}")
+
         pubsub = None
         was_disconnected = False
         last_heartbeat = time.monotonic()
@@ -172,7 +190,7 @@ class LogService:
         _first_msg_logged = False
         # Phase 2: 파일 폴링 fallback
         _no_msg_since = time.monotonic()
-        _file_pos = 0
+        _file_pos = _file_pos_init
         FILE_POLL_TIMEOUT = 5.0  # pub/sub 미수신 N초 후 파일 폴링 전환
 
         try:
