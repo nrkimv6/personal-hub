@@ -1,8 +1,8 @@
 """
-cli.py — CLI 진입점 (static 모드 출력)
+cli.py — CLI 진입점 (static 모드 + follow 모드 출력)
 
 사용법:
-    python -m app.log_viewer [target] [--admin] [--lines N]
+    python -m app.log_viewer [target] [--admin] [--lines N] [--follow] [--cleanup]
 
 target:
     생략 시 — 모든 소스 표시 (admin 여부에 따라 필터)
@@ -10,14 +10,17 @@ target:
     "plan-runner" — 활성 plan-runner 목록 표시
 
 옵션:
-    --admin    admin 전용 소스 포함
-    --lines N  tail 줄수 오버라이드 (기본: 소스별 tail_lines)
+    --admin      admin 전용 소스 포함
+    --lines N    tail 줄수 오버라이드 (기본: 소스별 tail_lines)
+    --follow/-f  실시간 tail 모드 (Follow 모드)
+    --cleanup    cleanup/정리 이벤트 라인만 표시
 """
 from __future__ import annotations
 
 import argparse
 import re
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -43,6 +46,7 @@ from app.log_viewer.config import (
 )
 from app.log_viewer.finder import find_latest_log, find_latest_logs
 from app.log_viewer.runner import RunnerInfo, get_active_runners
+from app.log_viewer.follower import LogLine, MultiTailer, RunnerWatcher
 from app.log_viewer.stale import is_stale
 
 # ---------------------------------------------------------------------------
@@ -91,6 +95,44 @@ def _tail_file(file_path: Path, n: int, filter_pattern: str | None = None) -> li
         return stripped[-n:] if stripped else []
     except OSError:
         return []
+
+
+# ---------------------------------------------------------------------------
+# Follow 모드 출력 헬퍼
+# ---------------------------------------------------------------------------
+
+_LEVEL_COLORS: dict[str, str] = {
+    "ERROR": "red bold",
+    "CRITICAL": "red bold",
+    "WARNING": "yellow",
+    "WARN": "yellow",
+    "INFO": "green",
+    "DEBUG": "bright_black",
+}
+
+
+def _print_follow_line(log_line: LogLine) -> None:
+    """Follow 모드에서 단일 LogLine을 출력한다."""
+    prefix = f"[{log_line.source}] "
+    if _RICH and console:
+        t = Text()
+        t.append(prefix, style=log_line.color)
+        level_color = _LEVEL_COLORS.get(log_line.level or "", "")
+        if level_color:
+            t.append(log_line.text, style=level_color)
+        else:
+            t.append(log_line.text)
+        console.print(t, highlight=False, markup=False)
+    else:
+        print(f"{prefix}{log_line.text}")
+
+
+def _print_follow_banner(target: str, cleanup: bool) -> None:
+    """Follow 시작 배너를 출력한다."""
+    _print_rule(f"Following {target}", "cyan")
+    if cleanup:
+        _print_colored("  cleanup 필터 활성\n", "yellow")
+    _print_colored("  Ctrl+C to stop\n", "bright_black")
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +194,62 @@ def show_all_sources(admin: bool, lines_override: int | None, cleanup: bool = Fa
         files = find_latest_logs(patterns, dirs, max_count=3)
         n = lines_override if lines_override is not None else src.tail_lines
         _print_source(src.name, files, src.color, n, filter_pattern=CLEANUP_FILTER_PATTERN if cleanup else None)
+
+
+# ---------------------------------------------------------------------------
+# Follow 모드 — 소스 tail
+# ---------------------------------------------------------------------------
+
+
+def follow_source(name: str, admin: bool, cleanup: bool = False) -> None:
+    """단일 소스를 실시간 tail한다."""
+    src = get_source_by_name(name.upper())
+    if src is None:
+        print(f"알 수 없는 소스: {name!r}", file=sys.stderr)
+        return
+
+    dirs = _resolve_dirs(admin)
+    patterns = [f"{p}*" for p in src.patterns]
+    path = find_latest_log(patterns, dirs)
+    if path is None:
+        print(f"[{src.name}] 로그 파일 없음", file=sys.stderr)
+        return
+
+    tailer = MultiTailer(cleanup=cleanup)
+    tailer.add_source(src.name, path, src.color, error_only=src.error_only)
+
+    _print_follow_banner(src.name, cleanup)
+    try:
+        while True:
+            for ln in tailer.poll_once():
+                _print_follow_line(ln)
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        pass
+
+
+def follow_all_sources(admin: bool, cleanup: bool = False) -> None:
+    """모든 소스를 실시간 통합 tail한다. plan-runner는 RunnerWatcher로 동적 관리."""
+    tailer = MultiTailer(cleanup=cleanup)
+    dirs = _resolve_dirs(admin)
+
+    for src in get_sources(admin):
+        patterns = [f"{p}*" for p in src.patterns]
+        path = find_latest_log(patterns, dirs)
+        if path is not None:
+            tailer.add_source(src.name, path, src.color, error_only=src.error_only)
+
+    watcher = RunnerWatcher()
+
+    _print_follow_banner("ALL", cleanup)
+    try:
+        while True:
+            watcher.refresh(tailer)
+            for ln in tailer.poll_once():
+                _print_follow_line(ln)
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +346,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="cleanup/정리 이벤트 라인만 표시 (모든 타겟에 적용)",
     )
+    parser.add_argument(
+        "--follow",
+        "-f",
+        action="store_true",
+        default=False,
+        help="실시간 tail 모드 (Follow 모드, Ctrl+C로 종료)",
+    )
     return parser
 
 
@@ -259,6 +364,18 @@ def main(argv: list[str] | None = None) -> None:
     admin: bool = args.admin
     lines: int | None = args.lines
     cleanup: bool = args.cleanup
+    follow: bool = args.follow
+
+    if follow:
+        # plan-runner는 RunnerWatcher가 follow_all_sources 내부에서 처리
+        try:
+            if target is None or target.lower() == "plan-runner":
+                follow_all_sources(admin, cleanup=cleanup)
+            else:
+                follow_source(target, admin, cleanup=cleanup)
+        except KeyboardInterrupt:
+            pass
+        return
 
     if target is None:
         show_all_sources(admin, lines, cleanup=cleanup)
