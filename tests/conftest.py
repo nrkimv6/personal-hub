@@ -197,9 +197,16 @@ def force_test_source_on_start_dev_runner():
 
     def _patched_init(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
+        # fakeredis 감지: production Redis가 아니면 guard 불필요
+        # __init__ 완료 후 self.redis_client 타입 확인 → FakeRedis이면 guard wrapping 스킵
+        try:
+            import fakeredis as _fakeredis
+            if isinstance(self.redis_client, _fakeredis.FakeRedis):
+                return  # fakeredis 주입 확인 → production Redis 미사용, guard 불필요
+        except ImportError:
+            pass
         original_method = self.start_dev_runner
         # bound method를 guard로 교체
-        import functools
         guarded = _make_guarded_start_dev_runner(original_method)
         self.start_dev_runner = guarded
 
