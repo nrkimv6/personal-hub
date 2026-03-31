@@ -368,10 +368,13 @@ def main(argv: list[str] | None = None) -> None:
 
     if follow:
         # plan-runner는 RunnerWatcher가 follow_all_sources 내부에서 처리
-        if target is None or target.lower() == "plan-runner":
-            follow_all_sources(admin, cleanup=cleanup)
-        else:
-            follow_source(target, admin, cleanup=cleanup)
+        try:
+            if target is None or target.lower() == "plan-runner":
+                follow_all_sources(admin, cleanup=cleanup)
+            else:
+                follow_source(target, admin, cleanup=cleanup)
+        except KeyboardInterrupt:
+            pass
         return
 
     if target is None:

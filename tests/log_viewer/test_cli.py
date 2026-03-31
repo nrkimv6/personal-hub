@@ -13,12 +13,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.log_viewer.cli import (
+    _print_follow_line,
     _tail_file,
     build_parser,
     main,
     show_source,
 )
 from app.log_viewer.config import CLEANUP_FILTER_PATTERN
+from app.log_viewer.follower import LogLine
 
 
 # ---------------------------------------------------------------------------
@@ -184,3 +186,48 @@ class TestRunnerTcFormatEndToEnd:
         info = result[0]
         assert info.display_name == "t-my-tc"
         assert info.short_id == "t-my-tc"
+
+
+# ---------------------------------------------------------------------------
+# Follow 모드 — build_parser / _print_follow_line (Phase T1 items 35-38)
+# ---------------------------------------------------------------------------
+
+
+class TestParserFollowFlag:
+    def test_parser_follow_flag(self):
+        """R(Right): --follow → args.follow=True, args.cleanup=False."""
+        args = build_parser().parse_args(["--follow"])
+        assert args.follow is True
+        assert args.cleanup is False
+
+    def test_parser_follow_short_flag(self):
+        """R(Right): -f → args.follow=True."""
+        args = build_parser().parse_args(["-f"])
+        assert args.follow is True
+
+    def test_parser_follow_with_target_and_cleanup(self):
+        """R(Right): target + --follow + --cleanup + --admin → 각 필드 정확히 설정."""
+        args = build_parser().parse_args(["api", "--follow", "--cleanup", "--admin"])
+        assert args.follow is True
+        assert args.cleanup is True
+        assert args.admin is True
+        assert args.target == "api"
+
+
+class TestPrintFollowLine:
+    def test_print_follow_line_format(self, capsys):
+        """R(Right): _print_follow_line → 출력에 [SOURCE] + 텍스트 포함."""
+        import app.log_viewer.cli as cli_mod
+
+        # rich 비활성화하여 plain print 경로 테스트
+        orig_rich = cli_mod._RICH
+        try:
+            cli_mod._RICH = False
+            log_line = LogLine(source="API", text="test message", color="cyan", level="ERROR")
+            _print_follow_line(log_line)
+        finally:
+            cli_mod._RICH = orig_rich
+
+        captured = capsys.readouterr()
+        assert "[API]" in captured.out
+        assert "test message" in captured.out
