@@ -1,6 +1,7 @@
 """로그 스트리밍 서비스 - Redis Pub/Sub 기반 실시간 로그"""
 
 import asyncio
+import hashlib
 import logging
 import time
 import re
@@ -50,6 +51,8 @@ class LogService:
 
     # stream_log_path 파일이 이 크기 이하이면 START 마커만 있는 빈 파일로 간주 → log_file_path로 fallback
     _STREAM_LOG_MIN_BYTES = 200
+    # 레거시 파일명(runner_id 없음) pseudo_id → Path 역매핑 캐시
+    _legacy_map: dict[str, "Path"] = {}
 
     def _find_current_log(self, runner_id: str) -> Optional[Path]:
         """특정 runner의 stream 로그 파일 (Redis에서 조회)
@@ -74,11 +77,49 @@ class LogService:
                     return log_path
         except redis.ConnectionError:
             pass
+
+        # Phase 3 fallback: Redis TTL 만료 후 파일시스템 검색 (신규 형식 전용)
+        # lg- 접두사는 레거시 파일용으로 Phase 2에서 별도 처리
+        if runner_id.startswith("lg-"):
+            return None
+        log_dir = self._get_log_dir()
+        if log_dir.exists():
+            for pattern in [
+                f"plan-runner-stream-{runner_id}-*.log",
+                f"plan-runner-{runner_id}-*.log",
+            ]:
+                matches = list(log_dir.glob(pattern))
+                if matches:
+                    return max(matches, key=lambda p: p.stat().st_mtime)
         return None
+
+    def _resolve_legacy_log(self, runner_id: str) -> Optional[Path]:
+        """lg- 접두사 pseudo runner_id로 레거시 파일 탐색.
+
+        1. _legacy_map 캐시 히트 → 즉시 반환
+        2. 캐시 미스 → 전체 스캔 후 _legacy_map 갱신
+        """
+        if runner_id in self._legacy_map:
+            return self._legacy_map[runner_id]
+        log_dir = self._get_log_dir()
+        if not log_dir.exists():
+            return None
+        for log_path in log_dir.glob("plan-runner-stream-*.log"):
+            m = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", log_path.name)
+            if not m:
+                continue
+            ts = m.group(1)
+            pseudo_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
+            self._legacy_map[pseudo_id] = log_path
+        return self._legacy_map.get(runner_id)
 
     def tail_log_file(self, runner_id: str, n_lines: int = 100) -> LogResponse:
         """로그 파일 끝에서 N줄 읽기 (초기 로드용)."""
         log_file = self._find_current_log(runner_id)
+
+        # Phase 2 fallback: lg- 접두사 pseudo runner_id → 레거시 파일 탐색
+        if log_file is None and runner_id.startswith("lg-"):
+            log_file = self._resolve_legacy_log(runner_id)
 
         if log_file and log_file.exists():
             try:
@@ -368,11 +409,18 @@ class LogService:
             for log_path in glob.glob(pattern):
                 path = Path(log_path)
                 fname = path.name
-                # runner_id 추출: plan-runner-stream-{8hex}-*.log
+                # runner_id 추출: 신규 형식 plan-runner-stream-{8hex}-*.log
                 m = re.match(r"plan-runner-stream-([0-9a-f]{8})-", fname)
                 if not m:
-                    continue
-                runner_id = m.group(1)
+                    # 레거시 형식 plan-runner-stream-{timestamp}.log
+                    m2 = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", fname)
+                    if not m2:
+                        continue
+                    ts = m2.group(1)
+                    runner_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
+                    self._legacy_map[runner_id] = path
+                else:
+                    runner_id = m.group(1)
 
                 # 이미 Redis에서 수집한 running runner면 log_file만 보정
                 if runner_id in runs:
@@ -421,10 +469,14 @@ class LogService:
         # 2. Redis에 없으면 파일 스캔으로 fallback
         if log_file is None:
             log_dir = self._get_log_dir()
-            pattern = str(log_dir / f"plan-runner-stream-{runner_id}-*.log")
-            matches = glob.glob(pattern)
-            if matches:
-                log_file = Path(sorted(matches)[-1])  # 가장 최신 파일
+            if runner_id.startswith("lg-"):
+                # 레거시 pseudo runner_id → _legacy_map 또는 전체 스캔
+                log_file = self._resolve_legacy_log(runner_id)
+            else:
+                pattern = str(log_dir / f"plan-runner-stream-{runner_id}-*.log")
+                matches = glob.glob(pattern)
+                if matches:
+                    log_file = Path(sorted(matches, key=lambda p: Path(p).stat().st_mtime)[-1])
 
         if log_file is None or not log_file.exists():
             return FullLogResponse(lines=[], total_lines=0, offset=offset, has_more=False)
