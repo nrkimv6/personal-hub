@@ -23,6 +23,7 @@ import redis as redis_sync
 
 from app.shared.redis.client import RedisClient
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
+from app.modules.dev_runner.services.visibility import is_visible_runner
 
 # ─── Redis 상수 ─────────────────────────────────────────────────────────────
 REDIS_HOST = "localhost"
@@ -111,9 +112,9 @@ class EventService:
             for rid in runner_ids:
                 payload = self._build_status_payload(rid)
                 if payload:
-                    trigger = payload.get("trigger") or ""
-                    if trigger and trigger.startswith("tc:"):
-                        continue  # tc: prefix 트리거만 제외 (테스트 자동화 실행 필터)
+                    # visibility.py 단일 함수로 판별 (화이트리스트 — user/user:all만 포함)
+                    if not is_visible_runner(payload.get("trigger"), rid):
+                        continue
                     result.append(payload)
             return result
         except Exception:

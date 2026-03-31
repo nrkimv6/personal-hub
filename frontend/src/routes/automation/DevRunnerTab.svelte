@@ -211,6 +211,8 @@
 						runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 					}
 				}
+				// API 응답에 없고 stopped인 탭 자동 정리 (누적 회색 점 방지)
+				runnerTabs = runnerTabs.filter(tab => runnerMap.has(tab.id) || tab.running);
 				// activeTabId가 없으면 마지막 탭 선택
 				if (!activeTabId && runnerTabs.length > 0) {
 					activeTabId = runnerTabs[runnerTabs.length - 1].id;
@@ -258,7 +260,7 @@
 		if (eventName === 'status') {
 			try {
 				const parsed = JSON.parse(data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null; trigger?: string | null }[] };
-				const runners = (parsed.runners ?? []).filter(r => !r.trigger?.startsWith('tc:'));
+				const runners = (parsed.runners ?? []).filter(r => r.trigger === 'user' || r.trigger === 'user:all');
 				// runner 종료 감지를 위해 업데이트 전 running 상태 캡처
 				const prevRunningIds = new Set(runnerTabs.filter(t => t.running).map(t => t.id));
 				const runningRunner = runners.find(r => r.status === 'running');
@@ -293,6 +295,8 @@
 							runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 						}
 					}
+					// SSE runners에 없고 stopped인 탭 자동 정리 (누적 회색 점 방지)
+					runnerTabs = runnerTabs.filter(tab => runnerMap.has(tab.id) || tab.running);
 					if (!activeTabId && runnerTabs.length > 0) {
 						activeTabId = runnerTabs[runnerTabs.length - 1].id;
 					}
@@ -437,7 +441,8 @@
 
 	async function fetchRunners() {
 		try {
-			const runners = await devRunnerRunnerApi.runners();
+			const allRunners = await devRunnerRunnerApi.runners();
+			const runners = allRunners.filter(r => r.visible !== false);
 			const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
 			runnerTabs = runnerTabs.map(tab => {
 				const runner = runnerMap.get(tab.id);
@@ -448,6 +453,8 @@
 					runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 				}
 			}
+			// API 응답에 없고 stopped인 탭 자동 정리 (누적 회색 점 방지)
+			runnerTabs = runnerTabs.filter(tab => runnerMap.has(tab.id) || tab.running);
 		} catch (e) {
 			console.warn('[DevRunner] fetchRunners 실패', e);
 		}

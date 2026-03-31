@@ -23,6 +23,7 @@ from app.config import logger
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.plan_service import plan_service
 from app.modules.dev_runner.services.settings_service import settings_service
+from app.modules.dev_runner.services.visibility import is_visible_runner
 from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
 from app.modules.dev_runner.services.state import get_state
 from app.modules.dev_runner.services.redis_connection import (
@@ -467,11 +468,8 @@ class ExecutorService:
 
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
                     is_orphan = self._fix_orphan_workflows(db, rid, running, status)
-                    # 화이트리스트: user/user:all 트리거만 UI에 표시 (fail-closed)
-                    is_user = bool(trigger and trigger in ("user", "user:all"))
-                    # 이중 방어: tc-pytest- prefix runner는 trigger와 무관하게 항상 invisible
-                    if rid.startswith("tc-pytest-"):
-                        is_user = False
+                    # visibility.py 단일 함수로 판별 (화이트리스트 + 이중 방어)
+                    is_user = is_visible_runner(trigger, rid)
                     result.append(RunnerListItem(
                         runner_id=rid,
                         running=running,
