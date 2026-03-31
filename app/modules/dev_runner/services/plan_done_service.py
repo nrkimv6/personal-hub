@@ -127,6 +127,33 @@ class PlanDoneService:
         return None
 
     @staticmethod
+    def _validate_done_preconditions(file_path: str, content: str) -> list:
+        """done 처리 전 사전 검증. 실패 사유 리스트 반환 (빈 리스트 = 통과)"""
+        errors = []
+        if re.search(r">\s*(branch|worktree):", content[:2000]):
+            errors.append("branch/worktree 필드 잔존 — /merge-test 먼저 실행 필요")
+        name = Path(file_path).name
+        is_fix = "_fix-" in name or "_fix_" in name
+        if not is_fix:
+            for line in content.split("\n")[:5]:
+                if line.startswith("# fix") and len(line) > 5 and line[5] in (":", "-", " "):
+                    is_fix = True
+                    break
+            if not is_fix and re.search(r">\s*유형:\s*fix", content[:1000]):
+                is_fix = True
+        if is_fix:
+            has_pr = "Phase R" in content or "재발 경로 분석" in content
+            if not has_pr:
+                errors.append("fix plan Phase R 섹션 필수 — /implement에서 Phase R 먼저 실행")
+            elif has_pr:
+                m = re.search(r"### Phase R.*?(?=\n### |\Z)", content, re.DOTALL)
+                if m:
+                    section = re.sub(r"```.*?```", "", m.group(0), flags=re.DOTALL)
+                    if "미방어" in section:
+                        errors.append("Phase R에 미방어 경로 잔존 — 모든 경로 방어 완료 필요")
+        return errors
+
+    @staticmethod
     def _update_plan_headers(content: str, total: int) -> str:
         """\uc0c1\ud0dc\u2192구현완료, \uc9c4\ud589\ub960\u2192100%, [\u2192ID]\u2192[x] \uce58\ud658, \ud478\ud130 \uac31\uc2e0"""
         content = re.sub(r'^(>\s*\uc0c1\ud0dc:\s*).*$', r'\1구현완료', content, flags=re.MULTILINE)
@@ -330,6 +357,11 @@ class PlanDoneService:
             content = path.read_text(encoding="utf-8", errors="ignore")
             title = self._extract_plan_title(content)
             total = pre_progress.total
+
+            # 0. 사전 검증 (구현완료 설정 전 게이트)
+            precondition_errors = self._validate_done_preconditions(plan_path, content)
+            if precondition_errors:
+                raise ValueError(f"done 사전 검증 실패: {'; '.join(precondition_errors)}")
 
             # 1. \ud5e4\ub354/\ud478\ud130 \uac31\uc2e0
             updated_content = self._update_plan_headers(content, total)

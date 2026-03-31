@@ -448,6 +448,9 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
     from plan_worktree_helpers import (
         remove_plan_header_fields as _remove_plan_header_fields,
         get_plan_completion as _get_plan_completion,
+        is_fix_plan as _is_fix_plan,
+        has_phase_r as _has_phase_r,
+        has_undefended_paths as _has_undefended_paths,
     )
     if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
         pub_fn("plan_file 없음(--all 모드) — done 스킵")
@@ -476,14 +479,32 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
     try:
         plan_text = Path(plan_file).read_text(encoding="utf-8", errors="replace")
         if re.search(r">\s*상태:\s*(머지대기|통합테스트중)", plan_text[:2000]):
-            updated = re.sub(
-                r"(>\s*상태:\s*)(머지대기|통합테스트중)",
-                r"\g<1>구현완료",
-                plan_text[:2000],
-            ) + plan_text[2000:]
-            Path(plan_file).write_text(updated, encoding="utf-8")
-            pub_fn("plan 상태 → 구현완료 전이 (fallback)")
-            logger.info(f"[_handle_post_merge_done] plan 상태 구현완료 전이: {plan_file}")
+            # fix plan 사전 검증: Phase R 부재/미방어 확인 (branch/worktree는 merge 직후이므로 면제)
+            if _is_fix_plan(plan_file, plan_text):
+                if not _has_phase_r(plan_text):
+                    pub_fn("fix plan 사전 검증 실패 — 구현완료 전이 보류: Phase R 섹션 필수")
+                    logger.warning(f"[_handle_post_merge_done] fix plan Phase R 부재, 구현완료 전이 스킵: {plan_file}")
+                elif _has_undefended_paths(plan_text):
+                    pub_fn("fix plan 사전 검증 실패 — 구현완료 전이 보류: Phase R에 미방어 경로 잔존")
+                    logger.warning(f"[_handle_post_merge_done] fix plan Phase R 미방어 잔존, 구현완료 전이 스킵: {plan_file}")
+                else:
+                    updated = re.sub(
+                        r"(>\s*상태:\s*)(머지대기|통합테스트중)",
+                        r"\g<1>구현완료",
+                        plan_text[:2000],
+                    ) + plan_text[2000:]
+                    Path(plan_file).write_text(updated, encoding="utf-8")
+                    pub_fn("plan 상태 → 구현완료 전이 (fallback)")
+                    logger.info(f"[_handle_post_merge_done] plan 상태 구현완료 전이: {plan_file}")
+            else:
+                updated = re.sub(
+                    r"(>\s*상태:\s*)(머지대기|통합테스트중)",
+                    r"\g<1>구현완료",
+                    plan_text[:2000],
+                ) + plan_text[2000:]
+                Path(plan_file).write_text(updated, encoding="utf-8")
+                pub_fn("plan 상태 → 구현완료 전이 (fallback)")
+                logger.info(f"[_handle_post_merge_done] plan 상태 구현완료 전이: {plan_file}")
     except Exception as _st_err:
         logger.debug(f"[_handle_post_merge_done] plan 상태 전이 실패 (무시): {_st_err}")
 

@@ -198,6 +198,50 @@ def get_plan_completion(plan_file: str | None) -> tuple[int, int]:
     return (done, total)
 
 
+def is_fix_plan(file_path: str, content: str = "") -> bool:
+    """fix plan 여부 판정 (Phase R 필수 대상)"""
+    name = Path(file_path).name
+    if "_fix-" in name or "_fix_" in name:
+        return True
+    if content:
+        for line in content.split("\n")[:5]:
+            if line.startswith("# fix") and len(line) > 5 and line[5] in (":", "-", " "):
+                return True
+        if re.search(r">\s*유형:\s*fix", content[:1000]):
+            return True
+    return False
+
+
+def has_phase_r(content: str) -> bool:
+    """Phase R 섹션 존재 여부"""
+    return "Phase R" in content or "재발 경로 분석" in content
+
+
+def has_undefended_paths(content: str) -> bool:
+    """Phase R 내 '미방어' 경로 잔존 여부"""
+    m = re.search(r"### Phase R.*?(?=\n### |\Z)", content, re.DOTALL)
+    if not m:
+        return False
+    section = m.group(0)
+    section_no_code = re.sub(r"```.*?```", "", section, flags=re.DOTALL)
+    return "미방어" in section_no_code
+
+
+def validate_done_preconditions(file_path: str, content: str) -> list:
+    """done 처리 전 사전 검증. 실패 사유 리스트 반환 (빈 리스트 = 통과)"""
+    errors = []
+    # 2.5: branch/worktree 필드 잔존
+    if re.search(r">\s*(branch|worktree):", content[:2000]):
+        errors.append("branch/worktree 필드 잔존 — /merge-test 먼저 실행 필요")
+    # 2.6-a: fix plan Phase R 부재
+    if is_fix_plan(file_path, content) and not has_phase_r(content):
+        errors.append("fix plan Phase R 섹션 필수 — /implement에서 Phase R 먼저 실행")
+    # 2.6-b: Phase R 내 미방어 경로 잔존
+    if is_fix_plan(file_path, content) and has_phase_r(content) and has_undefended_paths(content):
+        errors.append("Phase R에 미방어 경로 잔존 — 모든 경로 방어 완료 필요")
+    return errors
+
+
 def remove_plan_header_fields(plan_file: str):
     """plan 파일에서 '> branch:' / '> worktree:' 줄 제거"""
     try:
