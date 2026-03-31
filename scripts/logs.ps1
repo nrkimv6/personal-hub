@@ -621,6 +621,7 @@ function Show-LogContent {
     }
 }
 
+# [DEPRECATED 2026-03-31] Follow 모드 Python 위임으로 미사용. 추후 삭제 예정.
 # Real-time log tail function (single file)
 function Start-LogTail {
     param(
@@ -661,6 +662,7 @@ function Start-LogTail {
     }
 }
 
+# [DEPRECATED 2026-03-31] Follow 모드 Python 위임으로 미사용. 추후 삭제 예정.
 # Real-time combined log tail (using FileSystemWatcher instead of Start-Job for UTF-8 support)
 function Start-CombinedLogTail {
     param(
@@ -1105,68 +1107,32 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Monitor Page Log Viewer" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-# Real-time follow mode
+# Real-time follow mode — Python log_viewer에 위임 (2026-03-31)
 if ($Follow) {
-    switch ($Target) {
-        "api" {
-            Start-LogTail -FilePath $apiLogFile -Prefix "API"
-        }
-        "worker" {
-            if (-not $Admin) {
-                Write-Host "[!] Worker 로그는 Admin 모드에서만 사용 가능합니다. (-Admin 스위치를 추가하세요)" -ForegroundColor Red
-            } else {
-                Start-LogTail -FilePath $workerLogFile -Prefix "Worker"
-            }
-        }
-        "frontend" {
-            Start-LogTail -FilePath $frontendLogFile -Prefix "Frontend"
-        }
-        "watchdog" {
-            if (-not $Admin) {
-                Write-Host "[!] Watchdog 로그는 Admin 모드에서만 사용 가능합니다. (-Admin 스위치를 추가하세요)" -ForegroundColor Red
-            } else {
-                Start-CombinedLogTail `
-                    -WatchdogLog $watchdogLogFile `
-                    -ClaudeWatchdogLog $claudeWatchdogLogFile `
-                    -VideoDownloadWatchdogLog $videoDownloadWatchdogLogFile `
-                    -CrawlWatchdogLog $crawlWatchdogLogFile `
-                    -CommandListenerWatchdogLog $commandListenerWatchdogLogFile `
-                    -ApiWatchdogLog $apiWatchdogLogFile `
-                    -StartupApiWatchdogLog $startupApiWatchdogLogFile `
-                    -StartupBrowserWorkersLog $startupBrowserWorkersLogFile
-            }
-        }
-        "devrunner" {
-            if (-not $devRunnerLogFile) {
-                Write-Host "[!] Dev-Runner 로그 파일을 찾을 수 없습니다. -Admin 스위치를 추가하거나 logs/admin/ 디렉토리를 확인하세요." -ForegroundColor Red
-            } else {
-                if ($Cleanup) {
-                    Write-Host "  [Cleanup 필터 활성: [cleanup]|heartbeat.*cleanup|stale.*runner 포함 라인만 표시]" -ForegroundColor Yellow
-                }
-                Start-LogTail -FilePath $devRunnerLogFile -Prefix "DevRunner"
-            }
-        }
-        default {
-            Start-CombinedLogTail `
-                -ApiLog $apiLogFile `
-                -WorkerLog $workerLogFile `
-                -FrontendLog $frontendLogFile `
-                -ClaudeWorkerLog $claudeWorkerLogFile `
-                -VideoDownloadLog $videoDownloadWorkerLogFile `
-                -CrawlWorkerLog $crawlWorkerLogFile `
-                -ServiceRunnerLog $serviceRunnerLogFile `
-                -WatchdogLog $watchdogLogFile `
-                -ClaudeWatchdogLog $claudeWatchdogLogFile `
-                -VideoDownloadWatchdogLog $videoDownloadWatchdogLogFile `
-                -CrawlWatchdogLog $crawlWatchdogLogFile `
-                -CommandListenerWatchdogLog $commandListenerWatchdogLogFile `
-                -ApiWatchdogLog $apiWatchdogLogFile `
-                -StartupApiWatchdogLog $startupApiWatchdogLogFile `
-                -StartupBrowserWorkersLog $startupBrowserWorkersLogFile `
-                -DevRunnerLog $devRunnerLogFile `
-                -CloudflaredLog $cloudflaredLogFile
-        }
+    $pyExe = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+    $pyArgs = @("-m", "app.log_viewer")
+
+    if ($Target -ne "all") {
+        $pyArgs += $Target.ToLower()
     }
+
+    $pyArgs += "--follow"
+
+    if ($Admin) {
+        $pyArgs += "--admin"
+    }
+
+    if ($Cleanup) {
+        $pyArgs += "--cleanup"
+    }
+
+    Push-Location $ProjectRoot
+    try {
+        & $pyExe @pyArgs
+    } finally {
+        Pop-Location
+    }
+    exit $LASTEXITCODE
 } else {
     # Static log display — Python log_viewer에 위임
     $pyExe = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
