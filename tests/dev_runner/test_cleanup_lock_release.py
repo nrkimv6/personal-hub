@@ -8,6 +8,7 @@ Phase T1 TC:
 - test_stale_lock_ttl_expiry_E: TTL 만료 후 다른 runner acquire 성공 (ERROR)
 - test_cleanup_uses_per_repo_queue_key_R: 글로벌 키 아닌 per-repo 큐 키 사용 (RIGHT)
 """
+import importlib.util
 import sys
 import time
 import types
@@ -35,6 +36,26 @@ def _load_process_utils():
     import _dr_process_utils
     importlib.reload(_dr_process_utils)
     return _dr_process_utils
+
+
+@pytest.fixture(autouse=True)
+def restore_real_merge_queue():
+    """sys.modules["merge_queue"] 오염 방어.
+
+    test_post_merge_done_integration.py 등이 모듈 수준에서
+    sys.modules["merge_queue"]를 잘못된 키를 반환하는 mock으로 교체한다.
+    이 fixture는 각 테스트 전에 실제 merge_queue.py를 로드하여 sys.modules를 복원한다.
+    """
+    spec = importlib.util.spec_from_file_location("merge_queue", SCRIPTS_DIR / "merge_queue.py")
+    real_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real_mod)
+    old = sys.modules.get("merge_queue")
+    sys.modules["merge_queue"] = real_mod
+    yield
+    if old is None:
+        sys.modules.pop("merge_queue", None)
+    else:
+        sys.modules["merge_queue"] = old
 
 
 @pytest.fixture
@@ -72,12 +93,12 @@ class TestCleanupLockRelease:
 
     def test_cleanup_release_ignores_non_owner_B(self, redis_client):
         """B(Boundary): runner_a가 lock 보유 → runner_b cleanup → lock은 runner_a 소유 유지"""
-        from merge_queue import acquire_merge_turn, get_merge_lock_key
+        from merge_queue import acquire_merge_turn, get_queue_key
 
-        # runner_a가 lock 획득
-        ok = acquire_merge_turn(redis_client, "runner-a", repo_id="test-repo", timeout=3, lock_ttl=30)
+        # runner_a가 lock 획득 (큐 선두 = 소유자)
+        ok = acquire_merge_turn(redis_client, "runner-a", repo_id="test-repo", timeout=3, queue_ttl=30)
         assert ok is True
-        assert redis_client.get(get_merge_lock_key("test-repo")) == "runner-a"
+        assert redis_client.lindex(get_queue_key("test-repo"), 0) == "runner-a"
 
         # runner_b cleanup → runner_a lock에 영향 없음
         mock_redis = MagicMock()
@@ -88,8 +109,8 @@ class TestCleanupLockRelease:
             pu = _load_process_utils()
             pu._cleanup_process_state("runner-b", mock_redis, reason="process_exit")
 
-        # release_merge_lock이 호출됐지만 소유자 불일치 → 실물 Redis에서 runner-a 소유 유지됨
-        assert redis_client.get(get_merge_lock_key("test-repo")) == "runner-a"
+        # release_merge_lock이 호출됐지만 소유자 불일치 → 실물 Redis에서 runner-a 큐 선두 유지됨
+        assert redis_client.lindex(get_queue_key("test-repo"), 0) == "runner-a"
 
     def test_cleanup_release_exception_does_not_block_E(self):
         """E(Error): release_merge_lock 예외 발생 → cleanup 나머지 로직 정상 실행"""
@@ -107,16 +128,16 @@ class TestCleanupLockRelease:
         mock_redis.lrem.assert_called()
 
     def test_stale_lock_ttl_expiry_E(self, redis_client):
-        """E(Error): TTL=2초 lock → cleanup 미실행 → 3초 후 다른 runner acquire 성공"""
+        """E(Error): queue_ttl=2초 → 3초 후 큐 키 만료 → 다른 runner acquire 성공"""
         from merge_queue import acquire_merge_turn
 
-        ok = acquire_merge_turn(redis_client, "runner-stale", repo_id="test-repo", timeout=3, lock_ttl=2)
+        ok = acquire_merge_turn(redis_client, "runner-stale", repo_id="test-repo", timeout=3, queue_ttl=2)
         assert ok is True
 
-        # cleanup 없이 TTL 만료 대기
+        # cleanup 없이 queue_ttl 만료 대기
         time.sleep(3)
 
-        ok2 = acquire_merge_turn(redis_client, "runner-new", repo_id="test-repo", timeout=3, lock_ttl=10)
+        ok2 = acquire_merge_turn(redis_client, "runner-new", repo_id="test-repo", timeout=3, queue_ttl=10)
         assert ok2 is True
 
     def test_cleanup_uses_per_repo_queue_key_R(self):

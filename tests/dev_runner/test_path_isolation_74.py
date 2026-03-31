@@ -52,8 +52,8 @@ def test_external_plan_path_accepted(monkeypatch):
 
 
 def test_cwd_set_to_plan_runner_module_path():
-    """command-listener가 subprocess 실행 시 cwd가 plan-runner 모듈 경로로 설정됨"""
-    listener_path = Path("scripts/dev-runner-command-listener.py")
+    """_dr_plan_runner.py가 subprocess 실행 시 cwd가 plan-runner 모듈 경로로 설정됨"""
+    listener_path = Path("scripts/_dr_plan_runner.py")
     source = listener_path.read_text(encoding="utf-8", errors="ignore")
 
     # cwd가 PLAN_RUNNER_MODULE_PATH로 설정됨을 확인
@@ -62,10 +62,10 @@ def test_cwd_set_to_plan_runner_module_path():
 
 
 def test_listener_passes_plan_file_as_absolute_path():
-    """listener의 start_plan_runner가 plan_file을 --plan-file 인자로 전달함"""
+    """_dr_plan_runner.py의 start_plan_runner가 plan_file을 --plan-file 인자로 전달함"""
     from pathlib import Path
 
-    listener_path = Path("scripts/dev-runner-command-listener.py")
+    listener_path = Path("scripts/_dr_plan_runner.py")
     source = listener_path.read_text(encoding="utf-8", errors="ignore")
 
     assert '"--plan-file"' in source or "'--plan-file'" in source, \
