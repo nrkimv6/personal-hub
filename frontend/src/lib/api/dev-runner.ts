@@ -426,8 +426,8 @@ export const devRunnerLogApi = {
 		return new EventSource(`${DEV_RUNNER_BASE}/merge-log/stream?runner_id=${runnerId}`);
 	},
 
-	history: (limit: number = 20, offset: number = 0) =>
-		devRunnerRequest<RunHistoryResponse>(`/logs/history?limit=${limit}&offset=${offset}`),
+	history: (limit: number = 20, offset: number = 0, visibleOnly: boolean = false) =>
+		devRunnerRequest<RunHistoryResponse>(`/logs/history?limit=${limit}&offset=${offset}${visibleOnly ? '&visible_only=true' : ''}`),
 
 	full: (runnerId: string, offset: number = 0, limit: number = 500) =>
 		devRunnerRequest<FullLogResponse>(`/logs/full?runner_id=${runnerId}&offset=${offset}&limit=${limit}`),

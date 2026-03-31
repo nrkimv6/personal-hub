@@ -21,6 +21,7 @@ from app.shared.redis.client import RedisClient
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 from app.modules.dev_runner.schemas import LogResponse, RunHistoryItem, RunHistoryResponse, FullLogResponse
 from app.modules.dev_runner.services.state import get_state
+from app.modules.dev_runner.services.visibility import is_visible_runner
 # Redis 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
@@ -364,7 +365,7 @@ class LogService:
             pass
         return None
 
-    def get_run_history(self, limit: int = 20, offset: int = 0) -> RunHistoryResponse:
+    def get_run_history(self, limit: int = 20, offset: int = 0, visible_only: bool = False) -> RunHistoryResponse:
         """실행 이력 조회: Redis active_runners + 로그 파일 스캔 병합, start_time DESC 정렬"""
         runs: dict[str, RunHistoryItem] = {}
 
@@ -401,6 +402,8 @@ class LogService:
                 branch = f"runner/{runner_id}" if worktree_path else None
                 if trigger is None and log_file_path:
                     trigger = self._parse_trigger_from_log(log_file_path)
+                if visible_only and not is_visible_runner(trigger, runner_id):
+                    continue
                 runs[runner_id] = RunHistoryItem(
                     runner_id=runner_id,
                     plan_file=plan_file,
@@ -454,6 +457,9 @@ class LogService:
                 except OSError:
                     start_time = None
 
+                file_trigger = self._parse_trigger_from_log(str(path))
+                if visible_only and not is_visible_runner(file_trigger, runner_id):
+                    continue
                 runs[runner_id] = RunHistoryItem(
                     runner_id=runner_id,
                     plan_file=None,
@@ -464,7 +470,7 @@ class LogService:
                     end_time=None,
                     log_file=str(path),
                     has_log=True,
-                    trigger=self._parse_trigger_from_log(str(path)),
+                    trigger=file_trigger,
                 )
 
         # 3. start_time DESC 정렬

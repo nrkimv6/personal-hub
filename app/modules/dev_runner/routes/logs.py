@@ -45,9 +45,10 @@ async def get_diagnostics():
 async def get_run_history(
     limit: int = Query(20, ge=1, le=100, description="최대 반환 수"),
     offset: int = Query(0, ge=0, description="페이지 오프셋"),
+    visible_only: bool = Query(False, description="user runner만 필터링"),
 ):
     """실행 이력 조회 (Redis active_runners + 로그 파일 스캔)"""
-    return log_service.get_run_history(limit=limit, offset=offset)
+    return log_service.get_run_history(limit=limit, offset=offset, visible_only=visible_only)
 
 
 @router.get("/logs/full", response_model=FullLogResponse)

@@ -8,6 +8,7 @@
 	import CurrentTrackingCard from '$lib/components/dev-runner/CurrentTrackingCard.svelte';
 	import MergeQueuePanel from '$lib/components/dev-runner/MergeQueuePanel.svelte';
 	import UnifiedLogsView from '$lib/components/dev-runner/UnifiedLogsView.svelte';
+	import LogHistoryPanel from '$lib/components/dev-runner/LogHistoryPanel.svelte';
 	import DevRunnerSettingsPanel from '$lib/components/dev-runner/DevRunnerSettingsPanel.svelte';
 	import WorkflowList from '$lib/components/dev-runner/WorkflowList.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
@@ -37,7 +38,7 @@
 	let prevCycle = $state<number | null>(null);
 	let showExecutionModal = $state(false);
 	let taskHistoryOpen = $state(false);
-	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge'>('plans');
+	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge' | 'logs'>('plans');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let taskListRefreshTick = $state(0);
@@ -745,6 +746,13 @@
 							Merge
 							{#if mergeQueuedCount > 0}<span class="bg-primary text-primary-foreground text-[8px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5">{mergeQueuedCount}</span>{/if}
 						</button>
+						<button
+							onclick={() => { taskHistoryTab = 'logs'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'logs' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+							Logs
+						</button>
 												<!-- 모바일 닫기 버튼 -->
 						<button
 							onclick={() => { taskHistoryOpen = false; }}
@@ -782,6 +790,10 @@
 							<div class="h-full overflow-hidden">
 								<MergeQueuePanel />
 							<div class="border-t border-gray-200 mt-2"><WorkflowList /></div>
+							</div>
+						{:else if taskHistoryTab === 'logs'}
+							<div class="h-full overflow-hidden">
+								<LogHistoryPanel />
 							</div>
 						{/if}
 					</div>
