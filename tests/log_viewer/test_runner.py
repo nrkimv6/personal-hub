@@ -43,6 +43,30 @@ class TestGetRunnerFileId:
         result = get_runner_file_id(fname)
         assert result == ""
 
+    # --- Phase 3: TC runner 패턴 ---
+
+    def test_tc_runner_format_returns_name(self):
+        """R(Right): TC runner 기본 형식 → t-{name} 반환"""
+        fname = "plan-runner-t-my-plan-20260305-143022.log"
+        assert get_runner_file_id(fname) == "t-my-plan"
+
+    def test_tc_runner_with_numbers_non_greedy(self):
+        """B(Boundary): 숫자 포함 이름 — non-greedy로 YYYYMMDD 앞에서 끊어짐"""
+        fname = "plan-runner-t-test-99-20260305-143022.log"
+        assert get_runner_file_id(fname) == "t-test-99"
+
+    def test_tc_runner_single_name(self):
+        """B(Boundary): 최소 이름 (한 글자)"""
+        fname = "plan-runner-t-x-20260305-143022.log"
+        assert get_runner_file_id(fname) == "t-x"
+
+    def test_tc_runner_priority_over_hex(self):
+        """R(Right): TC runner 패턴이 8자 hex 패턴보다 먼저 매칭됨"""
+        # 이름이 마침 8자 hex처럼 생겼어도 t- 접두사 덕분에 TC runner로 인식
+        fname = "plan-runner-t-ab12cd34-20260305-143022.log"
+        result = get_runner_file_id(fname)
+        assert result == "t-ab12cd34"
+
 
 # ---------------------------------------------------------------------------
 # get_runner_display_name
@@ -72,6 +96,20 @@ class TestGetRunnerDisplayName:
     def test_only_date_prefix(self):
         plan = "2026-03-10_feature.md"
         assert get_runner_display_name(plan) == "feature"
+
+    # --- Phase 3: fallback 파라미터 ---
+
+    def test_fallback_used_when_plan_file_empty(self):
+        """R(Right): plan_file이 빈 문자열이면 fallback 반환"""
+        assert get_runner_display_name("", fallback="abc123") == "abc123"
+
+    def test_fallback_default_is_unknown(self):
+        # B(Boundary): fallback 미지정 시 기본값 "(unknown)"
+        assert get_runner_display_name("") == "(unknown)"
+
+    def test_fallback_ignored_when_plan_file_given(self):
+        """R(Right): plan_file이 있으면 fallback 무시하고 이름 추출"""
+        assert get_runner_display_name("2026-03-05_smart-push.md", fallback="xxx") == "smart-push"
 
 
 # ---------------------------------------------------------------------------
@@ -195,5 +233,33 @@ class TestGetActiveRunners:
         info = result[0]
         assert info.runner_id == "cccc3333"
         assert info.log_path is None
-        assert info.display_name == "(unknown)"
+        assert info.display_name == "cccc3333"  # plan_file=None → fallback to runner_id
         assert info.short_id == ""
+
+
+# ---------------------------------------------------------------------------
+# RunnerInfo — display_name fallback to runner_id (Phase 3)
+# ---------------------------------------------------------------------------
+
+class TestRunnerInfoFallback:
+    def test_runner_info_null_plan_shows_runner_id(self):
+        # R(Right): plan_file=None, runner_id="t-my-tc" → display_name == "t-my-tc"
+        info = RunnerInfo(
+            runner_id="t-my-tc",
+            log_path=None,
+            stream_path=None,
+            plan_file=None,
+            pid=None,
+        )
+        assert info.display_name == "t-my-tc"
+
+    def test_runner_info_with_plan_file_ignores_runner_id(self):
+        """R(Right): plan_file 있으면 runner_id 무시하고 이름 추출"""
+        info = RunnerInfo(
+            runner_id="ignored-id",
+            log_path=None,
+            stream_path=None,
+            plan_file="2026-03-05_deploy.md",
+            pid=None,
+        )
+        assert info.display_name == "deploy"

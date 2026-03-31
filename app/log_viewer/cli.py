@@ -16,6 +16,7 @@ target:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -29,6 +30,7 @@ except ImportError:  # pragma: no cover
     _RICH = False
 
 from app.log_viewer.config import (
+    CLEANUP_FILTER_PATTERN,
     LOG_SOURCES,
     PLAN_RUNNER_COLOR,
     PLAN_RUNNER_LOG_PATTERN,
@@ -78,12 +80,15 @@ def _print_line(text: str) -> None:
         print(text)
 
 
-def _tail_file(file_path: Path, n: int) -> list[str]:
-    """파일 마지막 n줄을 반환한다."""
+def _tail_file(file_path: Path, n: int, filter_pattern: str | None = None) -> list[str]:
+    """파일 마지막 n줄을 반환한다. filter_pattern이 있으면 매칭 라인만 유지 후 마지막 n줄 반환."""
     try:
         with file_path.open("r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
-        return [ln.rstrip("\n") for ln in lines[-n:]] if lines else []
+        stripped = [ln.rstrip("\n") for ln in lines] if lines else []
+        if filter_pattern is not None:
+            stripped = [ln for ln in stripped if re.search(filter_pattern, ln)]
+        return stripped[-n:] if stripped else []
     except OSError:
         return []
 
@@ -100,7 +105,7 @@ def _resolve_dirs(admin: bool) -> list[Path]:
     return dirs
 
 
-def _print_source(source_name: str, files: list[Path], color: str, lines: int) -> None:
+def _print_source(source_name: str, files: list[Path], color: str, lines: int, filter_pattern: str | None = None) -> None:
     """로그 소스 헤더와 tail 내용을 출력한다."""
     if not files:
         _print_rule(f"{source_name}  [파일 없음]", color)
@@ -115,7 +120,7 @@ def _print_source(source_name: str, files: list[Path], color: str, lines: int) -
                 stale_mark = " [stale]"
 
         _print_rule(f"{label}  {f.name}{stale_mark}", color)
-        tail_lines = _tail_file(f, lines)
+        tail_lines = _tail_file(f, lines, filter_pattern=filter_pattern)
         if tail_lines:
             for ln in tail_lines:
                 _print_line(ln)
@@ -123,7 +128,7 @@ def _print_source(source_name: str, files: list[Path], color: str, lines: int) -
             _print_line("  (비어있음)")
 
 
-def show_source(name: str, admin: bool, lines_override: int | None) -> None:
+def show_source(name: str, admin: bool, lines_override: int | None, cleanup: bool = False) -> None:
     """단일 소스를 찾아 출력한다."""
     src = get_source_by_name(name.upper())
     if src is None:
@@ -135,10 +140,10 @@ def show_source(name: str, admin: bool, lines_override: int | None) -> None:
     patterns = [f"{p}*" for p in src.patterns]
     files = find_latest_logs(patterns, dirs, max_count=3)
     n = lines_override if lines_override is not None else src.tail_lines
-    _print_source(src.name, files, src.color, n)
+    _print_source(src.name, files, src.color, n, filter_pattern=CLEANUP_FILTER_PATTERN if cleanup else None)
 
 
-def show_all_sources(admin: bool, lines_override: int | None) -> None:
+def show_all_sources(admin: bool, lines_override: int | None, cleanup: bool = False) -> None:
     """admin 여부에 따른 모든 소스를 출력한다."""
     sources = get_sources(admin)
     dirs = _resolve_dirs(admin)
@@ -146,16 +151,17 @@ def show_all_sources(admin: bool, lines_override: int | None) -> None:
         patterns = [f"{p}*" for p in src.patterns]
         files = find_latest_logs(patterns, dirs, max_count=3)
         n = lines_override if lines_override is not None else src.tail_lines
-        _print_source(src.name, files, src.color, n)
+        _print_source(src.name, files, src.color, n, filter_pattern=CLEANUP_FILTER_PATTERN if cleanup else None)
 
 
 # ---------------------------------------------------------------------------
 # plan-runner 출력
 # ---------------------------------------------------------------------------
 
-def show_plan_runners(admin: bool, lines_override: int | None) -> None:
+def show_plan_runners(admin: bool, lines_override: int | None, cleanup: bool = False) -> None:
     """활성 plan-runner 목록을 표시한다. Redis 미연결 시 정적 fallback."""
     runners = get_active_runners()
+    fp = CLEANUP_FILTER_PATTERN if cleanup else None
 
     if not runners:
         # Fallback: 정적 파일 탐색
@@ -169,16 +175,16 @@ def show_plan_runners(admin: bool, lines_override: int | None) -> None:
 
         n_log = lines_override if lines_override is not None else PLAN_RUNNER_TAIL
         n_stream = lines_override if lines_override is not None else PLAN_RUNNER_STREAM_TAIL
-        _print_source("PLAN-RUNNER (fallback)", log_files, PLAN_RUNNER_COLOR, n_log)
-        _print_source("PLAN-RUNNER-STREAM (fallback)", stream_files, PLAN_RUNNER_STREAM_COLOR, n_stream)
+        _print_source("PLAN-RUNNER (fallback)", log_files, PLAN_RUNNER_COLOR, n_log, filter_pattern=fp)
+        _print_source("PLAN-RUNNER-STREAM (fallback)", stream_files, PLAN_RUNNER_STREAM_COLOR, n_stream, filter_pattern=fp)
         return
 
     # Redis에서 가져온 활성 runner 표시
     for runner in runners:
-        _show_runner(runner, lines_override)
+        _show_runner(runner, lines_override, filter_pattern=fp)
 
 
-def _show_runner(runner: RunnerInfo, lines_override: int | None) -> None:
+def _show_runner(runner: RunnerInfo, lines_override: int | None, filter_pattern: str | None = None) -> None:
     label = f"PLAN-RUNNER [{runner.display_name}]  pid={runner.pid or '?'}"
     n_log = lines_override if lines_override is not None else PLAN_RUNNER_TAIL
     n_stream = lines_override if lines_override is not None else PLAN_RUNNER_STREAM_TAIL
@@ -188,7 +194,7 @@ def _show_runner(runner: RunnerInfo, lines_override: int | None) -> None:
         log_file = Path(runner.log_path)
         if log_file.exists():
             _print_rule(f"{label}  {log_file.name}", PLAN_RUNNER_COLOR)
-            for ln in _tail_file(log_file, n_log):
+            for ln in _tail_file(log_file, n_log, filter_pattern=filter_pattern):
                 _print_line(ln)
         else:
             _print_rule(f"{label}  [파일 없음]", PLAN_RUNNER_COLOR)
@@ -200,7 +206,7 @@ def _show_runner(runner: RunnerInfo, lines_override: int | None) -> None:
         stream_file = Path(runner.stream_path)
         if stream_file.exists():
             _print_rule(f"  ↳ STREAM  {stream_file.name}", PLAN_RUNNER_STREAM_COLOR)
-            for ln in _tail_file(stream_file, n_stream):
+            for ln in _tail_file(stream_file, n_stream, filter_pattern=filter_pattern):
                 _print_line(ln)
 
 
@@ -236,6 +242,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="출력할 tail 줄수 (기본: 소스별 설정값)",
     )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        default=False,
+        help="cleanup/정리 이벤트 라인만 표시 (모든 타겟에 적용)",
+    )
     return parser
 
 
@@ -246,14 +258,15 @@ def main(argv: list[str] | None = None) -> None:
     target: str | None = args.target
     admin: bool = args.admin
     lines: int | None = args.lines
+    cleanup: bool = args.cleanup
 
     if target is None:
-        show_all_sources(admin, lines)
-        show_plan_runners(admin, lines)
+        show_all_sources(admin, lines, cleanup=cleanup)
+        show_plan_runners(admin, lines, cleanup=cleanup)
     elif target.lower() == "plan-runner":
-        show_plan_runners(admin, lines)
+        show_plan_runners(admin, lines, cleanup=cleanup)
     else:
-        show_source(target, admin, lines)
+        show_source(target, admin, lines, cleanup=cleanup)
 
 
 if __name__ == "__main__":

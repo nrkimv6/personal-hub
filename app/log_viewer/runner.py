@@ -26,10 +26,10 @@ class RunnerInfo:
         self.short_id = get_runner_file_id(
             Path(self.log_path).name if self.log_path else ""
         )
-        self.display_name = get_runner_display_name(self.plan_file or "")
+        self.display_name = get_runner_display_name(self.plan_file or "", fallback=self.runner_id)
 
 
-def get_runner_display_name(plan_file: str) -> str:
+def get_runner_display_name(plan_file: str, fallback: str = "(unknown)") -> str:
     """
     plan_file 경로에서 표시 이름을 추출한다.
 
@@ -40,9 +40,11 @@ def get_runner_display_name(plan_file: str) -> str:
       2. .md 확장자 제거
       3. 첫 번째 '-' 구분 단어 최대 2개 반환 (단어가 1개면 그대로)
          예: smart-push-auto-rebase → "smart-push"
+
+    plan_file이 비어있으면 fallback을 반환한다.
     """
     if not plan_file:
-        return "(unknown)"
+        return fallback
 
     name = Path(plan_file).stem  # 확장자 제거
     # YYYY-MM-DD_ 접두사 제거
@@ -58,10 +60,15 @@ def get_runner_file_id(filename: str) -> str:
     """
     plan-runner 로그 파일명에서 짧은 식별자를 추출한다.
 
+    TC runner: plan-runner-t-{name}-YYYYMMDD-HHmmss.log → "t-{name}"
     신규 형식: plan-runner-{8자hex}-YYYYMMDD-HHmmss.log → runner_id (8자 hex)
     구버전 형식: plan-runner-YYYYMMDD-HHmmss.log → HHmmss (6자)
     매칭 없음: 빈 문자열 반환
     """
+    # TC runner 형식 (먼저 매칭 — 8자 hex 패턴보다 우선)
+    m = re.search(r"plan-runner-(t-.+?)-\d{8}-\d{6}", filename)
+    if m:
+        return m.group(1)
     # 신규 형식
     m = re.search(r"plan-runner-([0-9a-f]{8})-\d{8}-\d{6}", filename)
     if m:
