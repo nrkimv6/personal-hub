@@ -9,7 +9,8 @@ from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
 from fastapi import HTTPException
 
 @pytest.fixture
-def executor():
+def executor(monkeypatch):
+    monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
     service = ExecutorService()
     service.redis_client = fakeredis.FakeRedis(decode_responses=True)
     service.async_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)

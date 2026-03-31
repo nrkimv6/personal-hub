@@ -31,8 +31,10 @@ def fake_async_redis():
 
 
 @pytest.fixture
-def executor(fake_redis, fake_async_redis):
+def executor(fake_redis, fake_async_redis, monkeypatch):
     """fakeredis 주입된 ExecutorService 인스턴스"""
+    # guard fixture의 PLAN_RUNNER_REDIS_DB=0 차단을 우회 — fakeredis를 쓰므로 production Redis 미사용
+    monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
     service = ExecutorService()
     service.redis_client = fake_redis
     service.async_redis = fake_async_redis

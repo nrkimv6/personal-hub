@@ -8,7 +8,8 @@ class TestTransmissionPayload:
     """HTTP 발신(Redis 명령 전송) 전 페이로드 형식 Mock 테스트"""
 
     @pytest.fixture
-    def executor_service(self):
+    def executor_service(self, monkeypatch):
+        monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
         svc = ExecutorService()
         svc.async_redis = AsyncMock()
         # Mocking the heartbeat check to pass

@@ -6,12 +6,13 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-def test_external_plan_path_accepted():
+def test_external_plan_path_accepted(monkeypatch):
     """monitor-page 외부 경로 plan_file을 start_dev_runner가 listener로 전달함 (경로 거부 없음)"""
     from app.modules.dev_runner.services.executor_service import ExecutorService
     from app.modules.dev_runner.schemas import RunRequest
     import asyncio
 
+    monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
     svc = ExecutorService()
 
     external_plan = "D:/work/project/tools/monitor-page/docs/plan/test_stub.md"
