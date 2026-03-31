@@ -212,8 +212,6 @@
 						runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 					}
 				}
-				// API 응답에 없고 stopped인 탭 자동 정리 (누적 회색 점 방지)
-				runnerTabs = runnerTabs.filter(tab => runnerMap.has(tab.id) || tab.running);
 				// activeTabId가 없으면 마지막 탭 선택
 				if (!activeTabId && runnerTabs.length > 0) {
 					activeTabId = runnerTabs[runnerTabs.length - 1].id;
@@ -296,8 +294,6 @@
 							runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 						}
 					}
-					// SSE runners에 없고 stopped인 탭 자동 정리 (누적 회색 점 방지)
-					runnerTabs = runnerTabs.filter(tab => runnerMap.has(tab.id) || tab.running);
 					if (!activeTabId && runnerTabs.length > 0) {
 						activeTabId = runnerTabs[runnerTabs.length - 1].id;
 					}
@@ -454,8 +450,6 @@
 					runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 				}
 			}
-			// API 응답에 없고 stopped인 탭 자동 정리 (누적 회색 점 방지)
-			runnerTabs = runnerTabs.filter(tab => runnerMap.has(tab.id) || tab.running);
 		} catch (e) {
 			console.warn('[DevRunner] fetchRunners 실패', e);
 		}
