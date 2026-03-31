@@ -19,26 +19,10 @@ import pytest
 import fakeredis
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent))
 from merge_queue import acquire_merge_turn, release_merge_turn, get_merge_queue, _RUNNER_KEY_PREFIX
 from _dr_merge import _EXIT_CODE_HANDLERS
-
-# mock_merge_queue_turn: conftest.py에 정의된 헬퍼 (pytest conftest는 직접 import 불가)
-# 동일한 context manager를 인라인으로 참조
-from contextlib import contextmanager
-from unittest.mock import patch as _patch
-
-
-@contextmanager
-def mock_merge_queue_turn(repo_id: str):
-    """conftest.mock_merge_queue_turn와 동일 — 이 파일에서 직접 사용하기 위한 참조 복사본.
-    conftest.py가 원본이며, 정의를 변경할 경우 conftest.py를 먼저 수정할 것.
-
-    ⚠️ fakeredis는 Lua eval 미지원 — acquire_merge_turn을 직접 호출하는 TC에서 필수.
-    """
-    with _patch("merge_queue.acquire_merge_turn", return_value=True), \
-         _patch("merge_queue.release_merge_turn", return_value=True), \
-         _patch("merge_queue._get_repo_id", return_value=repo_id):
-        yield
+from merge_test_helpers import mock_merge_queue_turn
 
 REPO_ID = "test-e2e-brpop"
 
