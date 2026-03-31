@@ -450,6 +450,8 @@
 					runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 				}
 			}
+			// dismiss된 탭(서버에서 visible=false) 자동 정리
+			runnerTabs = runnerTabs.filter(tab => runnerMap.has(tab.id) || tab.running);
 		} catch (e) {
 			console.warn('[DevRunner] fetchRunners 실패', e);
 		}
