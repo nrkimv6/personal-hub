@@ -450,6 +450,8 @@ class TestStreamEventsLogIntegration:
         assert len(completed) >= 1
         data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
         assert data["runner_id"] == "runner02"
+        assert data["status"] == "success"
+        assert data["reason"] == "completed"
 
     @pytest.mark.asyncio
     async def test_stream_events_merge_log_message(self, event_service, async_redis):
@@ -495,6 +497,8 @@ class TestStreamEventsLogIntegration:
         assert len(completed) >= 1
         data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
         assert data["runner_id"] == "runner04"
+        assert data["status"] == "success"
+        assert data["reason"] == "completed"
 
     @pytest.mark.asyncio
     async def test_stream_events_existing_keyspace_events_still_work(self, event_service, async_redis, sync_redis):
@@ -681,6 +685,7 @@ class TestMergeLineChannelRouting:
         data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
         assert data["runner_id"] == "runner10"
         assert data["status"] == "failed"
+        assert data["reason"] == "merge_failed"
 
     @pytest.mark.asyncio
     async def test_stream_events_log_completed_with_status(self, event_service, async_redis):
@@ -704,6 +709,31 @@ class TestMergeLineChannelRouting:
         data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
         assert data["runner_id"] == "runner11"
         assert data["status"] == "failed"
+        assert data["reason"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_completed_reason_rate_limited_normalized(self, event_service, async_redis):
+        """R: __COMPLETED::rate_limited__ → reason=rate_limit 정규화 + failed 상태."""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner12",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": "__COMPLETED::rate_limited__",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner12"
+        assert data["status"] == "failed"
+        assert data["reason"] == "rate_limit"
 
     @pytest.mark.asyncio
     async def test_merge_line_in_log_channel_yields_log_event(self, event_service, async_redis):
