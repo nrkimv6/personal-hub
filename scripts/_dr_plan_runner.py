@@ -35,10 +35,10 @@ _COMPLETED_EXIT_REASONS = {"completed", "archived", "stopped", "on_hold"}
 
 
 def _normalize_exit_reason(reason: Optional[str]) -> str:
-    norm = (reason or "completed").strip().lower()
+    norm = (reason or "error").strip().lower()
     if norm == "rate_limited":
         return "rate_limit"
-    return norm or "completed"
+    return norm or "error"
 
 
 def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:

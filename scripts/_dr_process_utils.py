@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 
 def _normalize_exit_reason(reason: Optional[str]) -> str:
     """종료 사유 문자열을 UI 계약에 맞게 정규화한다."""
-    norm = (reason or "completed").strip().lower()
+    norm = (reason or "error").strip().lower()
     if norm == "rate_limited":
         return "rate_limit"
-    return norm or "completed"
+    return norm or "error"
 
 
 def _publish_with_retry(redis_client: redis.Redis, channel: str, msg: str) -> bool:
