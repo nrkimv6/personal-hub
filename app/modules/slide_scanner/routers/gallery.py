@@ -43,6 +43,7 @@ def get_slides(
             f"""
             SELECT
                 id, file_name, file_path, result_path, status,
+                aspect_ratio,
                 captured_at, source_app, is_archived, created_at, updated_at
             FROM slides
             {where_clause}
@@ -60,6 +61,7 @@ def get_slides(
             "file_path": row.file_path,
             "result_path": row.result_path,
             "status": row.status,
+            "aspect_ratio": row.aspect_ratio,
             "captured_at": row.captured_at,
             "source_app": row.source_app,
             "is_archived": bool(row.is_archived),

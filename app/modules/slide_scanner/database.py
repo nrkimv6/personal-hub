@@ -48,7 +48,15 @@ def init_db() -> None:
             sql_content = migration_file.read_text(encoding="utf-8")
             statements = [segment.strip() for segment in sql_content.split(";") if segment.strip()]
             for statement in statements:
-                db.execute(text(statement))
+                try:
+                    db.execute(text(statement))
+                except Exception as exc:  # noqa: BLE001
+                    # SQLite ADD COLUMN은 IF NOT EXISTS를 지원하지 않는 버전이 있어
+                    # 중복 컬럼 오류는 멱등 실행으로 간주하고 건너뛴다.
+                    message = str(exc).lower()
+                    if "duplicate column name" in message:
+                        continue
+                    raise
         db.commit()
     except Exception:
         db.rollback()

@@ -3,6 +3,7 @@ import { API_BASE, fetchWithTimeout, getAuthToken, request } from './client';
 const BASE = '/ss';
 
 export type SlideStatus = 'PENDING' | 'REVIEWED' | 'DONE';
+export type AspectRatioValue = 'AUTO' | '16:9' | '4:3';
 
 export interface SlidePoint {
   x: number;
@@ -22,6 +23,7 @@ export interface SlideDetailResponse {
   status: SlideStatus;
   captured_at?: string | null;
   source_app?: string | null;
+  aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
   points: SlidePoint[];
   inherited_points?: SlidePoint[] | null;
   has_result: boolean;
@@ -34,6 +36,7 @@ export interface SlideListItem {
   file_path: string;
   result_path?: string | null;
   status: SlideStatus;
+  aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
   captured_at?: string | null;
   source_app?: string | null;
   is_archived: boolean;
@@ -63,6 +66,7 @@ export interface ScanFolderResponse {
 export interface SlideTransformResponse {
   id: number;
   status: 'DONE';
+  aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
   result_path: string;
   result_url: string;
 }
@@ -143,13 +147,13 @@ function getSlideWithInherited(slideId: number): Promise<
 function transformSlide(
   slideId: number,
   points: SlidePoint[],
-  aspectRatio?: string
+  aspectRatio?: AspectRatioValue
 ): Promise<SlideTransformResponse> {
   return request<SlideTransformResponse>(`${BASE}/slides/${slideId}/transform`, {
     method: 'POST',
     body: JSON.stringify({
       points,
-      aspect_ratio: aspectRatio ?? null
+      aspect_ratio: aspectRatio && aspectRatio !== 'AUTO' ? aspectRatio : null
     })
   });
 }
@@ -204,13 +208,14 @@ function scanFolder(
 
 function batchTransform(
   ids: number[],
-  options?: { aspectRatio?: string | null }
+  options?: { aspectRatio?: AspectRatioValue | null }
 ): Promise<BatchTransformResponse> {
   return request<BatchTransformResponse>(`${BASE}/slides/batch-transform`, {
     method: 'POST',
     body: JSON.stringify({
       ids,
-      aspect_ratio: options?.aspectRatio ?? null
+      aspect_ratio:
+        options?.aspectRatio && options.aspectRatio !== 'AUTO' ? options.aspectRatio : null
     })
   });
 }

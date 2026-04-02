@@ -94,6 +94,18 @@ def _load_slide_or_404(db: Session, slide_id: int):
     return row
 
 
+def _normalize_aspect_ratio(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    normalized = value.strip().upper()
+    if normalized in {"", "AUTO"}:
+        return None
+    if normalized in {"16:9", "4:3"}:
+        return normalized
+    raise HTTPException(status_code=400, detail="Invalid aspect_ratio. Use AUTO, 16:9, or 4:3")
+
+
 def _find_inherited_points(db: Session, row) -> list[dict[str, float]] | None:
     base_sql = """
         SELECT
@@ -215,6 +227,7 @@ def get_slide(slide_id: int, db: Session = Depends(get_db)):
         "status": row.status,
         "captured_at": row.captured_at,
         "source_app": row.source_app,
+        "aspect_ratio": row.aspect_ratio,
         "points": _row_to_points(row),
         "inherited_points": inherited_points,
         "has_result": bool(row.result_path),
@@ -238,6 +251,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
     if not source_path.exists():
         raise HTTPException(status_code=404, detail="Original image file not found")
 
+    normalized_aspect_ratio = _normalize_aspect_ratio(payload.aspect_ratio)
     point_tuples = [(p.x, p.y) for p in payload.points]
     output_name = f"{slide_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
     output_path = settings.OUTPUT_DIR / output_name
@@ -247,7 +261,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
             image_path=source_path,
             points=point_tuples,
             output_path=output_path,
-            aspect_ratio=payload.aspect_ratio,
+            aspect_ratio=normalized_aspect_ratio,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"Transform failed: {exc}") from exc
@@ -259,6 +273,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
             UPDATE slides
             SET status = 'DONE',
                 result_path = :result_path,
+                aspect_ratio = :aspect_ratio,
                 pt_tl_x = :pt_tl_x, pt_tl_y = :pt_tl_y,
                 pt_tr_x = :pt_tr_x, pt_tr_y = :pt_tr_y,
                 pt_br_x = :pt_br_x, pt_br_y = :pt_br_y,
@@ -270,6 +285,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
         {
             "id": slide_id,
             "result_path": str(transformed),
+            "aspect_ratio": normalized_aspect_ratio,
             **point_params,
         },
     )
@@ -278,6 +294,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
     return {
         "id": slide_id,
         "status": "DONE",
+        "aspect_ratio": normalized_aspect_ratio,
         "result_path": str(transformed),
         "result_url": f"/api/v1/ss/slides/{slide_id}/result",
     }
