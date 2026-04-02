@@ -49,6 +49,7 @@ def get_slides(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=24, ge=1, le=200),
     status: str | None = None,
+    search: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     status_filter = status.upper() if status else None
@@ -64,6 +65,11 @@ def get_slides(
         where_clause += " AND status = :status"
         params["status"] = status_filter
 
+    search_filter = search.strip() if search else None
+    if search_filter:
+        where_clause += " AND extracted_text LIKE :search"
+        params["search"] = f"%{search_filter}%"
+
     total = (
         db.execute(text(f"SELECT COUNT(*) FROM slides {where_clause}"), params).scalar()  # noqa: S608
         or 0
@@ -74,7 +80,7 @@ def get_slides(
             f"""
             SELECT
                 id, file_name, file_path, result_path, status,
-                aspect_ratio, filters_applied,
+                aspect_ratio, filters_applied, extracted_text,
                 captured_at, source_app, is_archived, created_at, updated_at
             FROM slides
             {where_clause}
@@ -94,6 +100,7 @@ def get_slides(
             "status": row.status,
             "aspect_ratio": row.aspect_ratio,
             "filters_applied": _load_filters(row.filters_applied),
+            "extracted_text": row.extracted_text,
             "captured_at": row.captured_at,
             "source_app": row.source_app,
             "is_archived": bool(row.is_archived),

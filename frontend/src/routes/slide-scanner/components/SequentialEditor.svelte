@@ -13,6 +13,7 @@
     prev: void;
     next: void;
     review: void;
+    ocr: void;
     transform: void;
     saveAll: void;
   }>();
@@ -23,9 +24,11 @@
   export let canPrev = false;
   export let canNext = false;
   export let reviewing = false;
+  export let ocring = false;
   export let transforming = false;
   export let inheritedApplied = false;
   export let aspectRatioLabel = 'Auto';
+  export let extractedText = '';
   export let filters: SlideFilterOptions = {
     white_balance: false,
     contrast: 1.0,
@@ -83,6 +86,14 @@
       <button
         type="button"
         class="btn btn-outline"
+        onclick={() => dispatch('ocr')}
+        disabled={ocring || transforming || points.length !== 4}
+      >
+        {ocring ? 'OCR 추출 중...' : 'OCR 추출'}
+      </button>
+      <button
+        type="button"
+        class="btn btn-outline"
         onclick={() => dispatch('review')}
         disabled={reviewing || points.length !== 4}
       >
@@ -96,6 +107,15 @@
       >
         {transforming ? '변환 중...' : '보정 실행'}
       </button>
+    </div>
+
+    <div class="rounded-lg border border-border bg-muted/30 p-3">
+      <p class="mb-1 text-xs font-medium text-muted-foreground">OCR 텍스트</p>
+      {#if extractedText.trim().length > 0}
+        <pre class="max-h-40 overflow-auto whitespace-pre-wrap text-xs text-foreground">{extractedText}</pre>
+      {:else}
+        <p class="text-xs text-muted-foreground">아직 추출된 텍스트가 없습니다.</p>
+      {/if}
     </div>
 
     <p class="text-[11px] text-muted-foreground">

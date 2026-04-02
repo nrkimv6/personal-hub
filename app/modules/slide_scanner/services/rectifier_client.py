@@ -149,5 +149,17 @@ class RectifierClient:
             raise RuntimeError(f"PDF output not found: {path}")
         return path
 
+    def extract_text(
+        self,
+        image_path: Path,
+        languages: list[str] | None = None,
+    ) -> str:
+        args = ["ocr", str(image_path)]
+        if languages:
+            normalized = [lang.strip() for lang in languages if lang and lang.strip()]
+            if normalized:
+                args.extend(["--lang", ",".join(normalized)])
+        return self._run(args)
+
 
 rectifier_client = RectifierClient()

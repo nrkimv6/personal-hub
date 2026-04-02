@@ -27,6 +27,7 @@
   let resultUrl: string | null = null;
   let loading = false;
   let reviewing = false;
+  let ocring = false;
   let transforming = false;
   let savingAll = false;
   let inheritedApplied = false;
@@ -114,6 +115,25 @@
       errorMessage = parseError(error);
     } finally {
       transforming = false;
+    }
+  }
+
+  async function handleOcr() {
+    if (!currentSlide || points.length !== 4) return;
+
+    ocring = true;
+    errorMessage = '';
+    infoMessage = '';
+    try {
+      await slideScannerApi.ocrSlide(currentSlide.id, ['ko', 'en']);
+      currentSlide = await slideScannerApi.getSlideWithInherited(currentSlide.id);
+      infoMessage = currentSlide.extracted_text?.trim()
+        ? 'OCR 추출 완료'
+        : 'OCR 결과 텍스트가 비어 있습니다.';
+    } catch (error) {
+      errorMessage = parseError(error);
+    } finally {
+      ocring = false;
     }
   }
 
@@ -237,14 +257,17 @@
       {canPrev}
       {canNext}
       {reviewing}
+      {ocring}
       transforming={transforming || savingAll}
       inheritedApplied={inheritedApplied}
       {aspectRatioLabel}
+      extractedText={currentSlide?.extracted_text ?? ''}
       {filters}
       on:changePoints={handlePointsChange}
       on:changeFilters={handleFiltersChange}
       on:prev={() => void moveSequence(-1)}
       on:next={() => void moveSequence(1)}
+      on:ocr={() => void handleOcr()}
       on:review={() => void handleReview()}
       on:transform={() => void handleTransform()}
       on:saveAll={() => void handleSaveAll()}

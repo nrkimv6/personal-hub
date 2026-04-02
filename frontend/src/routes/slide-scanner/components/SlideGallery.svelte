@@ -39,6 +39,8 @@
   let noticeMessage = $state('');
   let showScanModal = $state(false);
   let showPdfModal = $state(false);
+  let searchInput = $state('');
+  let searchQuery = $state('');
 
   let allCurrentIds = $derived(slides.map((slide) => slide.id));
   let allSelected = $derived(
@@ -83,7 +85,8 @@
       const result = await slideScannerApi.getSlideList({
         skip: pager.offset,
         limit: pager.limit,
-        status: statusFilter
+        status: statusFilter,
+        search: searchQuery || undefined
       });
 
       if (reset) {
@@ -194,17 +197,27 @@
     selection.toggle(event.detail.id);
   }
 
+  function applySearch() {
+    searchQuery = searchInput.trim();
+  }
+
+  function clearSearch() {
+    searchInput = '';
+    searchQuery = '';
+  }
+
   function openInEditor(event: CustomEvent<{ id: number }>) {
     dispatch('open', { slideId: event.detail.id, sequenceIds: [...allCurrentIds] });
   }
 
   onMount(() => {
     mounted = true;
-    void loadSlides(true);
   });
 
   $effect(() => {
+    void mounted;
     void statusFilter;
+    void searchQuery;
     if (!mounted) return;
     void loadSlides(true);
   });
@@ -235,6 +248,20 @@
         {filterLabel[filter]}
       </button>
     {/each}
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2">
+    <input
+      type="text"
+      class="input input-bordered input-sm w-full max-w-sm"
+      placeholder="OCR 텍스트 검색"
+      bind:value={searchInput}
+      onkeydown={(event) => event.key === 'Enter' && applySearch()}
+    />
+    <button type="button" class="btn btn-outline btn-sm" onclick={applySearch}>검색</button>
+    <button type="button" class="btn btn-ghost btn-sm" onclick={clearSearch} disabled={!searchQuery}>
+      초기화
+    </button>
   </div>
 
   <BatchActionBar
