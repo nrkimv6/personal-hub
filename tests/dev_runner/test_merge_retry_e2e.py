@@ -285,10 +285,11 @@ class TestRetryMergeExitCode2AutoFix:
         mock_lock_mod = types.ModuleType("merge_queue")
         mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
         mock_lock_mod.release_merge_turn = MagicMock()
+        mock_lock_mod._get_repo_id = MagicMock(return_value="monitor-page")
 
         with patch.dict(sys.modules, {"merge_queue": mock_lock_mod}), \
              patch("subprocess.run", return_value=MagicMock(returncode=2)), \
-             patch.object(cl, "_launch_auto_impl_post_merge_process",
+             patch("_dr_merge._launch_auto_impl_post_merge_process",
                           return_value={"success": True, "message": "fixed"}) as mock_fix, \
              patch.object(cl, "_handle_post_merge_done"), \
              patch.object(cl, "_cleanup_process_state", MagicMock()):

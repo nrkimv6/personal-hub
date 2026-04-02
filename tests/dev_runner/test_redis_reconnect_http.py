@@ -36,7 +36,7 @@ def _mock_log_service_for_connected():
     from unittest.mock import patch as _patch
     import asyncio
 
-    async def _fake_stream_log_file(self, runner_id):
+    async def _fake_stream_log_file(self, runner_id, since_line=0):
         yield "event: connected\ndata: ok\n\n"
         yield "event: completed\ndata: completed\n\n"
 
