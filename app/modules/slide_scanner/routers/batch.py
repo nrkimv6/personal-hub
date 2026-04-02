@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -13,14 +14,21 @@ from sqlalchemy.orm import Session
 
 from app.modules.slide_scanner.config import settings
 from app.modules.slide_scanner.database import get_db
-from app.modules.slide_scanner.services.rectifier_client import rectifier_client
+from app.modules.slide_scanner.services.rectifier_client import SlideFilterOptions, rectifier_client
 
 router = APIRouter(prefix="/slides", tags=["slide-scanner"])
+
+
+class FilterPayload(BaseModel):
+    white_balance: bool = False
+    contrast: float = 1.0
+    document_mode: bool = False
 
 
 class BatchTransformRequest(BaseModel):
     ids: list[int] = Field(..., min_length=1)
     aspect_ratio: str | None = None
+    filters: FilterPayload | None = None
 
 
 def _build_in_clause(ids: list[int]) -> tuple[str, dict[str, int]]:
@@ -65,11 +73,34 @@ def _normalize_aspect_ratio(value: str | None) -> str | None:
     raise ValueError("Invalid aspect_ratio. Use AUTO, 16:9, or 4:3")
 
 
+def _normalize_filters(payload: FilterPayload | None) -> SlideFilterOptions | None:
+    if payload is None:
+        return None
+
+    contrast = float(payload.contrast)
+    if contrast < 0.5 or contrast > 2.0:
+        raise ValueError("Invalid filters.contrast. Use range 0.5 ~ 2.0")
+
+    normalized: SlideFilterOptions = {
+        "white_balance": bool(payload.white_balance),
+        "contrast": contrast,
+        "document_mode": bool(payload.document_mode),
+    }
+    if (
+        not normalized["white_balance"]
+        and not normalized["document_mode"]
+        and abs(normalized["contrast"] - 1.0) < 1e-6
+    ):
+        return None
+    return normalized
+
+
 @router.post("/batch-transform")
 def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db)):
     ids = list(dict.fromkeys(request.ids))
     try:
         normalized_aspect_ratio = _normalize_aspect_ratio(request.aspect_ratio)
+        normalized_filters = _normalize_filters(request.filters)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     in_clause, in_params = _build_in_clause(ids)
@@ -126,6 +157,7 @@ def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db
                 points=points,
                 output_path=output_path,
                 aspect_ratio=normalized_aspect_ratio,
+                filters=normalized_filters,
             )
             db.execute(
                 text(
@@ -134,6 +166,7 @@ def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db
                     SET status = 'DONE',
                         result_path = :result_path,
                         aspect_ratio = :aspect_ratio,
+                        filters_applied = :filters_applied,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = :id
                     """
@@ -142,6 +175,9 @@ def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db
                     "id": slide_id,
                     "result_path": str(transformed),
                     "aspect_ratio": normalized_aspect_ratio,
+                    "filters_applied": (
+                        json.dumps(normalized_filters, ensure_ascii=False) if normalized_filters else None
+                    ),
                 },
             )
             db.commit()
