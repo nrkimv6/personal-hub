@@ -352,11 +352,6 @@ if (Test-Path $planRunnerLogDir) {
     if ($found) { $planRunnerLogFile = $found.FullName }
 }
 $planRunnerStreamLogFile = $null
-if (Test-Path $planRunnerLogDir) {
-    $found = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-stream-*.log" -ErrorAction SilentlyContinue |
-        Sort-Object Name -Descending | Select-Object -First 1
-    if ($found) { $planRunnerStreamLogFile = $found.FullName }
-}
 
 # Plan-runner 표시 이름 추출: "2026-02-25_smart-push-auto-rebase.md" → "smart-push"
 # plan_file이 없는 TC runner는 Fallback(runner_id)을 반환
@@ -387,6 +382,53 @@ function Get-PlanRunnerFileId {
     # 구버전 형식: plan-runner-YYYYMMDD-HHmmss.log → HHmmss 추출
     if ($FileName -match 'plan-runner-\d{8}-(\d{6})') { return $Matches[1] }
     return "unknown"
+}
+
+# plan-runner 로그 파일명에서 타임스탬프 토큰(YYYYMMDD-HHmmss) 추출
+function Get-PlanRunnerTimestampToken {
+    param([string]$FileName)
+    if ($FileName -match 'plan-runner-(?:t-.+|[0-9a-f]{8})-(\d{8}-\d{6})') { return $Matches[1] }
+    if ($FileName -match 'plan-runner-(\d{8}-\d{6})') { return $Matches[1] }
+    return $null
+}
+
+# PR 로그 파일명/runner_id 기준으로 동일 실행의 stream 로그를 찾는다.
+# 🔴 전역 최신 stream 폴백은 금지 (다른 runner 로그 오매핑 방지)
+function Find-MatchingPlanRunnerStreamLog {
+    param(
+        [string]$LogDir,
+        [string]$PlanLogFileName,
+        [string]$RunnerId = ""
+    )
+    if (-not $LogDir -or -not (Test-Path $LogDir) -or -not $PlanLogFileName) { return $null }
+
+    if ($RunnerId) {
+        $byRunner = Get-ChildItem -Path $LogDir -Filter "plan-runner-stream-*${RunnerId}*.log" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($byRunner) { return $byRunner.FullName }
+    }
+
+    $fileId = Get-PlanRunnerFileId -FileName $PlanLogFileName
+    if ($fileId -and $fileId -ne "unknown") {
+        $byFileId = Get-ChildItem -Path $LogDir -Filter "plan-runner-stream-*${fileId}*.log" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($byFileId) { return $byFileId.FullName }
+    }
+
+    $tsToken = Get-PlanRunnerTimestampToken -FileName $PlanLogFileName
+    if ($tsToken) {
+        $byTimestamp = Get-ChildItem -Path $LogDir -Filter "plan-runner-stream-*${tsToken}*.log" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($byTimestamp) { return $byTimestamp.FullName }
+    }
+
+    return $null
+}
+
+if ($planRunnerLogFile) {
+    $planRunnerStreamLogFile = Find-MatchingPlanRunnerStreamLog `
+        -LogDir $planRunnerLogDir `
+        -PlanLogFileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
 }
 
 # Redis에서 활성 plan-runner 목록 조회
@@ -543,16 +585,13 @@ function Show-TodayPlanRunnerLogs {
     foreach ($lf in ($todayFiles | Sort-Object Name)) {
         $prFileId = Get-PlanRunnerFileId -FileName $lf.Name
         Show-LogContent -FilePath $lf.FullName -Label "PR:$prFileId" -Color White -TailLines $TailLines
-        # 동일 runner ID로 stream 파일 탐색
-        $streamFile = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-stream-*${prFileId}*.log" -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending | Select-Object -First 1
-        if (-not $streamFile) {
-            # ID 매칭 없으면 같은 날짜 최신 stream 파일
-            $streamFile = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-stream-*${todayStr}*.log" -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending | Select-Object -First 1
-        }
-        if ($streamFile) {
-            Show-LogContent -FilePath $streamFile.FullName -Label "PS:$prFileId" -Color DarkGray -TailLines ([Math]::Min($TailLines, 20))
+        $runnerHint = if ($prFileId -match '^[0-9a-f]{8}$') { $prFileId } else { "" }
+        $streamPath = Find-MatchingPlanRunnerStreamLog `
+            -LogDir $planRunnerLogDir `
+            -PlanLogFileName $lf.Name `
+            -RunnerId $runnerHint
+        if ($streamPath) {
+            Show-LogContent -FilePath $streamPath -Label "PS:$prFileId" -Color DarkGray -TailLines ([Math]::Min($TailLines, 20))
         }
     }
 }
@@ -722,21 +761,33 @@ function Start-CombinedLogTail {
                 $pidSuffix = if ($runner.PID) { "|PID:$($runner.PID)" } else { "" }
                 $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
                 $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
-                $psPath = if ($runner.StreamPath) { $runner.StreamPath } else { $planRunnerStreamLogFile }
+                $psPath = $runner.StreamPath
+                if (-not $psPath -and $runner.LogPath) {
+                    $psPath = Find-MatchingPlanRunnerStreamLog `
+                        -LogDir $planRunnerLogDir `
+                        -PlanLogFileName ([System.IO.Path]::GetFileName($runner.LogPath)) `
+                        -RunnerId $runner.RunnerId
+                }
                 $logConfig[$prKey] = @{ Path = $runner.LogPath; Color = "White";    Tail = 10 }
-                $logConfig[$psKey] = @{ Path = $psPath;         Color = "DarkGray"; Tail = 5  }
+                if ($psPath) {
+                    $logConfig[$psKey] = @{ Path = $psPath; Color = "DarkGray"; Tail = 5 }
+                }
             }
         } else {
             # 활성 runner 없음 — 폴백: 최신 파일 1개 (파일명 타임스탬프 식별자 사용)
             $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
             $logConfig["PR:$prFileId"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
-            $logConfig["PS:$prFileId"] = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5  }
+            if ($planRunnerStreamLogFile) {
+                $logConfig["PS:$prFileId"] = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5 }
+            }
         }
     } else {
         # Redis 없음 — 폴백: 최신 파일 1개 (파일명 타임스탬프 식별자 사용)
         $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
         $logConfig["PR:$prFileId"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
-        $logConfig["PS:$prFileId"] = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5  }
+        if ($planRunnerStreamLogFile) {
+            $logConfig["PS:$prFileId"] = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5 }
+        }
     }
 
     # Sources that only show errors/warnings (suppress verbose output)
@@ -1005,10 +1056,14 @@ function Start-CombinedLogTail {
                             $filePositions[$newPrKey] = 0
                             # stream 파일도 탐색
                             $cfgS = $planRunnerLogPatterns["PR-STREAM"]
-                            $latestS = Get-ChildItem -Path $cfgS.Dir -Filter $cfgS.Filter -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
-                            if ($latestS) {
-                                $logFiles[$newPsKey]      = $latestS.FullName
-                                $logFileNames[$newPsKey]  = $latestS.Name
+                            $runnerHint = if ($newFileId -match '^[0-9a-f]{8}$') { $newFileId } else { "" }
+                            $matchedStreamPath = Find-MatchingPlanRunnerStreamLog `
+                                -LogDir $cfgS.Dir `
+                                -PlanLogFileName $latest.Name `
+                                -RunnerId $runnerHint
+                            if ($matchedStreamPath) {
+                                $logFiles[$newPsKey]      = $matchedStreamPath
+                                $logFileNames[$newPsKey]  = [System.IO.Path]::GetFileName($matchedStreamPath)
                                 $logColors[$newPsKey]     = "DarkGray"
                                 $filePositions[$newPsKey] = 0
                             }

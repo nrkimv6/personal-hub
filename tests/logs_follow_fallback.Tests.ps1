@@ -53,6 +53,49 @@ BeforeAll {
         $latest = $candidates | Sort-Object Name -Descending | Select-Object -First 1
         return $latest
     }
+
+    # Helper: Replicate stream matching logic (runner/file id 우선, 글로벌 최신 stream 폴백 금지)
+    function Invoke-MatchStreamFile {
+        param(
+            [string]$LogDir,
+            [string]$PlanLogFileName,
+            [string]$RunnerId = ""
+        )
+        if (-not (Test-Path $LogDir) -or -not $PlanLogFileName) { return $null }
+
+        if ($RunnerId) {
+            $byRunner = Get-ChildItem -Path $LogDir -Filter "plan-runner-stream-*${RunnerId}*.log" -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($byRunner) { return $byRunner }
+        }
+
+        if ($PlanLogFileName -match 'plan-runner-(t-.+)-\d{8}-\d{6}') {
+            $fileId = $Matches[1]
+            $byFileId = Get-ChildItem -Path $LogDir -Filter "plan-runner-stream-*${fileId}*.log" -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($byFileId) { return $byFileId }
+        }
+        if ($PlanLogFileName -match 'plan-runner-([0-9a-f]{8})-\d{8}-\d{6}') {
+            $fileId = $Matches[1]
+            $byFileId = Get-ChildItem -Path $LogDir -Filter "plan-runner-stream-*${fileId}*.log" -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($byFileId) { return $byFileId }
+        }
+        if ($PlanLogFileName -match 'plan-runner-(?:t-.+|[0-9a-f]{8})-(\d{8}-\d{6})') {
+            $stamp = $Matches[1]
+            $byStamp = Get-ChildItem -Path $LogDir -Filter "plan-runner-stream-*${stamp}*.log" -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($byStamp) { return $byStamp }
+        }
+        if ($PlanLogFileName -match 'plan-runner-(\d{8}-\d{6})') {
+            $stamp = $Matches[1]
+            $byStamp = Get-ChildItem -Path $LogDir -Filter "plan-runner-stream-*${stamp}*.log" -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($byStamp) { return $byStamp }
+        }
+
+        return $null
+    }
 }
 
 Describe "T2: Redis Fallback Mode" {
@@ -158,7 +201,37 @@ Describe "T2: Redis Fallback Mode" {
         }
     }
 
-    Context "5. logs.ps1 script syntax" {
+    Context "5. Stream file matching safety" {
+        BeforeAll {
+            $tmpDir2 = Join-Path $env:TEMP "logs_ps1_stream_test_$(Get-Random)"
+            New-Item -ItemType Directory -Path $tmpDir2 -Force | Out-Null
+            @(
+                "plan-runner-7bdb249d-20260403-001108.log",
+                "plan-runner-stream-f6e1dc20-20260402_162850.log",
+                "plan-runner-stream-7bdb249d-20260403_001108.log"
+            ) | ForEach-Object {
+                New-Item -Path (Join-Path $tmpDir2 $_) -ItemType File -Force | Out-Null
+            }
+        }
+
+        AfterAll {
+            Remove-Item -Path $tmpDir2 -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        It "Matches stream by runner id when available" {
+            $result = Invoke-MatchStreamFile -LogDir $tmpDir2 -PlanLogFileName "plan-runner-7bdb249d-20260403-001108.log" -RunnerId "7bdb249d"
+            $result | Should -Not -BeNullOrEmpty
+            $result.Name | Should -Be "plan-runner-stream-7bdb249d-20260403_001108.log"
+        }
+
+        It "Returns null when no matching stream exists (no global latest fallback)" {
+            Remove-Item -Path (Join-Path $tmpDir2 "plan-runner-stream-7bdb249d-20260403_001108.log") -Force
+            $result = Invoke-MatchStreamFile -LogDir $tmpDir2 -PlanLogFileName "plan-runner-7bdb249d-20260403-001108.log" -RunnerId "7bdb249d"
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context "6. logs.ps1 script syntax" {
         It "logs.ps1 file exists" {
             $LogsScript | Should -Exist
         }
