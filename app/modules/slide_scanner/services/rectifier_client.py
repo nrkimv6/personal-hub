@@ -134,5 +134,20 @@ class RectifierClient:
             raise RuntimeError(f"Filter output not found: {path}")
         return path
 
+    def export_pdf(
+        self,
+        image_paths: list[Path],
+        output_path: Path,
+    ) -> Path:
+        if not image_paths:
+            raise RuntimeError("At least one image path is required for PDF export")
+
+        args = ["pdf", str(output_path), *[str(path) for path in image_paths]]
+        output = self._run(args)
+        path = Path(output)
+        if not path.exists():
+            raise RuntimeError(f"PDF output not found: {path}")
+        return path
+
 
 rectifier_client = RectifierClient()

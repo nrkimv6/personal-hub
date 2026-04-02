@@ -6,6 +6,7 @@
   import { createSelection } from '$lib/utils/selection.svelte';
 
   import BatchActionBar from './BatchActionBar.svelte';
+  import PdfExportModal from './PdfExportModal.svelte';
   import ScanFolderModal from './ScanFolderModal.svelte';
   import SlideCard from './SlideCard.svelte';
 
@@ -33,13 +34,33 @@
   let scanning = $state(false);
   let batchTransforming = $state(false);
   let archiving = $state(false);
+  let exportingPdf = $state(false);
   let errorMessage = $state('');
   let noticeMessage = $state('');
   let showScanModal = $state(false);
+  let showPdfModal = $state(false);
 
   let allCurrentIds = $derived(slides.map((slide) => slide.id));
   let allSelected = $derived(
     allCurrentIds.length > 0 ? selection.isAllSelected(allCurrentIds) : false
+  );
+  let selectedSlides = $derived.by(() =>
+    slides
+      .filter((slide) => selection.has(slide.id))
+      .sort((a, b) => {
+        const aMissing = !a.captured_at;
+        const bMissing = !b.captured_at;
+        if (aMissing !== bMissing) return aMissing ? 1 : -1;
+        if ((a.captured_at ?? '') !== (b.captured_at ?? '')) {
+          return (a.captured_at ?? '').localeCompare(b.captured_at ?? '');
+        }
+        return a.id - b.id;
+      })
+      .map((slide) => ({
+        id: slide.id,
+        file_name: slide.file_name,
+        captured_at: slide.captured_at
+      }))
   );
 
   function parseError(error: unknown): string {
@@ -139,6 +160,36 @@
     }
   }
 
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  async function handlePdfSubmit(event: CustomEvent<{ filename: string }>) {
+    const ids = selectedSlides.map((slide) => slide.id);
+    if (ids.length === 0) return;
+
+    exportingPdf = true;
+    errorMessage = '';
+    noticeMessage = '';
+    try {
+      const result = await slideScannerApi.exportPdf(ids, event.detail.filename);
+      downloadBlob(result.blob, result.filename);
+      noticeMessage = `PDF 내보내기 완료: ${ids.length}건`;
+      showPdfModal = false;
+    } catch (error) {
+      errorMessage = parseError(error);
+    } finally {
+      exportingPdf = false;
+    }
+  }
+
   function toggleSelection(event: CustomEvent<{ id: number }>) {
     selection.toggle(event.detail.id);
   }
@@ -191,10 +242,12 @@
     {allSelected}
     transforming={batchTransforming}
     {archiving}
+    {exportingPdf}
     disabled={slides.length === 0}
     on:toggleAll={() => selection.selectAll(allCurrentIds)}
     on:transform={() => void handleBatchTransform()}
     on:archive={() => void handleArchive()}
+    on:exportPdf={() => (showPdfModal = true)}
   />
 
   {#if noticeMessage}
@@ -240,4 +293,12 @@
   busy={scanning}
   on:close={() => (showScanModal = false)}
   on:submit={handleScanSubmit}
+/>
+
+<PdfExportModal
+  open={showPdfModal}
+  busy={exportingPdf}
+  {selectedSlides}
+  on:close={() => (showPdfModal = false)}
+  on:submit={handlePdfSubmit}
 />
