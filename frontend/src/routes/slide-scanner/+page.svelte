@@ -1,9 +1,9 @@
 <script lang="ts">
   import TabNav from '$lib/components/layout/TabNav.svelte';
 
-  import CornerEditor from './components/CornerEditor.svelte';
   import ImageUploader from './components/ImageUploader.svelte';
   import ResultPreview from './components/ResultPreview.svelte';
+  import SequentialEditor from './components/SequentialEditor.svelte';
   import SlideGallery from './components/SlideGallery.svelte';
 
   import { slideScannerApi, type SlideDetailResponse, type SlidePoint } from '$lib/api/slide-scanner';
@@ -18,8 +18,33 @@
   let points: SlidePoint[] = [];
   let resultUrl: string | null = null;
   let loading = false;
+  let reviewing = false;
   let transforming = false;
+  let inheritedApplied = false;
   let errorMessage = '';
+  let sequenceIds: number[] = [];
+  let sequenceIndex = -1;
+
+  function parseError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  async function loadSlideForEditor(slideId: number) {
+    loading = true;
+    try {
+      const detail = await slideScannerApi.getSlideWithInherited(slideId);
+      currentSlide = detail;
+
+      const inheritedPoints =
+        detail.inherited_points && detail.inherited_points.length === 4
+          ? detail.inherited_points
+          : null;
+      points = inheritedPoints ?? detail.points;
+      inheritedApplied = Boolean(inheritedPoints);
+    } finally {
+      loading = false;
+    }
+  }
 
   async function handleSelect(event: CustomEvent<File>) {
     loading = true;
@@ -30,8 +55,11 @@
       const detail = await slideScannerApi.getSlide(uploaded.id);
       currentSlide = detail;
       points = detail.points;
+      inheritedApplied = false;
+      sequenceIds = [];
+      sequenceIndex = -1;
     } catch (error) {
-      errorMessage = error instanceof Error ? error.message : String(error);
+      errorMessage = parseError(error);
     } finally {
       loading = false;
     }
@@ -47,16 +75,62 @@
     errorMessage = '';
     try {
       await slideScannerApi.transformSlide(currentSlide.id, points);
-      currentSlide = await slideScannerApi.getSlide(currentSlide.id);
+      currentSlide = await slideScannerApi.getSlideWithInherited(currentSlide.id);
       resultUrl = `${slideScannerApi.getSlideResultUrl(currentSlide.id)}?t=${Date.now()}`;
     } catch (error) {
-      errorMessage = error instanceof Error ? error.message : String(error);
+      errorMessage = parseError(error);
     } finally {
       transforming = false;
     }
   }
 
+  async function moveSequence(delta: number) {
+    if (sequenceIndex < 0) return;
+    const nextIndex = sequenceIndex + delta;
+    if (nextIndex < 0 || nextIndex >= sequenceIds.length) return;
+
+    sequenceIndex = nextIndex;
+    resultUrl = null;
+    await loadSlideForEditor(sequenceIds[nextIndex]);
+  }
+
+  async function handleReview() {
+    if (!currentSlide || points.length !== 4) return;
+
+    reviewing = true;
+    errorMessage = '';
+    try {
+      await slideScannerApi.reviewSlide(currentSlide.id, points);
+      if (sequenceIndex >= 0 && sequenceIndex < sequenceIds.length - 1) {
+        await moveSequence(1);
+      } else {
+        await loadSlideForEditor(currentSlide.id);
+      }
+    } catch (error) {
+      errorMessage = parseError(error);
+    } finally {
+      reviewing = false;
+    }
+  }
+
+  async function handleGalleryOpen(event: CustomEvent<{ slideId: number; sequenceIds: number[] }>) {
+    errorMessage = '';
+    resultUrl = null;
+    activeTab = 'editor';
+
+    sequenceIds = event.detail.sequenceIds;
+    sequenceIndex = sequenceIds.indexOf(event.detail.slideId);
+
+    try {
+      await loadSlideForEditor(event.detail.slideId);
+    } catch (error) {
+      errorMessage = parseError(error);
+    }
+  }
+
   $: imageUrl = currentSlide ? slideScannerApi.getSlideImageUrl(currentSlide.id) : '';
+  $: canPrev = sequenceIndex > 0;
+  $: canNext = sequenceIndex >= 0 && sequenceIndex < sequenceIds.length - 1;
 </script>
 
 <svelte:head>
@@ -74,34 +148,33 @@
   <TabNav tabs={tabs} bind:activeTab queryParam="tab" variant="primary" />
 
   {#if activeTab === 'gallery'}
-    <SlideGallery />
+    <SlideGallery on:open={handleGalleryOpen} />
   {:else}
     <ImageUploader on:select={handleSelect} />
 
     {#if loading}
-      <p class="text-sm text-muted-foreground">이미지 업로드 및 자동 검출 중...</p>
+      <p class="text-sm text-muted-foreground">이미지를 불러오는 중...</p>
     {/if}
 
     {#if errorMessage}
       <p class="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage}</p>
     {/if}
 
-    {#if currentSlide}
-      <section class="space-y-3 rounded-xl border border-border bg-card p-4">
-        <div class="flex items-center justify-between">
-          <h2 class="text-sm font-semibold">{currentSlide.file_name}</h2>
-          <button
-            type="button"
-            class="btn btn-primary"
-            onclick={handleTransform}
-            disabled={transforming || points.length !== 4}
-          >
-            {transforming ? '변환 중...' : '보정 실행'}
-          </button>
-        </div>
-        <CornerEditor imageUrl={imageUrl} {points} on:change={handlePointsChange} />
-      </section>
-    {/if}
+    <SequentialEditor
+      slide={currentSlide}
+      {points}
+      {imageUrl}
+      {canPrev}
+      {canNext}
+      {reviewing}
+      {transforming}
+      inheritedApplied={inheritedApplied}
+      on:changePoints={handlePointsChange}
+      on:prev={() => void moveSequence(-1)}
+      on:next={() => void moveSequence(1)}
+      on:review={() => void handleReview()}
+      on:transform={() => void handleTransform()}
+    />
 
     <ResultPreview {resultUrl} />
   {/if}

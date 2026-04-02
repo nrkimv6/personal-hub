@@ -23,6 +23,7 @@ export interface SlideDetailResponse {
   captured_at?: string | null;
   source_app?: string | null;
   points: SlidePoint[];
+  inherited_points?: SlidePoint[] | null;
   has_result: boolean;
   thumbnail_base64?: string | null;
 }
@@ -64,6 +65,11 @@ export interface SlideTransformResponse {
   status: 'DONE';
   result_path: string;
   result_url: string;
+}
+
+export interface SlideReviewResponse {
+  id: number;
+  status: 'REVIEWED';
 }
 
 function authHeaders(): HeadersInit {
@@ -110,9 +116,7 @@ function getSlide(slideId: number): Promise<SlideDetailResponse> {
 function getSlideWithInherited(slideId: number): Promise<
   SlideDetailResponse & { inherited_points?: SlidePoint[] | null }
 > {
-  return request<SlideDetailResponse & { inherited_points?: SlidePoint[] | null }>(
-    `${BASE}/slides/${slideId}`
-  );
+  return request<SlideDetailResponse>(`${BASE}/slides/${slideId}`);
 }
 
 function transformSlide(
@@ -131,6 +135,13 @@ function transformSlide(
 
 function getSlideImageUrl(slideId: number): string {
   return `${API_BASE}${BASE}/slides/${slideId}/image`;
+}
+
+function reviewSlide(slideId: number, points: SlidePoint[]): Promise<SlideReviewResponse> {
+  return request<SlideReviewResponse>(`${BASE}/slides/${slideId}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ points })
+  });
 }
 
 function getSlideThumbnailUrl(slideId: number): string {
@@ -184,6 +195,7 @@ export const slideScannerApi = {
   getSlideWithInherited,
   getSlideList,
   transformSlide,
+  reviewSlide,
   scanFolder,
   getSlideImageUrl,
   getSlideThumbnailUrl,

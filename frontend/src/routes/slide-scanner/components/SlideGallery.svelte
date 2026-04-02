@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
 
   import { slideScannerApi, type SlideListItem, type SlideStatus } from '$lib/api/slide-scanner';
   import { createOffsetPagination } from '$lib/utils/pagination.svelte';
@@ -9,6 +9,9 @@
   import SlideCard from './SlideCard.svelte';
 
   type StatusFilter = 'ALL' | SlideStatus;
+  const dispatch = createEventDispatcher<{
+    open: { slideId: number; sequenceIds: number[] };
+  }>();
 
   const pager = createOffsetPagination(24);
   const selection = createSelection();
@@ -97,6 +100,10 @@
     selection.toggle(event.detail.id);
   }
 
+  function openInEditor(event: CustomEvent<{ id: number }>) {
+    dispatch('open', { slideId: event.detail.id, sequenceIds: [...allCurrentIds] });
+  }
+
   onMount(() => {
     mounted = true;
     void loadSlides(true);
@@ -162,6 +169,7 @@
           {slide}
           selected={selection.has(slide.id)}
           on:toggle={toggleSelection}
+          on:open={openInEditor}
         />
       {/each}
     </div>

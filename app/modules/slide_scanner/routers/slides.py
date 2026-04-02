@@ -32,6 +32,10 @@ class TransformRequest(BaseModel):
     aspect_ratio: str | None = None
 
 
+class ReviewRequest(BaseModel):
+    points: list[PointPayload]
+
+
 def _points_to_params(points: list[tuple[float, float]]) -> dict[str, float]:
     if len(points) != 4:
         raise ValueError("Exactly four points are required")
@@ -48,6 +52,18 @@ def _points_to_params(points: list[tuple[float, float]]) -> dict[str, float]:
 
 
 def _row_to_points(row) -> list[dict[str, float]]:
+    if (
+        row.pt_tl_x is None
+        or row.pt_tl_y is None
+        or row.pt_tr_x is None
+        or row.pt_tr_y is None
+        or row.pt_br_x is None
+        or row.pt_br_y is None
+        or row.pt_bl_x is None
+        or row.pt_bl_y is None
+    ):
+        return []
+
     return [
         {"x": float(row.pt_tl_x), "y": float(row.pt_tl_y)},
         {"x": float(row.pt_tr_x), "y": float(row.pt_tr_y)},
@@ -76,6 +92,53 @@ def _load_slide_or_404(db: Session, slide_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="Slide not found")
     return row
+
+
+def _find_inherited_points(db: Session, row) -> list[dict[str, float]] | None:
+    base_sql = """
+        SELECT
+            pt_tl_x, pt_tl_y, pt_tr_x, pt_tr_y,
+            pt_br_x, pt_br_y, pt_bl_x, pt_bl_y
+        FROM slides
+        WHERE id != :id
+          AND status IN ('REVIEWED', 'DONE')
+          AND pt_tl_x IS NOT NULL AND pt_tl_y IS NOT NULL
+          AND pt_tr_x IS NOT NULL AND pt_tr_y IS NOT NULL
+          AND pt_br_x IS NOT NULL AND pt_br_y IS NOT NULL
+          AND pt_bl_x IS NOT NULL AND pt_bl_y IS NOT NULL
+    """
+
+    inherited = None
+    if row.captured_at:
+        inherited = db.execute(
+            text(
+                base_sql
+                + """
+                  AND captured_at IS NOT NULL
+                  AND captured_at < :captured_at
+                ORDER BY captured_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {"id": row.id, "captured_at": row.captured_at},
+        ).fetchone()
+
+    if not inherited:
+        inherited = db.execute(
+            text(
+                base_sql
+                + """
+                  AND id < :id
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ),
+            {"id": row.id},
+        ).fetchone()
+
+    if not inherited:
+        return None
+    return _row_to_points(inherited) or None
 
 
 @router.post("/upload")
@@ -145,6 +208,7 @@ async def upload_slide(
 @router.get("/{slide_id}")
 def get_slide(slide_id: int, db: Session = Depends(get_db)):
     row = _load_slide_or_404(db, slide_id)
+    inherited_points = _find_inherited_points(db, row)
     return {
         "id": row.id,
         "file_name": row.file_name,
@@ -152,6 +216,7 @@ def get_slide(slide_id: int, db: Session = Depends(get_db)):
         "captured_at": row.captured_at,
         "source_app": row.source_app,
         "points": _row_to_points(row),
+        "inherited_points": inherited_points,
         "has_result": bool(row.result_path),
         "thumbnail_base64": _as_base64(row.thumbnail),
     }
@@ -216,6 +281,34 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
         "result_path": str(transformed),
         "result_url": f"/api/v1/ss/slides/{slide_id}/result",
     }
+
+
+@router.post("/{slide_id}/review")
+def review_slide(slide_id: int, payload: ReviewRequest, db: Session = Depends(get_db)):
+    _load_slide_or_404(db, slide_id)
+    point_tuples = [(p.x, p.y) for p in payload.points]
+    point_params = _points_to_params(point_tuples)
+
+    db.execute(
+        text(
+            """
+            UPDATE slides
+            SET status = 'REVIEWED',
+                pt_tl_x = :pt_tl_x, pt_tl_y = :pt_tl_y,
+                pt_tr_x = :pt_tr_x, pt_tr_y = :pt_tr_y,
+                pt_br_x = :pt_br_x, pt_br_y = :pt_br_y,
+                pt_bl_x = :pt_bl_x, pt_bl_y = :pt_bl_y,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+            """
+        ),
+        {
+            "id": slide_id,
+            **point_params,
+        },
+    )
+    db.commit()
+    return {"id": slide_id, "status": "REVIEWED"}
 
 
 @router.get("/{slide_id}/result")
