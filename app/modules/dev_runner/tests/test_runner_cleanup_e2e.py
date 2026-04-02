@@ -80,6 +80,26 @@ class TestRunnerCleanupE2E:
         assert response.json()["running"] is False, \
             "cleanup 후 SREM active_runners → smembers 빈 set → running=False 이어야 함"
 
+    async def test_status_keeps_cc_codex_engine_for_running_runner(self, client, mock_executor_redis):
+        """cc-codex 엔진으로 실행 중인 runner 상태가 API 응답에 유지되는지 확인"""
+        fake_async = mock_executor_redis["async"]
+        rid = "cleanup-e2e-engine-cc-codex"
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        await fake_async.sadd(ACTIVE_RUNNERS_KEY, rid)
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "88888")
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:engine", "cc-codex")
+
+        with patch.object(executor_service, "_is_pid_alive", return_value=True):
+            response = await client.get("/api/v1/dev-runner/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["running"] is True
+        assert data["engine"] == "cc-codex"
+
     async def test_cleanup_event_service_emits_stopped_status(self, mock_executor_redis):
         """T4-2: cleanup 후 EventService._build_status_payload() → status=stopped
 
