@@ -27,6 +27,8 @@ from app.modules.dev_runner.schemas import RunnerListItem
 import fakeredis
 import fakeredis.aioredis
 
+from tests.dev_runner._path_helpers import get_listener_script_path, skip_if_missing
+
 pytestmark = pytest.mark.http
 
 BASE_URL = "/api/v1/dev-runner"
@@ -50,9 +52,8 @@ def dev_runner_config_isolation():
 
 @pytest.fixture(scope="module")
 def listener_mod():
-    script_path = Path("D:/work/project/tools/monitor-page/scripts/dev-runner-command-listener.py")
-    if not script_path.exists():
-        pytest.skip(f"Listener script not found: {script_path}")
+    script_path = get_listener_script_path()
+    skip_if_missing(script_path, "Listener script")
     spec = importlib.util.spec_from_file_location("dev_runner_cmd_listener_t4", str(script_path))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -67,6 +68,10 @@ class TestRunnersApiMergeStatusField:
     heartbeat cleanup이 pre_merge/resolving/testing/fixing를 보호하므로,
     이 값들이 Redis에 남아 있고 API가 그대로 노출해야 실제 보호 효과가 의미 있음.
     """
+
+    def test_listener_fixture_uses_repo_local_script_right(self, listener_mod):
+        """R: listener fixture가 현재 checkout의 scripts 경로를 로드해야 함"""
+        assert Path(listener_mod.__file__).resolve() == get_listener_script_path().resolve()
 
     @pytest.mark.parametrize("merge_status", list(MERGE_ACTIVE_STATUSES))
     def test_runners_api_exposes_merge_status_right(self, client, merge_status):

@@ -14,19 +14,24 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 import fakeredis
 
+from tests.dev_runner._path_helpers import (
+    get_listener_script_path,
+    get_repo_root,
+    skip_if_missing,
+)
+
 
 # ========== 모듈 로드 (하이픈 파일명 대응) ==========
 
 _listener_mod = None
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = REPO_ROOT / "scripts" / "dev-runner-command-listener.py"
+REPO_ROOT = get_repo_root()
+SCRIPT_PATH = get_listener_script_path()
 
 def _get_listener():
     global _listener_mod
     if _listener_mod is not None:
         return _listener_mod
-    if not SCRIPT_PATH.exists():
-        pytest.skip(f"Listener script not found: {SCRIPT_PATH}")
+    skip_if_missing(SCRIPT_PATH, "Listener script")
     spec = importlib.util.spec_from_file_location("dev_runner_command_listener", str(SCRIPT_PATH))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -88,7 +93,7 @@ class TestStartPlanRunner:
 
     def test_loader_uses_repo_local_script(self, listener_mod):
         """테스트 로더가 현재 checkout의 scripts 경로를 사용해야 함"""
-        assert Path(listener_mod.__file__).resolve() == SCRIPT_PATH.resolve()
+        assert Path(listener_mod.__file__).resolve() == get_listener_script_path().resolve()
 
     def test_start_launches_background_thread(self, listener_mod, fr, tmp_path, mock_worktree):
         """start_plan_runner은 None을 반환하고 백그라운드 스레드를 시작"""

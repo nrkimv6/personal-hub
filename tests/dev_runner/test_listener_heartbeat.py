@@ -9,9 +9,10 @@
 
 import importlib.util
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 import fakeredis
+
+from tests.dev_runner._path_helpers import get_listener_script_path, skip_if_missing
 
 
 # ========== 모듈 로드 ==========
@@ -23,12 +24,8 @@ def _get_listener():
     global _listener_mod
     if _listener_mod is not None:
         return _listener_mod
-    script_path = Path("D:/work/project/tools/monitor-page/.worktrees/impl-fix-heartbeat-merge-guard/scripts/dev-runner-command-listener.py")
-    if not script_path.exists():
-        # 원본 경로 fallback
-        script_path = Path("D:/work/project/tools/monitor-page/scripts/dev-runner-command-listener.py")
-    if not script_path.exists():
-        pytest.skip(f"Listener script not found: {script_path}")
+    script_path = get_listener_script_path()
+    skip_if_missing(script_path, "Listener script")
     spec = importlib.util.spec_from_file_location("dev_runner_command_listener", str(script_path))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -39,6 +36,13 @@ def _get_listener():
 @pytest.fixture(scope="module")
 def listener_mod():
     return _get_listener()
+
+
+@pytest.fixture(scope="module")
+def process_utils_mod(listener_mod):
+    import sys
+
+    return sys.modules["_dr_process_utils"]
 
 
 @pytest.fixture
@@ -187,7 +191,7 @@ class TestHeartbeatMergeGuard:
 class TestMonitorPidExitReason:
     """_monitor_pid_until_exit가 heartbeat_ prefix reason으로 cleanup 호출하는지 검증"""
 
-    def test_monitor_pid_exit_reason_has_heartbeat_prefix_right(self, listener_mod, fr):
+    def test_monitor_pid_exit_reason_has_heartbeat_prefix_right(self, listener_mod, process_utils_mod, fr):
         """R: _monitor_pid_until_exit → reason="heartbeat_pid_exit" 로 cleanup 호출
 
         수정 전: reason="pid_exit_detected" → 보호 가드 우회
@@ -212,8 +216,8 @@ class TestMonitorPidExitReason:
             listener_mod._running_processes.pop(rid, None)
 
         import threading
-        with patch.object(listener_mod, "_is_pid_alive", side_effect=fake_is_pid_alive), \
-             patch.object(listener_mod, "_cleanup_process_state", side_effect=fake_cleanup):
+        with patch.object(process_utils_mod, "_is_pid_alive", side_effect=fake_is_pid_alive), \
+             patch.object(process_utils_mod, "_cleanup_process_state", side_effect=fake_cleanup):
             t = threading.Thread(
                 target=listener_mod._monitor_pid_until_exit,
                 args=(runner_id, pid, fr),
