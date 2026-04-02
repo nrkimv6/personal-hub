@@ -20,6 +20,7 @@ class SlideScannerSettings(BaseSettings):
     DATA_DIR: Path = DATA_ROOT
     ORIGINALS_DIR: Path = DATA_ROOT / "originals"
     OUTPUT_DIR: Path = DATA_ROOT / "output"
+    ARCHIVE_DIR: Path = DATA_ROOT / "archive"
 
     THUMBNAIL_SIZE: tuple[int, int] = (320, 320)
     THUMBNAIL_QUALITY: int = 82
@@ -36,6 +37,7 @@ def ensure_dirs() -> None:
     settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
     settings.ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
     settings.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    settings.ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 ensure_dirs()

@@ -5,6 +5,7 @@
   import { createOffsetPagination } from '$lib/utils/pagination.svelte';
   import { createSelection } from '$lib/utils/selection.svelte';
 
+  import BatchActionBar from './BatchActionBar.svelte';
   import ScanFolderModal from './ScanFolderModal.svelte';
   import SlideCard from './SlideCard.svelte';
 
@@ -30,8 +31,10 @@
   let loading = $state(false);
   let loadingMore = $state(false);
   let scanning = $state(false);
+  let batchTransforming = $state(false);
+  let archiving = $state(false);
   let errorMessage = $state('');
-  let scanMessage = $state('');
+  let noticeMessage = $state('');
   let showScanModal = $state(false);
 
   let allCurrentIds = $derived(slides.map((slide) => slide.id));
@@ -79,13 +82,13 @@
   async function handleScanSubmit(event: CustomEvent<{ folderPath: string; recursive: boolean }>) {
     scanning = true;
     errorMessage = '';
-    scanMessage = '';
+    noticeMessage = '';
 
     try {
       const result = await slideScannerApi.scanFolder(event.detail.folderPath, {
         recursive: event.detail.recursive
       });
-      scanMessage =
+      noticeMessage =
         `스캔 완료: 등록 ${result.created}건, 중복 ${result.skipped}건, 실패 ${result.failed}건`;
       showScanModal = false;
       await loadSlides(true);
@@ -93,6 +96,46 @@
       errorMessage = parseError(error);
     } finally {
       scanning = false;
+    }
+  }
+
+  async function handleBatchTransform() {
+    const ids = selection.toArray();
+    if (ids.length === 0) return;
+
+    batchTransforming = true;
+    errorMessage = '';
+    noticeMessage = '';
+    try {
+      const result = await slideScannerApi.batchTransform(ids);
+      noticeMessage =
+        `일괄 변환 완료: 성공 ${result.done}건, 스킵 ${result.skipped}건, 실패 ${result.failed}건`;
+      selection.clear();
+      await loadSlides(true);
+    } catch (error) {
+      errorMessage = parseError(error);
+    } finally {
+      batchTransforming = false;
+    }
+  }
+
+  async function handleArchive() {
+    const ids = selection.toArray();
+    if (ids.length === 0) return;
+
+    archiving = true;
+    errorMessage = '';
+    noticeMessage = '';
+    try {
+      const result = await slideScannerApi.archiveSlides(ids);
+      noticeMessage =
+        `아카이브 완료: 압축 ${result.archived}건, 스킵 ${result.skipped.length}건`;
+      selection.clear();
+      await loadSlides(true);
+    } catch (error) {
+      errorMessage = parseError(error);
+    } finally {
+      archiving = false;
     }
   }
 
@@ -125,9 +168,6 @@
       </p>
     </div>
     <div class="flex items-center gap-2">
-      <button type="button" class="btn btn-outline btn-sm" onclick={() => selection.selectAll(allCurrentIds)} disabled={slides.length === 0}>
-        {allSelected ? '전체 해제' : '전체 선택'}
-      </button>
       <button type="button" class="btn btn-primary btn-sm" onclick={() => (showScanModal = true)}>
         폴더 스캔
       </button>
@@ -146,9 +186,20 @@
     {/each}
   </div>
 
-  {#if scanMessage}
+  <BatchActionBar
+    selectedCount={selection.count}
+    {allSelected}
+    transforming={batchTransforming}
+    {archiving}
+    disabled={slides.length === 0}
+    on:toggleAll={() => selection.selectAll(allCurrentIds)}
+    on:transform={() => void handleBatchTransform()}
+    on:archive={() => void handleArchive()}
+  />
+
+  {#if noticeMessage}
     <p class="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-      {scanMessage}
+      {noticeMessage}
     </p>
   {/if}
 

@@ -72,6 +72,27 @@ export interface SlideReviewResponse {
   status: 'REVIEWED';
 }
 
+export interface BatchTransformResponse {
+  requested: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  failures: Array<{ id: number; reason: string }>;
+}
+
+export interface ArchiveSlidesResponse {
+  archive_path?: string | null;
+  requested: number;
+  archived: number;
+  skipped: Array<{ id: number; reason: string }>;
+}
+
+export interface SlideScannerSettings {
+  scan_path?: string | null;
+  output_path: string;
+  archive_path: string;
+}
+
 function authHeaders(): HeadersInit {
   const token = getAuthToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -181,6 +202,40 @@ function scanFolder(
   });
 }
 
+function batchTransform(
+  ids: number[],
+  options?: { aspectRatio?: string | null }
+): Promise<BatchTransformResponse> {
+  return request<BatchTransformResponse>(`${BASE}/slides/batch-transform`, {
+    method: 'POST',
+    body: JSON.stringify({
+      ids,
+      aspect_ratio: options?.aspectRatio ?? null
+    })
+  });
+}
+
+function archiveSlides(ids: number[]): Promise<ArchiveSlidesResponse> {
+  return request<ArchiveSlidesResponse>(`${BASE}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ ids })
+  });
+}
+
+function getSettings(): Promise<SlideScannerSettings> {
+  return request<SlideScannerSettings>(`${BASE}/settings`);
+}
+
+function updateSettings(payload: {
+  scan_path?: string;
+  output_path?: string;
+}): Promise<SlideScannerSettings> {
+  return request<SlideScannerSettings>(`${BASE}/settings`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+}
+
 function getHealth(): Promise<{
   status: string;
   module: string;
@@ -197,6 +252,10 @@ export const slideScannerApi = {
   transformSlide,
   reviewSlide,
   scanFolder,
+  batchTransform,
+  archiveSlides,
+  getSettings,
+  updateSettings,
   getSlideImageUrl,
   getSlideThumbnailUrl,
   getSlideResultUrl,
