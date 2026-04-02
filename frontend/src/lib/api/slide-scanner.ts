@@ -105,6 +105,11 @@ export interface ArchiveSlidesResponse {
   skipped: Array<{ id: number; reason: string }>;
 }
 
+export interface PdfExportResponse {
+  blob: Blob;
+  filename: string;
+}
+
 export interface SlideScannerSettings {
   scan_path?: string | null;
   output_path: string;
@@ -134,6 +139,23 @@ function normalizeFilterPayload(filters?: SlideFilterOptions | null): SlideFilte
     return null;
   }
   return normalized;
+}
+
+function parseContentDispositionFilename(value: string | null): string | null {
+  if (!value) return null;
+
+  const utf8Match = value.match(/filename\\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+
+  const basicMatch = value.match(/filename=\"?([^\";]+)\"?/i);
+  if (!basicMatch?.[1]) return null;
+  return basicMatch[1];
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -264,6 +286,40 @@ function archiveSlides(ids: number[]): Promise<ArchiveSlidesResponse> {
   });
 }
 
+async function exportPdf(ids: number[], filename?: string): Promise<PdfExportResponse> {
+  const response = await fetchWithTimeout(`${API_BASE}${BASE}/export/pdf`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders()
+    },
+    credentials: 'include',
+    body: JSON.stringify({
+      ids,
+      filename: filename?.trim() || null
+    })
+  });
+
+  if (!response.ok) {
+    let message = response.statusText;
+    try {
+      const body = await response.json();
+      message = body?.detail ?? message;
+    } catch {
+      // ignore JSON parsing errors
+    }
+    throw new Error(message || 'PDF 내보내기 실패');
+  }
+
+  const blob = await response.blob();
+  const headerFilename = parseContentDispositionFilename(response.headers.get('content-disposition'));
+  const fallbackName = filename?.trim() ? `${filename.trim().replace(/\\.pdf$/i, '')}.pdf` : 'slides_export.pdf';
+  return {
+    blob,
+    filename: headerFilename || fallbackName
+  };
+}
+
 function getSettings(): Promise<SlideScannerSettings> {
   return request<SlideScannerSettings>(`${BASE}/settings`);
 }
@@ -296,6 +352,7 @@ export const slideScannerApi = {
   scanFolder,
   batchTransform,
   archiveSlides,
+  exportPdf,
   getSettings,
   updateSettings,
   getSlideImageUrl,

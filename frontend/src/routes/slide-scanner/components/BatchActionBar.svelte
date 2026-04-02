@@ -5,12 +5,14 @@
     toggleAll: void;
     transform: void;
     archive: void;
+    exportPdf: void;
   }>();
 
   export let selectedCount = 0;
   export let allSelected = false;
   export let transforming = false;
   export let archiving = false;
+  export let exportingPdf = false;
   export let disabled = false;
 </script>
 
@@ -35,6 +37,14 @@
       disabled={disabled || selectedCount === 0 || archiving}
     >
       {archiving ? '아카이브 중...' : '아카이브'}
+    </button>
+    <button
+      type="button"
+      class="btn btn-outline btn-sm"
+      onclick={() => dispatch('exportPdf')}
+      disabled={disabled || selectedCount === 0 || exportingPdf}
+    >
+      {exportingPdf ? 'PDF 생성 중...' : 'PDF로 내보내기'}
     </button>
   </div>
 </div>
