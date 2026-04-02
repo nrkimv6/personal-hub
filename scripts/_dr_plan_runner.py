@@ -31,6 +31,16 @@ except ImportError:
     _NOISE_BLOCK_MARKERS = []
 
 
+_COMPLETED_EXIT_REASONS = {"completed", "archived", "stopped", "on_hold"}
+
+
+def _normalize_exit_reason(reason: Optional[str]) -> str:
+    norm = (reason or "completed").strip().lower()
+    if norm == "rate_limited":
+        return "rate_limit"
+    return norm or "completed"
+
+
 def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     """merge_requested 플래그가 있을 때 _stream_output finally에서 호출되는 인라인 merge 함수.
 
@@ -213,6 +223,16 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
         exit_code = process.returncode
         logger.info(f"Output streaming thread finished (exit code: {exit_code})")
         logger.info(f"[_stream_output] finally 분기 시작 (runner_id={runner_id!r}, exit_code={exit_code})")
+        _exit_reason = "completed"
+        if runner_id:
+            try:
+                _exit_reason = _normalize_exit_reason(
+                    redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")
+                )
+            except Exception as _er:
+                logger.warning(f"[_stream_output] exit_reason 조회 실패 (runner_id={runner_id!r}): {_er}")
+                # 조회 실패 시 completed 기본값을 유지하면 false-completed를 유발할 수 있으므로 fail-safe 처리
+                _exit_reason = "error"
 
         # stdout 버퍼 drain: 파이프 루프 종료 후 파일에 추가된 미발행 라인만 publish
         log_file_path = _running_log_files.get(runner_id) if runner_id else None
@@ -245,7 +265,14 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
                 if _flag:
                     if exit_code == 0:
-                        _merge_requested = True
+                        if _exit_reason in _COMPLETED_EXIT_REASONS:
+                            _merge_requested = True
+                        else:
+                            _pub_and_log(
+                                runner_id,
+                                f"[_stream_output] merge_requested 있지만 exit_reason={_exit_reason} → merge 스킵",
+                                redis_client, "CLEANUP",
+                            )
                     else:
                         # exit_code != 0: worktree 커밋 유무로 merge 여부 결정
                         _branch_for_check = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
@@ -276,7 +303,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 logger.warning(f"[_stream_output] merge_requested 플래그 조회 실패 (runner_id={runner_id}): {e}")
         _pub_and_log(
             runner_id,
-            f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, exit_code={exit_code}",
+            f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, exit_code={exit_code}, exit_reason={_exit_reason}",
             redis_client, "CLEANUP",
         )
 
@@ -290,8 +317,15 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                             _pub_and_log(runner_id, f"[_stream_output] merge_requested 플래그 감지 → merge 흐름 진입", redis_client, "CLEANUP")
                             _wf_manager.update_status(wf["id"], "merge_pending")
                         else:
-                            _pub_and_log(runner_id, f"[_stream_output] merge_requested 플래그 없음 → completed 처리", redis_client, "CLEANUP")
-                            _wf_manager.update_status(wf["id"], "completed")
+                            if _exit_reason in _COMPLETED_EXIT_REASONS:
+                                _pub_and_log(runner_id, f"[_stream_output] merge_requested 플래그 없음 + exit_reason={_exit_reason} → completed 처리", redis_client, "CLEANUP")
+                                _wf_manager.update_status(wf["id"], "completed")
+                            else:
+                                _pub_and_log(runner_id, f"[_stream_output] exit_code=0이지만 exit_reason={_exit_reason} → failed 처리", redis_client, "CLEANUP")
+                                _wf_manager.update_status(
+                                    wf["id"], "failed",
+                                    error_message=f"Exit reason: {_exit_reason}",
+                                )
                     elif exit_code is not None and exit_code != 0:
                         _wf_manager.update_status(
                             wf["id"], "failed",
@@ -326,12 +360,18 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                     def _pub_fallback(msg: str) -> None:
                         _pub_and_log(runner_id, msg, redis_client, "MERGE-FALLBACK")
                     _handle_post_merge_done(_v2_detect["plan_file"], runner_id, _pub_fallback, redis_client)
-                    # Workflow 상태 보정: fallback 성공 시 completed로 전이
+                    # Workflow 상태 보정: fallback 성공 시에도 exit_reason 기반으로 최종 상태 결정
                     if _wf_manager and runner_id:
                         try:
                             _wf = _wf_manager.get_by_runner_id(runner_id)
                             if _wf:
-                                _wf_manager.update_status(_wf["id"], "completed")
+                                if _exit_reason in _COMPLETED_EXIT_REASONS:
+                                    _wf_manager.update_status(_wf["id"], "completed")
+                                else:
+                                    _wf_manager.update_status(
+                                        _wf["id"], "failed",
+                                        error_message=f"Fallback completed but exit_reason={_exit_reason}",
+                                    )
                         except Exception as _wf_err:
                             logger.debug(f"[_stream_output] fallback workflow update 실패 (무시): {_wf_err}")
                 except Exception as _fallback_err:

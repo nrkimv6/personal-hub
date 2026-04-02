@@ -264,6 +264,119 @@ def test_stream_output_v2_fallback_error_still_cleanup_E(tmp_path):
     mock_cleanup.assert_called_once()
 
 
+def test_stream_output_exit_reason_rate_limit_marks_failed_R(tmp_path):
+    """R(Right): exit_code=0 이어도 exit_reason=rate_limit이면 workflow failed 처리"""
+    import io
+
+    mock_redis = MagicMock()
+
+    def _get_side(key):
+        if key.endswith(":merge_requested"):
+            return None
+        if key.endswith(":exit_reason"):
+            return "rate_limit"
+        return None
+
+    mock_redis.get.side_effect = _get_side
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = iter([])
+    mock_proc.returncode = 0
+    mock_proc.wait.return_value = None
+
+    wf_mgr = MagicMock()
+    wf_mgr.get_by_runner_id.return_value = {"id": 777, "runner_id": "runner-t4"}
+
+    log_handle = io.StringIO()
+
+    with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
+         patch("_dr_plan_runner.get_running_log_files", return_value={}), \
+         patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_plan_runner._cleanup_process_state"), \
+         patch("_dr_plan_runner._do_inline_merge"):
+        from _dr_plan_runner import _stream_output
+        _stream_output(mock_proc, log_handle, mock_redis, "runner-t4")
+
+    wf_mgr.update_status.assert_any_call(777, "failed", error_message="Exit reason: rate_limit")
+
+
+def test_stream_output_merge_requested_but_rate_limit_skips_merge_R(tmp_path):
+    """R(Right): merge_requested=1 이어도 exit_reason=rate_limit이면 merge 진입 금지"""
+    import io
+
+    mock_redis = MagicMock()
+
+    def _get_side(key):
+        if key.endswith(":merge_requested"):
+            return "1"
+        if key.endswith(":exit_reason"):
+            return "rate_limit"
+        return None
+
+    mock_redis.get.side_effect = _get_side
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = iter([])
+    mock_proc.returncode = 0
+    mock_proc.wait.return_value = None
+
+    wf_mgr = MagicMock()
+    wf_mgr.get_by_runner_id.return_value = {"id": 778, "runner_id": "runner-t5"}
+
+    log_handle = io.StringIO()
+
+    with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
+         patch("_dr_plan_runner.get_running_log_files", return_value={}), \
+         patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_plan_runner._cleanup_process_state"), \
+         patch("_dr_plan_runner._do_inline_merge") as mock_inline_merge:
+        from _dr_plan_runner import _stream_output
+        _stream_output(mock_proc, log_handle, mock_redis, "runner-t5")
+
+    mock_inline_merge.assert_not_called()
+    wf_mgr.update_status.assert_any_call(778, "failed", error_message="Exit reason: rate_limit")
+
+
+def test_stream_output_exit_reason_lookup_error_marks_failed_R(tmp_path):
+    """R(Right): exit_reason 조회 실패 시 fail-safe로 completed 금지."""
+    import io
+
+    mock_redis = MagicMock()
+
+    def _get_side(key):
+        if key.endswith(":merge_requested"):
+            return None
+        if key.endswith(":exit_reason"):
+            raise RuntimeError("redis read failed")
+        return None
+
+    mock_redis.get.side_effect = _get_side
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = iter([])
+    mock_proc.returncode = 0
+    mock_proc.wait.return_value = None
+
+    wf_mgr = MagicMock()
+    wf_mgr.get_by_runner_id.return_value = {"id": 779, "runner_id": "runner-t6"}
+
+    log_handle = io.StringIO()
+
+    with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
+         patch("_dr_plan_runner.get_running_log_files", return_value={}), \
+         patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_plan_runner._cleanup_process_state"), \
+         patch("_dr_plan_runner._do_inline_merge"):
+        from _dr_plan_runner import _stream_output
+        _stream_output(mock_proc, log_handle, mock_redis, "runner-t6")
+
+    wf_mgr.update_status.assert_any_call(779, "failed", error_message="Exit reason: error")
+    assert not any(
+        len(call.args) >= 2 and call.args[1] == "completed"
+        for call in wf_mgr.update_status.call_args_list
+    )
+
+
 # ── heartbeat v2 fallback ─────────────────────────────────────────────────────
 
 

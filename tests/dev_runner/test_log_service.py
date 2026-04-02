@@ -628,6 +628,26 @@ def _make_mock_pubsub_completed():
     return mock_pubsub
 
 
+def _make_mock_pubsub_completed_with_reason(reason: str):
+    """__COMPLETED::{reason}__ 1회 반환하는 mock pubsub"""
+    mock_pubsub = MagicMock()
+    call_count = [0]
+
+    async def mock_get_message(**kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return {"type": "message", "data": f"__COMPLETED::{reason}__"}
+        return None
+
+    async def mock_subscribe(ch): pass
+    async def mock_aclose(): pass
+
+    mock_pubsub.get_message = mock_get_message
+    mock_pubsub.subscribe = mock_subscribe
+    mock_pubsub.aclose = mock_aclose
+    return mock_pubsub
+
+
 class TestStreamLogFileSinceLine:
     """stream_log_file() since_line 파라미터 동작 검증"""
 
@@ -701,6 +721,26 @@ class TestStreamLogFileSinceLine:
         data_chunks = [c for c in chunks if c.startswith("data: line")]
         # 50줄(인덱스 50~99) = 50줄의 buffered data가 전송됨
         assert len(data_chunks) == 50
+
+    def test_stream_log_file_completed_reason_rate_limited_normalized(self, tmp_path):
+        """R: __COMPLETED::rate_limited__ 수신 시 completed reason=rate_limit 정규화"""
+        svc = _make_log_service()
+        log_file = tmp_path / "stream.log"
+        log_file.write_text("", encoding="utf-8")
+        svc._find_current_log = MagicMock(return_value=log_file)
+
+        async def mock_ping(): return True
+        svc.async_redis.ping = mock_ping
+        svc.async_redis.pubsub = MagicMock(return_value=_make_mock_pubsub_completed_with_reason("rate_limited"))
+
+        async def collect():
+            chunks = []
+            async for chunk in svc.stream_log_file("runner", since_line=0):
+                chunks.append(chunk)
+            return chunks
+
+        chunks = _run_async(collect())
+        assert "event: completed\ndata: rate_limit\n\n" in chunks
 
 
 # ─── Phase T3: 통합 TC ────────────────────────────────────────────────────────

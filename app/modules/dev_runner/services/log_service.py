@@ -220,6 +220,8 @@ class LogService:
                             else:
                                 # __COMPLETED::{reason}__ 형태에서 reason 추출
                                 reason = data[len("__COMPLETED::"):].rstrip("_") or "completed"
+                            if reason == "rate_limited":
+                                reason = "rate_limit"
                             yield f"event: completed\ndata: {reason}\n\n"
                             return
                         yield f"data: {data}\n\n"

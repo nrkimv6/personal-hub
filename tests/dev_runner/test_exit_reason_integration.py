@@ -89,6 +89,17 @@ class TestNoProgressExitSetsRedisIntegration:
         stored = fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")
         assert stored == "rate_limit"
 
+    def test_commit_failed_exit_sets_redis_integration(self):
+        """commit_failed 종료 시 Redis에 exit_reason=commit_failed 기록."""
+        fake_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "tc-pytest-t3-005"
+
+        fake_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+        simulate_cleanup_redis_state(runner_id, "commit_failed", fake_redis)
+
+        stored = fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")
+        assert stored == "commit_failed"
+
 
 class TestListenerPublishesExitReasonIntegration:
     """T3: listener cleanup → __COMPLETED::{reason}__ publish 통합 검증."""
@@ -137,5 +148,25 @@ class TestListenerPublishesExitReasonIntegration:
         msg = pubsub.get_message(timeout=0.5)
         assert msg is not None
         assert msg["data"] == "__COMPLETED::completed__"
+
+        pubsub.close()
+
+    def test_listener_publishes_commit_failed_reason(self):
+        """commit_failed가 저장된 경우 __COMPLETED::commit_failed__ publish."""
+        fake_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "tc-pytest-t3-006"
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "commit_failed")
+
+        pubsub = fake_redis.pubsub()
+        pubsub.subscribe(log_channel)
+        pubsub.get_message(timeout=0.1)
+
+        simulate_listener_cleanup(runner_id, fake_redis, pubsub)
+
+        msg = pubsub.get_message(timeout=0.5)
+        assert msg is not None
+        assert msg["data"] == "__COMPLETED::commit_failed__"
 
         pubsub.close()

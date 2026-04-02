@@ -6,9 +6,10 @@ Phase T5: exit_reason 관련 HTTP 엔드포인트 검증
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.modules.dev_runner.routes.runner import router as runner_router
 
 BASE_URL = "/api/v1/dev-runner"
 
@@ -21,6 +22,8 @@ def dev_runner_config_isolation(tmp_path):
 
 @pytest.fixture
 def client():
+    app = FastAPI()
+    app.include_router(runner_router, prefix=BASE_URL)
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -62,6 +65,23 @@ class TestRunnersApiExitReasonHttp:
         assert len(data) == 1
         assert "exit_reason" in data[0]
         assert data[0]["exit_reason"] == "rate_limit"
+
+    @pytest.mark.http
+    def test_runners_api_exit_reason_commit_failed_present(self, client):
+        """exit_reason=commit_failed runner도 응답 JSON에 그대로 노출."""
+        runners = [_make_runner("r1b", exit_reason="commit_failed")]
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            return_value=runners,
+        ):
+            response = client.get(f"{BASE_URL}/runners")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert "exit_reason" in data[0]
+        assert data[0]["exit_reason"] == "commit_failed"
 
     @pytest.mark.http
     def test_runners_api_exit_reason_null_when_absent(self, client):

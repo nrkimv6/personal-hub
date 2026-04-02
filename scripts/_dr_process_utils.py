@@ -21,6 +21,14 @@ from _dr_subprocess import _ANSI_ESCAPE
 logger = logging.getLogger(__name__)
 
 
+def _normalize_exit_reason(reason: Optional[str]) -> str:
+    """종료 사유 문자열을 UI 계약에 맞게 정규화한다."""
+    norm = (reason or "completed").strip().lower()
+    if norm == "rate_limited":
+        return "rate_limit"
+    return norm or "completed"
+
+
 def _publish_with_retry(redis_client: redis.Redis, channel: str, msg: str) -> bool:
     """Redis publish — 1차 실패 시 ping 후 재시도. 성공 True, 실패 False 반환"""
     try:
@@ -139,7 +147,9 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     # cleanup 직전 SSE 클라이언트에 완료 신호 publish (exit_reason 포함)
     try:
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
-        exit_reason = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason") or "completed"
+        exit_reason = _normalize_exit_reason(
+            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")
+        )
         redis_client.publish(log_channel, f"__COMPLETED::{exit_reason}__")
     except Exception:
         pass
