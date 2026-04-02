@@ -1,13 +1,15 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 
-  import type { SlideDetailResponse, SlidePoint } from '$lib/api/slide-scanner';
+  import type { SlideDetailResponse, SlideFilterOptions, SlidePoint } from '$lib/api/slide-scanner';
 
   import CornerEditor from './CornerEditor.svelte';
+  import FilterPanel from './FilterPanel.svelte';
   import KeyboardShortcuts from './KeyboardShortcuts.svelte';
 
   const dispatch = createEventDispatcher<{
     changePoints: { points: SlidePoint[] };
+    changeFilters: { filters: SlideFilterOptions };
     prev: void;
     next: void;
     review: void;
@@ -24,9 +26,18 @@
   export let transforming = false;
   export let inheritedApplied = false;
   export let aspectRatioLabel = 'Auto';
+  export let filters: SlideFilterOptions = {
+    white_balance: false,
+    contrast: 1.0,
+    document_mode: false
+  };
 
   function handlePointsChange(event: CustomEvent<{ points: SlidePoint[] }>) {
     dispatch('changePoints', { points: event.detail.points });
+  }
+
+  function handleFiltersChange(event: CustomEvent<{ value: SlideFilterOptions }>) {
+    dispatch('changeFilters', { filters: event.detail.value });
   }
 </script>
 
@@ -62,6 +73,11 @@
     </div>
 
     <CornerEditor {imageUrl} {points} on:change={handlePointsChange} />
+    <FilterPanel
+      value={filters}
+      disabled={reviewing || transforming}
+      on:change={handleFiltersChange}
+    />
 
     <div class="flex flex-wrap items-center justify-end gap-2">
       <button

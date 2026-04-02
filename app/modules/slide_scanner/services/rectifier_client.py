@@ -5,8 +5,15 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import TypedDict
 
 from app.modules.slide_scanner.config import settings
+
+
+class SlideFilterOptions(TypedDict):
+    white_balance: bool
+    contrast: float
+    document_mode: bool
 
 
 class RectifierClient:
@@ -61,6 +68,7 @@ class RectifierClient:
         points: list[tuple[float, float]],
         output_path: Path,
         aspect_ratio: str | None = None,
+        filters: SlideFilterOptions | None = None,
     ) -> Path:
         points_payload = [{"x": float(x), "y": float(y)} for x, y in points]
         args = [
@@ -76,6 +84,54 @@ class RectifierClient:
         path = Path(output)
         if not path.exists():
             raise RuntimeError(f"Transform output not found: {path}")
+
+        normalized_filters = self._normalize_filters(filters)
+        if normalized_filters:
+            path = self.filter_image(
+                image_path=path,
+                output_path=path,
+                filters=normalized_filters,
+            )
+        return path
+
+    def _normalize_filters(self, filters: SlideFilterOptions | None) -> SlideFilterOptions | None:
+        if not filters:
+            return None
+
+        contrast = float(filters.get("contrast", 1.0))
+        if contrast < 0.5 or contrast > 2.0:
+            raise RuntimeError("contrast must be between 0.5 and 2.0")
+
+        normalized: SlideFilterOptions = {
+            "white_balance": bool(filters.get("white_balance", False)),
+            "contrast": contrast,
+            "document_mode": bool(filters.get("document_mode", False)),
+        }
+        if (
+            not normalized["white_balance"]
+            and not normalized["document_mode"]
+            and abs(normalized["contrast"] - 1.0) < 1e-6
+        ):
+            return None
+        return normalized
+
+    def filter_image(
+        self,
+        image_path: Path,
+        output_path: Path,
+        filters: SlideFilterOptions,
+    ) -> Path:
+        args = ["filter", str(image_path), str(output_path)]
+        if filters["white_balance"]:
+            args.append("--white-balance")
+        args.extend(["--contrast", str(filters["contrast"])])
+        if filters["document_mode"]:
+            args.append("--document-mode")
+
+        output = self._run(args)
+        path = Path(output)
+        if not path.exists():
+            raise RuntimeError(f"Filter output not found: {path}")
         return path
 
 

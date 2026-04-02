@@ -4,6 +4,17 @@ const BASE = '/ss';
 
 export type SlideStatus = 'PENDING' | 'REVIEWED' | 'DONE';
 export type AspectRatioValue = 'AUTO' | '16:9' | '4:3';
+export interface SlideFilterOptions {
+  white_balance: boolean;
+  contrast: number;
+  document_mode: boolean;
+}
+
+export const DEFAULT_SLIDE_FILTERS: SlideFilterOptions = {
+  white_balance: false,
+  contrast: 1.0,
+  document_mode: false
+};
 
 export interface SlidePoint {
   x: number;
@@ -24,6 +35,7 @@ export interface SlideDetailResponse {
   captured_at?: string | null;
   source_app?: string | null;
   aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
+  filters_applied?: SlideFilterOptions | null;
   points: SlidePoint[];
   inherited_points?: SlidePoint[] | null;
   has_result: boolean;
@@ -37,6 +49,7 @@ export interface SlideListItem {
   result_path?: string | null;
   status: SlideStatus;
   aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
+  filters_applied?: SlideFilterOptions | null;
   captured_at?: string | null;
   source_app?: string | null;
   is_archived: boolean;
@@ -67,6 +80,7 @@ export interface SlideTransformResponse {
   id: number;
   status: 'DONE';
   aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
+  filters_applied?: SlideFilterOptions | null;
   result_path: string;
   result_url: string;
 }
@@ -100,6 +114,26 @@ export interface SlideScannerSettings {
 function authHeaders(): HeadersInit {
   const token = getAuthToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function normalizeFilterPayload(filters?: SlideFilterOptions | null): SlideFilterOptions | null {
+  if (!filters) return null;
+
+  const normalized: SlideFilterOptions = {
+    white_balance: Boolean(filters.white_balance),
+    contrast: Number.isFinite(filters.contrast)
+      ? Math.max(0.5, Math.min(2.0, Number(filters.contrast)))
+      : 1.0,
+    document_mode: Boolean(filters.document_mode)
+  };
+  if (
+    !normalized.white_balance &&
+    !normalized.document_mode &&
+    Math.abs(normalized.contrast - 1.0) < 1e-6
+  ) {
+    return null;
+  }
+  return normalized;
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -147,13 +181,15 @@ function getSlideWithInherited(slideId: number): Promise<
 function transformSlide(
   slideId: number,
   points: SlidePoint[],
-  aspectRatio?: AspectRatioValue
+  aspectRatio?: AspectRatioValue,
+  filters?: SlideFilterOptions | null
 ): Promise<SlideTransformResponse> {
   return request<SlideTransformResponse>(`${BASE}/slides/${slideId}/transform`, {
     method: 'POST',
     body: JSON.stringify({
       points,
-      aspect_ratio: aspectRatio && aspectRatio !== 'AUTO' ? aspectRatio : null
+      aspect_ratio: aspectRatio && aspectRatio !== 'AUTO' ? aspectRatio : null,
+      filters: normalizeFilterPayload(filters)
     })
   });
 }
@@ -208,14 +244,15 @@ function scanFolder(
 
 function batchTransform(
   ids: number[],
-  options?: { aspectRatio?: AspectRatioValue | null }
+  options?: { aspectRatio?: AspectRatioValue | null; filters?: SlideFilterOptions | null }
 ): Promise<BatchTransformResponse> {
   return request<BatchTransformResponse>(`${BASE}/slides/batch-transform`, {
     method: 'POST',
     body: JSON.stringify({
       ids,
       aspect_ratio:
-        options?.aspectRatio && options.aspectRatio !== 'AUTO' ? options.aspectRatio : null
+        options?.aspectRatio && options.aspectRatio !== 'AUTO' ? options.aspectRatio : null,
+      filters: normalizeFilterPayload(options?.filters)
     })
   });
 }

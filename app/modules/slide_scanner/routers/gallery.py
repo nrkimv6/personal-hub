@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -11,6 +13,35 @@ from app.modules.slide_scanner.database import get_db
 router = APIRouter(prefix="/slides", tags=["slide-scanner"])
 
 VALID_STATUS = {"PENDING", "REVIEWED", "DONE"}
+
+
+def _load_filters(value: str | None) -> dict[str, object] | None:
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+
+    try:
+        contrast = float(parsed.get("contrast", 1.0))
+    except (TypeError, ValueError):
+        contrast = 1.0
+
+    normalized = {
+        "white_balance": bool(parsed.get("white_balance", False)),
+        "contrast": max(0.5, min(2.0, contrast)),
+        "document_mode": bool(parsed.get("document_mode", False)),
+    }
+    if (
+        not normalized["white_balance"]
+        and not normalized["document_mode"]
+        and abs(float(normalized["contrast"]) - 1.0) < 1e-6
+    ):
+        return None
+    return normalized
 
 
 @router.get("")
@@ -43,7 +74,7 @@ def get_slides(
             f"""
             SELECT
                 id, file_name, file_path, result_path, status,
-                aspect_ratio,
+                aspect_ratio, filters_applied,
                 captured_at, source_app, is_archived, created_at, updated_at
             FROM slides
             {where_clause}
@@ -62,6 +93,7 @@ def get_slides(
             "result_path": row.result_path,
             "status": row.status,
             "aspect_ratio": row.aspect_ratio,
+            "filters_applied": _load_filters(row.filters_applied),
             "captured_at": row.captured_at,
             "source_app": row.source_app,
             "is_archived": bool(row.is_archived),

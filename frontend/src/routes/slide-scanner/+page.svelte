@@ -9,8 +9,10 @@
 
   import {
     slideScannerApi,
+    DEFAULT_SLIDE_FILTERS,
     type AspectRatioValue,
     type SlideDetailResponse,
+    type SlideFilterOptions,
     type SlidePoint
   } from '$lib/api/slide-scanner';
 
@@ -33,9 +35,20 @@
   let sequenceIds: number[] = [];
   let sequenceIndex = -1;
   let aspectRatio: AspectRatioValue = 'AUTO';
+  let filters: SlideFilterOptions = { ...DEFAULT_SLIDE_FILTERS };
 
   function parseError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+  }
+
+  function normalizeFilters(value?: SlideFilterOptions | null): SlideFilterOptions {
+    const contrast =
+      typeof value?.contrast === 'number' && Number.isFinite(value.contrast) ? value.contrast : 1.0;
+    return {
+      white_balance: Boolean(value?.white_balance),
+      contrast: Math.max(0.5, Math.min(2.0, contrast)),
+      document_mode: Boolean(value?.document_mode)
+    };
   }
 
   async function loadSlideForEditor(slideId: number) {
@@ -51,6 +64,7 @@
       points = inheritedPoints ?? detail.points;
       inheritedApplied = Boolean(inheritedPoints);
       aspectRatio = detail.aspect_ratio === '16:9' || detail.aspect_ratio === '4:3' ? detail.aspect_ratio : 'AUTO';
+      filters = normalizeFilters(detail.filters_applied);
     } finally {
       loading = false;
     }
@@ -70,6 +84,7 @@
       sequenceIds = [];
       sequenceIndex = -1;
       aspectRatio = 'AUTO';
+      filters = { ...DEFAULT_SLIDE_FILTERS };
     } catch (error) {
       errorMessage = parseError(error);
     } finally {
@@ -81,15 +96,20 @@
     points = event.detail.points;
   }
 
+  function handleFiltersChange(event: CustomEvent<{ filters: SlideFilterOptions }>) {
+    filters = normalizeFilters(event.detail.filters);
+  }
+
   async function handleTransform() {
     if (!currentSlide || points.length !== 4) return;
     transforming = true;
     errorMessage = '';
     infoMessage = '';
     try {
-      await slideScannerApi.transformSlide(currentSlide.id, points, aspectRatio);
+      await slideScannerApi.transformSlide(currentSlide.id, points, aspectRatio, filters);
       currentSlide = await slideScannerApi.getSlideWithInherited(currentSlide.id);
       resultUrl = `${slideScannerApi.getSlideResultUrl(currentSlide.id)}?t=${Date.now()}`;
+      filters = normalizeFilters(currentSlide.filters_applied);
     } catch (error) {
       errorMessage = parseError(error);
     } finally {
@@ -152,11 +172,12 @@
     infoMessage = '';
     try {
       const targetIds = sequenceIds.length > 0 ? sequenceIds : [currentSlide.id];
-      const result = await slideScannerApi.batchTransform(targetIds, { aspectRatio });
+      const result = await slideScannerApi.batchTransform(targetIds, { aspectRatio, filters });
       infoMessage =
         `전체 저장 완료: 성공 ${result.done}건, 스킵 ${result.skipped}건, 실패 ${result.failed}건`;
       currentSlide = await slideScannerApi.getSlideWithInherited(currentSlide.id);
       resultUrl = `${slideScannerApi.getSlideResultUrl(currentSlide.id)}?t=${Date.now()}`;
+      filters = normalizeFilters(currentSlide.filters_applied);
     } catch (error) {
       errorMessage = parseError(error);
     } finally {
@@ -219,7 +240,9 @@
       transforming={transforming || savingAll}
       inheritedApplied={inheritedApplied}
       {aspectRatioLabel}
+      {filters}
       on:changePoints={handlePointsChange}
+      on:changeFilters={handleFiltersChange}
       on:prev={() => void moveSequence(-1)}
       on:next={() => void moveSequence(1)}
       on:review={() => void handleReview()}

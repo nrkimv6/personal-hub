@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.slide_scanner.config import settings
 from app.modules.slide_scanner.database import get_db
-from app.modules.slide_scanner.services.rectifier_client import rectifier_client
+from app.modules.slide_scanner.services.rectifier_client import SlideFilterOptions, rectifier_client
 
 router = APIRouter(prefix="/slides", tags=["slide-scanner"])
 
@@ -27,9 +28,16 @@ class PointPayload(BaseModel):
     y: float
 
 
+class FilterPayload(BaseModel):
+    white_balance: bool = False
+    contrast: float = 1.0
+    document_mode: bool = False
+
+
 class TransformRequest(BaseModel):
     points: list[PointPayload]
     aspect_ratio: str | None = None
+    filters: FilterPayload | None = None
 
 
 class ReviewRequest(BaseModel):
@@ -104,6 +112,59 @@ def _normalize_aspect_ratio(value: str | None) -> str | None:
     if normalized in {"16:9", "4:3"}:
         return normalized
     raise HTTPException(status_code=400, detail="Invalid aspect_ratio. Use AUTO, 16:9, or 4:3")
+
+
+def _normalize_filters(payload: FilterPayload | None) -> SlideFilterOptions | None:
+    if payload is None:
+        return None
+
+    contrast = float(payload.contrast)
+    if contrast < 0.5 or contrast > 2.0:
+        raise HTTPException(status_code=400, detail="Invalid filters.contrast. Use range 0.5 ~ 2.0")
+
+    normalized: SlideFilterOptions = {
+        "white_balance": bool(payload.white_balance),
+        "contrast": contrast,
+        "document_mode": bool(payload.document_mode),
+    }
+    if (
+        not normalized["white_balance"]
+        and not normalized["document_mode"]
+        and abs(normalized["contrast"] - 1.0) < 1e-6
+    ):
+        return None
+    return normalized
+
+
+def _load_filters(value: str | None) -> SlideFilterOptions | None:
+    if not value:
+        return None
+
+    try:
+        raw = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+
+    try:
+        contrast = float(raw.get("contrast", 1.0))
+    except (TypeError, ValueError):
+        contrast = 1.0
+    contrast = max(0.5, min(2.0, contrast))
+
+    normalized: SlideFilterOptions = {
+        "white_balance": bool(raw.get("white_balance", False)),
+        "contrast": contrast,
+        "document_mode": bool(raw.get("document_mode", False)),
+    }
+    if (
+        not normalized["white_balance"]
+        and not normalized["document_mode"]
+        and abs(normalized["contrast"] - 1.0) < 1e-6
+    ):
+        return None
+    return normalized
 
 
 def _find_inherited_points(db: Session, row) -> list[dict[str, float]] | None:
@@ -228,6 +289,7 @@ def get_slide(slide_id: int, db: Session = Depends(get_db)):
         "captured_at": row.captured_at,
         "source_app": row.source_app,
         "aspect_ratio": row.aspect_ratio,
+        "filters_applied": _load_filters(row.filters_applied),
         "points": _row_to_points(row),
         "inherited_points": inherited_points,
         "has_result": bool(row.result_path),
@@ -252,6 +314,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
         raise HTTPException(status_code=404, detail="Original image file not found")
 
     normalized_aspect_ratio = _normalize_aspect_ratio(payload.aspect_ratio)
+    normalized_filters = _normalize_filters(payload.filters)
     point_tuples = [(p.x, p.y) for p in payload.points]
     output_name = f"{slide_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
     output_path = settings.OUTPUT_DIR / output_name
@@ -262,6 +325,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
             points=point_tuples,
             output_path=output_path,
             aspect_ratio=normalized_aspect_ratio,
+            filters=normalized_filters,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"Transform failed: {exc}") from exc
@@ -274,6 +338,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
             SET status = 'DONE',
                 result_path = :result_path,
                 aspect_ratio = :aspect_ratio,
+                filters_applied = :filters_applied,
                 pt_tl_x = :pt_tl_x, pt_tl_y = :pt_tl_y,
                 pt_tr_x = :pt_tr_x, pt_tr_y = :pt_tr_y,
                 pt_br_x = :pt_br_x, pt_br_y = :pt_br_y,
@@ -286,6 +351,9 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
             "id": slide_id,
             "result_path": str(transformed),
             "aspect_ratio": normalized_aspect_ratio,
+            "filters_applied": (
+                json.dumps(normalized_filters, ensure_ascii=False) if normalized_filters else None
+            ),
             **point_params,
         },
     )
@@ -295,6 +363,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
         "id": slide_id,
         "status": "DONE",
         "aspect_ratio": normalized_aspect_ratio,
+        "filters_applied": normalized_filters,
         "result_path": str(transformed),
         "result_url": f"/api/v1/ss/slides/{slide_id}/result",
     }
