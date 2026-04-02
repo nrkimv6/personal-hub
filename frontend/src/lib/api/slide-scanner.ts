@@ -2,6 +2,8 @@ import { API_BASE, fetchWithTimeout, getAuthToken, request } from './client';
 
 const BASE = '/ss';
 
+export type SlideStatus = 'PENDING' | 'REVIEWED' | 'DONE';
+
 export interface SlidePoint {
   x: number;
   y: number;
@@ -9,7 +11,7 @@ export interface SlidePoint {
 
 export interface SlideUploadResponse {
   id: number;
-  status: 'PENDING' | 'REVIEWED' | 'DONE';
+  status: SlideStatus;
   points: SlidePoint[];
   thumbnail_base64?: string | null;
 }
@@ -17,12 +19,44 @@ export interface SlideUploadResponse {
 export interface SlideDetailResponse {
   id: number;
   file_name: string;
-  status: 'PENDING' | 'REVIEWED' | 'DONE';
+  status: SlideStatus;
   captured_at?: string | null;
   source_app?: string | null;
   points: SlidePoint[];
   has_result: boolean;
   thumbnail_base64?: string | null;
+}
+
+export interface SlideListItem {
+  id: number;
+  file_name: string;
+  file_path: string;
+  result_path?: string | null;
+  status: SlideStatus;
+  captured_at?: string | null;
+  source_app?: string | null;
+  is_archived: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+  thumbnail_url?: string;
+}
+
+export interface SlideListResponse {
+  slides: SlideListItem[];
+  skip: number;
+  limit: number;
+  total: number;
+  has_more: boolean;
+}
+
+export interface ScanFolderResponse {
+  folder_path: string;
+  recursive: boolean;
+  scanned: number;
+  created: number;
+  skipped: number;
+  failed: number;
+  errors: Array<{ file_path: string; error: string }>;
 }
 
 export interface SlideTransformResponse {
@@ -73,6 +107,14 @@ function getSlide(slideId: number): Promise<SlideDetailResponse> {
   return request<SlideDetailResponse>(`${BASE}/slides/${slideId}`);
 }
 
+function getSlideWithInherited(slideId: number): Promise<
+  SlideDetailResponse & { inherited_points?: SlidePoint[] | null }
+> {
+  return request<SlideDetailResponse & { inherited_points?: SlidePoint[] | null }>(
+    `${BASE}/slides/${slideId}`
+  );
+}
+
 function transformSlide(
   slideId: number,
   points: SlidePoint[],
@@ -91,8 +133,41 @@ function getSlideImageUrl(slideId: number): string {
   return `${API_BASE}${BASE}/slides/${slideId}/image`;
 }
 
+function getSlideThumbnailUrl(slideId: number): string {
+  return `${API_BASE}${BASE}/slides/${slideId}/thumbnail`;
+}
+
 function getSlideResultUrl(slideId: number): string {
   return `${API_BASE}${BASE}/slides/${slideId}/result`;
+}
+
+function getSlideList(params?: {
+  skip?: number;
+  limit?: number;
+  status?: SlideStatus | 'ALL';
+}): Promise<SlideListResponse> {
+  const query = new URLSearchParams();
+  if (typeof params?.skip === 'number') query.set('skip', String(params.skip));
+  if (typeof params?.limit === 'number') query.set('limit', String(params.limit));
+  if (params?.status && params.status !== 'ALL') query.set('status', params.status);
+
+  const qs = query.toString();
+  const path = qs ? `${BASE}/slides?${qs}` : `${BASE}/slides`;
+  return request<SlideListResponse>(path);
+}
+
+function scanFolder(
+  folderPath: string,
+  options?: { recursive?: boolean; limit?: number | null }
+): Promise<ScanFolderResponse> {
+  return request<ScanFolderResponse>(`${BASE}/scan`, {
+    method: 'POST',
+    body: JSON.stringify({
+      folder_path: folderPath,
+      recursive: options?.recursive ?? true,
+      limit: options?.limit ?? null
+    })
+  });
 }
 
 function getHealth(): Promise<{
@@ -106,8 +181,12 @@ function getHealth(): Promise<{
 export const slideScannerApi = {
   uploadSlide,
   getSlide,
+  getSlideWithInherited,
+  getSlideList,
   transformSlide,
+  scanFolder,
   getSlideImageUrl,
+  getSlideThumbnailUrl,
   getSlideResultUrl,
   getHealth
 };
