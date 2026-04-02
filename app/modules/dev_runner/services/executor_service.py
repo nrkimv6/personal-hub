@@ -107,6 +107,29 @@ class ExecutorService:
     def _runner_key(self, rid: str, suffix: str) -> str:
         return f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}"
 
+    @staticmethod
+    def _is_codex_preflight_failure(engine: str | None, fix_engine: str | None, message: str) -> bool:
+        """codex 사전검증/가용성 실패 메시지 여부."""
+        codex_requested = (engine == "codex") or (fix_engine == "codex")
+        if not codex_requested:
+            return False
+
+        msg = (message or "").lower()
+        markers = (
+            "codex",
+            "preflight",
+            "실행파일",
+            "인증 실패",
+            "authentication",
+            "unauthorized",
+            "not logged in",
+            "token",
+            "login",
+            "model_reasoning_effort",
+            "설정 불일치",
+        )
+        return any(marker in msg for marker in markers)
+
     async def _get_runner_fields(self, rid: str, *fields: str) -> dict:
         result = {}
         for f in fields:
@@ -233,9 +256,15 @@ class ExecutorService:
                 )
 
             if not result_data.get("success"):
+                message = result_data.get("message", "Failed to start")
+                if self._is_codex_preflight_failure(request.engine, request.fix_engine, message):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=message,
+                    )
                 raise HTTPException(
                     status_code=500,
-                    detail=result_data.get("message", "Failed to start")
+                    detail=message,
                 )
 
             # Redis에서 per-runner 상태 조회

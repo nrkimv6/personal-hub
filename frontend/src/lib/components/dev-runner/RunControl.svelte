@@ -68,22 +68,28 @@
 			'gemini-2.0-flash-thinking-exp',
 			'gemini-2.0-flash'
 		],
+		codex: [
+			'gpt-5.3-codex'
+		],
 		'cc-codex': [
 			'sonnet',
 			'opus',
 			'haiku'
 		]
 	};
+	const DEFAULT_ENGINE_OPTIONS = ['claude', 'gemini', 'codex', 'cc-codex'];
 
 	const ENGINE_LABELS: Record<string, string> = {
 		claude: 'Claude',
 		gemini: 'Gemini',
+		codex: 'Codex',
 		'cc-codex': 'CC-Codex'
 	};
 
 	const ENGINE_THEME_CLASSES: Record<string, string> = {
 		claude: 'text-sky-700 bg-sky-50 border-sky-200',
 		gemini: 'text-orange-700 bg-orange-50 border-orange-200',
+		codex: 'text-slate-700 bg-slate-50 border-slate-300',
 		'cc-codex': 'text-emerald-700 bg-emerald-50 border-emerald-200'
 	};
 
@@ -96,7 +102,8 @@
 
 	function getEngineOptions(): string[] {
 		const configured = getConfiguredEngines();
-		return Array.from(new Set([...configured, 'claude', 'gemini', 'cc-codex']));
+		if (configured.length > 0) return configured;
+		return DEFAULT_ENGINE_OPTIONS;
 	}
 
 	function normalizeSelectedEngines() {
@@ -122,9 +129,6 @@
 			}
 		}
 
-		if (engine === 'cc-codex') {
-			return PREDEFINED_MODELS['cc-codex'];
-		}
 		return PREDEFINED_MODELS[engine] ?? [];
 	}
 

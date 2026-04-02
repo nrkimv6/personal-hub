@@ -61,6 +61,30 @@ class TestFullFlow:
         assert command.get("engine") == "cc-codex"
         assert command.get("fix_engine") == "cc-codex"
 
+    async def test_run_request_propagates_codex_engine_and_fix_engine_to_command_queue(self, client, mock_executor_redis):
+        """POST /run의 codex engine/fix_engine 값이 Redis command payload에 유지되는지 검증"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={
+                    "plan_file": "test.md",
+                    "engine": "codex",
+                    "fix_engine": "codex",
+                },
+            )
+
+        assert response.status_code == 200
+        queued = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert queued, "command queue가 비어 있음"
+        command = json.loads(queued[0])
+        assert command.get("engine") == "codex"
+        assert command.get("fix_engine") == "codex"
+
         # 2. 시작 (listener heartbeat + 성공 응답 세팅)
         rid = "lifecycle-runner-1"
         await fake_async.set("plan-runner:listener:heartbeat", now)

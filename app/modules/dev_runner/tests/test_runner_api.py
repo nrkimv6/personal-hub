@@ -346,6 +346,93 @@ class TestStartRun:
         command = json.loads(raw[0])
         assert command.get("fix_engine") == "cc-codex", f"fix_engine 미포함: {command}"
 
+    async def test_start_run_engine_codex_stored_in_command(self, client, mock_executor_redis):
+        """codex main engine 필드가 Redis command에 포함되는지 확인"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "engine": "codex",
+            })
+
+        assert response.status_code == 200
+        raw = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert len(raw) > 0, "command queue에 항목 없음"
+        command = json.loads(raw[0])
+        assert command.get("engine") == "codex", f"engine 미포함: {command}"
+
+    async def test_start_run_fix_engine_codex_stored_in_command(self, client, mock_executor_redis):
+        """codex fix_engine 필드가 Redis command에 포함되는지 확인"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "fix_engine": "codex",
+            })
+
+        assert response.status_code == 200
+        raw = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert len(raw) > 0, "command queue에 항목 없음"
+        command = json.loads(raw[0])
+        assert command.get("fix_engine") == "codex", f"fix_engine 미포함: {command}"
+
+    async def test_start_run_unknown_engine_returns_422(self, client, mock_executor_redis):
+        """알 수 없는 engine 요청은 5xx가 아닌 422로 명시 실패"""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+
+        response = await client.post("/api/v1/dev-runner/run", json={
+            "plan_file": "test-plan.md",
+            "engine": "unknown-engine",
+        })
+
+        assert response.status_code == 422
+        assert "지원되지 않는 엔진" in response.text
+
+    async def test_start_run_codex_preflight_failure_returns_422(self, client, mock_executor_redis):
+        """codex preflight 실패는 5xx가 아닌 422로 반환"""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+
+        brpop_result = (
+            "plan-runner:command_results:abc123",
+            json.dumps({"success": False, "message": "codex 인증 실패: CLI 로그인/토큰 상태를 확인하세요."}),
+        )
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "engine": "codex",
+            })
+
+        assert response.status_code == 422
+        assert "codex 인증 실패" in response.text
+
+    async def test_start_run_non_codex_failure_keeps_500(self, client, mock_executor_redis):
+        """codex와 무관한 listener 실패는 기존대로 500 유지"""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+
+        brpop_result = (
+            "plan-runner:command_results:abc123",
+            json.dumps({"success": False, "message": "Already running (PID: 12345)"}),
+        )
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "engine": "claude",
+            })
+
+        assert response.status_code == 500
+        assert "Already running" in response.text
+
 
 class TestStopRun:
     async def test_stop_not_running_returns_404(self, client, mock_executor_redis):
