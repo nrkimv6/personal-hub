@@ -14,30 +14,26 @@ from unittest.mock import patch, MagicMock
 import fakeredis
 
 
-# ========== 워크트리 스크립트 로드 ==========
-# Phase 4 수정이 적용된 워크트리 버전을 로드한다.
+# ========== 스크립트 로드 ==========
+# 현재 checkout의 scripts 경로를 사용한다.
 
-_worktree_listener_mod = None
-
-WORKTREE_SCRIPT = Path(
-    "D:/work/project/tools/monitor-page/.worktrees/"
-    "2026-03-05-logs-follow-runner-detection/"
-    "scripts/dev-runner-command-listener.py"
-)
+_listener_mod = None
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_PATH = REPO_ROOT / "scripts" / "dev-runner-command-listener.py"
 
 
 def _get_worktree_listener():
-    global _worktree_listener_mod
-    if _worktree_listener_mod is not None:
-        return _worktree_listener_mod
-    if not WORKTREE_SCRIPT.exists():
-        pytest.skip(f"Worktree listener script not found: {WORKTREE_SCRIPT}")
+    global _listener_mod
+    if _listener_mod is not None:
+        return _listener_mod
+    if not SCRIPT_PATH.exists():
+        pytest.skip(f"Listener script not found: {SCRIPT_PATH}")
     spec = importlib.util.spec_from_file_location(
-        "dev_runner_command_listener_worktree", str(WORKTREE_SCRIPT)
+        "dev_runner_command_listener_current", str(SCRIPT_PATH)
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    _worktree_listener_mod = mod
+    _listener_mod = mod
     return mod
 
 
@@ -96,9 +92,9 @@ class TestStreamLogPathT3:
         RKP = wt_listener.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
 
-        with patch.object(wt_listener, "LOG_DIR", tmp_path), \
-             patch.object(wt_listener.threading, "Thread") as mock_thread, \
-             patch.object(wt_listener.subprocess, "Popen", return_value=mock_popen):
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen):
             mock_thread.return_value = MagicMock()
             result = wt_listener._launch_plan_runner_process(
                 command, fr, RUNNER_ID, mock_worktree, "test.md", None
@@ -120,9 +116,9 @@ class TestStreamLogPathT3:
         RKP = wt_listener.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
 
-        with patch.object(wt_listener, "LOG_DIR", tmp_path), \
-             patch.object(wt_listener.threading, "Thread") as mock_thread, \
-             patch.object(wt_listener.subprocess, "Popen", return_value=mock_popen):
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen):
             mock_thread.return_value = MagicMock()
             wt_listener._launch_plan_runner_process(
                 command, fr, RUNNER_ID, mock_worktree, "test.md", None
@@ -144,9 +140,9 @@ class TestStreamLogPathT3:
         RKP = wt_listener.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
 
-        with patch.object(wt_listener, "LOG_DIR", tmp_path), \
-             patch.object(wt_listener.threading, "Thread") as mock_thread, \
-             patch.object(wt_listener.subprocess, "Popen", return_value=mock_popen):
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen):
             mock_thread.return_value = MagicMock()
             wt_listener._launch_plan_runner_process(
                 command, fr, RUNNER_ID, mock_worktree, "test.md", None

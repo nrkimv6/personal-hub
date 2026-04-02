@@ -18,15 +18,16 @@ import fakeredis
 # ========== 모듈 로드 (하이픈 파일명 대응) ==========
 
 _listener_mod = None
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_PATH = REPO_ROOT / "scripts" / "dev-runner-command-listener.py"
 
 def _get_listener():
     global _listener_mod
     if _listener_mod is not None:
         return _listener_mod
-    script_path = Path("D:/work/project/tools/monitor-page/scripts/dev-runner-command-listener.py")
-    if not script_path.exists():
-        pytest.skip(f"Listener script not found: {script_path}")
-    spec = importlib.util.spec_from_file_location("dev_runner_command_listener", str(script_path))
+    if not SCRIPT_PATH.exists():
+        pytest.skip(f"Listener script not found: {SCRIPT_PATH}")
+    spec = importlib.util.spec_from_file_location("dev_runner_command_listener", str(SCRIPT_PATH))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     _listener_mod = mod
@@ -84,6 +85,10 @@ def mock_worktree(listener_mod, tmp_path):
 
 class TestStartPlanRunner:
     """start_plan_runner — 백그라운드 스레드 시작 동작 검증"""
+
+    def test_loader_uses_repo_local_script(self, listener_mod):
+        """테스트 로더가 현재 checkout의 scripts 경로를 사용해야 함"""
+        assert Path(listener_mod.__file__).resolve() == SCRIPT_PATH.resolve()
 
     def test_start_launches_background_thread(self, listener_mod, fr, tmp_path, mock_worktree):
         """start_plan_runner은 None을 반환하고 백그라운드 스레드를 시작"""
@@ -199,22 +204,11 @@ class TestLaunchPlanRunnerProcess:
         assert fr.get(f"{RKP}:{RUNNER_ID}:pid") == "12345"
         assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "test.md"
 
-    @pytest.mark.xfail(
-        reason=(
-            "이 테스트는 메인 스크립트(main branch) 로드 기준이므로 Phase 4 머지 전까지 실패. "
-            "worktree 버전 검증은 tests/dev_runner/test_stream_log_path_t3.py::TestStreamLogPathT3 참조."
-        ),
-        strict=True,
-    )
     def test_launch_sets_stream_log_path_in_redis(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """T3: stream_log_path가 Redis에 실제 로그 파일 경로로 저장되는지 확인 (nil 아님)
 
         Phase 4 수정 검증: _launch_plan_runner_process 실행 후
         'plan-runner:runners:{id}:stream_log_path' 키가 실제 파일 경로를 가져야 함.
-
-        NOTE: 메인 스크립트는 Phase 4 머지 후 이 테스트가 통과됨.
-              머지 전에는 xfail(strict)로 표시하여 예상된 실패임을 명시.
-              worktree 버전 통과 확인: test_stream_log_path_t3.py::TestStreamLogPathT3
         """
         RKP = listener_mod.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
