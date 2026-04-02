@@ -24,14 +24,15 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 
 # ── Session 0 감지 ──────────────────────────────────────────────
-def get_session_id() -> int:
-    """현재 프로세스의 Windows Session ID를 반환한다. 실패 시 -1."""
+def get_session_id(pid: int | None = None) -> int:
+    """Windows Session ID를 반환한다. 실패 시 -1."""
     if sys.platform != "win32":
         return -1
+    target_pid = os.getpid() if pid is None else pid
     try:
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
         session_id = ctypes.c_ulong(0)
-        if kernel32.ProcessIdToSessionId(os.getpid(), ctypes.byref(session_id)):
+        if kernel32.ProcessIdToSessionId(target_pid, ctypes.byref(session_id)):
             return session_id.value
     except Exception:
         pass
@@ -54,6 +55,40 @@ def find_pids_on_port(port: int) -> list[int]:
             if conn.pid and conn.pid not in pids:
                 pids.append(conn.pid)
     return pids
+
+
+def pick_listener_pid(port: int, prefer_name: str = "node.exe") -> int | None:
+    """지정 포트의 LISTEN PID 중 우선순위 1개를 선택한다.
+
+    우선순위:
+    1) 현재 세션과 동일한 PID
+    2) 프로세스명이 prefer_name과 일치
+    3) create_time이 더 최근인 PID
+    """
+    pids = find_pids_on_port(port)
+    if not pids:
+        return None
+    if len(pids) == 1:
+        return pids[0]
+
+    current_session = get_session_id()
+    candidates: list[tuple[int, bool, bool, float]] = []
+    for pid in pids:
+        try:
+            proc = psutil.Process(pid)
+            name = (proc.name() or "").lower()
+            matched = name == prefer_name.lower()
+            same_session = current_session != -1 and get_session_id(pid) == current_session
+            create_time = proc.create_time()
+            candidates.append((pid, same_session, matched, create_time))
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+
+    if not candidates:
+        return pids[0]
+
+    candidates.sort(key=lambda item: (item[1], item[2], item[3]), reverse=True)
+    return candidates[0][0]
 
 
 # ── 프로세스 유틸 ───────────────────────────────────────────────

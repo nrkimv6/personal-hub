@@ -7,6 +7,7 @@ Usage:
   python scripts/browser_workers.py status
   python scripts/browser_workers.py restart-api
   python scripts/browser_workers.py restart-frontend
+  python scripts/browser_workers.py restart-frontend --public
 """
 import argparse
 import asyncio
@@ -30,6 +31,7 @@ from scripts.service_utils import (
     is_port_listening,
     is_process_alive,
     kill_pid,
+    pick_listener_pid,
     read_pid_file,
     remove_pid_file,
     write_pid_file,
@@ -93,6 +95,7 @@ class BrowserWorkerManager:
         self.pid_suffix = "_admin"
         self.api_port = 8001
         self.frontend_port = 6101
+        self.frontend_restart_lock = self.pid_dir / "frontend_restart.lock"
 
         # venv python — use exe alias if available, fallback to python.exe
         alias_exe = PROJECT_ROOT / ".venv" / "Scripts" / "monitorpage-worker.exe"
@@ -384,78 +387,239 @@ class BrowserWorkerManager:
             cprint("API not responding yet (may still be starting)", YELLOW)
 
     # ── restart-frontend ─────────────────────────────────────────
-    def restart_frontend(self):
-        print(f"\n{YELLOW}{'=' * 40}")
-        print(f"  Restarting DEV Frontend")
-        print(f"  (Vite dev server on port {self.frontend_port}){RESET}")
-        print(f"{YELLOW}{'=' * 40}{RESET}\n")
+    def _frontend_mode(self, public: bool) -> tuple[str, int, int, Path, Path]:
+        """frontend 실행 모드별 런타임 정보를 반환한다."""
+        if public:
+            mode_label = "PUBLIC PREVIEW"
+            api_port = 8000
+            frontend_port = 6100
+            pid_file = self.pid_dir / "frontend.pid"
+            log_dir = PROJECT_ROOT / "logs"
+        else:
+            mode_label = "ADMIN DEV"
+            api_port = self.api_port
+            frontend_port = self.frontend_port
+            pid_file = self.pid_dir / f"frontend{self.pid_suffix}.pid"
+            log_dir = PROJECT_ROOT / "logs" / "admin"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return mode_label, api_port, frontend_port, pid_file, log_dir
 
-        pid_file = self.pid_dir / f"frontend{self.pid_suffix}.pid"
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
+    def _acquire_frontend_restart_lock(self, wait_seconds: int = 10) -> int | None:
+        """frontend 재시작 락을 획득한다. wait_seconds 내 실패 시 None."""
+        deadline = time.time() + max(wait_seconds, 1)
+        while time.time() <= deadline:
+            try:
+                fd = os.open(str(self.frontend_restart_lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode("ascii", errors="ignore"))
+                return fd
+            except FileExistsError:
+                stale_pid = read_pid_file(self.frontend_restart_lock)
+                if stale_pid and not is_process_alive(stale_pid):
+                    remove_pid_file(self.frontend_restart_lock)
+                    continue
+                time.sleep(0.5)
+            except Exception:
+                return None
+        return None
 
-        # 1. PID 파일에서 기존 프로세스 Kill
+    def _release_frontend_restart_lock(self, lock_fd: int | None) -> None:
+        """frontend 재시작 락을 해제한다."""
+        if lock_fd is not None:
+            try:
+                os.close(lock_fd)
+            except Exception:
+                pass
+        remove_pid_file(self.frontend_restart_lock)
+
+    def _cleanup_frontend_runtime(self, frontend_port: int, pid_file: Path) -> None:
+        """기존 PID/포트 점유/고아 node 프로세스를 정리한다."""
         pid = read_pid_file(pid_file)
         if pid and is_process_alive(pid):
             cprint(f"Stopping frontend process (PID: {pid})...")
             kill_pid(pid)
         remove_pid_file(pid_file)
 
-        # 2. 포트 점유 프로세스 Kill
-        for p in find_pids_on_port(self.frontend_port):
-            cprint(f"Killing process on port {self.frontend_port} (PID: {p})...")
-            kill_pid(p)
+        for pid_on_port in find_pids_on_port(frontend_port):
+            cprint(f"Killing process on port {frontend_port} (PID: {pid_on_port})...")
+            kill_pid(pid_on_port)
 
-        # 3. Vite 고아 프로세스 정리
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
                 if proc.info["name"] != "node.exe":
                     continue
-                cmdline = " ".join(proc.info["cmdline"] or [])
-                if "vite" in cmdline and f"--port {self.frontend_port}" in cmdline:
-                    cprint(f"Killing orphan Vite process (PID: {proc.pid})...")
+                cmdline = " ".join(proc.info.get("cmdline") or [])
+                has_target_port = f"--port {frontend_port}" in cmdline
+                has_frontend_server = "vite" in cmdline or "preview" in cmdline
+                if has_target_port and has_frontend_server:
+                    cprint(f"Killing orphan frontend process (PID: {proc.pid})...")
                     kill_pid(proc.pid)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
 
-        time.sleep(2)
+    def _prepare_frontend_env(self, api_port: int, public: bool) -> None:
+        """모드별 환경 파일/아티팩트를 준비한다."""
+        if public:
+            env_local = self.frontend_dir / ".env.local"
+            if env_local.exists():
+                env_local.unlink()
+            return
 
-        # 4. .env.development.local
         env_file = self.frontend_dir / ".env.development.local"
-        env_file.write_text(f"VITE_API_PORT={self.api_port}\n", encoding="utf-8")
-
-        # 5. Stale build 삭제
+        env_file.write_text(f"VITE_API_PORT={api_port}\n", encoding="utf-8")
         build_dir = self.frontend_dir / "build"
         if build_dir.exists():
             shutil.rmtree(build_dir, ignore_errors=True)
             cprint("Cleaned up stale build directory")
 
-        # 6. npm run dev
-        cprint(f"Starting frontend (npm run dev --port {self.frontend_port})...")
-        stdout_log = open(self.log_dir / f"frontend_{timestamp}.log", "w", encoding="utf-8")
-        stderr_log = open(self.log_dir / f"frontend_err_{timestamp}.log", "w", encoding="utf-8")
+    def _run_frontend_build_if_needed(self, public: bool) -> bool:
+        """public 모드에서 build 후 preview 가능 여부를 반환한다."""
+        if not public:
+            return True
 
-        proc = tracked_popen_sync(
-            ["npm.cmd", "run", "dev", "--", "--host", "--port", str(self.frontend_port)],
-            role="frontend",
+        cprint("Building frontend for PUBLIC PREVIEW...", YELLOW)
+        build_result = subprocess.run(
+            ["npm.cmd", "run", "build"],
             cwd=str(self.frontend_dir),
-            stdout=stdout_log,
-            stderr=stderr_log,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
         )
-        write_pid_file(pid_file, proc.pid)
-        cprint(f"Frontend started (PID: {proc.pid})", GREEN)
+        if build_result.returncode == 0:
+            cprint("Frontend build completed", GREEN)
+            return True
 
-        # 7. 헬스체크
-        cprint("Waiting 5s for frontend to initialize...")
-        time.sleep(5)
+        err_msg = (build_result.stderr or build_result.stdout or "").strip()
+        short_err = err_msg[-500:] if err_msg else "(no output)"
+        cprint(f"Frontend build failed (rc={build_result.returncode}): {short_err}", RED)
+
+        if not (self.frontend_dir / "build").exists():
+            cprint("No previous build artifact found — cannot run PUBLIC PREVIEW", RED)
+            return False
+
+        cprint("Using previous build artifact for fallback preview", YELLOW)
+        return True
+
+    def _read_log_tail(self, log_path: Path, max_chars: int = 4000) -> str:
+        if not log_path.exists():
+            return ""
         try:
-            with urllib.request.urlopen(
-                f"http://localhost:{self.frontend_port}", timeout=5
-            ) as resp:
-                if resp.status == 200:
-                    cprint(f"Frontend is healthy (http://localhost:{self.frontend_port})", GREEN)
+            content = log_path.read_text(encoding="utf-8", errors="replace")
         except Exception:
-            cprint("Frontend not responding yet (may still be starting)", YELLOW)
+            return ""
+        return content[-max_chars:]
+
+    def _has_port_collision_error(self, stderr_log_path: Path, frontend_port: int) -> bool:
+        tail = self._read_log_tail(stderr_log_path)
+        return f"Port {frontend_port} is already in use" in tail
+
+    def restart_frontend(self, public: bool = False) -> bool:
+        mode_label, api_port, frontend_port, pid_file, log_dir = self._frontend_mode(public)
+        print(f"\n{YELLOW}{'=' * 40}")
+        print(f"  Restarting {mode_label} Frontend")
+        print(f"  (port {frontend_port}){RESET}")
+        print(f"{YELLOW}{'=' * 40}{RESET}\n")
+
+        lock_fd = self._acquire_frontend_restart_lock(wait_seconds=10)
+        if lock_fd is None:
+            cprint("Frontend restart lock is busy; another restart is in progress", RED)
+            return False
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        stdout_log_path = log_dir / f"frontend_{timestamp}.log"
+        stderr_log_path = log_dir / f"frontend_err_{timestamp}.log"
+        old_listener_pid = pick_listener_pid(frontend_port)
+        if old_listener_pid:
+            cprint(f"Pre-restart listener PID on :{frontend_port} = {old_listener_pid}", YELLOW)
+
+        try:
+            self._cleanup_frontend_runtime(frontend_port, pid_file)
+            time.sleep(2)
+            self._prepare_frontend_env(api_port=api_port, public=public)
+
+            if not self._run_frontend_build_if_needed(public=public):
+                return False
+
+            start_cmd = (
+                ["npm.cmd", "run", "preview", "--", "--host", "--port", str(frontend_port)]
+                if public
+                else ["npm.cmd", "run", "dev", "--", "--host", "--port", str(frontend_port)]
+            )
+            cprint(f"Starting frontend ({' '.join(start_cmd)})...")
+
+            with open(stdout_log_path, "w", encoding="utf-8") as stdout_log, open(
+                stderr_log_path, "w", encoding="utf-8"
+            ) as stderr_log:
+                proc = tracked_popen_sync(
+                    start_cmd,
+                    role="frontend",
+                    cwd=str(self.frontend_dir),
+                    stdout=stdout_log,
+                    stderr=stderr_log,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            cprint(f"Frontend launcher started (PID: {proc.pid})", GREEN)
+
+            cprint("Waiting 5s for frontend to initialize...")
+            time.sleep(5)
+
+            new_listener_pid = pick_listener_pid(frontend_port)
+            if new_listener_pid is not None:
+                write_pid_file(pid_file, new_listener_pid)
+            elif is_process_alive(proc.pid):
+                write_pid_file(pid_file, proc.pid)
+            else:
+                remove_pid_file(pid_file)
+
+            if self._has_port_collision_error(stderr_log_path, frontend_port):
+                cprint(
+                    f"Port collision detected in {stderr_log_path.name}: Port {frontend_port} is already in use",
+                    RED,
+                )
+                return False
+
+            if old_listener_pid is not None and new_listener_pid == old_listener_pid:
+                cprint(f"Listener PID unchanged after restart (PID: {new_listener_pid})", RED)
+                return False
+
+            url = f"http://localhost:{frontend_port}"
+            try:
+                with urllib.request.urlopen(url, timeout=5) as resp:
+                    if resp.status == 200:
+                        cprint(
+                            f"Frontend healthy (mode={mode_label}, listener_pid={new_listener_pid}, url={url})",
+                            GREEN,
+                        )
+                        return True
+            except Exception as e:
+                cprint(f"Frontend not responding yet (may still be starting): {e}", YELLOW)
+                return False
+
+            cprint("Frontend health check returned unexpected status", YELLOW)
+            return False
+        finally:
+            self._release_frontend_restart_lock(lock_fd)
+
+    def _print_frontend_status(self, public: bool = False):
+        mode_label, _api_port, frontend_port, frontend_pid_file, _log_dir = self._frontend_mode(public)
+        pid = read_pid_file(frontend_pid_file)
+        port_up = is_port_listening(frontend_port)
+        if pid and is_process_alive(pid) and port_up:
+            print(f"  {GREEN}[+] Frontend {mode_label} :{frontend_port} (PID: {pid}){RESET}")
+            return
+
+        if port_up:
+            listener_pid = pick_listener_pid(frontend_port)
+            if listener_pid is not None:
+                write_pid_file(frontend_pid_file, listener_pid)
+                print(
+                    f"  {YELLOW}[~] Frontend {mode_label} :{frontend_port} "
+                    f"(PID file stale -> auto-healed to PID {listener_pid}){RESET}"
+                )
+            else:
+                print(f"  {YELLOW}[~] Frontend {mode_label} :{frontend_port} (port listening, PID file stale){RESET}")
+            return
+
+        print(f"  {YELLOW}[-] Frontend {mode_label} :{frontend_port}: Not running{RESET}")
 
     # ── status ───────────────────────────────────────────────────
     def status(self):
@@ -477,16 +641,9 @@ class BrowserWorkerManager:
             else:
                 print(f"  {YELLOW}[-] {name}: Not running{RESET}")
 
-        # Frontend
-        frontend_pid_file = self.pid_dir / f"frontend{self.pid_suffix}.pid"
-        pid = read_pid_file(frontend_pid_file)
-        port_up = is_port_listening(self.frontend_port)
-        if pid and is_process_alive(pid) and port_up:
-            print(f"  {GREEN}[+] Frontend DEV :{self.frontend_port} (PID: {pid}){RESET}")
-        elif port_up:
-            print(f"  {YELLOW}[~] Frontend DEV :{self.frontend_port} (port listening, PID file stale){RESET}")
-        else:
-            print(f"  {YELLOW}[-] Frontend DEV :{self.frontend_port}: Not running{RESET}")
+        # Frontend (admin/public)
+        self._print_frontend_status(public=False)
+        self._print_frontend_status(public=True)
 
         # 실제 워커 프로세스
         print(f"\n  {BOLD}Worker Processes:{RESET}")
@@ -780,6 +937,14 @@ class BrowserWorkerManager:
 
 
 def main():
+    if "--restart-frontend" in sys.argv[1:]:
+        print(
+            "error: '--restart-frontend' is not a valid option. "
+            "Use positional action: python scripts/browser_workers.py restart-frontend [--public]",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
     parser = argparse.ArgumentParser(description="Browser Workers Management")
     parser.add_argument(
         "action",
@@ -787,7 +952,17 @@ def main():
         help="Action to perform",
     )
     parser.add_argument("target", nargs="?", default=None, help="Target name for restart-infra")
+    parser.add_argument(
+        "--public",
+        action="store_true",
+        help="Use PUBLIC PREVIEW mode for restart-frontend (port 6100, build+preview)",
+    )
     args = parser.parse_args()
+
+    if args.public and args.action != "restart-frontend":
+        parser.error("--public can only be used with restart-frontend")
+    if args.action == "restart-infra" and not args.target:
+        parser.error("restart-infra requires target argument")
 
     mgr = BrowserWorkerManager()
     action_map = {
@@ -796,13 +971,15 @@ def main():
         "restart": mgr.restart,
         "status": mgr.status,
         "restart-api": mgr.restart_api,
-        "restart-frontend": mgr.restart_frontend,
         "redis-status": mgr.redis_status,
         "redis-restart": mgr.redis_restart,
         "redis-cleanup": mgr.redis_cleanup,
         "restart-listener": mgr.restart_listener,
         "restart-infra": lambda: mgr.restart_infra(args.target or ""),
     }
+    if args.action == "restart-frontend":
+        ok = mgr.restart_frontend(public=args.public)
+        raise SystemExit(0 if ok else 1)
     action_map[args.action]()
 
 

@@ -7,7 +7,8 @@
 #   .\scripts\browser-workers.ps1 -Action restart     # Restart browser workers
 #   .\scripts\browser-workers.ps1 -Action status      # Show status
 #   .\scripts\browser-workers.ps1 -Action restart-api       # Restart API server (NSSM service)
-#   .\scripts\browser-workers.ps1 -Action restart-frontend  # Restart DEV frontend only
+#   .\scripts\browser-workers.ps1 -Action restart-frontend          # Restart ADMIN DEV frontend (6101)
+#   .\scripts\browser-workers.ps1 -Action restart-frontend -Public  # Restart PUBLIC PREVIEW frontend (6100)
 #
 # Note: This script is for Dev mode only (browser workers require user session)
 #
@@ -19,12 +20,18 @@
 param(
     [Parameter(Mandatory=$true)]
     [ValidateSet("start", "stop", "restart", "status", "restart-api", "restart-frontend")]
-    [string]$Action
+    [string]$Action,
+    [switch]$Public
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
+
+if ($Public -and $Action -ne "restart-frontend") {
+    Write-Error "-Public 옵션은 restart-frontend 액션에서만 사용할 수 있습니다. 예: .\\scripts\\browser-workers.ps1 -Action restart-frontend -Public"
+    exit 1
+}
 
 # Import port utilities
 . "$ScriptDir\port-utils.ps1"
@@ -433,91 +440,40 @@ function Restart-ApiServer {
     }
 }
 
+function Get-PythonExecutable {
+    $candidates = @(
+        (Join-Path $ProjectRoot ".venv\Scripts\monitorpage-worker.exe"),
+        (Join-Path $ProjectRoot ".venv\Scripts\python.exe"),
+        (Join-Path $ProjectRoot "venv\Scripts\python.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+    return "python"
+}
+
 function Restart-Frontend {
+    param([switch]$Public)
+
+    $modeLabel = if ($Public) { "PUBLIC PREVIEW" } else { "ADMIN DEV" }
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Yellow
-    Write-Host "  Restarting DEV Frontend" -ForegroundColor Yellow
-    Write-Host "  (Vite dev server on port 6101)" -ForegroundColor Gray
+    Write-Host "  Restarting $modeLabel Frontend" -ForegroundColor Yellow
     Write-Host "========================================" -ForegroundColor Yellow
     Write-Host ""
 
-    $FrontendPort = 6101
-    $FrontendDir = Join-Path $ProjectRoot "frontend"
-    $FrontendPidFile = Join-Path $PidDir "frontend$PidSuffix.pid"
-    $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $frontendLogFile = Join-Path $LogDir "frontend_$Timestamp.log"
-    $frontendErrLogFile = Join-Path $LogDir "frontend_err_$Timestamp.log"
-
-    # 1. PID 파일에서 기존 프로세스 Kill
-    if (Test-Path $FrontendPidFile) {
-        $savedPid = Get-Content $FrontendPidFile -ErrorAction SilentlyContinue
-        if ($savedPid) {
-            $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
-            if ($proc) {
-                Write-Log "Stopping frontend process (PID: $savedPid)..."
-                Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
-            }
-        }
-        Remove-Item $FrontendPidFile -Force -ErrorAction SilentlyContinue
+    $pythonExe = Get-PythonExecutable
+    $args = @("$ScriptDir\browser_workers.py", "restart-frontend")
+    if ($Public) {
+        $args += "--public"
     }
 
-    # 2. 포트 6101 점유 프로세스 Kill
-    $conn = Get-NetTCPConnection -LocalPort $FrontendPort -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' }
-    if ($conn) {
-        $procId = $conn.OwningProcess
-        Write-Log "Killing process on port $FrontendPort (PID: $procId)..."
-        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-    }
-
-    # 3. Vite 고아 프로세스 정리
-    Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object {
-        try {
-            $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine
-            $cmdLine -and $cmdLine -match "vite" -and $cmdLine -match "--port\s+$FrontendPort"
-        } catch { $false }
-    } | ForEach-Object {
-        Write-Log "Killing orphan Vite process (PID: $($_.Id))..."
-        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-    }
-
-    Start-Sleep -Seconds 2
-
-    # 4. .env.development.local 설정 (API 포트)
-    $envDevLocalFile = Join-Path $FrontendDir ".env.development.local"
-    "VITE_API_PORT=8001" | Out-File $envDevLocalFile -Encoding utf8
-
-    # 5. Stale build 디렉토리 제거
-    $buildDir = Join-Path $FrontendDir "build"
-    if (Test-Path $buildDir) {
-        Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Log "Cleaned up stale build directory"
-    }
-
-    # 6. npm run dev 백그라운드 실행
-    Write-Log "Starting frontend (npm run dev --port $FrontendPort)..."
-    $frontendProcess = Start-Process -FilePath "npm.cmd" `
-        -ArgumentList "run", "dev", "--", "--host", "--port", $FrontendPort `
-        -WorkingDirectory $FrontendDir `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $frontendLogFile `
-        -RedirectStandardError $frontendErrLogFile `
-        -PassThru
-
-    $frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
-    Write-Log "Frontend started (PID: $($frontendProcess.Id))" "OK"
-    Write-Log "Log: $frontendLogFile"
-
-    # 7. 헬스체크
-    Write-Log "Waiting 5s for frontend to initialize..."
-    Start-Sleep -Seconds 5
-
-    try {
-        $response = Invoke-WebRequest "http://localhost:$FrontendPort" -TimeoutSec 5 -UseBasicParsing
-        if ($response.StatusCode -eq 200) {
-            Write-Log "Frontend is healthy (http://localhost:$FrontendPort)" "OK"
-        }
-    } catch {
-        Write-Log "Frontend not responding yet (may still be starting)" "WARN"
+    Write-Log "Delegating to browser_workers.py ($($args -join ' '))"
+    & $pythonExe @args
+    if ($LASTEXITCODE -ne 0) {
+        throw "restart-frontend failed (exit code: $LASTEXITCODE)"
     }
 }
 
@@ -667,7 +623,7 @@ switch ($Action) {
         Restart-ApiServer
     }
     "restart-frontend" {
-        Restart-Frontend
+        Restart-Frontend -Public:$Public
     }
     "status" {
         Show-Status

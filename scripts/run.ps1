@@ -244,7 +244,6 @@ try {
 
         # Start frontend and capture its actual PID via port
         $FrontendPidFile = Join-Path $ProjectRoot ".pids\frontend_admin.pid"
-        "DEV_MODE" | Out-File $FrontendPidFile -Encoding ascii
         $frontendPos = 0
 
         # Start frontend in background with VITE_API_PORT for proxy
@@ -260,6 +259,11 @@ try {
             $conn = Get-NetTCPConnection -LocalPort $FrontendPort -ErrorAction SilentlyContinue
             if ($conn) {
                 Write-Host "[+] Frontend is running on port $FrontendPort" -ForegroundColor Green
+                $listenerPid = $conn | Select-Object -ExpandProperty OwningProcess -Unique | Select-Object -First 1
+                if ($listenerPid) {
+                    $listenerPid | Out-File $FrontendPidFile -Encoding ascii
+                    Write-Host "[*] Frontend listener PID recorded: $listenerPid" -ForegroundColor Gray
+                }
                 break
             }
             Start-Sleep -Seconds 1
