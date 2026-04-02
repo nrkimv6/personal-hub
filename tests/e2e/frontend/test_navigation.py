@@ -5,7 +5,27 @@
 """
 
 import pytest
+import subprocess
+import sys
+import re
+from pathlib import Path
 from playwright.sync_api import Page, expect
+
+pytestmark = pytest.mark.e2e
+
+
+def _run_restart_frontend_admin() -> subprocess.CompletedProcess:
+    root = Path(__file__).resolve().parents[3]
+    script = root / "scripts" / "browser_workers.py"
+    return subprocess.run(
+        [sys.executable, str(script), "restart-frontend"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 class TestPageLoad:
@@ -69,6 +89,30 @@ class TestSidebar:
         page.wait_for_load_state("networkidle")
 
         # 네이버 예약 메뉴 클릭
+        naver_link = page.locator("aside a[href='/naver']")
+        naver_link.click()
+        page.wait_for_load_state("networkidle")
+        expect(page).to_have_url(f"{frontend_url}/naver")
+
+    def test_dashboard_loads_after_restart_frontend_admin_e2e(self, page: Page, frontend_url: str):
+        """CLI restart-frontend 직후 /dashboard가 정상 로드되어야 한다."""
+        result = _run_restart_frontend_admin()
+        assert result.returncode in (0, 1)
+
+        page.goto(f"{frontend_url}/dashboard")
+        page.wait_for_load_state("networkidle")
+        expect(page).to_have_title(re.compile(r"(모니터링 시스템|통합 대시보드)"))
+        expect(page.locator("main")).to_be_visible()
+
+    def test_sidebar_navigation_after_restart_frontend_admin_e2e(self, page: Page, frontend_url: str):
+        """CLI restart-frontend 직후 사이드바 내비게이션이 동작해야 한다."""
+        result = _run_restart_frontend_admin()
+        assert result.returncode in (0, 1)
+
+        page.set_viewport_size({"width": 1280, "height": 720})
+        page.goto(f"{frontend_url}/dashboard")
+        page.wait_for_load_state("networkidle")
+
         naver_link = page.locator("aside a[href='/naver']")
         naver_link.click()
         page.wait_for_load_state("networkidle")

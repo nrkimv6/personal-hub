@@ -170,7 +170,13 @@ class ServiceRunner:
                 self.log.warning(f"  Port {port} still in use (PIDs: {remaining})")
 
     # ── Frontend 시작 ────────────────────────────────────────────
-    def start_frontend(self) -> subprocess.Popen:
+    def start_frontend(self) -> subprocess.Popen | None:
+        """정책 고정: admin은 DEV, public은 BUILD+PREVIEW로 시작한다.
+
+        - admin(dev=True): `npm run dev -- --host --port 6101`
+        - public(dev=False): `npm run build` 후 `npm run preview -- --host --port 6100`
+          (build 실패 시 기존 `build/`가 있으면 fallback preview)
+        """
         self.log.info("Starting Frontend...")
         frontend_dir = PROJECT_ROOT / "frontend"
         timestamp = time.strftime("%Y%m%d_%H%M%S")
