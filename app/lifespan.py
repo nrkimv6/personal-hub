@@ -95,6 +95,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"파일 분류 모듈 DB 초기화 실패 (무시됨): {e}")
 
+        # 발표 사진 원근 보정 모듈 DB 초기화
+        try:
+            from app.modules.slide_scanner.database import init_db as ss_init_db
+            ss_init_db()
+            logger.info("슬라이드 스캐너 모듈 DB 초기화 완료")
+        except Exception as e:
+            logger.warning(f"슬라이드 스캐너 모듈 DB 초기화 실패 (무시됨): {e}")
+
         logger.info("추가 테이블 초기화 완료")
     except Exception as e:
         logger.error(f"추가 테이블 초기화 실패: {str(e)}")
