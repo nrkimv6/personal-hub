@@ -167,6 +167,7 @@ def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db
                         result_path = :result_path,
                         aspect_ratio = :aspect_ratio,
                         filters_applied = :filters_applied,
+                        extracted_text = NULL,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = :id
                     """

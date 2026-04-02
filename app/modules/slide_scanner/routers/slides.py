@@ -44,6 +44,10 @@ class ReviewRequest(BaseModel):
     points: list[PointPayload]
 
 
+class OcrRequest(BaseModel):
+    languages: list[str] | None = None
+
+
 def _points_to_params(points: list[tuple[float, float]]) -> dict[str, float]:
     if len(points) != 4:
         raise ValueError("Exactly four points are required")
@@ -290,6 +294,7 @@ def get_slide(slide_id: int, db: Session = Depends(get_db)):
         "source_app": row.source_app,
         "aspect_ratio": row.aspect_ratio,
         "filters_applied": _load_filters(row.filters_applied),
+        "extracted_text": row.extracted_text,
         "points": _row_to_points(row),
         "inherited_points": inherited_points,
         "has_result": bool(row.result_path),
@@ -339,6 +344,7 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
                 result_path = :result_path,
                 aspect_ratio = :aspect_ratio,
                 filters_applied = :filters_applied,
+                extracted_text = NULL,
                 pt_tl_x = :pt_tl_x, pt_tl_y = :pt_tl_y,
                 pt_tr_x = :pt_tr_x, pt_tr_y = :pt_tr_y,
                 pt_br_x = :pt_br_x, pt_br_y = :pt_br_y,
@@ -367,6 +373,41 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
         "result_path": str(transformed),
         "result_url": f"/api/v1/ss/slides/{slide_id}/result",
     }
+
+
+@router.post("/{slide_id}/ocr")
+def extract_slide_text(slide_id: int, payload: OcrRequest | None = None, db: Session = Depends(get_db)):
+    row = _load_slide_or_404(db, slide_id)
+    if not row.result_path:
+        raise HTTPException(status_code=400, detail="Transform result is required before OCR")
+
+    result_path = Path(row.result_path)
+    if not result_path.exists():
+        raise HTTPException(status_code=404, detail="Result image file not found")
+
+    languages = payload.languages if payload else None
+    try:
+        extracted_text = rectifier_client.extract_text(result_path, languages)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"OCR failed: {exc}") from exc
+
+    db.execute(
+        text(
+            """
+            UPDATE slides
+            SET extracted_text = :extracted_text,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+            """
+        ),
+        {
+            "id": slide_id,
+            "extracted_text": extracted_text,
+        },
+    )
+    db.commit()
+
+    return {"id": slide_id, "extracted_text": extracted_text}
 
 
 @router.post("/{slide_id}/review")

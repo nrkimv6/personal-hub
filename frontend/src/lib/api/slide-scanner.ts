@@ -36,6 +36,7 @@ export interface SlideDetailResponse {
   source_app?: string | null;
   aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
   filters_applied?: SlideFilterOptions | null;
+  extracted_text?: string | null;
   points: SlidePoint[];
   inherited_points?: SlidePoint[] | null;
   has_result: boolean;
@@ -50,6 +51,7 @@ export interface SlideListItem {
   status: SlideStatus;
   aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
   filters_applied?: SlideFilterOptions | null;
+  extracted_text?: string | null;
   captured_at?: string | null;
   source_app?: string | null;
   is_archived: boolean;
@@ -88,6 +90,11 @@ export interface SlideTransformResponse {
 export interface SlideReviewResponse {
   id: number;
   status: 'REVIEWED';
+}
+
+export interface SlideOcrResponse {
+  id: number;
+  extracted_text: string;
 }
 
 export interface BatchTransformResponse {
@@ -144,7 +151,7 @@ function normalizeFilterPayload(filters?: SlideFilterOptions | null): SlideFilte
 function parseContentDispositionFilename(value: string | null): string | null {
   if (!value) return null;
 
-  const utf8Match = value.match(/filename\\*=UTF-8''([^;]+)/i);
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
   if (utf8Match?.[1]) {
     try {
       return decodeURIComponent(utf8Match[1]);
@@ -227,6 +234,15 @@ function reviewSlide(slideId: number, points: SlidePoint[]): Promise<SlideReview
   });
 }
 
+function ocrSlide(slideId: number, languages?: string[]): Promise<SlideOcrResponse> {
+  return request<SlideOcrResponse>(`${BASE}/slides/${slideId}/ocr`, {
+    method: 'POST',
+    body: JSON.stringify({
+      languages: languages?.length ? languages : null
+    })
+  });
+}
+
 function getSlideThumbnailUrl(slideId: number): string {
   return `${API_BASE}${BASE}/slides/${slideId}/thumbnail`;
 }
@@ -239,11 +255,13 @@ function getSlideList(params?: {
   skip?: number;
   limit?: number;
   status?: SlideStatus | 'ALL';
+  search?: string;
 }): Promise<SlideListResponse> {
   const query = new URLSearchParams();
   if (typeof params?.skip === 'number') query.set('skip', String(params.skip));
   if (typeof params?.limit === 'number') query.set('limit', String(params.limit));
   if (params?.status && params.status !== 'ALL') query.set('status', params.status);
+  if (params?.search?.trim()) query.set('search', params.search.trim());
 
   const qs = query.toString();
   const path = qs ? `${BASE}/slides?${qs}` : `${BASE}/slides`;
@@ -313,7 +331,7 @@ async function exportPdf(ids: number[], filename?: string): Promise<PdfExportRes
 
   const blob = await response.blob();
   const headerFilename = parseContentDispositionFilename(response.headers.get('content-disposition'));
-  const fallbackName = filename?.trim() ? `${filename.trim().replace(/\\.pdf$/i, '')}.pdf` : 'slides_export.pdf';
+  const fallbackName = filename?.trim() ? `${filename.trim().replace(/\.pdf$/i, '')}.pdf` : 'slides_export.pdf';
   return {
     blob,
     filename: headerFilename || fallbackName
@@ -349,6 +367,7 @@ export const slideScannerApi = {
   getSlideList,
   transformSlide,
   reviewSlide,
+  ocrSlide,
   scanFolder,
   batchTransform,
   archiveSlides,
