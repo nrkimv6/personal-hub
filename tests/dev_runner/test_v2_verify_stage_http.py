@@ -6,9 +6,10 @@ auto-verify 에이전트 추가 + loop.py 재검증 루프가 API 레벨에서 �
 
 TestClient 기반 — 실서버 불필요.
 """
+import json
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +25,27 @@ pytestmark = pytest.mark.http
 def client():
     from app.main import app
     return TestClient(app)
+
+
+def _engines_json_path() -> Path:
+    return Path(__file__).parents[4] / "service" / "wtools" / "common" / "tools" / "plan-runner" / "engines.json"
+
+
+def _load_engines_data() -> dict:
+    engines_json = _engines_json_path()
+    if not engines_json.exists():
+        pytest.skip(f"engines.json 없음: {engines_json}")
+    return json.loads(engines_json.read_text(encoding="utf-8"))
+
+
+def _get_verify_model(engine: str) -> str:
+    config = _load_engines_data().get(engine, {})
+    models = config.get("models", {})
+    if isinstance(models, dict):
+        model = models.get("auto-verify") or models.get("plan")
+        if model:
+            return model
+    return config.get("default_model", "")
 
 
 class TestV2VerifyStageDispatch:
@@ -155,6 +177,7 @@ class TestV2VerifyPassTransition:
             missing=[], evidence="",
             round=1, red=0, yellow=0, green=1,
         )
+        verify_model = _get_verify_model("codex")
 
         # loop.py 로직: PASS → next_status = 검토완료 (StageAction 오버라이드 재현)
         from plan_runner.core.stages import StageAction
@@ -170,7 +193,7 @@ class TestV2VerifyPassTransition:
 
             # loop.py와 동일하게 StageAction 객체로 오버라이드 (단순 문자열 변수 아님)
             action = StageAction(
-                agent="auto-verify", model="opus", env="main",
+                agent="auto-verify", model=verify_model, env="main",
                 next_status="테스트중", auto_commit=True,
             )
             max_rounds = getattr(mock_runner.config, "max_verify_rounds", 3)
@@ -180,7 +203,7 @@ class TestV2VerifyPassTransition:
                     break
                 if result.status in ("PASS", "PASS-WITH-NOTES"):
                     action = StageAction(
-                        agent="auto-verify", model="opus", env="main",
+                        agent="auto-verify", model=verify_model, env="main",
                         next_status="검토완료", auto_commit=True,
                     )
                     break
@@ -287,22 +310,36 @@ class TestV2VerifyNeedsAgentTransition:
 class TestV2VerifyModelConfig:
     """33. engines.json auto-verify 키 존재 + impl.py 참조 검증"""
 
+    def test_v2_verify_stage_model_uses_engine_specific_value(self, client):
+        """R: 검증중 dispatch 모델은 codex 설정 기반으로 해석돼야 함"""
+        try:
+            from plan_runner.core.stages import StageDispatcher, resolve_stage_model
+        except ImportError:
+            pytest.skip("plan_runner 임포트 불가")
+
+        data = _load_engines_data()
+        codex_cfg = data.get("codex", {})
+        action = StageDispatcher.dispatch("검증중")
+        assert action is not None
+
+        resolved_model, source = resolve_stage_model(codex_cfg, action.agent, action.model)
+        assert resolved_model == _get_verify_model("codex")
+        assert source in {"models", "default", "explicit"}
+
     def test_v2_verify_model_config_http(self, client):
         """R: engines.json에 auto-verify 키가 있고 impl.py가 해당 키를 참조하는지 API 환경 검증"""
-        import json
-        from pathlib import Path
-
-        # wtools engines.json 경로 (monitor-page 환경에서 접근)
-        engines_json = Path(__file__).parents[4] / "service" / "wtools" / "common" / "tools" / "plan-runner" / "engines.json"
-        if not engines_json.exists():
-            pytest.skip(f"engines.json 없음: {engines_json}")
-
-        data = json.loads(engines_json.read_text(encoding="utf-8"))
+        data = _load_engines_data()
         claude_models = data.get("claude", {}).get("models", {})
         assert "auto-verify" in claude_models, \
             f"engines.json claude.models에 auto-verify 키 없음 (현재 키: {list(claude_models.keys())})"
         assert claude_models["auto-verify"] == "opus", \
             f"auto-verify 모델 값 오류: {claude_models['auto-verify']!r} (기대: 'opus')"
+
+        codex_models = data.get("codex", {}).get("models", {})
+        assert "auto-verify" in codex_models, \
+            f"engines.json codex.models에 auto-verify 키 없음 (현재 키: {list(codex_models.keys())})"
+        assert codex_models["auto-verify"] == "gpt-5.3-codex", \
+            f"codex auto-verify 모델 값 오류: {codex_models['auto-verify']!r}"
 
 
 class TestV2VerifyPromptFormat:

@@ -25,6 +25,7 @@
 	let engineConfigs = $state<AllEnginesConfig | null>(null);
 	let selectedEngineConfig = $derived(engineConfigs?.[selectedEngine] ?? null);
 	let selectedEngineModelOptions = $derived(getModelOptions(selectedEngine));
+	let selectedEnginePhases = $derived(getPhaseKeys(selectedEngineConfig));
 	let maxCycles = $state(0);
 
 	const ALL_PLANS_SENTINEL = '__ALL_PLANS__';
@@ -92,6 +93,7 @@
 		codex: 'text-slate-700 bg-slate-50 border-slate-300',
 		'cc-codex': 'text-emerald-700 bg-emerald-50 border-emerald-200'
 	};
+	const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-verify'];
 
 	function getConfiguredEngines(): string[] {
 		if (!engineConfigs) return [];
@@ -132,7 +134,30 @@
 		return PREDEFINED_MODELS[engine] ?? [];
 	}
 
-	function getPhaseModel(phase: 'plan' | 'impl' | 'done'): string {
+	function sortPhaseKeys(keys: string[]): string[] {
+		const unique = Array.from(new Set(keys.filter((key) => Boolean(key && key.trim()))));
+		return unique.sort((a, b) => {
+			const aPriority = PHASE_PRIORITY.indexOf(a);
+			const bPriority = PHASE_PRIORITY.indexOf(b);
+			const aInPriority = aPriority !== -1;
+			const bInPriority = bPriority !== -1;
+			if (aInPriority || bInPriority) {
+				if (!aInPriority) return 1;
+				if (!bInPriority) return -1;
+				if (aPriority !== bPriority) return aPriority - bPriority;
+			}
+			return a.localeCompare(b);
+		});
+	}
+
+	function getPhaseKeys(config: EngineConfig | null): string[] {
+		if (!config?.models) return ['plan', 'impl', 'done'];
+		const modelKeys = Object.keys(config.models);
+		if (modelKeys.length === 0) return ['plan', 'impl', 'done'];
+		return sortPhaseKeys(modelKeys);
+	}
+
+	function getPhaseModel(phase: string): string {
 		if (selectedEngineConfig) {
 			return selectedEngineConfig.models?.[phase] ?? selectedEngineConfig.default_model;
 		}
@@ -166,10 +191,10 @@
 		normalizeSelectedEngines();
 	});
 
-	async function updateModel(phase: 'plan' | 'impl' | 'done', model: string) {
+	async function updateModel(phase: string, model: string) {
 		if (!selectedEngineConfig || !selectedEngine) return;
 		try {
-			const nextModels: EngineConfig['models'] = { ...selectedEngineConfig.models, [phase]: model };
+			const nextModels: Record<string, string> = { ...selectedEngineConfig.models, [phase]: model };
 			await devRunnerEngineApi.update(selectedEngine, {
 				models: nextModels
 			});
@@ -420,20 +445,20 @@
 	{#if selectedEngineConfig}
 		<div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
 			<span class="text-[10px] font-bold text-gray-400 uppercase shrink-0 w-full sm:w-auto">Phase Models:</span>
-			{#each ['plan', 'impl', 'done'] as phase}
+			{#each selectedEnginePhases as phase}
 				<div class="flex items-center gap-1.5 flex-1 sm:flex-none">
-					<label class="text-[10px] font-mono uppercase text-muted-foreground w-10 shrink-0">{phase}</label>
+					<label class="text-[10px] font-mono uppercase text-muted-foreground w-28 shrink-0">{phase}</label>
 					<select
 						class="border rounded px-1.5 py-0.5 flex-1 sm:w-40 h-6 text-[10px] font-mono bg-white"
-						value={getPhaseModel(phase as 'plan' | 'impl' | 'done')}
-						onchange={(e) => updateModel(phase as any, e.currentTarget.value)}
+						value={getPhaseModel(phase)}
+						onchange={(e) => updateModel(phase, e.currentTarget.value)}
 					>
 						{#each selectedEngineModelOptions as model}
 							<option value={model}>{model}</option>
 						{/each}
-						{#if !selectedEngineModelOptions.includes(getPhaseModel(phase as 'plan' | 'impl' | 'done'))}
-							<option value={getPhaseModel(phase as 'plan' | 'impl' | 'done')}>
-								{getPhaseModel(phase as 'plan' | 'impl' | 'done')} (Custom)
+						{#if !selectedEngineModelOptions.includes(getPhaseModel(phase))}
+							<option value={getPhaseModel(phase)}>
+								{getPhaseModel(phase)} (Custom)
 							</option>
 						{/if}
 					</select>

@@ -191,12 +191,7 @@ async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}, 
 export interface EngineConfig {
 	default_model: string;
 	flags: string[];
-	models: {
-		plan: string;
-		impl: string;
-		done: string;
-		[key: string]: string;
-	};
+	models: Record<string, string>;
 }
 
 export interface AllEnginesConfig {
@@ -205,6 +200,7 @@ export interface AllEnginesConfig {
 
 export const devRunnerEngineApi = {
 	list: () => devRunnerRequest<AllEnginesConfig>('/engines'),
+	// 예: { models: { "auto-verify": "gpt-5.3-codex" } } 처럼 phase key 일부만 PATCH 가능
 	update: (engine: string, config: Partial<EngineConfig>) =>
 		devRunnerRequest<{ success: boolean; message: string }>(`/engines/${engine}`, {
 			method: 'PUT',

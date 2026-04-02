@@ -40,7 +40,12 @@ async def client(tmp_path: Path):
                 "codex": {
                     "default_model": "gpt-5.3-codex",
                     "flags": ["-c", "approval_policy=never", "-c", "sandbox_mode=danger-full-access"],
-                    "models": {"plan": "gpt-5.3-codex", "impl": "gpt-5.3-codex", "done": "gpt-5.3-codex"},
+                    "models": {
+                        "plan": "gpt-5.3-codex",
+                        "impl": "gpt-5.3-codex",
+                        "done": "gpt-5.3-codex",
+                        "auto-verify": "gpt-5.3-codex",
+                    },
                 },
             },
             ensure_ascii=False,
@@ -74,6 +79,7 @@ class TestEnginesApi:
         assert "codex" in data
         assert data["codex"]["default_model"] == "gpt-5.3-codex"
         assert data["codex"]["models"]["plan"] == "gpt-5.3-codex"
+        assert data["codex"]["models"]["auto-verify"] == "gpt-5.3-codex"
 
     async def test_get_engines_preserves_default_model_models_structure(self, client):
         response = await client.get("/api/v1/dev-runner/engines")
@@ -85,3 +91,43 @@ class TestEnginesApi:
             assert "default_model" in data[engine]
             assert "models" in data[engine]
             assert isinstance(data[engine]["models"], dict)
+
+    async def test_put_engines_partial_models_patch_preserves_existing_keys(self, client):
+        response = await client.put(
+            "/api/v1/dev-runner/engines/codex",
+            json={"models": {"auto-verify": "gpt-5.4-codex"}},
+        )
+        assert response.status_code == 200
+
+        data = (await client.get("/api/v1/dev-runner/engines")).json()
+        codex_models = data["codex"]["models"]
+        assert codex_models["plan"] == "gpt-5.3-codex"
+        assert codex_models["impl"] == "gpt-5.3-codex"
+        assert codex_models["done"] == "gpt-5.3-codex"
+        assert codex_models["auto-verify"] == "gpt-5.4-codex"
+
+    async def test_put_engines_rejects_non_dict_models_payload_and_keeps_file(self, client):
+        before = json.loads(engines_module.ENGINES_JSON_PATH.read_text(encoding="utf-8-sig"))
+
+        response = await client.put(
+            "/api/v1/dev-runner/engines/codex",
+            json={"models": []},
+        )
+        assert response.status_code == 400
+        assert "'models' must be an object" in response.text
+
+        after = json.loads(engines_module.ENGINES_JSON_PATH.read_text(encoding="utf-8-sig"))
+        assert after == before
+
+    async def test_put_engines_default_model_only_keeps_models_unchanged(self, client):
+        before = (await client.get("/api/v1/dev-runner/engines")).json()["codex"]["models"]
+
+        response = await client.put(
+            "/api/v1/dev-runner/engines/codex",
+            json={"default_model": "gpt-5.4-codex"},
+        )
+        assert response.status_code == 200
+
+        data = (await client.get("/api/v1/dev-runner/engines")).json()
+        assert data["codex"]["default_model"] == "gpt-5.4-codex"
+        assert data["codex"]["models"] == before

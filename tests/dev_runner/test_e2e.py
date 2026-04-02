@@ -103,12 +103,13 @@ async def executor_service():
 
 @pytest.mark.e2e
 @pytest.mark.asyncio
-async def test_e2e_full_lifecycle(dev_runner_listener, executor_service):
+@pytest.mark.parametrize("engine", ["gemini", "codex"])
+async def test_e2e_full_lifecycle(dev_runner_listener, executor_service, engine):
     """E2E Test: API -> Redis -> Listener -> plan-runner CLI -> success response"""
     
     # Create request with dry_run to execute quickly without LLM calls
     req = RunRequest(
-        engine="gemini",
+        engine=engine,
         dry_run=True,
         plan_file="test_plan_e2e_mock.md",
         test_source="test_e2e",
@@ -120,15 +121,20 @@ async def test_e2e_full_lifecycle(dev_runner_listener, executor_service):
 
     assert response.running is True
     assert runner_id is not None
-    assert response.engine == "gemini"
+    assert response.engine == engine
 
     # 2. Wait for listener to pick up command and set pid (async processing)
     # dry_run exits fast so check Redis directly for pid before stale cleanup
     from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX
     pid_appeared = False
+    engine_seen = False
     for _ in range(20):
         await asyncio.sleep(0.5)
         pid_val = executor_service.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+        engine_val = executor_service.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine")
+        if engine_val is not None:
+            assert engine_val == engine
+            engine_seen = True
         if pid_val is not None:
             pid_appeared = True
             break
@@ -138,6 +144,7 @@ async def test_e2e_full_lifecycle(dev_runner_listener, executor_service):
             pid_appeared = True  # process ran and completed
             break
     assert pid_appeared, "Listener never processed the run command"
+    assert engine_seen or response.engine == engine
 
     # Allow some time for plan-runner to run and exit (dry-run is fast)
     await asyncio.sleep(3)

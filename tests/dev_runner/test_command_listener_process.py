@@ -236,6 +236,55 @@ class TestLaunchPlanRunnerProcess:
         assert "--fix-engine" in cmd
         assert cmd[cmd.index("--fix-engine") + 1] == "codex"
 
+    def test_launch_includes_engine_and_fix_engine_codex_together(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """engine=codex + fix_engine=codex 조합 전달 시 두 인자가 모두 유지"""
+        command = {
+            "action": "run",
+            "runner_id": RUNNER_ID,
+            "plan_file": "common/docs/plan/test.md",
+            "engine": "codex",
+            "fix_engine": "codex",
+        }
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen) as mp:
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(
+                command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "codex", fix_engine="codex"
+            )
+
+        cmd = mp.call_args_list[0][0][0]
+        assert "--engine" in cmd
+        assert cmd[cmd.index("--engine") + 1] == "codex"
+        assert "--fix-engine" in cmd
+        assert cmd[cmd.index("--fix-engine") + 1] == "codex"
+
+    def test_launch_trigger_header_includes_engine_and_fix_engine(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """로그 헤더 [TRIGGER] 줄에 engine/fix_engine이 함께 기록돼야 함"""
+        command = {
+            "action": "run",
+            "runner_id": RUNNER_ID,
+            "plan_file": "common/docs/plan/test.md",
+            "engine": "codex",
+            "fix_engine": "codex",
+            "trigger": "user",
+        }
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen):
+            mock_thread.return_value = MagicMock()
+            result = listener_mod._launch_plan_runner_process(
+                command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "codex", fix_engine="codex"
+            )
+
+        log_file = Path(result["log_file"])
+        header_line = log_file.read_text(encoding="utf-8").splitlines()[0]
+        assert "[TRIGGER] user" in header_line
+        assert "engine=codex" in header_line
+        assert "fix_engine=codex" in header_line
+
     def test_launch_sets_redis_state(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """Redis per-runner 상태 저장 확인"""
         RKP = listener_mod.RUNNER_KEY_PREFIX
