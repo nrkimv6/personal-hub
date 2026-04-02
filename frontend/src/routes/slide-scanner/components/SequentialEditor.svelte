@@ -23,6 +23,7 @@
   export let reviewing = false;
   export let transforming = false;
   export let inheritedApplied = false;
+  export let aspectRatioLabel = 'Auto';
 
   function handlePointsChange(event: CustomEvent<{ points: SlidePoint[] }>) {
     dispatch('changePoints', { points: event.detail.points });
@@ -48,6 +49,7 @@
         <p class="text-xs text-muted-foreground">
           {inheritedApplied ? '이전 확정 좌표를 초기값으로 적용했습니다.' : '자동 검출 좌표를 초기값으로 사용합니다.'}
         </p>
+        <p class="text-[11px] text-muted-foreground">선택 비율: {aspectRatioLabel}</p>
       </div>
       <div class="flex items-center gap-2">
         <button type="button" class="btn btn-outline btn-sm" onclick={() => dispatch('prev')} disabled={!canPrev}>

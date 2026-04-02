@@ -3,10 +3,16 @@
 
   import ImageUploader from './components/ImageUploader.svelte';
   import ResultPreview from './components/ResultPreview.svelte';
+  import AspectRatioSelector from './components/AspectRatioSelector.svelte';
   import SequentialEditor from './components/SequentialEditor.svelte';
   import SlideGallery from './components/SlideGallery.svelte';
 
-  import { slideScannerApi, type SlideDetailResponse, type SlidePoint } from '$lib/api/slide-scanner';
+  import {
+    slideScannerApi,
+    type AspectRatioValue,
+    type SlideDetailResponse,
+    type SlidePoint
+  } from '$lib/api/slide-scanner';
 
   let activeTab = 'editor';
   const tabs = [
@@ -26,6 +32,7 @@
   let infoMessage = '';
   let sequenceIds: number[] = [];
   let sequenceIndex = -1;
+  let aspectRatio: AspectRatioValue = 'AUTO';
 
   function parseError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -43,6 +50,7 @@
           : null;
       points = inheritedPoints ?? detail.points;
       inheritedApplied = Boolean(inheritedPoints);
+      aspectRatio = detail.aspect_ratio === '16:9' || detail.aspect_ratio === '4:3' ? detail.aspect_ratio : 'AUTO';
     } finally {
       loading = false;
     }
@@ -61,6 +69,7 @@
       inheritedApplied = false;
       sequenceIds = [];
       sequenceIndex = -1;
+      aspectRatio = 'AUTO';
     } catch (error) {
       errorMessage = parseError(error);
     } finally {
@@ -78,7 +87,7 @@
     errorMessage = '';
     infoMessage = '';
     try {
-      await slideScannerApi.transformSlide(currentSlide.id, points);
+      await slideScannerApi.transformSlide(currentSlide.id, points, aspectRatio);
       currentSlide = await slideScannerApi.getSlideWithInherited(currentSlide.id);
       resultUrl = `${slideScannerApi.getSlideResultUrl(currentSlide.id)}?t=${Date.now()}`;
     } catch (error) {
@@ -143,7 +152,7 @@
     infoMessage = '';
     try {
       const targetIds = sequenceIds.length > 0 ? sequenceIds : [currentSlide.id];
-      const result = await slideScannerApi.batchTransform(targetIds);
+      const result = await slideScannerApi.batchTransform(targetIds, { aspectRatio });
       infoMessage =
         `전체 저장 완료: 성공 ${result.done}건, 스킵 ${result.skipped}건, 실패 ${result.failed}건`;
       currentSlide = await slideScannerApi.getSlideWithInherited(currentSlide.id);
@@ -158,6 +167,7 @@
   $: imageUrl = currentSlide ? slideScannerApi.getSlideImageUrl(currentSlide.id) : '';
   $: canPrev = sequenceIndex > 0;
   $: canNext = sequenceIndex >= 0 && sequenceIndex < sequenceIds.length - 1;
+  $: aspectRatioLabel = aspectRatio === 'AUTO' ? 'Auto (원본 기준)' : aspectRatio;
 </script>
 
 <svelte:head>
@@ -191,6 +201,14 @@
       <p class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{infoMessage}</p>
     {/if}
 
+    <div class="rounded-lg border border-border bg-card px-3 py-2">
+      <AspectRatioSelector
+        value={aspectRatio}
+        disabled={loading || transforming || savingAll}
+        on:change={(event) => (aspectRatio = event.detail.value)}
+      />
+    </div>
+
     <SequentialEditor
       slide={currentSlide}
       {points}
@@ -200,6 +218,7 @@
       {reviewing}
       transforming={transforming || savingAll}
       inheritedApplied={inheritedApplied}
+      {aspectRatioLabel}
       on:changePoints={handlePointsChange}
       on:prev={() => void moveSequence(-1)}
       on:next={() => void moveSequence(1)}

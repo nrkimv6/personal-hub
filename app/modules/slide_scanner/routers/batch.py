@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -54,9 +54,24 @@ def _row_points(row) -> list[tuple[float, float]] | None:
     ]
 
 
+def _normalize_aspect_ratio(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().upper()
+    if normalized in {"", "AUTO"}:
+        return None
+    if normalized in {"16:9", "4:3"}:
+        return normalized
+    raise ValueError("Invalid aspect_ratio. Use AUTO, 16:9, or 4:3")
+
+
 @router.post("/batch-transform")
 def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db)):
     ids = list(dict.fromkeys(request.ids))
+    try:
+        normalized_aspect_ratio = _normalize_aspect_ratio(request.aspect_ratio)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     in_clause, in_params = _build_in_clause(ids)
 
     rows = db.execute(
@@ -110,7 +125,7 @@ def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db
                 image_path=source_path,
                 points=points,
                 output_path=output_path,
-                aspect_ratio=request.aspect_ratio,
+                aspect_ratio=normalized_aspect_ratio,
             )
             db.execute(
                 text(
@@ -118,6 +133,7 @@ def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db
                     UPDATE slides
                     SET status = 'DONE',
                         result_path = :result_path,
+                        aspect_ratio = :aspect_ratio,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = :id
                     """
@@ -125,6 +141,7 @@ def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db
                 {
                     "id": slide_id,
                     "result_path": str(transformed),
+                    "aspect_ratio": normalized_aspect_ratio,
                 },
             )
             db.commit()
