@@ -308,6 +308,44 @@ class TestStartRun:
         command = json.loads(raw[0])
         assert command.get("fix_engine") == "claude", f"fix_engine 기본값 오류: {command}"
 
+    async def test_start_run_engine_cc_codex_stored_in_command(self, client, mock_executor_redis):
+        """cc-codex main engine 필드가 Redis command에 포함되는지 확인"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "engine": "cc-codex",
+            })
+
+        assert response.status_code == 200
+        raw = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert len(raw) > 0, "command queue에 항목 없음"
+        command = json.loads(raw[0])
+        assert command.get("engine") == "cc-codex", f"engine 미포함: {command}"
+
+    async def test_start_run_fix_engine_cc_codex_stored_in_command(self, client, mock_executor_redis):
+        """cc-codex fix_engine 필드가 Redis command에 포함되는지 확인"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "fix_engine": "cc-codex",
+            })
+
+        assert response.status_code == 200
+        raw = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert len(raw) > 0, "command queue에 항목 없음"
+        command = json.loads(raw[0])
+        assert command.get("fix_engine") == "cc-codex", f"fix_engine 미포함: {command}"
+
 
 class TestStopRun:
     async def test_stop_not_running_returns_404(self, client, mock_executor_redis):

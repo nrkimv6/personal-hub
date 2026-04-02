@@ -89,7 +89,7 @@ class TestStartPlanRunner:
         """start_plan_runner은 None을 반환하고 백그라운드 스레드를 시작"""
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
 
-        with patch.object(listener_mod.threading, 'Thread') as mock_thread:
+        with patch("_dr_plan_runner.threading.Thread") as mock_thread:
             mock_thread.return_value = MagicMock()
             result = listener_mod.start_plan_runner(command, fr)
 
@@ -101,7 +101,7 @@ class TestStartPlanRunner:
         """같은 runner_id로 이미 실행 중이면 에러 (_is_pid_alive mocked)"""
         listener_mod._running_processes[RUNNER_ID] = mock_popen  # poll() returns None = running
 
-        with patch.object(listener_mod, '_is_pid_alive', return_value=True):
+        with patch("_dr_plan_runner._is_pid_alive", return_value=True):
             result = listener_mod.start_plan_runner({"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}, fr)
         assert result["success"] is False
         assert "Already running" in result["message"]
@@ -114,9 +114,9 @@ class TestLaunchPlanRunnerProcess:
         """Popen 호출 인수 검증"""
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "common/docs/plan/test.md"}
 
-        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
-             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
-             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen) as mp:
             mock_thread.return_value = MagicMock()
             result = listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", None)
 
@@ -132,9 +132,9 @@ class TestLaunchPlanRunnerProcess:
         """parallel 모드: --plan-file 미포함"""
         command = {"action": "run", "runner_id": RUNNER_ID, "parallel": True}
 
-        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
-             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
-             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen) as mp:
             mock_thread.return_value = MagicMock()
             result = listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, None, None)
 
@@ -142,14 +142,56 @@ class TestLaunchPlanRunnerProcess:
         assert "--plan-file" not in cmd
         assert "--parallel" in cmd
 
+    def test_launch_includes_engine_cc_codex_argument(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """engine=cc-codex 전달 시 --engine cc-codex 인자 포함"""
+        command = {
+            "action": "run",
+            "runner_id": RUNNER_ID,
+            "plan_file": "common/docs/plan/test.md",
+            "engine": "cc-codex",
+        }
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen) as mp:
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(
+                command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "cc-codex"
+            )
+
+        cmd = mp.call_args_list[0][0][0]
+        assert "--engine" in cmd
+        assert cmd[cmd.index("--engine") + 1] == "cc-codex"
+
+    def test_launch_includes_fix_engine_cc_codex_argument(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """fix_engine=cc-codex 전달 시 --fix-engine cc-codex 인자 포함"""
+        command = {
+            "action": "run",
+            "runner_id": RUNNER_ID,
+            "plan_file": "common/docs/plan/test.md",
+            "fix_engine": "cc-codex",
+        }
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen) as mp:
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(
+                command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "claude"
+            )
+
+        cmd = mp.call_args_list[0][0][0]
+        assert "--fix-engine" in cmd
+        assert cmd[cmd.index("--fix-engine") + 1] == "cc-codex"
+
     def test_launch_sets_redis_state(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """Redis per-runner 상태 저장 확인"""
         RKP = listener_mod.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
 
-        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
-             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
-             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen):
             mock_thread.return_value = MagicMock()
             listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, "test.md", None)
 
@@ -177,9 +219,9 @@ class TestLaunchPlanRunnerProcess:
         RKP = listener_mod.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
 
-        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
-             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
-             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen):
             mock_thread.return_value = MagicMock()
             listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, "test.md", None)
 
@@ -201,9 +243,9 @@ class TestLaunchPlanRunnerProcess:
         RKP = listener_mod.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "parallel": True}
 
-        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
-             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
-             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen):
             mock_thread.return_value = MagicMock()
             listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, None, None)
 

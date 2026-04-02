@@ -10,6 +10,7 @@ import { request, API_BASE, getAuthToken, fetchWithTimeout } from './client';
 export interface RunRequest {
 	plan_file?: string | null;
 	engine?: string;
+	fix_engine?: string;
 	max_cycles?: number;
 	max_tokens?: number;
 	until?: string | null;

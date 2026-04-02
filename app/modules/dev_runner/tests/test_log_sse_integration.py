@@ -7,6 +7,8 @@ from io import StringIO
 from unittest.mock import MagicMock, call
 
 import pytest
+import fakeredis
+import fakeredis.aioredis
 
 
 # ---------------------------------------------------------------------------
@@ -79,3 +81,25 @@ def test_integration_subprocess_to_redis_pubsub():
     log_content = log_handle.read()
     assert "line-0" in log_content
     assert "line-4" in log_content
+
+
+def test_status_payload_includes_cc_codex_engine_in_sse_meta():
+    """EventService status payload에 cc-codex engine 메타가 포함되는지 검증"""
+    from app.modules.dev_runner.services.event_service import EventService, RUNNER_KEY_PREFIX
+
+    fake_sync = fakeredis.FakeRedis(decode_responses=True)
+    rid = "sse-cc-codex-01"
+    fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+    fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "12345")
+    fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:engine", "cc-codex")
+    fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", "docs/plan/test.md")
+
+    svc = EventService.__new__(EventService)
+    svc._sync = fake_sync
+    svc._async = fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+    payload = svc._build_status_payload(rid)
+
+    assert payload is not None
+    assert payload["runner_id"] == rid
+    assert payload["engine"] == "cc-codex"

@@ -51,9 +51,13 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
             plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
             engine = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine") or "claude"
+            fix_engine = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine") or "claude"
             log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
             try:
-                redis_client.publish(log_channel, f"main 추가 사이클 시작 (plan={plan_file}, engine={engine})")
+                redis_client.publish(
+                    log_channel,
+                    f"main 추가 사이클 시작 (plan={plan_file}, engine={engine}, fix_engine={fix_engine})",
+                )
             except Exception:
                 pass
             if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
@@ -64,6 +68,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                     "runner_id": new_runner_id,
                     "plan_file": plan_file,
                     "engine": engine,
+                    "fix_engine": fix_engine,
                 }
                 redis_client.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
                 _pub_and_log(runner_id, f"[_do_inline_merge] main 추가 사이클 큐잉: runner={new_runner_id}, plan={plan_file}", redis_client, "MERGE")
@@ -427,12 +432,23 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             logger.warning(f"[_do_start_plan_runner] workflow create 실패 (무시): {wf_err}")
 
     engine = command.get("engine")
+    fix_engine = command.get("fix_engine")
     is_parallel = command.get("parallel", False)
     if not plan_file and not is_parallel:
         _set_error_status("plan_file required (use parallel mode for batch execution)")
         return
 
-    result = _launch_plan_runner_process(command, redis_client, runner_id, worktree_path, plan_file, engine, branch=branch, project_root=plan_project_root)
+    result = _launch_plan_runner_process(
+        command,
+        redis_client,
+        runner_id,
+        worktree_path,
+        plan_file,
+        engine,
+        fix_engine=fix_engine,
+        branch=branch,
+        project_root=plan_project_root,
+    )
     if not result.get("success"):
         _set_error_status(result.get("message", "Unknown error"))
     else:
@@ -510,11 +526,23 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     return None  # sentinel: main loop에서 결과 push 스킵 (이미 위에서 push)
 
 
-def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner_id: str, worktree_path: Path, plan_file: str, engine: str, branch: str = "", project_root: Path = None) -> Dict:
+def _launch_plan_runner_process(
+    command: Dict,
+    redis_client: redis.Redis,
+    runner_id: str,
+    worktree_path: Path,
+    plan_file: str,
+    engine: str,
+    fix_engine: str = None,
+    branch: str = "",
+    project_root: Path = None,
+) -> Dict:
     """plan-runner CLI 프로세스 실행 (worktree 생성 이후 호출)"""
     from _dr_constants import PROJECT_ROOT as _PR
     if project_root is None:
         project_root = _PR
+    if fix_engine is None:
+        fix_engine = command.get("fix_engine")
 
     _running_processes = get_running_processes()
     _running_log_files = get_running_log_files()
@@ -531,6 +559,8 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         cmd.extend(["--plan-file", plan_file])
     if engine:
         cmd.extend(["--engine", engine])
+    if fix_engine:
+        cmd.extend(["--fix-engine", fix_engine])
 
     # 옵션 추가
     if command.get("max_cycles") is not None:
@@ -570,7 +600,10 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
     try:
         # subprocess 실행 및 stdout을 PIPE로 받아 스레드에서 파일+Redis 동시 기록
         log_handle = open(log_file, "w", encoding="utf-8")
-        log_handle.write(f"[TRIGGER] {command.get('trigger', 'unknown')} | plan={plan_file} | engine={engine} | runner_id={runner_id}\n")
+        log_handle.write(
+            f"[TRIGGER] {command.get('trigger', 'unknown')} | plan={plan_file} | "
+            f"engine={engine} | fix_engine={fix_engine} | runner_id={runner_id}\n"
+        )
         log_handle.flush()
 
         import os

@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi } from '$lib/api';
-	import type { DevRunnerRunStatusResponse, DevRunnerPlanFileResponse, AllEnginesConfig, DevRunnerRunnerListItem } from '$lib/api';
+	import type {
+		DevRunnerRunStatusResponse,
+		DevRunnerPlanFileResponse,
+		AllEnginesConfig,
+		EngineConfig,
+		DevRunnerRunnerListItem
+	} from '$lib/api';
 	import { onMount } from 'svelte';
 
 	interface Props {
@@ -17,6 +23,8 @@
 	let selectedEngine = $state('claude');
 	let selectedFixEngine = $state('claude');
 	let engineConfigs = $state<AllEnginesConfig | null>(null);
+	let selectedEngineConfig = $derived(engineConfigs?.[selectedEngine] ?? null);
+	let selectedEngineModelOptions = $derived(getModelOptions(selectedEngine));
 	let maxCycles = $state(0);
 
 	const ALL_PLANS_SENTINEL = '__ALL_PLANS__';
@@ -46,33 +54,7 @@
 	let syncMessage = $state<string | null>(null);
 	let forceStopNeeded = $state(false);
 
-	async function fetchEngineConfigs() {
-		try {
-			engineConfigs = await devRunnerEngineApi.list();
-		} catch (e) {
-			console.warn('Failed to fetch engine configs', e);
-		}
-	}
-
-	onMount(() => {
-		fetchEngineConfigs();
-	});
-
-	async function updateModel(phase: 'plan' | 'impl' | 'done', model: string) {
-		if (!engineConfigs || !selectedEngine) return;
-		try {
-			const currentModels = engineConfigs[selectedEngine].models;
-			await devRunnerEngineApi.update(selectedEngine, {
-				models: { ...currentModels, [phase]: model }
-			});
-			// 로컬 상태 즉시 반영 (낙관적 업데이트)
-			engineConfigs[selectedEngine].models[phase] = model;
-		} catch (e) {
-			actionError = '모델 변경 실패';
-		}
-	}
-
-	// 엔진별 사전 정의 모델 리스트
+	// 엔진별 fallback 모델 리스트 (engines API 실패/누락 시에만 사용)
 	const PREDEFINED_MODELS: Record<string, string[]> = {
 		claude: [
 			'opus',
@@ -85,8 +67,120 @@
 			'gemini-3-pro-preview',
 			'gemini-2.0-flash-thinking-exp',
 			'gemini-2.0-flash'
+		],
+		'cc-codex': [
+			'sonnet',
+			'opus',
+			'haiku'
 		]
 	};
+
+	const ENGINE_LABELS: Record<string, string> = {
+		claude: 'Claude',
+		gemini: 'Gemini',
+		'cc-codex': 'CC-Codex'
+	};
+
+	const ENGINE_THEME_CLASSES: Record<string, string> = {
+		claude: 'text-sky-700 bg-sky-50 border-sky-200',
+		gemini: 'text-orange-700 bg-orange-50 border-orange-200',
+		'cc-codex': 'text-emerald-700 bg-emerald-50 border-emerald-200'
+	};
+
+	function getConfiguredEngines(): string[] {
+		if (!engineConfigs) return [];
+		return Object.entries(engineConfigs)
+			.filter(([, config]) => Boolean(config?.default_model))
+			.map(([engine]) => engine);
+	}
+
+	function getEngineOptions(): string[] {
+		const configured = getConfiguredEngines();
+		return Array.from(new Set([...configured, 'claude', 'gemini', 'cc-codex']));
+	}
+
+	function normalizeSelectedEngines() {
+		const configured = getConfiguredEngines();
+		const options = configured.length > 0 ? configured : getEngineOptions();
+		if (options.length === 0) return;
+		if (!options.includes(selectedEngine)) {
+			selectedEngine = options[0];
+		}
+		if (!options.includes(selectedFixEngine)) {
+			selectedFixEngine = options[0];
+		}
+	}
+
+	function getModelOptions(engine: string): string[] {
+		const config = engineConfigs?.[engine];
+		if (config) {
+			const merged = [config.default_model, ...Object.values(config.models ?? {})]
+				.filter((model): model is string => Boolean(model && model.trim()));
+			const unique = Array.from(new Set(merged));
+			if (unique.length > 0) {
+				return unique;
+			}
+		}
+
+		if (engine === 'cc-codex') {
+			return PREDEFINED_MODELS['cc-codex'];
+		}
+		return PREDEFINED_MODELS[engine] ?? [];
+	}
+
+	function getPhaseModel(phase: 'plan' | 'impl' | 'done'): string {
+		if (selectedEngineConfig) {
+			return selectedEngineConfig.models?.[phase] ?? selectedEngineConfig.default_model;
+		}
+		return selectedEngineModelOptions[0] ?? '';
+	}
+
+	function formatEngineLabel(engine: string): string {
+		return ENGINE_LABELS[engine] ?? engine;
+	}
+
+	function getEngineThemeClasses(engine: string): string {
+		return ENGINE_THEME_CLASSES[engine] ?? 'text-gray-700 bg-gray-50 border-gray-200';
+	}
+
+	async function fetchEngineConfigs() {
+		try {
+			engineConfigs = await devRunnerEngineApi.list();
+			normalizeSelectedEngines();
+		} catch (e) {
+			console.warn('Failed to fetch engine configs', e);
+			normalizeSelectedEngines();
+		}
+	}
+
+	onMount(() => {
+		fetchEngineConfigs();
+	});
+
+	$effect(() => {
+		if (!engineConfigs) return;
+		normalizeSelectedEngines();
+	});
+
+	async function updateModel(phase: 'plan' | 'impl' | 'done', model: string) {
+		if (!selectedEngineConfig || !selectedEngine) return;
+		try {
+			const nextModels: EngineConfig['models'] = { ...selectedEngineConfig.models, [phase]: model };
+			await devRunnerEngineApi.update(selectedEngine, {
+				models: nextModels
+			});
+			// 로컬 상태 즉시 반영 (낙관적 업데이트)
+			engineConfigs = {
+				...(engineConfigs ?? {}),
+				[selectedEngine]: {
+					...selectedEngineConfig,
+					models: nextModels,
+				}
+			};
+		} catch (e) {
+			actionError = '모델 변경 실패';
+		}
+	}
 
 	async function handleStart() {
 		if (mode === 'single' && !selectedPlan) {
@@ -292,31 +386,34 @@
 			</select>
 
 			<select
-				class="border rounded px-2 py-1 text-xs h-7 w-[100px] font-mono font-medium"
-				class:text-orange-700={selectedEngine === 'gemini'}
-				class:bg-orange-50={selectedEngine === 'gemini'}
+				class={`border rounded px-2 py-1 text-xs h-7 w-[112px] font-mono font-medium ${getEngineThemeClasses(selectedEngine)}`}
 				bind:value={selectedEngine}
 			>
-				<option value="claude">Claude</option>
-				<option value="gemini">Gemini</option>
+				{#each getEngineOptions() as engine}
+					<option value={engine}>{formatEngineLabel(engine)}</option>
+				{/each}
 			</select>
 			<div class="flex items-center gap-1">
 				<span class="text-[10px] text-gray-400 font-medium">Fix</span>
 				<select
-					class="border rounded px-2 py-1 text-xs h-7 w-[100px] font-mono font-medium"
-					class:text-orange-700={selectedFixEngine === 'gemini'}
-					class:bg-orange-50={selectedFixEngine === 'gemini'}
+					class={`border rounded px-2 py-1 text-xs h-7 w-[112px] font-mono font-medium ${getEngineThemeClasses(selectedFixEngine)}`}
 					bind:value={selectedFixEngine}
 				>
-					<option value="claude">Claude</option>
-					<option value="gemini">Gemini</option>
+					{#each getEngineOptions() as engine}
+						<option value={engine}>{formatEngineLabel(engine)}</option>
+					{/each}
 				</select>
 			</div>
+			{#if status?.running}
+				<span class={`inline-flex h-7 items-center rounded border px-2 text-[10px] font-mono ${getEngineThemeClasses(runningEngine)}`}>
+					Run {formatEngineLabel(runningEngine)}
+				</span>
+			{/if}
 
 		</div>
 	</div>
 
-	{#if engineConfigs && engineConfigs[selectedEngine]}
+	{#if selectedEngineConfig}
 		<div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
 			<span class="text-[10px] font-bold text-gray-400 uppercase shrink-0 w-full sm:w-auto">Phase Models:</span>
 			{#each ['plan', 'impl', 'done'] as phase}
@@ -324,15 +421,15 @@
 					<label class="text-[10px] font-mono uppercase text-muted-foreground w-10 shrink-0">{phase}</label>
 					<select
 						class="border rounded px-1.5 py-0.5 flex-1 sm:w-40 h-6 text-[10px] font-mono bg-white"
-						value={engineConfigs[selectedEngine].models[phase]}
+						value={getPhaseModel(phase as 'plan' | 'impl' | 'done')}
 						onchange={(e) => updateModel(phase as any, e.currentTarget.value)}
 					>
-						{#each PREDEFINED_MODELS[selectedEngine] || [] as model}
+						{#each selectedEngineModelOptions as model}
 							<option value={model}>{model}</option>
 						{/each}
-						{#if !PREDEFINED_MODELS[selectedEngine]?.includes(engineConfigs[selectedEngine].models[phase])}
-							<option value={engineConfigs[selectedEngine].models[phase]}>
-								{engineConfigs[selectedEngine].models[phase]} (Custom)
+						{#if !selectedEngineModelOptions.includes(getPhaseModel(phase as 'plan' | 'impl' | 'done'))}
+							<option value={getPhaseModel(phase as 'plan' | 'impl' | 'done')}>
+								{getPhaseModel(phase as 'plan' | 'impl' | 'done')} (Custom)
 							</option>
 						{/if}
 					</select>
