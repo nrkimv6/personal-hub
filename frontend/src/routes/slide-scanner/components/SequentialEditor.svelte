@@ -4,6 +4,7 @@
   import type { SlideDetailResponse, SlidePoint } from '$lib/api/slide-scanner';
 
   import CornerEditor from './CornerEditor.svelte';
+  import KeyboardShortcuts from './KeyboardShortcuts.svelte';
 
   const dispatch = createEventDispatcher<{
     changePoints: { points: SlidePoint[] };
@@ -11,6 +12,7 @@
     next: void;
     review: void;
     transform: void;
+    saveAll: void;
   }>();
 
   export let slide: SlideDetailResponse | null = null;
@@ -29,6 +31,17 @@
 
 {#if slide}
   <section class="space-y-3 rounded-xl border border-border bg-card p-4">
+    <KeyboardShortcuts
+      enabled={Boolean(slide)}
+      disabled={reviewing || transforming}
+      {canPrev}
+      {canNext}
+      on:prev={() => dispatch('prev')}
+      on:next={() => dispatch('next')}
+      on:confirm={() => dispatch('transform')}
+      on:saveAll={() => dispatch('saveAll')}
+    />
+
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div>
         <h2 class="text-sm font-semibold">{slide.file_name}</h2>
@@ -66,6 +79,10 @@
         {transforming ? '변환 중...' : '보정 실행'}
       </button>
     </div>
+
+    <p class="text-[11px] text-muted-foreground">
+      단축키: `Space` 다음, `Enter` 보정 실행, `Ctrl+S` 전체 저장, `←/→` 이동
+    </p>
   </section>
 {:else}
   <section class="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
