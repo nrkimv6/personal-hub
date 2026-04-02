@@ -26,6 +26,32 @@ if ($Admin) {
     $RunWorkers = $false  # Public mode: no workers
 }
 
+function Stop-ProcessFromPidFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PidFilePath
+    )
+
+    if (-not (Test-Path $PidFilePath)) {
+        return
+    }
+
+    $raw = (Get-Content $PidFilePath -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $text = if ($null -ne $raw) { $raw.Trim() } else { "" }
+    if ($text -match '^\d+$') {
+        $pid = [int]$text
+        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        if ($proc) {
+            Write-Host "[*] Killing frontend from pid file (PID: $pid)" -ForegroundColor Yellow
+            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+        }
+    } elseif ($text) {
+        Write-Host "[*] Ignoring non-numeric frontend pid sentinel: $text" -ForegroundColor Gray
+    }
+
+    Remove-Item $PidFilePath -Force -ErrorAction SilentlyContinue
+}
+
 # Set APP_MODE environment variable for backend
 $env:APP_MODE = $AppMode
 
@@ -464,7 +490,7 @@ try {
                     Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
                 }
             }
-            Remove-Item $FrontendPidFile -Force -ErrorAction SilentlyContinue
+            Stop-ProcessFromPidFile -PidFilePath $FrontendPidFile
         }
     } else {
         # Normal (Production) mode: all background, workers disabled
@@ -510,6 +536,8 @@ try {
             Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
         }
     }
+    $GlobalFrontendPidFile = Join-Path $ProjectRoot ".pids\frontend_admin.pid"
+    Stop-ProcessFromPidFile -PidFilePath $GlobalFrontendPidFile
 
     # Kill API process directly by port
     $conn = Get-NetTCPConnection -LocalPort $ApiPort -ErrorAction SilentlyContinue

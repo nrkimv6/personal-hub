@@ -1,5 +1,8 @@
 """Redis 연결 누수 HTTP 통합 테스트 — TestClient 기반 SSE + diagnostics 검증."""
 import time
+import sys
+import subprocess
+from pathlib import Path
 
 import pytest
 import redis
@@ -7,6 +10,8 @@ import requests
 
 
 ADMIN_BASE = "http://localhost:8001"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "browser_workers.py"
 
 
 def _server_available() -> bool:
@@ -128,3 +133,46 @@ def test_redis_cleanup_dry_run_http():
     # 좀비 연결 없거나 감지 메시지가 있어야 함
     output = result.stdout
     assert "좀비" in output or "Zombie" in output or "redis-cleanup" in output.lower() or "Cleanup" in output
+
+
+@pytest.mark.skipif(not _server_available(), reason="Admin API not available")
+def test_http_frontend_restart_frontend_admin_keeps_api_alive():
+    """restart-frontend(admin) 이후 /dev-runner/runners가 200 유지되는지 검증."""
+    before = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=5)
+    assert before.status_code == 200
+
+    result = subprocess.run(
+        [sys.executable, str(BROWSER_WORKERS_SCRIPT), "restart-frontend"],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert result.returncode in (0, 1)
+
+    for _ in range(10):
+        try:
+            after = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=5)
+            if after.status_code == 200:
+                return
+        except Exception:
+            pass
+        time.sleep(1)
+    pytest.fail("/api/v1/dev-runner/runners did not recover after restart-frontend")
+
+
+def test_http_frontend_restart_frontend_public_invalid_mode_returns_error():
+    """잘못된 옵션 조합(status + --public)에서 에러 코드/메시지를 반환해야 한다."""
+    result = subprocess.run(
+        [sys.executable, str(BROWSER_WORKERS_SCRIPT), "status", "--public"],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert result.returncode != 0
+    assert "--public can only be used with restart-frontend" in (result.stderr or "")

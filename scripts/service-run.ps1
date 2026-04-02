@@ -30,6 +30,7 @@ if ($Admin) {
     $LogDir = Join-Path $ProjectRoot "logs"
     $PidSuffix = ""
 }
+$RunWorkers = $Admin
 
 # Ensure directories exist
 if (-not (Test-Path $LogDir)) {
@@ -73,6 +74,7 @@ Write-ServiceLog "Monitor Page Service Starting"
 Write-ServiceLog "Mode: $AppMode"
 Write-ServiceLog "API Port: $ApiPort, Frontend Port: $FrontendPort"
 Write-ServiceLog "Workers: $(if ($RunWorkers) { 'ON' } else { 'OFF' })"
+Write-ServiceLog "Frontend policy: Admin=DEV (npm run dev), Public=BUILD+PREVIEW (build fail 시 기존 build fallback)"
 Write-ServiceLog "=========================================="
 
 # Set environment variables
@@ -359,6 +361,7 @@ if ($Admin) {
         -Wait -WindowStyle Hidden `
         -PassThru
 
+    $canStartPreview = $true
     if ($buildResult.ExitCode -ne 0) {
         Write-ServiceLog "ERROR: Frontend build failed (exit code: $($buildResult.ExitCode))"
         Write-ServiceLog "Check build log: $buildLogFile"
@@ -369,23 +372,39 @@ if ($Admin) {
                 Write-ServiceLog "  $line"
             }
         }
-        exit 1
+        $buildDir = Join-Path $FrontendDir "build"
+        if (Test-Path $buildDir) {
+            Write-ServiceLog "WARNING: Using previous build artifact for preview fallback"
+        } else {
+            Write-ServiceLog "WARNING: No previous build artifact found — frontend unavailable, API-only mode"
+            $canStartPreview = $false
+        }
+    } else {
+        Write-ServiceLog "Frontend build completed"
     }
-    Write-ServiceLog "Frontend build completed"
 
     # Start preview server
-    Write-ServiceLog "Starting frontend preview server..."
-    $frontendProcess = Start-Process -FilePath "npm.cmd" `
-        -ArgumentList "run", "preview", "--", "--host", "--port", $FrontendPort `
-        -WorkingDirectory $FrontendDir `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $frontendLogFile `
-        -RedirectStandardError $frontendErrLogFile `
-        -PassThru
+    if ($canStartPreview) {
+        Write-ServiceLog "Starting frontend preview server..."
+        $frontendProcess = Start-Process -FilePath "npm.cmd" `
+            -ArgumentList "run", "preview", "--", "--host", "--port", $FrontendPort `
+            -WorkingDirectory $FrontendDir `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $frontendLogFile `
+            -RedirectStandardError $frontendErrLogFile `
+            -PassThru
+    } else {
+        $frontendProcess = $null
+    }
 }
 
-$frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
-Write-ServiceLog "Frontend started (PID: $($frontendProcess.Id))"
+if ($frontendProcess) {
+    $frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
+    Write-ServiceLog "Frontend started (PID: $($frontendProcess.Id))"
+} else {
+    Remove-Item $FrontendPidFile -Force -ErrorAction SilentlyContinue
+    Write-ServiceLog "Frontend not started (API-only mode)"
+}
 
 # ---- Workers Note ----
 # All browser-based workers are NOT started here.
