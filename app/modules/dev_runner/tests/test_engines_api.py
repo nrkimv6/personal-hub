@@ -37,6 +37,11 @@ async def client(tmp_path: Path):
                     "flags": ["-p"],
                     "models": {"plan": "sonnet", "impl": "opus", "done": "haiku"},
                 },
+                "codex": {
+                    "default_model": "gpt-5.3-codex",
+                    "flags": ["-c", "approval_policy=never", "-c", "sandbox_mode=danger-full-access"],
+                    "models": {"plan": "gpt-5.3-codex", "impl": "gpt-5.3-codex", "done": "gpt-5.3-codex"},
+                },
             },
             ensure_ascii=False,
         ),
@@ -61,12 +66,21 @@ class TestEnginesApi:
         assert data["cc-codex"]["models"]["impl"] == "opus"
         assert data["cc-codex"]["models"]["done"] == "haiku"
 
+    async def test_get_engines_includes_codex_key(self, client):
+        response = await client.get("/api/v1/dev-runner/engines")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert "codex" in data
+        assert data["codex"]["default_model"] == "gpt-5.3-codex"
+        assert data["codex"]["models"]["plan"] == "gpt-5.3-codex"
+
     async def test_get_engines_preserves_default_model_models_structure(self, client):
         response = await client.get("/api/v1/dev-runner/engines")
         assert response.status_code == 200
 
         data = response.json()
-        for engine in ("claude", "gemini", "cc-codex"):
+        for engine in ("claude", "gemini", "codex", "cc-codex"):
             assert engine in data
             assert "default_model" in data[engine]
             assert "models" in data[engine]

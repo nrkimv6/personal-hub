@@ -18,6 +18,7 @@
 	}
 
 	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
+	let isCodexEngine = $derived((engine ?? '').toLowerCase() === 'codex');
 
 	// 머지 진행 중 상태 판별
 	let isMerging = $derived(
@@ -516,6 +517,11 @@
 				{@const t = trigger}
 				<span class="text-[9px] px-1.5 py-0.5 rounded font-mono {t === 'user' ? 'bg-blue-500/20 text-blue-300' : t === 'user:all' ? 'bg-green-500/20 text-green-300' : t.startsWith('tc:') ? 'bg-orange-500/20 text-orange-300' : 'bg-gray-500/20 text-gray-400'}">
 					{t}
+				</span>
+			{/if}
+			{#if isCodexEngine}
+				<span class="text-[9px] px-1.5 py-0.5 rounded font-mono bg-slate-500/20 text-slate-300">
+					staged realtime
 				</span>
 			{/if}
 			<div class="flex items-center gap-1">

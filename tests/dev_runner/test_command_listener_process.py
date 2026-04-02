@@ -189,6 +189,48 @@ class TestLaunchPlanRunnerProcess:
         assert "--fix-engine" in cmd
         assert cmd[cmd.index("--fix-engine") + 1] == "cc-codex"
 
+    def test_launch_includes_engine_codex_argument(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """engine=codex 전달 시 --engine codex 인자 포함"""
+        command = {
+            "action": "run",
+            "runner_id": RUNNER_ID,
+            "plan_file": "common/docs/plan/test.md",
+            "engine": "codex",
+        }
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen) as mp:
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(
+                command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "codex"
+            )
+
+        cmd = mp.call_args_list[0][0][0]
+        assert "--engine" in cmd
+        assert cmd[cmd.index("--engine") + 1] == "codex"
+
+    def test_launch_includes_fix_engine_codex_argument(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """fix_engine=codex 전달 시 --fix-engine codex 인자 포함"""
+        command = {
+            "action": "run",
+            "runner_id": RUNNER_ID,
+            "plan_file": "common/docs/plan/test.md",
+            "fix_engine": "codex",
+        }
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen) as mp:
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(
+                command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "claude"
+            )
+
+        cmd = mp.call_args_list[0][0][0]
+        assert "--fix-engine" in cmd
+        assert cmd[cmd.index("--fix-engine") + 1] == "codex"
+
     def test_launch_sets_redis_state(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """Redis per-runner 상태 저장 확인"""
         RKP = listener_mod.RUNNER_KEY_PREFIX

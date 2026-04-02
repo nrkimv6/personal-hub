@@ -5,14 +5,16 @@ from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime
 from typing import Optional, List
 
+SUPPORTED_RUN_ENGINES = {"claude", "gemini", "codex", "cc-codex"}
+
 
 # ========== 스키마 ==========
 
 class RunRequest(BaseModel):
     """실행 요청 스키마"""
     plan_file: Optional[str] = Field(None, description="Plan 파일 경로 (null=전체 실행)")
-    engine: Optional[str] = Field("claude", description="AI 실행 엔진 (claude | gemini | cc-codex)")
-    fix_engine: Optional[str] = Field("claude", description="Fix/Resolver 전용 AI 엔진 (claude | gemini | cc-codex)")
+    engine: Optional[str] = Field("claude", description="AI 실행 엔진 (claude | gemini | codex | cc-codex)")
+    fix_engine: Optional[str] = Field("claude", description="Fix/Resolver 전용 AI 엔진 (claude | gemini | codex | cc-codex)")
     max_cycles: Optional[int] = Field(0, description="최대 사이클 수 (0=무제한)")
     max_tokens: Optional[int] = Field(0, description="최대 토큰 수 (0=무제한)")
     until: Optional[str] = Field(None, description="종료 시각 (HH:MM 형식)")
@@ -23,6 +25,21 @@ class RunRequest(BaseModel):
     worktree: bool = Field(True, description="worktree 모드 (격리 실행 + 머지 큐)")
     test_source: Optional[str] = Field(None, description="테스트 출처 (pytest TC 추적용)")
     trigger: Optional[str] = Field(None, description="트리거 소스 (user, user:all, tc:{name}, api)")
+
+    @field_validator("engine", "fix_engine", mode="before")
+    @classmethod
+    def validate_engine(cls, value):
+        if value is None:
+            return "claude"
+        if not isinstance(value, str):
+            raise ValueError("엔진 값은 문자열이어야 합니다")
+        normalized = value.strip()
+        if not normalized:
+            return "claude"
+        if normalized not in SUPPORTED_RUN_ENGINES:
+            engines = ", ".join(sorted(SUPPORTED_RUN_ENGINES))
+            raise ValueError(f"지원되지 않는 엔진: {normalized} (지원: {engines})")
+        return normalized
 
 
 class RunStatusResponse(BaseModel):
