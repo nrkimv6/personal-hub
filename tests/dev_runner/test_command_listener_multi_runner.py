@@ -163,6 +163,7 @@ class TestStartPlanRunner:
     def test_boundary_same_runner_id_twice_returns_already_running(self):
         """TC-Boundary: 동일 runner_id로 두 번 start → 두 번째 Already running 반환"""
         listener = _load_listener()
+        plan_runner_mod = sys.modules["_dr_plan_runner"]
 
         mock_proc = MagicMock()
         mock_proc.pid = 9999
@@ -170,7 +171,7 @@ class TestStartPlanRunner:
         listener._running_processes["t-clmulti-dup1"] = mock_proc
 
         fake_worktree = Path("/tmp/worktrees/dup11111")
-        with patch.object(listener, "_is_pid_alive", return_value=True), \
+        with patch.object(plan_runner_mod, "_is_pid_alive", return_value=True), \
              patch.object(listener.WorktreeManager, "create", return_value=fake_worktree):
             r = _make_redis_mock()
             command = {

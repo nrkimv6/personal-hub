@@ -13,21 +13,22 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import fakeredis
 
+from tests.dev_runner._path_helpers import get_listener_script_path, get_repo_root, skip_if_missing
+
 
 # ========== 스크립트 로드 ==========
 # 현재 checkout의 scripts 경로를 사용한다.
 
 _listener_mod = None
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_PATH = REPO_ROOT / "scripts" / "dev-runner-command-listener.py"
+REPO_ROOT = get_repo_root()
+SCRIPT_PATH = get_listener_script_path()
 
 
 def _get_worktree_listener():
     global _listener_mod
     if _listener_mod is not None:
         return _listener_mod
-    if not SCRIPT_PATH.exists():
-        pytest.skip(f"Listener script not found: {SCRIPT_PATH}")
+    skip_if_missing(SCRIPT_PATH, "Listener script")
     spec = importlib.util.spec_from_file_location(
         "dev_runner_command_listener_current", str(SCRIPT_PATH)
     )
@@ -82,6 +83,10 @@ RUNNER_ID = "t3test01"
 
 class TestStreamLogPathT3:
     """T3: stream_log_path Redis 키 설정 검증 (Phase 4 fix)"""
+
+    def test_loader_uses_repo_local_script(self, wt_listener):
+        """R: 로더가 현재 checkout의 scripts 경로를 사용해야 함"""
+        assert Path(wt_listener.__file__).resolve() == get_listener_script_path().resolve()
 
     def test_stream_log_path_is_set_not_nil(self, wt_listener, fr, mock_popen, tmp_path, mock_worktree):
         """T3 핵심: _launch_plan_runner_process 후 stream_log_path가 실제 경로로 저장됨

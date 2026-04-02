@@ -15,12 +15,18 @@ from pathlib import Path
 import pytest
 import redis as redis_lib
 
+from tests.dev_runner._path_helpers import (
+    get_listener_script_path,
+    get_project_python,
+    get_repo_root,
+)
+
 REDIS_TEST_DB = 15
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 PLAN_RUNNER_KEY_PATTERN = "plan-runner:*"
-LISTENER_SCRIPT = Path("D:/work/project/tools/monitor-page/scripts/dev-runner-command-listener.py")
-PYTHON_EXE = Path("D:/work/project/tools/monitor-page/.venv/Scripts/python.exe")
-PROJECT_ROOT = Path("D:/work/project/tools/monitor-page")
+LISTENER_SCRIPT = get_listener_script_path()
+PYTHON_EXE = Path(get_project_python())
+PROJECT_ROOT = get_repo_root()
 WORKTREE_BASE = PROJECT_ROOT / ".worktrees"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 TEST_PLAN_STEMS = ["test_minimal_plan", "test_plan_e2e_mock"]
