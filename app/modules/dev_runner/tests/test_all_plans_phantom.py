@@ -72,9 +72,10 @@ class TestPhantomAllPlansRegression:
         )
 
     def test_explicit_all_plans_sentinel_still_works(self, event_service, sync_redis):
-        """정상 케이스: plan_file=PLAN_FILE_ALL 명시 → 전체 실행 sentinel 그대로 반환"""
+        """정상 케이스: plan_file=PLAN_FILE_ALL + user trigger 명시 → sentinel 그대로 반환"""
         runner_id = "phantom_explicit_01"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", PLAN_FILE_ALL)
         sync_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 

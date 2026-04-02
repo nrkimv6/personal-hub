@@ -24,6 +24,7 @@ def _make_log_service(messages: list) -> LogService:
     svc = LogService.__new__(LogService)
     mock_pubsub = _make_pubsub_mock(messages)
     mock_async_redis = MagicMock()
+    mock_async_redis.ping = AsyncMock(return_value=True)
     mock_async_redis.pubsub = MagicMock(return_value=mock_pubsub)
     svc.async_redis = mock_async_redis
     return svc

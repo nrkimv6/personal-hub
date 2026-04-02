@@ -64,6 +64,7 @@ _DummyProcess = _listener._DummyProcess
 _reconnect_surviving_runners = _listener._reconnect_surviving_runners
 _attach_to_running_process = _listener._attach_to_running_process
 _cleanup_process_state = _listener._cleanup_process_state
+_proc_utils = importlib.import_module(_DummyProcess.__module__)
 
 
 # ---------------------------------------------------------------------------
@@ -109,14 +110,14 @@ def _make_redis(active_runners=None, pid_map=None, log_path=None):
 class TestDummyProcess:
     def test_poll_returns_none_when_alive(self):
         """poll() should return None when PID is alive."""
-        with patch.object(_listener, "_is_pid_alive", return_value=True):
+        with patch.object(_proc_utils, "_is_pid_alive", return_value=True):
             dp = _DummyProcess(1234)
             assert dp.poll() is None
             assert dp.returncode is None
 
     def test_poll_returns_minus_one_when_dead(self):
         """poll() should return -1 and set returncode when PID is dead."""
-        with patch.object(_listener, "_is_pid_alive", return_value=False):
+        with patch.object(_proc_utils, "_is_pid_alive", return_value=False):
             dp = _DummyProcess(9999)
             result = dp.poll()
             assert result == -1
@@ -131,7 +132,7 @@ class TestDummyProcess:
             call_count += 1
             return False
 
-        with patch.object(_listener, "_is_pid_alive", side_effect=_side):
+        with patch.object(_proc_utils, "_is_pid_alive", side_effect=_side):
             dp = _DummyProcess(42)
             dp.poll()  # sets returncode = -1
             dp.poll()  # should not call _is_pid_alive again
@@ -150,8 +151,8 @@ class TestReconnectSurvivingRunners:
                         log_path={runner_id: "/tmp/fake.log"})
 
         with (
-            patch.object(_listener, "_is_pid_alive", return_value=True),
-            patch.object(_listener, "_attach_to_running_process") as mock_attach,
+            patch.object(_proc_utils, "_is_pid_alive", return_value=True),
+            patch.object(_proc_utils, "_attach_to_running_process") as mock_attach,
         ):
             _reconnect_surviving_runners(r)
             mock_attach.assert_called_once_with(runner_id, pid, r)
@@ -163,8 +164,8 @@ class TestReconnectSurvivingRunners:
         r = _make_redis(active_runners=[runner_id], pid_map={runner_id: pid})
 
         with (
-            patch.object(_listener, "_is_pid_alive", return_value=False),
-            patch.object(_listener, "_cleanup_process_state") as mock_cleanup,
+            patch.object(_proc_utils, "_is_pid_alive", return_value=False),
+            patch.object(_proc_utils, "_cleanup_process_state") as mock_cleanup,
         ):
             _reconnect_surviving_runners(r)
             mock_cleanup.assert_called_once_with(runner_id, r, reason="reconnect_orphan")
@@ -174,7 +175,7 @@ class TestReconnectSurvivingRunners:
         runner_id = "nopid001"
         r = _make_redis(active_runners=[runner_id], pid_map={})  # no pid entry
 
-        with patch.object(_listener, "_cleanup_process_state") as mock_cleanup:
+        with patch.object(_proc_utils, "_cleanup_process_state") as mock_cleanup:
             _reconnect_surviving_runners(r)
             mock_cleanup.assert_called_once_with(runner_id, r, reason="reconnect_orphan")
 
@@ -187,8 +188,8 @@ class TestReconnectSurvivingRunners:
         _listener._running_processes[runner_id] = _DummyProcess(pid)
 
         with (
-            patch.object(_listener, "_is_pid_alive", return_value=True),
-            patch.object(_listener, "_attach_to_running_process") as mock_attach,
+            patch.object(_proc_utils, "_is_pid_alive", return_value=True),
+            patch.object(_proc_utils, "_attach_to_running_process") as mock_attach,
         ):
             _reconnect_surviving_runners(r)
             mock_attach.assert_not_called()
@@ -205,7 +206,7 @@ class TestAttachToRunningProcess:
         r = MagicMock()
         r.get.return_value = None  # no log file path in Redis
 
-        with patch.object(_listener, "_cleanup_process_state") as mock_cleanup:
+        with patch.object(_proc_utils, "_cleanup_process_state") as mock_cleanup:
             _attach_to_running_process(runner_id, pid, r)
             mock_cleanup.assert_called_once_with(runner_id, r, reason="no_log_file")
 
@@ -270,8 +271,8 @@ class TestCleanupStaleRunners:
         executor.async_redis.get = _get
 
         n = await executor._cleanup_stale_runners()
-        assert n == 1
-        executor._force_cleanup_state.assert_called_once_with(runner_id)
+        assert n["total"] == 1
+        assert n["cleaned_active"] == 1
 
     @pytest.mark.asyncio
     async def test_right_keeps_alive_pid(self, executor):
@@ -291,8 +292,8 @@ class TestCleanupStaleRunners:
         executor._force_cleanup_state = AsyncMock()
 
         n = await executor._cleanup_stale_runners()
-        assert n == 0
-        executor._force_cleanup_state.assert_not_called()
+        assert n["total"] == 0
+        assert n["cleaned_active"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -333,8 +334,7 @@ class TestPrepareListenerImports:
         assert first is second, "2회 호출 시 다른 모듈 객체가 등록됨"
 
     def test_missing_ensure_main_branch_causes_import_error(self):
-        """T3: ensure_main_branch 없는 stub 주입 시 listener import에서 ImportError 발생,
-        수정 후(stub 있음)에는 오류 없음을 함께 검증 — 근본 원인 재현 TC"""
+        """T3: 최소 worktree_manager stub에서도 listener import가 깨지지 않아야 함."""
         import importlib.util
         import types
 
@@ -369,10 +369,12 @@ class TestPrepareListenerImports:
             sys.modules["dev_runner_listener"] = m
             spec.loader.exec_module(m)
 
-        # 1) incomplete stub → ImportError 재현
+        # 1) incomplete stub → 현재 구조에서는 import 성공해야 함 (listener가 직접 의존하지 않음)
         _inject_incomplete_stub()
-        with pytest.raises((ImportError, AttributeError)):
+        try:
             _load_listener()
+        except (ImportError, AttributeError) as e:
+            pytest.fail(f"최소 stub에서 import 오류 발생: {e}")
 
         # 2) _prepare_listener_imports()으로 올바른 stub 주입 → 오류 없음
         sys.modules.pop("dev_runner_listener", None)
