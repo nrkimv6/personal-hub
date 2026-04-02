@@ -20,8 +20,10 @@
   let loading = false;
   let reviewing = false;
   let transforming = false;
+  let savingAll = false;
   let inheritedApplied = false;
   let errorMessage = '';
+  let infoMessage = '';
   let sequenceIds: number[] = [];
   let sequenceIndex = -1;
 
@@ -49,6 +51,7 @@
   async function handleSelect(event: CustomEvent<File>) {
     loading = true;
     errorMessage = '';
+    infoMessage = '';
     resultUrl = null;
     try {
       const uploaded = await slideScannerApi.uploadSlide(event.detail);
@@ -73,6 +76,7 @@
     if (!currentSlide || points.length !== 4) return;
     transforming = true;
     errorMessage = '';
+    infoMessage = '';
     try {
       await slideScannerApi.transformSlide(currentSlide.id, points);
       currentSlide = await slideScannerApi.getSlideWithInherited(currentSlide.id);
@@ -91,6 +95,7 @@
 
     sequenceIndex = nextIndex;
     resultUrl = null;
+    infoMessage = '';
     await loadSlideForEditor(sequenceIds[nextIndex]);
   }
 
@@ -99,6 +104,7 @@
 
     reviewing = true;
     errorMessage = '';
+    infoMessage = '';
     try {
       await slideScannerApi.reviewSlide(currentSlide.id, points);
       if (sequenceIndex >= 0 && sequenceIndex < sequenceIds.length - 1) {
@@ -115,6 +121,7 @@
 
   async function handleGalleryOpen(event: CustomEvent<{ slideId: number; sequenceIds: number[] }>) {
     errorMessage = '';
+    infoMessage = '';
     resultUrl = null;
     activeTab = 'editor';
 
@@ -125,6 +132,26 @@
       await loadSlideForEditor(event.detail.slideId);
     } catch (error) {
       errorMessage = parseError(error);
+    }
+  }
+
+  async function handleSaveAll() {
+    if (!currentSlide) return;
+
+    savingAll = true;
+    errorMessage = '';
+    infoMessage = '';
+    try {
+      const targetIds = sequenceIds.length > 0 ? sequenceIds : [currentSlide.id];
+      const result = await slideScannerApi.batchTransform(targetIds);
+      infoMessage =
+        `전체 저장 완료: 성공 ${result.done}건, 스킵 ${result.skipped}건, 실패 ${result.failed}건`;
+      currentSlide = await slideScannerApi.getSlideWithInherited(currentSlide.id);
+      resultUrl = `${slideScannerApi.getSlideResultUrl(currentSlide.id)}?t=${Date.now()}`;
+    } catch (error) {
+      errorMessage = parseError(error);
+    } finally {
+      savingAll = false;
     }
   }
 
@@ -160,6 +187,10 @@
       <p class="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage}</p>
     {/if}
 
+    {#if infoMessage}
+      <p class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{infoMessage}</p>
+    {/if}
+
     <SequentialEditor
       slide={currentSlide}
       {points}
@@ -167,13 +198,14 @@
       {canPrev}
       {canNext}
       {reviewing}
-      {transforming}
+      transforming={transforming || savingAll}
       inheritedApplied={inheritedApplied}
       on:changePoints={handlePointsChange}
       on:prev={() => void moveSequence(-1)}
       on:next={() => void moveSequence(1)}
       on:review={() => void handleReview()}
       on:transform={() => void handleTransform()}
+      on:saveAll={() => void handleSaveAll()}
     />
 
     <ResultPreview {resultUrl} />
