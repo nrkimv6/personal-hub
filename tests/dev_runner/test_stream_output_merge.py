@@ -293,3 +293,48 @@ def test_cleanup_allows_worktree_removal_without_merge_signal(listener_mod, fr):
         process_utils_mod._cleanup_process_state(runner_id, fr, reason="test")
 
     mock_wt.remove.assert_called_once(), "merge 시그널 없으면 WorktreeManager.remove 호출되어야 함"
+
+
+def test_cleanup_publishes_completed_after_status_stopped(process_utils_mod, fr):
+    """R(Right): _cleanup_process_state는 status=stopped 반영 후 __COMPLETED를 publish한다."""
+    runner_id = "t-clnup-order-001"
+    status_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:status"
+    exit_reason_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason"
+    log_channel = f"plan-runner:logs:{runner_id}"
+
+    fr.set(status_key, "running")
+    fr.set(exit_reason_key, "error")
+    fr.sadd("plan-runner:active_runners", runner_id)
+
+    ordered_events = []
+    original_set = fr.set
+    original_publish = fr.publish
+
+    def _set_spy(key, value, *args, **kwargs):
+        if key == status_key and value == "stopped":
+            ordered_events.append("status_stopped")
+        return original_set(key, value, *args, **kwargs)
+
+    def _publish_spy(channel, message, *args, **kwargs):
+        if channel == log_channel and str(message).startswith("__COMPLETED::"):
+            ordered_events.append("completed_publish")
+        return original_publish(channel, message, *args, **kwargs)
+
+    mock_wt = MagicMock()
+    with patch.object(process_utils_mod, "get_running_processes", return_value={}), \
+         patch.object(process_utils_mod, "get_running_log_files", return_value={}), \
+         patch.object(process_utils_mod, "get_stream_threads", return_value={}), \
+         patch.object(process_utils_mod, "get_cleanup_done", return_value={}), \
+         patch.object(process_utils_mod, "get_dead_process_first_seen", return_value={}), \
+         patch.object(process_utils_mod, "get_wf_manager", return_value=None), \
+         patch("plan_worktree_helpers.is_plan_in_progress", return_value=False), \
+         patch("worktree_manager.WorktreeManager", mock_wt), \
+         patch.object(fr, "set", side_effect=_set_spy), \
+         patch.object(fr, "publish", side_effect=_publish_spy):
+        process_utils_mod._cleanup_process_state(runner_id, fr, reason="test")
+
+    assert "status_stopped" in ordered_events, f"status=stopped 반영 누락: {ordered_events}"
+    assert "completed_publish" in ordered_events, f"completed publish 누락: {ordered_events}"
+    assert ordered_events.index("status_stopped") < ordered_events.index("completed_publish"), (
+        f"완료 신호가 상태 반영보다 먼저 publish됨: {ordered_events}"
+    )
