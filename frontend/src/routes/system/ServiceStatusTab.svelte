@@ -1274,8 +1274,8 @@
             </thead>
             <tbody>
               {#each processWatchRows as proc}
+                {@const deltaRate = getProcessDeltaRate(proc)}
                 <tr class="border-b border-border/50 hover:bg-muted/50 {proc.memory_mb > 512 ? 'bg-warning-light/30' : ''} {proc.memory_mb > 1024 ? 'bg-error-light/30' : ''}">
-                  {@const deltaRate = getProcessDeltaRate(proc)}
                   <td class="px-3 py-1.5 font-mono text-muted-foreground">{proc.pid}</td>
                   <td class="px-3 py-1.5 font-medium text-foreground max-w-[240px] truncate" title={proc.cmdline}>{proc.name}</td>
                   <td class="px-3 py-1.5 text-right font-mono {proc.memory_mb > 512 ? 'text-warning font-semibold' : ''} {proc.memory_mb > 1024 ? 'text-error font-semibold' : ''}">{proc.memory_mb.toFixed(1)} MB</td>
