@@ -21,6 +21,7 @@ from app.modules.dev_runner.services.executor_service import (
     ExecutorService,
     ACTIVE_RUNNERS_KEY,
     RECENT_RUNNERS_KEY,
+    RECENT_RUNNERS_TTL,
     RUNNER_KEY_PREFIX,
     RUNNER_KEY_SUFFIXES,
 )
@@ -50,9 +51,9 @@ def svc(fake_redis, fake_async_redis):
 
 # ─────────────────────────── helpers ─────────────────────────────
 
-async def _seed_recent(r, rid, *, status, plan_file, start_time_iso=None):
+async def _seed_recent(r, rid, *, status, plan_file, start_time_iso=None, score_ts=None):
     """recent_runners에 runner 시드"""
-    await r.zadd(RECENT_RUNNERS_KEY, {rid: time.time()})
+    await r.zadd(RECENT_RUNNERS_KEY, {rid: score_ts if score_ts is not None else time.time()})
     await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", status)
     if plan_file:
         await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", plan_file)
@@ -71,7 +72,7 @@ async def _seed_active(r, rid, *, pid):
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_archived_plan(svc, fake_async_redis, tmp_path):
-    """plan 없음 + archive 있음 → stale 정리 + reason=archived, bugs=0 (R)"""
+    """plan 없음 + archive 있음 + stopped + TTL 내 recent → 보존 (R)"""
     archive_file = tmp_path / "archive" / "2026-01-01_foo.md"
     archive_file.parent.mkdir(parents=True)
     archive_file.write_text("archived plan")
@@ -90,17 +91,18 @@ async def test_cleanup_stale_archived_plan(svc, fake_async_redis, tmp_path):
 
     result = await svc.cleanup_stale_runners()
 
-    assert result["cleaned_recent"] == 1
+    assert result["cleaned_recent"] == 0
+    assert result["preserved_recent"] == 1
     assert result["bugs"] == 0
-    assert result["total"] == 1
+    assert result["total"] == 0
 
     remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
-    assert rid not in remaining
+    assert rid in remaining
 
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_auto_history_plan_R(svc, fake_async_redis, tmp_path):
-    """_auto* plan은 docs/history 존재 시 archived로 분류되어 bugs 증가 없이 정리된다."""
+    """_auto* plan + docs/history + stopped + TTL 내 recent → 보존된다."""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     plan_file_path = str(plan_dir / "2026-02-01_auto-next-cleanup.md")
@@ -114,13 +116,17 @@ async def test_cleanup_stale_auto_history_plan_R(svc, fake_async_redis, tmp_path
 
     result = await svc.cleanup_stale_runners()
 
-    assert result["cleaned_recent"] == 1
+    assert result["cleaned_recent"] == 0
+    assert result["preserved_recent"] == 1
     assert result["bugs"] == 0
+
+    remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+    assert rid in remaining
 
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_file_lost(svc, fake_async_redis, tmp_path):
-    """plan 없음 + archive도 없음 + stopped → stale 정리 + reason=file_lost + bugs=1 (R)"""
+    """plan 없음 + archive도 없음 + stopped + TTL 내 recent → 보존 (R)"""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     plan_file_path = str(plan_dir / "2026-02-01_lost.md")
@@ -130,7 +136,36 @@ async def test_cleanup_stale_file_lost(svc, fake_async_redis, tmp_path):
 
     result = await svc.cleanup_stale_runners()
 
+    assert result["cleaned_recent"] == 0
+    assert result["preserved_recent"] == 1
+    assert result["bugs"] == 0
+    assert result["total"] == 0
+
+    remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+    assert rid in remaining
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_file_lost_after_ttl_removed(svc, fake_async_redis, tmp_path):
+    """plan 없음 + stopped + TTL 초과 recent → stale 정리 + bugs=1 (R)"""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    plan_file_path = str(plan_dir / "2026-02-01_lost_old.md")
+
+    rid = "t-lost-old-001"
+    old_ts = time.time() - (RECENT_RUNNERS_TTL + 120)
+    await _seed_recent(
+        fake_async_redis,
+        rid,
+        status="stopped",
+        plan_file=plan_file_path,
+        score_ts=old_ts,
+    )
+
+    result = await svc.cleanup_stale_runners()
+
     assert result["cleaned_recent"] == 1
+    assert result["preserved_recent"] == 0
     assert result["bugs"] == 1
     assert result["total"] == 1
 
@@ -243,6 +278,7 @@ async def test_cleanup_stale_empty_returns_zero(svc, fake_async_redis):
     assert result == {
         "cleaned_active": 0,
         "cleaned_recent": 0,
+        "preserved_recent": 0,
         "bugs": 0,
         "total": 0,
     }
@@ -323,7 +359,8 @@ async def test_cleanup_stale_real_redis(real_svc, real_redis_async, tmp_path):
 
     rid = "integration-test-runner-001"
 
-    await real_redis_async.zadd(RECENT_RUNNERS_KEY, {rid: time.time()})
+    old_ts = time.time() - (RECENT_RUNNERS_TTL + 120)
+    await real_redis_async.zadd(RECENT_RUNNERS_KEY, {rid: old_ts})
     await real_redis_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
     await real_redis_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", plan_file_path)
 
@@ -336,6 +373,39 @@ async def test_cleanup_stale_real_redis(real_svc, real_redis_async, tmp_path):
         remaining = await real_redis_async.zrange(RECENT_RUNNERS_KEY, 0, -1)
         assert rid not in remaining, f"더미 runner가 recent_runners에 여전히 존재: {remaining}"
 
+    finally:
+        await real_redis_async.zrem(RECENT_RUNNERS_KEY, rid)
+        for suffix in RUNNER_KEY_SUFFIXES:
+            await real_redis_async.delete(f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_cleanup_stale_preserve_recent_then_dismiss_real_redis(real_svc, real_redis_async, tmp_path):
+    """실제 Redis: stopped+TTL내 recent는 보존되고 dismiss 시 즉시 제거된다."""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    plan_file_path = str(plan_dir / "2026-01-01_dummy_recent.md")
+
+    rid = "integration-test-runner-preserve-001"
+
+    await real_redis_async.zadd(RECENT_RUNNERS_KEY, {rid: time.time()})
+    await real_redis_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+    await real_redis_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", plan_file_path)
+
+    try:
+        result = await real_svc.cleanup_stale_runners()
+        assert result["cleaned_recent"] == 0
+        assert result["preserved_recent"] >= 1
+
+        remaining = await real_redis_async.zrange(RECENT_RUNNERS_KEY, 0, -1)
+        assert rid in remaining
+
+        dismissed = await real_svc.dismiss_runner(rid)
+        assert dismissed is True
+
+        remaining_after_dismiss = await real_redis_async.zrange(RECENT_RUNNERS_KEY, 0, -1)
+        assert rid not in remaining_after_dismiss
     finally:
         await real_redis_async.zrem(RECENT_RUNNERS_KEY, rid)
         for suffix in RUNNER_KEY_SUFFIXES:

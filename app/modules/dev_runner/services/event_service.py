@@ -172,6 +172,7 @@ class EventService:
             values = self._sync.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
             data = dict(zip(fields, values))
             data["runner_id"] = runner_id
+            data["visible"] = is_visible_runner(data.get("trigger"), runner_id)
             # plan_file이 None(Redis 키 미설정)이면 None 반환 — sentinel fallback 제거
             # (프론트엔드에서 null과 sentinel을 구분하여 처리)
             if not data.get("plan_file"):
@@ -188,8 +189,7 @@ class EventService:
             for rid in runner_ids:
                 payload = self._build_status_payload(rid)
                 if payload:
-                    # visibility.py 단일 함수로 판별 (화이트리스트 — user/user:all만 포함)
-                    if not is_visible_runner(payload.get("trigger"), rid):
+                    if not payload.get("visible", False):
                         continue
                     result.append(payload)
             return result
@@ -317,7 +317,7 @@ class EventService:
                             runner_id = self._extract_runner_id(changed_key)
                             if runner_id:
                                 payload = self._build_status_payload(runner_id)
-                                if payload:
+                                if payload and payload.get("visible", False):
                                     yield self._sse("status", {"runners": [payload]})
                         elif event_type == "tracking":
                             payload = self._build_tracking_payload()
@@ -353,9 +353,16 @@ class EventService:
                                     )
                                 elif data.startswith(_LOG_COMPLETED_SENTINEL) or data.startswith(_LOG_COMPLETED_REASON_PREFIX):
                                     status, reason = _parse_log_completed_payload(data)
+                                    payload = {"runner_id": runner_id, "status": status, "reason": reason}
+                                    try:
+                                        error = self._sync.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:error")
+                                    except Exception:
+                                        error = None
+                                    if error:
+                                        payload["error"] = error
                                     yield self._sse(
                                         "log_completed",
-                                        {"runner_id": runner_id, "status": status, "reason": reason},
+                                        payload,
                                     )
                                 elif is_merge:
                                     yield self._sse(

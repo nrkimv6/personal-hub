@@ -1,6 +1,9 @@
 """RunnerState 단위 TC"""
 
+import importlib
 import os
+from pathlib import Path
+import sys
 from datetime import datetime, timedelta
 import pytest
 import fakeredis.aioredis as fake_aioredis
@@ -137,3 +140,51 @@ class TestCleanupStaleRunners:
 
         result = await state.cleanup_stale_runners()
         assert result["cleaned_recent"] == 0
+
+
+class TestRecentTtlContract:
+    def _import_ttl_modules(self):
+        import app.modules.dev_runner.services.redis_connection as redis_connection
+
+        scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        import _dr_constants as dr_constants
+        return redis_connection, dr_constants
+
+    def test_recent_ttl_contract_right_default_86400(self, monkeypatch):
+        monkeypatch.delenv("DEV_RUNNER_RECENT_TTL_SECONDS", raising=False)
+        redis_connection, dr_constants = self._import_ttl_modules()
+        redis_connection = importlib.reload(redis_connection)
+        dr_constants = importlib.reload(dr_constants)
+
+        assert redis_connection.RECENT_RUNNERS_TTL == 86400
+        assert dr_constants.RECENT_RUNNERS_TTL == 86400
+
+    def test_recent_ttl_contract_boundary_env_override(self, monkeypatch):
+        monkeypatch.setenv("DEV_RUNNER_RECENT_TTL_SECONDS", "7200")
+        redis_connection, dr_constants = self._import_ttl_modules()
+        try:
+            redis_connection = importlib.reload(redis_connection)
+            dr_constants = importlib.reload(dr_constants)
+
+            assert redis_connection.RECENT_RUNNERS_TTL == 7200
+            assert dr_constants.RECENT_RUNNERS_TTL == 7200
+        finally:
+            monkeypatch.delenv("DEV_RUNNER_RECENT_TTL_SECONDS", raising=False)
+            importlib.reload(redis_connection)
+            importlib.reload(dr_constants)
+
+    def test_recent_ttl_contract_error_invalid_env_fallback(self, monkeypatch):
+        monkeypatch.setenv("DEV_RUNNER_RECENT_TTL_SECONDS", "invalid")
+        redis_connection, dr_constants = self._import_ttl_modules()
+        try:
+            redis_connection = importlib.reload(redis_connection)
+            dr_constants = importlib.reload(dr_constants)
+
+            assert redis_connection.RECENT_RUNNERS_TTL == 86400
+            assert dr_constants.RECENT_RUNNERS_TTL == 86400
+        finally:
+            monkeypatch.delenv("DEV_RUNNER_RECENT_TTL_SECONDS", raising=False)
+            importlib.reload(redis_connection)
+            importlib.reload(dr_constants)

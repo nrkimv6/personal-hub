@@ -148,3 +148,24 @@ class TestSseFilterE2E:
             assert not redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id), (
                 f"cleanup 후 {runner_id!r}이 {ACTIVE_RUNNERS_KEY}에 잔류"
             )
+
+    def test_sse_initial_status_includes_user_stopped_runner(self, redis_client):
+        """user trigger stopped runner가 active set에 있으면 SSE initial status에 유지된다."""
+        runner_id = f"user-stop-{uuid.uuid4().hex[:8]}"
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "/tmp/plan.md")
+            redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+            runners = _collect_initial_status(timeout=5.0)
+            runner_ids = [r.get("runner_id") for r in runners]
+            assert runner_id in runner_ids, (
+                f"user stopped runner {runner_id!r}이 SSE initial status에서 누락됨"
+            )
+        finally:
+            redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
+            for suffix in ("status", "trigger", "plan_file"):
+                redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}")
+            remaining = redis_client.keys(f"{RUNNER_KEY_PREFIX}:{runner_id}:*")
+            assert remaining == [], f"cleanup 후 키 잔류: {remaining}"

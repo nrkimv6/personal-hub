@@ -219,3 +219,23 @@ class TestOldRunnersAutoCleaned:
         # RECENT_RUNNERS_KEY에서도 제거됐는지 확인
         recent_ids = fake.zrange(RECENT_RUNNERS_KEY, 0, -1)
         assert old_rid not in recent_ids
+
+
+class TestCleanupStaleKeepsStoppedRunner:
+    """cleanup-stale 호출 시 TTL 내 stopped runner 보존 확인"""
+
+    @pytest.mark.asyncio
+    async def test_cleanup_stale_keeps_stopped_tab_within_ttl(self, mock_executor_redis_sync):
+        fake = mock_executor_redis_sync
+        rid = "stopped-cleanup-keep-001"
+
+        fake.zadd(RECENT_RUNNERS_KEY, {rid: time.time()})
+        fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+        fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", "docs/plan/missing-plan.md")
+
+        result = await executor_service.cleanup_stale_runners()
+        assert result["cleaned_recent"] == 0
+        assert result.get("preserved_recent", 0) == 1
+
+        runners = await executor_service.get_all_runners()
+        assert rid in [r.runner_id for r in runners]

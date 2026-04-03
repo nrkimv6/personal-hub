@@ -135,6 +135,53 @@ class TestE2EScenario2:
         assert runners[0].running is False
 
 
+class TestE2EScenario2_1:
+    """시나리오 2-1: stop 후 탭 유지, dismiss 시점에만 제거"""
+
+    @pytest.mark.asyncio
+    async def test_e2e_scenario2_1_stop_keeps_tab_until_dismiss(self, executor):
+        """stop -> cleanup-stale 이후에도 runner_id 유지, dismiss 후 제거."""
+        runner_id = "t-multi-stop-dismiss"
+        stopped_runner = _make_runner_item(runner_id, running=False)
+
+        with patch.object(
+            executor,
+            "get_all_runners",
+            new_callable=AsyncMock,
+            side_effect=[[stopped_runner], [stopped_runner], []],
+        ):
+            with patch.object(
+                executor,
+                "cleanup_stale_runners",
+                new_callable=AsyncMock,
+                return_value={
+                    "cleaned_active": 0,
+                    "cleaned_recent": 0,
+                    "preserved_recent": 1,
+                    "bugs": 0,
+                    "total": 0,
+                },
+            ) as cleanup_mock, patch.object(
+                executor,
+                "dismiss_runner",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as dismiss_mock:
+                before = await executor.get_all_runners()
+                cleanup = await executor.cleanup_stale_runners()
+                after_cleanup = await executor.get_all_runners()
+                dismissed = await executor.dismiss_runner(runner_id)
+                after_dismiss = await executor.get_all_runners()
+
+        assert [r.runner_id for r in before] == [runner_id]
+        assert [r.runner_id for r in after_cleanup] == [runner_id]
+        assert cleanup["preserved_recent"] == 1
+        assert dismissed is True
+        assert after_dismiss == []
+        cleanup_mock.assert_awaited_once()
+        dismiss_mock.assert_awaited_once_with(runner_id)
+
+
 class TestE2EScenario3:
     """시나리오 3: 1개 실행 후 재실행 → 409 아닌 200 + 새 runner_id"""
 

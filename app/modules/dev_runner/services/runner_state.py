@@ -134,10 +134,17 @@ class RunnerState:
         """active_runners + recent_runners 중 stale 항목을 정리.
 
         Returns:
-            {"cleaned_active": int, "cleaned_recent": int, "bugs": int, "total": int}
+            {
+                "cleaned_active": int,
+                "cleaned_recent": int,
+                "preserved_recent": int,
+                "bugs": int,
+                "total": int,
+            }
         """
         cleaned_active = 0
         cleaned_recent = 0
+        preserved_recent = 0
         bugs = 0
         cleaned_active_ids: set = set()
 
@@ -166,16 +173,28 @@ class RunnerState:
                 cleaned_active += 1
 
         try:
-            recent_ids = await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+            recent_entries = await self.async_redis.zrange(
+                RECENT_RUNNERS_KEY,
+                0,
+                -1,
+                withscores=True,
+            )
         except Exception:
-            recent_ids = []
+            recent_entries = []
 
         now = datetime.now()
+        cutoff_ts = time.time() - RECENT_RUNNERS_TTL
         GRACE_SECONDS = 600
 
-        for rid in recent_ids:
+        for rid, recent_score in recent_entries:
             if rid in cleaned_active_ids:
                 continue
+            status = await self.async_redis.get(self._runner_key(rid, "status"))
+            if status == "stopped" and recent_score > cutoff_ts:
+                # stopped runner는 TTL 내에선 cleanup-stale로 삭제하지 않는다.
+                preserved_recent += 1
+                continue
+
             plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))
 
             if plan_file and Path(plan_file).exists():
@@ -195,7 +214,6 @@ class RunnerState:
             else:
                 reason = "file_lost"
 
-            status = await self.async_redis.get(self._runner_key(rid, "status"))
             start_time_str = await self.async_redis.get(self._runner_key(rid, "start_time"))
 
             if status == "running" and reason == "file_lost":
@@ -220,17 +238,24 @@ class RunnerState:
 
         total = cleaned_active + cleaned_recent
         if total:
-            logger.info(f"[dev-runner] cleanup_stale_runners: active={cleaned_active}, recent={cleaned_recent}, bugs={bugs}")
+            logger.info(
+                "[dev-runner] cleanup_stale_runners: active=%s, recent=%s, preserved=%s, bugs=%s",
+                cleaned_active,
+                cleaned_recent,
+                preserved_recent,
+                bugs,
+            )
 
         return {
             "cleaned_active": cleaned_active,
             "cleaned_recent": cleaned_recent,
+            "preserved_recent": preserved_recent,
             "bugs": bugs,
             "total": total,
         }
 
     async def dismiss_runner(self, runner_id: str) -> bool:
-        """종료된 runner를 탭에서 제거 (RECENT_RUNNERS_KEY에서 삭제 + per-runner 키 즉시 삭제)"""
+        """탭 hard delete 전용 경로: RECENT와 per-runner 키를 즉시 삭제한다."""
         try:
             await self.async_redis.zrem(RECENT_RUNNERS_KEY, runner_id)
             for key_suffix in RUNNER_KEY_SUFFIXES:

@@ -91,14 +91,17 @@ async def cleanup_stale_runners():
     result = await executor_service.cleanup_stale_runners()
     cleaned_active = result.get("cleaned_active", 0)
     cleaned_recent = result.get("cleaned_recent", 0)
+    preserved_recent = result.get("preserved_recent", 0)
     return {
         "success": True,
         "cleaned": result.get("total", cleaned_active + cleaned_recent),
         "cleaned_active": cleaned_active,
         "cleaned_recent": cleaned_recent,
+        "preserved_recent": preserved_recent,
         "detail": {
             "cleaned_active": cleaned_active,
             "cleaned_recent": cleaned_recent,
+            "preserved_recent": preserved_recent,
         },
     }
 

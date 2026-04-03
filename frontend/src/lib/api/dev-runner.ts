@@ -291,7 +291,18 @@ export const devRunnerRunnerApi = {
 		),
 
 	cleanupStale: () =>
-		devRunnerRequest<{ success: boolean; cleaned: number; detail: { cleaned_active: number; cleaned_recent: number } }>(
+		devRunnerRequest<{
+			success: boolean;
+			cleaned: number;
+			cleaned_active: number;
+			cleaned_recent: number;
+			preserved_recent?: number;
+			detail: {
+				cleaned_active: number;
+				cleaned_recent: number;
+				preserved_recent?: number;
+			};
+		}>(
 			'/runners/cleanup-stale',
 			{ method: 'POST' }
 		)

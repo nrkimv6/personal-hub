@@ -106,3 +106,116 @@ class TestCleanupStaleEndpointIdempotent:
         detail = data.get("detail", {})
         assert isinstance(detail.get("cleaned_active"), int)
         assert isinstance(detail.get("cleaned_recent"), int)
+
+
+class TestDismissRunnerTabContract:
+    """DELETE /runners/{runner_id}/tab 계약 검증"""
+
+    def test_delete_tab_removes_runner_from_list(self, client):
+        """dismiss 성공 후 GET /runners 목록에서 해당 runner가 제거된다."""
+        before = [{"runner_id": "runner-dismiss-01", "running": False, "visible": True}]
+        after = []
+
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            side_effect=[before, after],
+        ):
+            with patch(
+                "app.modules.dev_runner.routes.runner.executor_service.dismiss_runner",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as dismiss_mock:
+                before_resp = client.get(f"{BASE_URL}/runners")
+                delete_resp = client.delete(f"{BASE_URL}/runners/runner-dismiss-01/tab")
+                after_resp = client.get(f"{BASE_URL}/runners")
+
+        assert before_resp.status_code == 200
+        assert delete_resp.status_code == 200
+        assert after_resp.status_code == 200
+        assert [r["runner_id"] for r in before_resp.json()] == ["runner-dismiss-01"]
+        assert after_resp.json() == []
+        dismiss_mock.assert_awaited_once_with("runner-dismiss-01")
+
+    def test_cleanup_stale_preserves_then_delete_tab_removes(self, client):
+        """cleanup-stale 이후엔 탭 유지, DELETE /tab 이후에만 제거된다."""
+        runner = [{"runner_id": "runner-preserve-01", "running": False, "visible": True}]
+
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            side_effect=[runner, runner, []],
+        ):
+            with patch(
+                "app.modules.dev_runner.routes.runner.executor_service.cleanup_stale_runners",
+                new_callable=AsyncMock,
+                return_value={
+                    "cleaned_active": 0,
+                    "cleaned_recent": 0,
+                    "preserved_recent": 1,
+                    "bugs": 0,
+                    "total": 0,
+                },
+            ) as cleanup_mock, patch(
+                "app.modules.dev_runner.routes.runner.executor_service.dismiss_runner",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as dismiss_mock:
+                before = client.get(f"{BASE_URL}/runners")
+                cleanup = client.post(f"{BASE_URL}/runners/cleanup-stale")
+                after_cleanup = client.get(f"{BASE_URL}/runners")
+                delete = client.delete(f"{BASE_URL}/runners/runner-preserve-01/tab")
+                after_delete = client.get(f"{BASE_URL}/runners")
+
+        assert before.status_code == 200
+        assert cleanup.status_code == 200
+        assert after_cleanup.status_code == 200
+        assert delete.status_code == 200
+        assert after_delete.status_code == 200
+        assert [r["runner_id"] for r in before.json()] == ["runner-preserve-01"]
+        assert [r["runner_id"] for r in after_cleanup.json()] == ["runner-preserve-01"]
+        assert cleanup.json().get("preserved_recent") == 1
+        assert after_delete.json() == []
+        cleanup_mock.assert_awaited_once()
+        dismiss_mock.assert_awaited_once_with("runner-preserve-01")
+
+    def test_cleanup_stale_and_dismiss_order_is_consistent(self, client):
+        """dismiss 후 cleanup-stale를 호출해도 결과는 일관되게 빈 목록이다."""
+        runner = [{"runner_id": "runner-order-01", "running": False, "visible": True}]
+
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            side_effect=[runner, [], []],
+        ):
+            with patch(
+                "app.modules.dev_runner.routes.runner.executor_service.dismiss_runner",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as dismiss_mock, patch(
+                "app.modules.dev_runner.routes.runner.executor_service.cleanup_stale_runners",
+                new_callable=AsyncMock,
+                return_value={
+                    "cleaned_active": 0,
+                    "cleaned_recent": 0,
+                    "preserved_recent": 0,
+                    "bugs": 0,
+                    "total": 0,
+                },
+            ) as cleanup_mock:
+                before = client.get(f"{BASE_URL}/runners")
+                delete = client.delete(f"{BASE_URL}/runners/runner-order-01/tab")
+                after_delete = client.get(f"{BASE_URL}/runners")
+                cleanup = client.post(f"{BASE_URL}/runners/cleanup-stale")
+                after_cleanup = client.get(f"{BASE_URL}/runners")
+
+        assert before.status_code == 200
+        assert delete.status_code == 200
+        assert after_delete.status_code == 200
+        assert cleanup.status_code == 200
+        assert after_cleanup.status_code == 200
+        assert [r["runner_id"] for r in before.json()] == ["runner-order-01"]
+        assert after_delete.json() == []
+        assert after_cleanup.json() == []
+        dismiss_mock.assert_awaited_once_with("runner-order-01")
+        cleanup_mock.assert_awaited_once()

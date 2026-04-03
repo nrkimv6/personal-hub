@@ -22,7 +22,6 @@
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import type {
 		DevRunnerRunStatusResponse,
-		DevRunnerRunnerListItem,
 		DevRunnerPlanFileResponse,
 		CurrentTrackingResponse
 	} from '$lib/api';
@@ -137,6 +136,7 @@
 		orphan?: boolean;
 		exit_reason?: string | null;
 		error?: string | null;
+		visible?: boolean;
 	}
 
 	function createRunnerTab(runner: RunnerSource): RunnerTab {
@@ -186,6 +186,46 @@
 		};
 	}
 
+	function isVisibleRunnerSource(runner: RunnerSource): boolean {
+		if (typeof runner.visible === 'boolean') {
+			return runner.visible;
+		}
+		return runner.trigger === 'user' || runner.trigger === 'user:all';
+	}
+
+	function applyRunnersSync(
+		allRunners: RunnerSource[],
+		opts: { selectActive?: boolean } = {}
+	): RunnerSource[] {
+		const runners = allRunners.filter(isVisibleRunnerSource);
+		const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
+
+		runnerTabs = runnerTabs.map(tab => {
+			const runner = runnerMap.get(tab.id);
+			return runner ? updateRunnerTab(tab, runner) : { ...tab, running: false };
+		});
+		for (const runner of runners) {
+			if (!runnerTabs.some(t => t.id === runner.runner_id)) {
+				runnerTabs = [...runnerTabs, createRunnerTab(runner)];
+			}
+		}
+
+		if (opts.selectActive !== false && !activeTabId && runnerTabs.length > 0) {
+			activeTabId = runnerTabs[runnerTabs.length - 1].id;
+		}
+		return runners;
+	}
+
+	async function syncRunnerTabs(opts: { selectActive?: boolean } = {}): Promise<RunnerSource[]> {
+		try {
+			const allRunners = await devRunnerRunnerApi.runners();
+			return applyRunnersSync(allRunners, opts);
+		} catch (e) {
+			console.warn('[DevRunner] runners API 호출 실패', e);
+			return [];
+		}
+	}
+
 	let runnerTabs = $state<RunnerTab[]>([]);
 	let activeTabId = $state<string | null>(null);
 
@@ -217,29 +257,7 @@
 				lastPlanFile = status.plan_file;
 			}
 
-			// runner 탭 running 상태 동기화 + 신규 runner 추가
-			try {
-				const allRunners = await devRunnerRunnerApi.runners();
-				const runners = allRunners.filter(r => r.visible !== false);
-				const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
-				// 기존 탭 상태 갱신
-				runnerTabs = runnerTabs.map(tab => {
-					const runner = runnerMap.get(tab.id);
-					return runner ? updateRunnerTab(tab, runner) : { ...tab, running: false };
-				});
-				// 신규 runner 탭 추가 (페이지 로드 시 또는 외부에서 시작된 runner)
-				for (const runner of runners) {
-					if (!runnerTabs.some(t => t.id === runner.runner_id)) {
-						runnerTabs = [...runnerTabs, createRunnerTab(runner)];
-					}
-				}
-				// activeTabId가 없으면 마지막 탭 선택
-				if (!activeTabId && runnerTabs.length > 0) {
-					activeTabId = runnerTabs[runnerTabs.length - 1].id;
-				}
-			} catch {
-				// runners API 실패 시 무시
-			}
+			await syncRunnerTabs({ selectActive: true });
 		} catch (e) {
 			console.warn('[DevRunner] status API 호출 실패', e);
 		}
@@ -279,10 +297,24 @@
 	function handleSSEEvent(eventName: string, data: string) {
 		if (eventName === 'status') {
 			try {
-				const parsed = JSON.parse(data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null; trigger?: string | null; exit_reason?: string | null; error?: string | null }[] };
-				const runners = (parsed.runners ?? []).filter(r => r.trigger === 'user' || r.trigger === 'user:all');
+				const parsed = JSON.parse(data) as {
+					runners: {
+						runner_id: string;
+						status: string;
+						pid: string | null;
+						current_cycle: string | null;
+						start_time: string | null;
+						plan_file: string | null;
+						engine: string | null;
+						trigger?: string | null;
+						exit_reason?: string | null;
+						error?: string | null;
+						visible?: boolean;
+					}[];
+				};
 				// runner 종료 감지를 위해 업데이트 전 running 상태 캡처
 				const prevRunningIds = new Set(runnerTabs.filter(t => t.running).map(t => t.id));
+				const runners = applyRunnersSync(parsed.runners ?? [], { selectActive: true });
 				const runningRunner = runners.find(r => r.status === 'running');
 				const anyRunner = runners[0];
 				const r = runningRunner ?? anyRunner;
@@ -305,19 +337,6 @@
 					}
 				}
 				if (runners.length > 0) {
-					const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
-					runnerTabs = runnerTabs.map(tab => {
-						const runner = runnerMap.get(tab.id);
-						return runner ? updateRunnerTab(tab, runner) : { ...tab, running: false };
-					});
-					for (const runner of runners) {
-						if (!runnerTabs.some(t => t.id === runner.runner_id)) {
-							runnerTabs = [...runnerTabs, createRunnerTab(runner)];
-						}
-					}
-					if (!activeTabId && runnerTabs.length > 0) {
-						activeTabId = runnerTabs[runnerTabs.length - 1].id;
-					}
 					// running → stopped 전이 감지: 이전에 running이었던 runner가 stopped이거나 사라진 경우
 					const anyBecameStopped = [...prevRunningIds].some(id => {
 						const tab = runnerTabs.find(t => t.id === id);
@@ -351,15 +370,20 @@
 			} catch { /* 무시 */ }
 		} else if (eventName === 'log_completed') {
 			try {
-				const { runner_id, status, reason } = JSON.parse(data) as { runner_id: string; status?: string; reason?: string | null };
-				const resolvedReason = reason ?? (status === 'failed' ? 'error' : 'completed');
-				logRefs.get(runner_id)?.injectCompleted(resolvedReason);
+				const { runner_id, reason, error } = JSON.parse(data) as {
+					runner_id: string;
+					reason?: string | null;
+					error?: string | null;
+				};
+				const resolvedReason = reason ?? null;
+				logRefs.get(runner_id)?.injectCompleted(resolvedReason ?? undefined);
 				runnerTabs = runnerTabs.map(tab =>
 					tab.id === runner_id
 						? {
 							...tab,
 							running: false,
-							exit_reason: resolvedReason,
+							exit_reason: resolvedReason ?? tab.exit_reason ?? 'unknown',
+							error: error ?? tab.error ?? null,
 						}
 						: tab
 				);
@@ -403,7 +427,17 @@
 		if (!response.runner_id) return;
 		// runStatus 즉시 업데이트 (시작 API 응답에서 확보) — 상단 바 "실행 중" 즉시 표시
 		runStatus = response;
-		const newTab: RunnerTab = { ...createRunnerTab({ runner_id: response.runner_id, plan_file: response.plan_file, engine: response.engine, start_time: response.start_time }), running: true };
+		const responseTrigger = (response as { trigger?: string | null }).trigger ?? 'user';
+		const newTab: RunnerTab = {
+			...createRunnerTab({
+				runner_id: response.runner_id,
+				plan_file: response.plan_file,
+				engine: response.engine,
+				start_time: response.start_time,
+				trigger: responseTrigger,
+			}),
+			running: true,
+		};
 		runnerTabs = [...runnerTabs, newTab];
 		activeTabId = response.runner_id;
 		if (window.innerWidth < 640) {
@@ -414,6 +448,7 @@
 	}
 
 	function handleCloseTab(runnerId: string) {
+		// 탭 제거는 dismiss(수동 닫기) 경로에서만 수행한다. sync 경로는 remove를 하지 않는다.
 		// running이 아닌 탭은 서버에 dismiss 요청하여 다른 기기에서도 사라지게 함
 		const tab = runnerTabs.find(t => t.id === runnerId);
 		if (tab && !tab.running) {
@@ -462,7 +497,7 @@
 	async function handleCleanup() {
 		try {
 			const result = await devRunnerRunnerApi.cleanupStale();
-			await fetchRunners();
+			await syncRunnerTabs({ selectActive: true });
 			const msg = `정리 완료: ${result.cleaned}개 항목 제거`;
 			console.info('[DevRunner]', msg, result.detail);
 		} catch (e) {
@@ -471,24 +506,7 @@
 	}
 
 	async function fetchRunners() {
-		try {
-			const allRunners = await devRunnerRunnerApi.runners();
-			const runners = allRunners.filter(r => r.visible !== false);
-			const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
-			runnerTabs = runnerTabs.map(tab => {
-				const runner = runnerMap.get(tab.id);
-				return runner ? updateRunnerTab(tab, runner) : { ...tab, running: false };
-			});
-			for (const runner of runners) {
-				if (!runnerTabs.some(t => t.id === runner.runner_id)) {
-					runnerTabs = [...runnerTabs, createRunnerTab(runner)];
-				}
-			}
-			// dismiss된 탭(서버에서 visible=false) 자동 정리
-			runnerTabs = runnerTabs.filter(tab => runnerMap.has(tab.id) || tab.running);
-		} catch (e) {
-			console.warn('[DevRunner] fetchRunners 실패', e);
-		}
+		await syncRunnerTabs({ selectActive: true });
 	}
 
 	async function loadData() {
@@ -526,7 +544,7 @@
 		if (initialPlan) {
 			try {
 				const decodedPath = atob(initialPlan);
-				const initResponse = await devRunnerRunnerApi.start({ plan_file: decodedPath });
+				const initResponse = await devRunnerRunnerApi.start({ plan_file: decodedPath, trigger: 'user' });
 				handleRunStart(initResponse);
 				await pollStatus();
 				// URL에서 plan param 제거
