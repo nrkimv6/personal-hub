@@ -740,6 +740,215 @@ class TestStreamEventsLogIntegration:
         assert pubsub_call_count >= 2  # 최소 ks + log_pubsub 초기 생성
 
 
+class TestStreamEventsFileFallback:
+    @staticmethod
+    def _install_idle_dual_pubsub(async_redis, log_get_message=None, ks_get_message=None):
+        mock_ks = AsyncMock()
+        mock_ks.psubscribe = AsyncMock()
+        mock_ks.punsubscribe = AsyncMock()
+        mock_ks.aclose = AsyncMock()
+        mock_ks.get_message = AsyncMock(side_effect=ks_get_message) if ks_get_message else AsyncMock(return_value=None)
+
+        mock_log = AsyncMock()
+        mock_log.psubscribe = AsyncMock()
+        mock_log.punsubscribe = AsyncMock()
+        mock_log.aclose = AsyncMock()
+        mock_log.get_message = AsyncMock(side_effect=log_get_message) if log_get_message else AsyncMock(return_value=None)
+
+        call_count = 0
+
+        def factory():
+            nonlocal call_count
+            call_count += 1
+            return mock_ks if call_count <= 1 else mock_log
+
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        return mock_ks, mock_log
+
+    @pytest.mark.asyncio
+    async def test_stream_events_fallback_emits_file_delta_when_pubsub_idle(
+        self,
+        event_service,
+        async_redis,
+        sync_redis,
+        tmp_path,
+    ):
+        """R: pub/sub 무수신 상태에서 파일 증가분이 event: log로 전달된다."""
+        runner_id = "fb-runner-01"
+        log_file = tmp_path / "runner01.log"
+        log_file.write_text("boot line\n", encoding="utf-8")
+
+        sync_redis.sadd("plan-runner:active_runners", runner_id)
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))
+
+        self._install_idle_dual_pubsub(async_redis)
+        event_service._async = async_redis
+        event_service._file_poll_timeout = 0.0
+        event_service._file_poll_interval_sec = 0.0
+
+        gen = event_service.stream_events()
+        _ = await gen.__anext__()  # connected
+        _ = await gen.__anext__()  # status
+
+        with open(log_file, "a", encoding="utf-8") as handle:
+            handle.write("line from fallback\n")
+
+        events = await _collect_events(gen, 4, timeout=1.2)
+        await gen.aclose()
+
+        log_events = [e for e in events if e.startswith("event: log\n")]
+        assert len(log_events) >= 1
+        payloads = [json.loads(e.split("data: ")[1].split("\n")[0]) for e in log_events]
+        assert any(p["runner_id"] == runner_id and p["line"] == "line from fallback" for p in payloads)
+
+    @pytest.mark.asyncio
+    async def test_stream_events_fallback_skips_invisible_runner(
+        self,
+        event_service,
+        async_redis,
+        sync_redis,
+        tmp_path,
+    ):
+        """R: visible=False(trigger=api) runner는 fallback 대상에서 제외된다."""
+        runner_id = "fb-hidden-01"
+        log_file = tmp_path / "runner-hidden.log"
+        log_file.write_text("boot line\nhidden live line\n", encoding="utf-8")
+
+        sync_redis.sadd("plan-runner:active_runners", runner_id)
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "api")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))
+
+        self._install_idle_dual_pubsub(async_redis)
+        event_service._async = async_redis
+        event_service._file_poll_timeout = 0.0
+        event_service._file_poll_interval_sec = 0.0
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4, timeout=0.6)
+        await gen.aclose()
+
+        log_events = [e for e in events if e.startswith("event: log\n")]
+        assert len(log_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_events_fallback_then_same_pubsub_line_is_deduped(
+        self,
+        event_service,
+        async_redis,
+        sync_redis,
+        tmp_path,
+    ):
+        """R: fallback으로 주입된 동일 라인이 이후 pub/sub로 와도 log 중복 발행되지 않는다."""
+        runner_id = "fb-dedup-01"
+        duplicate_line = "same line from fallback and pubsub"
+        log_file = tmp_path / "runner-dedup.log"
+        log_file.write_text("boot\n", encoding="utf-8")
+
+        sync_redis.sadd("plan-runner:active_runners", runner_id)
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))
+
+        emit_pubsub_duplicate = False
+
+        async def log_get_message(**kwargs):
+            nonlocal emit_pubsub_duplicate
+            if emit_pubsub_duplicate:
+                emit_pubsub_duplicate = False
+                return {
+                    "type": "pmessage",
+                    "channel": f"plan-runner:logs:{runner_id}",
+                    "pattern": LOG_CHANNEL_PATTERN,
+                    "data": duplicate_line,
+                }
+            return None
+
+        self._install_idle_dual_pubsub(async_redis, log_get_message=log_get_message)
+        event_service._async = async_redis
+        event_service._file_poll_timeout = 0.0
+        event_service._file_poll_interval_sec = 0.0
+
+        gen = event_service.stream_events()
+        _ = await gen.__anext__()  # connected
+        _ = await gen.__anext__()  # status
+
+        with open(log_file, "a", encoding="utf-8") as handle:
+            handle.write(f"{duplicate_line}\n")
+
+        fallback_events = await _collect_events(gen, 5, timeout=1.2)
+        fallback_log_payloads = [
+            json.loads(e.split("data: ")[1].split("\n")[0])
+            for e in fallback_events
+            if e.startswith("event: log\n")
+        ]
+        assert any(p["line"] == duplicate_line for p in fallback_log_payloads)
+
+        emit_pubsub_duplicate = True
+        after_pubsub_events = await _collect_events(gen, 3, timeout=0.8)
+        after_pubsub_payloads = [
+            json.loads(e.split("data: ")[1].split("\n")[0])
+            for e in after_pubsub_events
+            if e.startswith("event: log\n")
+        ]
+        assert all(p["line"] != duplicate_line for p in after_pubsub_payloads)
+
+        await gen.aclose()
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_completed_cleans_tail_state(
+        self,
+        event_service,
+        async_redis,
+        sync_redis,
+        tmp_path,
+    ):
+        """R: log_completed 수신 시 runner tail/dedup 상태가 즉시 정리된다."""
+        runner_id = "fb-cleanup-01"
+        log_file = tmp_path / "runner-cleanup.log"
+        log_file.write_text("boot\n", encoding="utf-8")
+
+        sync_redis.sadd("plan-runner:active_runners", runner_id)
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))
+
+        emit_completed = False
+
+        async def log_get_message(**kwargs):
+            nonlocal emit_completed
+            if emit_completed:
+                emit_completed = False
+                return {
+                    "type": "pmessage",
+                    "channel": f"plan-runner:logs:{runner_id}",
+                    "pattern": LOG_CHANNEL_PATTERN,
+                    "data": _LOG_COMPLETED_SENTINEL,
+                }
+            return None
+
+        self._install_idle_dual_pubsub(async_redis, log_get_message=log_get_message)
+        event_service._async = async_redis
+        event_service._file_poll_timeout = 0.0
+        event_service._file_poll_interval_sec = 0.0
+
+        gen = event_service.stream_events()
+        _ = await gen.__anext__()  # connected
+        _ = await gen.__anext__()  # status
+
+        _ = await asyncio.wait_for(gen.__anext__(), timeout=2.0)  # fallback log 이벤트(초기 파일 라인)
+        assert runner_id in event_service._runner_tail_state
+
+        emit_completed = True
+        completed_event = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
+        await gen.aclose()
+
+        assert completed_event.startswith("event: log_completed\n")
+        assert runner_id not in event_service._runner_tail_state
+
+
 # ─── MERGE 라인 이중 경로 검증 ───────────────────────────────────────────────
 
 class TestMergeLineChannelRouting:

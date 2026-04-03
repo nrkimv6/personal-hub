@@ -83,6 +83,8 @@
 		injectMergeCompleted: (reason?: string, status?: string) => void;
 	}
 	const logRefs = new Map<string, LogViewerRef>();
+	const injectedLineFingerprints = new Map<string, string[]>();
+	const INJECT_LINE_DEDUP_LIMIT = 160;
 
 	function handlePlanModalOpen(plan: DevRunnerPlanFileResponse) {
 		modalPlan = plan;
@@ -166,6 +168,34 @@
 		status?: string | null;
 		error?: string | null;
 		source: CompletionEventSource;
+	}
+
+	function lineFingerprint(runnerId: string, line: string): string {
+		let hash = 2166136261;
+		const source = `${runnerId}\u0000${line}`;
+		for (let i = 0; i < source.length; i++) {
+			hash ^= source.charCodeAt(i);
+			hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+		}
+		return (hash >>> 0).toString(16);
+	}
+
+	function clearRunnerDedup(runnerId: string) {
+		injectedLineFingerprints.delete(runnerId);
+	}
+
+	function shouldSkipInjectedLine(runnerId: string, line: string): boolean {
+		const normalized = line.trimEnd();
+		if (!normalized) return true;
+		const fp = lineFingerprint(runnerId, normalized);
+		const recent = injectedLineFingerprints.get(runnerId) ?? [];
+		if (recent.includes(fp)) return true;
+		recent.push(fp);
+		if (recent.length > INJECT_LINE_DEDUP_LIMIT) {
+			recent.shift();
+		}
+		injectedLineFingerprints.set(runnerId, recent);
+		return false;
 	}
 
 	function normalizeEventLine(payload: unknown): string {
@@ -272,6 +302,12 @@
 	): RunnerSource[] {
 		const runners = allRunners.filter(isVisibleRunnerSource);
 		const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
+		const visibleIds = new Set(runners.map(r => r.runner_id));
+		for (const cachedRunnerId of injectedLineFingerprints.keys()) {
+			if (!visibleIds.has(cachedRunnerId)) {
+				injectedLineFingerprints.delete(cachedRunnerId);
+			}
+		}
 
 		runnerTabs = runnerTabs.map(tab => {
 			const runner = runnerMap.get(tab.id);
@@ -287,6 +323,12 @@
 			activeTabId = runnerTabs[runnerTabs.length - 1].id;
 		}
 		return runners;
+	}
+
+	function injectRunnerLine(runnerId: string, payload: EventLinePayload) {
+		const normalizedLine = normalizeEventLine(payload);
+		if (shouldSkipInjectedLine(runnerId, normalizedLine)) return;
+		logRefs.get(runnerId)?.injectLine(normalizedLine);
 	}
 
 	async function syncRunnerTabs(opts: { selectActive?: boolean } = {}): Promise<RunnerSource[]> {
@@ -435,11 +477,7 @@
 		} else if (eventName === 'log') {
 			try {
 				const { runner_id, line } = JSON.parse(data) as { runner_id: string; line: EventLinePayload };
-				const normalizedLine = normalizeEventLine(line);
-				if (!normalizedLine) return;
-				// MERGE 로그는 merge_log 이벤트가 동일 라인을 전달하므로 중복 방지를 위해 skip
-				if (normalizedLine.includes('[MERGE]')) return;
-				logRefs.get(runner_id)?.injectLine(normalizedLine);
+				injectRunnerLine(runner_id, line);
 			} catch { /* 무시 */ }
 		} else if (eventName === 'log_completed') {
 			try {
@@ -461,9 +499,7 @@
 		} else if (eventName === 'merge_log') {
 			try {
 				const { runner_id, line } = JSON.parse(data) as { runner_id: string; line: EventLinePayload };
-				const normalizedLine = normalizeEventLine(line);
-				if (!normalizedLine) return;
-				logRefs.get(runner_id)?.injectLine(normalizedLine);
+				injectRunnerLine(runner_id, line);
 			} catch { /* 무시 */ }
 		} else if (eventName === 'merge_log_completed') {
 			try {
@@ -537,6 +573,7 @@
 			});
 		}
 		logRefs.delete(runnerId);
+		clearRunnerDedup(runnerId);
 		runnerTabs = runnerTabs.filter(t => t.id !== runnerId);
 		if (activeTabId === runnerId) {
 			activeTabId = runnerTabs.length > 0 ? runnerTabs[runnerTabs.length - 1].id : null;
@@ -668,6 +705,7 @@
 			clearInterval(mergeQueuePollInterval);
 			mergeQueuePollInterval = null;
 		}
+		injectedLineFingerprints.clear();
 		});
 
 
