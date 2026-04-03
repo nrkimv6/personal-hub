@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -17,6 +17,7 @@ from app.modules.slide_scanner.services.mobile_delete import process_remote_dele
 from app.modules.slide_scanner.services.mobile_handoff import handoff_item_to_slides
 
 router = APIRouter(prefix="/mobile-review", tags=["slide-scanner"])
+_APPROVAL_STATUSES = {"PENDING", "APPROVED", "REJECTED"}
 
 
 class RejectRequest(BaseModel):
@@ -33,9 +34,100 @@ def _fetch_mobile_item_or_404(db: Session, item_id: int):
     return row
 
 
+def _normalize_approval_status_filter(raw_values: list[str] | None) -> list[str]:
+    if not raw_values:
+        return ["PENDING", "APPROVED"]
+
+    normalized: list[str] = []
+    for raw in raw_values:
+        for candidate in raw.split(","):
+            value = candidate.strip().upper()
+            if not value:
+                continue
+            if value not in _APPROVAL_STATUSES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported approval_status: {value}",
+                )
+            if value not in normalized:
+                normalized.append(value)
+
+    if not normalized:
+        raise HTTPException(status_code=400, detail="approval_status filter is empty")
+    return normalized
+
+
+def _derive_action_flags(
+    *,
+    approval_status: str,
+    remote_delete_status: str,
+    handoff_status: str,
+    slide_id: int | None,
+) -> dict[str, bool]:
+    can_approve = approval_status == "PENDING"
+    can_remote_delete = (
+        approval_status == "APPROVED"
+        and remote_delete_status != "DONE"
+        and handoff_status != "DONE"
+    )
+    can_handoff = (
+        approval_status == "APPROVED"
+        and remote_delete_status == "DONE"
+        and handoff_status != "DONE"
+    )
+    can_open_editor = handoff_status == "DONE" and slide_id is not None
+    return {
+        "can_approve": can_approve,
+        "can_remote_delete": can_remote_delete,
+        "can_handoff": can_handoff,
+        "can_open_editor": can_open_editor,
+    }
+
+
+def _build_state_snapshot(row) -> dict[str, Any]:
+    slide_id = int(row.slide_id) if row.slide_id is not None else None
+    payload: dict[str, Any] = {
+        "approval_status": row.approval_status,
+        "remote_delete_status": row.remote_delete_status,
+        "handoff_status": row.handoff_status,
+        "slide_id": slide_id,
+    }
+    payload.update(
+        _derive_action_flags(
+            approval_status=row.approval_status,
+            remote_delete_status=row.remote_delete_status,
+            handoff_status=row.handoff_status,
+            slide_id=slide_id,
+        )
+    )
+    return payload
+
+
+def _fetch_mobile_item_state(db: Session, item_id: int):
+    row = db.execute(
+        text(
+            """
+            SELECT
+                id,
+                approval_status,
+                remote_delete_status,
+                handoff_status,
+                slide_id
+            FROM mobile_ingest_items
+            WHERE id = :item_id
+            """
+        ),
+        {"item_id": item_id},
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Mobile ingest item not found")
+    return row
+
+
 @router.get("/items")
 def get_mobile_review_items(
     device_id: str | None = None,
+    approval_status: list[str] | None = Query(default=None),
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
@@ -46,11 +138,21 @@ def get_mobile_review_items(
         raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
 
     aliases = parse_mobile_device_aliases(settings.MOBILE_DEVICE_ALIAS_JSON)
-    where_clause = "WHERE approval_status = 'PENDING'"
+    approval_filter = _normalize_approval_status_filter(approval_status)
     params: dict[str, Any] = {"skip": skip, "limit": limit}
+    where_clauses: list[str] = []
+
+    approval_placeholders: list[str] = []
+    for index, status in enumerate(approval_filter):
+        key = f"approval_status_{index}"
+        params[key] = status
+        approval_placeholders.append(f":{key}")
+    where_clauses.append(f"approval_status IN ({', '.join(approval_placeholders)})")
+
     if device_id:
-        where_clause += " AND device_id = :device_id"
+        where_clauses.append("device_id = :device_id")
         params["device_id"] = device_id
+    where_clause = "WHERE " + " AND ".join(where_clauses)
 
     total = (
         db.execute(
@@ -75,6 +177,7 @@ def get_mobile_review_items(
                 remote_delete_status,
                 handoff_status,
                 local_cleanup_status,
+                slide_id,
                 error_message,
                 created_at,
                 updated_at
@@ -102,11 +205,20 @@ def get_mobile_review_items(
             "remote_delete_status": row.remote_delete_status,
             "handoff_status": row.handoff_status,
             "local_cleanup_status": row.local_cleanup_status,
+            "slide_id": int(row.slide_id) if row.slide_id is not None else None,
             "error_message": row.error_message,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
             "image_url": f"/api/v1/ss/mobile-review/{row.id}/image",
         }
+        item.update(
+            _derive_action_flags(
+                approval_status=row.approval_status,
+                remote_delete_status=row.remote_delete_status,
+                handoff_status=row.handoff_status,
+                slide_id=int(row.slide_id) if row.slide_id is not None else None,
+            )
+        )
         items.append(item)
 
     return {
@@ -144,16 +256,16 @@ def approve_mobile_review_item(item_id: int, db: Session = Depends(get_db)) -> d
         {"item_id": item_id},
     )
     db.commit()
-    return {
-        "id": item_id,
-        "approval_status": "APPROVED",
-    }
+    state = _fetch_mobile_item_state(db, item_id)
+    payload = {"id": item_id}
+    payload.update(_build_state_snapshot(state))
+    return payload
 
 
 @router.post("/{item_id}/reject")
 def reject_mobile_review_item(
     item_id: int,
-    payload: RejectRequest,
+    request: RejectRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     row = _fetch_mobile_item_or_404(db, item_id)
@@ -171,15 +283,17 @@ def reject_mobile_review_item(
         ),
         {
             "item_id": item_id,
-            "reason": payload.reason.strip(),
+            "reason": request.reason.strip(),
         },
     )
     db.commit()
-    return {
+    state = _fetch_mobile_item_state(db, item_id)
+    payload = {
         "id": item_id,
-        "approval_status": "REJECTED",
-        "reason": payload.reason.strip(),
+        "reason": request.reason.strip(),
     }
+    payload.update(_build_state_snapshot(state))
+    return payload
 
 
 def _require_approved_for_delete(row) -> None:
@@ -201,7 +315,10 @@ def remote_delete_mobile_item(item_id: int, db: Session = Depends(get_db)) -> di
         adb_path=settings.ADB_PATH,
         allowed_roots=settings.MOBILE_REMOTE_ROOTS,
     )
-    return result
+    state = _fetch_mobile_item_state(db, item_id)
+    payload = dict(result)
+    payload.update(_build_state_snapshot(state))
+    return payload
 
 
 @router.post("/{item_id}/remote-delete/retry")
@@ -215,7 +332,10 @@ def retry_remote_delete_mobile_item(item_id: int, db: Session = Depends(get_db))
         adb_path=settings.ADB_PATH,
         allowed_roots=settings.MOBILE_REMOTE_ROOTS,
     )
-    return result
+    state = _fetch_mobile_item_state(db, item_id)
+    payload = dict(result)
+    payload.update(_build_state_snapshot(state))
+    return payload
 
 
 @router.post("/{item_id}/handoff")
@@ -234,8 +354,11 @@ def handoff_mobile_item(item_id: int, db: Session = Depends(get_db)) -> dict[str
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    return {
+    state = _fetch_mobile_item_state(db, item_id)
+    payload = {
         "item_id": item_id,
         "slide_id": slide_id,
         "slide_url": f"/api/v1/ss/slides/{slide_id}",
     }
+    payload.update(_build_state_snapshot(state))
+    return payload

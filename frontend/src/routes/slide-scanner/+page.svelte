@@ -215,18 +215,17 @@
     }
   }
 
-  async function handleMoveToEditor(event: CustomEvent<{ itemId: number; fileName: string }>) {
+  async function handleMoveToEditor(event: CustomEvent<{ itemId: number; slideId: number }>) {
     loading = true;
     errorMessage = '';
     infoMessage = '';
     resultUrl = null;
 
     try {
-      const file = await slideScannerApi.getMobileReviewImageFile(event.detail.itemId, event.detail.fileName);
-      await handleSelectFile(file);
+      await loadSlideForEditor(event.detail.slideId);
       activeTab = 'editor';
       await goto('?tab=editor', { replaceState: false, noScroll: true, keepFocus: true });
-      toast.success('승인 큐 이미지를 보정 에디터로 불러왔습니다.');
+      toast.success('handoff 완료 슬라이드를 보정 에디터로 열었습니다.');
     } catch (error) {
       errorMessage = parseError(error);
       toast.error(errorMessage);
