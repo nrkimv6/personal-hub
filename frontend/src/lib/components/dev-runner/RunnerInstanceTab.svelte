@@ -3,6 +3,7 @@
 	import { devRunnerRunnerApi, devRunnerWorkflowApi } from '$lib/api';
 	import type { DevRunnerRunStatusResponse } from '$lib/api';
 	import LogViewer from './LogViewer.svelte';
+	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 
 	interface LogViewerRef {
 		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
@@ -174,18 +175,8 @@
 		!planFile ? '(알 수 없음)' : isAllPlans(planFile) ? '전체 실행' : planFile.split(/[\\/]/).pop() ?? planFile
 	);
 
-	let statusIcon = $derived(
-		running ? '실행중'
-		: exitReason === 'completed' ? '완료'
-		: exitReason === 'no_progress' ? '⏸️ 중단'
-		: exitReason === 'rate_limit' || exitReason === 'rate_limited' ? '⚠️ 제한'
-		: exitReason === 'quota_exhausted' ? '⚠️ Quota'
-		: exitReason === 'error' || exitReason === 'auto_done_failed' ? '❌ 에러'
-		: exitReason === 'stopped' ? '⏹ 중지'
-		: exitReason === 'archived' ? '📁 아카이브됨'
-		: exitReason === 'on_hold' ? '⏸️ 보류'
-		: '⁉️ 미상'
-	);
+	let exitDisplay = $derived(getExitReasonDisplay(exitReason));
+	let statusIcon = $derived(running ? '실행중' : exitDisplay.statusIcon);
 </script>
 
 <div class="flex flex-col h-full">

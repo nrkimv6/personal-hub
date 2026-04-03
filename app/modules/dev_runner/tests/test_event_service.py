@@ -755,6 +755,30 @@ class TestMergeLineChannelRouting:
         assert data["reason"] == "merge_failed"
 
     @pytest.mark.asyncio
+    async def test_stream_events_merge_completed_reason_passthrough(self, event_service, async_redis):
+        """R: __MERGE_COMPLETED::commit_failed__ → merge_log_completed가 raw reason 유지."""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:merge-log:runner10b",
+            "pattern": MERGE_LOG_CHANNEL_PATTERN,
+            "data": "__MERGE_COMPLETED::commit_failed__",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: merge_log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner10b"
+        assert data["status"] == "failed"
+        assert data["reason"] == "commit_failed"
+
+    @pytest.mark.asyncio
     async def test_stream_events_log_completed_with_status(self, event_service, async_redis):
         """R: __COMPLETED__:FAILED → log_completed 이벤트에 status='failed' 포함"""
         log_msg = {

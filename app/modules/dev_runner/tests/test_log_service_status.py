@@ -69,6 +69,16 @@ class TestMergeCompletedSentinelParsing:
         assert "data: merge_failed" in completed[0], f"data: merge_failed 기대, got: {completed[0]}"
 
     @pytest.mark.asyncio
+    async def test_merge_completed_reason_passthrough_sse(self):
+        """R: __MERGE_COMPLETED::commit_failed__ → raw reason(commit_failed) 유지."""
+        svc = _make_log_service([_msg("__MERGE_COMPLETED::commit_failed__")])
+        chunks = await _collect(svc.stream_merge_log("r1"))
+
+        completed = [c for c in chunks if "event: completed" in c]
+        assert len(completed) == 1
+        assert "data: commit_failed" in completed[0], f"data: commit_failed 기대, got: {completed[0]}"
+
+    @pytest.mark.asyncio
     async def test_merge_completed_no_suffix_backward_compat(self):
         """B: __MERGE_COMPLETED__ (접미사 없음) → data: completed (하위호환 기본값)"""
         svc = _make_log_service([_msg("__MERGE_COMPLETED__")])
@@ -90,3 +100,13 @@ class TestMergeCompletedSentinelParsing:
         completed = [c for c in chunks if "event: completed" in c]
         assert len(completed) == 1, f"completed 이벤트가 1개여야 함, got: {chunks}"
         assert "data: failed" in completed[0], f"reason=failed 기대, got: {completed[0]}"
+
+    @pytest.mark.asyncio
+    async def test_log_completed_rate_limited_normalized_sse(self):
+        """R: __COMPLETED::rate_limited__ → data: rate_limit 정규화."""
+        svc = _make_log_service([_msg("__COMPLETED::rate_limited__")])
+        chunks = await _collect(svc.stream_log_file("r1"))
+
+        completed = [c for c in chunks if "event: completed" in c]
+        assert len(completed) == 1
+        assert "data: rate_limit" in completed[0], f"reason=rate_limit 기대, got: {completed[0]}"

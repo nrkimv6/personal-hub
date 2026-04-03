@@ -18,6 +18,12 @@ import redis
 import redis.asyncio as aioredis
 
 from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services.completion_reason import (
+    is_log_completed_payload,
+    is_merge_completed_payload,
+    parse_log_completed_payload,
+    parse_merge_completed_payload,
+)
 from app.shared.redis.client import RedisClient
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 from app.modules.dev_runner.schemas import LogResponse, RunHistoryItem, RunHistoryResponse, FullLogResponse
@@ -328,15 +334,8 @@ class LogService:
                             _first_msg_logged = True
                         _no_msg_since = time.monotonic()
                         data = message["data"]
-                        if data.startswith("__COMPLETED"):
-                            # runner 종료 신호 — exit_reason 파싱 후 completed 이벤트 전송
-                            if data == "__COMPLETED__":
-                                reason = "completed"
-                            else:
-                                # __COMPLETED::{reason}__ 형태에서 reason 추출
-                                reason = data[len("__COMPLETED::"):].rstrip("_") or "completed"
-                            if reason == "rate_limited":
-                                reason = "rate_limit"
+                        if is_log_completed_payload(data):
+                            _, reason = parse_log_completed_payload(data)
                             yield f"event: completed\ndata: {reason}\n\n"
                             return
                         if multiline_frame_enabled:
@@ -442,12 +441,8 @@ class LogService:
                     )
                     if message and message["type"] == "message":
                         data = message["data"]
-                        if "__MERGE_COMPLETED__" in data:
-                            # sentinel 접미사 파싱: __MERGE_COMPLETED__:SUCCESS / :FAILED
-                            # 하위호환: 접미사 없으면 SUCCESS 기본값
-                            suffix = data.split("__MERGE_COMPLETED__", 1)[1]
-                            suffix = suffix.lstrip(":")
-                            reason = "completed" if (not suffix or suffix == "SUCCESS") else "merge_failed"
+                        if is_merge_completed_payload(data):
+                            _, reason = parse_merge_completed_payload(data)
                             yield f"event: completed\ndata: {reason}\n\n"
                             return
                         yield _format_sse_data(_ANSI_ESCAPE_RE.sub("", data))

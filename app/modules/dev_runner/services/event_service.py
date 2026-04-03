@@ -21,6 +21,14 @@ from typing import AsyncGenerator, Optional
 import redis.asyncio as aioredis
 import redis as redis_sync
 
+from app.modules.dev_runner.services.completion_reason import (
+    LOG_COMPLETED_SENTINEL as _LOG_COMPLETED_SENTINEL,
+    MERGE_LOG_COMPLETED_SENTINEL as _MERGE_LOG_COMPLETED_SENTINEL,
+    is_log_completed_payload as _is_log_completed_payload,
+    is_merge_completed_payload as _is_merge_completed_payload,
+    parse_log_completed_payload as _parse_log_completed_payload,
+    parse_merge_completed_payload as _parse_merge_completed_payload,
+)
 from app.shared.redis.client import RedisClient
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 from app.modules.dev_runner.services.visibility import is_visible_runner
@@ -42,25 +50,6 @@ KEYEVENT_CHANNEL = "__keyevent@0__:set"
 LOG_CHANNEL_PATTERN = "plan-runner:logs:*"
 MERGE_LOG_CHANNEL_PATTERN = "plan-runner:merge-log:*"
 
-# 완료 신호 sentinel
-_LOG_COMPLETED_SENTINEL = "__COMPLETED__"
-_MERGE_LOG_COMPLETED_SENTINEL = "__MERGE_COMPLETED__"
-_LOG_COMPLETED_REASON_PREFIX = "__COMPLETED::"
-_MERGE_COMPLETED_REASON_PREFIX = "__MERGE_COMPLETED::"
-_FAILED_COMPLETION_REASONS = {
-    "failed",
-    "error",
-    "rate_limit",
-    "commit_failed",
-    "quota_exhausted",
-    "plan_result_missing",
-    "auto_plan_failed",
-    "verify_result_missing",
-    "auto_verify_failed",
-    "no_progress",
-    "merge_failed",
-}
-
 # 감시할 키 접두사 → 이벤트 타입 매핑
 # 키가 이 접두사로 시작하면 해당 이벤트를 발행한다.
 KEY_EVENT_MAP = {
@@ -70,37 +59,6 @@ KEY_EVENT_MAP = {
 }
 
 HEARTBEAT_INTERVAL = 30  # 초
-
-
-def _normalize_completion_reason(reason: Optional[str]) -> str:
-    normalized = str(reason or "completed").strip().lower()
-    if normalized == "rate_limited":
-        return "rate_limit"
-    return normalized or "completed"
-
-
-def _parse_log_completed_payload(data: str) -> tuple[str, str]:
-    """`__COMPLETED__` sentinel을 (status, reason)으로 변환."""
-    if data.startswith(_LOG_COMPLETED_REASON_PREFIX):
-        reason = _normalize_completion_reason(data[len(_LOG_COMPLETED_REASON_PREFIX):].rstrip("_"))
-        status = "failed" if reason in _FAILED_COMPLETION_REASONS else "success"
-        return status, reason
-    suffix = data[len(_LOG_COMPLETED_SENTINEL):]
-    if suffix == ":FAILED":
-        return "failed", "failed"
-    return "success", "completed"
-
-
-def _parse_merge_completed_payload(data: str) -> tuple[str, str]:
-    """`__MERGE_COMPLETED__` sentinel을 (status, reason)으로 변환."""
-    if data.startswith(_MERGE_COMPLETED_REASON_PREFIX):
-        reason = _normalize_completion_reason(data[len(_MERGE_COMPLETED_REASON_PREFIX):].rstrip("_"))
-        status = "failed" if reason in _FAILED_COMPLETION_REASONS else "success"
-        return status, reason
-    suffix = data[len(_MERGE_LOG_COMPLETED_SENTINEL):]
-    if suffix == ":FAILED":
-        return "failed", "merge_failed"
-    return "success", "completed"
 
 
 def _build_log_line_payload(data: str) -> object:
@@ -345,13 +303,13 @@ class EventService:
                             runner_id = self._extract_runner_id_from_channel(channel)
                             if runner_id:
                                 is_merge = channel.startswith("plan-runner:merge-log:")
-                                if data.startswith(_MERGE_LOG_COMPLETED_SENTINEL) or data.startswith(_MERGE_COMPLETED_REASON_PREFIX):
+                                if _is_merge_completed_payload(data):
                                     status, reason = _parse_merge_completed_payload(data)
                                     yield self._sse(
                                         "merge_log_completed",
                                         {"runner_id": runner_id, "status": status, "reason": reason},
                                     )
-                                elif data.startswith(_LOG_COMPLETED_SENTINEL) or data.startswith(_LOG_COMPLETED_REASON_PREFIX):
+                                elif _is_log_completed_payload(data):
                                     status, reason = _parse_log_completed_payload(data)
                                     payload = {"runner_id": runner_id, "status": status, "reason": reason}
                                     try:

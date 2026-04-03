@@ -1,5 +1,6 @@
 <script lang="ts">
 	import DevRunnerSettingsPanel from './DevRunnerSettingsPanel.svelte';
+	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 
 	interface RunnerTab {
 		id: string;
@@ -257,14 +258,9 @@
 					<!-- 상태 dot -->
 					{#if runner.running}
 						<div class="pulse-dot bg-status-running shrink-0"></div>
-					{:else if runner.exit_reason === 'completed'}
-						<div class="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"></div>
-					{:else if runner.exit_reason === 'no_progress' || runner.exit_reason === 'rate_limit' || runner.exit_reason === 'rate_limited' || runner.exit_reason === 'quota_exhausted' || runner.exit_reason === 'stopped' || runner.exit_reason === 'on_hold' || runner.exit_reason === 'archived'}
-						<div class="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0"></div>
-					{:else if runner.exit_reason === 'error' || runner.exit_reason === 'auto_done_failed'}
-						<div class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></div>
 					{:else}
-						<div class="w-1.5 h-1.5 rounded-full bg-muted-foreground shrink-0"></div>
+						{@const exitDisplay = getExitReasonDisplay(runner.exit_reason)}
+						<div class="w-1.5 h-1.5 rounded-full {exitDisplay.dotClass} shrink-0"></div>
 					{/if}
 
 					<!-- plan 파일명 -->
