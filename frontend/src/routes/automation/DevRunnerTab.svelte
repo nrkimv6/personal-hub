@@ -713,7 +713,7 @@
 				<!-- 좌측 패널: Plans/Tasks/Merge/설정 (모바일=오버레이, 데스크톱=고정) -->
 				<div class="
 					{taskHistoryOpen ? 'flex' : 'hidden'} sm:flex
-					flex-col overflow-hidden
+					flex-col min-h-0 overflow-hidden
 					w-[300px] sm:w-[340px] shrink-0
 					fixed sm:static inset-y-0 left-0 z-50 sm:z-auto
 					bg-card rounded-md border border-border
@@ -761,16 +761,18 @@
 					<!-- 탭 콘텐츠 -->
 					<div class="flex-1 min-h-0 overflow-hidden">
 						{#if taskHistoryTab === 'tasks'}
-							<div class="px-4 pb-4 h-full flex flex-col">
+							<div class="px-4 pb-4 flex-1 min-h-0 flex flex-col overflow-hidden">
 								{#if currentTracking}
-									<CurrentTrackingCard tracking={currentTracking} />
+									<div class="shrink-0">
+										<CurrentTrackingCard tracking={currentTracking} />
+									</div>
 								{/if}
 								<div class="flex-1 min-h-0 overflow-hidden">
 									<TaskList planPath={taskListPlanPath} refreshTick={taskListRefreshTick} />
 								</div>
 							</div>
 						{:else if taskHistoryTab === 'plans'}
-							<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
+							<div class="px-4 pb-4 flex-1 min-h-0 overflow-hidden flex flex-col">
 								<PlanList
 									{plans}
 									onPlansChange={fetchPlans}
@@ -783,12 +785,16 @@
 								/>
 							</div>
 						{:else if taskHistoryTab === 'merge'}
-							<div class="h-full overflow-hidden">
-								<MergeQueuePanel />
-							<div class="border-t border-gray-200 mt-2"><WorkflowList /></div>
+							<div class="h-full min-h-0 flex flex-col overflow-hidden">
+								<div class="min-h-0 flex-[3] overflow-hidden">
+									<MergeQueuePanel />
+								</div>
+								<div class="min-h-0 flex-[2] overflow-hidden border-t border-gray-200">
+									<WorkflowList />
+								</div>
 							</div>
 						{:else if taskHistoryTab === 'logs'}
-							<div class="h-full overflow-hidden">
+							<div class="h-full min-h-0 overflow-hidden">
 								<LogHistoryPanel />
 							</div>
 						{/if}

@@ -82,7 +82,7 @@
 	});
 </script>
 
-<div class="p-4 flex flex-col h-full overflow-hidden">
+<div class="p-4 flex flex-col h-full min-h-0 overflow-hidden">
 	<div class="mb-3 flex items-center justify-between shrink-0">
 		<div class="flex items-center gap-2">
 			<h3 class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Merge Queue</h3>
@@ -104,7 +104,7 @@
 		<div class="bg-red-50 border border-red-100 text-red-600 text-[10px] p-2 rounded mb-3 shrink-0">{error}</div>
 	{/if}
 
-	<div class="flex-1 min-h-0 overflow-y-auto pr-0.5 custom-scrollbar">
+	<div class="flex-1 min-h-0 overflow-y-auto pr-0.5 dr-scrollbar-thin">
 		{#if activeItems.length === 0 && !loading}
 			<div class="flex flex-col items-center justify-center py-10 text-gray-400">
 				<svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 mb-2 opacity-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 21V9a9 9 0 0 0 9 9"/><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/></svg>

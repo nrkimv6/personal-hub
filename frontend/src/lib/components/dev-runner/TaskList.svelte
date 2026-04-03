@@ -46,7 +46,7 @@
 
 </script>
 
-<div class="flex flex-col gap-2 h-full min-h-0 overflow-y-auto">
+<div class="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto dr-scrollbar-thin">
 	{#if !planPath}
 		<div class="text-center py-8 text-xs text-gray-400">
 			Plan을 선택하면 항목이 표시됩니다
