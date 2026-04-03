@@ -8,15 +8,19 @@ T3 통합 검증:
 import pytest
 import time
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import fakeredis
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from app.modules.dev_runner.routes.runner import router as runner_router
 from app.modules.dev_runner.services.redis_connection import RECENT_RUNNERS_TTL
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
+BASE_URL = "/api/v1/dev-runner"
 
 
 def simulate_cleanup_redis_state(runner_id: str, exit_reason: str, fake_redis, stop_stage: str | None = None):
@@ -52,6 +56,27 @@ def simulate_listener_cleanup(runner_id: str, fake_redis, pubsub_mock):
         fake_redis.publish(log_channel, f"__COMPLETED::{exit_reason}__")
     except Exception:
         pass
+
+
+def _make_runner_payload_from_redis(fake_redis, runner_id: str) -> dict:
+    """fakeredis 상태를 /runners 응답용 payload로 변환."""
+    return {
+        "runner_id": runner_id,
+        "running": False,
+        "plan_file": "docs/plan/test.md",
+        "engine": "claude",
+        "start_time": "2026-04-03T00:00:00",
+        "pid": 1234,
+        "worktree_path": None,
+        "branch": None,
+        "merge_status": None,
+        "trigger": "user",
+        "visible": True,
+        "orphan": False,
+        "exit_reason": fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason"),
+        "stop_stage": fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage"),
+        "error": fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:error"),
+    }
 
 
 class TestNoProgressExitSetsRedisIntegration:
@@ -194,4 +219,48 @@ class TestListenerPublishesExitReasonIntegration:
         assert msg is not None
         assert msg["data"] == "__COMPLETED::commit_failed__"
 
+        pubsub.close()
+
+
+class TestCommitFailedDetailConvergence:
+    """T3: listener publish, Redis error, /runners 응답이 같은 commit_failed detail로 수렴한다."""
+
+    @pytest.mark.http
+    def test_commit_failed_detail_converges_with_runners_response(self):
+        fake_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "tc-pytest-t3-008"
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+        detail = "exit_reason=commit_failed; detail=commit_scope=docs/plan/test.md"
+
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "commit_failed")
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", detail)
+
+        pubsub = fake_redis.pubsub()
+        pubsub.subscribe(log_channel)
+        pubsub.get_message(timeout=0.1)
+
+        simulate_listener_cleanup(runner_id, fake_redis, pubsub)
+
+        msg = pubsub.get_message(timeout=0.5)
+        assert msg is not None
+        assert msg["data"] == "__COMPLETED::commit_failed__"
+        assert fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:error") == detail
+
+        app = FastAPI()
+        app.include_router(runner_router, prefix=BASE_URL)
+        payload = _make_runner_payload_from_redis(fake_redis, runner_id)
+
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            return_value=[payload],
+        ):
+            with TestClient(app, raise_server_exceptions=True) as client:
+                response = client.get(f"{BASE_URL}/runners")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["exit_reason"] == "commit_failed"
+        assert data[0]["error"] == detail
         pubsub.close()

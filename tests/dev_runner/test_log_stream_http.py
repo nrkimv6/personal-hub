@@ -7,15 +7,21 @@ GET /api/v1/dev-runner/logs/stream?runner_id=X 엔드포인트 검증
 import json
 import threading
 import time
+from unittest.mock import patch
 
 import pytest
 import redis
 import requests
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.modules.dev_runner.routes.logs import router as logs_router
 
 ADMIN_API = "http://localhost:8001"
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 REDIS_DB = 0
+BASE_URL = "/api/v1/dev-runner"
 
 
 @pytest.fixture
@@ -28,6 +34,64 @@ def r_live():
         pytest.skip("Redis not available")
     yield client
     client.close()
+
+
+def _parse_sse_events(content: str) -> list[dict[str, str]]:
+    """TestClient SSE 응답 텍스트를 이벤트 목록으로 파싱."""
+    events: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for line in content.splitlines():
+        if not line:
+            if current:
+                events.append(current)
+                current = {}
+            continue
+        if line.startswith("event:"):
+            current["event"] = line[6:].strip()
+        elif line.startswith("data:"):
+            current["data"] = line[5:].strip()
+    if current:
+        events.append(current)
+    return events
+
+
+@pytest.fixture
+def local_client():
+    app = FastAPI()
+    app.include_router(logs_router, prefix=BASE_URL)
+    return TestClient(app, raise_server_exceptions=True)
+
+
+@pytest.mark.http
+def test_http_log_stream_commit_failed_keeps_reason_and_detail(local_client):
+    """T3: /logs/stream route는 detail 로그와 completed reason=commit_failed를 같은 스트림에 유지한다."""
+    detail = "exit_reason=commit_failed; detail=commit_scope=docs/plan/test.md"
+
+    async def _fake_stream_log_file(runner_id: str, since_line: int = 0):
+        assert runner_id == "t3-commit-failed"
+        assert since_line == 0
+        yield "event: connected\ndata: ok\n\n"
+        yield f"event: log\ndata: {detail}\n\n"
+        yield "event: completed\ndata: commit_failed\n\n"
+
+    with patch(
+        "app.modules.dev_runner.routes.logs.log_service.stream_log_file",
+        new=_fake_stream_log_file,
+    ):
+        response = local_client.get(
+            f"{BASE_URL}/logs/stream",
+            params={"runner_id": "t3-commit-failed"},
+            headers={"Accept": "text/event-stream"},
+        )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    events = _parse_sse_events(response.text)
+    log_event = next(event for event in events if event.get("event") == "log")
+    completed = next(event for event in events if event.get("event") == "completed")
+    assert log_event["data"] == detail
+    assert completed["data"] == "commit_failed"
+    assert events.index(log_event) < events.index(completed)
 
 
 # ---------------------------------------------------------------------------

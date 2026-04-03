@@ -90,3 +90,13 @@ class TestMergeCompletedSentinelParsing:
         completed = [c for c in chunks if "event: completed" in c]
         assert len(completed) == 1, f"completed 이벤트가 1개여야 함, got: {chunks}"
         assert "data: failed" in completed[0], f"reason=failed 기대, got: {completed[0]}"
+
+    @pytest.mark.asyncio
+    async def test_log_completed_commit_failed_sse(self):
+        """R: __COMPLETED::commit_failed__ → stream_log_file completed 이벤트에 reason: commit_failed"""
+        svc = _make_log_service([_msg("__COMPLETED::commit_failed__")])
+        chunks = await _collect(svc.stream_log_file("r1"))
+
+        completed = [c for c in chunks if "event: completed" in c]
+        assert len(completed) == 1, f"completed 이벤트가 1개여야 함, got: {chunks}"
+        assert "data: commit_failed" in completed[0], f"reason=commit_failed 기대, got: {completed[0]}"

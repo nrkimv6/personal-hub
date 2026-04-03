@@ -51,6 +51,11 @@ _ERROR_DETAIL_HINTS = (
     "exit code",
     "enoent",
     "winerror",
+    "commit_scope=",
+    "failed_projects=",
+    "dirty_files=",
+    "state transition commit",
+    "상태 전이 커밋",
 )
 
 
@@ -407,11 +412,10 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
 
         if runner_id and not _completed_for_flow:
             try:
+                error_message = _failure_message if _exit_reason == "commit_failed" else (_error_detail or _failure_message)
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", error_message)
                 if _error_detail:
-                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", _error_detail)
                     _publish_with_retry(redis_client, log_channel, f"[ERROR] {_error_detail}")
-                else:
-                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", _failure_message)
             except Exception as _error_save_err:
                 logger.debug(f"[_stream_output] error detail 저장 실패 (무시): {_error_save_err}")
 
