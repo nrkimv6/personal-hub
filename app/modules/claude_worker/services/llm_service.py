@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import re
 import subprocess
 from datetime import date, datetime, timedelta
@@ -12,6 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
+from app.shared.io import read_json, write_json_atomic
 
 logger = logging.getLogger("claude_worker.llm_service")
 
@@ -26,7 +28,10 @@ QUEUE_PRIORITY = ["system", "utility"]
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000
 
 # LLM 기본값 설정 파일
-LLM_DEFAULTS_FILE = Path("data/llm_defaults.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+DEFAULT_LLM_DEFAULTS_FILE = PROJECT_ROOT / "data" / "llm_defaults.json"
+LEGACY_LLM_DEFAULTS_FILE = Path("data/llm_defaults.json")
+LLM_DEFAULTS_FILE = DEFAULT_LLM_DEFAULTS_FILE
 
 # LLM worker가 실제 지원하는 provider
 SUPPORTED_LLM_PROVIDERS = {"claude", "gemini"}
@@ -50,6 +55,56 @@ KNOWN_CALLER_TYPES = [
     "plan_recurrence_check",
     "plan_recurrence_suggest",
 ]
+
+
+def _normalize_path(path: Path) -> str:
+    absolute = path if path.is_absolute() else (Path.cwd() / path)
+    return os.path.normcase(os.path.normpath(str(absolute)))
+
+
+def _same_path(lhs: Path, rhs: Path) -> bool:
+    return _normalize_path(lhs) == _normalize_path(rhs)
+
+
+def _resolve_llm_defaults_path() -> Path:
+    """테스트 monkeypatch seam(LLM_DEFAULTS_FILE)을 유지하면서 경로를 해석."""
+    configured = Path(LLM_DEFAULTS_FILE)
+    if configured.is_absolute():
+        return configured
+    return PROJECT_ROOT / configured
+
+
+def _is_default_llm_defaults_path(path: Path) -> bool:
+    return _same_path(path, DEFAULT_LLM_DEFAULTS_FILE)
+
+
+def _migrate_legacy_llm_defaults_if_needed(target_path: Path) -> None:
+    if not _is_default_llm_defaults_path(target_path):
+        logger.debug(f"[llm-defaults] 주입 경로 감지: 레거시 마이그레이션 스킵 ({target_path})")
+        return
+    if target_path.exists():
+        logger.debug(f"[llm-defaults] 기본 경로 파일 존재: 레거시 마이그레이션 스킵 ({target_path})")
+        return
+
+    legacy_path = (
+        LEGACY_LLM_DEFAULTS_FILE
+        if LEGACY_LLM_DEFAULTS_FILE.is_absolute()
+        else (Path.cwd() / LEGACY_LLM_DEFAULTS_FILE)
+    )
+    if not legacy_path.exists():
+        logger.debug(f"[llm-defaults] 레거시 파일 없음: 마이그레이션 스킵 ({legacy_path})")
+        return
+    if _same_path(legacy_path, target_path):
+        logger.debug(f"[llm-defaults] 레거시/기본 경로 동일: 마이그레이션 스킵 ({target_path})")
+        return
+
+    legacy_payload = read_json(legacy_path, default=None)
+    if not isinstance(legacy_payload, dict):
+        logger.warning(f"[llm-defaults] 레거시 설정 파일 손상: 마이그레이션 스킵 ({legacy_path})")
+        return
+
+    write_json_atomic(target_path, legacy_payload)
+    logger.info(f"[llm-defaults] 레거시 설정 마이그레이션 완료: {legacy_path} -> {target_path}")
 
 
 def _parse_quota_retry_ms(text: str) -> Optional[int]:
@@ -170,14 +225,19 @@ class LLMService:
         return payload
 
     def load_llm_defaults(self) -> Dict[str, Any]:
-        if not LLM_DEFAULTS_FILE.exists():
+        target_path = _resolve_llm_defaults_path()
+        _migrate_legacy_llm_defaults_if_needed(target_path)
+
+        if not target_path.exists():
             return self._default_defaults_payload()
 
         try:
-            data = json.loads(LLM_DEFAULTS_FILE.read_text(encoding="utf-8"))
+            data = read_json(target_path, default=None)
+            if not isinstance(data, dict):
+                raise ValueError("llm defaults payload is not an object")
             return self._sanitize_defaults_payload(data)
         except Exception:
-            logger.warning(f"[llm-defaults] 설정 파일 읽기 실패, 기본값 사용: {LLM_DEFAULTS_FILE}")
+            logger.warning(f"[llm-defaults] 설정 파일 읽기 실패, 기본값 사용: {target_path}")
             return self._default_defaults_payload()
 
     def save_llm_defaults(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,8 +270,8 @@ class LLMService:
                 }
             defaults["caller_defaults"] = caller_defaults
 
-        LLM_DEFAULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        LLM_DEFAULTS_FILE.write_text(json.dumps(defaults, ensure_ascii=False, indent=2), encoding="utf-8")
+        target_path = _resolve_llm_defaults_path()
+        write_json_atomic(target_path, defaults)
         return defaults
 
     def resolve_provider_model(

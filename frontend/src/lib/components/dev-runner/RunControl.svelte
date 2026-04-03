@@ -168,6 +168,14 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		return selectedEngineModelOptions[0] ?? '';
 	}
 
+	function getPhaseSelectId(phase: string, index: number): string {
+		const normalized = phase
+			.toLowerCase()
+			.replace(/[^a-z0-9_-]+/g, '-')
+			.replace(/^-+|-+$/g, '');
+		return `phase-model-${normalized || 'default'}-${index}`;
+	}
+
 	function formatEngineLabel(engine: string): string {
 		return ENGINE_LABELS[engine] ?? engine;
 	}
@@ -475,10 +483,14 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	{#if selectedEngineConfig}
 		<div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
 			<span class="text-[10px] font-bold text-gray-400 uppercase shrink-0 w-full sm:w-auto">Phase Models:</span>
-			{#each selectedEnginePhases as phase}
+			{#each selectedEnginePhases as phase, index}
 				<div class="flex items-center gap-1.5 flex-1 sm:flex-none">
-					<label class="text-[10px] font-mono uppercase text-muted-foreground w-28 shrink-0">{phase}</label>
+					<label
+						for={getPhaseSelectId(phase, index)}
+						class="text-[10px] font-mono uppercase text-muted-foreground w-28 shrink-0"
+					>{phase}</label>
 					<select
+						id={getPhaseSelectId(phase, index)}
 						class="border rounded px-1.5 py-0.5 flex-1 sm:w-40 h-6 text-[10px] font-mono bg-white"
 						value={getPhaseModel(phase)}
 						onchange={(e) => updateModel(phase, e.currentTarget.value)}

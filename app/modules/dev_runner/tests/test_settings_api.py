@@ -89,3 +89,23 @@ async def test_settings_api_RIGHT_put_partial_update(client):
     assert data["max_concurrent_runners"] == 6
     assert data["default_engine"] == "gemini"
     assert data["default_fix_engine"] == "cc-codex"
+
+
+@pytest.mark.anyio
+async def test_settings_api_RIGHT_put_partial_default_engine(client):
+    """default_engine만 부분 업데이트해도 다른 필드는 유지된다."""
+    resp1 = await client.put(
+        "/api/v1/dev-runner/settings",
+        json={"max_concurrent_runners": 4, "default_engine": "claude", "default_fix_engine": "gemini"},
+    )
+    assert resp1.status_code == 200
+
+    resp2 = await client.put(
+        "/api/v1/dev-runner/settings",
+        json={"default_engine": "cc-codex"},
+    )
+    assert resp2.status_code == 200
+    data = resp2.json()
+    assert data["max_concurrent_runners"] == 4
+    assert data["default_engine"] == "cc-codex"
+    assert data["default_fix_engine"] == "gemini"

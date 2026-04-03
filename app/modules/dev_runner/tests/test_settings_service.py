@@ -1,5 +1,7 @@
 """settings_service 유닛 테스트"""
 
+import json
+
 import pytest
 
 from app.modules.dev_runner.services.settings_service import SettingsService
@@ -79,3 +81,32 @@ def test_settings_update_ERROR_invalid_default_engine(svc):
     """지원되지 않는 기본 엔진 입력 시 ValueError"""
     with pytest.raises(ValueError):
         svc.update({"default_engine": "unknown"})
+
+
+def test_settings_get_RIGHT_injected_path_skips_legacy_migration(
+    svc: SettingsService,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """settings_file 주입 경로는 레거시(data/*) 마이그레이션 대상이 아니다."""
+    monkeypatch.chdir(tmp_path)
+    legacy_file = tmp_path / "data" / "dev_runner_settings.json"
+    legacy_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy_file.write_text(
+        json.dumps(
+            {
+                "max_concurrent_runners": 9,
+                "default_engine": "gemini",
+                "default_fix_engine": "codex",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = svc.get()
+
+    assert result.max_concurrent_runners == config.MAX_CONCURRENT_RUNNERS
+    assert result.default_engine == "claude"
+    assert result.default_fix_engine == "claude"
+    assert not (tmp_path / "dev_runner_settings.json").exists()

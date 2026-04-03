@@ -8,6 +8,7 @@ FastAPI TestClient를 사용하여 실제 HTTP 요청/응답을 검증합니다.
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from app.database import get_db
 from app.modules.claude_worker.models.llm_request import LLMRequest
@@ -265,6 +266,73 @@ class TestQueueStats:
 
 class TestLlmDefaultsApi:
     """LLM 기본값 API 및 fallback 우선순위 테스트."""
+
+    def test_defaults_path_seam_monkeypatch_priority(self, client, monkeypatch, tmp_path):
+        original_path = Path(llm_service_module.LLM_DEFAULTS_FILE)
+        custom_path = tmp_path / "custom_llm_defaults.json"
+        monkeypatch.setattr(llm_service_module, "LLM_DEFAULTS_FILE", custom_path)
+
+        resp = client.put(
+            "/api/v1/llm/defaults",
+            json={"global_default": {"provider": "gemini", "model": "gemini-3-flash-preview"}, "caller_defaults": {}},
+        )
+        assert resp.status_code == 200
+        assert custom_path.exists()
+        assert not original_path.exists()
+
+    def test_defaults_path_is_cwd_independent(self, client, monkeypatch, tmp_path):
+        project_root = tmp_path / "fake-project"
+        project_root.mkdir(parents=True, exist_ok=True)
+        external_cwd = tmp_path / "external-cwd"
+        external_cwd.mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(llm_service_module, "PROJECT_ROOT", project_root)
+        monkeypatch.setattr(llm_service_module, "LLM_DEFAULTS_FILE", Path("data/llm_defaults.json"))
+        monkeypatch.chdir(external_cwd)
+
+        resp = client.put(
+            "/api/v1/llm/defaults",
+            json={"global_default": {"provider": "gemini", "model": "gemini-2.0-flash"}, "caller_defaults": {}},
+        )
+        assert resp.status_code == 200
+        assert (project_root / "data" / "llm_defaults.json").exists()
+        assert not (external_cwd / "data" / "llm_defaults.json").exists()
+
+    def test_defaults_save_error_keeps_load_fallback(self, test_db_session, monkeypatch):
+        service = llm_service_module.LLMService(test_db_session)
+
+        def _raise_atomic(*args, **kwargs):  # noqa: ARG001
+            raise OSError("atomic write failed")
+
+        monkeypatch.setattr(llm_service_module, "write_json_atomic", _raise_atomic)
+
+        with pytest.raises(OSError):
+            service.save_llm_defaults(
+                {
+                    "global_default": {"provider": "gemini", "model": "gemini-3-flash-preview"},
+                    "caller_defaults": {},
+                }
+            )
+
+        loaded = service.load_llm_defaults()
+        assert loaded["global_default"]["provider"] == "claude"
+        assert loaded["global_default"]["model"] == ""
+
+    def test_injected_defaults_path_skips_legacy_migration(self, test_db_session, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        legacy_file = tmp_path / "data" / "llm_defaults.json"
+        legacy_file.parent.mkdir(parents=True, exist_ok=True)
+        legacy_file.write_text(
+            '{"global_default":{"provider":"gemini","model":"gemini-3-flash-preview"},"caller_defaults":{}}',
+            encoding="utf-8",
+        )
+
+        service = llm_service_module.LLMService(test_db_session)
+        loaded = service.load_llm_defaults()
+
+        assert loaded["global_default"]["provider"] == "claude"
+        assert loaded["global_default"]["model"] == ""
+        assert not (tmp_path / "llm_defaults.json").exists()
 
     def test_get_defaults_returns_global_and_known_callers(self, client):
         response = client.get("/api/v1/llm/defaults")
