@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from app.modules.dev_runner.schemas import PlanFileResponse
 from app.modules.dev_runner.services.log_service import publish_log, log_service
+from app.modules.dev_runner.services.plan_path_resolver import resolve_plan_target
 
 logger = logging.getLogger(__name__)
 
@@ -201,10 +202,24 @@ class PlanDoneService:
         # 1. \uc6d0\ubcf8 \ud30c\uc77c\uc5d0 \uc218\uc815\ub41c \ub0b4\uc6a9 \ub36e\uc5b4\uc4f0\uae30 (git mv \uc804\uc5d0 \ub0b4\uc6a9 \ubc18\uc601)
         p.write_text(final_content, encoding="utf-8")
 
-        # 2. archive \ub514\ub809\ud1a0\ub9ac \uc0dd\uc131
-        archive_dir = p.parent.parent / "archive"
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        archive_path = archive_dir / p.name
+        # 2. 공통 resolver 기반 target 디렉토리 계산 (해석 실패 시 레거시 fallback)
+        try:
+            resolution = resolve_plan_target(plan_path, purpose="archive")
+            archive_path = resolution.target
+            archive_dir = archive_path.parent
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                "[done] archive target resolved: source=%s target=%s kind=%s rule=%s",
+                p,
+                archive_path,
+                resolution.target_kind,
+                resolution.rule_id,
+            )
+        except Exception as path_err:
+            archive_dir = p.parent.parent / "archive"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archive_path = archive_dir / p.name
+            logger.warning("[done] archive resolver fallback: plan=%s error=%s", plan_path, path_err)
 
         # 3. git mv\ub85c \uc774\ub3d9 (rename \uc774\ub825 \ubcf4\uc874 + staging \uc790\ub3d9)
         mv_proc = await asyncio.create_subprocess_exec(

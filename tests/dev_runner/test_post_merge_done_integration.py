@@ -188,3 +188,25 @@ def test_no_restart_flag_no_enqueue_B(cl):
         r.lpush(commands_key, json.dumps({"action": "run"}))
 
     assert len(r.lrange(commands_key, 0, -1)) == 0
+
+
+def test_pre_review_stopped_skips_done_and_restart_R(cl, tmp_path):
+    """R: stop_stage=pre_review면 _handle_post_merge_done이 done/restart를 모두 건너뛴다."""
+    r = _make_redis()
+    runner_id = "intg06-pre"
+    prefix = cl.RUNNER_KEY_PREFIX
+    plan_path = str(tmp_path / "plan_pre_review.md")
+    Path(plan_path).write_text(
+        "# pre review plan\n> 상태: 검토대기\n\n- [x] done\n",
+        encoding="utf-8",
+    )
+    _seed_runner_keys(r, prefix, runner_id, plan_path)
+    r.set(f"{prefix}:{runner_id}:stop_stage", "pre_review")
+
+    logs = []
+    with patch("requests.post") as mock_post:
+        cl._handle_post_merge_done(plan_path, runner_id, logs.append, r)
+
+    mock_post.assert_not_called()
+    assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None
+    assert any("pre_review" in line for line in logs)

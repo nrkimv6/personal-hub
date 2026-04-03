@@ -701,6 +701,37 @@ class TestEnsureMainBranch:
         with pytest.raises(WorktreeError, match="main으로 복귀 실패"):
             ensure_main_branch(repo)
 
+    def test_ensure_main_branch_linked_worktree_main_in_use_noop(self, tmp_path, monkeypatch):
+        """B(Boundary): linked worktree에서 main이 타 worktree 사용 중이면 예외 없이 스킵."""
+        import subprocess as sp_module
+
+        repo = tmp_path
+        repo.mkdir(exist_ok=True)
+        # linked worktree 시뮬레이션 (.git 파일)
+        (repo / ".git").write_text("gitdir: C:/repo/.git/worktrees/mock\n", encoding="utf-8")
+
+        class FakeResult:
+            def __init__(self, returncode=0, stdout="", stderr=""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        def mock_run(cmd, **kwargs):
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return FakeResult(returncode=0, stdout="plan/test\n", stderr="")
+            if cmd[:3] == ["git", "checkout", "main"]:
+                return FakeResult(
+                    returncode=1,
+                    stdout="",
+                    stderr="fatal: 'main' is already used by worktree at 'D:/repo/main'",
+                )
+            return FakeResult(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(sp_module, "run", mock_run)
+
+        # linked worktree + main occupied 케이스는 WorktreeError 없이 통과해야 한다.
+        ensure_main_branch(repo)
+
     def test_create_calls_ensure_main_branch(self, git_repo_main):
         """R(Right): plan 브랜치 상태에서 create() 호출 → ensure_main_branch 자동 실행, 성공"""
         repo = git_repo_main

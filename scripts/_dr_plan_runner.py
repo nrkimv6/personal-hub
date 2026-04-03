@@ -19,6 +19,7 @@ from _dr_state import (
     get_cleanup_done, get_wf_manager,
 )
 from _dr_subprocess import _ANSI_ESCAPE, _make_plan_runner_env
+from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, _DummyProcess
 from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 
@@ -39,6 +40,43 @@ def _normalize_exit_reason(reason: Optional[str]) -> str:
     if norm == "rate_limited":
         return "rate_limit"
     return norm or "error"
+
+
+def _resolve_stop_stage(runner_id: str, redis_client: redis.Redis, exit_reason: str) -> Optional[str]:
+    """exit_reason=stopped인 경우 pre/post review 단계 판별 및 Redis 기록."""
+    if not runner_id:
+        return None
+    key = f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage"
+    if exit_reason != "stopped":
+        try:
+            redis_client.delete(key)
+        except Exception:
+            pass
+        return None
+
+    try:
+        existing = redis_client.get(key)
+        if existing:
+            return existing
+    except Exception:
+        existing = None
+
+    stage = "unknown"
+    try:
+        plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
+            status = read_plan_status(plan_file)
+            classified = classify_plan_stage(status)
+            if classified in ("pre_review", "post_review"):
+                stage = classified
+    except Exception as stage_err:
+        logger.debug(f"[_stream_output] stop_stage 판별 실패 (runner_id={runner_id!r}): {stage_err}")
+
+    try:
+        redis_client.set(key, stage)
+    except Exception:
+        pass
+    return stage
 
 
 def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
@@ -233,6 +271,11 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 logger.warning(f"[_stream_output] exit_reason 조회 실패 (runner_id={runner_id!r}): {_er}")
                 # 조회 실패 시 completed 기본값을 유지하면 false-completed를 유발할 수 있으므로 fail-safe 처리
                 _exit_reason = "error"
+        _stop_stage = _resolve_stop_stage(runner_id, redis_client, _exit_reason) if runner_id else None
+        _completed_for_flow = (
+            _exit_reason in _COMPLETED_EXIT_REASONS
+            and not (_exit_reason == "stopped" and _stop_stage == "pre_review")
+        )
 
         # stdout 버퍼 drain: 파이프 루프 종료 후 파일에 추가된 미발행 라인만 publish
         log_file_path = _running_log_files.get(runner_id) if runner_id else None
@@ -265,12 +308,12 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
                 if _flag:
                     if exit_code == 0:
-                        if _exit_reason in _COMPLETED_EXIT_REASONS:
+                        if _completed_for_flow:
                             _merge_requested = True
                         else:
                             _pub_and_log(
                                 runner_id,
-                                f"[_stream_output] merge_requested 있지만 exit_reason={_exit_reason} → merge 스킵",
+                                f"[_stream_output] merge_requested 있지만 exit_reason={_exit_reason}, stop_stage={_stop_stage} → merge 스킵",
                                 redis_client, "CLEANUP",
                             )
                     else:
@@ -301,9 +344,20 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                             logger.info(f"[_stream_output] exit_code={exit_code}, branch 키 없음 — merge 스킵")
             except Exception as e:
                 logger.warning(f"[_stream_output] merge_requested 플래그 조회 실패 (runner_id={runner_id}): {e}")
+        if _merge_requested and _stop_stage == "pre_review":
+            _merge_requested = False
+            try:
+                redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            except Exception:
+                pass
+            _pub_and_log(
+                runner_id,
+                "[_stream_output] stop_stage=pre_review → inline merge 차단",
+                redis_client, "CLEANUP",
+            )
         _pub_and_log(
             runner_id,
-            f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, exit_code={exit_code}, exit_reason={_exit_reason}",
+            f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, exit_code={exit_code}, exit_reason={_exit_reason}, stop_stage={_stop_stage}",
             redis_client, "CLEANUP",
         )
 
@@ -317,14 +371,24 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                             _pub_and_log(runner_id, f"[_stream_output] merge_requested 플래그 감지 → merge 흐름 진입", redis_client, "CLEANUP")
                             _wf_manager.update_status(wf["id"], "merge_pending")
                         else:
-                            if _exit_reason in _COMPLETED_EXIT_REASONS:
-                                _pub_and_log(runner_id, f"[_stream_output] merge_requested 플래그 없음 + exit_reason={_exit_reason} → completed 처리", redis_client, "CLEANUP")
+                            if _completed_for_flow:
+                                _pub_and_log(
+                                    runner_id,
+                                    f"[_stream_output] merge_requested 플래그 없음 + exit_reason={_exit_reason}, stop_stage={_stop_stage} → completed 처리",
+                                    redis_client,
+                                    "CLEANUP",
+                                )
                                 _wf_manager.update_status(wf["id"], "completed")
                             else:
-                                _pub_and_log(runner_id, f"[_stream_output] exit_code=0이지만 exit_reason={_exit_reason} → failed 처리", redis_client, "CLEANUP")
+                                _pub_and_log(
+                                    runner_id,
+                                    f"[_stream_output] exit_code=0이지만 exit_reason={_exit_reason}, stop_stage={_stop_stage} → failed 처리",
+                                    redis_client,
+                                    "CLEANUP",
+                                )
                                 _wf_manager.update_status(
                                     wf["id"], "failed",
-                                    error_message=f"Exit reason: {_exit_reason}",
+                                    error_message=f"Exit reason: {_exit_reason} (stop_stage={_stop_stage})",
                                 )
                     elif exit_code is not None and exit_code != 0:
                         _wf_manager.update_status(
@@ -365,12 +429,12 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                         try:
                             _wf = _wf_manager.get_by_runner_id(runner_id)
                             if _wf:
-                                if _exit_reason in _COMPLETED_EXIT_REASONS:
+                                if _completed_for_flow:
                                     _wf_manager.update_status(_wf["id"], "completed")
                                 else:
                                     _wf_manager.update_status(
                                         _wf["id"], "failed",
-                                        error_message=f"Fallback completed but exit_reason={_exit_reason}",
+                                        error_message=f"Fallback completed but exit_reason={_exit_reason} (stop_stage={_stop_stage})",
                                     )
                         except Exception as _wf_err:
                             logger.debug(f"[_stream_output] fallback workflow update 실패 (무시): {_wf_err}")
@@ -386,6 +450,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     """plan-runner CLI 실행 (백그라운드 스레드에서 호출 — worktree 생성 포함)"""
     from worktree_manager import WorktreeManager, WorktreeError, ensure_main_branch
     from workflow_manager import WorkflowManager
+    from _dr_plan_paths import classify_plan_stage, read_plan_status, resolve_plan_target
     from plan_worktree_helpers import (
         is_plan_archived,
         is_worktree_active,
@@ -420,6 +485,20 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
 
     # archive 경로 방어: archive된 plan은 실행 거부
     if plan_file:
+        try:
+            _path_resolution = resolve_plan_target(plan_file, purpose="archive")
+            _status = read_plan_status(plan_file)
+            _plan_stage = classify_plan_stage(_status)
+            logger.info(
+                "[_do_start_plan_runner] plan rule resolved: plan=%s rule=%s target=%s kind=%s plan_stage=%s",
+                plan_file,
+                _path_resolution.rule_id,
+                _path_resolution.target,
+                _path_resolution.target_kind,
+                _plan_stage,
+            )
+        except Exception as _path_err:
+            logger.debug(f"[_do_start_plan_runner] plan rule 해석 실패 (무시): {_path_err}")
         if is_plan_archived(plan_file):
             _set_error_status(f"archived plan은 실행할 수 없습니다: {plan_file}")
             return
@@ -699,6 +778,7 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine", command.get("fix_engine", "claude"))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
+        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage")
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
         trigger = command.get("trigger", "unknown")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", trigger)

@@ -105,9 +105,11 @@ def listener_process(isolated_redis):
     python = str(PYTHON_EXE) if PYTHON_EXE.exists() else "python"
     process = subprocess.Popen(
         [python, str(LISTENER_SCRIPT), "--redis-db", str(REDIS_TEST_DB)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+        # NOTE:
+        # listener는 자체 파일 로그를 남긴다.
+        # PIPE를 열고 소비하지 않으면(특히 Windows) 버퍼가 차서 프로세스가 블로킹될 수 있다.
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     # heartbeat 대기 (최대 10초) — db=15에서 확인

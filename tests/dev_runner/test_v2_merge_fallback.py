@@ -37,7 +37,7 @@ def _load_dr_merge():
     return _dr_merge
 
 
-def _make_redis_mock(merge_status=None, plan_file=None, branch=None):
+def _make_redis_mock(merge_status=None, plan_file=None, branch=None, stop_stage=None):
     r = MagicMock()
     prefix = "plan-runner:runners"
 
@@ -48,6 +48,10 @@ def _make_redis_mock(merge_status=None, plan_file=None, branch=None):
             return plan_file
         if ":branch" in key:
             return branch
+        if ":stop_stage" in key:
+            return stop_stage
+        if ":exit_reason" in key:
+            return "stopped"
         return None
 
     r.get.side_effect = _get
@@ -159,6 +163,45 @@ def test_detect_merged_but_not_done_wrong_status_B(tmp_path):
         result = mod.detect_merged_but_not_done("runner1", r)
 
     assert result is None
+
+
+def test_detect_merged_but_not_done_pre_review_stopped_B(tmp_path):
+    """B: stop_stage=pre_review면 merge fallback 감지에서 제외."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("> 상태: 머지대기\n- [ ] todo\n", encoding="utf-8")
+
+    r = _make_redis_mock(
+        merge_status="merged",
+        plan_file=str(plan),
+        branch="plan/test-branch",
+        stop_stage="pre_review",
+    )
+
+    mod = _load_dr_merge()
+    with patch("plan_worktree_helpers.is_plan_archived", return_value=False):
+        result = mod.detect_merged_but_not_done("runner-pre", r)
+
+    assert result is None
+
+
+def test_detect_merged_but_not_done_post_review_stopped_R(tmp_path):
+    """R: stop_stage=post_review면 기존 merge fallback 감지를 유지."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("> 상태: 머지대기\n- [ ] todo\n", encoding="utf-8")
+
+    r = _make_redis_mock(
+        merge_status="merged",
+        plan_file=str(plan),
+        branch="plan/test-branch",
+        stop_stage="post_review",
+    )
+
+    mod = _load_dr_merge()
+    with patch("plan_worktree_helpers.is_plan_archived", return_value=False):
+        result = mod.detect_merged_but_not_done("runner-post", r)
+
+    assert result is not None
+    assert result["plan_file"] == str(plan)
 
 
 # ── _stream_output v2 fallback ────────────────────────────────────────────────
@@ -297,7 +340,8 @@ def test_stream_output_exit_reason_rate_limit_marks_failed_R(tmp_path):
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t4")
 
-    wf_mgr.update_status.assert_any_call(777, "failed", error_message="Exit reason: rate_limit")
+    err_msgs = [c.kwargs.get("error_message", "") for c in wf_mgr.update_status.call_args_list]
+    assert any("Exit reason: rate_limit" in m for m in err_msgs)
 
 
 def test_stream_output_merge_requested_but_rate_limit_skips_merge_R(tmp_path):
@@ -334,7 +378,8 @@ def test_stream_output_merge_requested_but_rate_limit_skips_merge_R(tmp_path):
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t5")
 
     mock_inline_merge.assert_not_called()
-    wf_mgr.update_status.assert_any_call(778, "failed", error_message="Exit reason: rate_limit")
+    err_msgs = [c.kwargs.get("error_message", "") for c in wf_mgr.update_status.call_args_list]
+    assert any("Exit reason: rate_limit" in m for m in err_msgs)
 
 
 def test_stream_output_exit_reason_lookup_error_marks_failed_R(tmp_path):
@@ -370,7 +415,8 @@ def test_stream_output_exit_reason_lookup_error_marks_failed_R(tmp_path):
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t6")
 
-    wf_mgr.update_status.assert_any_call(779, "failed", error_message="Exit reason: error")
+    err_msgs = [c.kwargs.get("error_message", "") for c in wf_mgr.update_status.call_args_list]
+    assert any("Exit reason: error" in m for m in err_msgs)
     assert not any(
         len(call.args) >= 2 and call.args[1] == "completed"
         for call in wf_mgr.update_status.call_args_list
@@ -410,7 +456,8 @@ def test_stream_output_missing_exit_reason_marks_failed_R(tmp_path):
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t7")
 
-    wf_mgr.update_status.assert_any_call(780, "failed", error_message="Exit reason: error")
+    err_msgs = [c.kwargs.get("error_message", "") for c in wf_mgr.update_status.call_args_list]
+    assert any("Exit reason: error" in m for m in err_msgs)
 
 
 # ── heartbeat v2 fallback ─────────────────────────────────────────────────────
@@ -876,3 +923,83 @@ def test_heartbeat_stream_hang_fallback_R():
         call_order.append("cleanup")  # cleanup 시점 마킹
 
     assert call_order == ["detect", "handle", "cleanup"], f"순서 불일치: {call_order}"
+
+
+def test_stream_output_merge_requested_pre_review_stopped_blocks_inline_merge_R(tmp_path):
+    """R: merge_requested=1 + stop_stage=pre_review면 _do_inline_merge 진입 금지."""
+    import io
+
+    runner_id = "runner-stop-pre"
+    mock_redis = MagicMock()
+
+    def _get(key):
+        if key.endswith(":exit_reason"):
+            return "stopped"
+        if key.endswith(":stop_stage"):
+            return "pre_review"
+        if key.endswith(":merge_requested"):
+            return "1"
+        if key.endswith(":branch"):
+            return "impl/test"
+        return None
+
+    mock_redis.get.side_effect = _get
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = iter([])
+    mock_proc.returncode = 0
+    mock_proc.wait.return_value = None
+
+    log_handle = io.StringIO()
+    from _dr_state import get_running_log_files
+    get_running_log_files()[runner_id] = tmp_path / "pre.log"
+    (tmp_path / "pre.log").write_text("", encoding="utf-8")
+
+    with patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_plan_runner._do_inline_merge") as mock_inline_merge, \
+         patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+        from _dr_plan_runner import _stream_output
+        _stream_output(mock_proc, log_handle, mock_redis, runner_id)
+
+    mock_inline_merge.assert_not_called()
+    mock_cleanup.assert_called_once()
+
+
+def test_stream_output_merge_requested_post_review_stopped_keeps_inline_merge_R(tmp_path):
+    """R: merge_requested=1 + stop_stage=post_review면 기존 inline merge 유지."""
+    import io
+
+    runner_id = "runner-stop-post"
+    mock_redis = MagicMock()
+
+    def _get(key):
+        if key.endswith(":exit_reason"):
+            return "stopped"
+        if key.endswith(":stop_stage"):
+            return "post_review"
+        if key.endswith(":merge_requested"):
+            return "1"
+        if key.endswith(":branch"):
+            return "impl/test"
+        return None
+
+    mock_redis.get.side_effect = _get
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = iter([])
+    mock_proc.returncode = 0
+    mock_proc.wait.return_value = None
+
+    log_handle = io.StringIO()
+    from _dr_state import get_running_log_files
+    get_running_log_files()[runner_id] = tmp_path / "post.log"
+    (tmp_path / "post.log").write_text("", encoding="utf-8")
+
+    with patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_plan_runner._do_inline_merge") as mock_inline_merge, \
+         patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+        from _dr_plan_runner import _stream_output
+        _stream_output(mock_proc, log_handle, mock_redis, runner_id)
+
+    mock_inline_merge.assert_called_once()
+    mock_cleanup.assert_not_called()

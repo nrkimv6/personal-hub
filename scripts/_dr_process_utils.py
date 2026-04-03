@@ -12,6 +12,7 @@ from _dr_constants import (
     LOG_CHANNEL_PREFIX, MERGE_ACTIVE_STATUSES, WORKTREE_BASE_DIR,
     RECENT_RUNNERS_TTL, RUNNER_KEY_SUFFIXES, PROJECT_ROOT,
 )
+from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_state import (
     get_running_processes, get_running_log_files, get_stream_threads,
     get_cleanup_done, get_dead_process_first_seen, get_wf_manager,
@@ -19,6 +20,41 @@ from _dr_state import (
 from _dr_subprocess import _ANSI_ESCAPE
 
 logger = logging.getLogger(__name__)
+
+
+def _is_pre_review_stopped_runner(runner_id: str, redis_client: redis.Redis) -> bool:
+    """runner가 검토완료 이전(pre_review) 중지 상태인지 판별."""
+    try:
+        stop_stage = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage")
+        if stop_stage == "pre_review":
+            return True
+        if stop_stage == "post_review":
+            return False
+    except Exception:
+        pass
+
+    try:
+        exit_reason = _normalize_exit_reason(
+            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")
+        )
+    except Exception:
+        exit_reason = ""
+    if exit_reason != "stopped":
+        return False
+
+    try:
+        plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
+            return False
+        stage = classify_plan_stage(read_plan_status(plan_file))
+        if stage in ("pre_review", "post_review"):
+            try:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage", stage)
+            except Exception:
+                pass
+        return stage == "pre_review"
+    except Exception:
+        return False
 
 
 def _normalize_exit_reason(reason: Optional[str]) -> str:
@@ -111,6 +147,11 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     _cleanup_done = get_cleanup_done()
     _dead_process_first_seen = get_dead_process_first_seen()
     _wf_manager = get_wf_manager()
+
+    # pre-review 중지 케이스는 별도 태그로 기록 (reconnect/heartbeat 공통)
+    if reason and reason.startswith(("reconnect_", "heartbeat_", "no_log_file")):
+        if _is_pre_review_stopped_runner(runner_id, redis_client):
+            reason = "pre_review_stopped"
 
     # 🔴 머지 보호 가드: reconnect_* / heartbeat_* 계열 reason이면 머지 진행 중 cleanup 거부
     if reason and reason.startswith(("reconnect_", "heartbeat_")):
@@ -686,8 +727,15 @@ def _cleanup_orphan_plans(redis_client: redis.Redis) -> int:
                         head_lines = [f.readline() for _ in range(20)]
                 except Exception:
                     continue
-                is_impl = any(_re.search(r">\s*상태:\s*(구현중|구현완료)", line) for line in head_lines if line)
-                if not is_impl:
+                status = ""
+                for line in head_lines:
+                    _m = _re.search(r">\s*상태:\s*(.+)", line or "")
+                    if _m:
+                        status = _m.group(1).strip()
+                        break
+                stage = classify_plan_stage(status)
+                is_impl = status in ("구현중", "구현완료")
+                if not is_impl and stage != "pre_review":
                     continue
                 filename = plan_file.name
                 # Workflow DB에서 이 plan에 대한 running 레코드 찾기
@@ -708,6 +756,11 @@ def _cleanup_orphan_plans(redis_client: redis.Redis) -> int:
 
                 # orphan이면 worktree/branch 정리 시도
                 if is_orphan:
+                    if stage == "pre_review":
+                        logger.info(
+                            f"[resumable_pre_review] {filename}: 상태={status} orphan 감지 — 자동 삭제 스킵"
+                        )
+                        continue
                     try:
                         active, branch, wt_abs = is_worktree_active(str(plan_file), PROJECT_ROOT)
                         if active and branch:

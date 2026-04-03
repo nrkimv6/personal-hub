@@ -16,6 +16,7 @@ from _dr_constants import (
     RUNNER_KEY_PREFIX, PLAN_FILE_ALL, _LEGACY_ALL, LOG_CHANNEL_PREFIX,
     PLAN_RUNNER_PYTHON, PLAN_RUNNER_MODULE_PATH, get_redis_db, get_admin_api_base,
 )
+from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _launch_auto_impl_post_merge_process, _launch_general_merge_resolver_process, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,26 @@ def is_done_completed(runner_id: str, redis_client: redis.Redis) -> bool:
     try:
         val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_completed")
         return val == "1"
+    except Exception:
+        return False
+
+
+def _is_pre_review_stopped(runner_id: str, redis_client: redis.Redis, plan_file: str | None = None) -> bool:
+    """stop_stage 또는 plan 상태를 기준으로 pre_review stopped 여부 판단."""
+    try:
+        stop_stage = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage")
+        if stop_stage == "pre_review":
+            return True
+        if stop_stage == "post_review":
+            return False
+    except Exception:
+        pass
+
+    if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
+        return False
+    try:
+        status = read_plan_status(plan_file)
+        return classify_plan_stage(status) == "pre_review"
     except Exception:
         return False
 
@@ -70,6 +91,11 @@ def detect_merged_but_not_done(runner_id: str, redis_client: redis.Redis) -> Opt
     # plan_file 없음 또는 ALL 모드이면 스킵
     if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
         logger.debug(f"[detect_merged] runner {runner_id}: plan_file 없음 또는 ALL → 스킵")
+        return None
+
+    # pre-review stopped는 fallback 대상에서 제외
+    if _is_pre_review_stopped(runner_id, redis_client, plan_file):
+        logger.info(f"[detect_merged] runner {runner_id}: stop_stage=pre_review → fallback 스킵")
         return None
 
     # 이미 archive됐으면 중복 방지
@@ -460,6 +486,12 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
     if not Path(plan_file).exists():
         pub_fn("plan 이미 처리됨 (파일 없음) — done 스킵")
         logger.info(f"[_handle_post_merge_done] plan 파일 없음, 이미 처리된 것으로 판단: {plan_file}")
+        return
+
+    # pre-review stopped는 done/restart 후처리 금지
+    if _is_pre_review_stopped(runner_id, redis_client, plan_file):
+        pub_fn("stop_stage=pre_review 감지 — post-merge done/restart 스킵")
+        logger.info(f"[_handle_post_merge_done] pre_review stopped guard: runner={runner_id}, plan={plan_file}")
         return
 
     # plan 상태 확인 — "완료"이면 이미 done 처리됨
