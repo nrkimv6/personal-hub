@@ -35,6 +35,7 @@
   let ocring = false;
   let transforming = false;
   let savingAll = false;
+  let tagSaving = false;
   let inheritedApplied = false;
   let errorMessage = '';
   let infoMessage = '';
@@ -42,6 +43,7 @@
   let sequenceIndex = -1;
   let aspectRatio: AspectRatioValue = 'AUTO';
   let filters: SlideFilterOptions = { ...DEFAULT_SLIDE_FILTERS };
+  let tagSuggestions: string[] = [];
   let mobileRefreshKey = 0;
 
   function parseError(error: unknown): string {
@@ -72,6 +74,7 @@
       inheritedApplied = Boolean(inheritedPoints);
       aspectRatio = detail.aspect_ratio === '16:9' || detail.aspect_ratio === '4:3' ? detail.aspect_ratio : 'AUTO';
       filters = normalizeFilters(detail.filters_applied);
+      await refreshTagSuggestions();
     } finally {
       loading = false;
     }
@@ -87,6 +90,16 @@
     sequenceIndex = -1;
     aspectRatio = 'AUTO';
     filters = { ...DEFAULT_SLIDE_FILTERS };
+    await refreshTagSuggestions();
+  }
+
+  async function refreshTagSuggestions() {
+    try {
+      const result = await slideScannerApi.getTags();
+      tagSuggestions = result.tags;
+    } catch {
+      // ignore suggestions failure; tag editing still works
+    }
   }
 
   async function handleSelect(event: CustomEvent<File>) {
@@ -109,6 +122,29 @@
 
   function handleFiltersChange(event: CustomEvent<{ filters: SlideFilterOptions }>) {
     filters = normalizeFilters(event.detail.filters);
+  }
+
+  async function handleTagChange(event: CustomEvent<{ tag: string | null }>) {
+    if (!currentSlide) return;
+
+    tagSaving = true;
+    errorMessage = '';
+    infoMessage = '';
+    try {
+      const updated = await slideScannerApi.updateSlide(currentSlide.id, {
+        tag: event.detail.tag
+      });
+      currentSlide = {
+        ...currentSlide,
+        tag: updated.tag ?? null
+      };
+      infoMessage = updated.tag ? `태그 저장: ${updated.tag}` : '태그를 제거했습니다.';
+      await refreshTagSuggestions();
+    } catch (error) {
+      errorMessage = parseError(error);
+    } finally {
+      tagSaving = false;
+    }
   }
 
   async function handleTransform() {
@@ -299,8 +335,12 @@
       {aspectRatioLabel}
       extractedText={currentSlide?.extracted_text ?? ''}
       {filters}
+      tag={currentSlide?.tag ?? null}
+      {tagSuggestions}
+      {tagSaving}
       on:changePoints={handlePointsChange}
       on:changeFilters={handleFiltersChange}
+      on:changeTag={(event) => void handleTagChange(event)}
       on:prev={() => void moveSequence(-1)}
       on:next={() => void moveSequence(1)}
       on:ocr={() => void handleOcr()}

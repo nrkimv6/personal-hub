@@ -32,6 +32,7 @@ export interface SlideDetailResponse {
   id: number;
   file_name: string;
   status: SlideStatus;
+  tag?: string | null;
   captured_at?: string | null;
   source_app?: string | null;
   aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
@@ -49,6 +50,7 @@ export interface SlideListItem {
   file_path: string;
   result_path?: string | null;
   status: SlideStatus;
+  tag?: string | null;
   aspect_ratio?: Exclude<AspectRatioValue, 'AUTO'> | null;
   filters_applied?: SlideFilterOptions | null;
   extracted_text?: string | null;
@@ -90,6 +92,13 @@ export interface SlideTransformResponse {
 export interface SlideReviewResponse {
   id: number;
   status: 'REVIEWED';
+}
+
+export interface SlideUpdateResponse {
+  id: number;
+  status: SlideStatus;
+  tag?: string | null;
+  updated_at?: string | null;
 }
 
 export interface SlideOcrResponse {
@@ -380,16 +389,31 @@ function getSlideList(params?: {
   limit?: number;
   status?: SlideStatus | 'ALL';
   search?: string;
+  tag?: string;
 }): Promise<SlideListResponse> {
   const query = new URLSearchParams();
   if (typeof params?.skip === 'number') query.set('skip', String(params.skip));
   if (typeof params?.limit === 'number') query.set('limit', String(params.limit));
   if (params?.status && params.status !== 'ALL') query.set('status', params.status);
   if (params?.search?.trim()) query.set('search', params.search.trim());
+  if (params?.tag?.trim()) query.set('tag', params.tag.trim());
 
   const qs = query.toString();
   const path = qs ? `${BASE}/slides?${qs}` : `${BASE}/slides`;
   return request<SlideListResponse>(path);
+}
+
+function updateSlide(slideId: number, payload: { tag?: string | null }): Promise<SlideUpdateResponse> {
+  return request<SlideUpdateResponse>(`${BASE}/slides/${slideId}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      tag: payload.tag ?? null
+    })
+  });
+}
+
+function getTags(): Promise<{ tags: string[] }> {
+  return request<{ tags: string[] }>(`${BASE}/tags`);
 }
 
 function scanFolder(
@@ -556,9 +580,11 @@ export const slideScannerApi = {
   getSlide,
   getSlideWithInherited,
   getSlideList,
+  getTags,
   transformSlide,
   reviewSlide,
   ocrSlide,
+  updateSlide,
   scanFolder,
   batchTransform,
   archiveSlides,

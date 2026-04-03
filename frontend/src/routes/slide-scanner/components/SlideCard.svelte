@@ -58,6 +58,9 @@
   <div class="space-y-1">
     <p class="line-clamp-1 text-xs font-medium text-foreground">{slide.file_name}</p>
     <p class="text-[11px] text-muted-foreground">{formatCapturedAt(slide.captured_at)}</p>
+    {#if slide.tag}
+      <p class="line-clamp-1 text-[11px] text-primary">#{slide.tag}</p>
+    {/if}
     <div class="flex items-center justify-between pt-1">
       <StatusBadge variant={statusVariant(slide.status)} size="sm">{statusLabel(slide.status)}</StatusBadge>
       <span class="text-[11px] text-muted-foreground">#{slide.id}</span>

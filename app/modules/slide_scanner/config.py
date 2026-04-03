@@ -17,6 +17,7 @@ class SlideScannerSettings(BaseSettings):
     RECTIFIER_PYTHON: Path = Path(
         r"D:\work\project\service\wtools\common\tools\slide-rectifier\.venv\Scripts\python.exe"
     )
+    RECTIFIER_DETECT_ENGINE: str = "opencv"
 
     DATA_DIR: Path = DATA_ROOT
     ORIGINALS_DIR: Path = DATA_ROOT / "originals"

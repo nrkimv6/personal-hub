@@ -10,7 +10,13 @@ from sqlalchemy.orm import sessionmaker
 
 from app.modules.slide_scanner.config import settings
 from app.modules.slide_scanner.database import get_db
-from app.modules.slide_scanner.routers import health_router, mobile_review_router, mobile_sync_router, slides_router
+from app.modules.slide_scanner.routers import (
+    gallery_router,
+    health_router,
+    mobile_review_router,
+    mobile_sync_router,
+    slides_router,
+)
 
 
 def _apply_sql_file(engine, sql_path: Path) -> None:
@@ -43,6 +49,11 @@ def slide_scanner_session(tmp_path: Path):
         / "migrations"
     )
     _apply_sql_file(engine, migrations_dir / "001_initial.sql")
+    _apply_sql_file(engine, migrations_dir / "002_settings.sql")
+    _apply_sql_file(engine, migrations_dir / "003_aspect_ratio.sql")
+    _apply_sql_file(engine, migrations_dir / "004_filters.sql")
+    _apply_sql_file(engine, migrations_dir / "005_ocr.sql")
+    _apply_sql_file(engine, migrations_dir / "006_tags.sql")
     _apply_sql_file(engine, migrations_dir / "010_mobile_ingest.sql")
     _apply_sql_file(engine, migrations_dir / "011_slides_source_device.sql")
 
@@ -124,6 +135,7 @@ def slide_scanner_app(slide_scanner_session, slide_scanner_test_dirs):
     app = FastAPI()
     app.include_router(health_router, prefix="/api/v1/ss")
     app.include_router(slides_router, prefix="/api/v1/ss")
+    app.include_router(gallery_router, prefix="/api/v1/ss")
     app.include_router(mobile_sync_router, prefix="/api/v1/ss")
     app.include_router(mobile_review_router, prefix="/api/v1/ss")
 

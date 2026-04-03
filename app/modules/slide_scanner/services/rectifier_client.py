@@ -17,6 +17,12 @@ class SlideFilterOptions(TypedDict):
 
 
 class RectifierClient:
+    def _normalize_detect_engine(self, value: str | None) -> str:
+        normalized = (value or "opencv").strip().lower()
+        if normalized in {"opencv", "dl"}:
+            return normalized
+        return "opencv"
+
     def _run(self, args: list[str]) -> str:
         if not settings.RECTIFIER_PYTHON.exists():
             raise RuntimeError(f"Rectifier python not found: {settings.RECTIFIER_PYTHON}")
@@ -39,7 +45,8 @@ class RectifierClient:
         return result.stdout.strip()
 
     def detect(self, image_path: Path) -> list[tuple[float, float]]:
-        payload = self._run(["detect", str(image_path)])
+        engine = self._normalize_detect_engine(settings.RECTIFIER_DETECT_ENGINE)
+        payload = self._run(["detect", str(image_path), "--engine", engine])
         try:
             parsed = json.loads(payload)
         except json.JSONDecodeError as exc:

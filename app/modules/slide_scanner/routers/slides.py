@@ -48,6 +48,10 @@ class OcrRequest(BaseModel):
     languages: list[str] | None = None
 
 
+class SlideUpdateRequest(BaseModel):
+    tag: str | None = None
+
+
 def _points_to_params(points: list[tuple[float, float]]) -> dict[str, float]:
     if len(points) != 4:
         raise ValueError("Exactly four points are required")
@@ -137,6 +141,17 @@ def _normalize_filters(payload: FilterPayload | None) -> SlideFilterOptions | No
         and abs(normalized["contrast"] - 1.0) < 1e-6
     ):
         return None
+    return normalized
+
+
+def _normalize_tag(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if len(normalized) > 64:
+        raise HTTPException(status_code=400, detail="Tag is too long. Maximum length is 64.")
     return normalized
 
 
@@ -290,6 +305,7 @@ def get_slide(slide_id: int, db: Session = Depends(get_db)):
         "id": row.id,
         "file_name": row.file_name,
         "status": row.status,
+        "tag": row.tag,
         "captured_at": row.captured_at,
         "source_app": row.source_app,
         "aspect_ratio": row.aspect_ratio,
@@ -447,3 +463,29 @@ def get_slide_result(slide_id: int, db: Session = Depends(get_db)):
     if not result_path.exists():
         raise HTTPException(status_code=404, detail="Result image file not found")
     return FileResponse(path=str(result_path), media_type="image/jpeg")
+
+
+@router.put("/{slide_id}")
+def update_slide(slide_id: int, payload: SlideUpdateRequest, db: Session = Depends(get_db)):
+    _load_slide_or_404(db, slide_id)
+    normalized_tag = _normalize_tag(payload.tag)
+    db.execute(
+        text(
+            """
+            UPDATE slides
+            SET tag = :tag,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+            """
+        ),
+        {"id": slide_id, "tag": normalized_tag},
+    )
+    db.commit()
+
+    row = _load_slide_or_404(db, slide_id)
+    return {
+        "id": row.id,
+        "status": row.status,
+        "tag": row.tag,
+        "updated_at": row.updated_at,
+    }
