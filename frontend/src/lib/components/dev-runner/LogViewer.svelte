@@ -15,7 +15,7 @@
 		worktreePath?: string | null;
 		branch?: string | null;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
-		onMergeCompleted?: () => void;
+		onMergeCompleted?: (reason?: string, status?: string) => void;
 	}
 
 	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
@@ -598,8 +598,18 @@
 		connected = 'disconnected';
 	}
 
-	export function injectMergeCompleted() {
-		onMergeCompleted?.();
+	function shouldShowMergeCompletionBanner(reason?: string | null, status?: string | null): boolean {
+		if (status === 'failed') return true;
+		if (!reason) return false;
+		const normalized = getExitReasonDisplay(reason).reason;
+		return !['completed', 'stopped', 'archived', 'on_hold', 'unknown'].includes(normalized);
+	}
+
+	export function injectMergeCompleted(reason?: string, status?: string) {
+		onMergeCompleted?.(reason, status);
+		if (shouldShowMergeCompletionBanner(reason, status)) {
+			injectCompleted(reason ?? 'merge_failed');
+		}
 	}
 
 </script>
