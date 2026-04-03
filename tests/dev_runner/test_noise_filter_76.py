@@ -54,6 +54,8 @@ def _run_stream(lines: list):
     # 다른 테스트가 오염시킨 listener_noise_filter mock을 sys.modules에서 제거
     # (test_command_listener_multi_runner.py가 is_noise_line=lambda: False로 mock 오염)
     sys.modules.pop("listener_noise_filter", None)
+    sys.modules.pop("_dr_plan_runner", None)
+    sys.modules.pop("_dr_process_utils", None)
     sys.modules.pop("_listener_under_test", None)
 
     import importlib.util
@@ -86,9 +88,32 @@ def _run_stream(lines: list):
 
     mock_redis = MagicMock()
     mock_redis.publish.side_effect = lambda ch, msg: published.append(msg)
+    # 기본 MagicMock 반환값이 cleanup 경로 분기를 오염시키지 않도록 고정
+    mock_redis.get.side_effect = lambda *_args, **_kwargs: None
+    mock_redis.set.return_value = True
+    mock_redis.delete.return_value = 0
+    mock_redis.expire.return_value = True
+    mock_redis.persist.return_value = True
+    mock_redis.srem.return_value = 0
+    mock_redis.zadd.return_value = 1
+    mock_redis.lrem.return_value = 0
 
     _stream_output(proc, mock_log, mock_redis, runner_id="t-noise-runner")
     return published, written
+
+
+def _flatten_user_lines(published: list[str]) -> list[str]:
+    """테스트 대상 로그 라인만 추출 (제어 메시지 제외)."""
+    lines: list[str] = []
+    for message in published:
+        if message.startswith("__COMPLETED::"):
+            continue
+        if message.startswith("[CLEANUP]"):
+            continue
+        for line in message.split("\n"):
+            if line:
+                lines.append(line)
+    return lines
 
 
 # ── is_noise_line 단위 테스트 ────────────────────────────────────────────────
@@ -182,8 +207,9 @@ class TestStreamOutputFilter:
 
     def test_normal_lines_published(self):
         published, _ = _run_stream(["정상 로그 A", "정상 로그 B"])
-        assert "정상 로그 A" in published
-        assert "정상 로그 B" in published
+        lines = _flatten_user_lines(published)
+        assert "정상 로그 A" in lines
+        assert "정상 로그 B" in lines
 
     def test_xterm_noise_not_published(self):
         published, written = _run_stream([
@@ -193,9 +219,10 @@ class TestStreamOutputFilter:
             "}",
             "정상 로그",
         ])
-        assert not any("xterm.js" in p for p in published), "xterm.js 줄 publish 안 됨"
-        assert any("lines suppressed" in p for p in published), "억제 요약 publish"
-        assert "정상 로그" in published
+        lines = _flatten_user_lines(published)
+        assert not any("xterm.js" in p for p in lines), "xterm.js 줄 publish 안 됨"
+        assert any("lines suppressed" in p for p in lines), "억제 요약 publish"
+        assert "정상 로그" in lines
 
     def test_attach_console_not_published(self):
         published, _ = _run_stream([
@@ -205,11 +232,12 @@ class TestStreamOutputFilter:
             "Node.js v24.7.0",
             "작업 시작",
         ])
-        assert not any("AttachConsole" in p for p in published)
-        assert not any("at Object.<anonymous>" in p for p in published)
-        assert not any("Node.js v" in p for p in published)
-        assert any("lines suppressed" in p for p in published)
-        assert "작업 시작" in published
+        lines = _flatten_user_lines(published)
+        assert not any("AttachConsole" in p for p in lines)
+        assert not any("at Object.<anonymous>" in p for p in lines)
+        assert not any("Node.js v" in p for p in lines)
+        assert any("lines suppressed" in p for p in lines)
+        assert "작업 시작" in lines
 
     def test_noise_lines_still_written_to_file(self):
         _, written = _run_stream([
@@ -223,7 +251,7 @@ class TestStreamOutputFilter:
     def test_suppression_summary_single_line(self):
         noise = ["xterm.js: Parsing error: {"] * 50 + ["정상"]
         published, _ = _run_stream(noise)
-        summary_lines = [p for p in published if "lines suppressed" in p]
+        summary_lines = [p for p in _flatten_user_lines(published) if "lines suppressed" in p]
         assert len(summary_lines) == 1, f"요약은 1줄: {summary_lines}"
 
     def test_rate_limiter_burst(self):
@@ -232,7 +260,7 @@ class TestStreamOutputFilter:
         published, _ = _run_stream(lines)
         repeat_publishes = [p for p in published if p == same_line]
         assert len(repeat_publishes) <= 10, f"burst 억제 미작동: {len(repeat_publishes)}회"
-        assert "다른 정상 로그" in published
+        assert any("다른 정상 로그" in p for p in published)
 
     def test_multiline_result_is_framed_as_single_publish(self):
         published, _ = _run_stream([
