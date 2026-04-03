@@ -1,11 +1,15 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import TabNav from '$lib/components/layout/TabNav.svelte';
+  import { toast } from '$lib/stores/toast';
 
   import ImageUploader from './components/ImageUploader.svelte';
   import ResultPreview from './components/ResultPreview.svelte';
   import AspectRatioSelector from './components/AspectRatioSelector.svelte';
   import SequentialEditor from './components/SequentialEditor.svelte';
   import SlideGallery from './components/SlideGallery.svelte';
+  import MobileReviewQueue from './components/MobileReviewQueue.svelte';
+  import MobileSyncPanel from './components/MobileSyncPanel.svelte';
 
   import {
     slideScannerApi,
@@ -19,7 +23,8 @@
   let activeTab = 'editor';
   const tabs = [
     { id: 'editor', label: '에디터' },
-    { id: 'gallery', label: '갤러리' }
+    { id: 'gallery', label: '갤러리' },
+    { id: 'mobile-review', label: '모바일 승인 큐' }
   ];
 
   let currentSlide: SlideDetailResponse | null = null;
@@ -37,6 +42,7 @@
   let sequenceIndex = -1;
   let aspectRatio: AspectRatioValue = 'AUTO';
   let filters: SlideFilterOptions = { ...DEFAULT_SLIDE_FILTERS };
+  let mobileRefreshKey = 0;
 
   function parseError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -71,21 +77,25 @@
     }
   }
 
+  async function handleSelectFile(file: File) {
+    const uploaded = await slideScannerApi.uploadSlide(file);
+    const detail = await slideScannerApi.getSlide(uploaded.id);
+    currentSlide = detail;
+    points = detail.points;
+    inheritedApplied = false;
+    sequenceIds = [];
+    sequenceIndex = -1;
+    aspectRatio = 'AUTO';
+    filters = { ...DEFAULT_SLIDE_FILTERS };
+  }
+
   async function handleSelect(event: CustomEvent<File>) {
     loading = true;
     errorMessage = '';
     infoMessage = '';
     resultUrl = null;
     try {
-      const uploaded = await slideScannerApi.uploadSlide(event.detail);
-      const detail = await slideScannerApi.getSlide(uploaded.id);
-      currentSlide = detail;
-      points = detail.points;
-      inheritedApplied = false;
-      sequenceIds = [];
-      sequenceIndex = -1;
-      aspectRatio = 'AUTO';
-      filters = { ...DEFAULT_SLIDE_FILTERS };
+      await handleSelectFile(event.detail);
     } catch (error) {
       errorMessage = parseError(error);
     } finally {
@@ -205,6 +215,30 @@
     }
   }
 
+  async function handleMoveToEditor(event: CustomEvent<{ itemId: number; fileName: string }>) {
+    loading = true;
+    errorMessage = '';
+    infoMessage = '';
+    resultUrl = null;
+
+    try {
+      const file = await slideScannerApi.getMobileReviewImageFile(event.detail.itemId, event.detail.fileName);
+      await handleSelectFile(file);
+      activeTab = 'editor';
+      await goto('?tab=editor', { replaceState: false, noScroll: true, keepFocus: true });
+      toast.success('승인 큐 이미지를 보정 에디터로 불러왔습니다.');
+    } catch (error) {
+      errorMessage = parseError(error);
+      toast.error(errorMessage);
+    } finally {
+      loading = false;
+    }
+  }
+
+  function handleSyncCompleted() {
+    mobileRefreshKey += 1;
+  }
+
   $: imageUrl = currentSlide ? slideScannerApi.getSlideImageUrl(currentSlide.id) : '';
   $: canPrev = sequenceIndex > 0;
   $: canNext = sequenceIndex >= 0 && sequenceIndex < sequenceIds.length - 1;
@@ -219,14 +253,17 @@
   <header>
     <h1 class="text-xl font-semibold">발표 사진 원근 보정 스캐너</h1>
     <p class="mt-1 text-sm text-muted-foreground">
-      에디터/갤러리 탭으로 단건 보정과 대량 스캔 워크플로우를 모두 처리합니다.
+      에디터/갤러리 워크플로우와 모바일 승인 큐를 하나의 페이지에서 연결해 처리합니다.
     </p>
   </header>
 
-  <TabNav tabs={tabs} bind:activeTab queryParam="tab" variant="primary" />
+  <TabNav tabs={tabs} bind:activeTab queryParam="tab" variant="primary" replaceState={false} />
 
   {#if activeTab === 'gallery'}
     <SlideGallery on:open={handleGalleryOpen} />
+  {:else if activeTab === 'mobile-review'}
+    <MobileSyncPanel on:syncCompleted={handleSyncCompleted} />
+    <MobileReviewQueue refreshKey={mobileRefreshKey} on:moveToEditor={handleMoveToEditor} />
   {:else}
     <ImageUploader on:select={handleSelect} />
 
