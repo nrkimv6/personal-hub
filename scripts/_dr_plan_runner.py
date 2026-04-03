@@ -3,6 +3,7 @@ import json
 import logging
 import subprocess
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -915,6 +916,11 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch or f"runner/{runner_id}")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        # 초기 heartbeat — subprocess 루프 진입 전 좀비 오판 방지 (TTL 300초)
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat", str(time.time()), ex=300)
+        except Exception:
+            logger.warning(f"_launch_plan_runner_process: 초기 heartbeat 저장 실패 (runner_id={runner_id})")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", command.get("engine", "claude"))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine", command.get("fix_engine", "claude"))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))

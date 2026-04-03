@@ -30,19 +30,43 @@ from merge_queue import (
 REPO_ID = "test-merge-queue-brpop"
 
 
+def _cleanup_redis_patterns(client, *patterns) -> None:
+    keys_to_delete = []
+    for pattern in patterns:
+        keys_to_delete.extend(list(client.scan_iter(pattern, count=200)))
+    if keys_to_delete:
+        client.delete(*keys_to_delete)
+
+
+def _close_redis_client(client) -> None:
+    try:
+        client.close()
+    finally:
+        try:
+            client.connection_pool.disconnect()
+        except Exception:
+            pass
+
+
 @pytest.fixture
 def r():
     client = redis.Redis(host="localhost", port=6379, db=15, decode_responses=True)
-    # setup cleanup
-    keys = client.keys("plan-runner:merge-queue:*") + client.keys("plan-runner:merge-turn:*")
-    if keys:
-        client.delete(*keys)
-    yield client
-    # teardown cleanup
-    keys = client.keys("plan-runner:merge-queue:*") + client.keys("plan-runner:merge-turn:*")
-    if keys:
-        client.delete(*keys)
-    client.close()
+    _cleanup_redis_patterns(
+        client,
+        "plan-runner:merge-queue:*",
+        "plan-runner:merge-turn:*",
+        "plan-runner:runners:runner-*",
+    )
+    try:
+        yield client
+    finally:
+        _cleanup_redis_patterns(
+            client,
+            "plan-runner:merge-queue:*",
+            "plan-runner:merge-turn:*",
+            "plan-runner:runners:runner-*",
+        )
+        _close_redis_client(client)
 
 
 # ── TC 1 ──────────────────────────────────────────────────────────────────────
@@ -170,7 +194,7 @@ def test_acquire_duplicate_enqueue_boundary(r):
 
 # ── TC 14 ─────────────────────────────────────────────────────────────────────
 def test_stale_front_removal_error(r):
-    """os.kill → ProcessLookupError → LREM + 다음 runner에 signal."""
+    """PID dead 판정 → LREM + 다음 runner에 signal."""
     queue_key = get_queue_key(REPO_ID)
     r.rpush(queue_key, "runner-dead", "runner-next")
 
@@ -178,7 +202,7 @@ def test_stale_front_removal_error(r):
     pid_key = f"{_RUNNER_KEY_PREFIX}:runner-dead:pid"
     r.set(pid_key, "99999")
 
-    with patch("merge_queue.os.kill", side_effect=ProcessLookupError):
+    with patch("merge_queue._is_pid_alive", return_value=False):
         removed = _remove_if_stale(r, "runner-dead", REPO_ID)
 
     assert removed is True
@@ -202,8 +226,7 @@ def test_stale_front_alive_right(r):
     pid_key = f"{_RUNNER_KEY_PREFIX}:runner-alive:pid"
     r.set(pid_key, "12345")
 
-    # os.kill이 예외 없이 반환 (살아있음)
-    with patch("merge_queue.os.kill", return_value=None):
+    with patch("merge_queue._is_pid_alive", return_value=True):
         removed = _remove_if_stale(r, "runner-alive", REPO_ID)
 
     assert removed is False
@@ -227,14 +250,14 @@ def test_acquire_turn_fifo_boundary(r):
             b_started.set()
             results["B"] = acquire_merge_turn(b_client, runner_id="runner-B", repo_id=REPO_ID, timeout=10, queue_ttl=60)
         finally:
-            b_client.close()
+            _close_redis_client(b_client)
             b_done.set()
 
     # A가 먼저 큐 진입
     results["A"] = acquire_merge_turn(r, runner_id="runner-A", repo_id=REPO_ID, timeout=10, queue_ttl=60)
     assert results["A"] is True
 
-    t = threading.Thread(target=run_b)
+    t = threading.Thread(target=run_b, daemon=True)
     t.start()
     b_started.wait(timeout=2)
     time.sleep(0.2)  # B가 BRPOP 대기 상태에 진입하도록 여유
@@ -242,8 +265,9 @@ def test_acquire_turn_fifo_boundary(r):
     # A release → B 깨어남
     release_merge_turn(r, runner_id="runner-A", repo_id=REPO_ID)
 
-    b_done.wait(timeout=10)
+    assert b_done.wait(timeout=10), "runner-B 스레드 완료 타임아웃"
     t.join(timeout=10)
+    assert not t.is_alive(), "runner-B 스레드가 종료되지 않음"
 
     assert results.get("B") is True
 
@@ -274,7 +298,7 @@ def test_acquire_turn_three_runners_boundary(r):
                     order.append("B")
             release_merge_turn(b_client, runner_id="runner-B", repo_id=REPO_ID)
         finally:
-            b_client.close()
+            _close_redis_client(b_client)
             b_done.set()
 
     def run_c():
@@ -287,7 +311,7 @@ def test_acquire_turn_three_runners_boundary(r):
                 with order_lock:
                     order.append("C")
         finally:
-            c_client.close()
+            _close_redis_client(c_client)
             c_done.set()
 
     # A 먼저 진입
@@ -296,22 +320,37 @@ def test_acquire_turn_three_runners_boundary(r):
     with order_lock:
         order.append("A")
 
-    tb = threading.Thread(target=run_b)
-    tc = threading.Thread(target=run_c)
+    tb = threading.Thread(target=run_b, daemon=True)
+    tc = threading.Thread(target=run_c, daemon=True)
     tb.start()
-    tc.start()
-
     b_started.wait(timeout=2)
+
+    # FIFO 보장을 위해 B가 먼저 큐에 들어간 것을 확인한 뒤 C 시작
+    for _ in range(20):
+        if get_merge_queue(r, repo_id=REPO_ID)[:2] == ["runner-A", "runner-B"]:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("runner-B enqueue 확인 실패")
+
+    tc.start()
     c_started.wait(timeout=2)
-    time.sleep(0.3)  # B, C 모두 BRPOP 대기 진입
+    for _ in range(20):
+        if get_merge_queue(r, repo_id=REPO_ID)[:3] == ["runner-A", "runner-B", "runner-C"]:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("runner-C enqueue 확인 실패")
 
     # A release
     release_merge_turn(r, runner_id="runner-A", repo_id=REPO_ID)
 
-    b_done.wait(timeout=10)
-    c_done.wait(timeout=10)
+    assert b_done.wait(timeout=10), "runner-B 스레드 완료 타임아웃"
+    assert c_done.wait(timeout=10), "runner-C 스레드 완료 타임아웃"
     tb.join(timeout=10)
     tc.join(timeout=10)
+    assert not tb.is_alive(), "runner-B 스레드가 종료되지 않음"
+    assert not tc.is_alive(), "runner-C 스레드가 종료되지 않음"
 
     assert results.get("B") is True
     assert results.get("C") is True
@@ -344,13 +383,14 @@ def test_acquire_turn_timeout_error(r):
                 b_client, runner_id="runner-B", repo_id=REPO_ID, timeout=2, queue_ttl=60
             )
         finally:
-            b_client.close()
+            _close_redis_client(b_client)
             done_event.set()
 
-    t = threading.Thread(target=run_b)
+    t = threading.Thread(target=run_b, daemon=True)
     t.start()
-    done_event.wait(timeout=15)
-    t.join(timeout=15)
+    assert done_event.wait(timeout=8), "runner-B 스레드 완료 타임아웃"
+    t.join(timeout=8)
+    assert not t.is_alive(), "runner-B 스레드가 종료되지 않음"
 
     assert results.get("B") is False
     # B가 큐에서 제거됨
@@ -373,17 +413,17 @@ def test_acquire_after_stale_removal_right(r):
         try:
             b_started.set()
             results["B"] = acquire_merge_turn(
-                b_client, runner_id="runner-B", repo_id=REPO_ID, timeout=30, queue_ttl=60
+                b_client, runner_id="runner-B", repo_id=REPO_ID, timeout=8, queue_ttl=60
             )
         finally:
-            b_client.close()
+            _close_redis_client(b_client)
             b_done.set()
 
     # A 진입
     a_acquired = acquire_merge_turn(r, runner_id="runner-A", repo_id=REPO_ID, timeout=10, queue_ttl=60)
     assert a_acquired is True
 
-    t = threading.Thread(target=run_b)
+    t = threading.Thread(target=run_b, daemon=True)
     t.start()
     b_started.wait(timeout=2)
     time.sleep(0.3)  # B가 BRPOP 루프에 진입하도록
@@ -393,8 +433,9 @@ def test_acquire_after_stale_removal_right(r):
     r.set(pid_key, "99999")
 
     # B가 5초 BRPOP timeout 후 stale 감지 → 승격 → True 반환 기다림
-    b_done.wait(timeout=15)
-    t.join(timeout=15)
+    assert b_done.wait(timeout=8), "runner-B 스레드 완료 타임아웃"
+    t.join(timeout=8)
+    assert not t.is_alive(), "runner-B 스레드가 종료되지 않음"
 
     assert results.get("B") is True
 
@@ -405,19 +446,17 @@ def test_acquire_after_stale_removal_right(r):
 
 # ── TC 20 ─────────────────────────────────────────────────────────────────────
 def test_acquire_cleans_stale_turn_key_right(r):
-    """merge-turn:B에 잔존 'go' LPUSH → B acquire → B가 front면 즉시 True (잔존 signal 영향 없음)."""
-    queue_key = get_queue_key(REPO_ID)
+    """merge-turn:B에 잔존 'go'가 있어도 acquire 시 stale signal을 정리하고 즉시 turn을 얻는다."""
     turn_key_b = get_turn_key("runner-B")
 
     # 잔존 signal 삽입
     r.lpush(turn_key_b, "go")
 
-    # B를 큐에 단독 등록 (front = B)
-    r.rpush(queue_key, "runner-B")
-
-    # acquire: DEL turn_key 후 enqueue, LINDEX 0 == me → 즉시 True
+    # acquire: 내부에서 DEL turn_key 후 enqueue, front면 즉시 True
     result = acquire_merge_turn(r, runner_id="runner-B", repo_id=REPO_ID, timeout=10, queue_ttl=60)
     assert result is True
+    assert r.lrange(turn_key_b, 0, -1) == []
+    assert get_merge_queue(r, repo_id=REPO_ID) == ["runner-B"]
 
     # 정리
     release_merge_turn(r, runner_id="runner-B", repo_id=REPO_ID)
@@ -435,17 +474,17 @@ def test_acquire_queue_expired_boundary(r):
         try:
             b_started.set()
             results["B"] = acquire_merge_turn(
-                b_client, runner_id="runner-B", repo_id=REPO_ID, timeout=30, queue_ttl=60
+                b_client, runner_id="runner-B", repo_id=REPO_ID, timeout=8, queue_ttl=60
             )
         finally:
-            b_client.close()
+            _close_redis_client(b_client)
             b_done.set()
 
     # A 진입
     a_acquired = acquire_merge_turn(r, runner_id="runner-A", repo_id=REPO_ID, timeout=10, queue_ttl=60)
     assert a_acquired is True
 
-    t = threading.Thread(target=run_b)
+    t = threading.Thread(target=run_b, daemon=True)
     t.start()
     b_started.wait(timeout=2)
     time.sleep(0.3)  # B가 BRPOP 루프에 진입하도록
@@ -454,7 +493,10 @@ def test_acquire_queue_expired_boundary(r):
     queue_key = get_queue_key(REPO_ID)
     r.delete(queue_key)
 
-    b_done.wait(timeout=15)
-    t.join(timeout=15)
+    assert b_done.wait(timeout=8), "runner-B 스레드 완료 타임아웃"
+    t.join(timeout=8)
+    assert not t.is_alive(), "runner-B 스레드가 종료되지 않음"
 
     assert results.get("B") is False
+    # 정리
+    release_merge_turn(r, runner_id="runner-A", repo_id=REPO_ID)

@@ -109,6 +109,7 @@ def test_stream_output_finally_no_merge_flag(listener_mod, plan_runner_mod, fr):
     """R(Right): merge_requested 플래그 없으면 _cleanup_process_state() 호출"""
     runner_id = "t-stream-eeff"
     # 플래그 미설정
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
 
     process = _make_process(returncode=0)
     log_handle = _make_log_handle()
@@ -197,6 +198,7 @@ def test_stream_output_finally_redis_error(listener_mod, plan_runner_mod, fr):
 def test_stream_output_workflow_status_no_merge(listener_mod, plan_runner_mod, fr):
     """R(Right): merge_requested 없는 정상 종료 시 workflow status=completed"""
     runner_id = "t-stream-1122"
+    # 플래그 미설정
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
 
     process = _make_process(returncode=0)

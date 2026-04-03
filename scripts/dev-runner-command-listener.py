@@ -39,6 +39,7 @@ from _dr_constants import (
     ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, PLAN_FILE_ALL, _LEGACY_ALL,
     RECENT_RUNNERS_TTL, ADMIN_API_PORT, RUNNER_KEY_SUFFIXES,
     HEARTBEAT_KEY, HEARTBEAT_INTERVAL, HEARTBEAT_TTL, MERGE_ACTIVE_STATUSES,
+    ZOMBIE_GRACE_SECONDS,
     SCRIPT_DIR, PROJECT_ROOT, WORKTREE_BASE_DIR, WTOOLS_BASE_DIR,
     PLAN_RUNNER_MODULE_PATH, PLAN_RUNNER_PYTHON, LOG_DIR,
     LOG_CHANNEL_PREFIX,
@@ -47,12 +48,14 @@ from _dr_constants import (
 from _dr_state import (
     set_wf_manager, get_wf_manager, get_running_processes, get_running_log_files,
     get_stream_threads, get_cleanup_done, get_dead_process_first_seen,
+    get_zombie_first_seen,
 )
 from _dr_process_utils import (
     _evict_stale_cleanup_done, _evict_stale_dead_process, _is_pid_alive,
     _cleanup_process_state, _DummyProcess, _tail_log_and_publish,
     _monitor_pid_until_exit, _attach_to_running_process, _recover_pending_merge,
     _reconnect_surviving_runners, _detect_orphan_workflows, _cleanup_orphan_plans,
+    _is_recent_runner_without_hb,
 )
 from _dr_subprocess import (
     _run_subprocess_streaming, _get_fix_engine, _make_plan_runner_env,
@@ -193,7 +196,12 @@ def _execute_heartbeat_done_fallback(
 
 
 # 하위 호환 별칭 — 테스트/외부 코드에서 직접 접근 지원 (리팩토링 후 _dr_state로 이동됨)
-_refresh_state_refs(reset=bool(os.environ.get("PYTEST_CURRENT_TEST")))
+_running_processes = get_running_processes()
+_running_log_files = get_running_log_files()
+_stream_threads = get_stream_threads()
+_cleanup_done = get_cleanup_done()
+_dead_process_first_seen = get_dead_process_first_seen()
+_zombie_first_seen = get_zombie_first_seen()
 
 
 def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
@@ -240,6 +248,103 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     if action in {"retry-merge", "direct-merge"}:
         _log_command_memory_stage(action, "dispatch-end", runner_id)
     return result
+
+
+def _handle_zombie_heartbeat(runner_id: str, proc, redis_client: redis.Redis, wf_manager=None) -> bool:
+    """PID alive 러너의 subprocess_heartbeat 누락을 감지하고 필요 시 강제 정리."""
+    _zombie_first_seen = get_zombie_first_seen()
+    _running_processes = get_running_processes()
+    _cleanup_done = get_cleanup_done()
+
+    try:
+        subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
+    except Exception:
+        return False
+
+    if subprocess_hb is not None:
+        _zombie_first_seen.pop(runner_id, None)
+        return False
+
+    # Phase 4: 레거시 runner 보호 — start_time < 600초면 좀비 판정 스킵
+    is_legacy, start_elapsed = _is_recent_runner_without_hb(redis_client, runner_id)
+    if is_legacy:
+        _zombie_first_seen.pop(runner_id, None)
+        logger.debug(
+            f"heartbeat: runner {runner_id} subprocess_heartbeat 없으나 "
+            f"start_time 기준 {start_elapsed:.0f}초 → 레거시 runner 보호 (스킵)"
+        )
+        return False
+
+    if runner_id not in _zombie_first_seen:
+        _zombie_first_seen[runner_id] = time.time()
+
+    zombie_elapsed = time.time() - _zombie_first_seen[runner_id]
+    if zombie_elapsed < ZOMBIE_GRACE_SECONDS:
+        logger.warning(
+            f"heartbeat: runner {runner_id} PID={proc.pid} subprocess_heartbeat 없음 "
+            f"(elapsed={zombie_elapsed:.0f}s, grace={ZOMBIE_GRACE_SECONDS}s) → 유예 중"
+        )
+        return False
+
+    # 유예 기간 초과 → force-kill + cleanup
+    _pub_and_log(
+        runner_id,
+        f"runner {runner_id} (PID: {proc.pid}) subprocess_heartbeat {zombie_elapsed:.0f}초 부재 → 강제 종료",
+        redis_client,
+        tag="ZOMBIE",
+    )
+    logger.error(
+        f"heartbeat: zombie runner {runner_id} PID={proc.pid} "
+        f"heartbeat_elapsed={zombie_elapsed:.0f}s → force-kill"
+    )
+    try:
+        proc.kill()
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+    zombie_error = f"zombie: subprocess heartbeat timeout ({zombie_elapsed:.0f}s)"
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "zombie_heartbeat_timeout")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", zombie_error)
+    except Exception:
+        pass
+    _running_processes.pop(runner_id, None)
+    _zombie_first_seen.pop(runner_id, None)
+    _cleanup_done[runner_id] = time.time()
+    _cleanup_process_state(runner_id, redis_client, reason="zombie_heartbeat_timeout")
+
+    try:
+        if wf_manager:
+            wf = wf_manager.get_by_runner_id(runner_id)
+            if wf and wf.get("status") in ("running", "merge_pending", "merging", "failed"):
+                wf_manager.update_status(
+                    wf["id"], "failed",
+                    error_message=zombie_error,
+                )
+    except Exception:
+        pass
+
+    return True
+
+
+def _handle_running_process_heartbeat(runner_id: str, proc, redis_client: redis.Redis, wf_manager=None) -> str:
+    """heartbeat 주기에서 살아있는 runner의 상태 동기화/좀비 감지 처리."""
+    _running_processes = get_running_processes()
+    _cleanup_done = get_cleanup_done()
+
+    if runner_id in _cleanup_done:
+        _running_processes.pop(runner_id, None)
+        return "skipped_cleanup_done"
+
+    current_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+    if current_status not in (None, "stopped") and current_status != "running":
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", proc.pid)
+        redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+        logger.info(f"heartbeat: Redis 상태 복원 (runner_id: {runner_id}, PID: {proc.pid})")
+
+    _handle_zombie_heartbeat(runner_id, proc, redis_client, wf_manager)
+    return "checked"
 
 
 def main():
@@ -314,16 +419,9 @@ def main():
                     _refresh_state_refs()
                     _wf_manager = get_wf_manager()
                     for rid, proc in list(_running_processes.items()):
-                        if rid in _cleanup_done:
-                            _running_processes.pop(rid, None)
-                            continue
                         if proc.poll() is None:
-                            current_status = r.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
-                            if current_status not in (None, "stopped") and current_status != "running":
-                                r.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
-                                r.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", proc.pid)
-                                r.sadd(ACTIVE_RUNNERS_KEY, rid)
-                                logger.info(f"heartbeat: Redis 상태 복원 (runner_id: {rid}, PID: {proc.pid})")
+                            if _handle_running_process_heartbeat(rid, proc, r, _wf_manager) == "skipped_cleanup_done":
+                                continue
                         else:
                             # 프로세스가 종료되었는데 전역변수가 남아있는 경우 — 머지 진행 중 여부 확인 후 cleanup
                             if rid not in _dead_process_first_seen:

@@ -75,7 +75,7 @@ async def test_force_cleanup_single_runner_invalidates_plans_cache(tmp_path):
     svc = ExecutorService.__new__(ExecutorService)
     svc.async_redis = fake_redis
 
-    with patch("app.modules.dev_runner.services.executor_service.plan_service") as mock_ps:
+    with patch("app.modules.dev_runner.services.runner_state.plan_service") as mock_ps:
         await svc._force_cleanup_state(runner_id)
         mock_ps.invalidate_plans_cache.assert_called_once()
 
@@ -93,7 +93,7 @@ async def test_force_cleanup_all_runners_invalidates_plans_cache(tmp_path):
     svc = ExecutorService.__new__(ExecutorService)
     svc.async_redis = fake_redis
 
-    with patch("app.modules.dev_runner.services.executor_service.plan_service") as mock_ps:
+    with patch("app.modules.dev_runner.services.runner_state.plan_service") as mock_ps:
         await svc._force_cleanup_state()
         mock_ps.invalidate_plans_cache.assert_called_once()
 
@@ -111,7 +111,7 @@ async def test_force_cleanup_already_cleaned_skips_cache_invalidation():
     svc = ExecutorService.__new__(ExecutorService)
     svc.async_redis = fake_redis
 
-    with patch("app.modules.dev_runner.services.executor_service.plan_service") as mock_ps:
+    with patch("app.modules.dev_runner.services.runner_state.plan_service") as mock_ps:
         await svc._force_cleanup_state(runner_id)
         mock_ps.invalidate_plans_cache.assert_not_called()
 
@@ -223,7 +223,6 @@ async def test_cleanup_triggers_cache_refresh_with_real_plan_service(tmp_path, d
     """T3: executor cleanup → invalidate → list_plans 재스캔 — end-to-end 흐름"""
     from app.modules.dev_runner.services.plan_service import PlanService
     from app.modules.dev_runner.services.executor_service import ExecutorService
-    import app.modules.dev_runner.services.executor_service as executor_module
 
     cfg = dev_runner_config_isolation
     cfg.REGISTERED_PATHS_FILE = tmp_path / "registered_paths.json"
@@ -246,8 +245,8 @@ async def test_cleanup_triggers_cache_refresh_with_real_plan_service(tmp_path, d
     # 파일 삭제
     plan_file.unlink()
 
-    # executor가 real_svc를 참조하도록 patch
-    with patch.object(executor_module, "plan_service", real_svc):
+    # RunnerState가 참조하는 plan_service를 real_svc로 교체
+    with patch("app.modules.dev_runner.services.runner_state.plan_service", real_svc):
         fake_redis = fakeredis_async.FakeRedis(decode_responses=True)
         runner_id = "cafebabe"
         await fake_redis.set(f"plan-runner:runners:{runner_id}:status", "running")

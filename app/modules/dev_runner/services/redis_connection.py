@@ -48,7 +48,7 @@ RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
     "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
-    "exit_reason", "stop_stage",
+    "exit_reason", "subprocess_heartbeat",
 )
 
 

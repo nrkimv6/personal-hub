@@ -53,25 +53,29 @@ class TestOrchestratorE2E:
 
     @pytest.mark.asyncio
     async def test_e2e2_merge_queue_push_and_query(self):
-        """E2E-2: Redis merge-queue에 요청 push → get_merge_queue() 조회 확인"""
+        """E2E-2: per-repo merge-queue push → get_merge_queue() 조회 확인"""
         fake_async = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
-        item = make_merge_queue_item("runner_e2e")
-        await fake_async.lpush("plan-runner:merge-queue", json.dumps(item))
+        runner_id = "runner_e2e"
+        repo_id = "test-repo"
+        await fake_async.rpush(f"plan-runner:merge-queue:{repo_id}", runner_id)
+        await fake_async.set(f"plan-runner:runners:{runner_id}:branch", f"runner/{runner_id}")
+        await fake_async.set(f"plan-runner:runners:{runner_id}:plan_file", "/work/docs/plan/test.md")
+        await fake_async.set(f"plan-runner:runners:{runner_id}:start_time", "2026-02-26T10:00:00")
 
         svc = make_executor_service(fake_async)
         result = await svc.get_merge_queue()
 
         assert len(result) == 1
-        assert result[0]["runner_id"] == "runner_e2e"
-        assert result[0]["status"] == "pending"
+        assert result[0]["runner_id"] == runner_id
+        assert result[0]["status"] == "merging"
 
     @pytest.mark.asyncio
     async def test_e2e3_get_merge_status(self):
         """E2E-3: get_merge_status(runner_id) → 상태 조회 확인"""
         fake_async = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
-        await fake_async.set("plan-runner:merge:runner_e2e:status", "testing")
+        await fake_async.set("plan-runner:runners:runner_e2e:merge_status", "testing")
 
         svc = make_executor_service(fake_async)
         result = await svc.get_merge_status("runner_e2e")

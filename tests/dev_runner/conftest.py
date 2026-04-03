@@ -135,6 +135,15 @@ def _try_connect_redis():
         return None
 
 
+def _should_skip_pid_kill(pid: int) -> bool:
+    """pytest 자기 PID는 정리 루틴에서 kill 금지."""
+    import os as _os
+    try:
+        return int(pid) == _os.getpid()
+    except Exception:
+        return False
+
+
 
 @pytest.fixture(autouse=True, scope="session")
 def runner_cleanup_report():
@@ -177,12 +186,16 @@ def runner_cleanup_report():
                 # PID kill
                 if pid and pid != "(none)":
                     try:
-                        _os.kill(int(pid), _signal.SIGTERM)
+                        _pid_i = int(pid)
+                        if _should_skip_pid_kill(_pid_i):
+                            lines.append(f"    -> skip self pid kill: {_pid_i}")
+                            continue
+                        _os.kill(_pid_i, _signal.SIGTERM)
                         _time.sleep(0.5)
                         if _sys.platform == "win32":
-                            _subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+                            _subprocess.run(["taskkill", "/F", "/T", "/PID", str(_pid_i)], capture_output=True)
                         else:
-                            _os.kill(int(pid), _signal.SIGKILL)
+                            _os.kill(_pid_i, _signal.SIGKILL)
                     except (ProcessLookupError, ValueError, OSError):
                         pass
 
@@ -235,13 +248,19 @@ def redis_cleanup():
                 _time.sleep(0.5)
             if pid_str:
                 try:
-                    _os.kill(int(pid_str), _signal.SIGTERM)
+                    _pid_i = int(pid_str)
+                    if _should_skip_pid_kill(_pid_i):
+                        print(f"[redis_cleanup] skip self pid kill: {runner_id} pid={_pid_i}")
+                        _pid_i = None
+                    if _pid_i is not None:
+                        _os.kill(_pid_i, _signal.SIGTERM)
                     _time.sleep(2)
                     # 강제종료 fallback — /T 플래그로 프로세스 트리 전체 kill
-                    if _sys.platform == "win32":
-                        _subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid_str)], capture_output=True)
-                    else:
-                        _os.kill(int(pid_str), _signal.SIGKILL)
+                    if _pid_i is not None:
+                        if _sys.platform == "win32":
+                            _subprocess.run(["taskkill", "/F", "/T", "/PID", str(_pid_i)], capture_output=True)
+                        else:
+                            _os.kill(_pid_i, _signal.SIGKILL)
                 except (ProcessLookupError, ValueError, OSError):
                     pass
             print(f"[redis_cleanup] 정리: {runner_id} (source: {test_source})")

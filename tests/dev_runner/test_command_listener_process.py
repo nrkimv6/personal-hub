@@ -65,6 +65,21 @@ def mock_popen():
 RUNNER_ID = "test1234"
 
 
+class _RedisHeartbeatSetFailProxy:
+    """subprocess_heartbeat SET만 실패시키는 Redis 프록시."""
+
+    def __init__(self, backing):
+        self._backing = backing
+
+    def set(self, key, *args, **kwargs):
+        if str(key).endswith(":subprocess_heartbeat"):
+            raise RuntimeError("simulated heartbeat set failure")
+        return self._backing.set(key, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._backing, name)
+
+
 @pytest.fixture(autouse=True)
 def reset_globals(listener_mod):
     """테스트 간 전역 dict 초기화"""
@@ -327,6 +342,38 @@ class TestLaunchPlanRunnerProcess:
             f"stream_log_path({stream_log_path!r})가 "
             f"log_file_path({log_file_path!r})와 다름"
         )
+
+    def test_launch_sets_initial_heartbeat(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """R(Right): launch 직후 subprocess_heartbeat 키가 TTL과 함께 저장된다."""
+        RKP = listener_mod.RUNNER_KEY_PREFIX
+        command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen):
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, "test.md", None)
+
+        hb_key = f"{RKP}:{RUNNER_ID}:subprocess_heartbeat"
+        hb_value = fr.get(hb_key)
+        hb_ttl = fr.ttl(hb_key)
+        assert hb_value is not None, "초기 subprocess_heartbeat가 저장되어야 함"
+        assert 0 < hb_ttl <= 300, f"초기 heartbeat TTL이 1~300초 범위여야 함 (actual={hb_ttl})"
+
+    def test_launch_initial_heartbeat_redis_error(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """E(Error): 초기 heartbeat SET 실패가 발생해도 프로세스 시작은 성공해야 한다."""
+        RKP = listener_mod.RUNNER_KEY_PREFIX
+        command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
+        redis_proxy = _RedisHeartbeatSetFailProxy(fr)
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen):
+            mock_thread.return_value = MagicMock()
+            result = listener_mod._launch_plan_runner_process(command, redis_proxy, RUNNER_ID, mock_worktree, "test.md", None)
+
+        assert result["success"] is True, "초기 heartbeat 저장 실패가 launch 실패로 전파되면 안 됨"
+        assert fr.get(f"{RKP}:{RUNNER_ID}:status") == "running"
 
     def test_launch_plan_file_none_saves_sentinel(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """plan_file=None → Redis에 '__ALL_PLANS__' sentinel 저장 (Right)"""

@@ -305,6 +305,4 @@ def test_generate_summary_error_file_not_found():
     mock_db = MagicMock()
 
     with pytest.raises(FileNotFoundError):
-        asyncio.get_event_loop().run_until_complete(
-            service.generate_summary(non_existent, mock_db)
-        )
+        asyncio.run(service.generate_summary(non_existent, mock_db))

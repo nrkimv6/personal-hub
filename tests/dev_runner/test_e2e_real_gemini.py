@@ -1,4 +1,5 @@
 import asyncio
+import os
 import pytest
 from pathlib import Path
 import sys
@@ -10,6 +11,14 @@ sys.path.insert(0, str(PLAN_RUNNER_MODULE_PATH))
 
 from plan_runner.core.executor import AIExecutor
 from plan_runner.config import Settings
+
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skipif(
+        os.getenv("RUN_REAL_GEMINI_E2E") != "1",
+        reason="실환경 Gemini E2E는 RUN_REAL_GEMINI_E2E=1에서만 실행",
+    ),
+]
 
 @pytest.mark.e2e
 class TestRealGeminiExecution:

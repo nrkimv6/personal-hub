@@ -177,6 +177,14 @@ class TestMergeQueueE2EQueuedRunnerGetsTurn:
         runner_a = "e2e-brpop-runner-a"
         runner_b = "e2e-brpop-runner-b"
         results = {}
+        queue_key = f"plan-runner:merge-queue:{REPO_ID}"
+        rr.delete(queue_key, f"plan-runner:merge-turn:{runner_a}", f"plan-runner:merge-turn:{runner_b}")
+        rr.delete(
+            f"{_RUNNER_KEY_PREFIX}:{runner_a}:pid",
+            f"{_RUNNER_KEY_PREFIX}:{runner_a}:status",
+            f"{_RUNNER_KEY_PREFIX}:{runner_b}:pid",
+            f"{_RUNNER_KEY_PREFIX}:{runner_b}:status",
+        )
 
         def _make_client():
             return redis_lib.Redis(
@@ -184,8 +192,11 @@ class TestMergeQueueE2EQueuedRunnerGetsTurn:
             )
 
         def run_a():
+            import os
             r = _make_client()
             try:
+                r.set(f"{_RUNNER_KEY_PREFIX}:{runner_a}:pid", str(os.getpid()))
+                r.set(f"{_RUNNER_KEY_PREFIX}:{runner_a}:status", "running")
                 acquired = acquire_merge_turn(r, runner_a, repo_id=REPO_ID, timeout=30, queue_ttl=60)
                 results["a_acquired"] = acquired
                 if acquired:
@@ -197,10 +208,13 @@ class TestMergeQueueE2EQueuedRunnerGetsTurn:
                 r.close()
 
         def run_b():
+            import os
             r = _make_client()
             try:
                 # A보다 약간 늦게 enqueue하여 A가 front가 되도록 보장
                 time.sleep(0.1)
+                r.set(f"{_RUNNER_KEY_PREFIX}:{runner_b}:pid", str(os.getpid()))
+                r.set(f"{_RUNNER_KEY_PREFIX}:{runner_b}:status", "running")
                 acquired = acquire_merge_turn(r, runner_b, repo_id=REPO_ID, timeout=30, queue_ttl=60)
                 results["b_acquired"] = acquired
                 if acquired:
@@ -209,8 +223,8 @@ class TestMergeQueueE2EQueuedRunnerGetsTurn:
             finally:
                 r.close()
 
-        thread_a = threading.Thread(target=run_a, name="runner-a")
-        thread_b = threading.Thread(target=run_b, name="runner-b")
+        thread_a = threading.Thread(target=run_a, name="runner-a", daemon=True)
+        thread_b = threading.Thread(target=run_b, name="runner-b", daemon=True)
 
         thread_a.start()
         thread_b.start()

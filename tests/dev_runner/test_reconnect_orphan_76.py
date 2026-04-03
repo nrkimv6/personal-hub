@@ -81,6 +81,14 @@ class TestOrphanScan:
             (cleanup_calls, attach_calls): 호출된 runner_id 목록
         """
         mod = _load_listener_module()
+        process_utils_mod = sys.modules["_dr_process_utils"]
+        state_mod = sys.modules["_dr_state"]
+        state_mod.get_running_processes().clear()
+        state_mod.get_running_log_files().clear()
+        state_mod.get_stream_threads().clear()
+        state_mod.get_cleanup_done().clear()
+        state_mod.get_dead_process_first_seen().clear()
+        state_mod.get_zombie_first_seen().clear()
         alive = set(alive_pids or [])
         cleanup_calls = []
         attach_calls = []
@@ -100,10 +108,9 @@ class TestOrphanScan:
             attach_calls.append(runner_id)
 
         with (
-            patch.object(mod, "_is_pid_alive", side_effect=fake_is_alive),
-            patch.object(mod, "_cleanup_process_state", side_effect=fake_cleanup),
-            patch.object(mod, "_attach_to_running_process", side_effect=fake_attach),
-            patch.object(mod, "_running_processes", {}),
+            patch.object(process_utils_mod, "_is_pid_alive", side_effect=fake_is_alive),
+            patch.object(process_utils_mod, "_cleanup_process_state", side_effect=fake_cleanup),
+            patch.object(process_utils_mod, "_attach_to_running_process", side_effect=fake_attach),
         ):
             mod._reconnect_surviving_runners(r)
 
@@ -123,6 +130,7 @@ class TestOrphanScan:
         """고아 키의 PID가 alive → attach 호출."""
         r = make_fake_redis()
         seed_orphan(r, "orphan-002", 12345)
+        r.set(f"{RUNNER_KEY_PREFIX}:orphan-002:subprocess_heartbeat", "alive", ex=120)
 
         cleanup_calls, attach_calls = self._run_reconnect(r, alive_pids={12345})
 

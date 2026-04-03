@@ -53,10 +53,10 @@ class TestDirectMergeHttp:
 
 
 class TestDirectMergePlanFileInSSE:
-    """T4: POST /merge/direct 후 SSE status의 plan_file 필드 확인"""
+    """T4: POST /merge/direct 후 SSE status의 plan_file 필드 계약 확인"""
 
-    def test_build_status_payload_returns_branch_as_plan_file(self):
-        """T4-21: dm-* runner에서 plan_file=None, branch="plan/test" → plan_file="plan/test" """
+    def test_build_status_payload_dm_runner_keeps_plan_file_none(self):
+        """T4-21: dm-* runner에서도 plan_file 미설정이면 None 유지"""
         from app.modules.dev_runner.services.event_service import EventService
 
         svc = EventService.__new__(EventService)
@@ -68,8 +68,8 @@ class TestDirectMergePlanFileInSSE:
 
         payload = svc._build_status_payload("dm-http-test")
         assert payload is not None
-        assert payload["plan_file"] == "plan/test", \
-            f"dm-* runner의 plan_file이 branch fallback 안 됨: {payload['plan_file']}"
+        assert payload["plan_file"] is None, \
+            f"dm-* runner의 plan_file은 None이어야 함: {payload['plan_file']}"
 
 
 class TestLogsRecentRedisListFallback:
@@ -97,10 +97,10 @@ class TestLogsRecentRedisListFallback:
 
 
 class TestNormalRunnerPlanFileAllRegression:
-    """T4: 기존 일반 runner SSE 회귀 — plan_file=None + branch=None → "ALL" """
+    """T4: 일반 runner SSE 계약 — plan_file 미설정 시 None 유지"""
 
-    def test_normal_runner_plan_file_all_regression(self):
-        """T4-23: 일반 runner에서 plan_file=None, branch=None → plan_file="ALL" 유지"""
+    def test_normal_runner_plan_file_none_regression(self):
+        """T4-23: 일반 runner에서 plan_file=None, branch=None → plan_file=None"""
         from app.modules.dev_runner.services.event_service import EventService
 
         svc = EventService.__new__(EventService)
@@ -112,8 +112,8 @@ class TestNormalRunnerPlanFileAllRegression:
 
         payload = svc._build_status_payload("normal-runner-01")
         assert payload is not None
-        assert payload["plan_file"] == "__ALL_PLANS__", \
-            f"일반 runner의 plan_file이 '__ALL_PLANS__'이 아님: {payload['plan_file']}"
+        assert payload["plan_file"] is None, \
+            f"일반 runner의 plan_file은 None이어야 함: {payload['plan_file']}"
 
 
 class TestRetryMergeExitCode2Http:

@@ -75,11 +75,12 @@ def test_three_runners_concurrent_merge_integration(r):
             client.close()
 
     runner_ids = ["runner-a", "runner-b", "runner-c"]
-    threads = [threading.Thread(target=run_runner, args=(rid,)) for rid in runner_ids]
+    threads = [threading.Thread(target=run_runner, args=(rid,), daemon=True) for rid in runner_ids]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=20)
+        assert not t.is_alive(), f"스레드 타임아웃: {t.name}"
 
     # 3개 모두 acquire 성공
     acquired = [(entry[0], entry[2]) for entry in results if entry[1] == "acquired"]
@@ -103,10 +104,19 @@ def test_stale_recovery_integration(r):
     """
     runner_a = "runner-a-stale"
     runner_b = "runner-b-waiter"
+    queue_key = get_queue_key(REPO_ID)
+    r.delete(queue_key, f"plan-runner:merge-turn:{runner_a}", f"plan-runner:merge-turn:{runner_b}")
+    r.delete(
+        f"{_RUNNER_KEY_PREFIX}:{runner_a}:pid",
+        f"{_RUNNER_KEY_PREFIX}:{runner_a}:status",
+        f"{_RUNNER_KEY_PREFIX}:{runner_b}:pid",
+        f"{_RUNNER_KEY_PREFIX}:{runner_b}:status",
+    )
 
     # A: acquire 후 PID를 존재하지 않는 PID(99999)로 교체하여 crash 시뮬레이션
     import os
     r.set(f"{_RUNNER_KEY_PREFIX}:{runner_a}:pid", str(os.getpid()))
+    r.set(f"{_RUNNER_KEY_PREFIX}:{runner_a}:status", "running")
     r.expire(f"{_RUNNER_KEY_PREFIX}:{runner_a}:pid", 120)
 
     ok_a = acquire_merge_turn(r, runner_a, repo_id=REPO_ID, timeout=5, queue_ttl=120)
@@ -117,6 +127,7 @@ def test_stale_recovery_integration(r):
 
     # B: acquire 대기 — stale 감지 후 승격 기대
     r.set(f"{_RUNNER_KEY_PREFIX}:{runner_b}:pid", str(os.getpid()))
+    r.set(f"{_RUNNER_KEY_PREFIX}:{runner_b}:status", "running")
     r.expire(f"{_RUNNER_KEY_PREFIX}:{runner_b}:pid", 120)
 
     ok_b = acquire_merge_turn(r, runner_b, repo_id=REPO_ID, timeout=15, queue_ttl=120)

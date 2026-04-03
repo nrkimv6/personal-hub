@@ -22,6 +22,8 @@ _stream_threads: dict = {}
 _cleanup_done: dict = {}
 # 프로세스 종료 최초 감지 시각: heartbeat stale merge flag / stream thread 타임아웃 추적용
 _dead_process_first_seen: dict = {}
+# 좀비 최초 감지 시각: subprocess_heartbeat 만료 최초 발견 시각 (rid → float timestamp)
+_zombie_first_seen: dict = {}
 
 
 def get_running_processes() -> dict:
@@ -42,3 +44,7 @@ def get_cleanup_done() -> dict:
 
 def get_dead_process_first_seen() -> dict:
     return _dead_process_first_seen
+
+
+def get_zombie_first_seen() -> dict:
+    return _zombie_first_seen

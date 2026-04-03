@@ -62,7 +62,7 @@ class TestGetMergeQueue:
         assert item["branch"] == "plan/test"
         assert item["plan_file"] == "/work/plan/test.md"
         assert item["project"] == "monitor-page"
-        assert item["status"] == "queued"  # v2: "waiting" → "queued"
+        assert item["status"] == "merging"  # index 0(front)는 실행 중 상태
         assert item["timestamp"] == "2026-03-09T17:00:00"
 
     @pytest.mark.asyncio
@@ -105,10 +105,14 @@ class TestGetMergeQueue:
     @pytest.mark.asyncio
     async def test_error_redis_failure_returns_empty(self):
         """Error: Redis 연결 실패 → 빈 리스트 (안전한 응답)"""
-        mock_redis = AsyncMock()
-        mock_redis.lrange.side_effect = Exception("Redis connection refused")
+        class BrokenRedis:
+            def scan_iter(self, *args, **kwargs):
+                async def _gen():
+                    raise Exception("Redis connection refused")
+                    yield ""  # pragma: no cover
+                return _gen()
 
-        svc = make_executor_service(mock_redis)
+        svc = make_executor_service(BrokenRedis())
         result = await svc.get_merge_queue()
         assert result == []
 
@@ -155,7 +159,7 @@ class TestGetMergeStatus:
     async def test_returns_status_dict(self):
         """TC-Right: get_merge_status(runner_id) → 상태 딕셔너리 반환"""
         fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        await fake_redis.set("plan-runner:merge:abc12345:status", "testing")
+        await fake_redis.set(f"{RUNNER_KEY_PREFIX}:abc12345:merge_status", "testing")
 
         svc = make_executor_service(fake_redis)
         result = await svc.get_merge_status("abc12345")
@@ -189,7 +193,7 @@ class TestGetMergeStatus:
     async def test_status_contains_fix_attempts_key(self):
         """TC-Right: 반환 딕셔너리에 fix_attempts 키 존재"""
         fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        await fake_redis.set("plan-runner:merge:abc12345:status", "done")
+        await fake_redis.set(f"{RUNNER_KEY_PREFIX}:abc12345:merge_status", "done")
 
         svc = make_executor_service(fake_redis)
         result = await svc.get_merge_status("abc12345")

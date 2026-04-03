@@ -164,7 +164,13 @@ class WorktreeManager:
                     capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent)
                 )
             if result.returncode != 0:
-                if "already exists" in result.stderr or "already checked out" in result.stderr:
+                _stale_markers = (
+                    "already exists",
+                    "already checked out",
+                    "already registered worktree",
+                    "missing but already registered worktree",
+                )
+                if any(marker in result.stderr for marker in _stale_markers):
                     # 워크트리 디렉토리가 실제로 존재하면 재사용 (커밋 보존)
                     if worktree_path.is_dir():
                         if WorktreeManager.validate(worktree_path):
@@ -175,12 +181,12 @@ class WorktreeManager:
                         logger.warning(f"[WorktreeManager] 깨진 worktree 정리 후 재생성: {branch} ({worktree_path})")
                         shutil.rmtree(str(worktree_path))
                         subprocess.run(
-                            ["git", "worktree", "prune"],
+                            ["git", "worktree", "prune", "--expire", "now"],
                             capture_output=True, cwd=str(base_dir.parent),
                         )
                     # 디렉토리 없음 + 브랜치만 남은 경우: 미머지 커밋 확인 후 분기
                     subprocess.run(
-                        ["git", "worktree", "prune"],
+                        ["git", "worktree", "prune", "--expire", "now"],
                         capture_output=True, cwd=str(base_dir.parent),
                     )
                     unmerged = subprocess.run(
@@ -277,19 +283,6 @@ class WorktreeManager:
             branch = f"runner/{runner_id}"
         stashed = False
         try:
-            # dirty 방어: merge 전 uncommitted changes 자동 커밋 (안전망)
-            porcelain = subprocess.run(
-                ["git", "status", "--porcelain"],
-                capture_output=True, text=True, encoding="utf-8", cwd=str(project_root)
-            ).stdout.strip()
-            if porcelain:
-                logger.warning(f"[merge_to_main] dirty 상태 감지, 안전망 커밋 실행: {porcelain[:200]}")
-                subprocess.run(["git", "add", "-A"], cwd=str(project_root), capture_output=True)
-                subprocess.run(
-                    ["git", "commit", "-m", "chore: pre-merge safety commit"],
-                    cwd=str(project_root), capture_output=True
-                )
-                # 커밋 실패(nothing to commit 등)는 무시 — merge 자체의 성패가 최종 판단
             # main 체크아웃
             ensure_main_branch(project_root)
             # is-ancestor 사전 체크 — 이미 머지된 브랜치면 skip

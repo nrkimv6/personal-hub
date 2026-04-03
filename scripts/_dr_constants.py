@@ -35,8 +35,22 @@ ADMIN_API_PORT = int(os.environ.get("ADMIN_API_PORT", "8001"))
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
-    "current_cycle", "quota_stopped", "error", "restart_after_merge", "exit_reason", "stop_stage", "test_source", "trigger",
+    "current_cycle", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
+    "subprocess_heartbeat",
 )
+def _read_zombie_grace_seconds(default: int = 240) -> int:
+    """좀비 감지 유예 시간(env override) 파싱."""
+    raw = os.environ.get("DEV_RUNNER_ZOMBIE_GRACE_SECONDS")
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+ZOMBIE_GRACE_SECONDS = _read_zombie_grace_seconds()  # 기본 240초, 테스트/운영에서 env로 오버라이드 가능
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)

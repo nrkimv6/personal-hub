@@ -58,15 +58,15 @@ def test_flushdb_test_only_not_prod():
 
 
 def test_executor_service_redis_db_constant():
-    """ExecutorService가 사용하는 Redis DB 인덱스 확인 (현재 0 = 운영)"""
-    from app.modules.dev_runner.services.executor_service import ExecutorService
+    """RedisConnection이 PLAN_RUNNER_REDIS_DB 값을 pool db 인자로 사용하는지 확인."""
+    import os
     import inspect
+    from app.modules.dev_runner.services.redis_connection import RedisConnection, REDIS_DB
 
-    source = inspect.getsource(ExecutorService.__init__)
-    # 현재 구조 문서화: db 파라미터 없으면 기본값 0 사용
-    # 이 테스트는 현재 상태를 기록하는 용도 (분리 미구현 확인)
-    assert "redis.Redis" in source or "aioredis.Redis" in source, \
-        "ExecutorService가 Redis 클라이언트를 직접 생성해야 함"
+    source = inspect.getsource(RedisConnection.reconnect)
+    assert "db=REDIS_DB" in source, "RedisConnection.reconnect가 pool 생성 시 REDIS_DB를 사용해야 함"
+    assert REDIS_DB == int(os.environ.get("PLAN_RUNNER_REDIS_DB", "0")), \
+        "REDIS_DB 상수는 PLAN_RUNNER_REDIS_DB 환경변수와 동기화되어야 함"
 
 
 def test_conftest_fixture_isolation_structure():
@@ -81,5 +81,5 @@ def test_conftest_fixture_isolation_structure():
             "TODO(7.5): conftest.py에 isolated_redis fixture 미구현 — "
             "테스트/운영 Redis DB 분리 작업 필요 (db=15 사용)"
         )
-    assert "db=15" in content or "REDIS_DB" in content, \
-        "isolated_redis fixture가 db=15를 사용해야 함"
+    assert "def isolated_redis" in content and "plan-runner:" in content, \
+        "isolated_redis fixture가 plan-runner 키 격리/정리 구조를 포함해야 함"
