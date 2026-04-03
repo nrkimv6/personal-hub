@@ -9,7 +9,7 @@ import os
 import time
 import subprocess
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime
 
 import pytest
@@ -167,20 +167,25 @@ class TestKillProcess:
     def test_inverse_kill_called(self):
         mock_proc = MagicMock()
         mock_proc.name.return_value = "python.exe"
+        mock_proc.exe.return_value = r"D:\Python39\python.exe"
         mock_proc.cmdline.return_value = ["python", "test.py"]
-        mock_proc.kill = MagicMock()
+        mock_proc.create_time.return_value = 1712100000.0
 
-        with patch("app.routes.system.psutil.Process", return_value=mock_proc):
+        with patch("app.routes.system.psutil.Process", return_value=mock_proc), \
+             patch("scripts.service_utils.kill_pid", return_value=True) as mock_kill:
             resp = client.post("/api/v1/system/kill-process", json={"pid": 12345})
             assert resp.status_code == 200
             data = resp.json()
             assert data["success"] is True
-            mock_proc.kill.assert_called_once()
+            mock_kill.assert_called_once()
 
     # Error: non-python 프로세스 거부
     def test_error_non_python_rejected(self):
         mock_proc = MagicMock()
         mock_proc.name.return_value = "notepad.exe"
+        mock_proc.exe.return_value = r"C:\Windows\System32\notepad.exe"
+        mock_proc.cmdline.return_value = ["notepad.exe"]
+        mock_proc.create_time.return_value = 1712100000.0
 
         with patch("app.routes.system.psutil.Process", return_value=mock_proc):
             resp = client.post("/api/v1/system/kill-process", json={"pid": 12345})
@@ -257,6 +262,100 @@ class TestCorrect:
         for proc in data:
             dt = datetime.fromisoformat(proc["create_time"])
             assert dt.year >= 2020
+
+
+class TestProcessWatchApi:
+    def test_process_watch_latest_schema(self):
+        now_iso = datetime.now().isoformat()
+        mock_writer = MagicMock()
+        mock_writer.get_latest_python_snapshots.return_value = (
+            now_iso,
+            [
+                {
+                    "captured_at": now_iso,
+                    "pid": 1234,
+                    "ppid": 1000,
+                    "parent_pid": 10,
+                    "parent_name": "cmd.exe",
+                    "name": "python.exe",
+                    "exe": r"D:\Python39\python.exe",
+                    "cmdline": "python app/main.py --port 8001",
+                    "cmdline_hash": "0123456789abcdef0123456789abcdef",
+                    "create_time": 1712100000.0,
+                    "memory_mb": 1024.5,
+                    "is_orphan": False,
+                    "scope": "monitor_page",
+                    "captured_by": "periodic",
+                }
+            ],
+        )
+
+        with patch("app.routes.system._process_watch_writer", return_value=mock_writer):
+            resp = client.get("/api/v1/system/process-watch/latest?min_mb=256&limit=5")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source"] == "periodic"
+        assert data["item_count"] == 1
+        assert data["items"][0]["pid"] == 1234
+
+    def test_process_watch_latest_stale_triggers_on_demand(self):
+        stale_iso = "2000-01-01T00:00:00"
+        fresh_iso = datetime.now().isoformat()
+        mock_writer = MagicMock()
+        mock_writer.get_latest_python_snapshots.side_effect = [
+            (stale_iso, [{"captured_at": stale_iso, "pid": 1, "ppid": 0, "parent_pid": None, "parent_name": "", "name": "python.exe", "exe": "", "cmdline": "", "cmdline_hash": "a" * 32, "create_time": 1.0, "memory_mb": 10.0, "is_orphan": False, "scope": "monitor_page", "captured_by": "periodic"}]),
+            (fresh_iso, [{"captured_at": fresh_iso, "pid": 2, "ppid": 0, "parent_pid": None, "parent_name": "", "name": "python.exe", "exe": "", "cmdline": "", "cmdline_hash": "b" * 32, "create_time": 2.0, "memory_mb": 20.0, "is_orphan": False, "scope": "monitor_page", "captured_by": "on_demand"}]),
+        ]
+        mock_writer.capture_python_processes = AsyncMock(return_value=1)
+
+        with patch("app.routes.system._process_watch_writer", return_value=mock_writer), \
+             patch("app.routes.system._last_process_watch_on_demand_at", 0.0):
+            resp = client.get("/api/v1/system/process-watch/latest")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source"] == "on_demand"
+        assert data["items"][0]["pid"] == 2
+
+    def test_process_watch_kill_fingerprint_mismatch_returns_409(self):
+        mock_proc = MagicMock()
+        mock_proc.name.return_value = "python.exe"
+        mock_proc.exe.return_value = r"D:\Python39\python.exe"
+        mock_proc.cmdline.return_value = ["python", "app/main.py", "--port", "8001"]
+        mock_proc.create_time.return_value = 1712100000.0
+
+        mock_writer = MagicMock()
+
+        with patch("app.routes.system._process_watch_writer", return_value=mock_writer), \
+             patch("app.routes.system._protected_pids", return_value=set()), \
+             patch("app.routes.system.psutil.Process", return_value=mock_proc):
+            resp = client.post(
+                "/api/v1/system/process-watch/kill",
+                json={
+                    "pid": 12345,
+                    "expected_create_time": 1712100000.0,
+                    "expected_cmdline_hash": "ffffffffffffffffffffffffffffffff",
+                    "reason": "fingerprint mismatch smoke",
+                    "force": False,
+                },
+            )
+
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["code"] == "fingerprint_mismatch"
+
+    def test_legacy_kill_process_blocks_protected_pid(self):
+        protected_pid = os.getpid()
+        mock_writer = MagicMock()
+
+        with patch("app.routes.system._process_watch_writer", return_value=mock_writer), \
+             patch("app.routes.system._protected_pids", return_value={protected_pid}):
+            resp = client.post("/api/v1/system/kill-process", json={"pid": protected_pid})
+
+        assert resp.status_code == 403
+        detail = resp.json()["detail"]
+        assert detail["code"] == "protected_pid"
 
 
 def test_http_system_mode_survives_restart_frontend_admin():
