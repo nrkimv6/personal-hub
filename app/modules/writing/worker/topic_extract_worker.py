@@ -61,8 +61,8 @@ class TopicExtractWorker:
         try:
             # target_config에서 LLM provider/model 읽기
             config = schedule.get_target_config() if schedule.target_config else {}
-            llm_provider = config.get("llm_provider", "claude")
-            llm_model = config.get("llm_model", "")
+            llm_provider = config.get("llm_provider")
+            llm_model = config.get("llm_model")
 
             # 비동기 요청 생성 (create_extract_requests 사용)
             request_count = self.create_extract_requests(limit=self.DAILY_LIMIT, llm_provider=llm_provider, llm_model=llm_model)
@@ -112,6 +112,11 @@ class TopicExtractWorker:
             for s in sources
         ])
         prompt = self.prompt_template.replace("{sources}", sources_text)
+        provider, model = self.llm_service.resolve_provider_model(
+            caller_type="topic_extract",
+            provider=None,
+            model=None,
+        )
 
         # LLM 요청 생성
         llm_request = LLMRequest(
@@ -121,6 +126,8 @@ class TopicExtractWorker:
             status="processing",
             requested_by="scheduler",
             request_source="topic_extract_worker",
+            provider=provider,
+            model=model,
         )
         self.db.add(llm_request)
         self.db.commit()
@@ -128,8 +135,13 @@ class TopicExtractWorker:
 
         try:
             # LLM 호출 (글쓰기는 도구 사용 금지)
-            result = self.llm_service.execute_claude(
-                prompt, timeout=self.LLM_TIMEOUT, parse_json=True, enable_tools=False
+            result = self.llm_service.execute_llm(
+                prompt=prompt,
+                provider=provider,
+                model=model,
+                timeout=self.LLM_TIMEOUT,
+                parse_json=True,
+                enable_tools=False,
             )
 
             if not result.get("success"):
@@ -235,7 +247,12 @@ class TopicExtractWorker:
 
         return saved_count
 
-    def create_extract_requests(self, limit: int = 100, llm_provider: str = "claude", llm_model: str = "") -> int:
+    def create_extract_requests(
+        self,
+        limit: int = 100,
+        llm_provider: Optional[str] = None,
+        llm_model: Optional[str] = None,
+    ) -> int:
         """소재 추출 LLM 요청 생성 (시범용).
 
         스케줄 없이 직접 LLMRequest를 생성합니다.
@@ -268,6 +285,11 @@ class TopicExtractWorker:
             # source_id 전체 기록 (추적 및 중복 감지용)
             source_ids = [s.id for s in batch]
             source_ids_str = ",".join(str(sid) for sid in source_ids)
+            provider, model = self.llm_service.resolve_provider_model(
+                caller_type="topic_extract",
+                provider=llm_provider,
+                model=llm_model,
+            )
 
             # LLM 요청 생성 (pending 상태)
             llm_request = LLMRequest(
@@ -277,8 +299,8 @@ class TopicExtractWorker:
                 status="pending",  # Claude Worker가 처리
                 requested_by="manual",
                 request_source="topic_extract_worker",
-                provider=llm_provider,
-                model=llm_model,
+                provider=provider,
+                model=model,
             )
             self.db.add(llm_request)
             request_count += 1

@@ -11,7 +11,7 @@ import redis.asyncio as aioredis
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -34,8 +34,8 @@ class LLMRequestCreate(BaseModel):
     prompt: str
     requested_by: str = "api"
     request_source: Optional[str] = None
-    provider: str = "claude"
-    model: str = ""
+    provider: Optional[str] = None
+    model: Optional[str] = None
     queue_name: str = "utility"
     cli_options: Optional[dict] = None
     mode: str = "single"
@@ -112,6 +112,23 @@ class HistoryStatsResponse(BaseModel):
     summary: dict
 
 
+class LLMDefaultConfig(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = ""
+
+
+class LLMDefaultsResponse(BaseModel):
+    global_default: LLMDefaultConfig
+    caller_defaults: dict[str, LLMDefaultConfig]
+    supported_providers: List[str]
+    known_caller_types: List[str]
+
+
+class LLMDefaultsUpdateRequest(BaseModel):
+    global_default: LLMDefaultConfig
+    caller_defaults: dict[str, LLMDefaultConfig] = Field(default_factory=dict)
+
+
 # ========== Endpoints ==========
 
 def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
@@ -164,6 +181,39 @@ def get_queue_stats(db: Session = Depends(get_db)):
     """
     service = LLMService(db)
     return service.get_queue_stats()
+
+
+@router.get("/defaults", response_model=LLMDefaultsResponse)
+def get_llm_defaults(db: Session = Depends(get_db)):
+    """LLM 기본 provider/model 설정 조회."""
+    service = LLMService(db)
+    defaults = service.load_llm_defaults()
+    return LLMDefaultsResponse(
+        global_default=LLMDefaultConfig(**defaults.get("global_default", {"provider": "claude", "model": ""})),
+        caller_defaults={k: LLMDefaultConfig(**v) for k, v in defaults.get("caller_defaults", {}).items()},
+        supported_providers=service.get_supported_providers(),
+        known_caller_types=service.get_known_caller_types(),
+    )
+
+
+@router.put("/defaults", response_model=LLMDefaultsResponse)
+def update_llm_defaults(
+    body: LLMDefaultsUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """LLM 기본 provider/model 설정 저장."""
+    service = LLMService(db)
+    try:
+        saved = service.save_llm_defaults(body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return LLMDefaultsResponse(
+        global_default=LLMDefaultConfig(**saved.get("global_default", {"provider": "claude", "model": ""})),
+        caller_defaults={k: LLMDefaultConfig(**v) for k, v in saved.get("caller_defaults", {}).items()},
+        supported_providers=service.get_supported_providers(),
+        known_caller_types=service.get_known_caller_types(),
+    )
 
 
 @router.get("/requests", response_model=LLMRequestListResponse)

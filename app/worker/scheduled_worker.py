@@ -378,6 +378,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """
         from app.models.plan_record import PlanRecord
         from app.modules.claude_worker.models.llm_request import LLMRequest
+        from app.modules.claude_worker.services.llm_service import LLMService
         from app.modules.claude_worker.services.plan_analyze_handler import build_plan_analyze_prompt
         from sqlalchemy import and_
         from pathlib import Path
@@ -406,6 +407,12 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             }
 
             inserted = 0
+            llm_service = LLMService(db)
+            provider, model = llm_service.resolve_provider_model(
+                caller_type="plan_archive_analyze",
+                provider=None,
+                model=None,
+            )
             for record in records:
                 if record.filename_hash in existing_pending:
                     continue
@@ -428,6 +435,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     prompt=prompt,
                     queue_name="utility",
                     requested_by="scheduler",
+                    provider=provider,
+                    model=model,
                 )
                 db.add(llm_req)
                 inserted += 1

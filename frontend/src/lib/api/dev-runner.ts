@@ -194,6 +194,10 @@ export interface EngineConfig {
 	models: Record<string, string>;
 }
 
+export interface EngineConfigUpdatePayload extends Partial<EngineConfig> {
+	overwrite_all_phases?: boolean;
+}
+
 export interface AllEnginesConfig {
 	[engine: string]: EngineConfig;
 }
@@ -201,7 +205,7 @@ export interface AllEnginesConfig {
 export const devRunnerEngineApi = {
 	list: () => devRunnerRequest<AllEnginesConfig>('/engines'),
 	// 예: { models: { "auto-verify": "gpt-5.3-codex" } } 처럼 phase key 일부만 PATCH 가능
-	update: (engine: string, config: Partial<EngineConfig>) =>
+	update: (engine: string, config: EngineConfigUpdatePayload) =>
 		devRunnerRequest<{ success: boolean; message: string }>(`/engines/${engine}`, {
 			method: 'PUT',
 			body: JSON.stringify(config)
@@ -514,19 +518,32 @@ export const devRunnerMergeApi = {
 
 export interface DevRunnerSettings {
 	max_concurrent_runners: number;
+	default_engine: string;
+	default_fix_engine: string;
 	updated_at: string | null;
+}
+
+export interface DevRunnerSettingsUpdatePayload {
+	max_concurrent_runners?: number;
+	default_engine?: string;
+	default_fix_engine?: string;
 }
 
 export const devRunnerSettingsApi = {
 	get: (): Promise<DevRunnerSettings> =>
 		devRunnerRequest<DevRunnerSettings>('/settings'),
 
-	update: (maxRunners: number): Promise<DevRunnerSettings> =>
-		devRunnerRequest<DevRunnerSettings>('/settings', {
+	update: (payload: number | DevRunnerSettingsUpdatePayload): Promise<DevRunnerSettings> => {
+		const body =
+			typeof payload === 'number'
+				? { max_concurrent_runners: payload }
+				: payload;
+		return devRunnerRequest<DevRunnerSettings>('/settings', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ max_concurrent_runners: maxRunners }),
-		}),
+			body: JSON.stringify(body),
+		});
+	},
 };
 
 

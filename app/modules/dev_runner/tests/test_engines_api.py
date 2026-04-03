@@ -131,3 +131,21 @@ class TestEnginesApi:
         data = (await client.get("/api/v1/dev-runner/engines")).json()
         assert data["codex"]["default_model"] == "gpt-5.4-codex"
         assert data["codex"]["models"] == before
+
+    async def test_put_engines_overwrite_all_phases_true_syncs_default_and_models(self, client):
+        response = await client.put(
+            "/api/v1/dev-runner/engines/codex",
+            json={
+                "default_model": "gpt-5.4-codex",
+                "overwrite_all_phases": True,
+            },
+        )
+        assert response.status_code == 200
+
+        data = (await client.get("/api/v1/dev-runner/engines")).json()
+        codex = data["codex"]
+        assert codex["default_model"] == "gpt-5.4-codex"
+        assert codex["models"]["plan"] == "gpt-5.4-codex"
+        assert codex["models"]["impl"] == "gpt-5.4-codex"
+        assert codex["models"]["done"] == "gpt-5.4-codex"
+        assert codex["models"]["auto-verify"] == "gpt-5.4-codex"

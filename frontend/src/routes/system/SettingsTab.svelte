@@ -1,8 +1,9 @@
 <script lang="ts">
 	import NotificationSettings from '$lib/components/NotificationSettings.svelte';
 	import SchedulerSettings from '$lib/components/SchedulerSettings.svelte';
+	import AiDefaultsSettings from '$lib/components/system/AiDefaultsSettings.svelte';
 
-	type Tab = 'notification' | 'scheduler';
+	type Tab = 'notification' | 'scheduler' | 'ai-defaults';
 	let activeTab: Tab = 'notification';
 
 	function switchTab(tab: Tab) {
@@ -33,6 +34,15 @@
 			>
 				스케줄러
 			</button>
+			<button
+				onclick={() => switchTab('ai-defaults')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab ===
+				'ai-defaults'
+					? 'border-blue-600 text-primary'
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+			>
+				AI 기본값
+			</button>
 		</nav>
 	</div>
 
@@ -40,5 +50,7 @@
 		<NotificationSettings />
 	{:else if activeTab === 'scheduler'}
 		<SchedulerSettings />
+	{:else if activeTab === 'ai-defaults'}
+		<AiDefaultsSettings />
 	{/if}
 </div>

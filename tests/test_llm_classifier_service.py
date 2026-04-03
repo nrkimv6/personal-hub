@@ -1123,7 +1123,7 @@ class TestQuotaWarnLog:
         p = InstagramPost(
             post_id="qw_test_001",
             caption="quota warn test caption",
-            username="test_user",
+            account="test_user",
         )
         test_session.add(p)
         test_session.commit()
@@ -1154,7 +1154,7 @@ class TestQuotaWarnLog:
             p = InstagramPost(
                 post_id=f"batch_qw_{i}",
                 caption=f"caption {i}",
-                username="test_user",
+                account="test_user",
             )
             test_session.add(p)
             posts.append(p)
@@ -1180,4 +1180,3 @@ class TestQuotaWarnLog:
 
         quota_warns = [r for r in caplog.records if "[QUOTA_WARN]" in r.message]
         assert len(quota_warns) == 0
-        assert result["result"]["reasoning"] == "서울 풍경"

@@ -8,12 +8,15 @@
 
   let settings: DevRunnerSettings | null = $state(null);
   let inputValue = $state(3);
+  let defaultEngine = $state('claude');
+  let defaultFixEngine = $state('claude');
   let saving = $state(false);
   let toast = $state('');
   let toastTimer: ReturnType<typeof setTimeout>;
   let activeRunnerCount = $state(0);
   let loading = $state(true);
   let error = $state('');
+  const engineOptions = ['claude', 'gemini', 'codex', 'cc-codex'];
 
   onMount(async () => {
     try {
@@ -23,6 +26,8 @@
       ]);
       settings = s;
       inputValue = s.max_concurrent_runners;
+      defaultEngine = s.default_engine || 'claude';
+      defaultFixEngine = s.default_fix_engine || 'claude';
       activeRunnerCount = runners.filter((r: any) => r.running).length;
     } catch (e) {
       error = '설정 불러오기 실패';
@@ -35,7 +40,13 @@
     saving = true;
     error = '';
     try {
-      settings = await devRunnerSettingsApi.update(inputValue);
+      settings = await devRunnerSettingsApi.update({
+        max_concurrent_runners: inputValue,
+        default_engine: defaultEngine,
+        default_fix_engine: defaultFixEngine,
+      });
+      defaultEngine = settings.default_engine || defaultEngine;
+      defaultFixEngine = settings.default_fix_engine || defaultFixEngine;
       showToast('저장됨');
     } catch (e: unknown) {
       error = (e as Error)?.message ?? '저장 실패';
@@ -71,6 +82,22 @@
         <button on:click={handleSave} disabled={saving}>
           {saving ? '저장 중...' : '저장'}
         </button>
+      </div>
+      <div class="row">
+        <label class="sub-label" for="default-engine">기본 Engine</label>
+        <select id="default-engine" bind:value={defaultEngine} disabled={saving}>
+          {#each engineOptions as engine}
+            <option value={engine}>{engine}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="row">
+        <label class="sub-label" for="default-fix-engine">기본 Fix Engine</label>
+        <select id="default-fix-engine" bind:value={defaultFixEngine} disabled={saving}>
+          {#each engineOptions as engine}
+            <option value={engine}>{engine}</option>
+          {/each}
+        </select>
       </div>
       <p class="hint">현재 {activeRunnerCount}개 실행 중 · 허용 최대: {settings?.max_concurrent_runners ?? inputValue}개</p>
       {#if settings?.updated_at}
@@ -111,6 +138,11 @@
     font-size: 0.85rem;
     font-weight: 500;
   }
+  .sub-label {
+    min-width: 100px;
+    font-size: 0.78rem;
+    color: #6b7280;
+  }
   .row {
     display: flex;
     gap: 0.5rem;
@@ -121,6 +153,14 @@
     padding: 0.3rem 0.5rem;
     border: 1px solid #ccc;
     border-radius: 4px;
+  }
+  select {
+    min-width: 120px;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: white;
+    font-size: 0.82rem;
   }
   button {
     padding: 0.3rem 0.8rem;

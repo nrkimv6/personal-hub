@@ -18,6 +18,7 @@ from app.models.writing import (
 )
 from app.modules.writing.models.writing_batch import WritingBatch
 from app.modules.claude_worker.models.llm_request import LLMRequest
+from app.modules.claude_worker.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,19 @@ class WritingService:
 
     def __init__(self, db: Session):
         self.db = db
+        self._llm_service = LLMService(db)
+
+    def _resolve_provider_model(
+        self,
+        caller_type: str,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> tuple[str, str]:
+        return self._llm_service.resolve_provider_model(
+            caller_type=caller_type,
+            provider=provider,
+            model=model,
+        )
 
     # ========== 생성된 글 조회 ==========
 
@@ -182,6 +196,7 @@ class WritingService:
 
         refine_template = refine_prompt_path.read_text(encoding="utf-8")
         refine_prompt = refine_template.replace("{content}", writing.content)
+        provider, model = self._resolve_provider_model(caller_type="writing_refine")
 
         # LLM 요청 생성
         refine_request = LLMRequest(
@@ -191,6 +206,8 @@ class WritingService:
             status="pending",
             requested_by="manual",
             request_source="writing_api",
+            provider=provider,
+            model=model,
         )
         self.db.add(refine_request)
         self.db.commit()
@@ -537,6 +554,7 @@ class WritingService:
             "source_ids": [s.id for s in sources],
             "index": index,
         }
+        provider, model = self._resolve_provider_model(caller_type="writing")
 
         request = LLMRequest(
             caller_type="writing",
@@ -547,6 +565,8 @@ class WritingService:
             request_source="writing_batch",
             writing_batch_id=batch_id,
             writing_metadata=json.dumps(metadata, ensure_ascii=False),
+            provider=provider,
+            model=model,
         )
         self.db.add(request)
         self.db.commit()
@@ -630,6 +650,7 @@ class WritingService:
             "season": season,
             "index": index,
         }
+        provider, model = self._resolve_provider_model(caller_type="writing")
 
         request = LLMRequest(
             caller_type="writing",
@@ -640,6 +661,8 @@ class WritingService:
             request_source="writing_batch",
             writing_batch_id=batch_id,
             writing_metadata=json.dumps(metadata, ensure_ascii=False),
+            provider=provider,
+            model=model,
         )
         self.db.add(request)
         self.db.commit()
@@ -714,6 +737,7 @@ class WritingService:
             "season": season,
             "index": index,
         }
+        provider, model = self._resolve_provider_model(caller_type="writing")
 
         request = LLMRequest(
             caller_type="writing",
@@ -724,6 +748,8 @@ class WritingService:
             request_source="writing_batch",
             writing_batch_id=batch_id,
             writing_metadata=json.dumps(metadata, ensure_ascii=False),
+            provider=provider,
+            model=model,
         )
         self.db.add(request)
         self.db.commit()

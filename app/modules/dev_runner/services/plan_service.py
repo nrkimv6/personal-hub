@@ -1472,8 +1472,6 @@ class PlanService:
             prompt=prompt,
             requested_by="api",
             request_source="plan_summary",
-            provider="claude",
-            model="",
             queue_name="utility",
         )
         db.commit()

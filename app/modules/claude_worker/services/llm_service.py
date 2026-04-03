@@ -5,7 +5,8 @@ import logging
 import re
 import subprocess
 from datetime import date, datetime, timedelta
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -23,6 +24,32 @@ QUEUE_PRIORITY = ["system", "utility"]
 
 # Quota pause 기본 대기 시간 (ms) — 6시간
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000
+
+# LLM 기본값 설정 파일
+LLM_DEFAULTS_FILE = Path("data/llm_defaults.json")
+
+# LLM worker가 실제 지원하는 provider
+SUPPORTED_LLM_PROVIDERS = {"claude", "gemini"}
+
+# 설정 UI 노출용 caller_type 목록 (코드 기준)
+KNOWN_CALLER_TYPES = [
+    "instagram",
+    "universal_crawl",
+    "image_classify",
+    "event_import",
+    "report",
+    "pytest_fix",
+    "dev_runner",
+    "git_repos",
+    "topic_extract",
+    "writing",
+    "writing_generate",
+    "writing_refine",
+    "plan_archive_analyze",
+    "plan_requirements_sync",
+    "plan_recurrence_check",
+    "plan_recurrence_suggest",
+]
 
 
 def _parse_quota_retry_ms(text: str) -> Optional[int]:
@@ -58,6 +85,161 @@ class LLMService:
     def __init__(self, db: Session):
         self.db = db
 
+    # ========== 기본값 관리 ==========
+
+    @staticmethod
+    def get_supported_providers() -> List[str]:
+        return sorted(SUPPORTED_LLM_PROVIDERS)
+
+    @staticmethod
+    def get_known_caller_types() -> List[str]:
+        return sorted(KNOWN_CALLER_TYPES)
+
+    @staticmethod
+    def _normalize_provider(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @staticmethod
+    def _normalize_model(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value)
+        normalized = value.strip()
+        # 빈 문자열은 "미지정"으로 간주
+        return normalized or None
+
+    @classmethod
+    def _default_defaults_payload(cls) -> Dict[str, Any]:
+        return {
+            "global_default": {"provider": "claude", "model": ""},
+            "caller_defaults": {},
+        }
+
+    def _sanitize_defaults_payload(self, raw: Any) -> Dict[str, Any]:
+        payload = self._default_defaults_payload()
+        if not isinstance(raw, dict):
+            return payload
+
+        raw_global = raw.get("global_default")
+        if isinstance(raw_global, dict):
+            provider = self._normalize_provider(raw_global.get("provider")) or "claude"
+            if provider not in SUPPORTED_LLM_PROVIDERS:
+                provider = "claude"
+            model = raw_global.get("model")
+            if model is None:
+                model = ""
+            if not isinstance(model, str):
+                model = str(model)
+            payload["global_default"] = {
+                "provider": provider,
+                "model": model.strip(),
+            }
+
+        raw_callers = raw.get("caller_defaults")
+        if not isinstance(raw_callers, dict):
+            return payload
+
+        caller_defaults: Dict[str, Dict[str, str]] = {}
+        for caller_type, config in raw_callers.items():
+            caller = str(caller_type).strip()
+            if not caller or not isinstance(config, dict):
+                continue
+
+            provider = self._normalize_provider(config.get("provider"))
+            if provider is None or provider not in SUPPORTED_LLM_PROVIDERS:
+                continue
+
+            model = config.get("model")
+            if model is None:
+                model = ""
+            if not isinstance(model, str):
+                model = str(model)
+
+            caller_defaults[caller] = {
+                "provider": provider,
+                "model": model.strip(),
+            }
+
+        payload["caller_defaults"] = caller_defaults
+        return payload
+
+    def load_llm_defaults(self) -> Dict[str, Any]:
+        if not LLM_DEFAULTS_FILE.exists():
+            return self._default_defaults_payload()
+
+        try:
+            data = json.loads(LLM_DEFAULTS_FILE.read_text(encoding="utf-8"))
+            return self._sanitize_defaults_payload(data)
+        except Exception:
+            logger.warning(f"[llm-defaults] 설정 파일 읽기 실패, 기본값 사용: {LLM_DEFAULTS_FILE}")
+            return self._default_defaults_payload()
+
+    def save_llm_defaults(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        defaults = self._sanitize_defaults_payload(payload)
+
+        # 저장 요청에서 caller_defaults를 명시적으로 보낸 경우 provider 공백 항목 제거
+        if isinstance(payload, dict) and isinstance(payload.get("caller_defaults"), dict):
+            requested = payload.get("caller_defaults", {})
+            caller_defaults: Dict[str, Dict[str, str]] = {}
+            for caller_type, config in requested.items():
+                caller = str(caller_type).strip()
+                if not caller:
+                    continue
+                if not isinstance(config, dict):
+                    continue
+                provider = self._normalize_provider(config.get("provider"))
+                if provider is None:
+                    # provider가 비어 있으면 caller override 삭제(=global fallback)
+                    continue
+                if provider not in SUPPORTED_LLM_PROVIDERS:
+                    raise ValueError(f"지원되지 않는 provider: {provider}")
+                model = config.get("model")
+                if model is None:
+                    model = ""
+                if not isinstance(model, str):
+                    model = str(model)
+                caller_defaults[caller] = {
+                    "provider": provider,
+                    "model": model.strip(),
+                }
+            defaults["caller_defaults"] = caller_defaults
+
+        LLM_DEFAULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LLM_DEFAULTS_FILE.write_text(json.dumps(defaults, ensure_ascii=False, indent=2), encoding="utf-8")
+        return defaults
+
+    def resolve_provider_model(
+        self,
+        caller_type: str,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> Tuple[str, str]:
+        defaults = self.load_llm_defaults()
+        global_default = defaults.get("global_default", {})
+        caller_defaults = defaults.get("caller_defaults", {})
+        caller_default = caller_defaults.get(caller_type, {}) if isinstance(caller_defaults, dict) else {}
+
+        resolved_provider = self._normalize_provider(provider)
+        if resolved_provider is None:
+            resolved_provider = caller_default.get("provider") or global_default.get("provider") or "claude"
+        if resolved_provider not in SUPPORTED_LLM_PROVIDERS:
+            resolved_provider = "claude"
+
+        resolved_model = self._normalize_model(model)
+        if resolved_model is None:
+            if isinstance(caller_default, dict) and "model" in caller_default:
+                resolved_model = str(caller_default.get("model") or "")
+            else:
+                resolved_model = str(global_default.get("model") or "")
+
+        return resolved_provider, resolved_model
+
     # ========== 큐 관리 ==========
 
     def enqueue(
@@ -67,8 +249,8 @@ class LLMService:
         prompt: str,
         requested_by: str = "unknown",
         request_source: str = None,
-        provider: str = "claude",
-        model: str = "",
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
         cli_options: dict = None,
         queue_name: str = "utility",
         mode: str = "single",
@@ -81,8 +263,8 @@ class LLMService:
             prompt: LLM에 전달할 프롬프트
             requested_by: 요청자 (예: 'api', 'scheduler', 'manual')
             request_source: 요청 출처 (예: 'instagram_crawl', 'manual_test')
-            provider: LLM Provider ('claude' 또는 'gemini')
-            model: 모델명 (빈 문자열이면 기본 모델 사용)
+            provider: LLM Provider (미지정 시 caller/global 설정 fallback)
+            model: 모델명 (미지정 시 caller/global 설정 fallback)
             cli_options: CLI 옵션 dict (output_format, json_schema, allowed_tools, use_prompt_flag 등)
             queue_name: 큐 이름 ('utility' 또는 'system', 기본값: 'utility')
 
@@ -106,6 +288,12 @@ class LLMService:
             logger.debug(f"이미 pending 요청 존재: {caller_type}:{caller_id} (queue={queue_name})")
             return existing
 
+        resolved_provider, resolved_model = self.resolve_provider_model(
+            caller_type=caller_type,
+            provider=provider,
+            model=model,
+        )
+
         request = LLMRequest(
             caller_type=caller_type,
             caller_id=caller_id,
@@ -113,8 +301,8 @@ class LLMService:
             status="pending",
             requested_by=requested_by,
             request_source=request_source,
-            provider=provider,
-            model=model,
+            provider=resolved_provider,
+            model=resolved_model,
             cli_options=json.dumps(cli_options, ensure_ascii=False) if cli_options else None,
             queue_name=queue_name,
             mode=mode,

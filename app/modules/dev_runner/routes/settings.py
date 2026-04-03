@@ -15,6 +15,8 @@ async def get_settings():
     settings = settings_service.get()
     return DevRunnerSettingsResponse(
         max_concurrent_runners=settings.max_concurrent_runners,
+        default_engine=settings.default_engine,
+        default_fix_engine=settings.default_fix_engine,
         updated_at=settings.updated_at,
     )
 
@@ -23,9 +25,14 @@ async def get_settings():
 async def update_settings(body: DevRunnerSettingsUpdateRequest):
     """dev-runner 설정 업데이트"""
     try:
-        settings = settings_service.update(body.max_concurrent_runners)
+        payload = body.model_dump(exclude_none=True)
+        if not payload:
+            raise HTTPException(status_code=422, detail="최소 1개 필드를 전달해야 합니다.")
+        settings = settings_service.update(payload)
         return DevRunnerSettingsResponse(
             max_concurrent_runners=settings.max_concurrent_runners,
+            default_engine=settings.default_engine,
+            default_fix_engine=settings.default_fix_engine,
             updated_at=settings.updated_at,
         )
     except ValueError as e:

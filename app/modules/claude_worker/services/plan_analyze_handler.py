@@ -13,6 +13,7 @@ from typing import Optional, List
 from sqlalchemy.orm import Session
 
 from app.models.plan_record import PlanRecord
+from app.modules.claude_worker.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
@@ -260,12 +261,20 @@ def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
         ]
 
         prompt = build_requirements_sync_prompt(category, plan_summaries)
+        llm_service = LLMService(db)
+        provider, model = llm_service.resolve_provider_model(
+            caller_type="plan_requirements_sync",
+            provider=None,
+            model=None,
+        )
         llm_req = LLMRequest(
             caller_type="plan_requirements_sync",
             caller_id=category,
             prompt=prompt,
             queue_name="utility",
             requested_by="scheduler",
+            provider=provider,
+            model=model,
         )
         db.add(llm_req)
         db.commit()
@@ -351,12 +360,20 @@ def detect_recurrence(db: Session, record: PlanRecord) -> bool:
             return False
 
         prompt = build_recurrence_check_prompt(record, candidates)
+        llm_service = LLMService(db)
+        provider, model = llm_service.resolve_provider_model(
+            caller_type="plan_recurrence_check",
+            provider=None,
+            model=None,
+        )
         llm_req = LLMRequest(
             caller_type="plan_recurrence_check",
             caller_id=record.filename_hash,
             prompt=prompt,
             queue_name="utility",
             requested_by="scheduler",
+            provider=provider,
+            model=model,
         )
         db.add(llm_req)
         db.commit()
@@ -519,12 +536,20 @@ def maybe_queue_recurrence_suggest(db: Session, record: PlanRecord) -> bool:
             chain_records = [root_record] + chain_records
 
         prompt = build_recurrence_suggest_prompt(chain_records)
+        llm_service = LLMService(db)
+        provider, model = llm_service.resolve_provider_model(
+            caller_type="plan_recurrence_suggest",
+            provider=None,
+            model=None,
+        )
         llm_req = LLMRequest(
             caller_type="plan_recurrence_suggest",
             caller_id=chain_root,
             prompt=prompt,
             queue_name="utility",
             requested_by="scheduler",
+            provider=provider,
+            model=model,
         )
         db.add(llm_req)
         db.commit()

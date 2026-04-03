@@ -29,6 +29,7 @@ from app.modules.dev_runner.services.plan_record_service import (
     _compute_filename_hash,
 )
 from app.modules.claude_worker.models.llm_request import LLMRequest
+from app.modules.claude_worker.services.llm_service import LLMService
 from app.modules.dev_runner.services.log_service import REDIS_HOST, REDIS_PORT
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 
@@ -254,6 +255,12 @@ class PlanArchiveListener(BaseWorker):
 
             # 3. LLMRequest INSERT
             prompt = self._build_prompt(filename)
+            llm_service = LLMService(db)
+            provider, model = llm_service.resolve_provider_model(
+                caller_type="plan_archive_analyze",
+                provider=None,
+                model=None,
+            )
             req = LLMRequest(
                 caller_type="plan_archive_analyze",
                 caller_id=filename_hash,
@@ -262,6 +269,8 @@ class PlanArchiveListener(BaseWorker):
                 request_source="plan:archived",
                 queue_name="utility",
                 status="pending",
+                provider=provider,
+                model=model,
             )
             db.add(req)
             db.commit()
