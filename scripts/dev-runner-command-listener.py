@@ -19,12 +19,14 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
+import psutil
 import redis
 
 # scripts/ 디렉토리 sys.path 등록
@@ -90,12 +92,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def _safe_state_dict(name: str, value) -> dict:
+    if isinstance(value, dict):
+        return value
+    logger.warning("[listener-state] %s is not dict (%s) -> reset", name, type(value).__name__)
+    return {}
+
+
+def _refresh_state_refs(reset: bool = False) -> None:
+    """_dr_state 전역 dict 참조를 새로 가져오고 타입 불변식을 보장한다."""
+    global _running_processes, _running_log_files, _stream_threads, _cleanup_done, _dead_process_first_seen
+    _running_processes = _safe_state_dict("running_processes", get_running_processes())
+    _running_log_files = _safe_state_dict("running_log_files", get_running_log_files())
+    _stream_threads = _safe_state_dict("stream_threads", get_stream_threads())
+    _cleanup_done = _safe_state_dict("cleanup_done", get_cleanup_done())
+    _dead_process_first_seen = _safe_state_dict("dead_process_first_seen", get_dead_process_first_seen())
+    if reset:
+        _running_processes.clear()
+        _running_log_files.clear()
+        _stream_threads.clear()
+        _cleanup_done.clear()
+        _dead_process_first_seen.clear()
+
+
+def _log_command_memory_stage(action: str, stage: str, runner_id: str = "") -> None:
+    """retry/direct merge 디스패치 경로 메모리 로그 표준 포맷."""
+    try:
+        available_mb = psutil.virtual_memory().available / (1024 * 1024)
+    except Exception:
+        available_mb = -1.0
+    logger.info(
+        "[MEM-STAGE] action=%s stage=%s runner_id=%s available_mb=%.1f",
+        action,
+        stage,
+        runner_id or "-",
+        available_mb,
+    )
+
+
 # 하위 호환 별칭 — 테스트/외부 코드에서 직접 접근 지원 (리팩토링 후 _dr_state로 이동됨)
-_running_processes = get_running_processes()
-_running_log_files = get_running_log_files()
-_stream_threads = get_stream_threads()
-_cleanup_done = get_cleanup_done()
-_dead_process_first_seen = get_dead_process_first_seen()
+_refresh_state_refs(reset=bool(os.environ.get("PYTEST_CURRENT_TEST")))
 
 
 def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
@@ -110,33 +147,38 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     """
     action = command.get("action")
 
+    runner_id = command.get("runner_id", "")
+    if action in {"retry-merge", "direct-merge"}:
+        _log_command_memory_stage(action, "dispatch-start", runner_id)
+
     if action == "run":
-        return start_plan_runner(command, redis_client)
+        result = start_plan_runner(command, redis_client)
     elif action == "stop":
-        runner_id = command.get("runner_id", "")
-        return stop_plan_runner(runner_id, redis_client)
+        result = stop_plan_runner(runner_id, redis_client)
     elif action == "force-stop":
-        runner_id = command.get("runner_id", "")
-        return force_stop_plan_runner(runner_id, redis_client)
+        result = force_stop_plan_runner(runner_id, redis_client)
     elif action == "force-kill":
-        runner_id = command.get("runner_id", "")
-        return force_kill_plan_runner(runner_id, redis_client)
+        result = force_kill_plan_runner(runner_id, redis_client)
     elif action == "status":
-        return get_status(redis_client)
+        result = get_status(redis_client)
     elif action == "retry-merge":
-        return retry_merge(command, redis_client)
+        result = retry_merge(command, redis_client)
     elif action == "direct-merge":
-        return direct_merge(command, redis_client)
+        result = direct_merge(command, redis_client)
     elif action == "resolve-conflict":
-        return resolve_conflict(command, redis_client)
+        result = resolve_conflict(command, redis_client)
     elif action == "cleanup-worktree":
-        return cleanup_worktree(command, redis_client)
+        result = cleanup_worktree(command, redis_client)
     elif action == "start-orchestrator":
-        return start_merge_orchestrator(redis_client)
+        result = start_merge_orchestrator(redis_client)
     elif action == "stop-orchestrator":
-        return stop_merge_orchestrator(redis_client)
+        result = stop_merge_orchestrator(redis_client)
     else:
-        return {"success": False, "message": f"Unknown action: {action}"}
+        result = {"success": False, "message": f"Unknown action: {action}"}
+
+    if action in {"retry-merge", "direct-merge"}:
+        _log_command_memory_stage(action, "dispatch-end", runner_id)
+    return result
 
 
 def main():
@@ -191,7 +233,7 @@ def main():
             _threading.Thread(target=_bg_orphan_cleanup, daemon=True).start()
 
             # Redis 재연결 시 현재 프로세스 상태 복원
-            _running_processes = get_running_processes()
+            _refresh_state_refs()
             for rid, proc in list(_running_processes.items()):
                 if proc.poll() is None and _is_pid_alive(proc.pid):
                     r.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
@@ -208,10 +250,7 @@ def main():
                     _evict_stale_cleanup_done()
                     _evict_stale_dead_process()
                     # 각 runner 상태 동기화
-                    _running_processes = get_running_processes()
-                    _cleanup_done = get_cleanup_done()
-                    _dead_process_first_seen = get_dead_process_first_seen()
-                    _stream_threads = get_stream_threads()
+                    _refresh_state_refs()
                     _wf_manager = get_wf_manager()
                     for rid, proc in list(_running_processes.items()):
                         if rid in _cleanup_done:

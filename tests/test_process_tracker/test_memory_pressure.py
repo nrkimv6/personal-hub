@@ -66,6 +66,7 @@ async def test_check_fatal_below_256mb():
 
     with patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(200)), \
          patch.object(responder, "_send_telegram", mock_telegram), \
+         patch.object(responder, "_attempt_pre_fatal_mitigation", return_value=(False, 200.0, [])), \
          patch("app.shared.process.memory_pressure.subprocess.run", mock_run):
         level = await responder.check()
 
@@ -109,11 +110,54 @@ async def test_fatal_triggered_once_only():
 
     with patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(100)), \
          patch.object(responder, "_send_telegram", mock_telegram), \
+         patch.object(responder, "_attempt_pre_fatal_mitigation", return_value=(False, 100.0, [])), \
          patch("app.shared.process.memory_pressure.subprocess.run", mock_run):
         await responder.check()  # 1회 → fatal
         await responder.check()  # 2회 → _fatal_triggered=True → 스킵
 
     assert mock_run.call_count == 1
+
+
+def test_attempt_pre_fatal_mitigation_kills_single_heavy_test():
+    """R: 고메모리 test_*.py 단일 대상 선제 종료 후 복구 판정"""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    heavy_mem = MagicMock()
+    heavy_mem.rss = 2400 * 1024 * 1024
+    heavy_proc = MagicMock()
+    heavy_proc.info = {
+        "pid": 4321,
+        "name": "python.exe",
+        "memory_info": heavy_mem,
+        "cmdline": ["python", "tests/dev_runner/test_merge_retry_e2e.py"],
+    }
+
+    small_mem = MagicMock()
+    small_mem.rss = 200 * 1024 * 1024
+    small_proc = MagicMock()
+    small_proc.info = {
+        "pid": 9999,
+        "name": "python.exe",
+        "memory_info": small_mem,
+        "cmdline": ["python", "tests/smoke/test_light.py"],
+    }
+
+    killer = MagicMock()
+    with patch("app.shared.process.memory_pressure.psutil.process_iter", return_value=[heavy_proc, small_proc]), \
+         patch("app.shared.process.memory_pressure.psutil.Process", return_value=killer), \
+         patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(600)), \
+         patch("app.shared.process.memory_pressure.time.sleep", MagicMock()):
+        recovered, available_after_mb, killed = responder._attempt_pre_fatal_mitigation(120.0)
+
+    assert recovered is True
+    assert available_after_mb == 600
+    assert len(killed) == 1
+    assert killed[0]["pid"] == 4321
+    killer.terminate.assert_called_once()
+    killer.wait.assert_called_once()
 
 
 # ── _extract_script_path ──────────────────────────────────────────────────────
@@ -651,6 +695,7 @@ async def test_on_fatal_persists_and_shuts_down():
 
     with patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(100)), \
          patch.object(responder, "_send_telegram", AsyncMock()), \
+         patch.object(responder, "_attempt_pre_fatal_mitigation", return_value=(False, 100.0, [])), \
          patch.object(responder, "_get_top_processes", return_value=[]), \
          patch.object(responder, "_persist_snapshot", side_effect=mock_persist), \
          patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
@@ -681,6 +726,7 @@ async def test_on_fatal_logs_top_processes():
 
     with patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(100)), \
          patch.object(responder, "_send_telegram", AsyncMock()), \
+         patch.object(responder, "_attempt_pre_fatal_mitigation", return_value=(False, 100.0, [])), \
          patch.object(responder, "_get_top_processes", return_value=[fake_proc]), \
          patch.object(responder, "_persist_snapshot", MagicMock()), \
          patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
@@ -692,3 +738,32 @@ async def test_on_fatal_logs_top_processes():
     # critical 호출 중 하나에 PID= 포함
     critical_calls = [str(c) for c in mock_logger.critical.call_args_list]
     assert any("PID=555" in c for c in critical_calls)
+
+
+@pytest.mark.asyncio
+async def test_on_fatal_recovery_skips_shutdown():
+    """R: 선제 종료로 메모리 복구 시 shutdown 미호출"""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    with patch.object(
+        responder,
+        "_attempt_pre_fatal_mitigation",
+        return_value=(True, 480.0, [{"pid": 4321, "script_path": "tests/dev_runner/test_merge_retry_e2e.py", "memory_mb": 2400.0}]),
+    ), \
+         patch.object(responder, "_get_top_processes", return_value=[]), \
+         patch.object(responder, "_persist_snapshot", MagicMock()) as mock_persist, \
+         patch.object(responder, "_send_telegram", AsyncMock()) as mock_telegram, \
+         patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
+         patch("app.shared.process.memory_pressure._format_process_tree", return_value=""), \
+         patch("app.shared.process.memory_pressure.subprocess.run", MagicMock()) as mock_run:
+        await responder._on_fatal(120.0)
+
+    assert responder._fatal_triggered is False
+    mock_persist.assert_called_once()
+    persist_level = mock_persist.call_args[0][0]
+    assert persist_level == "fatal_recovered"
+    mock_telegram.assert_awaited_once()
+    mock_run.assert_not_called()

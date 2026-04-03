@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
+import psutil
 import redis
 
 from _dr_constants import (
@@ -20,6 +21,30 @@ from _dr_process_utils import _cleanup_process_state, get_plan_git_root
 from _dr_plan_runner import _do_inline_merge
 
 logger = logging.getLogger(__name__)
+
+
+def _log_memory_stage(
+    action: str,
+    stage: str,
+    runner_id: str = "",
+    redis_client: redis.Redis | None = None,
+) -> None:
+    """retry/direct merge 경로의 메모리 단계 로그를 표준화한다."""
+    try:
+        available_mb = psutil.virtual_memory().available / (1024 * 1024)
+    except Exception:
+        available_mb = -1.0
+
+    message = (
+        f"[MEM-STAGE] action={action} stage={stage} "
+        f"runner_id={runner_id or '-'} available_mb={available_mb:.1f}"
+    )
+    logger.info(message)
+    if redis_client and runner_id:
+        try:
+            _pub_and_log(runner_id, message, redis_client, "MEMORY")
+        except Exception:
+            pass
 
 
 def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, command: Dict = None) -> None:
@@ -41,6 +66,7 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
 
     result = {"success": False, "message": "unknown error", "action": "retry-merge"}
     try:
+        _log_memory_stage("retry-merge", "start", runner_id, redis_client)
         # Redis 키 만료 시 command payload로 재발급
         worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         if not worktree_path_str and command:
@@ -97,6 +123,7 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
             _pub(f"[RETRY-MERGE] pre_merge_gate 통과 — merge 진행")
 
         # lock + subprocess + 결과 처리는 공통 헬퍼에 위임
+        _log_memory_stage("retry-merge", "mid", runner_id, redis_client)
         merge_result = _execute_merge_with_lock(runner_id, redis_client, action_name="retry-merge")
         result = merge_result
 
@@ -105,6 +132,7 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         result = {"success": False, "message": str(e), "action": "retry-merge"}
 
     finally:
+        _log_memory_stage("retry-merge", "end", runner_id, redis_client)
         _cleanup_process_state(runner_id, redis_client)
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
         redis_client.expire(result_key, 60)
@@ -144,6 +172,7 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
     runner_id = f"dm-{uuid4().hex[:8]}"
     result = {"success": False, "message": "unknown error", "action": "direct-merge", "runner_id": runner_id}
     logger.info(f"[direct_merge] _do_direct_merge 스레드 진입: runner_id={runner_id}, branch={branch}, worktree={worktree_path_str}")
+    _log_memory_stage("direct-merge", "start", runner_id, redis_client)
 
     try:
         # worktree_path 결정
@@ -204,6 +233,7 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         logger.info(f"[direct_merge] 임시 runner {runner_id} 생성, branch={branch}, worktree={worktree_path}")
 
         # _do_inline_merge 호출 (lock+cleanup+로그 발행 포함)
+        _log_memory_stage("direct-merge", "mid", runner_id, redis_client)
         _do_inline_merge(runner_id, redis_client)
 
         # 머지 결과 읽기
@@ -222,6 +252,7 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         logger.error(f"[direct_merge] 실패: {e}\n{traceback.format_exc()}")
         result = {"success": False, "message": str(e), "action": "direct-merge", "runner_id": runner_id}
     finally:
+        _log_memory_stage("direct-merge", "end", runner_id, redis_client)
         # merge_status Redis 키 보장 (스레드 실패 시에도 상태 추적 가능)
         try:
             current_ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")

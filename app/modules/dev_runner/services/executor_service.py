@@ -276,7 +276,7 @@ class ExecutorService:
         try:
             result_data = await self._send_command(command)
             if result_data is None:
-                await self._force_cleanup_state(runner_id)
+                await self._cleanup_runner_state(runner_id, reason="start_timeout")
                 raise HTTPException(
                     status_code=504,
                     detail="Command timeout - listener may not be responding"
@@ -348,6 +348,18 @@ class ExecutorService:
     async def _force_cleanup_state(self, runner_id: str = ""):
         self._sync_state()
         await self.state._force_cleanup_state(runner_id)
+
+    async def _cleanup_runner_state(self, runner_id: str, reason: str) -> None:
+        """timeout/예외/stop 경로 공통 정리 함수."""
+        try:
+            await self._force_cleanup_state(runner_id)
+        except Exception as exc:
+            logger.warning(
+                "[dev-runner] 상태 정리 실패 (runner_id=%s, reason=%s): %s",
+                runner_id,
+                reason,
+                exc,
+            )
 
     async def _send_force_stop(self, runner_id: str = ""):
         """listener에 force-stop 명령 전송 (_running_processes 변수까지 정리)"""
@@ -425,12 +437,12 @@ class ExecutorService:
             if result_data is None:
                 # listener 무응답 → 프로세스가 죽었을 가능성 → 상태 강제 정리
                 logger.warning("[dev-runner] listener 무응답, Redis 상태 강제 정리")
-                await self._force_cleanup_state(runner_id)
+                await self._cleanup_runner_state(runner_id, reason="stop_timeout")
                 return {"message": "Force cleaned (listener not responding)"}
 
             if not result_data.get("success"):
                 # stop 실패해도 상태 정리
-                await self._force_cleanup_state(runner_id)
+                await self._cleanup_runner_state(runner_id, reason="stop_command_failed")
                 return {"message": f"Force cleaned: {result_data.get('message', '')}"}
 
             return {"message": "Stopped successfully"}
@@ -441,13 +453,13 @@ class ExecutorService:
                 detail="Redis connection failed - command listener may not be running"
             )
         except json.JSONDecodeError:
-            await self._force_cleanup_state(runner_id)
+            await self._cleanup_runner_state(runner_id, reason="stop_invalid_response")
             return {"message": "Force cleaned (invalid listener response)"}
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"[dev-runner] stop 실패: {traceback.format_exc()}")
-            await self._force_cleanup_state(runner_id)
+            await self._cleanup_runner_state(runner_id, reason="stop_exception")
             raise HTTPException(status_code=500, detail=f"Failed to stop: {str(e)}")
 
     async def get_runner_status(self, runner_id: str) -> RunStatusResponse:

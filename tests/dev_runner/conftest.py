@@ -3,6 +3,7 @@
 import json
 import sys
 import pytest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -15,6 +16,96 @@ try:
     import plan_runner.core.stages  # noqa: F401
 except ImportError:
     pass
+
+
+def _collect_python_memory_snapshot(cmdline_filter: str | None = None, limit: int = 30) -> dict:
+    """python 프로세스 PID/memory 스냅샷 수집."""
+    import psutil
+
+    procs = []
+    total_mb = 0.0
+    for proc in psutil.process_iter(["pid", "name", "memory_info", "cmdline"]):
+        try:
+            name = (proc.info.get("name") or "").lower()
+            if "python" not in name:
+                continue
+            cmdline_list = proc.info.get("cmdline") or []
+            cmdline = " ".join(cmdline_list)
+            normalized = cmdline.replace("\\", "/")
+            if cmdline_filter and cmdline_filter not in normalized:
+                continue
+            rss = proc.info["memory_info"].rss if proc.info["memory_info"] else 0
+            memory_mb = round(rss / (1024 * 1024), 1)
+            total_mb += memory_mb
+            procs.append(
+                {
+                    "pid": int(proc.info["pid"]),
+                    "name": proc.info.get("name") or "",
+                    "memory_mb": memory_mb,
+                    "cmdline": cmdline[:240],
+                }
+            )
+        except Exception:
+            continue
+
+    procs.sort(key=lambda item: item["memory_mb"], reverse=True)
+    return {
+        "captured_at": datetime.now().isoformat(),
+        "count": len(procs),
+        "total_memory_mb": round(total_mb, 1),
+        "processes": procs[:limit],
+    }
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    rep = outcome.get_result()
+    setattr(item, f"rep_{rep.when}", rep)
+
+
+@pytest.fixture(autouse=True)
+def merge_retry_memory_snapshot(request):
+    """test_merge_retry_e2e 전후 스냅샷 수집. 실패 케이스만 파일 보존."""
+    nodeid = request.node.nodeid.replace("\\", "/")
+    if "tests/dev_runner/test_merge_retry_e2e.py" not in nodeid:
+        yield
+        return
+
+    started_at = datetime.now()
+    before = _collect_python_memory_snapshot("test_merge_retry_e2e.py")
+    yield
+    after = _collect_python_memory_snapshot("test_merge_retry_e2e.py")
+
+    failed = any(
+        bool(getattr(request.node, f"rep_{phase}", None))
+        and not getattr(request.node, f"rep_{phase}").passed
+        for phase in ("setup", "call", "teardown")
+    )
+
+    snapshot = {
+        "nodeid": request.node.nodeid,
+        "started_at": started_at.isoformat(),
+        "finished_at": datetime.now().isoformat(),
+        "duration_sec": round((datetime.now() - started_at).total_seconds(), 3),
+        "failed": failed,
+        "before": before,
+        "after": after,
+    }
+
+    log_dir = Path("logs") / "pytest_memory_snapshots"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = request.node.nodeid.replace("\\", "_").replace("/", "_").replace("::", "__")
+    log_path = log_dir / f"{safe_name}.json"
+    log_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if failed:
+        print(f"[memory_snapshot] failed case snapshot: {log_path}")
+    else:
+        try:
+            log_path.unlink()
+        except OSError:
+            pass
 
 
 @pytest.fixture(autouse=True)

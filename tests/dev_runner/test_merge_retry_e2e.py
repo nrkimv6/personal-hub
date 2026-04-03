@@ -68,6 +68,20 @@ def make_merge_result(merged=True, tests_passed=True, conflict=False, message="o
     return result
 
 
+def test_load_listener_resets_global_state_between_imports():
+    """R: _load_listener() 반복 호출 시 전역 상태 dict가 누적되지 않아야 한다."""
+    first = _load_listener()
+    first._running_processes["old"] = object()
+    first._stream_threads["old"] = object()
+
+    second = _load_listener()
+
+    assert second._running_processes == {}
+    assert second._stream_threads == {}
+    assert "old" not in second._running_processes
+    assert "old" not in second._stream_threads
+
+
 class TestRetryMergeFullFlow:
     def test_retry_merge_full_flow(self, tmp_path):
         """
@@ -88,7 +102,7 @@ class TestRetryMergeFullFlow:
         with patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
              patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch.object(cl, "_cleanup_process_state") as mock_cleanup:
+             patch("_dr_commands._cleanup_process_state") as mock_cleanup:
             mock_wf = MagicMock()
             mock_wf.run.return_value = merge_result
             mock_wf_cls.return_value = mock_wf
@@ -105,6 +119,7 @@ class TestRetryMergeFullFlow:
         assert pushed.get("success") is True
         assert pushed.get("action") == "retry-merge"
 
+    @pytest.mark.memory_spike_repro
     def test_retry_merge_full_flow_do_retry(self, tmp_path):
         """
         E2E: _do_retry_merge() 직접 → merge_status 전이 + cleanup 확인
@@ -135,7 +150,7 @@ class TestRetryMergeFullFlow:
         with patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
              patch("subprocess.run", return_value=proc_mock), \
-             patch.object(cl, "_cleanup_process_state") as mock_cleanup:
+             patch("_dr_commands._cleanup_process_state") as mock_cleanup:
             cl._do_retry_merge(runner_id, redis, "cmd-e2e-002")
 
         # merge_status 전이: queued → merging → merged
@@ -165,7 +180,7 @@ class TestDirectMergeFullFlow:
             "command_id": "cmd-e2e-003",
         }
 
-        with patch.object(cl, "_do_inline_merge") as mock_inline:
+        with patch("_dr_commands._do_inline_merge") as mock_inline:
             cl.direct_merge(command, redis)
 
         # accepted가 Redis에 LPUSH됐는지 확인
@@ -176,6 +191,7 @@ class TestDirectMergeFullFlow:
         assert pushed.get("success") is True
         assert pushed.get("action") == "direct-merge"
 
+    @pytest.mark.memory_spike_repro
     def test_direct_merge_full_flow_do_direct(self, tmp_path):
         """
         E2E: _do_direct_merge() 직접 → 임시 dm- runner_id + Redis 키 + active_runners + _do_inline_merge 호출
@@ -187,7 +203,7 @@ class TestDirectMergeFullFlow:
         branch = "runner/e2e-test2"
         redis = make_redis_mock()
 
-        with patch.object(cl, "_do_inline_merge") as mock_inline:
+        with patch("_dr_commands._do_inline_merge") as mock_inline:
             cl._do_direct_merge(branch, str(worktree), None, redis, "cmd-e2e-004")
 
         mock_inline.assert_called_once()
@@ -246,7 +262,7 @@ class TestDirectMergeConflictResolverCrashSafe:
              patch("subprocess.run", return_value=MagicMock(returncode=3)), \
              patch.object(cl, "_launch_conflict_resolver_process",
                           return_value={"success": False, "message": "resolve 실패 시뮬레이션"}), \
-             patch.object(cl, "_cleanup_process_state", MagicMock()):
+             patch("_dr_plan_runner._cleanup_process_state", MagicMock()):
 
             # 크래시 없이 실행 완료되어야 함
             cl._do_inline_merge("dm-crash-test", redis)
@@ -292,7 +308,7 @@ class TestRetryMergeExitCode2AutoFix:
              patch("_dr_merge._launch_auto_impl_post_merge_process",
                           return_value={"success": True, "message": "fixed"}) as mock_fix, \
              patch.object(cl, "_handle_post_merge_done"), \
-             patch.object(cl, "_cleanup_process_state", MagicMock()):
+             patch("_dr_commands._cleanup_process_state", MagicMock()):
 
             cl._do_retry_merge("r-e2e-exit2", redis, "cmd-e2e-exit2")
 

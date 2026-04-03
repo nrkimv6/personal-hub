@@ -155,58 +155,82 @@ class OrphanDetector:
 
         return cleaned
 
-    async def run_periodic(self, interval: int = 60) -> None:
-        """주기적으로 고아 프로세스를 스캔하고 정리한다.
+    async def run_periodic(
+        self,
+        interval: float = 60,
+        memory_check_interval: float | None = None,
+    ) -> None:
+        """주기적으로 고아 프로세스를 스캔/정리하고 메모리 압박을 체크한다.
 
         Args:
-            interval: 스캔 주기 (초)
+            interval: 프로세스 스캔/정리 주기 (초)
+            memory_check_interval: 메모리 압박 체크 주기 (초). None이면 설정값 사용
         """
         # MemoryPressureResponder는 지연 임포트 (순환 방지)
         from app.shared.process.memory_pressure import MemoryPressureResponder
 
         pressure = MemoryPressureResponder(self)
+        scan_interval = max(0.1, float(interval))
+        _configured_memory_interval = (
+            float(getattr(settings, "MEMORY_PRESSURE_CHECK_INTERVAL", scan_interval))
+            if memory_check_interval is None
+            else float(memory_check_interval)
+        )
+        memory_interval = max(0.1, _configured_memory_interval)
+
         loop_count = 0
         capture_every_loops = max(1, int(getattr(settings, "PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 1)))
         capture_timeout = max(1, int(getattr(settings, "PROCESS_WATCH_CAPTURE_TIMEOUT_SEC", 10)))
         capture_limit = max(1, int(getattr(settings, "PROCESS_WATCH_CAPTURE_LIMIT", 200)))
+        next_scan_at = time.monotonic()
+        next_memory_check_at = next_scan_at
 
         while True:
             try:
-                loop_count += 1
-                if loop_count % capture_every_loops == 0:
-                    try:
-                        from app.shared.process.snapshot_writer import SnapshotWriter
+                now = time.monotonic()
+                if now >= next_scan_at:
+                    loop_count += 1
+                    if loop_count % capture_every_loops == 0:
+                        try:
+                            from app.shared.process.snapshot_writer import SnapshotWriter
 
-                        writer = SnapshotWriter(self.registry)
-                        captured = await asyncio.wait_for(
-                            writer.capture_python_processes(
-                                min_memory_mb=0.0,
-                                limit=capture_limit,
-                                captured_by="periodic",
-                            ),
-                            timeout=capture_timeout,
-                        )
-                        logger.debug(
-                            "[process-watch] periodic capture complete: count=%s loop=%s",
-                            captured,
-                            loop_count,
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "[process-watch] periodic capture timeout after %ss", capture_timeout
-                        )
-                    except Exception as capture_exc:
-                        logger.warning(
-                            "[process-watch] periodic capture failed: %s", capture_exc
-                        )
+                            writer = SnapshotWriter(self.registry)
+                            captured = await asyncio.wait_for(
+                                writer.capture_python_processes(
+                                    min_memory_mb=0.0,
+                                    limit=capture_limit,
+                                    captured_by="periodic",
+                                ),
+                                timeout=capture_timeout,
+                            )
+                            logger.debug(
+                                "[process-watch] periodic capture complete: count=%s loop=%s",
+                                captured,
+                                loop_count,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "[process-watch] periodic capture timeout after %ss", capture_timeout
+                            )
+                        except Exception as capture_exc:
+                            logger.warning(
+                                "[process-watch] periodic capture failed: %s", capture_exc
+                            )
 
-                orphans = await self.scan()
-                await self.cleanup(orphans)
-                await pressure.check()
+                    orphans = await self.scan()
+                    await self.cleanup(orphans)
+                    next_scan_at = time.monotonic() + scan_interval
+
+                now = time.monotonic()
+                if now >= next_memory_check_at:
+                    await pressure.check()
+                    next_memory_check_at = time.monotonic() + memory_interval
             except asyncio.CancelledError:
                 logger.info("OrphanDetector 루프 취소됨")
                 raise
             except Exception as exc:
                 logger.error("OrphanDetector 루프 오류: %s", exc, exc_info=True)
 
-            await asyncio.sleep(interval)
+            sleep_until = min(next_scan_at, next_memory_check_at)
+            sleep_for = max(0.05, sleep_until - time.monotonic())
+            await asyncio.sleep(sleep_for)
