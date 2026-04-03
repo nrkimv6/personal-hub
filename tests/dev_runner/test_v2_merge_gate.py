@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
-from tests.dev_runner.conftest import attach_default_redis_behaviors
+from tests.dev_runner.conftest import assert_no_magicmock_leak, make_strict_redis_mock
 
 # wtools plan-runner 경로 추가
 _WTOOLS_CORE = Path(__file__).parents[4] / "service" / "wtools" / "common" / "tools" / "plan-runner"
@@ -31,7 +31,7 @@ def project_dir(tmp_path):
 
 
 def _strict_redis_mock() -> MagicMock:
-    return attach_default_redis_behaviors(MagicMock())
+    return make_strict_redis_mock()
 
 
 def _run(coro):
@@ -39,6 +39,13 @@ def _run(coro):
 
 
 class TestV2MergeGate:
+    def test_v2_gate_strict_redis_default_none_B(self):
+        """B(Boundary): strict helper 기본값 누출이 lock 분기를 오염시키지 않는다."""
+        mock_redis = _strict_redis_mock()
+        value = mock_redis.get("plan-runner:runners:strict-check:merge_requested")
+        assert_no_magicmock_leak(value, "redis.get")
+        assert value is None
+
     def test_v2_gate_lock_timeout_returns_failed_E(self, project_dir):
         """E(Error): lock acquire timeout → StageResult(FAILED) + execute_merge 미호출"""
         mock_redis = _strict_redis_mock()

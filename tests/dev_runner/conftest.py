@@ -405,7 +405,17 @@ def assert_no_magicmock_leak(value, method_name: str = "redis.get") -> None:
     )
 
 
+def make_strict_redis_mock() -> MagicMock:
+    """Redis MagicMock factory with explicit defaults and leak guard."""
+    redis_mock = attach_default_redis_behaviors(MagicMock())
+    assert_no_magicmock_leak(
+        redis_mock.get("plan-runner:runners:strict-check:merge_requested"),
+        "redis.get",
+    )
+    return redis_mock
+
+
 @pytest.fixture
 def strict_redis_mock() -> MagicMock:
     """기본 반환값 누출을 방지한 strict Redis MagicMock."""
-    return attach_default_redis_behaviors(MagicMock())
+    return make_strict_redis_mock()

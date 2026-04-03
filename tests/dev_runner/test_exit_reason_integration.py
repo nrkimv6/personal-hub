@@ -6,12 +6,20 @@ T3 통합 검증:
 """
 
 import pytest
+import sys
 import time
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 import fakeredis
 
 from app.modules.dev_runner.services.redis_connection import RECENT_RUNNERS_TTL
+
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from _dr_runtime_utils import _normalize_exit_reason
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
@@ -41,14 +49,17 @@ def simulate_cleanup_redis_state(runner_id: str, exit_reason: str, fake_redis, s
         pass
 
 
-def simulate_listener_cleanup(runner_id: str, fake_redis, pubsub_mock):
+def simulate_listener_cleanup(runner_id: str, fake_redis):
     """listener dev-runner-command-listener.py cleanup 로직 시뮬레이션.
 
     cleanup 직전 exit_reason을 읽어 __COMPLETED::{reason}__ 형태로 publish.
+    운영 계약과 동일하게 missing -> error, rate_limited -> rate_limit으로 정규화한다.
     """
     log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
     try:
-        exit_reason = fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason") or "completed"
+        exit_reason = _normalize_exit_reason(
+            fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")
+        )
         fake_redis.publish(log_channel, f"__COMPLETED::{exit_reason}__")
     except Exception:
         pass
@@ -146,7 +157,7 @@ class TestListenerPublishesExitReasonIntegration:
         pubsub.get_message(timeout=0.1)
 
         # listener cleanup 시뮬레이션
-        simulate_listener_cleanup(runner_id, fake_redis, pubsub)
+        simulate_listener_cleanup(runner_id, fake_redis)
 
         # publish된 메시지 수신
         msg = pubsub.get_message(timeout=0.5)
@@ -156,8 +167,8 @@ class TestListenerPublishesExitReasonIntegration:
 
         pubsub.close()
 
-    def test_listener_publishes_completed_when_no_exit_reason(self):
-        """exit_reason 키가 없을 때 listener가 __COMPLETED::completed__ 형태로 publish."""
+    def test_listener_publishes_error_when_no_exit_reason(self):
+        """exit_reason 키가 없을 때 listener가 __COMPLETED::error__ 형태로 publish."""
         fake_redis = fakeredis.FakeRedis(decode_responses=True)
         runner_id = "tc-pytest-t3-004"
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -168,11 +179,52 @@ class TestListenerPublishesExitReasonIntegration:
         pubsub.subscribe(log_channel)
         pubsub.get_message(timeout=0.1)
 
-        simulate_listener_cleanup(runner_id, fake_redis, pubsub)
+        simulate_listener_cleanup(runner_id, fake_redis)
+
+        msg = pubsub.get_message(timeout=0.5)
+        assert msg is not None
+        assert msg["data"] == "__COMPLETED::error__"
+        assert msg["data"] != "__COMPLETED::completed__"
+
+        pubsub.close()
+
+    def test_listener_publishes_explicit_completed_reason(self):
+        """명시적으로 completed가 저장된 경우에만 completed sentinel을 유지한다."""
+        fake_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "tc-pytest-t3-004b"
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+
+        pubsub = fake_redis.pubsub()
+        pubsub.subscribe(log_channel)
+        pubsub.get_message(timeout=0.1)
+
+        simulate_listener_cleanup(runner_id, fake_redis)
 
         msg = pubsub.get_message(timeout=0.5)
         assert msg is not None
         assert msg["data"] == "__COMPLETED::completed__"
+
+        pubsub.close()
+
+    def test_listener_normalizes_rate_limited_reason(self):
+        """rate_limited sentinel은 런타임 계약과 같이 rate_limit으로 정규화한다."""
+        fake_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "tc-pytest-t3-004c"
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "rate_limited")
+
+        pubsub = fake_redis.pubsub()
+        pubsub.subscribe(log_channel)
+        pubsub.get_message(timeout=0.1)
+
+        simulate_listener_cleanup(runner_id, fake_redis)
+
+        msg = pubsub.get_message(timeout=0.5)
+        assert msg is not None
+        assert msg["data"] == "__COMPLETED::rate_limit__"
 
         pubsub.close()
 
@@ -188,10 +240,30 @@ class TestListenerPublishesExitReasonIntegration:
         pubsub.subscribe(log_channel)
         pubsub.get_message(timeout=0.1)
 
-        simulate_listener_cleanup(runner_id, fake_redis, pubsub)
+        simulate_listener_cleanup(runner_id, fake_redis)
 
         msg = pubsub.get_message(timeout=0.5)
         assert msg is not None
         assert msg["data"] == "__COMPLETED::commit_failed__"
+
+        pubsub.close()
+
+    def test_listener_cleanup_pubsub_error_path(self):
+        """publish 실패가 발생해도 helper가 예외를 바깥으로 전파하지 않는다."""
+        fake_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "tc-pytest-t3-008"
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "error")
+
+        pubsub = fake_redis.pubsub()
+        pubsub.subscribe(log_channel)
+        pubsub.get_message(timeout=0.1)
+
+        with patch.object(fake_redis, "publish", side_effect=RuntimeError("publish failed")):
+            simulate_listener_cleanup(runner_id, fake_redis)
+
+        assert pubsub.get_message(timeout=0.1) is None
+        assert fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason") == "error"
 
         pubsub.close()

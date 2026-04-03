@@ -23,7 +23,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from listener_noise_filter import NOISE_BLOCK_MARKERS, is_noise_line
-from tests.dev_runner.conftest import assert_no_magicmock_leak
+from tests.dev_runner.conftest import assert_no_magicmock_leak, make_strict_redis_mock
 
 
 @pytest.fixture(autouse=True)
@@ -253,5 +253,14 @@ class TestStreamOutputFilter:
 
     def test_strict_redis_mock_get_default_none_B(self, strict_redis_mock):
         value = strict_redis_mock.get("plan-runner:runners:any:merge_requested")
+        assert_no_magicmock_leak(value, "redis.get")
+        assert value is None
+
+    def test_raw_magicmock_leak_is_blocked_by_strict_helper_B(self):
+        raw_redis = MagicMock()
+        assert isinstance(raw_redis.get("plan-runner:runners:any:merge_requested"), MagicMock)
+
+        hardened = make_strict_redis_mock()
+        value = hardened.get("plan-runner:runners:any:merge_requested")
         assert_no_magicmock_leak(value, "redis.get")
         assert value is None

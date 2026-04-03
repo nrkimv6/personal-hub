@@ -1,7 +1,7 @@
-"""T5: LogViewer SSE HTTP 통합 테스트
+"""Legacy filename: real-server `http_live` SSE/log history integration tests.
 
 GET /api/v1/dev-runner/logs/stream?runner_id=X 엔드포인트 검증
-(실행: /merge-test, TestClient 기반 — 실서버 불필요)
+(실행: /merge-test, localhost:8001 실서버 + Redis 필요)
 """
 
 import json
@@ -11,6 +11,8 @@ import time
 import pytest
 import redis
 import requests
+
+pytestmark = pytest.mark.http_live
 
 ADMIN_API = "http://localhost:8001"
 REDIS_HOST = "localhost"

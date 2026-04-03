@@ -107,12 +107,62 @@ function Get-OrphanPytestChain {
     return $killList
 }
 
+function Get-ProcessBucketSummary {
+    param(
+        [string]$Label,
+        [scriptblock]$Predicate
+    )
+
+    $count = 0
+    $totalMb = 0.0
+    foreach ($p in (Get-CimInstance Win32_Process -EA SilentlyContinue)) {
+        $cmd = if ($p.CommandLine) { $p.CommandLine } else { "" }
+        if (-not (& $Predicate $p $cmd)) { continue }
+        $count += 1
+        $proc = Get-Process -Id $p.ProcessId -EA SilentlyContinue
+        if ($proc) {
+            $totalMb += [math]::Round($proc.WorkingSet64 / 1MB, 1)
+        }
+    }
+
+    return [pscustomobject]@{
+        Label = $Label
+        Count = $count
+        MemoryMB = [math]::Round($totalMb, 1)
+    }
+}
+
+function Get-OrphanCleanupSnapshot {
+    $pythonSummary = Get-ProcessBucketSummary -Label "python" -Predicate {
+        param($proc, $cmdline)
+        return $proc.Name -like 'python*'
+    }
+    $pytestSummary = Get-ProcessBucketSummary -Label "pytest" -Predicate {
+        param($proc, $cmdline)
+        return ($cmdline -like '*-m pytest*') -or ($cmdline -like '*\\pytest*')
+    }
+    $codexSummary = Get-ProcessBucketSummary -Label "codex" -Predicate {
+        param($proc, $cmdline)
+        return ($proc.Name -match 'codex|claude') -or ($cmdline -match 'codex|claude')
+    }
+    return @($pythonSummary, $pytestSummary, $codexSummary)
+}
+
 # ── 메인 ──────────────────────────────────────────────────────
+
+$beforeSnapshot = Get-OrphanCleanupSnapshot
+foreach ($bucket in $beforeSnapshot) {
+    Write-Host "[ORPHAN-SUMMARY][BEFORE] $($bucket.Label) Count=$($bucket.Count) RSS_MB=$($bucket.MemoryMB)"
+}
 
 $targets = Get-OrphanPytestChain
 
 if ($targets.Count -eq 0) {
-    Write-Host "[ORPHAN-CLEAN] 고아 pytest 없음"
+    $afterSnapshot = Get-OrphanCleanupSnapshot
+    foreach ($bucket in $afterSnapshot) {
+        Write-Host "[ORPHAN-SUMMARY][AFTER] $($bucket.Label) Count=$($bucket.Count) RSS_MB=$($bucket.MemoryMB)"
+    }
+    Write-Host "[ORPHAN-CLEAN] no orphan pytest"
     exit 0
 }
 
@@ -155,7 +205,12 @@ foreach ($id in $targets) {
 $lines | Out-File -FilePath $logPath -Encoding UTF8
 
 if ($DryRun) {
-    Write-Host "[ORPHAN-CLEAN] DryRun 완료 — 총 $($targets.Count)개 대상, 약 $([math]::Round($totalMemMB/1024,1)) GB (로그: $logPath)"
+    Write-Host "[ORPHAN-CLEAN] dry-run complete: targets=$($targets.Count) approx_gb=$([math]::Round($totalMemMB/1024,1)) log=$logPath"
 } else {
-    Write-Host "[ORPHAN-CLEAN] 완료 — 총 $($targets.Count)개 kill, 약 $([math]::Round($totalMemMB/1024,1)) GB 회수 (로그: $logPath)"
+    Write-Host "[ORPHAN-CLEAN] complete: killed=$($targets.Count) reclaimed_gb=$([math]::Round($totalMemMB/1024,1)) log=$logPath"
+}
+
+$afterSnapshot = Get-OrphanCleanupSnapshot
+foreach ($bucket in $afterSnapshot) {
+    Write-Host "[ORPHAN-SUMMARY][AFTER] $($bucket.Label) Count=$($bucket.Count) RSS_MB=$($bucket.MemoryMB)"
 }
