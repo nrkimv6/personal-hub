@@ -83,7 +83,7 @@ def reset_listener_state():
 def client(test_db_engine):
     app = FastAPI()
     app.include_router(runner_router, prefix=BASE_URL)
-    app.include_router(workflows_router, prefix=BASE_URL)
+    app.include_router(workflows_router, prefix=f"{BASE_URL}/workflows")
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
 
@@ -147,20 +147,76 @@ def test_zombie_cleanup_workflow_status_api(client, fake_services, test_db_engin
     state_mod = sys.modules["_dr_state"]
     fake_sync = fake_services["sync"]
 
-    from workflow_manager import WorkflowManager
+    from app.models.workflow import Workflow
 
-    db_path = Path(str(test_db_engine.url.database))
-    wf_manager = WorkflowManager(db_path)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
+
+    class _TestWorkflowManager:
+        def __init__(self, session_factory):
+            self._session_factory = session_factory
+
+        def get_by_runner_id(self, runner_id: str):
+            db = self._session_factory()
+            try:
+                wf = (
+                    db.query(Workflow)
+                    .filter(Workflow.runner_id == runner_id)
+                    .order_by(Workflow.created_at.desc())
+                    .first()
+                )
+                if not wf:
+                    return None
+                return {
+                    "id": wf.id,
+                    "status": wf.status,
+                    "runner_id": wf.runner_id,
+                    "error_message": wf.error_message,
+                }
+            finally:
+                db.close()
+
+        def update_status(self, workflow_id: int, status: str, **kwargs):
+            db = self._session_factory()
+            try:
+                wf = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+                if not wf:
+                    return
+                wf.status = status
+                if "error_message" in kwargs:
+                    wf.error_message = kwargs["error_message"]
+                if status == "running":
+                    wf.started_at = datetime.now()
+                if status in ("merged", "failed", "cancelled"):
+                    wf.finished_at = datetime.now()
+                    if status == "merged":
+                        wf.merged_at = datetime.now()
+                db.commit()
+            finally:
+                db.close()
 
     runner_id = f"wf-zombie-{uuid.uuid4().hex[:8]}"
     proc = MagicMock()
     proc.pid = 56789
 
-    workflow_id = wf_manager.create(
-        slug=f"wf-zombie-{uuid.uuid4().hex[:6]}",
-        plan_file="docs/plan/2026-04-03_fix-zombie-runner-heartbeat-detection_todo-2.md",
-    )
-    wf_manager.update_status(workflow_id, "running", runner_id=runner_id, engine="claude")
+    db = SessionLocal()
+    try:
+        wf = Workflow(
+            slug=f"wf-zombie-{uuid.uuid4().hex[:6]}",
+            plan_file="docs/plan/2026-04-03_fix-zombie-runner-heartbeat-detection_todo-2.md",
+            status="running",
+            runner_id=runner_id,
+            engine="claude",
+            created_at=datetime.now(),
+            started_at=datetime.now(),
+        )
+        db.add(wf)
+        db.commit()
+        db.refresh(wf)
+        workflow_id = wf.id
+    finally:
+        db.close()
+
+    wf_manager = _TestWorkflowManager(SessionLocal)
     state_mod.set_wf_manager(wf_manager)
 
     _seed_running_runner(fake_sync, runner_id, proc.pid)

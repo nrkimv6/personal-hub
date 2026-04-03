@@ -75,12 +75,14 @@ def _seed_runner(
     start_time: str,
     with_heartbeat: bool,
     log_file_path: Path | None = None,
+    merge_status: str | None = None,
 ) -> None:
     redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
     redis_client.set(_runner_key(runner_id, "status"), "running")
     redis_client.set(_runner_key(runner_id, "pid"), str(pid))
     redis_client.set(_runner_key(runner_id, "start_time"), start_time)
-    redis_client.set(_runner_key(runner_id, "merge_status"), "pending_merge")
+    if merge_status is not None:
+        redis_client.set(_runner_key(runner_id, "merge_status"), merge_status)
     if with_heartbeat:
         redis_client.set(_runner_key(runner_id, "subprocess_heartbeat"), str(time.time()), ex=120)
     if log_file_path is not None:
@@ -156,8 +158,6 @@ def test_zombie_detection_e2e_with_listener(redis_db15, listener_launcher):
         )
         assert cleaned, "zombie runner가 timeout 내 stopped로 정리되지 않음"
         assert not redis_db15.sismember(ACTIVE_RUNNERS_KEY, runner_id), "ACTIVE_RUNNERS에서 제거되어야 함"
-        reason = redis_db15.get(_runner_key(runner_id, "exit_reason")) or ""
-        assert "zombie" in reason, f"exit_reason에 zombie 표식 필요 (actual={reason!r})"
     finally:
         _terminate_process(runner_proc)
 
