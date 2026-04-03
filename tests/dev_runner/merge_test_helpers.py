@@ -4,7 +4,14 @@ from datetime import datetime
 from pathlib import Path
 import tempfile
 import time
+import sys
 from unittest.mock import patch
+
+_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from _dr_plan_paths import resolve_plan_target
 
 
 @contextmanager
@@ -61,3 +68,8 @@ def emit_codex_runtime_failure(
         log_path = Path(fp.name)
     redis_client.set(f"{prefix}:stream_log_path", str(log_path))
     return log_path
+
+
+def resolve_archive_or_history_path(plan_file: str) -> Path:
+    """plan 파일의 규칙 기반 archive/history target 경로 반환."""
+    return resolve_plan_target(plan_file, purpose="archive").target

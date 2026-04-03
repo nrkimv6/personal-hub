@@ -18,18 +18,20 @@ RECENT_RUNNERS_TTL = 3600
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
 
 
-def simulate_cleanup_redis_state(runner_id: str, exit_reason: str, fake_redis):
+def simulate_cleanup_redis_state(runner_id: str, exit_reason: str, fake_redis, stop_stage: str | None = None):
     """runner.py _cleanup_redis_state 로직 시뮬레이션."""
     REDIS_STATE_KEY = f"plan-runner:state:{runner_id}"
     RUNNER_KEY_SUFFIXES = (
         "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
         "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
-        "current_cycle", "quota_stopped", "error", "restart_after_merge", "exit_reason",
+        "current_cycle", "quota_stopped", "error", "restart_after_merge", "exit_reason", "stop_stage",
     )
     try:
         fake_redis.set(f"{REDIS_STATE_KEY}:status", "stopped")
         fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
         fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", exit_reason)
+        if stop_stage:
+            fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage", stop_stage)
         for suffix in RUNNER_KEY_SUFFIXES:
             fake_redis.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", RECENT_RUNNERS_TTL)
         fake_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
@@ -99,6 +101,17 @@ class TestNoProgressExitSetsRedisIntegration:
 
         stored = fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")
         assert stored == "commit_failed"
+
+    def test_stopped_pre_review_sets_stop_stage_integration(self):
+        """stopped 종료 시 stop_stage=pre_review가 Redis에 함께 기록된다."""
+        fake_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "tc-pytest-t3-007"
+
+        fake_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+        simulate_cleanup_redis_state(runner_id, "stopped", fake_redis, stop_stage="pre_review")
+
+        stored = fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage")
+        assert stored == "pre_review"
 
 
 class TestListenerPublishesExitReasonIntegration:

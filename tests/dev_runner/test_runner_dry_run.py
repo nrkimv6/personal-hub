@@ -134,7 +134,12 @@ async def _post_dry_run(client: httpx.AsyncClient, plan_file: str = TEST_PLAN_FI
     """dry_run POST 실행 → runner_id 반환."""
     resp = await client.post(
         "/api/v1/dev-runner/run",
-        json={"engine": "gemini", "plan_file": plan_file, "dry_run": True},
+        json={
+            "engine": "gemini",
+            "plan_file": plan_file,
+            "dry_run": True,
+            "test_source": "test_runner_dry_run",
+        },
     )
     assert resp.status_code == 200, f"POST /run 실패: {resp.status_code} {resp.text}"
     runner_id = resp.json().get("runner_id")

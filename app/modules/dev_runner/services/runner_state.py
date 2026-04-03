@@ -10,6 +10,10 @@ from app.config import logger
 
 # 모듈 전용 logger (테스트에서 caplog로 캡처 가능)
 _module_logger = logging.getLogger("app.modules.dev_runner.services.executor_service")
+from app.modules.dev_runner.services.plan_path_resolver import (
+    PathRuleError,
+    resolve_plan_target,
+)
 from app.modules.dev_runner.services.plan_service import plan_service
 from app.modules.dev_runner.services.redis_connection import (
     ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL,
@@ -179,10 +183,14 @@ class RunnerState:
 
             reason = None
             if plan_file:
-                archive_path = plan_file.replace("docs/plan/", "docs/archive/").replace("docs\\plan\\", "docs\\archive\\")
-                if Path(archive_path).exists():
-                    reason = "archived"
-                else:
+                try:
+                    target = resolve_plan_target(plan_file, purpose="archive")
+                    if Path(target.target).exists():
+                        reason = "archived"
+                    else:
+                        reason = "file_lost"
+                except PathRuleError:
+                    # 규칙 해석 실패 경로는 보수적으로 file_lost 취급
                     reason = "file_lost"
             else:
                 reason = "file_lost"

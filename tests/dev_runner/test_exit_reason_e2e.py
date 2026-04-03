@@ -39,6 +39,7 @@ class TestExitReasonE2ERunners:
                 "visible": True,
                 "orphan": False,
                 "exit_reason": "rate_limit",
+                "stop_stage": None,
             }
         ]
         with patch(
@@ -52,7 +53,40 @@ class TestExitReasonE2ERunners:
         data = response.json()
         assert len(data) == 1
         assert data[0]["exit_reason"] == "rate_limit"
+        assert "stop_stage" in data[0]
         assert data[0]["running"] is False
+
+    def test_pre_review_stop_stage_exposed_e2e(self, client):
+        """T4: pre_review 중지 케이스에서 stop_stage가 runners API에 노출된다."""
+        runners = [
+            {
+                "runner_id": "e2e_runner_pre",
+                "running": False,
+                "plan_file": "docs/plan/test.md",
+                "engine": "claude",
+                "start_time": "2026-03-27T00:00:00",
+                "pid": 9998,
+                "worktree_path": None,
+                "branch": None,
+                "merge_status": None,
+                "trigger": "user",
+                "visible": True,
+                "orphan": False,
+                "exit_reason": "stopped",
+                "stop_stage": "pre_review",
+            }
+        ]
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            return_value=runners,
+        ):
+            response = client.get("/api/v1/dev-runner/runners")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["exit_reason"] == "stopped"
+        assert data[0]["stop_stage"] == "pre_review"
 
 
 class TestExitReasonE2ESseStream:

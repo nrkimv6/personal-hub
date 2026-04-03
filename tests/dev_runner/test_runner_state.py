@@ -1,6 +1,7 @@
 """RunnerState 단위 TC"""
 
 import os
+from datetime import datetime, timedelta
 import pytest
 import fakeredis.aioredis as fake_aioredis
 from unittest.mock import AsyncMock, patch
@@ -90,3 +91,49 @@ class TestDismissRunner:
         state = make_state(fake_r)
         result = await state.dismiss_runner("nonexist_runner")
         assert result is True
+
+
+class TestCleanupStaleRunners:
+    @pytest.mark.asyncio
+    async def test_cleanup_stale_auto_history_archived_R(self, tmp_path):
+        """_auto* plan은 docs/history 파일이 있으면 archived로 분류되어 bugs 증가 없이 정리된다."""
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        state = make_state(fake_r)
+
+        rid = "rs-auto-h1"
+        plan_file = tmp_path / "docs" / "plan" / "2026-04-03_auto-next.md"
+        history_file = tmp_path / "docs" / "history" / "2026-04-03_auto-next.md"
+        plan_file.parent.mkdir(parents=True)
+        history_file.parent.mkdir(parents=True)
+        history_file.write_text("archived", encoding="utf-8")
+
+        await fake_r.zadd(RECENT_RUNNERS_KEY, {rid: 1})
+        await fake_r.set(runner_key(rid, "status"), "stopped")
+        await fake_r.set(runner_key(rid, "plan_file"), str(plan_file))
+        await fake_r.set(runner_key(rid, "stop_stage"), "post_review")
+
+        result = await state.cleanup_stale_runners()
+        assert result["cleaned_recent"] == 1
+        assert result["bugs"] == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_stale_pre_review_running_grace_B(self, tmp_path):
+        """stop_stage=pre_review + running + grace 내 file_lost는 즉시 정리되지 않는다."""
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        state = make_state(fake_r)
+
+        rid = "rs-pre-grace"
+        plan_file = tmp_path / "docs" / "plan" / "2026-04-03_fix.md"
+        plan_file.parent.mkdir(parents=True)
+
+        await fake_r.zadd(RECENT_RUNNERS_KEY, {rid: 1})
+        await fake_r.set(runner_key(rid, "status"), "running")
+        await fake_r.set(runner_key(rid, "plan_file"), str(plan_file))
+        await fake_r.set(runner_key(rid, "stop_stage"), "pre_review")
+        await fake_r.set(
+            runner_key(rid, "start_time"),
+            (datetime.now() - timedelta(minutes=3)).isoformat(),
+        )
+
+        result = await state.cleanup_stale_runners()
+        assert result["cleaned_recent"] == 0

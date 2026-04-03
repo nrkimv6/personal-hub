@@ -10,6 +10,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from _dr_plan_paths import is_archive_or_history_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,9 +45,8 @@ def is_worktree_active(plan_file: str, project_root: "Path | None" = None) -> tu
 
 
 def is_plan_archived(plan_file: str) -> bool:
-    """plan 파일 경로가 아카이브 디렉토리(docs/archive 또는 docs\\archive)에 있는지 확인"""
-    normalized = plan_file.replace("\\", "/")
-    return "/docs/archive/" in normalized
+    """plan 파일 경로가 docs/archive 또는 docs/history인지 확인"""
+    return is_archive_or_history_path(plan_file)
 
 
 def has_unmerged_commits(branch: str, cwd: "Path | None" = None) -> bool:

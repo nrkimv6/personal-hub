@@ -237,3 +237,53 @@ class TestHandlePostMergeDoneFixNoPhaseR:
         assert "머지대기" in result
         # 로그에 사전 검증 실패 메시지
         assert any("Phase R" in log for log in logs)
+
+
+class TestArchivePathParity:
+    """PlanService/PlanDoneService archive/history target 경로 패리티."""
+
+    @pytest.mark.asyncio
+    async def test_common_docs_plan_parity(self, tmp_path):
+        from app.modules.dev_runner.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_done_service import PlanDoneService
+
+        ps_plan = tmp_path / "svc1" / "common" / "docs" / "plan" / "2026-04-03_fix.md"
+        pd_plan = tmp_path / "svc2" / "common" / "docs" / "plan" / "2026-04-03_fix.md"
+        ps_plan.parent.mkdir(parents=True)
+        pd_plan.parent.mkdir(parents=True)
+        ps_plan.write_text("# t\n> 상태: 구현완료\n", encoding="utf-8")
+        pd_plan.write_text("# t\n> 상태: 구현완료\n", encoding="utf-8")
+
+        svc = PlanService.__new__(PlanService)
+        scanner = Mock()
+        scanner._find_todo_file.return_value = None
+        done_svc = PlanDoneService(scanner=scanner, registry=Mock())
+
+        ps_archive, _ = await svc._archive_plan(str(ps_plan), ps_plan.read_text(encoding="utf-8"))
+        pd_archive, _ = await done_svc._archive_plan(str(pd_plan), pd_plan.read_text(encoding="utf-8"))
+
+        assert ps_archive.parts[-3:] == ("docs", "archive", "2026-04-03_fix.md")
+        assert pd_archive.parts[-3:] == ("docs", "archive", "2026-04-03_fix.md")
+
+    @pytest.mark.asyncio
+    async def test_auto_plan_history_parity(self, tmp_path):
+        from app.modules.dev_runner.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_done_service import PlanDoneService
+
+        ps_plan = tmp_path / "svc1" / "docs" / "plan" / "2026-04-03_auto-next.md"
+        pd_plan = tmp_path / "svc2" / "docs" / "plan" / "2026-04-03_auto-next.md"
+        ps_plan.parent.mkdir(parents=True)
+        pd_plan.parent.mkdir(parents=True)
+        ps_plan.write_text("# t\n> 상태: 구현완료\n", encoding="utf-8")
+        pd_plan.write_text("# t\n> 상태: 구현완료\n", encoding="utf-8")
+
+        svc = PlanService.__new__(PlanService)
+        scanner = Mock()
+        scanner._find_todo_file.return_value = None
+        done_svc = PlanDoneService(scanner=scanner, registry=Mock())
+
+        ps_archive, _ = await svc._archive_plan(str(ps_plan), ps_plan.read_text(encoding="utf-8"))
+        pd_archive, _ = await done_svc._archive_plan(str(pd_plan), pd_plan.read_text(encoding="utf-8"))
+
+        assert ps_archive.parts[-3:] == ("docs", "history", "2026-04-03_auto-next.md")
+        assert pd_archive.parts[-3:] == ("docs", "history", "2026-04-03_auto-next.md")

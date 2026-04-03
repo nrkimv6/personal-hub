@@ -14,6 +14,7 @@ from typing import List, Optional
 
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.log_service import LOG_CHANNEL, REDIS_HOST, REDIS_PORT
+from app.modules.dev_runner.services.plan_path_resolver import resolve_plan_target
 from app.modules.dev_runner.schemas import (
     PlanFileResponse, PlanProgressResponse,
     PlanDetailResponse, PlanPhaseResponse, PlanItemResponse,
@@ -841,10 +842,24 @@ class PlanService:
         # 1. 원본 파일에 수정된 내용 덮어쓰기 (git mv 전에 내용 반영)
         p.write_text(final_content, encoding="utf-8")
 
-        # 2. archive 디렉토리 생성
-        archive_dir = p.parent.parent / "archive"
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        archive_path = archive_dir / p.name
+        # 2. 공통 resolver 기반 target 디렉토리 계산 (해석 실패 시 레거시 fallback)
+        try:
+            resolution = resolve_plan_target(plan_path, purpose="archive")
+            archive_path = resolution.target
+            archive_dir = archive_path.parent
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                "[done] archive target resolved: source=%s target=%s kind=%s rule=%s",
+                p,
+                archive_path,
+                resolution.target_kind,
+                resolution.rule_id,
+            )
+        except Exception as path_err:
+            archive_dir = p.parent.parent / "archive"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archive_path = archive_dir / p.name
+            logger.warning("[done] archive resolver fallback: plan=%s error=%s", plan_path, path_err)
 
         # 3. git mv로 이동 (rename 이력 보존 + staging 자동)
         mv_proc = await asyncio.create_subprocess_exec(

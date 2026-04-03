@@ -27,7 +27,7 @@ def client():
     return TestClient(app, raise_server_exceptions=True)
 
 
-def _make_runner(runner_id="abc123", exit_reason=None):
+def _make_runner(runner_id="abc123", exit_reason=None, stop_stage=None):
     """RunnerListItem 모의 딕셔너리 생성"""
     return {
         "runner_id": runner_id,
@@ -43,6 +43,7 @@ def _make_runner(runner_id="abc123", exit_reason=None):
         "visible": True,
         "orphan": False,
         "exit_reason": exit_reason,
+        "stop_stage": stop_stage,
     }
 
 
@@ -114,6 +115,21 @@ class TestRunnersApiExitReasonHttp:
         data = response.json()
         assert "exit_reason" in data[0]
         assert data[0]["exit_reason"] is None
+
+    @pytest.mark.http
+    def test_runners_api_stop_stage_present(self, client):
+        """중지 runner 응답에 stop_stage(pre_review)가 노출된다."""
+        runners = [_make_runner("r3", exit_reason="stopped", stop_stage="pre_review")]
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            return_value=runners,
+        ):
+            response = client.get(f"{BASE_URL}/runners")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["stop_stage"] == "pre_review"
 
 
 class TestRestartRunnerHttp:

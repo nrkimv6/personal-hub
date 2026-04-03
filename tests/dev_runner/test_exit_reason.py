@@ -51,7 +51,7 @@ class TestCleanupRedisStateExitReason:
         RUNNER_KEY_SUFFIXES = (
             "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
             "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
-            "current_cycle", "quota_stopped", "error", "restart_after_merge", "exit_reason",
+            "current_cycle", "quota_stopped", "error", "restart_after_merge", "exit_reason", "stop_stage",
         )
         REDIS_STATE_KEY = f"plan-runner:state:{runner._runner_id}"
         r = runner._redis
@@ -178,6 +178,7 @@ class TestGetAllRunnersExitReason:
                 f"{RUNNER_KEY_PREFIX}:{rid}:branch": None,
                 f"{RUNNER_KEY_PREFIX}:{rid}:trigger": "user",
                 f"{RUNNER_KEY_PREFIX}:{rid}:exit_reason": "no_progress",
+                f"{RUNNER_KEY_PREFIX}:{rid}:stop_stage": None,
             }
             return mapping.get(key)
 
@@ -210,6 +211,7 @@ class TestGetAllRunnersExitReason:
                 f"{RUNNER_KEY_PREFIX}:{rid}:branch": None,
                 f"{RUNNER_KEY_PREFIX}:{rid}:trigger": "user",
                 # exit_reason 키 없음
+                f"{RUNNER_KEY_PREFIX}:{rid}:stop_stage": None,
             }
             return mapping.get(key)
 

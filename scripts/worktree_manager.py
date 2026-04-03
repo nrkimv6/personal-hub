@@ -17,6 +17,12 @@ class WorktreeError(Exception):
     pass
 
 
+def _is_linked_worktree(project_root: Path) -> bool:
+    """현재 project_root가 linked worktree인지 판별."""
+    # 메인 worktree는 .git 디렉토리, linked worktree는 .git 파일(포인터) 형태다.
+    return (project_root / ".git").is_file()
+
+
 def ensure_main_branch(project_root: Path) -> None:
     """메인 레포가 main 브랜치인지 확인하고, 아니면 main으로 복귀.
 
@@ -36,6 +42,16 @@ def ensure_main_branch(project_root: Path) -> None:
         capture_output=True, text=True, encoding="utf-8", cwd=str(project_root)
     )
     if checkout.returncode != 0:
+        stderr = (checkout.stderr or "").strip()
+        # linked worktree에서는 main이 다른 worktree에 checkout되어 있으면
+        # 현재 worktree에서 main checkout이 구조적으로 불가능하다.
+        if _is_linked_worktree(project_root) and "is already used by worktree at" in stderr:
+            logger.info(
+                "[WorktreeManager] linked worktree에서 main checkout 스킵 "
+                "(main은 다른 worktree에서 사용 중): %s",
+                project_root,
+            )
+            return
         raise WorktreeError(f"메인 레포를 main으로 복귀 실패 (현재: {branch}): {checkout.stderr}")
 
 

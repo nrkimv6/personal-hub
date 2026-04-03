@@ -24,6 +24,7 @@ from app.modules.dev_runner.services.executor_service import (
     RUNNER_KEY_PREFIX,
     RUNNER_KEY_SUFFIXES,
 )
+from tests.dev_runner.merge_test_helpers import resolve_archive_or_history_path
 
 
 # ─────────────────────────── Fixtures ────────────────────────────
@@ -80,9 +81,8 @@ async def test_cleanup_stale_archived_plan(svc, fake_async_redis, tmp_path):
     plan_dir.mkdir(parents=True)
     plan_file_path = str(plan_dir / "2026-01-01_foo.md")
 
-    archive_dir = tmp_path / "docs" / "archive"
-    archive_dir.mkdir(parents=True)
-    archive_file2 = archive_dir / "2026-01-01_foo.md"
+    archive_file2 = resolve_archive_or_history_path(plan_file_path)
+    archive_file2.parent.mkdir(parents=True)
     archive_file2.write_text("archived")
 
     rid = "t-arch-001"
@@ -96,6 +96,26 @@ async def test_cleanup_stale_archived_plan(svc, fake_async_redis, tmp_path):
 
     remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
     assert rid not in remaining
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_auto_history_plan_R(svc, fake_async_redis, tmp_path):
+    """_auto* plan은 docs/history 존재 시 archived로 분류되어 bugs 증가 없이 정리된다."""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    plan_file_path = str(plan_dir / "2026-02-01_auto-next-cleanup.md")
+
+    history_file = resolve_archive_or_history_path(plan_file_path)
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    history_file.write_text("history archived", encoding="utf-8")
+
+    rid = "t-auto-history-001"
+    await _seed_recent(fake_async_redis, rid, status="stopped", plan_file=plan_file_path)
+
+    result = await svc.cleanup_stale_runners()
+
+    assert result["cleaned_recent"] == 1
+    assert result["bugs"] == 0
 
 
 @pytest.mark.asyncio

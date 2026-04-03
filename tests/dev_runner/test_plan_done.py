@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.dev_runner.services.plan_service import PlanService
+from app.modules.dev_runner.services.plan_done_service import PlanDoneService
 from app.models.plan_record import PlanRecord, PlanEvent
 
 
@@ -201,6 +202,46 @@ class TestArchivePlan:
         await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
 
         assert (tmp_path / "docs" / "archive").exists()
+
+    @pytest.mark.asyncio
+    async def test_archive_target_parity_common_docs_plan_R(self, tmp_path, svc):
+        """common/docs/plan 입력에서 PlanService/PlanDoneService target 경로 패리티."""
+        ps_plan = tmp_path / "ps" / "common" / "docs" / "plan" / "2026-04-03_fix.md"
+        pd_plan = tmp_path / "pd" / "common" / "docs" / "plan" / "2026-04-03_fix.md"
+        ps_plan.parent.mkdir(parents=True)
+        pd_plan.parent.mkdir(parents=True)
+        ps_plan.write_text("# t\n> 상태: 구현완료\n", encoding="utf-8")
+        pd_plan.write_text("# t\n> 상태: 구현완료\n", encoding="utf-8")
+
+        scanner = MagicMock()
+        scanner._find_todo_file.return_value = None
+        done_svc = PlanDoneService(scanner=scanner, registry=MagicMock())
+
+        ps_archive, _ = await svc._archive_plan(str(ps_plan), ps_plan.read_text(encoding="utf-8"))
+        pd_archive, _ = await done_svc._archive_plan(str(pd_plan), pd_plan.read_text(encoding="utf-8"))
+
+        assert ps_archive.parts[-3:] == ("docs", "archive", "2026-04-03_fix.md")
+        assert pd_archive.parts[-3:] == ("docs", "archive", "2026-04-03_fix.md")
+
+    @pytest.mark.asyncio
+    async def test_archive_target_parity_auto_to_history_R(self, tmp_path, svc):
+        """_auto* 입력에서 두 서비스 모두 docs/history로 이동."""
+        ps_plan = tmp_path / "ps" / "docs" / "plan" / "2026-04-03_auto-next.md"
+        pd_plan = tmp_path / "pd" / "docs" / "plan" / "2026-04-03_auto-next.md"
+        ps_plan.parent.mkdir(parents=True)
+        pd_plan.parent.mkdir(parents=True)
+        ps_plan.write_text("# t\n> 상태: 구현완료\n", encoding="utf-8")
+        pd_plan.write_text("# t\n> 상태: 구현완료\n", encoding="utf-8")
+
+        scanner = MagicMock()
+        scanner._find_todo_file.return_value = None
+        done_svc = PlanDoneService(scanner=scanner, registry=MagicMock())
+
+        ps_archive, _ = await svc._archive_plan(str(ps_plan), ps_plan.read_text(encoding="utf-8"))
+        pd_archive, _ = await done_svc._archive_plan(str(pd_plan), pd_plan.read_text(encoding="utf-8"))
+
+        assert ps_archive.parts[-3:] == ("docs", "history", "2026-04-03_auto-next.md")
+        assert pd_archive.parts[-3:] == ("docs", "history", "2026-04-03_auto-next.md")
 
 
 # ========== _update_todo_done ==========

@@ -22,6 +22,7 @@ from fastapi import HTTPException
 from app.config import logger
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.plan_service import plan_service
+from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_history_path
 from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.services.visibility import is_visible_runner
 from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
@@ -227,7 +228,7 @@ class ExecutorService:
         )
 
         if request.plan_file:
-            if "docs/archive/" in request.plan_file.replace("\\", "/"):
+            if is_archive_or_history_path(request.plan_file):
                 raise HTTPException(status_code=400, detail="archived plan은 실행할 수 없습니다")
             command["plan_file"] = request.plan_file
 
@@ -499,7 +500,7 @@ class ExecutorService:
                 for rid in all_ids:
                     d = await self._get_runner_fields(rid, "status", "pid", "plan_file", "engine",
                                                       "start_time", "worktree_path", "merge_status",
-                                                      "branch", "trigger", "exit_reason")
+                                                      "branch", "trigger", "exit_reason", "stop_stage")
                     status = d["status"]
                     pid_str = d["pid"]
                     plan_file = d["plan_file"]
@@ -510,6 +511,7 @@ class ExecutorService:
                     branch = d["branch"]
                     trigger = d["trigger"]
                     exit_reason = d["exit_reason"]
+                    stop_stage = d["stop_stage"]
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
                     start_time = None
@@ -540,6 +542,7 @@ class ExecutorService:
                         visible=is_user,
                         orphan=is_orphan,
                         exit_reason=exit_reason,
+                        stop_stage=stop_stage,
                     ))
                 return result
             finally:
