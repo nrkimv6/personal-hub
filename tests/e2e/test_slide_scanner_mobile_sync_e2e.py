@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.modules.slide_scanner.config import settings
 from app.modules.slide_scanner.database import get_db
 from app.modules.slide_scanner.routers import mobile_review_router, mobile_sync_router, slides_router
+from app.modules.slide_scanner.routers import mobile_review as mobile_review_module
 
 
 def _apply_sql_file(engine, sql_path: Path) -> None:
@@ -164,3 +165,115 @@ def test_mobile_sync_e2e_rejected_item_not_handed_off(
 
     handoff_response = client.post(f"/api/v1/ss/mobile-review/{target_item_id}/handoff")
     assert handoff_response.status_code == 409
+
+
+def test_mobile_sync_e2e_can_open_editor_after_handoff(
+    mobile_sync_e2e_context: tuple[TestClient, Session, Callable[[str, str, bytes], Path]],
+):
+    client, _db, add_remote_file = mobile_sync_e2e_context
+
+    remote_path = "/sdcard/DCIM/Camera/IMG_E2E_EDITOR_OPEN.jpg"
+    add_remote_file("FAKE001", remote_path, _jpeg_bytes((80, 160, 220)))
+
+    run_response = client.post("/api/v1/ss/mobile-sync/run", json={"background": False})
+    assert run_response.status_code == 200
+    assert run_response.json()["inserted"] == 1
+
+    queue_response = client.get("/api/v1/ss/mobile-review/items")
+    assert queue_response.status_code == 200
+    item = queue_response.json()["items"][0]
+    target_item_id = item["id"]
+    assert item["can_open_editor"] is False
+
+    approve_response = client.post(f"/api/v1/ss/mobile-review/{target_item_id}/approve")
+    assert approve_response.status_code == 200
+    approve_payload = approve_response.json()
+    assert approve_payload["approval_status"] == "APPROVED"
+    assert approve_payload["can_open_editor"] is False
+
+    delete_response = client.post(f"/api/v1/ss/mobile-review/{target_item_id}/remote-delete")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["status"] == "done"
+
+    handoff_response = client.post(f"/api/v1/ss/mobile-review/{target_item_id}/handoff")
+    assert handoff_response.status_code == 200
+    handoff_payload = handoff_response.json()
+    assert handoff_payload["handoff_status"] == "DONE"
+    assert handoff_payload["can_open_editor"] is True
+
+
+def test_mobile_sync_e2e_remote_delete_retry_then_handoff(
+    mobile_sync_e2e_context: tuple[TestClient, Session, Callable[[str, str, bytes], Path]],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client, _db, add_remote_file = mobile_sync_e2e_context
+
+    remote_path = "/sdcard/DCIM/Camera/IMG_E2E_RETRY.jpg"
+    add_remote_file("FAKE001", remote_path, _jpeg_bytes((210, 90, 90)))
+
+    run_response = client.post("/api/v1/ss/mobile-sync/run", json={"background": False})
+    assert run_response.status_code == 200
+    assert run_response.json()["inserted"] == 1
+
+    queue_response = client.get("/api/v1/ss/mobile-review/items")
+    assert queue_response.status_code == 200
+    target_item_id = queue_response.json()["items"][0]["id"]
+
+    approve_response = client.post(f"/api/v1/ss/mobile-review/{target_item_id}/approve")
+    assert approve_response.status_code == 200
+    assert approve_response.json()["approval_status"] == "APPROVED"
+
+    call_count = {"value": 0}
+
+    def _toggle_remote_delete(*, db, item_id: int, adb_path, allowed_roots):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            db.execute(
+                text(
+                    """
+                    UPDATE mobile_ingest_items
+                    SET remote_delete_status = 'FAILED',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :item_id
+                    """
+                ),
+                {"item_id": item_id},
+            )
+            db.commit()
+            return {"status": "failed", "item_id": item_id, "results": {}, "error": "adb timeout"}
+
+        db.execute(
+            text(
+                """
+                UPDATE mobile_ingest_items
+                SET remote_delete_status = 'DONE',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :item_id
+                """
+            ),
+            {"item_id": item_id},
+        )
+        db.commit()
+        return {"status": "done", "item_id": item_id, "results": {remote_path: True}}
+
+    monkeypatch.setattr(mobile_review_module, "process_remote_delete_for_item", _toggle_remote_delete)
+
+    first_delete = client.post(f"/api/v1/ss/mobile-review/{target_item_id}/remote-delete")
+    assert first_delete.status_code == 200
+    first_payload = first_delete.json()
+    assert first_payload["status"] == "failed"
+    assert first_payload["remote_delete_status"] == "FAILED"
+    assert first_payload["can_handoff"] is False
+
+    retry_delete = client.post(f"/api/v1/ss/mobile-review/{target_item_id}/remote-delete/retry")
+    assert retry_delete.status_code == 200
+    retry_payload = retry_delete.json()
+    assert retry_payload["status"] == "done"
+    assert retry_payload["remote_delete_status"] == "DONE"
+    assert retry_payload["can_handoff"] is True
+
+    handoff_response = client.post(f"/api/v1/ss/mobile-review/{target_item_id}/handoff")
+    assert handoff_response.status_code == 200
+    handoff_payload = handoff_response.json()
+    assert handoff_payload["handoff_status"] == "DONE"
+    assert handoff_payload["can_open_editor"] is True
