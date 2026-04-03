@@ -14,13 +14,19 @@ SSE 포맷으로 실시간 전달한다.
 """
 
 import asyncio
+import glob
+import hashlib
 import json
+import logging
 import time
+from collections import deque
+from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 import redis.asyncio as aioredis
 import redis as redis_sync
 
+from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.completion_reason import (
     LOG_COMPLETED_SENTINEL as _LOG_COMPLETED_SENTINEL,
     MERGE_LOG_COMPLETED_SENTINEL as _MERGE_LOG_COMPLETED_SENTINEL,
@@ -32,6 +38,8 @@ from app.modules.dev_runner.services.completion_reason import (
 from app.shared.redis.client import RedisClient
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 from app.modules.dev_runner.services.visibility import is_visible_runner
+
+logger = logging.getLogger(__name__)
 
 # ─── Redis 상수 ─────────────────────────────────────────────────────────────
 REDIS_HOST = "localhost"
@@ -59,6 +67,13 @@ KEY_EVENT_MAP = {
 }
 
 HEARTBEAT_INTERVAL = 30  # 초
+FILE_POLL_TIMEOUT = 5.0
+FILE_POLL_INTERVAL = 1.0
+MAX_FALLBACK_READ_LINES = 400
+MAX_FALLBACK_READ_CHARS = 65536
+TAIL_STATE_TTL_SEC = 600.0
+DEFAULT_DEDUP_WINDOW = 256
+COMPLETED_RUNNER_TTL_SEC = 120.0
 
 
 def _build_log_line_payload(data: str) -> object:
@@ -95,6 +110,15 @@ class EventService:
             socket_connect_timeout=5, max_connections=50,
         )
         self._async = aioredis.Redis(connection_pool=self._async_pool)
+        self._runner_tail_state: dict[str, dict] = {}
+        self._completed_runners: dict[str, float] = {}
+        self._tail_state_ttl_sec = TAIL_STATE_TTL_SEC
+        self._completed_runner_ttl_sec = COMPLETED_RUNNER_TTL_SEC
+        self._dedup_window = DEFAULT_DEDUP_WINDOW
+        self._file_poll_timeout = FILE_POLL_TIMEOUT
+        self._file_poll_interval_sec = FILE_POLL_INTERVAL
+        self._file_poll_max_lines = MAX_FALLBACK_READ_LINES
+        self._file_poll_max_chars = MAX_FALLBACK_READ_CHARS
 
     # ── 초기화 ──────────────────────────────────────────────────────────────
 
@@ -212,6 +236,299 @@ class EventService:
         runner_id = channel.split(":")[-1]
         return runner_id if runner_id else None
 
+    # ── /events fallback 상태 관리 ───────────────────────────────────────────
+
+    def _ensure_runtime_state(self) -> None:
+        """__new__ 기반 테스트에서도 런타임 상태 필드를 보장한다."""
+        if not hasattr(self, "_runner_tail_state"):
+            self._runner_tail_state = {}
+        if not hasattr(self, "_completed_runners"):
+            self._completed_runners = {}
+        if not hasattr(self, "_tail_state_ttl_sec"):
+            self._tail_state_ttl_sec = TAIL_STATE_TTL_SEC
+        if not hasattr(self, "_completed_runner_ttl_sec"):
+            self._completed_runner_ttl_sec = COMPLETED_RUNNER_TTL_SEC
+        if not hasattr(self, "_dedup_window"):
+            self._dedup_window = DEFAULT_DEDUP_WINDOW
+        if not hasattr(self, "_file_poll_timeout"):
+            self._file_poll_timeout = FILE_POLL_TIMEOUT
+        if not hasattr(self, "_file_poll_interval_sec"):
+            self._file_poll_interval_sec = FILE_POLL_INTERVAL
+        if not hasattr(self, "_file_poll_max_lines"):
+            self._file_poll_max_lines = MAX_FALLBACK_READ_LINES
+        if not hasattr(self, "_file_poll_max_chars"):
+            self._file_poll_max_chars = MAX_FALLBACK_READ_CHARS
+
+    def _get_or_create_tail_state(self, runner_id: str) -> dict:
+        self._ensure_runtime_state()
+        state = self._runner_tail_state.get(runner_id)
+        if state is None:
+            state = {
+                "path": None,
+                "inode": None,
+                "offset": 0,
+                "recent_fingerprints": deque(maxlen=self._dedup_window),
+                "last_seen": time.monotonic(),
+            }
+            self._runner_tail_state[runner_id] = state
+        return state
+
+    def _drop_tail_state(self, runner_id: str) -> None:
+        self._ensure_runtime_state()
+        self._runner_tail_state.pop(runner_id, None)
+
+    def _mark_runner_completed(self, runner_id: str) -> None:
+        self._ensure_runtime_state()
+        self._completed_runners[runner_id] = time.monotonic()
+        self._drop_tail_state(runner_id)
+
+    def _is_runner_recently_completed(self, runner_id: str) -> bool:
+        self._ensure_runtime_state()
+        marked_at = self._completed_runners.get(runner_id)
+        if marked_at is None:
+            return False
+        if time.monotonic() - marked_at > self._completed_runner_ttl_sec:
+            self._completed_runners.pop(runner_id, None)
+            return False
+        return True
+
+    def _fingerprint_line(self, runner_id: str, line: str) -> str:
+        text = str(line or "")
+        raw = f"{runner_id}\x00{text}".encode("utf-8", errors="ignore")
+        return hashlib.sha1(raw).hexdigest()[:16]
+
+    def _is_duplicate_log_line(self, runner_id: str, line: str) -> bool:
+        state = self._get_or_create_tail_state(runner_id)
+        state["last_seen"] = time.monotonic()
+        recent = state.get("recent_fingerprints")
+        if not isinstance(recent, deque):
+            recent = deque(maxlen=self._dedup_window)
+            state["recent_fingerprints"] = recent
+        fp = self._fingerprint_line(runner_id, line)
+        if fp in recent:
+            return True
+        recent.append(fp)
+        return False
+
+    def _list_visible_active_runner_ids(self) -> list[str]:
+        self._ensure_runtime_state()
+        try:
+            runner_ids = self._sync.smembers(ACTIVE_RUNNERS_KEY) or set()
+        except Exception:
+            return []
+
+        visible_running_ids: list[str] = []
+        for rid in runner_ids:
+            runner_id = str(rid)
+            payload = self._build_status_payload(runner_id)
+            if (
+                payload
+                and payload.get("visible", False)
+                and payload.get("status") == "running"
+            ):
+                self._completed_runners.pop(runner_id, None)
+                visible_running_ids.append(runner_id)
+            else:
+                self._drop_tail_state(runner_id)
+        return visible_running_ids
+
+    def _resolve_runner_log_path(self, runner_id: str) -> Optional[Path]:
+        prefix = f"{RUNNER_KEY_PREFIX}:{runner_id}"
+        try:
+            stream_path_str = self._sync.get(f"{prefix}:stream_log_path")
+            if stream_path_str:
+                stream_path = Path(stream_path_str)
+                if stream_path.exists():
+                    return stream_path
+
+            log_path_str = self._sync.get(f"{prefix}:log_file_path")
+            if log_path_str:
+                log_path = Path(log_path_str)
+                if log_path.exists():
+                    return log_path
+        except Exception:
+            pass
+
+        log_dir = Path(config.LOG_DIR)
+        if not log_dir.is_absolute():
+            log_dir = Path.cwd() / log_dir
+        if not log_dir.exists():
+            return None
+
+        patterns = [
+            str(log_dir / f"plan-runner-stream-{runner_id}-*.log"),
+            str(log_dir / f"plan-runner-{runner_id}-*.log"),
+        ]
+        candidates: list[Path] = []
+        for pattern in patterns:
+            for matched in glob.glob(pattern):
+                path = Path(matched)
+                if path.exists():
+                    candidates.append(path)
+        if not candidates:
+            return None
+        try:
+            return max(candidates, key=lambda p: p.stat().st_mtime)
+        except Exception:
+            return candidates[-1]
+
+    def _ensure_tail_state_for_path(self, runner_id: str, path: Path) -> Optional[dict]:
+        self._ensure_runtime_state()
+        try:
+            stat = path.stat()
+        except Exception:
+            self._drop_tail_state(runner_id)
+            return None
+
+        state = self._get_or_create_tail_state(runner_id)
+        now = time.monotonic()
+        path_str = str(path)
+        inode_sig = (stat.st_dev, stat.st_ino)
+        prev_path = state.get("path")
+        prev_inode = state.get("inode")
+        prev_offset = int(state.get("offset", 0))
+        reset_reason: Optional[str] = None
+
+        if prev_path is None and prev_inode is None:
+            # 첫 연결은 offset=0으로 시작해 pub/sub 공백 구간 로그 유실을 방지한다.
+            state["path"] = path_str
+            state["inode"] = inode_sig
+            state["offset"] = 0
+        elif prev_path != path_str:
+            state["path"] = path_str
+            state["inode"] = inode_sig
+            state["offset"] = 0
+            state["recent_fingerprints"] = deque(maxlen=self._dedup_window)
+            reset_reason = "path_changed"
+        elif prev_inode != inode_sig:
+            state["inode"] = inode_sig
+            state["offset"] = 0
+            state["recent_fingerprints"] = deque(maxlen=self._dedup_window)
+            reset_reason = "rotate"
+        elif stat.st_size < prev_offset:
+            state["offset"] = 0
+            state["recent_fingerprints"] = deque(maxlen=self._dedup_window)
+            reset_reason = "truncate"
+
+        state["last_seen"] = now
+        if reset_reason:
+            logger.debug(
+                "[events-fallback] tail offset reset (runner=%s, reason=%s, from=%s, to=%s)",
+                runner_id,
+                reset_reason,
+                prev_offset,
+                state.get("offset"),
+            )
+        return state
+
+    def _cleanup_runner_tail_state(self, visible_runner_ids: set[str]) -> None:
+        self._ensure_runtime_state()
+        now = time.monotonic()
+        for runner_id, state in list(self._runner_tail_state.items()):
+            last_seen = float(state.get("last_seen", 0.0))
+            if runner_id not in visible_runner_ids:
+                self._runner_tail_state.pop(runner_id, None)
+                continue
+            if now - last_seen > self._tail_state_ttl_sec:
+                self._runner_tail_state.pop(runner_id, None)
+        for runner_id, marked_at in list(self._completed_runners.items()):
+            if runner_id not in visible_runner_ids:
+                self._completed_runners.pop(runner_id, None)
+                continue
+            if now - marked_at > self._completed_runner_ttl_sec:
+                self._completed_runners.pop(runner_id, None)
+
+    def _poll_runner_log_delta(self, runner_id: str) -> list[tuple[str, dict]]:
+        self._ensure_runtime_state()
+        try:
+            trigger = self._sync.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+        except Exception:
+            trigger = None
+        if not is_visible_runner(trigger, runner_id):
+            self._drop_tail_state(runner_id)
+            return []
+        if self._is_runner_recently_completed(runner_id):
+            return []
+
+        path = self._resolve_runner_log_path(runner_id)
+        if path is None or not path.exists():
+            self._drop_tail_state(runner_id)
+            return []
+
+        state = self._ensure_tail_state_for_path(runner_id, path)
+        if state is None:
+            return []
+
+        max_lines = int(self._file_poll_max_lines)
+        max_chars = int(self._file_poll_max_chars)
+        offset = int(state.get("offset", 0))
+        lines_read = 0
+        chars_read = 0
+        events: list[tuple[str, dict]] = []
+        completed_from_file = False
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(offset)
+                while lines_read < max_lines and chars_read < max_chars:
+                    start_pos = handle.tell()
+                    raw_line = handle.readline()
+                    if raw_line == "":
+                        break
+
+                    chars_read += len(raw_line)
+                    if chars_read > max_chars and lines_read > 0:
+                        handle.seek(start_pos)
+                        break
+
+                    line = raw_line.rstrip("\n")
+                    if not line:
+                        continue
+                    lines_read += 1
+
+                    if _is_log_completed_payload(line):
+                        status, reason = _parse_log_completed_payload(line)
+                        payload = {"runner_id": runner_id, "status": status, "reason": reason}
+                        try:
+                            error = self._sync.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:error")
+                        except Exception:
+                            error = None
+                        if error:
+                            payload["error"] = error
+                        events.append(("log_completed", payload))
+                        completed_from_file = True
+                        break
+
+                    if self._is_duplicate_log_line(runner_id, line):
+                        continue
+
+                    events.append(
+                        (
+                            "log",
+                            {"runner_id": runner_id, "line": _build_log_line_payload(line)},
+                        )
+                    )
+
+                new_offset = handle.tell()
+        except Exception as exc:
+            logger.debug("[events-fallback] file poll read failed (runner=%s): %s", runner_id, exc)
+            return []
+
+        if completed_from_file:
+            self._mark_runner_completed(runner_id)
+            return events
+
+        state["offset"] = int(new_offset)
+        state["last_seen"] = time.monotonic()
+        if lines_read >= max_lines or chars_read >= max_chars:
+            logger.debug(
+                "[events-fallback] read cap reached (runner=%s, lines=%s, chars=%s)",
+                runner_id,
+                lines_read,
+                chars_read,
+            )
+        return events
+
     # ── SSE 포맷 헬퍼 ────────────────────────────────────────────────────────
 
     @staticmethod
@@ -247,8 +564,11 @@ class EventService:
         pubsub: Optional[aioredis.client.PubSub] = None
         log_pubsub: Optional[aioredis.client.PubSub] = None
         last_heartbeat = time.monotonic()
+        last_log_activity = time.monotonic()
+        last_fallback_poll = 0.0
         consecutive_errors = 0
         MAX_CONSECUTIVE_ERRORS = 5
+        self._ensure_runtime_state()
 
         try:
             while True:
@@ -275,8 +595,15 @@ class EventService:
                             runner_id = self._extract_runner_id(changed_key)
                             if runner_id:
                                 payload = self._build_status_payload(runner_id)
-                                if payload and payload.get("visible", False):
-                                    yield self._sse("status", {"runners": [payload]})
+                                if payload:
+                                    if payload.get("visible", False):
+                                        yield self._sse("status", {"runners": [payload]})
+                                    else:
+                                        self._drop_tail_state(runner_id)
+                                    if payload.get("status") != "running":
+                                        self._drop_tail_state(runner_id)
+                                    else:
+                                        self._completed_runners.pop(runner_id, None)
                         elif event_type == "tracking":
                             payload = self._build_tracking_payload()
                             if payload:
@@ -318,6 +645,7 @@ class EventService:
                                         error = None
                                     if error:
                                         payload["error"] = error
+                                    self._mark_runner_completed(runner_id)
                                     yield self._sse(
                                         "log_completed",
                                         payload,
@@ -328,16 +656,39 @@ class EventService:
                                         {"runner_id": runner_id, "line": _build_log_line_payload(data)},
                                     )
                                 else:
+                                    self._completed_runners.pop(runner_id, None)
+                                    if self._is_duplicate_log_line(runner_id, str(data)):
+                                        continue
                                     yield self._sse(
                                         "log",
                                         {"runner_id": runner_id, "line": _build_log_line_payload(data)},
                                     )
 
                         last_heartbeat = time.monotonic()
+                        last_log_activity = time.monotonic()
                         consecutive_errors = 0
 
                     if not message and not log_message:
                         now = time.monotonic()
+                        if (
+                            now - last_log_activity >= self._file_poll_timeout
+                            and now - last_fallback_poll >= self._file_poll_interval_sec
+                        ):
+                            visible_runner_ids = self._list_visible_active_runner_ids()
+                            self._cleanup_runner_tail_state(set(visible_runner_ids))
+                            fallback_emitted = False
+                            for runner_id in visible_runner_ids:
+                                fallback_events = self._poll_runner_log_delta(runner_id)
+                                if not fallback_events:
+                                    continue
+                                fallback_emitted = True
+                                for event_name, payload in fallback_events:
+                                    yield self._sse(event_name, payload)
+                            if fallback_emitted:
+                                last_heartbeat = now
+                                last_log_activity = now
+                                consecutive_errors = 0
+                            last_fallback_poll = now
                         if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                             yield ": heartbeat\n\n"
                             last_heartbeat = now
@@ -351,6 +702,8 @@ class EventService:
                     log_pubsub = None
                     yield "event: redis_disconnected\ndata: Redis not available\n\n"
                     last_heartbeat = time.monotonic()
+                    last_log_activity = time.monotonic()
+                    last_fallback_poll = 0.0
                     await asyncio.sleep(5)
 
                 except Exception as e:
@@ -360,6 +713,8 @@ class EventService:
                     await safe_close_pubsub(log_pubsub)
                     log_pubsub = None
                     last_heartbeat = time.monotonic()
+                    last_log_activity = time.monotonic()
+                    last_fallback_poll = 0.0
 
                     if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                         yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
