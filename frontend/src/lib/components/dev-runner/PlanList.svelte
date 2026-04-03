@@ -139,8 +139,8 @@
 
 		const status = plan.status;
 		if (status === '구현중') return 'bg-blue-50/50 hover:bg-blue-100/50';
-		if (['구현완료', '완료', '수정 완료', '배포완료', '수정완료'].includes(status)) return 'bg-gray-200 opacity-60 hover:opacity-100';
-		if (status === '완료' || status === '배포완료') return 'bg-gray-600 text-white hover:bg-gray-700';
+		if (status === '완료' || status === '배포완료') return 'bg-gray-700 text-white hover:bg-gray-800';
+		if (['구현완료', '수정 완료', '수정완료'].includes(status)) return 'bg-gray-200 opacity-60 hover:opacity-100';
 
 		return 'bg-white hover:bg-gray-50';
 	}
@@ -471,9 +471,9 @@
 						{#if isArchive}
 							<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-200 text-gray-400">아카이브</span>
 						{:else if plan.status === '구현완료'}
-							<span class="w-[70px] text-[10px] font-mono uppercase inline-flex items-center justify-center rounded {statusBadge('구현완료')}">구현완료</span>
+							<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 text-[10px] font-mono uppercase whitespace-nowrap rounded {statusBadge('구현완료')}">구현완료</span>
 						{:else if showIgnored && plan.status === '보류'}
-							<span class="w-[70px] text-[10px] font-mono uppercase inline-flex items-center justify-center rounded {statusBadge('보류')}">보류</span>
+							<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 text-[10px] font-mono uppercase whitespace-nowrap rounded {statusBadge('보류')}">보류</span>
 						{/if}
 
 						{#if batchStatus === 'running'}
@@ -486,7 +486,7 @@
 						<!-- Done button: canDone OR lastPlanFile -->
 						{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}
 							<button
-								class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50 opacity-0 group-hover:opacity-100 transition-opacity"
+								class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
 								onclick={(e) => handleDone(e, plan)}
 								disabled={doneLoadingPath === plan.path}
 								title="완료 처리 (아카이브, TODO→DONE, 커밋)"
@@ -502,7 +502,7 @@
 						<!-- Hold button (활성 목록에서만, 무시 목록 아닐 때) -->
 						{#if !showIgnored && !isRunning && plan.status !== '보류'}
 							<button
-								class="shrink-0 p-1 rounded hover:bg-yellow-100 opacity-0 group-hover:opacity-100 transition-opacity"
+								class="shrink-0 p-1 rounded hover:bg-yellow-100 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
 								onclick={(e) => handleHold(e, plan)}
 								title="보류"
 							>
@@ -513,7 +513,7 @@
 						<!-- Unhold button (무시 목록에서 보류 상태일 때) -->
 						{#if showIgnored && plan.status === '보류'}
 							<button
-								class="shrink-0 p-1 rounded hover:bg-blue-100 opacity-0 group-hover:opacity-100 transition-opacity"
+								class="shrink-0 p-1 rounded hover:bg-blue-100 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
 								onclick={(e) => handleUnhold(e, plan)}
 								title="보류 해제"
 							>

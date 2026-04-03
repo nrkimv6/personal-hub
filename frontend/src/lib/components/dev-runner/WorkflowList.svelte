@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { devRunnerWorkflowApi, type WorkflowResponse } from '$lib/api';
+	import { toast } from '$lib/stores/toast';
 
 	let workflows = $state<WorkflowResponse[]>([]);
 	let loading = $state(true);
@@ -48,7 +49,8 @@
 			const updated = await devRunnerWorkflowApi.cancel(id);
 			workflows = workflows.map(w => w.id === id ? updated : w);
 		} catch (err) {
-			alert(`취소 실패: ${err}`);
+			const message = err instanceof Error ? err.message : String(err);
+			toast.error(`취소 실패: ${message}`);
 		}
 	}
 
@@ -58,17 +60,12 @@
 	}
 
 	$effect(() => {
-		load();
-	});
-
-	// statusFilter 변경 시 재로드
-	$effect(() => {
 		statusFilter;
-		load();
+		void load();
 	});
 </script>
 
-<div class="flex flex-col gap-3 p-4 h-full overflow-hidden">
+<div class="flex flex-col gap-3 p-4 h-full min-h-0 overflow-hidden">
 	<!-- 헤더 -->
 	<div class="flex items-center justify-between shrink-0">
 		<h3 class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Workflows</h3>
@@ -101,7 +98,7 @@
 	</div>
 
 	<!-- 리스트 -->
-	<div class="flex-1 min-h-0 overflow-y-auto pr-0.5 custom-scrollbar">
+	<div class="flex-1 min-h-0 overflow-y-auto pr-0.5 dr-scrollbar-thin">
 		{#if loading && workflows.length === 0}
 			<div class="flex items-center justify-center py-10">
 				<div class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
