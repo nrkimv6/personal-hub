@@ -229,9 +229,9 @@ def test_stream_output_v2_fallback_trigger_R(tmp_path):
 
     # subprocess mock: stdout이 비어있는 프로세스
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")
     mock_proc.returncode = 15
-    mock_proc.wait.return_value = None
+    mock_proc.wait.return_value = 0
 
     log_handle = io.StringIO()
 
@@ -258,9 +258,9 @@ def test_stream_output_v2_fallback_skip_B(tmp_path):
     mock_redis.get.return_value = None
 
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")
     mock_proc.returncode = 0
-    mock_proc.wait.return_value = None
+    mock_proc.wait.return_value = 0
 
     log_handle = io.StringIO()
 
@@ -288,9 +288,9 @@ def test_stream_output_v2_fallback_error_still_cleanup_E(tmp_path):
     mock_redis.get.return_value = None
 
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")
     mock_proc.returncode = 15
-    mock_proc.wait.return_value = None
+    mock_proc.wait.return_value = 0
 
     log_handle = io.StringIO()
 
@@ -323,9 +323,9 @@ def test_stream_output_exit_reason_rate_limit_marks_failed_R(tmp_path):
     mock_redis.get.side_effect = _get_side
 
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")
     mock_proc.returncode = 0
-    mock_proc.wait.return_value = None
+    mock_proc.wait.return_value = 0
 
     wf_mgr = MagicMock()
     wf_mgr.get_by_runner_id.return_value = {"id": 777, "runner_id": "runner-t4"}
@@ -341,7 +341,7 @@ def test_stream_output_exit_reason_rate_limit_marks_failed_R(tmp_path):
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t4")
 
     err_msgs = [c.kwargs.get("error_message", "") for c in wf_mgr.update_status.call_args_list]
-    assert any("Exit reason: rate_limit" in m for m in err_msgs)
+    assert any("exit_reason=rate_limit" in m for m in err_msgs)
 
 
 def test_stream_output_merge_requested_but_rate_limit_skips_merge_R(tmp_path):
@@ -360,9 +360,9 @@ def test_stream_output_merge_requested_but_rate_limit_skips_merge_R(tmp_path):
     mock_redis.get.side_effect = _get_side
 
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")
     mock_proc.returncode = 0
-    mock_proc.wait.return_value = None
+    mock_proc.wait.return_value = 0
 
     wf_mgr = MagicMock()
     wf_mgr.get_by_runner_id.return_value = {"id": 778, "runner_id": "runner-t5"}
@@ -379,7 +379,7 @@ def test_stream_output_merge_requested_but_rate_limit_skips_merge_R(tmp_path):
 
     mock_inline_merge.assert_not_called()
     err_msgs = [c.kwargs.get("error_message", "") for c in wf_mgr.update_status.call_args_list]
-    assert any("Exit reason: rate_limit" in m for m in err_msgs)
+    assert any("exit_reason=rate_limit" in m for m in err_msgs)
 
 
 def test_stream_output_exit_reason_lookup_error_marks_failed_R(tmp_path):
@@ -398,9 +398,9 @@ def test_stream_output_exit_reason_lookup_error_marks_failed_R(tmp_path):
     mock_redis.get.side_effect = _get_side
 
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")
     mock_proc.returncode = 0
-    mock_proc.wait.return_value = None
+    mock_proc.wait.return_value = 0
 
     wf_mgr = MagicMock()
     wf_mgr.get_by_runner_id.return_value = {"id": 779, "runner_id": "runner-t6"}
@@ -416,7 +416,7 @@ def test_stream_output_exit_reason_lookup_error_marks_failed_R(tmp_path):
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t6")
 
     err_msgs = [c.kwargs.get("error_message", "") for c in wf_mgr.update_status.call_args_list]
-    assert any("Exit reason: error" in m for m in err_msgs)
+    assert any("exit_reason=error" in m for m in err_msgs)
     assert not any(
         len(call.args) >= 2 and call.args[1] == "completed"
         for call in wf_mgr.update_status.call_args_list
@@ -439,9 +439,9 @@ def test_stream_output_missing_exit_reason_marks_failed_R(tmp_path):
     mock_redis.get.side_effect = _get_side
 
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")
     mock_proc.returncode = 0
-    mock_proc.wait.return_value = None
+    mock_proc.wait.return_value = 0
 
     wf_mgr = MagicMock()
     wf_mgr.get_by_runner_id.return_value = {"id": 780, "runner_id": "runner-t7"}
@@ -457,7 +457,7 @@ def test_stream_output_missing_exit_reason_marks_failed_R(tmp_path):
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t7")
 
     err_msgs = [c.kwargs.get("error_message", "") for c in wf_mgr.update_status.call_args_list]
-    assert any("Exit reason: error" in m for m in err_msgs)
+    assert any("exit_reason=error" in m for m in err_msgs)
 
 
 # ── heartbeat v2 fallback ─────────────────────────────────────────────────────
@@ -599,9 +599,10 @@ async def test_handle_merge_stage_sets_merge_status_on_success_R():
     with patch("core.merge_stage.execute_merge", new=AsyncMock(return_value=mock_merge_result)), \
          patch("core.merge_stage.run_post_merge_tests", new=AsyncMock(return_value=mock_test_result)), \
          patch("core.merge_stage.run_done", return_value=True), \
-         patch("core.merge_stage._ml_acquire", return_value=True), \
-         patch("core.merge_stage._ml_release"), \
          patch("core.merge_stage._cleanup_remote_branch"), \
+         patch("core.merge_stage._ml_get_repo_id", return_value="repo-test"), \
+         patch("core.merge_stage._ml_acquire", return_value=True), \
+         patch("core.merge_stage._ml_release", return_value=True), \
          patch("core.merge_stage._redis_mod") as mock_redis_mod:
         mock_redis_mod.Redis.return_value = mock_redis
 
@@ -615,10 +616,11 @@ async def test_handle_merge_stage_sets_merge_status_on_success_R():
         )
 
     assert result.status == "SUCCESS"
-    merge_key = "plan-runner:runners:runner-ms-test:merge_status"
-    assert status_calls.get(merge_key) == "done", f"최종 merge_status=done 세팅 누락. calls={status_calls}"
-    merge_values = [v for (k, v) in status_history if k == merge_key]
-    assert "merged" in merge_values, f"중간 merge_status=merged 세팅 누락. history={status_history}"
+    # merge_status는 merged를 거쳐 최종 done으로 마감된다.
+    merged_key = "plan-runner:runners:runner-ms-test:merge_status"
+    assert any(k == merged_key and v == "merged" for k, v in status_history), \
+        f"merge_status=merged 세팅 이력 없음. history={status_history}"
+    assert status_calls.get(merged_key) == "done", f"최종 merge_status가 done이 아님. calls={status_calls}"
 
 
 @pytest.mark.asyncio
@@ -648,8 +650,9 @@ async def test_handle_merge_stage_sets_merge_status_on_failure_E():
     mock_merge_result.message = "merge 실패"
 
     with patch("core.merge_stage.execute_merge", new=AsyncMock(return_value=mock_merge_result)), \
+         patch("core.merge_stage._ml_get_repo_id", return_value="repo-test"), \
          patch("core.merge_stage._ml_acquire", return_value=True), \
-         patch("core.merge_stage._ml_release"), \
+         patch("core.merge_stage._ml_release", return_value=True), \
          patch("core.merge_stage._redis_mod") as mock_redis_mod:
         mock_redis_mod.Redis.return_value = mock_redis
 
@@ -701,8 +704,9 @@ async def test_handle_merge_stage_sets_merging_before_execute_R():
         return r
 
     with patch("core.merge_stage.execute_merge", new=_mock_execute_merge), \
+         patch("core.merge_stage._ml_get_repo_id", return_value="repo-test"), \
          patch("core.merge_stage._ml_acquire", return_value=True), \
-         patch("core.merge_stage._ml_release"), \
+         patch("core.merge_stage._ml_release", return_value=True), \
          patch("core.merge_stage._redis_mod") as mock_redis_mod:
         mock_redis_mod.Redis.return_value = mock_redis
 
@@ -955,9 +959,9 @@ def test_stream_output_merge_requested_pre_review_stopped_blocks_inline_merge_R(
     mock_redis.get.side_effect = _get
 
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")
     mock_proc.returncode = 0
-    mock_proc.wait.return_value = None
+    mock_proc.wait.return_value = 0
 
     log_handle = io.StringIO()
     from _dr_state import get_running_log_files
@@ -975,7 +979,7 @@ def test_stream_output_merge_requested_pre_review_stopped_blocks_inline_merge_R(
 
 
 def test_stream_output_merge_requested_post_review_stopped_keeps_inline_merge_R(tmp_path):
-    """R: merge_requested=1 + stop_stage=post_review면 기존 inline merge 유지."""
+    """R: merge_requested=1 + stop_stage=post_review라도 비정상 종료면 inline merge를 수행하지 않는다."""
     import io
 
     runner_id = "runner-stop-post"
@@ -995,9 +999,9 @@ def test_stream_output_merge_requested_post_review_stopped_keeps_inline_merge_R(
     mock_redis.get.side_effect = _get
 
     mock_proc = MagicMock()
-    mock_proc.stdout = iter([])
+    mock_proc.stdout = io.StringIO("")
     mock_proc.returncode = 0
-    mock_proc.wait.return_value = None
+    mock_proc.wait.return_value = 0
 
     log_handle = io.StringIO()
     from _dr_state import get_running_log_files
@@ -1010,5 +1014,5 @@ def test_stream_output_merge_requested_post_review_stopped_keeps_inline_merge_R(
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, runner_id)
 
-    mock_inline_merge.assert_called_once()
-    mock_cleanup.assert_not_called()
+    mock_inline_merge.assert_not_called()
+    mock_cleanup.assert_called_once()

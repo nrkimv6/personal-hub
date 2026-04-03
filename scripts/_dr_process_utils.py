@@ -232,16 +232,6 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     except Exception:
         pass
 
-    # cleanup 직전 SSE 클라이언트에 완료 신호 publish (exit_reason 포함)
-    try:
-        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
-        exit_reason = _normalize_exit_reason(
-            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")
-        )
-        redis_client.publish(log_channel, f"__COMPLETED::{exit_reason}__")
-    except Exception:
-        pass
-
     _running_processes.pop(runner_id, None)
     _running_log_files.pop(runner_id, None)
     _dead_process_first_seen.pop(runner_id, None)
@@ -267,6 +257,16 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         logger.info(f"[cleanup] RECENT 등록 완료: {runner_id}")
     except Exception as e:
         logger.warning(f"[cleanup] RECENT 등록 실패 (runner_id={runner_id}): {e}")
+
+    # RECENT/stopped 반영 이후 완료 신호 publish (SSE 상태/완료 순서 충돌 방지)
+    try:
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+        exit_reason = _normalize_exit_reason(
+            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")
+        )
+        _publish_with_retry(redis_client, log_channel, f"__COMPLETED::{exit_reason}__")
+    except Exception:
+        pass
 
     # 2) worktree 정리 (RECENT 등록과 분리하여 worktree 실패가 탭 보존을 깨지 않도록)
     try:

@@ -12,9 +12,13 @@ import fakeredis.aioredis
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import sessionmaker
 
+from app.database import get_db
+from app.models.workflow import Workflow
 from app.modules.dev_runner.routes.logs import router as logs_router
 from app.modules.dev_runner.routes.runner import router as runner_router
+from app.modules.dev_runner.routes.workflows import router as workflows_router
 from app.modules.dev_runner.schemas import RunStatusResponse
 from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.log_service import log_service
@@ -31,11 +35,30 @@ def dev_runner_config_isolation(tmp_path):
 
 
 @pytest.fixture
-def client():
+def client(test_db_engine):
+    from app import database as app_database
+    from app.core import database as core_database
+
     app = FastAPI()
     app.include_router(runner_router, prefix=BASE_URL)
     app.include_router(logs_router, prefix=BASE_URL)
-    return TestClient(app, raise_server_exceptions=True)
+    app.include_router(workflows_router, prefix=f"{BASE_URL}/workflows")
+
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
+
+    def override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    with patch.object(app_database, "SessionLocal", SessionLocal), \
+         patch.object(core_database, "SessionLocal", SessionLocal):
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -57,25 +80,60 @@ def _cleanup_log(path: Path) -> None:
         pass
 
 
+def _seed_failed_workflow(
+    test_db_engine,
+    *,
+    slug: str,
+    runner_id: str,
+    plan_file: str,
+    error_message: str,
+) -> int:
+    """runtime 실패를 반영한 workflow 레코드를 테스트 DB에 생성."""
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
+    db = SessionLocal()
+    try:
+        wf = Workflow(
+            slug=slug,
+            plan_file=plan_file,
+            runner_id=runner_id,
+            status="failed",
+            engine="codex",
+            error_message=error_message,
+            started_at=datetime.now(),
+            finished_at=datetime.now(),
+        )
+        db.add(wf)
+        db.commit()
+        db.refresh(wf)
+        return int(wf.id)
+    finally:
+        db.close()
+
+
 class TestCodexRuntimeFailureHttp:
     def test_run_accepted_then_runtime_failure_reflected_in_runners_and_logs(
         self,
         client,
         fake_services,
+        test_db_engine,
     ):
-        """accepted 이후 runtime 실패(auto_plan_failed)가 runners/logs API에 동시 반영된다."""
+        """accepted 이후 runtime 실패가 runners/workflows/logs API에 일관 반영된다."""
         fake_sync = fake_services["sync"]
         fake_sync.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+        runner_id = f"codex-runtime-{datetime.now().strftime('%H%M%S%f')}"
+        plan_file = "docs/plan/runtime-failure.md"
         synthetic = [
             "Error: unknown variant `xhigh`, expected one of `minimal`, `low`, `medium`, `high`",
             "in `model_reasoning_effort`",
         ]
+        error_detail = synthetic[0]
+        workflow_error = f"exit_code=15; exit_reason=auto_plan_failed; detail={error_detail}"
 
         accepted = RunStatusResponse(
             running=True,
             engine="codex",
-            runner_id="codex-runtime-accepted",
-            plan_file="docs/plan/runtime-failure.md",
+            runner_id=runner_id,
+            plan_file=plan_file,
             listener_alive=True,
             redis_connected=True,
         )
@@ -87,7 +145,7 @@ class TestCodexRuntimeFailureHttp:
             response = client.post(
                 f"{BASE_URL}/run",
                 json={
-                    "plan_file": "docs/plan/runtime-failure.md",
+                    "plan_file": plan_file,
                     "engine": "codex",
                     "fix_engine": "codex",
                     "trigger": "tc:codex_runtime_failure_http",
@@ -101,10 +159,18 @@ class TestCodexRuntimeFailureHttp:
         log_path = emit_codex_runtime_failure(
             fake_sync,
             runner_id,
-            plan_file="docs/plan/runtime-failure.md",
+            plan_file=plan_file,
             trigger="tc:codex_runtime_failure_http",
             exit_reason="auto_plan_failed",
             stderr_lines=synthetic,
+        )
+        fake_sync.set(f"plan-runner:runners:{runner_id}:error", error_detail)
+        _seed_failed_workflow(
+            test_db_engine,
+            slug=f"runtime-failure-{runner_id}",
+            runner_id=runner_id,
+            plan_file=plan_file,
+            error_message=workflow_error,
         )
 
         try:
@@ -114,6 +180,13 @@ class TestCodexRuntimeFailureHttp:
             target = next(item for item in runners if item["runner_id"] == runner_id)
             assert target["running"] is False
             assert target["exit_reason"] == "auto_plan_failed"
+            assert target["error"] == error_detail
+
+            workflows_resp = client.get(f"{BASE_URL}/workflows", params={"status": "failed"})
+            assert workflows_resp.status_code == 200
+            failed_workflows = workflows_resp.json()
+            workflow = next(item for item in failed_workflows if item["runner_id"] == runner_id)
+            assert workflow["error_message"] == workflow_error
 
             logs_resp = client.get(f"{BASE_URL}/logs/recent", params={"runner_id": runner_id})
             assert logs_resp.status_code == 200
