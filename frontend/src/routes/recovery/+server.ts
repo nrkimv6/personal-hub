@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { execSync } from 'child_process';
 import type { RequestHandler } from './$types';
+import { assertAdminCredential, assertLocalRequest } from '$lib/server/recovery-guard';
 
 const WMI_CHECK_TIMEOUT_MS = 5000;
 const API_CHECK_TIMEOUT_MS = 3000;
@@ -37,7 +38,9 @@ async function checkApiHealth(port: number): Promise<{ up: boolean; error?: stri
 }
 
 /** GET /recovery — WMI 상태 + API 서버 상태 반환 */
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async (event) => {
+	assertLocalRequest(event);
+
 	const wmi = checkWmiHealth();
 	const [api8000, api8001] = await Promise.all([
 		checkApiHealth(8000),
@@ -55,7 +58,11 @@ export const GET: RequestHandler = async () => {
 };
 
 /** POST /recovery — WMI 재시작 실행 */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+	assertLocalRequest(event);
+	assertAdminCredential(event);
+
+	const { request } = event;
 	let action = 'restart-wmi';
 	try {
 		const body = await request.json();

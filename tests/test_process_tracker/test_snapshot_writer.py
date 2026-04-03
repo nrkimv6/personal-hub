@@ -2,8 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import sqlite3
-import tempfile
-import os
+import psutil
 
 
 def make_registry(procs: dict):
@@ -24,7 +23,7 @@ def make_entry(pid: int, ppid: int = 1, name: str = "worker") -> dict:
 
 def make_in_memory_db():
     """테스트용 인메모리 SQLite DB를 만들고 SessionLocal mock 반환."""
-    conn = sqlite3.connect(":memory:")
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.execute("""
         CREATE TABLE process_snapshots (
             id INTEGER PRIMARY KEY,
@@ -37,6 +36,38 @@ def make_in_memory_db():
             memory_mb REAL,
             is_orphan INTEGER DEFAULT 0,
             action_taken TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE process_watch_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            captured_at TEXT NOT NULL,
+            pid INTEGER NOT NULL,
+            ppid INTEGER,
+            parent_pid INTEGER,
+            parent_name TEXT,
+            name TEXT,
+            exe TEXT,
+            cmdline TEXT,
+            cmdline_hash TEXT,
+            create_time REAL,
+            memory_mb REAL,
+            is_orphan INTEGER DEFAULT 0,
+            scope TEXT DEFAULT 'external',
+            captured_by TEXT DEFAULT 'periodic'
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE process_watch_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            acted_at TEXT NOT NULL,
+            action TEXT NOT NULL,
+            pid INTEGER NOT NULL,
+            cmdline_hash TEXT,
+            reason TEXT,
+            actor TEXT,
+            result TEXT,
+            detail TEXT
         )
     """)
     conn.commit()
@@ -61,6 +92,17 @@ class MockSession:
 
     def __exit__(self, *args):
         pass
+
+
+class FakeProc:
+    def __init__(self, info):
+        self.info = info
+
+
+class AccessDeniedInfoProc:
+    @property
+    def info(self):
+        raise psutil.AccessDenied(pid=9999)
 
 
 @pytest.mark.asyncio
@@ -134,3 +176,105 @@ def test_purge_old_deletes_expired():
     pids = [r[0] for r in rows]
     assert 999 not in pids
     assert 888 in pids
+
+
+def test_cmdline_hash_stable_for_same_cmdline():
+    """동일 cmdline 입력은 항상 동일한 hash를 반환한다."""
+    from app.shared.process.snapshot_writer import SnapshotWriter
+
+    cmdline = "python scripts/browser_workers.py restart-api"
+    h1 = SnapshotWriter._cmdline_hash(cmdline)
+    h2 = SnapshotWriter._cmdline_hash(cmdline)
+
+    assert h1 == h2
+    assert len(h1) == 32
+
+
+@pytest.mark.asyncio
+async def test_capture_python_processes_collects_parent_chain():
+    """python 프로세스 스캔 시 parent_name/parent_pid까지 저장된다."""
+    from app.shared.process.snapshot_writer import SnapshotWriter
+
+    conn = make_in_memory_db()
+    registry = MagicMock()
+
+    mem = MagicMock()
+    mem.rss = 2048 * 1024 * 1024  # 2GB
+
+    proc = FakeProc(
+        {
+            "pid": 43210,
+            "name": "python.exe",
+            "exe": r"D:\Python39\python.exe",
+            "ppid": 5000,
+            "cmdline": [
+                "python",
+                r"D:\work\project\tools\monitor-page\scripts\browser_workers.py",
+                "start",
+            ],
+            "memory_info": mem,
+            "create_time": 1712100000.0,
+        }
+    )
+
+    parent_proc = MagicMock()
+    parent_proc.name.return_value = "cmd.exe"
+    parent_proc.ppid.return_value = 1000
+
+    with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)), \
+         patch("app.shared.process.snapshot_writer.psutil.process_iter", return_value=[proc]), \
+         patch("app.shared.process.snapshot_writer.psutil.Process", return_value=parent_proc), \
+         patch("app.shared.process.snapshot_writer.psutil.pid_exists", return_value=True):
+        writer = SnapshotWriter(registry)
+        count = await writer.capture_python_processes(limit=10, captured_by="test")
+
+    assert count == 1
+    row = conn.execute(
+        """
+        SELECT pid, ppid, parent_pid, parent_name, cmdline_hash, scope, captured_by
+        FROM process_watch_snapshots
+        """
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 43210
+    assert row[1] == 5000
+    assert row[2] == 1000
+    assert row[3] == "cmd.exe"
+    assert len(row[4]) == 32
+    assert row[5] == "monitor_page"
+    assert row[6] == "test"
+
+
+@pytest.mark.asyncio
+async def test_capture_python_processes_access_denied_skips():
+    """일부 항목 AccessDenied가 발생해도 나머지 python 프로세스는 저장된다."""
+    from app.shared.process.snapshot_writer import SnapshotWriter
+
+    conn = make_in_memory_db()
+    registry = MagicMock()
+
+    mem = MagicMock()
+    mem.rss = 512 * 1024 * 1024
+
+    valid_proc = FakeProc(
+        {
+            "pid": 7001,
+            "name": "python.exe",
+            "exe": r"D:\Python39\python.exe",
+            "ppid": 1,
+            "cmdline": ["python", "-m", "pytest"],
+            "memory_info": mem,
+            "create_time": 1712100000.0,
+        }
+    )
+
+    with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)), \
+         patch("app.shared.process.snapshot_writer.psutil.process_iter", return_value=[AccessDeniedInfoProc(), valid_proc]), \
+         patch("app.shared.process.snapshot_writer.psutil.Process", side_effect=psutil.AccessDenied(pid=1)), \
+         patch("app.shared.process.snapshot_writer.psutil.pid_exists", return_value=True):
+        writer = SnapshotWriter(registry)
+        count = await writer.capture_python_processes(limit=10, captured_by="test")
+
+    assert count == 1
+    rows = conn.execute("SELECT pid FROM process_watch_snapshots").fetchall()
+    assert rows == [(7001,)]

@@ -104,6 +104,13 @@ class Settings(BaseSettings):
 
     # 프로세스 트리 추적 설정
     PROCESS_SCAN_INTERVAL: int = 60  # 프로세스 스캔 주기 (초)
+    PROCESS_WATCH_STALE_SECONDS: int = 120  # 최신 스냅샷 stale 기준 (초)
+    PROCESS_WATCH_ON_DEMAND_COOLDOWN_SEC: int = 30  # on-demand 캡처 최소 간격 (초)
+    PROCESS_WATCH_CAPTURE_TIMEOUT_SEC: int = 10  # 주기 수집 타임아웃 (초)
+    PROCESS_WATCH_CAPTURE_EVERY_LOOPS: int = 1  # N 루프마다 스냅샷 수집
+    PROCESS_WATCH_RETENTION_DAYS: int = 7  # 스냅샷/감사로그 보관일
+    PROCESS_WATCH_LOG_ROTATE_MB: int = 20  # JSONL 회전 크기 (MB)
+    PROCESS_WATCH_CAPTURE_LIMIT: int = 200  # 1회 수집 최대 레코드 수
     MEMORY_CAUTION_MB: int = 4096   # 주의 임계값 (MB)
     MEMORY_WARNING_MB: int = 2048   # 경고 임계값 (MB)
     MEMORY_CRITICAL_MB: int = 1024  # 위험 임계값 (MB)

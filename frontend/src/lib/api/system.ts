@@ -1164,12 +1164,115 @@ export interface PythonProcess {
   create_time: string;
   status: string;
   uptime: string;
+  ppid?: number | null;
+  parent_name?: string | null;
+  scope?: string;
+  cmdline_hash?: string;
+  is_orphan?: boolean;
 }
 
 export interface KillProcessResponse {
   success: boolean;
   message: string;
 }
+
+export interface ProcessWatchItem {
+  captured_at: string;
+  pid: number;
+  ppid: number | null;
+  parent_pid: number | null;
+  parent_name: string;
+  name: string;
+  exe: string;
+  cmdline: string;
+  cmdline_hash: string;
+  create_time: number | null;
+  memory_mb: number;
+  is_orphan: boolean;
+  scope: string;
+  captured_by: string;
+}
+
+export interface ProcessWatchLatestResponse {
+  captured_at: string | null;
+  source: 'periodic' | 'on_demand' | 'stale_cache';
+  snapshot_age_seconds: number | null;
+  stale: boolean;
+  item_count: number;
+  items: ProcessWatchItem[];
+  error?: string | null;
+}
+
+export interface ProcessWatchHistoryResponse {
+  total: number;
+  items: ProcessWatchItem[];
+}
+
+export interface ProcessWatchKillRequest {
+  pid: number;
+  expected_create_time?: number | null;
+  expected_cmdline_hash?: string | null;
+  reason: string;
+  force: boolean;
+}
+
+export interface ProcessWatchKillResponse {
+  success: boolean;
+  pid: number;
+  result_code: string;
+  message: string;
+  scope?: string | null;
+  cmdline_hash?: string | null;
+}
+
+// 레거시 processMonitorApi 공존 정책:
+// - 기존 호출자는 processMonitorApi 유지
+// - 신규 화면은 processWatchApi 사용
+// - 필요 시 toLegacyProcess()로 신규 스키마를 레거시 테이블에 매핑
+export function toLegacyProcess(item: ProcessWatchItem): PythonProcess {
+  return {
+    pid: item.pid,
+    role: item.name || 'python',
+    memory_mb: item.memory_mb,
+    cpu_percent: 0,
+    cmdline: item.cmdline,
+    create_time: item.create_time ? new Date(item.create_time * 1000).toISOString() : item.captured_at,
+    status: 'unknown',
+    uptime: '-',
+    ppid: item.ppid,
+    parent_name: item.parent_name,
+    scope: item.scope,
+    cmdline_hash: item.cmdline_hash,
+    is_orphan: item.is_orphan
+  };
+}
+
+export const processWatchApi = {
+  latest: (params?: { min_mb?: number; scope?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    if (params?.min_mb !== undefined) search.set('min_mb', String(params.min_mb));
+    if (params?.scope) search.set('scope', params.scope);
+    if (params?.limit !== undefined) search.set('limit', String(params.limit));
+    const query = search.toString();
+    return request<ProcessWatchLatestResponse>(`/system/process-watch/latest${query ? `?${query}` : ''}`);
+  },
+
+  history: (params?: { min_mb?: number; only_orphan?: boolean; scope?: string; limit?: number }) => {
+    const search = new URLSearchParams();
+    if (params?.min_mb !== undefined) search.set('min_mb', String(params.min_mb));
+    if (params?.only_orphan !== undefined) search.set('only_orphan', String(params.only_orphan));
+    if (params?.scope) search.set('scope', params.scope);
+    if (params?.limit !== undefined) search.set('limit', String(params.limit));
+    const query = search.toString();
+    return request<ProcessWatchHistoryResponse>(`/system/process-watch/history${query ? `?${query}` : ''}`);
+  },
+
+  kill: (payload: ProcessWatchKillRequest) =>
+    request<ProcessWatchKillResponse>('/system/process-watch/kill', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+};
 
 export const processMonitorApi = {
   getPythonProcesses: () =>
