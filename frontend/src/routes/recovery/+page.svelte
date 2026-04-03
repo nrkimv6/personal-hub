@@ -168,13 +168,13 @@
 		}, 5000);
 	});
 
-	$: {
+	$effect(() => {
 		try {
 			localStorage.setItem('recovery_admin_token', adminToken.trim());
 		} catch {
 			// noop
 		}
-	}
+	});
 
 	onDestroy(() => {
 		if (pollTimer !== null) clearInterval(pollTimer);

@@ -17,7 +17,10 @@ function New-Headers {
     )
     $headers = @{}
     if ($Json) { $headers["Content-Type"] = "application/json" }
-    if ($WithToken -and $AdminToken) { $headers["x-recovery-admin-token"] = $AdminToken }
+    if ($WithToken -and $AdminToken) {
+        $headers["x-recovery-admin-token"] = $AdminToken
+        $headers["Authorization"] = "Bearer $AdminToken"
+    }
     return $headers
 }
 
