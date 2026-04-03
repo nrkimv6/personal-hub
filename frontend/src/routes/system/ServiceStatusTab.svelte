@@ -54,6 +54,8 @@
   let processLoading = $state(false);
   let processPollingEnabled = $state(false);
   let processPollingInterval: ReturnType<typeof setInterval> | null = null;
+  let processMemBaseline = $state<Record<string, { memoryMb: number; capturedAtMs: number }>>({});
+  let processMemDeltaRate = $state<Record<string, number | null>>({});
   const PROCESS_REFRESH_INTERVAL = 5000;
 
   const REFRESH_INTERVAL = 30000;
@@ -140,6 +142,85 @@
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     return `${h}시간 ${m}분`;
+  }
+
+  function formatProcessUptime(proc: ProcessWatchItem): string {
+    if (proc.uptime_human) return proc.uptime_human;
+    if (proc.uptime_seconds !== undefined && proc.uptime_seconds !== null) {
+      return formatUptime(proc.uptime_seconds);
+    }
+    return '-';
+  }
+
+  function formatProcessStart(proc: ProcessWatchItem): string {
+    if (proc.start_time) return formatDateTime(proc.start_time);
+    if (proc.create_time !== undefined && proc.create_time !== null) {
+      try {
+        return formatDateTime(new Date(proc.create_time * 1000).toISOString());
+      } catch {
+        return '-';
+      }
+    }
+    return '-';
+  }
+
+  function formatAncestorChain(proc: ProcessWatchItem): string {
+    const chain = proc.ancestor_chain ?? [];
+    if (!chain.length) {
+      return proc.parent_name
+        ? `${proc.pid}:${proc.name} <- ${proc.ppid ?? '-'}:${proc.parent_name}`
+        : `${proc.pid}:${proc.name}`;
+    }
+    return chain
+      .map((node) => `${node.pid}:${node.name || 'unknown'}${node.alive ? '' : ' (dead)'}`)
+      .join(' <- ');
+  }
+
+  function processWatchKey(proc: ProcessWatchItem): string {
+    return `${proc.pid}:${proc.cmdline_hash || ''}`;
+  }
+
+  function updateProcessDeltaRates(items: ProcessWatchItem[]) {
+    const nextBaseline: Record<string, { memoryMb: number; capturedAtMs: number }> = {};
+    const nextRate: Record<string, number | null> = {};
+
+    for (const item of items) {
+      const key = processWatchKey(item);
+      const capturedAtMs = item.captured_at ? new Date(item.captured_at).getTime() : Date.now();
+      const currentMem = Number(item.memory_mb ?? 0);
+      const prev = processMemBaseline[key];
+      let rate: number | null = null;
+
+      if (prev && capturedAtMs > (prev.capturedAtMs + 500)) {
+        const dtSec = (capturedAtMs - prev.capturedAtMs) / 1000;
+        const raw = (currentMem - prev.memoryMb) / dtSec;
+        rate = Number.isFinite(raw) ? raw : null;
+      }
+
+      nextBaseline[key] = { memoryMb: currentMem, capturedAtMs };
+      nextRate[key] = rate;
+    }
+
+    processMemBaseline = nextBaseline;
+    processMemDeltaRate = nextRate;
+  }
+
+  function getProcessDeltaRate(proc: ProcessWatchItem): number | null {
+    return processMemDeltaRate[processWatchKey(proc)] ?? null;
+  }
+
+  function formatProcessDelta(rate: number | null): string {
+    if (rate === null) return '-';
+    const sign = rate > 0 ? '+' : '';
+    return `${sign}${rate.toFixed(1)} MB/s`;
+  }
+
+  function processDeltaTextClass(rate: number | null): string {
+    if (rate === null) return 'text-muted-foreground';
+    if (rate >= 256) return 'text-error font-semibold';
+    if (rate >= 128) return 'text-warning font-semibold';
+    if (rate <= -128) return 'text-success font-semibold';
+    return 'text-foreground';
   }
 
   function serviceVariant(svc: NssmService): 'success' | 'warning' | 'error' | 'gray' {
@@ -271,6 +352,7 @@
       processWatchLatest = latest;
       processWatchRows = latest.items;
       processWatchHistoryRows = history.items;
+      updateProcessDeltaRates(latest.items);
       processWatchError = latest.error ?? null;
     } catch (e) {
       processWatchError = e instanceof Error ? e.message : 'process-watch 조회 실패';
@@ -1183,7 +1265,9 @@
                 <th class="px-3 py-2 text-left font-medium">PID</th>
                 <th class="px-3 py-2 text-left font-medium">프로세스</th>
                 <th class="px-3 py-2 text-right font-medium">메모리</th>
-                <th class="px-3 py-2 text-left font-medium">부모</th>
+                <th class="px-3 py-2 text-right font-medium">ΔMB/s</th>
+                <th class="px-3 py-2 text-left font-medium">실행시간</th>
+                <th class="px-3 py-2 text-left font-medium">조상 체인</th>
                 <th class="px-3 py-2 text-left font-medium">scope</th>
                 <th class="px-3 py-2 text-center font-medium">종료</th>
               </tr>
@@ -1191,16 +1275,31 @@
             <tbody>
               {#each processWatchRows as proc}
                 <tr class="border-b border-border/50 hover:bg-muted/50 {proc.memory_mb > 512 ? 'bg-warning-light/30' : ''} {proc.memory_mb > 1024 ? 'bg-error-light/30' : ''}">
+                  {@const deltaRate = getProcessDeltaRate(proc)}
                   <td class="px-3 py-1.5 font-mono text-muted-foreground">{proc.pid}</td>
                   <td class="px-3 py-1.5 font-medium text-foreground max-w-[240px] truncate" title={proc.cmdline}>{proc.name}</td>
                   <td class="px-3 py-1.5 text-right font-mono {proc.memory_mb > 512 ? 'text-warning font-semibold' : ''} {proc.memory_mb > 1024 ? 'text-error font-semibold' : ''}">{proc.memory_mb.toFixed(1)} MB</td>
-                  <td class="px-3 py-1.5">
-                    <span class="font-mono text-muted-foreground">PPID {proc.ppid ?? '-'}</span>
-                    {#if proc.parent_name}
-                      <span class="ml-1 text-muted-foreground">({proc.parent_name})</span>
+                  <td class="px-3 py-1.5 text-right">
+                    <div class="font-mono {processDeltaTextClass(deltaRate)}">{formatProcessDelta(deltaRate)}</div>
+                    {#if deltaRate !== null && deltaRate >= 256}
+                      <span class="text-[10px] px-1 py-0.5 rounded bg-error-light text-error">급등</span>
+                    {:else if deltaRate !== null && deltaRate >= 128}
+                      <span class="text-[10px] px-1 py-0.5 rounded bg-warning-light text-warning">상승</span>
                     {/if}
+                  </td>
+                  <td class="px-3 py-1.5">
+                    <div class="font-mono text-foreground">{formatProcessUptime(proc)}</div>
+                    <div class="text-[10px] text-muted-foreground">{formatProcessStart(proc)}</div>
+                  </td>
+                  <td class="px-3 py-1.5">
+                    <div class="font-mono text-[10px] text-muted-foreground max-w-[420px] truncate" title={formatAncestorChain(proc)}>
+                      {formatAncestorChain(proc)}
+                    </div>
+                    <div class="text-[10px] text-muted-foreground">
+                      PPID {proc.ppid ?? '-'} {proc.parent_name ? `(${proc.parent_name})` : ''}
+                    </div>
                     {#if proc.is_orphan}
-                      <span class="ml-1 text-[10px] px-1 py-0.5 rounded bg-error-light text-error">orphan</span>
+                      <span class="mt-1 inline-block text-[10px] px-1 py-0.5 rounded bg-error-light text-error">orphan</span>
                     {/if}
                   </td>
                   <td class="px-3 py-1.5">
@@ -1231,9 +1330,10 @@
                 <div class="text-[11px] text-muted-foreground flex items-center gap-2">
                   <span class="font-mono text-foreground">PID {item.pid}</span>
                   <span>{item.memory_mb.toFixed(1)}MB</span>
+                  <span>{formatProcessUptime(item)}</span>
                   <span>{item.scope}</span>
                   {#if item.is_orphan}<span class="text-error">orphan</span>{/if}
-                  <span class="truncate">{item.parent_name || '-'}</span>
+                  <span class="truncate max-w-[380px]" title={formatAncestorChain(item)}>{formatAncestorChain(item)}</span>
                   <span class="ml-auto">{new Date(item.captured_at).toLocaleTimeString('ko-KR')}</span>
                 </div>
               {/each}

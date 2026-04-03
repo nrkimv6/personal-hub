@@ -1191,6 +1191,16 @@ export interface ProcessWatchItem {
   is_orphan: boolean;
   scope: string;
   captured_by: string;
+  start_time?: string | null;
+  uptime_seconds?: number | null;
+  uptime_human?: string | null;
+  ancestor_chain?: ProcessWatchAncestor[];
+}
+
+export interface ProcessWatchAncestor {
+  pid: number;
+  name: string;
+  alive: boolean;
 }
 
 export interface ProcessWatchLatestResponse {
