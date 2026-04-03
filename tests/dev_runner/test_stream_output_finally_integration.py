@@ -204,3 +204,59 @@ class TestStreamOutputFinallyIntegration:
             channel == log_channel and msg == "__COMPLETED::error__"
             for channel, msg in published
         ), f"__COMPLETED::error__ publish 누락. published={published}"
+
+    def test_stream_output_finally_commit_failed_preserves_scope_detail(self, plan_runner_mod, fr):
+        """commit_failed 종료 시 detail 라인과 summary 메시지가 둘 다 보존된다."""
+        import tempfile
+
+        runner_id = "t3-finally-commit-failed-001"
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "commit_failed")
+
+        published = []
+        orig_publish = fr.publish
+
+        def _capture_publish(channel, message):
+            published.append((channel, message))
+            return orig_publish(channel, message)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False, encoding="utf-8") as f:
+            f.write("[INFO] unrelated line\n")
+            f.write("failed_projects=monitor-page\n")
+            f.write("dirty_files=app/modules/dev_runner/services/event_service.py\n")
+            f.write("commit_scope=docs/plan/test.md\n")
+            log_path = f.name
+
+        process = _make_process(returncode=0)
+        log_handle = io.StringIO()
+        wf_mgr, wf = _make_wf_manager(runner_id)
+
+        try:
+            with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+                 patch.object(plan_runner_mod, "get_running_log_files", return_value={runner_id: log_path}), \
+                 patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+                 patch.object(plan_runner_mod, "_do_inline_merge"), \
+                 patch.object(plan_runner_mod, "_cleanup_process_state", return_value=None), \
+                 patch.object(fr, "publish", side_effect=_capture_publish):
+                plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+            error_message = fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:error")
+            assert error_message is not None
+            assert error_message.startswith("exit_code=0; exit_reason=commit_failed")
+            assert "detail=commit_scope=docs/plan/test.md" in error_message
+            wf_mgr.update_status.assert_any_call(
+                wf["id"],
+                "failed",
+                error_message=error_message,
+            )
+            assert any(
+                channel == log_channel and msg == "[ERROR] commit_scope=docs/plan/test.md"
+                for channel, msg in published
+            ), f"commit_failed detail publish 누락. published={published}"
+        finally:
+            try:
+                import os
+
+                os.unlink(log_path)
+            except Exception:
+                pass

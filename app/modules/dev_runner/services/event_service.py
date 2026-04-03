@@ -139,6 +139,41 @@ class EventService:
         except Exception:
             return None
 
+    def _read_runner_error(self, runner_id: str) -> Optional[str]:
+        """runner error 값을 Redis에서 읽는다."""
+        try:
+            return self._sync.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:error")
+        except Exception:
+            return None
+
+    async def _read_runner_error_with_retry(
+        self,
+        runner_id: str,
+        retries: int = 1,
+        delay: float = 0.05,
+    ) -> Optional[str]:
+        """commit_failed 같은 순서 경쟁을 흡수하기 위해 error를 한 번 더 재조회한다."""
+        error = self._read_runner_error(runner_id)
+        if error:
+            return error
+        for _ in range(retries):
+            await asyncio.sleep(delay)
+            error = self._read_runner_error(runner_id)
+            if error:
+                return error
+        return None
+
+    async def _stabilize_commit_failed_status_payload(self, runner_id: str, payload: dict) -> dict:
+        """exit_reason=commit_failed일 때 error 키 반영이 늦어도 한 번 더 흡수한다."""
+        if payload.get("exit_reason") != "commit_failed" or payload.get("error"):
+            return payload
+
+        await asyncio.sleep(0.05)
+        refreshed = self._build_status_payload(runner_id)
+        if refreshed and refreshed.get("error"):
+            return refreshed
+        return payload
+
     def _build_all_runners_status(self) -> list[dict]:
         """모든 active runner 상태를 묶어서 반환"""
         try:
@@ -237,6 +272,13 @@ class EventService:
 
         # 초기 status 이벤트 1회 즉시 발행
         runners = self._build_all_runners_status()
+        stabilized_runners = []
+        for payload in runners:
+            runner_id = payload.get("runner_id") if isinstance(payload, dict) else None
+            if runner_id:
+                payload = await self._stabilize_commit_failed_status_payload(runner_id, payload)
+            stabilized_runners.append(payload)
+        runners = stabilized_runners
         yield self._sse("status", {"runners": runners})
 
         # 초기 tracking 이벤트
@@ -276,6 +318,7 @@ class EventService:
                             if runner_id:
                                 payload = self._build_status_payload(runner_id)
                                 if payload and payload.get("visible", False):
+                                    payload = await self._stabilize_commit_failed_status_payload(runner_id, payload)
                                     yield self._sse("status", {"runners": [payload]})
                         elif event_type == "tracking":
                             payload = self._build_tracking_payload()
@@ -313,7 +356,10 @@ class EventService:
                                     status, reason = _parse_log_completed_payload(data)
                                     payload = {"runner_id": runner_id, "status": status, "reason": reason}
                                     try:
-                                        error = self._sync.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:error")
+                                        error = await self._read_runner_error_with_retry(
+                                            runner_id,
+                                            retries=2 if reason == "commit_failed" else 0,
+                                        )
                                     except Exception:
                                         error = None
                                     if error:

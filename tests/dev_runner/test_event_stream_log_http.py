@@ -7,15 +7,21 @@ SSE /events 스트림에서 log/log_completed/merge_log 이벤트 수신을 확�
 import json
 import threading
 import time
+from unittest.mock import patch
 
 import pytest
 import redis
 import requests
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.modules.dev_runner.routes.events import router as events_router
 
 ADMIN_API = "http://localhost:8001"
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 REDIS_DB = 0
+BASE_URL = "/api/v1/dev-runner"
 
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
 MERGE_LOG_CHANNEL = "plan-runner:merge-log"
@@ -54,6 +60,25 @@ def _collect_sse_events(url: str, target_events: set[str], timeout: float = 5.0)
     return collected
 
 
+def _parse_sse_events(content: str) -> list[dict[str, str]]:
+    """TestClient SSE 응답 텍스트를 이벤트 목록으로 파싱."""
+    events: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for line in content.splitlines():
+        if not line:
+            if current:
+                events.append(current)
+                current = {}
+            continue
+        if line.startswith("event:"):
+            current["event"] = line[6:].strip()
+        elif line.startswith("data:"):
+            current["data"] = line[5:].strip()
+    if current:
+        events.append(current)
+    return events
+
+
 @pytest.fixture
 def r():
     """실제 Redis DB 0 클라이언트"""
@@ -68,6 +93,52 @@ def _check_admin_api():
         return resp.status_code == 200
     except Exception:
         return False
+
+
+@pytest.fixture
+def local_client():
+    app = FastAPI()
+    app.include_router(events_router, prefix=BASE_URL)
+    return TestClient(app, raise_server_exceptions=True)
+
+
+@pytest.mark.http
+def test_http_events_log_completed_commit_failed_preserves_error_detail(local_client):
+    """T3: /events route는 log_completed의 commit_failed reason + error detail pair를 그대로 전달한다."""
+    detail = "exit_reason=commit_failed; detail=commit_scope=docs/plan/test.md"
+
+    async def _fake_stream_events():
+        yield "event: connected\ndata: ok\n\n"
+        yield (
+            "event: log_completed\ndata: "
+            + json.dumps(
+                {
+                    "runner_id": "http-t3-runner",
+                    "status": "failed",
+                    "reason": "commit_failed",
+                    "error": detail,
+                },
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        )
+
+    with patch(
+        "app.modules.dev_runner.routes.events.event_service.stream_events",
+        new=_fake_stream_events,
+    ):
+        response = local_client.get(
+            f"{BASE_URL}/events",
+            headers={"Accept": "text/event-stream"},
+        )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    events = _parse_sse_events(response.text)
+    completed = next(event for event in events if event.get("event") == "log_completed")
+    payload = json.loads(completed["data"])
+    assert payload["reason"] == "commit_failed"
+    assert payload["error"] == detail
 
 
 @pytest.mark.skipif(not _check_admin_api(), reason="Admin API not available (localhost:8001)")
