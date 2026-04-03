@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.slide_scanner.database import get_db
 
-router = APIRouter(prefix="/slides", tags=["slide-scanner"])
+router = APIRouter(tags=["slide-scanner"])
 
 VALID_STATUS = {"PENDING", "REVIEWED", "DONE"}
 
@@ -44,12 +44,13 @@ def _load_filters(value: str | None) -> dict[str, object] | None:
     return normalized
 
 
-@router.get("")
+@router.get("/slides")
 def get_slides(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=24, ge=1, le=200),
     status: str | None = None,
     search: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     status_filter = status.upper() if status else None
@@ -70,6 +71,11 @@ def get_slides(
         where_clause += " AND extracted_text LIKE :search"
         params["search"] = f"%{search_filter}%"
 
+    tag_filter = tag.strip() if tag else None
+    if tag_filter:
+        where_clause += " AND tag = :tag"
+        params["tag"] = tag_filter
+
     total = (
         db.execute(text(f"SELECT COUNT(*) FROM slides {where_clause}"), params).scalar()  # noqa: S608
         or 0
@@ -80,7 +86,7 @@ def get_slides(
             f"""
             SELECT
                 id, file_name, file_path, result_path, status,
-                aspect_ratio, filters_applied, extracted_text,
+                aspect_ratio, filters_applied, extracted_text, tag,
                 captured_at, source_app, is_archived, created_at, updated_at
             FROM slides
             {where_clause}
@@ -101,6 +107,7 @@ def get_slides(
             "aspect_ratio": row.aspect_ratio,
             "filters_applied": _load_filters(row.filters_applied),
             "extracted_text": row.extracted_text,
+            "tag": row.tag,
             "captured_at": row.captured_at,
             "source_app": row.source_app,
             "is_archived": bool(row.is_archived),
@@ -132,3 +139,19 @@ def get_slide_thumbnail(slide_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Thumbnail not available")
 
     return Response(content=bytes(row.thumbnail), media_type="image/jpeg")
+
+
+@router.get("/tags")
+def get_tags(db: Session = Depends(get_db)):
+    rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT TRIM(tag) AS tag
+            FROM slides
+            WHERE tag IS NOT NULL
+              AND TRIM(tag) != ''
+            ORDER BY LOWER(TRIM(tag)) ASC, TRIM(tag) ASC
+            """
+        )
+    ).fetchall()
+    return {"tags": [str(row.tag) for row in rows]}

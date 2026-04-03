@@ -50,6 +50,7 @@ def mobile_sync_e2e_context(
     _apply_sql_file(engine, migrations_dir / "001_initial.sql")
     _apply_sql_file(engine, migrations_dir / "010_mobile_ingest.sql")
     _apply_sql_file(engine, migrations_dir / "011_slides_source_device.sql")
+    _apply_sql_file(engine, migrations_dir / "012_rectifier_detect_meta.sql")
 
     data_dir = tmp_path / "slide_scanner_data"
     originals_dir = data_dir / "originals"

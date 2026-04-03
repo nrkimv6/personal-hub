@@ -41,6 +41,8 @@
   let showPdfModal = $state(false);
   let searchInput = $state('');
   let searchQuery = $state('');
+  let tagFilter = $state('ALL');
+  let availableTags = $state<string[]>([]);
 
   let allCurrentIds = $derived(slides.map((slide) => slide.id));
   let allSelected = $derived(
@@ -82,11 +84,15 @@
     }
 
     try {
+      if (reset) {
+        await loadTags();
+      }
       const result = await slideScannerApi.getSlideList({
         skip: pager.offset,
         limit: pager.limit,
         status: statusFilter,
-        search: searchQuery || undefined
+        search: searchQuery || undefined,
+        tag: tagFilter !== 'ALL' ? tagFilter : undefined
       });
 
       if (reset) {
@@ -100,6 +106,18 @@
     } finally {
       loading = false;
       loadingMore = false;
+    }
+  }
+
+  async function loadTags() {
+    try {
+      const result = await slideScannerApi.getTags();
+      availableTags = result.tags;
+      if (tagFilter !== 'ALL' && !result.tags.includes(tagFilter)) {
+        tagFilter = 'ALL';
+      }
+    } catch {
+      availableTags = [];
     }
   }
 
@@ -218,6 +236,7 @@
     void mounted;
     void statusFilter;
     void searchQuery;
+    void tagFilter;
     if (!mounted) return;
     void loadSlides(true);
   });
@@ -262,6 +281,15 @@
     <button type="button" class="btn btn-ghost btn-sm" onclick={clearSearch} disabled={!searchQuery}>
       초기화
     </button>
+    <select
+      class="select select-bordered select-sm w-full max-w-[240px]"
+      bind:value={tagFilter}
+    >
+      <option value="ALL">전체 태그</option>
+      {#each availableTags as tag}
+        <option value={tag}>{tag}</option>
+      {/each}
+    </select>
   </div>
 
   <BatchActionBar

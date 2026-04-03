@@ -13,7 +13,7 @@ from app.modules.image_classifier.config import settings as ic_settings
 from app.modules.slide_scanner.config import settings
 
 from .metadata import extract_slide_metadata
-from .rectifier_client import rectifier_client
+from .rectifier_client import DetectMeta, rectifier_client
 
 
 THUMBNAIL_SIZE = (200, 200)
@@ -69,6 +69,27 @@ def _points_to_params(points: list[tuple[float, float]]) -> dict[str, float]:
     }
 
 
+def _detect_meta_to_params(meta: DetectMeta | None) -> dict[str, Any]:
+    if not meta:
+        return {
+            "detect_engine": None,
+            "detect_confidence": None,
+            "detect_fallback_reason": None,
+        }
+
+    return {
+        "detect_engine": str(meta.get("selected_engine") or "").strip() or None,
+        "detect_confidence": (
+            float(meta["confidence"]) if meta.get("confidence") is not None else None
+        ),
+        "detect_fallback_reason": (
+            str(meta.get("fallback_reason")).strip()
+            if meta.get("fallback_reason") is not None
+            else None
+        ),
+    }
+
+
 def scan_folder(
     db: Session,
     folder_path: Path,
@@ -106,11 +127,15 @@ def scan_folder(
                 thumbnail = _thumbnail_to_jpeg_bytes(image)
 
             try:
-                points = rectifier_client.detect(image_path)
+                detect_result = rectifier_client.detect_with_meta(image_path)
+                points = detect_result["points"]
+                detect_meta = detect_result["meta"]
                 if len(points) != 4:
                     points = _default_points(width, height)
+                    detect_meta = None
             except Exception:
                 points = _default_points(width, height)
+                detect_meta = None
 
             db.execute(
                 text(
@@ -118,10 +143,12 @@ def scan_folder(
                     INSERT INTO slides (
                         file_name, file_path, status,
                         pt_tl_x, pt_tl_y, pt_tr_x, pt_tr_y, pt_br_x, pt_br_y, pt_bl_x, pt_bl_y,
+                        detect_engine, detect_confidence, detect_fallback_reason,
                         captured_at, source_app, thumbnail, is_archived
                     ) VALUES (
                         :file_name, :file_path, 'PENDING',
                         :pt_tl_x, :pt_tl_y, :pt_tr_x, :pt_tr_y, :pt_br_x, :pt_br_y, :pt_bl_x, :pt_bl_y,
+                        :detect_engine, :detect_confidence, :detect_fallback_reason,
                         :captured_at, :source_app, :thumbnail, 0
                     )
                     """
@@ -133,6 +160,7 @@ def scan_folder(
                     "source_app": source_app,
                     "thumbnail": thumbnail,
                     **_points_to_params(points),
+                    **_detect_meta_to_params(detect_meta),
                 },
             )
             db.commit()

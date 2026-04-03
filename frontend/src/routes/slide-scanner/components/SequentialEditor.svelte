@@ -6,10 +6,12 @@
   import CornerEditor from './CornerEditor.svelte';
   import FilterPanel from './FilterPanel.svelte';
   import KeyboardShortcuts from './KeyboardShortcuts.svelte';
+  import TagInput from './TagInput.svelte';
 
   const dispatch = createEventDispatcher<{
     changePoints: { points: SlidePoint[] };
     changeFilters: { filters: SlideFilterOptions };
+    changeTag: { tag: string | null };
     prev: void;
     next: void;
     review: void;
@@ -34,6 +36,9 @@
     contrast: 1.0,
     document_mode: false
   };
+  export let tag: string | null = null;
+  export let tagSuggestions: string[] = [];
+  export let tagSaving = false;
 
   function handlePointsChange(event: CustomEvent<{ points: SlidePoint[] }>) {
     dispatch('changePoints', { points: event.detail.points });
@@ -41,6 +46,10 @@
 
   function handleFiltersChange(event: CustomEvent<{ value: SlideFilterOptions }>) {
     dispatch('changeFilters', { filters: event.detail.value });
+  }
+
+  function handleTagChange(event: CustomEvent<{ value: string | null }>) {
+    dispatch('changeTag', { tag: event.detail.value });
   }
 </script>
 
@@ -74,6 +83,14 @@
         </button>
       </div>
     </div>
+
+    <TagInput
+      value={tag}
+      suggestions={tagSuggestions}
+      disabled={reviewing || transforming}
+      saving={tagSaving}
+      on:change={handleTagChange}
+    />
 
     <CornerEditor {imageUrl} {points} on:change={handlePointsChange} />
     <FilterPanel
