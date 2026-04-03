@@ -8,7 +8,7 @@
 	interface LogViewerRef {
 		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
 		injectCompleted: (reason?: string) => void;
-		injectMergeCompleted: () => void;
+		injectMergeCompleted: (reason?: string, status?: string) => void;
 	}
 
 	interface Props {
@@ -37,7 +37,7 @@
 		| {
 				injectLine: (t: string | { text: string; meta?: Record<string, unknown> }) => void;
 				injectCompleted: (reason?: string) => void;
-				injectMergeCompleted: () => void;
+				injectMergeCompleted: (reason?: string, status?: string) => void;
 		  }
 		| undefined;
 	let elapsed = $state('');

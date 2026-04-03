@@ -20,6 +20,7 @@
 	} from '$lib/api';
 	import { devRunnerMergeApi, devRunnerPlanApi } from '$lib/api/dev-runner';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
+	import { normalizeExitReason } from '$lib/utils/dev-runner-exit-reason';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerPlanFileResponse,
@@ -79,7 +80,7 @@
 	interface LogViewerRef {
 		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
 		injectCompleted: (reason?: string) => void;
-		injectMergeCompleted: () => void;
+		injectMergeCompleted: (reason?: string, status?: string) => void;
 	}
 	const logRefs = new Map<string, LogViewerRef>();
 
@@ -130,6 +131,8 @@
 		engine?: string | null;
 		running?: boolean;
 		status?: string;
+		pid?: number | string | null;
+		current_cycle?: number | string | null;
 		start_time?: string | null;
 		branch?: string | null;
 		trigger?: string | null;
@@ -155,6 +158,15 @@
 	}
 
 	type EventLinePayload = string | { text: string; meta?: Record<string, unknown> };
+	type CompletionEventSource = 'log_completed' | 'merge_log_completed';
+
+	interface CompletionUpdatePayload {
+		runner_id: string;
+		reason?: string | null;
+		status?: string | null;
+		error?: string | null;
+		source: CompletionEventSource;
+	}
 
 	function normalizeEventLine(payload: unknown): string {
 		if (typeof payload === 'string') return payload;
@@ -168,6 +180,67 @@
 		}
 		if (payload == null) return '';
 		return String(payload);
+	}
+
+	function isFailedExitReason(reason?: string | null): boolean {
+		if (!reason) return false;
+		const normalized = normalizeExitReason(reason);
+		return !['completed', 'stopped', 'archived', 'on_hold', 'unknown'].includes(normalized);
+	}
+
+	function resolveCompletionReason(
+		currentReason: string | null | undefined,
+		incomingReason: string | null | undefined,
+		incomingStatus: string | null | undefined,
+		source: CompletionEventSource
+	): string {
+		const normalizedCurrent = currentReason ? normalizeExitReason(currentReason) : null;
+		const normalizedIncoming = incomingReason ? normalizeExitReason(incomingReason) : null;
+		const statusFailed = incomingStatus === 'failed';
+
+		let candidate = normalizedIncoming;
+		if (!candidate && statusFailed && source === 'merge_log_completed') {
+			candidate = 'merge_failed';
+		}
+		if (!candidate && incomingStatus === 'success') {
+			candidate = 'completed';
+		}
+
+		// 실패 reason은 success/completed 후속 이벤트보다 우선한다.
+		if (isFailedExitReason(candidate) || statusFailed) {
+			return candidate ?? normalizedCurrent ?? 'unknown';
+		}
+		if (isFailedExitReason(normalizedCurrent)) {
+			return normalizedCurrent ?? 'unknown';
+		}
+		return candidate ?? normalizedCurrent ?? 'unknown';
+	}
+
+	function applyCompletionUpdate(payload: CompletionUpdatePayload): string {
+		let resolvedReason = resolveCompletionReason(
+			null,
+			payload.reason ?? null,
+			payload.status ?? null,
+			payload.source
+		);
+
+		runnerTabs = runnerTabs.map(tab => {
+			if (tab.id !== payload.runner_id) return tab;
+			resolvedReason = resolveCompletionReason(
+				tab.exit_reason ?? null,
+				payload.reason ?? null,
+				payload.status ?? null,
+				payload.source
+			);
+			return {
+				...tab,
+				running: false,
+				exit_reason: resolvedReason,
+				error: payload.error ?? tab.error ?? null,
+			};
+		});
+
+		return resolvedReason;
 	}
 
 	const isAllPlansSentinel = (f: string | null | undefined) =>
@@ -322,8 +395,8 @@
 					runStatus = {
 						...(runStatus ?? {} as DevRunnerRunStatusResponse),
 						running: r.status === 'running',
-						pid: r.pid ? parseInt(r.pid) : null,
-						current_cycle: r.current_cycle !== null ? parseInt(r.current_cycle) : null,
+						pid: r.pid != null ? Number(r.pid) : null,
+						current_cycle: r.current_cycle != null ? Number(r.current_cycle) : null,
 						start_time: r.start_time ?? null,
 						plan_file: r.plan_file ?? null,
 						runner_id: r.runner_id,
@@ -370,23 +443,20 @@
 			} catch { /* 무시 */ }
 		} else if (eventName === 'log_completed') {
 			try {
-				const { runner_id, reason, error } = JSON.parse(data) as {
+				const { runner_id, reason, status, error } = JSON.parse(data) as {
 					runner_id: string;
 					reason?: string | null;
+					status?: string | null;
 					error?: string | null;
 				};
-				const resolvedReason = reason ?? null;
-				logRefs.get(runner_id)?.injectCompleted(resolvedReason ?? undefined);
-				runnerTabs = runnerTabs.map(tab =>
-					tab.id === runner_id
-						? {
-							...tab,
-							running: false,
-							exit_reason: resolvedReason ?? tab.exit_reason ?? 'unknown',
-							error: error ?? tab.error ?? null,
-						}
-						: tab
-				);
+				const resolvedReason = applyCompletionUpdate({
+					runner_id,
+					reason: reason ?? null,
+					status: status ?? null,
+					error: error ?? null,
+					source: 'log_completed',
+				});
+				logRefs.get(runner_id)?.injectCompleted(resolvedReason);
 			} catch { /* 무시 */ }
 		} else if (eventName === 'merge_log') {
 			try {
@@ -397,8 +467,18 @@
 			} catch { /* 무시 */ }
 		} else if (eventName === 'merge_log_completed') {
 			try {
-				const { runner_id } = JSON.parse(data) as { runner_id: string };
-				logRefs.get(runner_id)?.injectMergeCompleted();
+				const { runner_id, reason, status } = JSON.parse(data) as {
+					runner_id: string;
+					reason?: string | null;
+					status?: string | null;
+				};
+				const resolvedReason = applyCompletionUpdate({
+					runner_id,
+					reason: reason ?? null,
+					status: status ?? null,
+					source: 'merge_log_completed',
+				});
+				logRefs.get(runner_id)?.injectMergeCompleted(resolvedReason, status ?? undefined);
 			} catch { /* 무시 */ }
 		}
 	}
