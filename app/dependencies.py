@@ -6,6 +6,10 @@
 
 새 코드에서는 다음을 사용하세요:
     from app.core.dependencies import get_notification_service, get_db_session
+
+주의:
+    워커/라우트 신규 코드에서 `app.dependencies`를 import하지 말고
+    반드시 `app.core.dependencies`를 직접 사용하세요.
 """
 from app.core.dependencies import (
     get_notification_service,

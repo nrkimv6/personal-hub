@@ -6,6 +6,7 @@ imagehash.phash로 빠른 화면 변경 감지 후 OCR 실행 여부 결정.
 from __future__ import annotations
 
 import logging
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,10 @@ except ImportError:
 
 class TextDiffDetector:
     """화면 변경 감지 + 새 텍스트 라인 추출."""
+
+    def __init__(self, recent_cache_size: int = 30) -> None:
+        # OCR 흔들림으로 같은 라인이 반복 신규로 판정되는 현상을 완화한다.
+        self._recent_messages: deque[str] = deque(maxlen=recent_cache_size)
 
     def has_visual_change(
         self,
@@ -70,9 +75,24 @@ class TextDiffDetector:
         """
         if not curr_lines:
             return []
+        normalized_curr = [line.strip() for line in curr_lines if line and line.strip()]
+        if not normalized_curr:
+            return []
         if not prev_lines:
-            return [line for line in curr_lines if line.strip()]
+            return self._filter_recent_duplicates(normalized_curr)
 
-        prev_set = set(prev_lines)
-        new_lines = [line for line in curr_lines if line not in prev_set and line.strip()]
-        return new_lines
+        prev_set = {line.strip() for line in prev_lines if line and line.strip()}
+        candidates = [line for line in normalized_curr if line not in prev_set]
+        return self._filter_recent_duplicates(candidates)
+
+    def _filter_recent_duplicates(self, lines: list[str]) -> list[str]:
+        """짧은 구간의 중복 메시지를 제거한다."""
+        if not lines:
+            return []
+        filtered: list[str] = []
+        for line in lines:
+            if line in self._recent_messages:
+                continue
+            self._recent_messages.append(line)
+            filtered.append(line)
+        return filtered

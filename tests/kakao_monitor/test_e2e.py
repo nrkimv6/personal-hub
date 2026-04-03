@@ -171,3 +171,12 @@ def test_config_delete_cascades_keywords_and_posts(app_client, test_db_session: 
     test_db_session.expire_all()
     assert test_db_session.get(KakaoKeyword, kw_id) is None
     assert test_db_session.get(KakaoCollectedPost, post_id) is None
+
+
+def test_status_idle_message_when_no_active_config(app_client):
+    """T4: active config 0건일 때 status_message 계약 확인."""
+    res = app_client.get("/api/v1/kakao-monitor/status")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["active_config_count"] == 0
+    assert data["status_message"] in {"idle(no active config)", "kakao process not running"}

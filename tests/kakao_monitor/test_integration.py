@@ -163,3 +163,23 @@ def test_db_migration_tables_exist(test_db_session: Session):
     assert "kakao_keywords" in tables
     assert "kakao_collected_posts" in tables
     assert "kakao_alert_logs" in tables
+
+
+def test_worker_uses_polling_interval_normalization():
+    """T3: polling_interval_sec 정규화(최소 1초) 확인."""
+    import sys
+
+    with patch.dict(sys.modules, {
+        "psutil": MagicMock(), "win32gui": MagicMock(), "win32con": MagicMock(),
+        "win32clipboard": MagicMock(), "pyautogui": MagicMock(),
+        "paddleocr": MagicMock(), "imagehash": MagicMock(), "win32ui": MagicMock(),
+        "app.worker.crawl_worker_base": MagicMock(),
+        "app.worker.scheduled_worker": MagicMock(),
+        "app.worker.ondemand_worker": MagicMock(),
+    }):
+        from app.worker.kakao_monitor_worker import KakaoMonitorWorker
+
+        worker = KakaoMonitorWorker()
+        assert worker._normalize_interval(0) == 1.0
+        assert worker._normalize_interval(0.5) == 1.0
+        assert worker._normalize_interval(7) == 7.0

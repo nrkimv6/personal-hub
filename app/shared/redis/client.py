@@ -188,3 +188,12 @@ async def get_redis() -> Optional[redis.Redis]:
         redis.Redis | None: Redis 클라이언트 또는 None
     """
     return await RedisClient.get_client()
+
+
+def get_redis_client_sync() -> Optional[redis_sync.Redis]:
+    """동기 Redis 클라이언트 반환 헬퍼.
+
+    서비스 레이어에서 일관된 import 경로(`app.shared.redis`)를 사용할 수 있도록
+    공개 래퍼를 제공한다.
+    """
+    return RedisClient.get_sync_client()

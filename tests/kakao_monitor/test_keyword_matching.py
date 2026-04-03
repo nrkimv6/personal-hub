@@ -107,3 +107,18 @@ def test_match_inactive_keyword_skipped():
     active_keywords = [kw for kw in [inactive_kw] if kw.is_active]
     result = w._match_keywords("예약 오픈", active_keywords)
     assert result is None
+
+
+def test_action_type_invalid_fallback_to_collect():
+    """E: 알 수 없는 action_type은 collect로 정규화."""
+    w = _get_worker()
+    assert w._normalize_action_type("unknown") == "collect"
+
+
+def test_trigger_dedupe_blocks_immediate_duplicate():
+    """B: 동일 트리거 연속 입력 시 dedupe 동작."""
+    w = _get_worker()
+    first = w._is_duplicate_trigger(1, 10, "예약 오픈")
+    second = w._is_duplicate_trigger(1, 10, "예약 오픈")
+    assert first is False
+    assert second is True

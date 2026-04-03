@@ -33,6 +33,14 @@ class KakaoCollectService:
         status: str = KakaoCollectedPost.STATUS_SUCCESS,
     ) -> KakaoCollectedPost:
         """수집 게시물 저장 후 반환."""
+        normalized_status = (status or "").strip().lower()
+        if normalized_status not in KakaoCollectedPost.VALID_STATUSES:
+            logger.warning(
+                "알 수 없는 status=%r - failed로 대체 저장",
+                status,
+            )
+            normalized_status = KakaoCollectedPost.STATUS_FAILED
+
         post = KakaoCollectedPost(
             config_id=config_id,
             keyword_id=keyword_id,
@@ -40,7 +48,7 @@ class KakaoCollectService:
             trigger_message=trigger_msg,
             collected_content=content,
             screenshot_path=screenshot_path,
-            status=status,
+            status=normalized_status,
         )
         self.db.add(post)
         self.db.commit()
