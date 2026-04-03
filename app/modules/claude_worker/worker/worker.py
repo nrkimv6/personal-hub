@@ -747,6 +747,12 @@ def save_writing_result(db, request, result: dict) -> bool:
         if refine_prompt_path.exists():
             refine_template = refine_prompt_path.read_text(encoding="utf-8")
             refine_prompt = refine_template.replace("{content}", writing.content)
+            llm_service = LLMService(db)
+            provider, model = llm_service.resolve_provider_model(
+                caller_type="writing_refine",
+                provider=None,
+                model=None,
+            )
 
             refine_request = LLMRequest(
                 caller_type="writing_refine",
@@ -755,6 +761,8 @@ def save_writing_result(db, request, result: dict) -> bool:
                 status="pending",
                 requested_by="auto",
                 request_source="writing_worker",
+                provider=provider,
+                model=model,
             )
             db.add(refine_request)
             logger.info(f"교정 요청 생성: writing_id={writing.id}")
@@ -1507,9 +1515,12 @@ class LLMWorker:
             # - writing 관련: 도구 사용 금지 (도구 사용 시 글 작성 대신 프롬프트 분석만 함)
             enable_tools = request.caller_type in ["instagram", "universal_crawl"]
 
-            # provider/model 읽기 (기본값: claude, "")
-            provider = getattr(request, "provider", None) or "claude"
-            model = getattr(request, "model", None) or ""
+            # provider/model 해석 (요청값 > caller 기본값 > global 기본값 > 최종 claude/"")
+            provider, model = service.resolve_provider_model(
+                caller_type=request.caller_type,
+                provider=getattr(request, "provider", None),
+                model=getattr(request, "model", None),
+            )
 
             # LLM 실행 (비동기 실행을 위해 run_in_executor 사용)
             loop = asyncio.get_event_loop()
@@ -1602,7 +1613,6 @@ class LLMWorker:
                         # Quota 에러 감지 및 provider pause 설정
                         quota_retry_ms = result.get("quota_retry_ms")
                         if quota_retry_ms is not None:
-                            provider = getattr(request, "provider", None) or "claude"
                             paused_until = service.set_provider_quota_pause(
                                 provider, quota_retry_ms, reason=result.get("error", "")
                             )
@@ -1624,7 +1634,6 @@ class LLMWorker:
                     # Quota 에러 감지 및 provider pause 설정
                     quota_retry_ms = result.get("quota_retry_ms")
                     if quota_retry_ms is not None:
-                        provider = getattr(request, "provider", None) or "claude"
                         paused_until = service.set_provider_quota_pause(
                             provider, quota_retry_ms, reason=result.get("error", "")
                         )

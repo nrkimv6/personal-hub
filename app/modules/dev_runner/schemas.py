@@ -13,8 +13,8 @@ SUPPORTED_RUN_ENGINES = {"claude", "gemini", "codex", "cc-codex"}
 class RunRequest(BaseModel):
     """실행 요청 스키마"""
     plan_file: Optional[str] = Field(None, description="Plan 파일 경로 (null=전체 실행)")
-    engine: Optional[str] = Field("claude", description="AI 실행 엔진 (claude | gemini | codex | cc-codex)")
-    fix_engine: Optional[str] = Field("claude", description="Fix/Resolver 전용 AI 엔진 (claude | gemini | codex | cc-codex)")
+    engine: Optional[str] = Field(None, description="AI 실행 엔진 (claude | gemini | codex | cc-codex)")
+    fix_engine: Optional[str] = Field(None, description="Fix/Resolver 전용 AI 엔진 (claude | gemini | codex | cc-codex)")
     max_cycles: Optional[int] = Field(0, description="최대 사이클 수 (0=무제한)")
     max_tokens: Optional[int] = Field(0, description="최대 토큰 수 (0=무제한)")
     until: Optional[str] = Field(None, description="종료 시각 (HH:MM 형식)")
@@ -30,12 +30,12 @@ class RunRequest(BaseModel):
     @classmethod
     def validate_engine(cls, value):
         if value is None:
-            return "claude"
+            return None
         if not isinstance(value, str):
             raise ValueError("엔진 값은 문자열이어야 합니다")
         normalized = value.strip()
         if not normalized:
-            return "claude"
+            return None
         if normalized not in SUPPORTED_RUN_ENGINES:
             engines = ", ".join(sorted(SUPPORTED_RUN_ENGINES))
             raise ValueError(f"지원되지 않는 엔진: {normalized} (지원: {engines})")
@@ -319,12 +319,31 @@ class MergeHistoryItem(BaseModel):
 class DevRunnerSettingsResponse(BaseModel):
     """Dev Runner 설정 응답 스키마"""
     max_concurrent_runners: int
+    default_engine: str = "claude"
+    default_fix_engine: str = "claude"
     updated_at: Optional[str] = None
 
 
 class DevRunnerSettingsUpdateRequest(BaseModel):
     """Dev Runner 설정 업데이트 요청 스키마"""
-    max_concurrent_runners: int = Field(..., ge=1, le=10, description="최대 동시 실행 수 (1~10)")
+    max_concurrent_runners: Optional[int] = Field(None, ge=1, le=10, description="최대 동시 실행 수 (1~10)")
+    default_engine: Optional[str] = Field(None, description="기본 실행 엔진")
+    default_fix_engine: Optional[str] = Field(None, description="기본 fix 엔진")
+
+    @field_validator("default_engine", "default_fix_engine", mode="before")
+    @classmethod
+    def validate_default_engine(cls, value):
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("엔진 값은 문자열이어야 합니다")
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if normalized not in SUPPORTED_RUN_ENGINES:
+            engines = ", ".join(sorted(SUPPORTED_RUN_ENGINES))
+            raise ValueError(f"지원되지 않는 엔진: {normalized} (지원: {engines})")
+        return normalized
 
 
 class WorkflowResponse(BaseModel):

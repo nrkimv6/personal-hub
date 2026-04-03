@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from app.database import get_db
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.routes.llm_routes import router as llm_router
+import app.modules.claude_worker.services.llm_service as llm_service_module
 
 # LLM 라우터만 포함하는 minimal test app (playwright 등 무거운 의존성 제외)
 app = FastAPI()
@@ -41,6 +42,17 @@ def cleanup(test_db_session):
     yield
     test_db_session.query(LLMRequest).delete()
     test_db_session.commit()
+
+
+@pytest.fixture(autouse=True)
+def isolate_llm_defaults_file(monkeypatch, tmp_path):
+    """테스트 간 LLM 기본값 파일 격리."""
+    monkeypatch.setattr(
+        llm_service_module,
+        "LLM_DEFAULTS_FILE",
+        tmp_path / "llm_defaults.json",
+    )
+    yield
 
 
 class TestCreateRequestQueueName:
@@ -249,3 +261,99 @@ class TestQueueStats:
 
         assert data["system"]["pending"] == 2
         assert data["utility"]["pending"] == 3
+
+
+class TestLlmDefaultsApi:
+    """LLM 기본값 API 및 fallback 우선순위 테스트."""
+
+    def test_get_defaults_returns_global_and_known_callers(self, client):
+        response = client.get("/api/v1/llm/defaults")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["global_default"]["provider"] == "claude"
+        assert "dev_runner" in data["known_caller_types"]
+
+    def test_put_defaults_and_create_request_uses_caller_fallback(self, client):
+        put_resp = client.put(
+            "/api/v1/llm/defaults",
+            json={
+                "global_default": {"provider": "gemini", "model": "gemini-3-flash-preview"},
+                "caller_defaults": {
+                    "report": {"provider": "claude", "model": "sonnet"}
+                },
+            },
+        )
+        assert put_resp.status_code == 200
+
+        create_resp = client.post(
+            "/api/v1/llm/requests",
+            json={
+                "caller_type": "report",
+                "caller_id": "defaults-report-1",
+                "prompt": "test",
+            },
+        )
+        assert create_resp.status_code in (200, 201)
+        created = create_resp.json()
+        assert created["provider"] == "claude"
+        assert created["model"] == "sonnet"
+
+    def test_put_defaults_and_create_request_uses_global_fallback_for_unknown_caller(self, client):
+        put_resp = client.put(
+            "/api/v1/llm/defaults",
+            json={
+                "global_default": {"provider": "gemini", "model": "gemini-2.0-flash"},
+                "caller_defaults": {},
+            },
+        )
+        assert put_resp.status_code == 200
+
+        create_resp = client.post(
+            "/api/v1/llm/requests",
+            json={
+                "caller_type": "unknown_caller_type",
+                "caller_id": "defaults-unknown-1",
+                "prompt": "test",
+            },
+        )
+        assert create_resp.status_code in (200, 201)
+        created = create_resp.json()
+        assert created["provider"] == "gemini"
+        assert created["model"] == "gemini-2.0-flash"
+
+    def test_request_provider_model_override_defaults(self, client):
+        put_resp = client.put(
+            "/api/v1/llm/defaults",
+            json={
+                "global_default": {"provider": "claude", "model": "sonnet"},
+                "caller_defaults": {
+                    "report": {"provider": "gemini", "model": "gemini-3-flash-preview"}
+                },
+            },
+        )
+        assert put_resp.status_code == 200
+
+        create_resp = client.post(
+            "/api/v1/llm/requests",
+            json={
+                "caller_type": "report",
+                "caller_id": "defaults-override-1",
+                "prompt": "test",
+                "provider": "claude",
+                "model": "opus",
+            },
+        )
+        assert create_resp.status_code in (200, 201)
+        created = create_resp.json()
+        assert created["provider"] == "claude"
+        assert created["model"] == "opus"
+
+    def test_put_defaults_rejects_unsupported_provider(self, client):
+        response = client.put(
+            "/api/v1/llm/defaults",
+            json={
+                "global_default": {"provider": "claude", "model": ""},
+                "caller_defaults": {"report": {"provider": "unknown-provider", "model": ""}},
+            },
+        )
+        assert response.status_code == 422

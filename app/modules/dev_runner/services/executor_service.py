@@ -138,6 +138,23 @@ class ExecutorService:
         )
         return any(marker in msg for marker in preflight_markers)
 
+    @staticmethod
+    def resolve_run_engines(request: RunRequest, settings) -> tuple[str, str]:
+        """요청값 > settings 기본값 > claude 규칙으로 engine/fix_engine 해석."""
+        def _normalize(value: object) -> str | None:
+            if isinstance(value, str):
+                normalized = value.strip()
+                return normalized or None
+            return None
+
+        fallback_engine = _normalize(getattr(settings, "default_engine", None)) or "claude"
+        fallback_fix_engine = _normalize(getattr(settings, "default_fix_engine", None)) or "claude"
+
+        resolved_engine = _normalize(request.engine) or fallback_engine
+        resolved_fix_engine = _normalize(request.fix_engine) or fallback_fix_engine
+
+        return resolved_engine, resolved_fix_engine
+
     async def _get_runner_fields(self, rid: str, *fields: str) -> dict:
         result = {}
         for f in fields:
@@ -179,6 +196,8 @@ class ExecutorService:
                 detail=f"최대 {settings.max_concurrent_runners}개 동시 실행 가능 (현재 {count}개)"
             )
 
+        resolved_engine, resolved_fix_engine = self.resolve_run_engines(request, settings)
+
         # 새 runner_id 생성 (멀티 실행 지원 - 409 체크 없음)
         # test_source가 있으면 TC 추적용 접두사 포함 (t-{source}-{4hex})
         if request.test_source:
@@ -202,18 +221,18 @@ class ExecutorService:
             "timestamp": datetime.now().isoformat(),
         }
 
-        logger.info(f"[dev-runner] Request engine: {request.engine}, runner_id: {runner_id}")
+        logger.info(
+            f"[dev-runner] Request engine={request.engine}, fix_engine={request.fix_engine} "
+            f"-> resolved engine={resolved_engine}, fix_engine={resolved_fix_engine}, runner_id={runner_id}"
+        )
 
         if request.plan_file:
             if "docs/archive/" in request.plan_file.replace("\\", "/"):
                 raise HTTPException(status_code=400, detail="archived plan은 실행할 수 없습니다")
             command["plan_file"] = request.plan_file
 
-        if request.engine:
-            command["engine"] = request.engine
-
-        if request.fix_engine:
-            command["fix_engine"] = request.fix_engine
+        command["engine"] = resolved_engine
+        command["fix_engine"] = resolved_fix_engine
 
         # 옵션 추가
         if request.max_cycles is not None:
@@ -265,7 +284,7 @@ class ExecutorService:
 
             if not result_data.get("success"):
                 message = result_data.get("message", "Failed to start")
-                if self._is_codex_preflight_failure(request.engine, request.fix_engine, message):
+                if self._is_codex_preflight_failure(resolved_engine, resolved_fix_engine, message):
                     raise HTTPException(
                         status_code=422,
                         detail=message,
@@ -284,7 +303,7 @@ class ExecutorService:
             return RunStatusResponse(
                 running=True,
                 runner_id=runner_id,
-                engine=request.engine,
+                engine=resolved_engine,
                 pid=int(pid) if pid else None,
                 plan_file=plan_file or request.plan_file,
                 start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,

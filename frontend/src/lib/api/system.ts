@@ -524,6 +524,23 @@ export interface QuotaProviderStatus {
 }
 export type QuotaStatusMap = Record<string, QuotaProviderStatus>;
 
+export interface LLMDefaultConfig {
+  provider?: string | null;
+  model?: string | null;
+}
+
+export interface LLMDefaultsResponse {
+  global_default: LLMDefaultConfig;
+  caller_defaults: Record<string, LLMDefaultConfig>;
+  supported_providers: string[];
+  known_caller_types: string[];
+}
+
+export interface LLMDefaultsUpdateRequest {
+  global_default: LLMDefaultConfig;
+  caller_defaults?: Record<string, LLMDefaultConfig>;
+}
+
 export const llmApi = {
   // 요청 목록 조회
   list: (params?: LLMRequestListParams, options?: RequestInit) => {
@@ -652,7 +669,15 @@ export const llmApi = {
       body: JSON.stringify({ caller_type: callerType || null })
     }),
 
-  getQuotaStatus: () => request<QuotaStatusMap>('/llm/quota-status')
+  getQuotaStatus: () => request<QuotaStatusMap>('/llm/quota-status'),
+
+  getDefaults: () => request<LLMDefaultsResponse>('/llm/defaults'),
+
+  updateDefaults: (payload: LLMDefaultsUpdateRequest) =>
+    request<LLMDefaultsResponse>('/llm/defaults', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
 };
 
 // ============================================================

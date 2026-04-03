@@ -3,6 +3,7 @@
 import json
 from unittest.mock import patch, AsyncMock
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 import redis
@@ -307,6 +308,30 @@ class TestStartRun:
         assert len(raw) > 0, "command queue에 항목 없음"
         command = json.loads(raw[0])
         assert command.get("fix_engine") == "claude", f"fix_engine 기본값 오류: {command}"
+
+    async def test_start_run_uses_settings_default_engines_when_request_missing(self, client, mock_executor_redis):
+        """요청에 engine/fix_engine 미지정 시 settings 기본값 사용"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        mocked_settings = SimpleNamespace(
+            max_concurrent_runners=3,
+            default_engine="gemini",
+            default_fix_engine="codex",
+        )
+
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)), \
+             patch("app.modules.dev_runner.services.executor_service.settings_service.get", return_value=mocked_settings):
+            response = await client.post("/api/v1/dev-runner/run", json={"plan_file": "test-plan.md"})
+
+        assert response.status_code == 200
+        raw = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert len(raw) > 0, "command queue에 항목 없음"
+        command = json.loads(raw[0])
+        assert command.get("engine") == "gemini"
+        assert command.get("fix_engine") == "codex"
 
     async def test_start_run_engine_cc_codex_stored_in_command(self, client, mock_executor_redis):
         """cc-codex main engine 필드가 Redis command에 포함되는지 확인"""

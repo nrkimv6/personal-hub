@@ -225,7 +225,7 @@ class TestGeminiDeepValidation:
         await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
 
         req = RunRequest(test_source="gemini_integration", plan_file="test.md")
-        assert req.engine == "claude"
+        assert req.engine is None
 
         captured = []
         with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured)):

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi } from '$lib/api';
+	import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi, devRunnerSettingsApi } from '$lib/api';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerPlanFileResponse,
@@ -182,8 +182,24 @@
 		}
 	}
 
+	async function fetchDefaultEngines() {
+		try {
+			const settings = await devRunnerSettingsApi.get();
+			if (settings.default_engine) {
+				selectedEngine = settings.default_engine;
+			}
+			if (settings.default_fix_engine) {
+				selectedFixEngine = settings.default_fix_engine;
+			}
+			normalizeSelectedEngines();
+		} catch (e) {
+			console.warn('Failed to fetch dev-runner defaults', e);
+		}
+	}
+
 	onMount(() => {
 		fetchEngineConfigs();
+		fetchDefaultEngines();
 	});
 
 	$effect(() => {
@@ -194,11 +210,21 @@
 	async function updateModel(phase: string, model: string) {
 		if (!selectedEngineConfig || !selectedEngine) return;
 		try {
+			const overwriteAll = confirm(
+				`"${selectedEngine}" 엔진의 모든 phase 모델을 "${model}"로 덮어쓸까요?\n` +
+				"취소하면 현재 phase만 변경됩니다."
+			);
+			if (overwriteAll) {
+				await devRunnerEngineApi.update(selectedEngine, {
+					default_model: model,
+					overwrite_all_phases: true
+				});
+				await fetchEngineConfigs();
+				return;
+			}
+
 			const nextModels: Record<string, string> = { ...selectedEngineConfig.models, [phase]: model };
-			await devRunnerEngineApi.update(selectedEngine, {
-				models: nextModels
-			});
-			// 로컬 상태 즉시 반영 (낙관적 업데이트)
+			await devRunnerEngineApi.update(selectedEngine, { models: nextModels });
 			engineConfigs = {
 				...(engineConfigs ?? {}),
 				[selectedEngine]: {

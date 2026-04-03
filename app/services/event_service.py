@@ -505,6 +505,14 @@ class EventService:
 
         # LLM 요청 생성 (비동기 큐 패턴)
         from app.modules.claude_worker.models.llm_request import LLMRequest
+        from app.modules.claude_worker.services.llm_service import LLMService
+
+        llm_service = LLMService(db)
+        provider, model = llm_service.resolve_provider_model(
+            caller_type="event_import",
+            provider=None,
+            model=None,
+        )
 
         llm_request = LLMRequest(
             caller_type="event_import",
@@ -513,6 +521,8 @@ class EventService:
             status="pending",
             requested_by="api",
             request_source="event_import",
+            provider=provider,
+            model=model,
         )
         db.add(llm_request)
         db.commit()

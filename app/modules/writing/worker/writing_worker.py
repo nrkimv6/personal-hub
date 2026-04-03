@@ -183,8 +183,8 @@ class WritingWorker:
 
         # target_config에서 LLM provider/model 읽기
         config = schedule.get_target_config() if schedule.target_config else {}
-        llm_provider = config.get("llm_provider", "claude")
-        llm_model = config.get("llm_model", "")
+        llm_provider = config.get("llm_provider")
+        llm_model = config.get("llm_model")
 
         # 당일 슬롯 컨텍스트 생성
         slot_context = SlotContext()
@@ -291,6 +291,11 @@ class WritingWorker:
                 prompt = prompt.replace(placeholder, source.content)
 
             # LLM 요청 생성 (pending 상태 - Worker가 처리)
+            provider, model = self.llm_service.resolve_provider_model(
+                caller_type="writing_generate",
+                provider=llm_provider,
+                model=llm_model,
+            )
             llm_request = LLMRequest(
                 caller_type="writing_generate",
                 caller_id=f"mix_{run_id}_{index}",
@@ -298,8 +303,8 @@ class WritingWorker:
                 status="pending",
                 requested_by="scheduler",
                 request_source="writing_worker",
-                provider=llm_provider,
-                model=llm_model,
+                provider=provider,
+                model=model,
                 writing_metadata=json.dumps({
                     "task_type": "mix",
                     "source_ids": [s.id for s in sources],
@@ -375,6 +380,11 @@ class WritingWorker:
             }
 
             # LLM 요청 생성 (pending 상태)
+            provider, model = self.llm_service.resolve_provider_model(
+                caller_type="writing_generate",
+                provider=llm_provider,
+                model=llm_model,
+            )
             llm_request = LLMRequest(
                 caller_type="writing_generate",
                 caller_id=f"random_{run_id}_{index}",
@@ -382,8 +392,8 @@ class WritingWorker:
                 status="pending",
                 requested_by="scheduler",
                 request_source="writing_worker",
-                provider=llm_provider,
-                model=llm_model,
+                provider=provider,
+                model=model,
                 writing_metadata=json.dumps({
                     "task_type": "random",
                     "selected_elements": selected_json,
@@ -460,6 +470,11 @@ class WritingWorker:
             }
 
             # LLM 요청 생성 (pending 상태)
+            provider, model = self.llm_service.resolve_provider_model(
+                caller_type="writing_generate",
+                provider=llm_provider,
+                model=llm_model,
+            )
             llm_request = LLMRequest(
                 caller_type="writing_generate",
                 caller_id=f"keyword_{run_id}_{index}",
@@ -467,8 +482,8 @@ class WritingWorker:
                 status="pending",
                 requested_by="scheduler",
                 request_source="writing_worker",
-                provider=llm_provider,
-                model=llm_model,
+                provider=provider,
+                model=model,
                 writing_metadata=json.dumps({
                     "task_type": "keyword",
                     "selected_elements": selected_json,
