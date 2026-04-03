@@ -165,6 +165,22 @@ class TestBuildStatusPayload:
         assert payload is not None
         assert payload["trigger"] is None
 
+    def test_build_status_payload_includes_visible_field(self, event_service, sync_redis):
+        """R: trigger=user면 visible=True, trigger=api면 visible=False."""
+        rid_user = "visible-user-01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_user}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_user}:trigger", "user")
+        payload_user = event_service._build_status_payload(rid_user)
+        assert payload_user is not None
+        assert payload_user["visible"] is True
+
+        rid_api = "visible-api-01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_api}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_api}:trigger", "api")
+        payload_api = event_service._build_status_payload(rid_api)
+        assert payload_api is not None
+        assert payload_api["visible"] is False
+
     def test_build_status_payload_includes_exit_reason_and_error(self, event_service, sync_redis):
         """R: exit_reason/error 저장 시 status payload에 그대로 포함."""
         runner_id = "failed01"
@@ -722,6 +738,33 @@ class TestMergeLineChannelRouting:
         assert data["runner_id"] == "runner11"
         assert data["status"] == "failed"
         assert data["reason"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_completed_includes_error(self, event_service, async_redis, sync_redis):
+        """R: log_completed payload에 runner error 요약이 포함된다."""
+        runner_id = "runner11e"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", "Process exited with code 15")
+        log_msg = {
+            "type": "pmessage",
+            "channel": f"plan-runner:logs:{runner_id}",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": "__COMPLETED::error__",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == runner_id
+        assert data["status"] == "failed"
+        assert data["reason"] == "error"
+        assert data["error"] == "Process exited with code 15"
 
     @pytest.mark.asyncio
     async def test_stream_events_log_completed_reason_rate_limited_normalized(self, event_service, async_redis):
