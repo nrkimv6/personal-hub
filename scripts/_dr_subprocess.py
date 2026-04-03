@@ -20,7 +20,15 @@ _ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 
 def _make_plan_runner_env(runner_id: str, **extra: str) -> dict:
+    """plan-runner 서브프로세스용 env를 구성한다.
+
+    부모 프로세스의 PLAN_RUNNER_* 키는 stale 값 전파를 막기 위해 기본 제거한다.
+    필요한 키는 각 호출부에서 allowlist 형태로 extra 인자로만 명시 주입한다.
+    """
     env = os.environ.copy()
+    for key in list(env.keys()):
+        if key.startswith("PLAN_RUNNER_"):
+            env.pop(key, None)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
@@ -144,7 +152,11 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
     if needs_remerge:
         cmd.append("--needs-remerge")
 
-    env = _make_plan_runner_env(runner_id, PLAN_RUNNER_WORK_DIR=str(worktree_path))
+    env = _make_plan_runner_env(
+        runner_id,
+        PLAN_RUNNER_PROJECT_ROOT=str(PROJECT_ROOT),
+        PLAN_RUNNER_WORK_DIR=str(worktree_path),
+    )
 
     result = _run_subprocess_streaming(
         cmd=cmd,
@@ -192,7 +204,11 @@ def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, re
         "--engine", engine,
     ]
 
-    env = _make_plan_runner_env(runner_id)
+    env = _make_plan_runner_env(
+        runner_id,
+        PLAN_RUNNER_PROJECT_ROOT=str(PROJECT_ROOT),
+        PLAN_RUNNER_WORK_DIR=str(PROJECT_ROOT),
+    )
 
     result = _run_subprocess_streaming(
         cmd=cmd,
@@ -281,6 +297,7 @@ def _launch_general_merge_resolver_process(runner_id: str, branch: str, error_ms
 
     env = _make_plan_runner_env(
         runner_id,
+        PLAN_RUNNER_PROJECT_ROOT=str(PROJECT_ROOT),
         PLAN_RUNNER_WORK_DIR=str(PROJECT_ROOT),
         PLAN_RUNNER_MERGE_ERROR=error_msg[:2000],
     )

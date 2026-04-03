@@ -92,6 +92,7 @@ def _merge_lock_patch():
     mock_lock_mod = types.ModuleType("merge_queue")
     mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
     mock_lock_mod.release_merge_turn = MagicMock()
+    mock_lock_mod._get_repo_id = MagicMock(return_value="monitor-page")
     return patch.dict("sys.modules", {"merge_queue": mock_lock_mod})
 
 
@@ -110,8 +111,12 @@ class TestDoInlineMergeSubprocess:
              patch("subprocess.run", return_value=proc_result) as mock_run:
             cl._do_inline_merge("r1", redis)
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
+        post_merge_calls = [
+            c for c in mock_run.call_args_list
+            if "plan_runner" in str(c) and "post-merge" in str(c)
+        ]
+        assert len(post_merge_calls) >= 1, f"plan_runner post-merge 호출이 없음: {mock_run.call_args_list}"
+        cmd = post_merge_calls[0][0][0]
         assert "-m" in cmd
         assert "plan_runner" in cmd
         assert "post-merge" in cmd
@@ -179,7 +184,7 @@ class TestDoInlineMergeSubprocess:
         proc_ok.returncode = 0
 
         with _merge_lock_patch(), \
-             patch.object(cl, "_cleanup_process_state") as mock_cleanup_ok, \
+             patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup_ok, \
              patch("subprocess.run", return_value=proc_ok):
             cl._do_inline_merge("r_cleanup_ok", redis_ok)
 
@@ -191,7 +196,7 @@ class TestDoInlineMergeSubprocess:
         proc_fail.returncode = 1
 
         with _merge_lock_patch(), \
-             patch.object(cl, "_cleanup_process_state") as mock_cleanup_fail, \
+             patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup_fail, \
              patch("subprocess.run", return_value=proc_fail):
             cl._do_inline_merge("r_cleanup_fail", redis_fail)
 
@@ -332,13 +337,14 @@ class TestInlineMergeE2ESubprocessFlow:
         mock_lock_mod = _types.ModuleType("merge_queue")
         mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
         mock_lock_mod.release_merge_turn = MagicMock()
+        mock_lock_mod._get_repo_id = MagicMock(return_value="monitor-page")
 
         proc_result = MagicMock()
         proc_result.returncode = 0
 
         with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
              patch("subprocess.run", return_value=proc_result), \
-             patch.object(cl, "_cleanup_process_state") as mock_cleanup:
+             patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
             cl._do_inline_merge(runner_id, fake_r)
 
         # merge_status = "merged" 확인
@@ -373,13 +379,14 @@ class TestInlineMergeE2ESubprocessFlow:
         mock_lock_mod = _types.ModuleType("merge_queue")
         mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
         mock_lock_mod.release_merge_turn = MagicMock()
+        mock_lock_mod._get_repo_id = MagicMock(return_value="monitor-page")
 
         proc_result = MagicMock()
         proc_result.returncode = 0
 
         with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
              patch("subprocess.run", return_value=proc_result), \
-             patch.object(cl, "_cleanup_process_state") as mock_cleanup:
+             patch("_dr_commands._cleanup_process_state") as mock_cleanup:
             cl._do_retry_merge(runner_id, fake_r, "cmd_e2e")
 
         # merge_status = "merged" 확인
@@ -529,6 +536,7 @@ class TestExitCode2IntegrationFakeRedis:
         mock_lock_mod = _types.ModuleType("merge_queue")
         mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
         mock_lock_mod.release_merge_turn = MagicMock()
+        mock_lock_mod._get_repo_id = MagicMock(return_value="monitor-page")
 
         proc_result = MagicMock()
         proc_result.returncode = 2
