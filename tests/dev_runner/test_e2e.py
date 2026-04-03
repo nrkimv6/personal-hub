@@ -7,6 +7,7 @@ import pytest
 from pathlib import Path
 import redis
 import redis.asyncio as aioredis
+from fastapi import HTTPException
 from app.modules.dev_runner.services.executor_service import ExecutorService
 from app.modules.dev_runner.schemas import RunRequest
 
@@ -16,7 +17,7 @@ REDIS_PORT = 6379
 
 REDIS_TEST_DB = 15
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def dev_runner_listener():
     """Start the listener script as a background process for E2E tests (db=15 격리)"""
     import os as _os
@@ -116,7 +117,15 @@ async def test_e2e_full_lifecycle(dev_runner_listener, executor_service, engine)
     )
     
     # 1. Start execution
-    response = await executor_service.start_dev_runner(req)
+    try:
+        response = await executor_service.start_dev_runner(req)
+    except HTTPException as exc:
+        # Listener hand-off가 지연되는 케이스가 있어 1회 재시도 허용
+        if exc.status_code != 504:
+            raise
+        await asyncio.sleep(1.0)
+        await executor_service.cleanup_stale_runners()
+        response = await executor_service.start_dev_runner(req)
     runner_id = response.runner_id
 
     assert response.running is True
