@@ -33,6 +33,7 @@ def _mock_cleanup_stale(cleaned_active: int = 0, cleaned_recent: int = 0, bugs: 
             "success": True,
             "cleaned_active": cleaned_active,
             "cleaned_recent": cleaned_recent,
+            "preserved_recent": 0,
             "bugs": bugs,
         },
     )
@@ -62,3 +63,25 @@ class TestHttpCleanupStaleSuccess:
         assert data.get("success") is True
         assert data.get("cleaned_active") == 0
         assert data.get("cleaned_recent") == 0
+
+    def test_cleanup_stale_response_includes_preserved_recent(self, client):
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.cleanup_stale_runners",
+            new_callable=AsyncMock,
+            return_value={
+                "success": True,
+                "cleaned_active": 1,
+                "cleaned_recent": 0,
+                "preserved_recent": 2,
+                "bugs": 0,
+                "total": 1,
+            },
+        ):
+            response = client.post(f"{BASE_URL}/runners/cleanup-stale")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("cleaned_active") == 1
+        assert data.get("cleaned_recent") == 0
+        assert data.get("preserved_recent") == 2
+        assert data.get("detail", {}).get("preserved_recent") == 2

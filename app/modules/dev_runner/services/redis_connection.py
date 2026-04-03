@@ -8,6 +8,29 @@ from fastapi import HTTPException
 
 from app.config import logger
 
+# RECENT runner 보존 TTL 계약
+_ENV_RECENT_RUNNERS_TTL = "DEV_RUNNER_RECENT_TTL_SECONDS"
+_DEFAULT_RECENT_RUNNERS_TTL = 86400  # 24시간
+
+
+def _resolve_recent_runners_ttl() -> int:
+    """RECENT_RUNNERS_TTL 환경변수를 안전하게 파싱한다."""
+    raw = os.environ.get(_ENV_RECENT_RUNNERS_TTL, str(_DEFAULT_RECENT_RUNNERS_TTL))
+    try:
+        ttl = int(str(raw).strip())
+        if ttl <= 0:
+            raise ValueError("TTL must be > 0")
+        return ttl
+    except (TypeError, ValueError):
+        logger.warning(
+            "[executor-service] %s=%r invalid → fallback %s",
+            _ENV_RECENT_RUNNERS_TTL,
+            raw,
+            _DEFAULT_RECENT_RUNNERS_TTL,
+        )
+        return _DEFAULT_RECENT_RUNNERS_TTL
+
+
 # Redis 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
@@ -17,7 +40,7 @@ RESULTS_KEY = "plan-runner:command_results"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
-RECENT_RUNNERS_TTL = 3600  # 1시간 (초) — cleanup 후 분석용 보관
+RECENT_RUNNERS_TTL = _resolve_recent_runners_ttl()  # 기본 24시간
 COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생성 시간 고려
 # per-runner 키 suffix 전체 목록 (listener와 공유되는 단일 진실 원천)
 # scripts/dev-runner-command-listener.py도 동일 상수를 별도 정의하여 참조
@@ -55,8 +78,9 @@ class RedisConnection:
                 pass
 
         # 상수 재갱신 (테스트에서 os.environ 변경 시 반영을 위함)
-        global REDIS_DB
+        global REDIS_DB, RECENT_RUNNERS_TTL
         REDIS_DB = int(os.environ.get("PLAN_RUNNER_REDIS_DB", "0"))
+        RECENT_RUNNERS_TTL = _resolve_recent_runners_ttl()
 
         self._sync_pool = redis.ConnectionPool(
             host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB,

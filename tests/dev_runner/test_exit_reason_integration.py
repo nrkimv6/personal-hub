@@ -11,10 +11,11 @@ import threading
 from unittest.mock import MagicMock, patch
 import fakeredis
 
+from app.modules.dev_runner.services.redis_connection import RECENT_RUNNERS_TTL
+
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
-RECENT_RUNNERS_TTL = 3600
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
 
 
@@ -55,6 +56,17 @@ def simulate_listener_cleanup(runner_id: str, fake_redis, pubsub_mock):
 
 class TestNoProgressExitSetsRedisIntegration:
     """T3: 실제 Runner + Redis 통합 — exit_reason 기록 검증."""
+
+    def test_cleanup_simulation_uses_unified_recent_ttl(self):
+        """cleanup 시뮬레이션이 redis_connection.RECENT_RUNNERS_TTL 상수를 그대로 사용한다."""
+        fake_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "tc-pytest-t3-ttl-001"
+
+        simulate_cleanup_redis_state(runner_id, "completed", fake_redis)
+
+        ttl = fake_redis.ttl(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+        assert ttl <= RECENT_RUNNERS_TTL
+        assert ttl > max(0, RECENT_RUNNERS_TTL - 5)
 
     def test_no_progress_exit_sets_redis_integration(self):
         """no_progress 종료 시 Redis에 exit_reason=no_progress 기록."""

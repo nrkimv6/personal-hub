@@ -791,6 +791,30 @@ class TestMergeLineChannelRouting:
         assert data["reason"] == "rate_limit"
 
     @pytest.mark.asyncio
+    async def test_stream_events_log_completed_reason_passthrough(self, event_service, async_redis):
+        """R: __COMPLETED::{reason}__에서 reason이 그대로 전달된다 (정규화 예외 제외)."""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner13",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": "__COMPLETED::auto_plan_failed__",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner13"
+        assert data["status"] == "failed"
+        assert data["reason"] == "auto_plan_failed"
+
+    @pytest.mark.asyncio
     async def test_merge_line_in_log_channel_yields_log_event(self, event_service, async_redis):
         """R: plan-runner:logs:{id}에 [MERGE] 라인 도착 시 event: log 로 전달됨 (백엔드는 필터링 안 함)."""
         merge_line = "[12:34:56] [MERGE] [INFO] execute_merge: project_dir=D:/foo, branch=impl/bar"
