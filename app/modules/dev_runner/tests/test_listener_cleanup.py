@@ -12,7 +12,7 @@ import fakeredis
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
-RECENT_RUNNERS_TTL = 86400
+RECENT_RUNNERS_TTL = 3600
 
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
