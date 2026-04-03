@@ -48,7 +48,14 @@ def init_db() -> None:
             sql_content = migration_file.read_text(encoding="utf-8")
             statements = [segment.strip() for segment in sql_content.split(";") if segment.strip()]
             for statement in statements:
-                db.execute(text(statement))
+                try:
+                    db.execute(text(statement))
+                except Exception as exc:
+                    error_text = str(exc).lower()
+                    # Allow idempotent rerun of ALTER TABLE ADD COLUMN migrations.
+                    if "duplicate column name" in error_text:
+                        continue
+                    raise
         db.commit()
     except Exception:
         db.rollback()

@@ -48,6 +48,19 @@ def _points_to_params(points: list[tuple[float, float]]) -> dict[str, float]:
 
 
 def _row_to_points(row) -> list[dict[str, float]]:
+    raw_points = [
+        row.pt_tl_x,
+        row.pt_tl_y,
+        row.pt_tr_x,
+        row.pt_tr_y,
+        row.pt_br_x,
+        row.pt_br_y,
+        row.pt_bl_x,
+        row.pt_bl_y,
+    ]
+    if any(value is None for value in raw_points):
+        return []
+
     return [
         {"x": float(row.pt_tl_x), "y": float(row.pt_tl_y)},
         {"x": float(row.pt_tr_x), "y": float(row.pt_tr_y)},
