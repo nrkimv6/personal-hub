@@ -18,7 +18,11 @@ from sqlalchemy.orm import Session
 
 from app.modules.slide_scanner.config import settings
 from app.modules.slide_scanner.database import get_db
-from app.modules.slide_scanner.services.rectifier_client import SlideFilterOptions, rectifier_client
+from app.modules.slide_scanner.services.rectifier_client import (
+    DetectMeta,
+    SlideFilterOptions,
+    rectifier_client,
+)
 
 router = APIRouter(prefix="/slides", tags=["slide-scanner"])
 
@@ -67,6 +71,46 @@ def _points_to_params(points: list[tuple[float, float]]) -> dict[str, float]:
     }
 
 
+def _detect_meta_to_params(meta: DetectMeta | None) -> dict[str, str | float | None]:
+    if not meta:
+        return {
+            "detect_engine": None,
+            "detect_confidence": None,
+            "detect_fallback_reason": None,
+        }
+    return {
+        "detect_engine": str(meta.get("selected_engine") or "").strip() or None,
+        "detect_confidence": (
+            float(meta["confidence"]) if meta.get("confidence") is not None else None
+        ),
+        "detect_fallback_reason": (
+            str(meta.get("fallback_reason")).strip()
+            if meta.get("fallback_reason") is not None
+            else None
+        ),
+    }
+
+
+def _normalize_detect_meta(meta: DetectMeta | None) -> dict[str, str | float | None] | None:
+    if not meta:
+        return None
+    return {
+        "requested_engine": str(meta.get("requested_engine") or "").strip() or None,
+        "selected_engine": str(meta.get("selected_engine") or "").strip() or None,
+        "confidence": (float(meta["confidence"]) if meta.get("confidence") is not None else None),
+        "fallback_reason": (
+            str(meta.get("fallback_reason")).strip()
+            if meta.get("fallback_reason") is not None
+            else None
+        ),
+        "selection_reason": (
+            str(meta.get("selection_reason")).strip()
+            if meta.get("selection_reason") is not None
+            else None
+        ),
+    }
+
+
 def _row_to_points(row) -> list[dict[str, float]]:
     if (
         row.pt_tl_x is None
@@ -86,6 +130,20 @@ def _row_to_points(row) -> list[dict[str, float]]:
         {"x": float(row.pt_br_x), "y": float(row.pt_br_y)},
         {"x": float(row.pt_bl_x), "y": float(row.pt_bl_y)},
     ]
+
+
+def _row_to_detect_meta(row) -> dict[str, str | float | None] | None:
+    if (
+        row.detect_engine is None
+        and row.detect_confidence is None
+        and row.detect_fallback_reason is None
+    ):
+        return None
+    return {
+        "selected_engine": row.detect_engine,
+        "confidence": (float(row.detect_confidence) if row.detect_confidence is not None else None),
+        "fallback_reason": row.detect_fallback_reason,
+    }
 
 
 def _build_thumbnail_bytes(image_path: Path) -> bytes:
@@ -255,12 +313,13 @@ async def upload_slide(
     stored_path.write_bytes(content)
 
     try:
-        detected = rectifier_client.detect(stored_path)
+        detected = rectifier_client.detect_with_meta(stored_path)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"Corner detection failed: {exc}") from exc
 
     thumbnail = _build_thumbnail_bytes(stored_path)
-    point_params = _points_to_params(detected)
+    point_params = _points_to_params(detected["points"])
+    detect_meta = _normalize_detect_meta(detected["meta"])
 
     db.execute(
         text(
@@ -268,10 +327,12 @@ async def upload_slide(
             INSERT INTO slides (
                 file_name, file_path, status,
                 pt_tl_x, pt_tl_y, pt_tr_x, pt_tr_y, pt_br_x, pt_br_y, pt_bl_x, pt_bl_y,
+                detect_engine, detect_confidence, detect_fallback_reason,
                 captured_at, source_app, thumbnail, is_archived
             ) VALUES (
                 :file_name, :file_path, 'REVIEWED',
                 :pt_tl_x, :pt_tl_y, :pt_tr_x, :pt_tr_y, :pt_br_x, :pt_br_y, :pt_bl_x, :pt_bl_y,
+                :detect_engine, :detect_confidence, :detect_fallback_reason,
                 :captured_at, :source_app, :thumbnail, 0
             )
             """
@@ -283,6 +344,7 @@ async def upload_slide(
             "source_app": source_app,
             "thumbnail": thumbnail,
             **point_params,
+            **_detect_meta_to_params(detected["meta"]),
         },
     )
     slide_id = db.execute(text("SELECT last_insert_rowid()")).scalar_one()
@@ -293,6 +355,7 @@ async def upload_slide(
         "id": slide.id,
         "status": slide.status,
         "points": _row_to_points(slide),
+        "detect_meta": detect_meta,
         "thumbnail_base64": _as_base64(slide.thumbnail),
     }
 
@@ -312,6 +375,7 @@ def get_slide(slide_id: int, db: Session = Depends(get_db)):
         "filters_applied": _load_filters(row.filters_applied),
         "extracted_text": row.extracted_text,
         "points": _row_to_points(row),
+        "detect_meta": _row_to_detect_meta(row),
         "inherited_points": inherited_points,
         "has_result": bool(row.result_path),
         "thumbnail_base64": _as_base64(row.thumbnail),

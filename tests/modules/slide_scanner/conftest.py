@@ -56,6 +56,7 @@ def slide_scanner_session(tmp_path: Path):
     _apply_sql_file(engine, migrations_dir / "006_tags.sql")
     _apply_sql_file(engine, migrations_dir / "010_mobile_ingest.sql")
     _apply_sql_file(engine, migrations_dir / "011_slides_source_device.sql")
+    _apply_sql_file(engine, migrations_dir / "012_rectifier_detect_meta.sql")
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     session = SessionLocal()
