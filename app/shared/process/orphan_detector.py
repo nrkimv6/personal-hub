@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import psutil
 
+from app.core.config import settings
 from app.shared.process.registry import ProcessRegistry
 
 if TYPE_CHECKING:
@@ -164,9 +165,41 @@ class OrphanDetector:
         from app.shared.process.memory_pressure import MemoryPressureResponder
 
         pressure = MemoryPressureResponder(self)
+        loop_count = 0
+        capture_every_loops = max(1, int(getattr(settings, "PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 1)))
+        capture_timeout = max(1, int(getattr(settings, "PROCESS_WATCH_CAPTURE_TIMEOUT_SEC", 10)))
+        capture_limit = max(1, int(getattr(settings, "PROCESS_WATCH_CAPTURE_LIMIT", 200)))
 
         while True:
             try:
+                loop_count += 1
+                if loop_count % capture_every_loops == 0:
+                    try:
+                        from app.shared.process.snapshot_writer import SnapshotWriter
+
+                        writer = SnapshotWriter(self.registry)
+                        captured = await asyncio.wait_for(
+                            writer.capture_python_processes(
+                                min_memory_mb=0.0,
+                                limit=capture_limit,
+                                captured_by="periodic",
+                            ),
+                            timeout=capture_timeout,
+                        )
+                        logger.debug(
+                            "[process-watch] periodic capture complete: count=%s loop=%s",
+                            captured,
+                            loop_count,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[process-watch] periodic capture timeout after %ss", capture_timeout
+                        )
+                    except Exception as capture_exc:
+                        logger.warning(
+                            "[process-watch] periodic capture failed: %s", capture_exc
+                        )
+
                 orphans = await self.scan()
                 await self.cleanup(orphans)
                 await pressure.check()

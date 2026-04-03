@@ -1,7 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { serviceDashboardApi, systemApi, processMonitorApi } from '$lib/api';
-  import type { ServiceDashboardStatus, RedisStatus, NssmService, WorkerProcess, ScheduledTask, StartupProgram, PythonProcess, NightlyCleanupStats } from '$lib/api';
+  import { serviceDashboardApi, systemApi, processWatchApi } from '$lib/api';
+  import type {
+    ServiceDashboardStatus,
+    RedisStatus,
+    NssmService,
+    WorkerProcess,
+    ScheduledTask,
+    StartupProgram,
+    ProcessWatchItem,
+    ProcessWatchLatestResponse,
+    NightlyCleanupStats
+  } from '$lib/api';
   import { devRunnerRunnerApi } from '$lib/api/dev-runner';
   import type { RunStatusResponse } from '$lib/api/dev-runner';
   import StatusDot from '$lib/components/ui/StatusDot.svelte';
@@ -36,8 +46,11 @@
   let cleanupStats = $state<NightlyCleanupStats | null>(null);
   let cleanupStatsLoading = $state(false);
 
-  // Python 프로세스 모니터
-  let pythonProcesses = $state<PythonProcess[]>([]);
+  // Process Watch 모니터
+  let processWatchLatest = $state<ProcessWatchLatestResponse | null>(null);
+  let processWatchRows = $state<ProcessWatchItem[]>([]);
+  let processWatchHistoryRows = $state<ProcessWatchItem[]>([]);
+  let processWatchError = $state<string | null>(null);
   let processLoading = $state(false);
   let processPollingEnabled = $state(false);
   let processPollingInterval: ReturnType<typeof setInterval> | null = null;
@@ -249,33 +262,61 @@
     } catch { /* graceful */ }
   }
 
-  async function fetchPythonProcesses() {
+  async function fetchProcessWatch() {
     try {
-      pythonProcesses = await processMonitorApi.getPythonProcesses();
-    } catch { /* graceful */ }
+      const [latest, history] = await Promise.all([
+        processWatchApi.latest({ min_mb: 0, limit: 200 }),
+        processWatchApi.history({ min_mb: 1024, limit: 200 })
+      ]);
+      processWatchLatest = latest;
+      processWatchRows = latest.items;
+      processWatchHistoryRows = history.items;
+      processWatchError = latest.error ?? null;
+    } catch (e) {
+      processWatchError = e instanceof Error ? e.message : 'process-watch 조회 실패';
+    }
   }
 
   function toggleProcessPolling() {
     processPollingEnabled = !processPollingEnabled;
     if (processPollingEnabled) {
       processLoading = true;
-      fetchPythonProcesses().finally(() => { processLoading = false; });
-      processPollingInterval = setInterval(fetchPythonProcesses, PROCESS_REFRESH_INTERVAL);
+      fetchProcessWatch().finally(() => { processLoading = false; });
+      processPollingInterval = setInterval(fetchProcessWatch, PROCESS_REFRESH_INTERVAL);
     } else {
       if (processPollingInterval) { clearInterval(processPollingInterval); processPollingInterval = null; }
     }
   }
 
-  async function handleKillProcess(pid: number, role: string) {
+  async function handleKillProcess(item: ProcessWatchItem) {
+    const scope = item.scope ?? 'external';
+    const defaultReason = scope === 'monitor_page'
+      ? 'memory pressure cleanup'
+      : 'external process emergency cleanup';
+    const reason = window.prompt(
+      `PID ${item.pid} 종료 사유를 입력하세요 (최소 8자).\nscope=${scope}`,
+      defaultReason
+    );
+    if (!reason || reason.trim().length < 8) {
+      alert('종료 사유는 최소 8자 이상이어야 합니다.');
+      return;
+    }
     showConfirm(
       '프로세스 강제 종료',
-      `PID ${pid} (${role})을 강제 종료하시겠습니까?`,
+      `PID ${item.pid} (${item.name})을 강제 종료하시겠습니까?`,
       async () => {
         try {
-          await processMonitorApi.killProcess(pid);
-          await fetchPythonProcesses();
+          await processWatchApi.kill({
+            pid: item.pid,
+            expected_create_time: item.create_time,
+            expected_cmdline_hash: item.cmdline_hash,
+            reason: reason.trim(),
+            force: scope !== 'monitor_page'
+          });
+          await fetchProcessWatch();
         } catch (e) {
           console.error('프로세스 종료 실패:', e);
+          alert(`프로세스 종료 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
         }
       },
       true,
@@ -1087,20 +1128,31 @@
     </div>
   {/if}
 
-  <!-- Python 프로세스 모니터 -->
+  <!-- Process Watch 모니터 -->
   <div class="bg-card rounded-lg border border-border shadow-card">
     <div class="flex items-center justify-between px-4 py-3 border-b border-border">
       <div class="flex items-center gap-2">
-        <h3 class="text-sm font-semibold text-foreground">Python 프로세스</h3>
+        <h3 class="text-sm font-semibold text-foreground">Process Watch (Python)</h3>
         {#if processPollingEnabled}
-          <span class="text-[10px] px-1.5 py-0.5 rounded bg-success-light text-success font-medium">{pythonProcesses.length}개</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-success-light text-success font-medium">{processWatchRows.length}개</span>
           <span class="text-[10px] text-muted-foreground">5초 갱신</span>
+        {/if}
+        {#if processWatchLatest}
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+            source={processWatchLatest.source}
+          </span>
+          {#if processWatchLatest.snapshot_age_seconds !== null}
+            <span class="text-[10px] text-muted-foreground">age {processWatchLatest.snapshot_age_seconds}s</span>
+          {/if}
+          {#if processWatchLatest.stale}
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-warning-light text-warning">stale</span>
+          {/if}
         {/if}
       </div>
       <div class="flex items-center gap-1.5">
         {#if processPollingEnabled}
           <button
-            onclick={() => fetchPythonProcesses()}
+            onclick={() => fetchProcessWatch()}
             class="h-6 px-2 text-[11px] rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >새로고침</button>
         {/if}
@@ -1116,36 +1168,47 @@
     {#if processPollingEnabled}
       {#if processLoading}
         <div class="p-4 text-center text-muted-foreground text-xs">로딩 중...</div>
-      {:else if pythonProcesses.length === 0}
-        <div class="p-4 text-center text-muted-foreground text-xs">Python 프로세스가 없습니다.</div>
+      {:else if processWatchRows.length === 0}
+        <div class="p-4 text-center text-muted-foreground text-xs">Python 프로세스 스냅샷이 없습니다.</div>
       {:else}
+        {#if processWatchError}
+          <div class="px-4 py-2 text-[11px] text-warning bg-warning-light/20 border-b border-border">
+            조회 경고: {processWatchError}
+          </div>
+        {/if}
         <div class="overflow-x-auto">
           <table class="w-full text-[11px]">
             <thead>
               <tr class="border-b border-border text-muted-foreground">
                 <th class="px-3 py-2 text-left font-medium">PID</th>
-                <th class="px-3 py-2 text-left font-medium">역할</th>
+                <th class="px-3 py-2 text-left font-medium">프로세스</th>
                 <th class="px-3 py-2 text-right font-medium">메모리</th>
-                <th class="px-3 py-2 text-right font-medium">CPU%</th>
-                <th class="px-3 py-2 text-left font-medium">실행시간</th>
-                <th class="px-3 py-2 text-left font-medium">상태</th>
+                <th class="px-3 py-2 text-left font-medium">부모</th>
+                <th class="px-3 py-2 text-left font-medium">scope</th>
                 <th class="px-3 py-2 text-center font-medium">종료</th>
               </tr>
             </thead>
             <tbody>
-              {#each pythonProcesses as proc}
-                <tr class="border-b border-border/50 hover:bg-muted/50 {proc.memory_mb > 500 ? 'bg-warning-light/30' : ''} {proc.memory_mb > 1000 ? 'bg-error-light/30' : ''}">
+              {#each processWatchRows as proc}
+                <tr class="border-b border-border/50 hover:bg-muted/50 {proc.memory_mb > 512 ? 'bg-warning-light/30' : ''} {proc.memory_mb > 1024 ? 'bg-error-light/30' : ''}">
                   <td class="px-3 py-1.5 font-mono text-muted-foreground">{proc.pid}</td>
-                  <td class="px-3 py-1.5 font-medium text-foreground max-w-[200px] truncate" title={proc.cmdline}>{proc.role}</td>
-                  <td class="px-3 py-1.5 text-right font-mono {proc.memory_mb > 500 ? 'text-warning font-semibold' : ''} {proc.memory_mb > 1000 ? 'text-error font-semibold' : ''}">{proc.memory_mb.toFixed(1)} MB</td>
-                  <td class="px-3 py-1.5 text-right font-mono">{proc.cpu_percent.toFixed(1)}</td>
-                  <td class="px-3 py-1.5 text-muted-foreground">{proc.uptime}</td>
+                  <td class="px-3 py-1.5 font-medium text-foreground max-w-[240px] truncate" title={proc.cmdline}>{proc.name}</td>
+                  <td class="px-3 py-1.5 text-right font-mono {proc.memory_mb > 512 ? 'text-warning font-semibold' : ''} {proc.memory_mb > 1024 ? 'text-error font-semibold' : ''}">{proc.memory_mb.toFixed(1)} MB</td>
                   <td class="px-3 py-1.5">
-                    <span class="text-[10px] px-1.5 py-0.5 rounded {proc.status === 'running' ? 'bg-success-light text-success' : proc.status === 'sleeping' ? 'bg-muted text-muted-foreground' : 'bg-warning-light text-warning'}">{proc.status}</span>
+                    <span class="font-mono text-muted-foreground">PPID {proc.ppid ?? '-'}</span>
+                    {#if proc.parent_name}
+                      <span class="ml-1 text-muted-foreground">({proc.parent_name})</span>
+                    {/if}
+                    {#if proc.is_orphan}
+                      <span class="ml-1 text-[10px] px-1 py-0.5 rounded bg-error-light text-error">orphan</span>
+                    {/if}
+                  </td>
+                  <td class="px-3 py-1.5">
+                    <span class="text-[10px] px-1.5 py-0.5 rounded {proc.scope === 'monitor_page' ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}">{proc.scope}</span>
                   </td>
                   <td class="px-3 py-1.5 text-center">
                     <button
-                      onclick={() => handleKillProcess(proc.pid, proc.role)}
+                      onclick={() => handleKillProcess(proc)}
                       class="h-5 w-5 inline-flex items-center justify-center rounded text-muted-foreground hover:text-error hover:bg-error-light transition-colors"
                       title="강제 종료"
                     >
@@ -1157,10 +1220,30 @@
             </tbody>
           </table>
         </div>
+
+        <div class="px-4 py-3 border-t border-border">
+          <div class="text-[11px] font-medium text-muted-foreground mb-2">1GB+ 최근 이력</div>
+          {#if processWatchHistoryRows.length === 0}
+            <div class="text-[11px] text-muted-foreground">기록 없음</div>
+          {:else}
+            <div class="space-y-1">
+              {#each processWatchHistoryRows.slice(0, 8) as item}
+                <div class="text-[11px] text-muted-foreground flex items-center gap-2">
+                  <span class="font-mono text-foreground">PID {item.pid}</span>
+                  <span>{item.memory_mb.toFixed(1)}MB</span>
+                  <span>{item.scope}</span>
+                  {#if item.is_orphan}<span class="text-error">orphan</span>{/if}
+                  <span class="truncate">{item.parent_name || '-'}</span>
+                  <span class="ml-auto">{new Date(item.captured_at).toLocaleTimeString('ko-KR')}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
       {/if}
     {:else}
       <div class="px-4 py-3 text-[11px] text-muted-foreground">
-        '모니터링 시작' 버튼을 누르면 Python 프로세스를 5초마다 조회합니다.
+        '모니터링 시작' 버튼을 누르면 process-watch 최신 스냅샷을 5초마다 조회합니다.
       </div>
     {/if}
   </div>
