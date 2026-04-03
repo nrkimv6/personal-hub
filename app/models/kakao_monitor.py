@@ -47,7 +47,7 @@ class KakaoWatchConfig(Base):
         cascade="all, delete-orphan",
     )
 
-    # action_type 유효값
+    # 키워드 액션 타입 유효값 (KakaoKeyword.action_type와 동일 계약)
     ACTION_TYPE_COLLECT = "collect"
     ACTION_TYPE_ALERT_ONLY = "alert_only"
 
@@ -75,6 +75,13 @@ class KakaoKeyword(Base):
     # 관계
     config = relationship("KakaoWatchConfig", back_populates="keywords")
     collected_posts = relationship("KakaoCollectedPost", back_populates="keyword")
+
+    # action_type 계약:
+    # - collect: 수집/저장 후 알림
+    # - alert_only: 수집 생략하고 트리거 기반 알림만 수행
+    ACTION_TYPE_COLLECT = KakaoWatchConfig.ACTION_TYPE_COLLECT
+    ACTION_TYPE_ALERT_ONLY = KakaoWatchConfig.ACTION_TYPE_ALERT_ONLY
+    VALID_ACTION_TYPES = {ACTION_TYPE_COLLECT, ACTION_TYPE_ALERT_ONLY}
 
     def __repr__(self) -> str:
         return f"<KakaoKeyword(id={self.id}, keyword={self.keyword!r}, action={self.action_type})>"
@@ -104,10 +111,14 @@ class KakaoCollectedPost(Base):
     screenshot_path = Column(String(500), nullable=True)
     status = Column(String(20), default="success", index=True)
 
-    # status 유효값
+    # status 계약:
+    # - success: 게시물 수집 + 저장까지 완료
+    # - partial: 트리거 저장/알림만 완료(수집 일부 실패 포함)
+    # - failed: 저장 시점에서 치명적 실패
     STATUS_SUCCESS = "success"
     STATUS_PARTIAL = "partial"
     STATUS_FAILED = "failed"
+    VALID_STATUSES = {STATUS_SUCCESS, STATUS_PARTIAL, STATUS_FAILED}
 
     # 관계
     config = relationship("KakaoWatchConfig", back_populates="collected_posts")

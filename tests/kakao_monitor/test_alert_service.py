@@ -61,3 +61,19 @@ def test_send_alert_log_fields(test_db_session: Session, config_and_post):
     assert log.sent_at is not None
     assert before <= log.sent_at <= after
     assert log.result == "ok"
+
+
+def test_publish_redis_uses_shared_sync_client(test_db_session: Session, config_and_post):
+    """Re: app.shared.redis.get_redis_client_sync 경로로 publish 호출."""
+    from app.modules.kakao_monitor.services.alert_service import KakaoAlertService
+
+    _, post = config_and_post
+    mock_sync_client = MagicMock()
+
+    with patch("app.shared.redis.get_redis_client_sync", return_value=mock_sync_client):
+        svc = KakaoAlertService(test_db_session)
+        svc._publish_redis(post, alert_type="sse", action_type="alert_only")
+
+    mock_sync_client.publish.assert_called_once()
+    payload = mock_sync_client.publish.call_args.args[1]
+    assert "\"action_type\": \"alert_only\"" in payload

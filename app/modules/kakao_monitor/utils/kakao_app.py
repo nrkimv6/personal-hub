@@ -63,6 +63,9 @@ class KakaoAppController:
         """카카오톡 메인 창 핸들 반환. 미발견 시 None.
 
         탐색 순서: EVA_Window_Dblclk → EVA_Window → #32770
+        stale handle 완화 기준:
+            - IsWindowVisible=True 이고
+            - class/title 조건을 만족하는 첫 번째 hwnd를 채택한다.
         """
         if win32gui is None:
             logger.warning("win32gui 미설치 — find_main_window() None 반환")

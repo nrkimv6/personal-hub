@@ -1,9 +1,12 @@
-"""
-의존성 주입 모듈
+"""의존성 주입 모듈.
 
 프로세스 분리 아키텍처:
     - API 서버: DB를 통해 워커와 통신, 브라우저 직접 사용 안함
     - 워커: BrowserManager 직접 관리
+
+DB 세션 규칙:
+    - 워커/라우트의 신규 구현은 `app.core.dependencies.get_db_session()`을 사용한다.
+    - `app.dependencies` 경로는 하위 호환용 래퍼이며 신규 코드 import를 금지한다.
 """
 from __future__ import annotations
 
@@ -29,5 +32,8 @@ def get_notification_service() -> "NotificationService":
 
 
 def get_db_session() -> Session:
-    """DB 세션을 반환합니다."""
+    """SQLAlchemy Session 인스턴스를 반환한다.
+
+    호출 측에서 `with get_db_session() as db:` 형태로 사용한다.
+    """
     return SessionLocal()

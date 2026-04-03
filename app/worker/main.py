@@ -226,20 +226,51 @@ async def run_with_orchestrator(
             orchestrator.register_worker("plan_archive_listener", plan_archive_listener)
             logger.info("PlanArchiveListener 등록됨")
 
-        # 카카오 모니터 워커 (활성 설정이 있을 때만)
+        # 카카오 모니터 워커 (활성 설정 0건이어도 idle 모드로 등록)
+        kakao_stage = "import"
         try:
-            from app.database import get_db_session
+            from app.core.dependencies import get_db_session
             from app.models.kakao_monitor import KakaoWatchConfig
+            from app.modules.kakao_monitor.runtime_status import mark_registration
+
+            kakao_stage = "query"
             with get_db_session() as _db:
-                has_kakao_config = _db.query(KakaoWatchConfig).filter(
+                active_config_count = _db.query(KakaoWatchConfig).filter(
                     KakaoWatchConfig.is_active.is_(True)
-                ).count() > 0
-            if has_kakao_config:
-                kakao_worker = KakaoMonitorWorker(browser_manager)
-                orchestrator.register_worker("kakao_monitor", kakao_worker)
-                logger.info("KakaoMonitorWorker 등록됨")
+                ).count()
+
+            kakao_stage = "instantiate"
+            kakao_worker = KakaoMonitorWorker(
+                browser_manager=orchestrator.browser_manager
+            )
+
+            kakao_stage = "register"
+            orchestrator.register_worker("kakao_monitor", kakao_worker)
+            mark_registration(registered=True, stage="register")
+            logger.info(
+                "[KAKAO_REGISTER] 등록 완료 (active_config_count=%d)",
+                active_config_count,
+            )
+            if active_config_count == 0:
+                logger.info(
+                    "[KAKAO_REGISTER] active config 없음 - idle 모드로 대기"
+                )
         except Exception as _e:
-            logger.warning("KakaoMonitorWorker 등록 실패 (무시): %s", _e)
+            try:
+                from app.modules.kakao_monitor.runtime_status import mark_registration
+
+                mark_registration(
+                    registered=False,
+                    stage=kakao_stage,
+                    error=f"{type(_e).__name__}: {_e}",
+                )
+            except Exception:
+                pass
+            logger.warning(
+                "[KAKAO_REGISTER] 등록 실패 stage=%s error=%s",
+                kakao_stage,
+                _e,
+            )
 
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
