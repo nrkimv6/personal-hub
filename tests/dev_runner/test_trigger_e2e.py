@@ -41,8 +41,9 @@ def listener_process(redis_client):
 
     process = subprocess.Popen(
         [sys.executable, str(script_path), "--redis-db", str(REDIS_TEST_DB)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     time.sleep(2)  # 리스너 시작 대기
 
@@ -58,6 +59,11 @@ def listener_process(redis_client):
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+        )
 
 
 @pytest.mark.e2e

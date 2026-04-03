@@ -27,6 +27,7 @@ def git_repo(tmp_path):
     (tmp_path / "README.md").write_text("init")
     subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
+    subprocess.run(["git", "checkout", "-B", "main"], capture_output=True, cwd=str(tmp_path))
     base = tmp_path / ".worktrees"
     base.mkdir()
     return tmp_path, base

@@ -12,6 +12,7 @@ Redis 키 구조:
 import os
 import time
 import logging
+import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,45 @@ _ENQUEUE_LUA = (
     "redis.call('RPUSH', KEYS[1], ARGV[1]); "
     "return 1"
 )
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """PID 생존 여부를 안전하게 확인한다.
+
+    Windows에서 ``os.kill(pid, 0)``는 POSIX와 달리 안전한 존재 확인이 아니므로
+    우선 ``psutil.pid_exists``를 사용한다.
+    """
+    if pid <= 0:
+        return False
+
+    if sys.platform == "win32":
+        try:
+            import psutil
+
+            return bool(psutil.pid_exists(pid))
+        except Exception:
+            # psutil 사용 불가 시 OpenProcess fallback
+            try:
+                import ctypes
+
+                SYNCHRONIZE = 0x00100000
+                handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+                if handle == 0:
+                    return False
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            except Exception:
+                return False
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
 
 
 def _get_repo_id(project_root: Path) -> str:
@@ -74,7 +114,7 @@ def get_turn_key(runner_id: str) -> str:
 def _remove_if_stale(redis_client, front: str, repo_id: str) -> bool:
     """큐 맨 앞 runner가 죽었으면 큐에서 제거하고 다음 runner에게 signal을 보낸다.
 
-    PID Redis 키 → os.kill(0) 생존 확인 → 죽었으면 LREM.
+    PID Redis 키 → 안전한 PID 생존 확인 → 죽었으면 LREM.
     LREM 후 새 front runner에게 LPUSH signal.
 
     Args:
@@ -90,10 +130,8 @@ def _remove_if_stale(redis_client, front: str, repo_id: str) -> bool:
     if pid_raw is not None:
         try:
             pid = int(pid_raw.decode() if isinstance(pid_raw, bytes) else pid_raw)
-            os.kill(pid, 0)  # 생존 확인 (signal 0, 실제 시그널 미전송)
-            return False  # 살아있음
-        except (ProcessLookupError, OSError):
-            pass  # 죽은 프로세스 → fall-through to LREM
+            if _is_pid_alive(pid):
+                return False
         except (ValueError, TypeError):
             pass  # pid 파싱 실패 → status 기반 판단으로 fall-through
 

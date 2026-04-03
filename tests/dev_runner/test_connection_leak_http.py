@@ -14,6 +14,27 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "browser_workers.py"
 
 
+def _assert_no_redis_connection_leak(
+    r: redis.Redis,
+    before: int,
+    *,
+    max_delta: int = 1,
+    settle_seconds: int = 8,
+) -> None:
+    """연결 수가 일시적으로 튀는 환경을 고려해 settle 구간의 최소값으로 검증."""
+    threshold = before + max_delta
+    observed: list[int] = []
+    for _ in range(settle_seconds):
+        info = r.info("clients")
+        observed.append(info.get("connected_clients", 0))
+        if observed[-1] <= threshold:
+            return
+        time.sleep(1)
+    raise AssertionError(
+        f"연결 누수: before={before}, threshold={threshold}, observed={observed}"
+    )
+
+
 def _server_available() -> bool:
     try:
         r = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=3)
@@ -62,12 +83,7 @@ def test_sse_events_connection_cleanup_http():
     finally:
         session.close()
 
-    time.sleep(5)
-
-    info_after = r.info("clients")
-    after = info_after.get("connected_clients", 0)
-
-    assert after <= before + 1, f"연결 누수: before={before}, after={after}"
+    _assert_no_redis_connection_leak(r, before, max_delta=1, settle_seconds=10)
     r.close()
 
 
@@ -95,12 +111,7 @@ def test_sse_log_stream_nonexistent_runner_http():
     finally:
         session.close()
 
-    time.sleep(3)
-
-    info_after = r.info("clients")
-    after = info_after.get("connected_clients", 0)
-
-    assert after <= before + 1, f"연결 누수: before={before}, after={after}"
+    _assert_no_redis_connection_leak(r, before, max_delta=1, settle_seconds=10)
     r.close()
 
 

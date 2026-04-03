@@ -47,6 +47,19 @@ def _collect_initial_status_http(timeout: float = 5.0) -> list[dict]:
     return []
 
 
+def _wait_runner_in_initial_status(runner_id: str, timeout: float = 20.0) -> list[dict]:
+    """초기 status 이벤트를 재시도 수집해 특정 runner가 나타날 때까지 대기한다."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining = max(1.0, deadline - time.monotonic())
+        runners = _collect_initial_status_http(timeout=min(5.0, remaining))
+        matching = [r for r in runners if r.get("runner_id") == runner_id]
+        if matching:
+            return matching
+        time.sleep(0.3)
+    return []
+
+
 def _is_api_available() -> bool:
     try:
         resp = requests.get(f"{ADMIN_API}/health", timeout=2)
@@ -98,9 +111,9 @@ class TestSseFilterHttp:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
             # plan_file 키 미설정
             redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+            time.sleep(0.2)
 
-            runners = _collect_initial_status_http(timeout=5.0)
-            matching = [r for r in runners if r.get("runner_id") == runner_id]
+            matching = _wait_runner_in_initial_status(runner_id)
 
             assert len(matching) >= 1, f"runner {runner_id!r}이 HTTP /events 결과에 없음"
             plan_file = matching[0].get("plan_file")
@@ -128,9 +141,9 @@ class TestSseFilterHttp:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user:all")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", PLAN_FILE_ALL)
             redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+            time.sleep(0.2)
 
-            runners = _collect_initial_status_http(timeout=5.0)
-            matching = [r for r in runners if r.get("runner_id") == runner_id]
+            matching = _wait_runner_in_initial_status(runner_id)
 
             assert len(matching) >= 1, f"runner {runner_id!r}이 HTTP /events 결과에 없음"
             assert matching[0].get("plan_file") == PLAN_FILE_ALL

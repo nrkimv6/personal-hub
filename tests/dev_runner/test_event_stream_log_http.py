@@ -71,6 +71,7 @@ def _check_admin_api():
 
 
 @pytest.mark.skipif(not _check_admin_api(), reason="Admin API not available (localhost:8001)")
+@pytest.mark.integration
 class TestEventStreamLogIntegration:
     """T3/T4: /events SSE에서 log/merge_log 이벤트 수신 확인"""
 

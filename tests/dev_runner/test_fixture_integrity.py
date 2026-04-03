@@ -11,6 +11,8 @@ def test_fixture_files_match_stems():
 
 def test_fixture_no_stale_branch_fields():
     """B: 각 fixture .md 파일 내용에 '> branch:' / '> worktree:' 문자열 없음 assert"""
+    # 이전 E2E 실행에서 남은 헤더 필드를 선정리해 실행 순서 의존성을 제거
+    _cleanup_test_worktrees()
     for stem in TEST_PLAN_STEMS:
         content = (FIXTURES_DIR / f"{stem}.md").read_text(encoding="utf-8")
         assert "> branch:" not in content, f"stale branch field found in {stem}.md"

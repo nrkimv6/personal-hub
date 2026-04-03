@@ -33,6 +33,20 @@ def _load_listener():
     return mod
 
 
+def _get_process_utils():
+    return sys.modules["_dr_process_utils"]
+
+
+def _reset_shared_state():
+    state_mod = sys.modules["_dr_state"]
+    state_mod.get_running_processes().clear()
+    state_mod.get_running_log_files().clear()
+    state_mod.get_stream_threads().clear()
+    state_mod.get_cleanup_done().clear()
+    state_mod.get_dead_process_first_seen().clear()
+    state_mod.get_zombie_first_seen().clear()
+
+
 def make_redis_for_reconnect(runner_id: str, pid: str | None, merge_status: str | None):
     """reconnect 테스트용 Redis mock — active_runners + runner 키 시뮬레이션"""
     redis = MagicMock()
@@ -64,6 +78,8 @@ class TestReconnectDmOrphan:
     def test_reconnect_dm_orphan_queued_calls_recover(self):
         """R(Right): active_runners에 dm-* runner, pid 없음, merge_status=queued → _recover_pending_merge 호출"""
         cl = _load_listener()
+        pu = _get_process_utils()
+        _reset_shared_state()
         runner_id = "t-reconn-abcd"
         redis = make_redis_for_reconnect(runner_id, pid=None, merge_status="queued")
 
@@ -73,8 +89,8 @@ class TestReconnectDmOrphan:
         def mock_thread_start(self_t):
             started_threads.append(self_t)
 
-        with patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
-             patch.object(cl, "_recover_pending_merge") as mock_recover, \
+        with patch.object(pu, "_cleanup_process_state") as mock_cleanup, \
+             patch.object(pu, "_recover_pending_merge") as mock_recover, \
              patch("threading.Thread") as mock_thread_cls:
             mock_thread = MagicMock()
             mock_thread_cls.return_value = mock_thread
@@ -91,11 +107,13 @@ class TestReconnectDmOrphan:
     def test_reconnect_dm_orphan_merging_calls_recover(self):
         """R(Right): merge_status=merging → _recover_pending_merge 호출"""
         cl = _load_listener()
+        pu = _get_process_utils()
+        _reset_shared_state()
         runner_id = "t-reconn-beef"
         redis = make_redis_for_reconnect(runner_id, pid=None, merge_status="merging")
 
-        with patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
-             patch.object(cl, "_recover_pending_merge") as mock_recover, \
+        with patch.object(pu, "_cleanup_process_state") as mock_cleanup, \
+             patch.object(pu, "_recover_pending_merge") as mock_recover, \
              patch("threading.Thread") as mock_thread_cls:
             mock_thread = MagicMock()
             mock_thread_cls.return_value = mock_thread
@@ -109,10 +127,12 @@ class TestReconnectDmOrphan:
     def test_reconnect_dm_orphan_no_merge_status_cleanup(self):
         """B(Boundary): pid 없음 + merge_status 없음 → cleanup 호출"""
         cl = _load_listener()
+        pu = _get_process_utils()
+        _reset_shared_state()
         runner_id = "t-reconn-dead"
         redis = make_redis_for_reconnect(runner_id, pid=None, merge_status=None)
 
-        with patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
+        with patch.object(pu, "_cleanup_process_state") as mock_cleanup, \
              patch("threading.Thread") as mock_thread_cls:
             cl._reconnect_surviving_runners(redis)
 
@@ -149,11 +169,13 @@ class TestReconnectOrphanScan:
     def test_reconnect_orphan_scan_no_pid_queued(self):
         """R(Right): orphan scan — dm-* pid 없음, merge_status=queued → _recover_pending_merge"""
         cl = _load_listener()
+        pu = _get_process_utils()
+        _reset_shared_state()
         orphan_id = "dm-cafe9999"
         redis = self._make_redis_orphan_scan(orphan_id, merge_status="queued")
 
-        with patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
-             patch.object(cl, "_recover_pending_merge") as mock_recover, \
+        with patch.object(pu, "_cleanup_process_state") as mock_cleanup, \
+             patch.object(pu, "_recover_pending_merge") as mock_recover, \
              patch("threading.Thread") as mock_thread_cls:
             mock_thread = MagicMock()
             mock_thread_cls.return_value = mock_thread
@@ -167,10 +189,12 @@ class TestReconnectOrphanScan:
     def test_reconnect_orphan_scan_no_pid_cleanup(self):
         """B(Boundary): orphan scan — pid 없음, merge_status 없음 → cleanup"""
         cl = _load_listener()
+        pu = _get_process_utils()
+        _reset_shared_state()
         orphan_id = "dm-dead1111"
         redis = self._make_redis_orphan_scan(orphan_id, merge_status=None)
 
-        with patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
+        with patch.object(pu, "_cleanup_process_state") as mock_cleanup, \
              patch("threading.Thread") as mock_thread_cls:
             cl._reconnect_surviving_runners(redis)
 

@@ -43,10 +43,11 @@ class TestCorrectConformance:
         """Existence - 필수 파일 누락 시 동작 의도 확인"""
         # RunRequest 스키마 자체에서는 plan_file이 Optional이지만, 
         # API 레이어(ExecutorService)에서는 parallel=False일 때 plan_file이 없으면
-        # cli에서 거부하도록 설계되어 있음. 스키마가 이를 허용하는지(Optional[str]) 확인
+        # cli에서 거부하도록 설계되어 있음. 스키마가 이를 허용하는지(Optional[str]) 확인.
+        # 엔진 기본값은 settings 단계에서 해석되므로 요청 스키마 기본값은 None이다.
         req = RunRequest(parallel=False)
         assert req.plan_file is None
-        assert req.engine == "claude" # default is claude
+        assert req.engine is None
 
     def test_time_until_format(self):
         """Time - until 시간 형식 검증"""

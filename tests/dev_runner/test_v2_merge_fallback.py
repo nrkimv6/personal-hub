@@ -521,7 +521,7 @@ def test_cleanup_normal_join_B():
 
 @pytest.mark.asyncio
 async def test_handle_merge_stage_sets_merge_status_on_success_R():
-    """R(Right): execute_merge mock 성공 → Redis merge_status=merged 확인"""
+    """R(Right): execute_merge mock 성공 → Redis merge_status가 merged를 거쳐 done으로 종료"""
     import sys
     _wtools_path = Path(__file__).parents[6] / "service" / "wtools" / "common" / "tools" / "plan-runner"
     if str(_wtools_path) not in sys.path:
@@ -534,9 +534,11 @@ async def test_handle_merge_stage_sets_merge_status_on_success_R():
 
     mock_redis = MagicMock()
     status_calls = {}
+    status_history = []
 
     def _redis_set(key, val):
         status_calls[key] = val
+        status_history.append((key, val))
 
     mock_redis.set.side_effect = _redis_set
     mock_redis.ping.return_value = True
@@ -550,6 +552,8 @@ async def test_handle_merge_stage_sets_merge_status_on_success_R():
     with patch("core.merge_stage.execute_merge", new=AsyncMock(return_value=mock_merge_result)), \
          patch("core.merge_stage.run_post_merge_tests", new=AsyncMock(return_value=mock_test_result)), \
          patch("core.merge_stage.run_done", return_value=True), \
+         patch("core.merge_stage._ml_acquire", return_value=True), \
+         patch("core.merge_stage._ml_release"), \
          patch("core.merge_stage._cleanup_remote_branch"), \
          patch("core.merge_stage._redis_mod") as mock_redis_mod:
         mock_redis_mod.Redis.return_value = mock_redis
@@ -564,9 +568,10 @@ async def test_handle_merge_stage_sets_merge_status_on_success_R():
         )
 
     assert result.status == "SUCCESS"
-    # merge_status=merged 키가 세팅됐는지 확인
-    merged_key = "plan-runner:runners:runner-ms-test:merge_status"
-    assert status_calls.get(merged_key) == "merged", f"merge_status 세팅 없음. calls={status_calls}"
+    merge_key = "plan-runner:runners:runner-ms-test:merge_status"
+    assert status_calls.get(merge_key) == "done", f"최종 merge_status=done 세팅 누락. calls={status_calls}"
+    merge_values = [v for (k, v) in status_history if k == merge_key]
+    assert "merged" in merge_values, f"중간 merge_status=merged 세팅 누락. history={status_history}"
 
 
 @pytest.mark.asyncio
@@ -596,6 +601,8 @@ async def test_handle_merge_stage_sets_merge_status_on_failure_E():
     mock_merge_result.message = "merge 실패"
 
     with patch("core.merge_stage.execute_merge", new=AsyncMock(return_value=mock_merge_result)), \
+         patch("core.merge_stage._ml_acquire", return_value=True), \
+         patch("core.merge_stage._ml_release"), \
          patch("core.merge_stage._redis_mod") as mock_redis_mod:
         mock_redis_mod.Redis.return_value = mock_redis
 
@@ -647,6 +654,8 @@ async def test_handle_merge_stage_sets_merging_before_execute_R():
         return r
 
     with patch("core.merge_stage.execute_merge", new=_mock_execute_merge), \
+         patch("core.merge_stage._ml_acquire", return_value=True), \
+         patch("core.merge_stage._ml_release"), \
          patch("core.merge_stage._redis_mod") as mock_redis_mod:
         mock_redis_mod.Redis.return_value = mock_redis
 

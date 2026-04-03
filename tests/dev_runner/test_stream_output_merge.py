@@ -88,6 +88,7 @@ def test_stream_output_finally_merge_requested_flag(listener_mod, plan_runner_mo
     """R(Right): merge_requested 플래그 있으면 _do_inline_merge() 호출"""
     runner_id = "t-stream-aabb"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
 
     process = _make_process(returncode=0)
     log_handle = _make_log_handle()
@@ -108,6 +109,7 @@ def test_stream_output_finally_no_merge_flag(listener_mod, plan_runner_mod, fr):
     """R(Right): merge_requested 플래그 없으면 _cleanup_process_state() 호출"""
     runner_id = "t-stream-eeff"
     # 플래그 미설정
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
 
     process = _make_process(returncode=0)
     log_handle = _make_log_handle()
@@ -193,6 +195,7 @@ def test_stream_output_workflow_status_no_merge(listener_mod, plan_runner_mod, f
     """R(Right): merge_requested 없는 정상 종료 시 workflow status=completed"""
     runner_id = "t-stream-1122"
     # 플래그 미설정
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
 
     process = _make_process(returncode=0)
     log_handle = _make_log_handle()
@@ -212,6 +215,7 @@ def test_stream_output_sets_pre_merge_status(listener_mod, plan_runner_mod, fr):
     """R(Right): merge_requested=1 + exit_code=0 시 인라인 merge가 상태 전이를 담당"""
     runner_id = "t-premrg-aabb"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
 
     process = _make_process(returncode=0)
     log_handle = _make_log_handle()

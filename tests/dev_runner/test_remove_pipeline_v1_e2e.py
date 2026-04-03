@@ -164,8 +164,9 @@ def listener_process_e2e(redis_client_e2e):
 
     process = subprocess.Popen(
         [sys.executable, str(script_path), "--redis-db", str(REDIS_TEST_DB)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     # heartbeat 대기 (최대 15초)
     heartbeat_ok = False
@@ -185,6 +186,11 @@ def listener_process_e2e(redis_client_e2e):
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+        )
 
 
 @pytest.mark.e2e

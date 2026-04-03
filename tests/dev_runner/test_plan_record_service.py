@@ -514,6 +514,11 @@ class TestDbIsolationNoProductionPollution:
         try:
             cursor = conn.cursor()
             cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='plan_records'"
+            )
+            if cursor.fetchone() is None:
+                pytest.skip(f"Production DB에 plan_records 테이블 없음: {prod_db_path}")
+            cursor.execute(
                 "SELECT COUNT(*) FROM plan_records WHERE file_path LIKE '%pytest-isolation-check%'"
             )
             count = cursor.fetchone()[0]

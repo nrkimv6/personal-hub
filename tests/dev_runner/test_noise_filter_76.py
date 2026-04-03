@@ -11,8 +11,9 @@
 """
 import sys
 import time
+import io
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -36,7 +37,7 @@ def _real_is_noise_line(monkeypatch):
 
 def _make_process_stub(lines: list):
     proc = MagicMock()
-    proc.stdout = iter(line + "\n" for line in lines)
+    proc.stdout = io.StringIO("".join(f"{line}\n" for line in lines))
     proc.returncode = 0
     proc.wait = MagicMock(return_value=0)
     return proc
@@ -44,32 +45,16 @@ def _make_process_stub(lines: list):
 
 def _run_stream(lines: list):
     """_stream_output 직접 호출 → (published_messages, written_lines) 반환"""
-    # listener 모듈 로드 (redis는 mock으로 대체)
-    import unittest.mock as um
-    _redis_mock = um.MagicMock()
-    sys.modules.setdefault("redis", _redis_mock)
-
-    # 다른 테스트가 오염시킨 listener_noise_filter mock을 sys.modules에서 제거
-    # (test_command_listener_multi_runner.py가 is_noise_line=lambda: False로 mock 오염)
-    sys.modules.pop("listener_noise_filter", None)
-    sys.modules.pop("_listener_under_test", None)
-
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "_listener_under_test",
-        str(_SCRIPTS_DIR / "dev-runner-command-listener.py"),
-    )
-    mod = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(mod)
-    except Exception:
-        pass  # 전역 초기화 실패 무시 (함수만 사용)
+    # _dr_plan_runner 모듈은 재로딩하지 않고, 필터 함수 바인딩만 덮어써서
+    # 로깅/stdio 핸들러 재초기화 부작용을 피한다.
+    import _dr_plan_runner as mod
+    setattr(mod, "_is_noise_line", is_noise_line)
 
     # 이전 테스트에서 오염된 프로세스 상태 초기화 (self-join RuntimeError 방지)
-    if hasattr(mod, '_running_processes'):
-        mod._running_processes.clear()
-    if hasattr(mod, '_stream_threads'):
-        mod._stream_threads.clear()
+    from _dr_state import get_running_processes, get_stream_threads
+
+    get_running_processes().clear()
+    get_stream_threads().clear()
 
     _stream_output = getattr(mod, "_stream_output", None)
     if _stream_output is None:
@@ -83,9 +68,12 @@ def _run_stream(lines: list):
     mock_log.write.side_effect = lambda s: written.append(s)
 
     mock_redis = MagicMock()
+    mock_redis.get.return_value = None
     mock_redis.publish.side_effect = lambda ch, msg: published.append(msg)
 
-    _stream_output(proc, mock_log, mock_redis, runner_id="t-noise-runner")
+    # 노이즈 필터 동작만 검증하고, cleanup/merge fallback 부작용은 격리한다.
+    with patch.object(mod, "_cleanup_process_state"), patch.object(mod, "detect_merged_but_not_done", return_value=None):
+        _stream_output(proc, mock_log, mock_redis, runner_id="t-noise-runner")
     return published, written
 
 

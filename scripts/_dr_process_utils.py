@@ -2,6 +2,7 @@
 import logging
 import time
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -82,6 +83,51 @@ def _is_pid_alive(pid: int) -> bool:
         return exit_code.value == STILL_ACTIVE
     except Exception:
         return False
+
+
+def _parse_start_elapsed_seconds(start_time_raw, now_ts: Optional[float] = None) -> Optional[float]:
+    """start_time 값(epoch/isoformat)을 경과 초로 변환. 변환 불가 시 None."""
+    if start_time_raw in (None, ""):
+        return None
+
+    raw = str(start_time_raw).strip()
+    if not raw:
+        return None
+
+    current_ts = time.time() if now_ts is None else now_ts
+
+    # 1) epoch seconds/milliseconds 처리
+    try:
+        start_ts = float(raw)
+        if start_ts > 1e12:  # milliseconds
+            start_ts = start_ts / 1000.0
+        return max(0.0, current_ts - start_ts)
+    except Exception:
+        pass
+
+    # 2) ISO8601 문자열 처리 (naive datetime 포함)
+    try:
+        start_dt = datetime.fromisoformat(raw)
+        return max(0.0, current_ts - start_dt.timestamp())
+    except Exception:
+        return None
+
+
+def _is_recent_runner_without_hb(
+    redis_client: redis.Redis,
+    runner_id: str,
+    startup_grace_seconds: int = 600,
+) -> tuple[bool, Optional[float]]:
+    """subprocess_heartbeat 미존재 시, start_time 기준으로 최근 실행 runner인지 판정."""
+    try:
+        start_time_raw = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time")
+    except Exception:
+        return False, None
+
+    start_elapsed = _parse_start_elapsed_seconds(start_time_raw)
+    if start_elapsed is None:
+        return False, None
+    return start_elapsed < startup_grace_seconds, start_elapsed
 
 
 def get_plan_git_root(plan_file: str) -> Path:
@@ -495,7 +541,32 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
             continue
 
         if _is_pid_alive(pid):
-            _attach_to_running_process(runner_id, pid, redis_client)
+            # 좀비 감지: PID alive + subprocess_heartbeat 만료 → reconnect 대신 cleanup
+            _reconnect_zombie = False
+            try:
+                subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
+                if subprocess_hb is None:
+                    # Phase 4: 레거시 runner 보호 — start_time < 600초이면 fallback
+                    _rc_legacy, _rc_elapsed = _is_recent_runner_without_hb(redis_client, runner_id)
+                    if _rc_legacy:
+                        logger.debug(
+                            f"[reconnect] runner {runner_id} heartbeat 없음 but start_time "
+                            f"{_rc_elapsed:.0f}s 경과 → 레거시 보호 fallback"
+                        )
+                    if not _rc_legacy:
+                        _reconnect_zombie = True
+            except Exception:
+                pass  # Redis 오류 시 기존 로직 유지
+            if _reconnect_zombie:
+                try:
+                    from _dr_merge import _pub_and_log as _pal
+                    _pal(runner_id, f"runner {runner_id} PID {pid} alive but subprocess_heartbeat 없음 → reconnect_zombie cleanup", redis_client, "ZOMBIE")
+                except Exception:
+                    pass
+                logger.warning(f"[reconnect] zombie runner {runner_id} PID={pid} subprocess_heartbeat 없음 → cleanup")
+                _cleanup_process_state(runner_id, redis_client, reason="reconnect_zombie")
+            else:
+                _attach_to_running_process(runner_id, pid, redis_client)
         else:
             try:
                 _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
@@ -576,8 +647,32 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                 _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
                 continue
             if _is_pid_alive(pid):
-                logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 생존 → 재연결")
-                _attach_to_running_process(orphan_id, pid, redis_client)
+                # 좀비 감지: PID alive + subprocess_heartbeat 만료 → 재연결 대신 cleanup
+                _orphan_zombie = False
+                try:
+                    subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:subprocess_heartbeat")
+                    if subprocess_hb is None:
+                        _op_legacy, _op_elapsed = _is_recent_runner_without_hb(redis_client, orphan_id)
+                        if _op_legacy:
+                            logger.debug(
+                                f"[reconnect] orphan {orphan_id} heartbeat 없음 but start_time "
+                                f"{_op_elapsed:.0f}s 경과 → 레거시 보호 fallback"
+                            )
+                        if not _op_legacy:
+                            _orphan_zombie = True
+                except Exception:
+                    pass
+                if _orphan_zombie:
+                    try:
+                        from _dr_merge import _pub_and_log as _pal
+                        _pal(orphan_id, f"orphan {orphan_id} PID {pid} alive but subprocess_heartbeat 없음 → reconnect_zombie cleanup", redis_client, "ZOMBIE")
+                    except Exception:
+                        pass
+                    logger.warning(f"[reconnect] zombie orphan {orphan_id} PID={pid} subprocess_heartbeat 없음 → cleanup")
+                    _cleanup_process_state(orphan_id, redis_client, reason="reconnect_zombie")
+                else:
+                    logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 생존 → 재연결")
+                    _attach_to_running_process(orphan_id, pid, redis_client)
             else:
                 try:
                     _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_requested")

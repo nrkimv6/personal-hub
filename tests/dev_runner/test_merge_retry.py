@@ -80,7 +80,7 @@ class TestDoRetryMerge:
         with patch.object(mq, "acquire_merge_turn", return_value=True) as mock_acquire, \
              patch.object(mq, "release_merge_turn") as mock_release, \
              patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch.object(cl, "_cleanup_process_state"):
+             patch("_dr_commands._cleanup_process_state"):
             mock_wf = MagicMock()
             mock_wf.run.return_value = merge_result
             mock_wf_cls.return_value = mock_wf
@@ -103,7 +103,7 @@ class TestDoRetryMerge:
         with patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
              patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch.object(cl, "_cleanup_process_state"):
+             patch("_dr_commands._cleanup_process_state"):
             mock_wf = MagicMock()
             mock_wf.run.return_value = merge_result
             mock_wf_cls.return_value = mock_wf
@@ -127,7 +127,7 @@ class TestDoRetryMerge:
         with patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
              patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch.object(cl, "_cleanup_process_state") as mock_cleanup:
+             patch("_dr_commands._cleanup_process_state") as mock_cleanup:
             mock_wf = MagicMock()
             mock_wf.run.return_value = merge_result
             mock_wf_cls.return_value = mock_wf
@@ -145,11 +145,11 @@ class TestDoRetryMerge:
 
         import plan_runner.core.stages as stages
         with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_execute_merge_with_lock", return_value={
+             patch("_dr_commands._execute_merge_with_lock", return_value={
                  "success": False, "message": "conflict",
                  "conflict": True, "merge_status": "conflict", "action": "retry-merge"
              }), \
-             patch.object(cl, "_cleanup_process_state") as mock_cleanup:
+             patch("_dr_commands._cleanup_process_state") as mock_cleanup:
             cl._do_retry_merge("runner04", redis, "cmd004")
 
         mock_cleanup.assert_called_once()
@@ -169,7 +169,7 @@ class TestDoRetryMerge:
         import merge_queue as mq
         with patch.object(mq, "acquire_merge_turn", return_value=False), \
              patch.object(mq, "release_merge_turn"), \
-             patch.object(cl, "_cleanup_process_state") as mock_cleanup:
+             patch("_dr_commands._cleanup_process_state") as mock_cleanup:
             cl._do_retry_merge("runner05", redis, "cmd005")
 
         set_calls = [str(c) for c in redis.set.call_args_list]
@@ -182,7 +182,7 @@ class TestDoRetryMerge:
 
         redis = make_redis_mock(worktree_path=None)
 
-        with patch.object(cl, "_cleanup_process_state"):
+        with patch("_dr_commands._cleanup_process_state"):
             cl._do_retry_merge("runner06", redis, "cmd006")
 
         push_calls = redis.lpush.call_args_list
@@ -209,8 +209,8 @@ class TestDoRetryMergePhase3Gate:
         import plan_runner.core.stages as stages
         with patch.object(stages, "pre_merge_gate", side_effect=[(False, "git dirty: file.py"), (True, "clean")]) as mock_gate, \
              patch.object(stages, "auto_commit_stage", return_value=True) as mock_commit, \
-             patch.object(cl, "_execute_merge_with_lock", return_value={"success": True, "message": "merged", "merge_status": "merged", "action": "retry-merge"}), \
-             patch.object(cl, "_cleanup_process_state"):
+             patch("_dr_commands._execute_merge_with_lock", return_value={"success": True, "message": "merged", "merge_status": "merged", "action": "retry-merge"}), \
+             patch("_dr_commands._cleanup_process_state"):
             cl._do_retry_merge("runner_gate01", redis, "cmd_gate01")
 
         mock_commit.assert_called()
@@ -227,7 +227,7 @@ class TestDoRetryMergePhase3Gate:
         # 항상 dirty, auto_commit도 실패
         with patch.object(stages, "pre_merge_gate", return_value=(False, "git dirty: file.py")), \
              patch.object(stages, "auto_commit_stage", return_value=False), \
-             patch.object(cl, "_cleanup_process_state"):
+             patch("_dr_commands._cleanup_process_state"):
             cl._do_retry_merge("runner_gate02", redis, "cmd_gate02")
 
         set_calls = [str(c) for c in redis.set.call_args_list]
@@ -247,11 +247,11 @@ class TestDoRetryMergeConflictAutoResolve:
 
         import plan_runner.core.stages as stages
         with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_execute_merge_with_lock", return_value={
+             patch("_dr_commands._execute_merge_with_lock", return_value={
                  "success": False, "message": "conflict", "conflict": True,
                  "merge_status": "conflict", "action": "retry-merge"
              }), \
-             patch.object(cl, "_cleanup_process_state"):
+             patch("_dr_commands._cleanup_process_state"):
             cl._do_retry_merge("runner_conflict01", redis, "cmd_conflict01")
 
         # result에 conflict 정보가 LPUSH됨
@@ -268,11 +268,11 @@ class TestDoRetryMergeConflictAutoResolve:
 
         import plan_runner.core.stages as stages
         with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_execute_merge_with_lock", return_value={
+             patch("_dr_commands._execute_merge_with_lock", return_value={
                  "success": True, "message": "conflict resolved",
                  "merge_status": "merged", "action": "retry-merge"
              }), \
-             patch.object(cl, "_cleanup_process_state"):
+             patch("_dr_commands._cleanup_process_state"):
             cl._do_retry_merge("runner_conflict02", redis, "cmd_conflict02")
 
         push_calls = redis.lpush.call_args_list
@@ -290,11 +290,11 @@ class TestDoRetryMergeConflictAutoResolve:
 
         import plan_runner.core.stages as stages
         with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_execute_merge_with_lock", return_value={
+             patch("_dr_commands._execute_merge_with_lock", return_value={
                  "success": False, "message": "conflict",
                  "merge_status": "conflict", "action": "retry-merge"
              }), \
-             patch.object(cl, "_cleanup_process_state"):
+             patch("_dr_commands._cleanup_process_state"):
             cl._do_retry_merge("runner_conflict03", redis, "cmd_conflict03")
 
         push_calls = redis.lpush.call_args_list
@@ -316,11 +316,11 @@ class TestDoRetryMergePostPipeline:
 
         import plan_runner.core.stages as stages
         with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_execute_merge_with_lock", return_value={
+             patch("_dr_commands._execute_merge_with_lock", return_value={
                  "success": True, "message": "merged",
                  "merge_status": "merged", "action": "retry-merge"
              }), \
-             patch.object(cl, "_cleanup_process_state"):
+             patch("_dr_commands._cleanup_process_state"):
             cl._do_retry_merge("runner_pipe01", redis, "cmd_pipe01")
 
         push_calls = redis.lpush.call_args_list
@@ -338,14 +338,15 @@ class TestDoRetryMergePostPipeline:
 
         import plan_runner.core.stages as stages
         with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_execute_merge_with_lock", return_value={
+             patch("_dr_commands._execute_merge_with_lock", return_value={
                  "success": False, "message": "test_failed",
                  "merge_status": "test_failed", "action": "retry-merge"
              }), \
-             patch.object(cl, "_cleanup_process_state"):
+             patch("_dr_commands._cleanup_process_state"):
             cl._do_retry_merge("runner_pipe02", redis, "cmd_pipe02")
 
         push_calls = redis.lpush.call_args_list
         assert push_calls, "결과 LPUSH 없음"
         result = json.loads(push_calls[-1][0][1])
         assert result.get("success") is False
+

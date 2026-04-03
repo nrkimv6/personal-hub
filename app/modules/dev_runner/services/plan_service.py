@@ -422,8 +422,9 @@ class PlanService:
         # 완료 계열 상태
         if status in self._DONE_STATUSES:
             return True
-        # 체크박스 완료 여부는 visibility에 영향 주지 않음
-        # — /done 또는 수동 아카이브를 통해서만 목록에서 제거됨
+        # 진행률 100% plan은 자동 숨김 (완료 처리 전 임시 잔존 방지)
+        if progress and progress.total > 0 and progress.done >= progress.total:
+            return True
         return False
 
     # ========== plan 파싱 ==========

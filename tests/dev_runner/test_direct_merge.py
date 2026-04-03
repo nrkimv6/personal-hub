@@ -32,6 +32,14 @@ def _load_listener():
     return mod
 
 
+def _get_commands_module():
+    return sys.modules["_dr_commands"]
+
+
+def _get_plan_runner_module():
+    return sys.modules["_dr_plan_runner"]
+
+
 def make_redis_mock():
     redis = MagicMock()
     redis.set.return_value = True
@@ -50,12 +58,13 @@ class TestDoDirectMerge:
     def test_direct_merge_creates_temp_runner_id(self, tmp_path):
         """R(Right): dm- 접두사 runner_id + Redis 키 세팅 + active_runners SADD"""
         cl = _load_listener()
+        commands_mod = _get_commands_module()
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
         redis = make_redis_mock()
 
-        with patch.object(cl, "_do_inline_merge") as mock_inline:
+        with patch.object(commands_mod, "_do_inline_merge") as mock_inline:
             cl._do_direct_merge("runner/abc123", str(worktree), None, redis, "cmd001")
 
         # active_runners SADD 확인
@@ -73,11 +82,12 @@ class TestDoDirectMerge:
     def test_direct_merge_validates_worktree_exists(self, tmp_path):
         """E(Error): 존재하지 않는 worktree_path → 에러 LPUSH + _do_inline_merge 미호출"""
         cl = _load_listener()
+        commands_mod = _get_commands_module()
 
         redis = make_redis_mock()
         non_existent = str(tmp_path / "nonexistent" / "worktree")
 
-        with patch.object(cl, "_do_inline_merge") as mock_inline:
+        with patch.object(commands_mod, "_do_inline_merge") as mock_inline:
             cl._do_direct_merge("runner/abc123", non_existent, None, redis, "cmd002")
 
         push_calls = redis.lpush.call_args_list
@@ -102,12 +112,13 @@ class TestDoDirectMerge:
     def test_direct_merge_calls_inline_merge(self, tmp_path):
         """R(Right): 유효한 worktree → _do_inline_merge(runner_id, redis) 호출"""
         cl = _load_listener()
+        commands_mod = _get_commands_module()
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
         redis = make_redis_mock()
 
-        with patch.object(cl, "_do_inline_merge") as mock_inline:
+        with patch.object(commands_mod, "_do_inline_merge") as mock_inline:
             cl._do_direct_merge("runner/test001", str(worktree), None, redis, "cmd004")
 
         mock_inline.assert_called_once()
@@ -118,13 +129,14 @@ class TestDoDirectMerge:
     def test_direct_merge_sets_minimum_redis_keys(self, tmp_path):
         """R(Right): status/worktree_path/branch/merge_status 키 세팅"""
         cl = _load_listener()
+        commands_mod = _get_commands_module()
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
         redis = make_redis_mock()
         branch = "runner/mytest"
 
-        with patch.object(cl, "_do_inline_merge"):
+        with patch.object(commands_mod, "_do_inline_merge"):
             cl._do_direct_merge(branch, str(worktree), None, redis, "cmd005")
 
         set_calls = [str(c) for c in redis.set.call_args_list]
@@ -147,6 +159,7 @@ class TestInlineMergeBranchFromRedis:
         from unittest.mock import patch, MagicMock
 
         cl = _load_listener()
+        plan_runner_mod = _get_plan_runner_module()
 
         worktree = tmp_path / f"wt_{runner_id}"
         worktree.mkdir()
@@ -164,8 +177,8 @@ class TestInlineMergeBranchFromRedis:
             captured["branch"] = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id_}:branch")
             return {"success": True, "message": "mocked", "merge_status": "merged", "action": action_name}
 
-        with patch.object(cl, "_execute_merge_with_lock", side_effect=mock_execute_merge):
-            with patch.object(cl, "_cleanup_process_state", MagicMock()):
+        with patch.object(plan_runner_mod, "_execute_merge_with_lock", side_effect=mock_execute_merge):
+            with patch.object(plan_runner_mod, "_cleanup_process_state", MagicMock()):
                 cl._do_inline_merge(runner_id, redis)
 
         return captured

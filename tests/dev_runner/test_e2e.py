@@ -17,6 +17,31 @@ REDIS_PORT = 6379
 
 REDIS_TEST_DB = 15
 
+
+def _resolve_repo_root() -> Path:
+    """Resolve primary repo root even when tests run inside a git worktree."""
+    here = Path(__file__).resolve().parent
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            cwd=str(here),
+            check=True,
+        )
+        git_common_dir = Path(result.stdout.strip())
+        if not git_common_dir.is_absolute():
+            git_common_dir = (here / git_common_dir).resolve()
+        return git_common_dir.parent
+    except Exception:
+        # Fallback: tests/dev_runner/test_e2e.py -> repo root
+        return Path(__file__).resolve().parents[2]
+
+
+REPO_ROOT = _resolve_repo_root()
+E2E_PLAN_FILE = REPO_ROOT / "tests" / "dev_runner" / "fixtures" / "test_plan_e2e_mock.md"
+
+
 @pytest.fixture
 def dev_runner_listener():
     """Start the listener script as a background process for E2E tests (db=15 격리)"""
@@ -40,9 +65,9 @@ def dev_runner_listener():
     # Start listener process (db=15)
     process = subprocess.Popen(
         [sys.executable, str(script_path), "--redis-db", str(REDIS_TEST_DB)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     
     # Wait for listener to register heartbeat
@@ -52,8 +77,12 @@ def dev_runner_listener():
             break
         time.sleep(0.5)
     else:
-        out, err = process.communicate(timeout=1)
-        pytest.fail(f"Listener failed to start. Stdout: {out}, Stderr: {err}")
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        pytest.fail("Listener failed to start (heartbeat not detected within 10s)")
         
     yield process
 
@@ -66,10 +95,18 @@ def dev_runner_listener():
     # Teardown
     if process.poll() is None:
         process.terminate()
-        process.wait(timeout=5)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+        )
 
     # worktree 잔여물 정리
-    _root = Path("D:/work/project/tools/monitor-page")
+    _root = REPO_ROOT
     for _stem in ["test_plan_e2e_mock"]:
         subprocess.run(
             ["git", "worktree", "remove", str(_root / ".worktrees" / _stem), "--force"],
@@ -107,12 +144,14 @@ async def executor_service():
 @pytest.mark.parametrize("engine", ["gemini", "codex"])
 async def test_e2e_full_lifecycle(dev_runner_listener, executor_service, engine):
     """E2E Test: API -> Redis -> Listener -> plan-runner CLI -> success response"""
-    
+    if not E2E_PLAN_FILE.exists():
+        pytest.skip(f"E2E fixture plan not found: {E2E_PLAN_FILE}")
+
     # Create request with dry_run to execute quickly without LLM calls
     req = RunRequest(
         engine=engine,
         dry_run=True,
-        plan_file="test_plan_e2e_mock.md",
+        plan_file=str(E2E_PLAN_FILE),
         test_source="test_e2e",
     )
     

@@ -8,6 +8,7 @@ fakeredis 기반 단위 테스트와 분리하여 관리.
 """
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -105,9 +106,9 @@ def listener_process(isolated_redis):
     python = str(PYTHON_EXE) if PYTHON_EXE.exists() else "python"
     process = subprocess.Popen(
         [python, str(LISTENER_SCRIPT), "--redis-db", str(REDIS_TEST_DB)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     # heartbeat 대기 (최대 10초) — db=15에서 확인
@@ -117,7 +118,10 @@ def listener_process(isolated_redis):
         time.sleep(0.5)
     else:
         process.terminate()
-        process.wait(timeout=5)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
         pytest.fail("Listener heartbeat not detected within 10 seconds")
 
     yield process
@@ -164,6 +168,17 @@ def _cleanup_test_worktrees() -> None:
         )
         if res2.returncode != 0 and b"not found" not in res2.stderr:
             print(f"[cleanup] git branch remove failed for {stem}: {res2.stderr.decode('utf-8', errors='ignore').strip()}")
+
+        # fixture 파일에 남은 header 필드(> branch:, > worktree:)도 정리
+        fixture_path = FIXTURES_DIR / f"{stem}.md"
+        if fixture_path.exists():
+            try:
+                lines = fixture_path.read_text(encoding="utf-8").splitlines(keepends=True)
+                cleaned = [ln for ln in lines if not re.match(r"^>\s*(branch|worktree):", ln)]
+                if cleaned != lines:
+                    fixture_path.write_text("".join(cleaned), encoding="utf-8")
+            except Exception as e:
+                print(f"[cleanup] fixture header cleanup failed for {stem}: {e}")
 
 
 _PRESERVE_KEYS = {
