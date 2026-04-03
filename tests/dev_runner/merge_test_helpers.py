@@ -1,5 +1,9 @@
 """fakeredis 기반 dev_runner TC 공유 헬퍼 — pytest conftest는 직접 import 불가하여 별도 모듈로 추출"""
 from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
+import tempfile
+import time
 from unittest.mock import patch
 
 
@@ -19,3 +23,41 @@ def mock_merge_queue_turn(repo_id: str):
          patch("merge_queue.release_merge_turn", return_value=True), \
          patch("merge_queue._get_repo_id", return_value=repo_id):
         yield
+
+
+def emit_codex_runtime_failure(
+    redis_client,
+    runner_id: str,
+    *,
+    plan_file: str = "docs/plan/test.md",
+    trigger: str = "tc:codex_runtime_failure_http",
+    exit_reason: str = "auto_plan_failed",
+    stderr_lines: list[str] | None = None,
+) -> Path:
+    """accepted runner를 runtime 실패 상태로 전이시키는 테스트 헬퍼.
+
+    runners API 조회용 Redis 상태와 logs/recent 조회용 stream_log_path를 함께 구성한다.
+    반환값: 생성된 임시 로그 파일 경로 (테스트에서 unlink 필요).
+    """
+    if stderr_lines is None:
+        stderr_lines = [
+            "Error: unknown variant `xhigh`, expected one of `minimal`, `low`, `medium`, `high`",
+            "in `model_reasoning_effort`",
+        ]
+
+    prefix = f"plan-runner:runners:{runner_id}"
+    redis_client.srem("plan-runner:active_runners", runner_id)
+    redis_client.zadd("plan-runner:recent_runners", {runner_id: time.time()})
+    redis_client.set(f"{prefix}:status", "failed")
+    redis_client.set(f"{prefix}:engine", "codex")
+    redis_client.set(f"{prefix}:trigger", trigger)
+    redis_client.set(f"{prefix}:plan_file", plan_file)
+    redis_client.set(f"{prefix}:start_time", datetime.now().isoformat())
+    redis_client.set(f"{prefix}:exit_reason", exit_reason)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False, encoding="utf-8") as fp:
+        for line in stderr_lines:
+            fp.write(f"[09:50:53] [ERROR] {line}\n")
+        log_path = Path(fp.name)
+    redis_client.set(f"{prefix}:stream_log_path", str(log_path))
+    return log_path

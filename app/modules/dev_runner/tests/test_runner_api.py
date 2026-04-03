@@ -415,6 +415,49 @@ class TestStartRun:
         assert response.status_code == 422
         assert "codex 인증 실패" in response.text
 
+    async def test_start_run_codex_runtime_failure_not_preflight_422(self, client, mock_executor_redis):
+        """codex 요청이 accepted된 경우 runtime 실패는 start 단계 preflight 422 대상이 아님"""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+
+        brpop_result = (
+            "plan-runner:command_results:abc123",
+            json.dumps({"success": True, "message": "Started"}),
+        )
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "engine": "codex",
+                "fix_engine": "codex",
+            })
+
+        assert response.status_code == 200
+        assert response.json()["running"] is True
+
+    async def test_start_run_codex_runtime_failure_marker_detected_in_message(self, client, mock_executor_redis):
+        """model_reasoning_effort/xhigh 문자열은 preflight(422)가 아닌 runtime 실패(500)로 분류"""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+
+        brpop_result = (
+            "plan-runner:command_results:abc123",
+            json.dumps(
+                {
+                    "success": False,
+                    "message": "Error: unknown variant `xhigh`, expected one of `minimal`, `low`, `medium`, `high`\nin `model_reasoning_effort`",
+                }
+            ),
+        )
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "engine": "codex",
+                "fix_engine": "codex",
+            })
+
+        assert response.status_code == 500
+        assert "model_reasoning_effort" in response.text
+
     async def test_start_run_non_codex_failure_keeps_500(self, client, mock_executor_redis):
         """codex와 무관한 listener 실패는 기존대로 500 유지"""
         fake_async = mock_executor_redis["async"]

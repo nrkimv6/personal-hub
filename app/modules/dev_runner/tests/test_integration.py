@@ -116,6 +116,88 @@ class TestFullFlow:
         assert response.status_code == 200
         assert response.json()["running"] is False
 
+    async def test_run_accepted_then_runtime_failure_updates_runner_state(self, client, mock_executor_redis):
+        """accepted 이후 runtime 실패(auto_plan_failed)가 runners API 상태에 반영되는지 검증"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now()
+        await fake_async.set("plan-runner:listener:heartbeat", now.isoformat())
+
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={
+                    "plan_file": "test.md",
+                    "engine": "codex",
+                    "fix_engine": "codex",
+                    "trigger": "user",
+                },
+            )
+
+        assert response.status_code == 200
+        rid = response.json()["runner_id"]
+        prefix = f"plan-runner:runners:{rid}"
+
+        await fake_async.srem("plan-runner:active_runners", rid)
+        await fake_async.zadd("plan-runner:recent_runners", {rid: now.timestamp()})
+        await fake_async.set(f"{prefix}:status", "failed")
+        await fake_async.set(f"{prefix}:engine", "codex")
+        await fake_async.set(f"{prefix}:trigger", "user")
+        await fake_async.set(f"{prefix}:plan_file", "test.md")
+        await fake_async.set(f"{prefix}:exit_reason", "auto_plan_failed")
+
+        runners_response = await client.get("/api/v1/dev-runner/runners")
+        assert runners_response.status_code == 200
+        items = runners_response.json()
+        target = next(item for item in items if item["runner_id"] == rid)
+        assert target["running"] is False
+        assert target["exit_reason"] == "auto_plan_failed"
+
+    async def test_runtime_failure_preserves_engine_fix_engine_trigger_metadata(self, client, mock_executor_redis):
+        """runtime 실패가 발생해도 run command 메타데이터(engine/fix_engine/trigger)가 보존되는지 검증"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now()
+        await fake_async.set("plan-runner:listener:heartbeat", now.isoformat())
+
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={
+                    "plan_file": "runtime-failure.md",
+                    "engine": "codex",
+                    "fix_engine": "codex",
+                    "trigger": "tc:runtime_failure",
+                },
+            )
+
+        assert response.status_code == 200
+        rid = response.json()["runner_id"]
+
+        queued = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert queued, "command queue가 비어 있음"
+        command = json.loads(queued[0])
+        assert command.get("engine") == "codex"
+        assert command.get("fix_engine") == "codex"
+        assert command.get("trigger") == "tc:runtime_failure"
+
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.srem("plan-runner:active_runners", rid)
+        await fake_async.zadd("plan-runner:recent_runners", {rid: now.timestamp()})
+        await fake_async.set(f"{prefix}:status", "failed")
+        await fake_async.set(f"{prefix}:engine", command["engine"])
+        await fake_async.set(f"{prefix}:trigger", command["trigger"])
+        await fake_async.set(f"{prefix}:plan_file", "runtime-failure.md")
+        await fake_async.set(f"{prefix}:exit_reason", "auto_plan_failed")
+
+        runners_response = await client.get("/api/v1/dev-runner/runners")
+        assert runners_response.status_code == 200
+        items = runners_response.json()
+        target = next(item for item in items if item["runner_id"] == rid)
+        assert target["engine"] == "codex"
+        assert target["trigger"] == "tc:runtime_failure"
+        assert target["plan_file"] == "runtime-failure.md"
+
 
 class TestLifecycleE2E:
     """E2E: 시작 → 실행 중 → 종료 전환 회귀 테스트 (Fix 1+2 검증)"""

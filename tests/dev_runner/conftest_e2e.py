@@ -37,6 +37,15 @@ RUNNER_KEY_PREFIX = "plan-runner:runners"
 
 
 @pytest.fixture
+def codex_runtime_failure_stderr():
+    """codex runtime 실패 재현용 synthetic stderr 라인."""
+    return [
+        "Error: unknown variant `xhigh`, expected one of `minimal`, `low`, `medium`, `high`",
+        "in `model_reasoning_effort`",
+    ]
+
+
+@pytest.fixture
 def real_redis():
     """실제 Redis 연결 — 미실행 시 자동 skip"""
     try:

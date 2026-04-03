@@ -84,6 +84,22 @@ class TestRunnersApiExitReasonHttp:
         assert data[0]["exit_reason"] == "commit_failed"
 
     @pytest.mark.http
+    def test_runners_api_exit_reason_auto_plan_failed_present(self, client):
+        """codex runtime 실패 사유(auto_plan_failed)도 응답 JSON에 그대로 노출."""
+        runners = [_make_runner("r1c", exit_reason="auto_plan_failed")]
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            return_value=runners,
+        ):
+            response = client.get(f"{BASE_URL}/runners")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["exit_reason"] == "auto_plan_failed"
+
+    @pytest.mark.http
     def test_runners_api_exit_reason_null_when_absent(self, client):
         """exit_reason이 없는 runner → 응답 JSON에 exit_reason=null"""
         runners = [_make_runner("r2", exit_reason=None)]

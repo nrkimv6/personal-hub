@@ -115,8 +115,17 @@ class ExecutorService:
             return False
 
         msg = (message or "").lower()
-        markers = (
-            "codex",
+        # accepted 이후 plan 단계에서 발생하는 runtime 오류는 preflight(422)가 아니다.
+        runtime_markers = (
+            "model_reasoning_effort",
+            "unknown variant",
+            "auto_plan_failed",
+            "plan_agent_failed",
+        )
+        if any(marker in msg for marker in runtime_markers):
+            return False
+
+        preflight_markers = (
             "preflight",
             "실행파일",
             "인증 실패",
@@ -125,10 +134,9 @@ class ExecutorService:
             "not logged in",
             "token",
             "login",
-            "model_reasoning_effort",
             "설정 불일치",
         )
-        return any(marker in msg for marker in markers)
+        return any(marker in msg for marker in preflight_markers)
 
     async def _get_runner_fields(self, rid: str, *fields: str) -> dict:
         result = {}

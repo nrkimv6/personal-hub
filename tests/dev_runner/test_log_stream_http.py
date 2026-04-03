@@ -457,6 +457,49 @@ def test_http_log_recent_legacy_pseudo_id_after_size_removal():
             pass
 
 
+@pytest.mark.http_live
+def test_http_log_recent_codex_runtime_failure_signature():
+    """T5: logs/recent가 codex runtime 실패 시그니처(xhigh/model_reasoning_effort)를 노출한다."""
+    import tempfile
+    import os
+
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+    try:
+        r.ping()
+    except Exception:
+        pytest.skip("Redis not available")
+
+    runner_id = "t5-codex-runtime-failure"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False, encoding="utf-8") as f:
+        f.write("[09:50:53] [ERROR] Error: unknown variant `xhigh`, expected one of `minimal`, `low`, `medium`, `high`\n")
+        f.write("[09:50:53] [ERROR] in `model_reasoning_effort`\n")
+        log_path = f.name
+
+    try:
+        r.set(f"plan-runner:runners:{runner_id}:stream_log_path", log_path)
+        resp = requests.get(
+            f"{ADMIN_API}/api/v1/dev-runner/logs/recent",
+            params={"runner_id": runner_id},
+            timeout=5,
+        )
+        assert resp.status_code == 200
+        lines = resp.json().get("lines", [])
+        merged = "\n".join(lines)
+        assert "unknown variant `xhigh`" in merged
+        assert "model_reasoning_effort" in merged
+    except requests.exceptions.ConnectionError:
+        pytest.skip("API server not responding")
+    except requests.exceptions.Timeout:
+        pytest.skip("API server timeout")
+    finally:
+        r.delete(f"plan-runner:runners:{runner_id}:stream_log_path")
+        r.close()
+        try:
+            os.unlink(log_path)
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # T5 신규: visible_only 파라미터 + /full 청크 응답 구조 검증
 # ---------------------------------------------------------------------------
