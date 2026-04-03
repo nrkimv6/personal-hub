@@ -19,7 +19,7 @@ from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.event_service import EventService, RUNNER_KEY_PREFIX
 
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
-RECENT_RUNNERS_TTL = 3600
+RECENT_RUNNERS_TTL = 86400
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────

@@ -12,7 +12,7 @@ ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
 PLAN_FILE_ALL = "__ALL_PLANS__"  # 전체실행 sentinel — plan_file 미지정 시 Redis에 저장
 _LEGACY_ALL = "ALL"  # 하위 호환: 이전 버전에서 저장된 "ALL" 값 인식용
-RECENT_RUNNERS_TTL = 3600  # 1시간 (초) — app/modules/dev_runner/services/redis_connection.py와 동일하게 유지
+RECENT_RUNNERS_TTL = 86400  # 24시간 (초) — executor_service.py의 RECENT_RUNNERS_TTL과 동일하게 유지
 ADMIN_API_PORT = int(os.environ.get("ADMIN_API_PORT", "8001"))
 
 # per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
