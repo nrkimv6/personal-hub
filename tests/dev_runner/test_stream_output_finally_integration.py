@@ -19,6 +19,12 @@ from unittest.mock import MagicMock, patch
 import fakeredis
 import pytest
 
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from _dr_runtime_utils import _normalize_exit_reason
+
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
@@ -78,6 +84,11 @@ def _make_wf_manager(runner_id: str = "test-runner"):
     mgr = MagicMock()
     mgr.get_by_runner_id.return_value = wf
     return mgr, wf
+
+
+def _publish_cleanup_sentinel(rid: str, redis_client):
+    reason = _normalize_exit_reason(redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:exit_reason"))
+    redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{rid}", f"__COMPLETED::{reason}__")
 
 
 class TestStreamOutputFinallyIntegration:
@@ -141,15 +152,11 @@ class TestStreamOutputFinallyIntegration:
         log_handle = io.StringIO()
         wf_mgr, wf = _make_wf_manager(runner_id)
 
-        def _fake_cleanup(rid, redis_client):
-            reason = redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:exit_reason") or "completed"
-            redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{rid}", f"__COMPLETED::{reason}__")
-
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
              patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
              patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state", side_effect=_fake_cleanup), \
+             patch.object(plan_runner_mod, "_cleanup_process_state", side_effect=_publish_cleanup_sentinel), \
              patch.object(fr, "publish", side_effect=_capture_publish):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
@@ -165,3 +172,35 @@ class TestStreamOutputFinallyIntegration:
             channel == log_channel and msg == "__COMPLETED::rate_limit__"
             for channel, msg in published
         ), f"__COMPLETED::rate_limit__ publish 누락. published={published}"
+
+    def test_stream_output_finally_missing_exit_reason_publishes_error(self, plan_runner_mod, fr):
+        """exit_reason 누락 시 completed fallback 대신 error sentinel을 publish한다."""
+        runner_id = "t3-finally-missing-001"
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+
+        published = []
+        orig_publish = fr.publish
+
+        def _capture_publish(channel, message):
+            published.append((channel, message))
+            return orig_publish(channel, message)
+
+        process = _make_process(returncode=0)
+        log_handle = io.StringIO()
+        wf_mgr, wf = _make_wf_manager(runner_id)
+
+        with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+             patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(plan_runner_mod, "_do_inline_merge"), \
+             patch.object(plan_runner_mod, "_cleanup_process_state", side_effect=_publish_cleanup_sentinel), \
+             patch.object(fr, "publish", side_effect=_capture_publish):
+            plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+        wf_mgr.update_status.assert_any_call(
+            wf["id"], "failed", error_message="exit_code=0; exit_reason=error"
+        )
+        assert any(
+            channel == log_channel and msg == "__COMPLETED::error__"
+            for channel, msg in published
+        ), f"__COMPLETED::error__ publish 누락. published={published}"

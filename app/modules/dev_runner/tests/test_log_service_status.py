@@ -1,6 +1,7 @@
 """log_service sentinel 파싱 TC
 
-__MERGE_COMPLETED__:SUCCESS / :FAILED / (접미사 없음) 및 __COMPLETED__:FAILED 파싱 검증.
+__MERGE_COMPLETED__:SUCCESS / :FAILED / (접미사 없음)과
+__COMPLETED::{reason}__ 파싱 검증.
 """
 
 import asyncio
@@ -101,6 +102,15 @@ class TestMergeCompletedSentinelParsing:
         assert len(completed) == 1, f"completed 이벤트가 1개여야 함, got: {chunks}"
         assert "data: failed" in completed[0], f"reason=failed 기대, got: {completed[0]}"
 
+    async def test_log_completed_error_sse(self):
+        """R: __COMPLETED::error__ → data: error."""
+        svc = _make_log_service([_msg("__COMPLETED::error__")])
+        chunks = await _collect(svc.stream_log_file("r1"))
+
+        completed = [c for c in chunks if "event: completed" in c]
+        assert len(completed) == 1
+        assert "data: error" in completed[0], f"reason=error 기대, got: {completed[0]}"
+
     @pytest.mark.asyncio
     async def test_log_completed_rate_limited_normalized_sse(self):
         """R: __COMPLETED::rate_limited__ → data: rate_limit 정규화."""
@@ -110,3 +120,23 @@ class TestMergeCompletedSentinelParsing:
         completed = [c for c in chunks if "event: completed" in c]
         assert len(completed) == 1
         assert "data: rate_limit" in completed[0], f"reason=rate_limit 기대, got: {completed[0]}"
+
+    @pytest.mark.asyncio
+    async def test_log_completed_commit_failed_sse(self):
+        """R: __COMPLETED::commit_failed__ → data: commit_failed."""
+        svc = _make_log_service([_msg("__COMPLETED::commit_failed__")])
+        chunks = await _collect(svc.stream_log_file("r1"))
+
+        completed = [c for c in chunks if "event: completed" in c]
+        assert len(completed) == 1
+        assert "data: commit_failed" in completed[0], f"reason=commit_failed 기대, got: {completed[0]}"
+
+    @pytest.mark.asyncio
+    async def test_log_completed_stopped_sse(self):
+        """R: __COMPLETED::stopped__ → data: stopped."""
+        svc = _make_log_service([_msg("__COMPLETED::stopped__")])
+        chunks = await _collect(svc.stream_log_file("r1"))
+
+        completed = [c for c in chunks if "event: completed" in c]
+        assert len(completed) == 1
+        assert "data: stopped" in completed[0], f"reason=stopped 기대, got: {completed[0]}"

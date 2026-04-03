@@ -1,4 +1,8 @@
-"""T4: E2E 테스트 — exit_reason SSE 스트림 및 runners API 검증 (TestClient 기반)"""
+"""Legacy filename: exit_reason HTTP contract tests (TestClient based).
+
+이 파일은 실서버 E2E가 아니라 FastAPI `TestClient` 기반 API 계약 검증이다.
+파일명은 historical 이유로 `*_e2e.py`를 유지하지만 marker는 `http`가 기준이다.
+"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
@@ -19,11 +23,11 @@ def client():
     return TestClient(app, raise_server_exceptions=True)
 
 
-class TestExitReasonE2ERunners:
-    """T4: runner 종료 후 GET /runners 응답에 exit_reason 필드 포함 확인"""
+class TestExitReasonHttpRunners:
+    """HTTP: runner 종료 후 GET /runners 응답에 exit_reason 필드 포함 확인"""
 
-    def test_exit_reason_e2e_runners_api(self, client):
-        """T4: runner 종료 후 /runners 응답에 exit_reason 필드 포함 확인"""
+    def test_exit_reason_http_runners_api(self, client):
+        """HTTP: runner 종료 후 /runners 응답에 exit_reason 필드 포함 확인"""
         runners = [
             {
                 "runner_id": "e2e_runner_1",
@@ -56,8 +60,8 @@ class TestExitReasonE2ERunners:
         assert "stop_stage" in data[0]
         assert data[0]["running"] is False
 
-    def test_pre_review_stop_stage_exposed_e2e(self, client):
-        """T4: pre_review 중지 케이스에서 stop_stage가 runners API에 노출된다."""
+    def test_pre_review_stop_stage_exposed_http(self, client):
+        """HTTP: pre_review 중지 케이스에서 stop_stage가 runners API에 노출된다."""
         runners = [
             {
                 "runner_id": "e2e_runner_pre",
@@ -89,11 +93,11 @@ class TestExitReasonE2ERunners:
         assert data[0]["stop_stage"] == "pre_review"
 
 
-class TestExitReasonE2ESseStream:
-    """T4: SSE 완료 이벤트 reason 파싱 확인 (log_service 레벨)"""
+class TestExitReasonHttpSseStream:
+    """HTTP contract: SSE 완료 이벤트 reason 파싱 확인 (log_service 레벨)"""
 
-    def test_exit_reason_e2e_sse_stream(self):
-        """T4: log_service가 __COMPLETED::rate_limit__ sentinel을 completed 이벤트로 파싱"""
+    def test_exit_reason_http_sse_stream(self):
+        """HTTP: log_service가 __COMPLETED::rate_limit__ sentinel을 completed 이벤트로 파싱"""
         from app.modules.dev_runner.services.log_service import LogService
 
         svc = LogService.__new__(LogService)
@@ -114,11 +118,11 @@ class TestExitReasonE2ESseStream:
         assert reason2 == "completed"
 
 
-class TestRestartButtonE2E:
-    """T4: 비정상종료 runner 재실행 → POST /run 호출 확인"""
+class TestRestartButtonHttp:
+    """HTTP: 비정상종료 runner 재실행 → POST /run 호출 확인"""
 
-    def test_restart_button_triggers_new_runner_e2e(self, client):
-        """T4: POST /run으로 비정상종료 runner 재실행 → running=True 응답"""
+    def test_restart_button_triggers_new_runner_http(self, client):
+        """HTTP: POST /run으로 비정상종료 runner 재실행 → running=True 응답"""
         from app.modules.dev_runner.schemas import RunStatusResponse
         new_status = RunStatusResponse(
             running=True,

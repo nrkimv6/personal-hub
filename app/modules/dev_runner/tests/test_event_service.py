@@ -854,6 +854,54 @@ class TestMergeLineChannelRouting:
         assert data["reason"] == "rate_limit"
 
     @pytest.mark.asyncio
+    async def test_stream_events_log_completed_reason_commit_failed_failed(self, event_service, async_redis):
+        """R: __COMPLETED::commit_failed__ → failed 상태 유지."""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner12b",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": "__COMPLETED::commit_failed__",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner12b"
+        assert data["status"] == "failed"
+        assert data["reason"] == "commit_failed"
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_completed_reason_stopped_success(self, event_service, async_redis):
+        """R: __COMPLETED::stopped__ → non-failed 종료로 분류된다."""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner12c",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": "__COMPLETED::stopped__",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        completed = [e for e in events if e.startswith("event: log_completed\n")]
+        assert len(completed) >= 1
+        data = json.loads(completed[0].split("data: ")[1].split("\n")[0])
+        assert data["runner_id"] == "runner12c"
+        assert data["status"] == "success"
+        assert data["reason"] == "stopped"
+
+    @pytest.mark.asyncio
     async def test_stream_events_log_completed_reason_passthrough(self, event_service, async_redis):
         """R: __COMPLETED::{reason}__에서 reason이 그대로 전달된다 (정규화 예외 제외)."""
         log_msg = {

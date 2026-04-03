@@ -14,6 +14,13 @@ import fakeredis
 import fakeredis.aioredis
 import sys
 import os
+from pathlib import Path
+
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from _dr_runtime_utils import _normalize_exit_reason
 
 
 # ─── 파싱 헬퍼 (log_service 로직 추출) ───────────────────────────────────────
@@ -23,7 +30,8 @@ def parse_completed_sentinel(data: str) -> str:
     if data == "__COMPLETED__":
         return "completed"
     if data.startswith("__COMPLETED::"):
-        return data[len("__COMPLETED::"):].rstrip("_") or "completed"
+        reason = data[len("__COMPLETED::"):].rstrip("_") or "completed"
+        return _normalize_exit_reason(reason)
     return "completed"
 
 
@@ -127,6 +135,7 @@ class TestCompletedSentinelParsing:
         cases = [
             ("__COMPLETED::completed__", "completed"),
             ("__COMPLETED::rate_limit__", "rate_limit"),
+            ("__COMPLETED::rate_limited__", "rate_limit"),
             ("__COMPLETED::error__", "error"),
             ("__COMPLETED::archived__", "archived"),
             ("__COMPLETED::on_hold__", "on_hold"),

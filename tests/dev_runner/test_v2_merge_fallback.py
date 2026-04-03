@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
-from tests.dev_runner.conftest import attach_default_redis_behaviors, assert_no_magicmock_leak
+from tests.dev_runner.conftest import assert_no_magicmock_leak, make_strict_redis_mock
 
 _SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -39,12 +39,7 @@ def _load_dr_merge():
 
 
 def _strict_redis_mock() -> MagicMock:
-    mock_redis = attach_default_redis_behaviors(MagicMock())
-    assert_no_magicmock_leak(
-        mock_redis.get("plan-runner:runners:strict-check:merge_requested"),
-        "redis.get",
-    )
-    return mock_redis
+    return make_strict_redis_mock()
 
 
 def _make_redis_mock(merge_status=None, plan_file=None, branch=None, stop_stage=None):
@@ -66,6 +61,14 @@ def _make_redis_mock(merge_status=None, plan_file=None, branch=None, stop_stage=
 
     r.get.side_effect = _get
     return r
+
+
+def test_make_redis_mock_unknown_key_defaults_none_B():
+    """B(Boundary): shared strict helper + custom get side_effect도 미매핑 키를 None으로 고정."""
+    mock_redis = _make_redis_mock()
+    value = mock_redis.get("plan-runner:runners:strict-check:merge_requested")
+    assert_no_magicmock_leak(value, "redis.get")
+    assert value is None
 
 
 # ── detect_merged_but_not_done ────────────────────────────────────────────────

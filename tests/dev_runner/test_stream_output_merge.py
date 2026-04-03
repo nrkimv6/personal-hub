@@ -9,7 +9,7 @@ import io
 import pytest
 from unittest.mock import MagicMock, patch
 import fakeredis
-from tests.dev_runner.conftest import attach_default_redis_behaviors
+from tests.dev_runner.conftest import assert_no_magicmock_leak, make_strict_redis_mock
 
 from tests.dev_runner._path_helpers import get_listener_script_path, skip_if_missing
 
@@ -84,7 +84,7 @@ RUNNER_KEY_PREFIX = "plan-runner:runners"
 
 
 def _strict_redis_mock() -> MagicMock:
-    return attach_default_redis_behaviors(MagicMock())
+    return make_strict_redis_mock()
 
 
 # ========== TC ==========
@@ -198,6 +198,14 @@ def test_stream_output_finally_redis_error(listener_mod, plan_runner_mod, fr):
     # Redis 오류 → merge 실패 → cleanup fallback
     mock_cleanup.assert_called_once_with(runner_id, broken_redis)
     mock_merge.assert_not_called()
+
+
+def test_stream_output_merge_strict_redis_default_none_B():
+    """B(Boundary): shared strict helper는 merge_requested 기본값을 None으로 고정한다."""
+    mock_redis = _strict_redis_mock()
+    value = mock_redis.get(f"{RUNNER_KEY_PREFIX}:strict-check:merge_requested")
+    assert_no_magicmock_leak(value, "redis.get")
+    assert value is None
 
 
 def test_stream_output_workflow_status_no_merge(listener_mod, plan_runner_mod, fr):
