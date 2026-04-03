@@ -93,7 +93,11 @@
 		codex: 'text-slate-700 bg-slate-50 border-slate-300',
 		'cc-codex': 'text-emerald-700 bg-emerald-50 border-emerald-200'
 	};
-	const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-verify'];
+const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-verify'];
+
+	function isArchivedPlanPath(path: string): boolean {
+		return path.includes('/archive/') || path.includes('\\archive\\');
+	}
 
 	function getConfiguredEngines(): string[] {
 		if (!engineConfigs) return [];
@@ -244,7 +248,7 @@
 		}
 		if (mode === 'single' && selectedPlan) {
 			const selected = plans.find(p => p.path === selectedPlan);
-			if (selected?.path_type === 'archive' || selectedPlan.includes('/archive/') || selectedPlan.includes('\\archive\\')) {
+			if ((selected?.path != null && isArchivedPlanPath(selected.path)) || isArchivedPlanPath(selectedPlan)) {
 				actionError = '아카이브된 Plan은 실행할 수 없습니다.';
 				return;
 			}
@@ -504,7 +508,7 @@
 					bind:value={selectedPlan}
 				>
 					<option value="">Plan 선택...</option>
-					{#each plans.filter(p => p.path_type !== 'archive') as plan}
+					{#each plans.filter((p) => !isArchivedPlanPath(p.path)) as plan}
 						<option value={plan.path}>{plan.filename}{plan.progress != null ? ` (${plan.progress.percent}%)` : ''}</option>
 					{/each}
 				</select>

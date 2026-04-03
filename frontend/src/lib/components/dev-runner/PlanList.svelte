@@ -131,8 +131,12 @@
 		return `${parseInt(match[1])}/${parseInt(match[2])}`;
 	}
 
+	function isArchivePlan(plan: DevRunnerPlanFileResponse): boolean {
+		return plan.path.includes('/archive/') || plan.path.includes('\\archive\\');
+	}
+
 	function getPlanItemBg(plan: DevRunnerPlanFileResponse, isRunning: boolean, isLastRun: boolean, batchStatus: string | null) {
-		if (plan.path_type === 'archive') return 'bg-gray-100 opacity-50 cursor-not-allowed';
+		if (isArchivePlan(plan)) return 'bg-gray-100 opacity-50 cursor-not-allowed';
 		if (batchStatus === 'running') return 'border border-cyan-300 bg-cyan-50';
 		if (isRunning) return 'border border-green-300 bg-green-50';
 		if (batchStatus === 'done' || isLastRun) return 'bg-gray-50 opacity-60';
@@ -432,7 +436,7 @@
 		<div class="flex-1 overflow-y-auto -mx-1 px-1">
 			<div class="flex flex-col gap-1">
 				{#each displayPlans as plan}
-					{@const isArchive = plan.path_type === 'archive'}
+					{@const isArchive = isArchivePlan(plan)}
 					{@const isRunning = runningPlanFile === plan.path}
 					{@const isLastRun = !isRunning && lastPlanFile === plan.path}
 					{@const isDone = plan.status === '구현완료'}
