@@ -78,7 +78,7 @@
 
 	// SSE 로그 이벤트 라우팅용 LogViewer ref Map
 	interface LogViewerRef {
-		injectLine: (text: string) => void;
+		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
 		injectCompleted: (reason?: string) => void;
 		injectMergeCompleted: () => void;
 	}
@@ -152,6 +152,22 @@
 			exit_reason: runner.exit_reason ?? undefined,
 			error: runner.error ?? undefined,
 		};
+	}
+
+	type EventLinePayload = string | { text: string; meta?: Record<string, unknown> };
+
+	function normalizeEventLine(payload: unknown): string {
+		if (typeof payload === 'string') return payload;
+		if (
+			payload &&
+			typeof payload === 'object' &&
+			'text' in (payload as Record<string, unknown>) &&
+			typeof (payload as { text?: unknown }).text === 'string'
+		) {
+			return (payload as { text: string }).text;
+		}
+		if (payload == null) return '';
+		return String(payload);
 	}
 
 	const isAllPlansSentinel = (f: string | null | undefined) =>
@@ -326,10 +342,12 @@
 			taskListRefreshTick++;
 		} else if (eventName === 'log') {
 			try {
-				const { runner_id, line } = JSON.parse(data) as { runner_id: string; line: string };
+				const { runner_id, line } = JSON.parse(data) as { runner_id: string; line: EventLinePayload };
+				const normalizedLine = normalizeEventLine(line);
+				if (!normalizedLine) return;
 				// MERGE 로그는 merge_log 이벤트가 동일 라인을 전달하므로 중복 방지를 위해 skip
-				if (line.includes('[MERGE]')) return;
-				logRefs.get(runner_id)?.injectLine(line);
+				if (normalizedLine.includes('[MERGE]')) return;
+				logRefs.get(runner_id)?.injectLine(normalizedLine);
 			} catch { /* 무시 */ }
 		} else if (eventName === 'log_completed') {
 			try {
@@ -348,8 +366,10 @@
 			} catch { /* 무시 */ }
 		} else if (eventName === 'merge_log') {
 			try {
-				const { runner_id, line } = JSON.parse(data) as { runner_id: string; line: string };
-				logRefs.get(runner_id)?.injectLine(line);
+				const { runner_id, line } = JSON.parse(data) as { runner_id: string; line: EventLinePayload };
+				const normalizedLine = normalizeEventLine(line);
+				if (!normalizedLine) return;
+				logRefs.get(runner_id)?.injectLine(normalizedLine);
 			} catch { /* 무시 */ }
 		} else if (eventName === 'merge_log_completed') {
 			try {

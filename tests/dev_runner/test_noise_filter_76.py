@@ -36,7 +36,9 @@ def _real_is_noise_line(monkeypatch):
 
 def _make_process_stub(lines: list):
     proc = MagicMock()
-    proc.stdout = iter(line + "\n" for line in lines)
+    stdout = MagicMock()
+    stdout.readline.side_effect = [line + "\n" for line in lines] + [""]
+    proc.stdout = stdout
     proc.returncode = 0
     proc.wait = MagicMock(return_value=0)
     return proc
@@ -231,3 +233,16 @@ class TestStreamOutputFilter:
         repeat_publishes = [p for p in published if p == same_line]
         assert len(repeat_publishes) <= 10, f"burst 억제 미작동: {len(repeat_publishes)}회"
         assert "다른 정상 로그" in published
+
+    def test_multiline_result_is_framed_as_single_publish(self):
+        published, _ = _run_stream([
+            "[12:00:00] [RESULT] line-1",
+            "line-2",
+            "line-3",
+            "[12:00:01] [AI] done",
+        ])
+        framed = [p for p in published if "[RESULT] line-1" in p]
+        assert len(framed) == 1, f"RESULT 프레임이 단일 publish가 아님: {published}"
+        assert "line-2" in framed[0]
+        assert "line-3" in framed[0]
+        assert "line-2" not in [p for p in published if p == "line-2"]

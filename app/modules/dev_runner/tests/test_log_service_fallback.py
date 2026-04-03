@@ -170,3 +170,52 @@ async def test_stream_log_file_fallback_dedup(tmp_path):
     # 중복 방지: line-1이 정확히 1번만 나타나야 함 (_file_pos 이후만 재읽기)
     line1_count = sum(1 for c in collected_data if "line-1" in c)
     assert line1_count == 1, f"line-1이 {line1_count}번 나왔습니다 (중복 발생)"
+
+
+@pytest.mark.asyncio
+async def test_stream_log_file_fallback_multiline_frame_single_sse_event(tmp_path):
+    """파일 폴링 fallback이 멀티라인 RESULT를 단일 SSE 이벤트로 보낸다."""
+    log_file = tmp_path / "framed.log"
+    log_file.write_text(
+        "[12:00:00] [RESULT] line-1\nline-2\nline-3\n[12:00:01] [AI] done\n",
+        encoding="utf-8",
+    )
+
+    from app.modules.dev_runner.services.log_service import LogService
+
+    svc = MagicMock(spec=LogService)
+    svc.async_redis = AsyncMock()
+    svc.async_redis.ping = AsyncMock()
+
+    calls = [0]
+
+    async def get_message_side_effect(**kwargs):
+        calls[0] += 1
+        if calls[0] >= 3:
+            return {"type": "message", "data": "__COMPLETED__"}
+        return None
+
+    mock_pubsub = AsyncMock()
+    mock_pubsub.get_message = get_message_side_effect
+    mock_pubsub.subscribe = AsyncMock()
+    svc.async_redis.pubsub = MagicMock(return_value=mock_pubsub)
+    svc._find_current_log = MagicMock(return_value=log_file)
+
+    ticks = [0]
+
+    def fake_monotonic():
+        ticks[0] += 1
+        if ticks[0] <= 2:
+            return 1000.0
+        return 1010.0
+
+    collected = []
+    with patch("app.modules.dev_runner.services.log_service.time") as mock_time:
+        mock_time.monotonic = fake_monotonic
+        async for chunk in LogService.stream_log_file(svc, "framed-runner"):
+            collected.append(chunk)
+
+    result_chunks = [c for c in collected if "[RESULT] line-1" in c]
+    assert len(result_chunks) == 1, f"RESULT가 분절됨: {collected}"
+    assert "data: line-2" in result_chunks[0]
+    assert "data: line-3" in result_chunks[0]

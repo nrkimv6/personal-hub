@@ -20,6 +20,7 @@ from _dr_state import (
 )
 from _dr_subprocess import _ANSI_ESCAPE, _make_plan_runner_env
 from _dr_plan_paths import classify_plan_stage, read_plan_status
+from _dr_log_framing import MultilineFrameBuffer
 from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, _DummyProcess
 from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 
@@ -244,6 +245,41 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
     _line_count = 0
     publish_ok = 0
     publish_fail = 0
+    framer = MultilineFrameBuffer(max_chars=8192)
+
+    def _publish_frame(frame_text: str) -> None:
+        nonlocal suppressed_count, last_line, repeat_count, repeat_start, publish_ok, publish_fail
+        if not frame_text:
+            return
+
+        now = time.time()
+        if frame_text == last_line:
+            if now - repeat_start <= BURST_WINDOW:
+                repeat_count += 1
+            else:
+                repeat_count = 1
+                repeat_start = now
+        else:
+            last_line = frame_text
+            repeat_count = 1
+            repeat_start = now
+
+        if repeat_count > BURST_LIMIT:
+            suppressed_count += 1
+            return
+
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
+        if suppressed_count > 0:
+            _publish_with_retry(redis_client, log_channel, f"[NOISE] {suppressed_count} lines suppressed")
+            suppressed_count = 0
+
+        if _publish_with_retry(redis_client, log_channel, frame_text):
+            publish_ok += 1
+            return
+
+        publish_fail += 1
+        if publish_fail % 100 == 0:
+            logger.warning(f"[_stream_output] publish 실패 {publish_fail}건 (runner_id={runner_id!r})")
 
     try:
         while True:
@@ -263,47 +299,34 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             except Exception:
                 pass
 
+            sanitized = _ANSI_ESCAPE.sub('', stripped)
+
             # 2. 노이즈 필터: 억제 대상이면 카운트 후 skip
-            if _is_noise_line(stripped):
+            if _is_noise_line(sanitized):
+                pending = framer.flush()
+                if pending:
+                    _publish_frame(pending)
                 suppressed_count += 1
                 continue
 
-            # 3. rate-limiter: 동일 내용 burst 감지
-            now = time.time()
-            if stripped == last_line:
-                if now - repeat_start <= BURST_WINDOW:
-                    repeat_count += 1
-                else:
-                    repeat_count = 1
-                    repeat_start = now
-            else:
-                last_line = stripped
-                repeat_count = 1
-                repeat_start = now
+            ready_frames, overflow = framer.push_line(sanitized)
+            if overflow:
+                logger.warning(
+                    f"[_stream_output] 프레임 버퍼 상한(8192 chars) 초과 즉시 flush (runner_id={runner_id!r})"
+                )
+            for frame in ready_frames:
+                _publish_frame(frame)
 
-            if repeat_count > BURST_LIMIT:
-                suppressed_count += 1
-                continue
-
-            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
-
-            # 4. 직전 억제 요약 먼저 publish
-            if suppressed_count > 0:
-                _publish_with_retry(redis_client, log_channel, f"[NOISE] {suppressed_count} lines suppressed")
-                suppressed_count = 0
-
-            # 5. 정상 라인 publish (ANSI 이스케이프 코드 제거)
-            if _publish_with_retry(redis_client, log_channel, _ANSI_ESCAPE.sub('', stripped)):
-                publish_ok += 1
-            else:
-                publish_fail += 1
-                if publish_fail % 100 == 0:
-                    logger.warning(f"[_stream_output] publish 실패 {publish_fail}건 (runner_id={runner_id!r})")
+        # 루프 종료 시 잔여 프레임 flush
+        remaining_frame = framer.flush()
+        if remaining_frame:
+            _publish_frame(remaining_frame)
 
         # 루프 종료 후 잔여 억제 요약
         if suppressed_count > 0:
             log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
             _publish_with_retry(redis_client, log_channel, f"[NOISE] {suppressed_count} lines suppressed")
+            suppressed_count = 0
 
     except Exception as e:
         logger.error(f"Output streaming error: {e}")
@@ -364,16 +387,34 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                         start_pos = max(_last_flushed_pos, end_pos - 8192)
                         _drain_f.seek(start_pos)
                         tail_lines = _drain_f.readlines()
+                        drain_framer = MultilineFrameBuffer(max_chars=8192)
                         for _tail_line in tail_lines[-50:]:
                             _stripped = _tail_line.rstrip('\n')
                             if _stripped:
-                                _tail_lines_for_detail.append(_stripped)
-                                try:
-                                    redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', _stripped))
-                                except redis.ConnectionError:
-                                    pass
+                                _cleaned = _ANSI_ESCAPE.sub('', _stripped)
+                                _tail_lines_for_detail.append(_cleaned)
+                                if _is_noise_line(_cleaned):
+                                    _pending = drain_framer.flush()
+                                    if _pending:
+                                        _publish_frame(_pending)
+                                    suppressed_count += 1
+                                    continue
+                                _ready_frames, _overflow = drain_framer.push_line(_cleaned)
+                                if _overflow:
+                                    logger.warning(
+                                        f"[_stream_output] drain 프레임 버퍼 상한 초과 즉시 flush (runner_id={runner_id!r})"
+                                    )
+                                for _frame in _ready_frames:
+                                    _publish_frame(_frame)
+                        _drain_tail = drain_framer.flush()
+                        if _drain_tail:
+                            _publish_frame(_drain_tail)
             except Exception as _drain_err:
                 logger.debug(f"[_stream_output] stdout drain 실패 (무시): {_drain_err}")
+
+        if suppressed_count > 0:
+            _publish_with_retry(redis_client, log_channel, f"[NOISE] {suppressed_count} lines suppressed")
+            suppressed_count = 0
 
         _error_detail = _pick_error_detail_line(_load_log_tail_lines(log_file_path))
         if not _error_detail:

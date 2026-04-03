@@ -103,6 +103,25 @@ def _parse_merge_completed_payload(data: str) -> tuple[str, str]:
     return "success", "completed"
 
 
+def _build_log_line_payload(data: str) -> object:
+    """로그 payload 직렬화.
+
+    하위호환: 단일 라인은 기존처럼 string.
+    확장: 멀티라인은 {text, meta} 객체로 보내 UI가 줄바꿈 보존/보조메타를 활용할 수 있게 한다.
+    """
+    text = str(data or "")
+    if "\n" not in text:
+        return text
+    line_count = text.count("\n") + 1
+    return {
+        "text": text,
+        "meta": {
+            "multiline": True,
+            "line_count": line_count,
+        },
+    }
+
+
 class EventService:
     """Redis keyspace notifications 구독 + SSE 이벤트 생성"""
 
@@ -339,9 +358,15 @@ class EventService:
                                         {"runner_id": runner_id, "status": status, "reason": reason},
                                     )
                                 elif is_merge:
-                                    yield self._sse("merge_log", {"runner_id": runner_id, "line": data})
+                                    yield self._sse(
+                                        "merge_log",
+                                        {"runner_id": runner_id, "line": _build_log_line_payload(data)},
+                                    )
                                 else:
-                                    yield self._sse("log", {"runner_id": runner_id, "line": data})
+                                    yield self._sse(
+                                        "log",
+                                        {"runner_id": runner_id, "line": _build_log_line_payload(data)},
+                                    )
 
                         last_heartbeat = time.monotonic()
                         consecutive_errors = 0

@@ -5,7 +5,7 @@
 	import LogViewer from './LogViewer.svelte';
 
 	interface LogViewerRef {
-		injectLine: (text: string) => void;
+		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
 		injectCompleted: (reason?: string) => void;
 		injectMergeCompleted: () => void;
 	}
@@ -32,7 +32,13 @@
 
 	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, exitReason = null, error = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
-	let logViewer: { injectLine: (t: string) => void; injectCompleted: (reason?: string) => void; injectMergeCompleted: () => void } | undefined;
+	let logViewer:
+		| {
+				injectLine: (t: string | { text: string; meta?: Record<string, unknown> }) => void;
+				injectCompleted: (reason?: string) => void;
+				injectMergeCompleted: () => void;
+		  }
+		| undefined;
 	let elapsed = $state('');
 	let stopping = $state(false);
 	let killing = $state(false);

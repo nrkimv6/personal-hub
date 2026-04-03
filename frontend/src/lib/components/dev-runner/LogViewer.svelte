@@ -34,6 +34,7 @@
 	let batchDoneCount = $derived(batchPlans.filter(p => p.status === 'done').length);
 
 	interface ParsedLine {
+		id: string;
 		timestamp: string;
 		tag: string;
 		message: string;
@@ -57,12 +58,15 @@
 	let pendingStale = $state(false);
 	let exitBanner = $state<{ show: boolean; reason: string }>({ show: false, reason: 'completed' }); // runner 종료 배너
 	const MAX_LINES = 500;
-	let resultQueue: ParsedLine[] = [];
-	let resultDrainInterval: ReturnType<typeof setInterval> | null = null;
 	const SEPARATOR_PATTERN = '════════════════';
+	const PREVIEW_LINE_LIMIT = 3;
+	const MAX_RENDER_CHARS = 8 * 1024;
+	const PREVIEW_TOGGLE_STORAGE_KEY = 'devRunnerPreviewCollapse';
+	let previewCollapsedEnabled = $state(true);
+	let lineSequence = 0;
 
 	let copied = $state(false);
-	let expandedLongLines = $state<Set<number>>(new Set());
+	let expandedLongLines = $state<Set<string>>(new Set());
 
 	const BASE_DELAY = 3000;
 
@@ -97,29 +101,70 @@
 	const MERGE_TAG_PATTERN = /^\[MERGE\]\[(\w+)\]\s*(.*)/;
 	const PR_PREFIX_PATTERN = /^\[PR:[^\]]+\]\s*/;
 
+	function normalizeLogText(text: string): string {
+		return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+	}
+
+	function createLineId(tag: string, timestamp: string, raw: string): string {
+		lineSequence += 1;
+		const seed = `${tag}|${timestamp}|${raw}`;
+		let hash = 0;
+		for (let i = 0; i < seed.length; i++) {
+			hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+		}
+		return `${lineSequence}-${Math.abs(hash)}`;
+	}
+
 	function parseLine(text: string, isStale: boolean): ParsedLine {
+		const normalizedRaw = normalizeLogText(text);
+		const [head = '', ...tail] = normalizedRaw.split('\n');
+		const tailText = tail.length > 0 ? `\n${tail.join('\n')}` : '';
+
 		// [PR:name#hash|PID:12345] prefix 제거 후 일반 파싱
-		const stripped = text.replace(PR_PREFIX_PATTERN, '');
-		const finalMatch = stripped.match(LINE_PATTERN);
+		const strippedHead = head.replace(PR_PREFIX_PATTERN, '');
+		const finalMatch = strippedHead.match(LINE_PATTERN);
 		if (finalMatch) {
-			return { timestamp: finalMatch[1], tag: finalMatch[2], message: finalMatch[3], raw: text, isStale };
+			const message = `${finalMatch[3]}${tailText}`;
+			return {
+				id: createLineId(finalMatch[2], finalMatch[1], normalizedRaw),
+				timestamp: finalMatch[1],
+				tag: finalMatch[2],
+				message,
+				raw: normalizedRaw,
+				isStale
+			};
 		}
 		// [MERGE][TAG] message 형식 (머지 로그)
-		const mergeMatch = stripped.match(MERGE_TAG_PATTERN);
+		const mergeMatch = strippedHead.match(MERGE_TAG_PATTERN);
 		if (mergeMatch) {
-			return { timestamp: '', tag: mergeMatch[1], message: mergeMatch[2], raw: text, isStale };
+			const message = `${mergeMatch[2]}${tailText}`;
+			return {
+				id: createLineId(mergeMatch[1], '', normalizedRaw),
+				timestamp: '',
+				tag: mergeMatch[1],
+				message,
+				raw: normalizedRaw,
+				isStale
+			};
 		}
-		const diagMatch = stripped.match(DIAG_PATTERN);
+		const diagMatch = strippedHead.match(DIAG_PATTERN);
 		if (diagMatch) {
 			const tag = diagMatch[1];
-			const message = diagMatch[2];
+			const message = `${diagMatch[2]}${tailText}`;
 			if (tag === 'NOISE') {
-				const noiseCount = parseInt(message) || 0;
-				return { timestamp: '', tag, message, raw: text, isStale, noiseCount };
+				const noiseCount = parseInt(diagMatch[2]) || 0;
+				return { id: createLineId(tag, '', normalizedRaw), timestamp: '', tag, message, raw: normalizedRaw, isStale, noiseCount };
 			}
-			return { timestamp: '', tag, message, raw: text, isStale };
+			return { id: createLineId(tag, '', normalizedRaw), timestamp: '', tag, message, raw: normalizedRaw, isStale };
 		}
-		return { timestamp: '', tag: '', message: text, raw: text, isStale };
+		return {
+			id: createLineId('', '', normalizedRaw),
+			timestamp: '',
+			tag: '',
+			message: normalizedRaw,
+			raw: normalizedRaw,
+			isStale
+		};
 	}
 
 	function isSeparator(text: string): boolean {
@@ -130,16 +175,66 @@
 		return text.replace(/[═=\s]+/g, ' ').trim() || '새 세션';
 	}
 
-	function isLongLine(msg: string): boolean {
-		return msg.length > 300 || (msg.match(/\n/g)?.length ?? 0) >= 3;
+	function getRenderableText(message: string): string {
+		const normalized = normalizeLogText(message);
+		if (normalized.length <= MAX_RENDER_CHARS) return normalized;
+		const hiddenChars = normalized.length - MAX_RENDER_CHARS;
+		return `${normalized.slice(0, MAX_RENDER_CHARS)}\n… ${hiddenChars} chars truncated`;
 	}
 
-	function truncateToLines(msg: string, maxLines: number): string {
-		const parts = msg.split('\n');
-		if (parts.length > maxLines) {
-			return parts.slice(0, maxLines).join('\n');
+	function getPreviewLines(message: string, maxLines: number = PREVIEW_LINE_LIMIT): string {
+		const renderable = getRenderableText(message);
+		const parts = renderable.split('\n');
+		return parts.slice(0, maxLines).join('\n');
+	}
+
+	function getHiddenLineCount(message: string, maxLines: number = PREVIEW_LINE_LIMIT): number {
+		const normalized = normalizeLogText(message);
+		const count = normalized.split('\n').length;
+		return Math.max(0, count - maxLines);
+	}
+
+	function getHiddenCharCount(message: string): number {
+		const normalized = normalizeLogText(message);
+		return Math.max(0, normalized.length - MAX_RENDER_CHARS);
+	}
+
+	function shouldCollapseMessage(message: string): boolean {
+		if (!previewCollapsedEnabled) return false;
+		return getHiddenLineCount(message) > 0 || getHiddenCharCount(message) > 0;
+	}
+
+	function getExpandLabel(message: string): string {
+		const hiddenLines = getHiddenLineCount(message);
+		const hiddenChars = getHiddenCharCount(message);
+		const parts: string[] = [];
+		if (hiddenLines > 0) parts.push(`+${hiddenLines} lines`);
+		if (hiddenChars > 0) parts.push(`+${hiddenChars} chars`);
+		return parts.length > 0 ? `… 더보기 (${parts.join(', ')})` : '… 더보기';
+	}
+
+	function toggleExpand(lineId: string) {
+		const next = new Set(expandedLongLines);
+		if (next.has(lineId)) next.delete(lineId);
+		else next.add(lineId);
+		expandedLongLines = next;
+	}
+
+	function isExpanded(lineId: string): boolean {
+		return expandedLongLines.has(lineId);
+	}
+
+	function handleExpandKeydown(event: KeyboardEvent, lineId: string) {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			toggleExpand(lineId);
 		}
-		return msg.slice(0, 300);
+	}
+
+	function getExpandButtonClass(expanded: boolean): string {
+		return expanded
+			? 'shrink-0 text-[10px] ml-1 px-1 py-0.5 rounded border border-emerald-700/60 text-emerald-300 bg-emerald-950/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/70 active:scale-[0.98] whitespace-nowrap'
+			: 'shrink-0 text-[10px] ml-1 px-1 py-0.5 rounded border border-gray-700/50 text-gray-500 hover:text-gray-300 hover:border-gray-500/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-400/70 active:scale-[0.98] whitespace-nowrap';
 	}
 
 	async function copyLog() {
@@ -221,23 +316,6 @@
 			batchPlans = [];
 		}
 
-		// RESULT 라인(실시간)은 큐에 넣고 순차 출력
-		if (parsed.tag === 'RESULT' && !isStale) {
-			resultQueue.push(parsed);
-			if (!resultDrainInterval) {
-				resultDrainInterval = setInterval(() => {
-					const next = resultQueue.shift();
-					if (next) {
-						pushLine(next);
-					} else {
-						clearInterval(resultDrainInterval!);
-						resultDrainInterval = null;
-					}
-				}, 40);
-			}
-			return;
-		}
-
 		pushLine(parsed);
 	}
 
@@ -245,6 +323,12 @@
 		lines.push(parsed);
 		if (lines.length > MAX_LINES) {
 			lines = lines.slice(lines.length - MAX_LINES);
+			const validIds = new Set(lines.map((line) => line.id));
+			const nextExpanded = new Set<string>();
+			for (const id of expandedLongLines) {
+				if (validIds.has(id)) nextExpanded.add(id);
+			}
+			expandedLongLines = nextExpanded;
 		}
 		if (autoScroll && logContainer) {
 			requestAnimationFrame(() => {
@@ -362,6 +446,7 @@
 			const res = await devRunnerLogApi.full(runnerId, 0, 500);
 			if (res.lines.length > 0) {
 				lines = res.lines.map((text: string) => parseLine(text, true));
+				expandedLongLines = new Set();
 			}
 		} catch {
 			// full 로그 없을 수 있음
@@ -393,6 +478,7 @@
 			}
 
 			lines = parsed;
+			expandedLongLines = new Set();
 
 			// running 중 500줄 꽉 찼으면 더 오래된 로그가 있음 → loadFull로 전체 재로드
 			if (running && parsed.length === 500) {
@@ -428,6 +514,14 @@
 	}
 
 	onMount(async () => {
+		try {
+			const stored = window.localStorage.getItem(PREVIEW_TOGGLE_STORAGE_KEY);
+			if (stored === 'off') {
+				previewCollapsedEnabled = false;
+			}
+		} catch {
+			// localStorage unavailable in some environments
+		}
 		await runDiagnostics();
 		await loadRecent();
 		// 초기 로드 후 스크롤을 맨 아래로 이동
@@ -445,10 +539,6 @@
 			eventSource.close();
                         if (noiseTimer) clearTimeout(noiseTimer);
 			eventSource = null;
-		}
-		if (resultDrainInterval) {
-			clearInterval(resultDrainInterval);
-			resultDrainInterval = null;
 		}
 	});
 
@@ -490,8 +580,14 @@
 
 	// ── managed 모드 공개 API ───────────────────────────────────────────────────
 
-	export function injectLine(text: string) {
-		addLine(text, false);
+	export function injectLine(payload: string | { text: string; meta?: Record<string, unknown> }) {
+		if (typeof payload === 'string') {
+			addLine(payload, false);
+			return;
+		}
+		if (payload && typeof payload.text === 'string') {
+			addLine(payload.text, false);
+		}
 	}
 
 	export function injectCompleted(reason: string = 'completed') {
@@ -521,7 +617,7 @@
 			{/if}
 			{#if isCodexEngine}
 				<span class="text-[9px] px-1.5 py-0.5 rounded font-mono bg-slate-500/20 text-slate-300">
-					staged realtime
+					realtime
 				</span>
 			{/if}
 			<div class="flex items-center gap-1">
@@ -661,35 +757,82 @@
 					</div>
 				{:else if line.tag === 'CYCLE'}
 					{@const style = getTagStyle(line.tag)}
+					{@const cycleExpanded = isExpanded(line.id)}
+					{@const cycleCollapsed = shouldCollapseMessage(line.message)}
 					<div class="phase-separator {line.isStale ? 'opacity-30' : ''}">
 						<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-						<span class="font-mono text-[10px] text-muted-foreground">{line.message}</span>
+						<span class="font-mono text-[10px] text-muted-foreground whitespace-pre-wrap">
+							{cycleCollapsed && !cycleExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
+						</span>
+						{#if cycleCollapsed}
+							<button
+								type="button"
+								class={getExpandButtonClass(cycleExpanded)}
+								aria-expanded={cycleExpanded}
+								aria-pressed={cycleExpanded}
+								onclick={() => toggleExpand(line.id)}
+								onkeydown={(e) => handleExpandKeydown(e, line.id)}
+							>
+								{cycleExpanded ? '접기' : getExpandLabel(line.message)}
+							</button>
+						{/if}
 					</div>
 				{:else if line.tag === 'PHASE'}
 					{@const style = getTagStyle(line.tag)}
+					{@const phaseExpanded = isExpanded(line.id)}
+					{@const phaseCollapsed = shouldCollapseMessage(line.message)}
 					<div class="dr-log-line dr-log-line-phase flex items-start gap-2 py-0 leading-5 mt-1.5 border-t border-indigo-900/40 {line.isStale ? 'opacity-30' : ''}">
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 						</span>
-						<span class="flex-1 min-w-0 break-all text-indigo-300 font-medium">
-							{line.message}
+						<span class="flex-1 min-w-0 break-all text-indigo-300 font-medium whitespace-pre-wrap">
+							{phaseCollapsed && !phaseExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
 						</span>
+						{#if phaseCollapsed}
+							<button
+								type="button"
+								class={getExpandButtonClass(phaseExpanded)}
+								aria-expanded={phaseExpanded}
+								aria-pressed={phaseExpanded}
+								onclick={() => toggleExpand(line.id)}
+								onkeydown={(e) => handleExpandKeydown(e, line.id)}
+							>
+								{phaseExpanded ? '접기' : getExpandLabel(line.message)}
+							</button>
+						{/if}
 					</div>
 				{:else if line.tag === 'TOOL'}
 					{@const style = getTagStyle(line.tag)}
+					{@const toolExpanded = isExpanded(line.id)}
+					{@const toolCollapsed = shouldCollapseMessage(line.message)}
 					<div class="dr-log-line dr-log-line-tool flex items-start gap-2 py-0 leading-5 opacity-40 {line.isStale ? 'opacity-20' : ''}">
 						<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 						</span>
-						<span class="flex-1 min-w-0 truncate text-gray-500">
-							{line.message}
+						<span class="flex-1 min-w-0 break-all whitespace-pre-wrap text-gray-500">
+							{toolCollapsed && !toolExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
 						</span>
+						{#if toolCollapsed}
+							<button
+								type="button"
+								class={getExpandButtonClass(toolExpanded)}
+								aria-expanded={toolExpanded}
+								aria-pressed={toolExpanded}
+								onclick={() => toggleExpand(line.id)}
+								onkeydown={(e) => handleExpandKeydown(e, line.id)}
+							>
+								{toolExpanded ? '접기' : getExpandLabel(line.message)}
+							</button>
+						{/if}
 					</div>
 				{:else if line.tag === 'RESULT'}
 					{@const style = getTagStyle(line.tag)}
 					{@const resultMatch = line.message.match(/^(\d+)→\s?(.*)/)}
+					{@const resultBody = resultMatch ? resultMatch[2] : line.message}
+					{@const resultExpanded = isExpanded(line.id)}
+					{@const resultCollapsed = shouldCollapseMessage(resultBody)}
 					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 opacity-60 {line.isStale ? 'opacity-20' : ''}">
 						{#if resultMatch}
 							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
@@ -699,51 +842,87 @@
 							<span class="flex-1 min-w-0 flex items-baseline bg-gray-900/60 rounded px-1 font-mono">
 								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch[1]}</span>
 								<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
-								{#if isLongLine(resultMatch[2]) && !expandedLongLines.has(i)}
-							<span class="flex-1 min-w-0 break-all text-emerald-300/80 text-[11px]">{truncateToLines(resultMatch[2], 3)}</span>
-							<button class="shrink-0 text-[10px] text-gray-500 hover:text-gray-300 ml-1 whitespace-nowrap" onclick={() => { expandedLongLines.add(i); expandedLongLines = expandedLongLines; }}>… 더보기</button>
-						{:else if isLongLine(resultMatch[2])}
-							<span class="flex-1 min-w-0 break-all text-emerald-300/80 text-[11px]">{resultMatch[2]}</span>
-							<button class="shrink-0 text-[10px] text-gray-500 hover:text-gray-300 ml-1 whitespace-nowrap" onclick={() => { expandedLongLines.delete(i); expandedLongLines = expandedLongLines; }}>접기</button>
-						{:else}
-							<span class="flex-1 min-w-0 break-all text-emerald-300/80 text-[11px]">{resultMatch[2]}</span>
-						{/if}
+								<span class="flex-1 min-w-0 break-all whitespace-pre-wrap text-emerald-300/80 text-[11px]">
+									{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
+								</span>
+								{#if resultCollapsed}
+									<button
+										type="button"
+										class={getExpandButtonClass(resultExpanded)}
+										aria-expanded={resultExpanded}
+										aria-pressed={resultExpanded}
+										onclick={() => toggleExpand(line.id)}
+										onkeydown={(e) => handleExpandKeydown(e, line.id)}
+									>
+										{resultExpanded ? '접기' : getExpandLabel(resultBody)}
+									</button>
+								{/if}
 							</span>
 						{:else}
 							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 							<span class="shrink-0 w-[42px] text-right {style.text}">
 								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 							</span>
-							<span class="flex-1 min-w-0 break-all text-gray-400 text-xs">{line.message}</span>
+							<span class="flex-1 min-w-0 break-all whitespace-pre-wrap text-gray-400 text-xs">
+								{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
+							</span>
+							{#if resultCollapsed}
+								<button
+									type="button"
+									class={getExpandButtonClass(resultExpanded)}
+									aria-expanded={resultExpanded}
+									aria-pressed={resultExpanded}
+									onclick={() => toggleExpand(line.id)}
+									onkeydown={(e) => handleExpandKeydown(e, line.id)}
+								>
+									{resultExpanded ? '접기' : getExpandLabel(resultBody)}
+								</button>
+							{/if}
 						{/if}
 					</div>
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}
+					{@const lineExpanded = isExpanded(line.id)}
+					{@const lineCollapsed = shouldCollapseMessage(line.message)}
 					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 						</span>
-						{#if isLongLine(line.message) && !expandedLongLines.has(i)}
-							<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">{truncateToLines(line.message, 3)}</span>
-							<button class="shrink-0 text-[10px] text-gray-500 hover:text-gray-300 ml-1 whitespace-nowrap" onclick={() => { expandedLongLines.add(i); expandedLongLines = expandedLongLines; }}>… 더보기</button>
-						{:else if isLongLine(line.message)}
-							<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">{line.message}</span>
-							<button class="shrink-0 text-[10px] text-gray-500 hover:text-gray-300 ml-1 whitespace-nowrap" onclick={() => { expandedLongLines.delete(i); expandedLongLines = expandedLongLines; }}>접기</button>
-						{:else}
-							<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">{line.message}</span>
+						<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">
+							{lineCollapsed && !lineExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
+						</span>
+						{#if lineCollapsed}
+							<button
+								type="button"
+								class={getExpandButtonClass(lineExpanded)}
+								aria-expanded={lineExpanded}
+								aria-pressed={lineExpanded}
+								onclick={() => toggleExpand(line.id)}
+								onkeydown={(e) => handleExpandKeydown(e, line.id)}
+							>
+								{lineExpanded ? '접기' : getExpandLabel(line.message)}
+							</button>
 						{/if}
 					</div>
 				{:else}
-					<div class="py-0.5 leading-5 text-gray-400 break-all whitespace-pre-wrap">
-						{#if isLongLine(line.raw) && !expandedLongLines.has(i)}
-							{truncateToLines(line.raw, 3)}
-							<button class="text-[10px] text-gray-500 hover:text-gray-300 ml-1" onclick={() => { expandedLongLines.add(i); expandedLongLines = expandedLongLines; }}>… 더보기</button>
-						{:else if isLongLine(line.raw)}
-							{line.raw}
-							<button class="text-[10px] text-gray-500 hover:text-gray-300 ml-1" onclick={() => { expandedLongLines.delete(i); expandedLongLines = expandedLongLines; }}>접기</button>
-						{:else}
-							{line.raw}
+					{@const rawExpanded = isExpanded(line.id)}
+					{@const rawCollapsed = shouldCollapseMessage(line.raw)}
+					<div class="py-0.5 leading-5 text-gray-400 break-all whitespace-pre-wrap flex items-start">
+						<span class="flex-1 min-w-0">
+							{rawCollapsed && !rawExpanded ? getPreviewLines(line.raw) : getRenderableText(line.raw)}
+						</span>
+						{#if rawCollapsed}
+							<button
+								type="button"
+								class={getExpandButtonClass(rawExpanded)}
+								aria-expanded={rawExpanded}
+								aria-pressed={rawExpanded}
+								onclick={() => toggleExpand(line.id)}
+								onkeydown={(e) => handleExpandKeydown(e, line.id)}
+							>
+								{rawExpanded ? '접기' : getExpandLabel(line.raw)}
+							</button>
 						{/if}
 					</div>
 				{/if}

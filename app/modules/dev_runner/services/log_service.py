@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+import os
 import time
 import re
 
@@ -31,6 +32,102 @@ LOG_CHANNEL_PREFIX = "plan-runner:logs"
 LOG_CHANNEL = "plan-runner:logs"  # 하위호환 — plan_service 등 단일 채널 publish용
 
 HEARTBEAT_INTERVAL = 30  # 초
+MAX_SSE_FRAME_CHARS = 8192
+MULTILINE_FRAME_ENV = "DEV_RUNNER_MULTILINE_FRAME"
+_TIMESTAMP_TAG_START_RE = re.compile(r"^\s*\[\d{2}:\d{2}:\d{2}\]\s*\[[^\]]+\]\s*")
+_MERGE_TAG_START_RE = re.compile(r"^\s*\[MERGE\]\[[^\]]+\]\s*")
+_GENERIC_TAG_START_RE = re.compile(r"^\s*\[[A-Z][A-Z0-9_-]{1,24}\](?:\[[A-Z0-9_-]{1,24}\])?\s*")
+_ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def _is_multiline_frame_enabled() -> bool:
+    raw = os.getenv(MULTILINE_FRAME_ENV)
+    if raw is None:
+        return True
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "on", "yes", "y"}:
+        return True
+    if value in {"0", "false", "off", "no", "n"}:
+        return False
+    return True
+
+
+def _normalize_newlines(text: str) -> str:
+    return (text or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _truncate_sse_payload(payload: str, max_chars: int = MAX_SSE_FRAME_CHARS) -> str:
+    normalized = _normalize_newlines(payload)
+    if len(normalized) <= max_chars:
+        return normalized
+    hidden = len(normalized) - max_chars
+    return f"{normalized[:max_chars]}\n… {hidden} chars truncated"
+
+
+def _format_sse_data(data: str, event: Optional[str] = None) -> str:
+    """멀티라인 안전 SSE 직렬화.
+
+    SSE 규격상 data 라인이 여러 줄이면 각 줄 앞에 `data:` 접두사를 반복해야 한다.
+    """
+    payload = _truncate_sse_payload(data)
+    lines = payload.split("\n")
+    prefix = f"event: {event}\n" if event else ""
+    data_block = "".join(f"data: {line}\n" for line in lines)
+    return f"{prefix}{data_block}\n"
+
+
+def _is_frame_start(line: str) -> bool:
+    if not line:
+        return False
+    return bool(
+        _TIMESTAMP_TAG_START_RE.match(line)
+        or _MERGE_TAG_START_RE.match(line)
+        or _GENERIC_TAG_START_RE.match(line)
+    )
+
+
+class _PollFrameBuffer:
+    """파일 폴링 fallback에서 물리 라인을 논리 프레임으로 묶는다."""
+
+    def __init__(self, max_chars: int = MAX_SSE_FRAME_CHARS):
+        self._lines: list[str] = []
+        self._char_count = 0
+        self._max_chars = max_chars
+
+    def push_line(self, line: str) -> tuple[list[str], bool]:
+        text = (line or "").rstrip("\n")
+        if not text:
+            return [], False
+
+        ready: list[str] = []
+        if self._lines and _is_frame_start(text):
+            flushed = self.flush()
+            if flushed:
+                ready.append(flushed)
+
+        self._append(text)
+
+        overflow = False
+        if self._char_count >= self._max_chars:
+            overflow = True
+            flushed = self.flush()
+            if flushed:
+                ready.append(flushed)
+        return ready, overflow
+
+    def flush(self) -> Optional[str]:
+        if not self._lines:
+            return None
+        msg = "\n".join(self._lines)
+        self._lines = []
+        self._char_count = 0
+        return msg
+
+    def _append(self, line: str) -> None:
+        if self._lines:
+            self._char_count += 1
+        self._lines.append(line)
+        self._char_count += len(line)
 
 
 class LogService:
@@ -154,6 +251,7 @@ class LogService:
         """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)"""
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
         logger.info(f"[SSE] stream_log_file 시작: channel={log_channel}")
+        multiline_frame_enabled = _is_multiline_frame_enabled()
 
         # 초기 Redis 연결 확인
         try:
@@ -175,10 +273,25 @@ class LogService:
                         gap_lines = gf.readlines()
                         _file_pos_init = gf.tell()
                     buffered = gap_lines[since_line:]
-                    for bl in buffered:
-                        stripped = bl.rstrip('\n')
-                        if stripped:
-                            yield f"data: {stripped}\n\n"
+                    if multiline_frame_enabled:
+                        gap_framer = _PollFrameBuffer()
+                        for bl in buffered:
+                            stripped = _ANSI_ESCAPE_RE.sub("", bl.rstrip("\n"))
+                            if not stripped:
+                                continue
+                            ready_frames, overflow = gap_framer.push_line(stripped)
+                            if overflow:
+                                logger.warning(f"[SSE] gap fill 프레임 상한 초과 (runner={runner_id})")
+                            for frame in ready_frames:
+                                yield _format_sse_data(frame)
+                        pending_gap = gap_framer.flush()
+                        if pending_gap:
+                            yield _format_sse_data(pending_gap)
+                    else:
+                        for bl in buffered:
+                            stripped = _ANSI_ESCAPE_RE.sub("", bl.rstrip("\n"))
+                            if stripped:
+                                yield f"data: {stripped}\n\n"
                 except Exception as ge:
                     logger.debug(f"[SSE] since_line gap fill 실패: {ge}")
 
@@ -193,6 +306,8 @@ class LogService:
         _no_msg_since = time.monotonic()
         _file_pos = _file_pos_init
         FILE_POLL_TIMEOUT = 5.0  # pub/sub 미수신 N초 후 파일 폴링 전환
+        _poll_chunk_buffer = ""
+        _poll_framer = _PollFrameBuffer()
 
         try:
             while True:
@@ -224,7 +339,10 @@ class LogService:
                                 reason = "rate_limit"
                             yield f"event: completed\ndata: {reason}\n\n"
                             return
-                        yield f"data: {data}\n\n"
+                        if multiline_frame_enabled:
+                            yield _format_sse_data(_ANSI_ESCAPE_RE.sub("", data))
+                        else:
+                            yield f"data: {data}\n\n"
                         last_heartbeat = time.monotonic()
                         consecutive_errors = 0
                     else:
@@ -241,10 +359,29 @@ class LogService:
                                         new_lines = f.read()
                                         new_pos = f.tell()
                                     if new_lines:
-                                        for poll_line in new_lines.splitlines():
-                                            stripped_line = poll_line.strip()
-                                            if stripped_line:
-                                                yield f"data: {stripped_line}\n\n"
+                                        if multiline_frame_enabled:
+                                            _poll_chunk_buffer += _normalize_newlines(new_lines)
+                                            parts = _poll_chunk_buffer.split("\n")
+                                            _poll_chunk_buffer = parts.pop() if parts else ""
+                                            for poll_line in parts:
+                                                stripped_line = _ANSI_ESCAPE_RE.sub("", poll_line.rstrip("\n"))
+                                                if not stripped_line:
+                                                    continue
+                                                ready_frames, overflow = _poll_framer.push_line(stripped_line)
+                                                if overflow:
+                                                    logger.warning(
+                                                        f"[SSE] 파일 폴링 프레임 상한 초과 즉시 flush (runner={runner_id})"
+                                                    )
+                                                for frame in ready_frames:
+                                                    yield _format_sse_data(frame)
+                                            pending_poll = _poll_framer.flush()
+                                            if pending_poll:
+                                                yield _format_sse_data(pending_poll)
+                                        else:
+                                            for poll_line in new_lines.splitlines():
+                                                stripped_line = poll_line.strip()
+                                                if stripped_line:
+                                                    yield f"data: {stripped_line}\n\n"
                                         _file_pos = new_pos
                                         last_heartbeat = time.monotonic()
                                 except Exception as fe:
@@ -313,7 +450,7 @@ class LogService:
                             reason = "completed" if (not suffix or suffix == "SUCCESS") else "merge_failed"
                             yield f"event: completed\ndata: {reason}\n\n"
                             return
-                        yield f"data: {data}\n\n"
+                        yield _format_sse_data(_ANSI_ESCAPE_RE.sub("", data))
                         last_heartbeat = time.monotonic()
                         consecutive_errors = 0
                     else:

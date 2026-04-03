@@ -57,7 +57,24 @@ export function createFetchSSE(options: FetchSSEOptions): FetchSSEHandle {
 
 			while (true) {
 				const { done, value } = await reader.read();
-				if (done) break;
+				if (done) {
+					// 스트림 종료 시 마지막 버퍼/이벤트 flush
+					if (buffer.length > 0) {
+						const tailLine = buffer.endsWith('\r') ? buffer.slice(0, -1) : buffer;
+						if (tailLine.startsWith('event:')) {
+							const raw = tailLine.slice('event:'.length);
+							currentEvent = raw.startsWith(' ') ? raw.slice(1) : raw;
+						} else if (tailLine.startsWith('data:')) {
+							const raw = tailLine.slice('data:'.length);
+							const next = raw.startsWith(' ') ? raw.slice(1) : raw;
+							currentData = currentData ? `${currentData}\n${next}` : next;
+						}
+					}
+					if (currentData) {
+						onEvent?.(currentEvent, currentData);
+					}
+					break;
+				}
 
 				buffer += decoder.decode(value, { stream: true });
 				const lines = buffer.split('\n');
@@ -65,11 +82,16 @@ export function createFetchSSE(options: FetchSSEOptions): FetchSSEHandle {
 				buffer = lines.pop() ?? '';
 
 				for (const line of lines) {
-					if (line.startsWith('event:')) {
-						currentEvent = line.slice('event:'.length).trim();
-					} else if (line.startsWith('data:')) {
-						currentData += line.slice('data:'.length).trim();
-					} else if (line === '') {
+					const normalizedLine = line.endsWith('\r') ? line.slice(0, -1) : line;
+					if (normalizedLine.startsWith('event:')) {
+						const raw = normalizedLine.slice('event:'.length);
+						currentEvent = raw.startsWith(' ') ? raw.slice(1) : raw;
+					} else if (normalizedLine.startsWith('data:')) {
+						// SSE 스펙: multi data line은 '\n'로 결합하고 공백/개행 원문을 보존한다.
+						const raw = normalizedLine.slice('data:'.length);
+						const next = raw.startsWith(' ') ? raw.slice(1) : raw;
+						currentData = currentData ? `${currentData}\n${next}` : next;
+					} else if (normalizedLine === '') {
 						// 빈 줄 = 이벤트 경계
 						if (currentData) {
 							onEvent?.(currentEvent, currentData);

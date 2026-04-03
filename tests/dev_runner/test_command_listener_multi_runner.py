@@ -108,7 +108,9 @@ class TestStreamOutput:
         listener = _load_listener()
 
         mock_process = MagicMock()
-        mock_process.stdout = iter(["hello world\n"])
+        mock_stdout = MagicMock()
+        mock_stdout.readline.side_effect = ["hello world\n", ""]
+        mock_process.stdout = mock_stdout
         mock_process.returncode = 0
         mock_process.wait = MagicMock()
 
@@ -122,6 +124,35 @@ class TestStreamOutput:
         assert len(call_args_list) > 0
         channel = call_args_list[-1][0][0]
         assert channel == f"{listener.LOG_CHANNEL_PREFIX}:t-clmulti-abc1"
+
+    def test_stream_output_multiline_frame_published_once(self):
+        """_stream_output이 멀티라인 RESULT를 1회 publish payload로 묶는다."""
+        listener = _load_listener()
+
+        mock_process = MagicMock()
+        mock_stdout = MagicMock()
+        mock_stdout.readline.side_effect = [
+            "[12:00:00] [RESULT] line-1\n",
+            "line-2\n",
+            "line-3\n",
+            "[12:00:01] [AI] done\n",
+            "",
+        ]
+        mock_process.stdout = mock_stdout
+        mock_process.returncode = 0
+        mock_process.wait = MagicMock()
+
+        mock_log_handle = MagicMock()
+        r = _make_redis_mock()
+
+        with patch.object(listener, "_cleanup_process_state"):
+            listener._stream_output(mock_process, mock_log_handle, r, "t-clmulti-abc2")
+
+        published_messages = [args[0][1] for args in r.publish.call_args_list if args[0]]
+        result_msgs = [msg for msg in published_messages if "[RESULT] line-1" in msg]
+        assert len(result_msgs) == 1, f"RESULT 프레임 분절 publish 발생: {published_messages}"
+        assert "line-2" in result_msgs[0]
+        assert "line-3" in result_msgs[0]
 
 
 class TestStartPlanRunner:

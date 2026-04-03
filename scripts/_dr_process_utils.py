@@ -17,6 +17,7 @@ from _dr_state import (
     get_running_processes, get_running_log_files, get_stream_threads,
     get_cleanup_done, get_dead_process_first_seen, get_wf_manager,
 )
+from _dr_log_framing import MultilineFrameBuffer
 from _dr_subprocess import _ANSI_ESCAPE
 
 logger = logging.getLogger(__name__)
@@ -294,6 +295,7 @@ def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Red
     """
     _running_processes = get_running_processes()
     log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+    frame_buffer = MultilineFrameBuffer(max_chars=8192)
     try:
         with open(log_path, "r", encoding="utf-8", errors="replace") as f:
             # 파일 끝으로 이동 (재연결 전 기존 내용은 재발행하지 않음)
@@ -304,8 +306,14 @@ def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Red
                     break
                 line = f.readline()
                 if line:
-                    stripped = line.rstrip('\n')
-                    _publish_with_retry(redis_client, log_channel, _ANSI_ESCAPE.sub('', stripped))
+                    stripped = _ANSI_ESCAPE.sub('', line.rstrip('\n'))
+                    ready_frames, overflow = frame_buffer.push_line(stripped)
+                    if overflow:
+                        logger.warning(
+                            f"[tail_log] 프레임 버퍼 상한(8192 chars) 초과 즉시 flush (runner_id={runner_id})"
+                        )
+                    for frame in ready_frames:
+                        _publish_with_retry(redis_client, log_channel, frame)
                 else:
                     # 더 읽을 내용 없음 — PID가 죽었는지 확인
                     proc = _running_processes.get(runner_id)
@@ -317,11 +325,23 @@ def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Red
                             remaining = f.readline()
                             if not remaining:
                                 break
-                            _stripped = remaining.rstrip('\n')
+                            _stripped = _ANSI_ESCAPE.sub('', remaining.rstrip('\n'))
                             if _stripped:
-                                _publish_with_retry(redis_client, log_channel, _ANSI_ESCAPE.sub('', _stripped))
+                                _ready, _overflow = frame_buffer.push_line(_stripped)
+                                if _overflow:
+                                    logger.warning(
+                                        f"[tail_log] drain 프레임 버퍼 상한 초과 즉시 flush (runner_id={runner_id})"
+                                    )
+                                for _frame in _ready:
+                                    _publish_with_retry(redis_client, log_channel, _frame)
+                        pending = frame_buffer.flush()
+                        if pending:
+                            _publish_with_retry(redis_client, log_channel, pending)
                         break
                     time.sleep(0.2)
+            pending = frame_buffer.flush()
+            if pending:
+                _publish_with_retry(redis_client, log_channel, pending)
     except FileNotFoundError:
         logger.warning(f"[tail_log] 로그 파일 없음: {log_path}")
     except Exception as e:

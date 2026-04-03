@@ -15,6 +15,7 @@ from app.modules.dev_runner.services.event_service import (
     EventService, RUNNER_KEY_PREFIX, REDIS_STATE_KEY,
     LOG_CHANNEL_PATTERN, MERGE_LOG_CHANNEL_PATTERN,
     _LOG_COMPLETED_SENTINEL, _MERGE_LOG_COMPLETED_SENTINEL,
+    _build_log_line_payload,
 )
 
 
@@ -288,6 +289,19 @@ class TestSseFormat:
         data_line = [l for l in result.splitlines() if l.startswith("data: ")][0]
         parsed = json.loads(data_line[6:])  # "data: " 제거
         assert parsed["runners"][0]["runner_id"] == "abc"
+
+
+class TestBuildLogLinePayload:
+    def test_single_line_returns_string(self):
+        payload = _build_log_line_payload("hello")
+        assert payload == "hello"
+
+    def test_multiline_returns_object(self):
+        payload = _build_log_line_payload("a\nb\nc")
+        assert isinstance(payload, dict)
+        assert payload["text"] == "a\nb\nc"
+        assert payload["meta"]["multiline"] is True
+        assert payload["meta"]["line_count"] == 3
 
 
 # ─── stream_events 통합 테스트 (Right) ──────────────────────────────────────
@@ -582,6 +596,31 @@ class TestStreamEventsLogIntegration:
 
         log_events = [e for e in events if e.startswith("event: log\n")]
         assert len(log_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_events_log_multiline_payload_as_object(self, event_service, async_redis):
+        """멀티라인 로그는 line={text,meta} 객체 포맷으로 전달된다."""
+        log_msg = {
+            "type": "pmessage",
+            "channel": "plan-runner:logs:runner-multi",
+            "pattern": LOG_CHANNEL_PATTERN,
+            "data": "[12:00:00] [RESULT] line-1\nline-2\nline-3",
+        }
+        _, _, factory = _make_dual_pubsub_mocks(log_messages=[log_msg])
+        async_redis.pubsub = MagicMock(side_effect=factory)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        events = await _collect_events(gen, 4)
+        await gen.aclose()
+
+        log_events = [e for e in events if e.startswith("event: log\n")]
+        assert len(log_events) >= 1
+        data = json.loads(log_events[0].split("data: ")[1].split("\n")[0])
+        assert isinstance(data["line"], dict)
+        assert data["line"]["text"].startswith("[12:00:00] [RESULT] line-1")
+        assert data["line"]["meta"]["multiline"] is True
+        assert data["line"]["meta"]["line_count"] == 3
 
     @pytest.mark.asyncio
     async def test_stream_events_log_pubsub_redis_disconnect(self, event_service, async_redis):
