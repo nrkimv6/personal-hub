@@ -4,22 +4,33 @@
   import type {
     ServiceDashboardStatus,
     RedisStatus,
-    NssmService,
-    WorkerProcess,
-    ScheduledTask,
-    StartupProgram,
     ProcessWatchItem,
     ProcessWatchLatestResponse,
     NightlyCleanupStats
   } from '$lib/api';
   import { devRunnerRunnerApi } from '$lib/api/dev-runner';
   import type { RunStatusResponse } from '$lib/api/dev-runner';
-  import StatusDot from '$lib/components/ui/StatusDot.svelte';
-  import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
   import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
   import SectionSkeleton from '$lib/components/ui/SectionSkeleton.svelte';
+  import ServiceDashboardSection from './service-status/ServiceDashboardSection.svelte';
+  import ProcessWatchSection from './service-status/ProcessWatchSection.svelte';
+  import CleanupStatsSection from './service-status/CleanupStatsSection.svelte';
+  import {
+    groupBy,
+    groupTasksByFolder,
+    formatCollectedAt,
+    formatDateTime,
+    formatUptime,
+    serviceVariant,
+    workerVariant,
+    workerStatusText,
+    workerStatusTextClass,
+    taskVariant,
+    processWatchKey,
+    formatProcessDelta
+  } from './service-status/utils';
+  import type { ConfirmAction, RestartStep, RestartStepKey } from './service-status/types';
 
-  // Props
   interface Props {
     onStatusChange?: (runningCount: number, totalCount: number) => void;
   }
@@ -31,118 +42,90 @@
   let actionLoading = $state<string | null>(null);
   let refreshing = $state(false);
 
-  // Self-restart 상태
   let selfRestartState = $state<'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed'>('idle');
   let selfRestartMessage = $state('');
 
-  // Dev Runner + Redis 상태
   let devRunnerStatus = $state<RunStatusResponse | null>(null);
-  let redisStatus = $state<RedisStatus | null>({ connected: false, container_running: null, uptime_seconds: null, used_memory_mb: null, connected_clients: null });
+  let redisStatus = $state<RedisStatus | null>({
+    connected: false,
+    container_running: null,
+    uptime_seconds: null,
+    used_memory_mb: null,
+    connected_clients: null
+  });
 
-  // ConfirmDialog 상태
-  let confirmDialog = $state({ open: false, title: '', description: '', confirmText: '확인', destructive: false, action: () => {} });
+  let confirmDialog = $state<{
+    open: boolean;
+    title: string;
+    description: string;
+    confirmText: string;
+    destructive: boolean;
+    action: ConfirmAction;
+  }>({
+    open: false,
+    title: '',
+    description: '',
+    confirmText: '확인',
+    destructive: false,
+    action: () => {}
+  });
 
-  // Nightly Cleanup 통계
   let cleanupStats = $state<NightlyCleanupStats | null>(null);
   let cleanupStatsLoading = $state(false);
 
-  // Process Watch 모니터
   let processWatchLatest = $state<ProcessWatchLatestResponse | null>(null);
   let processWatchRows = $state<ProcessWatchItem[]>([]);
   let processWatchHistoryRows = $state<ProcessWatchItem[]>([]);
   let processWatchError = $state<string | null>(null);
   let processLoading = $state(false);
+  let processWatchInFlight = $state(false);
   let processPollingEnabled = $state(false);
   let processPollingInterval: ReturnType<typeof setInterval> | null = null;
   let processMemBaseline = $state<Record<string, { memoryMb: number; capturedAtMs: number }>>({});
   let processMemDeltaRate = $state<Record<string, number | null>>({});
+
   const PROCESS_REFRESH_INTERVAL = 5000;
-
   const REFRESH_INTERVAL = 30000;
+  const SELF_RESTART_MAX_POLL = 36;
+  const SELF_RESTART_POLL_INTERVAL = 5000;
+  const SELF_RESTART_INITIAL_WAIT_SELF = 20000;
+  const SELF_RESTART_INITIAL_WAIT_REMOTE = 10000;
 
-  // === 데이터 변환 (프로젝트별 → 카테고리별) ===
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
   let allServices = $derived.by(() => {
     if (!status) return [];
-    return Object.values(status.projects).flatMap(p => p.nssm_services);
+    return Object.values(status.projects).flatMap((project) => project.nssm_services);
   });
 
   let allWorkers = $derived.by(() => {
     if (!status) return [];
-    return Object.values(status.projects).flatMap(p => p.worker_processes);
+    return Object.values(status.projects).flatMap((project) => project.worker_processes);
   });
 
-  let workerTierProcs = $derived(allWorkers.filter(w => w.tier !== 'infra'));
-  let infraTierProcs = $derived(allWorkers.filter(w => w.tier === 'infra'));
+  let workerTierProcs = $derived(allWorkers.filter((worker) => worker.tier !== 'infra'));
+  let infraTierProcs = $derived(allWorkers.filter((worker) => worker.tier === 'infra'));
 
   let allTasks = $derived.by(() => {
     if (!status) return [];
-    return Object.values(status.projects).flatMap(p => p.scheduled_tasks);
+    return Object.values(status.projects).flatMap((project) => project.scheduled_tasks);
   });
 
   let allStartups = $derived.by(() => {
     if (!status) return [];
-    return Object.values(status.projects).flatMap(p => p.startup_programs);
+    return Object.values(status.projects).flatMap((project) => project.startup_programs);
   });
 
-  // === KPI 계산 ===
-  let runningServices = $derived(allServices.filter(s => s.status === 'Running').length);
-  let healthyWorkers = $derived(allWorkers.filter(w => {
-    const wd = w.watchdog?.running ?? false;
-    const wk = w.worker?.running ?? false;
-    return wd || wk;
+  let servicesByProject = $derived.by(() => groupBy(allServices));
+  let tasksByFolder = $derived.by(() => groupTasksByFolder(allTasks));
+
+  let runningServices = $derived(allServices.filter((service) => service.status === 'Running').length);
+  let healthyWorkers = $derived(allWorkers.filter((worker) => {
+    const watchdogRunning = worker.watchdog?.running ?? false;
+    const workerRunning = worker.worker?.running ?? false;
+    return watchdogRunning || workerRunning;
   }).length);
-  let taskErrors = $derived(allTasks.filter(t => t.LastResult !== null && t.LastResult !== 0).length);
-
-  // === 그룹핑 ===
-  function groupBy<T extends { project: string }>(items: T[]): Record<string, T[]> {
-    const groups: Record<string, T[]> = {};
-    for (const item of items) {
-      (groups[item.project] ??= []).push(item);
-    }
-    return groups;
-  }
-
-  function groupTasksByFolder(tasks: ScheduledTask[]): Record<string, ScheduledTask[]> {
-    const groups: Record<string, ScheduledTask[]> = {};
-    for (const task of tasks) {
-      (groups[task.Folder] ??= []).push(task);
-    }
-    return groups;
-  }
-
-  // === 유틸리티 ===
-  function formatCollectedAt(isoString: string | null): string {
-    if (!isoString) return '수집 전';
-    try {
-      const date = new Date(isoString);
-      const now = new Date();
-      const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-      if (diffSeconds < 10) return '방금 전';
-      if (diffSeconds < 60) return `${diffSeconds}초 전`;
-      if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}분 전`;
-      return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-    } catch { return isoString; }
-  }
-
-  function formatDateTime(isoString: string | null): string {
-    if (!isoString) return '-';
-    try {
-      const date = new Date(isoString);
-      const now = new Date();
-      const isToday = date.toDateString() === now.toDateString();
-      if (isToday) return `오늘 ${date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`;
-      return `${date.getMonth() + 1}월 ${date.getDate()}일 ${date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`;
-    } catch { return isoString; }
-  }
-
-  function formatUptime(seconds: number | null): string {
-    if (seconds === null) return '-';
-    if (seconds < 60) return `${seconds}초`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}분`;
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return `${h}시간 ${m}분`;
-  }
+  let taskErrors = $derived(allTasks.filter((task) => task.LastResult !== null && task.LastResult !== 0).length);
 
   function formatProcessUptime(proc: ProcessWatchItem): string {
     if (proc.uptime_human) return proc.uptime_human;
@@ -176,10 +159,6 @@
       .join(' <- ');
   }
 
-  function processWatchKey(proc: ProcessWatchItem): string {
-    return `${proc.pid}:${proc.cmdline_hash || ''}`;
-  }
-
   function updateProcessDeltaRates(items: ProcessWatchItem[]) {
     const nextBaseline: Record<string, { memoryMb: number; capturedAtMs: number }> = {};
     const nextRate: Record<string, number | null> = {};
@@ -209,12 +188,6 @@
     return processMemDeltaRate[processWatchKey(proc)] ?? null;
   }
 
-  function formatProcessDelta(rate: number | null): string {
-    if (rate === null) return '-';
-    const sign = rate > 0 ? '+' : '';
-    return `${sign}${rate.toFixed(1)} MB/s`;
-  }
-
   function processDeltaTextClass(rate: number | null): string {
     if (rate === null) return 'text-muted-foreground';
     if (rate >= 256) return 'text-error font-semibold';
@@ -223,68 +196,52 @@
     return 'text-foreground';
   }
 
-  function serviceVariant(svc: NssmService): 'success' | 'warning' | 'error' | 'gray' {
-    if (svc.status === 'Unregistered') return 'error';
-    if (svc.status === 'Running') return 'success';
-    if (svc.status === 'StartPending' || svc.status === 'StopPending') return 'warning';
-    return 'error';
-  }
-
-  function workerVariant(w: WorkerProcess): 'success' | 'warning' | 'error' | 'gray' {
-    const hasWatchdog = w.watchdog !== null && w.watchdog !== undefined;
-    const wd = w.watchdog?.running ?? false;
-    const wk = w.worker?.running ?? false;
-    // watchdog이 없는 워커(sleep-now 세션 워커 등): worker 상태만으로 판단
-    if (!hasWatchdog) return wk ? 'success' : 'gray';
-    if (wd && wk) return 'success';
-    if (wd && !wk) return 'warning';
-    return 'error';
-  }
-
-  function workerStatusText(w: WorkerProcess): { text: string; variant: 'success' | 'warning' | 'error' } {
-    const hasWatchdog = w.watchdog !== null && w.watchdog !== undefined;
-    const wd = w.watchdog?.running ?? false;
-    const wk = w.worker?.running ?? false;
-    // watchdog이 없는 워커: worker 상태만으로 판단
-    if (!hasWatchdog) return wk ? { text: '정상', variant: 'success' } : { text: '중지됨', variant: 'error' };
-    if (wd && wk) return { text: '정상', variant: 'success' };
-    if (wd && !wk) return { text: '워커 중지', variant: 'warning' };
-    if (!wd && wk) return { text: 'WD 없음', variant: 'warning' };
-    return { text: '중지됨', variant: 'error' };
-  }
-
-  function taskVariant(state: string): 'success' | 'warning' | 'gray' {
-    if (state === 'Ready') return 'success';
-    if (state === 'Running') return 'warning';
-    return 'gray';
-  }
-
-  // Graceful restart 단계
-  const restartSteps = [
+  const restartSteps: readonly RestartStep[] = [
     { key: 'requested', label: '요청' },
     { key: 'waiting', label: '대기' },
     { key: 'checking', label: '확인' },
-    { key: 'done', label: '완료' },
-  ] as const;
+    { key: 'done', label: '완료' }
+  ];
 
-  function stepStatus(stepKey: string): 'active' | 'done' | 'pending' | 'failed' {
-    const order = ['requested', 'waiting', 'checking', 'done'];
-    const currentIdx = order.indexOf(selfRestartState);
-    const stepIdx = order.indexOf(stepKey);
+  function stepStatus(stepKey: RestartStepKey): 'active' | 'done' | 'pending' | 'failed' {
+    const order: RestartStepKey[] = ['requested', 'waiting', 'checking', 'done'];
     if (selfRestartState === 'failed') {
-      return stepIdx <= currentIdx ? 'failed' : 'pending';
+      return stepKey === 'done' ? 'pending' : 'failed';
     }
-    if (stepIdx < currentIdx) return 'done';
-    if (stepIdx === currentIdx) return 'active';
+    if (selfRestartState === 'idle') return 'pending';
+
+    const currentIndex = order.indexOf(selfRestartState as RestartStepKey);
+    const stepIndex = order.indexOf(stepKey);
+    if (stepIndex < currentIndex) return 'done';
+    if (stepIndex === currentIndex) return 'active';
     return 'pending';
   }
 
-  // === 확인 다이얼로그 헬퍼 ===
-  function showConfirm(title: string, description: string, action: () => void, destructive = false, confirmText = '확인') {
+  function showConfirm(
+    title: string,
+    description: string,
+    action: ConfirmAction,
+    destructive = false,
+    confirmText = '확인'
+  ) {
     confirmDialog = { open: true, title, description, confirmText, destructive, action };
   }
 
-  // === API 호출 ===
+  async function runWithActionLoading(
+    actionKey: string,
+    work: () => Promise<void>,
+    onErrorPrefix: string
+  ): Promise<void> {
+    actionLoading = actionKey;
+    try {
+      await work();
+    } catch (e) {
+      alert(`${onErrorPrefix}: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally {
+      actionLoading = null;
+    }
+  }
+
   async function fetchStatus() {
     try {
       status = await serviceDashboardApi.status();
@@ -320,30 +277,41 @@
   }
 
   function updateServiceCounts() {
-    if (status && onStatusChange) {
-      let running = 0, total = 0;
-      for (const project of Object.values(status.projects)) {
-        for (const svc of project.nssm_services) {
-          total++;
-          if (svc.status === 'Running') running++;
-        }
+    if (!status || !onStatusChange) return;
+
+    let running = 0;
+    let total = 0;
+    for (const project of Object.values(status.projects)) {
+      for (const service of project.nssm_services) {
+        total += 1;
+        if (service.status === 'Running') running += 1;
       }
-      onStatusChange(running, total);
     }
+    onStatusChange(running, total);
   }
 
   async function fetchExtraStatus() {
     try {
-      const [anStatus, rStatus] = await Promise.all([
+      const [runnerStatus, redis] = await Promise.all([
         devRunnerRunnerApi.status().catch(() => null),
-        serviceDashboardApi.redisStatus().catch(() => null),
+        serviceDashboardApi.redisStatus().catch(() => null)
       ]);
-      if (anStatus !== null) devRunnerStatus = anStatus;
-      redisStatus = rStatus ?? { connected: false, container_running: null, uptime_seconds: null, used_memory_mb: null, connected_clients: null };
-    } catch { /* graceful */ }
+      if (runnerStatus !== null) devRunnerStatus = runnerStatus;
+      redisStatus = redis ?? {
+        connected: false,
+        container_running: null,
+        uptime_seconds: null,
+        used_memory_mb: null,
+        connected_clients: null
+      };
+    } catch {
+      // graceful
+    }
   }
 
   async function fetchProcessWatch() {
+    if (processWatchInFlight) return;
+    processWatchInFlight = true;
     try {
       const [latest, history] = await Promise.all([
         processWatchApi.latest({ min_mb: 0, limit: 200 }),
@@ -356,17 +324,30 @@
       processWatchError = latest.error ?? null;
     } catch (e) {
       processWatchError = e instanceof Error ? e.message : 'process-watch 조회 실패';
+    } finally {
+      processWatchInFlight = false;
     }
+  }
+
+  function clearProcessPollingInterval() {
+    if (!processPollingInterval) return;
+    clearInterval(processPollingInterval);
+    processPollingInterval = null;
   }
 
   function toggleProcessPolling() {
     processPollingEnabled = !processPollingEnabled;
     if (processPollingEnabled) {
       processLoading = true;
-      fetchProcessWatch().finally(() => { processLoading = false; });
-      processPollingInterval = setInterval(fetchProcessWatch, PROCESS_REFRESH_INTERVAL);
+      fetchProcessWatch().finally(() => {
+        processLoading = false;
+      });
+      clearProcessPollingInterval();
+      processPollingInterval = setInterval(() => {
+        void fetchProcessWatch();
+      }, PROCESS_REFRESH_INTERVAL);
     } else {
-      if (processPollingInterval) { clearInterval(processPollingInterval); processPollingInterval = null; }
+      clearProcessPollingInterval();
     }
   }
 
@@ -375,6 +356,7 @@
     const defaultReason = scope === 'monitor_page'
       ? 'memory pressure cleanup'
       : 'external process emergency cleanup';
+
     const reason = window.prompt(
       `PID ${item.pid} 종료 사유를 입력하세요 (최소 8자).\nscope=${scope}`,
       defaultReason
@@ -383,6 +365,7 @@
       alert('종료 사유는 최소 8자 이상이어야 합니다.');
       return;
     }
+
     showConfirm(
       '프로세스 강제 종료',
       `PID ${item.pid} (${item.name})을 강제 종료하시겠습니까?`,
@@ -417,106 +400,157 @@
     }
   }
 
-  onMount(() => {
-    fetchStatus();
-    fetchExtraStatus();
-    fetchCleanupStats();
-    const interval = setInterval(() => { if (selfRestartState !== 'idle') return; fetchStatus(); fetchExtraStatus(); }, REFRESH_INTERVAL);
-    return () => {
-      clearInterval(interval);
-      if (processPollingInterval) clearInterval(processPollingInterval);
-    };
-  });
+  function resetSelfRestartState() {
+    selfRestartState = 'idle';
+    selfRestartMessage = '';
+  }
 
-  // === 관리 기능 ===
-  async function stopService(name: string) {
-    actionLoading = `nssm-stop-${name}`;
+  async function pollApiReadyByPort(
+    port: number,
+    maxPoll: number,
+    intervalMs: number,
+    label: string
+  ): Promise<boolean> {
+    const startTime = Date.now();
+    for (let i = 1; i <= maxPoll; i += 1) {
+      let isReady = false;
+      try {
+        const checkUrl = `http://${location.hostname}:${port}/api/v1/system/status`;
+        const response = await fetch(checkUrl);
+        isReady = response.ok;
+      } catch {
+        isReady = false;
+      }
+
+      if (isReady) return true;
+
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      selfRestartMessage = `${label} 응답 대기 중... ${elapsed}초 (${i}/${maxPoll})`;
+
+      if (i < maxPoll) {
+        await sleep(intervalMs);
+      }
+    }
+
+    return false;
+  }
+
+  async function selfRestartApi(port: number, label: string) {
+    const isSelf = (location.port === '6101' && port === 8001) || (location.port === '6100' && port === 8000);
+    const initialWaitMs = isSelf ? SELF_RESTART_INITIAL_WAIT_SELF : SELF_RESTART_INITIAL_WAIT_REMOTE;
+
+    selfRestartState = 'requested';
+    selfRestartMessage = `${label} Self-restart 요청 중...`;
+
     try {
+      const response = await systemApi.selfRestartByPort(port, 2.0);
+      selfRestartState = 'waiting';
+      selfRestartMessage = `${label} PID ${response.pid} 종료 대기 중...`;
+    } catch (e) {
+      if (!isSelf) {
+        selfRestartState = 'failed';
+        selfRestartMessage = `${label} 요청 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`;
+        return;
+      }
+      selfRestartState = 'waiting';
+      selfRestartMessage = `${label} 연결 끊김 (정상) - 재시작 대기 중...`;
+    }
+
+    await sleep(initialWaitMs);
+
+    selfRestartState = 'checking';
+    selfRestartMessage = `${label} 재시작 확인 중...`;
+
+    const success = await pollApiReadyByPort(
+      port,
+      SELF_RESTART_MAX_POLL,
+      SELF_RESTART_POLL_INTERVAL,
+      label
+    );
+
+    if (success) {
+      selfRestartState = 'done';
+      selfRestartMessage = `${label} 재시작 완료`;
+      await fetchStatus();
+      setTimeout(() => {
+        resetSelfRestartState();
+      }, 3000);
+    } else {
+      selfRestartState = 'failed';
+      selfRestartMessage = `${label} 재시작 확인 실패 (3분 초과). 수동 확인 필요.`;
+    }
+  }
+
+  async function stopDevRunnerWithFallback() {
+    const runnerId = devRunnerStatus?.runner_id;
+    if (runnerId) {
+      await devRunnerRunnerApi.stop(runnerId);
+      return;
+    }
+    await devRunnerRunnerApi.stopLegacy();
+  }
+
+  async function stopService(name: string) {
+    await runWithActionLoading(`nssm-stop-${name}`, async () => {
       await serviceDashboardApi.stopNssm(name);
       await fetchStatus();
-    } catch (e) {
-      alert(`중지 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '중지 실패');
   }
 
   async function startService(name: string) {
-    actionLoading = `nssm-start-${name}`;
-    try {
+    await runWithActionLoading(`nssm-start-${name}`, async () => {
       await serviceDashboardApi.startNssm(name);
       await fetchStatus();
-    } catch (e) {
-      alert(`시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '시작 실패');
   }
 
   async function removeStartup(name: string) {
-    actionLoading = `startup-${name}`;
-    try {
+    await runWithActionLoading(`startup-${name}`, async () => {
       await serviceDashboardApi.removeStartup(name);
       await fetchStatus();
-    } catch (e) {
-      alert(`제거 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '제거 실패');
   }
 
   async function runTask(folder: string, name: string) {
-    actionLoading = `run-${folder}-${name}`;
-    try {
+    await runWithActionLoading(`run-${folder}-${name}`, async () => {
       await serviceDashboardApi.runTask(folder, name);
       await fetchStatus();
-    } catch (e) {
-      alert(`실행 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '실행 실패');
   }
 
   async function removeTask(folder: string, name: string) {
-    actionLoading = `task-${folder}-${name}`;
-    try {
+    await runWithActionLoading(`task-${folder}-${name}`, async () => {
       await serviceDashboardApi.removeTask(folder, name);
       await fetchStatus();
-    } catch (e) {
-      alert(`제거 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '제거 실패');
   }
 
   async function restartWorkers() {
-    actionLoading = 'workers';
-    try {
+    await runWithActionLoading('workers', async () => {
       await serviceDashboardApi.restartWorkers();
       await fetchStatus();
-    } catch (e) {
-      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '재시작 실패');
   }
 
-  async function restartSingleWorker(name: string, label: string) {
-    actionLoading = `worker-${name}`;
-    try {
+  async function restartSingleWorker(name: string) {
+    await runWithActionLoading(`worker-${name}`, async () => {
       await serviceDashboardApi.restartWorker(name);
       await fetchStatus();
-    } catch (e) {
-      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '재시작 실패');
   }
 
-  async function restartInfra(name: string, label: string) {
-    actionLoading = `infra-${name}`;
-    try {
+  async function restartInfra(name: string) {
+    await runWithActionLoading(`infra-${name}`, async () => {
       await serviceDashboardApi.restartInfra(name);
       await fetchStatus();
-    } catch (e) {
-      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '재시작 실패');
   }
 
   async function stopWatchdogs() {
-    actionLoading = 'watchdogs-stop';
-    try {
+    await runWithActionLoading('watchdogs-stop', async () => {
       await serviceDashboardApi.stopWatchdogs();
       await fetchStatus();
-    } catch (e) {
-      alert(`중지 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '중지 실패');
   }
 
   async function startWatchdogs() {
@@ -524,146 +558,68 @@
       alert('Redis가 연결되지 않았습니다.\nwatchdog 시작은 Redis Command Listener를 경유합니다.\n\nCLI에서 실행: python scripts/browser_workers.py start');
       return;
     }
-    actionLoading = 'watchdogs-start';
-    try {
+
+    await runWithActionLoading('watchdogs-start', async () => {
       await serviceDashboardApi.startWatchdogs();
       await fetchStatus();
-    } catch (e) {
-      alert(`시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}\n\nCLI에서 실행: python scripts/browser_workers.py start`);
-    } finally { actionLoading = null; }
-  }
-
-  let selfRestartTarget = $state('');
-
-  async function selfRestartApi(port: number, label: string) {
-    // 자기 자신 재시작인지 판별 (프론트엔드 프록시 대상 포트와 비교)
-    const isSelf = (location.port === '6101' && port === 8001) || (location.port === '6100' && port === 8000);
-    const MAX_POLL = 36;       // 최대 36회 × 5초 = 3분
-    const POLL_INTERVAL = 5000;
-    const INITIAL_WAIT = isSelf ? 20000 : 10000; // 자기 자신이면 좀 더 대기
-
-    selfRestartState = 'requested';
-    selfRestartTarget = label;
-    selfRestartMessage = `${label} Self-restart 요청 중...`;
-    try {
-      const response = await systemApi.selfRestartByPort(port, 2.0);
-      selfRestartState = 'waiting';
-      selfRestartMessage = `${label} PID ${response.pid} 종료 대기 중...`;
-      await new Promise(r => setTimeout(r, INITIAL_WAIT));
-      selfRestartState = 'checking';
-      selfRestartMessage = `${label} 재시작 확인 중...`;
-      let success = false;
-      const startTime = Date.now();
-      for (let i = 1; i <= MAX_POLL; i++) {
-        const elapsed = Math.round((Date.now() - startTime) / 1000);
-        try {
-          const checkUrl = `http://${location.hostname}:${port}/api/v1/system/status`;
-          const res = await fetch(checkUrl);
-          if (res.ok) { success = true; break; }
-        } catch {
-          selfRestartMessage = `${label} 응답 대기 중... ${elapsed}초 (${i}/${MAX_POLL})`;
-          if (i < MAX_POLL) await new Promise(r => setTimeout(r, POLL_INTERVAL));
-        }
-      }
-      if (success) {
-        selfRestartState = 'done';
-        selfRestartMessage = `${label} 재시작 완료`;
-        await fetchStatus();
-        setTimeout(() => { selfRestartState = 'idle'; selfRestartMessage = ''; selfRestartTarget = ''; }, 3000);
-      } else {
-        selfRestartState = 'failed';
-        selfRestartMessage = `${label} 재시작 확인 실패 (3분 초과). 수동 확인 필요.`;
-      }
-    } catch (e) {
-      // 자기 자신 재시작 시 요청 자체가 끊길 수 있음 → 정상 동작
-      if (isSelf) {
-        selfRestartState = 'waiting';
-        selfRestartMessage = `${label} 연결 끊김 (정상) — 재시작 대기 중...`;
-        await new Promise(r => setTimeout(r, INITIAL_WAIT));
-        selfRestartState = 'checking';
-        let success = false;
-        const startTime = Date.now();
-        for (let i = 1; i <= MAX_POLL; i++) {
-          const elapsed = Math.round((Date.now() - startTime) / 1000);
-          try {
-            const checkUrl = `http://${location.hostname}:${port}/api/v1/system/status`;
-            const res = await fetch(checkUrl);
-            if (res.ok) { success = true; break; }
-          } catch {
-            selfRestartMessage = `${label} 응답 대기 중... ${elapsed}초 (${i}/${MAX_POLL})`;
-            if (i < MAX_POLL) await new Promise(r => setTimeout(r, POLL_INTERVAL));
-          }
-        }
-        if (success) {
-          selfRestartState = 'done';
-          selfRestartMessage = `${label} 재시작 완료`;
-          await fetchStatus();
-          setTimeout(() => { selfRestartState = 'idle'; selfRestartMessage = ''; selfRestartTarget = ''; }, 3000);
-        } else {
-          selfRestartState = 'failed';
-          selfRestartMessage = `${label} 재시작 확인 실패 (3분 초과). 수동 확인 필요.`;
-        }
-      } else {
-        selfRestartState = 'failed';
-        selfRestartMessage = `${label} 요청 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`;
-      }
-    }
+    }, '시작 실패\n\nCLI에서 실행: python scripts/browser_workers.py start');
   }
 
   async function startDevRunner() {
-    actionLoading = 'dev-runner-start';
-    try {
+    await runWithActionLoading('dev-runner-start', async () => {
       await devRunnerRunnerApi.start({});
       await fetchExtraStatus();
-    } catch (e) {
-      alert(`시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '시작 실패');
   }
 
   async function stopDevRunner() {
-    actionLoading = 'dev-runner-stop';
-    try {
-      await devRunnerRunnerApi.stop();
+    await runWithActionLoading('dev-runner-stop', async () => {
+      await stopDevRunnerWithFallback();
       await fetchExtraStatus();
-    } catch (e) {
-      alert(`중지 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '중지 실패');
   }
 
   async function restartDevRunner() {
-    actionLoading = 'dev-runner-restart';
-    try {
-      await devRunnerRunnerApi.stop();
+    await runWithActionLoading('dev-runner-restart', async () => {
+      await stopDevRunnerWithFallback();
       await devRunnerRunnerApi.start({});
       await fetchExtraStatus();
-    } catch (e) {
-      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '재시작 실패');
   }
 
   async function resetDevRunner() {
-    actionLoading = 'dev-runner-reset';
-    try {
+    await runWithActionLoading('dev-runner-reset', async () => {
       await devRunnerRunnerApi.resetState();
       await fetchExtraStatus();
-    } catch (e) {
-      alert(`리셋 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally { actionLoading = null; }
+    }, '리셋 실패');
   }
 
   async function restartRedis() {
-    actionLoading = 'redis-restart';
-    try {
+    await runWithActionLoading('redis-restart', async () => {
       const result = await serviceDashboardApi.restartRedis();
       alert(result.message);
       await fetchExtraStatus();
-    } catch (e) {
-      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}\n\nCLI: browser_workers.py redis-restart`);
-    } finally { actionLoading = null; }
+    }, '재시작 실패\n\nCLI: browser_workers.py redis-restart');
   }
+
+  onMount(() => {
+    fetchStatus();
+    fetchExtraStatus();
+    fetchCleanupStats();
+
+    const interval = setInterval(() => {
+      if (selfRestartState !== 'idle') return;
+      void fetchStatus();
+      void fetchExtraStatus();
+    }, REFRESH_INTERVAL);
+
+    return () => {
+      clearInterval(interval);
+      clearProcessPollingInterval();
+    };
+  });
 </script>
 
-<!-- ConfirmDialog (전역 1개) -->
 <ConfirmDialog
   bind:open={confirmDialog.open}
   title={confirmDialog.title}
@@ -675,10 +631,6 @@
 />
 
 <div class="space-y-4 max-w-6xl mx-auto">
-
-  <!-- ============================================================ -->
-  <!-- Status Overview -->
-  <!-- ============================================================ -->
   {#if loading}
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {#each Array(4) as _}
@@ -694,734 +646,90 @@
       <button onclick={fetchStatus} class="mt-2 text-sm text-error underline hover:no-underline">다시 시도</button>
     </div>
   {:else if status}
-    <!-- Overview 카드 + 액션 바 -->
-    <div class="bg-card rounded-lg border border-border shadow-card p-4">
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <h2 class="text-base font-semibold text-foreground">Status Overview</h2>
-        <div class="flex items-center gap-2">
-          <button
-            onclick={fetchStatus}
-            class="h-8 px-3 text-xs rounded-md font-medium border border-input bg-background hover:bg-accent transition-colors"
-          >
-            새로고침
-          </button>
-          <button
-            onclick={refreshStatus}
-            disabled={refreshing}
-            class="h-8 px-3 text-xs rounded-md font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50 transition-colors"
-          >
-            {refreshing ? '수집 중...' : '즉시 수집'}
-          </button>
-        </div>
-      </div>
-
-      <!-- 4 KPI -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-        <!-- NSSM Services -->
-        <div class="flex items-center gap-3 p-3 rounded-lg bg-muted/40">
-          <div class="flex items-center justify-center h-9 w-9 rounded-md {runningServices === allServices.length ? 'bg-success-light' : 'bg-warning-light'}">
-            <StatusDot variant={runningServices === allServices.length ? 'success' : 'warning'} size="md" pulse={runningServices === allServices.length} />
-          </div>
-          <div>
-            <div class="text-xs text-muted-foreground">NSSM 서비스</div>
-            <div class="text-lg font-semibold font-mono">{runningServices}<span class="text-sm text-muted-foreground font-normal">/{allServices.length}</span></div>
-          </div>
-        </div>
-
-        <!-- Workers -->
-        <div class="flex items-center gap-3 p-3 rounded-lg bg-muted/40">
-          <div class="flex items-center justify-center h-9 w-9 rounded-md {healthyWorkers === allWorkers.length ? 'bg-success-light' : 'bg-warning-light'}">
-            <StatusDot variant={healthyWorkers === allWorkers.length ? 'success' : 'warning'} size="md" pulse={healthyWorkers === allWorkers.length} />
-          </div>
-          <div>
-            <div class="text-xs text-muted-foreground">워커 프로세스</div>
-            <div class="text-lg font-semibold font-mono">{healthyWorkers}<span class="text-sm text-muted-foreground font-normal">/{allWorkers.length}</span></div>
-          </div>
-        </div>
-
-        <!-- Tasks -->
-        <div class="flex items-center gap-3 p-3 rounded-lg bg-muted/40">
-          <div class="flex items-center justify-center h-9 w-9 rounded-md {taskErrors > 0 ? 'bg-error-light' : 'bg-muted'}">
-            <StatusDot variant={taskErrors > 0 ? 'error' : 'gray'} size="md" />
-          </div>
-          <div>
-            <div class="text-xs text-muted-foreground">예약 작업</div>
-            <div class="text-lg font-semibold font-mono">{allTasks.length}
-              {#if taskErrors > 0}<span class="text-xs text-error font-normal ml-1">({taskErrors} 에러)</span>{/if}
-            </div>
-          </div>
-        </div>
-
-        <!-- Startups -->
-        <div class="flex items-center gap-3 p-3 rounded-lg bg-muted/40">
-          <div class="flex items-center justify-center h-9 w-9 rounded-md bg-muted">
-            <StatusDot variant="gray" size="md" />
-          </div>
-          <div>
-            <div class="text-xs text-muted-foreground">시작프로그램</div>
-            <div class="text-lg font-semibold font-mono">{allStartups.length}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 수집 시각 + 자동 갱신 -->
-      <div class="flex items-center gap-2 text-xs text-muted-foreground">
-        <StatusDot variant="success" size="sm" pulse />
-        <span>자동 갱신 30초</span>
-        <span class="mx-1">·</span>
-        <span>마지막 수집: {formatCollectedAt(status.collected_at)}</span>
-      </div>
-    </div>
-
-    <!-- ============================================================ -->
-    <!-- Services + Workers (2-col) -->
-    <!-- ============================================================ -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-      <!-- Windows Services -->
-      <div class="bg-card rounded-lg border border-border shadow-card p-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <h3 class="text-sm font-semibold text-foreground">Windows 서비스</h3>
-            <span class="text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">{allServices.length}</span>
-          </div>
-          <div class="flex gap-1">
-            <button
-              onclick={() => showConfirm('Dev API 재시작', 'Dev API(:8001)를 재시작합니다. 약 15초간 중단됩니다.', () => selfRestartApi(8001, 'Dev'), true, '재시작')}
-              disabled={selfRestartState !== 'idle'}
-              class="h-7 px-2 text-[11px] rounded-md font-medium border border-input bg-background hover:bg-accent transition-colors disabled:opacity-50"
-            >
-              Dev 재시작
-            </button>
-            <button
-              onclick={() => showConfirm('Prod API 재시작', 'Prod API(:8000)를 재시작합니다. 약 15초간 중단됩니다.', () => selfRestartApi(8000, 'Prod'), true, '재시작')}
-              disabled={selfRestartState !== 'idle'}
-              class="h-7 px-2 text-[11px] rounded-md font-medium border border-input bg-background hover:bg-accent transition-colors disabled:opacity-50"
-            >
-              Prod 재시작
-            </button>
-          </div>
-        </div>
-
-        <!-- Graceful Restart 진행바 -->
-        {#if selfRestartState !== 'idle'}
-          <div class="mb-3 p-3 rounded-lg bg-muted/50">
-            <div class="flex items-center gap-1 mb-2">
-              {#each restartSteps as step, i}
-                {@const s = stepStatus(step.key)}
-                {#if i > 0}
-                  <div class="h-px w-4 {s === 'done' || s === 'active' ? 'bg-primary' : s === 'failed' ? 'bg-error' : 'bg-border'}"></div>
-                {/if}
-                <div class="flex items-center gap-1">
-                  <div class="h-2 w-2 rounded-full {s === 'done' ? 'bg-success' : s === 'active' ? 'bg-primary animate-pulse-soft' : s === 'failed' ? 'bg-error' : 'bg-muted-foreground/30'}"></div>
-                  <span class="text-[10px] {s === 'active' ? 'text-primary font-medium' : s === 'failed' ? 'text-error' : 'text-muted-foreground'}">{step.label}</span>
-                </div>
-              {/each}
-            </div>
-            <div class="flex items-center gap-2 text-xs">
-              {#if selfRestartState !== 'done' && selfRestartState !== 'failed'}
-                <div class="inline-block animate-spin rounded-full h-3 w-3 border-2 border-primary border-t-transparent"></div>
-              {/if}
-              <span class="text-muted-foreground">{selfRestartMessage}</span>
-              {#if selfRestartState === 'failed'}
-                <button onclick={() => { selfRestartState = 'idle'; selfRestartMessage = ''; }} class="text-xs text-error underline ml-auto">닫기</button>
-              {/if}
-            </div>
-          </div>
-        {/if}
-
-        <!-- 프로젝트별 서비스 -->
-        {#each Object.entries(groupBy(allServices)) as [project, services]}
-          <div class="mb-2 last:mb-0">
-            <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-1">{project}</div>
-            {#each services as svc}
-              <div class="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 rounded transition-colors">
-                <StatusDot variant={serviceVariant(svc)} size="sm" pulse={svc.status === 'Running'} />
-                <span class="font-medium text-sm text-foreground truncate">{svc.display_name}</span>
-                <span class="font-mono text-[11px] text-muted-foreground truncate hidden sm:inline">{svc.name}</span>
-                <div class="ml-auto flex items-center gap-2 shrink-0">
-                  <StatusBadge variant={serviceVariant(svc)} size="sm">{svc.status === 'Unregistered' ? '미등록' : svc.status}</StatusBadge>
-                  <span class="text-[10px] text-muted-foreground">{svc.start_type}</span>
-                  {#if svc.status === 'Running'}
-                    <button
-                      onclick={() => showConfirm('서비스 중지', `"${svc.display_name}" 서비스를 중지합니다.`, () => stopService(svc.name), true, '중지')}
-                      disabled={actionLoading?.startsWith('nssm-')}
-                      class="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-error hover:bg-error-light transition-colors disabled:opacity-50"
-                      title="중지"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
-                    </button>
-                  {:else}
-                    <button
-                      onclick={() => startService(svc.name)}
-                      disabled={actionLoading?.startsWith('nssm-')}
-                      class="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-success hover:bg-success-light transition-colors disabled:opacity-50"
-                      title="시작"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16"><path d="M4 2l10 6-10 6V2z"/></svg>
-                    </button>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/each}
-
-        {#if allServices.length === 0}
-          <p class="text-sm text-muted-foreground py-4 text-center">서비스 정보가 없습니다.</p>
-        {/if}
-      </div>
-
-      <!-- Worker Processes -->
-      <div class="bg-card rounded-lg border border-border shadow-card p-4">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <h3 class="text-sm font-semibold text-foreground">워커 프로세스</h3>
-            <span class="text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">{allWorkers.length}</span>
-            <span class="text-[10px] text-muted-foreground flex items-center gap-2 ml-1">
-              <span class="flex items-center gap-0.5"><span class="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/40"></span>WD</span>
-              <span class="flex items-center gap-0.5"><span class="inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/40"></span>WK</span>
-            </span>
-          </div>
-          <div class="flex items-center gap-1">
-            <button
-              onclick={() => showConfirm('전체 재시작', '모든 워커를 재시작합니다. watchdog가 자동으로 재시작합니다.', restartWorkers)}
-              disabled={actionLoading === 'workers'}
-              class="h-7 px-2 text-[11px] rounded-md font-medium border border-input bg-background hover:bg-accent transition-colors disabled:opacity-50"
-            >
-              전체 재시작
-            </button>
-            <button
-              onclick={() => showConfirm('Watchdog 중지', '모든 watchdog를 중지합니다. 워커가 죽어도 자동 재시작되지 않습니다.', stopWatchdogs, true, '중지')}
-              disabled={actionLoading === 'watchdogs-stop'}
-              class="h-7 px-2 text-[11px] rounded-md font-medium text-warning border border-warning/30 bg-warning-light hover:bg-warning/10 transition-colors disabled:opacity-50"
-            >
-              WD 중지
-            </button>
-            <button
-              onclick={() => startWatchdogs()}
-              disabled={actionLoading === 'watchdogs-start'}
-              class="h-7 px-2 text-[11px] rounded-md font-medium text-success border border-success/30 bg-success-light hover:bg-success/10 transition-colors disabled:opacity-50"
-              title={redisStatus && !redisStatus.connected ? 'Redis 연결 필요' : ''}
-            >
-              WD 시작
-            </button>
-          </div>
-        </div>
-
-        {#each workerTierProcs as proc}
-          {@const ws = workerStatusText(proc)}
-          <div class="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 rounded transition-colors">
-            <StatusDot variant={workerVariant(proc)} size="sm" pulse={workerVariant(proc) === 'success'} />
-            <span class="font-medium text-sm text-foreground">{proc.label}</span>
-            <span class="font-mono text-[11px] text-muted-foreground hidden sm:inline">{proc.name}</span>
-
-            <!-- WD/WK dots -->
-            <div class="ml-auto flex items-center gap-3 shrink-0">
-              <span class="flex items-center gap-1">
-                {#if proc.watchdog}
-                  <span
-                    class="inline-block w-1.5 h-1.5 rounded-full {proc.watchdog.running ? 'bg-success' : 'bg-muted-foreground/30'}"
-                    title="Watchdog: {proc.watchdog.running ? `Running (PID: ${proc.watchdog.pid})` : 'Stopped'}"
-                  ></span>
-                {/if}
-                {#if proc.worker}
-                  <span
-                    class="inline-block w-1.5 h-1.5 rounded-full {proc.worker.running ? 'bg-success' : 'bg-muted-foreground/30'}"
-                    title="Worker: {proc.worker.running ? `Running (PID: ${proc.worker.pid})` : 'Stopped'}"
-                  ></span>
-                {/if}
-              </span>
-
-              <span class="text-[11px] font-medium text-{ws.variant}">{ws.text}</span>
-
-              {#if proc.worker}
-                <button
-                  onclick={() => showConfirm('워커 재시작', `"${proc.label}" 워커를 재시작합니다.`, () => restartSingleWorker(proc.name, proc.label))}
-                  disabled={actionLoading === `worker-${proc.name}`}
-                  class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                >
-                  재시작
-                </button>
-              {/if}
-            </div>
-          </div>
-        {/each}
-
-        {#if infraTierProcs.length > 0}
-          <div class="border-t border-border mt-2 pt-2">
-            <span class="text-xs text-muted-foreground px-3">인프라</span>
-            {#each infraTierProcs as proc}
-              {@const ws = workerStatusText(proc)}
-              <div class="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 rounded transition-colors">
-                <StatusDot variant={workerVariant(proc)} size="sm" pulse={workerVariant(proc) === 'success'} />
-                <span class="font-medium text-sm text-foreground">{proc.label}</span>
-                <span class="font-mono text-[11px] text-muted-foreground hidden sm:inline">{proc.name}</span>
-
-                <div class="ml-auto flex items-center gap-3 shrink-0">
-                  <span class="flex items-center gap-1">
-                    {#if proc.watchdog}
-                      <span
-                        class="inline-block w-1.5 h-1.5 rounded-full {proc.watchdog.running ? 'bg-success' : 'bg-muted-foreground/30'}"
-                        title="Watchdog: {proc.watchdog.running ? `Running (PID: ${proc.watchdog.pid})` : 'Stopped'}"
-                      ></span>
-                    {/if}
-                    {#if proc.worker}
-                      <span
-                        class="inline-block w-1.5 h-1.5 rounded-full {proc.worker.running ? 'bg-success' : 'bg-muted-foreground/30'}"
-                        title="Worker: {proc.worker.running ? `Running (PID: ${proc.worker.pid})` : 'Stopped'}"
-                      ></span>
-                    {/if}
-                  </span>
-
-                  <span class="text-[11px] font-medium text-{ws.variant}">{ws.text}</span>
-
-                  <button
-                    onclick={() => showConfirm('인프라 재시작', `"${proc.label}" 인프라를 재시작합니다.`, () => restartInfra(proc.name, proc.label))}
-                    disabled={actionLoading === `infra-${proc.name}`}
-                    class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                  >
-                    재시작
-                  </button>
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/if}
-
-        {#if allWorkers.length === 0}
-          <p class="text-sm text-muted-foreground py-4 text-center">워커 정보가 없습니다.</p>
-        {/if}
-      </div>
-    </div>
-
-    <!-- ============================================================ -->
-    <!-- Tasks + Infrastructure (3-col) -->
-    <!-- ============================================================ -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-      <!-- Scheduled Tasks -->
-      <div class="lg:col-span-2 bg-card rounded-lg border border-border shadow-card p-4">
-        <div class="flex items-center gap-2 mb-3">
-          <h3 class="text-sm font-semibold text-foreground">예약 작업</h3>
-          <span class="text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">{allTasks.length}</span>
-        </div>
-
-        {#each Object.entries(groupTasksByFolder(allTasks)) as [folder, tasks]}
-          <div class="mb-2 last:mb-0">
-            <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-1">{folder}</div>
-            {#each tasks as task}
-              <div class="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 rounded transition-colors text-sm">
-                <span class="font-medium text-foreground truncate" title={task.Description || ''}>{task.Name}</span>
-
-                {#if task.LastResult !== null && task.LastResult !== 0}
-                  <span class="text-error shrink-0" title="Error: 0x{task.LastResult.toString(16).toUpperCase()}">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><line x1="12" y1="8" x2="12" y2="12" stroke-width="2"/><line x1="12" y1="16" x2="12.01" y2="16" stroke-width="2"/></svg>
-                  </span>
-                {/if}
-
-                <div class="ml-auto flex items-center gap-2 shrink-0">
-                  <span class="text-[10px] text-muted-foreground hidden md:inline" title="마지막 실행">{formatDateTime(task.LastRun)}</span>
-                  <span class="text-[10px] text-foreground hidden lg:inline" title="다음 실행">{formatDateTime(task.NextRun)}</span>
-                  <StatusBadge variant={taskVariant(task.State)} size="sm">{task.State}</StatusBadge>
-
-                  <button
-                    onclick={() => runTask(task.Folder, task.Name)}
-                    disabled={actionLoading?.startsWith(`run-${task.Folder}`)}
-                    class="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary-light transition-colors disabled:opacity-50"
-                    title="실행"
-                  >
-                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 16 16"><path d="M4 2l10 6-10 6V2z"/></svg>
-                  </button>
-                  <button
-                    onclick={() => showConfirm('작업 제거', `예약 작업 "${folder}/${task.Name}"을 제거합니다. (관리자 권한 필요)`, () => removeTask(task.Folder, task.Name), true, '제거')}
-                    disabled={actionLoading?.startsWith(`task-${task.Folder}`)}
-                    class="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-error hover:bg-error-light transition-colors disabled:opacity-50"
-                    title="제거"
-                  >
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>
-                  </button>
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/each}
-
-        {#if allTasks.length === 0}
-          <p class="text-sm text-muted-foreground py-4 text-center">예약 작업이 없습니다.</p>
-        {/if}
-      </div>
-
-      <!-- Infrastructure -->
-      <div class="bg-card rounded-lg border border-border shadow-card p-4">
-        <h3 class="text-sm font-semibold text-foreground mb-3">인프라</h3>
-
-        <!-- Redis -->
-        {#if redisStatus}
-          <div class="mb-3 pb-3 border-b border-border">
-            <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center gap-2">
-                <StatusDot variant={redisStatus.connected ? 'success' : 'error'} size="md" pulse={redisStatus.connected} />
-                <span class="font-medium text-sm">Redis</span>
-                <StatusBadge variant={redisStatus.connected ? 'success' : 'error'} size="sm">
-                  {redisStatus.connected ? 'Connected' : 'Disconnected'}
-                </StatusBadge>
-              </div>
-              <button
-                onclick={() => showConfirm('Redis 재시작', 'Redis를 재시작합니다. Session 0에서는 실패할 수 있습니다.', restartRedis, true, '재시작')}
-                disabled={actionLoading === 'redis-restart'}
-                class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                재시작
-              </button>
-            </div>
-            {#if redisStatus.container_running !== null}
-              <div class="text-[10px] text-muted-foreground mb-1 px-1">
-                Container: {redisStatus.container_running ? 'Running' : 'Stopped'}
-              </div>
-            {/if}
-            {#if redisStatus.connected}
-              <div class="flex gap-3 text-[10px] text-muted-foreground px-1">
-                <span>Uptime: {formatUptime(redisStatus.uptime_seconds)}</span>
-                <span>Mem: {redisStatus.used_memory_mb ?? '-'}MB</span>
-                <span>Clients: {redisStatus.connected_clients ?? '-'}</span>
-              </div>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- Dev Runner -->
-        {#if devRunnerStatus}
-          <div class="mb-3 pb-3 border-b border-border">
-            <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center gap-2">
-                <StatusDot
-                  variant={devRunnerStatus.running ? 'success' : devRunnerStatus.crashed ? 'error' : 'gray'}
-                  size="md"
-                  pulse={devRunnerStatus.running}
-                />
-                <span class="font-medium text-sm">Dev Runner</span>
-                <StatusBadge
-                  variant={devRunnerStatus.running ? 'success' : devRunnerStatus.crashed ? 'error' : 'gray'}
-                  size="sm"
-                >
-                  {devRunnerStatus.running ? 'Running' : devRunnerStatus.crashed ? 'Crashed' : 'Stopped'}
-                </StatusBadge>
-              </div>
-              <div class="flex gap-1">
-                {#if devRunnerStatus.running}
-                  <button
-                    onclick={() => showConfirm('Dev Runner 재시작', 'Dev Runner를 재시작합니다.', restartDevRunner, false, '재시작')}
-                    disabled={actionLoading === 'dev-runner-restart'}
-                    class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                  >
-                    재시작
-                  </button>
-                  <button
-                    onclick={() => showConfirm('Dev Runner 중지', 'Dev Runner를 중지합니다.', stopDevRunner, true, '중지')}
-                    disabled={actionLoading === 'dev-runner-stop'}
-                    class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                  >
-                    중지
-                  </button>
-                {:else if devRunnerStatus.crashed}
-                  <button
-                    onclick={() => showConfirm('Dev Runner 리셋', 'RUNNING → PENDING 상태로 리셋합니다.', resetDevRunner)}
-                    disabled={actionLoading === 'dev-runner-reset'}
-                    class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                  >
-                    리셋
-                  </button>
-                {:else}
-                  <button
-                    onclick={() => showConfirm('Dev Runner 시작', 'Dev Runner를 시작합니다.', startDevRunner, false, '시작')}
-                    disabled={actionLoading === 'dev-runner-start'}
-                    class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-                  >
-                    시작
-                  </button>
-                {/if}
-              </div>
-            </div>
-            {#if devRunnerStatus.pid}
-              <div class="text-[10px] text-muted-foreground px-1">PID: {devRunnerStatus.pid}</div>
-            {/if}
-            {#if devRunnerStatus.plan_file}
-              <div class="text-[10px] text-muted-foreground px-1 truncate" title={devRunnerStatus.plan_file}>
-                {devRunnerStatus.plan_file}
-              </div>
-            {/if}
-            {#if devRunnerStatus.running && devRunnerStatus.start_time}
-              <div class="text-[10px] text-muted-foreground px-1">시작: {formatCollectedAt(devRunnerStatus.start_time)}</div>
-            {/if}
-            <!-- 경고 -->
-            {#if !devRunnerStatus.running && !devRunnerStatus.redis_connected}
-              <div class="mt-1 text-[10px] text-error px-1 flex items-center gap-1">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><line x1="12" y1="8" x2="12" y2="12" stroke-width="2"/><line x1="12" y1="16" x2="12.01" y2="16" stroke-width="2"/></svg>
-                Redis 미연결
-              </div>
-            {:else if !devRunnerStatus.running && !devRunnerStatus.listener_alive && devRunnerStatus.redis_connected}
-              <div class="mt-1 text-[10px] text-warning px-1 flex items-center gap-1">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><line x1="12" y1="8" x2="12" y2="12" stroke-width="2"/><line x1="12" y1="16" x2="12.01" y2="16" stroke-width="2"/></svg>
-                Command Listener 미실행
-              </div>
-            {/if}
-          </div>
-        {/if}
-
-        <!-- Startup Programs -->
-        <div>
-          <div class="flex items-center gap-2 mb-2">
-            <span class="text-xs font-medium text-muted-foreground">시작프로그램</span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">{allStartups.length}</span>
-          </div>
-          {#each allStartups as prog}
-            <div class="flex items-center gap-2 px-1 py-1.5 text-sm">
-              <span class="font-medium text-foreground text-xs">{prog.name}</span>
-              <span class="text-[10px] text-muted-foreground truncate" title={prog.path}>{prog.project}</span>
-              <button
-                onclick={() => showConfirm('시작프로그램 제거', `"${prog.name}" 시작프로그램을 제거합니다.`, () => removeStartup(prog.name), true, '제거')}
-                disabled={actionLoading === `startup-${prog.name}`}
-                class="ml-auto h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-error hover:bg-error-light transition-colors disabled:opacity-50 shrink-0"
-                title="제거"
-              >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>
-              </button>
-            </div>
-          {/each}
-          {#if allStartups.length === 0}
-            <p class="text-[11px] text-muted-foreground py-2 text-center">시작프로그램이 없습니다.</p>
-          {/if}
-        </div>
-      </div>
-    </div>
-
+    <ServiceDashboardSection
+      {status}
+      {refreshing}
+      {runningServices}
+      {allServices}
+      {healthyWorkers}
+      {allWorkers}
+      {allTasks}
+      {allStartups}
+      {taskErrors}
+      {servicesByProject}
+      {tasksByFolder}
+      {workerTierProcs}
+      {infraTierProcs}
+      {redisStatus}
+      {devRunnerStatus}
+      {selfRestartState}
+      {selfRestartMessage}
+      {restartSteps}
+      {stepStatus}
+      {actionLoading}
+      {formatCollectedAt}
+      {formatDateTime}
+      {formatUptime}
+      {serviceVariant}
+      {workerVariant}
+      {workerStatusText}
+      {workerStatusTextClass}
+      {taskVariant}
+      {showConfirm}
+      {fetchStatus}
+      {refreshStatus}
+      {selfRestartApi}
+      {resetSelfRestartState}
+      {stopService}
+      {startService}
+      {restartWorkers}
+      {stopWatchdogs}
+      {startWatchdogs}
+      {restartSingleWorker}
+      {restartInfra}
+      {runTask}
+      {removeTask}
+      {restartRedis}
+      {restartDevRunner}
+      {stopDevRunner}
+      {resetDevRunner}
+      {startDevRunner}
+      {removeStartup}
+    />
   {:else}
-    <!-- Empty -->
     <div class="bg-card rounded-lg border border-border shadow-card p-8 text-center">
       <p class="text-muted-foreground mb-3">서비스 정보가 없습니다.</p>
       <button
         onclick={refreshStatus}
         disabled={refreshing}
-        class="h-9 px-4 text-sm rounded-md font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50 transition-colors"
+        class="h-9 px-4 text-sm rounded-md font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         즉시 수집
       </button>
     </div>
   {/if}
 
-  <!-- Process Watch 모니터 -->
-  <div class="bg-card rounded-lg border border-border shadow-card">
-    <div class="flex items-center justify-between px-4 py-3 border-b border-border">
-      <div class="flex items-center gap-2">
-        <h3 class="text-sm font-semibold text-foreground">Process Watch (Python)</h3>
-        {#if processPollingEnabled}
-          <span class="text-[10px] px-1.5 py-0.5 rounded bg-success-light text-success font-medium">{processWatchRows.length}개</span>
-          <span class="text-[10px] text-muted-foreground">5초 갱신</span>
-        {/if}
-        {#if processWatchLatest}
-          <span class="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-            source={processWatchLatest.source}
-          </span>
-          {#if processWatchLatest.snapshot_age_seconds !== null}
-            <span class="text-[10px] text-muted-foreground">age {processWatchLatest.snapshot_age_seconds}s</span>
-          {/if}
-          {#if processWatchLatest.stale}
-            <span class="text-[10px] px-1.5 py-0.5 rounded bg-warning-light text-warning">stale</span>
-          {/if}
-        {/if}
-      </div>
-      <div class="flex items-center gap-1.5">
-        {#if processPollingEnabled}
-          <button
-            onclick={() => fetchProcessWatch()}
-            class="h-6 px-2 text-[11px] rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >새로고침</button>
-        {/if}
-        <button
-          onclick={toggleProcessPolling}
-          class="h-6 px-2 text-[11px] rounded font-medium transition-colors {processPollingEnabled ? 'bg-error-light text-error hover:bg-error hover:text-white' : 'bg-primary text-white hover:bg-primary-hover'}"
-        >
-          {processPollingEnabled ? '모니터링 중지' : '모니터링 시작'}
-        </button>
-      </div>
-    </div>
+  <ProcessWatchSection
+    {processPollingEnabled}
+    {processWatchLatest}
+    {processWatchRows}
+    {processWatchHistoryRows}
+    {processWatchError}
+    {processLoading}
+    {toggleProcessPolling}
+    {fetchProcessWatch}
+    {handleKillProcess}
+    {getProcessDeltaRate}
+    {formatProcessDelta}
+    {processDeltaTextClass}
+    {formatProcessUptime}
+    {formatProcessStart}
+    {formatAncestorChain}
+    {processWatchKey}
+  />
 
-    {#if processPollingEnabled}
-      {#if processLoading}
-        <div class="p-4 text-center text-muted-foreground text-xs">로딩 중...</div>
-      {:else if processWatchRows.length === 0}
-        <div class="p-4 text-center text-muted-foreground text-xs">Python 프로세스 스냅샷이 없습니다.</div>
-      {:else}
-        {#if processWatchError}
-          <div class="px-4 py-2 text-[11px] text-warning bg-warning-light/20 border-b border-border">
-            조회 경고: {processWatchError}
-          </div>
-        {/if}
-        <div class="overflow-x-auto">
-          <table class="w-full text-[11px]">
-            <thead>
-              <tr class="border-b border-border text-muted-foreground">
-                <th class="px-3 py-2 text-left font-medium">PID</th>
-                <th class="px-3 py-2 text-left font-medium">프로세스</th>
-                <th class="px-3 py-2 text-right font-medium">메모리</th>
-                <th class="px-3 py-2 text-right font-medium">ΔMB/s</th>
-                <th class="px-3 py-2 text-left font-medium">실행시간</th>
-                <th class="px-3 py-2 text-left font-medium">조상 체인</th>
-                <th class="px-3 py-2 text-left font-medium">scope</th>
-                <th class="px-3 py-2 text-center font-medium">종료</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each processWatchRows as proc}
-                {@const deltaRate = getProcessDeltaRate(proc)}
-                <tr class="border-b border-border/50 hover:bg-muted/50 {proc.memory_mb > 512 ? 'bg-warning-light/30' : ''} {proc.memory_mb > 1024 ? 'bg-error-light/30' : ''}">
-                  <td class="px-3 py-1.5 font-mono text-muted-foreground">{proc.pid}</td>
-                  <td class="px-3 py-1.5 font-medium text-foreground max-w-[240px] truncate" title={proc.cmdline}>{proc.name}</td>
-                  <td class="px-3 py-1.5 text-right font-mono {proc.memory_mb > 512 ? 'text-warning font-semibold' : ''} {proc.memory_mb > 1024 ? 'text-error font-semibold' : ''}">{proc.memory_mb.toFixed(1)} MB</td>
-                  <td class="px-3 py-1.5 text-right">
-                    <div class="font-mono {processDeltaTextClass(deltaRate)}">{formatProcessDelta(deltaRate)}</div>
-                    {#if deltaRate !== null && deltaRate >= 256}
-                      <span class="text-[10px] px-1 py-0.5 rounded bg-error-light text-error">급등</span>
-                    {:else if deltaRate !== null && deltaRate >= 128}
-                      <span class="text-[10px] px-1 py-0.5 rounded bg-warning-light text-warning">상승</span>
-                    {/if}
-                  </td>
-                  <td class="px-3 py-1.5">
-                    <div class="font-mono text-foreground">{formatProcessUptime(proc)}</div>
-                    <div class="text-[10px] text-muted-foreground">{formatProcessStart(proc)}</div>
-                  </td>
-                  <td class="px-3 py-1.5">
-                    <div class="font-mono text-[10px] text-muted-foreground max-w-[420px] truncate" title={formatAncestorChain(proc)}>
-                      {formatAncestorChain(proc)}
-                    </div>
-                    <div class="text-[10px] text-muted-foreground">
-                      PPID {proc.ppid ?? '-'} {proc.parent_name ? `(${proc.parent_name})` : ''}
-                    </div>
-                    {#if proc.is_orphan}
-                      <span class="mt-1 inline-block text-[10px] px-1 py-0.5 rounded bg-error-light text-error">orphan</span>
-                    {/if}
-                  </td>
-                  <td class="px-3 py-1.5">
-                    <span class="text-[10px] px-1.5 py-0.5 rounded {proc.scope === 'monitor_page' ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}">{proc.scope}</span>
-                  </td>
-                  <td class="px-3 py-1.5 text-center">
-                    <button
-                      onclick={() => handleKillProcess(proc)}
-                      class="h-5 w-5 inline-flex items-center justify-center rounded text-muted-foreground hover:text-error hover:bg-error-light transition-colors"
-                      title="강제 종료"
-                    >
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
-                    </button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
+  <CleanupStatsSection {cleanupStats} {cleanupStatsLoading} />
 
-        <div class="px-4 py-3 border-t border-border">
-          <div class="text-[11px] font-medium text-muted-foreground mb-2">1GB+ 최근 이력</div>
-          {#if processWatchHistoryRows.length === 0}
-            <div class="text-[11px] text-muted-foreground">기록 없음</div>
-          {:else}
-            <div class="space-y-1">
-              {#each processWatchHistoryRows.slice(0, 8) as item}
-                <div class="text-[11px] text-muted-foreground flex items-center gap-2">
-                  <span class="font-mono text-foreground">PID {item.pid}</span>
-                  <span>{item.memory_mb.toFixed(1)}MB</span>
-                  <span>{formatProcessUptime(item)}</span>
-                  <span>{item.scope}</span>
-                  {#if item.is_orphan}<span class="text-error">orphan</span>{/if}
-                  <span class="truncate max-w-[380px]" title={formatAncestorChain(item)}>{formatAncestorChain(item)}</span>
-                  <span class="ml-auto">{new Date(item.captured_at).toLocaleTimeString('ko-KR')}</span>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {/if}
-    {:else}
-      <div class="px-4 py-3 text-[11px] text-muted-foreground">
-        '모니터링 시작' 버튼을 누르면 process-watch 최신 스냅샷을 5초마다 조회합니다.
-      </div>
-    {/if}
-  </div>
-
-  <!-- ============================================================ -->
-  <!-- Nightly Cleanup Stats -->
-  <!-- ============================================================ -->
-  {#if cleanupStats || cleanupStatsLoading}
-    <div class="bg-card rounded-lg border border-border shadow-card p-4">
-      <div class="flex items-center gap-2 mb-3">
-        <h3 class="text-sm font-semibold text-foreground">Nightly Cleanup 통계</h3>
-        <span class="text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">최근 14일</span>
-        {#if cleanupStats}
-          <span class="ml-auto text-[10px] text-muted-foreground">
-            총 {cleanupStats.summary.total_runs}회 실행 · {cleanupStats.summary.total_items_archived.toLocaleString()}개 아카이브 · 평균 {cleanupStats.summary.avg_items_per_run}/회
-          </span>
-        {/if}
-      </div>
-
-      {#if cleanupStatsLoading}
-        <p class="text-sm text-muted-foreground py-4 text-center">통계 로딩 중...</p>
-      {:else if cleanupStats}
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <!-- 일별 실행 이력 -->
-          <div>
-            <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">일별 실행 이력</div>
-            <div class="overflow-x-auto">
-              <table class="w-full text-[11px]">
-                <thead>
-                  <tr class="border-b border-border">
-                    <th class="text-left px-2 py-1 text-muted-foreground font-medium">날짜</th>
-                    <th class="text-right px-2 py-1 text-muted-foreground font-medium">항목수</th>
-                    <th class="text-right px-2 py-1 text-muted-foreground font-medium">프로젝트</th>
-                    <th class="text-right px-2 py-1 text-muted-foreground font-medium">소요</th>
-                    <th class="text-center px-2 py-1 text-muted-foreground font-medium">상태</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each cleanupStats.runs as run}
-                    <tr class="border-b border-border/50 hover:bg-muted/50">
-                      <td class="px-2 py-1.5 font-mono text-foreground">{run.date}</td>
-                      <td class="px-2 py-1.5 text-right font-semibold {run.total_items > 0 ? 'text-primary' : 'text-muted-foreground'}">{run.total_items.toLocaleString()}</td>
-                      <td class="px-2 py-1.5 text-right text-muted-foreground">{run.processed}</td>
-                      <td class="px-2 py-1.5 text-right font-mono text-muted-foreground">{run.duration ?? '-'}</td>
-                      <td class="px-2 py-1.5 text-center">
-                        {#if run.failed > 0}
-                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-error-light text-error">실패 {run.failed}</span>
-                        {:else}
-                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-success-light text-success">성공</span>
-                        {/if}
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- 프로젝트별 누적 -->
-          <div>
-            <div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">프로젝트별 누적 (14일)</div>
-            {#each Object.entries(cleanupStats.summary.by_project).sort((a, b) => b[1] - a[1]) as [proj, count]}
-              {@const maxCount = Math.max(...Object.values(cleanupStats.summary.by_project))}
-              <div class="flex items-center gap-2 py-1">
-                <span class="text-[11px] text-foreground w-36 truncate shrink-0" title={proj}>{proj}</span>
-                <div class="flex-1 bg-muted rounded-full h-1.5 overflow-hidden">
-                  <div class="h-full bg-primary rounded-full" style="width: {maxCount > 0 ? Math.round((count / maxCount) * 100) : 0}%"></div>
-                </div>
-                <span class="text-[11px] font-mono text-muted-foreground w-12 text-right shrink-0">{count.toLocaleString()}</span>
-              </div>
-            {/each}
-          </div>
-        </div>
-      {/if}
-    </div>
-  {/if}
-
-  <!-- Loading skeleton (전체) -->
   {#if loading}
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <SectionSkeleton rows={4} />
