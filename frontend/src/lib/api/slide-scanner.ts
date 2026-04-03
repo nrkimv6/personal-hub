@@ -153,7 +153,22 @@ export interface MobileSyncRunResponse extends Record<string, unknown> {
   message?: string;
 }
 
-export interface MobileReviewItem {
+export type MobileApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type MobileDeleteStatus = 'PENDING' | 'DONE' | 'FAILED';
+export type MobileHandoffStatus = 'PENDING' | 'DONE' | 'FAILED';
+
+export interface MobileReviewStateSnapshot {
+  approval_status: MobileApprovalStatus;
+  remote_delete_status: MobileDeleteStatus;
+  handoff_status: MobileHandoffStatus;
+  slide_id?: number | null;
+  can_approve: boolean;
+  can_remote_delete: boolean;
+  can_handoff: boolean;
+  can_open_editor: boolean;
+}
+
+export interface MobileReviewItem extends MobileReviewStateSnapshot {
   id: number;
   device_id: string;
   device_serial: string;
@@ -162,9 +177,6 @@ export interface MobileReviewItem {
   source_uri: string;
   pc_inbox_path: string;
   captured_at_utc: string;
-  approval_status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  remote_delete_status: 'PENDING' | 'DONE' | 'FAILED';
-  handoff_status: 'PENDING' | 'DONE' | 'FAILED';
   local_cleanup_status: 'PENDING' | 'DONE' | 'FAILED';
   error_message?: string | null;
   created_at: string;
@@ -182,7 +194,14 @@ export interface MobileReviewItemsResponse {
 
 export interface MobileReviewUpdateResponse {
   id: number;
-  approval_status: 'APPROVED' | 'REJECTED';
+  approval_status: MobileApprovalStatus;
+  remote_delete_status: MobileDeleteStatus;
+  handoff_status: MobileHandoffStatus;
+  slide_id?: number | null;
+  can_approve: boolean;
+  can_remote_delete: boolean;
+  can_handoff: boolean;
+  can_open_editor: boolean;
   reason?: string;
 }
 
@@ -191,12 +210,27 @@ export interface MobileRemoteDeleteResponse {
   item_id: number;
   results: Record<string, boolean>;
   error?: string;
+  approval_status: MobileApprovalStatus;
+  remote_delete_status: MobileDeleteStatus;
+  handoff_status: MobileHandoffStatus;
+  slide_id?: number | null;
+  can_approve: boolean;
+  can_remote_delete: boolean;
+  can_handoff: boolean;
+  can_open_editor: boolean;
 }
 
 export interface MobileHandoffResponse {
   item_id: number;
   slide_id: number;
   slide_url: string;
+  approval_status: MobileApprovalStatus;
+  remote_delete_status: MobileDeleteStatus;
+  handoff_status: MobileHandoffStatus;
+  can_approve: boolean;
+  can_remote_delete: boolean;
+  can_handoff: boolean;
+  can_open_editor: boolean;
 }
 
 function authHeaders(): HeadersInit {
@@ -246,7 +280,21 @@ async function parseResponse<T>(response: Response): Promise<T> {
     let message = response.statusText;
     try {
       const body = await response.json();
-      message = body?.detail ?? message;
+      const detail = body?.detail;
+      if (typeof detail === 'string' && detail.trim()) {
+        message = detail;
+      } else if (detail && typeof detail === 'object') {
+        const stage = typeof detail.stage === 'string' ? `[${detail.stage}] ` : '';
+        const detailMessage =
+          typeof detail.message === 'string'
+            ? detail.message
+            : typeof detail.error === 'string'
+              ? detail.error
+              : JSON.stringify(detail);
+        message = `${stage}${detailMessage}`;
+      } else if (typeof body?.message === 'string' && body.message.trim()) {
+        message = body.message;
+      }
     } catch {
       // ignore JSON parsing errors
     }
@@ -455,11 +503,18 @@ function getMobileSyncStatus(): Promise<MobileSyncStatusResponse> {
 
 function getMobileReviewItems(params: {
   deviceId?: string;
+  approvalStatus?: MobileApprovalStatus | MobileApprovalStatus[];
   skip?: number;
   limit?: number;
 } = {}): Promise<MobileReviewItemsResponse> {
   const search = new URLSearchParams();
   if (params.deviceId) search.set('device_id', params.deviceId);
+  if (params.approvalStatus) {
+    const statuses = Array.isArray(params.approvalStatus) ? params.approvalStatus : [params.approvalStatus];
+    for (const status of statuses) {
+      search.append('approval_status', status);
+    }
+  }
   if (params.skip !== undefined) search.set('skip', String(params.skip));
   if (params.limit !== undefined) search.set('limit', String(params.limit));
   const query = search.toString();
@@ -496,29 +551,6 @@ function getMobileReviewImageUrl(itemId: number): string {
   return `${API_BASE}${BASE}/mobile-review/${itemId}/image`;
 }
 
-async function getMobileReviewImageFile(itemId: number, fileName: string): Promise<File> {
-  const response = await fetchWithTimeout(getMobileReviewImageUrl(itemId), {
-    method: 'GET',
-    headers: authHeaders(),
-    credentials: 'include'
-  });
-
-  if (!response.ok) {
-    let message = response.statusText;
-    try {
-      const body = await response.json();
-      message = body?.detail ?? message;
-    } catch {
-      // ignore JSON parsing errors
-    }
-    throw new Error(message || '이미지 로드 실패');
-  }
-
-  const blob = await response.blob();
-  const mime = blob.type || 'image/jpeg';
-  return new File([blob], fileName, { type: mime });
-}
-
 export const slideScannerApi = {
   uploadSlide,
   getSlide,
@@ -545,6 +577,5 @@ export const slideScannerApi = {
   rejectMobileItem,
   remoteDeleteMobileItem,
   handoffMobileItem,
-  getMobileReviewImageUrl,
-  getMobileReviewImageFile
+  getMobileReviewImageUrl
 };

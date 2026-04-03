@@ -5,11 +5,16 @@
 
   export let item: MobileReviewItem;
   export let busy = false;
+  export let busyStage: string | null = null;
+  export let failureMessage: string | null = null;
 
   const dispatch = createEventDispatcher<{
     approve: { itemId: number };
     reject: { itemId: number; reason: string };
-    moveToEditor: { itemId: number; fileName: string };
+    remoteDelete: { itemId: number };
+    retryRemoteDelete: { itemId: number };
+    handoff: { itemId: number };
+    moveToEditor: { itemId: number; slideId: number };
   }>();
 
   let rejectReason = '';
@@ -35,9 +40,32 @@
     rejectReason = '';
   }
 
-  function handleMoveToEditor() {
-    dispatch('moveToEditor', { itemId: item.id, fileName: item.original_filename });
+  function handleRemoteDelete() {
+    dispatch('remoteDelete', { itemId: item.id });
   }
+
+  function handleRetryRemoteDelete() {
+    dispatch('retryRemoteDelete', { itemId: item.id });
+  }
+
+  function handleHandoff() {
+    dispatch('handoff', { itemId: item.id });
+  }
+
+  function handleMoveToEditor() {
+    if (typeof item.slide_id !== 'number') {
+      toast.warning('slide_id가 없어 에디터를 열 수 없습니다.');
+      return;
+    }
+    dispatch('moveToEditor', { itemId: item.id, slideId: item.slide_id });
+  }
+
+  $: canApprove = item.can_approve;
+  $: canReject = item.approval_status === 'PENDING';
+  $: canRemoteDelete = item.can_remote_delete && item.remote_delete_status !== 'FAILED';
+  $: canRetryRemoteDelete = item.can_remote_delete && item.remote_delete_status === 'FAILED';
+  $: canHandoff = item.can_handoff;
+  $: canOpenEditor = item.can_open_editor && typeof item.slide_id === 'number';
 </script>
 
 <article class="rounded-xl border border-border bg-card p-3">
@@ -60,28 +88,57 @@
     <p class="font-medium">{item.original_filename}</p>
     <p class="text-muted-foreground">기기: {item.device_alias || item.device_serial}</p>
     <p class="text-muted-foreground">촬영시각: {formatDate(item.captured_at_utc)}</p>
-    <p class="text-muted-foreground">상태: {item.approval_status} / 삭제 {item.remote_delete_status}</p>
+    <p class="text-muted-foreground">
+      상태: 승인 {item.approval_status} / 삭제 {item.remote_delete_status} / handoff {item.handoff_status}
+    </p>
+    {#if busyStage}
+      <p class="text-amber-600">진행 중: {busyStage}</p>
+    {/if}
+    {#if failureMessage}
+      <p class="text-red-600">{failureMessage}</p>
+    {/if}
   </div>
 
   <div class="mt-3 flex flex-wrap gap-2">
-    <button type="button" class="btn btn-sm btn-primary" onclick={handleApprove} disabled={busy}>
-      승인
-    </button>
-    <button type="button" class="btn btn-sm btn-outline" onclick={handleMoveToEditor} disabled={busy}>
-      보정 단계로 이동
-    </button>
+    {#if canApprove}
+      <button type="button" class="btn btn-sm btn-primary" onclick={handleApprove} disabled={busy}>
+        승인
+      </button>
+    {/if}
+    {#if canRemoteDelete}
+      <button type="button" class="btn btn-sm btn-outline" onclick={handleRemoteDelete} disabled={busy}>
+        원격 삭제
+      </button>
+    {/if}
+    {#if canRetryRemoteDelete}
+      <button type="button" class="btn btn-sm btn-outline" onclick={handleRetryRemoteDelete} disabled={busy}>
+        원격 삭제 재시도
+      </button>
+    {/if}
+    {#if canHandoff}
+      <button type="button" class="btn btn-sm btn-outline" onclick={handleHandoff} disabled={busy}>
+        handoff
+      </button>
+    {/if}
+    {#if canOpenEditor}
+      <button type="button" class="btn btn-sm btn-outline" onclick={handleMoveToEditor} disabled={busy}>
+        에디터 열기
+      </button>
+    {/if}
   </div>
 
-  <div class="mt-3 space-y-2">
-    <input
-      type="text"
-      class="input input-sm w-full"
-      placeholder="반려 사유 입력"
-      bind:value={rejectReason}
-      disabled={busy}
-    />
-    <button type="button" class="btn btn-sm btn-outline w-full" onclick={handleReject} disabled={busy}>
-      반려
-    </button>
-  </div>
+  {#if canReject}
+    <div class="mt-3 space-y-2">
+      <input
+        type="text"
+        class="input input-sm w-full"
+        placeholder="반려 사유 입력"
+        bind:value={rejectReason}
+        disabled={busy}
+      />
+      <button type="button" class="btn btn-sm btn-outline w-full" onclick={handleReject} disabled={busy}>
+        반려
+      </button>
+    </div>
+  {/if}
 </article>
