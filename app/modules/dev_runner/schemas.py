@@ -74,6 +74,7 @@ class RunnerListItem(BaseModel):
     orphan: bool = False  # Workflow DB에 running/merge_pending이지만 Redis에 없는 runner
     exit_reason: Optional[str] = None  # 종료 사유 (completed/no_progress/rate_limit/error 등)
     stop_stage: Optional[str] = None  # stopped 세부 단계 (pre_review|post_review|unknown)
+    error: Optional[str] = None  # 종료 에러 요약
 
 
 class PlanProgressResponse(BaseModel):

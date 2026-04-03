@@ -32,7 +32,23 @@ except ImportError:
     _NOISE_BLOCK_MARKERS = []
 
 
-_COMPLETED_EXIT_REASONS = {"completed", "archived", "stopped", "on_hold"}
+_COMPLETED_EXIT_REASONS = {"completed"}
+_ERROR_DETAIL_NOISE_PREFIXES = (
+    "[NOISE]",
+    ": heartbeat",
+)
+_ERROR_DETAIL_HINTS = (
+    "error",
+    "failed",
+    "failure",
+    "traceback",
+    "exception",
+    "timeout",
+    "fatal",
+    "exit code",
+    "enoent",
+    "winerror",
+)
 
 
 def _normalize_exit_reason(reason: Optional[str]) -> str:
@@ -40,6 +56,64 @@ def _normalize_exit_reason(reason: Optional[str]) -> str:
     if norm == "rate_limited":
         return "rate_limit"
     return norm or "error"
+
+
+def _build_failure_error_message(
+    exit_code: Optional[int],
+    exit_reason: str,
+    stop_stage: Optional[str],
+    detail: Optional[str],
+) -> str:
+    parts = [f"exit_code={exit_code}", f"exit_reason={exit_reason}"]
+    if stop_stage:
+        parts.append(f"stop_stage={stop_stage}")
+    if detail:
+        parts.append(f"detail={detail}")
+    return "; ".join(parts)
+
+
+def _load_log_tail_lines(log_file_path: Optional[Path], max_lines: int = 120) -> list[str]:
+    if not log_file_path:
+        return []
+    try:
+        with open(str(log_file_path), "r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+            return [line.rstrip("\n") for line in lines[-max_lines:]]
+    except Exception:
+        return []
+
+
+def _pick_error_detail_line(lines: list[str]) -> Optional[str]:
+    if not lines:
+        return None
+    for line in reversed(lines):
+        text = (line or "").strip()
+        if not text:
+            continue
+        lower = text.lower()
+        if any(lower.startswith(prefix.lower()) for prefix in _ERROR_DETAIL_NOISE_PREFIXES):
+            continue
+        if any(marker in lower for marker in _NOISE_BLOCK_MARKERS):
+            continue
+        if _is_noise_line(text):
+            continue
+        if any(hint in lower for hint in _ERROR_DETAIL_HINTS):
+            return text[:400]
+
+    # 힌트 라인이 없으면 마지막 유의미 라인이라도 보존
+    for line in reversed(lines):
+        text = (line or "").strip()
+        if not text:
+            continue
+        lower = text.lower()
+        if any(lower.startswith(prefix.lower()) for prefix in _ERROR_DETAIL_NOISE_PREFIXES):
+            continue
+        if any(marker in lower for marker in _NOISE_BLOCK_MARKERS):
+            continue
+        if _is_noise_line(text):
+            continue
+        return text[:400]
+    return None
 
 
 def _resolve_stop_stage(runner_id: str, redis_client: redis.Redis, exit_reason: str) -> Optional[str]:
@@ -272,15 +346,14 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 # 조회 실패 시 completed 기본값을 유지하면 false-completed를 유발할 수 있으므로 fail-safe 처리
                 _exit_reason = "error"
         _stop_stage = _resolve_stop_stage(runner_id, redis_client, _exit_reason) if runner_id else None
-        _completed_for_flow = (
-            _exit_reason in _COMPLETED_EXIT_REASONS
-            and not (_exit_reason == "stopped" and _stop_stage == "pre_review")
-        )
+        _completed_for_flow = _exit_reason in _COMPLETED_EXIT_REASONS
+        _tail_lines_for_detail: list[str] = []
+        _error_detail = None
 
         # stdout 버퍼 drain: 파이프 루프 종료 후 파일에 추가된 미발행 라인만 publish
         log_file_path = _running_log_files.get(runner_id) if runner_id else None
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
         if log_file_path and runner_id:
-            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
             try:
                 with open(str(log_file_path), "r", encoding="utf-8", errors="replace") as _drain_f:
                     _drain_f.seek(0, 2)
@@ -294,12 +367,33 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                         for _tail_line in tail_lines[-50:]:
                             _stripped = _tail_line.rstrip('\n')
                             if _stripped:
+                                _tail_lines_for_detail.append(_stripped)
                                 try:
                                     redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', _stripped))
                                 except redis.ConnectionError:
                                     pass
             except Exception as _drain_err:
                 logger.debug(f"[_stream_output] stdout drain 실패 (무시): {_drain_err}")
+
+        _error_detail = _pick_error_detail_line(_load_log_tail_lines(log_file_path))
+        if not _error_detail:
+            _error_detail = _pick_error_detail_line(_tail_lines_for_detail)
+        _failure_message = _build_failure_error_message(
+            exit_code=exit_code,
+            exit_reason=_exit_reason,
+            stop_stage=_stop_stage,
+            detail=_error_detail,
+        )
+
+        if runner_id and not _completed_for_flow:
+            try:
+                if _error_detail:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", _error_detail)
+                    _publish_with_retry(redis_client, log_channel, f"[ERROR] {_error_detail}")
+                else:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", _failure_message)
+            except Exception as _error_save_err:
+                logger.debug(f"[_stream_output] error detail 저장 실패 (무시): {_error_save_err}")
 
         # merge_requested 플래그 확인 (1회) — exit_code != 0이어도 worktree 커밋이 있으면 merge 시도
         _merge_requested = False
@@ -388,18 +482,18 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                                 )
                                 _wf_manager.update_status(
                                     wf["id"], "failed",
-                                    error_message=f"Exit reason: {_exit_reason} (stop_stage={_stop_stage})",
+                                    error_message=_failure_message,
                                 )
                     elif exit_code is not None and exit_code != 0:
                         _wf_manager.update_status(
                             wf["id"], "failed",
-                            error_message=f"Process exited with code {exit_code}",
+                            error_message=_failure_message,
                         )
                     else:
                         logger.warning(f"[_stream_output] exit_code=None → workflow {wf['id']} failed 처리")
                         _wf_manager.update_status(
                             wf["id"], "failed",
-                            error_message="Process terminated unexpectedly (exit_code=None)",
+                            error_message=_failure_message,
                         )
             except Exception as wf_err:
                 logger.warning(f"[_stream_output] workflow update 실패 (무시): {wf_err}")
@@ -440,7 +534,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                                 else:
                                     _wf_manager.update_status(
                                         _wf["id"], "failed",
-                                        error_message=f"Fallback completed but exit_reason={_exit_reason} (stop_stage={_stop_stage})",
+                                        error_message=_failure_message,
                                     )
                         except Exception as _wf_err:
                             logger.debug(f"[_stream_output] fallback workflow update 실패 (무시): {_wf_err}")

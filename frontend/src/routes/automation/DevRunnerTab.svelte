@@ -79,7 +79,7 @@
 	// SSE 로그 이벤트 라우팅용 LogViewer ref Map
 	interface LogViewerRef {
 		injectLine: (text: string) => void;
-		injectCompleted: () => void;
+		injectCompleted: (reason?: string) => void;
 		injectMergeCompleted: () => void;
 	}
 	const logRefs = new Map<string, LogViewerRef>();
@@ -122,6 +122,7 @@
 		trigger?: string | null;
 		orphan?: boolean;
 		exit_reason?: string | null;
+		error?: string | null;
 	}
 
 	interface RunnerSource {
@@ -134,6 +135,8 @@
 		branch?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
+		exit_reason?: string | null;
+		error?: string | null;
 	}
 
 	function createRunnerTab(runner: RunnerSource): RunnerTab {
@@ -146,7 +149,8 @@
 			branch: runner.branch ?? null,
 			trigger: runner.trigger ?? null,
 			orphan: runner.orphan ?? false,
-			exit_reason: (runner as { exit_reason?: string | null }).exit_reason ?? undefined,
+			exit_reason: runner.exit_reason ?? undefined,
+			error: runner.error ?? undefined,
 		};
 	}
 
@@ -161,7 +165,8 @@
 			engine: (runner.engine ?? tab.engine) ?? null,
 			start_time: (runner.start_time ?? tab.start_time) ?? null,
 			orphan: runner.orphan ?? tab.orphan ?? false,
-			exit_reason: (runner as { exit_reason?: string | null }).exit_reason ?? tab.exit_reason ?? undefined,
+			exit_reason: runner.exit_reason ?? tab.exit_reason ?? undefined,
+			error: runner.error ?? tab.error ?? undefined,
 		};
 	}
 
@@ -258,7 +263,7 @@
 	function handleSSEEvent(eventName: string, data: string) {
 		if (eventName === 'status') {
 			try {
-				const parsed = JSON.parse(data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null; trigger?: string | null }[] };
+				const parsed = JSON.parse(data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null; trigger?: string | null; exit_reason?: string | null; error?: string | null }[] };
 				const runners = (parsed.runners ?? []).filter(r => r.trigger === 'user' || r.trigger === 'user:all');
 				// runner 종료 감지를 위해 업데이트 전 running 상태 캡처
 				const prevRunningIds = new Set(runnerTabs.filter(t => t.running).map(t => t.id));
@@ -328,9 +333,18 @@
 			} catch { /* 무시 */ }
 		} else if (eventName === 'log_completed') {
 			try {
-				const { runner_id, status } = JSON.parse(data) as { runner_id: string; status?: string };
-				const reason = status === 'failed' ? 'error' : 'completed';
-				logRefs.get(runner_id)?.injectCompleted(reason);
+				const { runner_id, status, reason } = JSON.parse(data) as { runner_id: string; status?: string; reason?: string | null };
+				const resolvedReason = reason ?? (status === 'failed' ? 'error' : 'completed');
+				logRefs.get(runner_id)?.injectCompleted(resolvedReason);
+				runnerTabs = runnerTabs.map(tab =>
+					tab.id === runner_id
+						? {
+							...tab,
+							running: false,
+							exit_reason: resolvedReason,
+						}
+						: tab
+				);
 			} catch { /* 무시 */ }
 		} else if (eventName === 'merge_log') {
 			try {
@@ -825,6 +839,7 @@
 										trigger={tab.trigger}
 										orphan={tab.orphan}
 										exitReason={tab.exit_reason}
+										error={tab.error}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
 										onRestart={() => handleRestart(tab)}

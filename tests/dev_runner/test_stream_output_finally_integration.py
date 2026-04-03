@@ -154,7 +154,7 @@ class TestStreamOutputFinallyIntegration:
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
         wf_mgr.update_status.assert_any_call(
-            wf["id"], "failed", error_message="Exit reason: rate_limit"
+            wf["id"], "failed", error_message="exit_code=0; exit_reason=rate_limit"
         )
         assert not any(
             len(c.args) >= 2 and c.args[1] == "completed"

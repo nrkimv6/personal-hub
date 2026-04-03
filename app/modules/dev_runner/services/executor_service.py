@@ -512,7 +512,7 @@ class ExecutorService:
                 for rid in all_ids:
                     d = await self._get_runner_fields(rid, "status", "pid", "plan_file", "engine",
                                                       "start_time", "worktree_path", "merge_status",
-                                                      "branch", "trigger", "exit_reason", "stop_stage")
+                                                      "branch", "trigger", "exit_reason", "stop_stage", "error")
                     status = d["status"]
                     pid_str = d["pid"]
                     plan_file = d["plan_file"]
@@ -524,6 +524,7 @@ class ExecutorService:
                     trigger = d["trigger"]
                     exit_reason = d["exit_reason"]
                     stop_stage = d["stop_stage"]
+                    error = d["error"]
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
                     start_time = None
@@ -555,6 +556,7 @@ class ExecutorService:
                         orphan=is_orphan,
                         exit_reason=exit_reason,
                         stop_stage=stop_stage,
+                        error=error,
                     ))
                 return result
             finally:

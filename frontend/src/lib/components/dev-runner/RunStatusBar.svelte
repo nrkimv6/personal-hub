@@ -257,7 +257,7 @@
 					<!-- 상태 dot -->
 					{#if runner.running}
 						<div class="pulse-dot bg-status-running shrink-0"></div>
-					{:else if runner.exit_reason === 'completed' || !runner.exit_reason}
+					{:else if runner.exit_reason === 'completed'}
 						<div class="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"></div>
 					{:else if runner.exit_reason === 'no_progress' || runner.exit_reason === 'rate_limit' || runner.exit_reason === 'rate_limited' || runner.exit_reason === 'quota_exhausted' || runner.exit_reason === 'stopped' || runner.exit_reason === 'on_hold' || runner.exit_reason === 'archived'}
 						<div class="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0"></div>

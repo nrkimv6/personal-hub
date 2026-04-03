@@ -6,7 +6,7 @@
 
 	interface LogViewerRef {
 		injectLine: (text: string) => void;
-		injectCompleted: () => void;
+		injectCompleted: (reason?: string) => void;
 		injectMergeCompleted: () => void;
 	}
 
@@ -22,6 +22,7 @@
 		trigger?: string | null;
 		orphan?: boolean;
 		exitReason?: string | null;
+		error?: string | null;
 		onStop: () => void;
 		onClose: () => void;
 		onRestart?: () => void;
@@ -29,9 +30,9 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, exitReason = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, exitReason = null, error = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
-	let logViewer: { injectLine: (t: string) => void; injectCompleted: () => void; injectMergeCompleted: () => void } | undefined;
+	let logViewer: { injectLine: (t: string) => void; injectCompleted: (reason?: string) => void; injectMergeCompleted: () => void } | undefined;
 	let elapsed = $state('');
 	let stopping = $state(false);
 	let killing = $state(false);
@@ -169,7 +170,7 @@
 
 	let statusIcon = $derived(
 		running ? '실행중'
-		: exitReason === 'completed' || !exitReason ? '완료'
+		: exitReason === 'completed' ? '완료'
 		: exitReason === 'no_progress' ? '⏸️ 중단'
 		: exitReason === 'rate_limit' || exitReason === 'rate_limited' ? '⚠️ 제한'
 		: exitReason === 'quota_exhausted' ? '⚠️ Quota'
@@ -177,7 +178,7 @@
 		: exitReason === 'stopped' ? '⏹ 중지'
 		: exitReason === 'archived' ? '📁 아카이브됨'
 		: exitReason === 'on_hold' ? '⏸️ 보류'
-		: '⁉️ 알 수 없음'
+		: '⁉️ 미상'
 	);
 </script>
 
@@ -256,6 +257,12 @@
 
 	{#if stopError}
 		<div class="px-3 py-1 text-xs text-red-600 bg-red-50 border-b border-red-100">{stopError}</div>
+	{/if}
+
+	{#if !running && error}
+		<div class="px-3 py-1.5 text-xs text-red-700 bg-red-50 border-b border-red-100 truncate" title={error}>
+			{error}
+		</div>
 	{/if}
 
 	{#if mergeStatus === 'resolving'}

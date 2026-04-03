@@ -165,6 +165,18 @@ class TestBuildStatusPayload:
         assert payload is not None
         assert payload["trigger"] is None
 
+    def test_build_status_payload_includes_exit_reason_and_error(self, event_service, sync_redis):
+        """R: exit_reason/error 저장 시 status payload에 그대로 포함."""
+        runner_id = "failed01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "error")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", "Process exited with code 15")
+
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["exit_reason"] == "error"
+        assert payload["error"] == "Process exited with code 15"
+
 
 # ─── _build_all_runners_status 필터링 테스트 ─────────────────────────────────
 
