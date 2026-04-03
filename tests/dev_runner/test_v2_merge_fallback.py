@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
+from tests.dev_runner.conftest import attach_default_redis_behaviors, assert_no_magicmock_leak
 
 _SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -37,8 +38,17 @@ def _load_dr_merge():
     return _dr_merge
 
 
+def _strict_redis_mock() -> MagicMock:
+    mock_redis = attach_default_redis_behaviors(MagicMock())
+    assert_no_magicmock_leak(
+        mock_redis.get("plan-runner:runners:strict-check:merge_requested"),
+        "redis.get",
+    )
+    return mock_redis
+
+
 def _make_redis_mock(merge_status=None, plan_file=None, branch=None, stop_stage=None):
-    r = MagicMock()
+    r = _strict_redis_mock()
     prefix = "plan-runner:runners"
 
     def _get(key):
@@ -142,7 +152,7 @@ def test_detect_merged_but_not_done_no_plan_file_E():
 
 def test_detect_merged_but_not_done_redis_error_E():
     """E(Error): Redis 연결 실패 시 예외 전파 않고 None 반환"""
-    r = MagicMock()
+    r = _strict_redis_mock()
     r.get.side_effect = Exception("Redis connection refused")
 
     mod = _load_dr_merge()
@@ -224,7 +234,7 @@ def test_stream_output_v2_fallback_trigger_R(tmp_path):
     plan.write_text("> 상태: 머지대기\n- [ ] todo\n", encoding="utf-8")
 
     detect_result = {"plan_file": str(plan), "branch": "plan/test"}
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     mock_redis.get.return_value = None  # merge_requested = None
 
     # subprocess mock: stdout이 비어있는 프로세스
@@ -254,7 +264,7 @@ def test_stream_output_v2_fallback_skip_B(tmp_path):
     """B(Boundary): detect → None → _handle_post_merge_done 미호출 + _cleanup_process_state 호출"""
     import io
 
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     mock_redis.get.return_value = None
 
     mock_proc = MagicMock()
@@ -284,7 +294,7 @@ def test_stream_output_v2_fallback_error_still_cleanup_E(tmp_path):
     import io
 
     detect_result = {"plan_file": "/some/plan.md", "branch": "plan/test"}
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     mock_redis.get.return_value = None
 
     mock_proc = MagicMock()
@@ -311,7 +321,7 @@ def test_stream_output_exit_reason_rate_limit_marks_failed_R(tmp_path):
     """R(Right): exit_code=0 이어도 exit_reason=rate_limit이면 workflow failed 처리"""
     import io
 
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
 
     def _get_side(key):
         if key.endswith(":merge_requested"):
@@ -348,7 +358,7 @@ def test_stream_output_merge_requested_but_rate_limit_skips_merge_R(tmp_path):
     """R(Right): merge_requested=1 이어도 exit_reason=rate_limit이면 merge 진입 금지"""
     import io
 
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
 
     def _get_side(key):
         if key.endswith(":merge_requested"):
@@ -386,7 +396,7 @@ def test_stream_output_exit_reason_lookup_error_marks_failed_R(tmp_path):
     """R(Right): exit_reason 조회 실패 시 fail-safe로 completed 금지."""
     import io
 
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
 
     def _get_side(key):
         if key.endswith(":merge_requested"):
@@ -427,7 +437,7 @@ def test_stream_output_missing_exit_reason_marks_failed_R(tmp_path):
     """R(Right): exit_reason 키 누락(None)도 fail-safe로 completed 금지."""
     import io
 
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
 
     def _get_side(key):
         if key.endswith(":merge_requested"):
@@ -472,7 +482,7 @@ def test_heartbeat_v2_fallback_R(tmp_path):
 
     # heartbeat fallback 로직 직접 테스트: 해당 분기 추출
     pub_calls = []
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
 
     with patch("_dr_merge.detect_merged_but_not_done", return_value=detect_result) as mock_detect, \
          patch("_dr_merge._handle_post_merge_done") as mock_done, \
@@ -506,7 +516,7 @@ def test_cleanup_no_self_join_R():
         get_stream_threads()[runner_id] = t
         get_running_processes()[runner_id] = MagicMock()
 
-        mock_redis = MagicMock()
+        mock_redis = _strict_redis_mock()
         mock_redis.get.return_value = None
         mock_redis.set.return_value = None
         mock_redis.srem.return_value = None
@@ -545,7 +555,7 @@ def test_cleanup_normal_join_B():
     get_stream_threads()[runner_id] = mock_stream_t
     get_running_processes()[runner_id] = MagicMock()
 
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     mock_redis.get.return_value = None
     mock_redis.set.return_value = None
     mock_redis.srem.return_value = None
@@ -579,7 +589,7 @@ async def test_handle_merge_stage_sets_merge_status_on_success_R():
     except ImportError:
         pytest.skip("wtools merge_stage 임포트 불가")
 
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     status_calls = {}
     status_history = []
 
@@ -636,7 +646,7 @@ async def test_handle_merge_stage_sets_merge_status_on_failure_E():
     except ImportError:
         pytest.skip("wtools merge_stage 임포트 불가")
 
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     status_calls = {}
 
     def _redis_set(key, val):
@@ -683,7 +693,7 @@ async def test_handle_merge_stage_sets_merging_before_execute_R():
     except ImportError:
         pytest.skip("wtools merge_stage 임포트 불가")
 
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     call_order = []
 
     def _redis_set(key, val):
@@ -742,7 +752,7 @@ def test_handle_post_merge_done_transitions_status_R(tmp_path):
     )
 
     pub_calls = []
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     mock_redis.get.return_value = None
 
     with patch("plan_worktree_helpers.remove_plan_header_fields"), \
@@ -832,7 +842,7 @@ def test_monitor_pid_fallback_calls_detect_before_cleanup_R():
     from _dr_state import get_stream_threads, get_running_processes, get_cleanup_done
 
     runner_id = "runner-g3-mpid"
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     detect_result = {"plan_file": "/tmp/plan.md", "branch": "impl/test"}
 
     call_order = []
@@ -866,7 +876,7 @@ def test_attach_no_log_file_fallback_R():
     from _dr_process_utils import _attach_to_running_process
 
     runner_id = "runner-g3-nolog"
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     mock_redis.get.return_value = None  # log_file_path = None
     detect_result = {"plan_file": "/tmp/plan.md", "branch": "impl/test"}
 
@@ -888,7 +898,7 @@ def test_reconnect_no_pid_fallback_R():
     from _dr_process_utils import _reconnect_surviving_runners
 
     runner_id = "runner-g3-nopid"
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     detect_result = {"plan_file": "/tmp/plan.md", "branch": "impl/test"}
 
     # smembers → 1개 runner, pid → None
@@ -917,7 +927,7 @@ def test_heartbeat_stream_hang_fallback_R():
     """R(Right): heartbeat에서 stream thread hang 30초 경과 → detect→handle→cleanup 순서"""
     # command-listener 코드에서 직접 호출되는 로직을 단위 테스트
     # detect→handle→cleanup 순서를 증명
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
     detect_result = {"plan_file": "/tmp/plan.md", "branch": "impl/test"}
 
     call_order = []
@@ -943,7 +953,7 @@ def test_stream_output_merge_requested_pre_review_stopped_blocks_inline_merge_R(
     import io
 
     runner_id = "runner-stop-pre"
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
 
     def _get(key):
         if key.endswith(":exit_reason"):
@@ -983,7 +993,7 @@ def test_stream_output_merge_requested_post_review_stopped_keeps_inline_merge_R(
     import io
 
     runner_id = "runner-stop-post"
-    mock_redis = MagicMock()
+    mock_redis = _strict_redis_mock()
 
     def _get(key):
         if key.endswith(":exit_reason"):
@@ -1016,3 +1026,4 @@ def test_stream_output_merge_requested_post_review_stopped_keeps_inline_merge_R(
 
     mock_inline_merge.assert_not_called()
     mock_cleanup.assert_called_once()
+

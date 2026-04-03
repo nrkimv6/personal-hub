@@ -9,6 +9,7 @@ import io
 import pytest
 from unittest.mock import MagicMock, patch
 import fakeredis
+from tests.dev_runner.conftest import attach_default_redis_behaviors
 
 from tests.dev_runner._path_helpers import get_listener_script_path, skip_if_missing
 
@@ -80,6 +81,10 @@ def _make_wf_manager():
 
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
+
+
+def _strict_redis_mock() -> MagicMock:
+    return attach_default_redis_behaviors(MagicMock())
 
 
 # ========== TC ==========
@@ -175,7 +180,7 @@ def test_stream_output_finally_redis_error(listener_mod, plan_runner_mod, fr):
     log_handle = _make_log_handle()
     wf_mgr, _ = _make_wf_manager()
 
-    broken_redis = MagicMock()
+    broken_redis = _strict_redis_mock()
     broken_redis.get.side_effect = Exception("Connection refused")
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \

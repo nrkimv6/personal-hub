@@ -20,6 +20,7 @@ from _dr_state import (
 )
 from _dr_log_framing import MultilineFrameBuffer
 from _dr_subprocess import _ANSI_ESCAPE
+from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -56,29 +57,6 @@ def _is_pre_review_stopped_runner(runner_id: str, redis_client: redis.Redis) -> 
                 pass
         return stage == "pre_review"
     except Exception:
-        return False
-
-
-def _normalize_exit_reason(reason: Optional[str]) -> str:
-    """종료 사유 문자열을 UI 계약에 맞게 정규화한다."""
-    norm = (reason or "error").strip().lower()
-    if norm == "rate_limited":
-        return "rate_limit"
-    return norm or "error"
-
-
-def _publish_with_retry(redis_client: redis.Redis, channel: str, msg: str) -> bool:
-    """Redis publish — 1차 실패 시 ping 후 재시도. 성공 True, 실패 False 반환"""
-    try:
-        redis_client.publish(channel, msg)
-        return True
-    except redis.ConnectionError:
-        pass
-    try:
-        redis_client.ping()
-        redis_client.publish(channel, msg)
-        return True
-    except (redis.ConnectionError, Exception):
         return False
 
 

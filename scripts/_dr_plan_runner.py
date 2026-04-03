@@ -23,6 +23,7 @@ from _dr_subprocess import _ANSI_ESCAPE, _make_plan_runner_env
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_log_framing import MultilineFrameBuffer
 from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, _DummyProcess
+from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
 from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 
 logger = logging.getLogger(__name__)
@@ -51,13 +52,6 @@ _ERROR_DETAIL_HINTS = (
     "enoent",
     "winerror",
 )
-
-
-def _normalize_exit_reason(reason: Optional[str]) -> str:
-    norm = (reason or "error").strip().lower()
-    if norm == "rate_limited":
-        return "rate_limit"
-    return norm or "error"
 
 
 def _build_failure_error_message(
@@ -202,22 +196,6 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         logger.warning(f"[_do_inline_merge] restart_after_merge 처리 실패 (무시): {_re}")
 
     _cleanup_process_state(runner_id, redis_client)
-
-
-def _publish_with_retry(redis_client: redis.Redis, channel: str, msg: str) -> bool:
-    """Redis publish — 1차 실패 시 ping 후 재시도. 성공 True, 실패 False 반환"""
-    try:
-        redis_client.publish(channel, msg)
-        return True
-    except redis.ConnectionError:
-        pass
-    # 재시도
-    try:
-        redis_client.ping()
-        redis_client.publish(channel, msg)
-        return True
-    except (redis.ConnectionError, Exception):
-        return False
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):

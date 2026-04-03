@@ -372,3 +372,40 @@ def isolated_redis():
     stale_keys = [k for k in list(storage.keys()) if k.startswith("plan-runner:")]
     for key in stale_keys:
         storage.pop(key, None)
+
+
+def attach_default_redis_behaviors(redis_mock: MagicMock) -> MagicMock:
+    """Redis MagicMock 기본 동작을 엄격 모드로 고정한다.
+
+    기본 반환값이 다시 MagicMock으로 누출되어 분기 조건을 오염시키지 않도록
+    핵심 메서드의 기본 반환값을 명시적으로 지정한다.
+    """
+    redis_mock.get.side_effect = lambda *_args, **_kwargs: None
+    redis_mock.set.return_value = True
+    redis_mock.delete.return_value = 0
+    redis_mock.expire.return_value = True
+    redis_mock.persist.return_value = True
+    redis_mock.srem.return_value = 0
+    redis_mock.zadd.return_value = 1
+    redis_mock.lrem.return_value = 0
+    redis_mock.publish.return_value = 1
+    redis_mock.ping.return_value = True
+    redis_mock.smembers.return_value = set()
+    redis_mock.zrange.return_value = []
+    redis_mock.keys.return_value = []
+    redis_mock.scan_iter.return_value = iter(())
+    return redis_mock
+
+
+def assert_no_magicmock_leak(value, method_name: str = "redis.get") -> None:
+    """strict mock 경계에서 MagicMock 기본값 누출 여부를 검사한다."""
+    assert not isinstance(value, MagicMock), (
+        f"{method_name} returned MagicMock leak. "
+        "Use attach_default_redis_behaviors()/strict_redis_mock for explicit defaults."
+    )
+
+
+@pytest.fixture
+def strict_redis_mock() -> MagicMock:
+    """기본 반환값 누출을 방지한 strict Redis MagicMock."""
+    return attach_default_redis_behaviors(MagicMock())

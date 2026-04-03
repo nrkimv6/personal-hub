@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
+from tests.dev_runner.conftest import attach_default_redis_behaviors
 
 # wtools plan-runner 경로 추가
 _WTOOLS_CORE = Path(__file__).parents[4] / "service" / "wtools" / "common" / "tools" / "plan-runner"
@@ -29,6 +30,10 @@ def project_dir(tmp_path):
     return tmp_path
 
 
+def _strict_redis_mock() -> MagicMock:
+    return attach_default_redis_behaviors(MagicMock())
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -36,8 +41,7 @@ def _run(coro):
 class TestV2MergeGate:
     def test_v2_gate_lock_timeout_returns_failed_E(self, project_dir):
         """E(Error): lock acquire timeout → StageResult(FAILED) + execute_merge 미호출"""
-        mock_redis = MagicMock()
-        mock_redis.ping.return_value = True
+        mock_redis = _strict_redis_mock()
 
         with patch.object(_ms, "_ml_acquire", return_value=False), \
              patch.object(_ms, "execute_merge") as mock_exec, \
@@ -59,8 +63,7 @@ class TestV2MergeGate:
     def test_v2_gate_lock_acquired_before_merge_R(self, project_dir):
         """R(Right): lock acquire 호출이 execute_merge 호출보다 먼저 발생"""
         call_order = []
-        mock_redis = MagicMock()
-        mock_redis.ping.return_value = True
+        mock_redis = _strict_redis_mock()
 
         def mock_acquire(*args, **kwargs):
             call_order.append("acquire")
@@ -95,8 +98,7 @@ class TestV2MergeGate:
 
     def test_v2_gate_lock_released_on_success_R(self, project_dir):
         """R(Right): 성공 시나리오 → finally 블록에서 _ml_release 호출"""
-        mock_redis = MagicMock()
-        mock_redis.ping.return_value = True
+        mock_redis = _strict_redis_mock()
 
         async def mock_exec(*args, **kwargs):
             from plan_runner.core.merge_stage import PostMergeResult
@@ -126,8 +128,7 @@ class TestV2MergeGate:
 
     def test_v2_gate_lock_released_on_exception_E(self, project_dir):
         """E(Error): execute_merge 예외 발생 → finally에서 _ml_release 여전히 호출"""
-        mock_redis = MagicMock()
-        mock_redis.ping.return_value = True
+        mock_redis = _strict_redis_mock()
 
         async def mock_exec_raises(*args, **kwargs):
             raise RuntimeError("merge exploded")

@@ -23,6 +23,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from listener_noise_filter import NOISE_BLOCK_MARKERS, is_noise_line
+from tests.dev_runner.conftest import assert_no_magicmock_leak
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +44,7 @@ def _make_process_stub(lines: list):
     return proc
 
 
-def _run_stream(lines: list):
+def _run_stream(lines: list, strict_redis_mock):
     """_stream_output 직접 호출 → (published_messages, written_lines) 반환"""
     # _dr_plan_runner 모듈은 재로딩하지 않고, 필터 함수 바인딩만 덮어써서
     # 로깅/stdio 핸들러 재초기화 부작용을 피한다.
@@ -67,18 +68,9 @@ def _run_stream(lines: list):
     mock_log = MagicMock()
     mock_log.write.side_effect = lambda s: written.append(s)
 
-    mock_redis = MagicMock()
-    mock_redis.get.return_value = None
+    mock_redis = strict_redis_mock
     mock_redis.publish.side_effect = lambda ch, msg: published.append(msg)
-    # 기본 MagicMock 반환값이 cleanup 경로 분기를 오염시키지 않도록 고정
-    mock_redis.get.side_effect = lambda *_args, **_kwargs: None
-    mock_redis.set.return_value = True
-    mock_redis.delete.return_value = 0
-    mock_redis.expire.return_value = True
-    mock_redis.persist.return_value = True
-    mock_redis.srem.return_value = 0
-    mock_redis.zadd.return_value = 1
-    mock_redis.lrem.return_value = 0
+    assert_no_magicmock_leak(mock_redis.get("plan-runner:runners:t-noise-runner:merge_requested"), "redis.get")
 
     # 노이즈 필터 동작만 검증하고, cleanup/merge fallback 부작용은 격리한다.
     with patch.object(mod, "_cleanup_process_state"), patch.object(mod, "detect_merged_but_not_done", return_value=None):
@@ -189,33 +181,33 @@ class TestIsNoiseLine:
 
 class TestStreamOutputFilter:
 
-    def test_normal_lines_published(self):
-        published, _ = _run_stream(["정상 로그 A", "정상 로그 B"])
+    def test_normal_lines_published(self, strict_redis_mock):
+        published, _ = _run_stream(["정상 로그 A", "정상 로그 B"], strict_redis_mock)
         lines = _flatten_user_lines(published)
         assert "정상 로그 A" in lines
         assert "정상 로그 B" in lines
 
-    def test_xterm_noise_not_published(self):
+    def test_xterm_noise_not_published(self, strict_redis_mock):
         published, written = _run_stream([
             "xterm.js: Parsing error: {",
             "  position: 1186,",
             "  code: 20108",
             "}",
             "정상 로그",
-        ])
+        ], strict_redis_mock)
         lines = _flatten_user_lines(published)
         assert not any("xterm.js" in p for p in lines), "xterm.js 줄 publish 안 됨"
         assert any("lines suppressed" in p for p in lines), "억제 요약 publish"
         assert "정상 로그" in lines
 
-    def test_attach_console_not_published(self):
+    def test_attach_console_not_published(self, strict_redis_mock):
         published, _ = _run_stream([
             "Error: AttachConsole failed",
             "    at Object.<anonymous> (conpty_console_list_agent.js:11:26)",
             "    at Module._compile (node:internal/modules/cjs/loader:1738:14)",
             "Node.js v24.7.0",
             "작업 시작",
-        ])
+        ], strict_redis_mock)
         lines = _flatten_user_lines(published)
         assert not any("AttachConsole" in p for p in lines)
         assert not any("at Object.<anonymous>" in p for p in lines)
@@ -223,38 +215,43 @@ class TestStreamOutputFilter:
         assert any("lines suppressed" in p for p in lines)
         assert "작업 시작" in lines
 
-    def test_noise_lines_still_written_to_file(self):
+    def test_noise_lines_still_written_to_file(self, strict_redis_mock):
         _, written = _run_stream([
             "xterm.js: Parsing error: {",
             "  position: 1186",
             "}",
-        ])
+        ], strict_redis_mock)
         combined = "".join(written)
         assert "xterm.js" in combined, "파일에는 노이즈 라인도 기록"
 
-    def test_suppression_summary_single_line(self):
+    def test_suppression_summary_single_line(self, strict_redis_mock):
         noise = ["xterm.js: Parsing error: {"] * 50 + ["정상"]
-        published, _ = _run_stream(noise)
+        published, _ = _run_stream(noise, strict_redis_mock)
         summary_lines = [p for p in _flatten_user_lines(published) if "lines suppressed" in p]
         assert len(summary_lines) == 1, f"요약은 1줄: {summary_lines}"
 
-    def test_rate_limiter_burst(self):
+    def test_rate_limiter_burst(self, strict_redis_mock):
         same_line = "반복 에러"
         lines = [same_line] * 30 + ["다른 정상 로그"]
-        published, _ = _run_stream(lines)
+        published, _ = _run_stream(lines, strict_redis_mock)
         repeat_publishes = [p for p in published if p == same_line]
         assert len(repeat_publishes) <= 10, f"burst 억제 미작동: {len(repeat_publishes)}회"
         assert any("다른 정상 로그" in p for p in published)
 
-    def test_multiline_result_is_framed_as_single_publish(self):
+    def test_multiline_result_is_framed_as_single_publish(self, strict_redis_mock):
         published, _ = _run_stream([
             "[12:00:00] [RESULT] line-1",
             "line-2",
             "line-3",
             "[12:00:01] [AI] done",
-        ])
+        ], strict_redis_mock)
         framed = [p for p in published if "[RESULT] line-1" in p]
         assert len(framed) == 1, f"RESULT 프레임이 단일 publish가 아님: {published}"
         assert "line-2" in framed[0]
         assert "line-3" in framed[0]
         assert "line-2" not in [p for p in published if p == "line-2"]
+
+    def test_strict_redis_mock_get_default_none_B(self, strict_redis_mock):
+        value = strict_redis_mock.get("plan-runner:runners:any:merge_requested")
+        assert_no_magicmock_leak(value, "redis.get")
+        assert value is None

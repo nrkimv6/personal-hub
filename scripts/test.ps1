@@ -15,6 +15,9 @@
 .PARAMETER Integration
     Integration 테스트만 실행
 
+.PARAMETER DevRunnerRegression
+    dev-runner 핵심 회귀 세트만 실행
+
 .PARAMETER Args
     pytest에 전달할 추가 인자
 
@@ -35,6 +38,10 @@
     # Integration 테스트만 실행
 
 .EXAMPLE
+    .\scripts\test.ps1 -DevRunnerRegression
+    # dev-runner 핵심 회귀 세트 실행
+
+.EXAMPLE
     .\scripts\test.ps1 tests\test_slot_check_api.py -v
     # 특정 테스트 파일 실행
 #>
@@ -43,6 +50,7 @@ param(
     [switch]$Force,
     [switch]$Slow,
     [switch]$Integration,
+    [switch]$DevRunnerRegression,
     [Parameter(ValueFromRemainingArguments)]
     [string[]]$Args
 )
@@ -75,6 +83,12 @@ $pytestArgs = @()
 
 if ($Integration) {
     $pytestArgs += "tests/integration/"
+} elseif ($DevRunnerRegression) {
+    $pytestArgs += "tests/dev_runner/test_dr_runtime_utils.py"
+    $pytestArgs += "tests/dev_runner/test_noise_filter_76.py"
+    $pytestArgs += "tests/dev_runner/test_v2_merge_fallback.py"
+    $pytestArgs += "tests/dev_runner/test_stream_output_merge.py"
+    $pytestArgs += "tests/dev_runner/test_v2_merge_gate.py"
 } elseif ($Args.Count -eq 0) {
     $pytestArgs += "tests/"
     if (-not $Slow) {
