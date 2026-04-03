@@ -15,6 +15,7 @@ import pytest
 
 from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse
 from app.modules.dev_runner.services.plan_service import PlanService
+from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 
 
 # ===========================================================================
@@ -111,6 +112,30 @@ def test_archive_plan_no_todo_unchanged_boundary(tmp_path, service):
 
     assert len(mv_calls) == 1, f"git mv 1회 호출 기대, 실제: {len(mv_calls)}"
     assert todo_archive_path is None
+
+
+def test_archive_plan_resolver_error_keeps_companion_todo_error(tmp_path, service):
+    """E: resolver 실패 시 plan/_todo 모두 원위치 유지 + git mv 미호출."""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+
+    plan_file = plan_dir / "2026-01-01_test.md"
+    todo_file = plan_dir / "2026-01-01_test_todo.md"
+    plan_original = "> 상태: 구현완료\n\n# Test\n"
+    todo_original = "# Test TODO\n"
+    plan_file.write_text(plan_original, encoding="utf-8")
+    todo_file.write_text(todo_original, encoding="utf-8")
+
+    with patch(
+        "app.modules.dev_runner.services.archive_service.resolve_archive_target_or_raise",
+        side_effect=PathRuleError("archive target resolve failed: source=/x rule=resolve_plan_target reason=invalid"),
+    ), patch("asyncio.create_subprocess_exec") as mock_exec:
+        with pytest.raises(ValueError, match="archive target resolve failed"):
+            asyncio.run(service._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8")))
+
+    mock_exec.assert_not_called()
+    assert plan_file.read_text(encoding="utf-8") == plan_original
+    assert todo_file.read_text(encoding="utf-8") == todo_original
 
 
 # ===========================================================================

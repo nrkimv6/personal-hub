@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services.archive_service import archive_plan_bundle
 from app.modules.dev_runner.services.log_service import LOG_CHANNEL, REDIS_HOST, REDIS_PORT
-from app.modules.dev_runner.services.plan_path_resolver import resolve_plan_target
+from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 from app.modules.dev_runner.schemas import (
     PlanFileResponse, PlanProgressResponse,
     PlanDetailResponse, PlanPhaseResponse, PlanItemResponse,
@@ -816,82 +817,20 @@ class PlanService:
         return content
 
     async def _archive_plan(self, plan_path: str, content: str) -> tuple[Path, Optional[Path]]:
-        """완료일 헤더 삽입 후 git mv로 archive 디렉토리로 이동.
+        """공통 archive 로직으로 plan/_todo를 이동한다.
 
         Returns:
             (archive_path, todo_archive_path) — todo_archive_path는 companion _todo.md가 없으면 None
         """
-        p = Path(plan_path)
-        today = date.today().isoformat()
-
-        # 완료일 헤더 삽입 (> 상태: 줄 다음에)
-        lines = content.splitlines(keepends=True)
-        inserted = False
-        for i, line in enumerate(lines):
-            if re.match(r'^>\s*상태:', line):
-                lines.insert(i + 1, f'> 완료일: {today}\n')
-                inserted = True
-                break
-        if not inserted:
-            for i, line in enumerate(lines):
-                if line.startswith('#'):
-                    lines.insert(i + 1, f'\n> 완료일: {today}\n')
-                    break
-        final_content = "".join(lines)
-
-        # 1. 원본 파일에 수정된 내용 덮어쓰기 (git mv 전에 내용 반영)
-        p.write_text(final_content, encoding="utf-8")
-
-        # 2. 공통 resolver 기반 target 디렉토리 계산 (해석 실패 시 레거시 fallback)
         try:
-            resolution = resolve_plan_target(plan_path, purpose="archive")
-            archive_path = resolution.target
-            archive_dir = archive_path.parent
-            archive_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(
-                "[done] archive target resolved: source=%s target=%s kind=%s rule=%s",
-                p,
-                archive_path,
-                resolution.target_kind,
-                resolution.rule_id,
+            archive_path, todo_archive_path, _ = await archive_plan_bundle(
+                plan_path=plan_path,
+                content=content,
+                find_todo_file=self._find_todo_file,
             )
-        except Exception as path_err:
-            archive_dir = p.parent.parent / "archive"
-            archive_dir.mkdir(parents=True, exist_ok=True)
-            archive_path = archive_dir / p.name
-            logger.warning("[done] archive resolver fallback: plan=%s error=%s", plan_path, path_err)
-
-        # 3. git mv로 이동 (rename 이력 보존 + staging 자동)
-        mv_proc = await asyncio.create_subprocess_exec(
-            "git", "mv", str(p), str(archive_path),
-            cwd=str(p.parent),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await mv_proc.communicate()
-        if mv_proc.returncode != 0:
-            # git mv 실패 시 fallback: 파일시스템 이동
-            archive_path.write_text(final_content, encoding="utf-8")
-            p.unlink()
-
-        # 4. companion _todo.md 아카이브 처리
-        todo_archive_path: Optional[Path] = None
-        todo_file = self._find_todo_file(p)
-        if todo_file and todo_file.exists():
-            todo_archive_path = archive_dir / todo_file.name
-            todo_mv_proc = await asyncio.create_subprocess_exec(
-                "git", "mv", str(todo_file), str(todo_archive_path),
-                cwd=str(todo_file.parent),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await todo_mv_proc.communicate()
-            if todo_mv_proc.returncode != 0:
-                # fallback: 파일시스템 이동
-                todo_archive_path.write_text(todo_file.read_text(encoding="utf-8"), encoding="utf-8")
-                todo_file.unlink()
-
-        return archive_path, todo_archive_path
+            return archive_path, todo_archive_path
+        except PathRuleError as path_err:
+            raise ValueError(str(path_err)) from path_err
 
     @staticmethod
     def _update_todo_done(project_dir: Path, plan_title: str) -> None:

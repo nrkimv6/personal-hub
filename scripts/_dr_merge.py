@@ -1,4 +1,5 @@
 """_dr_merge.py — dev-runner merge 실행 헬퍼 모듈"""
+import base64
 import functools
 import json
 import logging
@@ -7,7 +8,6 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote as _url_quote
 
 import requests
 import redis
@@ -209,15 +209,66 @@ def _pub_and_log(runner_id: str, msg: str, redis_client: redis.Redis, tag: str =
         logger.debug(f"[_pub_and_log] 파일 기록 실패 (무시): {_e}")
 
 
+def _extract_post_merge_done_failure(done_result) -> tuple[bool, str]:
+    """post-merge done 결과에서 실패 여부/사유를 추출한다."""
+    if not isinstance(done_result, dict):
+        return False, ""
+    if done_result.get("success", True):
+        return False, ""
+    reason = done_result.get("reason") or done_result.get("status") or "done_post_merge_failed"
+    return True, str(reason)
+
+
+def _compose_merge_result_with_done(
+    runner_id: str,
+    redis_client: redis.Redis,
+    action_name: str,
+    base_message: str,
+    done_result,
+    pub_fn,
+) -> dict:
+    """merge 성공 결과에 post-merge done 결과를 반영한다."""
+    failed, reason = _extract_post_merge_done_failure(done_result)
+    if failed:
+        pub_fn(f"post-merge done 실패 전파: {reason}")
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+        except Exception:
+            pass
+        result = {
+            "success": False,
+            "message": f"{base_message}; post-merge done failed: {reason}",
+            "merge_status": "error",
+            "action": action_name,
+        }
+    else:
+        result = {
+            "success": True,
+            "message": base_message,
+            "merge_status": "merged",
+            "action": action_name,
+        }
+
+    if isinstance(done_result, dict):
+        result["post_merge_done"] = done_result
+    return result
+
+
 def _handle_merge_success(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn, action_name: str = "inline-merge") -> dict:
     try:
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
     except Exception:
         pass
     pub_fn("merge 성공 (exit_code=0)")
-    result = {"success": True, "message": "merged", "merge_status": "merged", "action": action_name}
-    _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
-    return result
+    done_result = _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
+    return _compose_merge_result_with_done(
+        runner_id=runner_id,
+        redis_client=redis_client,
+        action_name=action_name,
+        base_message="merged",
+        done_result=done_result,
+        pub_fn=pub_fn,
+    )
 
 
 def _handle_test_failed(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn, action_name: str = "inline-merge", _test_fix_attempt: int = 0) -> dict:
@@ -250,9 +301,15 @@ def _handle_test_failed(runner_id: str, redis_client: redis.Redis, plan_file, pu
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
             except Exception:
                 pass
-            result = {"success": True, "message": "test fixed and merged", "merge_status": "merged", "action": action_name}
-            _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
-            return result
+            done_result = _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
+            return _compose_merge_result_with_done(
+                runner_id=runner_id,
+                redis_client=redis_client,
+                action_name=action_name,
+                base_message="test fixed and merged",
+                done_result=done_result,
+                pub_fn=pub_fn,
+            )
         else:
             pub_fn(f"auto-impl-post-merge 실패: {_fix_result['message']}")
             try:
@@ -289,9 +346,15 @@ def _handle_conflict(runner_id: str, redis_client: redis.Redis, plan_file, pub_f
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
         except Exception:
             pass
-        result = {"success": True, "message": "conflict resolved", "merge_status": "merged", "action": action_name}
-        _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
-        return result
+        done_result = _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
+        return _compose_merge_result_with_done(
+            runner_id=runner_id,
+            redis_client=redis_client,
+            action_name=action_name,
+            base_message="conflict resolved",
+            done_result=done_result,
+            pub_fn=pub_fn,
+        )
     else:
         pub_fn(f"conflict resolver 실패: {_resolve_result['message']}")
         try:
@@ -458,7 +521,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
     return result
 
 
-def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client) -> None:
+def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client) -> dict:
     """머지 성공 후 done flow를 실행한다.
 
     plan_file에서 branch/worktree 헤더 필드를 제거하고,
@@ -480,26 +543,26 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
     )
     if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
         pub_fn("plan_file 없음(--all 모드) — done 스킵")
-        return
+        return {"success": True, "status": "skipped_no_plan", "reason": "no_plan_file"}
 
     # plan 파일 존재 확인 — 이미 archive됨 (fix: v2-pipeline-transition-safety Phase 2)
     if not Path(plan_file).exists():
         pub_fn("plan 이미 처리됨 (파일 없음) — done 스킵")
         logger.info(f"[_handle_post_merge_done] plan 파일 없음, 이미 처리된 것으로 판단: {plan_file}")
-        return
+        return {"success": True, "status": "skipped_missing_plan", "reason": "missing_plan_file"}
 
     # pre-review stopped는 done/restart 후처리 금지
     if _is_pre_review_stopped(runner_id, redis_client, plan_file):
         pub_fn("stop_stage=pre_review 감지 — post-merge done/restart 스킵")
         logger.info(f"[_handle_post_merge_done] pre_review stopped guard: runner={runner_id}, plan={plan_file}")
-        return
+        return {"success": True, "status": "skipped_pre_review", "reason": "pre_review_stopped"}
 
     # plan 상태 확인 — "완료"이면 이미 done 처리됨
     try:
         _head = Path(plan_file).read_text(encoding="utf-8", errors="replace")[:2000]
         if re.search(r">\s*상태:\s*완료", _head):
             pub_fn("plan 이미 완료 상태 — done 스킵")
-            return
+            return {"success": True, "status": "skipped_already_done", "reason": "already_done"}
     except Exception:
         pass
 
@@ -544,17 +607,39 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
     done_count, total_count = _get_plan_completion(plan_file)
     if total_count > 0 and done_count == total_count:
         pub_fn(f"완료율 100% ({done_count}/{total_count}) — 자동 done 처리 시작")
-        _call_done_api(plan_file, runner_id, pub_fn)
-    else:
-        pub_fn(f"미완료 태스크 있음 ({done_count}/{total_count}) — main 추가 사이클 예약")
+        done_ok = _call_done_api(plan_file, runner_id, pub_fn)
+        if done_ok:
+            try:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_status", "success")
+            except Exception:
+                pass
+            return {"success": True, "status": "done_called", "done_count": done_count, "total_count": total_count}
+
         try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_status", "failed")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_error", "done_api_failed")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
         except Exception:
             pass
+        pub_fn("자동 done 실패 — main 추가 사이클 예약")
+        return {
+            "success": False,
+            "status": "done_failed",
+            "reason": "done_api_failed",
+            "done_count": done_count,
+            "total_count": total_count,
+        }
+
+    pub_fn(f"미완료 태스크 있음 ({done_count}/{total_count}) — main 추가 사이클 예약")
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
+    except Exception:
+        pass
+    return {"success": True, "status": "restart_scheduled", "done_count": done_count, "total_count": total_count}
 
 
 def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
-    """plan_file 경로에 대해 Admin API /plans/{path}/done 를 호출한다.
+    """plan_file 경로에 대해 Admin API /plans/{encoded_path}/done 를 호출한다.
 
     Args:
         plan_file: plan 파일 절대 경로
@@ -565,14 +650,48 @@ def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
         True if done API returned 200, False otherwise
     """
     try:
-        encoded = _url_quote(plan_file, safe="")
+        encoded = base64.urlsafe_b64encode(plan_file.encode("utf-8")).decode("ascii").rstrip("=")
         url = f"{get_admin_api_base()}/plans/{encoded}/done"
         resp = requests.post(url, timeout=60)
-        if resp.status_code == 200:
-            return True
-        pub_fn(f"done API 실패 (status={resp.status_code}) — 수동 처리 필요")
-        logger.warning(f"[_call_done_api] done API 실패: runner={runner_id}, status={resp.status_code}, url={url}")
-        return False
+        if resp.status_code != 200:
+            pub_fn(f"done API 실패 (status={resp.status_code}) — 수동 처리 필요")
+            logger.warning(f"[_call_done_api] done API 실패: runner={runner_id}, status={resp.status_code}, url={url}")
+            return False
+
+        try:
+            payload = resp.json()
+        except ValueError as parse_err:
+            pub_fn("done API 응답 파싱 실패 — 수동 처리 필요")
+            logger.warning(
+                "[_call_done_api] done API 응답 파싱 실패: runner=%s, url=%s, error=%s",
+                runner_id,
+                url,
+                parse_err,
+            )
+            return False
+
+        if not isinstance(payload, dict):
+            pub_fn("done API 응답 형식 오류 — 수동 처리 필요")
+            logger.warning(
+                "[_call_done_api] done API 응답 형식 오류: runner=%s, url=%s, type=%s",
+                runner_id,
+                url,
+                type(payload).__name__,
+            )
+            return False
+
+        if payload.get("success") is False:
+            reason = payload.get("message") or "unknown"
+            pub_fn(f"done API 실패 (success=false): {reason} — 수동 처리 필요")
+            logger.warning(
+                "[_call_done_api] done API success=false: runner=%s, url=%s, reason=%s",
+                runner_id,
+                url,
+                reason,
+            )
+            return False
+
+        return True
     except requests.exceptions.RequestException as e:
         pub_fn(f"done API 연결 실패: {e} — 수동 처리 필요")
         logger.warning(f"[_call_done_api] done API 연결 실패: runner={runner_id}, error={e}")

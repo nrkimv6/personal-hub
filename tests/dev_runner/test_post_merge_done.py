@@ -10,7 +10,10 @@ Phase T1: get_plan_completion / _call_done_api 검증
 - test_call_done_api_success_R
 - test_call_done_api_http_error_E
 - test_call_done_api_connection_error_E
+- test_call_done_api_success_false_body_E
+- test_call_done_api_uses_base64_encoded_path_Co
 """
+import base64
 import importlib.util
 import sys
 import types
@@ -99,6 +102,7 @@ def test_call_done_api_success_R(cl):
     pub_calls = []
     mock_resp = MagicMock()
     mock_resp.status_code = 200
+    mock_resp.json.return_value = {"success": True}
 
     with patch("requests.post", return_value=mock_resp):
         result = cl._call_done_api("/some/plan.md", "runner1", pub_calls.append)
@@ -131,3 +135,36 @@ def test_call_done_api_connection_error_E(cl):
 
     assert result is False
     assert any("연결 실패" in m for m in pub_calls)
+
+
+def test_call_done_api_success_false_body_E(cl):
+    """E: 200 + success=false 응답 → False 반환, pub_fn 호출됨"""
+    pub_calls = []
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"success": False, "message": "archive target resolve failed"}
+
+    with patch("requests.post", return_value=mock_resp):
+        result = cl._call_done_api("/some/plan.md", "runner1", pub_calls.append)
+
+    assert result is False
+    assert any("success=false" in m for m in pub_calls)
+
+
+def test_call_done_api_uses_base64_encoded_path_Co(cl):
+    """Co: done API 호출 URL이 base64 encoded_path 규약을 사용한다."""
+    pub_calls = []
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"success": True}
+    plan_path = "/some/path/with space/plan.md"
+
+    with patch("requests.post", return_value=mock_resp) as mock_post:
+        result = cl._call_done_api(plan_path, "runner1", pub_calls.append)
+
+    assert result is True
+    called_url = mock_post.call_args[0][0]
+    encoded = called_url.split("/plans/")[1].split("/done")[0]
+    padded = encoded + "=" * ((4 - len(encoded) % 4) % 4)
+    decoded = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+    assert decoded == plan_path

@@ -203,6 +203,47 @@ class TestRunDoneRejectsFixWithoutPhaseR:
 
 
 # ---------------------------------------------------------------------------
+# resolver 실패 시 상태 보존
+# ---------------------------------------------------------------------------
+
+class TestDoneResolverErrorState:
+    """resolver 실패 시 run_done이 실패 반환하고 plan 상태를 보존한다."""
+
+    @pytest.mark.asyncio
+    async def test_done_resolver_error_preserves_plan_state_E(self, tmp_path):
+        from app.modules.dev_runner.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
+
+        plan = tmp_path / "docs" / "plan" / "2026-04-03_resolver-state.md"
+        plan.parent.mkdir(parents=True)
+        original = (
+            "# feat: resolver 실패 상태 보존\n"
+            "\n"
+            "> 상태: 구현완료\n"
+            "> 진행률: 1/1 (100%)\n"
+            "\n"
+            "- [x] archive 처리\n"
+            "\n"
+            "*상태: 구현완료 | 진행률: 1/1 (100%)*\n"
+        )
+        plan.write_text(original, encoding="utf-8")
+
+        svc = PlanService.__new__(PlanService)
+        with patch(
+            "app.modules.dev_runner.services.archive_service.resolve_archive_target_or_raise",
+            side_effect=PathRuleError(
+                "archive target resolve failed: source=/x rule=resolve_plan_target reason=invalid"
+            ),
+        ):
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is False
+        assert "archive target resolve failed" in result.get("message", "")
+        assert plan.exists()
+        assert plan.read_text(encoding="utf-8") == original
+
+
+# ---------------------------------------------------------------------------
 # T3: _handle_post_merge_done 통합 TC (근본 원인 재현)
 # ---------------------------------------------------------------------------
 

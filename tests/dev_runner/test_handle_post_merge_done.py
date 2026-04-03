@@ -55,16 +55,16 @@ def test__handle_post_merge_done_right_calls_done_api(cl, tmp_path):
 
     pub_msgs = []
     mock_redis = MagicMock()
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-
-    with patch.object(cl, "_remove_plan_header_fields"), \
-         patch("requests.post", return_value=mock_resp):
-        cl._handle_post_merge_done(str(plan), "runner1", pub_msgs.append, mock_redis)
+    with patch("plan_worktree_helpers.remove_plan_header_fields"), \
+         patch("_dr_merge._call_done_api", return_value=True):
+        result = cl._handle_post_merge_done(str(plan), "runner1", pub_msgs.append, mock_redis)
 
     assert any("100%" in m for m in pub_msgs)
+    assert result["success"] is True
+    assert result["status"] == "done_called"
     # restart_after_merge 설정 안 됨
-    mock_redis.set.assert_not_called()
+    restart_calls = [c for c in mock_redis.set.call_args_list if "restart_after_merge" in c.args[0]]
+    assert restart_calls == []
 
 
 def test__handle_post_merge_done_right_skips_incomplete(cl, tmp_path):
@@ -75,12 +75,14 @@ def test__handle_post_merge_done_right_skips_incomplete(cl, tmp_path):
     pub_msgs = []
     mock_redis = MagicMock()
 
-    with patch.object(cl, "_remove_plan_header_fields"), \
-         patch.object(cl, "_call_done_api") as mock_done:
-        cl._handle_post_merge_done(str(plan), "runner2", pub_msgs.append, mock_redis)
+    with patch("plan_worktree_helpers.remove_plan_header_fields"), \
+         patch("_dr_merge._call_done_api") as mock_done:
+        result = cl._handle_post_merge_done(str(plan), "runner2", pub_msgs.append, mock_redis)
 
     mock_done.assert_not_called()
     assert any("추가 사이클 예약" in m for m in pub_msgs)
+    assert result["success"] is True
+    assert result["status"] == "restart_scheduled"
     mock_redis.set.assert_called_once()
     set_call_args = mock_redis.set.call_args[0]
     assert "restart_after_merge" in set_call_args[0]
@@ -92,13 +94,15 @@ def test__handle_post_merge_done_boundary_no_plan_file(cl):
     pub_msgs = []
     mock_redis = MagicMock()
 
-    with patch.object(cl, "_remove_plan_header_fields") as mock_remove, \
-         patch.object(cl, "_call_done_api") as mock_done:
-        cl._handle_post_merge_done(None, "runner3", pub_msgs.append, mock_redis)
+    with patch("plan_worktree_helpers.remove_plan_header_fields") as mock_remove, \
+         patch("_dr_merge._call_done_api") as mock_done:
+        result = cl._handle_post_merge_done(None, "runner3", pub_msgs.append, mock_redis)
 
     mock_remove.assert_not_called()
     mock_done.assert_not_called()
     assert any("done 스킵" in m for m in pub_msgs)
+    assert result["success"] is True
+    assert result["status"] == "skipped_no_plan"
 
 
 def test__handle_post_merge_done_boundary_all_mode(cl):
@@ -106,12 +110,14 @@ def test__handle_post_merge_done_boundary_all_mode(cl):
     pub_msgs = []
     mock_redis = MagicMock()
 
-    with patch.object(cl, "_remove_plan_header_fields") as mock_remove, \
-         patch.object(cl, "_call_done_api") as mock_done:
-        cl._handle_post_merge_done(cl.PLAN_FILE_ALL, "runner4", pub_msgs.append, mock_redis)
+    with patch("plan_worktree_helpers.remove_plan_header_fields") as mock_remove, \
+         patch("_dr_merge._call_done_api") as mock_done:
+        result = cl._handle_post_merge_done(cl.PLAN_FILE_ALL, "runner4", pub_msgs.append, mock_redis)
 
     mock_remove.assert_not_called()
     mock_done.assert_not_called()
+    assert result["success"] is True
+    assert result["status"] == "skipped_no_plan"
 
 
 def test__handle_post_merge_done_error_api_failure_no_raise(cl, tmp_path):
@@ -121,13 +127,33 @@ def test__handle_post_merge_done_error_api_failure_no_raise(cl, tmp_path):
 
     pub_msgs = []
     mock_redis = MagicMock()
-    mock_resp = MagicMock()
-    mock_resp.status_code = 500
-
-    with patch.object(cl, "_remove_plan_header_fields"), \
-         patch("requests.post", return_value=mock_resp):
+    with patch("plan_worktree_helpers.remove_plan_header_fields"), \
+         patch("_dr_merge._call_done_api", return_value=False):
         # 예외 발생 없이 정상 완료되어야 함
-        cl._handle_post_merge_done(str(plan), "runner5", pub_msgs.append, mock_redis)
+        result = cl._handle_post_merge_done(str(plan), "runner5", pub_msgs.append, mock_redis)
+
+    assert result["success"] is False
+    assert result["status"] == "done_failed"
+    restart_calls = [c for c in mock_redis.set.call_args_list if "restart_after_merge" in c.args[0]]
+    assert restart_calls, "done 실패 시 restart_after_merge 예약 필요"
+
+
+def test_handle_post_merge_done_propagates_done_failure_E(cl, tmp_path):
+    """E: done API 실패 시 결과/후속 신호가 호출자에 전달된다."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("- [x] 항목1\n- [x] 항목2\n", encoding="utf-8")
+
+    pub_msgs = []
+    mock_redis = MagicMock()
+
+    with patch("plan_worktree_helpers.remove_plan_header_fields"), \
+         patch("_dr_merge._call_done_api", return_value=False) as mock_done:
+        result = cl._handle_post_merge_done(str(plan), "runner-fail", pub_msgs.append, mock_redis)
+
+    assert mock_done.call_count == 1
+    assert result["success"] is False
+    assert result["reason"] == "done_api_failed"
+    assert any("자동 done 실패" in m for m in pub_msgs)
 
 
 # ── T3: conflict resolver 성공 후 done flow 재현 TC ─────────────
@@ -171,8 +197,8 @@ def test_conflict_resolve_success_triggers_done_flow(cl, tmp_path):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
 
-    with patch.object(cl, "_launch_conflict_resolver_process", return_value=resolver_success), \
-         patch.object(cl, "_handle_post_merge_done", side_effect=mock_handle), \
+    with patch("_dr_merge._launch_conflict_resolver_process", return_value=resolver_success), \
+         patch("_dr_merge._handle_post_merge_done", side_effect=mock_handle), \
          patch("subprocess.run", return_value=merge_result_conflict), \
          patch("merge_queue.acquire_merge_turn", return_value=True), \
          patch("merge_queue.release_merge_turn"):

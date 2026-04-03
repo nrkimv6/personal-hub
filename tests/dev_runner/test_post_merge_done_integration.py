@@ -210,3 +210,27 @@ def test_pre_review_stopped_skips_done_and_restart_R(cl, tmp_path):
     mock_post.assert_not_called()
     assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None
     assert any("pre_review" in line for line in logs)
+
+
+def test_all_done_success_false_body_sets_restart_E(cl, tmp_path):
+    """E: done API success=false 응답이면 done_failed로 처리되고 restart가 예약된다."""
+    r = _make_redis()
+    runner_id = "intg07-fail"
+    prefix = cl.RUNNER_KEY_PREFIX
+    plan_path = str(tmp_path / "plan_all_done_fail.md")
+    _make_all_done_plan(plan_path)
+    _seed_runner_keys(r, prefix, runner_id, plan_path)
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"success": False, "message": "archive target resolve failed"}
+
+    with patch("requests.post", return_value=mock_resp):
+        result = _run_merge(cl, runner_id, r)
+
+    assert result["success"] is False
+    assert result["merge_status"] == "error"
+    assert "post-merge done failed" in result["message"]
+    assert r.get(f"{prefix}:{runner_id}:done_post_merge_status") == "failed"
+    assert r.get(f"{prefix}:{runner_id}:done_post_merge_error") == "done_api_failed"
+    assert r.get(f"{prefix}:{runner_id}:restart_after_merge") == "1"
