@@ -158,10 +158,17 @@ class TestSseFilterE2E:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "/tmp/plan.md")
             redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
-            runners = _collect_initial_status(timeout=5.0)
-            runner_ids = [r.get("runner_id") for r in runners]
-            assert runner_id in runner_ids, (
-                f"user stopped runner {runner_id!r}이 SSE initial status에서 누락됨"
+            seen_ids: list[str] = []
+            for _ in range(5):
+                runners = _collect_initial_status(timeout=2.0)
+                seen_ids = [r.get("runner_id") for r in runners]
+                if runner_id in seen_ids:
+                    break
+                time.sleep(0.2)
+
+            assert runner_id in seen_ids, (
+                f"user stopped runner {runner_id!r}이 SSE initial status에서 누락됨. "
+                f"observed={seen_ids}"
             )
         finally:
             redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
