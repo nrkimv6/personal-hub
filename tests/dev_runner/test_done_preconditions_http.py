@@ -90,3 +90,26 @@ class TestDonePreconditionsHttp:
             result = asyncio.get_event_loop().run_until_complete(svc.run_done(str(plan_path)))
 
         assert result["success"] is True
+
+    def test_plan_done_api_resolver_error_returns_failure_E(self, svc, tmp_path, dev_runner_config_isolation):
+        """docs/plan 외 경로 plan은 resolver hard-fail 응답(success=false)을 반환한다."""
+        plan_dir = tmp_path / "docs" / "tmp"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plan_dir / "2026-04-03_resolver-http-fail.md"
+        original = textwrap.dedent("""\
+            # feat: resolver failure
+
+            > 상태: 구현완료
+            > 진행률: 1/1 (100%)
+
+            - [x] done
+        """)
+        plan_path.write_text(original, encoding="utf-8")
+
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(svc.run_done(str(plan_path)))
+
+        assert result["success"] is False
+        assert "archive target resolve failed" in result["message"]
+        assert plan_path.exists()
+        assert plan_path.read_text(encoding="utf-8") == original

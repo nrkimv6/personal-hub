@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from app.modules.dev_runner.schemas import PlanFileResponse
+from app.modules.dev_runner.services.archive_service import archive_plan_bundle
 from app.modules.dev_runner.services.log_service import publish_log, log_service
-from app.modules.dev_runner.services.plan_path_resolver import resolve_plan_target
+from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 
 logger = logging.getLogger(__name__)
 
@@ -176,82 +177,16 @@ class PlanDoneService:
         return content
 
     async def _archive_plan(self, plan_path: str, content: str) -> tuple:
-        """\uc644\ub8cc\uc77c \ud5e4\ub354 \uc0bd\uc785 \ud6c4 git mv\ub85c archive \ub514\ub809\ud1a0\ub9ac\ub85c \uc774\ub3d9.
-
-        Returns:
-            (archive_path, todo_archive_path) \u2014 todo_archive_path\ub294 companion _todo.md\uac00 \uc5c6\uc73c\uba74 None
-        """
-        p = Path(plan_path)
-        today = date.today().isoformat()
-
-        # \uc644\ub8cc\uc77c \ud5e4\ub354 \uc0bd\uc785 (> \uc0c1\ud0dc: \uc904 \ub2e4\uc74c\uc5d0)
-        lines = content.splitlines(keepends=True)
-        inserted = False
-        for i, line in enumerate(lines):
-            if re.match(r'^>\s*\uc0c1\ud0dc:', line):
-                lines.insert(i + 1, f'> \uc644\ub8cc\uc77c: {today}\n')
-                inserted = True
-                break
-        if not inserted:
-            for i, line in enumerate(lines):
-                if line.startswith('#'):
-                    lines.insert(i + 1, f'\n> \uc644\ub8cc\uc77c: {today}\n')
-                    break
-        final_content = "".join(lines)
-
-        # 1. \uc6d0\ubcf8 \ud30c\uc77c\uc5d0 \uc218\uc815\ub41c \ub0b4\uc6a9 \ub36e\uc5b4\uc4f0\uae30 (git mv \uc804\uc5d0 \ub0b4\uc6a9 \ubc18\uc601)
-        p.write_text(final_content, encoding="utf-8")
-
-        # 2. 공통 resolver 기반 target 디렉토리 계산 (해석 실패 시 레거시 fallback)
+        """공통 archive 로직으로 plan/_todo를 이동한다."""
         try:
-            resolution = resolve_plan_target(plan_path, purpose="archive")
-            archive_path = resolution.target
-            archive_dir = archive_path.parent
-            archive_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(
-                "[done] archive target resolved: source=%s target=%s kind=%s rule=%s",
-                p,
-                archive_path,
-                resolution.target_kind,
-                resolution.rule_id,
+            archive_path, todo_archive_path, _ = await archive_plan_bundle(
+                plan_path=plan_path,
+                content=content,
+                find_todo_file=self.scanner._find_todo_file,
             )
-        except Exception as path_err:
-            archive_dir = p.parent.parent / "archive"
-            archive_dir.mkdir(parents=True, exist_ok=True)
-            archive_path = archive_dir / p.name
-            logger.warning("[done] archive resolver fallback: plan=%s error=%s", plan_path, path_err)
-
-        # 3. git mv\ub85c \uc774\ub3d9 (rename \uc774\ub825 \ubcf4\uc874 + staging \uc790\ub3d9)
-        mv_proc = await asyncio.create_subprocess_exec(
-            "git", "mv", str(p), str(archive_path),
-            cwd=str(p.parent),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await mv_proc.communicate()
-        if mv_proc.returncode != 0:
-            # git mv \uc2e4\ud328 \uc2dc fallback: \ud30c\uc77c\uc2dc\uc2a4\ud15c \uc774\ub3d9
-            archive_path.write_text(final_content, encoding="utf-8")
-            p.unlink()
-
-        # 4. companion _todo.md \uc544\uce74\uc774\ube0c \ucc98\ub9ac
-        todo_archive_path: Optional[Path] = None
-        todo_file = self.scanner._find_todo_file(p)
-        if todo_file and todo_file.exists():
-            todo_archive_path = archive_dir / todo_file.name
-            todo_mv_proc = await asyncio.create_subprocess_exec(
-                "git", "mv", str(todo_file), str(todo_archive_path),
-                cwd=str(todo_file.parent),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await todo_mv_proc.communicate()
-            if todo_mv_proc.returncode != 0:
-                # fallback: \ud30c\uc77c\uc2dc\uc2a4\ud15c \uc774\ub3d9
-                todo_archive_path.write_text(todo_file.read_text(encoding="utf-8"), encoding="utf-8")
-                todo_file.unlink()
-
-        return archive_path, todo_archive_path
+            return archive_path, todo_archive_path
+        except PathRuleError as path_err:
+            raise ValueError(str(path_err)) from path_err
 
     @staticmethod
     def _update_todo_done(project_dir: Path, plan_title: str) -> None:
@@ -610,3 +545,4 @@ from app.modules.dev_runner.services.plan_scanner import plan_scanner
 from app.modules.dev_runner.services.plan_path_registry import plan_path_registry
 
 plan_done_service = PlanDoneService(plan_scanner, plan_path_registry)
+

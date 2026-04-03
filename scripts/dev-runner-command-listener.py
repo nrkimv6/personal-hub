@@ -131,6 +131,67 @@ def _log_command_memory_stage(action: str, stage: str, runner_id: str = "") -> N
     )
 
 
+def _propagate_fallback_done_failure(
+    runner_id: str,
+    done_result,
+    redis_client: redis.Redis,
+    wf_manager,
+    context: str,
+) -> None:
+    """heartbeat fallback done 실패를 상태/워크플로우에 반영한다."""
+    if not isinstance(done_result, dict):
+        return
+    if done_result.get("success", True):
+        return
+
+    reason = str(done_result.get("reason") or done_result.get("status") or "done_post_merge_failed")
+    _pub_and_log(runner_id, f"{context} fallback done 실패 전파: {reason}", redis_client, "MERGE-FALLBACK")
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+    except Exception:
+        pass
+
+    try:
+        if wf_manager:
+            wf = wf_manager.get_by_runner_id(runner_id)
+            if wf:
+                wf_manager.update_status(
+                    wf["id"],
+                    "failed",
+                    error_message=f"{context} fallback done failed: {reason}",
+                )
+    except Exception:
+        pass
+
+
+def _execute_heartbeat_done_fallback(
+    runner_id: str,
+    detect_result,
+    redis_client: redis.Redis,
+    wf_manager,
+    context: str,
+) -> None:
+    """heartbeat dead/hang 경로에서 v2 done fallback 실행 + 실패 전파."""
+    if not detect_result:
+        return
+
+    logger.info(f"heartbeat: v2 merge fallback 실행 ({context}, runner_id={runner_id})")
+
+    def _fallback_pub(msg: str, _rid=runner_id) -> None:
+        _pub_and_log(_rid, msg, redis_client, "MERGE-FALLBACK")
+
+    done_result = _handle_post_merge_done(
+        detect_result["plan_file"], runner_id, _fallback_pub, redis_client
+    )
+    _propagate_fallback_done_failure(
+        runner_id=runner_id,
+        done_result=done_result,
+        redis_client=redis_client,
+        wf_manager=wf_manager,
+        context=context,
+    )
+
+
 # 하위 호환 별칭 — 테스트/외부 코드에서 직접 접근 지원 (리팩토링 후 _dr_state로 이동됨)
 _refresh_state_refs(reset=bool(os.environ.get("PYTEST_CURRENT_TEST")))
 
@@ -334,11 +395,14 @@ def main():
                                         except Exception as _hang_det_err:
                                             logger.debug(f"heartbeat: v2 detect 실패 (hang 경로, 무시): {_hang_det_err}")
                                         if _hang_v2_detect:
-                                            logger.info(f"heartbeat: v2 merge fallback 실행 (hang 경로, runner_id={rid})")
                                             try:
-                                                def _hang_pub(msg: str, _rid=rid) -> None:
-                                                    _pub_and_log(_rid, msg, r, "MERGE-FALLBACK")
-                                                _handle_post_merge_done(_hang_v2_detect["plan_file"], rid, _hang_pub, r)
+                                                _execute_heartbeat_done_fallback(
+                                                    runner_id=rid,
+                                                    detect_result=_hang_v2_detect,
+                                                    redis_client=r,
+                                                    wf_manager=_wf_manager,
+                                                    context="heartbeat-hang",
+                                                )
                                             except Exception as _hang_fb_err:
                                                 logger.warning(f"heartbeat: v2 merge fallback 실패 (hang, cleanup 계속): {_hang_fb_err}")
                                         _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
@@ -364,11 +428,14 @@ def main():
                                     except Exception as _hb_det_err:
                                         logger.debug(f"heartbeat: v2 detect 실패 (무시): {_hb_det_err}")
                                     if _hb_v2_detect:
-                                        logger.info(f"heartbeat: v2 merge fallback 실행 (runner_id={rid})")
                                         try:
-                                            def _hb_pub(msg: str, _rid=rid) -> None:
-                                                _pub_and_log(_rid, msg, r, "MERGE-FALLBACK")
-                                            _handle_post_merge_done(_hb_v2_detect["plan_file"], rid, _hb_pub, r)
+                                            _execute_heartbeat_done_fallback(
+                                                runner_id=rid,
+                                                detect_result=_hb_v2_detect,
+                                                redis_client=r,
+                                                wf_manager=_wf_manager,
+                                                context="heartbeat-dead",
+                                            )
                                         except Exception as _hb_fb_err:
                                             logger.warning(f"heartbeat: v2 merge fallback 실패 (cleanup 계속): {_hb_fb_err}")
                                     _cleanup_process_state(rid, r, reason="heartbeat_dead_process")

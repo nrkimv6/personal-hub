@@ -423,13 +423,19 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 try:
                     def _pub_fallback(msg: str) -> None:
                         _pub_and_log(runner_id, msg, redis_client, "MERGE-FALLBACK")
-                    _handle_post_merge_done(_v2_detect["plan_file"], runner_id, _pub_fallback, redis_client)
+                    _done_result = _handle_post_merge_done(_v2_detect["plan_file"], runner_id, _pub_fallback, redis_client)
                     # Workflow 상태 보정: fallback 성공 시에도 exit_reason 기반으로 최종 상태 결정
                     if _wf_manager and runner_id:
                         try:
                             _wf = _wf_manager.get_by_runner_id(runner_id)
                             if _wf:
-                                if _completed_for_flow:
+                                if not _done_result.get("success", True):
+                                    _reason = _done_result.get("reason", "done_post_merge_failed")
+                                    _wf_manager.update_status(
+                                        _wf["id"], "failed",
+                                        error_message=f"Fallback done failed: {_reason}",
+                                    )
+                                elif _completed_for_flow:
                                     _wf_manager.update_status(_wf["id"], "completed")
                                 else:
                                     _wf_manager.update_status(

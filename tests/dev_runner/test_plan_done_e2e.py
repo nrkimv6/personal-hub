@@ -5,6 +5,7 @@ test_plan_done_e2e.py — monitor-page batch_done API e2e 테스트
 - POST /plans/batch-done 호출 시 완료 plan 아카이브
 - 성공 시 PLAN_DONE 로그 태그 확인
 - 실패 시 PLAN_FAILED 로그 태그 확인 (로그 버그 수정 검증)
+- resolver 실패 경로(done hard-fail)에서 plan 이동이 발생하지 않는지 확인
 """
 
 import asyncio
@@ -150,3 +151,30 @@ async def test_batch_done_no_targets(svc, dev_runner_config_isolation):
         result = await svc.batch_done()
 
     assert result.get("total", 0) == 0 or result.get("success_count", 0) == 0
+
+
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_run_done_resolver_error_keeps_plan_unmoved_E(svc, tmp_path, dev_runner_config_isolation):
+    """E: docs/plan 외 경로는 resolver hard-fail로 종료하고 파일 이동을 금지한다."""
+    src_dir = tmp_path / "docs" / "tmp"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = src_dir / "2026-04-03_plan-done-resolver-fail.md"
+    original = textwrap.dedent("""\
+        # feat: resolver fail e2e
+
+        > 상태: 구현완료
+        > 진행률: 1/1 (100%)
+
+        - [x] task
+    """)
+    plan_path.write_text(original, encoding="utf-8")
+    archive_path = tmp_path / "docs" / "archive" / plan_path.name
+
+    result = await svc.run_done(str(plan_path))
+
+    assert result["success"] is False
+    assert "archive target resolve failed" in result["message"]
+    assert plan_path.exists()
+    assert plan_path.read_text(encoding="utf-8") == original
+    assert not archive_path.exists()

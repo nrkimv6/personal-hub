@@ -17,8 +17,8 @@ from app.modules.dev_runner.schemas import PlanProgressResponse
 @pytest.fixture
 def tmp_plan_dir(tmp_path):
     """임시 plan 디렉토리"""
-    plan_dir = tmp_path / "plan"
-    plan_dir.mkdir()
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
     return plan_dir
 
 
@@ -59,10 +59,10 @@ class TestIsIgnoredPlan:
         assert svc._is_ignored_plan(path, "구현완료", progress) is True
 
     def test_all_checkboxes_done_is_ignored(self, svc, tmp_path):
-        """100% 체크박스 완료 (done == total > 0) → True"""
+        """체크박스 완료율은 목록 표시 여부를 바꾸지 않음 → False"""
         path = tmp_path / "test.md"
         progress = PlanProgressResponse(done=5, total=5, percent=100)
-        assert svc._is_ignored_plan(path, "구현중", progress) is True
+        assert svc._is_ignored_plan(path, "구현중", progress) is False
 
     def test_zero_checkboxes_not_ignored(self, svc, tmp_path):
         """체크박스 0개 (total=0)인 plan → False"""
@@ -671,6 +671,22 @@ class TestRunDone:
         assert "archive failed" in result["message"]
         assert result["remaining_tasks"] == 0
         assert result["total_tasks"] == 0
+
+    @pytest.mark.asyncio
+    async def test_resolver_error_failure_message(self, svc, tmp_plan_dir):
+        """Inverse: resolver 실패 메시지가 run_done 실패 응답에 노출된다."""
+        plan = tmp_plan_dir / "resolver_fail.md"
+        plan.write_text("> 상태: 구현완료\n\n1. [x] task", encoding="utf-8")
+
+        with patch.object(
+            svc,
+            "_archive_plan",
+            side_effect=ValueError("archive target resolve failed: source=/x rule=resolve_plan_target reason=invalid"),
+        ):
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is False
+        assert "archive target resolve failed" in result["message"]
 
     @pytest.mark.asyncio
     async def test_nonexistent_plan_file(self, svc, tmp_path):

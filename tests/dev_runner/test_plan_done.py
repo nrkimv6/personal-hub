@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.dev_runner.services.plan_service import PlanService
 from app.modules.dev_runner.services.plan_done_service import PlanDoneService
+from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 from app.models.plan_record import PlanRecord, PlanEvent
 
 
@@ -243,6 +244,56 @@ class TestArchivePlan:
         assert ps_archive.parts[-3:] == ("docs", "history", "2026-04-03_auto-next.md")
         assert pd_archive.parts[-3:] == ("docs", "history", "2026-04-03_auto-next.md")
 
+    @pytest.mark.asyncio
+    async def test_archive_plan_resolver_error_no_git_mv_B(self, tmp_path, svc):
+        """B: resolver 실패 시 git mv 미호출 + 원본 파일 무변경."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "2026-04-03-resolver-error.md"
+        original = "# 테스트\n> 상태: 구현완료\n"
+        plan_file.write_text(original, encoding="utf-8")
+
+        with patch(
+            "app.modules.dev_runner.services.archive_service.resolve_archive_target_or_raise",
+            side_effect=PathRuleError("archive target resolve failed: source=/x rule=resolve_plan_target reason=docs/plan 경로가 아닌 파일"),
+        ), patch("asyncio.create_subprocess_exec") as mock_exec:
+            with pytest.raises(ValueError, match="archive target resolve failed"):
+                await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
+
+        mock_exec.assert_not_called()
+        assert plan_file.exists()
+        assert plan_file.read_text(encoding="utf-8") == original
+
+    @pytest.mark.asyncio
+    async def test_archive_failure_contract_parity_Co(self, tmp_path, svc):
+        """Co: PlanService/PlanDoneService resolver 실패 계약(메시지/무이동) 동일성."""
+        ps_plan = tmp_path / "ps" / "docs" / "plan" / "2026-04-03_fix.md"
+        pd_plan = tmp_path / "pd" / "docs" / "plan" / "2026-04-03_fix.md"
+        ps_plan.parent.mkdir(parents=True)
+        pd_plan.parent.mkdir(parents=True)
+        ps_original = "# ps\n> 상태: 구현완료\n"
+        pd_original = "# pd\n> 상태: 구현완료\n"
+        ps_plan.write_text(ps_original, encoding="utf-8")
+        pd_plan.write_text(pd_original, encoding="utf-8")
+
+        scanner = MagicMock()
+        scanner._find_todo_file.return_value = None
+        done_svc = PlanDoneService(scanner=scanner, registry=MagicMock())
+
+        with patch(
+            "app.modules.dev_runner.services.archive_service.resolve_archive_target_or_raise",
+            side_effect=PathRuleError("archive target resolve failed: source=/x rule=resolve_plan_target reason=docs/plan 경로가 아닌 파일"),
+        ):
+            with pytest.raises(ValueError, match="archive target resolve failed") as ps_err:
+                await svc._archive_plan(str(ps_plan), ps_original)
+            with pytest.raises(ValueError, match="archive target resolve failed") as pd_err:
+                await done_svc._archive_plan(str(pd_plan), pd_original)
+
+        assert str(ps_err.value) == str(pd_err.value)
+        assert ps_plan.exists() and pd_plan.exists()
+        assert ps_plan.read_text(encoding="utf-8") == ps_original
+        assert pd_plan.read_text(encoding="utf-8") == pd_original
+
 
 # ========== _update_todo_done ==========
 
@@ -395,6 +446,32 @@ class TestRunDone:
         content = done_path.read_text(encoding="utf-8")
         assert "테스트 플랜" in content
         assert today in content
+
+    @pytest.mark.asyncio
+    async def test_archive_plan_resolver_error_returns_failure_R(self, tmp_path, svc):
+        """R: resolver 실패 시 run_done()이 실패 반환 + 원본 파일 유지."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "2026-04-03-resolver-run-done.md"
+        original = (
+            "# Resolver 실패 테스트\n\n"
+            "> 상태: 구현완료\n"
+            "> 진행률: 1/1 (100%)\n\n"
+            "- [x] 항목1\n\n"
+            "*상태: 구현완료 | 진행률: 1/1 (100%)*\n"
+        )
+        plan_file.write_text(original, encoding="utf-8")
+
+        with patch(
+            "app.modules.dev_runner.services.archive_service.resolve_archive_target_or_raise",
+            side_effect=PathRuleError("archive target resolve failed: source=/x rule=resolve_plan_target reason=docs/plan 경로가 아닌 파일"),
+        ):
+            result = await svc.run_done(str(plan_file))
+
+        assert result["success"] is False
+        assert "archive target resolve failed" in result["message"]
+        assert plan_file.exists()
+        assert plan_file.read_text(encoding="utf-8") == original
 
 
 # ========== run_done DB 연동 Cross-check ==========

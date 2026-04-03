@@ -6,6 +6,7 @@ plan-runner의 done 경로 변경이 admin API를 통해 간접 실행되므로 
 
 fix: v2-pipeline-transition-safety
 """
+import base64
 import re
 import sys
 from pathlib import Path
@@ -91,3 +92,39 @@ class TestT5NoDoneOnMergeFailure:
             mock_sub.return_value = MagicMock(returncode=1, stdout="")
             result = detect_merged_but_not_done(runner_id, mock_rc)
             assert result is None, f"merge 실패인데 감지됨: {result}"
+
+
+class TestT5DoneApiContract:
+    """35. done API 호출 계약(base64 경로 + success=false 처리)"""
+
+    def test_T5_done_api_uses_base64_path(self):
+        from _dr_merge import _call_done_api
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"success": True}
+        plan_path = "/tmp/v2 done plan.md"
+
+        with patch("requests.post", return_value=mock_resp) as mock_post:
+            ok = _call_done_api(plan_path, "t5-contract", lambda _m: None)
+
+        assert ok is True
+        called_url = mock_post.call_args[0][0]
+        encoded = called_url.split("/plans/")[1].split("/done")[0]
+        padded = encoded + "=" * ((4 - len(encoded) % 4) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+        assert decoded == plan_path
+
+    def test_T5_done_api_success_false_body_returns_false(self):
+        from _dr_merge import _call_done_api
+
+        messages = []
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"success": False, "message": "archive target resolve failed"}
+
+        with patch("requests.post", return_value=mock_resp):
+            ok = _call_done_api("/tmp/plan.md", "t5-contract", messages.append)
+
+        assert ok is False
+        assert any("success=false" in m for m in messages)
