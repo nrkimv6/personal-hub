@@ -1,4 +1,5 @@
 """OrphanDetector TC"""
+import asyncio
 import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -135,3 +136,29 @@ async def test_scan_removes_dead_processes():
         await detector.scan()
 
     registry.unregister.assert_called_with(6001)
+
+
+@pytest.mark.asyncio
+async def test_run_periodic_checks_memory_more_frequently_than_scan():
+    """R: memory_check_interval < interval이면 pressure.check가 scan보다 더 자주 호출됨"""
+    from app.shared.process.orphan_detector import OrphanDetector
+
+    registry = make_registry({})
+    detector = OrphanDetector(registry)
+    detector.scan = AsyncMock(return_value=[])
+    detector.cleanup = AsyncMock(return_value=[])
+
+    fake_pressure = MagicMock()
+    fake_pressure.check = AsyncMock(return_value="normal")
+
+    with patch("app.shared.process.memory_pressure.MemoryPressureResponder", return_value=fake_pressure), \
+         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 999):
+        task = asyncio.create_task(
+            detector.run_periodic(interval=0.20, memory_check_interval=0.05)
+        )
+        await asyncio.sleep(0.27)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert fake_pressure.check.await_count > detector.scan.await_count

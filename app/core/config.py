@@ -104,6 +104,7 @@ class Settings(BaseSettings):
 
     # 프로세스 트리 추적 설정
     PROCESS_SCAN_INTERVAL: int = 60  # 프로세스 스캔 주기 (초)
+    MEMORY_PRESSURE_CHECK_INTERVAL: int = 10  # 메모리 압박 체크 주기 (초)
     PROCESS_WATCH_STALE_SECONDS: int = 120  # 최신 스냅샷 stale 기준 (초)
     PROCESS_WATCH_ON_DEMAND_COOLDOWN_SEC: int = 30  # on-demand 캡처 최소 간격 (초)
     PROCESS_WATCH_CAPTURE_TIMEOUT_SEC: int = 10  # 주기 수집 타임아웃 (초)

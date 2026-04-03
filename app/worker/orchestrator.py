@@ -163,7 +163,10 @@ class WorkerOrchestrator:
         # OrphanDetector 태스크 시작
         from app.core.config import settings
         self._orphan_task = asyncio.create_task(
-            OrphanDetector(ProcessRegistry()).run_periodic(settings.PROCESS_SCAN_INTERVAL),
+            OrphanDetector(ProcessRegistry()).run_periodic(
+                settings.PROCESS_SCAN_INTERVAL,
+                settings.MEMORY_PRESSURE_CHECK_INTERVAL,
+            ),
             name="orphan_detector",
         )
 

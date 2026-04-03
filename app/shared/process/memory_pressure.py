@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _ALERT_COOLDOWN_SEC = 600  # 10분 쿨다운
 _SCRIPT_EXTENSIONS = {".py", ".ps1", ".bat", ".cmd"}
+_HEAVY_TEST_PROCESS_MB_DEFAULT = 1500.0
 
 
 def _shorten_path(path: str, max_len: int = 80) -> str:
@@ -52,6 +53,18 @@ def _extract_script_path(cmdline: list[str]) -> str | None:
                 return _shorten_path(arg)
         except (ValueError, TypeError):
             continue
+    return None
+
+
+def _extract_test_script_path(cmdline: list[str]) -> str | None:
+    """cmdline에서 test_*.py 스크립트 경로를 추출한다."""
+    for arg in cmdline:
+        try:
+            path = Path(arg)
+        except (TypeError, ValueError):
+            continue
+        if path.suffix.lower() == ".py" and path.name.lower().startswith("test_"):
+            return str(path)
     return None
 
 
@@ -194,6 +207,75 @@ class MemoryPressureResponder:
     def _record_alert(self, level: str) -> None:
         """알림 시각을 기록한다."""
         self._last_alert_time[level] = time.time()
+
+    def _attempt_pre_fatal_mitigation(self, available_mb: float) -> tuple[bool, float, list[dict]]:
+        """fatal 직전 단일 고메모리 test_*.py 프로세스를 선제 종료한다.
+
+        Returns:
+            (recovered, available_after_mb, killed_processes)
+        """
+        heavy_threshold_mb = float(
+            getattr(settings, "MEMORY_HEAVY_TEST_PROCESS_MB", _HEAVY_TEST_PROCESS_MB_DEFAULT)
+        )
+        candidates: list[dict] = []
+        for proc in psutil.process_iter(["pid", "name", "memory_info", "cmdline"]):
+            try:
+                cmdline = proc.info.get("cmdline") or []
+                script_path = _extract_test_script_path(cmdline)
+                if not script_path:
+                    continue
+                rss = proc.info["memory_info"].rss if proc.info["memory_info"] else 0
+                memory_mb = round(rss / (1024 * 1024), 1)
+                if memory_mb < heavy_threshold_mb:
+                    continue
+                candidates.append(
+                    {
+                        "pid": int(proc.info["pid"]),
+                        "name": proc.info.get("name") or "",
+                        "script_path": script_path,
+                        "memory_mb": memory_mb,
+                    }
+                )
+            except (psutil.NoSuchProcess, psutil.AccessDenied, TypeError, ValueError):
+                continue
+
+        if not candidates:
+            return False, available_mb, []
+
+        candidates.sort(key=lambda item: item["memory_mb"], reverse=True)
+        target = candidates[0]
+        target_pid = target["pid"]
+        try:
+            process = psutil.Process(target_pid)
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired) as exc:
+            logger.warning(
+                "[memory-pressure] pre-fatal mitigation 실패: pid=%s reason=%s",
+                target_pid,
+                exc,
+            )
+            return False, available_mb, []
+
+        # RSS 회수 지연을 감안해 짧게 대기 후 재측정
+        time.sleep(1.0)
+        available_after_mb = psutil.virtual_memory().available / (1024 * 1024)
+        recovered = available_after_mb >= settings.MEMORY_FATAL_MB
+        logger.warning(
+            "[memory-pressure] pre-fatal mitigation kill: pid=%s script=%s rss=%.1fMB "
+            "available_before=%.1fMB available_after=%.1fMB recovered=%s",
+            target["pid"],
+            target["script_path"],
+            target["memory_mb"],
+            available_mb,
+            available_after_mb,
+            recovered,
+        )
+        return recovered, available_after_mb, [target]
 
     def _get_top_processes(self, n: int = 5) -> list[dict]:
         """메모리 사용량 상위 n개 프로세스를 반환한다.
@@ -428,17 +510,37 @@ class MemoryPressureResponder:
         if not self._should_alert("fatal"):
             return
 
+        recovered, available_after_mb, killed = self._attempt_pre_fatal_mitigation(available_mb)
+        if recovered:
+            top10 = self._get_top_processes(10)
+            tree = _collect_process_tree()
+            tree_text = _format_process_tree(tree)
+            self._persist_snapshot("fatal_recovered", available_after_mb, top10, tree_text)
+            killed_summary = ", ".join(
+                f"PID={p['pid']} {p['script_path']}({p['memory_mb']}MB)" for p in killed
+            )
+            msg = (
+                f"🟠 재부팅 보류: fatal 직전 고메모리 테스트 프로세스 선제 종료 후 복구 "
+                f"({available_mb:.0f}MB -> {available_after_mb:.0f}MB)\n"
+                f"종료 대상: {killed_summary or '(없음)'}"
+            )
+            logger.critical(msg)
+            await self._send_telegram(msg)
+            return
+
+        fatal_available_mb = available_after_mb
+
         # 재부팅 전 프로세스 트리 수집 + 영속 기록 (먼저 실행)
         top10 = self._get_top_processes(10)
         detail = "\n".join(self._format_process_detail(p) for p in top10)
         tree = _collect_process_tree()
         tree_text = _format_process_tree(tree)
-        self._persist_snapshot("fatal", available_mb, top10, tree_text)
+        self._persist_snapshot("fatal", fatal_available_mb, top10, tree_text)
         logger.critical("재부팅 전 상위 프로세스:\n%s", detail)
         logger.critical("프로세스 트리:\n%s", tree_text)
 
         msg = (
-            f"🔴 강제 재부팅: 메모리 {available_mb:.0f}MB 미만 — 30초 후 재부팅\n"
+            f"🔴 강제 재부팅: 메모리 {fatal_available_mb:.0f}MB 미만 — 30초 후 재부팅\n"
             f"상위 프로세스:\n{detail}"
         )
         logger.critical(msg)
@@ -452,7 +554,7 @@ class MemoryPressureResponder:
                 "/t",
                 "30",
                 "/c",
-                f"메모리 부족 자동 재부팅 ({available_mb:.0f}MB 미만)",
+                f"메모리 부족 자동 재부팅 ({fatal_available_mb:.0f}MB 미만)",
             ],
             check=False,
         )
