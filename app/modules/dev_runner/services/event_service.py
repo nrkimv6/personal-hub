@@ -473,26 +473,27 @@ class EventService:
             if now - marked_at > self._completed_runner_ttl_sec:
                 self._completed_runners.pop(runner_id, None)
 
-    def _poll_runner_log_delta(self, runner_id: str) -> list[tuple[str, dict]]:
+    def _poll_runner_log_delta(self, runner_id: str) -> tuple[list[tuple[str, dict]], int]:
         self._ensure_runtime_state()
+        dedup_skipped = 0
         try:
             trigger = self._sync.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
         except Exception:
             trigger = None
         if not is_visible_runner(trigger, runner_id):
             self._drop_tail_state(runner_id)
-            return []
+            return [], dedup_skipped
         if self._is_runner_recently_completed(runner_id):
-            return []
+            return [], dedup_skipped
 
         path = self._resolve_runner_log_path(runner_id)
         if path is None or not path.exists():
             self._drop_tail_state(runner_id)
-            return []
+            return [], dedup_skipped
 
         state = self._ensure_tail_state_for_path(runner_id, path)
         if state is None:
-            return []
+            return [], dedup_skipped
 
         max_lines = int(self._file_poll_max_lines)
         max_chars = int(self._file_poll_max_chars)
@@ -535,6 +536,7 @@ class EventService:
                         break
 
                     if self._is_duplicate_log_line(runner_id, line):
+                        dedup_skipped += 1
                         continue
 
                     events.append(
@@ -547,11 +549,11 @@ class EventService:
                 new_offset = handle.tell()
         except Exception as exc:
             logger.debug("[events-fallback] file poll read failed (runner=%s): %s", runner_id, exc)
-            return []
+            return [], dedup_skipped
 
         if completed_from_file:
             self._mark_runner_completed(runner_id)
-            return events
+            return events, dedup_skipped
 
         state["offset"] = int(new_offset)
         state["last_seen"] = time.monotonic()
@@ -562,7 +564,7 @@ class EventService:
                 lines_read,
                 chars_read,
             )
-        return events
+        return events, dedup_skipped
 
     # ── SSE 포맷 헬퍼 ────────────────────────────────────────────────────────
 
@@ -609,6 +611,11 @@ class EventService:
         last_log_activity = time.monotonic()
         last_fallback_poll = 0.0
         consecutive_errors = 0
+        fallback_active = False
+        fallback_enter_count = 0
+        fallback_exit_count = 0
+        dedup_skip_counts: dict[str, int] = {}
+        dedup_skip_last_logged_at = 0.0
         MAX_CONSECUTIVE_ERRORS = 5
         self._ensure_runtime_state()
 
@@ -630,6 +637,19 @@ class EventService:
                     )
 
                     if message and message["type"] in ("message", "pmessage"):
+                        if fallback_active:
+                            fallback_active = False
+                            fallback_exit_count += 1
+                            logger.debug(
+                                "[events-fallback] exit #%s (reason=keyspace_message)",
+                                fallback_exit_count,
+                            )
+                            if dedup_skip_counts:
+                                logger.debug(
+                                    "[events-fallback] dedup-skip summary (reason=keyspace_message): %s",
+                                    dedup_skip_counts,
+                                )
+                                dedup_skip_counts = {}
                         changed_key = message["data"]
                         event_type = self._classify_key(changed_key)
 
@@ -664,6 +684,19 @@ class EventService:
                     )
 
                     if log_message and log_message["type"] in ("message", "pmessage"):
+                        if fallback_active:
+                            fallback_active = False
+                            fallback_exit_count += 1
+                            logger.debug(
+                                "[events-fallback] exit #%s (reason=log_message)",
+                                fallback_exit_count,
+                            )
+                            if dedup_skip_counts:
+                                logger.debug(
+                                    "[events-fallback] dedup-skip summary (reason=log_message): %s",
+                                    dedup_skip_counts,
+                                )
+                                dedup_skip_counts = {}
                         channel = log_message.get("channel") or log_message.get("pattern", "")
                         data = log_message.get("data")
 
@@ -704,6 +737,9 @@ class EventService:
                                 else:
                                     self._completed_runners.pop(runner_id, None)
                                     if self._is_duplicate_log_line(runner_id, str(data)):
+                                        dedup_skip_counts[runner_id] = (
+                                            dedup_skip_counts.get(runner_id, 0) + 1
+                                        )
                                         continue
                                     yield self._sse(
                                         "log",
@@ -721,15 +757,37 @@ class EventService:
                             and now - last_fallback_poll >= self._file_poll_interval_sec
                         ):
                             visible_runner_ids = self._list_visible_active_runner_ids()
+                            if not fallback_active:
+                                fallback_active = True
+                                fallback_enter_count += 1
+                                logger.debug(
+                                    "[events-fallback] enter #%s (idle_sec=%.2f, visible=%s)",
+                                    fallback_enter_count,
+                                    now - last_log_activity,
+                                    len(visible_runner_ids),
+                                )
                             self._cleanup_runner_tail_state(set(visible_runner_ids))
                             fallback_emitted = False
                             for runner_id in visible_runner_ids:
-                                fallback_events = self._poll_runner_log_delta(runner_id)
+                                fallback_events, dedup_skipped = self._poll_runner_log_delta(runner_id)
+                                if dedup_skipped > 0:
+                                    dedup_skip_counts[runner_id] = (
+                                        dedup_skip_counts.get(runner_id, 0) + dedup_skipped
+                                    )
                                 if not fallback_events:
                                     continue
                                 fallback_emitted = True
                                 for event_name, payload in fallback_events:
                                     yield self._sse(event_name, payload)
+                            if dedup_skip_counts and (
+                                dedup_skip_last_logged_at == 0.0
+                                or (now - dedup_skip_last_logged_at) >= 15.0
+                            ):
+                                logger.debug(
+                                    "[events-fallback] dedup-skip aggregate: %s",
+                                    dedup_skip_counts,
+                                )
+                                dedup_skip_last_logged_at = now
                             if fallback_emitted:
                                 last_heartbeat = now
                                 last_log_activity = now
@@ -742,6 +800,13 @@ class EventService:
 
                 except (redis_sync.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
                     # ── Redis 연결 실패 → 정리 후 재시도
+                    if fallback_active:
+                        fallback_active = False
+                        fallback_exit_count += 1
+                        logger.debug(
+                            "[events-fallback] exit #%s (reason=redis_disconnected)",
+                            fallback_exit_count,
+                        )
                     await safe_close_pubsub(pubsub)
                     pubsub = None
                     await safe_close_pubsub(log_pubsub)
@@ -754,6 +819,13 @@ class EventService:
 
                 except Exception as e:
                     consecutive_errors += 1
+                    if fallback_active:
+                        fallback_active = False
+                        fallback_exit_count += 1
+                        logger.debug(
+                            "[events-fallback] exit #%s (reason=stream_exception)",
+                            fallback_exit_count,
+                        )
                     await safe_close_pubsub(pubsub)
                     pubsub = None
                     await safe_close_pubsub(log_pubsub)

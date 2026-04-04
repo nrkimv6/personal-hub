@@ -15,6 +15,7 @@ import requests
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.modules.dev_runner.routes.events import router as events_router
 from app.modules.dev_runner.routes.logs import router as logs_router
 
 pytestmark = pytest.mark.http_live
@@ -64,6 +65,13 @@ def local_client():
     return TestClient(app, raise_server_exceptions=True)
 
 
+@pytest.fixture
+def local_events_client():
+    app = FastAPI()
+    app.include_router(events_router, prefix=BASE_URL)
+    return TestClient(app, raise_server_exceptions=True)
+
+
 @pytest.mark.http
 def test_http_log_stream_commit_failed_keeps_reason_and_detail(local_client):
     """T3: /logs/stream route는 detail 로그와 completed reason=commit_failed를 같은 스트림에 유지한다."""
@@ -94,6 +102,33 @@ def test_http_log_stream_commit_failed_keeps_reason_and_detail(local_client):
     assert log_event["data"] == detail
     assert completed["data"] == "commit_failed"
     assert events.index(log_event) < events.index(completed)
+
+
+@pytest.mark.http
+def test_http_events_stream_fallback_log_delivery(local_events_client):
+    """T5: /events route가 fallback 경로에서 생성된 log payload를 그대로 전달한다."""
+
+    async def _fake_stream_events():
+        yield "event: connected\ndata: ok\n\n"
+        yield "event: status\ndata: {\"runners\": []}\n\n"
+        yield "event: log\ndata: {\"runner_id\": \"fb-http-01\", \"line\": \"line from fallback\"}\n\n"
+
+    with patch(
+        "app.modules.dev_runner.routes.events.event_service.stream_events",
+        new=_fake_stream_events,
+    ):
+        response = local_events_client.get(
+            f"{BASE_URL}/events",
+            headers={"Accept": "text/event-stream"},
+        )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    events = _parse_sse_events(response.text)
+    log_event = next(event for event in events if event.get("event") == "log")
+    payload = json.loads(log_event["data"])
+    assert payload["runner_id"] == "fb-http-01"
+    assert payload["line"] == "line from fallback"
 
 
 # ---------------------------------------------------------------------------

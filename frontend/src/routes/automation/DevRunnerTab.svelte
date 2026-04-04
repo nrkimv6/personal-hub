@@ -21,6 +21,7 @@
 	import { devRunnerMergeApi, devRunnerPlanApi } from '$lib/api/dev-runner';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import { normalizeExitReason } from '$lib/utils/dev-runner-exit-reason';
+	import { shouldSkipInjectedLine } from '$lib/dev-runner/log-dedup.js';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerPlanFileResponse,
@@ -170,32 +171,8 @@
 		source: CompletionEventSource;
 	}
 
-	function lineFingerprint(runnerId: string, line: string): string {
-		let hash = 2166136261;
-		const source = `${runnerId}\u0000${line}`;
-		for (let i = 0; i < source.length; i++) {
-			hash ^= source.charCodeAt(i);
-			hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
-		}
-		return (hash >>> 0).toString(16);
-	}
-
 	function clearRunnerDedup(runnerId: string) {
 		injectedLineFingerprints.delete(runnerId);
-	}
-
-	function shouldSkipInjectedLine(runnerId: string, line: string): boolean {
-		const normalized = line.trimEnd();
-		if (!normalized) return true;
-		const fp = lineFingerprint(runnerId, normalized);
-		const recent = injectedLineFingerprints.get(runnerId) ?? [];
-		if (recent.includes(fp)) return true;
-		recent.push(fp);
-		if (recent.length > INJECT_LINE_DEDUP_LIMIT) {
-			recent.shift();
-		}
-		injectedLineFingerprints.set(runnerId, recent);
-		return false;
 	}
 
 	function normalizeEventLine(payload: unknown): string {
@@ -327,7 +304,7 @@
 
 	function injectRunnerLine(runnerId: string, payload: EventLinePayload) {
 		const normalizedLine = normalizeEventLine(payload);
-		if (shouldSkipInjectedLine(runnerId, normalizedLine)) return;
+		if (shouldSkipInjectedLine(injectedLineFingerprints, runnerId, normalizedLine, INJECT_LINE_DEDUP_LIMIT)) return;
 		logRefs.get(runnerId)?.injectLine(normalizedLine);
 	}
 
@@ -379,6 +356,11 @@
 	}
 
 	// ── SSE 연결 ────────────────────────────────────────────────────────────
+	// 재현 체크리스트(실시간 정지 후 새로고침 시 반영):
+	// 1) /events SSE 연결 상태에서 특정 runner 로그가 증가하는지 확인
+	// 2) Redis pub/sub 지연/공백을 유도한 뒤 sseConnected=true 상태에서 실시간 라인 정지 여부 관찰
+	// 3) 같은 runner 탭에서 새로고침(loadRecent) 없이 라인이 재개되는지 확인
+	// 4) 정지 시점과 재개 시점의 runner_id/engine/sseConnected를 함께 기록
 
 	function handleSSEError() {
 		sseConnected = false;
