@@ -31,3 +31,7 @@ frontend/static/diagnostics.json
 .worktrees/
 data/image_classifier
 .claude/worktrees/
+/check-full.txt
+/check-machine.txt
+/check-machine-service-status.txt
+/data/slide_scanner/
