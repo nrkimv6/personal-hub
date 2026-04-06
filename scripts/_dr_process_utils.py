@@ -35,6 +35,30 @@ def _is_user_visible_trigger(trigger: Optional[str], runner_id: str = "") -> boo
     return trigger in ("user", "user:all")
 
 
+def _try_v2_merge_fallback(runner_id: str, redis_client: redis.Redis, reason_tag: str) -> bool:
+    """v2 merge fallback 공통 헬퍼 — detect → handle 패턴.
+
+    detect_merged_but_not_done이 양성이면 _handle_post_merge_done을 실행하고 True 반환.
+    detect 실패, 양성 없음, handle 실패 시 False 반환 (호출자의 cleanup은 계속 진행).
+    """
+    try:
+        from _dr_merge import detect_merged_but_not_done as _dmnd, _handle_post_merge_done as _hpmd, _pub_and_log as _pal
+        detect_result = _dmnd(runner_id, redis_client)
+        if detect_result:
+            logger.info(f"[{reason_tag}] v2 merge fallback 실행 (runner_id={runner_id})")
+            try:
+                def _pub(msg: str, _rid=runner_id) -> None:
+                    _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
+                _hpmd(detect_result["plan_file"], runner_id, _pub, redis_client)
+            except Exception as _handle_err:
+                logger.warning(f"[{reason_tag}] v2 merge fallback 실패 (cleanup 계속): {_handle_err}")
+            return False
+        return False
+    except Exception as _det_err:
+        logger.debug(f"[{reason_tag}] v2 detect 실패 (무시): {_det_err}")
+        return False
+
+
 def _is_pre_review_stopped_runner(runner_id: str, redis_client: redis.Redis) -> bool:
     """runner가 검토완료 이전(pre_review) 중지 상태인지 판별."""
     try:
@@ -420,19 +444,7 @@ def _monitor_pid_until_exit(runner_id: str, pid: int, redis_client: redis.Redis)
                 break
             logger.info(f"[monitor_pid] runner {runner_id} → cleanup")
             # v2 merge fallback: merge_requested 없어도 merge 후처리 누락 여부 확인
-            try:
-                from _dr_merge import detect_merged_but_not_done as _dmnd, _handle_post_merge_done as _hpmd, _pub_and_log as _pal
-                _mp_detect = _dmnd(runner_id, redis_client)
-                if _mp_detect:
-                    logger.info(f"[monitor_pid] v2 merge fallback 실행 (runner_id={runner_id})")
-                    try:
-                        def _mp_pub(msg: str, _rid=runner_id) -> None:
-                            _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
-                        _hpmd(_mp_detect["plan_file"], runner_id, _mp_pub, redis_client)
-                    except Exception as _mp_fb_err:
-                        logger.warning(f"[monitor_pid] v2 merge fallback 실패 (cleanup 계속): {_mp_fb_err}")
-            except Exception as _mp_det_err:
-                logger.debug(f"[monitor_pid] v2 detect 실패 (무시): {_mp_det_err}")
+            _try_v2_merge_fallback(runner_id, redis_client, "monitor_pid")
             _cleanup_process_state(runner_id, redis_client, reason="heartbeat_pid_exit")
             break
         time.sleep(1)
@@ -454,19 +466,7 @@ def _attach_to_running_process(runner_id: str, pid: int, redis_client: redis.Red
     if not log_file_path or not Path(log_file_path).exists():
         logger.warning(f"[attach] runner {runner_id} 로그 파일 없음 → cleanup")
         # v2 merge fallback: 로그 없어도 merge 완료 여부 확인
-        try:
-            from _dr_merge import detect_merged_but_not_done as _dmnd, _handle_post_merge_done as _hpmd, _pub_and_log as _pal
-            _nl_detect = _dmnd(runner_id, redis_client)
-            if _nl_detect:
-                logger.info(f"[attach] v2 merge fallback 실행 (runner_id={runner_id})")
-                try:
-                    def _nl_pub(msg: str, _rid=runner_id) -> None:
-                        _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
-                    _hpmd(_nl_detect["plan_file"], runner_id, _nl_pub, redis_client)
-                except Exception as _nl_fb_err:
-                    logger.warning(f"[attach] v2 merge fallback 실패 (cleanup 계속): {_nl_fb_err}")
-        except Exception as _nl_det_err:
-            logger.debug(f"[attach] v2 detect 실패 (무시): {_nl_det_err}")
+        _try_v2_merge_fallback(runner_id, redis_client, "attach_no_log")
         _cleanup_process_state(runner_id, redis_client, reason="no_log_file")
         return
 
@@ -532,10 +532,117 @@ def _recover_pending_merge(runner_id: str, redis_client: redis.Redis, merge_stat
         logger.warning(f"[recover_merge] runner {runner_id} 머지 복구 실패: {e}")
 
 
+def _process_runner_entry(
+    runner_id: str,
+    pid_str: Optional[str],
+    redis_client: redis.Redis,
+    *,
+    is_orphan: bool = False,
+) -> None:
+    """active runner 또는 orphan 키 1개의 reconnect 처리 공통 로직.
+
+    is_orphan=False: active_runners set 소속 (cleanup reason="reconnect_orphan")
+    is_orphan=True:  orphan scan 소속 (cleanup reason="reconnect_orphan_scan", no-pid merge fallback 없음)
+    """
+    _running_processes = get_running_processes()
+    _stream_threads = get_stream_threads()
+    cleanup_reason = "reconnect_orphan_scan" if is_orphan else "reconnect_orphan"
+    label = "orphan" if is_orphan else "runner"
+    dead_pid_tag = "reconnect_orphan_dead_pid" if is_orphan else "reconnect_dead_pid"
+
+    if not pid_str:
+        try:
+            _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        except Exception:
+            _mr, _ms = None, None
+        if _mr or _ms in MERGE_ACTIVE_STATUSES:
+            logger.warning(
+                f"[reconnect] {label} {runner_id} PID 없으나 머지 대기중 "
+                f"(merge_requested={bool(_mr)}, merge_status={_ms}) → _recover_pending_merge"
+            )
+            if not (runner_id in _stream_threads and _stream_threads[runner_id].is_alive()):
+                t = threading.Thread(
+                    target=_recover_pending_merge,
+                    args=(runner_id, redis_client, _ms),
+                    daemon=True,
+                )
+                t.start()
+        else:
+            logger.info(f"[reconnect] {label} {runner_id} PID 없음 → cleanup")
+            if not is_orphan:
+                # active loop에서만 merge fallback 적용 (orphan no-pid는 기존 동작 유지)
+                _try_v2_merge_fallback(runner_id, redis_client, "reconnect_no_pid")
+            _cleanup_process_state(runner_id, redis_client, reason=cleanup_reason)
+        return
+
+    try:
+        pid = int(pid_str)
+    except ValueError:
+        logger.warning(f"[reconnect] {label} {runner_id} 잘못된 PID: {pid_str!r} → cleanup")
+        _cleanup_process_state(runner_id, redis_client, reason=cleanup_reason)
+        return
+
+    # active runner가 이미 _running_processes에 등록된 경우(Redis 재연결 상황) 스킵
+    if not is_orphan and runner_id in _running_processes:
+        return
+
+    if _is_pid_alive(pid):
+        # 좀비 감지: PID alive + subprocess_heartbeat 만료 → reconnect 대신 cleanup
+        _is_zombie = False
+        try:
+            subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
+            if subprocess_hb is None:
+                _legacy, _elapsed = _is_recent_runner_without_hb(redis_client, runner_id)
+                if _legacy:
+                    logger.debug(
+                        f"[reconnect] {label} {runner_id} heartbeat 없음 but start_time "
+                        f"{_elapsed:.0f}s 경과 → 레거시 보호 fallback"
+                    )
+                if not _legacy:
+                    _is_zombie = True
+        except Exception:
+            pass
+        if _is_zombie:
+            try:
+                from _dr_merge import _pub_and_log as _pal
+                _pal(runner_id, f"{label} {runner_id} PID {pid} alive but subprocess_heartbeat 없음 → reconnect_zombie cleanup", redis_client, "ZOMBIE")
+            except Exception:
+                pass
+            logger.warning(f"[reconnect] zombie {label} {runner_id} PID={pid} subprocess_heartbeat 없음 → cleanup")
+            _cleanup_process_state(runner_id, redis_client, reason="reconnect_zombie")
+        else:
+            if is_orphan:
+                logger.info(f"[reconnect] {label} {runner_id} PID {pid} 생존 → 재연결")
+            _attach_to_running_process(runner_id, pid, redis_client)
+    else:
+        try:
+            _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        except Exception:
+            _mr, _ms = None, None
+
+        if _mr or _ms in MERGE_ACTIVE_STATUSES:
+            logger.warning(
+                f"[reconnect] {label} {runner_id} PID {pid} 죽었으나 머지 대기중 "
+                f"(merge_requested={bool(_mr)}, merge_status={_ms}) → cleanup 스킵"
+            )
+            if not (runner_id in _stream_threads and _stream_threads[runner_id].is_alive()):
+                t = threading.Thread(
+                    target=_recover_pending_merge,
+                    args=(runner_id, redis_client, _ms),
+                    daemon=True,
+                )
+                t.start()
+        else:
+            logger.info(f"[reconnect] {label} {runner_id} PID {pid} 종료됨 → cleanup")
+            _try_v2_merge_fallback(runner_id, redis_client, dead_pid_tag)
+            _cleanup_process_state(runner_id, redis_client, reason=cleanup_reason)
+
+
 def _reconnect_surviving_runners(redis_client: redis.Redis):
     """listener 시작(또는 재시작) 시 한 번 호출."""
     _running_processes = get_running_processes()
-    _stream_threads = get_stream_threads()
     try:
         runner_ids = redis_client.smembers(ACTIVE_RUNNERS_KEY)
     except Exception as e:
@@ -554,116 +661,7 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                 )
                 continue
         pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
-        if not pid_str:
-            try:
-                _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
-                _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-            except Exception:
-                _mr, _ms = None, None
-            if _mr or _ms in MERGE_ACTIVE_STATUSES:
-                logger.warning(
-                    f"[reconnect] runner {runner_id} PID 없으나 머지 대기중 "
-                    f"(merge_requested={bool(_mr)}, merge_status={_ms}) → _recover_pending_merge"
-                )
-                if not (runner_id in _stream_threads and _stream_threads[runner_id].is_alive()):
-                    t = threading.Thread(
-                        target=_recover_pending_merge,
-                        args=(runner_id, redis_client, _ms),
-                        daemon=True,
-                    )
-                    t.start()
-            else:
-                logger.info(f"[listener] runner {runner_id} PID 정보 없음 → cleanup")
-                # v2 merge fallback: PID 없어도 merge 완료 여부 확인
-                try:
-                    from _dr_merge import detect_merged_but_not_done as _dmnd, _handle_post_merge_done as _hpmd, _pub_and_log as _pal
-                    _np_detect = _dmnd(runner_id, redis_client)
-                    if _np_detect:
-                        logger.info(f"[reconnect] v2 merge fallback 실행 (no-pid, runner_id={runner_id})")
-                        try:
-                            def _np_pub(msg: str, _rid=runner_id) -> None:
-                                _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
-                            _hpmd(_np_detect["plan_file"], runner_id, _np_pub, redis_client)
-                        except Exception as _np_fb_err:
-                            logger.warning(f"[reconnect] v2 merge fallback 실패 (cleanup 계속): {_np_fb_err}")
-                except Exception as _np_det_err:
-                    logger.debug(f"[reconnect] v2 detect 실패 (무시): {_np_det_err}")
-                _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
-            continue
-        try:
-            pid = int(pid_str)
-        except ValueError:
-            logger.warning(f"[reconnect] runner {runner_id} 잘못된 PID 값: {pid_str!r} → cleanup")
-            _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
-            continue
-
-        # 이미 _running_processes에 등록된 경우(Redis 재연결 상황) 스킵
-        if runner_id in _running_processes:
-            continue
-
-        if _is_pid_alive(pid):
-            # 좀비 감지: PID alive + subprocess_heartbeat 만료 → reconnect 대신 cleanup
-            _reconnect_zombie = False
-            try:
-                subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
-                if subprocess_hb is None:
-                    # Phase 4: 레거시 runner 보호 — start_time < 600초이면 fallback
-                    _rc_legacy, _rc_elapsed = _is_recent_runner_without_hb(redis_client, runner_id)
-                    if _rc_legacy:
-                        logger.debug(
-                            f"[reconnect] runner {runner_id} heartbeat 없음 but start_time "
-                            f"{_rc_elapsed:.0f}s 경과 → 레거시 보호 fallback"
-                        )
-                    if not _rc_legacy:
-                        _reconnect_zombie = True
-            except Exception:
-                pass  # Redis 오류 시 기존 로직 유지
-            if _reconnect_zombie:
-                try:
-                    from _dr_merge import _pub_and_log as _pal
-                    _pal(runner_id, f"runner {runner_id} PID {pid} alive but subprocess_heartbeat 없음 → reconnect_zombie cleanup", redis_client, "ZOMBIE")
-                except Exception:
-                    pass
-                logger.warning(f"[reconnect] zombie runner {runner_id} PID={pid} subprocess_heartbeat 없음 → cleanup")
-                _cleanup_process_state(runner_id, redis_client, reason="reconnect_zombie")
-            else:
-                _attach_to_running_process(runner_id, pid, redis_client)
-        else:
-            try:
-                _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
-                _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-            except Exception:
-                _mr, _ms = None, None
-
-            if _mr or _ms in MERGE_ACTIVE_STATUSES:
-                logger.warning(
-                    f"[reconnect] runner {runner_id} PID {pid} 죽었으나 머지 대기중 "
-                    f"(merge_requested={bool(_mr)}, merge_status={_ms}) → cleanup 스킵"
-                )
-                if not (runner_id in _stream_threads and _stream_threads[runner_id].is_alive()):
-                    t = threading.Thread(
-                        target=_recover_pending_merge,
-                        args=(runner_id, redis_client, _ms),
-                        daemon=True,
-                    )
-                    t.start()
-            else:
-                logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 종료됨 → cleanup")
-                # v2 merge fallback: merge_requested 없어도 merge 후처리 누락 여부 확인
-                try:
-                    from _dr_merge import detect_merged_but_not_done as _dmnd, _handle_post_merge_done as _hpmd, _pub_and_log as _pal
-                    _rc_detect = _dmnd(runner_id, redis_client)
-                    if _rc_detect:
-                        logger.info(f"[reconnect] v2 merge fallback 실행 (runner_id={runner_id})")
-                        try:
-                            def _rc_pub(msg: str, _rid=runner_id) -> None:
-                                _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
-                            _hpmd(_rc_detect["plan_file"], runner_id, _rc_pub, redis_client)
-                        except Exception as _rc_fb_err:
-                            logger.warning(f"[reconnect] v2 merge fallback 실패 (cleanup 계속): {_rc_fb_err}")
-                except Exception as _rc_det_err:
-                    logger.debug(f"[reconnect] v2 detect 실패 (무시): {_rc_det_err}")
-                _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
+        _process_runner_entry(runner_id, pid_str, redis_client, is_orphan=False)
 
     # --- 고아 키 탐색: active_runners set에 없지만 runners:*:status 키가 존재하는 경우 ---
     try:
@@ -689,97 +687,7 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                     continue
             logger.info(f"[reconnect] orphan key found (not in active_runners): {orphan_id}")
             pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:pid")
-            if not pid_str:
-                try:
-                    _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_requested")
-                    _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_status")
-                except Exception:
-                    _mr, _ms = None, None
-                if _mr or _ms in MERGE_ACTIVE_STATUSES:
-                    logger.warning(
-                        f"[reconnect] orphan {orphan_id} PID 없으나 머지 대기중 "
-                        f"(merge_requested={bool(_mr)}, merge_status={_ms}) → _recover_pending_merge"
-                    )
-                    if not (orphan_id in _stream_threads and _stream_threads[orphan_id].is_alive()):
-                        t = threading.Thread(
-                            target=_recover_pending_merge,
-                            args=(orphan_id, redis_client, _ms),
-                            daemon=True,
-                        )
-                        t.start()
-                else:
-                    logger.info(f"[reconnect] orphan {orphan_id} PID 없음 → cleanup")
-                    _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
-                continue
-            try:
-                pid = int(pid_str)
-            except ValueError:
-                logger.warning(f"[reconnect] orphan {orphan_id} 잘못된 PID: {pid_str!r} → cleanup")
-                _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
-                continue
-            if _is_pid_alive(pid):
-                # 좀비 감지: PID alive + subprocess_heartbeat 만료 → 재연결 대신 cleanup
-                _orphan_zombie = False
-                try:
-                    subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:subprocess_heartbeat")
-                    if subprocess_hb is None:
-                        _op_legacy, _op_elapsed = _is_recent_runner_without_hb(redis_client, orphan_id)
-                        if _op_legacy:
-                            logger.debug(
-                                f"[reconnect] orphan {orphan_id} heartbeat 없음 but start_time "
-                                f"{_op_elapsed:.0f}s 경과 → 레거시 보호 fallback"
-                            )
-                        if not _op_legacy:
-                            _orphan_zombie = True
-                except Exception:
-                    pass
-                if _orphan_zombie:
-                    try:
-                        from _dr_merge import _pub_and_log as _pal
-                        _pal(orphan_id, f"orphan {orphan_id} PID {pid} alive but subprocess_heartbeat 없음 → reconnect_zombie cleanup", redis_client, "ZOMBIE")
-                    except Exception:
-                        pass
-                    logger.warning(f"[reconnect] zombie orphan {orphan_id} PID={pid} subprocess_heartbeat 없음 → cleanup")
-                    _cleanup_process_state(orphan_id, redis_client, reason="reconnect_zombie")
-                else:
-                    logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 생존 → 재연결")
-                    _attach_to_running_process(orphan_id, pid, redis_client)
-            else:
-                try:
-                    _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_requested")
-                    _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_status")
-                except Exception:
-                    _mr, _ms = None, None
-
-                if _mr or _ms in MERGE_ACTIVE_STATUSES:
-                    logger.warning(
-                        f"[reconnect] orphan {orphan_id} PID {pid} 죽었으나 머지 대기중 "
-                        f"(merge_requested={bool(_mr)}, merge_status={_ms}) → cleanup 스킵"
-                    )
-                    if not (orphan_id in _stream_threads and _stream_threads[orphan_id].is_alive()):
-                        t = threading.Thread(
-                            target=_recover_pending_merge,
-                            args=(orphan_id, redis_client, _ms),
-                            daemon=True,
-                        )
-                        t.start()
-                else:
-                    logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 종료됨 → cleanup")
-                    # v2 merge fallback: merge_requested 없어도 merge 후처리 누락 여부 확인
-                    try:
-                        from _dr_merge import detect_merged_but_not_done as _dmnd2, _handle_post_merge_done as _hpmd2, _pub_and_log as _pal2
-                        _os_detect = _dmnd2(orphan_id, redis_client)
-                        if _os_detect:
-                            logger.info(f"[reconnect] v2 merge fallback 실행 (orphan_id={orphan_id})")
-                            try:
-                                def _os_pub(msg: str, _rid=orphan_id) -> None:
-                                    _pal2(_rid, msg, redis_client, "MERGE-FALLBACK")
-                                _hpmd2(_os_detect["plan_file"], orphan_id, _os_pub, redis_client)
-                            except Exception as _os_fb_err:
-                                logger.warning(f"[reconnect] v2 merge fallback 실패 (cleanup 계속): {_os_fb_err}")
-                    except Exception as _os_det_err:
-                        logger.debug(f"[reconnect] v2 detect 실패 (무시): {_os_det_err}")
-                    _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
+            _process_runner_entry(orphan_id, pid_str, redis_client, is_orphan=True)
     except Exception as e:
         logger.warning(f"[reconnect] orphan scan 실패: {e}")
 
