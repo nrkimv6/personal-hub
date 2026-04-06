@@ -69,13 +69,24 @@ class TestBuildStatusPayloadPlanFileNullDefense:
         payload = svc._build_status_payload("runner-c")
 
         assert payload is not None
-        assert payload["plan_file"] == "docs/plan/test.md"
+        assert payload["plan_file"] == plan
 
 
 class TestBuildStatusPayloadVisible:
     def test_visible_true_for_user_trigger(self):
         svc = _make_service()
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", SENTINEL, "claude", None, None]
+        svc._sync.mget.return_value = [
+            "running",
+            "1234",
+            "1",
+            "2026-03-04T00:00:00",
+            SENTINEL,
+            "claude",
+            None,
+            "user",
+            None,
+            None,
+        ]
 
         payload = svc._build_status_payload("runner-user")
 
@@ -84,7 +95,18 @@ class TestBuildStatusPayloadVisible:
 
     def test_visible_false_for_api_trigger(self):
         svc = _make_service()
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", "ALL", "claude", None, None]
+        svc._sync.mget.return_value = [
+            "running",
+            "1234",
+            "1",
+            "2026-03-04T00:00:00",
+            "ALL",
+            "claude",
+            None,
+            "api",
+            None,
+            None,
+        ]
 
         payload = svc._build_status_payload("runner-api")
 

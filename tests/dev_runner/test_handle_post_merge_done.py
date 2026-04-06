@@ -57,10 +57,11 @@ def test__handle_post_merge_done_right_calls_done_api(cl, tmp_path):
     mock_redis = MagicMock()
     mock_resp = MagicMock()
     mock_resp.status_code = 200
+    mock_resp.json.return_value = {"success": True}
 
     with patch("plan_worktree_helpers.remove_plan_header_fields"), \
          patch("requests.post", return_value=mock_resp):
-        cl._handle_post_merge_done(str(plan), "runner1", pub_msgs.append, mock_redis)
+        result = cl._handle_post_merge_done(str(plan), "runner1", pub_msgs.append, mock_redis)
 
     assert any("100%" in m for m in pub_msgs)
     assert result["success"] is True
@@ -80,7 +81,7 @@ def test__handle_post_merge_done_right_skips_incomplete(cl, tmp_path):
 
     with patch("plan_worktree_helpers.remove_plan_header_fields"), \
          patch("_dr_merge._call_done_api") as mock_done:
-        cl._handle_post_merge_done(str(plan), "runner2", pub_msgs.append, mock_redis)
+        result = cl._handle_post_merge_done(str(plan), "runner2", pub_msgs.append, mock_redis)
 
     mock_done.assert_not_called()
     assert any("추가 사이클 예약" in m for m in pub_msgs)
@@ -99,7 +100,7 @@ def test__handle_post_merge_done_boundary_no_plan_file(cl):
 
     with patch("plan_worktree_helpers.remove_plan_header_fields") as mock_remove, \
          patch("_dr_merge._call_done_api") as mock_done:
-        cl._handle_post_merge_done(None, "runner3", pub_msgs.append, mock_redis)
+        result = cl._handle_post_merge_done(None, "runner3", pub_msgs.append, mock_redis)
 
     mock_remove.assert_not_called()
     mock_done.assert_not_called()
@@ -115,7 +116,7 @@ def test__handle_post_merge_done_boundary_all_mode(cl):
 
     with patch("plan_worktree_helpers.remove_plan_header_fields") as mock_remove, \
          patch("_dr_merge._call_done_api") as mock_done:
-        cl._handle_post_merge_done(cl.PLAN_FILE_ALL, "runner4", pub_msgs.append, mock_redis)
+        result = cl._handle_post_merge_done(cl.PLAN_FILE_ALL, "runner4", pub_msgs.append, mock_redis)
 
     mock_remove.assert_not_called()
     mock_done.assert_not_called()

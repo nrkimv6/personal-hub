@@ -4,6 +4,7 @@ merge_queue.py (BRPOP 기반) 단위 테스트
 실물 Redis DB15 사용. fakeredis는 BRPOP threading 테스트에 부적합하여 사용 금지.
 """
 
+import os
 import sys
 import threading
 import time
@@ -174,12 +175,9 @@ def test_double_release_boundary(r):
 
 # ── TC 12 ─────────────────────────────────────────────────────────────────────
 def test_acquire_empty_repo_id_boundary(r):
-    """repo_id=None → _get_repo_id(Path.cwd()) 자동 호출 확인."""
-    with patch("merge_queue._get_repo_id", return_value=REPO_ID) as mock_get:
-        acquire_merge_turn(r, runner_id="runner-A", repo_id=None, timeout=10, queue_ttl=60)
-        mock_get.assert_called_once()
-    # cleanup
-    release_merge_turn(r, runner_id="runner-A", repo_id=REPO_ID)
+    """repo_id=None에서도 turn 획득이 정상 동작해야 한다."""
+    acquired = acquire_merge_turn(r, runner_id="runner-A", repo_id=None, timeout=10, queue_ttl=60)
+    assert acquired is True
 
 
 # ── TC 13 ─────────────────────────────────────────────────────────────────────
@@ -198,12 +196,10 @@ def test_stale_front_removal_error(r):
     queue_key = get_queue_key(REPO_ID)
     r.rpush(queue_key, "runner-dead", "runner-next")
 
-    # PID 키 설정 (죽은 PID처럼 보이도록)
+    # PID 키 설정 (항상 죽은 PID로 판정되는 값)
     pid_key = f"{_RUNNER_KEY_PREFIX}:runner-dead:pid"
-    r.set(pid_key, "99999")
-
-    with patch("merge_queue._is_pid_alive", return_value=False):
-        removed = _remove_if_stale(r, "runner-dead", REPO_ID)
+    r.set(pid_key, "-1")
+    removed = _remove_if_stale(r, "runner-dead", REPO_ID)
 
     assert removed is True
     # runner-dead 큐에서 제거됨
@@ -224,10 +220,8 @@ def test_stale_front_alive_right(r):
     r.rpush(queue_key, "runner-alive", "runner-next")
 
     pid_key = f"{_RUNNER_KEY_PREFIX}:runner-alive:pid"
-    r.set(pid_key, "12345")
-
-    with patch("merge_queue._is_pid_alive", return_value=True):
-        removed = _remove_if_stale(r, "runner-alive", REPO_ID)
+    r.set(pid_key, str(os.getpid()))
+    removed = _remove_if_stale(r, "runner-alive", REPO_ID)
 
     assert removed is False
     queue = r.lrange(queue_key, 0, -1)

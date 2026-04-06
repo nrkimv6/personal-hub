@@ -718,9 +718,16 @@ class TestStreamLogFileSinceLine:
             return chunks
 
         chunks = _run_async(collect())
-        data_chunks = [c for c in chunks if c.startswith("data: line")]
-        # 50줄(인덱스 50~99) = 50줄의 buffered data가 전송됨
-        assert len(data_chunks) == 50
+        # 멀티라인 프레임 ON/OFF 모두 허용: 전송 단위(chunk)가 아니라 실제 data line 기준으로 검증
+        data_lines = []
+        for chunk in chunks:
+            for row in chunk.splitlines():
+                if row.startswith("data: line "):
+                    data_lines.append(row.replace("data: ", "", 1))
+
+        assert len(data_lines) == 50
+        assert data_lines[0] == "line 50"
+        assert data_lines[-1] == "line 99"
 
     def test_stream_log_file_completed_reason_rate_limited_normalized(self, tmp_path):
         """R: __COMPLETED::rate_limited__ 수신 시 completed reason=rate_limit 정규화"""

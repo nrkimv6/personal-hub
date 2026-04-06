@@ -184,6 +184,7 @@
           </thead>
           <tbody>
             {#each monitoringEvents as event (event.id)}
+              {@const slots = parseSlotsInfo(event)}
               <tr>
                 <td class="text-sm text-muted-foreground whitespace-nowrap">{formatDateTime(event.timestamp)}</td>
                 <td>
@@ -197,7 +198,6 @@
                   </Badge>
                 </td>
                 <td class="text-xs text-muted-foreground">
-                  {@const slots = parseSlotsInfo(event)}
                   {#if slots.length === 0}
                     -
                   {:else}
