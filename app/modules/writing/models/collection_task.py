@@ -4,8 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, DateTime, String, Text, Uuid
 
 from app.models.base import Base
 
@@ -31,7 +30,7 @@ class CollectionTask(Base):
     STATUS_FAILED = "failed"
 
     task_id = Column(
-        UUID(as_uuid=True),
+        Uuid(),
         primary_key=True,
         default=uuid.uuid4,
     )
