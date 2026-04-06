@@ -219,3 +219,79 @@ class TestDismissRunnerTabContract:
         assert after_cleanup.json() == []
         dismiss_mock.assert_awaited_once_with("runner-order-01")
         cleanup_mock.assert_awaited_once()
+
+
+# ──────────────────────────────────────────────
+# T5: visible_only + stopped user 보존 계약 (Phase T5)
+# ──────────────────────────────────────────────
+
+class TestHttpLogHistoryVisibleOnly:
+    """GET /logs/history?visible_only=true — stopped user 보존 계약 TC"""
+
+    def test_logs_history_visible_only_returns_user_runner(self, client):
+        """visible_only=True: trigger=user runner가 응답에 포함된다"""
+        from unittest.mock import patch, MagicMock
+        from app.modules.dev_runner.schemas import RunHistoryItem, RunHistoryResponse
+        from datetime import datetime
+
+        user_run = RunHistoryItem(
+            runner_id="t5-user-01",
+            plan_file="docs/plan/test.md",
+            engine="claude",
+            status="completed",
+            pid=None,
+            start_time=datetime(2026, 4, 6, 10, 0, 0),
+            end_time=None,
+            log_file=None,
+            has_log=True,
+            trigger="user",
+        )
+        mock_resp = RunHistoryResponse(runs=[user_run], total=1)
+
+        with patch(
+            "app.modules.dev_runner.routes.logs.log_service.get_run_history",
+            return_value=mock_resp,
+        ):
+            response = client.get(f"{BASE_URL}/logs/history?visible_only=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert data["runs"][0]["runner_id"] == "t5-user-01"
+        assert data["runs"][0]["trigger"] == "user"
+
+    def test_logs_history_visible_only_excludes_tc_runner(self, client):
+        """visible_only=True: trigger=tc:xxx runner는 응답에서 제외된다"""
+        from unittest.mock import patch
+        from app.modules.dev_runner.schemas import RunHistoryResponse
+
+        mock_resp = RunHistoryResponse(runs=[], total=0)
+
+        with patch(
+            "app.modules.dev_runner.routes.logs.log_service.get_run_history",
+            return_value=mock_resp,
+        ):
+            response = client.get(f"{BASE_URL}/logs/history?visible_only=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 0
+        assert data["runs"] == []
+
+    def test_logs_history_default_not_visible_only(self, client):
+        """visible_only 파라미터 없이 호출 시 → visible_only=False로 동작"""
+        from unittest.mock import patch, call
+        from app.modules.dev_runner.schemas import RunHistoryResponse
+
+        mock_resp = RunHistoryResponse(runs=[], total=0)
+
+        with patch(
+            "app.modules.dev_runner.routes.logs.log_service.get_run_history",
+            return_value=mock_resp,
+        ) as mock_get:
+            response = client.get(f"{BASE_URL}/logs/history")
+
+        assert response.status_code == 200
+        # visible_only=False가 기본값
+        call_kwargs = mock_get.call_args[1] if mock_get.call_args else {}
+        assert call_kwargs.get("visible_only", False) is False

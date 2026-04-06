@@ -85,3 +85,51 @@ class TestHttpCleanupStaleSuccess:
         assert data.get("cleaned_recent") == 0
         assert data.get("preserved_recent") == 2
         assert data.get("detail", {}).get("preserved_recent") == 2
+
+
+class TestHttpCleanupStalePreservesUserStopped:
+    """cleanup-stale API — stopped user 러너 보존 계약 TC (Phase T5)"""
+
+    def test_cleanup_stale_preserves_user_stopped_runner(self, client):
+        """stopped+user runner는 cleanup-stale 후 preserved_recent에 포함된다"""
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.cleanup_stale_runners",
+            new_callable=AsyncMock,
+            return_value={
+                "success": True,
+                "cleaned_active": 0,
+                "cleaned_recent": 0,
+                "preserved_recent": 1,  # user stopped runner 보존
+                "bugs": 0,
+            },
+        ):
+            response = client.post(f"{BASE_URL}/runners/cleanup-stale")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("success") is True
+        assert data.get("preserved_recent") == 1, \
+            "stopped user runner가 보존되어 preserved_recent=1이어야 한다"
+        assert data.get("cleaned_recent") == 0, \
+            "stopped user runner가 cleaned에 포함되면 안 된다"
+
+    def test_cleanup_stale_response_separates_cleaned_from_preserved(self, client):
+        """cleanup 결과에서 cleaned_recent와 preserved_recent가 독립적으로 반환된다"""
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.cleanup_stale_runners",
+            new_callable=AsyncMock,
+            return_value={
+                "success": True,
+                "cleaned_active": 1,
+                "cleaned_recent": 2,
+                "preserved_recent": 3,
+                "bugs": 0,
+            },
+        ):
+            response = client.post(f"{BASE_URL}/runners/cleanup-stale")
+
+        assert response.status_code == 200
+        data = response.json()
+        # cleaned과 preserved는 독립 카운터
+        assert data.get("cleaned_recent") == 2
+        assert data.get("preserved_recent") == 3
