@@ -6,6 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.coupang_travel_api_feasibility import (  # noqa: E402
+    extract_api_product_id_from_html,
     extract_vendor_item_package_ids_from_html,
     load_coupang_cookies_from_storage_state,
     summarize_product_page_html,
@@ -77,6 +78,11 @@ def test_extract_vendor_item_package_ids_from_html():
     assert ids == ["30000011218342"]
 
 
+def test_extract_api_product_id_from_html():
+    html = '{"productId":10000011286099,"productType":"TICKET"}'
+    assert extract_api_product_id_from_html(html) == "10000011286099"
+
+
 def test_summarize_product_page_html_flags():
     html = """
     <html>
@@ -86,6 +92,7 @@ def test_summarize_product_page_html_flags():
     </html>
     """
     summary = summarize_product_page_html(html)
+    assert summary["api_product_id"] is None
     assert summary["contains_vendorItemPackageId"] is True
     assert summary["contains_saleStatus"] is True
     assert summary["contains_stockCount"] is False

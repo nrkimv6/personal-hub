@@ -126,6 +126,27 @@ def extract_vendor_item_package_ids_from_html(html: str) -> List[str]:
     return sorted(set(found))
 
 
+def extract_api_product_id_from_html(html: str) -> Optional[str]:
+    match = re.search(r'"productId"\s*:\s*(\d+)', html)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def extract_product_type_from_html(html: str) -> Optional[str]:
+    match = re.search(r'"productType"\s*:\s*"([A-Z_]+)"', html)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def extract_sale_status_from_html(html: str) -> Optional[str]:
+    match = re.search(r'"saleStatus"\s*:\s*"([A-Z_]*)"', html)
+    if not match:
+        return None
+    return match.group(1)
+
+
 def summarize_product_page_html(html: str) -> Dict[str, Any]:
     return {
         "html_length": len(html),
@@ -134,6 +155,9 @@ def summarize_product_page_html(html: str) -> Dict[str, Any]:
         "contains_stockCount": "stockCount" in html,
         "contains_travelItems": "travelItems" in html,
         "contains_vendorItems": "vendorItems" in html,
+        "api_product_id": extract_api_product_id_from_html(html),
+        "product_type": extract_product_type_from_html(html),
+        "sale_status": extract_sale_status_from_html(html),
         "vendor_item_package_ids": extract_vendor_item_package_ids_from_html(html),
     }
 
@@ -513,12 +537,20 @@ async def run_probe(args: argparse.Namespace) -> Dict[str, Any]:
             timeout_sec=args.timeout_sec,
         )
 
+    effective_product_id = args.product_id
+    if args.resolve_product_id and isinstance(page_probe, dict):
+        html_summary = page_probe.get("html_summary") or {}
+        if isinstance(html_summary, dict):
+            resolved = html_summary.get("api_product_id")
+            if isinstance(resolved, str) and resolved.strip():
+                effective_product_id = resolved.strip()
+
     for select_date in args.dates:
         for attempt in range(1, args.repeat + 1):
             if "httpx" in methods:
                 all_results.append(
                     await probe_httpx(
-                        product_id=args.product_id,
+                        product_id=effective_product_id,
                         vendor_item_package_id=args.vendor_item_package_id,
                         select_date=select_date,
                         timeout_sec=args.timeout_sec,
@@ -552,7 +584,7 @@ async def run_probe(args: argparse.Namespace) -> Dict[str, Any]:
                             all_results.append(
                                 await probe_playwright_fetch(
                                     page=page,
-                                    product_id=args.product_id,
+                                    product_id=effective_product_id,
                                     vendor_item_package_id=args.vendor_item_package_id,
                                     select_date=select_date,
                                     attempt=attempt,
@@ -562,7 +594,7 @@ async def run_probe(args: argparse.Namespace) -> Dict[str, Any]:
                             all_results.append(
                                 await probe_playwright_context_request(
                                     context=context,
-                                    product_id=args.product_id,
+                                    product_id=effective_product_id,
                                     vendor_item_package_id=args.vendor_item_package_id,
                                     select_date=select_date,
                                     attempt=attempt,
@@ -576,7 +608,8 @@ async def run_probe(args: argparse.Namespace) -> Dict[str, Any]:
 
     report = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "product_id": args.product_id,
+        "input_product_id": args.product_id,
+        "effective_product_id": effective_product_id,
         "vendor_item_package_id": args.vendor_item_package_id,
         "dates": args.dates,
         "methods": methods,
@@ -592,6 +625,7 @@ async def run_probe(args: argparse.Namespace) -> Dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Probe Coupang travel vendor-items API feasibility")
+    parser.set_defaults(resolve_product_id=True)
     parser.add_argument("--product-id", default=DEFAULT_PRODUCT_ID, help="Coupang travel product ID")
     parser.add_argument(
         "--vendor-item-package-id",
@@ -616,6 +650,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--headed", action="store_true", help="Run Playwright in headed mode")
     parser.add_argument("--skip-goto", action="store_true", help="Skip page.goto before browser probes")
     parser.add_argument("--skip-page-probe", action="store_true", help="Skip product page URL/HTML probe")
+    parser.add_argument(
+        "--no-resolve-product-id",
+        dest="resolve_product_id",
+        action="store_false",
+        help="Do not resolve API productId from page HTML",
+    )
     parser.add_argument("--repeat", type=int, default=1, help="Repeat count per date")
     parser.add_argument("--interval-sec", type=float, default=0.0, help="Sleep seconds between repeats")
     parser.add_argument("--timeout-sec", type=float, default=20.0, help="Request timeout in seconds")
@@ -625,6 +665,10 @@ def parse_args() -> argparse.Namespace:
 
 def _print_summary(report: Dict[str, Any], output_path: Path) -> None:
     print(f"[coupang-feasibility] output: {output_path}")
+    print(
+        f"- product_id: input={report.get('input_product_id')} "
+        f"effective={report.get('effective_product_id')}"
+    )
     page_probe = report.get("page_probe")
     if isinstance(page_probe, dict):
         tp = page_probe.get("tp_url", {})
