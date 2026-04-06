@@ -92,6 +92,7 @@ class ScheduleService:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         search: Optional[str] = None,
+        service_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """전체 일정 + 상위 컨텍스트 조회 (일정 관리 페이지용)"""
         query = db.query(
@@ -123,6 +124,8 @@ class ScheduleService:
                 (Business.name.ilike(search_pattern)) |
                 (BizItem.name.ilike(search_pattern))
             )
+        if service_type is not None:
+            query = query.filter(Business.service_type == service_type)
 
         results = query.order_by(MonitorSchedule.date.desc()).all()
         return self._build_context_list(results)

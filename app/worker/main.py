@@ -68,6 +68,7 @@ try:
     from app.worker.plan_archive_listener import PlanArchiveListener
     from app.modules.git_repos.worker import GitRepoWorker
     from app.worker.kakao_monitor_worker import KakaoMonitorWorker
+    from app.worker.coupang_monitor_worker import CoupangMonitorWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -85,6 +86,7 @@ try:
         'app.worker.video_download_worker',
         'app.worker.file_search_worker',
         'app.worker.plan_archive_listener',
+        'app.worker.coupang_monitor_worker',
         'app.worker.crawl_worker_base',
         'app.modules.git_repos.worker',
         'instagram.worker_status',
@@ -137,6 +139,7 @@ async def run_with_orchestrator(
     run_file_search: bool = True,
     run_git: bool = True,
     run_plan_archive_listener: bool = True,
+    run_coupang: bool = True,
 ):
     """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
@@ -272,6 +275,19 @@ async def run_with_orchestrator(
                 _e,
             )
 
+        # 쿠팡 모니터 워커
+        try:
+            coupang_worker = CoupangMonitorWorker(
+                browser_manager=orchestrator.browser_manager
+            )
+            orchestrator.register_worker("coupang_monitor", coupang_worker)
+            logger.info("[COUPANG_REGISTER] CoupangMonitorWorker 등록됨")
+        except Exception as _e:
+            logger.warning(
+                "[COUPANG_REGISTER] 등록 실패: %s",
+                _e,
+            )
+
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
             return
@@ -304,7 +320,8 @@ async def main(args):
         f"activity={args.activity or args.all}, "
         f"mobile={args.mobile or args.all}, "
         f"video_dl={args.video_dl or args.all}, "
-        f"git={args.git or args.all}"
+        f"git={args.git or args.all}, "
+        f"coupang={args.coupang or args.all}"
     )
     logger.info("=" * 50)
 
@@ -320,6 +337,7 @@ async def main(args):
             run_file_search=args.file_search or args.all,
             run_git=args.git or args.all,
             run_plan_archive_listener=args.all,
+            run_coupang=args.coupang or args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
@@ -385,6 +403,11 @@ def parse_args():
         help="Git 레포 워커만 실행",
     )
     parser.add_argument(
+        "--coupang",
+        action="store_true",
+        help="쿠팡 모니터 워커만 실행",
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         default=True,
@@ -394,7 +417,7 @@ def parse_args():
     args = parser.parse_args()
 
     # 개별 옵션이 지정되면 --all은 False
-    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search or args.git:
+    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search or args.git or args.coupang:
         args.all = False
 
     return args

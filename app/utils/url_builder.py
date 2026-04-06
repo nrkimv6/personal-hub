@@ -21,22 +21,20 @@ def __getattr__(name):
 
 
 def build_coupang_url(
-    seller_id: str,
     product_id: str,
     date: Optional[str] = None
 ) -> str:
     """
-    쿠팡 URL 생성 (향후 확장용)
+    쿠팡 여행상품 URL 생성
 
     Args:
-        seller_id: 쿠팡 판매자 ID
         product_id: 쿠팡 상품 ID
         date: 예약 날짜 (옵션)
 
     Returns:
         쿠팡 상품 URL
     """
-    base_url = f"https://trip.coupang.com/products/{product_id}"
+    base_url = f"https://trip.coupang.com/tp/products/{product_id}"
     if date:
         return f"{base_url}?date={date}"
     return base_url
@@ -64,8 +62,7 @@ def build_monitoring_url(schedule_context: Dict[str, Any]) -> str:
         )
     elif service_type == "coupang":
         return build_coupang_url(
-            seller_id=schedule_context["business_id"],
-            product_id=schedule_context["biz_item_id"],
+            product_id=schedule_context["item_biz_item_id"],
             date=schedule_context["date"],
         )
     else:
