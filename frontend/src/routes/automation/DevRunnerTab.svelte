@@ -129,6 +129,7 @@
 		exit_reason?: string | null;
 		error?: string | null;
 		display_plan_name?: string | null;
+		execution_count?: number | null;
 	}
 
 	interface RunnerSource {
@@ -147,6 +148,7 @@
 		error?: string | null;
 		visible?: boolean;
 		display_plan_name?: string | null;
+		execution_count?: number | null;
 	}
 
 	function createRunnerTab(runner: RunnerSource): RunnerTab {
@@ -162,6 +164,7 @@
 			exit_reason: runner.exit_reason ?? undefined,
 			error: runner.error ?? undefined,
 			display_plan_name: runner.display_plan_name ?? null,
+			execution_count: runner.execution_count ?? null,
 		};
 	}
 
@@ -268,6 +271,7 @@
 			orphan: runner.orphan ?? tab.orphan ?? false,
 			exit_reason: runner.exit_reason ?? tab.exit_reason ?? undefined,
 			error: runner.error ?? tab.error ?? undefined,
+			execution_count: runner.execution_count ?? tab.execution_count ?? null,
 		};
 	}
 
@@ -984,6 +988,7 @@
 										exitReason={tab.exit_reason}
 										error={tab.error}
 										displayPlanName={tab.display_plan_name}
+										executionCount={tab.execution_count}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
 										onRestart={() => handleRestart(tab)}
