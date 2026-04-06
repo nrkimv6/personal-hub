@@ -27,16 +27,22 @@ _mock_noise.is_noise_line = lambda line: False
 
 RESULTS_KEY = "plan-runner:command_results"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+_LOAD_COUNTER = 0
 
 
 def _load_listener():
+    global _LOAD_COUNTER
+    _LOAD_COUNTER += 1
+    module_name = f"_listener_e2e_{_LOAD_COUNTER}"
     sys.modules["listener_noise_filter"] = _mock_noise
-    spec = importlib.util.spec_from_file_location("_listener_e2e", _SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location(module_name, _SCRIPT_PATH)
     mod = importlib.util.module_from_spec(spec)
     mod._running_processes = {}
     mod._running_log_files = {}
     mod._stream_threads = {}
     spec.loader.exec_module(mod)
+    if hasattr(mod, "_refresh_state_refs"):
+        mod._refresh_state_refs(reset=True)
     return mod
 
 
