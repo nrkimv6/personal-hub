@@ -193,6 +193,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     try:
         from worktree_manager import WorktreeManager
         from plan_worktree_helpers import is_plan_in_progress as _is_plan_in_progress
+        from plan_worktree_helpers import has_unmerged_commits as _has_unmerged_commits
 
         merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
         plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
@@ -206,6 +207,19 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             logger.info(f"워크트리 보존 (plan 구현중): {runner_id}")
             # 워크트리 보존 시 worktree_path TTL 제거 (영구 보존)
             redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+
+        # 미머지 커밋 보호: 브랜치에 독자 커밋이 있으면 삭제 금지
+        if not _preserve_worktree:
+            _branch = (
+                f"plan/{Path(plan_file_val).stem}" if plan_file_val
+                else f"runner/{runner_id}"
+            )
+            if _has_unmerged_commits(_branch, get_plan_git_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
+                _preserve_worktree = True
+                logger.warning(
+                    f"[cleanup] 워크트리 보존 (미머지 커밋 존재): runner={runner_id}, branch={_branch}"
+                )
+                redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
 
         if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
             try:
