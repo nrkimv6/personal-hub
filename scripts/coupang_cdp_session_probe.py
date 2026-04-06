@@ -38,6 +38,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repeat", type=int, default=6, help="Loop count")
     parser.add_argument("--interval-sec", type=float, default=30.0, help="Interval between loops")
     parser.add_argument("--timeout-sec", type=float, default=30.0, help="Navigation timeout")
+    parser.add_argument(
+        "--wait-for-auth-sec",
+        type=float,
+        default=0.0,
+        help="Wait up to N seconds for auth-ready state before running loops",
+    )
+    parser.add_argument(
+        "--auth-poll-interval-sec",
+        type=float,
+        default=10.0,
+        help="Polling interval while waiting for auth-ready state",
+    )
     parser.add_argument("--output", help="Output JSON path")
     return parser.parse_args()
 
@@ -70,6 +82,70 @@ async def goto_snapshot(page, url: str, timeout_ms: int) -> Dict[str, Any]:
         rec["has_login_text"] = False
         rec["has_logout_text"] = False
     return rec
+
+
+def _is_blocked_title(title: str) -> bool:
+    lower = (title or "").strip().lower()
+    return "access denied" in lower or "moved permanently" in lower
+
+
+def _is_auth_ready(login_rec: Dict[str, Any], my_rec: Dict[str, Any]) -> bool:
+    # Strong signal: user-visible logout marker on either page
+    if login_rec.get("has_logout_text") or my_rec.get("has_logout_text"):
+        return True
+
+    login_status = login_rec.get("status")
+    my_status = my_rec.get("status")
+
+    login_ok = bool(login_status in (200, 302) and not _is_blocked_title(str(login_rec.get("title") or "")))
+    my_ok = bool(my_status in (200, 302) and not _is_blocked_title(str(my_rec.get("title") or "")))
+    return login_ok and my_ok
+
+
+async def wait_for_auth_ready(
+    page,
+    *,
+    timeout_sec: float,
+    poll_interval_sec: float,
+    nav_timeout_sec: float,
+) -> Dict[str, Any]:
+    nav_timeout_ms = int(nav_timeout_sec * 1000)
+    checks: List[Dict[str, Any]] = []
+    started = datetime.now()
+    deadline = started.timestamp() + timeout_sec
+
+    while True:
+        login_rec = await goto_snapshot(page, LOGIN_URL, nav_timeout_ms)
+        my_rec = await goto_snapshot(page, MYCOUPANG_URL, nav_timeout_ms)
+        ready = _is_auth_ready(login_rec, my_rec)
+        check = {
+            "checked_at": datetime.now().isoformat(timespec="seconds"),
+            "login": login_rec,
+            "mycoupang": my_rec,
+            "auth_ready": ready,
+        }
+        checks.append(check)
+        print(
+            f"[auth-wait] ready={ready} "
+            f"login={login_rec.get('status')}:{login_rec.get('title')} "
+            f"my={my_rec.get('status')}:{my_rec.get('title')}"
+        )
+        if ready:
+            break
+        if datetime.now().timestamp() >= deadline:
+            break
+        await page.wait_for_timeout(int(max(poll_interval_sec, 0.1) * 1000))
+
+    ended = datetime.now()
+    return {
+        "requested_timeout_sec": timeout_sec,
+        "poll_interval_sec": poll_interval_sec,
+        "started_at": started.isoformat(timespec="seconds"),
+        "ended_at": ended.isoformat(timespec="seconds"),
+        "elapsed_sec": round((ended - started).total_seconds(), 2),
+        "auth_ready": bool(checks and checks[-1].get("auth_ready")),
+        "checks": checks,
+    }
 
 
 async def fetch_vendor_items(
@@ -163,7 +239,10 @@ async def main_async(args: argparse.Namespace) -> Dict[str, Any]:
             "repeat": args.repeat,
             "interval_sec": args.interval_sec,
             "timeout_sec": args.timeout_sec,
+            "wait_for_auth_sec": args.wait_for_auth_sec,
+            "auth_poll_interval_sec": args.auth_poll_interval_sec,
         },
+        "auth_wait": None,
         "runs": [],
     }
 
@@ -175,6 +254,16 @@ async def main_async(args: argparse.Namespace) -> Dict[str, Any]:
             else:
                 context = await browser.new_context()
             page = context.pages[0] if context.pages else await context.new_page()
+
+            if args.wait_for_auth_sec > 0:
+                report["auth_wait"] = await wait_for_auth_ready(
+                    page,
+                    timeout_sec=args.wait_for_auth_sec,
+                    poll_interval_sec=args.auth_poll_interval_sec,
+                    nav_timeout_sec=args.timeout_sec,
+                )
+                if not report["auth_wait"].get("auth_ready"):
+                    return report
 
             for i in range(1, args.repeat + 1):
                 row = await run_once(
@@ -221,6 +310,7 @@ def summarize(report: Dict[str, Any]) -> Dict[str, Any]:
         }
     )
     return {
+        "auth_ready": bool((report.get("auth_wait") or {}).get("auth_ready", False)),
         "attempt_count": len(runs),
         "login_statuses": login_statuses,
         "mycoupang_statuses": my_statuses,
