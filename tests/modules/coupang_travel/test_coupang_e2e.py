@@ -4,7 +4,7 @@ DB: 실제 SQLite(테스트용 in-memory 또는 테스트 DB)
 """
 import json
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.coupang_travel.services.api_client import VendorItem
 
@@ -80,6 +80,34 @@ def db_session():
                 last_booking_time TEXT,
                 created_at TEXT,
                 updated_at TEXT
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS monitoring_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER NOT NULL,
+                timestamp TEXT,
+                event_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                available_count INTEGER DEFAULT 0,
+                slots_info TEXT,
+                error_message TEXT,
+                response_time_ms REAL,
+                data_hash TEXT,
+                hash_changed INTEGER DEFAULT 0,
+                fetch_method TEXT,
+                time_range TEXT,
+                original_slot_count INTEGER,
+                filtered_slot_count INTEGER,
+                target_time_matched INTEGER DEFAULT 0,
+                booking_triggered INTEGER DEFAULT 0,
+                booking_success INTEGER,
+                proxy_url TEXT,
+                graphql_response TEXT,
+                graphql_time_ms REAL,
+                proxy_retry_count INTEGER,
+                booking_time_ms REAL,
+                booking_attempt_count INTEGER
             )
         """))
         conn.commit()
@@ -235,3 +263,77 @@ async def test_coupang_monitor_full_pipeline():
         changes3 = await service.check_and_notify("10000011218760", "pkg_abc", ["2026-04-15"], mock_page)
         assert changes3 == [], "변화 없으면 변경 0건"
         assert len(sent_messages) == 1, "추가 알림 없음"
+
+
+@pytest.mark.asyncio
+async def test_coupang_monitor_logs_events(db_session, coupang_schedule):
+    """_main_loop_iteration 수준에서 schedule_id 전달 시 monitoring_events 기록 확인."""
+    from sqlalchemy import text
+    from sqlalchemy.orm import sessionmaker
+    from app.modules.coupang_travel.services.api_client import CoupangApiClient
+    from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
+    from app.shared.notification import NotificationService
+
+    schedule_id, _, _ = coupang_schedule
+
+    mock_api = AsyncMock(spec=CoupangApiClient)
+    mock_api.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="특실A", sale_status="ON_SALE", stock_count=1),
+    ])
+    notification_service = NotificationService()
+
+    local_factory = sessionmaker(bind=db_session.bind)
+
+    with patch.object(notification_service, "send_notification_message", AsyncMock()):
+        with patch("app.services.event_logger.SessionLocal", local_factory):
+            service = CoupangMonitorService(mock_api, notification_service)
+            await service.check_and_notify(
+                "99999",
+                "pkg_test",
+                ["2026-04-15"],
+                AsyncMock(),
+                schedule_id=schedule_id,
+            )
+
+    row = db_session.execute(text("SELECT COUNT(*) FROM monitoring_events")).scalar()
+    assert row == 1
+
+
+@pytest.mark.asyncio
+async def test_coupang_worker_updates_active_flag_during_run():
+    """워커 체크 시 set_active(True/False) 호출 검증."""
+    from app.worker.coupang_monitor_worker import CoupangMonitorWorker
+
+    mock_browser = AsyncMock()
+    mock_context = AsyncMock()
+    mock_page = AsyncMock()
+    mock_page.url = "https://trip.coupang.com/tp/products/99999"
+    mock_context.pages = [mock_page]
+    mock_browser.get_context = AsyncMock(return_value=mock_context)
+
+    worker = CoupangMonitorWorker(browser_manager=mock_browser)
+    worker._monitor_service = AsyncMock()
+    worker._monitor_service.check_and_notify = AsyncMock(return_value=[])
+
+    ctx = {
+        "id": 101,
+        "item_biz_item_id": "99999",
+        "date": "2026-04-15",
+        "service_account_id": 1,
+        "biz_item_pk": 1,
+    }
+
+    mock_db = MagicMock()
+    mock_db.close = MagicMock()
+    mock_schedule_service = MagicMock()
+
+    with (
+        patch.object(worker, "_extract_vendor_item_package_id", return_value="pkg_test"),
+        patch("app.worker.coupang_monitor_worker.schedule_service", mock_schedule_service),
+        patch("app.worker.coupang_monitor_worker.SessionLocal", return_value=mock_db),
+    ):
+        await worker._check_schedule(ctx)
+
+    assert mock_schedule_service.set_active.call_count == 2
+    assert mock_schedule_service.set_active.call_args_list[0].args[2] is True
+    assert mock_schedule_service.set_active.call_args_list[1].args[2] is False
