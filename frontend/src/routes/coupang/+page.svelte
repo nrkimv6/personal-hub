@@ -1,60 +1,144 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { coupangTravelApi, type CoupangTarget, type CoupangSchedule } from '$lib/api/coupangTravel';
+  import { onMount, onDestroy } from 'svelte';
+  import TabNav from '$lib/components/layout/TabNav.svelte';
+  import CoupangMonitoringHistory from '$lib/components/CoupangMonitoringHistory.svelte';
+  import {
+    coupangTravelApi,
+    type CoupangTarget,
+    type CoupangSchedule,
+    type CoupangStatusSummary
+  } from '$lib/api/coupangTravel';
   import { serviceAccountApi, type ServiceAccountWithProfile } from '$lib/api/common';
+  import { createSelection } from '$lib/utils/selection.svelte';
+  import { toast } from '$lib/stores/toast';
 
-  // ── 상태 ────────────────────────────────────────────────────
   let targets = $state<CoupangTarget[]>([]);
   let schedules = $state<CoupangSchedule[]>([]);
   let accounts = $state<ServiceAccountWithProfile[]>([]);
+  let statusSummary = $state<CoupangStatusSummary>({
+    total_schedules: 0,
+    enabled_schedules: 0,
+    active_schedules: 0
+  });
+
   let loading = $state(false);
   let error = $state('');
-  let successMsg = $state('');
+  let activeTab = $state<'schedules' | 'history'>('schedules');
 
-  // 상품 등록 폼
   let newUrl = $state('');
   let newVendorItemPackageId = $state('');
   let newName = $state('');
   let submittingTarget = $state(false);
 
-  // 일정 추가 폼
-  let selectedTargetId = $state<number | null>(null);
+  let selectedTargetId = $state('');
   let newDate = $state('');
-  let selectedAccountId = $state<number | null>(null);
+  let selectedAccountId = $state('');
   let submittingSchedule = $state(false);
 
-  // ── 초기 로드 ───────────────────────────────────────────────
-  onMount(async () => {
-    await loadAll();
+  let scheduleFilters = $state({
+    search: '',
+    is_enabled: 'all' as 'all' | 'enabled' | 'disabled',
+    date_from: getTodayDate(),
+    date_to: ''
   });
 
-  async function loadAll() {
-    loading = true;
+  let refreshInterval: ReturnType<typeof setInterval> | null = null;
+  let abortController: AbortController | null = null;
+
+  const selection = createSelection();
+
+  const coupangTabs = $derived([
+    { id: 'schedules', label: '일정', count: schedules.length || undefined },
+    { id: 'history', label: '이력' }
+  ]);
+
+  const filteredSchedules = $derived(
+    schedules.filter((schedule) => {
+      const query = scheduleFilters.search.trim().toLowerCase();
+      if (query) {
+        const text = `${schedule.item_name ?? ''} ${schedule.business_name ?? ''} ${schedule.product_id ?? ''}`.toLowerCase();
+        if (!text.includes(query)) return false;
+      }
+      if (scheduleFilters.is_enabled === 'enabled' && !schedule.is_enabled) return false;
+      if (scheduleFilters.is_enabled === 'disabled' && schedule.is_enabled) return false;
+      if (scheduleFilters.date_from && schedule.date < scheduleFilters.date_from) return false;
+      if (scheduleFilters.date_to && schedule.date > scheduleFilters.date_to) return false;
+      return true;
+    })
+  );
+
+  async function loadAll(showLoading = true): Promise<void> {
+    if (showLoading) loading = true;
+    abortController?.abort();
+    abortController = new AbortController();
     error = '';
+
     try {
-      const [t, s, a] = await Promise.all([
-        coupangTravelApi.listTargets(),
-        coupangTravelApi.listSchedules(),
-        serviceAccountApi.listActive('coupang')
+      const [targetData, scheduleData, accountData, statusData] = await Promise.all([
+        coupangTravelApi.listTargets({ signal: abortController.signal }),
+        coupangTravelApi.listSchedules({ signal: abortController.signal }),
+        serviceAccountApi.listActive('coupang', { signal: abortController.signal }),
+        coupangTravelApi.getStatus({ signal: abortController.signal })
       ]);
-      targets = t;
-      schedules = s;
-      accounts = a;
+      targets = targetData;
+      schedules = scheduleData;
+      accounts = accountData;
+      statusSummary = statusData;
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : '데이터 로드 실패';
+      if (e instanceof Error && e.name === 'AbortError') return;
+      const message = e instanceof Error ? e.message : '쿠팡 데이터 로드 실패';
+      error = message;
     } finally {
-      loading = false;
+      if (showLoading) loading = false;
     }
   }
 
-  // ── 상품 등록 ────────────────────────────────────────────────
-  async function submitTarget() {
+  async function fetchSchedulesAndStatus(showLoading = false): Promise<void> {
+    if (showLoading) loading = true;
+    abortController?.abort();
+    abortController = new AbortController();
+
+    try {
+      const [scheduleData, statusData] = await Promise.all([
+        coupangTravelApi.listSchedules({ signal: abortController.signal }),
+        coupangTravelApi.getStatus({ signal: abortController.signal })
+      ]);
+      schedules = scheduleData;
+      statusSummary = statusData;
+      error = '';
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') return;
+      const message = e instanceof Error ? e.message : '쿠팡 일정 갱신 실패';
+      error = message;
+    } finally {
+      if (showLoading) loading = false;
+    }
+  }
+
+  function getTodayDate(): string {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  function clearMessages(): void {
+    error = '';
+  }
+
+  function cleanupPolling(): void {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+      refreshInterval = null;
+    }
+    abortController?.abort();
+    abortController = null;
+  }
+
+  async function submitTarget(): Promise<void> {
     if (!newUrl.trim() || !newVendorItemPackageId.trim() || !newName.trim()) {
-      error = 'URL, vendor_item_package_id, 이름을 모두 입력해주세요.';
+      toast.error('URL, vendor_item_package_id, 이름을 모두 입력해주세요.');
       return;
     }
+
     submittingTarget = true;
-    error = '';
     try {
       await coupangTravelApi.createTarget({
         url: newUrl.trim(),
@@ -64,269 +148,397 @@
       newUrl = '';
       newVendorItemPackageId = '';
       newName = '';
-      successMsg = '상품이 등록되었습니다.';
-      targets = await coupangTravelApi.listTargets();
+      toast.success('상품이 등록되었습니다.');
+      await loadAll(false);
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : '등록 실패';
+      toast.error(e instanceof Error ? e.message : '상품 등록 실패');
     } finally {
       submittingTarget = false;
     }
   }
 
-  // ── 상품 삭제 ────────────────────────────────────────────────
-  async function deleteTarget(id: number) {
-    if (!confirm('이 상품과 관련 일정을 모두 삭제합니까?')) return;
+  async function deleteTarget(id: number): Promise<void> {
     try {
       await coupangTravelApi.deleteTarget(id);
-      targets = targets.filter(t => t.id !== id);
-      schedules = schedules.filter(s => {
-        const tgt = targets.find(t => t.id === id);
-        return !tgt || s.product_id !== tgt.product_id;
-      });
-      schedules = await coupangTravelApi.listSchedules();
-      successMsg = '상품이 삭제되었습니다.';
+      toast.success('상품이 삭제되었습니다.');
+      await loadAll(false);
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : '삭제 실패';
+      toast.error(e instanceof Error ? e.message : '상품 삭제 실패');
     }
   }
 
-  // ── 일정 추가 ────────────────────────────────────────────────
-  async function submitSchedule() {
-    if (!selectedTargetId || !newDate || !selectedAccountId) {
-      error = '상품, 날짜, 계정을 모두 선택해주세요.';
+  async function submitSchedule(): Promise<void> {
+    const targetId = Number(selectedTargetId);
+    const accountId = Number(selectedAccountId);
+
+    if (!targetId || !newDate || !accountId) {
+      toast.error('상품, 날짜, 계정을 모두 선택해주세요.');
       return;
     }
+
     submittingSchedule = true;
-    error = '';
     try {
-      const res = await coupangTravelApi.createSchedules({
-        biz_item_id: selectedTargetId,
+      const result = await coupangTravelApi.createSchedules({
+        biz_item_id: targetId,
         dates: [newDate],
-        service_account_id: selectedAccountId
+        service_account_id: accountId
       });
-      successMsg = `일정 ${res.created}건이 추가되었습니다.`;
       newDate = '';
-      schedules = await coupangTravelApi.listSchedules();
+      toast.success(`일정 ${result.created}건이 추가되었습니다.`);
+      await fetchSchedulesAndStatus(false);
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : '일정 추가 실패';
+      toast.error(e instanceof Error ? e.message : '일정 등록 실패');
     } finally {
       submittingSchedule = false;
     }
   }
 
-  // ── 일정 삭제 ────────────────────────────────────────────────
-  async function deleteSchedule(id: number) {
+  async function toggleSchedule(schedule: CoupangSchedule): Promise<void> {
     try {
-      await coupangTravelApi.deleteSchedule(id);
-      schedules = schedules.filter(s => s.id !== id);
-      successMsg = '일정이 삭제되었습니다.';
+      if (schedule.is_enabled) {
+        await coupangTravelApi.disableSchedule(schedule.id);
+      } else {
+        await coupangTravelApi.enableSchedule(schedule.id);
+      }
+      await fetchSchedulesAndStatus(false);
+      toast.success(`일정이 ${schedule.is_enabled ? '비활성화' : '활성화'}되었습니다.`);
     } catch (e: unknown) {
-      error = e instanceof Error ? e.message : '일정 삭제 실패';
+      toast.error(e instanceof Error ? e.message : '일정 상태 변경 실패');
     }
   }
 
-  function clearMessages() {
-    error = '';
-    successMsg = '';
+  async function deleteSchedule(id: number): Promise<void> {
+    try {
+      await coupangTravelApi.deleteSchedule(id);
+      selection.clear();
+      toast.success('일정이 삭제되었습니다.');
+      await fetchSchedulesAndStatus(false);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '일정 삭제 실패');
+    }
   }
+
+  async function runBulkAction(action: 'enable' | 'disable' | 'delete'): Promise<void> {
+    const ids = selection.toArray();
+    if (ids.length === 0) return;
+
+    const results = await Promise.allSettled(
+      ids.map(async (id) => {
+        if (action === 'enable') return coupangTravelApi.enableSchedule(id);
+        if (action === 'disable') return coupangTravelApi.disableSchedule(id);
+        return coupangTravelApi.deleteSchedule(id);
+      })
+    );
+
+    const successCount = results.filter((r) => r.status === 'fulfilled').length;
+    const failedCount = results.length - successCount;
+    selection.clear();
+
+    await fetchSchedulesAndStatus(false);
+
+    const actionLabel =
+      action === 'enable' ? '활성화' : action === 'disable' ? '비활성화' : '삭제';
+
+    if (failedCount > 0) {
+      toast.warning(`일괄 ${actionLabel}: ${successCount}건 성공, ${failedCount}건 실패`);
+      return;
+    }
+    toast.success(`일괄 ${actionLabel} 완료 (${successCount}건)`);
+  }
+
+  onMount(() => {
+    void loadAll(true);
+    refreshInterval = setInterval(() => {
+      if (activeTab !== 'schedules') return;
+      void fetchSchedulesAndStatus(false);
+    }, 5000);
+  });
+
+  onDestroy(() => {
+    cleanupPolling();
+  });
+
+  $effect(() => {
+    if (activeTab === 'schedules') {
+      void fetchSchedulesAndStatus(false);
+    }
+  });
 </script>
 
-<div class="space-y-8">
-  <h1 class="text-2xl font-bold">쿠팡 여행상품 모니터링</h1>
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-bold">쿠팡 여행상품 모니터링</h1>
+    <button
+      class="btn btn-secondary btn-sm"
+      onclick={() => loadAll(true)}
+      disabled={loading}
+    >
+      새로고침
+    </button>
+  </div>
 
-  <!-- 알림 -->
   {#if error}
     <div class="rounded bg-red-100 px-4 py-3 text-red-800" role="alert">
       {error}
       <button class="ml-2 text-sm underline" onclick={clearMessages}>닫기</button>
     </div>
   {/if}
-  {#if successMsg}
-    <div class="rounded bg-green-100 px-4 py-3 text-green-800" role="status">
-      {successMsg}
-      <button class="ml-2 text-sm underline" onclick={clearMessages}>닫기</button>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="card text-center">
+      <div class="text-3xl font-bold text-foreground">{statusSummary.total_schedules}</div>
+      <div class="text-sm text-muted-foreground">전체 일정</div>
     </div>
+    <div class="card text-center">
+      <div class="text-3xl font-bold text-primary">{statusSummary.enabled_schedules}</div>
+      <div class="text-sm text-muted-foreground">활성 일정</div>
+    </div>
+    <div class="card text-center">
+      <div class="text-3xl font-bold text-success">{statusSummary.active_schedules}</div>
+      <div class="text-sm text-muted-foreground">동작 중</div>
+    </div>
+  </div>
+
+  <TabNav tabs={coupangTabs} bind:activeTab variant="primary" queryParam="tab" />
+
+  {#if activeTab === 'schedules'}
+    <section class="card">
+      <h2 class="text-lg font-semibold mb-4">상품 등록</h2>
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700" for="url">상품 URL</label>
+          <input
+            id="url"
+            type="text"
+            placeholder="https://trip.coupang.com/tp/products/..."
+            bind:value={newUrl}
+            class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+          />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700" for="vpid">vendor_item_package_id</label>
+          <input
+            id="vpid"
+            type="text"
+            placeholder="패키지 ID"
+            bind:value={newVendorItemPackageId}
+            class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+          />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700" for="name">이름</label>
+          <input
+            id="name"
+            type="text"
+            placeholder="상품 이름"
+            bind:value={newName}
+            class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+          />
+        </div>
+      </div>
+      <button
+        class="mt-3 rounded bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+        onclick={submitTarget}
+        disabled={submittingTarget}
+      >
+        {submittingTarget ? '등록 중...' : '상품 등록'}
+      </button>
+    </section>
+
+    <section class="card">
+      <h2 class="text-lg font-semibold mb-4">일정 추가</h2>
+      <div class="grid gap-3 sm:grid-cols-3">
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700" for="target-select">상품 선택</label>
+          <select
+            id="target-select"
+            bind:value={selectedTargetId}
+            class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+          >
+            <option value="">-- 상품 선택 --</option>
+            {#each targets as target (target.id)}
+              <option value={target.id}>{target.name} ({target.product_id})</option>
+            {/each}
+          </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700" for="date-input">날짜</label>
+          <input
+            id="date-input"
+            type="date"
+            bind:value={newDate}
+            class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+          />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700" for="account-select">쿠팡 계정</label>
+          <select
+            id="account-select"
+            bind:value={selectedAccountId}
+            class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+          >
+            <option value="">-- 계정 선택 --</option>
+            {#each accounts as account (account.id)}
+              <option value={account.id}>{account.profile_name ?? account.identifier ?? `계정 #${account.id}`}</option>
+            {/each}
+          </select>
+        </div>
+      </div>
+      <button
+        class="mt-3 rounded bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+        onclick={submitSchedule}
+        disabled={submittingSchedule}
+      >
+        {submittingSchedule ? '추가 중...' : '일정 추가'}
+      </button>
+    </section>
+
+    <section class="card">
+      <div class="mb-3 flex items-center justify-between">
+        <h2 class="text-lg font-semibold">등록된 상품 ({targets.length})</h2>
+      </div>
+      {#if targets.length === 0}
+        <p class="text-sm text-muted-foreground">등록된 상품이 없습니다.</p>
+      {:else}
+        <div class="overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>상품명</th>
+                <th>product_id</th>
+                <th>관리</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each targets as target (target.id)}
+                <tr>
+                  <td>{target.name}</td>
+                  <td class="text-sm text-muted-foreground">{target.product_id}</td>
+                  <td>
+                    <button class="btn btn-danger btn-xs" onclick={() => deleteTarget(target.id)}>삭제</button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </section>
+
+    <section class="card">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+        <div>
+          <label for="schedule-search" class="block text-sm font-medium text-foreground mb-1">검색</label>
+          <input id="schedule-search" class="input" bind:value={scheduleFilters.search} placeholder="상품명 / product_id" />
+        </div>
+        <div>
+          <label for="schedule-status" class="block text-sm font-medium text-foreground mb-1">활성 상태</label>
+          <select id="schedule-status" class="input" bind:value={scheduleFilters.is_enabled}>
+            <option value="all">전체</option>
+            <option value="enabled">활성</option>
+            <option value="disabled">비활성</option>
+          </select>
+        </div>
+        <div>
+          <label for="schedule-date-from" class="block text-sm font-medium text-foreground mb-1">시작일</label>
+          <input id="schedule-date-from" type="date" class="input" bind:value={scheduleFilters.date_from} />
+        </div>
+        <div>
+          <label for="schedule-date-to" class="block text-sm font-medium text-foreground mb-1">종료일</label>
+          <input id="schedule-date-to" type="date" class="input" bind:value={scheduleFilters.date_to} />
+        </div>
+      </div>
+
+      <div class="mb-4 flex items-center justify-between">
+        <div class="text-sm text-muted-foreground">
+          총 {filteredSchedules.length}건
+          {#if selection.count > 0}
+            <span class="ml-2 text-primary">({selection.count}건 선택)</span>
+          {/if}
+        </div>
+        {#if selection.count > 0}
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" onclick={() => runBulkAction('enable')}>일괄 활성화</button>
+            <button class="btn btn-secondary btn-sm" onclick={() => runBulkAction('disable')}>일괄 비활성화</button>
+            <button class="btn btn-danger btn-sm" onclick={() => runBulkAction('delete')}>일괄 삭제</button>
+          </div>
+        {/if}
+      </div>
+
+      {#if loading}
+        <div class="flex justify-center items-center h-40">
+          <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+        </div>
+      {:else if filteredSchedules.length === 0}
+        <p class="text-sm text-muted-foreground">조건에 맞는 일정이 없습니다.</p>
+      {:else}
+        <div class="overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="w-8">
+                  <input
+                    type="checkbox"
+                    checked={selection.isAllSelected(filteredSchedules.map((schedule) => schedule.id))}
+                    indeterminate={
+                      selection.count > 0 &&
+                      !selection.isAllSelected(filteredSchedules.map((schedule) => schedule.id))
+                    }
+                    onchange={() => selection.selectAll(filteredSchedules.map((schedule) => schedule.id))}
+                  />
+                </th>
+                <th>상품</th>
+                <th>날짜</th>
+                <th>상태</th>
+                <th>동작</th>
+                <th>관리</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each filteredSchedules as schedule (schedule.id)}
+                <tr class={selection.has(schedule.id) ? 'bg-primary-light' : ''}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selection.has(schedule.id)}
+                      onchange={() => selection.toggle(schedule.id)}
+                    />
+                  </td>
+                  <td>
+                    <div class="font-medium text-sm">{schedule.item_name ?? schedule.business_name ?? '-'}</div>
+                    <div class="text-xs text-muted-foreground">{schedule.product_id ?? '-'}</div>
+                  </td>
+                  <td class="text-sm">{schedule.date}</td>
+                  <td>
+                    <button
+                      class={schedule.is_enabled ? 'btn btn-success btn-xs' : 'btn btn-secondary btn-xs'}
+                      onclick={() => toggleSchedule(schedule)}
+                    >
+                      {schedule.is_enabled ? '활성' : '비활성'}
+                    </button>
+                  </td>
+                  <td>
+                    {#if schedule.is_enabled && schedule.is_active}
+                      <span class="badge badge-success">동작중</span>
+                    {:else}
+                      <span class="badge badge-gray">대기</span>
+                    {/if}
+                  </td>
+                  <td>
+                    <div class="flex gap-2">
+                      <button class="btn btn-danger btn-xs" onclick={() => deleteSchedule(schedule.id)}>삭제</button>
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </section>
   {/if}
 
-  <!-- ── 상품 등록 폼 ── -->
-  <section class="rounded border bg-white p-4 shadow-sm">
-    <h2 class="mb-4 text-lg font-semibold">상품 등록</h2>
-    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <div>
-        <label class="mb-1 block text-sm font-medium text-gray-700" for="url">상품 URL</label>
-        <input
-          id="url"
-          type="text"
-          placeholder="https://trip.coupang.com/tp/products/..."
-          bind:value={newUrl}
-          class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-        />
-      </div>
-      <div>
-        <label class="mb-1 block text-sm font-medium text-gray-700" for="vpid">vendor_item_package_id</label>
-        <input
-          id="vpid"
-          type="text"
-          placeholder="패키지 ID"
-          bind:value={newVendorItemPackageId}
-          class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-        />
-      </div>
-      <div>
-        <label class="mb-1 block text-sm font-medium text-gray-700" for="name">이름</label>
-        <input
-          id="name"
-          type="text"
-          placeholder="상품 이름"
-          bind:value={newName}
-          class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-        />
-      </div>
-    </div>
-    <button
-      class="mt-3 rounded bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
-      onclick={submitTarget}
-      disabled={submittingTarget}
-    >
-      {submittingTarget ? '등록 중...' : '상품 등록'}
-    </button>
-  </section>
-
-  <!-- ── 상품 목록 ── -->
-  <section class="rounded border bg-white p-4 shadow-sm">
-    <div class="mb-3 flex items-center justify-between">
-      <h2 class="text-lg font-semibold">등록된 상품 ({targets.length})</h2>
-      <button
-        class="rounded border px-3 py-1 text-sm text-gray-600 hover:bg-gray-100"
-        onclick={loadAll}
-        disabled={loading}
-      >
-        새로고침
-      </button>
-    </div>
-    {#if loading}
-      <p class="text-sm text-gray-500">로딩 중...</p>
-    {:else if targets.length === 0}
-      <p class="text-sm text-gray-500">등록된 상품이 없습니다.</p>
-    {:else}
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b text-left text-gray-600">
-              <th class="py-2 pr-4">이름</th>
-              <th class="py-2 pr-4">product_id</th>
-              <th class="py-2">관리</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each targets as target (target.id)}
-              <tr class="border-b hover:bg-gray-50">
-                <td class="py-2 pr-4 font-medium">{target.name}</td>
-                <td class="py-2 pr-4 font-mono text-gray-500">{target.product_id}</td>
-                <td class="py-2">
-                  <button
-                    class="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                    onclick={() => deleteTarget(target.id)}
-                  >
-                    삭제
-                  </button>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
-  </section>
-
-  <!-- ── 일정 추가 폼 ── -->
-  <section class="rounded border bg-white p-4 shadow-sm">
-    <h2 class="mb-4 text-lg font-semibold">일정 추가</h2>
-    <div class="grid gap-3 sm:grid-cols-3">
-      <div>
-        <label class="mb-1 block text-sm font-medium text-gray-700" for="target-select">상품 선택</label>
-        <select
-          id="target-select"
-          bind:value={selectedTargetId}
-          class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-        >
-          <option value={null}>-- 상품 선택 --</option>
-          {#each targets as t (t.id)}
-            <option value={t.id}>{t.name} ({t.product_id})</option>
-          {/each}
-        </select>
-      </div>
-      <div>
-        <label class="mb-1 block text-sm font-medium text-gray-700" for="date-input">날짜</label>
-        <input
-          id="date-input"
-          type="date"
-          bind:value={newDate}
-          class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-        />
-      </div>
-      <div>
-        <label class="mb-1 block text-sm font-medium text-gray-700" for="account-select">쿠팡 계정</label>
-        <select
-          id="account-select"
-          bind:value={selectedAccountId}
-          class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-        >
-          <option value={null}>-- 계정 선택 --</option>
-          {#each accounts as a (a.id)}
-            <option value={a.id}>{a.profile?.name ?? `계정 #${a.id}`}</option>
-          {/each}
-        </select>
-      </div>
-    </div>
-    <button
-      class="mt-3 rounded bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
-      onclick={submitSchedule}
-      disabled={submittingSchedule}
-    >
-      {submittingSchedule ? '추가 중...' : '일정 추가'}
-    </button>
-  </section>
-
-  <!-- ── 일정 목록 (대시보드) ── -->
-  <section class="rounded border bg-white p-4 shadow-sm">
-    <h2 class="mb-3 text-lg font-semibold">모니터링 일정 ({schedules.length})</h2>
-    {#if schedules.length === 0}
-      <p class="text-sm text-gray-500">등록된 일정이 없습니다.</p>
-    {:else}
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b text-left text-gray-600">
-              <th class="py-2 pr-4">상품명</th>
-              <th class="py-2 pr-4">날짜</th>
-              <th class="py-2 pr-4">상태</th>
-              <th class="py-2">관리</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each schedules as s (s.id)}
-              <tr class="border-b hover:bg-gray-50">
-                <td class="py-2 pr-4 font-medium">{s.item_name ?? s.business_name ?? '-'}</td>
-                <td class="py-2 pr-4">{s.date}</td>
-                <td class="py-2 pr-4">
-                  <span class={s.is_enabled ? 'text-green-600' : 'text-gray-400'}>
-                    {s.is_enabled ? '활성' : '비활성'}
-                  </span>
-                </td>
-                <td class="py-2">
-                  <button
-                    class="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                    onclick={() => deleteSchedule(s.id)}
-                  >
-                    삭제
-                  </button>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
-  </section>
+  {#if activeTab === 'history'}
+    <CoupangMonitoringHistory />
+  {/if}
 </div>

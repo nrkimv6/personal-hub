@@ -3,6 +3,8 @@
  */
 
 import { request } from './client';
+import type { MonitoringEventListParams } from './naver-booking';
+import type { MonitoringEventList } from '$lib/types';
 
 const BASE = '/coupang';
 
@@ -20,10 +22,17 @@ export interface CoupangSchedule {
   id: number;
   date: string;
   is_enabled: boolean;
+  is_active: boolean;
   product_id: string | null;
   item_name: string | null;
   business_name: string | null;
   service_account_id: number | null;
+}
+
+export interface CoupangStatusSummary {
+  total_schedules: number;
+  enabled_schedules: number;
+  active_schedules: number;
 }
 
 export interface CreateTargetRequest {
@@ -41,8 +50,8 @@ export interface CreateScheduleRequest {
 // ========== API ==========
 
 export const coupangTravelApi = {
-  async listTargets(): Promise<CoupangTarget[]> {
-    return request<CoupangTarget[]>(`${BASE}/targets`);
+  async listTargets(options?: RequestInit): Promise<CoupangTarget[]> {
+    return request<CoupangTarget[]>(`${BASE}/targets`, options);
   },
 
   async createTarget(body: CreateTargetRequest): Promise<{ id: number; product_id: string }> {
@@ -57,8 +66,8 @@ export const coupangTravelApi = {
     await request(`${BASE}/targets/${id}`, { method: 'DELETE' });
   },
 
-  async listSchedules(): Promise<CoupangSchedule[]> {
-    return request<CoupangSchedule[]>(`${BASE}/schedules`);
+  async listSchedules(options?: RequestInit): Promise<CoupangSchedule[]> {
+    return request<CoupangSchedule[]>(`${BASE}/schedules`, options);
   },
 
   async createSchedules(body: CreateScheduleRequest): Promise<{ created: number }> {
@@ -71,5 +80,36 @@ export const coupangTravelApi = {
 
   async deleteSchedule(id: number): Promise<void> {
     await request(`${BASE}/schedules/${id}`, { method: 'DELETE' });
+  },
+
+  async enableSchedule(id: number): Promise<{ id: number; is_enabled: boolean }> {
+    return request(`${BASE}/schedules/${id}/enable`, { method: 'POST' });
+  },
+
+  async disableSchedule(id: number): Promise<{ id: number; is_enabled: boolean }> {
+    return request(`${BASE}/schedules/${id}/disable`, { method: 'POST' });
+  },
+
+  async getStatus(options?: RequestInit): Promise<CoupangStatusSummary> {
+    return request<CoupangStatusSummary>(`${BASE}/status`, options);
+  },
+
+  async listEvents(
+    params?: Omit<MonitoringEventListParams, 'service_type'>,
+    options?: RequestInit
+  ): Promise<MonitoringEventList> {
+    const searchParams = new URLSearchParams();
+    if (params?.schedule_id) searchParams.append('schedule_id', String(params.schedule_id));
+    if (params?.biz_item_id) searchParams.append('biz_item_id', String(params.biz_item_id));
+    if (params?.business_id) searchParams.append('business_id', String(params.business_id));
+    if (params?.status) searchParams.append('status', params.status);
+    if (params?.event_type) searchParams.append('event_type', params.event_type);
+    if (params?.date_from) searchParams.append('date_from', params.date_from);
+    if (params?.date_to) searchParams.append('date_to', params.date_to);
+    if (params?.page) searchParams.append('page', String(params.page));
+    if (params?.page_size) searchParams.append('page_size', String(params.page_size));
+    searchParams.append('service_type', 'coupang');
+    const query = searchParams.toString();
+    return request<MonitoringEventList>(`/monitoring/events${query ? `?${query}` : ''}`, options);
   }
 };

@@ -72,6 +72,7 @@ class CoupangMonitorWorker(BaseWorker):
 
     async def _check_schedule(self, ctx: Dict) -> None:
         """단일 스케줄 상태 체크."""
+        schedule_id = ctx.get("id")
         product_id = ctx.get("item_biz_item_id")
         date = ctx.get("date")
         service_account_id = ctx.get("service_account_id")
@@ -94,7 +95,11 @@ class CoupangMonitorWorker(BaseWorker):
             logger.warning("[%s] BrowserManager 없음", self.name)
             return
 
+        active_marked = False
         try:
+            self._set_schedule_active(schedule_id, True)
+            active_marked = True
+
             context = await self.browser.get_context(service_account_id)
             pages = context.pages
             if pages:
@@ -112,6 +117,7 @@ class CoupangMonitorWorker(BaseWorker):
                 vendor_item_package_id=vendor_item_package_id,
                 dates=[date],
                 page=page,
+                schedule_id=schedule_id,
             )
 
             if changes:
@@ -132,6 +138,27 @@ class CoupangMonitorWorker(BaseWorker):
                 exc_info=True,
             )
             raise
+        finally:
+            if active_marked:
+                self._set_schedule_active(schedule_id, False)
+
+    def _set_schedule_active(self, schedule_id: Optional[int], is_active: bool) -> None:
+        """스케줄 active 상태를 DB에 반영."""
+        if schedule_id is None:
+            return
+        db = SessionLocal()
+        try:
+            schedule_service.set_active(db, schedule_id, is_active)
+        except Exception as e:
+            logger.warning(
+                "[%s] set_active 실패 (schedule_id=%s, is_active=%s): %s",
+                self.name,
+                schedule_id,
+                is_active,
+                e,
+            )
+        finally:
+            db.close()
 
     def _extract_vendor_item_package_id(self, ctx: Dict) -> Optional[str]:
         """컨텍스트에서 vendor_item_package_id 추출."""

@@ -27,6 +27,7 @@ def get_monitoring_events(
     schedule_id: Optional[int] = Query(None, description="스케줄 ID로 필터링"),
     biz_item_id: Optional[int] = Query(None, description="상품 ID로 필터링"),
     business_id: Optional[int] = Query(None, description="업체 ID로 필터링"),
+    service_type: Optional[str] = Query(None, description="서비스 타입으로 필터링 (naver/coupang/instagram)"),
     status: Optional[str] = Query(None, description="상태로 필터링 (success/available/no_slots/hidden/paused/closed/not_opened/error)"),
     event_type: Optional[str] = Query(None, description="이벤트 타입으로 필터링"),
     date_from: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
@@ -56,14 +57,17 @@ def get_monitoring_events(
     )
 
     # 필터 적용
-    if schedule_id:
+    if schedule_id is not None:
         query = query.filter(MonitoringEvent.schedule_id == schedule_id)
 
-    if biz_item_id:
+    if biz_item_id is not None:
         query = query.filter(MonitorSchedule.biz_item_id == biz_item_id)
 
-    if business_id:
+    if business_id is not None:
         query = query.filter(BizItem.business_id == business_id)
+
+    if service_type:
+        query = query.filter(Business.service_type == service_type)
 
     if status:
         query = query.filter(MonitoringEvent.status == status)
@@ -147,6 +151,7 @@ def get_monitoring_stats(
     schedule_id: Optional[int] = Query(None, description="스케줄 ID로 필터링"),
     biz_item_id: Optional[int] = Query(None, description="상품 ID로 필터링"),
     business_id: Optional[int] = Query(None, description="업체 ID로 필터링"),
+    service_type: Optional[str] = Query(None, description="서비스 타입으로 필터링 (naver/coupang/instagram)"),
     date_from: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
     db: Session = Depends(get_db)
@@ -158,24 +163,48 @@ def get_monitoring_stats(
     # 기본 쿼리
     query = db.query(MonitoringEvent)
 
-    if schedule_id or biz_item_id or business_id:
+    join_schedule = (
+        schedule_id is not None
+        or biz_item_id is not None
+        or business_id is not None
+        or service_type is not None
+    )
+    join_biz_item = (
+        biz_item_id is not None
+        or business_id is not None
+        or service_type is not None
+    )
+    join_business = (
+        business_id is not None
+        or service_type is not None
+    )
+
+    if join_schedule:
         query = query.join(
             MonitorSchedule, MonitoringEvent.schedule_id == MonitorSchedule.id
         )
 
-        if biz_item_id or business_id:
+        if join_biz_item:
             query = query.join(
                 BizItem, MonitorSchedule.biz_item_id == BizItem.id
             )
 
-        if schedule_id:
+        if join_business:
+            query = query.join(
+                Business, BizItem.business_id == Business.id
+            )
+
+        if schedule_id is not None:
             query = query.filter(MonitoringEvent.schedule_id == schedule_id)
 
-        if biz_item_id:
+        if biz_item_id is not None:
             query = query.filter(MonitorSchedule.biz_item_id == biz_item_id)
 
-        if business_id:
+        if business_id is not None:
             query = query.filter(BizItem.business_id == business_id)
+
+        if service_type is not None:
+            query = query.filter(Business.service_type == service_type)
 
     if date_from:
         try:

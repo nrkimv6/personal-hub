@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -60,10 +61,34 @@ class ScheduleItem(BaseModel):
     id: int
     date: str
     is_enabled: bool
+    is_active: bool
     product_id: Optional[str]
     item_name: Optional[str]
     business_name: Optional[str]
     service_account_id: Optional[int]
+
+
+class CoupangStatusSummary(BaseModel):
+    total_schedules: int
+    enabled_schedules: int
+    active_schedules: int
+
+
+def _get_coupang_schedule_or_404(schedule_id: int, db: Session) -> MonitorSchedule:
+    """쿠팡 서비스 소유 스케줄만 조회."""
+    schedule = (
+        db.query(MonitorSchedule)
+        .join(BizItem, MonitorSchedule.biz_item_id == BizItem.id)
+        .join(Business, BizItem.business_id == Business.id)
+        .filter(
+            MonitorSchedule.id == schedule_id,
+            Business.service_type == "coupang",
+        )
+        .first()
+    )
+    if not schedule:
+        raise HTTPException(status_code=404, detail="MonitorSchedule not found")
+    return schedule
 
 
 # ──────────────────────────────────────────────
@@ -224,6 +249,7 @@ def list_schedules(db: Session = Depends(get_db)):
             id=ctx["id"],
             date=ctx["date"],
             is_enabled=ctx["is_enabled"],
+            is_active=ctx.get("is_active", False),
             product_id=ctx.get("item_biz_item_id"),
             item_name=ctx.get("item_name"),
             business_name=ctx.get("business_name"),
@@ -232,12 +258,65 @@ def list_schedules(db: Session = Depends(get_db)):
     return result
 
 
+@router.post("/schedules/{schedule_id}/enable", status_code=status.HTTP_200_OK)
+def enable_schedule(schedule_id: int, db: Session = Depends(get_db)):
+    """쿠팡 모니터링 일정 활성화."""
+    _get_coupang_schedule_or_404(schedule_id, db)
+    updated = _schedule_service.enable(db, schedule_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="MonitorSchedule not found")
+    return {"id": updated.id, "is_enabled": updated.is_enabled}
+
+
+@router.post("/schedules/{schedule_id}/disable", status_code=status.HTTP_200_OK)
+def disable_schedule(schedule_id: int, db: Session = Depends(get_db)):
+    """쿠팡 모니터링 일정 비활성화."""
+    _get_coupang_schedule_or_404(schedule_id, db)
+    updated = _schedule_service.disable(db, schedule_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="MonitorSchedule not found")
+    return {"id": updated.id, "is_enabled": updated.is_enabled}
+
+
 @router.delete("/schedules/{schedule_id}", status_code=status.HTTP_200_OK)
 def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
     """모니터링 일정 삭제."""
-    schedule = db.query(MonitorSchedule).filter(MonitorSchedule.id == schedule_id).first()
-    if not schedule:
-        raise HTTPException(status_code=404, detail="MonitorSchedule not found")
+    schedule = _get_coupang_schedule_or_404(schedule_id, db)
     db.delete(schedule)
     db.commit()
     return {"deleted": schedule_id}
+
+
+@router.get("/status", response_model=CoupangStatusSummary)
+def get_coupang_status(db: Session = Depends(get_db)):
+    """쿠팡 모니터링 상태 요약."""
+    stats = (
+        db.query(
+            func.count(MonitorSchedule.id).label("total_schedules"),
+            func.sum(
+                case((MonitorSchedule.is_enabled.is_(True), 1), else_=0)
+            ).label("enabled_schedules"),
+            func.sum(
+                case(
+                    (
+                        and_(
+                            MonitorSchedule.is_enabled.is_(True),
+                            MonitorSchedule.is_active.is_(True),
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("active_schedules"),
+        )
+        .join(BizItem, MonitorSchedule.biz_item_id == BizItem.id)
+        .join(Business, BizItem.business_id == Business.id)
+        .filter(Business.service_type == "coupang")
+        .first()
+    )
+
+    return CoupangStatusSummary(
+        total_schedules=int(stats.total_schedules or 0),
+        enabled_schedules=int(stats.enabled_schedules or 0),
+        active_schedules=int(stats.active_schedules or 0),
+    )

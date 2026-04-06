@@ -120,7 +120,94 @@ async def test_worker_uses_service_account_context():
         "biz_item_pk": 5,
     }
 
-    with patch.object(worker, "_extract_vendor_item_package_id", return_value="pkg456"):
+    mock_db = MagicMock()
+    mock_db.close = MagicMock()
+    mock_schedule_service = MagicMock()
+
+    with (
+        patch.object(worker, "_extract_vendor_item_package_id", return_value="pkg456"),
+        patch("app.worker.coupang_monitor_worker.schedule_service", mock_schedule_service),
+        patch("app.worker.coupang_monitor_worker.SessionLocal", return_value=mock_db),
+    ):
         await worker._check_schedule(ctx)
 
     mock_browser.get_context.assert_called_once_with(99)
+
+
+@pytest.mark.asyncio
+async def test_worker_passes_schedule_id_to_check_and_notify():
+    from app.worker.coupang_monitor_worker import CoupangMonitorWorker
+
+    mock_browser = AsyncMock()
+    mock_context = AsyncMock()
+    mock_page = AsyncMock()
+    mock_page.url = "https://trip.coupang.com/tp/products/123"
+    mock_context.pages = [mock_page]
+    mock_browser.get_context = AsyncMock(return_value=mock_context)
+
+    worker = CoupangMonitorWorker(browser_manager=mock_browser)
+    worker._monitor_service = AsyncMock()
+    worker._monitor_service.check_and_notify = AsyncMock(return_value=[])
+
+    ctx = {
+        "id": 7,
+        "item_biz_item_id": "123",
+        "date": "2026-04-10",
+        "service_account_id": 77,
+        "biz_item_pk": 5,
+    }
+
+    mock_db = MagicMock()
+    mock_db.close = MagicMock()
+    mock_schedule_service = MagicMock()
+
+    with (
+        patch.object(worker, "_extract_vendor_item_package_id", return_value="pkg456"),
+        patch("app.worker.coupang_monitor_worker.schedule_service", mock_schedule_service),
+        patch("app.worker.coupang_monitor_worker.SessionLocal", return_value=mock_db),
+    ):
+        await worker._check_schedule(ctx)
+
+    kwargs = worker._monitor_service.check_and_notify.call_args.kwargs
+    assert kwargs["schedule_id"] == 7
+
+
+@pytest.mark.asyncio
+async def test_worker_sets_active_true_false_around_check():
+    from app.worker.coupang_monitor_worker import CoupangMonitorWorker
+
+    mock_browser = AsyncMock()
+    mock_context = AsyncMock()
+    mock_page = AsyncMock()
+    mock_page.url = "https://trip.coupang.com/tp/products/123"
+    mock_context.pages = [mock_page]
+    mock_browser.get_context = AsyncMock(return_value=mock_context)
+
+    worker = CoupangMonitorWorker(browser_manager=mock_browser)
+    worker._monitor_service = AsyncMock()
+    worker._monitor_service.check_and_notify = AsyncMock(return_value=[])
+
+    ctx = {
+        "id": 8,
+        "item_biz_item_id": "123",
+        "date": "2026-04-10",
+        "service_account_id": 77,
+        "biz_item_pk": 5,
+    }
+
+    mock_db = MagicMock()
+    mock_db.close = MagicMock()
+    mock_schedule_service = MagicMock()
+
+    with (
+        patch.object(worker, "_extract_vendor_item_package_id", return_value="pkg456"),
+        patch("app.worker.coupang_monitor_worker.schedule_service", mock_schedule_service),
+        patch("app.worker.coupang_monitor_worker.SessionLocal", return_value=mock_db),
+    ):
+        await worker._check_schedule(ctx)
+
+    assert mock_schedule_service.set_active.call_count == 2
+    first_call = mock_schedule_service.set_active.call_args_list[0]
+    second_call = mock_schedule_service.set_active.call_args_list[1]
+    assert first_call.args[1] == 8 and first_call.args[2] is True
+    assert second_call.args[1] == 8 and second_call.args[2] is False

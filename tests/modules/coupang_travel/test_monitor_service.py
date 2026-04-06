@@ -2,7 +2,7 @@
 모니터링 서비스 테스트 (RIGHT-BICEP: R, B, I, C)
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, patch
 
 from app.modules.coupang_travel.services.api_client import VendorItem
 from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
@@ -95,3 +95,62 @@ async def test_check_and_notify_no_change():
 
     assert changes == []
     notification.send_notification_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_logs_event_with_schedule_id():
+    service, api_client, _ = make_service()
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)
+    ])
+
+    with patch("app.modules.coupang_travel.services.monitor_service.EventLogger.log_monitoring_event") as log_event:
+        await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page(), schedule_id=10)
+
+    assert log_event.call_count == 1
+    kwargs = log_event.call_args.kwargs
+    assert kwargs["schedule_id"] == 10
+    assert kwargs["status"] == "no_slots"
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_skips_logging_without_schedule_id():
+    service, api_client, _ = make_service()
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)
+    ])
+
+    with patch("app.modules.coupang_travel.services.monitor_service.EventLogger.log_monitoring_event") as log_event:
+        await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page(), schedule_id=None)
+
+    log_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_logs_error_on_api_failure_with_schedule_id():
+    service, api_client, _ = make_service()
+    api_client.fetch_vendor_items = AsyncMock(return_value=None)
+
+    with patch("app.modules.coupang_travel.services.monitor_service.EventLogger.log_monitoring_event") as log_event:
+        await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page(), schedule_id=11)
+
+    assert log_event.call_count == 1
+    kwargs = log_event.call_args.kwargs
+    assert kwargs["schedule_id"] == 11
+    assert kwargs["status"] == "error"
+    assert kwargs["slots_info"] is None
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_slots_info_not_double_serialized():
+    service, api_client, _ = make_service()
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=2)
+    ])
+
+    with patch("app.modules.coupang_travel.services.monitor_service.EventLogger.log_monitoring_event") as log_event:
+        await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page(), schedule_id=12)
+
+    kwargs = log_event.call_args.kwargs
+    assert isinstance(kwargs["slots_info"], list)
+    assert kwargs["slots_info"][0]["vendorItemName"] == "옵션A"
