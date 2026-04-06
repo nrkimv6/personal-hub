@@ -39,6 +39,13 @@
 - 커밋 스크립트 사용:
   `& "D:\work\project\tools\common\commit.ps1" "type: message"`
 
+## Skill Authoring Guardrail
+
+- 스킬 파일에 단일 파일 기준의 고정 설명/제한(예: 특정 파일 N줄 이하 유지, 특정 파일만 구조 강제) 작성 금지.
+- 예시 금지: `loop.py <= 220`, `commands.py <= 550` 같은 파일별 수치 임계값.
+- 파일 경로 명시는 작업 대상 지정 목적에 한해 허용한다.
+- 품질 기준은 파일 크기 숫자 대신 동작 계약, 테스트 검증, 실패/리스크 조건으로 작성한다.
+
 ## Troubleshooting
 
 - 통합 트러블슈팅: [`docs/dev-guide/troubleshooting.md`](docs/dev-guide/troubleshooting.md)
