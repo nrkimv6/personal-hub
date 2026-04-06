@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.modules.system.config import MANAGED_PROJECTS
-from app.modules.system.services.system_service import SystemService
+from app.modules.system.services.worker_service import WorkerService as SystemService
 
 
 # ============================================================
@@ -73,7 +73,7 @@ class TestGetWorkerStatus:
     """SystemService.get_worker_status() 단위 테스트"""
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_get_worker_status_no_watchdog_right(self, tmp_path):
         """R: watchdog_pid_file=None인 워커에서 반환값의 watchdog가 None인지 검증"""
@@ -99,7 +99,7 @@ class TestGetWorkerStatus:
                 }
             }
         }
-        with patch("app.modules.system.services.system_service.MANAGED_PROJECTS", fake_projects):
+        with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", fake_projects):
             svc = SystemService()
             result = self._run(svc.get_worker_status())
 
@@ -134,7 +134,7 @@ class TestGetWorkerStatus:
                 }
             }
         }
-        with patch("app.modules.system.services.system_service.MANAGED_PROJECTS", fake_projects):
+        with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", fake_projects):
             svc = SystemService()
             result = self._run(svc.get_worker_status())
 
@@ -163,7 +163,7 @@ class TestGetWorkerStatus:
                 }
             }
         }
-        with patch("app.modules.system.services.system_service.MANAGED_PROJECTS", fake_projects):
+        with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", fake_projects):
             svc = SystemService()
             result = self._run(svc.get_worker_status())
 

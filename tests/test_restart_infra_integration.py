@@ -17,7 +17,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.modules.system.services.system_service import SystemService
+from app.modules.system.services.worker_service import WorkerService as SystemService
 
 
 class TestRestartInfraIntegration:
@@ -68,7 +68,7 @@ class TestRestartInfraIntegration:
             with patch("app.shared.redis.client.RedisClient") as mock_client:
                 mock_client.get_client = AsyncMock(return_value=redis_mock)
                 svc = SystemService()
-                result = asyncio.get_event_loop().run_until_complete(svc.restart_infra(name))
+                result = asyncio.run(svc.restart_infra(name))
 
             assert result["success"] is True, f"{name}: {result['message']}"
 
@@ -94,7 +94,7 @@ class TestRestartInfraIntegration:
 
         svc = SystemService()
         for name in worker_names:
-            result = asyncio.get_event_loop().run_until_complete(svc.restart_infra(name))
+            result = asyncio.run(svc.restart_infra(name))
             assert result["success"] is False, f"worker tier '{name}'이 infra restart 통과됨"
 
     def test_get_worker_status_includes_infra_command_listener(self, tmp_path):
@@ -105,9 +105,9 @@ class TestRestartInfraIntegration:
         fake["monitor-page"]["path"] = str(tmp_path)
         (tmp_path / ".pids").mkdir(exist_ok=True)
 
-        with patch("app.modules.system.services.system_service.MANAGED_PROJECTS", fake):
+        with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", fake):
             svc = SystemService()
-            result = asyncio.get_event_loop().run_until_complete(svc.get_worker_status())
+            result = asyncio.run(svc.get_worker_status())
 
         names = [e["name"] for e in result if e["project"] == "monitor-page"]
         assert "infra_command_listener" in names, \

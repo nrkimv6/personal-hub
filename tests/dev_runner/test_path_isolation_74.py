@@ -44,7 +44,7 @@ def test_external_plan_path_accepted(monkeypatch):
 
     # "Path not in workspace" 에러 없이 정상 반환
     try:
-        result = asyncio.get_event_loop().run_until_complete(run())
+        result = asyncio.run(run())
     except Exception as e:
         if "Path not in workspace" in str(e):
             pytest.fail(f"외부 경로 거부됨 (Path not in workspace): {e}")

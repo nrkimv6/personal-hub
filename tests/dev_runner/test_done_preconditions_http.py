@@ -44,7 +44,7 @@ class TestDonePreconditionsHttp:
         result_coro = svc.run_done(str(plan_path))
 
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(result_coro)
+        result = asyncio.run(result_coro)
 
         assert result["success"] is False
         assert "Phase R" in result["message"]
@@ -87,7 +87,7 @@ class TestDonePreconditionsHttp:
              patch("app.modules.dev_runner.services.plan_service._publish_log"), \
              patch("app.modules.dev_runner.services.plan_service._get_redis", return_value=MagicMock()):
             import asyncio
-            result = asyncio.get_event_loop().run_until_complete(svc.run_done(str(plan_path)))
+            result = asyncio.run(svc.run_done(str(plan_path)))
 
         assert result["success"] is True
 
@@ -107,7 +107,7 @@ class TestDonePreconditionsHttp:
         plan_path.write_text(original, encoding="utf-8")
 
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(svc.run_done(str(plan_path)))
+        result = asyncio.run(svc.run_done(str(plan_path)))
 
         assert result["success"] is False
         assert "archive target resolve failed" in result["message"]

@@ -53,7 +53,7 @@ def test_trigger_roundtrip_redis(monkeypatch):
             svc.cleanup_stale_runners = AsyncMock(return_value={"cleaned_active": 0, "cleaned_recent": 0, "bugs": 0, "total": 0})
             await svc.start_dev_runner(RunRequest(trigger="test:trigger_source", plan_file="test.md", dry_run=True, test_source="test_trigger_roundtrip_redis"))
 
-        asyncio.get_event_loop().run_until_complete(run_test())
+        asyncio.run(run_test())
 
     # pushed_commands에 command가 있어야 함
     assert len(pushed_commands) > 0, "command가 Redis에 push되지 않음"

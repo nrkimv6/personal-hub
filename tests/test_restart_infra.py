@@ -17,11 +17,11 @@ import pytest
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.modules.system.services.system_service import SystemService
+from app.modules.system.services.worker_service import WorkerService as SystemService
 
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # ─── restart_infra ────────────────────────────────────────────────────────────
@@ -175,9 +175,9 @@ class TestGetWorkerStatusTier:
         fake["monitor-page"]["path"] = str(tmp_path)
         (tmp_path / ".pids").mkdir(exist_ok=True)
 
-        with patch("app.modules.system.services.system_service.MANAGED_PROJECTS", fake):
+        with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", fake):
             svc = SystemService()
-            result = asyncio.get_event_loop().run_until_complete(svc.get_worker_status())
+            result = asyncio.run(svc.get_worker_status())
 
         monitor_entries = [e for e in result if e["project"] == "monitor-page"]
         assert len(monitor_entries) > 0
@@ -200,9 +200,9 @@ class TestGetWorkerStatusTier:
             "worker_pid_file": None,
         })
 
-        with patch("app.modules.system.services.system_service.MANAGED_PROJECTS", fake):
+        with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", fake):
             svc = SystemService()
-            result = asyncio.get_event_loop().run_until_complete(svc.get_worker_status())
+            result = asyncio.run(svc.get_worker_status())
 
         no_tier = next((e for e in result if e["name"] == "no_tier_worker"), None)
         assert no_tier is not None
@@ -224,7 +224,7 @@ class TestRestartWorkerExcludesInfra:
         # worker tier PID 파일 생성 (통합 워커)
         (pid_dir / "unified_worker_admin.pid").write_text(str(os.getpid()))
 
-        with patch("app.modules.system.services.system_service.MANAGED_PROJECTS", fake):
+        with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", fake):
             svc = SystemService()
             killed_labels = []
             original_kill = svc._kill_pid_file
@@ -234,7 +234,7 @@ class TestRestartWorkerExcludesInfra:
                 return False, f"mock: {label}"
 
             svc._kill_pid_file = tracking_kill
-            asyncio.get_event_loop().run_until_complete(svc.restart_worker("all"))
+            asyncio.run(svc.restart_worker("all"))
 
         # infra tier 항목이 kill 대상에 포함되지 않아야 함
         infra_items = [

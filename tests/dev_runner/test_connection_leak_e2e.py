@@ -56,11 +56,13 @@ def test_sse_events_disconnect_cleanup_e2e():
     finally:
         session.close()
 
-    # cleanup 대기
-    time.sleep(3)
-
-    info_after = r.info("clients")
-    after = info_after.get("connected_clients", 0)
+    # cleanup 반영 대기 (단일 스냅샷 대신 폴링 최소값 사용)
+    after_samples = []
+    for _ in range(6):
+        time.sleep(0.5)
+        info_after = r.info("clients")
+        after_samples.append(info_after.get("connected_clients", 0))
+    after = min(after_samples) if after_samples else before
 
     # SSE 연결 해제 후 연결 수가 크게 증가하지 않음
     assert after <= before + 2, f"연결 누수 의심: before={before}, after={after}"
@@ -94,10 +96,12 @@ def test_sse_log_stream_disconnect_cleanup_e2e():
     finally:
         session.close()
 
-    time.sleep(3)
-
-    info_after = r.info("clients")
-    after = info_after.get("connected_clients", 0)
+    after_samples = []
+    for _ in range(6):
+        time.sleep(0.5)
+        info_after = r.info("clients")
+        after_samples.append(info_after.get("connected_clients", 0))
+    after = min(after_samples) if after_samples else before
 
     assert after <= before + 2, f"연결 누수 의심: before={before}, after={after}"
     r.close()

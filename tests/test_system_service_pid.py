@@ -30,7 +30,7 @@ class TestReadPidStatus:
         self.service = SystemService()
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_read_pid_status_with_bom(self, tmp_path):
         """R(Right): BOM 포함 PID 파일 → 정상 파싱"""
@@ -96,7 +96,7 @@ class TestKillPidFile:
         self.service = SystemService()
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_kill_pid_file_with_bom(self, tmp_path):
         """R(Right): BOM 포함 PID 파일 → 파싱 성공 (taskkill subprocess mock)"""
@@ -139,7 +139,7 @@ class TestReadPidStatusIntegration:
         self.service = SystemService()
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_read_pid_status_bom_real_file(self, tmp_path):
         """T3: 실제 tmp에 BOM 포함 PID 파일 생성 → _read_pid_status 통합 검증"""
@@ -162,7 +162,7 @@ class TestKillPidFileIntegration:
         self.service = SystemService()
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_kill_pid_file_bom_real(self, tmp_path):
         """T3: 실제 tmp 파일에 BOM PID 기록 → _kill_pid_file 파싱 성공 확인 (subprocess mock)"""

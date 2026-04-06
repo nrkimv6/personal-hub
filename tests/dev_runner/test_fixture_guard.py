@@ -211,7 +211,7 @@ class TestGuardNewInstance:
 
         # guard가 pytest.fail()을 호출하면 Failed 예외가 발생함
         with pytest.raises(Failed) as exc_info:
-            asyncio.get_event_loop().run_until_complete(svc.start_dev_runner(req))
+            asyncio.run(svc.start_dev_runner(req))
 
         assert "test_source" in str(exc_info.value), (
             f"오류 메시지에 'test_source' 포함 기대. 실제: {exc_info.value}"
@@ -254,7 +254,7 @@ class TestGuardUserTriggerBlocked:
 
         # guard가 pytest.fail()을 호출하면 Failed 예외가 발생함
         with pytest.raises(Failed) as exc_info:
-            asyncio.get_event_loop().run_until_complete(svc.start_dev_runner(req))
+            asyncio.run(svc.start_dev_runner(req))
 
         assert "trigger" in str(exc_info.value), (
             f"오류 메시지에 'trigger' 포함 기대. 실제: {exc_info.value}"
@@ -280,7 +280,7 @@ class TestGuardUserTriggerBlocked:
         assert req.trigger == "user:all", "전제 조건: trigger가 'user:all'이어야 함"
 
         with pytest.raises(Failed) as exc_info:
-            asyncio.get_event_loop().run_until_complete(svc.start_dev_runner(req))
+            asyncio.run(svc.start_dev_runner(req))
 
         assert "trigger" in str(exc_info.value), (
             f"오류 메시지에 'trigger' 포함 기대. 실제: {exc_info.value}"

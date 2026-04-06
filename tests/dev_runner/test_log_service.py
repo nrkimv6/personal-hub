@@ -605,7 +605,7 @@ import asyncio as _asyncio
 
 
 def _run_async(coro):
-    return _asyncio.get_event_loop().run_until_complete(coro)
+    return _asyncio.run(coro)
 
 
 def _make_mock_pubsub_completed():

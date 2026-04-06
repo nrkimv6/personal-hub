@@ -242,8 +242,7 @@ def real_redis_client():
     yield client
     # 정리
     try:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(client.aclose())
+        asyncio.run(client.aclose())
     except Exception:
         pass
 

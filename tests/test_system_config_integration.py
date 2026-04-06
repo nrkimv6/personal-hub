@@ -15,14 +15,15 @@ import pytest
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.modules.system.services.system_service import SystemService
+from app.modules.system.services.worker_service import WorkerService
+from app.modules.system.services.nssm_service import NssmService
 
 
 class TestSleepNowPidDetectionIntegration:
     """sleep-now PID 감지 통합 테스트 — 실제 파일시스템 사용"""
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_integration_sleepnow_pid_detection(self, tmp_path):
         """
@@ -42,8 +43,8 @@ class TestSleepNowPidDetectionIntegration:
         fake_projects = copy.deepcopy(MANAGED_PROJECTS)
         fake_projects["sleep-now"]["path"] = str(tmp_path)
 
-        with patch("app.modules.system.services.system_service.MANAGED_PROJECTS", fake_projects):
-            svc = SystemService()
+        with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", fake_projects):
+            svc = WorkerService()
             result = self._run(svc.get_worker_status())
 
         # sleep-now session_worker가 결과에 포함되어야 함
@@ -60,10 +61,10 @@ class TestSleepNowPidDetectionIntegration:
     def test_integration_startup_prefix_finds_lnk(self):
         """
         T3: 실제 startup 디렉토리에서 SleepNow- prefix로 시작하는 .lnk 파일 존재 여부를
-        SystemService().get_startup_programs() 호출로 검증.
+        NssmService().get_startup_programs() 호출로 검증.
         실제 파일시스템 사용, mock 없음.
         """
-        svc = SystemService()
+        svc = NssmService()
         result = self._run(svc.get_startup_programs())
 
         # SleepNow- prefix 시작 프로그램이 등록되어 있어야 함
@@ -83,7 +84,7 @@ class TestGetNssmServicesUnregisteredIntegration:
     """get_nssm_services() 미등록 sentinel 통합 테스트"""
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_get_nssm_services_includes_sentinel_for_unregistered(self):
         """
@@ -92,7 +93,7 @@ class TestGetNssmServicesUnregisteredIntegration:
         """
         from unittest.mock import AsyncMock, patch as mock_patch
 
-        svc = SystemService()
+        svc = NssmService()
 
         async def fake_wait_for(coro, timeout):
             return (b"", b"")
