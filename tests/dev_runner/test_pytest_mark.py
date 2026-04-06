@@ -68,10 +68,14 @@ class TestPytestMarkInfra:
         assert "test_http_log_stream_connected_event" in result.stdout
 
     def test_log_stream_live_file_not_collected_by_http(self):
-        """TC-Boundary: test_log_stream_http.py는 -m http에서 무선택이어야 한다."""
+        """TC-Boundary: 혼합 마커 파일에서 -m http는 http 테스트만 수집하고 http_live 전용은 제외한다."""
         result = _run_collect_only("tests/dev_runner/test_log_stream_http.py", "http")
         combined = result.stdout + result.stderr
-        assert "no tests collected" in combined, combined
+        assert result.returncode == 0, combined
+        assert "test_http_log_stream_commit_failed_keeps_reason_and_detail" in combined, combined
+        assert "test_http_events_stream_fallback_log_delivery" in combined, combined
+        # http_live-only 실서버 케이스는 -m http에서 수집되면 안 된다.
+        assert "test_http_log_stream_connected_event" not in combined, combined
 
     def test_boundary_http_live_excluded_from_default(self):
         """TC-Boundary: addopts에 'not http_live' 포함 → 기본 pytest 실행 시 http_live 제외"""

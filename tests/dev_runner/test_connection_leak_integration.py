@@ -1,5 +1,6 @@
 """Redis 연결 누수 통합 테스트 — 실제 Redis에서 pubsub cleanup 확인."""
 import asyncio
+import uuid
 
 import pytest
 import redis.asyncio as aioredis
@@ -20,34 +21,31 @@ def _redis_available() -> bool:
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _redis_available(), reason="Redis not available")
 async def test_pubsub_cleanup_integration_real_redis():
-    """실제 Redis에 pubsub 구독 → generator aclose → CLIENT LIST로 해당 구독 해제 확인."""
+    """실제 Redis에 pubsub 구독 후 unsubscribe/aclose 시 채널 subscriber가 0으로 복구되는지 확인."""
     r = aioredis.Redis(host="localhost", port=6379, decode_responses=True)
-    channel = "test:connection-leak:cleanup"
-
-    # 구독 전 클라이언트 수
-    info_before = await r.info("clients")
-    before = info_before.get("connected_clients", 0)
+    channel = f"test:connection-leak:cleanup:{uuid.uuid4().hex}"
 
     # pubsub 구독
     pubsub = r.pubsub()
     await pubsub.subscribe(channel)
 
-    # 구독 중 클라이언트 수 확인 (pubsub은 별도 연결)
-    info_during = await r.info("clients")
-    during = info_during.get("connected_clients", 0)
-    assert during >= before  # pubsub 연결이 추가됨
+    # 구독 중에는 해당 채널 subscriber가 1 이상이어야 함
+    during_numsub = (await r.pubsub_numsub(channel))[0][1]
+    assert during_numsub >= 1
 
     # 정리
     await pubsub.unsubscribe(channel)
     await pubsub.aclose()
 
-    # 약간의 대기 후 클라이언트 수 확인
-    await asyncio.sleep(0.5)
-    info_after = await r.info("clients")
-    after = info_after.get("connected_clients", 0)
+    # unsubscribe 반영이 비동기적으로 지연될 수 있어 짧게 폴링
+    after_numsub = None
+    for _ in range(10):
+        after_numsub = (await r.pubsub_numsub(channel))[0][1]
+        if after_numsub == 0:
+            break
+        await asyncio.sleep(0.2)
 
-    # pubsub 연결이 해제되어 during보다 감소 (또는 동일)
-    assert after <= during
+    assert after_numsub == 0, f"unsubscribe/aclose 후 subscriber 잔존: channel={channel}, numsub={after_numsub}"
 
     await r.aclose()
 
