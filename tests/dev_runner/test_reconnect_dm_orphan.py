@@ -200,3 +200,92 @@ class TestReconnectOrphanScan:
 
         mock_cleanup.assert_called()
         mock_thread_cls.assert_not_called()
+
+
+# ──────────────────────────────────────────────
+# stopped+user 보존 계약 TC (Phase 2-1)
+# ──────────────────────────────────────────────
+
+class TestReconnectStoppedUserPreservation:
+    """_reconnect_surviving_runners() — stopped+user 러너 cleanup 스킵 보존 계약"""
+
+    def _make_redis_stopped_user(self, runner_id: str, trigger: str):
+        """stopped+trigger runner가 ACTIVE에 남아있는 상황 시뮬레이션"""
+        redis = MagicMock()
+        redis.smembers.return_value = {runner_id}
+
+        def redis_get(key):
+            if key == f"{RUNNER_KEY_PREFIX}:{runner_id}:status":
+                return "stopped"
+            if key == f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger":
+                return trigger
+            return None
+
+        redis.get.side_effect = redis_get
+        return redis
+
+    def _make_redis_orphan_stopped_user(self, orphan_id: str, trigger: str):
+        """orphan stopped+trigger runner (active_runners에 없음) 시뮬레이션"""
+        redis = MagicMock()
+        redis.smembers.return_value = set()  # active_runners에 없음
+
+        def redis_get(key):
+            if key == f"{RUNNER_KEY_PREFIX}:{orphan_id}:status":
+                return "stopped"
+            if key == f"{RUNNER_KEY_PREFIX}:{orphan_id}:trigger":
+                return trigger
+            return None
+
+        redis.get.side_effect = redis_get
+
+        # orphan scan: runners:*:status 키 스캔 결과 시뮬레이션
+        redis.scan_iter.return_value = iter(
+            [f"{RUNNER_KEY_PREFIX}:{orphan_id}:status"]
+        )
+        return redis
+
+    def test_active_stopped_user_skips_cleanup(self):
+        """R: active_runners에 있는 stopped+user 러너 → _cleanup_process_state 미호출"""
+        cl = _load_listener()
+        pu = _get_process_utils()
+        _reset_shared_state()
+        runner_id = "su-active-001"
+        redis = self._make_redis_stopped_user(runner_id, trigger="user")
+
+        with patch.object(pu, "_cleanup_process_state") as mock_cleanup:
+            cl._reconnect_surviving_runners(redis)
+
+        mock_cleanup.assert_not_called(), (
+            "stopped+user runner가 cleanup됨. dismiss 전까지 보존되어야 한다."
+        )
+
+    def test_active_stopped_user_all_skips_cleanup(self):
+        """R: active_runners에 있는 stopped+user:all 러너 → cleanup 스킵"""
+        cl = _load_listener()
+        pu = _get_process_utils()
+        _reset_shared_state()
+        runner_id = "su-all-active-002"
+        redis = self._make_redis_stopped_user(runner_id, trigger="user:all")
+
+        with patch.object(pu, "_cleanup_process_state") as mock_cleanup:
+            cl._reconnect_surviving_runners(redis)
+
+        mock_cleanup.assert_not_called()
+
+    def test_orphan_stopped_user_skips_cleanup(self):
+        """R: orphan scan에서 발견된 stopped+user orphan 러너 → cleanup 스킵"""
+        cl = _load_listener()
+        pu = _get_process_utils()
+        _reset_shared_state()
+        orphan_id = "su-orphan-003"
+        redis = self._make_redis_orphan_stopped_user(orphan_id, trigger="user")
+
+        with patch.object(pu, "_cleanup_process_state") as mock_cleanup, \
+             patch("threading.Thread"):
+            cl._reconnect_surviving_runners(redis)
+
+        # orphan scan에서도 cleanup 호출 없어야 함
+        for call_args in mock_cleanup.call_args_list:
+            assert orphan_id not in str(call_args), (
+                f"orphan stopped+user runner '{orphan_id}'가 cleanup됨."
+            )

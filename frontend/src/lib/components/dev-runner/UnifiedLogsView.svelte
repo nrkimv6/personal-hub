@@ -130,7 +130,13 @@
 					<span class="inline-block w-2 h-2 rounded-full flex-shrink-0 {item.run.status === 'running' ? 'bg-status-running pulse-dot' : item.run.status === 'completed' ? 'bg-muted-foreground' : 'bg-status-queued'}"></span>
 					<!-- plan 파일명 -->
 					<span class="text-[11px] font-mono font-semibold {idx === 0 ? 'text-gray-200' : 'text-gray-500'}">
-						{item.run.plan_file === '__ALL_PLANS__' || item.run.plan_file === 'ALL' ? '전체 실행' : item.run.plan_file ? item.run.plan_file.split(/[\\/]/).pop() : '(알 수 없음)'}
+						{item.run.plan_file === '__ALL_PLANS__' || item.run.plan_file === 'ALL'
+							? '전체 실행'
+							: item.run.plan_file
+								? item.run.plan_file.split(/[\\/]/).pop()
+								: item.run.trigger === 'user:all'
+									? '전체 실행'
+									: '(알 수 없음)'}
 					</span>
 					<!-- trigger 배지 -->
 					{#if item.run.trigger}

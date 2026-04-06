@@ -52,6 +52,7 @@ export interface RunnerListItem {
 	orphan: boolean;
 	exit_reason?: string | null;
 	error?: string | null;
+	display_plan_name?: string | null;
 }
 
 export interface PlanProgressResponse {

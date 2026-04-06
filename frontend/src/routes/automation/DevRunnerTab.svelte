@@ -126,6 +126,7 @@
 		orphan?: boolean;
 		exit_reason?: string | null;
 		error?: string | null;
+		display_plan_name?: string | null;
 	}
 
 	interface RunnerSource {
@@ -143,6 +144,7 @@
 		exit_reason?: string | null;
 		error?: string | null;
 		visible?: boolean;
+		display_plan_name?: string | null;
 	}
 
 	function createRunnerTab(runner: RunnerSource): RunnerTab {
@@ -157,6 +159,7 @@
 			orphan: runner.orphan ?? false,
 			exit_reason: runner.exit_reason ?? undefined,
 			error: runner.error ?? undefined,
+			display_plan_name: runner.display_plan_name ?? null,
 		};
 	}
 
@@ -978,6 +981,7 @@
 										orphan={tab.orphan}
 										exitReason={tab.exit_reason}
 										error={tab.error}
+										displayPlanName={tab.display_plan_name}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
 										onRestart={() => handleRestart(tab)}

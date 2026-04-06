@@ -270,3 +270,77 @@ class TestE2EScenario5:
             result = await executor.stop_all_runners()
 
         assert result == {"stopped": 0}
+
+
+# ──────────────────────────────────────────────
+# T3: 종료 후 미확인 보존 → dismiss 제거 시나리오
+# ──────────────────────────────────────────────
+
+class TestE2EScenario6StoppedUserDismiss:
+    """시나리오 6 (T3): 종료 후 미확인 상태 유지 → dismiss 후 제거"""
+
+    @pytest.mark.asyncio
+    async def test_stopped_user_preserved_until_dismiss(self, executor):
+        """stopped+user runner는 cleanup_stale_runners() 후에도 보존되고 dismiss 후에만 제거된다"""
+        import time
+        import fakeredis.aioredis as fake_aioredis
+        from app.modules.dev_runner.services.runner_state import RunnerState
+        from app.modules.dev_runner.services.redis_connection import (
+            RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY,
+        )
+
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        runner_id = "e2e-s6-stopped-user"
+
+        def runner_key(rid, suffix):
+            return f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}"
+
+        # TTL 초과 score(25시간 전)로 등록
+        score = time.time() - 90000
+        await fake_r.zadd(RECENT_RUNNERS_KEY, {runner_id: score})
+        await fake_r.set(runner_key(runner_id, "status"), "stopped")
+        await fake_r.set(runner_key(runner_id, "trigger"), "user")
+        await fake_r.set(runner_key(runner_id, "plan_file"), "docs/plan/2026-04-06_fix.md")
+
+        state = RunnerState(fake_r, runner_key, None, None)
+
+        # Step 1: cleanup_stale_runners() 실행 → user stopped는 보존
+        result = await state.cleanup_stale_runners()
+        assert await fake_r.zscore(RECENT_RUNNERS_KEY, runner_id) is not None, \
+            "cleanup_stale 후에도 user stopped runner가 RECENT에 남아있어야 한다"
+        assert result["preserved_recent"] >= 1
+
+        # Step 2: dismiss_runner() 호출 → hard-delete
+        dismiss_result = await state.dismiss_runner(runner_id)
+        assert dismiss_result is True
+        assert await fake_r.zscore(RECENT_RUNNERS_KEY, runner_id) is None, \
+            "dismiss 후 RECENT에서 제거되어야 한다"
+
+    @pytest.mark.asyncio
+    async def test_multiple_cleanup_cycles_preserve_user_stopped(self, executor):
+        """cleanup_stale_runners() 반복 실행 시 user stopped runner는 계속 보존된다"""
+        import time
+        import fakeredis.aioredis as fake_aioredis
+        from app.modules.dev_runner.services.runner_state import RunnerState
+        from app.modules.dev_runner.services.redis_connection import (
+            RUNNER_KEY_PREFIX, RECENT_RUNNERS_KEY,
+        )
+
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        runner_id = "e2e-s6-multi-cycle"
+
+        def runner_key(rid, suffix):
+            return f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}"
+
+        score = time.time() - 90000
+        await fake_r.zadd(RECENT_RUNNERS_KEY, {runner_id: score})
+        await fake_r.set(runner_key(runner_id, "status"), "stopped")
+        await fake_r.set(runner_key(runner_id, "trigger"), "user")
+
+        state = RunnerState(fake_r, runner_key, None, None)
+
+        # 3회 반복 cleanup
+        for cycle in range(3):
+            result = await state.cleanup_stale_runners()
+            assert await fake_r.zscore(RECENT_RUNNERS_KEY, runner_id) is not None, \
+                f"cycle {cycle+1}: user stopped runner가 제거됨. 보존되어야 한다."
