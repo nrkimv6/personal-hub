@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import time
 from collections.abc import Mapping
 from datetime import datetime
@@ -33,6 +34,10 @@ def build_vendor_items_url(product_id: str) -> str:
 
 def build_product_url(product_id: str) -> str:
     return f"https://trip.coupang.com/tp/products/{product_id}"
+
+
+def build_legacy_product_url(product_id: str) -> str:
+    return f"https://trip.coupang.com/products/{product_id}"
 
 
 def load_coupang_cookies_from_storage_state(storage_state_path: Path) -> Dict[str, str]:
@@ -106,6 +111,33 @@ def summarize_vendor_items_response(payload: Any) -> Dict[str, Any]:
     return summary
 
 
+def extract_vendor_item_package_ids_from_html(html: str) -> List[str]:
+    """Extract candidate vendorItemPackageId values from product page HTML."""
+    patterns = (
+        r'vendorItemPackageId"\s*:\s*"?(?P<id>\d+)"?',
+        r'vendorItemPackageIdToString"\s*:\s*"?(?P<id>\d+)"?',
+    )
+    found: List[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, html):
+            value = match.group("id")
+            if value:
+                found.append(value)
+    return sorted(set(found))
+
+
+def summarize_product_page_html(html: str) -> Dict[str, Any]:
+    return {
+        "html_length": len(html),
+        "contains_vendorItemPackageId": "vendorItemPackageId" in html,
+        "contains_saleStatus": "saleStatus" in html,
+        "contains_stockCount": "stockCount" in html,
+        "contains_travelItems": "travelItems" in html,
+        "contains_vendorItems": "vendorItems" in html,
+        "vendor_item_package_ids": extract_vendor_item_package_ids_from_html(html),
+    }
+
+
 def _safe_parse_json(text: str, content_type: str) -> Optional[Any]:
     if not text:
         return None
@@ -149,11 +181,13 @@ def _build_result(
     raw_text: str,
     error: Optional[str],
     response_headers: Dict[str, str],
+    attempt: int = 1,
 ) -> Dict[str, Any]:
     summary = summarize_vendor_items_response(parsed_json)
     return {
         "method": method,
         "select_date": select_date,
+        "attempt": attempt,
         "elapsed_ms": elapsed_ms,
         "status_code": status_code,
         "ok": ok,
@@ -185,6 +219,7 @@ async def probe_httpx(
     select_date: str,
     timeout_sec: float,
     cookies: Optional[Dict[str, str]],
+    attempt: int = 1,
 ) -> Dict[str, Any]:
     headers = _base_headers(product_id)
     payload = {
@@ -213,6 +248,7 @@ async def probe_httpx(
             raw_text=text,
             error=None,
             response_headers=_pick_interest_headers(resp.headers),
+            attempt=attempt,
         )
     except Exception as exc:  # pylint: disable=broad-except
         elapsed = int((time.perf_counter() - start) * 1000)
@@ -227,7 +263,43 @@ async def probe_httpx(
             raw_text="",
             error=f"{type(exc).__name__}: {exc}",
             response_headers={},
+            attempt=attempt,
         )
+
+
+async def probe_product_page_http(*, product_id: str, timeout_sec: float) -> Dict[str, Any]:
+    """Probe product page URL patterns and extract HTML-level markers."""
+    tp_url = build_product_url(product_id)
+    legacy_url = build_legacy_product_url(product_id)
+    result: Dict[str, Any] = {
+        "tp_url": {"url": tp_url, "status_code": None, "content_type": "", "location": None},
+        "legacy_url": {"url": legacy_url, "status_code": None, "content_type": "", "location": None},
+        "html_summary": None,
+        "error": None,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=False) as client:
+            tp_resp = await client.get(tp_url)
+            legacy_resp = await client.get(legacy_url)
+
+        result["tp_url"] = {
+            "url": tp_url,
+            "status_code": tp_resp.status_code,
+            "content_type": tp_resp.headers.get("content-type", ""),
+            "location": tp_resp.headers.get("location"),
+        }
+        result["legacy_url"] = {
+            "url": legacy_url,
+            "status_code": legacy_resp.status_code,
+            "content_type": legacy_resp.headers.get("content-type", ""),
+            "location": legacy_resp.headers.get("location"),
+        }
+        if tp_resp.is_success:
+            result["html_summary"] = summarize_product_page_html(tp_resp.text)
+    except Exception as exc:  # pylint: disable=broad-except
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return result
 
 
 async def probe_playwright_fetch(
@@ -236,6 +308,7 @@ async def probe_playwright_fetch(
     product_id: str,
     vendor_item_package_id: str,
     select_date: str,
+    attempt: int = 1,
 ) -> Dict[str, Any]:
     headers = _base_headers(product_id)
     payload = {
@@ -304,7 +377,24 @@ async ({ url, headers, payload }) => {
 """
 
     start = time.perf_counter()
-    raw = await page.evaluate(script, {"url": url, "headers": headers, "payload": payload})
+    try:
+        raw = await page.evaluate(script, {"url": url, "headers": headers, "payload": payload})
+    except Exception as exc:  # pylint: disable=broad-except
+        elapsed = int((time.perf_counter() - start) * 1000)
+        return _build_result(
+            method="playwright_fetch",
+            select_date=select_date,
+            elapsed_ms=elapsed,
+            status_code=None,
+            ok=False,
+            content_type="",
+            parsed_json=None,
+            raw_text="",
+            error=f"{type(exc).__name__}: {exc}",
+            response_headers={},
+            attempt=attempt,
+        )
+
     elapsed = int((time.perf_counter() - start) * 1000)
     if raw.get("error"):
         return _build_result(
@@ -318,6 +408,7 @@ async ({ url, headers, payload }) => {
             raw_text=str(raw.get("text", "")),
             error=str(raw.get("error")),
             response_headers=dict(raw.get("interestHeaders", {}) or {}),
+            attempt=attempt,
         )
     return _build_result(
         method="playwright_fetch",
@@ -330,6 +421,7 @@ async ({ url, headers, payload }) => {
         raw_text=str(raw.get("text", "")),
         error=None,
         response_headers=dict(raw.get("interestHeaders", {}) or {}),
+        attempt=attempt,
     )
 
 
@@ -339,6 +431,7 @@ async def probe_playwright_context_request(
     product_id: str,
     vendor_item_package_id: str,
     select_date: str,
+    attempt: int = 1,
 ) -> Dict[str, Any]:
     headers = _base_headers(product_id)
     payload = {
@@ -366,6 +459,7 @@ async def probe_playwright_context_request(
             raw_text=text,
             error=None,
             response_headers=_pick_interest_headers(resp.headers),
+            attempt=attempt,
         )
     except Exception as exc:  # pylint: disable=broad-except
         elapsed = int((time.perf_counter() - start) * 1000)
@@ -380,11 +474,12 @@ async def probe_playwright_context_request(
             raw_text="",
             error=f"{type(exc).__name__}: {exc}",
             response_headers={},
+            attempt=attempt,
         )
 
 
 def _default_output_path() -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     return Path("logs") / "coupang-feasibility" / f"probe_{timestamp}.json"
 
 
@@ -410,18 +505,31 @@ async def run_probe(args: argparse.Namespace) -> Dict[str, Any]:
         cookies = load_coupang_cookies_from_storage_state(Path(args.storage_state))
 
     all_results: List[Dict[str, Any]] = []
+    page_probe: Optional[Dict[str, Any]] = None
+
+    if not args.skip_page_probe:
+        page_probe = await probe_product_page_http(
+            product_id=args.product_id,
+            timeout_sec=args.timeout_sec,
+        )
 
     for select_date in args.dates:
-        if "httpx" in methods:
-            all_results.append(
-                await probe_httpx(
-                    product_id=args.product_id,
-                    vendor_item_package_id=args.vendor_item_package_id,
-                    select_date=select_date,
-                    timeout_sec=args.timeout_sec,
-                    cookies=cookies,
+        for attempt in range(1, args.repeat + 1):
+            if "httpx" in methods:
+                all_results.append(
+                    await probe_httpx(
+                        product_id=args.product_id,
+                        vendor_item_package_id=args.vendor_item_package_id,
+                        select_date=select_date,
+                        timeout_sec=args.timeout_sec,
+                        cookies=cookies,
+                        attempt=attempt,
+                    )
                 )
-            )
+            if args.interval_sec > 0 and attempt < args.repeat and not any(
+                m.startswith("playwright") for m in methods
+            ):
+                await asyncio.sleep(args.interval_sec)
 
     needs_playwright = any(m.startswith("playwright") for m in methods)
     if needs_playwright:
@@ -439,24 +547,29 @@ async def run_probe(args: argparse.Namespace) -> Dict[str, Any]:
 
             try:
                 for select_date in args.dates:
-                    if "playwright_fetch" in methods:
-                        all_results.append(
-                            await probe_playwright_fetch(
-                                page=page,
-                                product_id=args.product_id,
-                                vendor_item_package_id=args.vendor_item_package_id,
-                                select_date=select_date,
+                    for attempt in range(1, args.repeat + 1):
+                        if "playwright_fetch" in methods:
+                            all_results.append(
+                                await probe_playwright_fetch(
+                                    page=page,
+                                    product_id=args.product_id,
+                                    vendor_item_package_id=args.vendor_item_package_id,
+                                    select_date=select_date,
+                                    attempt=attempt,
+                                )
                             )
-                        )
-                    if "playwright_context_request" in methods:
-                        all_results.append(
-                            await probe_playwright_context_request(
-                                context=context,
-                                product_id=args.product_id,
-                                vendor_item_package_id=args.vendor_item_package_id,
-                                select_date=select_date,
+                        if "playwright_context_request" in methods:
+                            all_results.append(
+                                await probe_playwright_context_request(
+                                    context=context,
+                                    product_id=args.product_id,
+                                    vendor_item_package_id=args.vendor_item_package_id,
+                                    select_date=select_date,
+                                    attempt=attempt,
+                                )
                             )
-                        )
+                        if args.interval_sec > 0 and attempt < args.repeat:
+                            await asyncio.sleep(args.interval_sec)
             finally:
                 await context.close()
                 await browser.close()
@@ -468,6 +581,9 @@ async def run_probe(args: argparse.Namespace) -> Dict[str, Any]:
         "dates": args.dates,
         "methods": methods,
         "storage_state": args.storage_state or None,
+        "repeat": args.repeat,
+        "interval_sec": args.interval_sec,
+        "page_probe": page_probe,
         "results": all_results,
         "analysis": _build_analysis(all_results),
     }
@@ -499,6 +615,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--storage-state", help="Path to Playwright storage_state JSON (optional)")
     parser.add_argument("--headed", action="store_true", help="Run Playwright in headed mode")
     parser.add_argument("--skip-goto", action="store_true", help="Skip page.goto before browser probes")
+    parser.add_argument("--skip-page-probe", action="store_true", help="Skip product page URL/HTML probe")
+    parser.add_argument("--repeat", type=int, default=1, help="Repeat count per date")
+    parser.add_argument("--interval-sec", type=float, default=0.0, help="Sleep seconds between repeats")
     parser.add_argument("--timeout-sec", type=float, default=20.0, help="Request timeout in seconds")
     parser.add_argument("--output", help="Output JSON path. Default: logs/coupang-feasibility/probe_*.json")
     return parser.parse_args()
@@ -506,10 +625,20 @@ def parse_args() -> argparse.Namespace:
 
 def _print_summary(report: Dict[str, Any], output_path: Path) -> None:
     print(f"[coupang-feasibility] output: {output_path}")
+    page_probe = report.get("page_probe")
+    if isinstance(page_probe, dict):
+        tp = page_probe.get("tp_url", {})
+        legacy = page_probe.get("legacy_url", {})
+        html_summary = page_probe.get("html_summary", {}) or {}
+        print(
+            "- page_probe: "
+            f"tp={tp.get('status_code')} legacy={legacy.get('status_code')} "
+            f"vendorItemPackageIds={html_summary.get('vendor_item_package_ids', [])}"
+        )
     for item in report["results"]:
         schema = item.get("schema_summary", {})
         print(
-            f"- {item['method']} {item['select_date']}: "
+            f"- {item['method']} {item['select_date']}#attempt{item.get('attempt', 1)}: "
             f"status={item.get('status_code')} ok={item.get('ok')} "
             f"travelItems={schema.get('travel_items_count')} vendorItems={schema.get('vendor_items_count')} "
             f"error={item.get('error') or '-'}"
@@ -521,6 +650,10 @@ def main() -> None:
     args = parse_args()
     if not args.dates:
         args.dates = [datetime.now().strftime("%Y-%m-%d")]
+    if args.repeat < 1:
+        raise ValueError("--repeat must be >= 1")
+    if args.interval_sec < 0:
+        raise ValueError("--interval-sec must be >= 0")
 
     output_path = Path(args.output) if args.output else _default_output_path()
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -6,7 +6,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.coupang_travel_api_feasibility import (  # noqa: E402
+    extract_vendor_item_package_ids_from_html,
     load_coupang_cookies_from_storage_state,
+    summarize_product_page_html,
     summarize_vendor_items_response,
 )
 
@@ -63,3 +65,28 @@ def test_load_coupang_cookies_from_storage_state_filters_domains(tmp_path: Path)
     cookies = load_coupang_cookies_from_storage_state(path)
 
     assert cookies == {"sid": "abc", "cid": "def"}
+
+
+def test_extract_vendor_item_package_ids_from_html():
+    html = """
+    <script>
+    {"vendorItemPackageId":"30000011218342","vendorItemPackageIdToString":"30000011218342"}
+    </script>
+    """
+    ids = extract_vendor_item_package_ids_from_html(html)
+    assert ids == ["30000011218342"]
+
+
+def test_summarize_product_page_html_flags():
+    html = """
+    <html>
+      <body>
+        {"vendorItemPackageId":"30000011218342","saleStatus":"ON_SALE"}
+      </body>
+    </html>
+    """
+    summary = summarize_product_page_html(html)
+    assert summary["contains_vendorItemPackageId"] is True
+    assert summary["contains_saleStatus"] is True
+    assert summary["contains_stockCount"] is False
+    assert summary["vendor_item_package_ids"] == ["30000011218342"]
