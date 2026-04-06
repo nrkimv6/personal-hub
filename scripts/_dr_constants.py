@@ -38,7 +38,7 @@ RUNNER_KEY_SUFFIXES = (
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
     "subprocess_heartbeat",
 )
-def _read_zombie_grace_seconds(default: int = 240) -> int:
+def _read_zombie_grace_seconds(default: int = 24000) -> int:
     """좀비 감지 유예 시간(env override) 파싱."""
     raw = os.environ.get("DEV_RUNNER_ZOMBIE_GRACE_SECONDS")
     if raw is None:
