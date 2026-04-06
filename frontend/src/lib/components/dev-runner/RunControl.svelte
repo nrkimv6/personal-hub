@@ -17,9 +17,10 @@
 		selectedPlan?: string;
 		mode?: 'single' | 'all';
 		runnerTabs?: { id: string; running: boolean }[];
+		hidePlanSelector?: boolean;
 	}
 
-	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), mode = $bindable('single'), runnerTabs = [] }: Props = $props();
+	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), mode = $bindable('single'), runnerTabs = [], hidePlanSelector = false }: Props = $props();
 	let selectedEngine = $state('claude');
 	let selectedFixEngine = $state('claude');
 	let engineConfigs = $state<AllEnginesConfig | null>(null);
@@ -511,25 +512,27 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 
 	<!-- Options Row -->
 	<div class="flex items-center gap-4 flex-wrap text-xs">
-		{#if mode === 'single'}
-			<div class="flex items-center gap-2">
-				<label for="plan-select" class="text-gray-500 text-xs">Plan</label>
-				<select
-					id="plan-select"
-					class="border rounded px-2 py-1 text-xs w-[200px] h-7 font-mono"
-					bind:value={selectedPlan}
-				>
-					<option value="">Plan 선택...</option>
-					{#each plans.filter((p) => !isArchivedPlanPath(p.path)) as plan}
-						<option value={plan.path}>{plan.filename}{plan.progress != null ? ` (${plan.progress.percent}%)` : ''}</option>
-					{/each}
-				</select>
-			</div>
-			{#if planSummary}
-				<p class="text-[10px] text-gray-500 font-mono leading-relaxed col-span-full mt-0.5 line-clamp-2">{planSummary}</p>
+		{#if !hidePlanSelector}
+			{#if mode === 'single'}
+				<div class="flex items-center gap-2">
+					<label for="plan-select" class="text-gray-500 text-xs">Plan</label>
+					<select
+						id="plan-select"
+						class="border rounded px-2 py-1 text-xs w-[200px] h-7 font-mono"
+						bind:value={selectedPlan}
+					>
+						<option value="">Plan 선택...</option>
+						{#each plans.filter((p) => !isArchivedPlanPath(p.path)) as plan}
+							<option value={plan.path}>{plan.filename}{plan.progress != null ? ` (${plan.progress.percent}%)` : ''}</option>
+						{/each}
+					</select>
+				</div>
+				{#if planSummary}
+					<p class="text-[10px] text-gray-500 font-mono leading-relaxed col-span-full mt-0.5 line-clamp-2">{planSummary}</p>
+				{/if}
+			{:else}
+				<span class="text-gray-400 text-xs">모든 미완료 Plan 자동 실행</span>
 			{/if}
-		{:else}
-			<span class="text-gray-400 text-xs">모든 미완료 Plan 자동 실행</span>
 		{/if}
 
 		<div class="flex items-center gap-2">
