@@ -25,10 +25,19 @@ from app.modules.dev_runner.services.completion_reason import (
     parse_merge_completed_payload,
 )
 from app.shared.redis.client import RedisClient
-from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
+from app.modules.dev_runner.services.sse_helpers import (
+    safe_close_pubsub,
+    MAX_SSE_FRAME_CHARS,
+    _is_multiline_frame_enabled,
+    _normalize_newlines,
+    _format_sse_data,
+    _is_frame_start,
+    _PollFrameBuffer,
+)
 from app.modules.dev_runner.schemas import LogResponse, RunHistoryItem, RunHistoryResponse, FullLogResponse
 from app.modules.dev_runner.services.state import get_state
 from app.modules.dev_runner.services.visibility import is_visible_runner
+from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
 # Redis 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
@@ -38,102 +47,7 @@ LOG_CHANNEL_PREFIX = "plan-runner:logs"
 LOG_CHANNEL = "plan-runner:logs"  # 하위호환 — plan_service 등 단일 채널 publish용
 
 HEARTBEAT_INTERVAL = 30  # 초
-MAX_SSE_FRAME_CHARS = 8192
-MULTILINE_FRAME_ENV = "DEV_RUNNER_MULTILINE_FRAME"
-_TIMESTAMP_TAG_START_RE = re.compile(r"^\s*\[\d{2}:\d{2}:\d{2}\]\s*\[[^\]]+\]\s*")
-_MERGE_TAG_START_RE = re.compile(r"^\s*\[MERGE\]\[[^\]]+\]\s*")
-_GENERIC_TAG_START_RE = re.compile(r"^\s*\[[A-Z][A-Z0-9_-]{1,24}\](?:\[[A-Z0-9_-]{1,24}\])?\s*")
 _ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
-
-
-def _is_multiline_frame_enabled() -> bool:
-    raw = os.getenv(MULTILINE_FRAME_ENV)
-    if raw is None:
-        return True
-    value = str(raw).strip().lower()
-    if value in {"1", "true", "on", "yes", "y"}:
-        return True
-    if value in {"0", "false", "off", "no", "n"}:
-        return False
-    return True
-
-
-def _normalize_newlines(text: str) -> str:
-    return (text or "").replace("\r\n", "\n").replace("\r", "\n")
-
-
-def _truncate_sse_payload(payload: str, max_chars: int = MAX_SSE_FRAME_CHARS) -> str:
-    normalized = _normalize_newlines(payload)
-    if len(normalized) <= max_chars:
-        return normalized
-    hidden = len(normalized) - max_chars
-    return f"{normalized[:max_chars]}\n… {hidden} chars truncated"
-
-
-def _format_sse_data(data: str, event: Optional[str] = None) -> str:
-    """멀티라인 안전 SSE 직렬화.
-
-    SSE 규격상 data 라인이 여러 줄이면 각 줄 앞에 `data:` 접두사를 반복해야 한다.
-    """
-    payload = _truncate_sse_payload(data)
-    lines = payload.split("\n")
-    prefix = f"event: {event}\n" if event else ""
-    data_block = "".join(f"data: {line}\n" for line in lines)
-    return f"{prefix}{data_block}\n"
-
-
-def _is_frame_start(line: str) -> bool:
-    if not line:
-        return False
-    return bool(
-        _TIMESTAMP_TAG_START_RE.match(line)
-        or _MERGE_TAG_START_RE.match(line)
-        or _GENERIC_TAG_START_RE.match(line)
-    )
-
-
-class _PollFrameBuffer:
-    """파일 폴링 fallback에서 물리 라인을 논리 프레임으로 묶는다."""
-
-    def __init__(self, max_chars: int = MAX_SSE_FRAME_CHARS):
-        self._lines: list[str] = []
-        self._char_count = 0
-        self._max_chars = max_chars
-
-    def push_line(self, line: str) -> tuple[list[str], bool]:
-        text = (line or "").rstrip("\n")
-        if not text:
-            return [], False
-
-        ready: list[str] = []
-        if self._lines and _is_frame_start(text):
-            flushed = self.flush()
-            if flushed:
-                ready.append(flushed)
-
-        self._append(text)
-
-        overflow = False
-        if self._char_count >= self._max_chars:
-            overflow = True
-            flushed = self.flush()
-            if flushed:
-                ready.append(flushed)
-        return ready, overflow
-
-    def flush(self) -> Optional[str]:
-        if not self._lines:
-            return None
-        msg = "\n".join(self._lines)
-        self._lines = []
-        self._char_count = 0
-        return msg
-
-    def _append(self, line: str) -> None:
-        if self._lines:
-            self._char_count += 1
-        self._lines.append(line)
-        self._char_count += len(line)
 
 
 class LogService:
@@ -152,67 +66,18 @@ class LogService:
             socket_connect_timeout=5, max_connections=50,
         )
         self.async_redis = aioredis.Redis(connection_pool=self._async_pool)
+        self.resolver = LogFileResolver(config, self.redis_client)
 
-    # 레거시 파일명(runner_id 없음) pseudo_id → Path 역매핑 캐시
+    # 레거시 파일명(runner_id 없음) pseudo_id → Path 역매핑 캐시 (resolver와 공유)
     _legacy_map: dict[str, "Path"] = {}
 
     def _find_current_log(self, runner_id: str) -> Optional[Path]:
-        """특정 runner의 stream 로그 파일 (Redis에서 조회)
-
-        stream_log_path 존재 시 즉시 반환. 없거나 파일 미존재 시 log_file_path로 fallback.
-        """
-        try:
-            stream_path_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
-            log_path_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
-
-            # stream_log_path 존재 시 즉시 반환 (크기 무관)
-            if stream_path_str:
-                stream_path = Path(stream_path_str)
-                if stream_path.exists():
-                    return stream_path
-
-            # fallback: 실제 로그가 기록된 log_file_path
-            if log_path_str:
-                log_path = Path(log_path_str)
-                if log_path.exists():
-                    return log_path
-        except redis.ConnectionError:
-            pass
-
-        # Phase 3 fallback: Redis TTL 만료 후 파일시스템 검색 (신규 형식 전용)
-        # lg- 접두사는 레거시 파일용으로 Phase 2에서 별도 처리
-        if runner_id.startswith("lg-"):
-            return None
-        log_dir = self._get_log_dir()
-        if log_dir.exists():
-            for pattern in [
-                f"plan-runner-stream-{runner_id}-*.log",
-                f"plan-runner-{runner_id}-*.log",
-            ]:
-                matches = list(log_dir.glob(pattern))
-                if matches:
-                    return max(matches, key=lambda p: p.stat().st_mtime)
-        return None
+        """[shim] → self.resolver.find_current_log()"""
+        return self.resolver.find_current_log(runner_id)
 
     def _resolve_legacy_log(self, runner_id: str) -> Optional[Path]:
-        """lg- 접두사 pseudo runner_id로 레거시 파일 탐색.
-
-        1. _legacy_map 캐시 히트 → 즉시 반환
-        2. 캐시 미스 → 전체 스캔 후 _legacy_map 갱신
-        """
-        if runner_id in self._legacy_map:
-            return self._legacy_map[runner_id]
-        log_dir = self._get_log_dir()
-        if not log_dir.exists():
-            return None
-        for log_path in log_dir.glob("plan-runner-stream-*.log"):
-            m = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", log_path.name)
-            if not m:
-                continue
-            ts = m.group(1)
-            pseudo_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
-            self._legacy_map[pseudo_id] = log_path
-        return self._legacy_map.get(runner_id)
+        """[shim] → self.resolver.resolve_legacy_log()"""
+        return self.resolver.resolve_legacy_log(runner_id)
 
     def tail_log_file(self, runner_id: str, n_lines: int = 100) -> LogResponse:
         """로그 파일 끝에서 N줄 읽기 (초기 로드용)."""
@@ -252,6 +117,80 @@ class LogService:
             pass
 
         return LogResponse(lines=[], total_lines=0)
+
+    async def _stream_sse_loop(
+        self,
+        channel: str,
+        completion_checker,
+        completion_parser,
+        *,
+        multiline_frame: bool = True,
+    ) -> AsyncGenerator[str, None]:
+        """공통 Redis Pub/Sub SSE 루프 — pubsub 생성·completion·heartbeat·에러 처리.
+
+        파일 폴링 fallback 없는 순수 pubsub 스트리밍.
+        stream_merge_log 등 단순 채널 구독에 사용한다.
+        """
+        pubsub = None
+        was_disconnected = False
+        last_heartbeat = time.monotonic()
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 5
+
+        try:
+            while True:
+                try:
+                    if pubsub is None:
+                        pubsub = self.async_redis.pubsub()
+                        await pubsub.subscribe(channel)
+                        if was_disconnected:
+                            yield "event: connected\ndata: ok\n\n"
+                            was_disconnected = False
+
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=0.5
+                    )
+                    if message and message["type"] == "message":
+                        data = message["data"]
+                        if completion_checker(data):
+                            _, reason = completion_parser(data)
+                            yield f"event: completed\ndata: {reason}\n\n"
+                            return
+                        if multiline_frame:
+                            yield _format_sse_data(_ANSI_ESCAPE_RE.sub("", data))
+                        else:
+                            yield f"data: {data}\n\n"
+                        last_heartbeat = time.monotonic()
+                        consecutive_errors = 0
+                    else:
+                        now = time.monotonic()
+                        if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                            yield ": heartbeat\n\n"
+                            last_heartbeat = now
+                        await asyncio.sleep(0.3)
+
+                except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
+                    await safe_close_pubsub(pubsub)
+                    pubsub = None
+                    was_disconnected = True
+                    yield "event: redis_disconnected\ndata: Redis not available\n\n"
+                    last_heartbeat = time.monotonic()
+                    await asyncio.sleep(5)
+
+                except Exception as e:
+                    consecutive_errors += 1
+                    await safe_close_pubsub(pubsub)
+                    pubsub = None
+                    last_heartbeat = time.monotonic()
+
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
+                        return
+
+                    yield f"data: [Stream error #{consecutive_errors}: {str(e)}]\n\n"
+                    await asyncio.sleep(5)
+        finally:
+            await safe_close_pubsub(pubsub)
 
     async def stream_log_file(self, runner_id: str, since_line: int = 0) -> AsyncGenerator[str, None]:
         """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)"""
@@ -415,108 +354,30 @@ class LogService:
 
 
     async def stream_merge_log(self, runner_id: str) -> AsyncGenerator[str, None]:
-        """Redis Pub/Sub 기반 머지 로그 SSE 스트리밍"""
+        """Redis Pub/Sub 기반 머지 로그 SSE 스트리밍 (_stream_sse_loop thin wrapper)"""
         log_channel = f"plan-runner:merge-log:{runner_id}"
-
         yield "event: connected\ndata: ok\n\n"
-
-        pubsub = None
-        was_disconnected = False
-        last_heartbeat = time.monotonic()
-        consecutive_errors = 0
-        MAX_CONSECUTIVE_ERRORS = 5
-
-        try:
-            while True:
-                try:
-                    if pubsub is None:
-                        pubsub = self.async_redis.pubsub()
-                        await pubsub.subscribe(log_channel)
-                        if was_disconnected:
-                            yield "event: connected\ndata: ok\n\n"
-                            was_disconnected = False
-
-                    message = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=0.5
-                    )
-                    if message and message["type"] == "message":
-                        data = message["data"]
-                        if is_merge_completed_payload(data):
-                            _, reason = parse_merge_completed_payload(data)
-                            yield f"event: completed\ndata: {reason}\n\n"
-                            return
-                        yield _format_sse_data(_ANSI_ESCAPE_RE.sub("", data))
-                        last_heartbeat = time.monotonic()
-                        consecutive_errors = 0
-                    else:
-                        now = time.monotonic()
-                        if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-                            yield ": heartbeat\n\n"
-                            last_heartbeat = now
-                        await asyncio.sleep(0.3)
-
-                except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
-                    await safe_close_pubsub(pubsub)
-                    pubsub = None
-                    was_disconnected = True
-                    yield "event: redis_disconnected\ndata: Redis not available\n\n"
-                    last_heartbeat = time.monotonic()
-                    await asyncio.sleep(5)
-
-                except Exception as e:
-                    consecutive_errors += 1
-                    await safe_close_pubsub(pubsub)
-                    pubsub = None
-                    last_heartbeat = time.monotonic()
-
-                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                        yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
-                        return
-
-                    yield f"data: [Stream error #{consecutive_errors}: {str(e)}]\n\n"
-                    await asyncio.sleep(5)
-        finally:
-            await safe_close_pubsub(pubsub)
+        async for event in self._stream_sse_loop(
+            log_channel,
+            is_merge_completed_payload,
+            parse_merge_completed_payload,
+            multiline_frame=True,
+        ):
+            yield event
 
     def _get_log_dir(self) -> Path:
-        """로그 디렉토리 경로 반환 (config.LOG_DIR 기준, wtools 절대경로로 보정)"""
-        log_dir = config.LOG_DIR
-        if not log_dir.is_absolute():
-            log_dir = config.WTOOLS_BASE_DIR / log_dir
-        return log_dir
+        """[shim] → self.resolver.get_log_dir()"""
+        return self.resolver.get_log_dir()
 
     @staticmethod
     def _parse_meta_from_log(log_file_path: str, scan_lines: int = 15) -> dict:
-        """로그 파일 선두 N줄에서 [TRIGGER]/plan= 메타데이터 파싱.
-
-        Returns:
-            {"trigger": str|None, "plan": str|None}
-        """
-        result: dict = {"trigger": None, "plan": None}
-        try:
-            with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
-                for _ in range(scan_lines):
-                    line = f.readline()
-                    if not line:
-                        break
-                    line = line.rstrip("\n")
-                    if line.startswith("[TRIGGER] ") and result["trigger"] is None:
-                        rest = line[len("[TRIGGER] "):]
-                        parts = rest.split(" | ")
-                        result["trigger"] = parts[0]
-                        for p in parts[1:]:
-                            if p.startswith("plan=") and result["plan"] is None:
-                                result["plan"] = p[5:]
-                        if result["trigger"] and result["plan"]:
-                            break
-        except (OSError, IOError):
-            pass
-        return result
+        """[shim] → LogFileResolver.parse_meta_from_log()"""
+        return LogFileResolver.parse_meta_from_log(log_file_path, scan_lines)
 
     @staticmethod
     def _parse_trigger_from_log(log_file_path: str) -> Optional[str]:
-        """로그 파일 선두 N줄에서 [TRIGGER] 파싱. 기존 호출처 호환."""
-        return LogService._parse_meta_from_log(log_file_path).get("trigger")
+        """[shim] → LogFileResolver.parse_trigger_from_log()"""
+        return LogFileResolver.parse_trigger_from_log(log_file_path)
 
     def get_run_history(self, limit: int = 20, offset: int = 0, visible_only: bool = False) -> RunHistoryResponse:
         """실행 이력 조회: Redis active_runners + 로그 파일 스캔 병합, start_time DESC 정렬"""

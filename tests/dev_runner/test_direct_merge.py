@@ -204,6 +204,8 @@ class TestDirectMergeEndpoint:
         """R(Right): send_direct_merge_command → Redis에 action=direct-merge + branch 전송"""
         from app.modules.dev_runner.services.executor_service import ExecutorService
 
+        from app.modules.dev_runner.services.merge_service import MergeService
+
         svc = ExecutorService.__new__(ExecutorService)
         svc.async_redis = AsyncMock()
         svc.async_redis.ping = AsyncMock(return_value=True)
@@ -221,6 +223,21 @@ class TestDirectMergeEndpoint:
         svc.async_redis.lpush = fake_lpush
         svc.async_redis.brpop = fake_brpop
         svc.async_redis.delete = AsyncMock()
+
+        # __new__로 생성 시 self.merge가 없으므로 직접 초기화
+        svc.merge = MergeService(svc.async_redis, lambda rid, sfx: f"plan-runner:runners:{rid}:{sfx}", svc._send_command if hasattr(svc, "_send_command") else None)
+        # _send_command가 없으므로 직접 등록 (lpush/brpop 기반)
+        from app.modules.dev_runner.services.redis_connection import COMMANDS_KEY, RESULTS_KEY, COMMAND_TIMEOUT
+        async def _send_command(command, timeout=COMMAND_TIMEOUT):
+            import uuid
+            command["command_id"] = command.get("command_id", str(uuid.uuid4()))
+            await svc.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+            raw = await svc.async_redis.brpop(f"{RESULTS_KEY}:{command['command_id']}", timeout=timeout)
+            if raw is None:
+                return None
+            return json.loads(raw[1])
+        svc._send_command = _send_command
+        svc.merge = MergeService(svc.async_redis, lambda rid, sfx: f"plan-runner:runners:{rid}:{sfx}", _send_command)
 
         await svc.send_direct_merge_command("runner/test123", "/worktree/path", None)
 

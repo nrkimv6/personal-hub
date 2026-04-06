@@ -118,13 +118,13 @@ async def dismiss_runner_tab(runner_id: str):
 @router.get("/merge-queue", response_model=list[MergeQueueItem])
 async def get_merge_queue():
     """Merge Queue 목록 조회"""
-    return await executor_service.get_merge_queue()
+    return await executor_service.merge.get_merge_queue()
 
 
 @router.get("/merge-queue-length")
 async def get_merge_queue_length():
     """순수 대기 수 반환 (실행 중 runner 제외). 외부 소비자용 경량 엔드포인트."""
-    length = await executor_service.get_merge_queue_length()
+    length = await executor_service.merge.get_merge_queue_length()
     return {"length": length}
 
 
@@ -132,13 +132,13 @@ async def get_merge_queue_length():
 @router.get("/merge/history", response_model=list[MergeHistoryItem])
 async def get_merge_history(limit: int = 50):
     """Merge 실행 이력 조회 (최신순, 기본 50건)"""
-    return await executor_service.get_merge_history(limit=limit)
+    return await executor_service.merge.get_merge_history(limit=limit)
 
 
 @router.get("/merge/{runner_id}", response_model=MergeStatusResponse)
 async def get_merge_status(runner_id: str):
     """특정 runner의 merge 상태 조회"""
-    status = await executor_service.get_merge_status(runner_id)
+    status = await executor_service.merge.get_merge_status(runner_id)
     if status is None:
         raise HTTPException(status_code=404, detail=f"merge status not found for runner {runner_id}")
     return status
@@ -159,7 +159,7 @@ async def revert_merge_request(runner_id: str):
 @router.post("/merge/direct")
 async def direct_merge(request: DirectMergeRequest):
     """직접 머지 — 러너 없이 branch/worktree만으로 머지 실행 (삭제된 러너 재시도용)"""
-    return await executor_service.send_direct_merge_command(
+    return await executor_service.merge.send_direct_merge_command(
         request.branch, request.worktree_path, request.plan_file
     )
 

@@ -82,7 +82,7 @@ def _reset_listener_globals():
     _listener._stream_threads.clear()
 
 
-def _make_redis(active_runners=None, pid_map=None, log_path=None):
+def _make_redis(active_runners=None, pid_map=None, log_path=None, heartbeat_map=None):
     """Return a MagicMock Redis client with configurable smembers / get."""
     r = MagicMock()
     r.smembers.return_value = set(active_runners or [])
@@ -98,6 +98,10 @@ def _make_redis(active_runners=None, pid_map=None, log_path=None):
                     return path
                 if key == f"plan-runner:runners:{runner_id}:stream_log_path":
                     return None
+        if heartbeat_map:
+            for runner_id, hb in heartbeat_map.items():
+                if key == f"plan-runner:runners:{runner_id}:subprocess_heartbeat":
+                    return hb
         return None
 
     r.get.side_effect = _get
@@ -147,8 +151,10 @@ class TestReconnectSurvivingRunners:
         """Alive PID should result in _DummyProcess registered in _running_processes."""
         runner_id = "abc12345"
         pid = 5555
+        # subprocess_heartbeat를 제공해야 zombie 감지를 우회하고 _attach_to_running_process 호출
         r = _make_redis(active_runners=[runner_id], pid_map={runner_id: pid},
-                        log_path={runner_id: "/tmp/fake.log"})
+                        log_path={runner_id: "/tmp/fake.log"},
+                        heartbeat_map={runner_id: "1234567890"})
 
         with (
             patch.object(_proc_utils, "_is_pid_alive", return_value=True),
