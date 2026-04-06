@@ -25,6 +25,15 @@ from _dr_log_framing import MultilineFrameBuffer
 from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, _DummyProcess
 from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
 from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
+from _dr_stream_cleanup import (
+    _COMPLETED_EXIT_REASONS,
+    _StreamCleanupCtx,
+    _build_failure_error_message,
+    _do_inline_merge,
+    _load_log_tail_lines,
+    _pick_error_detail_line,
+    _resolve_stop_stage,
+)
 
 logger = logging.getLogger(__name__)
 
