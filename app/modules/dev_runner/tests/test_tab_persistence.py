@@ -239,3 +239,81 @@ class TestCleanupStaleKeepsStoppedRunner:
 
         runners = await executor_service.get_all_runners()
         assert rid in [r.runner_id for r in runners]
+
+
+class TestConnectionError503:
+    """ConnectionError → 503 반환 검증 (Phase 3 수정)"""
+
+    @pytest.mark.asyncio
+    async def test_get_all_runners_redis_connection_error_raises(self, mock_executor_redis_sync):
+        """E: async_redis.smembers에서 ConnectionError → get_all_runners()가 예외 전파 (빈 리스트 반환 안 함)"""
+        import redis
+        with patch.object(executor_service.async_redis, "smembers", side_effect=redis.ConnectionError("test")):
+            with pytest.raises(redis.ConnectionError):
+                await executor_service.get_all_runners()
+
+    @pytest.mark.asyncio
+    async def test_list_runners_503_on_connection_error(self):
+        """E: get_all_runners()가 ConnectionError raise → /runners 엔드포인트 503 응답"""
+        import redis
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_all_runners",
+            side_effect=redis.ConnectionError("test"),
+        ):
+            response = client.get("/api/v1/dev-runner/runners")
+
+        assert response.status_code == 503, (
+            f"ConnectionError 시 503이 아닌 {response.status_code} 반환됨\n"
+            f"응답: {response.text}"
+        )
+
+
+class TestT4EndpointVisibility:
+    """Phase T4: HTTP 엔드포인트 통합 — trigger='user' 러너 가시성 + 503 확인"""
+
+    @pytest.mark.asyncio
+    async def test_runners_endpoint_after_merge_restart_visible(self, mock_executor_redis_sync):
+        """T4: trigger='user' 러너가 ACTIVE에 등록된 후 GET /runners 응답에 표시됨 확인"""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        runner_id = "tc-t4-merge-restart-001"
+        # fakeredis에 trigger='user' 러너 등록 (merge 후 재시작 시나리오)
+        mock_executor_redis_sync.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+        mock_executor_redis_sync.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        mock_executor_redis_sync.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        mock_executor_redis_sync.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/v1/dev-runner/runners")
+
+        assert response.status_code == 200, f"예상 200, 실제 {response.status_code}: {response.text}"
+        runners = response.json()
+        runner_ids = [r["runner_id"] for r in runners]
+        assert runner_id in runner_ids, (
+            f"trigger='user' 러너({runner_id})가 /runners 응답에 없음\n"
+            f"  응답 runner_ids: {runner_ids}\n"
+            f"  이 실패는 visibility 필터링 회귀를 의미합니다."
+        )
+
+    @pytest.mark.asyncio
+    async def test_runners_endpoint_503_on_redis_error(self, mock_executor_redis_sync):
+        """T4: async_redis ConnectionError → GET /runners → 503 응답"""
+        import redis
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(executor_service.async_redis, "smembers", side_effect=redis.ConnectionError("t4-test")):
+            response = client.get("/api/v1/dev-runner/runners")
+
+        assert response.status_code == 503, (
+            f"async_redis ConnectionError 시 503이 아닌 {response.status_code} 반환됨\n"
+            f"응답: {response.text}"
+        )

@@ -149,6 +149,9 @@
 							<div class="flex items-center gap-2 text-[10px] text-muted-foreground font-mono">
 								<span>{item.runner_id.slice(0, 8)}</span>
 								<span>{formatTime(item.start_time)}</span>
+								{#if item.execution_count != null}
+									<span class="px-1 py-0.5 rounded bg-indigo-50 text-indigo-600">{item.execution_count}번째</span>
+								{/if}
 							</div>
 						</button>
 					{/each}

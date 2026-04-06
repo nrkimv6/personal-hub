@@ -270,6 +270,8 @@ class TestImportArchived:
         """GET /api/v1/plans/records?category=instagram → 해당 카테고리만 반환"""
         from app.models.plan_record import PlanRecord
         from datetime import datetime
+        test_db_session.query(PlanRecord).filter_by(filename_hash="t4_instagram_001").delete(synchronize_session=False)
+        test_db_session.commit()
         r = PlanRecord(
             filename_hash="t4_instagram_001",
             file_path="/archive/instagram/2026-02-10_t4-insta.md",
@@ -291,6 +293,8 @@ class TestImportArchived:
         """GET /api/v1/plans/records?tags=feat,fix → 태그 포함 레코드만 반환"""
         from app.models.plan_record import PlanRecord
         from datetime import datetime
+        test_db_session.query(PlanRecord).filter_by(filename_hash="t4_tags_feat_001").delete(synchronize_session=False)
+        test_db_session.commit()
         r = PlanRecord(
             filename_hash="t4_tags_feat_001",
             file_path="/archive/common/2026-02-11_t4-tagged.md",
@@ -319,6 +323,8 @@ class TestIntentFieldsInResponse:
         import json
         from datetime import date, datetime
         from app.models.plan_record import PlanRecord
+        test_db_session.query(PlanRecord).filter_by(filename_hash="t5_intent_fields_001").delete(synchronize_session=False)
+        test_db_session.commit()
 
         r = PlanRecord(
             filename_hash="t5_intent_fields_001",
@@ -350,6 +356,8 @@ class TestIntentFieldsInResponse:
         """값 없는 레코드 조회 → 5개 신규 필드 모두 null로 반환 (500 아님)"""
         from datetime import datetime
         from app.models.plan_record import PlanRecord
+        test_db_session.query(PlanRecord).filter_by(filename_hash="t5_null_fields_001").delete(synchronize_session=False)
+        test_db_session.commit()
 
         r = PlanRecord(
             filename_hash="t5_null_fields_001",

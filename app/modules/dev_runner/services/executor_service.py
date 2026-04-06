@@ -299,11 +299,46 @@ class ExecutorService:
                     detail=message,
                 )
 
+            # 기존 워커에 attach된 경우 → 기존 runner_id로 상태 반환
+            if result_data.get("status") == "attached":
+                existing_id = result_data["runner_id"]
+                fields = await self._get_runner_fields(existing_id, "pid", "plan_file", "start_time", "execution_count", "engine")
+                existing_pid = fields.get("pid")
+                existing_start_time_str = fields.get("start_time")
+                existing_engine = fields.get("engine") or resolved_engine
+                existing_exec_count_raw = fields.get("execution_count")
+                existing_exec_count = None
+                if existing_exec_count_raw is not None:
+                    try:
+                        existing_exec_count = int(existing_exec_count_raw)
+                    except (TypeError, ValueError):
+                        existing_exec_count = None
+                return RunStatusResponse(
+                    running=True,
+                    runner_id=existing_id,
+                    attached=True,
+                    engine=existing_engine,
+                    pid=int(existing_pid) if existing_pid else None,
+                    plan_file=fields.get("plan_file") or request.plan_file,
+                    start_time=datetime.fromisoformat(existing_start_time_str) if existing_start_time_str else None,
+                    current_cycle=0,
+                    execution_count=existing_exec_count,
+                    listener_alive=True,
+                    redis_connected=True,
+                )
+
             # Redis에서 per-runner 상태 조회
-            fields = await self._get_runner_fields(runner_id, "pid", "plan_file", "start_time")
+            fields = await self._get_runner_fields(runner_id, "pid", "plan_file", "start_time", "execution_count")
             pid = fields["pid"]
             plan_file = fields["plan_file"]
             start_time_str = fields["start_time"]
+            execution_count_raw = fields["execution_count"]
+            execution_count = None
+            if execution_count_raw is not None:
+                try:
+                    execution_count = int(execution_count_raw)
+                except (TypeError, ValueError):
+                    execution_count = None
 
             return RunStatusResponse(
                 running=True,
@@ -313,6 +348,7 @@ class ExecutorService:
                 plan_file=plan_file or request.plan_file,
                 start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
                 current_cycle=0,
+                execution_count=execution_count,
                 listener_alive=True,
                 redis_connected=True,
             )
@@ -479,18 +515,27 @@ class ExecutorService:
 
     async def get_runner_status(self, runner_id: str) -> RunStatusResponse:
         """특정 runner 상태 조회 (per-runner Redis 키 기반)"""
-        data = await self._get_runner_fields(runner_id, "status", "pid", "plan_file", "start_time", "engine")
+        data = await self._get_runner_fields(
+            runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count"
+        )
         status = data["status"]
         pid_str = data["pid"]
         plan_file = data["plan_file"]
         start_time_str = data["start_time"]
         engine = data["engine"] or "claude"
+        execution_count_raw = data["execution_count"]
         running = status == "running"
 
         running, pid_str = await self._correct_pid_state(runner_id, status, pid_str, caller="get_runner_status")
 
         current_cycle_str = await self.async_redis.get(self._runner_key(runner_id, "current_cycle"))
         current_cycle = int(current_cycle_str) if current_cycle_str is not None else None
+        execution_count = None
+        if execution_count_raw is not None:
+            try:
+                execution_count = int(execution_count_raw)
+            except (TypeError, ValueError):
+                execution_count = None
 
         return RunStatusResponse(
             runner_id=runner_id,
@@ -500,6 +545,7 @@ class ExecutorService:
             plan_file=plan_file,
             start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
             current_cycle=current_cycle,
+            execution_count=execution_count,
             listener_alive=True,
             redis_connected=True,
         )
@@ -531,13 +577,14 @@ class ExecutorService:
                 result = []
                 for rid in all_ids:
                     d = await self._get_runner_fields(rid, "status", "pid", "plan_file", "engine",
-                                                      "start_time", "worktree_path", "merge_status",
+                                                      "start_time", "execution_count", "worktree_path", "merge_status",
                                                       "branch", "trigger", "exit_reason", "stop_stage", "error")
                     status = d["status"]
                     pid_str = d["pid"]
                     plan_file = d["plan_file"]
                     engine = d["engine"]
                     start_time_str = d["start_time"]
+                    execution_count_raw = d["execution_count"]
                     worktree_path = d["worktree_path"]
                     merge_status = d["merge_status"]
                     branch = d["branch"]
@@ -553,6 +600,12 @@ class ExecutorService:
                             start_time = datetime.fromisoformat(start_time_str)
                         except ValueError:
                             pass
+                    execution_count = None
+                    if execution_count_raw is not None:
+                        try:
+                            execution_count = int(execution_count_raw)
+                        except (TypeError, ValueError):
+                            execution_count = None
                     # PID 기반 양방향 보정: Redis status와 실제 프로세스 상태 불일치 교정
                     running = status == "running"
                     running, pid_str = await self._correct_pid_state(rid, status, pid_str, caller="get_all_runners")
@@ -574,6 +627,7 @@ class ExecutorService:
                         plan_file=plan_file,
                         engine=engine,
                         start_time=start_time,
+                        execution_count=execution_count,
                         pid=int(pid_str) if pid_str else None,
                         worktree_path=worktree_path,
                         branch=branch,
@@ -590,7 +644,7 @@ class ExecutorService:
             finally:
                 db.close()
         except (redis.ConnectionError, aioredis.ConnectionError):
-            return []
+            raise
 
     async def dismiss_runner(self, runner_id: str) -> bool:
         self._sync_state()

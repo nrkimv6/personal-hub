@@ -222,10 +222,11 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", now_iso)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
         if plan_file:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
         # TTL 설정 (24시간)
-        for suffix in ("status", "worktree_path", "branch", "start_time", "merge_status", "plan_file"):
+        for suffix in ("status", "worktree_path", "branch", "start_time", "merge_status", "plan_file", "trigger"):
             redis_client.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", RECENT_RUNNERS_TTL)
         # SSE가 감지하도록 active_runners 등록
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)

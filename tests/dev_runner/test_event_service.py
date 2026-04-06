@@ -132,3 +132,32 @@ class TestBuildStatusPayloadBranchHandling:
         payload = svc._build_status_payload("normal-runner")
         assert payload is not None
         assert payload["plan_file"] is None
+
+
+class TestBuildStatusPayloadExecutionCount:
+    """execution_count 필드가 SSE payload에 포함되는지 검증 (Phase T1)."""
+
+    def test_execution_count_included_when_set(self):
+        """R: Redis execution_count=2 → payload["execution_count"] == "2"."""
+        svc = _make_service()
+        # 11 fields: status, pid, current_cycle, start_time, plan_file, engine, branch, trigger, exit_reason, error, execution_count
+        svc._sync.mget.return_value = [
+            "running", "1234", "1", "2026-03-04T00:00:00",
+            "docs/plan/test.md", "claude", None, "user",
+            None, None, "2",
+        ]
+        payload = svc._build_status_payload("runner-ec")
+        assert payload is not None
+        assert payload["execution_count"] == "2"
+
+    def test_execution_count_none_when_not_set(self):
+        """B: Redis execution_count 미설정(None) → payload["execution_count"] is None."""
+        svc = _make_service()
+        svc._sync.mget.return_value = [
+            "running", "1234", "1", "2026-03-04T00:00:00",
+            "docs/plan/test.md", "claude", None, "user",
+            None, None, None,
+        ]
+        payload = svc._build_status_payload("runner-no-ec")
+        assert payload is not None
+        assert payload.get("execution_count") is None

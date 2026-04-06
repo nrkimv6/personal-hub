@@ -112,11 +112,14 @@
 							{item.plan_file.split('/').pop() ?? item.plan_file}
 						</div>
 					{/if}
-					<!-- time + pid -->
-					<div class="text-[10px] text-gray-600 pl-3 mt-0.5">
+					<!-- time + pid + execution_count -->
+					<div class="text-[10px] text-gray-600 pl-3 mt-0.5 flex items-center gap-1.5">
 						{formatTime(item.start_time)}
 						{#if item.pid}
 							<span class="ml-1">PID:{item.pid}</span>
+						{/if}
+						{#if item.execution_count != null}
+							<span class="px-1 py-0.5 rounded bg-indigo-900/40 text-indigo-300">{item.execution_count}번째</span>
 						{/if}
 					</div>
 				</button>

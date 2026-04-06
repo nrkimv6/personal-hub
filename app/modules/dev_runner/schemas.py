@@ -52,10 +52,12 @@ class RunStatusResponse(BaseModel):
     plan_file: Optional[str] = None
     start_time: Optional[datetime] = None
     current_cycle: Optional[int] = None
+    execution_count: Optional[int] = None
     exit_code: Optional[int] = None  # None=실행중/미시작, 0=정상종료, 그 외=crash
     crashed: bool = False  # exit_code != 0일 때 True
     current_plan_name: Optional[str] = None  # 전체실행 시 현재 실행 중인 plan 파일명
     runner_id: Optional[str] = None
+    attached: bool = False  # True = 기존 워커에 연결됨 (새 워커 생성 안 함)
 
 
 class RunnerListItem(BaseModel):
@@ -65,6 +67,7 @@ class RunnerListItem(BaseModel):
     plan_file: Optional[str] = None
     engine: Optional[str] = None
     start_time: Optional[datetime] = None
+    execution_count: Optional[int] = None
     pid: Optional[int] = None
     worktree_path: Optional[str] = None
     branch: Optional[str] = None

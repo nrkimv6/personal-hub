@@ -35,6 +35,8 @@ export interface RunStatusResponse {
 	crashed: boolean;
 	current_plan_name: string | null;
 	runner_id: string | null;
+	execution_count?: number | null;
+	attached?: boolean;
 }
 
 export interface RunnerListItem {
@@ -52,6 +54,7 @@ export interface RunnerListItem {
 	orphan: boolean;
 	exit_reason?: string | null;
 	error?: string | null;
+	execution_count?: number | null;
 	display_plan_name?: string | null;
 }
 
@@ -414,6 +417,7 @@ export interface RunHistoryItem {
 	branch: string | null;
 	merge_status: string | null;
 	trigger?: string | null;
+	execution_count?: number | null;
 }
 
 export interface RunHistoryResponse {

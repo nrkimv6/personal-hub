@@ -175,6 +175,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
             engine = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine") or "claude"
             fix_engine = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine") or "claude"
+            trigger = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
             log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
             try:
                 redis_client.publish(
@@ -183,6 +184,9 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 )
             except Exception:
                 pass
+            if not trigger:
+                logger.warning(f"[_do_inline_merge] trigger 소실 — restart_after_merge 스킵: {runner_id}")
+                return
             if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
                 import uuid as _uuid
                 new_runner_id = _uuid.uuid4().hex[:8]
@@ -192,6 +196,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                     "plan_file": plan_file,
                     "engine": engine,
                     "fix_engine": fix_engine,
+                    "trigger": trigger,
                 }
                 redis_client.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
                 _pub_and_log(runner_id, f"[_do_inline_merge] main 추가 사이클 큐잉: runner={new_runner_id}, plan={plan_file}", redis_client, "MERGE")
@@ -416,11 +421,19 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", error_message)
                 if _error_detail:
                     _publish_with_retry(redis_client, log_channel, f"[ERROR] {_error_detail}")
+                else:
+                    _publish_with_retry(redis_client, log_channel, f"[ERROR] {_failure_message}")
             except Exception as _error_save_err:
                 logger.debug(f"[_stream_output] error detail 저장 실패 (무시): {_error_save_err}")
 
-        # merge_requested 플래그 확인 (1회) — exit_code != 0이어도 worktree 커밋이 있으면 merge 시도
+        # merge_requested 플래그 확인 (1회) — 프로세스 종료 후 유일한 cleanup 지점에서 항상 실행:
+        # (1) plan-runner:runners:{id}:merge_requested string key는 recover_merge 복구 경로
+        #     (_dr_process_utils.py)에서만 세팅됨 — plan-runner 내부 _publish_merge_request는 다른 hash key 사용
+        # (2) v2 fallback(detect_merged_but_not_done)은 _merge_requested=False 분기에서 실행되므로
+        #     이 블록을 제거하면 fallback도 동작하지 않음
+        # (3) exit_code != 0이어도 worktree 커밋이 있으면 merge 시도
         _merge_requested = False
+        _flag = None  # Redis get 예외 시 NameError 방지 (아래 조건부 로그에서 _flag 참조)
         if runner_id:
             try:
                 _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
@@ -473,11 +486,16 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 "[_stream_output] stop_stage=pre_review → inline merge 차단",
                 redis_client, "CLEANUP",
             )
-        _pub_and_log(
-            runner_id,
-            f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, exit_code={exit_code}, exit_reason={_exit_reason}, stop_stage={_stop_stage}",
-            redis_client, "CLEANUP",
-        )
+        if _flag:
+            _pub_and_log(
+                runner_id,
+                f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, exit_code={exit_code}, exit_reason={_exit_reason}, stop_stage={_stop_stage}",
+                redis_client, "CLEANUP",
+            )
+        else:
+            logger.debug(
+                f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, exit_code={exit_code}, exit_reason={_exit_reason}, stop_stage={_stop_stage}"
+            )
 
         # Workflow 상태 업데이트
         if _wf_manager and runner_id:
@@ -526,7 +544,8 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             # merge 흐름 — cleanup은 merge 완료/실패 후 _do_inline_merge 내부에서 호출
             _do_inline_merge(runner_id, redis_client)
         else:
-            # v2 merge fallback: merge_requested 플래그 없이도 merge 후처리 누락 여부 확인
+            # v2 merge fallback: merge_requested 플래그 없이도 "이미 머지됐지만 done 처리가 안 된" 상태를 감지하는 안전장치.
+            # 이 블록은 _merge_requested=False 분기에서만 실행되므로, 위 merge 판정 블록을 제거하면 fallback도 동작하지 않음.
             _v2_detect = None
             if runner_id:
                 try:
@@ -586,6 +605,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     runner_id = command.get("runner_id")
     _wf_id: Optional[int] = None
     _wf_manager = get_wf_manager()
+    _wf_marked_running = False
 
     def _set_error_status(message: str):
         """실패 시 per-runner 상태를 Redis에 기록 + 라이브 로그 채널에 publish"""
@@ -681,6 +701,28 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
         _set_error_status("plan_file required (use parallel mode for batch execution)")
         return
 
+    _normalized_plan_key = WorkflowManager._normalize_plan_key(plan_file)
+    command["plan_key"] = _normalized_plan_key
+    if _wf_manager and _wf_id:
+        try:
+            started_at_iso, execution_count = _wf_manager.mark_running_with_execution_count(
+                _wf_id,
+                runner_id,
+                branch,
+                str(worktree_path),
+                engine or "claude",
+            )
+            command["started_at"] = started_at_iso
+            command["execution_count"] = execution_count
+            _wf_marked_running = True
+        except Exception as wf_err:
+            logger.warning(f"[_do_start_plan_runner] workflow running+count update 실패 (fallback): {wf_err}")
+            command.setdefault("started_at", datetime.now().isoformat())
+            command.setdefault("execution_count", "unknown")
+    else:
+        command.setdefault("started_at", datetime.now().isoformat())
+        command.setdefault("execution_count", "unknown")
+
     result = _launch_plan_runner_process(
         command,
         redis_client,
@@ -696,7 +738,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
         _set_error_status(result.get("message", "Unknown error"))
     else:
         # Workflow running 상태 업데이트
-        if _wf_manager and _wf_id:
+        if _wf_manager and _wf_id and not _wf_marked_running:
             try:
                 _wf_manager.update_status(
                     _wf_id, "running",
@@ -742,6 +784,67 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     elif proc and proc.poll() is not None:
         logger.info(f"Previous process ended (exit code: {proc.returncode}), cleaning up")
         _cleanup_process_state(runner_id, redis_client)
+
+    # plan_file 기준 기존 워커 감지 (재실행 시 attach — runner_id는 달라도 같은 plan 실행 중)
+    plan_file_req = command.get("plan_file")
+    if plan_file_req and plan_file_req not in (PLAN_FILE_ALL, _LEGACY_ALL):
+        from _dr_constants import RESULTS_KEY as _RESULTS_KEY_EARLY
+        _command_id_early = command.get("command_id", "")
+        _result_key_early = f"{_RESULTS_KEY_EARLY}:{_command_id_early}" if _command_id_early else _RESULTS_KEY_EARLY
+        try:
+            _existing_runners = redis_client.smembers(ACTIVE_RUNNERS_KEY) or set()
+        except Exception:
+            _existing_runners = set()
+
+        for _rid_raw in _existing_runners:
+            _rid = _rid_raw if isinstance(_rid_raw, str) else _rid_raw.decode("utf-8", errors="replace")
+            if _rid == runner_id:
+                continue  # 자기 자신 스킵
+
+            # cleanup 진행 중 확인 → 동일 plan이면 "정리 중" 응답
+            _cleanup_flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{_rid}:cleanup_in_progress")
+            _cleanup_flag_str = _cleanup_flag if isinstance(_cleanup_flag, str) else (_cleanup_flag.decode("utf-8") if _cleanup_flag else None)
+            _existing_pf_raw = redis_client.get(f"{RUNNER_KEY_PREFIX}:{_rid}:plan_file")
+            _existing_pf = _existing_pf_raw if isinstance(_existing_pf_raw, str) else (_existing_pf_raw.decode("utf-8") if _existing_pf_raw else None)
+            if _cleanup_flag_str == "1" and _existing_pf == plan_file_req:
+                logger.info(f"[start_plan_runner] 동일 plan cleanup 진행 중 (rid={_rid}, plan={plan_file_req})")
+                _cleanup_resp = {
+                    "success": False,
+                    "message": f"이전 실행 정리 중 (runner_id: {_rid}) — 잠시 후 재시도하세요",
+                    "runner_id": runner_id,
+                    "action": "run",
+                    "executed_at": datetime.now().isoformat(),
+                }
+                redis_client.lpush(_result_key_early, json.dumps(_cleanup_resp, ensure_ascii=False))
+                redis_client.expire(_result_key_early, 60)
+                return None
+
+            # plan_file 불일치이면 스킵
+            if _existing_pf != plan_file_req:
+                continue
+
+            # PID alive 확인 → attach
+            _pid_raw = redis_client.get(f"{RUNNER_KEY_PREFIX}:{_rid}:pid")
+            if not _pid_raw:
+                continue
+            try:
+                _existing_pid = int(_pid_raw if isinstance(_pid_raw, str) else _pid_raw.decode("utf-8"))
+            except (ValueError, TypeError):
+                continue
+
+            if _is_pid_alive(_existing_pid):
+                logger.info(f"[start_plan_runner] 동일 plan 기존 워커 → attach (rid={_rid}, pid={_existing_pid}, plan={plan_file_req})")
+                _attached_resp = {
+                    "success": True,
+                    "status": "attached",
+                    "runner_id": _rid,
+                    "message": "기존 워커에 연결됨",
+                    "action": "run",
+                    "executed_at": datetime.now().isoformat(),
+                }
+                redis_client.lpush(_result_key_early, json.dumps(_attached_resp, ensure_ascii=False))
+                redis_client.expire(_result_key_early, 60)
+                return None
 
     # 즉시 "accepted" 결과를 per-command result key에 push → API 타임아웃 방지
     from _dr_constants import RESULTS_KEY
@@ -843,11 +946,27 @@ def _launch_plan_runner_process(
     try:
         # subprocess 실행 및 stdout을 PIPE로 받아 스레드에서 파일+Redis 동시 기록
         log_handle = open(log_file, "w", encoding="utf-8")
+        started_at_text = command.get("started_at") or datetime.now().isoformat()
+        execution_count_text = command.get("execution_count")
+        if execution_count_text is None:
+            execution_count_text = "unknown"
+        plan_key_text = command.get("plan_key") or (plan_file or PLAN_FILE_ALL)
+
         log_handle.write(
             f"[TRIGGER] {command.get('trigger', 'unknown')} | plan={plan_file} | "
             f"engine={engine} | fix_engine={fix_engine} | runner_id={runner_id}\n"
         )
+        run_meta_line = (
+            f"[RUN_META] started_at={started_at_text} | "
+            f"execution_count={execution_count_text} | plan_key={plan_key_text}"
+        )
+        log_handle.write(run_meta_line + "\n")
         log_handle.flush()
+
+        try:
+            redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", run_meta_line)
+        except Exception:
+            pass
 
         import os
         import re as _re
@@ -896,7 +1015,8 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", process.pid)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file or PLAN_FILE_ALL)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch or f"runner/{runner_id}")
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", started_at_text)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:execution_count", str(execution_count_text))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         # 초기 heartbeat — subprocess 루프 진입 전 좀비 오판 방지 (TTL 300초)
         try:

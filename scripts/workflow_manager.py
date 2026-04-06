@@ -123,6 +123,20 @@ class WorkflowManager:
     # ──────────────────────────────────────────────
 
     @staticmethod
+    def _normalize_plan_key(plan_file: Optional[str]) -> str:
+        """실행 순번 집계를 위한 plan key 정규화.
+
+        - None/빈값/"ALL"/"__ALL_PLANS__" 는 동일 sentinel 그룹으로 취급
+        - 파일 경로는 slash 표준화만 수행
+        """
+        if plan_file is None:
+            return "__ALL_PLANS__"
+        raw = str(plan_file).strip()
+        if not raw or raw in {"ALL", "__ALL_PLANS__"}:
+            return "__ALL_PLANS__"
+        return raw.replace("\\", "/")
+
+    @staticmethod
     def _slug_from_plan_file(plan_file: str) -> str:
         """plan 파일명에서 slug 추출 (e.g., 'docs/plan/2026-03-03_workflow-manager_todo.md' → '2026-03-03_workflow-manager')"""
         basename = os.path.splitext(os.path.basename(plan_file))[0]
@@ -135,6 +149,100 @@ class WorkflowManager:
     def _slug_from_runner_id(runner_id: str) -> str:
         """runner_id에서 slug 생성 (plan_file 없을 때 fallback)"""
         return f"runner-{runner_id[:8]}"
+
+    def count_started_runs_until(
+        self,
+        plan_key: str,
+        until_started_at_iso: str,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> int:
+        """동일 plan_key 그룹의 started_at 누적 실행 횟수를 반환."""
+        own_conn = conn is None
+        if own_conn:
+            conn = self._get_conn()
+        try:
+            if plan_key == "__ALL_PLANS__":
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM workflows
+                    WHERE started_at IS NOT NULL
+                      AND started_at <= ?
+                      AND (
+                          plan_file IS NULL
+                          OR TRIM(plan_file) = ''
+                          OR plan_file = '__ALL_PLANS__'
+                          OR plan_file = 'ALL'
+                      )
+                    """,
+                    (until_started_at_iso,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM workflows
+                    WHERE started_at IS NOT NULL
+                      AND started_at <= ?
+                      AND REPLACE(COALESCE(plan_file, ''), '\\', '/') = ?
+                    """,
+                    (until_started_at_iso, plan_key),
+                ).fetchone()
+            return int(row["cnt"]) if row and row["cnt"] is not None else 0
+        finally:
+            if own_conn:
+                conn.close()
+
+    def mark_running_with_execution_count(
+        self,
+        workflow_id: int,
+        runner_id: str,
+        branch: str,
+        worktree_path: str,
+        engine: str,
+    ) -> tuple[str, int]:
+        """running 전이 + started_at + execution_count를 원자적으로 계산/반영."""
+        conn = self._get_conn()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT id, plan_file FROM workflows WHERE id = ?",
+                (workflow_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"workflow not found: id={workflow_id}")
+
+            started_at_iso = datetime.now().isoformat()
+            plan_key = self._normalize_plan_key(row["plan_file"])
+
+            conn.execute(
+                """
+                UPDATE workflows
+                SET status = 'running',
+                    started_at = ?,
+                    runner_id = ?,
+                    branch = ?,
+                    worktree_path = ?,
+                    engine = ?
+                WHERE id = ?
+                """,
+                (started_at_iso, runner_id, branch, worktree_path, engine, workflow_id),
+            )
+
+            execution_count = self.count_started_runs_until(plan_key, started_at_iso, conn=conn)
+            conn.commit()
+            logger.info(
+                "[WorkflowManager] mark_running_with_execution_count id=%s plan_key=%s count=%s",
+                workflow_id,
+                plan_key,
+                execution_count,
+            )
+            return started_at_iso, execution_count
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     # ──────────────────────────────────────────────
     # 데이터 마이그레이션 유틸리티

@@ -64,6 +64,7 @@ def _is_api_available() -> bool:
 
 
 @pytest.mark.skipif(not _is_api_available(), reason="Admin API 서버 미실행")
+@pytest.mark.allow_prod_redis
 class TestSseFilterE2E:
     def test_sse_initial_status_excludes_tc_trigger_runner(self, redis_client):
         """Redis에 trigger="tc:test" runner 등록 → SSE /events initial status에 미포함"""

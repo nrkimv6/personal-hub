@@ -310,6 +310,190 @@ def test_cleanup_allows_worktree_removal_without_merge_signal(listener_mod, fr):
     mock_wt.remove.assert_called_once(), "merge 시그널 없으면 WorktreeManager.remove 호출되어야 함"
 
 
+# ========== 신규 TC: 에러 가시성 + merge 판정 로그 레벨 ==========
+
+def test_error_exit_no_stdout_publishes_failure_message(listener_mod, plan_runner_mod, fr):
+    """R(Right): stdout 없는 에러 종료 → [ERROR] _failure_message 채널 publish"""
+    runner_id = "t-err-vis-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "error")
+
+    process = _make_process(returncode=15)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    published_messages = []
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge"), \
+         patch.object(plan_runner_mod, "_cleanup_process_state"), \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(plan_runner_mod, "_pick_error_detail_line", return_value=None), \
+         patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=[]), \
+         patch.object(plan_runner_mod, "_publish_with_retry", side_effect=lambda rc, ch, msg: published_messages.append(msg) or True):
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    error_msgs = [m for m in published_messages if m.startswith("[ERROR]")]
+    assert error_msgs, f"[ERROR] 메시지가 채널에 발행되지 않음. published={published_messages}"
+    assert any("exit_code=15" in m for m in error_msgs), \
+        f"exit_code=15 포함 [ERROR] 메시지 없음. error_msgs={error_msgs}"
+
+
+def test_error_exit_with_detail_publishes_detail(listener_mod, plan_runner_mod, fr):
+    """R(Right): stdout에 에러 힌트 있음 → 기존대로 [ERROR] {_error_detail} publish (회귀 방지)"""
+    runner_id = "t-err-vis-002"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "error")
+
+    process = _make_process(returncode=1)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    published_messages = []
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge"), \
+         patch.object(plan_runner_mod, "_cleanup_process_state"), \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(plan_runner_mod, "_pick_error_detail_line", return_value="SomeError: details"), \
+         patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=["SomeError: details"]), \
+         patch.object(plan_runner_mod, "_publish_with_retry", side_effect=lambda rc, ch, msg: published_messages.append(msg) or True):
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    error_msgs = [m for m in published_messages if m.startswith("[ERROR]")]
+    assert any("SomeError: details" in m for m in error_msgs), \
+        f"[ERROR] SomeError: details 메시지 없음. error_msgs={error_msgs}"
+    # _failure_message 포맷이 아닌 _error_detail 원문이 publish되어야 함
+    assert not any("exit_code=" in m and "SomeError" not in m for m in error_msgs), \
+        f"_failure_message 포맷이 잘못 publish됨: {error_msgs}"
+
+
+def test_no_merge_flag_uses_debug_log(listener_mod, plan_runner_mod, fr):
+    """R(Right): merge_requested 키 없음 → CLEANUP 채널에 'merge 분기 판정' 미출력"""
+    runner_id = "t-merge-log-001"
+    # merge_requested 키 미세팅
+
+    process = _make_process(returncode=15)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    pub_and_log_calls = []
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge"), \
+         patch.object(plan_runner_mod, "_cleanup_process_state"), \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(plan_runner_mod, "_pub_and_log", side_effect=lambda rid, msg, rc, tag: pub_and_log_calls.append(msg)), \
+         patch.object(plan_runner_mod, "logger") as mock_logger:
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    # _pub_and_log에 "merge 분기 판정" 문자열이 전달되지 않아야 함
+    assert not any("merge 분기 판정" in m for m in pub_and_log_calls), \
+        f"merge 분기 판정이 CLEANUP 채널에 publish됨: {pub_and_log_calls}"
+    # logger.debug에 "merge 분기 판정"이 기록되어야 함
+    debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+    assert any("merge 분기 판정" in c for c in debug_calls), \
+        f"logger.debug에 merge 분기 판정 미기록. debug_calls={debug_calls}"
+
+
+def test_merge_flag_exists_publishes_cleanup_log(listener_mod, plan_runner_mod, fr):
+    """R(Right): merge_requested 키 존재 → CLEANUP 채널에 'merge 분기 판정' 출력 유지"""
+    runner_id = "t-merge-log-002"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    pub_and_log_calls = []
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge"), \
+         patch.object(plan_runner_mod, "_cleanup_process_state"), \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(plan_runner_mod, "_pub_and_log", side_effect=lambda rid, msg, rc, tag: pub_and_log_calls.append(msg)):
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    assert any("merge 분기 판정" in m for m in pub_and_log_calls), \
+        f"merge_requested 있을 때 CLEANUP 채널 미출력. pub_and_log_calls={pub_and_log_calls}"
+
+
+def test_v2_fallback_runs_without_merge_flag(listener_mod, plan_runner_mod, fr):
+    """B(Boundary): merge_requested 없어도 v2 fallback(detect_merged_but_not_done) 실행"""
+    runner_id = "t-v2-fallback-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+    # merge_requested 키 미세팅
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(plan_runner_mod, "_cleanup_process_state"), \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None) as mock_detect:
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    mock_detect.assert_called_once_with(runner_id, fr)
+    mock_merge.assert_not_called()
+
+
+def test_flag_undefined_on_redis_error_no_name_error(listener_mod, plan_runner_mod, fr):
+    """E(Error): Redis get 실패 시 _flag=None fallback, NameError 없음"""
+    runner_id = "t-flag-init-001"
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    pub_and_log_calls = []
+
+    broken_redis = _strict_redis_mock()
+    broken_redis.get.side_effect = Exception("Connection refused")
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge"), \
+         patch.object(plan_runner_mod, "_cleanup_process_state"), \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(plan_runner_mod, "_pub_and_log", side_effect=lambda rid, msg, rc, tag: pub_and_log_calls.append(msg)):
+        # NameError 없이 정상 종료해야 함
+        listener_mod._stream_output(process, log_handle, broken_redis, runner_id=runner_id)
+
+    # _flag=None → debug 경로 → _pub_and_log에 "merge 분기 판정" 미전달
+    assert not any("merge 분기 판정" in m for m in pub_and_log_calls), \
+        f"Redis 오류 시 _flag=None인데 CLEANUP 채널에 merge 분기 판정 publish됨: {pub_and_log_calls}"
+
+
+def test_completed_exit_with_no_stdout_no_error_publish(listener_mod, plan_runner_mod, fr):
+    """B(Boundary): exit_code=0 + completed → [ERROR] publish 안 함"""
+    runner_id = "t-completed-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    published_messages = []
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge"), \
+         patch.object(plan_runner_mod, "_cleanup_process_state"), \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(plan_runner_mod, "_pick_error_detail_line", return_value=None), \
+         patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=[]), \
+         patch.object(plan_runner_mod, "_publish_with_retry", side_effect=lambda rc, ch, msg: published_messages.append(msg) or True):
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    error_msgs = [m for m in published_messages if m.startswith("[ERROR]")]
+    assert not error_msgs, f"completed 종료인데 [ERROR] 메시지가 발행됨: {error_msgs}"
+
+
 def test_cleanup_publishes_completed_after_status_stopped(process_utils_mod, fr):
     """R(Right): _cleanup_process_state는 status=stopped 반영 후 __COMPLETED를 publish한다."""
     runner_id = "t-clnup-order-001"

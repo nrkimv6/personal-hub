@@ -47,7 +47,7 @@ COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
-    "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
+    "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
     "exit_reason", "subprocess_heartbeat",
 )
 

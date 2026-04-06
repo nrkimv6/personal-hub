@@ -35,7 +35,7 @@ ADMIN_API_PORT = int(os.environ.get("ADMIN_API_PORT", "8001"))
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
-    "current_cycle", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
+    "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
     "subprocess_heartbeat",
 )
 def _read_zombie_grace_seconds(default: int = 240) -> int:

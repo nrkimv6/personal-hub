@@ -129,3 +129,133 @@ def test_workflow_manager_slug_from_runner_id():
     """R(Right): _slug_from_runner_id — runner-{id[:8]} 생성"""
     slug = WorkflowManager._slug_from_runner_id("abcdef1234567890")
     assert slug == "runner-abcdef12"
+
+
+# ── Phase T1: 신규 함수 TC ─────────────────────────────────────────────────────
+
+class TestNormalizePlanKey:
+    """_normalize_plan_key 동치 검증"""
+
+    def test_none_returns_sentinel(self):
+        assert WorkflowManager._normalize_plan_key(None) == "__ALL_PLANS__"
+
+    def test_empty_string_returns_sentinel(self):
+        assert WorkflowManager._normalize_plan_key("") == "__ALL_PLANS__"
+
+    def test_whitespace_returns_sentinel(self):
+        assert WorkflowManager._normalize_plan_key("   ") == "__ALL_PLANS__"
+
+    def test_ALL_returns_sentinel(self):
+        assert WorkflowManager._normalize_plan_key("ALL") == "__ALL_PLANS__"
+
+    def test_dunder_ALL_PLANS_returns_sentinel(self):
+        assert WorkflowManager._normalize_plan_key("__ALL_PLANS__") == "__ALL_PLANS__"
+
+    def test_backslash_normalized_to_slash(self):
+        result = WorkflowManager._normalize_plan_key("docs\\plan\\test.md")
+        assert result == "docs/plan/test.md"
+
+    def test_forward_slash_preserved(self):
+        result = WorkflowManager._normalize_plan_key("docs/plan/test.md")
+        assert result == "docs/plan/test.md"
+
+    def test_absolute_path_windows_normalized(self):
+        result = WorkflowManager._normalize_plan_key("D:\\work\\project\\docs\\plan\\test.md")
+        assert result == "D:/work/project/docs/plan/test.md"
+
+    def test_regular_path_not_sentinel(self):
+        result = WorkflowManager._normalize_plan_key("docs/plan/2026-04-06_my-plan.md")
+        assert result != "__ALL_PLANS__"
+
+
+class TestCountStartedRunsUntil:
+    """count_started_runs_until: started_at IS NOT NULL AND started_at <= target 기준 집계"""
+
+    def test_count_zero_for_empty_db(self, wf_manager):
+        """B(Boundary): 빈 DB → 0"""
+        result = wf_manager.count_started_runs_until("docs/plan/test.md", "2099-01-01T00:00:00")
+        assert result == 0
+
+    def test_count_includes_started_runs(self, wf_manager):
+        """R(Right): started_at이 있는 레코드만 집계"""
+        id1 = wf_manager.create("slug-r1", "docs/plan/test.md")
+        id2 = wf_manager.create("slug-r2", "docs/plan/test.md")
+        id3 = wf_manager.create("slug-r3", "docs/plan/test.md")  # not started
+
+        wf_manager.update_status(id1, "running", runner_id="r1")
+        wf_manager.update_status(id2, "running", runner_id="r2")
+        # id3 remains planned (no started_at)
+
+        plan_key = "docs/plan/test.md"
+        count = wf_manager.count_started_runs_until(plan_key, "2099-01-01T00:00:00")
+        assert count == 2
+
+    def test_different_plan_not_included(self, wf_manager):
+        """R(Right): 다른 plan_key 레코드는 집계에서 제외"""
+        id1 = wf_manager.create("slug-a", "docs/plan/plan-a.md")
+        id2 = wf_manager.create("slug-b", "docs/plan/plan-b.md")
+        wf_manager.update_status(id1, "running", runner_id="r1")
+        wf_manager.update_status(id2, "running", runner_id="r2")
+
+        count_a = wf_manager.count_started_runs_until("docs/plan/plan-a.md", "2099-01-01T00:00:00")
+        count_b = wf_manager.count_started_runs_until("docs/plan/plan-b.md", "2099-01-01T00:00:00")
+        assert count_a == 1
+        assert count_b == 1
+
+    def test_sentinel_group_counts_null_and_ALL(self, wf_manager):
+        """R(Right): __ALL_PLANS__ sentinel — plan_file=None/ALL 레코드 집계"""
+        id1 = wf_manager.create("slug-all1", None)
+        id2 = wf_manager.create("slug-all2", "ALL")
+        id3 = wf_manager.create("slug-specific", "docs/plan/specific.md")
+        wf_manager.update_status(id1, "running", runner_id="r1")
+        wf_manager.update_status(id2, "running", runner_id="r2")
+        wf_manager.update_status(id3, "running", runner_id="r3")
+
+        count = wf_manager.count_started_runs_until("__ALL_PLANS__", "2099-01-01T00:00:00")
+        # id1 (None) + id2 (ALL) = 2, id3 (specific) 미포함
+        assert count == 2
+
+
+class TestMarkRunningWithExecutionCount:
+    """mark_running_with_execution_count: running 전이 + started_at + 순번 원자 처리"""
+
+    def test_first_run_returns_count_1(self, wf_manager):
+        """R(Right): plan 첫 실행 → execution_count=1"""
+        wf_id = wf_manager.create("slug-first", "docs/plan/test.md")
+        started_at, count = wf_manager.mark_running_with_execution_count(
+            wf_id, "runner-1", "plan/test", "/worktrees/test", "python"
+        )
+        assert count == 1
+        assert started_at is not None
+
+    def test_second_run_returns_count_2(self, wf_manager):
+        """R(Right): 같은 plan 2번째 실행 → execution_count=2"""
+        id1 = wf_manager.create("slug-run1", "docs/plan/test.md")
+        id2 = wf_manager.create("slug-run2", "docs/plan/test.md")
+
+        _, count1 = wf_manager.mark_running_with_execution_count(
+            id1, "runner-1", "plan/test", "/wt/1", "python"
+        )
+        _, count2 = wf_manager.mark_running_with_execution_count(
+            id2, "runner-2", "plan/test", "/wt/2", "python"
+        )
+        assert count1 == 1
+        assert count2 == 2
+
+    def test_nonexistent_id_raises_value_error(self, wf_manager):
+        """E(Error): 없는 id → ValueError"""
+        with pytest.raises(ValueError, match="workflow not found"):
+            wf_manager.mark_running_with_execution_count(
+                99999, "runner-x", "plan/test", "/wt/x", "python"
+            )
+
+    def test_status_becomes_running(self, wf_manager):
+        """R(Right): mark_running 후 status='running'으로 변경됨"""
+        wf_id = wf_manager.create("slug-status", "docs/plan/test.md")
+        wf_manager.mark_running_with_execution_count(
+            wf_id, "runner-1", "plan/test", "/wt/1", "python"
+        )
+        row = wf_manager.get_by_slug("slug-status")
+        assert row["status"] == "running"
+        assert row["runner_id"] == "runner-1"
+        assert row["started_at"] is not None

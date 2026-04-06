@@ -43,11 +43,10 @@ def test_classify_folders_basic(client, seeded_folders_and_categories):
     """1.1 Right: POST /folders/classify → 폴더 자동 분류"""
     response = client.post("/api/ic/folders/classify")
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     data = response.json()
 
-    assert data["status"] == "completed"
-    assert "stats" in data
+    assert data["status"] == "started"
     assert "message" in data
 
 
@@ -55,11 +54,11 @@ def test_classify_folders_with_force(client, seeded_folders_and_categories):
     """1.2 Right: POST /folders/classify?force=true → 재분류"""
     response = client.post("/api/ic/folders/classify?force=true")
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     data = response.json()
 
-    assert data["status"] == "completed"
-    assert "재분류" in data["message"]
+    assert data["status"] == "started"
+    assert "시작" in data["message"] or "started" in data["message"].lower()
 
 
 def test_map_folder_to_category(client, seeded_folders_and_categories):

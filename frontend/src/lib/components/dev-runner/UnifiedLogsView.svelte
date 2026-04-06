@@ -145,6 +145,12 @@
 							{t}
 						</span>
 					{/if}
+					<!-- 실행 순번 배지 -->
+					{#if item.run.execution_count != null}
+						<span class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
+							{item.run.execution_count}번째 실행
+						</span>
+					{/if}
 					<!-- 시간 -->
 					{#if item.run.start_time}
 						<span class="text-[10px] {idx === 0 ? 'text-gray-400' : 'text-gray-600'} ml-1">

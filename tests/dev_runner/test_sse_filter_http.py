@@ -76,6 +76,7 @@ def redis_client():
 
 
 @pytest.mark.skipif(not _is_api_available(), reason="Admin API 서버 미실행")
+@pytest.mark.allow_prod_redis
 class TestSseFilterHttp:
     def test_http_events_initial_status_excludes_tc_trigger(self, redis_client):
         """GET /events → initial status → tc:trigger runner 미포함"""

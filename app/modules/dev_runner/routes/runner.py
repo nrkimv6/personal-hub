@@ -4,6 +4,8 @@ import asyncio
 import json
 from datetime import datetime
 from typing import Optional
+import redis
+import redis.asyncio as aioredis
 from fastapi import APIRouter, HTTPException
 
 from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem, MergeQueueItem, MergeStatusResponse, MergeHistoryItem, DirectMergeRequest, RetryMergeRequest
@@ -15,7 +17,10 @@ router = APIRouter()
 @router.get("/runners", response_model=list[RunnerListItem])
 async def list_runners():
     """모든 active runner 목록 조회"""
-    return await executor_service.get_all_runners()
+    try:
+        return await executor_service.get_all_runners()
+    except (redis.ConnectionError, aioredis.ConnectionError):
+        raise HTTPException(status_code=503, detail="Redis 연결 실패")
 
 
 @router.post("/runners/{runner_id}/stop")
@@ -43,7 +48,10 @@ async def stop_run():
         await executor_service.async_redis.ping()
     except Exception:
         raise HTTPException(status_code=503, detail="Redis unavailable")
-    runners = await executor_service.get_all_runners()
+    try:
+        runners = await executor_service.get_all_runners()
+    except (redis.ConnectionError, aioredis.ConnectionError):
+        raise HTTPException(status_code=503, detail="Redis 연결 실패")
     if not runners:
         raise HTTPException(status_code=404, detail="Not running")
     return await executor_service.stop_dev_runner(runners[0].runner_id)

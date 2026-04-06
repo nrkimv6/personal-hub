@@ -1275,3 +1275,70 @@ class TestMergeLineChannelRouting:
         merge_data = json.loads(merge_events[0].split("data: ")[1].split("\n")[0])
         assert log_data["line"] == merge_line
         assert merge_data["line"] == merge_line
+
+
+# ─── Phase T1: SSE RECENT 포함 TC ────────────────────────────────────────────
+
+from app.modules.dev_runner.services.event_service import ACTIVE_RUNNERS_KEY  # noqa: E402
+
+RECENT_RUNNERS_KEY_FOR_TEST = "plan-runner:recent_runners"
+
+
+class TestBuildAllRunnersStatusRecentInclusion:
+    """SSE _build_all_runners_status()의 RECENT visible 러너 포함 검증 (Phase 4 수정)"""
+
+    def _register_recent(self, r, runner_id: str, trigger: str | None = None):
+        """RECENT_RUNNERS_KEY에 등록 (ACTIVE에는 미등록)"""
+        import time
+        r.zadd(RECENT_RUNNERS_KEY_FOR_TEST, {runner_id: time.time()})
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+        if trigger is not None:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", trigger)
+
+    def test_build_all_runners_status_includes_recent_visible(self, event_service, sync_redis):
+        """R: ACTIVE 빈 + RECENT에 trigger='user' runner → 결과에 포함"""
+        runner_id = "recent-vis-001"
+        self._register_recent(sync_redis, runner_id, trigger="user")
+
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+
+        assert runner_id in ids, (
+            f"RECENT의 visible runner {runner_id!r}이 SSE 결과에 포함되지 않음. "
+            f"결과: {ids}"
+        )
+
+    def test_build_all_runners_status_excludes_recent_invisible(self, event_service, sync_redis):
+        """I: RECENT에 trigger=None runner → 결과에 미포함 (화이트리스트 필터링)"""
+        runner_id = "recent-invis-001"
+        self._register_recent(sync_redis, runner_id, trigger=None)
+
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+
+        assert runner_id not in ids, (
+            f"RECENT의 invisible runner {runner_id!r}이 SSE 결과에 포함됨 — 필터링 실패. "
+            f"결과: {ids}"
+        )
+
+    def test_build_all_runners_status_deduplicates_active_recent(self, event_service, sync_redis):
+        """B: 동일 runner_id가 ACTIVE+RECENT 모두에 존재 → 결과에 1개만 포함"""
+        import time
+        runner_id = "dedup-001"
+        # ACTIVE에 등록
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+        sync_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+        # RECENT에도 동일 runner 등록
+        sync_redis.zadd(RECENT_RUNNERS_KEY_FOR_TEST, {runner_id: time.time()})
+
+        result = event_service._build_all_runners_status()
+        ids = [r["runner_id"] for r in result]
+        count = ids.count(runner_id)
+
+        assert count == 1, (
+            f"ACTIVE+RECENT 중복 runner {runner_id!r}이 {count}회 포함됨 (기대: 1회). "
+            f"결과: {ids}"
+        )

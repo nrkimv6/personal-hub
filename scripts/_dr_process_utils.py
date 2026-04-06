@@ -108,6 +108,12 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     _dead_process_first_seen = get_dead_process_first_seen()
     _wf_manager = get_wf_manager()
 
+    # cleanup 진행 중 표시 — 재실행 attach 감지 시 이 플래그를 확인함 (TTL 30초)
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:cleanup_in_progress", "1", ex=30)
+    except Exception:
+        pass
+
     # pre-review 중지 케이스는 별도 태그로 기록 (reconnect/heartbeat 공통)
     if reason and reason.startswith(("reconnect_", "heartbeat_", "no_log_file")):
         if _is_pre_review_stopped_runner(runner_id, redis_client):
@@ -227,6 +233,12 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
     logger.info(f"[cleanup] _cleanup_process_state 완료: {runner_id} (reason={reason})")
 
+    # cleanup 완료 — 진행 중 플래그 제거
+    try:
+        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:cleanup_in_progress")
+    except Exception:
+        pass
+
 
 class _DummyProcess:
     """재연결된 plan-runner 프로세스를 위한 래퍼.
@@ -248,10 +260,11 @@ class _DummyProcess:
         return self.returncode
 
 
-def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Redis):
-    """로그 파일 끝(EOF)부터 새 줄을 읽어 Redis log channel에 publish하는 스레드.
+def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Redis, replay_from_start: bool = False):
+    """로그 파일을 읽어 Redis log channel에 publish하는 스레드.
 
     재연결된 runner에서 pipe가 없을 때 파일 tailing으로 대체 스트리밍한다.
+    replay_from_start=True이면 파일 처음부터 읽어 기존 로그를 전부 재발행한다.
     PID 종료 + 더 이상 새 줄 없음 → 스레드 종료.
     """
     _running_processes = get_running_processes()
@@ -259,8 +272,9 @@ def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Red
     frame_buffer = MultilineFrameBuffer(max_chars=8192)
     try:
         with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-            # 파일 끝으로 이동 (재연결 전 기존 내용은 재발행하지 않음)
-            f.seek(0, 2)
+            # replay_from_start=False일 때만 파일 끝으로 이동 (기존 내용 재발행 안 함)
+            if not replay_from_start:
+                f.seek(0, 2)
             while True:
                 # runner가 이미 cleanup됐으면 스레드 종료
                 if runner_id not in _running_processes:
@@ -376,10 +390,10 @@ def _attach_to_running_process(runner_id: str, pid: int, redis_client: redis.Red
     _running_processes[runner_id] = dummy
     _running_log_files[runner_id] = Path(log_file_path)
 
-    # tailing 스레드 시작
+    # tailing 스레드 시작 — replay_from_start=True: 리스너 재시작 시 기존 로그 전체 재발행
     tail_thread = threading.Thread(
         target=_tail_log_and_publish,
-        args=(runner_id, log_file_path, redis_client),
+        args=(runner_id, log_file_path, redis_client, True),
         daemon=True,
     )
     tail_thread.start()

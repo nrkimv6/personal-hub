@@ -26,7 +26,10 @@ router = APIRouter(prefix="/files", tags=["Files"])
 
 
 @router.get("/{file_id}/thumbnail")
-async def get_thumbnail(file_id: int):
+async def get_thumbnail(
+    file_id: int,
+    db: Session = Depends(get_db),
+):
     """
     썸네일 이미지 서빙
 
@@ -36,6 +39,13 @@ async def get_thumbnail(file_id: int):
     Returns:
         JPEG 이미지
     """
+    file_exists = db.execute(
+        text("SELECT 1 FROM file_classifications WHERE id = :id"),
+        {"id": file_id},
+    ).fetchone()
+    if not file_exists:
+        raise HTTPException(status_code=404, detail="썸네일이 생성되지 않았습니다.")
+
     thumbnail_path = get_thumbnail_path(file_id, settings)
 
     if not thumbnail_path.exists():

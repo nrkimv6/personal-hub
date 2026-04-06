@@ -5,7 +5,7 @@ from PIL import Image
 
 
 @pytest.fixture
-async def seeded_duplicates(client, test_db, tmp_path):
+def seeded_duplicates(client, test_db, tmp_path):
     """중복 그룹이 있는 DB 상태 생성"""
     from app.modules.image_classifier.workers.phash import PHashWorker
     from app.modules.image_classifier.workers.duplicate_detector import DuplicateDetector
@@ -39,7 +39,7 @@ async def seeded_duplicates(client, test_db, tmp_path):
 
     # 중복 감지 실행
     detector = DuplicateDetector(test_db, settings)
-    await detector.detect_duplicates()
+    detector.detect_duplicates_sync()
 
     return {"file1_id": 1, "file2_id": 2, "paths": [path1, path2]}
 
@@ -48,8 +48,7 @@ async def seeded_duplicates(client, test_db, tmp_path):
 # Right: 기본 CRUD 동작
 # ================================================
 
-@pytest.mark.asyncio
-async def test_get_duplicate_groups_list(seeded_duplicates, client):
+def test_get_duplicate_groups_list(seeded_duplicates, client):
     """7E.1 Right: GET / → 그룹 목록"""
     response = client.get("/api/ic/duplicates")
 
@@ -67,8 +66,7 @@ async def test_get_duplicate_groups_list(seeded_duplicates, client):
     assert "status" in group
 
 
-@pytest.mark.asyncio
-async def test_get_group_detail_with_members(seeded_duplicates, client, test_db):
+def test_get_group_detail_with_members(seeded_duplicates, client, test_db):
     """7E.2 Right: GET /{id} → 멤버 포함 상세"""
     # 생성된 그룹 ID 조회
     group_result = test_db.execute(text("""
@@ -95,8 +93,7 @@ async def test_get_group_detail_with_members(seeded_duplicates, client, test_db)
     assert "quality_score" in member
 
 
-@pytest.mark.asyncio
-async def test_resolve_keep_best_quality(seeded_duplicates, client, test_db):
+def test_resolve_keep_best_quality(seeded_duplicates, client, test_db):
     """7E.3 Right: POST /{id}/resolve → 상태 변경"""
     # 그룹 ID 조회
     group_result = test_db.execute(text("""
@@ -127,8 +124,7 @@ async def test_resolve_keep_best_quality(seeded_duplicates, client, test_db):
 # Boundary: 필터링
 # ================================================
 
-@pytest.mark.asyncio
-async def test_filter_by_status(seeded_duplicates, client, test_db):
+def test_filter_by_status(seeded_duplicates, client, test_db):
     """7E.4 Boundary: status=pending/resolved/ignored"""
     # pending 필터
     response_pending = client.get("/api/ic/duplicates?status=pending")
@@ -158,8 +154,7 @@ def test_resolve_nonexistent_group(client):
     assert response.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_resolve_non_member_file(seeded_duplicates, client, test_db):
+def test_resolve_non_member_file(seeded_duplicates, client, test_db):
     """7E.6 Error: 그룹 멤버가 아닌 파일 → 400"""
     # 그룹 ID 조회
     group_result = test_db.execute(text("""
@@ -219,8 +214,7 @@ def _setup_e2e_pair_data(test_db, base_id=100):
     return [gid - 1, gid]
 
 
-@pytest.mark.asyncio
-async def test_get_folder_pair_analysis_http(client, test_db):
+def test_get_folder_pair_analysis_http(client, test_db):
     """GET /folder-pair-analysis → 200 응답 + pairs 구조 확인"""
     _setup_e2e_pair_data(test_db)
 
@@ -241,8 +235,7 @@ async def test_get_folder_pair_analysis_http(client, test_db):
     assert isinstance(pair["group_ids"], list)
 
 
-@pytest.mark.asyncio
-async def test_resolve_by_folder_pair_http(client, test_db):
+def test_resolve_by_folder_pair_http(client, test_db):
     """POST /resolve-by-folder-pair → 정상 해결 + file_path_aliases 저장 확인"""
     group_ids = _setup_e2e_pair_data(test_db, base_id=200)
 
@@ -263,8 +256,7 @@ async def test_resolve_by_folder_pair_http(client, test_db):
     assert alias_count > 0
 
 
-@pytest.mark.asyncio
-async def test_resolve_by_folder_pair_empty_groups(client):
+def test_resolve_by_folder_pair_empty_groups(client):
     """POST /resolve-by-folder-pair with empty group_ids → 400 에러 응답"""
     response = client.post("/api/ic/duplicates/resolve-by-folder-pair", json={
         "keep_folder": "D:\folderA",

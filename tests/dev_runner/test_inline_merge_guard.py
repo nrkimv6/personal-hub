@@ -403,3 +403,143 @@ class TestStreamOutputExitCodeMergeBranch:
         _flag = r.get(f"plan-runner:runners:{runner_id}:merge_requested")
         _merge_requested = bool(_flag)
         assert _merge_requested is False
+
+
+# ─── Phase T1: trigger 전파 + direct-merge trigger TC ─────────────────────────
+
+
+RUNNER_KEY_PREFIX = "plan-runner:runners"
+COMMANDS_KEY = "plan-runner:commands"
+
+
+def _setup_restart_after_merge_runner(r, runner_id, trigger, plan_file="docs/plan/test.md"):
+    """restart_after_merge 시나리오용 Redis 상태 세팅"""
+    r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+    r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
+    r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", "claude")
+    r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine", "claude")
+    r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
+    if trigger is not None:
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", trigger)
+
+
+class TestDoInlineMergeTriggerPropagation:
+    """trigger 전파 단위 테스트 — _do_inline_merge()"""
+
+    def test_do_inline_merge_propagates_trigger(self, fake_redis):
+        """R: trigger='user' runner → restart_after_merge → 새 command에 trigger='user' 전파"""
+        runner_id = "prop-trigger-01"
+        _setup_restart_after_merge_runner(fake_redis, runner_id, trigger="user")
+
+        with patch("_dr_plan_runner._execute_merge_with_lock") as mock_merge, \
+             patch("_dr_plan_runner._cleanup_process_state"):
+            from _dr_plan_runner import _do_inline_merge
+            _do_inline_merge(runner_id, fake_redis)
+
+        # COMMANDS_KEY에서 새 command 추출
+        raw = fake_redis.lrange(COMMANDS_KEY, 0, -1)
+        assert len(raw) == 1, f"새 command가 COMMANDS_KEY에 없음: {raw}"
+        command = json.loads(raw[0])
+        assert command["trigger"] == "user", f"trigger 전파 실패: {command}"
+        assert command["plan_file"] == "docs/plan/test.md"
+        assert command["action"] == "run"
+
+    def test_do_inline_merge_propagates_api_trigger(self, fake_redis):
+        """R: trigger='api' runner → restart_after_merge → 새 command에 trigger='api' 전파 (user 하드코딩 방지)"""
+        runner_id = "prop-trigger-02"
+        _setup_restart_after_merge_runner(fake_redis, runner_id, trigger="api")
+
+        with patch("_dr_plan_runner._execute_merge_with_lock"), \
+             patch("_dr_plan_runner._cleanup_process_state"):
+            from _dr_plan_runner import _do_inline_merge
+            _do_inline_merge(runner_id, fake_redis)
+
+        raw = fake_redis.lrange(COMMANDS_KEY, 0, -1)
+        # trigger='api'는 화이트리스트에 없으므로 새 runner도 비가시. 하지만 원본 trigger 보존이 목표
+        assert len(raw) == 1, f"api trigger runner도 restart_after_merge command를 생성해야 함: {raw}"
+        command = json.loads(raw[0])
+        assert command["trigger"] == "api", f"원본 trigger='api'가 'user'로 변경됨 (하드코딩 버그): {command}"
+
+    def test_do_inline_merge_missing_trigger_skips_restart(self, fake_redis):
+        """B: trigger=None(소실) → restart_after_merge 스킵 + 새 command 미생성"""
+        runner_id = "prop-trigger-03"
+        _setup_restart_after_merge_runner(fake_redis, runner_id, trigger=None)  # trigger 키 미설정
+
+        with patch("_dr_plan_runner._execute_merge_with_lock"), \
+             patch("_dr_plan_runner._cleanup_process_state"):
+            from _dr_plan_runner import _do_inline_merge
+            _do_inline_merge(runner_id, fake_redis)
+
+        raw = fake_redis.lrange(COMMANDS_KEY, 0, -1)
+        assert len(raw) == 0, f"trigger=None 시 새 command를 생성하면 안 됨: {raw}"
+
+    def test_do_inline_merge_no_restart_flag(self, fake_redis):
+        """B: restart_after_merge 플래그 없음 → 새 command 미생성 (기존 동작 보존)"""
+        runner_id = "prop-trigger-04"
+        # restart_after_merge 없이 일반 runner 상태
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+        fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        # restart_after_merge 키 미설정
+
+        with patch("_dr_plan_runner._execute_merge_with_lock"), \
+             patch("_dr_plan_runner._cleanup_process_state"):
+            from _dr_plan_runner import _do_inline_merge
+            _do_inline_merge(runner_id, fake_redis)
+
+        raw = fake_redis.lrange(COMMANDS_KEY, 0, -1)
+        assert len(raw) == 0, f"restart_after_merge 없으면 새 command 생성 금지: {raw}"
+
+
+class TestDoDirectMergeTrigger:
+    """direct-merge trigger 단위 테스트"""
+
+    def _run_direct_merge(self, fake_redis, worktree_path, branch="impl/test-dm", plan_file=None):
+        """_do_direct_merge 실행 후 runner_id를 반환 (내부 uuid4 고정으로 캡처)"""
+        captured_runner_id = []
+
+        original_uuid4 = __import__("uuid").uuid4
+
+        def _fake_uuid4():
+            uid = original_uuid4()
+            # runner_id 캡처 (dm-{hex[:8]} 패턴)
+            captured_runner_id.append(f"dm-{uid.hex[:8]}")
+            return uid
+
+        with patch("_dr_commands._do_inline_merge"), \
+             patch("_dr_commands._log_memory_stage"), \
+             patch("_dr_commands.ACTIVE_RUNNERS_KEY", "plan-runner:active_runners"), \
+             patch("_dr_commands.RECENT_RUNNERS_TTL", 86400), \
+             patch("uuid.uuid4", _fake_uuid4):
+            from _dr_commands import _do_direct_merge
+            _do_direct_merge(
+                branch=branch,
+                worktree_path_str=str(worktree_path),
+                plan_file=plan_file,
+                redis_client=fake_redis,
+                command_id="test-cmd-id",
+            )
+
+        return captured_runner_id[0] if captured_runner_id else None
+
+    def test_do_direct_merge_sets_trigger(self, fake_redis, tmp_path):
+        """R: _do_direct_merge 실행 후 Redis에서 {runner_id}:trigger == 'user'"""
+        worktree_path = tmp_path / "test-worktree"
+        worktree_path.mkdir()
+
+        runner_id = self._run_direct_merge(fake_redis, worktree_path)
+        assert runner_id is not None
+
+        trigger_val = fake_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+        assert trigger_val == "user", f"direct-merge trigger 미설정: {trigger_val!r}"
+
+    def test_do_direct_merge_trigger_has_ttl(self, fake_redis, tmp_path):
+        """B: _do_direct_merge 실행 후 {runner_id}:trigger 키에 TTL 설정 확인"""
+        worktree_path = tmp_path / "test-worktree2"
+        worktree_path.mkdir()
+
+        runner_id = self._run_direct_merge(fake_redis, worktree_path, branch="impl/test-ttl")
+        assert runner_id is not None
+
+        ttl = fake_redis.ttl(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+        assert ttl > 0, f"trigger 키에 TTL 미설정 (ttl={ttl})"

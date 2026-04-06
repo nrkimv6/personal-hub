@@ -105,12 +105,24 @@ class LogFileResolver:
 
     @staticmethod
     def parse_meta_from_log(log_file_path: str, scan_lines: int = 15) -> dict:
-        """로그 파일 선두 N줄에서 [TRIGGER]/plan= 메타데이터 파싱.
+        """로그 파일 선두 N줄에서 [TRIGGER]/[RUN_META] 메타데이터 파싱.
 
         Returns:
-            {"trigger": str|None, "plan": str|None}
+            {
+                "trigger": str|None,
+                "plan": str|None,
+                "started_at": str|None,   # [RUN_META] started_at=
+                "execution_count": int|None,  # [RUN_META] execution_count=
+                "plan_key": str|None,     # [RUN_META] plan_key=
+            }
         """
-        result: dict = {"trigger": None, "plan": None}
+        result: dict = {
+            "trigger": None,
+            "plan": None,
+            "started_at": None,
+            "execution_count": None,
+            "plan_key": None,
+        }
         try:
             with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
                 for _ in range(scan_lines):
@@ -125,8 +137,22 @@ class LogFileResolver:
                         for p in parts[1:]:
                             if p.startswith("plan=") and result["plan"] is None:
                                 result["plan"] = p[5:]
-                        if result["trigger"] and result["plan"]:
-                            break
+                    elif line.startswith("[RUN_META] ") and result["started_at"] is None:
+                        parts = line[len("[RUN_META] "):].split(" | ")
+                        for p in parts:
+                            if p.startswith("started_at="):
+                                result["started_at"] = p[len("started_at="):]
+                            elif p.startswith("execution_count="):
+                                raw = p[len("execution_count="):]
+                                try:
+                                    result["execution_count"] = int(raw)
+                                except (ValueError, TypeError):
+                                    pass
+                            elif p.startswith("plan_key="):
+                                result["plan_key"] = p[len("plan_key="):]
+                    # 두 줄 모두 파싱 완료되면 종료
+                    if result["trigger"] and result["started_at"] is not None:
+                        break
         except (OSError, IOError):
             pass
         return result

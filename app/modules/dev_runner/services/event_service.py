@@ -47,6 +47,8 @@ REDIS_PORT = 6379
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
+MAX_RECENT_IN_SSE = 20  # SSE status 이벤트에 포함할 RECENT 러너 최대 수
 REDIS_STATE_KEY = "plan-runner:state"
 PLAN_FILE_ALL = "__ALL_PLANS__"  # 전체실행 sentinel (command-listener와 공유)
 _LEGACY_ALL = "ALL"  # 하위 호환
@@ -150,6 +152,7 @@ class EventService:
                 "trigger",
                 "exit_reason",
                 "error",
+                "execution_count",
             ]
             values = self._sync.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
             data = dict(zip(fields, values))
@@ -199,11 +202,14 @@ class EventService:
         return payload
 
     def _build_all_runners_status(self) -> list[dict]:
-        """모든 active runner 상태를 묶어서 반환"""
+        """모든 active + RECENT visible runner 상태를 묶어서 반환"""
         try:
-            runner_ids = self._sync.smembers(ACTIVE_RUNNERS_KEY) or set()
+            active_ids: set = self._sync.smembers(ACTIVE_RUNNERS_KEY) or set()
+            recent_ids: list = self._sync.zrange(RECENT_RUNNERS_KEY, -MAX_RECENT_IN_SSE, -1) or []
+            # 중복 제거 (ACTIVE가 RECENT에도 있을 수 있음)
+            all_ids = active_ids | set(recent_ids)
             result = []
-            for rid in runner_ids:
+            for rid in all_ids:
                 payload = self._build_status_payload(rid)
                 if payload:
                     if not payload.get("visible", False):

@@ -99,6 +99,7 @@ async def test_reproduce_visible_leak_trigger_none():
 
 
 @pytest.mark.asyncio
+@pytest.mark.allow_prod_redis
 async def test_reproduce_5th_visible_leak():
     """T3 재현: 실제 Redis에 tc-pytest- prefix + trigger="user" 직접 기록 → visible=False 확인
 

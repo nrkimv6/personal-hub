@@ -215,6 +215,37 @@ def force_test_source_on_start_dev_runner():
         yield
 
 
+@pytest.fixture()
+def block_trigger_user_direct_write():
+    """fakeredis에서 trigger='user' 직접 기록 차단 fixture (비autouse — 명시 사용 전용).
+
+    단위 테스트에서 trigger='user'를 fakeredis에 직접 기록하는 코드를 탐지한다.
+    autouse 대신 명시적으로 사용하여 격리 guard 자체를 검증하는 TC에서 활용한다.
+    E2E 테스트는 allow_prod_redis 마커로 실서버 Redis를 사용하므로 이 fixture 불필요.
+    """
+    try:
+        import fakeredis as _fakeredis
+    except ImportError:
+        yield
+        return
+
+    original_fake_set = _fakeredis.FakeRedis.set
+
+    def _guarded_fake_set(self, name, value, *args, **kwargs):
+        name_str = str(name) if name else ""
+        value_str = str(value) if value else ""
+        if name_str.endswith(":trigger") and value_str in ("user", "user:all"):
+            pytest.fail(
+                f"테스트에서 trigger='user' 또는 'user:all' Redis 직접 기록 금지.\n"
+                f"  key={name!r}, value={value!r}\n"
+                f"  tc:{{test_name}} 형태의 trigger를 사용하세요."
+            )
+        return original_fake_set(self, name, value, *args, **kwargs)
+
+    with patch.object(_fakeredis.FakeRedis, "set", _guarded_fake_set):
+        yield
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _set_testing_env():
     """테스트 세션 동안 TESTING=1, TEST_DB_PATH 환경변수 설정

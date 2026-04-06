@@ -1,7 +1,7 @@
 """분류 API 엔드포인트"""
 import threading
 from typing import Optional, List
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -87,11 +87,24 @@ class ApproveRequest(BaseModel):
 
 
 @router.post("/classify/rule/start")
-async def classify_rule_start(background_tasks: BackgroundTasks):
+async def classify_rule_start():
     """규칙 기반 분류 시작"""
-    if classify_state["is_running"]:
-        return {"status": "already_running"}
-    background_tasks.add_task(_run_rule_classify_background)
+    with _classify_lock:
+        if classify_state["is_running"]:
+            return {"status": "already_running"}
+        classify_state["is_running"] = True
+        classify_state["error"] = None
+    try:
+        threading.Thread(
+            target=_run_rule_classify_background,
+            daemon=True,
+            name="fc-rule-classify",
+        ).start()
+    except Exception as exc:
+        with _classify_lock:
+            classify_state["is_running"] = False
+            classify_state["error"] = str(exc)
+        return {"status": "error", "message": str(exc)}
     return {"status": "started"}
 
 
@@ -119,11 +132,24 @@ async def classify_approve(request: ApproveRequest):
 
 
 @router.post("/classify/llm/start")
-async def classify_llm_start(background_tasks: BackgroundTasks):
+async def classify_llm_start():
     """LLM 분류 시작"""
-    if llm_state["is_running"]:
-        return {"status": "already_running"}
-    background_tasks.add_task(_run_llm_classify_background)
+    with _llm_lock:
+        if llm_state["is_running"]:
+            return {"status": "already_running"}
+        llm_state["is_running"] = True
+        llm_state["error"] = None
+    try:
+        threading.Thread(
+            target=_run_llm_classify_background,
+            daemon=True,
+            name="fc-llm-classify",
+        ).start()
+    except Exception as exc:
+        with _llm_lock:
+            llm_state["is_running"] = False
+            llm_state["error"] = str(exc)
+        return {"status": "error", "message": str(exc)}
     return {"status": "started"}
 
 

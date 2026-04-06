@@ -463,6 +463,14 @@ class LogService:
                     trigger = self._parse_trigger_from_log(log_file_path)
                 if visible_only and not is_visible_runner(trigger, runner_id):
                     continue
+                # execution_count: Redis에서 우선 조회
+                execution_count = None
+                ec_raw = self.redis_client.get(f"{prefix}:execution_count")
+                if ec_raw is not None:
+                    try:
+                        execution_count = int(ec_raw)
+                    except (ValueError, TypeError):
+                        pass
                 runs[runner_id] = RunHistoryItem(
                     runner_id=runner_id,
                     plan_file=plan_file,
@@ -477,6 +485,7 @@ class LogService:
                     branch=branch,
                     merge_status=merge_status,
                     trigger=trigger,
+                    execution_count=execution_count,
                 )
         except redis.ConnectionError:
             pass
@@ -519,8 +528,16 @@ class LogService:
                 file_meta = self._parse_meta_from_log(str(path))
                 file_trigger = file_meta.get("trigger")
                 file_plan = file_meta.get("plan")
+                file_started_at = file_meta.get("started_at")
+                file_execution_count = file_meta.get("execution_count")
                 if visible_only and not is_visible_runner(file_trigger, runner_id):
                     continue
+                # RUN_META.started_at 우선, 없으면 mtime fallback
+                if file_started_at:
+                    try:
+                        start_time = datetime.fromisoformat(file_started_at)
+                    except (ValueError, TypeError):
+                        pass
                 runs[runner_id] = RunHistoryItem(
                     runner_id=runner_id,
                     plan_file=file_plan,  # 로그에서 파싱된 plan 경로 (Redis 소실 시 fallback)
@@ -532,6 +549,7 @@ class LogService:
                     log_file=str(path),
                     has_log=True,
                     trigger=file_trigger,
+                    execution_count=file_execution_count,
                 )
 
         # 3. start_time DESC 정렬
