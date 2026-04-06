@@ -37,6 +37,7 @@ from app.modules.dev_runner.services.sse_helpers import (
 from app.modules.dev_runner.schemas import LogResponse, RunHistoryItem, RunHistoryResponse, FullLogResponse
 from app.modules.dev_runner.services.state import get_state
 from app.modules.dev_runner.services.visibility import is_visible_runner
+from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
 # Redis 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
@@ -65,67 +66,18 @@ class LogService:
             socket_connect_timeout=5, max_connections=50,
         )
         self.async_redis = aioredis.Redis(connection_pool=self._async_pool)
+        self.resolver = LogFileResolver(config, self.redis_client)
 
-    # 레거시 파일명(runner_id 없음) pseudo_id → Path 역매핑 캐시
+    # 레거시 파일명(runner_id 없음) pseudo_id → Path 역매핑 캐시 (resolver와 공유)
     _legacy_map: dict[str, "Path"] = {}
 
     def _find_current_log(self, runner_id: str) -> Optional[Path]:
-        """특정 runner의 stream 로그 파일 (Redis에서 조회)
-
-        stream_log_path 존재 시 즉시 반환. 없거나 파일 미존재 시 log_file_path로 fallback.
-        """
-        try:
-            stream_path_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
-            log_path_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
-
-            # stream_log_path 존재 시 즉시 반환 (크기 무관)
-            if stream_path_str:
-                stream_path = Path(stream_path_str)
-                if stream_path.exists():
-                    return stream_path
-
-            # fallback: 실제 로그가 기록된 log_file_path
-            if log_path_str:
-                log_path = Path(log_path_str)
-                if log_path.exists():
-                    return log_path
-        except redis.ConnectionError:
-            pass
-
-        # Phase 3 fallback: Redis TTL 만료 후 파일시스템 검색 (신규 형식 전용)
-        # lg- 접두사는 레거시 파일용으로 Phase 2에서 별도 처리
-        if runner_id.startswith("lg-"):
-            return None
-        log_dir = self._get_log_dir()
-        if log_dir.exists():
-            for pattern in [
-                f"plan-runner-stream-{runner_id}-*.log",
-                f"plan-runner-{runner_id}-*.log",
-            ]:
-                matches = list(log_dir.glob(pattern))
-                if matches:
-                    return max(matches, key=lambda p: p.stat().st_mtime)
-        return None
+        """[shim] → self.resolver.find_current_log()"""
+        return self.resolver.find_current_log(runner_id)
 
     def _resolve_legacy_log(self, runner_id: str) -> Optional[Path]:
-        """lg- 접두사 pseudo runner_id로 레거시 파일 탐색.
-
-        1. _legacy_map 캐시 히트 → 즉시 반환
-        2. 캐시 미스 → 전체 스캔 후 _legacy_map 갱신
-        """
-        if runner_id in self._legacy_map:
-            return self._legacy_map[runner_id]
-        log_dir = self._get_log_dir()
-        if not log_dir.exists():
-            return None
-        for log_path in log_dir.glob("plan-runner-stream-*.log"):
-            m = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", log_path.name)
-            if not m:
-                continue
-            ts = m.group(1)
-            pseudo_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
-            self._legacy_map[pseudo_id] = log_path
-        return self._legacy_map.get(runner_id)
+        """[shim] → self.resolver.resolve_legacy_log()"""
+        return self.resolver.resolve_legacy_log(runner_id)
 
     def tail_log_file(self, runner_id: str, n_lines: int = 100) -> LogResponse:
         """로그 파일 끝에서 N줄 읽기 (초기 로드용)."""
@@ -414,44 +366,18 @@ class LogService:
             yield event
 
     def _get_log_dir(self) -> Path:
-        """로그 디렉토리 경로 반환 (config.LOG_DIR 기준, wtools 절대경로로 보정)"""
-        log_dir = config.LOG_DIR
-        if not log_dir.is_absolute():
-            log_dir = config.WTOOLS_BASE_DIR / log_dir
-        return log_dir
+        """[shim] → self.resolver.get_log_dir()"""
+        return self.resolver.get_log_dir()
 
     @staticmethod
     def _parse_meta_from_log(log_file_path: str, scan_lines: int = 15) -> dict:
-        """로그 파일 선두 N줄에서 [TRIGGER]/plan= 메타데이터 파싱.
-
-        Returns:
-            {"trigger": str|None, "plan": str|None}
-        """
-        result: dict = {"trigger": None, "plan": None}
-        try:
-            with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
-                for _ in range(scan_lines):
-                    line = f.readline()
-                    if not line:
-                        break
-                    line = line.rstrip("\n")
-                    if line.startswith("[TRIGGER] ") and result["trigger"] is None:
-                        rest = line[len("[TRIGGER] "):]
-                        parts = rest.split(" | ")
-                        result["trigger"] = parts[0]
-                        for p in parts[1:]:
-                            if p.startswith("plan=") and result["plan"] is None:
-                                result["plan"] = p[5:]
-                        if result["trigger"] and result["plan"]:
-                            break
-        except (OSError, IOError):
-            pass
-        return result
+        """[shim] → LogFileResolver.parse_meta_from_log()"""
+        return LogFileResolver.parse_meta_from_log(log_file_path, scan_lines)
 
     @staticmethod
     def _parse_trigger_from_log(log_file_path: str) -> Optional[str]:
-        """로그 파일 선두 N줄에서 [TRIGGER] 파싱. 기존 호출처 호환."""
-        return LogService._parse_meta_from_log(log_file_path).get("trigger")
+        """[shim] → LogFileResolver.parse_trigger_from_log()"""
+        return LogFileResolver.parse_trigger_from_log(log_file_path)
 
     def get_run_history(self, limit: int = 20, offset: int = 0, visible_only: bool = False) -> RunHistoryResponse:
         """실행 이력 조회: Redis active_runners + 로그 파일 스캔 병합, start_time DESC 정렬"""
