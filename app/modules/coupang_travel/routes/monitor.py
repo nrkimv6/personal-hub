@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_db
+from app.core.database import get_db
 from app.models.business import Business
 from app.models.biz_item import BizItem
 from app.models.monitor_schedule import MonitorSchedule

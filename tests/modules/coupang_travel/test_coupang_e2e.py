@@ -184,3 +184,54 @@ def test_naver_worker_pending_queue_excludes_coupang(db_session, coupang_schedul
     """))
     pending_ids = [row[0] for row in result.fetchall()]
     assert coupang_sched_id not in pending_ids
+
+
+@pytest.mark.asyncio
+async def test_coupang_monitor_full_pipeline():
+    """쿠팡 모니터링 전체 파이프라인 — mock API 클라이언트 + 실 CoupangMonitorService."""
+    from app.modules.coupang_travel.services.api_client import CoupangApiClient
+    from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
+    from app.shared.notification import NotificationService
+
+    mock_api = AsyncMock(spec=CoupangApiClient)
+    notification_service = NotificationService()
+    sent_messages = []
+
+    async def fake_send(msg, send_desktop=False):
+        sent_messages.append(msg)
+
+    with patch.object(notification_service, "send_notification_message", side_effect=fake_send):
+        service = CoupangMonitorService(mock_api, notification_service)
+
+        mock_page = AsyncMock()
+
+        # 1회차: SOLD_OUT → 초기 상태 저장, 알림 없음
+        mock_api.fetch_vendor_items.return_value = [
+            VendorItem(vendor_item_name="특실A", sale_status="SOLD_OUT", stock_count=0),
+            VendorItem(vendor_item_name="특실B", sale_status="SOLD_OUT", stock_count=0),
+        ]
+        changes1 = await service.check_and_notify("10000011218760", "pkg_abc", ["2026-04-15"], mock_page)
+        assert changes1 == [], "초기 호출은 변경 없음"
+        assert len(sent_messages) == 0, "초기 호출은 알림 없음"
+
+        # 2회차: 특실A → ON_SALE, 특실B → 변화 없음
+        mock_api.fetch_vendor_items.return_value = [
+            VendorItem(vendor_item_name="특실A", sale_status="ON_SALE", stock_count=2),
+            VendorItem(vendor_item_name="특실B", sale_status="SOLD_OUT", stock_count=0),
+        ]
+        changes2 = await service.check_and_notify("10000011218760", "pkg_abc", ["2026-04-15"], mock_page)
+        assert len(changes2) == 1, "특실A 변경 1건"
+        assert changes2[0].item_name == "특실A"
+        assert changes2[0].new_status == "ON_SALE"
+        assert len(sent_messages) == 1
+        assert "[쿠팡]" in sent_messages[0]
+        assert "특실A" in sent_messages[0]
+
+        # 3회차: 두 옵션 모두 변화 없음
+        mock_api.fetch_vendor_items.return_value = [
+            VendorItem(vendor_item_name="특실A", sale_status="ON_SALE", stock_count=2),
+            VendorItem(vendor_item_name="특실B", sale_status="SOLD_OUT", stock_count=0),
+        ]
+        changes3 = await service.check_and_notify("10000011218760", "pkg_abc", ["2026-04-15"], mock_page)
+        assert changes3 == [], "변화 없으면 변경 0건"
+        assert len(sent_messages) == 1, "추가 알림 없음"
