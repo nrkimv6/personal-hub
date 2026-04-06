@@ -15,6 +15,8 @@ if sys.platform == 'win32':
 import pytest
 from pathlib import Path
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
+from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 
 # 프로젝트 루트
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -83,7 +85,16 @@ def api_url():
 @pytest.fixture
 def frontend_url():
     """프론트엔드 URL"""
-    return E2E_CONFIG["frontend_url"]
+    url = E2E_CONFIG["frontend_url"]
+    try:
+        # HTTPError(4xx/5xx)는 서버 기동 상태로 간주하고 테스트 진행
+        with urlopen(url, timeout=2):
+            pass
+    except HTTPError:
+        pass
+    except URLError:
+        pytest.skip(f"Frontend not available: {url}")
+    return url
 
 
 # =============================================================================
