@@ -181,11 +181,21 @@ class ServiceRunner:
         frontend_dir = PROJECT_ROOT / "frontend"
         timestamp = time.strftime("%Y%m%d_%H%M%S")
 
-        # node_modules 확인
-        if not (frontend_dir / "node_modules").exists():
-            self.log.info("Running npm install...")
+        # frontend 의존성 확인 (node_modules 디렉토리만 믿지 말고 vite 실행 파일도 확인)
+        node_modules_dir = frontend_dir / "node_modules"
+        vite_bin = node_modules_dir / ".bin" / "vite.cmd"
+        deps_reason = None
+        if not node_modules_dir.exists():
+            deps_reason = "node_modules missing"
+        elif not vite_bin.exists():
+            deps_reason = "vite binary missing"
+
+        if deps_reason:
+            self.log.warning(f"Frontend dependency check: {deps_reason}; running npm install...")
             subprocess.run(["npm.cmd", "install"], cwd=str(frontend_dir), check=False,
                            encoding="utf-8", errors="replace")
+            if not vite_bin.exists():
+                self.log.error("Vite binary is still missing after npm install; frontend start may fail")
 
         if self.dev:
             # Stale build ??

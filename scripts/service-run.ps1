@@ -308,13 +308,25 @@ $frontendLogFile = Join-Path $LogDir "frontend_$Timestamp.log"
 $frontendErrLogFile = Join-Path $LogDir "frontend_err_$Timestamp.log"
 $FrontendPidFile = Join-Path $PidDir "frontend$PidSuffix.pid"
 
-# Check node_modules
+# Frontend dependency check
+# node_modules 디렉토리만 있더라도 vite.cmd 누락이면 즉시 장애가 나므로 함께 검증
 $nodeModules = Join-Path $FrontendDir "node_modules"
+$viteCmd = Join-Path $nodeModules ".bin\vite.cmd"
+$installReason = $null
 if (-not (Test-Path $nodeModules)) {
-    Write-ServiceLog "Running npm install..."
+    $installReason = "node_modules missing"
+} elseif (-not (Test-Path $viteCmd)) {
+    $installReason = "vite binary missing"
+}
+
+if ($installReason) {
+    Write-ServiceLog "Frontend dependency check: $installReason; running npm install..."
     $npmResult = Start-Process -FilePath "npm" -ArgumentList "install" -WorkingDirectory $FrontendDir -Wait -NoNewWindow -PassThru
     if ($npmResult.ExitCode -ne 0) {
         Write-ServiceLog "WARNING: npm install failed with exit code $($npmResult.ExitCode)"
+    }
+    if (-not (Test-Path $viteCmd)) {
+        Write-ServiceLog "WARNING: vite.cmd still missing after npm install — frontend start may fail"
     }
 }
 
