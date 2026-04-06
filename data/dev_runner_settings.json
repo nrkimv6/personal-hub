@@ -1,0 +1,6 @@
+{
+  "max_concurrent_runners": 3,
+  "default_engine": "claude",
+  "default_fix_engine": "claude",
+  "updated_at": "2026-04-06T14:22:15.535064"
+}

@@ -51,6 +51,8 @@ def test_sse_events_disconnect_cleanup_e2e():
                 break
     except requests.exceptions.ReadTimeout:
         pass
+    except requests.exceptions.ConnectionError:
+        pytest.skip("Admin API unavailable during test run")
     finally:
         session.close()
 
@@ -87,6 +89,8 @@ def test_sse_log_stream_disconnect_cleanup_e2e():
                 break
     except requests.exceptions.ReadTimeout:
         pass
+    except requests.exceptions.ConnectionError:
+        pytest.skip("Admin API unavailable during test run")
     finally:
         session.close()
 

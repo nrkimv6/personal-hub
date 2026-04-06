@@ -1,0 +1,7 @@
+{
+  "global_default": {
+    "provider": "claude",
+    "model": ""
+  },
+  "caller_defaults": {}
+}

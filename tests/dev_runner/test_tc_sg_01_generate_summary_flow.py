@@ -66,9 +66,7 @@ def test_tc_sg01_generate_summary_enqueues_llm_and_returns_request_id(tmp_path):
         "app.modules.claude_worker.services.llm_service.LLMService",
         return_value=mock_llm_svc,
     ), patch("asyncio.create_task"):  # _write_back 태스크 생성 억제
-        request_id = asyncio.get_event_loop().run_until_complete(
-            PlanService().generate_summary(plan_file, mock_db)
-        )
+        request_id = asyncio.run(PlanService().generate_summary(plan_file, mock_db))
 
     assert request_id == 42
     mock_llm_svc.enqueue.assert_called_once()
