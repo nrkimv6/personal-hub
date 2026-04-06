@@ -381,8 +381,10 @@ class PlanService:
             try:
                 content = plan_file.read_text(encoding="utf-8")
                 summary = self._extract_summary(content)
+                wt_meta = self._extract_worktree_meta(content)
             except Exception:
                 summary = None
+                wt_meta = {"branch": None, "worktree_path": None, "worktree_owner": None}
 
             item = PlanFileResponse(
                 path=str(plan_file),
@@ -393,6 +395,9 @@ class PlanService:
                 ignored=is_ignored,
                 path_type=path_type,
                 summary=summary,
+                branch=wt_meta.get("branch"),
+                worktree_path=wt_meta.get("worktree_path"),
+                worktree_owner=wt_meta.get("worktree_owner"),
             )
             scanned_items.append(item)
 
@@ -502,6 +507,38 @@ class PlanService:
         if todo_path.exists():
             return todo_path
         return None
+
+    @staticmethod
+    def _extract_worktree_meta(content: str) -> dict:
+        """plan 헤더에서 branch/worktree/worktree-owner 메타데이터를 추출한다.
+
+        상단 20줄만 탐색. 경로 정규화:
+        - 백슬래시 → 슬래시
+        - 프로젝트 루트 절대경로 prefix 제거 → 상대경로
+        반환: {"branch": str|None, "worktree_path": str|None, "worktree_owner": str|None}
+        """
+        project_root = str(Path(__file__).resolve().parents[3]).replace("\\", "/").rstrip("/") + "/"
+        result: dict = {"branch": None, "worktree_path": None, "worktree_owner": None}
+        for line in content.split("\n")[:20]:
+            if result["branch"] is None:
+                m = re.match(r'^>\s*branch:\s*(.+)', line)
+                if m:
+                    result["branch"] = m.group(1).strip()
+            if result["worktree_path"] is None:
+                m = re.match(r'^>\s*worktree:\s*(.+)', line)
+                if m:
+                    val = m.group(1).strip().replace("\\", "/")
+                    if val.startswith(project_root):
+                        val = val[len(project_root):]
+                    result["worktree_path"] = val
+            if result["worktree_owner"] is None:
+                m = re.match(r'^>\s*worktree-owner:\s*(.+)', line)
+                if m:
+                    val = m.group(1).strip().replace("\\", "/")
+                    if val.startswith(project_root):
+                        val = val[len(project_root):]
+                    result["worktree_owner"] = val
+        return result
 
     @staticmethod
     def _extract_summary(content: str) -> Optional[str]:
@@ -772,7 +809,7 @@ class PlanService:
         """done 처리 전 사전 검증. 실패 사유 리스트 반환 (빈 리스트 = 통과)"""
         errors = []
         # branch/worktree 필드 잔존
-        if re.search(r">\s*(branch|worktree):", content[:2000]):
+        if re.search(r">\s*(branch|worktree(-owner)?):", content[:2000]):
             errors.append("branch/worktree 필드 잔존 — /merge-test 먼저 실행 필요")
         # fix plan 판정
         name = Path(file_path).name
@@ -801,7 +838,7 @@ class PlanService:
         """상태→구현완료, 진행률→100%, [→ID]→[x] 치환, 푸터 갱신"""
         content = re.sub(r'^(>\s*상태:\s*).*$', r'\1구현완료', content, flags=re.MULTILINE)
         # branch/worktree 헤더 제거 — 잔존 시 /done 스킬 2.5단계에서 차단됨 (post-merge 이후이므로 삭제 안전)
-        content = re.sub(r'^>\s*(branch|worktree):.*\n?', '', content, flags=re.MULTILINE)
+        content = re.sub(r'^>\s*(branch|worktree(-owner)?):.*\n?', '', content, flags=re.MULTILINE)
         content = re.sub(
             r'^(>\s*진행률:\s*)[\d/\s()%]+$',
             f'> 진행률: {total}/{total} (100%)',
@@ -1127,6 +1164,11 @@ class PlanService:
                 worktree_match = re.search(r'^>\s*worktree:\s*(.+)', top20, re.MULTILINE)
                 if worktree_match and self._check_worktree_exists(worktree_match.group(1).strip()):
                     return False
+                # branch/worktree 없이 worktree-owner만 잔존한 경우 방어
+                if not branch_match and not worktree_match:
+                    owner_match = re.search(r'^>\s*worktree-owner:\s*(.+)', top20, re.MULTILINE)
+                    if owner_match:
+                        return False
         except Exception:
             pass  # 파일 읽기 실패 시 기존 로직으로 진행
 

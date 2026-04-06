@@ -95,6 +95,9 @@ class PlanFileResponse(BaseModel):
     ignored: bool = False  # 완료/빈 plan
     path_type: Optional[str] = None  # "file" | "folder" | None (등록된 경로일 때만 설정)
     summary: Optional[str] = None  # > 요약: 헤더에서 추출한 요약 텍스트
+    branch: Optional[str] = None  # > branch: 헤더에서 추출한 impl 브랜치명
+    worktree_path: Optional[str] = None  # > worktree: 헤더에서 추출한 워크트리 경로
+    worktree_owner: Optional[str] = None  # > worktree-owner: 헤더에서 추출한 소유 plan 경로
 
 
 class RegisteredPathResponse(BaseModel):

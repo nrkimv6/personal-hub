@@ -480,6 +480,10 @@
 							<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 text-[10px] font-mono uppercase whitespace-nowrap rounded {statusBadge('보류')}">보류</span>
 						{/if}
 
+						{#if plan.branch}
+							<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-100 text-purple-700 shrink-0" title={plan.worktree_owner ?? plan.branch}>{plan.branch}</span>
+						{/if}
+
 						{#if batchStatus === 'running'}
 							<span class="text-[10px] px-1 py-0 rounded text-cyan-600 bg-cyan-100">실행중</span>
 						{:else if batchStatus === 'done'}

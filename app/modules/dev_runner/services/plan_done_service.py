@@ -132,7 +132,7 @@ class PlanDoneService:
     def _validate_done_preconditions(file_path: str, content: str) -> list:
         """done 처리 전 사전 검증. 실패 사유 리스트 반환 (빈 리스트 = 통과)"""
         errors = []
-        if re.search(r">\s*(branch|worktree):", content[:2000]):
+        if re.search(r">\s*(branch|worktree(-owner)?):", content[:2000]):
             errors.append("branch/worktree 필드 잔존 — /merge-test 먼저 실행 필요")
         name = Path(file_path).name
         is_fix = "_fix-" in name or "_fix_" in name
@@ -160,7 +160,7 @@ class PlanDoneService:
         """\uc0c1\ud0dc\u2192구현완료, \uc9c4\ud589\ub960\u2192100%, [\u2192ID]\u2192[x] \uce58\ud658, \ud478\ud130 \uac31\uc2e0"""
         content = re.sub(r'^(>\s*\uc0c1\ud0dc:\s*).*$', r'\1구현완료', content, flags=re.MULTILINE)
         # branch/worktree \ud5e4\ub354 \uc81c\uac70 \u2014 \uc794\uc874 \uc2dc /done \uc2a4\ud0ac 2.5\ub2e8\uacc4\uc5d0\uc11c \ucc28\ub2e8\ub428 (post-merge \uc774\ud6c4\uc774\ub974\ub85c \uc0ad\uc81c \uc548\uc804)
-        content = re.sub(r'^>\s*(branch|worktree):.*\n?', '', content, flags=re.MULTILINE)
+        content = re.sub(r'^>\s*(branch|worktree(-owner)?):.*\n?', '', content, flags=re.MULTILINE)
         content = re.sub(
             r'^(>\s*\uc9c4\ud589\ub960:\s*)[\d/\s()%]+$',
             f'> \uc9c4\ud589\ub960: {total}/{total} (100%)',

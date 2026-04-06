@@ -70,6 +70,9 @@ export interface PlanFileResponse {
 	ignored: boolean;
 	path_type: 'file' | 'folder' | null;
 	summary?: string | null;  // > 요약: 헤더에서 추출한 요약 텍스트
+	branch?: string | null;  // > branch: 헤더에서 추출한 impl 브랜치명
+	worktree_path?: string | null;  // > worktree: 헤더에서 추출한 워크트리 경로
+	worktree_owner?: string | null;  // > worktree-owner: 헤더에서 추출한 소유 plan 경로
 }
 
 export interface RegisteredPathResponse {
