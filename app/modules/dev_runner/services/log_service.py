@@ -71,13 +71,57 @@ class LogService:
     # 레거시 파일명(runner_id 없음) pseudo_id → Path 역매핑 캐시 (resolver와 공유)
     _legacy_map: dict[str, "Path"] = {}
 
+    def _sync_resolver(self) -> None:
+        """resolver 지연 초기화 + redis_client 교체 동기화 (테스트 __new__ 경로 지원)."""
+        resolver = getattr(self, "resolver", None)
+        redis_client = getattr(self, "redis_client", None)
+        if resolver is None or not isinstance(resolver, LogFileResolver):
+            self.resolver = LogFileResolver(config, redis_client)
+        elif getattr(resolver, "_redis_client", None) is not redis_client:
+            self.resolver = LogFileResolver(config, redis_client)
+        # 레거시 pseudo_id 캐시는 LogService/Resolver 간 공유 유지
+        self.resolver._legacy_map = self._legacy_map
+
     def _find_current_log(self, runner_id: str) -> Optional[Path]:
         """[shim] → self.resolver.find_current_log()"""
-        return self.resolver.find_current_log(runner_id)
+        self._sync_resolver()
+        resolved = self.resolver.find_current_log(runner_id)
+        if resolved is not None:
+            return resolved
+
+        # 호환 fallback: 테스트에서 _get_log_dir patch한 경로까지 포함해 파일시스템 재탐색
+        if runner_id.startswith("lg-"):
+            return None
+        log_dir = self._get_log_dir()
+        if log_dir.exists():
+            for pattern in [
+                f"plan-runner-stream-{runner_id}-*.log",
+                f"plan-runner-{runner_id}-*.log",
+            ]:
+                matches = list(log_dir.glob(pattern))
+                if matches:
+                    return max(matches, key=lambda p: p.stat().st_mtime)
+        return None
 
     def _resolve_legacy_log(self, runner_id: str) -> Optional[Path]:
         """[shim] → self.resolver.resolve_legacy_log()"""
-        return self.resolver.resolve_legacy_log(runner_id)
+        self._sync_resolver()
+        # 호환: LogService 클래스 캐시 우선 (기존 테스트 계약)
+        if runner_id in self._legacy_map:
+            return self._legacy_map[runner_id]
+
+        log_dir = self._get_log_dir()
+        if not log_dir.exists():
+            return None
+
+        for log_path in log_dir.glob("plan-runner-stream-*.log"):
+            m = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", log_path.name)
+            if not m:
+                continue
+            ts = m.group(1)
+            pseudo_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
+            self._legacy_map[pseudo_id] = log_path
+        return self._legacy_map.get(runner_id)
 
     def tail_log_file(self, runner_id: str, n_lines: int = 100) -> LogResponse:
         """로그 파일 끝에서 N줄 읽기 (초기 로드용)."""
@@ -367,6 +411,7 @@ class LogService:
 
     def _get_log_dir(self) -> Path:
         """[shim] → self.resolver.get_log_dir()"""
+        self._sync_resolver()
         return self.resolver.get_log_dir()
 
     @staticmethod

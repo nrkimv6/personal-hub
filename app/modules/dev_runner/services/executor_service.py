@@ -344,6 +344,16 @@ class ExecutorService:
             self.state._is_pid_alive_fn = self._is_pid_alive
             self.state._force_cleanup_fn = self._force_cleanup_state
 
+    def _sync_merge(self):
+        """merge를 on-demand 생성하고 async_redis/fn들을 현재 값으로 동기화 (테스트 mock 지원)."""
+        if not hasattr(self, "merge") or self.merge is None:
+            self.merge = MergeService(self.async_redis, self._runner_key, self._send_command)
+        else:
+            if self.merge.async_redis is not self.async_redis:
+                self.merge.async_redis = self.async_redis
+            self.merge._runner_key = self._runner_key
+            self.merge._send_command = self._send_command
+
     async def _correct_pid_state(
         self, rid: str, status: str, pid_str: str | None, caller: str = ""
     ) -> tuple[bool, str | None]:
@@ -625,18 +635,22 @@ class ExecutorService:
 
     async def get_merge_queue(self) -> list:
         """[deprecated shim] → self.merge.get_merge_queue()"""
+        self._sync_merge()
         return await self.merge.get_merge_queue()
 
     async def get_merge_queue_length(self) -> int:
         """[deprecated shim] → self.merge.get_merge_queue_length()"""
+        self._sync_merge()
         return await self.merge.get_merge_queue_length()
 
     async def get_merge_status(self, runner_id: str) -> dict | None:
         """[deprecated shim] → self.merge.get_merge_status()"""
+        self._sync_merge()
         return await self.merge.get_merge_status(runner_id)
 
     async def get_merge_history(self, limit: int = 50) -> list:
         """[deprecated shim] → self.merge.get_merge_history()"""
+        self._sync_merge()
         return await self.merge.get_merge_history(limit)
 
     async def send_runner_command(self, runner_id: str, action: str, extra: dict | None = None) -> dict:
@@ -664,6 +678,7 @@ class ExecutorService:
 
     async def send_direct_merge_command(self, branch: str, worktree_path: str | None, plan_file: str | None) -> dict:
         """[deprecated shim] → self.merge.send_direct_merge_command()"""
+        self._sync_merge()
         return await self.merge.send_direct_merge_command(branch, worktree_path, plan_file)
 
     async def stop_all_runners(self) -> dict:

@@ -92,7 +92,7 @@ def frontend_url():
             pass
     except HTTPError:
         pass
-    except URLError:
+    except (URLError, OSError):
         pytest.skip(f"Frontend not available: {url}")
     return url
 

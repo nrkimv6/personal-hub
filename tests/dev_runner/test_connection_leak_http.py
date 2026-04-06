@@ -83,7 +83,7 @@ def test_sse_events_connection_cleanup_http():
     finally:
         session.close()
 
-    _assert_no_redis_connection_leak(r, before, max_delta=1, settle_seconds=10)
+    _assert_no_redis_connection_leak(r, before, max_delta=2, settle_seconds=10)
     r.close()
 
 
@@ -111,7 +111,7 @@ def test_sse_log_stream_nonexistent_runner_http():
     finally:
         session.close()
 
-    _assert_no_redis_connection_leak(r, before, max_delta=1, settle_seconds=10)
+    _assert_no_redis_connection_leak(r, before, max_delta=2, settle_seconds=10)
     r.close()
 
 

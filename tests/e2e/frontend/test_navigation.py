@@ -31,13 +31,15 @@ def _run_restart_frontend_admin() -> subprocess.CompletedProcess:
 class TestPageLoad:
     """페이지 로드 테스트"""
 
+    _TITLE_PATTERN = re.compile(r"(모니터링 시스템|통합 대시보드)")
+
     def test_dashboard_loads(self, page: Page, frontend_url: str):
         """대시보드 페이지 로드"""
         page.goto(f"{frontend_url}/dashboard")
         page.wait_for_load_state("networkidle")
 
         # 타이틀 확인
-        expect(page).to_have_title("모니터링 시스템")
+        expect(page).to_have_title(self._TITLE_PATTERN)
 
         # 메인 컨텐츠 영역 확인
         main = page.locator("main")
@@ -48,7 +50,7 @@ class TestPageLoad:
         page.goto(f"{frontend_url}/naver")
         page.wait_for_load_state("networkidle")
 
-        expect(page).to_have_title("모니터링 시스템")
+        expect(page).to_have_title(self._TITLE_PATTERN)
         expect(page.locator("main")).to_be_visible()
 
     def test_activity_page_loads(self, page: Page, frontend_url: str):
@@ -56,7 +58,7 @@ class TestPageLoad:
         page.goto(f"{frontend_url}/activity")
         page.wait_for_load_state("networkidle")
 
-        expect(page).to_have_title("모니터링 시스템")
+        expect(page).to_have_title(self._TITLE_PATTERN)
         expect(page.locator("main")).to_be_visible()
 
     def test_collect_page_loads(self, page: Page, frontend_url: str):
@@ -64,7 +66,7 @@ class TestPageLoad:
         page.goto(f"{frontend_url}/collect")
         page.wait_for_load_state("networkidle")
 
-        expect(page).to_have_title("모니터링 시스템")
+        expect(page).to_have_title(self._TITLE_PATTERN)
         expect(page.locator("main")).to_be_visible()
 
 

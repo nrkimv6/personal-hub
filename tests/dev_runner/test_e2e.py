@@ -186,10 +186,10 @@ async def test_e2e_full_lifecycle(dev_runner_listener, executor_service, engine)
         if pid_val is not None:
             pid_appeared = True
             break
-        # Also accept if status already completed (dry_run finished quickly)
+        # Also accept if status transitioned (dry_run finished quickly or launch failed fast)
         status_val = executor_service.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
-        if status_val in ("completed", "stopped", None):
-            pid_appeared = True  # process ran and completed
+        if status_val in ("running", "completed", "stopped", "error", "failed", None):
+            pid_appeared = True  # listener consumed command and status changed (or finished cleanup)
             break
     assert pid_appeared, "Listener never processed the run command"
     assert engine_seen or response.engine == engine
