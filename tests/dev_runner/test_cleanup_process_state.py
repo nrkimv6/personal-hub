@@ -376,6 +376,98 @@ class TestCleanupStaleRunnersLogs:
 
 
 # ──────────────────────────────────────────────
+# _cleanup_process_state 보존 계약 TC (Phase 1-1)
+# ──────────────────────────────────────────────
+
+class TestCleanupProcessStatePersistSuffixes:
+    """_cleanup_process_state() — plan_file/branch/trigger 영구 보존 계약 검증"""
+
+    def _import_process_utils(self):
+        import importlib
+        import importlib.util
+        import types
+
+        # listener noise filter mock (부수 효과 방지)
+        if "listener_noise_filter" not in sys.modules:
+            mock_noise = types.ModuleType("listener_noise_filter")
+            mock_noise.NOISE_BLOCK_MARKERS = []
+            mock_noise.is_noise_line = lambda line: False
+            sys.modules["listener_noise_filter"] = mock_noise
+
+        # _dr_constants, _dr_state 먼저 로드 (_dr_process_utils 의존)
+        for mod_name in ("_dr_constants", "_dr_state"):
+            if mod_name not in sys.modules:
+                spec = importlib.util.spec_from_file_location(
+                    mod_name, Path(_SCRIPTS_DIR) / f"{mod_name}.py"
+                )
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[mod_name] = mod
+                spec.loader.exec_module(mod)
+
+        if "_dr_process_utils" not in sys.modules:
+            spec = importlib.util.spec_from_file_location(
+                "_dr_process_utils", Path(_SCRIPTS_DIR) / "_dr_process_utils.py"
+            )
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["_dr_process_utils"] = mod
+            spec.loader.exec_module(mod)
+
+        return sys.modules["_dr_process_utils"]
+
+    def test_cleanup_process_state_persist_trigger_plan_branch(self):
+        """R: _cleanup_process_state() 후 plan_file/branch/trigger TTL == -1 (영구 보존)"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-persist-001"
+
+        # 키 세팅: plan_file, branch, trigger 포함
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "impl/test")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        pu._cleanup_process_state(runner_id, r, reason="test_persist")
+
+        for key_suffix in ("trigger", "plan_file", "branch"):
+            key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{key_suffix}"
+            ttl = r.ttl(key)
+            assert ttl == -1, (
+                f"'{key_suffix}' 키 TTL이 -1이어야 하는데 {ttl}. "
+                "dismiss 전까지 영구 보존 계약 위반."
+            )
+
+    def test_cleanup_process_state_other_keys_have_ttl(self):
+        """R: _cleanup_process_state() 후 persist 제외 키에는 TTL이 설정된다"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-persist-002"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        _PERSIST = frozenset({"plan_file", "branch", "trigger"})
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        pu._cleanup_process_state(runner_id, r, reason="test_other_ttl")
+
+        for suffix in RUNNER_KEY_SUFFIXES:
+            if suffix in _PERSIST:
+                continue
+            key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
+            ttl = r.ttl(key)
+            assert ttl > 0 or ttl == -2, (
+                f"'{suffix}' 키 TTL이 설정되지 않음 (ttl={ttl})."
+            )
+
+
+# ──────────────────────────────────────────────
 # 키 상수 동기화 테스트
 # ──────────────────────────────────────────────
 

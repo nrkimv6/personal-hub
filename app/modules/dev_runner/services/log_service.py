@@ -486,18 +486,37 @@ class LogService:
         return log_dir
 
     @staticmethod
-    def _parse_trigger_from_log(log_file_path: str) -> Optional[str]:
-        """로그 파일 첫 줄에서 [TRIGGER] 메타데이터 파싱. 없으면 None 반환."""
+    def _parse_meta_from_log(log_file_path: str, scan_lines: int = 15) -> dict:
+        """로그 파일 선두 N줄에서 [TRIGGER]/plan= 메타데이터 파싱.
+
+        Returns:
+            {"trigger": str|None, "plan": str|None}
+        """
+        result: dict = {"trigger": None, "plan": None}
         try:
             with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
-                first_line = f.readline().rstrip("\n")
-            if first_line.startswith("[TRIGGER] "):
-                # "[TRIGGER] user | plan=..." → "user"
-                rest = first_line[len("[TRIGGER] "):]
-                return rest.split(" | ")[0]
+                for _ in range(scan_lines):
+                    line = f.readline()
+                    if not line:
+                        break
+                    line = line.rstrip("\n")
+                    if line.startswith("[TRIGGER] ") and result["trigger"] is None:
+                        rest = line[len("[TRIGGER] "):]
+                        parts = rest.split(" | ")
+                        result["trigger"] = parts[0]
+                        for p in parts[1:]:
+                            if p.startswith("plan=") and result["plan"] is None:
+                                result["plan"] = p[5:]
+                        if result["trigger"] and result["plan"]:
+                            break
         except (OSError, IOError):
             pass
-        return None
+        return result
+
+    @staticmethod
+    def _parse_trigger_from_log(log_file_path: str) -> Optional[str]:
+        """로그 파일 선두 N줄에서 [TRIGGER] 파싱. 기존 호출처 호환."""
+        return LogService._parse_meta_from_log(log_file_path).get("trigger")
 
     def get_run_history(self, limit: int = 20, offset: int = 0, visible_only: bool = False) -> RunHistoryResponse:
         """실행 이력 조회: Redis active_runners + 로그 파일 스캔 병합, start_time DESC 정렬"""
@@ -591,12 +610,14 @@ class LogService:
                 except OSError:
                     start_time = None
 
-                file_trigger = self._parse_trigger_from_log(str(path))
+                file_meta = self._parse_meta_from_log(str(path))
+                file_trigger = file_meta.get("trigger")
+                file_plan = file_meta.get("plan")
                 if visible_only and not is_visible_runner(file_trigger, runner_id):
                     continue
                 runs[runner_id] = RunHistoryItem(
                     runner_id=runner_id,
-                    plan_file=None,
+                    plan_file=file_plan,  # 로그에서 파싱된 plan 경로 (Redis 소실 시 fallback)
                     engine=None,
                     status="completed",
                     pid=None,

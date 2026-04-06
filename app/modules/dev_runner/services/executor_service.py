@@ -494,9 +494,15 @@ class ExecutorService:
         """활성 runner + 최근 종료 runner 목록 조회 (탭 복원 지원)"""
         from app.modules.dev_runner.schemas import RunnerListItem
         try:
-            # 24시간 이상 된 최근 종료 runner 자동 정리
+            # TTL 만료 recent runner 정리: trigger=user/user:all는 dismiss 전까지 보존
             cutoff_ts = time.time() - RECENT_RUNNERS_TTL
-            await self.async_redis.zremrangebyscore(RECENT_RUNNERS_KEY, "-inf", cutoff_ts)
+            expired_entries = await self.async_redis.zrangebyscore(RECENT_RUNNERS_KEY, "-inf", cutoff_ts)
+            for rid in expired_entries:
+                trigger = await self.async_redis.get(self._runner_key(rid, "trigger"))
+                if is_visible_runner(trigger, rid):
+                    # user/user:all: 만료되어도 dismiss 전까지 보존
+                    continue
+                await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
 
             # ACTIVE_RUNNERS_KEY + RECENT_RUNNERS_KEY 합집합으로 runner 목록 구성
             active_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
@@ -541,6 +547,13 @@ class ExecutorService:
                     is_orphan = self._fix_orphan_workflows(db, rid, running, status)
                     # visibility.py 단일 함수로 판별 (화이트리스트 + 이중 방어)
                     is_user = is_visible_runner(trigger, rid)
+                    # plan_file 소실 시 worktree_path/branch에서 fallback 이름 추출
+                    display_plan_name: str | None = None
+                    if not plan_file:
+                        if worktree_path:
+                            display_plan_name = Path(worktree_path).name
+                        elif branch:
+                            display_plan_name = branch.split("/")[-1] if "/" in branch else branch
                     result.append(RunnerListItem(
                         runner_id=rid,
                         running=running,
@@ -557,6 +570,7 @@ class ExecutorService:
                         exit_reason=exit_reason,
                         stop_stage=stop_stage,
                         error=error,
+                        display_plan_name=display_plan_name,
                     ))
                 return result
             finally:

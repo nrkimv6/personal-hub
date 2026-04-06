@@ -19,6 +19,10 @@ from app.modules.dev_runner.services.redis_connection import (
     ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL,
     RUNNER_KEY_PREFIX, RUNNER_KEY_SUFFIXES,
 )
+from app.modules.dev_runner.services.visibility import is_visible_runner
+
+# stopped user 러너 보존 계약: dismiss 전까지 이 키들은 TTL 없이 영구 보존
+_PERSIST_SUFFIXES = frozenset({"plan_file", "branch", "trigger"})
 
 
 class RunnerState:
@@ -105,7 +109,11 @@ class RunnerState:
                 await self.async_redis.set(self._runner_key(runner_id, "status"), "stopped")
                 pipe = self.async_redis.pipeline()
                 for key_suffix in RUNNER_KEY_SUFFIXES:
-                    pipe.expire(self._runner_key(runner_id, key_suffix), RECENT_RUNNERS_TTL)
+                    if key_suffix in _PERSIST_SUFFIXES:
+                        # dismiss 전까지 영구 보존: plan_file/branch/trigger에 TTL 설정 안 함
+                        pipe.persist(self._runner_key(runner_id, key_suffix))
+                    else:
+                        pipe.expire(self._runner_key(runner_id, key_suffix), RECENT_RUNNERS_TTL)
                 pipe.srem(ACTIVE_RUNNERS_KEY, runner_id)
                 pipe.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
                 await pipe.execute()
@@ -122,7 +130,10 @@ class RunnerState:
                     await self.async_redis.set(self._runner_key(rid, "status"), "stopped")
                     pipe = self.async_redis.pipeline()
                     for key_suffix in RUNNER_KEY_SUFFIXES:
-                        pipe.expire(self._runner_key(rid, key_suffix), RECENT_RUNNERS_TTL)
+                        if key_suffix in _PERSIST_SUFFIXES:
+                            pipe.persist(self._runner_key(rid, key_suffix))
+                        else:
+                            pipe.expire(self._runner_key(rid, key_suffix), RECENT_RUNNERS_TTL)
                     pipe.zadd(RECENT_RUNNERS_KEY, {rid: stop_ts})
                     await pipe.execute()
                 await self.async_redis.delete(ACTIVE_RUNNERS_KEY)
@@ -190,10 +201,16 @@ class RunnerState:
             if rid in cleaned_active_ids:
                 continue
             status = await self.async_redis.get(self._runner_key(rid, "status"))
-            if status == "stopped" and recent_score > cutoff_ts:
-                # stopped runner는 TTL 내에선 cleanup-stale로 삭제하지 않는다.
-                preserved_recent += 1
-                continue
+            if status == "stopped":
+                trigger = await self.async_redis.get(self._runner_key(rid, "trigger"))
+                if is_visible_runner(trigger, rid):
+                    # user/user:all trigger: dismiss 전까지 cleanup-stale로 삭제하지 않는다
+                    preserved_recent += 1
+                    continue
+                if recent_score > cutoff_ts:
+                    # 기타 stopped runner는 TTL 내에선 cleanup-stale로 삭제하지 않는다.
+                    preserved_recent += 1
+                    continue
 
             plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))
 

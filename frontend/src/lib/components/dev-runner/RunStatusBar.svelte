@@ -10,6 +10,15 @@
 		start_time: string | null;
 		branch?: string | null;
 		exit_reason?: string | null;
+		display_plan_name?: string | null;
+	}
+
+	function resolveLabel(runner: RunnerTab): string {
+		if (runner.plan_file) {
+			if (runner.plan_file === '__ALL_PLANS__' || runner.plan_file === 'ALL') return '전체 실행';
+			return runner.plan_file.split(/[/\\]/).pop() ?? runner.plan_file;
+		}
+		return runner.display_plan_name ?? '(알 수 없음)';
 	}
 
 	interface RunStatus {
@@ -81,9 +90,9 @@
 				<div class="flex items-center gap-1 shrink-0">
 					{#each runners as runner (runner.id)}
 						{#if runner.running}
-							<div class="pulse-dot bg-status-running" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '(알 수 없음)'} - 실행 중"></div>
+							<div class="pulse-dot bg-status-running" title="{resolveLabel(runner)} - 실행 중"></div>
 						{:else}
-							<div class="w-2 h-2 rounded-full bg-muted-foreground/30" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '(알 수 없음)'} - 중지"></div>
+							<div class="w-2 h-2 rounded-full bg-muted-foreground/30" title="{resolveLabel(runner)} - 중지"></div>
 						{/if}
 					{/each}
 				</div>
@@ -263,9 +272,9 @@
 						<div class="w-1.5 h-1.5 rounded-full {exitDisplay.dotClass} shrink-0"></div>
 					{/if}
 
-					<!-- plan 파일명 -->
-					<span class="truncate flex-1 min-w-0 font-mono text-[11px] text-foreground" title={runner.plan_file ?? ''}>
-						{runner.plan_file === '__ALL_PLANS__' || runner.plan_file === 'ALL' ? '전체 실행' : runner.plan_file ? runner.plan_file.split(/[/\\]/).pop() : '(알 수 없음)'}
+					<!-- plan 파일명 (display_plan_name → plan_file → '(알 수 없음)') -->
+					<span class="truncate flex-1 min-w-0 font-mono text-[11px] text-foreground" title={runner.plan_file ?? runner.display_plan_name ?? ''}>
+						{resolveLabel(runner)}
 					</span>
 
 					<!-- engine (sm 이상) -->

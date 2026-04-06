@@ -24,6 +24,7 @@
 		orphan?: boolean;
 		exitReason?: string | null;
 		error?: string | null;
+		displayPlanName?: string | null;
 		onStop: () => void;
 		onClose: () => void;
 		onRestart?: () => void;
@@ -31,7 +32,7 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, exitReason = null, error = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, exitReason = null, error = null, displayPlanName = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -172,7 +173,11 @@
 		f === '__ALL_PLANS__' || f === 'ALL';
 
 	let planBasename = $derived(
-		!planFile ? '(알 수 없음)' : isAllPlans(planFile) ? '전체 실행' : planFile.split(/[\\/]/).pop() ?? planFile
+		!planFile
+			? (displayPlanName ?? '(알 수 없음)')
+			: isAllPlans(planFile)
+				? '전체 실행'
+				: planFile.split(/[\\/]/).pop() ?? planFile
 	);
 
 	let exitDisplay = $derived(getExitReasonDisplay(exitReason));

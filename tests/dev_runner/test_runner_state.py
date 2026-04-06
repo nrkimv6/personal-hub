@@ -188,3 +188,82 @@ class TestRecentTtlContract:
             monkeypatch.delenv("DEV_RUNNER_RECENT_TTL_SECONDS", raising=False)
             importlib.reload(redis_connection)
             importlib.reload(dr_constants)
+
+
+class TestStoppedUserPreservation:
+    """stopped user 러너 보존 계약 TC (plan: Phase 1-2)"""
+
+    @pytest.mark.asyncio
+    async def test_force_cleanup_persists_trigger_key(self):
+        """_force_cleanup_state() — trigger/plan_file/branch 키는 TTL 없이 영구 보존"""
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        rid = "r-persist-trigger"
+        await fake_r.set(runner_key(rid, "status"), "running")
+        await fake_r.set(runner_key(rid, "trigger"), "user")
+        await fake_r.set(runner_key(rid, "plan_file"), "docs/plan/test.md")
+        await fake_r.set(runner_key(rid, "branch"), "impl/test")
+        await fake_r.sadd(ACTIVE_RUNNERS_KEY, rid)
+
+        state = make_state(fake_r)
+        await state._force_cleanup_state(rid)
+
+        trigger_ttl = await fake_r.ttl(runner_key(rid, "trigger"))
+        plan_ttl = await fake_r.ttl(runner_key(rid, "plan_file"))
+        branch_ttl = await fake_r.ttl(runner_key(rid, "branch"))
+        assert trigger_ttl == -1, f"trigger TTL should be -1 (persistent), got {trigger_ttl}"
+        assert plan_ttl == -1, f"plan_file TTL should be -1 (persistent), got {plan_ttl}"
+        assert branch_ttl == -1, f"branch TTL should be -1 (persistent), got {branch_ttl}"
+
+    @pytest.mark.asyncio
+    async def test_cleanup_stale_preserves_user_stopped_beyond_ttl(self):
+        """cleanup_stale_runners() — trigger=user stopped runner는 TTL 초과해도 보존"""
+        import time
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        rid = "r-user-stopped"
+        score = time.time() - 90000  # 25h ago (TTL cutoff 초과)
+        await fake_r.zadd(RECENT_RUNNERS_KEY, {rid: score})
+        await fake_r.set(runner_key(rid, "status"), "stopped")
+        await fake_r.set(runner_key(rid, "trigger"), "user")
+        await fake_r.set(runner_key(rid, "plan_file"), "docs/plan/test.md")
+
+        state = make_state(fake_r)
+        result = await state.cleanup_stale_runners()
+
+        assert await fake_r.zscore(RECENT_RUNNERS_KEY, rid) is not None, \
+            "user stopped runner should be preserved even beyond TTL"
+        assert result["preserved_recent"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_cleanup_stale_preserves_user_all_stopped(self):
+        """cleanup_stale_runners() — trigger=user:all stopped runner도 보존"""
+        import time
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        rid = "r-user-all-stopped"
+        score = time.time() - 90000
+        await fake_r.zadd(RECENT_RUNNERS_KEY, {rid: score})
+        await fake_r.set(runner_key(rid, "status"), "stopped")
+        await fake_r.set(runner_key(rid, "trigger"), "user:all")
+
+        state = make_state(fake_r)
+        result = await state.cleanup_stale_runners()
+
+        assert await fake_r.zscore(RECENT_RUNNERS_KEY, rid) is not None
+        assert result["preserved_recent"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_dismiss_removes_user_stopped_runner(self):
+        """dismiss_runner() — user stopped runner를 즉시 hard-delete"""
+        import time
+        fake_r = fake_aioredis.FakeRedis(decode_responses=True)
+        rid = "r-dismiss-user"
+        await fake_r.zadd(RECENT_RUNNERS_KEY, {rid: time.time()})
+        await fake_r.set(runner_key(rid, "status"), "stopped")
+        await fake_r.set(runner_key(rid, "trigger"), "user")
+        await fake_r.set(runner_key(rid, "plan_file"), "docs/plan/test.md")
+
+        state = make_state(fake_r)
+        result = await state.dismiss_runner(rid)
+
+        assert result is True
+        assert await fake_r.zscore(RECENT_RUNNERS_KEY, rid) is None, \
+            "dismiss should hard-delete the runner from RECENT"

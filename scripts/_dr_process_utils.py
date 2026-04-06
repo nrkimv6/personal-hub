@@ -25,6 +25,16 @@ from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
 logger = logging.getLogger(__name__)
 
 
+def _is_user_visible_trigger(trigger: Optional[str], runner_id: str = "") -> bool:
+    """trigger=user/user:all 이고 TC/테스트 접두사가 없는 경우 True.
+
+    visibility.py is_visible_runner와 동일 계약 (scripts 환경 독립 버전).
+    """
+    if runner_id.startswith("t-") or runner_id.startswith("test_"):
+        return False
+    return trigger in ("user", "user:all")
+
+
 def _is_pre_review_stopped_runner(runner_id: str, redis_client: redis.Redis) -> bool:
     """runner가 검토완료 이전(pre_review) 중지 상태인지 판별."""
     try:
@@ -225,9 +235,11 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     try:
         from _dr_constants import RECENT_RUNNERS_KEY
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        # 보존 계약 (runner_state.py _PERSIST_SUFFIXES와 동일): dismiss 전까지 TTL 없이 영구 보존
+        _PERSIST_SUFFIXES_LOCAL = frozenset({"plan_file", "branch", "trigger"})
         for suffix in RUNNER_KEY_SUFFIXES:
-            if suffix in ("plan_file", "branch"):
-                continue  # 불변 속성: TTL 없이 영구 보존 (종료 후에도 탭 표시용)
+            if suffix in _PERSIST_SUFFIXES_LOCAL:
+                continue  # dismiss 전까지 영구 보존 (종료 후에도 탭 표시 + visible_only 판별용)
             key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
             redis_client.expire(key, RECENT_RUNNERS_TTL)
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
@@ -531,6 +543,16 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
         return
 
     for runner_id in runner_ids:
+        # stopped+user/user:all: dismiss 전까지 재정리하지 않는다
+        _r_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+        if _r_status == "stopped":
+            _r_trigger = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+            if _is_user_visible_trigger(_r_trigger, runner_id):
+                logger.info(
+                    f"[reconnect] runner {runner_id} stopped+user trigger → cleanup 스킵 "
+                    f"(trigger={_r_trigger}, 미확인 종료 로그 보존)"
+                )
+                continue
         pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
         if not pid_str:
             try:
@@ -655,6 +677,16 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                 continue
             if orphan_id in runner_ids:
                 continue  # active_runners에 이미 있음 → 위에서 처리됨
+            # stopped+user/user:all orphan: dismiss 전까지 재정리하지 않는다
+            _o_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:status")
+            if _o_status == "stopped":
+                _o_trigger = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:trigger")
+                if _is_user_visible_trigger(_o_trigger, orphan_id):
+                    logger.info(
+                        f"[reconnect] orphan {orphan_id} stopped+user trigger → cleanup 스킵 "
+                        f"(trigger={_o_trigger}, 미확인 종료 로그 보존)"
+                    )
+                    continue
             logger.info(f"[reconnect] orphan key found (not in active_runners): {orphan_id}")
             pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:pid")
             if not pid_str:

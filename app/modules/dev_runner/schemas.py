@@ -75,6 +75,7 @@ class RunnerListItem(BaseModel):
     exit_reason: Optional[str] = None  # 종료 사유 (completed/no_progress/rate_limit/error 등)
     stop_stage: Optional[str] = None  # stopped 세부 단계 (pre_review|post_review|unknown)
     error: Optional[str] = None  # 종료 에러 요약
+    display_plan_name: Optional[str] = None  # plan_file 소실 시 표시용 fallback 이름
 
 
 class PlanProgressResponse(BaseModel):
