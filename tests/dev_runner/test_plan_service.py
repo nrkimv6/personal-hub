@@ -59,10 +59,10 @@ class TestIsIgnoredPlan:
         assert svc._is_ignored_plan(path, "구현완료", progress) is True
 
     def test_all_checkboxes_done_is_ignored(self, svc, tmp_path):
-        """체크박스 완료율은 목록 표시 여부를 바꾸지 않음 → False"""
+        """체크박스 100% 완료 plan은 자동 숨김 대상 → True"""
         path = tmp_path / "test.md"
         progress = PlanProgressResponse(done=5, total=5, percent=100)
-        assert svc._is_ignored_plan(path, "구현중", progress) is False
+        assert svc._is_ignored_plan(path, "구현중", progress) is True
 
     def test_zero_checkboxes_not_ignored(self, svc, tmp_path):
         """체크박스 0개 (total=0)인 plan → False"""
