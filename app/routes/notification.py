@@ -33,7 +33,15 @@ def get_notification_settings_from_db() -> NotificationSettings:
                 try:
                     notify_states = json.loads(notify_states)
                 except json.JSONDecodeError:
-                    notify_states = ["available", "booking_success", "booking_failed", "error", "startup", "shutdown"]
+                    notify_states = [
+                        "available",
+                        "booking_success",
+                        "booking_failed",
+                        "error",
+                        "startup",
+                        "shutdown",
+                        "popup_new",
+                    ]
 
             return NotificationSettings(
                 enable_telegram=bool(result[0]),
@@ -45,14 +53,30 @@ def get_notification_settings_from_db() -> NotificationSettings:
         return NotificationSettings(
             enable_telegram=True,
             enable_desktop=True,
-            notify_states=["available", "booking_success", "booking_failed", "error", "startup", "shutdown"]
+            notify_states=[
+                "available",
+                "booking_success",
+                "booking_failed",
+                "error",
+                "startup",
+                "shutdown",
+                "popup_new",
+            ]
         )
     except Exception as e:
         logger.error(f"알림 설정 조회 중 오류: {str(e)}")
         return NotificationSettings(
             enable_telegram=True,
             enable_desktop=True,
-            notify_states=["available", "booking_success", "booking_failed", "error", "startup", "shutdown"]
+            notify_states=[
+                "available",
+                "booking_success",
+                "booking_failed",
+                "error",
+                "startup",
+                "shutdown",
+                "popup_new",
+            ]
         )
     finally:
         db.close()
@@ -126,6 +150,7 @@ async def update_notification_settings(settings: NotificationSettingsUpdate):
         - error: 오류 발생
         - startup: 서버 시작
         - shutdown: 서버 종료
+        - popup_new: 팝업 URL 모니터 신규 항목 감지
     """
     try:
         return update_notification_settings_in_db(settings)

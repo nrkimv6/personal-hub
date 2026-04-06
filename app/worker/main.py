@@ -8,6 +8,7 @@ WorkerOrchestrator를 사용하여 모든 워커를 관리합니다:
 - GoogleSearchWorker: Google 검색 큐 처리
 - VideoDownloadWorker: YouTube/Vimeo 비디오 다운로드 처리 (브라우저 불필요)
 - FileSearchWorker: 파일 검색 처리 (ripgrep/Everything, 유저 세션 필요)
+- PopupMonitorWorker: 네이버 팝업 URL 모니터링
 
 실행 방법:
     python -m app.worker.main                  # 모든 워커 실행
@@ -17,6 +18,7 @@ WorkerOrchestrator를 사용하여 모든 워커를 관리합니다:
     python -m app.worker.main --google         # Google 검색 워커만
     python -m app.worker.main --crawl          # 크롤 워커만 (scheduled + ondemand)
     python -m app.worker.main --video-dl       # 비디오 다운로드 워커만
+    python -m app.worker.main --popup          # 네이버 팝업 URL 워커만
 
 주요 기능:
     - WorkerOrchestrator를 통한 중앙 집중식 워커 관리
@@ -69,6 +71,7 @@ try:
     from app.modules.git_repos.worker import GitRepoWorker
     from app.worker.kakao_monitor_worker import KakaoMonitorWorker
     from app.worker.coupang_monitor_worker import CoupangMonitorWorker
+    from app.worker.popup_monitor_worker import PopupMonitorWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -140,6 +143,7 @@ async def run_with_orchestrator(
     run_git: bool = True,
     run_plan_archive_listener: bool = True,
     run_coupang: bool = True,
+    run_popup: bool = True,
 ):
     """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
@@ -276,17 +280,32 @@ async def run_with_orchestrator(
             )
 
         # 쿠팡 모니터 워커
-        try:
-            coupang_worker = CoupangMonitorWorker(
-                browser_manager=orchestrator.browser_manager
-            )
-            orchestrator.register_worker("coupang_monitor", coupang_worker)
-            logger.info("[COUPANG_REGISTER] CoupangMonitorWorker 등록됨")
-        except Exception as _e:
-            logger.warning(
-                "[COUPANG_REGISTER] 등록 실패: %s",
-                _e,
-            )
+        if run_coupang:
+            try:
+                coupang_worker = CoupangMonitorWorker(
+                    browser_manager=orchestrator.browser_manager
+                )
+                orchestrator.register_worker("coupang_monitor", coupang_worker)
+                logger.info("[COUPANG_REGISTER] CoupangMonitorWorker 등록됨")
+            except Exception as _e:
+                logger.warning(
+                    "[COUPANG_REGISTER] 등록 실패: %s",
+                    _e,
+                )
+
+        # 네이버 팝업 URL 모니터 워커
+        if run_popup:
+            try:
+                popup_worker = PopupMonitorWorker(
+                    browser_manager=orchestrator.browser_manager
+                )
+                orchestrator.register_worker("popup_monitor", popup_worker)
+                logger.info("[POPUP_REGISTER] PopupMonitorWorker 등록됨")
+            except Exception as _e:
+                logger.warning(
+                    "[POPUP_REGISTER] 등록 실패: %s",
+                    _e,
+                )
 
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
@@ -319,9 +338,10 @@ async def main(args):
         f"google={args.google or args.all}, "
         f"activity={args.activity or args.all}, "
         f"mobile={args.mobile or args.all}, "
-        f"video_dl={args.video_dl or args.all}, "
-        f"git={args.git or args.all}, "
-        f"coupang={args.coupang or args.all}"
+            f"video_dl={args.video_dl or args.all}, "
+            f"git={args.git or args.all}, "
+            f"coupang={args.coupang or args.all}, "
+            f"popup={args.popup or args.all}"
     )
     logger.info("=" * 50)
 
@@ -338,6 +358,7 @@ async def main(args):
             run_git=args.git or args.all,
             run_plan_archive_listener=args.all,
             run_coupang=args.coupang or args.all,
+            run_popup=args.popup or args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
@@ -408,6 +429,11 @@ def parse_args():
         help="쿠팡 모니터 워커만 실행",
     )
     parser.add_argument(
+        "--popup",
+        action="store_true",
+        help="네이버 팝업 URL 모니터 워커만 실행",
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         default=True,
@@ -417,7 +443,7 @@ def parse_args():
     args = parser.parse_args()
 
     # 개별 옵션이 지정되면 --all은 False
-    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search or args.git or args.coupang:
+    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search or args.git or args.coupang or args.popup:
         args.all = False
 
     return args
