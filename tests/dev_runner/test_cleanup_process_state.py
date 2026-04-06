@@ -497,3 +497,219 @@ class TestRunnerKeySuffixesCompleteness:
             f"listener에서 set하지만 RUNNER_KEY_SUFFIXES에 없는 suffix: {missing}\n"
             f"executor_service.py의 RUNNER_KEY_SUFFIXES에 추가하세요."
         )
+
+
+# ──────────────────────────────────────────────
+# 미머지 커밋 보호 가드 TC
+# ──────────────────────────────────────────────
+
+class TestCleanupUnmergedCommitsGuard:
+    """_cleanup_process_state() — 미머지 커밋 있는 워크트리 보존 가드 검증"""
+
+    def _import_process_utils(self):
+        import importlib
+        import importlib.util
+        import types
+
+        if "listener_noise_filter" not in sys.modules:
+            mock_noise = types.ModuleType("listener_noise_filter")
+            mock_noise.NOISE_BLOCK_MARKERS = []
+            mock_noise.is_noise_line = lambda line: False
+            sys.modules["listener_noise_filter"] = mock_noise
+
+        for mod_name in ("_dr_constants", "_dr_state"):
+            if mod_name not in sys.modules:
+                spec = importlib.util.spec_from_file_location(
+                    mod_name, Path(_SCRIPTS_DIR) / f"{mod_name}.py"
+                )
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[mod_name] = mod
+                spec.loader.exec_module(mod)
+
+        # 재로드: 이 테스트 클래스에서 수정된 _dr_process_utils를 사용
+        if "_dr_process_utils" in sys.modules:
+            del sys.modules["_dr_process_utils"]
+        spec = importlib.util.spec_from_file_location(
+            "_dr_process_utils", Path(_SCRIPTS_DIR) / "_dr_process_utils.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["_dr_process_utils"] = mod
+        spec.loader.exec_module(mod)
+
+        return sys.modules["_dr_process_utils"]
+
+    def test_cleanup_preserves_worktree_with_unmerged_commits_R(self):
+        """R: 미머지 커밋이 있으면 WorktreeManager.remove를 호출하지 않아야 한다"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-unmerged-001"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/2026-04-07_test.md")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        with patch("plan_worktree_helpers.has_unmerged_commits", return_value=True), \
+             patch("worktree_manager.WorktreeManager.remove") as mock_remove, \
+             patch("plan_worktree_helpers.is_plan_in_progress", return_value=False):
+            pu._cleanup_process_state(runner_id, r, reason="test")
+
+        mock_remove.assert_not_called()
+
+    def test_cleanup_removes_worktree_without_unmerged_commits_R(self):
+        """R: 미머지 커밋이 없으면 WorktreeManager.remove를 호출해야 한다"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-unmerged-002"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/2026-04-07_test.md")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        with patch("plan_worktree_helpers.has_unmerged_commits", return_value=False), \
+             patch("worktree_manager.WorktreeManager.remove") as mock_remove, \
+             patch("plan_worktree_helpers.is_plan_in_progress", return_value=False):
+            pu._cleanup_process_state(runner_id, r, reason="test")
+
+        mock_remove.assert_called_once()
+
+    def test_cleanup_preserves_worktree_on_check_failure_E(self):
+        """E: has_unmerged_commits 예외 시 보수적으로 워크트리를 보존해야 한다"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-unmerged-003"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/2026-04-07_test.md")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        # has_unmerged_commits 자체가 True를 반환(예외 시 True)하면 보존
+        with patch("plan_worktree_helpers.has_unmerged_commits", return_value=True), \
+             patch("worktree_manager.WorktreeManager.remove") as mock_remove, \
+             patch("plan_worktree_helpers.is_plan_in_progress", return_value=False):
+            pu._cleanup_process_state(runner_id, r, reason="test")
+
+        mock_remove.assert_not_called()
+
+    def test_cleanup_preserves_worktree_branch_resolution_B(self):
+        """B: plan_file 없을 때 runner/{runner_id} 브랜치명으로 체크해야 한다"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-unmerged-004"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        # plan_file 없음 (PLAN_FILE_ALL도 아님, 아예 없는 경우)
+        r.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        captured_branch = []
+
+        def _capture_has_unmerged(branch, cwd=None):
+            captured_branch.append(branch)
+            return True  # 보존
+
+        with patch("plan_worktree_helpers.has_unmerged_commits", side_effect=_capture_has_unmerged), \
+             patch("worktree_manager.WorktreeManager.remove") as mock_remove, \
+             patch("plan_worktree_helpers.is_plan_in_progress", return_value=False):
+            pu._cleanup_process_state(runner_id, r, reason="test")
+
+        assert captured_branch, "has_unmerged_commits가 호출되지 않음"
+        assert captured_branch[0] == f"runner/{runner_id}", (
+            f"브랜치명이 'runner/{runner_id}'여야 하는데 '{captured_branch[0]}'"
+        )
+        mock_remove.assert_not_called()
+
+
+# ──────────────────────────────────────────────
+# T3: 실물 git worktree 통합 테스트
+# ──────────────────────────────────────────────
+
+class TestCleanupUnmergedCommitsGuardIntegration:
+    """T3: 실제 git repo + worktree 환경에서 cleanup 보호 검증"""
+
+    def _setup_git_repo(self, tmp_path: Path):
+        """tmp_path에 실제 git repo 생성, 초기 커밋, worktree 추가"""
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(repo), capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(repo), capture_output=True)
+
+        # 초기 커밋 (main 브랜치 생성)
+        (repo / "README.md").write_text("init")
+        subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo), check=True, capture_output=True)
+        # 기본 브랜치를 main으로 명시
+        subprocess.run(["git", "branch", "-M", "main"], cwd=str(repo), capture_output=True)
+
+        return repo
+
+    def _import_has_unmerged(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "plan_worktree_helpers_real",
+            Path(_SCRIPTS_DIR) / "plan_worktree_helpers.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.has_unmerged_commits
+
+    def test_cleanup_real_git_worktree_with_commits_T3(self, tmp_path):
+        """T3-R: 미머지 커밋 있는 실물 워크트리 — has_unmerged_commits가 True를 반환해야 한다"""
+        import subprocess
+
+        repo = self._setup_git_repo(tmp_path)
+        wt_path = tmp_path / "worktree"
+        branch = "plan/test-feature"
+
+        # 워크트리 + 브랜치 생성
+        subprocess.run(
+            ["git", "worktree", "add", str(wt_path), "-b", branch],
+            cwd=str(repo), check=True, capture_output=True
+        )
+
+        # 워크트리 브랜치에 독자 커밋 추가
+        (wt_path / "feature.txt").write_text("feature")
+        subprocess.run(["git", "add", "."], cwd=str(wt_path), check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: add feature"], cwd=str(wt_path), check=True, capture_output=True)
+
+        has_unmerged = self._import_has_unmerged()
+        result = has_unmerged(branch, repo)
+
+        assert result is True, "미머지 커밋이 있는데 has_unmerged_commits가 False를 반환"
+
+    def test_cleanup_real_git_worktree_no_commits_T3(self, tmp_path):
+        """T3-R: 독자 커밋 없는 실물 워크트리 — has_unmerged_commits가 False를 반환해야 한다"""
+        import subprocess
+
+        repo = self._setup_git_repo(tmp_path)
+        wt_path = tmp_path / "worktree"
+        branch = "plan/no-changes"
+
+        # 워크트리 + 브랜치 생성 (커밋 없음)
+        subprocess.run(
+            ["git", "worktree", "add", str(wt_path), "-b", branch],
+            cwd=str(repo), check=True, capture_output=True
+        )
+
+        has_unmerged = self._import_has_unmerged()
+        result = has_unmerged(branch, repo)
+
+        assert result is False, "독자 커밋 없는 브랜치인데 has_unmerged_commits가 True를 반환"
