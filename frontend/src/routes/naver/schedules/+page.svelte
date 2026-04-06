@@ -8,6 +8,7 @@
   import AutoBookingList from '$lib/components/schedules/AutoBookingList.svelte';
   import MonitoringHistory from '$lib/components/MonitoringHistory.svelte';
   import BusinessManager from '$lib/components/businesses/BusinessManager.svelte';
+  import PopupUrlMonitorPanel from '$lib/components/naver/PopupUrlMonitorPanel.svelte';
   import { createSelection } from '$lib/utils/selection.svelte';
 
   let schedules: ScheduleWithContext[] = [];
@@ -52,7 +53,7 @@
   }
 
   // 탭 상태
-  let activeTab: 'schedules' | 'booking' | 'recurring' | 'history' | 'businesses' = 'schedules';
+  let activeTab: 'schedules' | 'booking' | 'recurring' | 'history' | 'businesses' | 'popup_monitor' = 'schedules';
 
   // URL 쿼리 파라미터로 탭 제어
   import { page } from '$app/stores';
@@ -61,7 +62,7 @@
   // URL 파라미터에서 탭 초기화
   $: {
     const tab = $page.url.searchParams.get('tab');
-    if (tab === 'booking' || tab === 'recurring' || tab === 'history' || tab === 'businesses') {
+    if (tab === 'booking' || tab === 'recurring' || tab === 'history' || tab === 'businesses' || tab === 'popup_monitor') {
       activeTab = tab;
     } else if (tab === null || tab === 'schedules') {
       activeTab = 'schedules';
@@ -73,6 +74,7 @@
     { id: 'schedules', label: '전체 일정', count: schedules.length || undefined },
     { id: 'booking', label: '자동 예약' },
     { id: 'recurring', label: '반복 규칙', count: recurringRules.length || undefined },
+    { id: 'popup_monitor', label: '팝업 URL 모니터' },
     { id: 'history', label: '실행 내역' },
     { id: 'businesses', label: '업체 관리' },
   ];
@@ -1289,6 +1291,11 @@
         </div>
       </div>
     {/if}
+  {/if}
+
+  <!-- 실행 내역 탭 -->
+  {#if activeTab === 'popup_monitor'}
+    <PopupUrlMonitorPanel />
   {/if}
 
   <!-- 실행 내역 탭 -->

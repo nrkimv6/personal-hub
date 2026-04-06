@@ -11,7 +11,15 @@ class NotificationSettings(BaseModel):
     enable_telegram: bool = Field(True, description="텔레그램 알림 활성화")
     enable_desktop: bool = Field(True, description="데스크톱 알림 활성화")
     notify_states: List[str] = Field(
-        default_factory=lambda: ["available", "booking_success", "booking_failed", "error", "startup", "shutdown"],
+        default_factory=lambda: [
+            "available",
+            "booking_success",
+            "booking_failed",
+            "error",
+            "startup",
+            "shutdown",
+            "popup_new",
+        ],
         description="알림 받을 상태 목록"
     )
 
