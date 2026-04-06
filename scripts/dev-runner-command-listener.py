@@ -39,7 +39,7 @@ from _dr_constants import (
     ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, PLAN_FILE_ALL, _LEGACY_ALL,
     RECENT_RUNNERS_TTL, ADMIN_API_PORT, RUNNER_KEY_SUFFIXES,
     HEARTBEAT_KEY, HEARTBEAT_INTERVAL, HEARTBEAT_TTL, MERGE_ACTIVE_STATUSES,
-    ZOMBIE_GRACE_SECONDS,
+    ZOMBIE_GRACE_SECONDS, SUBPROCESS_HEARTBEAT_TTL,
     SCRIPT_DIR, PROJECT_ROOT, WORKTREE_BASE_DIR, WTOOLS_BASE_DIR,
     PLAN_RUNNER_MODULE_PATH, PLAN_RUNNER_PYTHON, LOG_DIR,
     LOG_CHANNEL_PREFIX,
@@ -342,6 +342,16 @@ def _handle_running_process_heartbeat(runner_id: str, proc, redis_client: redis.
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", proc.pid)
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
         logger.info(f"heartbeat: Redis 상태 복원 (runner_id: {runner_id}, PID: {proc.pid})")
+
+    # PID가 살아있으므로 subprocess_heartbeat를 먼저 갱신 (zombie 감지 전)
+    try:
+        redis_client.set(
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat",
+            str(time.time()),
+            ex=SUBPROCESS_HEARTBEAT_TTL,
+        )
+    except Exception:
+        pass  # Redis 실패 시 무시 — zombie 체크는 계속 진행
 
     _handle_zombie_heartbeat(runner_id, proc, redis_client, wf_manager)
     return "checked"

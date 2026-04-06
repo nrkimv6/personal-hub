@@ -1,4 +1,4 @@
-"""_dr_constants.py — dev-runner-command-listener 상수 모듈"""
+﻿"""_dr_constants.py — dev-runner-command-listener 상수 모듈"""
 import os
 from pathlib import Path
 
@@ -38,7 +38,7 @@ RUNNER_KEY_SUFFIXES = (
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
     "subprocess_heartbeat",
 )
-def _read_zombie_grace_seconds(default: int = 24000) -> int:
+def _read_zombie_grace_seconds(default: int = 240) -> int:
     """좀비 감지 유예 시간(env override) 파싱."""
     raw = os.environ.get("DEV_RUNNER_ZOMBIE_GRACE_SECONDS")
     if raw is None:
@@ -51,6 +51,7 @@ def _read_zombie_grace_seconds(default: int = 24000) -> int:
 
 
 ZOMBIE_GRACE_SECONDS = _read_zombie_grace_seconds()  # 기본 240초, 테스트/운영에서 env로 오버라이드 가능
+SUBPROCESS_HEARTBEAT_TTL = 60  # subprocess heartbeat TTL(초) — listener 10초 주기 × 6회 miss 허용
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)

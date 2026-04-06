@@ -13,7 +13,7 @@ import redis
 from _dr_constants import (
     RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, PLAN_FILE_ALL, _LEGACY_ALL,
     LOG_CHANNEL_PREFIX, COMMANDS_KEY, PLAN_RUNNER_PYTHON, PLAN_RUNNER_MODULE_PATH,
-    LOG_DIR, PROJECT_ROOT,
+    LOG_DIR, PROJECT_ROOT, SUBPROCESS_HEARTBEAT_TTL,
 )
 from _dr_state import (
     get_running_processes, get_running_log_files, get_stream_threads,
@@ -1027,9 +1027,18 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", started_at_text)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:execution_count", str(execution_count_text))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
-        # 초기 heartbeat — subprocess 루프 진입 전 좀비 오판 방지 (TTL 300초)
+        # 초기 heartbeat — subprocess 루프 진입 전 좀비 오판 방지
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat", str(time.time()), ex=300)
+            _hb_val = str(time.time())
+            _hb_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat"
+            redis_client.set(_hb_key, _hb_val, ex=SUBPROCESS_HEARTBEAT_TTL)
+            # Problem A 디버깅: SET 직후 GET 확인 — 불일치 시 Redis 경로/연결 의심
+            _hb_check = redis_client.get(_hb_key)
+            if _hb_check is None:
+                logger.error(
+                    f"_launch_plan_runner_process: 초기 heartbeat SET 직후 GET=None — "
+                    f"Redis 경로 불일치 의심 (runner_id={runner_id}, key={_hb_key})"
+                )
         except Exception:
             logger.warning(f"_launch_plan_runner_process: 초기 heartbeat 저장 실패 (runner_id={runner_id})")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", command.get("engine", "claude"))

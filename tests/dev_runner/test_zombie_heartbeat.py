@@ -339,3 +339,155 @@ def test_zombie_runner_full_lifecycle(listener_mod, state_mod, fr):
     assert wf_manager.updated, "workflow failed 업데이트가 호출되어야 함"
     assert wf_manager.updated[-1][1] == "failed"
     assert "zombie: subprocess heartbeat timeout" in (wf_manager.updated[-1][2] or "")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 신규 TC: listener heartbeat 갱신 검증
+# ---------------------------------------------------------------------------
+
+
+def test_listener_renews_heartbeat_for_alive_process(listener_mod, state_mod, fr):
+    """RIGHT: PID alive이면 _handle_running_process_heartbeat 호출 시 subprocess_heartbeat 갱신."""
+    runner_id = "hb-renew-alive-1"
+    proc = MagicMock()
+    proc.poll.return_value = None  # alive
+    proc.pid = 11001
+
+    state_mod.get_running_processes()[runner_id] = proc
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
+    # 초기에는 heartbeat 없음
+    assert fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat") is None
+
+    with patch.object(listener_mod, "_handle_zombie_heartbeat"):
+        listener_mod._handle_running_process_heartbeat(runner_id, proc, fr, wf_manager=None)
+
+    hb = fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
+    assert hb is not None, "_handle_running_process_heartbeat 호출 후 subprocess_heartbeat가 존재해야 함"
+
+
+def test_listener_heartbeat_uses_correct_ttl(listener_mod, state_mod, fr):
+    """CORRECT: heartbeat 갱신 시 TTL이 SUBPROCESS_HEARTBEAT_TTL 이하인지 검증."""
+    runner_id = "hb-ttl-check-1"
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.pid = 11002
+
+    state_mod.get_running_processes()[runner_id] = proc
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
+
+    with patch.object(listener_mod, "_handle_zombie_heartbeat"):
+        listener_mod._handle_running_process_heartbeat(runner_id, proc, fr, wf_manager=None)
+
+    ttl = fr.ttl(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
+    expected_ttl = listener_mod.SUBPROCESS_HEARTBEAT_TTL
+    assert 0 < ttl <= expected_ttl, (
+        f"TTL {ttl}이 SUBPROCESS_HEARTBEAT_TTL({expected_ttl}) 이하이고 0 초과여야 함"
+    )
+
+
+def test_listener_heartbeat_skips_on_redis_failure(listener_mod, state_mod, fr):
+    """ERROR: Redis SET 실패 시 heartbeat 갱신이 조용히 실패하고 zombie 체크는 계속 진행."""
+    runner_id = "hb-redis-fail-1"
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.pid = 11003
+
+    state_mod.get_running_processes()[runner_id] = proc
+
+    # Redis mock: status get은 성공, set은 실패
+    failing_redis = MagicMock()
+    failing_redis.get.return_value = "running"
+    failing_redis.set.side_effect = Exception("Redis connection error")
+
+    with patch.object(listener_mod, "_handle_zombie_heartbeat") as mock_zombie:
+        # Exception이 외부로 전파되지 않아야 함
+        result = listener_mod._handle_running_process_heartbeat(runner_id, proc, failing_redis, wf_manager=None)
+
+    assert result == "checked", "Redis 실패해도 함수가 정상 반환해야 함"
+    mock_zombie.assert_called_once()  # zombie 체크는 계속 진행
+
+
+def test_heartbeat_renewed_before_zombie_check(listener_mod, state_mod, fr):
+    """BOUNDARY: heartbeat 갱신이 zombie 감지보다 먼저 실행되어 PID alive 러너가 zombie로 판정 안 됨."""
+    runner_id = "hb-order-check-1"
+    proc = MagicMock()
+    proc.poll.return_value = None
+    proc.pid = 11004
+
+    state_mod.get_running_processes()[runner_id] = proc
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", "2026-01-01T00:00:00")
+    # subprocess_heartbeat 없는 상태
+
+    # 실제 _handle_zombie_heartbeat를 실행 (mock 없이) — heartbeat 먼저 갱신 후 zombie 체크
+    with patch.object(listener_mod, "_cleanup_process_state") as mock_cleanup:
+        result = listener_mod._handle_running_process_heartbeat(runner_id, proc, fr, wf_manager=None)
+
+    assert result == "checked"
+    # heartbeat가 먼저 갱신되었으므로 zombie_first_seen에 등록되지 않아야 함
+    assert runner_id not in state_mod.get_zombie_first_seen(), (
+        "heartbeat 갱신이 먼저 실행되어 zombie 오판 없어야 함"
+    )
+    mock_cleanup.assert_not_called()
+
+
+def test_initial_heartbeat_uses_shared_ttl():
+    """CORRECT: _launch_plan_runner_process 소스에서 SUBPROCESS_HEARTBEAT_TTL 상수 사용 확인."""
+    import inspect
+    import importlib.util
+    from pathlib import Path
+    scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+    spec = importlib.util.spec_from_file_location(
+        "_dr_plan_runner_ttl_check", str(scripts_dir / "_dr_plan_runner.py")
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    source = inspect.getsource(mod._launch_plan_runner_process)
+    assert "SUBPROCESS_HEARTBEAT_TTL" in source, (
+        "_launch_plan_runner_process가 SUBPROCESS_HEARTBEAT_TTL 상수를 사용해야 함"
+    )
+    assert "ex=300" not in source, (
+        "ex=300 하드코딩이 제거되어야 함"
+    )
+
+
+def test_initial_heartbeat_set_get_consistency(fr):
+    """CORRECT: fakeredis에서 SET→GET 순서가 동일 값을 반환하는지 검증."""
+    from _dr_constants import RUNNER_KEY_PREFIX, SUBPROCESS_HEARTBEAT_TTL
+    runner_id = "hb-setget-1"
+    hb_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat"
+    hb_val = str(time.time())
+    fr.set(hb_key, hb_val, ex=SUBPROCESS_HEARTBEAT_TTL)
+    got = fr.get(hb_key)
+    assert got is not None, "SET 직후 GET이 None이면 Problem A 재발"
+    assert got == hb_val, f"SET({hb_val!r}) != GET({got!r})"
+
+
+def test_alive_process_never_zombie_even_without_output(listener_mod, state_mod, fr):
+    """T3: 무출력 subprocess가 장시간 실행되어도 listener heartbeat 갱신으로 zombie 오판 없음."""
+    import subprocess as _sp
+    runner_id = "hb-alive-output-1"
+
+    proc = _sp.Popen(
+        ["python", "-c", "import time; time.sleep(5)"],
+        stdout=_sp.PIPE, stderr=_sp.PIPE,
+    )
+    try:
+        state_mod.get_running_processes()[runner_id] = proc
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
+
+        with patch.object(listener_mod, "_cleanup_process_state") as mock_cleanup:
+            # 3회 heartbeat 갱신 시뮬레이션
+            for _ in range(3):
+                listener_mod._handle_running_process_heartbeat(runner_id, proc, fr, wf_manager=None)
+
+        hb = fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
+        assert hb is not None, "subprocess_heartbeat가 존재해야 함"
+        assert runner_id not in state_mod.get_zombie_first_seen(), "zombie 오판 없어야 함"
+        mock_cleanup.assert_not_called()
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)

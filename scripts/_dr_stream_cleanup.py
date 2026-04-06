@@ -25,6 +25,7 @@ from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
 logger = logging.getLogger(__name__)
 
 # _dr_plan_runner.py에서 이동된 상수
+_COMPLETED_EXIT_REASONS = {"completed"}  # 정상 완료로 처리되는 exit_reason 집합
 _ERROR_DETAIL_NOISE_PREFIXES = (
     "[NOISE]",
     ": heartbeat",
