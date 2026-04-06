@@ -517,7 +517,7 @@ class PlanService:
         - 프로젝트 루트 절대경로 prefix 제거 → 상대경로
         반환: {"branch": str|None, "worktree_path": str|None, "worktree_owner": str|None}
         """
-        project_root = str(Path(__file__).resolve().parents[3]).replace("\\", "/").rstrip("/") + "/"
+        project_root = str(Path(__file__).resolve().parents[4]).replace("\\", "/").rstrip("/") + "/"
         result: dict = {"branch": None, "worktree_path": None, "worktree_owner": None}
         for line in content.split("\n")[:20]:
             if result["branch"] is None:
