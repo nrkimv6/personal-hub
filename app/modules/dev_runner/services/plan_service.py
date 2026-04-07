@@ -28,6 +28,27 @@ logger = logging.getLogger(__name__)
 _redis_client: Optional[redis.Redis] = None
 
 
+def _extract_created_at(content: str, path: Path) -> Optional[str]:
+    """plan 헤더에서 작성일시 추출.
+    fallback: 파일명 날짜 → file mtime.
+    """
+    from datetime import datetime
+
+    # 1. 헤더 > 작성일시: YYYY-MM-DD HH:MM
+    m = re.search(r'^>\s*작성일시:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', content, re.MULTILINE)
+    if m:
+        return m.group(1).strip()
+    # 2. 파일명 YYYY-MM-DD
+    m2 = re.match(r'^(\d{4}-\d{2}-\d{2})', path.name)
+    if m2:
+        return m2.group(1) + ' 00:00'
+    # 3. file mtime
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+    except Exception:
+        return '0000-00-00 00:00'
+
+
 def _get_redis() -> Optional[redis.Redis]:
     global _redis_client
     if _redis_client is None:
@@ -252,8 +273,10 @@ class PlanService:
                         try:
                             content = p.read_text(encoding="utf-8")
                             summary = self._extract_summary(content)
+                            created_at = _extract_created_at(content, p)
                         except Exception:
                             summary = None
+                            created_at = _extract_created_at('', p)
                         results.append(
                             PlanFileResponse(
                                 path=str(p),
@@ -264,10 +287,11 @@ class PlanService:
                                 ignored=is_ignored,
                                 path_type="file",
                                 summary=summary,
+                                created_at=created_at,
                             )
                         )
 
-        results.sort(key=lambda x: x.filename, reverse=True)
+        results.sort(key=lambda x: x.created_at or x.filename, reverse=True)
         return results
 
     def list_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
@@ -381,9 +405,11 @@ class PlanService:
             try:
                 content = plan_file.read_text(encoding="utf-8")
                 summary = self._extract_summary(content)
+                created_at = _extract_created_at(content, plan_file)
                 wt_meta = self._extract_worktree_meta(content)
             except Exception:
                 summary = None
+                created_at = _extract_created_at('', plan_file)
                 wt_meta = {"branch": None, "worktree_path": None, "worktree_owner": None}
 
             item = PlanFileResponse(
@@ -395,6 +421,7 @@ class PlanService:
                 ignored=is_ignored,
                 path_type=path_type,
                 summary=summary,
+                created_at=created_at,
                 branch=wt_meta.get("branch"),
                 worktree_path=wt_meta.get("worktree_path"),
                 worktree_owner=wt_meta.get("worktree_owner"),

@@ -919,8 +919,8 @@
 							<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 						</button>
 					</div>
-					<!-- 탭 콘텐츠 -->
-					<div class="flex-1 min-h-0 overflow-hidden">
+					<!-- 탭 콘텐츠: flex flex-col 필수 (하위 flex-1 높이 전파 — 제거 금지) -->
+					<div class="flex-1 min-h-0 flex flex-col overflow-hidden">
 						{#if taskHistoryTab === 'tasks'}
 							<div class="px-4 pb-4 flex-1 min-h-0 flex flex-col overflow-hidden">
 								{#if currentTracking}
@@ -928,7 +928,7 @@
 										<CurrentTrackingCard tracking={currentTracking} />
 									</div>
 								{/if}
-								<div class="flex-1 min-h-0 overflow-hidden">
+								<div class="flex-1 min-h-0 flex flex-col overflow-hidden">
 									<TaskList planPath={taskListPlanPath} refreshTick={taskListRefreshTick} />
 								</div>
 							</div>
