@@ -14,8 +14,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from app.log_viewer.config import CLEANUP_FILTER_PATTERN
+from app.log_viewer.config import CLEANUP_FILTER_PATTERN, LogSource
+from app.log_viewer.finder import find_latest_log
 from app.log_viewer.runner import RunnerInfo, get_active_runners
+from app.log_viewer.stale import is_stale
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +96,19 @@ def _apply_filters(
     return True
 
 
+def _read_tail_lines(path: Path, n: int, encoding: str = "utf-8") -> list[str]:
+    """파일 끝에서 n줄을 읽어 반환한다. n=0이거나 파일이 없으면 빈 리스트."""
+    if n <= 0:
+        return []
+    try:
+        with open(path, encoding=encoding, errors="replace") as f:
+            lines = f.readlines()
+        result = [ln.rstrip("\n") for ln in lines if ln.rstrip("\n")]
+        return result[-n:] if result else []
+    except OSError:
+        return []
+
+
 # ---------------------------------------------------------------------------
 # FileTailer — 단일 파일 tail
 # ---------------------------------------------------------------------------
@@ -106,21 +121,30 @@ class FileTailer:
     파일 rotation(삭제 후 재생성) 시 처음부터 읽기로 리셋한다.
     """
 
-    def __init__(self, path: Path, encoding: str = "utf-8") -> None:
+    def __init__(self, path: Path, encoding: str = "utf-8", initial_tail: int = 0) -> None:
         self._path = path
         self._encoding = encoding
-        # 기존 내용 스킵 — 신규 줄만 읽기
+        # 기존 내용 스킵 — 신규 줄만 읽기 (initial_tail > 0이어도 _pos는 파일 끝으로 설정)
         try:
             self._pos: int = path.stat().st_size
         except OSError:
             self._pos = 0
+        # initial_tail > 0이면 파일 끝 N줄을 첫 read_new_lines 호출 시 반환
+        self._initial_buffer: list[str] = (
+            _read_tail_lines(path, initial_tail, encoding) if initial_tail > 0 else []
+        )
 
     def read_new_lines(self) -> list[str]:
         """마지막 읽기 위치 이후의 새 줄을 반환한다.
 
+        첫 호출 시 _initial_buffer에 내용이 있으면 먼저 반환하고 버퍼를 비운다.
         파일 미존재 또는 크기 축소(rotation) 시 _pos를 0으로 리셋하여
         새 파일을 처음부터 읽는다.
         """
+        if self._initial_buffer:
+            buf = self._initial_buffer
+            self._initial_buffer = []
+            return buf
         try:
             current_size = self._path.stat().st_size
         except OSError:
@@ -167,13 +191,20 @@ class MultiTailer:
         path: Path,
         color: str,
         error_only: bool = False,
+        initial_tail: int = 0,
+        replace: bool = False,
     ) -> None:
-        """소스를 추가한다. 이미 같은 name이 있으면 무시한다."""
-        if name in self._sources:
+        """소스를 추가한다.
+
+        replace=False(기본): 같은 name이 있으면 무시한다.
+        replace=True: StaticSourceWatcher가 path 교체 시 사용 — 기존 항목을 새 FileTailer로 덮어쓴다.
+        initial_tail > 0: FileTailer 생성 시 파일 끝 N줄을 첫 호출에 반환한다.
+        """
+        if name in self._sources and not replace:
             return
         self._sources[name] = _SourceEntry(
             name=name,
-            tailer=FileTailer(path),
+            tailer=FileTailer(path, initial_tail=initial_tail),
             color=color,
             error_only=error_only,
         )
@@ -276,3 +307,82 @@ class RunnerWatcher:
                     self._known_runners.discard(sid)
                     del self._stale_tracker[sid]
                     self._id_to_short.pop(sid, None)
+
+
+# ---------------------------------------------------------------------------
+# StaticSourceWatcher — 정적 소스 주기적 재스캔
+# ---------------------------------------------------------------------------
+
+
+class StaticSourceWatcher:
+    """정적 소스(config.LOG_SOURCES)를 주기적으로 재스캔하여 tailer에 등록/교체한다.
+
+    부팅 직후 아직 존재하지 않는 로그 파일을 주기적으로 발견하고,
+    find_latest_log가 어제 파일을 반환하던 상황도 오늘 파일로 교체한다.
+
+    사용:
+        watcher = StaticSourceWatcher(list(get_sources(admin)), dirs)
+        while True:
+            watcher.refresh(tailer)   # 10초 주기로 noop
+            ...
+    """
+
+    _REFRESH_INTERVAL: float = 10.0
+
+    def __init__(self, sources: list[LogSource], dirs: list[Path]) -> None:
+        import os as _os
+        self._sources = sources
+        self._dirs = dirs
+        # source.name → resolved path string (중복 등록 방지)
+        self._known_paths: dict[str, str] = {}
+        # 첫 호출 즉시 실행 보장
+        self._last_refresh: float = -float("inf")
+        # 테스트용: STATIC_WATCHER_INTERVAL 환경변수로 interval 오버라이드 가능
+        _override = _os.environ.get("STATIC_WATCHER_INTERVAL")
+        if _override:
+            try:
+                self._REFRESH_INTERVAL = float(_override)
+            except ValueError:
+                pass
+
+    def refresh(self, tailer: MultiTailer) -> None:
+        """정적 소스를 재스캔하고 신규/변경된 파일을 tailer에 등록한다.
+
+        _REFRESH_INTERVAL 미경과 시 즉시 return.
+        """
+        now = time.monotonic()
+        if now - self._last_refresh < self._REFRESH_INTERVAL:
+            return
+        self._last_refresh = now
+
+        for src in self._sources:
+            patterns = [f"{p}*" for p in src.patterns]
+            path = find_latest_log(patterns, self._dirs)
+            if path is None:
+                continue
+            # 오래된 파일(어제 파일 등)은 등록하지 않음 — 오늘 파일이 생길 때까지 대기
+            if is_stale(path):
+                continue
+
+            resolved = str(path.resolve())
+            prev = self._known_paths.get(src.name)
+
+            if prev == resolved:
+                # 동일 파일 → noop
+                continue
+
+            # 신규 또는 path 변경 → tailer에 등록/교체
+            action = "교체" if prev is not None else "신규 감지"
+            tailer.add_source(
+                src.name,
+                path,
+                src.color,
+                error_only=src.error_only,
+                initial_tail=src.tail_lines,
+                replace=True,
+            )
+            self._known_paths[src.name] = resolved
+            print(
+                f"[{src.name}] === {action}: {path.name} ===",
+                flush=True,
+            )

@@ -17,6 +17,7 @@ from app.log_viewer.follower import (
     LogLine,
     MultiTailer,
     RunnerWatcher,
+    StaticSourceWatcher,
     _apply_filters,
     _detect_level,
     _is_error_line,
@@ -414,3 +415,279 @@ class TestApplyFilters:
         assert _apply_filters("[cleanup] done", error_only=True, cleanup_pattern=CLEANUP_FILTER_PATTERN) is False
         # error이면서 cleanup 매칭 → True
         assert _apply_filters("ERROR [cleanup] failed", error_only=True, cleanup_pattern=CLEANUP_FILTER_PATTERN) is True
+
+
+# ---------------------------------------------------------------------------
+# FileTailer.initial_tail TC (Phase T1 — Phase 1 대응)
+# ---------------------------------------------------------------------------
+
+
+class TestFileTailerInitialTail:
+    def test_file_tailer_R_initial_tail_returns_existing_lines(self, tmp_path: Path):
+        """R: 5줄 기록된 파일에 initial_tail=3 → 첫 read_new_lines()에서 마지막 3줄 반환."""
+        f = tmp_path / "log.log"
+        f.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
+
+        tailer = FileTailer(f, initial_tail=3)
+        result = tailer.read_new_lines()
+        assert result == ["c", "d", "e"]
+
+    def test_file_tailer_R_initial_tail_then_new_lines(self, tmp_path: Path):
+        """R: initial_tail 3줄 반환 후, 신규 추가한 2줄을 다음 호출에서 반환 (이중 반환 없음)."""
+        f = tmp_path / "log.log"
+        f.write_text("old1\nold2\nold3\n", encoding="utf-8")
+
+        tailer = FileTailer(f, initial_tail=2)
+        first = tailer.read_new_lines()
+        assert first == ["old2", "old3"]
+
+        with f.open("a", encoding="utf-8") as fh:
+            fh.write("new1\nnew2\n")
+
+        second = tailer.read_new_lines()
+        assert second == ["new1", "new2"]
+
+        third = tailer.read_new_lines()
+        assert third == []
+
+    def test_file_tailer_B_initial_tail_zero_skips_existing(self, tmp_path: Path):
+        """B: initial_tail=0(기본)이면 기존 줄 무시 (회귀 방어)."""
+        f = tmp_path / "log.log"
+        f.write_text("existing\n", encoding="utf-8")
+
+        tailer = FileTailer(f, initial_tail=0)
+        result = tailer.read_new_lines()
+        assert result == []
+
+    def test_file_tailer_B_initial_tail_larger_than_file(self, tmp_path: Path):
+        """B: 파일 줄 수(2) < initial_tail(10) → 가용한 모든 줄 반환."""
+        f = tmp_path / "log.log"
+        f.write_text("line1\nline2\n", encoding="utf-8")
+
+        tailer = FileTailer(f, initial_tail=10)
+        result = tailer.read_new_lines()
+        assert result == ["line1", "line2"]
+
+    def test_file_tailer_E_initial_tail_on_missing_file(self, tmp_path: Path):
+        """E: 미존재 파일에 initial_tail 전달 → _initial_buffer 빈 채로 생성, 예외 없음."""
+        f = tmp_path / "nonexistent.log"
+        tailer = FileTailer(f, initial_tail=5)
+        assert tailer._initial_buffer == []
+        assert tailer.read_new_lines() == []
+
+
+# ---------------------------------------------------------------------------
+# MultiTailer.add_source replace TC (Phase T1 — Phase 2 대응)
+# ---------------------------------------------------------------------------
+
+
+class TestMultiTailerReplace:
+    def test_multi_tailer_R_replace_true_overwrites_entry(self, tmp_path: Path):
+        """R: 같은 name으로 replace=True 호출 → 새 path의 FileTailer로 교체됨."""
+        file_a = tmp_path / "a.log"
+        file_b = tmp_path / "b.log"
+        file_a.write_text("old\n", encoding="utf-8")
+        file_b.write_text("", encoding="utf-8")
+
+        tailer = MultiTailer()
+        tailer.add_source("SRC", file_a, "cyan")
+        # file_b로 교체
+        tailer.add_source("SRC", file_b, "cyan", replace=True)
+
+        # file_b에 줄 추가 → tailer가 감지해야 함
+        with file_b.open("a", encoding="utf-8") as fh:
+            fh.write("new_line\n")
+
+        lines = tailer.poll_once()
+        assert any(ln.text == "new_line" for ln in lines)
+
+    def test_multi_tailer_B_replace_false_keeps_existing(self, tmp_path: Path):
+        """B: replace=False(기본) → 기존 entry 유지 (회귀 방어)."""
+        file_a = tmp_path / "a.log"
+        file_b = tmp_path / "b.log"
+        file_a.write_text("", encoding="utf-8")
+        file_b.write_text("", encoding="utf-8")
+
+        tailer = MultiTailer()
+        tailer.add_source("SRC", file_a, "cyan")
+        tailer.add_source("SRC", file_b, "cyan", replace=False)  # 무시됨
+
+        # file_b에 줄 추가해도 감지 안 됨 (여전히 file_a를 follow 중)
+        with file_b.open("a", encoding="utf-8") as fh:
+            fh.write("from_b\n")
+
+        lines = tailer.poll_once()
+        assert not any(ln.text == "from_b" for ln in lines)
+
+
+# ---------------------------------------------------------------------------
+# StaticSourceWatcher TC (Phase T1 — Phase 3 대응)
+# ---------------------------------------------------------------------------
+
+
+class TestStaticSourceWatcher:
+    def _make_source(self, name: str, prefix: str, tail_lines: int = 5):
+        """테스트용 LogSource 생성 헬퍼."""
+        from app.log_viewer.config import LogSource
+        return LogSource(
+            name=name,
+            patterns=[prefix],
+            color="cyan",
+            tail_lines=tail_lines,
+            admin_only=False,
+            check_stale=True,
+            error_only=False,
+        )
+
+    def test_static_watcher_R_first_refresh_immediate(self, tmp_path: Path):
+        """R: 생성 직후 첫 refresh 호출이 즉시 실행됨 (_last_refresh = -inf)."""
+        src = self._make_source("TST", "tst_")
+        watcher = StaticSourceWatcher([src], [tmp_path])
+        assert watcher._last_refresh == -float("inf")
+
+        tailer = MultiTailer()
+        log_file = tmp_path / "tst_20260407_000000.log"
+        log_file.write_text("hello\n", encoding="utf-8")
+
+        # 첫 호출 즉시 실행 확인 — 10초 기다릴 필요 없음
+        watcher.refresh(tailer)
+        assert "TST" in tailer._sources
+
+    def test_static_watcher_R_initial_no_file_then_appears(self, tmp_path: Path, monkeypatch):
+        """R: 시작 시 파일 없음 → 파일 생성 후 refresh → tailer에 add_source 호출됨."""
+        from app.log_viewer import follower as follower_mod
+        src = self._make_source("TST2", "tst2_")
+        watcher = StaticSourceWatcher([src], [tmp_path])
+
+        tailer = MultiTailer()
+        # 첫 refresh: 파일 없음 → 등록 안 됨
+        watcher.refresh(tailer)
+        assert "TST2" not in tailer._sources
+
+        # 강제로 _last_refresh를 리셋하여 throttle 우회
+        watcher._last_refresh = -float("inf")
+
+        # 오늘 날짜 파일 생성
+        from datetime import date
+        today_str = date.today().strftime("%Y%m%d")
+        log_file = tmp_path / f"tst2_{today_str}_120000.log"
+        log_file.write_text("boot_line\n", encoding="utf-8")
+
+        watcher.refresh(tailer)
+        assert "TST2" in tailer._sources
+
+    def test_static_watcher_R_idempotent_known_path(self, tmp_path: Path):
+        """R: 같은 path가 두 번 발견돼도 add_source 1회만 (mock spy)."""
+        from datetime import date
+        today_str = date.today().strftime("%Y%m%d")
+        log_file = tmp_path / f"tst3_{today_str}_000000.log"
+        log_file.write_text("data\n", encoding="utf-8")
+
+        src = self._make_source("TST3", "tst3_")
+        watcher = StaticSourceWatcher([src], [tmp_path])
+        tailer = MultiTailer()
+
+        calls = []
+        orig = tailer.add_source
+        tailer.add_source = lambda *a, **kw: (calls.append(a[0]), orig(*a, **kw))  # type: ignore[method-assign]
+
+        watcher.refresh(tailer)
+        first_count = len(calls)
+
+        watcher._last_refresh = -float("inf")
+        watcher.refresh(tailer)
+
+        # 두 번째 refresh에서 same path → add_source 재호출 없음
+        assert len(calls) == first_count
+
+    def test_static_watcher_R_path_change_replaces(self, tmp_path: Path):
+        """R: 어제 파일 → 오늘 파일로 갱신 → tailer.add_source(replace=True) 호출됨."""
+        from datetime import date, timedelta
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        today_str = today.strftime("%Y%m%d")
+        yesterday_str = yesterday.strftime("%Y%m%d")
+
+        # 어제 파일 (non-stale mock용 — is_stale을 monkeypatch로 제어하기 어려우므로
+        # 오늘 날짜 파일 두 개로 대리)
+        file_old = tmp_path / f"tstp_{today_str}_100000.log"
+        file_new = tmp_path / f"tstp_{today_str}_110000.log"
+        file_old.write_text("old data\n", encoding="utf-8")
+        file_new.write_text("", encoding="utf-8")
+
+        src = self._make_source("TSTP", "tstp_")
+        watcher = StaticSourceWatcher([src], [tmp_path])
+        tailer = MultiTailer()
+
+        watcher.refresh(tailer)
+        first_path = watcher._known_paths.get("TSTP")
+
+        # 새 파일 갱신 (더 최근 mtime)
+        import time as _time
+        _time.sleep(0.01)
+        file_new.write_text("newer data\n", encoding="utf-8")
+
+        watcher._last_refresh = -float("inf")
+        watcher.refresh(tailer)
+        second_path = watcher._known_paths.get("TSTP")
+
+        # path가 바뀌었어야 함
+        assert first_path != second_path
+
+    def test_static_watcher_B_throttled_within_interval(self, tmp_path: Path):
+        """B: 첫 refresh 후 interval 내 재호출 → no-op."""
+        from datetime import date
+        today_str = date.today().strftime("%Y%m%d")
+        log_file = tmp_path / f"tst5_{today_str}_000000.log"
+        log_file.write_text("data\n", encoding="utf-8")
+
+        src = self._make_source("TST5", "tst5_")
+        watcher = StaticSourceWatcher([src], [tmp_path])
+        tailer = MultiTailer()
+
+        watcher.refresh(tailer)  # 첫 호출 — 등록
+
+        # _REFRESH_INTERVAL을 100초로 강제
+        watcher._REFRESH_INTERVAL = 100.0
+        watcher._last_refresh = __import__("time").monotonic()
+
+        calls = []
+        orig = tailer.add_source
+        tailer.add_source = lambda *a, **kw: (calls.append(a[0]), orig(*a, **kw))  # type: ignore[method-assign]
+
+        watcher.refresh(tailer)  # throttle → no-op
+        assert len(calls) == 0
+
+    def test_static_watcher_B_stale_file_skipped(self, tmp_path: Path):
+        """B: is_stale=True인 어제 파일만 존재 → add_source 호출 안 됨."""
+        from datetime import date, timedelta
+        yesterday = date.today() - timedelta(days=1)
+        old_str = yesterday.strftime("%Y%m%d")
+        old_file = tmp_path / f"tst6_{old_str}_120000.log"
+        old_file.write_text("old data\n", encoding="utf-8")
+
+        src = self._make_source("TST6", "tst6_")
+        watcher = StaticSourceWatcher([src], [tmp_path])
+        tailer = MultiTailer()
+
+        watcher.refresh(tailer)
+        assert "TST6" not in tailer._sources
+
+    def test_static_watcher_E_missing_dir_no_crash(self, tmp_path: Path):
+        """E: dirs에 미존재 디렉토리 포함 → 예외 없이 스킵."""
+        nonexistent = tmp_path / "no_such_dir"
+        src = self._make_source("TST7", "tst7_")
+        watcher = StaticSourceWatcher([src], [nonexistent])
+        tailer = MultiTailer()
+        # 예외 발생 없어야 함
+        watcher.refresh(tailer)
+        assert "TST7" not in tailer._sources
+
+    def test_static_watcher_E_find_latest_log_returns_none(self, tmp_path: Path):
+        """E: 패턴 매칭 파일 0개 → 해당 source는 등록되지 않음, 예외 없음."""
+        src = self._make_source("TST8", "no_match_pattern_xyz_")
+        watcher = StaticSourceWatcher([src], [tmp_path])
+        tailer = MultiTailer()
+
+        watcher.refresh(tailer)
+        assert "TST8" not in tailer._sources

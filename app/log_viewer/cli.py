@@ -46,15 +46,26 @@ from app.log_viewer.config import (
 )
 from app.log_viewer.finder import find_latest_log, find_latest_logs
 from app.log_viewer.runner import RunnerInfo, get_active_runners
-from app.log_viewer.follower import LogLine, MultiTailer, RunnerWatcher
+from app.log_viewer.follower import LogLine, MultiTailer, RunnerWatcher, StaticSourceWatcher
 from app.log_viewer.stale import is_stale
 
 # ---------------------------------------------------------------------------
 # 기본 로그 디렉토리 (프로젝트 루트 기준)
 # ---------------------------------------------------------------------------
+import os as _os
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _LOGS_DIR = _PROJECT_ROOT / "logs"
 _LOGS_ADMIN_DIR = _PROJECT_ROOT / "logs" / "admin"
+
+
+def _resolve_logs_root() -> Path:
+    """MONITOR_LOG_DIR 환경변수가 설정되어 있으면 그 경로를 사용한다.
+
+    환경변수 미설정 시 _LOGS_DIR을 사용 (기존 monkeypatch 호환).
+    """
+    override = _os.environ.get("MONITOR_LOG_DIR")
+    return Path(override) if override else _LOGS_DIR
 
 console: "Console | None" = Console() if _RICH else None
 
@@ -140,10 +151,14 @@ def _print_follow_banner(target: str, cleanup: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def _resolve_dirs(admin: bool) -> list[Path]:
-    """admin 여부에 따라 탐색 디렉토리 목록을 반환한다."""
-    dirs = [_LOGS_DIR]
+    """admin 여부에 따라 탐색 디렉토리 목록을 반환한다.
+
+    MONITOR_LOG_DIR 환경변수가 설정된 경우 해당 경로를 기준으로 사용한다. (테스트용)
+    """
+    logs_root = _resolve_logs_root()
+    dirs = [logs_root]
     if admin:
-        dirs.append(_LOGS_ADMIN_DIR)
+        dirs.append(logs_root / "admin")
     return dirs
 
 
@@ -229,22 +244,33 @@ def follow_source(name: str, admin: bool, cleanup: bool = False) -> None:
 
 
 def follow_all_sources(admin: bool, cleanup: bool = False) -> None:
-    """모든 소스를 실시간 통합 tail한다. plan-runner는 RunnerWatcher로 동적 관리."""
+    """모든 소스를 실시간 통합 tail한다.
+
+    - plan-runner는 RunnerWatcher로 동적 관리.
+    - 정적 소스는 StaticSourceWatcher가 10초 주기로 재스캔 → 부팅 직후 누락 소스 자동 감지.
+    - 시작 시 stale 필터 적용 → 어제 파일에 점착되지 않음.
+    """
     tailer = MultiTailer(cleanup=cleanup)
     dirs = _resolve_dirs(admin)
+    sources = list(get_sources(admin))
 
-    for src in get_sources(admin):
+    # 시작 시 1회 스캔: stale 파일은 제외 (StaticSourceWatcher가 오늘 파일 생기면 추가)
+    for src in sources:
         patterns = [f"{p}*" for p in src.patterns]
         path = find_latest_log(patterns, dirs)
-        if path is not None:
+        if path is not None and not is_stale(path):
             tailer.add_source(src.name, path, src.color, error_only=src.error_only)
+        elif path is not None and is_stale(path):
+            print(f"[{src.name}] (오늘 로그 파일 대기 중...)", flush=True)
 
-    watcher = RunnerWatcher()
+    runner_watcher = RunnerWatcher()
+    static_watcher = StaticSourceWatcher(sources, dirs)
 
     _print_follow_banner("ALL", cleanup)
     try:
         while True:
-            watcher.refresh(tailer)
+            static_watcher.refresh(tailer)
+            runner_watcher.refresh(tailer)
             for ln in tailer.poll_once():
                 _print_follow_line(ln)
             time.sleep(0.2)
