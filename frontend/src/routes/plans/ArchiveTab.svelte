@@ -540,7 +540,8 @@
 {#if showDuplicatesModal}
   <div
     class="fixed inset-0 z-40 bg-black/40 flex items-center justify-center"
-    onclick={(e) => { if (e.target === e.currentTarget) { () => { showDuplicatesModal = false; ; } }}}
+    onclick={(e) => { if (e.target === e.currentTarget) { showDuplicatesModal = false; } }}
+    onkeydown={(e) => { if (e.key === 'Escape') { showDuplicatesModal = false; } }}
     role="dialog"
     aria-modal="true"
   >

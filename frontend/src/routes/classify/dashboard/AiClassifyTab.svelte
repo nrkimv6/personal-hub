@@ -425,7 +425,7 @@
 
         <!-- Target Images -->
         <div class="space-y-1.5">
-          <label class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">대상 이미지</label>
+          <p class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">대상 이미지</p>
           <div class="flex gap-2">
             {#each [{ key: 'unclassified', label: '미분류' }, { key: 'all', label: '전체' }, { key: 'failed', label: '실패' }] as opt}
               <button
