@@ -1321,7 +1321,7 @@
       </div>
       <form onsubmit={(e) => { e.preventDefault(); handleUpdateSchedule(); }} class="p-4 space-y-4">
         <div>
-          <label class="block text-sm font-medium text-foreground mb-2">시간 설정 방식</label>
+          <p class="block text-sm font-medium text-foreground mb-2">시간 설정 방식</p>
           <div class="flex gap-4 mb-2">
             <label class="flex items-center gap-1">
               <input type="radio" bind:group={editForm.use_time_range} value={false} />
@@ -1352,7 +1352,7 @@
           {/if}
         </div>
         <div>
-          <label class="block text-sm font-medium text-foreground mb-2">모니터링 간격</label>
+          <p class="block text-sm font-medium text-foreground mb-2">모니터링 간격</p>
           <div class="space-y-2">
             <label class="flex items-center gap-2">
               <input type="checkbox" bind:checked={editForm.custom_interval} />

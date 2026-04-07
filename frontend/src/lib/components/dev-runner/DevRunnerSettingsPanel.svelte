@@ -79,7 +79,7 @@
           bind:value={inputValue}
           disabled={saving}
         />
-        <button on:click={handleSave} disabled={saving}>
+        <button onclick={handleSave} disabled={saving}>
           {saving ? '저장 중...' : '저장'}
         </button>
       </div>

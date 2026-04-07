@@ -770,8 +770,9 @@
 					</select>
 				</div>
 				<div class="w-full">
-					<label class="mb-1 block text-xs text-muted-foreground">제외 키워드</label>
+					<label for="exclude-keywords" class="mb-1 block text-xs text-muted-foreground">제외 키워드</label>
 					<input
+						id="exclude-keywords"
 						type="text"
 						bind:value={excludeKeywords}
 						placeholder="콤마로 구분 (예: 구매, 판매, 광고)"
@@ -1204,8 +1205,9 @@
 								</select>
 							</div>
 							<div class="w-full">
-								<label class="mb-1 block text-xs text-muted-foreground">제외 키워드</label>
+								<label for="exclude-keywords-2" class="mb-1 block text-xs text-muted-foreground">제외 키워드</label>
 								<input
+									id="exclude-keywords-2"
 									type="text"
 									bind:value={excludeKeywords}
 									placeholder="콤마로 구분 (예: 구매, 판매, 광고)"
