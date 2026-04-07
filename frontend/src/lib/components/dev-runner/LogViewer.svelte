@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
+	import { shouldShowMergeCompletionBanner } from '$lib/utils/dev-runner-merge-banner';
 
 	interface Props {
 		runnerId: string;
@@ -413,6 +414,12 @@
 		// Redis 재연결 시 connected 이벤트로 복구
 		eventSource.addEventListener('connected', () => {
 			redisAvailable = true;
+			// running 상태에서 connected 재수신 시 잘못된 exitBanner를 클리어한다.
+			// (skip-only 사이클이 FAILED sentinel을 publish한 경우 다음 사이클 시작 전 배너 제거)
+			// 진짜 종료 후 stale connected 이벤트로 배너가 사라지는 부작용 방지를 위해 running 조건 사용.
+			if (running && exitBanner.show) {
+				exitBanner = { show: false, reason: 'completed' };
+			}
 		});
 		// runner 종료 신호 — 배너 표시 후 재연결 중지
 		eventSource.addEventListener('completed', (event: MessageEvent) => {
@@ -598,14 +605,12 @@
 		connected = 'disconnected';
 	}
 
-	function shouldShowMergeCompletionBanner(reason?: string | null, status?: string | null): boolean {
-		if (status === 'failed') return true;
-		if (!reason) return false;
-		const normalized = getExitReasonDisplay(reason).reason;
-		return !['completed', 'stopped', 'archived', 'on_hold', 'unknown'].includes(normalized);
-	}
-
 	export function injectMergeCompleted(reason?: string, status?: string) {
+		// running 상태에서는 배너 표시 건너뜀 — 잘못된 FAILED sentinel이 흘러와도 깜빡임 방지
+		if (running) {
+			onMergeCompleted?.(reason, status);
+			return;
+		}
 		onMergeCompleted?.(reason, status);
 		if (shouldShowMergeCompletionBanner(reason, status)) {
 			injectCompleted(reason ?? 'merge_failed');
