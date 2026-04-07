@@ -91,6 +91,27 @@ def _make_wf_manager(runner_id="test-runner"):
     return mgr, wf
 
 
+def _make_subprocess_router(repo_dir: str, post_merge_returncode: int = 0):
+    """git log는 실제 실행, plan-runner post-merge는 mock 반환하는 subprocess.run side_effect.
+
+    패치 전 실제 subprocess.run 참조를 캡처하여 무한 재귀를 방지한다.
+    """
+    import subprocess as _sp
+    _real_run = _sp.run  # 패치 전에 실제 함수 참조 저장
+
+    def _router(cmd, *args, **kwargs):
+        if cmd and len(cmd) >= 2 and cmd[0] == "git" and "log" in cmd:
+            # _has_worktree_commits의 git log → 실제 git 실행 (repo_dir cwd 강제)
+            return _real_run(cmd, *args, **{**kwargs, "cwd": repo_dir})
+        else:
+            # plan-runner post-merge subprocess → mock 반환
+            result = MagicMock()
+            result.returncode = post_merge_returncode
+            return result
+
+    return _router
+
+
 class TestAutoMergeE2E:
     def test_auto_merge_on_completed_merge_status_transitions(
         self, real_git_repo_with_feature_branch, fr
@@ -98,13 +119,11 @@ class TestAutoMergeE2E:
         """T4 R: exit_code=0 + completed + worktree 커밋 있음
         → merge_status 전이 (queued → merging) + cleanup 호출 검증
 
-        _execute_merge_with_lock 내 subprocess.run(plan-runner post-merge)을 mock하여
-        E2E 흐름만 검증 (실제 plan_runner 바이너리 불필요).
+        subprocess.run side_effect로 git log(실제)와 post-merge(mock)를 분리.
         """
         repo_dir, branch = real_git_repo_with_feature_branch
         runner_id = "t4-auto-merge-e2e-001"
 
-        # Redis 세팅: completed 경로 + branch 키 있음 (merge_requested 없음)
         fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
         fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch)
 
@@ -124,9 +143,6 @@ class TestAutoMergeE2E:
 
         import merge_queue as mq
 
-        post_merge_proc = MagicMock()
-        post_merge_proc.returncode = 0  # merged 성공 경로
-
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
              patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
@@ -134,10 +150,9 @@ class TestAutoMergeE2E:
              patch("_dr_constants.PROJECT_ROOT", Path(repo_dir)), \
              patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
-             patch("subprocess.run", return_value=post_merge_proc):
+             patch("subprocess.run", side_effect=_make_subprocess_router(repo_dir)):
             plan_runner_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
 
-        # merge_status queued → merging 전이 확인
         assert "queued" in merge_status_seq, (
             f"merge_status=queued 전이 누락. 실제 전이: {merge_status_seq}"
         )
@@ -147,16 +162,12 @@ class TestAutoMergeE2E:
         assert merge_status_seq.index("queued") < merge_status_seq.index("merging"), (
             "queued → merging 순서 오류"
         )
-
-        # cleanup은 _do_inline_merge 내부에서 호출 → mock_cleanup 호출 확인
         mock_cleanup.assert_called_once_with(runner_id, fr)
 
     def test_no_auto_merge_without_worktree_commits(self, fr):
         """T4 B: exit_code=0 + completed + worktree 커밋 없음 → merge 없이 cleanup만 호출"""
         runner_id = "t4-auto-merge-e2e-002"
 
-        # branch 키 있지만 main 대비 커밋 0개인 상태 → _has_worktree_commits = False
-        # 실제 git 없이 subprocess.run mock으로 커밋 0개 시뮬레이션
         fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
         fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/empty-branch")
 
@@ -164,8 +175,9 @@ class TestAutoMergeE2E:
         log_handle = io.StringIO()
         wf_mgr, _ = _make_wf_manager(runner_id)
 
+        # git log 결과: 커밋 없음 (빈 stdout)
         empty_git_proc = MagicMock()
-        empty_git_proc.stdout = ""  # 커밋 없음
+        empty_git_proc.stdout = ""
         empty_git_proc.returncode = 0
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
@@ -203,9 +215,6 @@ class TestAutoMergeE2E:
 
         import merge_queue as mq
 
-        post_merge_proc = MagicMock()
-        post_merge_proc.returncode = 0
-
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
              patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
@@ -213,7 +222,7 @@ class TestAutoMergeE2E:
              patch("_dr_constants.PROJECT_ROOT", Path(repo_dir)), \
              patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
-             patch("subprocess.run", return_value=post_merge_proc):
+             patch("subprocess.run", side_effect=_make_subprocess_router(repo_dir)):
             plan_runner_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
 
         statuses = [v for _, v in order]
