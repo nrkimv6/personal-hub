@@ -148,10 +148,11 @@
 		<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 			<!-- 보고서 타입 -->
 			<div>
-				<label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+				<label for="filter-report-type" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
 					보고서 타입
 				</label>
 				<select
+					id="filter-report-type"
 					bind:value={filterReportType}
 					class="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-md bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100"
 				>
@@ -164,10 +165,11 @@
 
 			<!-- 검색 -->
 			<div>
-				<label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+				<label for="filter-search" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">
 					검색
 				</label>
 				<input
+					id="filter-search"
 					type="text"
 					bind:value={filterSearch}
 					placeholder="제목 또는 요약..."

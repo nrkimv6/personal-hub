@@ -28,6 +28,8 @@
 </script>
 
 <div
+  role="region"
+  aria-label="파일 업로드 영역"
   class="rounded-xl border-2 border-dashed p-6 text-center transition-colors
     {isDragging ? 'border-blue-400 bg-blue-50/40' : 'border-border bg-muted/30'}"
   ondragover={(event) => {
