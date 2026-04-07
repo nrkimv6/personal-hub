@@ -7,13 +7,14 @@
 	import PlanListTab from '../plans/PlanListTab.svelte';
 	import ArchiveTab from '../plans/ArchiveTab.svelte';
 	import HistoryTab from '../plans/HistoryTab.svelte';
+	import WorktreeTab from '../plans/WorktreeTab.svelte';
 
 	type MainTab = 'dev-runner' | 'git-repos' | 'plans';
 	let mainTab: MainTab = $state('dev-runner');
 	let initialPlan = $state('');
 
 	// plans 서브탭
-	type PlansSubTab = 'plans' | 'archive' | 'history';
+	type PlansSubTab = 'plans' | 'archive' | 'history' | 'worktrees';
 	let plansSubTab: PlansSubTab = $state('plans');
 
 	$effect(() => {
@@ -23,7 +24,7 @@
 		} else if (tabParam === 'plans') {
 			mainTab = 'plans';
 			const subParam = $page.url.searchParams.get('subtab') as PlansSubTab | null;
-			plansSubTab = subParam && ['plans', 'archive', 'history'].includes(subParam) ? subParam : 'plans';
+			plansSubTab = subParam && ['plans', 'archive', 'history', 'worktrees'].includes(subParam) ? subParam : 'plans';
 		} else {
 			mainTab = 'dev-runner';
 		}
@@ -40,6 +41,7 @@
 		{ id: 'plans', label: '계획' },
 		{ id: 'archive', label: '아카이브' },
 		{ id: 'history', label: '이력' },
+		{ id: 'worktrees', label: '워크트리' },
 	];
 
 	function setMainTab(tab: MainTab) {
@@ -85,6 +87,8 @@
 						<ArchiveTab />
 					{:else if plansSubTab === 'history'}
 						<HistoryTab />
+					{:else if plansSubTab === 'worktrees'}
+						<WorktreeTab />
 					{/if}
 				</div>
 			</div>

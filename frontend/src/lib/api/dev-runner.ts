@@ -589,6 +589,34 @@ export interface WorkflowCreateRequest {
 	slug?: string;
 }
 
+export interface CommitDiffStat {
+	file: string;
+	changes: string;
+}
+
+export interface WorktreeCommit {
+	hash: string;
+	short_hash: string;
+	message: string;
+	date: string;
+	diff_stat: CommitDiffStat[];
+}
+
+export interface WorktreeInfo {
+	branch: string;
+	worktree_path: string;
+	created_at: string | null;
+	ahead: number;
+	behind: number;
+	locked: boolean;
+	commits: WorktreeCommit[];
+	plan_file: string | null;
+}
+
+export const devRunnerWorktreeApi = {
+	list: (): Promise<WorktreeInfo[]> => devRunnerRequest<WorktreeInfo[]>('/worktrees'),
+};
+
 export const devRunnerWorkflowApi = {
 	list: (params?: { status?: string; limit?: number; offset?: number }): Promise<WorkflowResponse[]> => {
 		const qs = new URLSearchParams();

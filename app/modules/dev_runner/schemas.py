@@ -394,6 +394,33 @@ class RetryMergeRequest(BaseModel):
     branch: Optional[str] = Field(default=None, description="브랜치명")
 
 
+class CommitDiffStat(BaseModel):
+    """커밋별 파일 변경 통계"""
+    file: str
+    changes: str  # 예: "+5 -2"
+
+
+class WorktreeCommit(BaseModel):
+    """워크트리 커밋 정보"""
+    hash: str
+    short_hash: str
+    message: str
+    date: str
+    diff_stat: List[CommitDiffStat]
+
+
+class WorktreeInfo(BaseModel):
+    """워크트리 상태 정보"""
+    branch: str
+    worktree_path: str
+    created_at: Optional[str]
+    ahead: int
+    behind: int
+    locked: bool
+    commits: List[WorktreeCommit]
+    plan_file: Optional[str]
+
+
 __all__ = [
     'PlanEventResponse',
     'PlanRecordResponse',
@@ -427,4 +454,7 @@ __all__ = [
     'WorkflowCreateRequest',
     'DirectMergeRequest',
     'RetryMergeRequest',
+    'CommitDiffStat',
+    'WorktreeCommit',
+    'WorktreeInfo',
 ]
