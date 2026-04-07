@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -464,3 +467,120 @@ class TestStreamOutputE2EFlow:
 
         # (3) _cleanup_process_state 미호출 (merge 흐름에서는 merge 내부에서 처리)
         mock_cleanup.assert_not_called()
+
+
+# ========== Phase T3: _determine_merge_requested 실 git 통합 TC ==========
+
+@pytest.fixture
+def real_git_repo_with_commits():
+    """main + feature 브랜치(커밋 1개 앞)를 가진 임시 git 저장소 반환"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "test",
+            "GIT_AUTHOR_EMAIL": "t@t.com",
+            "GIT_COMMITTER_NAME": "test",
+            "GIT_COMMITTER_EMAIL": "t@t.com",
+        }
+        # git init (main)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmpdir, capture_output=True, env=env, check=False)
+        readme = os.path.join(tmpdir, "README.md")
+        with open(readme, "w") as f:
+            f.write("init")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True, env=env)
+        # feature 브랜치 + 추가 커밋
+        subprocess.run(["git", "checkout", "-b", "plan/test-feature"], cwd=tmpdir, capture_output=True, env=env)
+        with open(readme, "a") as f:
+            f.write("\nfeature")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "feat: add feature"], cwd=tmpdir, capture_output=True, env=env)
+        yield tmpdir
+
+
+@pytest.fixture
+def real_git_repo_no_extra_commit():
+    """main + feature 브랜치(main과 동일 커밋)를 가진 임시 git 저장소 반환"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "test",
+            "GIT_AUTHOR_EMAIL": "t@t.com",
+            "GIT_COMMITTER_NAME": "test",
+            "GIT_COMMITTER_EMAIL": "t@t.com",
+        }
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmpdir, capture_output=True, env=env, check=False)
+        readme = os.path.join(tmpdir, "README.md")
+        with open(readme, "w") as f:
+            f.write("init")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True, env=env)
+        # feature 브랜치 생성만 (추가 커밋 없음 — main과 동일)
+        subprocess.run(["git", "checkout", "-b", "plan/test-feature"], cwd=tmpdir, capture_output=True, env=env)
+        yield tmpdir
+
+
+def _get_stream_cleanup_mod():
+    """_dr_stream_cleanup 모듈을 반환한다 (이미 로드된 경우 재사용)"""
+    if "_dr_stream_cleanup" in sys.modules:
+        return sys.modules["_dr_stream_cleanup"]
+    scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import _dr_stream_cleanup
+    return _dr_stream_cleanup
+
+
+def test_determine_merge_requested_real_git_worktree_commit_T3(real_git_repo_with_commits):
+    """T3: 실 git repo — feature 브랜치에 커밋 있음 + flag=None + exit_code=0 + completed → True"""
+    stream_cleanup = _get_stream_cleanup_mod()
+    server = fakeredis.FakeServer()
+    fr = fakeredis.FakeRedis(server=server, decode_responses=True)
+
+    runner_id = "t3-dmr-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/test-feature")
+    # merge_requested 키 미설정 (flag=None)
+
+    ctx = stream_cleanup._StreamCleanupCtx(
+        runner_id=runner_id,
+        redis_client=fr,
+        log_channel="plan-runner:log",
+        exit_code=0,
+        exit_reason="completed",
+        completed_for_flow=True,
+    )
+
+    with patch("_dr_stream_cleanup._pub_and_log"), \
+         patch("_dr_constants.PROJECT_ROOT", Path(real_git_repo_with_commits)):
+        result = stream_cleanup._determine_merge_requested(ctx)
+
+    assert result is True, (
+        f"실 git repo에 커밋 있음 + flag=None + exit_code=0 + completed → True여야 함, 실제: {result}"
+    )
+
+
+def test_determine_merge_requested_real_git_no_extra_commit_T3(real_git_repo_no_extra_commit):
+    """T3: 실 git repo — feature 브랜치가 main과 동일 (추가 커밋 없음) + flag=None → False"""
+    stream_cleanup = _get_stream_cleanup_mod()
+    server = fakeredis.FakeServer()
+    fr = fakeredis.FakeRedis(server=server, decode_responses=True)
+
+    runner_id = "t3-dmr-002"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/test-feature")
+
+    ctx = stream_cleanup._StreamCleanupCtx(
+        runner_id=runner_id,
+        redis_client=fr,
+        log_channel="plan-runner:log",
+        exit_code=0,
+        exit_reason="completed",
+        completed_for_flow=True,
+    )
+
+    with patch("_dr_stream_cleanup._pub_and_log"), \
+         patch("_dr_constants.PROJECT_ROOT", Path(real_git_repo_no_extra_commit)):
+        result = stream_cleanup._determine_merge_requested(ctx)
+
+    assert result is False, (
+        f"main과 동일한 커밋 상태 → False여야 함, 실제: {result}"
+    )

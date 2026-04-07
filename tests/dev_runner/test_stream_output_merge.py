@@ -729,3 +729,113 @@ def test_cleanup_publishes_completed_after_status_stopped(process_utils_mod, fr)
     assert ordered_events.index("status_stopped") < ordered_events.index("completed_publish"), (
         f"완료 신호가 상태 반영보다 먼저 publish됨: {ordered_events}"
     )
+
+
+# ========== Phase T1: _determine_merge_requested (flag=None 경로) 단위 TC ==========
+# 주의: _determine_merge_requested 는 _dr_stream_cleanup 에 정의됨.
+# mock 패치 대상은 반드시 stream_cleanup_mod._has_worktree_commits (plan_runner_mod 패치 무효)
+
+@pytest.fixture(scope="module")
+def stream_cleanup_mod(listener_mod):
+    import sys
+    return sys.modules["_dr_stream_cleanup"]
+
+
+def _make_ctx(stream_cleanup_mod, runner_id, redis_client, exit_code=0, completed_for_flow=True):
+    """_StreamCleanupCtx 편의 생성 — log_channel 필수 포함"""
+    return stream_cleanup_mod._StreamCleanupCtx(
+        runner_id=runner_id,
+        redis_client=redis_client,
+        log_channel="plan-runner:log",
+        exit_code=exit_code,
+        exit_reason="completed" if completed_for_flow else "error",
+        completed_for_flow=completed_for_flow,
+    )
+
+
+def test_determine_merge_requested_flag_none_exit0_completed_with_commits_R(
+    stream_cleanup_mod, fr
+):
+    """R(Right): flag=None + exit_code=0 + completed_for_flow=True + 워크트리 커밋 있음 → True"""
+    runner_id = "t-dmr-001"
+    ctx = _make_ctx(stream_cleanup_mod, runner_id, fr, exit_code=0, completed_for_flow=True)
+    # merge_requested 키 미설정 (flag=None)
+
+    with patch.object(stream_cleanup_mod, "_has_worktree_commits", return_value=True), \
+         patch.object(stream_cleanup_mod, "_pub_and_log"):
+        result = stream_cleanup_mod._determine_merge_requested(ctx)
+
+    assert result is True, f"exit_code=0 + completed + 커밋 있음 → True여야 함, 실제: {result}"
+
+
+def test_determine_merge_requested_flag_none_exit0_completed_no_commits_B(
+    stream_cleanup_mod, fr
+):
+    """B(Boundary): flag=None + exit_code=0 + completed_for_flow=True + 워크트리 커밋 없음 → False"""
+    runner_id = "t-dmr-002"
+    ctx = _make_ctx(stream_cleanup_mod, runner_id, fr, exit_code=0, completed_for_flow=True)
+
+    with patch.object(stream_cleanup_mod, "_has_worktree_commits", return_value=False), \
+         patch.object(stream_cleanup_mod, "_pub_and_log"):
+        result = stream_cleanup_mod._determine_merge_requested(ctx)
+
+    assert result is False, f"커밋 없음 → False여야 함, 실제: {result}"
+
+
+def test_determine_merge_requested_flag_none_exit0_not_completed_B(
+    stream_cleanup_mod, fr
+):
+    """B(Boundary): flag=None + exit_code=0 + completed_for_flow=False → False, 워크트리 체크 호출 안 됨"""
+    runner_id = "t-dmr-003"
+    ctx = _make_ctx(stream_cleanup_mod, runner_id, fr, exit_code=0, completed_for_flow=False)
+
+    with patch.object(stream_cleanup_mod, "_has_worktree_commits") as mock_hwc, \
+         patch.object(stream_cleanup_mod, "_pub_and_log"):
+        result = stream_cleanup_mod._determine_merge_requested(ctx)
+
+    assert result is False, f"completed_for_flow=False → False여야 함, 실제: {result}"
+    mock_hwc.assert_not_called(), "_has_worktree_commits는 not_completed 경로에서 호출 안 됨"
+
+
+def test_determine_merge_requested_flag_none_exit_nonzero_B(
+    stream_cleanup_mod, fr
+):
+    """B(Boundary): flag=None + exit_code=1 → False, 워크트리 체크 호출 안 됨"""
+    runner_id = "t-dmr-004"
+    ctx = _make_ctx(stream_cleanup_mod, runner_id, fr, exit_code=1, completed_for_flow=False)
+
+    with patch.object(stream_cleanup_mod, "_has_worktree_commits") as mock_hwc, \
+         patch.object(stream_cleanup_mod, "_pub_and_log"):
+        result = stream_cleanup_mod._determine_merge_requested(ctx)
+
+    assert result is False, f"exit_code=1 → False여야 함, 실제: {result}"
+    mock_hwc.assert_not_called(), "_has_worktree_commits는 exit_code!=0 경로에서 호출 안 됨"
+
+
+def test_determine_merge_requested_flag_none_has_worktree_commits_raises_E(
+    stream_cleanup_mod, fr
+):
+    """E(Error): _has_worktree_commits 예외 발생 → False 반환 (안전 기본값, 예외 전파 없음)"""
+    runner_id = "t-dmr-005"
+    ctx = _make_ctx(stream_cleanup_mod, runner_id, fr, exit_code=0, completed_for_flow=True)
+
+    with patch.object(stream_cleanup_mod, "_has_worktree_commits", side_effect=Exception("git error")), \
+         patch.object(stream_cleanup_mod, "_pub_and_log"):
+        # 예외가 전파되면 안 됨
+        result = stream_cleanup_mod._determine_merge_requested(ctx)
+
+    assert result is False, f"예외 발생 시 안전 기본값 False여야 함, 실제: {result}"
+
+
+def test_determine_merge_requested_flag_none_runner_id_empty_E(
+    stream_cleanup_mod, fr
+):
+    """E(Error): ctx.runner_id=None → False 반환 (기존 동작 유지 회귀 방지)"""
+    ctx = _make_ctx(stream_cleanup_mod, runner_id=None, redis_client=fr, exit_code=0, completed_for_flow=True)
+
+    with patch.object(stream_cleanup_mod, "_has_worktree_commits") as mock_hwc, \
+         patch.object(stream_cleanup_mod, "_pub_and_log"):
+        result = stream_cleanup_mod._determine_merge_requested(ctx)
+
+    assert result is False, f"runner_id=None → False여야 함, 실제: {result}"
+    mock_hwc.assert_not_called(), "runner_id=None이면 _has_worktree_commits 호출 안 됨"

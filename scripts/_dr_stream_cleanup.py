@@ -402,6 +402,42 @@ def _process_error_details(
             )
 
 
+def _has_worktree_commits(runner_id: str, redis_client) -> bool:
+    """워크트리 브랜치에 main 대비 커밋이 있으면 True를 반환한다.
+
+    - branch Redis 키가 없으면 False 반환 (orphan/legacy runner)
+    - git log 실행 실패 시 False 반환 (안전 기본값 — merge 스킵)
+    """
+    try:
+        branch = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+        if not branch:
+            logger.info(
+                f"[_has_worktree_commits] branch 키 없음 (runner_id={runner_id}) → False"
+            )
+            return False
+        from _dr_constants import PROJECT_ROOT as _PR
+        log_proc = subprocess.run(
+            ["git", "log", f"main..{branch}", "--oneline"],
+            capture_output=True, text=True, cwd=str(_PR), timeout=15,
+        )
+        commit_count = len([line for line in log_proc.stdout.splitlines() if line.strip()])
+        if commit_count > 0:
+            logger.info(
+                f"[_has_worktree_commits] 워크트리 커밋 {commit_count}개 존재 "
+                f"(runner_id={runner_id}, branch={branch}) → True"
+            )
+            return True
+        else:
+            logger.info(
+                f"[_has_worktree_commits] 워크트리 커밋 없음 "
+                f"(runner_id={runner_id}, branch={branch}) → False"
+            )
+            return False
+    except Exception as e:
+        logger.warning(f"[_has_worktree_commits] git log 확인 실패: {e} → False")
+        return False
+
+
 def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
     """merge_requested 여부를 판정"""
     merge_requested = False
@@ -471,6 +507,17 @@ def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
                         logger.info(
                             f"[_stream_output] exit_code={ctx.exit_code}, branch 키 없음 — merge 스킵"
                         )
+            else:
+                # merge_requested 플래그 없음: exit_code=0 + completed 완료 시에도 워크트리 커밋 감지
+                if ctx.exit_code == 0 and ctx.completed_for_flow:
+                    if _has_worktree_commits(ctx.runner_id, ctx.redis_client):
+                        merge_requested = True
+                        _pub_and_log(
+                            ctx.runner_id,
+                            "[_stream_output] merge_requested 플래그 없음 + exit_code=0 + completed + 워크트리 커밋 있음 → merge",
+                            ctx.redis_client,
+                            "CLEANUP",
+                        )
         except Exception as e:
             logger.warning(
                 f"[_stream_output] merge_requested 플래그 조회 실패 (runner_id={ctx.runner_id}): {e}"
@@ -491,8 +538,8 @@ def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
             "CLEANUP",
         )
 
-    # 로그 출력
-    if flag:
+    # 로그 출력 — flag 있음 또는 flag 없이 worktree 커밋 감지로 merge 결정된 경우 CLEANUP 채널에 출력
+    if flag or merge_requested:
         _pub_and_log(
             ctx.runner_id,
             f"[_stream_output] merge 분기 판정: _merge_requested={merge_requested}, exit_code={ctx.exit_code}, exit_reason={ctx.exit_reason}, stop_stage={ctx.stop_stage}",
