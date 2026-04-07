@@ -6,6 +6,9 @@
 
 import importlib.util
 import io
+import os
+import subprocess
+import tempfile
 import pytest
 from unittest.mock import MagicMock, patch
 import fakeredis
@@ -492,6 +495,195 @@ def test_completed_exit_with_no_stdout_no_error_publish(listener_mod, plan_runne
 
     error_msgs = [m for m in published_messages if m.startswith("[ERROR]")]
     assert not error_msgs, f"completed 종료인데 [ERROR] 메시지가 발행됨: {error_msgs}"
+
+
+# ========== 신규 TC: exit_code=0 + completed 경로 워크트리 커밋 감지 ==========
+
+def test_auto_merge_on_completed_with_worktree_commits_R_success(listener_mod, plan_runner_mod, fr):
+    """R(Right): exit_code=0 + completed + merge_requested 없음 + 워크트리 커밋 있음 → merge"""
+    runner_id = "t-automrg-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+    # merge_requested 키 미설정
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(plan_runner_mod, "_has_worktree_commits", return_value=True):
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    mock_merge.assert_called_once_with(runner_id, fr)
+    mock_cleanup.assert_not_called()
+
+
+def test_no_merge_on_completed_without_worktree_commits_B_no_commits(listener_mod, plan_runner_mod, fr):
+    """B(Boundary): exit_code=0 + completed + merge_requested 없음 + 워크트리 커밋 없음 → merge 안 함"""
+    runner_id = "t-automrg-002"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(plan_runner_mod, "_has_worktree_commits", return_value=False):
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    mock_merge.assert_not_called()
+    mock_cleanup.assert_called_once_with(runner_id, fr)
+
+
+def test_no_merge_on_completed_without_branch_key_B_no_branch(listener_mod, plan_runner_mod, fr):
+    """B(Boundary): exit_code=0 + completed + merge_requested 없음 + branch 키 없음 → merge 안 함"""
+    runner_id = "t-automrg-003"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+    # branch 키 미설정 → _has_worktree_commits가 False 반환
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None):
+        # _has_worktree_commits는 실제 호출 — FakeRedis에 branch 키 없으므로 False 반환
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    mock_merge.assert_not_called()
+    mock_cleanup.assert_called_once_with(runner_id, fr)
+
+
+def test_merge_requested_flag_still_takes_precedence_I_flag_override(listener_mod, plan_runner_mod, fr):
+    """I(Inverse): merge_requested=1 플래그 있으면 _has_worktree_commits 호출 없이 merge"""
+    runner_id = "t-automrg-004"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(plan_runner_mod, "_cleanup_process_state"), \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(plan_runner_mod, "_has_worktree_commits") as mock_hwc:
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    mock_merge.assert_called_once_with(runner_id, fr)
+    # 플래그 경로에서는 _has_worktree_commits 호출 안 함
+    mock_hwc.assert_not_called()
+
+
+# ========== 신규 TC: _has_worktree_commits 단위 테스트 ==========
+
+def test_has_worktree_commits_true_R_success(plan_runner_mod, fr):
+    """R(Right): branch 키 있고 git log 결과 있으면 True"""
+    runner_id = "t-hwc-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/some-branch")
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="abc1234 feat: impl\ndef5678 fix: test\n", returncode=0)
+        result = plan_runner_mod._has_worktree_commits(runner_id, fr)
+
+    assert result is True
+
+
+def test_has_worktree_commits_false_B_no_commits(plan_runner_mod, fr):
+    """B(Boundary): branch 키 있지만 git log 결과 비어있으면 False"""
+    runner_id = "t-hwc-002"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/some-branch")
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="", returncode=0)
+        result = plan_runner_mod._has_worktree_commits(runner_id, fr)
+
+    assert result is False
+
+
+def test_has_worktree_commits_no_branch_E_missing_branch(plan_runner_mod, fr):
+    """E(Error): branch 키 없으면 subprocess 호출 없이 False"""
+    runner_id = "t-hwc-003"
+    # branch 키 미설정
+
+    with patch("subprocess.run") as mock_run:
+        result = plan_runner_mod._has_worktree_commits(runner_id, fr)
+
+    assert result is False
+    mock_run.assert_not_called()
+
+
+def test_has_worktree_commits_git_error_E_command_fail(plan_runner_mod, fr):
+    """E(Error): git log 실행 실패(Exception) → False 반환 (안전 기본값)"""
+    runner_id = "t-hwc-004"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/some-branch")
+
+    with patch("subprocess.run", side_effect=Exception("git not found")):
+        result = plan_runner_mod._has_worktree_commits(runner_id, fr)
+
+    assert result is False
+
+
+# ========== Phase T3: 실제 git 기반 통합 TC ==========
+
+@pytest.fixture
+def real_git_repo():
+    """실제 git 저장소를 임시 디렉토리에 생성하고 경로를 반환한다."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env = {**os.environ, "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "t@t.com",
+               "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "t@t.com"}
+        # git init
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmpdir, capture_output=True, env=env)
+        # 최초 커밋 (main)
+        dummy = os.path.join(tmpdir, "README.md")
+        with open(dummy, "w") as f:
+            f.write("init")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True, env=env)
+        # feature 브랜치 생성 + 커밋 추가
+        subprocess.run(["git", "checkout", "-b", "plan/test-feature"], cwd=tmpdir, capture_output=True, env=env)
+        with open(dummy, "a") as f:
+            f.write("\nfeature")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "feat: add feature"], cwd=tmpdir, capture_output=True, env=env)
+        yield tmpdir
+
+
+def test_completed_flow_triggers_merge_with_real_git(listener_mod, plan_runner_mod, fr, real_git_repo):
+    """T3: 실제 git 저장소로 exit_code=0 + completed + 워크트리 커밋 → _do_inline_merge 호출 검증"""
+    runner_id = "t-realgit-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/test-feature")
+    # merge_requested 키 미설정 (no flag)
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+    wf_mgr, _ = _make_wf_manager()
+
+    from pathlib import Path
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(plan_runner_mod, "_cleanup_process_state"), \
+         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch("_dr_constants.PROJECT_ROOT", Path(real_git_repo)):
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    mock_merge.assert_called_once_with(runner_id, fr), (
+        "exit_code=0 + completed + worktree 커밋 존재 → _do_inline_merge 호출되어야 함"
+    )
 
 
 def test_cleanup_publishes_completed_after_status_stopped(process_utils_mod, fr):

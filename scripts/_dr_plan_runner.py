@@ -68,6 +68,42 @@ _ERROR_DETAIL_HINTS = (
 )
 
 
+def _has_worktree_commits(runner_id: str, redis_client) -> bool:
+    """워크트리 브랜치에 main 대비 커밋이 있으면 True를 반환한다.
+
+    - branch Redis 키가 없으면 False 반환 (orphan/legacy runner)
+    - git log 실행 실패 시 False 반환 (안전 기본값 — merge 스킵)
+    """
+    try:
+        branch = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+        if not branch:
+            logger.info(
+                f"[_has_worktree_commits] branch 키 없음 (runner_id={runner_id}) → False"
+            )
+            return False
+        from _dr_constants import PROJECT_ROOT as _PR
+        log_proc = subprocess.run(
+            ["git", "log", f"main..{branch}", "--oneline"],
+            capture_output=True, text=True, cwd=str(_PR), timeout=15,
+        )
+        commit_count = len([line for line in log_proc.stdout.splitlines() if line.strip()])
+        if commit_count > 0:
+            logger.info(
+                f"[_has_worktree_commits] 워크트리 커밋 {commit_count}개 존재 "
+                f"(runner_id={runner_id}, branch={branch}) → True"
+            )
+            return True
+        else:
+            logger.info(
+                f"[_has_worktree_commits] 워크트리 커밋 없음 "
+                f"(runner_id={runner_id}, branch={branch}) → False"
+            )
+            return False
+    except Exception as e:
+        logger.warning(f"[_has_worktree_commits] git log 확인 실패: {e} → False")
+        return False
+
+
 def _build_failure_error_message(
     exit_code: Optional[int],
     exit_reason: str,
@@ -458,30 +494,22 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                             )
                     else:
                         # exit_code != 0: worktree 커밋 유무로 merge 여부 결정
-                        _branch_for_check = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
-                        if _branch_for_check:
-                            try:
-                                from _dr_constants import PROJECT_ROOT as _PR
-                                _log_proc = subprocess.run(
-                                    ["git", "log", f"main..{_branch_for_check}", "--oneline"],
-                                    capture_output=True, text=True, cwd=str(_PR), timeout=15,
-                                )
-                                _commit_count = len([l for l in _log_proc.stdout.splitlines() if l.strip()])
-                                if _commit_count > 0:
-                                    _merge_requested = True
-                                    logger.info(
-                                        f"[_stream_output] exit_code={exit_code}이지만 worktree 커밋 {_commit_count}개 존재 "
-                                        f"(runner_id={runner_id}, branch={_branch_for_check}) — merge 시도"
-                                    )
-                                else:
-                                    logger.info(
-                                        f"[_stream_output] exit_code={exit_code}, worktree 커밋 없음 "
-                                        f"(runner_id={runner_id}, branch={_branch_for_check}) — merge 스킵"
-                                    )
-                            except Exception as _git_err:
-                                logger.warning(f"[_stream_output] git log 커밋 수 확인 실패: {_git_err} — merge 스킵")
-                        else:
-                            logger.info(f"[_stream_output] exit_code={exit_code}, branch 키 없음 — merge 스킵")
+                        if _has_worktree_commits(runner_id, redis_client):
+                            _merge_requested = True
+                            logger.info(
+                                f"[_stream_output] exit_code={exit_code}이지만 worktree 커밋 존재 "
+                                f"(runner_id={runner_id}) — merge 시도"
+                            )
+                else:
+                    # merge_requested 플래그 없음: exit_code=0 + completed 완료 시에도 worktree 커밋 감지
+                    if exit_code == 0 and _completed_for_flow:
+                        if _has_worktree_commits(runner_id, redis_client):
+                            _merge_requested = True
+                            _pub_and_log(
+                                runner_id,
+                                f"[_stream_output] worktree 커밋 감지 → merge 시도 (exit_reason={_exit_reason})",
+                                redis_client, "CLEANUP",
+                            )
             except Exception as e:
                 logger.warning(f"[_stream_output] merge_requested 플래그 조회 실패 (runner_id={runner_id}): {e}")
         if _merge_requested and _stop_stage == "pre_review":
