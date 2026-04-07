@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.dev_runner.services.plan_service import PlanService
 from app.modules.dev_runner.services.plan_done_service import PlanDoneService
+from app.modules.dev_runner.services._plan_header_utils import update_plan_headers
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 from app.models.plan_record import PlanRecord, PlanEvent
 
@@ -126,29 +127,29 @@ class TestUpdatePlanHeaders:
 
     def test_status_updated_to_done(self):
         content = "> 상태: 구현중\n내용"
-        result = PlanService._update_plan_headers(content, 5)
+        result = update_plan_headers(content, 5)
         assert "> 상태: 구현완료" in result
 
     def test_progress_updated_to_100(self):
         content = "> 진행률: 3/5 (60%)\n내용"
-        result = PlanService._update_plan_headers(content, 5)
+        result = update_plan_headers(content, 5)
         assert "> 진행률: 5/5 (100%)" in result
 
     def test_arrow_id_converted_to_x(self):
         content = "1. [→TODO] 항목 1\n2. [→P1] 항목 2"
-        result = PlanService._update_plan_headers(content, 2)
+        result = update_plan_headers(content, 2)
         assert "[→TODO]" not in result
         assert "[→P1]" not in result
         assert result.count("[x]") == 2
 
     def test_footer_updated(self):
         content = "내용\n*상태: 구현중 | 진행률: 3/5 (60%)*"
-        result = PlanService._update_plan_headers(content, 5)
+        result = update_plan_headers(content, 5)
         assert "*상태: 구현완료 | 진행률: 5/5 (100%)*" in result
 
     def test_zero_total_handled(self):
         content = "> 상태: 초안\n> 진행률: 0/0 (0%)"
-        result = PlanService._update_plan_headers(content, 0)
+        result = update_plan_headers(content, 0)
         assert "> 상태: 구현완료" in result
         assert "> 진행률: 0/0 (100%)" in result
 

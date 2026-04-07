@@ -229,18 +229,17 @@ def has_undefended_paths(content: str) -> bool:
 
 
 def validate_done_preconditions(file_path: str, content: str) -> list:
-    """done 처리 전 사전 검증. 실패 사유 리스트 반환 (빈 리스트 = 통과)"""
-    errors = []
-    # 2.5: branch/worktree 필드 잔존
-    if re.search(r">\s*(branch|worktree):", content[:2000]):
-        errors.append("branch/worktree 필드 잔존 — /merge-test 먼저 실행 필요")
-    # 2.6-a: fix plan Phase R 부재
-    if is_fix_plan(file_path, content) and not has_phase_r(content):
-        errors.append("fix plan Phase R 섹션 필수 — /implement에서 Phase R 먼저 실행")
-    # 2.6-b: Phase R 내 미방어 경로 잔존
-    if is_fix_plan(file_path, content) and has_phase_r(content) and has_undefended_paths(content):
-        errors.append("Phase R에 미방어 경로 잔존 — 모든 경로 방어 완료 필요")
-    return errors
+    """done 처리 전 사전 검증. 실패 사유 리스트 반환 (빈 리스트 = 통과)
+
+    _plan_header_utils 공통 구현으로 위임 (re-export).
+    이 함수는 하위 호환성 유지용으로 존재한다.
+    """
+    import sys as _sys
+    _project_root = str(Path(__file__).resolve().parent.parent)
+    if _project_root not in _sys.path:
+        _sys.path.insert(0, _project_root)
+    from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions as _utils_validate
+    return _utils_validate(file_path, content)
 
 
 def remove_plan_header_fields(plan_file: str):

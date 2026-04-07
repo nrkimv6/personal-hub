@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from app.modules.dev_runner.schemas import PlanFileResponse
+from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.log_service import publish_log, log_service
@@ -128,54 +129,6 @@ class PlanDoneService:
         except Exception:
             pass
         return None
-
-    @staticmethod
-    def _validate_done_preconditions(file_path: str, content: str) -> list:
-        """done 처리 전 사전 검증. 실패 사유 리스트 반환 (빈 리스트 = 통과)"""
-        errors = []
-        if re.search(r">\s*(branch|worktree(-owner)?):", content[:2000]):
-            errors.append("branch/worktree 필드 잔존 — /merge-test 먼저 실행 필요")
-        name = Path(file_path).name
-        is_fix = "_fix-" in name or "_fix_" in name
-        if not is_fix:
-            for line in content.split("\n")[:5]:
-                if line.startswith("# fix") and len(line) > 5 and line[5] in (":", "-", " "):
-                    is_fix = True
-                    break
-            if not is_fix and re.search(r">\s*유형:\s*fix", content[:1000]):
-                is_fix = True
-        if is_fix:
-            has_pr = "Phase R" in content or "재발 경로 분석" in content
-            if not has_pr:
-                errors.append("fix plan Phase R 섹션 필수 — /implement에서 Phase R 먼저 실행")
-            elif has_pr:
-                m = re.search(r"### Phase R.*?(?=\n### |\Z)", content, re.DOTALL)
-                if m:
-                    section = re.sub(r"```.*?```", "", m.group(0), flags=re.DOTALL)
-                    if "미방어" in section:
-                        errors.append("Phase R에 미방어 경로 잔존 — 모든 경로 방어 완료 필요")
-        return errors
-
-    @staticmethod
-    def _update_plan_headers(content: str, total: int) -> str:
-        """\uc0c1\ud0dc\u2192구현완료, \uc9c4\ud589\ub960\u2192100%, [\u2192ID]\u2192[x] \uce58\ud658, \ud478\ud130 \uac31\uc2e0"""
-        content = re.sub(r'^(>\s*\uc0c1\ud0dc:\s*).*$', r'\1구현완료', content, flags=re.MULTILINE)
-        # branch/worktree \ud5e4\ub354 \uc81c\uac70 \u2014 \uc794\uc874 \uc2dc /done \uc2a4\ud0ac 2.5\ub2e8\uacc4\uc5d0\uc11c \ucc28\ub2e8\ub428 (post-merge \uc774\ud6c4\uc774\ub974\ub85c \uc0ad\uc81c \uc548\uc804)
-        content = re.sub(r'^>\s*(branch|worktree(-owner)?):.*\n?', '', content, flags=re.MULTILINE)
-        content = re.sub(
-            r'^(>\s*\uc9c4\ud589\ub960:\s*)[\d/\s()%]+$',
-            f'> \uc9c4\ud589\ub960: {total}/{total} (100%)',
-            content, flags=re.MULTILINE
-        )
-        # [\u2192ID] \ud615\ud0dc \u2192 [x]
-        content = re.sub(r'\[→[^\]]*\]', '[x]', content)
-        # \ud478\ud130 \uac31\uc2e0: *\uc0c1\ud0dc: ... | \uc9c4\ud589\ub960: ...*
-        content = re.sub(
-            r'\*\uc0c1\ud0dc:[^|*]+\|[^*]*\uc9c4\ud589\ub960:[^*]*\*',
-            f'*\uc0c1\ud0dc: 구현완료 | \uc9c4\ud589\ub960: {total}/{total} (100%)*',
-            content
-        )
-        return content
 
     async def _archive_plan(self, plan_path: str, content: str) -> tuple:
         """공통 archive 로직으로 plan/_todo를 이동한다."""
@@ -310,12 +263,12 @@ class PlanDoneService:
             total = pre_progress.total
 
             # 0. 사전 검증 (구현완료 설정 전 게이트)
-            precondition_errors = self._validate_done_preconditions(plan_path, content)
+            precondition_errors = validate_done_preconditions(plan_path, content)
             if precondition_errors:
                 raise ValueError(f"done 사전 검증 실패: {'; '.join(precondition_errors)}")
 
             # 1. \ud5e4\ub354/\ud478\ud130 \uac31\uc2e0
-            updated_content = self._update_plan_headers(content, total)
+            updated_content = update_plan_headers(content, total)
 
             # 2. \ubbf8\uc644\ub8cc \uccb4\ud06c\ubc15\uc2a4 \u2192 MANUAL_TASKS.md \uc774\uad00
             project_dir = self._resolve_project_dir(plan_path)

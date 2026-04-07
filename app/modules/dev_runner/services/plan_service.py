@@ -13,10 +13,12 @@ from pathlib import Path
 from typing import List, Optional
 
 from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle
 from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL, REDIS_HOST, REDIS_PORT
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
+from app.core.config import PROJECT_ROOT
 from app.modules.dev_runner.schemas import (
     PlanFileResponse, PlanProgressResponse,
     PlanDetailResponse, PlanPhaseResponse, PlanItemResponse,
@@ -545,7 +547,7 @@ class PlanService:
         - 프로젝트 루트 절대경로 prefix 제거 → 상대경로
         반환: {"branch": str|None, "worktree_path": str|None, "worktree_owner": str|None}
         """
-        project_root = str(Path(__file__).resolve().parents[4]).replace("\\", "/").rstrip("/") + "/"
+        project_root = str(PROJECT_ROOT).replace("\\", "/").rstrip("/") + "/"
         result: dict = {"branch": None, "worktree_path": None, "worktree_owner": None}
         for line in content.split("\n")[:20]:
             if result["branch"] is None:
@@ -832,56 +834,6 @@ class PlanService:
             pass
         return None
 
-    @staticmethod
-    def _validate_done_preconditions(file_path: str, content: str) -> list:
-        """done 처리 전 사전 검증. 실패 사유 리스트 반환 (빈 리스트 = 통과)"""
-        errors = []
-        # branch/worktree 필드 잔존
-        if re.search(r">\s*(branch|worktree(-owner)?):", content[:2000]):
-            errors.append("branch/worktree 필드 잔존 — /merge-test 먼저 실행 필요")
-        # fix plan 판정
-        name = Path(file_path).name
-        is_fix = "_fix-" in name or "_fix_" in name
-        if not is_fix:
-            for line in content.split("\n")[:5]:
-                if line.startswith("# fix") and len(line) > 5 and line[5] in (":", "-", " "):
-                    is_fix = True
-                    break
-            if not is_fix and re.search(r">\s*유형:\s*fix", content[:1000]):
-                is_fix = True
-        if is_fix:
-            has_pr = "Phase R" in content or "재발 경로 분석" in content
-            if not has_pr:
-                errors.append("fix plan Phase R 섹션 필수 — /implement에서 Phase R 먼저 실행")
-            elif has_pr:
-                m = re.search(r"### Phase R.*?(?=\n### |\Z)", content, re.DOTALL)
-                if m:
-                    section = re.sub(r"```.*?```", "", m.group(0), flags=re.DOTALL)
-                    if "미방어" in section:
-                        errors.append("Phase R에 미방어 경로 잔존 — 모든 경로 방어 완료 필요")
-        return errors
-
-    @staticmethod
-    def _update_plan_headers(content: str, total: int) -> str:
-        """상태→구현완료, 진행률→100%, [→ID]→[x] 치환, 푸터 갱신"""
-        content = re.sub(r'^(>\s*상태:\s*).*$', r'\1구현완료', content, flags=re.MULTILINE)
-        # branch/worktree 헤더 제거 — 잔존 시 /done 스킬 2.5단계에서 차단됨 (post-merge 이후이므로 삭제 안전)
-        content = re.sub(r'^>\s*(branch|worktree(-owner)?):.*\n?', '', content, flags=re.MULTILINE)
-        content = re.sub(
-            r'^(>\s*진행률:\s*)[\d/\s()%]+$',
-            f'> 진행률: {total}/{total} (100%)',
-            content, flags=re.MULTILINE
-        )
-        # [→ID] 형태 → [x]
-        content = re.sub(r'\[→[^\]]*\]', '[x]', content)
-        # 푸터 갱신: *상태: ... | 진행률: ...*
-        content = re.sub(
-            r'\*상태:[^|*]+\|[^*]*진행률:[^*]*\*',
-            f'*상태: 구현완료 | 진행률: {total}/{total} (100%)*',
-            content
-        )
-        return content
-
     async def _archive_plan(self, plan_path: str, content: str) -> tuple[Path, Optional[Path]]:
         """공통 archive 로직으로 plan/_todo를 이동한다.
 
@@ -1020,12 +972,12 @@ class PlanService:
             total = pre_progress.total
 
             # 0. 사전 검증 (구현완료 설정 전 게이트)
-            precondition_errors = self._validate_done_preconditions(plan_path, content)
+            precondition_errors = validate_done_preconditions(plan_path, content)
             if precondition_errors:
                 raise ValueError(f"done 사전 검증 실패: {'; '.join(precondition_errors)}")
 
             # 1. 헤더/푸터 갱신
-            updated_content = self._update_plan_headers(content, total)
+            updated_content = update_plan_headers(content, total)
 
             # 2. 미완료 체크박스 → MANUAL_TASKS.md 이관
             project_dir = self._resolve_project_dir(plan_path)
