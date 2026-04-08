@@ -127,8 +127,9 @@ class TestPickModel:
         with pytest.raises(NoAvailableModelError):
             pick_model("plan_feat", oneshot=False, now=now)
 
-    def test_pick_model_Co_oneshot_flag_allowed_when_oneshot_true(self, tmp_registry_state):
-        """Co: oneshot=True 모드에서는 oneshot:true 후보도 선택 가능."""
+    def test_pick_model_Co_oneshot_flag_allowed_when_oneshot_true(self, tmp_registry_state, monkeypatch):
+        """Co: oneshot=True 모드에서는 oneshot:true 후보도 선택 가능 (DUMPTRUCK_MODE=1 필요)."""
+        monkeypatch.setenv("DUMPTRUCK_MODE", "1")
         _, state_file = tmp_registry_state
         _write_state(state_file, {
             "claude/claude-sonnet-4-6": _make_quota(pct=100, cooldown_until=_kst() + timedelta(hours=1)),
@@ -162,6 +163,51 @@ class TestPickModel:
         p, m = pick_model("status_tracking", now=now)
         # status_tracking: claude-haiku 먼저지만 state 없으므로 0% → 선택됨
         assert p in ("claude", "gemini")
+
+    # ── oneshot 환경변수 가드 TC ───────────────────────────────────────────────
+
+    def test_pick_model_oneshot_guard_R_with_env(self, tmp_registry_state, monkeypatch):
+        """R: DUMPTRUCK_MODE=1 설정 후 pick_model(oneshot=True) 정상 반환 (gemini-3.1-pro 선택)."""
+        _, state_file = tmp_registry_state
+        _write_state(state_file, {
+            "claude/claude-sonnet-4-6": _make_quota(pct=100, cooldown_until=_kst() + timedelta(hours=1)),
+            "openai/gpt-5.4": _make_quota(pct=100, cooldown_until=_kst() + timedelta(hours=1)),
+            "gemini/gemini-3.1-pro": _make_quota(pct=5),
+        })
+        monkeypatch.setenv("DUMPTRUCK_MODE", "1")
+        p, m = pick_model("plan_feat", oneshot=True, now=_kst())
+        assert p == "gemini"
+        assert m == "gemini-3.1-pro"
+
+    def test_pick_model_oneshot_guard_E_without_env(self, tmp_registry_state, monkeypatch):
+        """E: DUMPTRUCK_MODE 미설정 + oneshot=True 호출 시 RuntimeError 발생 + 메시지에 DUMPTRUCK_MODE 포함."""
+        # monkeypatch로 DUMPTRUCK_MODE를 명시적으로 "0"으로 설정 (미설정과 동일한 차단 효과)
+        monkeypatch.setenv("DUMPTRUCK_MODE", "0")
+        with pytest.raises(RuntimeError, match="DUMPTRUCK_MODE"):
+            pick_model("plan_feat", oneshot=True, now=_kst())
+
+    def test_pick_model_default_oneshot_false_excludes_gemini(self, tmp_registry_state):
+        """R 회귀: pick_model("plan_feat") 기본값(oneshot=False)이 gemini-3.1-pro를 제외하고 다른 provider 반환."""
+        _, state_file = tmp_registry_state
+        _write_state(state_file, {
+            "claude/claude-sonnet-4-6": _make_quota(pct=5),
+            "openai/gpt-5.4": _make_quota(pct=5),
+            "gemini/gemini-3.1-pro": _make_quota(pct=5),
+        })
+        p, m = pick_model("plan_feat", now=_kst())
+        # gemini-3.1-pro는 oneshot:true이므로 oneshot=False 호출에서 제외되어야 함
+        assert not (p == "gemini" and m == "gemini-3.1-pro")
+
+    def test_pick_model_oneshot_false_explicit_excludes_gemini(self, tmp_registry_state):
+        """B(Boundary): oneshot=False 명시 호출도 동일하게 gemini-3.1-pro 제외."""
+        _, state_file = tmp_registry_state
+        _write_state(state_file, {
+            "claude/claude-sonnet-4-6": _make_quota(pct=5),
+            "openai/gpt-5.4": _make_quota(pct=5),
+            "gemini/gemini-3.1-pro": _make_quota(pct=5),
+        })
+        p, m = pick_model("plan_feat", oneshot=False, now=_kst())
+        assert not (p == "gemini" and m == "gemini-3.1-pro")
 
     def test_pick_model_Co_exclude_providers_skips_openai(self, tmp_registry_state):
         """Co(O-2): exclude_providers={"openai","gemini"} → openai/gemini skip, claude만 남음."""
