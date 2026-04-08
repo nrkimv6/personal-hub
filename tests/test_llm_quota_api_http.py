@@ -152,6 +152,46 @@ class TestPostQuotaReport:
         assert resp.status_code == 400
 
 
+class TestGeminiDumptruck:
+    """Gemini oneshot 덤프트럭 시나리오 T5 — dumptruck_run.ps1 호출 패턴 검증."""
+
+    def test_http_quota_report_gemini_delta_dumptruck_scenario(self, client):
+        """T5-R: Gemini delta 10% POST → GET에서 weekly_used_pct 증가 확인."""
+        resp = client.post("/api/v1/llm/quota/report", json={
+            "provider": "gemini",
+            "model": "gemini-3.1-pro",
+            "delta_weekly_pct": 10,
+        })
+        assert resp.status_code == 200
+
+        entries = client.get("/api/v1/llm/quota").json()["entries"]
+        assert "gemini/gemini-3.1-pro" in entries
+        assert entries["gemini/gemini-3.1-pro"]["weekly_used_pct"] == 10.0
+
+    def test_http_quota_report_gemini_delta_accumulates(self, client):
+        """T5-B: Gemini delta 2회 호출 → 20% 누적 확인 (멱등 아닌 누적)."""
+        for _ in range(2):
+            resp = client.post("/api/v1/llm/quota/report", json={
+                "provider": "gemini",
+                "model": "gemini-3.1-pro",
+                "delta_weekly_pct": 10,
+            })
+            assert resp.status_code == 200
+
+        entries = client.get("/api/v1/llm/quota").json()["entries"]
+        assert entries["gemini/gemini-3.1-pro"]["weekly_used_pct"] == 20.0
+
+    def test_http_quota_report_gemini_absolute_and_delta_conflict(self, client):
+        """T5-E: weekly_used_pct + delta_weekly_pct 동시 지정 → 400 응답."""
+        resp = client.post("/api/v1/llm/quota/report", json={
+            "provider": "gemini",
+            "model": "gemini-3.1-pro",
+            "weekly_used_pct": 50,
+            "delta_weekly_pct": 10,
+        })
+        assert resp.status_code == 400
+
+
 class TestPostQuotaClear:
     def test_POST_quota_clear_resets_entries(self, client):
         """clear → 해당 항목 삭제(=0%) 또는 0%로 리셋."""

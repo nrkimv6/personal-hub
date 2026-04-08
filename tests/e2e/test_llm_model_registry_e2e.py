@@ -112,3 +112,49 @@ def test_enqueue_respects_explicit_override(llm_svc, db_session):
 
     assert req.provider == "gemini"
     assert req.model == "gemini-3-flash"
+
+
+@pytest.mark.e2e
+def test_e2e_pick_model_oneshot_blocked_in_normal_env(monkeypatch):
+    """E2E: DUMPTRUCK_MODE 미설정 + pick_model(oneshot=True) → RuntimeError.
+
+    실제 registry 파일 기반 검증 (monkeypatch로 DUMPTRUCK_MODE만 제거).
+    """
+    import os
+    monkeypatch.delenv("DUMPTRUCK_MODE", raising=False)
+
+    from app.shared.llm_registry import pick_model
+
+    with pytest.raises(RuntimeError, match="DUMPTRUCK_MODE"):
+        pick_model("plan_feat", oneshot=True)
+
+
+@pytest.mark.e2e
+def test_e2e_pick_model_default_call_never_returns_gemini(monkeypatch):
+    """E2E: 일반 pick_model() 호출은 gemini-3.1-pro를 절대 반환하지 않는다.
+
+    실제 registry 파일 기반 — DUMPTRUCK_MODE 미설정 상태에서 모든 step 테스트.
+    """
+    import os
+    monkeypatch.delenv("DUMPTRUCK_MODE", raising=False)
+
+    from app.shared.llm_registry import pick_model
+
+    test_steps = ["plan_feat", "implement", "status_tracking"]
+    for step in test_steps:
+        try:
+            result = pick_model(step)
+            # pick_model은 (provider, model) 튜플 또는 None 반환
+            if result is not None:
+                provider, model = result
+                assert not (provider == "gemini" and model == "gemini-3.1-pro"), (
+                    f"step={step}: gemini-3.1-pro가 반환되면 안 됨. got: {result}"
+                )
+        except RuntimeError as e:
+            err_msg = str(e)
+            if "DUMPTRUCK_MODE" in err_msg:
+                # oneshot 가드가 기본 pick_model에서 작동하면 안 됨
+                raise AssertionError(
+                    f"step={step}: 기본 pick_model(oneshot=False)에서 DUMPTRUCK_MODE 가드 발동 — 예상치 못한 동작"
+                )
+            # step 미존재 등 다른 RuntimeError는 registry 상태에 따라 발생 가능, 무시
