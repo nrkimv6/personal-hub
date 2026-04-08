@@ -99,15 +99,32 @@ def test_build_cli_env_C_extra_env_merge(isolate_profiles):
 # ────────────────────────────────────────────
 
 def test_build_cli_env_E_forbidden_extra_env_PATH(isolate_profiles):
-    """E: extra_env 에 PATH → ValueError."""
-    _set_profile("claude", "bad", config_dir=None, extra_env={"PATH": "/evil"})
+    """E: extra_env 에 PATH → ValueError (save 우회해 직접 파일 쓰기로 검증)."""
+    import json
+    # save_profiles 도 검증하므로 파일 직접 쓰기로 우회 (isolate_profiles = file path)
+    bad_payload = {
+        "selected": {"claude": "bad", "gemini": "default"},
+        "profiles": [
+            {"engine": "claude", "name": "bad", "config_dir": None, "extra_env": {"PATH": "/evil"}},
+            {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}},
+        ],
+    }
+    isolate_profiles.write_text(json.dumps(bad_payload), encoding="utf-8")
     with pytest.raises(ValueError, match="forbidden env key"):
         pe.build_cli_env("claude")
 
 
 def test_build_cli_env_E_forbidden_extra_env_HOME(isolate_profiles):
-    """E: extra_env 에 HOME → ValueError."""
-    _set_profile("claude", "bad2", config_dir=None, extra_env={"HOME": "/evil"})
+    """E: extra_env 에 HOME → ValueError (save 우회해 직접 파일 쓰기로 검증)."""
+    import json
+    bad_payload = {
+        "selected": {"claude": "bad2", "gemini": "default"},
+        "profiles": [
+            {"engine": "claude", "name": "bad2", "config_dir": None, "extra_env": {"HOME": "/evil"}},
+            {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}},
+        ],
+    }
+    isolate_profiles.write_text(json.dumps(bad_payload), encoding="utf-8")
     with pytest.raises(ValueError, match="forbidden env key"):
         pe.build_cli_env("claude")
 

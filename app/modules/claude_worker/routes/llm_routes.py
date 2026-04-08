@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_admin, UserInfo
 from app.database import get_db
 from app.modules.claude_worker.services.llm_service import LLMService, SUPPORTED_LLM_PROVIDERS
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
@@ -887,7 +888,7 @@ _ENGINE_CLI_COMMANDS: dict[str, str] = {
 def launch_cli(
     engine: str,
     name: str,
-    admin=Depends(lambda: None),  # admin app 에만 include_router → 실질 admin 전용
+    admin: UserInfo = Depends(require_admin),
 ):
     """CLI 직접 실행 (admin 전용) — 해당 profile env 로 새 콘솔 창을 띄운다.
 

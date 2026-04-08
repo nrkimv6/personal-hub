@@ -80,6 +80,16 @@ def load_profiles() -> Dict[str, Any]:
 
 def save_profiles(payload: Dict[str, Any]) -> Dict[str, Any]:
     """llm_profiles.json 원자적 저장."""
+    # extra_env 금지 키 검증 (save 시점에 400-level 에러로 노출)
+    from app.modules.claude_worker.services.profile_env import FORBIDDEN_EXTRA_ENV  # noqa: PLC0415
+    for item in payload.get("profiles", []):
+        if not isinstance(item, dict):
+            continue
+        extra_env = dict(item.get("extra_env") or {})
+        for env_key in extra_env:
+            if env_key in FORBIDDEN_EXTRA_ENV:
+                raise ValueError(f"forbidden env key: {env_key!r}")
+
     clean = _sanitize_payload(payload)
     path = _resolve_profiles_path()
     path.parent.mkdir(parents=True, exist_ok=True)
