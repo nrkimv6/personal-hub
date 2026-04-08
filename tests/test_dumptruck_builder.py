@@ -144,3 +144,66 @@ class TestLoadTemplate:
         monkeypatch.setattr(db, "TEMPLATES_DIR", tmpl_dir)
         result = db.load_template("architecture")
         assert "아키텍처" in result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase T3: 통합 TC (실제 파일시스템, mock 없음)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestIntegration:
+    """실제 프로젝트 파일과 템플릿을 사용하는 통합 TC."""
+
+    REAL_REGISTRY = SCRIPTS_DIR.parent / "app" / "shared" / "llm_registry.py"
+
+    def test_main_integration_real_repo_subset(self, tmp_path):
+        """T3-R: 실제 llm_registry.py 1개 파일 include → 출력에 코드 블록 + 트리 포함."""
+        # 실제 파일이 존재해야 의미 있는 TC
+        assert self.REAL_REGISTRY.exists(), f"파일 없음: {self.REAL_REGISTRY}"
+
+        out_file = tmp_path / "out.md"
+        old_argv = sys.argv
+        try:
+            sys.argv = [
+                "dumptruck_builder.py",
+                "--template", "architecture",
+                "--include", "app/shared/llm_registry.py",
+                "--out", str(out_file),
+            ]
+            db.main()
+        finally:
+            sys.argv = old_argv
+
+        assert out_file.exists(), "출력 파일이 생성되지 않음"
+        content = out_file.read_text(encoding="utf-8")
+
+        # 파일 내용 블록 포함 여부 (언어 블록 헤더 또는 경로)
+        assert "llm_registry" in content, "llm_registry 경로/이름이 출력에 없음"
+        # ASCII 트리 출력 포함 여부
+        assert "llm_registry.py" in content
+
+    def test_main_integration_template_header_present(self, tmp_path):
+        """T3-R: --template architecture 출력에 실제 architecture.md 헤더 텍스트 포함."""
+        # 실제 템플릿 파일 존재 확인
+        tmpl_file = SCRIPTS_DIR / "dumptruck_templates" / "architecture.md"
+        assert tmpl_file.exists(), f"템플릿 없음: {tmpl_file}"
+
+        # 템플릿 첫 줄 추출
+        first_line = tmpl_file.read_text(encoding="utf-8").splitlines()[0]
+
+        out_file = tmp_path / "out_arch.md"
+        old_argv = sys.argv
+        try:
+            sys.argv = [
+                "dumptruck_builder.py",
+                "--template", "architecture",
+                "--include", "app/shared/llm_registry.py",
+                "--out", str(out_file),
+            ]
+            db.main()
+        finally:
+            sys.argv = old_argv
+
+        assert out_file.exists()
+        content = out_file.read_text(encoding="utf-8")
+        # 템플릿 첫 줄이 출력에 포함되어야 함
+        assert first_line in content, f"템플릿 헤더 '{first_line}'가 출력에 없음"
