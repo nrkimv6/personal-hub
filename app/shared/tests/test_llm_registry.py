@@ -127,8 +127,9 @@ class TestPickModel:
         with pytest.raises(NoAvailableModelError):
             pick_model("plan_feat", oneshot=False, now=now)
 
-    def test_pick_model_Co_oneshot_flag_allowed_when_oneshot_true(self, tmp_registry_state):
-        """Co: oneshot=True 모드에서는 oneshot:true 후보도 선택 가능."""
+    def test_pick_model_Co_oneshot_flag_allowed_when_oneshot_true(self, tmp_registry_state, monkeypatch):
+        """Co: oneshot=True 모드에서는 oneshot:true 후보도 선택 가능 (DUMPTRUCK_MODE=1 필요)."""
+        monkeypatch.setenv("DUMPTRUCK_MODE", "1")
         _, state_file = tmp_registry_state
         _write_state(state_file, {
             "claude/claude-sonnet-4-6": _make_quota(pct=100, cooldown_until=_kst() + timedelta(hours=1)),

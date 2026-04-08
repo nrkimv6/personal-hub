@@ -292,6 +292,11 @@ def pick_model(
     - 전부 제외 + cooldown 아닌 후보 있음 → weekly_used_pct 최소 선택 + WARN
     - 전부 cooldown → NoAvailableModelError
     """
+    if oneshot and os.environ.get("DUMPTRUCK_MODE") != "1":
+        raise RuntimeError(
+            "oneshot=True 호출은 DUMPTRUCK_MODE=1 환경에서만 허용됩니다 (핑퐁 차단)"
+        )
+
     _now = now or _now_kst()
     exclude = exclude_providers or set()
 
