@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Gemini oneshot 덤프트럭 컨텍스트 빌더.
+"""Gemini oneshot 덤프트럭 컨텍스트 빌더 — CLI wrapper.
 
-대상 디렉토리의 파일 트리 + 파일 내용 전문을 하나의 거대 프롬프트 파일로 조립합니다.
+핵심 함수는 app/shared/context_bundle_builder.py 로 이관됨.
+이 파일은 argparse + main() 진입점만 유지하는 얇은 wrapper.
 
 사용 예:
     python scripts/dumptruck_builder.py \\
@@ -26,135 +27,36 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 TEMPLATES_DIR = SCRIPT_DIR / "dumptruck_templates"
 
-# 기본 제외 디렉토리 (최상위 컴포넌트 이름)
-DEFAULT_EXCLUDE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "data"}
+# app/ 패키지 접근을 위해 PROJECT_ROOT를 sys.path에 추가
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# 바이너리 파일 판정 시 읽는 바이트 수
-BINARY_PROBE_BYTES = 8192
+from app.shared.context_bundle_builder import (  # noqa: E402
+    collect_files as _collect_files,
+    render_tree as _render_tree,
+    concat_files as _concat_files,
+    estimate_tokens,
+)
 
 # 토큰 임계치 (Gemini 2M 컨텍스트의 75%)
 TOKEN_LIMIT = 1_500_000
 
-# 확장자 → 언어 매핑 (코드 블록 언어 표기용)
-LANG_MAP = {
-    ".py": "python",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".svelte": "svelte",
-    ".json": "json",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".toml": "toml",
-    ".md": "markdown",
-    ".sql": "sql",
-    ".sh": "bash",
-    ".ps1": "powershell",
-    ".html": "html",
-    ".css": "css",
-    ".txt": "text",
-}
-
 TEMPLATE_CHOICES = ["architecture", "refactor", "conflict", "logdump"]
 
 
-def _is_binary(path: Path) -> bool:
-    """파일이 바이너리인지 빠르게 판정한다."""
-    try:
-        with path.open("rb") as f:
-            chunk = f.read(BINARY_PROBE_BYTES)
-        return b"\x00" in chunk
-    except OSError:
-        return True
-
-
-def _lang_of(path: Path) -> str:
-    return LANG_MAP.get(path.suffix.lower(), "text")
-
-
 def collect_files(includes: list[str], excludes: list[str]) -> list[Path]:
-    """include glob 패턴에 매칭되는 파일 목록을 반환한다.
-
-    - 기본 제외 디렉토리 (DEFAULT_EXCLUDE_DIRS)에 속하는 파일은 항상 제외
-    - excludes 추가 패턴도 제외
-    - 결과는 상대경로 기준으로 정렬됨
-    """
-    collected: set[Path] = set()
-
-    for pattern in includes:
-        for p in PROJECT_ROOT.rglob(pattern.lstrip("/")):
-            if not p.is_file():
-                continue
-            # 기본 제외 디렉토리 체크
-            if any(part in DEFAULT_EXCLUDE_DIRS for part in p.parts):
-                continue
-            collected.add(p.resolve())
-
-    # exclude 패턴 제거
-    excluded: set[Path] = set()
-    for pattern in (excludes or []):
-        for p in PROJECT_ROOT.rglob(pattern.lstrip("/")):
-            excluded.add(p.resolve())
-
-    result = sorted(collected - excluded)
-    return result
+    """PROJECT_ROOT 기준 collect_files wrapper (하위 호환)."""
+    return _collect_files(includes, excludes, root=PROJECT_ROOT)
 
 
 def render_tree(paths: list[Path]) -> str:
-    """파일 목록을 ASCII 디렉토리 트리 문자열로 반환한다."""
-    if not paths:
-        return "(파일 없음)"
-
-    # PROJECT_ROOT 기준 상대 경로로 변환
-    rel_paths = [p.relative_to(PROJECT_ROOT) for p in paths]
-
-    # 트리 노드 구성: dict of dict
-    tree: dict = {}
-    for rp in rel_paths:
-        node = tree
-        for part in rp.parts[:-1]:
-            node = node.setdefault(part, {})
-        # 파일 노드는 None으로 표기
-        node[rp.name] = None
-
-    lines: list[str] = []
-
-    def _walk(node: dict, prefix: str = "") -> None:
-        items = list(node.items())
-        for idx, (name, child) in enumerate(items):
-            is_last = idx == len(items) - 1
-            connector = "└──" if is_last else "├──"
-            lines.append(f"{prefix}{connector} {name}")
-            if child is not None:
-                extension = "    " if is_last else "│   "
-                _walk(child, prefix + extension)
-
-    _walk(tree)
-    return "\n".join(lines)
+    """PROJECT_ROOT 기준 render_tree wrapper (하위 호환)."""
+    return _render_tree(paths, root=PROJECT_ROOT)
 
 
 def concat_files(paths: list[Path]) -> str:
-    """파일 목록을 코드 블록으로 직렬화한다.
-
-    각 파일: ```{lang}\n# {상대경로}\n{내용}\n```
-    바이너리 파일은 스킵한다.
-    """
-    parts: list[str] = []
-    for p in paths:
-        if _is_binary(p):
-            continue
-        try:
-            content = p.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        lang = _lang_of(p)
-        try:
-            rel = p.relative_to(PROJECT_ROOT)
-        except ValueError:
-            rel = p
-        parts.append(f"```{lang}\n# {rel}\n{content}\n```")
-    return "\n\n".join(parts)
+    """PROJECT_ROOT 기준 concat_files wrapper (하위 호환)."""
+    return _concat_files(paths, root=PROJECT_ROOT)
 
 
 def load_template(name: str) -> str:
@@ -167,11 +69,6 @@ def load_template(name: str) -> str:
     if not template_path.exists():
         raise FileNotFoundError(f"템플릿 파일을 찾을 수 없습니다: {template_path}")
     return template_path.read_text(encoding="utf-8")
-
-
-def estimate_tokens(text: str) -> int:
-    """텍스트의 토큰 수를 휴리스틱으로 추정한다 (len // 4)."""
-    return len(text) // 4
 
 
 def main() -> None:
