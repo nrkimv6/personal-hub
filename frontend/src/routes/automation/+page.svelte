@@ -12,6 +12,7 @@
 	type MainTab = 'dev-runner' | 'git-repos' | 'plans';
 	let mainTab: MainTab = $state('dev-runner');
 	let initialPlan = $state('');
+	let initialRunner = $state('');
 
 	// plans 서브탭
 	type PlansSubTab = 'plans' | 'archive' | 'history' | 'worktrees';
@@ -29,6 +30,7 @@
 			mainTab = 'dev-runner';
 		}
 		initialPlan = $page.url.searchParams.get('plan') ?? '';
+		initialRunner = $page.url.searchParams.get('runner') ?? '';
 	});
 
 	const autoTabs = [
@@ -69,7 +71,7 @@
 
 	<div class="flex-1 overflow-hidden">
 		{#if mainTab === 'dev-runner'}
-			<DevRunnerTab {initialPlan} />
+			<DevRunnerTab {initialPlan} {initialRunner} />
 		{:else if mainTab === 'git-repos'}
 			<div class="overflow-auto h-full">
 				<GitReposTab />

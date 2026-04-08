@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import TaskList from '$lib/components/dev-runner/TaskList.svelte';
 	import RunControl from '$lib/components/dev-runner/RunControl.svelte';
@@ -29,7 +30,7 @@
 	} from '$lib/api';
 	import { fetchPlans as storeFetchPlans, plansStore } from '$lib/stores/devRunnerPlans';
 
-	let { initialPlan = '' }: { initialPlan?: string } = $props();
+	let { initialPlan = '', initialRunner = '' }: { initialPlan?: string; initialRunner?: string } = $props();
 
 	let runStatus = $state<DevRunnerRunStatusResponse | null>(null);
 	let plans = $derived($plansStore);
@@ -330,6 +331,23 @@
 
 	let runnerTabs = $state<RunnerTab[]>([]);
 	let activeTabId = $state<string | null>(null);
+
+	// Phase 2: URL 동기화 준비 완료 플래그 (onMount 완료 전 $effect 실행 방지)
+	let isReady = $state(false);
+
+	// Phase 2: activeTabId 변경 시 URL ?runner= 파라미터 동기화
+	$effect(() => {
+		if (!isReady) return; // onMount 완료 전 skip (race condition 방지)
+		const currentRunner = $page.url.searchParams.get('runner');
+		if (activeTabId === currentRunner) return; // 이미 동기화됨
+		const url = new URL($page.url.toString());
+		if (activeTabId) {
+			url.searchParams.set('runner', activeTabId);
+		} else {
+			url.searchParams.delete('runner');
+		}
+		goto(url.toString(), { replaceState: true, keepFocus: true });
+	});
 
 	// Phase 1: elapsed 타이머
 	let elapsed = $state('00:00:00');
@@ -654,6 +672,19 @@
                 loading = false;
                 error = null;
 
+		// Phase 1: initialRunner가 있으면 해당 탭으로 활성화
+		if (initialRunner) {
+			const SPECIAL_IDS = ['__logs__', '__merge__'];
+			const exists = runnerTabs.some(t => t.id === initialRunner) || SPECIAL_IDS.includes(initialRunner);
+			if (exists) {
+				activeTabId = initialRunner;
+			}
+			// 존재하지 않는 ID는 무시 (기존 activeTabId 유지)
+		}
+
+		// Phase 2: onMount 완료 — URL 동기화 $effect 활성화
+		isReady = true;
+
 		// Phase 4: initialPlan이 있으면 자동 실행
 		if (initialPlan) {
 			try {
@@ -661,9 +692,12 @@
 				const initResponse = await devRunnerRunnerApi.start({ plan_file: decodedPath, trigger: 'user' });
 				handleRunStart(initResponse);
 				await pollStatus();
-				// URL에서 plan param 제거
+				// Phase 3: URL에서 plan param 제거, runner param 동시 설정
 				const url = new URL(window.location.href);
 				url.searchParams.delete('plan');
+				if (initResponse.runner_id) {
+					url.searchParams.set('runner', initResponse.runner_id);
+				}
 				goto(url.toString(), { replaceState: true, keepFocus: true });
 			} catch (e) {
 				console.warn('[DevRunner] initialPlan 자동 실행 실패', e);
