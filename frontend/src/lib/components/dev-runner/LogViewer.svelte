@@ -588,13 +588,40 @@
 
 	// ── managed 모드 공개 API ───────────────────────────────────────────────────
 
+	let _catchUpInProgress = false;
+	let _pendingInjectBuffer: string[] = [];
+
 	export function injectLine(payload: string | { text: string; meta?: Record<string, unknown> }) {
-		if (typeof payload === 'string') {
-			addLine(payload, false);
+		const text = typeof payload === 'string' ? payload : payload?.text;
+		if (typeof text !== 'string') return;
+		if (_catchUpInProgress) {
+			_pendingInjectBuffer.push(text);
 			return;
 		}
-		if (payload && typeof payload.text === 'string') {
-			addLine(payload.text, false);
+		addLine(text, false);
+	}
+
+	export async function catchUp(): Promise<void> {
+		if (mode !== 'managed' || _catchUpInProgress) return;
+		_catchUpInProgress = true;
+		try {
+			await loadRecent();
+			// loadRecent 후 파일의 마지막 라인 이후에 도착한 펜딩 라인만 flush
+			if (_pendingInjectBuffer.length > 0) {
+				const lastFileLine = lines.length > 0 ? lines[lines.length - 1].raw : null;
+				let startIdx = 0;
+				if (lastFileLine) {
+					const matchIdx = _pendingInjectBuffer.lastIndexOf(lastFileLine);
+					if (matchIdx >= 0) startIdx = matchIdx + 1;
+				}
+				for (let i = startIdx; i < _pendingInjectBuffer.length; i++) {
+					addLine(_pendingInjectBuffer[i], false);
+				}
+			}
+		} finally {
+			_pendingInjectBuffer = [];
+			_catchUpInProgress = false;
+			requestAnimationFrame(() => scrollToBottom());
 		}
 	}
 

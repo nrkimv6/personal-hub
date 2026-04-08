@@ -9,6 +9,7 @@
 		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
 		injectCompleted: (reason?: string) => void;
 		injectMergeCompleted: (reason?: string, status?: string) => void;
+		catchUp?: () => Promise<void>;
 	}
 
 	interface Props {
@@ -40,6 +41,7 @@
 				injectLine: (t: string | { text: string; meta?: Record<string, unknown> }) => void;
 				injectCompleted: (reason?: string) => void;
 				injectMergeCompleted: (reason?: string, status?: string) => void;
+				catchUp?: () => Promise<void>;
 		  }
 		| undefined;
 	let elapsed = $state('');
@@ -88,7 +90,7 @@
 			elapsed = formatElapsed(startTime);
 		}, 1000);
 		if (logViewer && logRef) {
-			logRef({ injectLine: logViewer.injectLine, injectCompleted: logViewer.injectCompleted, injectMergeCompleted: logViewer.injectMergeCompleted });
+			logRef({ injectLine: logViewer.injectLine, injectCompleted: logViewer.injectCompleted, injectMergeCompleted: logViewer.injectMergeCompleted, catchUp: logViewer.catchUp });
 		}
 	});
 

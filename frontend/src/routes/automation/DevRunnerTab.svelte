@@ -83,6 +83,7 @@
 		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
 		injectCompleted: (reason?: string) => void;
 		injectMergeCompleted: (reason?: string, status?: string) => void;
+		catchUp?: () => Promise<void>;
 	}
 	const logRefs = new Map<string, LogViewerRef>();
 	const injectedLineFingerprints = new Map<string, string[]>();
@@ -523,6 +524,11 @@
 				if (fallbackTimer) {
 					clearInterval(fallbackTimer);
 					fallbackTimer = null;
+				}
+				// SSE 재연결 시 running 탭에 catch-up 신호 전달
+				for (const [id, ref] of logRefs) {
+					const tab = runnerTabs.find(t => t.id === id);
+					if (tab) void ref.catchUp?.();
 				}
 			},
 			onError: handleSSEError,

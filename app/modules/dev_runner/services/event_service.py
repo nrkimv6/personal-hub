@@ -572,6 +572,40 @@ class EventService:
             )
         return events, dedup_skipped
 
+    async def _init_tail_offsets_for_active_runners(self) -> None:
+        """SSE 연결 시점에 활성 러너의 tail offset을 현재 파일 EOF로 초기화한다.
+
+        API 재시작 후 SSE 재연결 시 _runner_tail_state가 리셋되어 fallback이
+        파일 전체(offset 0)를 재전송하는 문제를 방지한다.
+        클라이언트는 catchUp()으로 이미 파일 내용을 로드하므로 서버 fallback은
+        이 시점 이후의 신규 라인만 전달하면 된다.
+        """
+        try:
+            runner_ids = self._list_visible_active_runner_ids()
+        except Exception as e:
+            logger.warning("[events-init-offsets] runner 목록 획득 실패: %s", e)
+            return
+
+        for runner_id in runner_ids:
+            try:
+                path = self._resolve_runner_log_path(runner_id)
+                if path is None:
+                    continue
+                state = self._ensure_tail_state_for_path(runner_id, path)
+                if state is None:
+                    continue
+                try:
+                    state["offset"] = path.stat().st_size
+                except Exception as e:
+                    logger.warning(
+                        "[events-init-offsets] stat 실패 (runner=%s, path=%s): %s",
+                        runner_id,
+                        path,
+                        e,
+                    )
+            except Exception as e:
+                logger.warning("[events-init-offsets] runner=%s 처리 중 예외: %s", runner_id, e)
+
     # ── SSE 포맷 헬퍼 ────────────────────────────────────────────────────────
 
     @staticmethod
@@ -594,6 +628,13 @@ class EventService:
 
         # ── 초기 연결 이벤트 (클라이언트가 연결 직후 현재 상태를 받도록)
         yield "event: connected\ndata: ok\n\n"
+
+        # API 재시작 후 SSE 재연결 시 fallback 중복 재전송 방지: tail offset을 EOF로 초기화
+        # (클라이언트 catchUp()이 파일 현재 내용을 로드하므로 서버 fallback은 이후 신규 라인만 담당)
+        try:
+            await self._init_tail_offsets_for_active_runners()
+        except Exception as _e:
+            logger.warning("[events-init-offsets] 초기화 중 예외 (스트림 계속): %s", _e)
 
         # 초기 status 이벤트 1회 즉시 발행
         runners = self._build_all_runners_status()
