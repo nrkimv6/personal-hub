@@ -63,6 +63,8 @@ if (-not (Test-Path $BuilderScript)) {
 # 임시 입력 파일 경로
 $TmpGuid = [guid]::NewGuid().ToString()
 $TmpInput = Join-Path $env:TEMP "dumptruck_$TmpGuid.txt"
+# StrictMode 적용 중이므로 try 블록 바깥에 선언 (finally에서 참조 가능)
+$StderrFile = Join-Path $env:TEMP "dumptruck_stderr_$TmpGuid.txt"
 
 try {
     # ──────────────────────────────────────────────────────────────────────────
@@ -84,7 +86,7 @@ try {
         $BuilderArgs += $Exclude
     }
 
-    & $PythonExe @BuilderArgs
+    & $PythonExe @BuilderArgs 2>$StderrFile
     if ($LASTEXITCODE -ne 0) {
         Write-Error "[DUMPTRUCK] Builder 실패 (exit $LASTEXITCODE). --force 추가 또는 include 범위 축소가 필요합니다."
         exit $LASTEXITCODE
@@ -92,6 +94,31 @@ try {
 
     $InputSize = (Get-Item $TmpInput).Length
     Write-Host "[DUMPTRUCK] 입력 파일 생성 완료: $([math]::Round($InputSize / 1MB, 2)) MB" -ForegroundColor Green
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # 1-b. est_tokens → delta_pct 환산 (2M 컨텍스트 기준)
+    # ──────────────────────────────────────────────────────────────────────────
+    $EstTokens = 0
+    $DeltaPct = 10  # fallback default
+    try {
+        if (Test-Path $StderrFile) {
+            $StderrContent = Get-Content -Path $StderrFile -Raw -ErrorAction Stop
+            $Match = [regex]::Match($StderrContent, 'est_tokens=([\d,]+)')
+            if ($Match.Success) {
+                $EstTokens = [int64]($Match.Groups[1].Value -replace ',', '')
+                $DeltaPct = [math]::Max(1, [math]::Min(100, [math]::Ceiling($EstTokens / 2_000_000 * 100)))
+            } else {
+                Write-Warning "[DUMPTRUCK] est_tokens를 stderr에서 찾지 못했습니다. fallback delta=$DeltaPct% 사용."
+                $EstTokens = 0
+            }
+        } else {
+            Write-Warning "[DUMPTRUCK] stderr 파일을 찾지 못했습니다. fallback delta=$DeltaPct% 사용."
+            $EstTokens = 0
+        }
+    } catch {
+        Write-Warning "[DUMPTRUCK] est_tokens 파싱 중 오류: $_. fallback delta=$DeltaPct% 사용."
+        $EstTokens = 0
+    }
 
     # ──────────────────────────────────────────────────────────────────────────
     # 2. Quota 사전 확인
@@ -150,7 +177,7 @@ try {
         $ReportBody = @{
             provider        = "gemini"
             model           = "gemini-3.1-pro"
-            delta_weekly_pct = 10
+            delta_weekly_pct = $DeltaPct
         } | ConvertTo-Json
 
         Invoke-RestMethod `
@@ -160,7 +187,7 @@ try {
             -ContentType "application/json" `
             -TimeoutSec 5 | Out-Null
 
-        Write-Host "[DUMPTRUCK] Quota +10% delta 보고 완료." -ForegroundColor Green
+        Write-Host "[DUMPTRUCK] Quota +${DeltaPct}% delta 보고 완료. (est_tokens=$EstTokens)" -ForegroundColor Green
     } catch {
         Write-Warning "[DUMPTRUCK] Quota delta 보고 실패: $_. 수동으로 quota를 업데이트하세요."
     }
@@ -172,5 +199,10 @@ try {
     if (Test-Path $TmpInput) {
         Remove-Item -Path $TmpInput -Force
         Write-Verbose "[DUMPTRUCK] 임시 파일 삭제: $TmpInput"
+    }
+    # stderr 임시 파일 삭제 보장
+    if (Test-Path $StderrFile) {
+        Remove-Item -Path $StderrFile -Force
+        Write-Verbose "[DUMPTRUCK] stderr 임시 파일 삭제: $StderrFile"
     }
 }
