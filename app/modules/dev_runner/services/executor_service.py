@@ -33,6 +33,7 @@ from app.modules.dev_runner.services.redis_connection import (
     COMMANDS_KEY, RESULTS_KEY, RUNNER_KEY_PREFIX,
     ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL,
     COMMAND_TIMEOUT, RUNNER_KEY_SUFFIXES,
+    SESSION_ID_KEY_PREFIX,
 )
 from app.modules.dev_runner.services.runner_state import RunnerState
 from app.modules.dev_runner.services.merge_service import MergeService
@@ -217,6 +218,18 @@ class ExecutorService:
         else:
             trigger = request.trigger or "api"
 
+        # session_id: 유효한 UUID면 사용, 없거나 잘못된 형식이면 자동 발급
+        raw_session_id = (request.session_id or "").strip()
+        if raw_session_id:
+            try:
+                uuid.UUID(raw_session_id)
+                session_id = raw_session_id
+            except ValueError:
+                logger.warning(f"[session] invalid session_id format={raw_session_id!r}, issuing new UUID")
+                session_id = str(uuid.uuid4())
+        else:
+            session_id = str(uuid.uuid4())
+
         # Redis 명령 생성
         command = {
             "action": "run",
@@ -267,6 +280,15 @@ class ExecutorService:
         if request.test_source:
             command["test_source"] = request.test_source
 
+        # fused 세션 ID 주입
+        command["session_id"] = session_id
+        if request.fused_session:
+            command["fused_session"] = True
+
+        logger.info(
+            f"[session] runner_id={runner_id} session_id={session_id} fused={request.fused_session}"
+        )
+
         # registered_paths에서 wtools 외부 경로 추출 (asyncio.to_thread로 이벤트 루프 블로킹 방지)
         if request.parallel:
             import asyncio
@@ -279,6 +301,11 @@ class ExecutorService:
                 command["ignored_plans"] = ",".join(ignored_paths)
 
         try:
+            # session_id를 Redis에 저장 (TTL 24h)
+            await self.async_redis.set(
+                f"{SESSION_ID_KEY_PREFIX}{runner_id}", session_id, ex=86400
+            )
+
             result_data = await self._send_command(command)
             if result_data is None:
                 await self._cleanup_runner_state(runner_id, reason="start_timeout")
@@ -313,6 +340,13 @@ class ExecutorService:
                         existing_exec_count = int(existing_exec_count_raw)
                     except (TypeError, ValueError):
                         existing_exec_count = None
+                # 같은 runner_id로 중복 start 시 기존 session_id 재사용 (정책: 세션 연속성 유지)
+                existing_session_id = await self.async_redis.get(f"{SESSION_ID_KEY_PREFIX}{existing_id}")
+                if not existing_session_id:
+                    logger.warning(
+                        f"[session] attached runner_id={existing_id} session_id not found in Redis, issuing new UUID"
+                    )
+                    existing_session_id = str(uuid.uuid4())
                 return RunStatusResponse(
                     running=True,
                     runner_id=existing_id,
@@ -325,6 +359,7 @@ class ExecutorService:
                     execution_count=existing_exec_count,
                     listener_alive=True,
                     redis_connected=True,
+                    session_id=existing_session_id,
                 )
 
             # Redis에서 per-runner 상태 조회
@@ -351,6 +386,7 @@ class ExecutorService:
                 execution_count=execution_count,
                 listener_alive=True,
                 redis_connected=True,
+                session_id=session_id,
             )
 
         except redis.ConnectionError:
@@ -537,6 +573,9 @@ class ExecutorService:
             except (TypeError, ValueError):
                 execution_count = None
 
+        # session_id 조회: 없으면 None (기존 runner 하위 호환)
+        session_id = await self.async_redis.get(f"{SESSION_ID_KEY_PREFIX}{runner_id}")
+
         return RunStatusResponse(
             runner_id=runner_id,
             running=running,
@@ -548,6 +587,7 @@ class ExecutorService:
             execution_count=execution_count,
             listener_alive=True,
             redis_connected=True,
+            session_id=session_id,
         )
 
     async def get_all_runners(self) -> list:

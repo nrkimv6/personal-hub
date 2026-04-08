@@ -23,6 +23,15 @@ async def list_runners():
         raise HTTPException(status_code=503, detail="Redis 연결 실패")
 
 
+@router.get("/runners/{runner_id}", response_model=RunStatusResponse)
+async def get_runner_status(runner_id: str):
+    """특정 runner 상태 조회 (session_id 포함)"""
+    try:
+        return await executor_service.get_runner_status(runner_id)
+    except (redis.ConnectionError, aioredis.ConnectionError):
+        raise HTTPException(status_code=503, detail="Redis 연결 실패")
+
+
 @router.post("/runners/{runner_id}/stop")
 async def stop_runner(runner_id: str):
     """특정 runner 중지"""

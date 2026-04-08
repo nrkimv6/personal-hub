@@ -50,6 +50,7 @@ RUNNER_KEY_SUFFIXES = (
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
     "exit_reason", "subprocess_heartbeat",
 )
+SESSION_ID_KEY_PREFIX = "plan-runner:session:"  # fused 세션 ID 저장 키 접두사 (runner_id → session_id 매핑)
 
 
 class RedisConnection:

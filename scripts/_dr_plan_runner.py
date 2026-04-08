@@ -973,8 +973,21 @@ def _launch_plan_runner_process(
     if command.get("ignored_plans"):
         cmd.extend(["--ignored-plans", command["ignored_plans"]])
 
+    # fused 세션 인자 추가 (--worktree 이전 위치 — 순서 spec: --engine 직후 ~ --worktree 직전)
+    if command.get("session_id"):
+        cmd.extend(["--session-id", str(command["session_id"])])
+    if command.get("fused_session"):
+        cmd.append("--fused-session")
+
     if command.get("worktree") or worktree_path:
         cmd.append("--worktree")
+
+    logger.info(
+        "[session] runner_id=%s session_id=%s fused=%s",
+        runner_id,
+        command.get("session_id", ""),
+        command.get("fused_session", False),
+    )
 
     # 로그 파일 생성
     LOG_DIR.mkdir(parents=True, exist_ok=True)

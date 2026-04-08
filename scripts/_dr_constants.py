@@ -12,6 +12,7 @@ ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
 PLAN_FILE_ALL = "__ALL_PLANS__"  # 전체실행 sentinel — plan_file 미지정 시 Redis에 저장
 _LEGACY_ALL = "ALL"  # 하위 호환: 이전 버전에서 저장된 "ALL" 값 인식용
+SESSION_ID_KEY_PREFIX = "plan-runner:session:"  # fused 세션 ID 저장 키 접두사 (runner_id → session_id 매핑)
 # RECENT runner 보존 TTL 계약 (API와 동일 키/기본값 사용)
 _ENV_RECENT_RUNNERS_TTL = "DEV_RUNNER_RECENT_TTL_SECONDS"
 _DEFAULT_RECENT_RUNNERS_TTL = 86400  # 24시간

@@ -25,6 +25,8 @@ class RunRequest(BaseModel):
     worktree: bool = Field(True, description="worktree 모드 (격리 실행 + 머지 큐)")
     test_source: Optional[str] = Field(None, description="테스트 출처 (pytest TC 추적용)")
     trigger: Optional[str] = Field(None, description="트리거 소스 (user, user:all, tc:{name}, api)")
+    session_id: Optional[str] = Field(None, description="fused 세션 ID (UUID). 미지정 시 자동 발급.")
+    fused_session: bool = Field(False, description="fused 세션 모드 활성화: 동일 session_id로 단계 간 CLI 세션 연속 유지")
 
     @field_validator("engine", "fix_engine", mode="before")
     @classmethod
@@ -58,6 +60,7 @@ class RunStatusResponse(BaseModel):
     current_plan_name: Optional[str] = None  # 전체실행 시 현재 실행 중인 plan 파일명
     runner_id: Optional[str] = None
     attached: bool = False  # True = 기존 워커에 연결됨 (새 워커 생성 안 함)
+    session_id: Optional[str] = None  # fused 세션 ID (UUID4 형식)
 
 
 class RunnerListItem(BaseModel):
