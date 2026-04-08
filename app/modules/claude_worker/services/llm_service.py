@@ -14,6 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
 from app.shared.io import read_json, write_json_atomic
+from app.shared.llm_registry import (
+    CALLER_TYPE_TO_STEP,
+    SUPPORTED_EXECUTION_PROVIDERS as _EXECUTION_PROVIDERS,
+    NoAvailableModelError,
+    pick_model,
+    report_quota,
+)
 
 logger = logging.getLogger("claude_worker.llm_service")
 
@@ -34,7 +41,9 @@ LEGACY_LLM_DEFAULTS_FILE = Path("data/llm_defaults.json")
 LLM_DEFAULTS_FILE = DEFAULT_LLM_DEFAULTS_FILE
 
 # LLM worker가 실제 지원하는 provider
-SUPPORTED_LLM_PROVIDERS = {"claude", "gemini"}
+SUPPORTED_LLM_PROVIDERS = {"claude", "gemini", "openai"}
+# claude_worker가 실제 CLI 실행 가능한 provider (openai는 실행 경로 없음 — O-2)
+SUPPORTED_EXECUTION_PROVIDERS = {"claude", "gemini"}
 
 # 설정 UI 노출용 caller_type 목록 (코드 기준)
 KNOWN_CALLER_TYPES = [
@@ -280,25 +289,86 @@ class LLMService:
         provider: Optional[str] = None,
         model: Optional[str] = None,
     ) -> Tuple[str, str]:
+        """우선순위 1-D:
+        1순위: 호출자 명시 provider/model → 즉시 반환 (quota 확인 없음)
+        2순위: caller_defaults pin → 반환. oneshot 모델 pin 시 WARN
+        3순위: registry picker (step 기반) — openai 반환 시 재-pick (O-2)
+        4순위: global_default (quota 차단이면 에러 전파)
+        """
         defaults = self.load_llm_defaults()
         global_default = defaults.get("global_default", {})
         caller_defaults = defaults.get("caller_defaults", {})
         caller_default = caller_defaults.get(caller_type, {}) if isinstance(caller_defaults, dict) else {}
 
-        resolved_provider = self._normalize_provider(provider)
-        if resolved_provider is None:
-            resolved_provider = caller_default.get("provider") or global_default.get("provider") or "claude"
-        if resolved_provider not in SUPPORTED_LLM_PROVIDERS:
-            resolved_provider = "claude"
+        # ── 1순위: 호출자 명시 ────────────────────────────────────────────────
+        explicit_provider = self._normalize_provider(provider)
+        explicit_model = self._normalize_model(model)
+        if explicit_provider is not None and explicit_model is not None:
+            return explicit_provider, explicit_model
 
-        resolved_model = self._normalize_model(model)
-        if resolved_model is None:
-            if isinstance(caller_default, dict) and "model" in caller_default:
-                resolved_model = str(caller_default.get("model") or "")
-            else:
-                resolved_model = str(global_default.get("model") or "")
+        # ── 2순위: caller pin (명시 provider OR model 부분 지정 포함) ──────────
+        pin_provider = self._normalize_provider(caller_default.get("provider"))
+        pin_model = self._normalize_model(caller_default.get("model"))
+        if pin_provider and pin_model:
+            # O-5: pin된 모델이 oneshot 후보와 일치하면 WARN
+            try:
+                from app.shared.llm_registry import load_registry
+                registry = load_registry()
+                for candidates in registry.values():
+                    for cand in candidates:
+                        if cand.oneshot and cand.provider == pin_provider and cand.model == pin_model:
+                            logger.warning(
+                                f"[resolve] caller_pin {pin_provider}/{pin_model}이 "
+                                "oneshot 전용 registry 모델과 일치. 핑퐁 경로에서 호출됩니다."
+                            )
+                            break
+            except Exception:
+                pass
+            return pin_provider, pin_model
 
-        return resolved_provider, resolved_model
+        # ── 3순위: registry picker ───────────────────────────────────────────
+        step = CALLER_TYPE_TO_STEP.get(caller_type)
+        if step:
+            try:
+                picked_provider, picked_model = pick_model(step, oneshot=False)
+                # O-2: openai는 claude_worker 실행 경로 없음 → exclude 재-pick
+                if picked_provider not in _EXECUTION_PROVIDERS:
+                    logger.warning(
+                        f"[resolve] picker가 {picked_provider}/{picked_model} 반환 "
+                        f"(실행 불가, SUPPORTED_EXECUTION_PROVIDERS={_EXECUTION_PROVIDERS}). 재-pick."
+                    )
+                    picked_provider, picked_model = pick_model(
+                        step, oneshot=False, exclude_providers=set(SUPPORTED_LLM_PROVIDERS) - _EXECUTION_PROVIDERS
+                    )
+                return picked_provider, picked_model
+            except NoAvailableModelError as e:
+                logger.error(f"[resolve] picker 실패: {e}. global_default로 fallback.")
+            except Exception as e:
+                logger.error(f"[resolve] picker 예외: {e}. global_default로 fallback.")
+
+        # ── 4순위: global_default ─────────────────────────────────────────────
+        gd_provider = self._normalize_provider(global_default.get("provider")) or "claude"
+        gd_model = self._normalize_model(global_default.get("model")) or ""
+        # 4순위도 quota 재확인 (1-E step 3)
+        if gd_provider in _EXECUTION_PROVIDERS:
+            try:
+                from app.shared.llm_registry import load_quota_state
+                state = load_quota_state()
+                key = f"{gd_provider}/{gd_model}" if gd_model else None
+                if key and key in state:
+                    quota = state[key]
+                    from app.shared.llm_registry import _now_kst
+                    now = _now_kst()
+                    if quota.is_in_cooldown(now) or quota.is_weekly_exhausted():
+                        raise NoAvailableModelError(
+                            caller_type,
+                            f"global_default {gd_provider}/{gd_model}도 quota 차단. 수동 보고 필요."
+                        )
+            except NoAvailableModelError:
+                raise
+            except Exception:
+                pass  # quota 조회 실패 시 global_default 그대로 사용
+        return gd_provider, gd_model
 
     # ========== 큐 관리 ==========
 

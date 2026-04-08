@@ -7,8 +7,15 @@ from typing import Any
 import logging
 import os
 
+from typing import Literal
+
 from app.modules.dev_runner.config import config
 from app.shared.io import read_json, write_json_atomic
+from app.shared.llm_registry import (
+    NoAvailableModelError,
+    load_quota_state,
+    pick_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +186,59 @@ class SettingsService:
         )
 
         return settings
+
+
+    def suggest_engine(self, kind: Literal["feat", "fix"]) -> dict:
+        """registry picker 결과를 dev-runner engine 문자열로 변환.
+
+        dev-runner 경로는 openai 반환 허용 (O-2: 모달에서 사람이 codex 수동 실행).
+        NoAvailableModelError 발생 시 default_engine/default_fix_engine fallback.
+
+        Returns:
+            {suggested_engine, provider, model, reason, quota_snapshot}
+        """
+        _PROVIDER_TO_ENGINE: dict[str, str] = {
+            "claude": "claude",
+            "openai": "codex",
+            "gemini": "gemini",
+        }
+        step = "plan_feat" if kind == "feat" else "plan_fix"
+        current = self.get()
+        fallback_engine = current.default_engine if kind == "feat" else current.default_fix_engine
+
+        try:
+            provider, model = pick_model(step, oneshot=False)
+            engine = _PROVIDER_TO_ENGINE.get(provider)
+            if engine is None:
+                raise ValueError(f"provider={provider!r}에 대한 engine 매핑 없음")
+            reason = f"registry picker: step={step}, quota 기반"
+        except NoAvailableModelError as e:
+            provider, model, engine = "", "", fallback_engine
+            reason = f"NoAvailableModelError — fallback: {fallback_engine}. {e}"
+            logger.warning(f"[suggest_engine] {e}")
+        except ValueError:
+            raise
+
+        # quota_snapshot: 현재 state (decay 적용)
+        try:
+            state = load_quota_state()
+            quota_snapshot = {
+                k: {
+                    "weekly_used_pct": v.weekly_used_pct,
+                    "short_cooldown_until": v.short_cooldown_until.isoformat() if v.short_cooldown_until else None,
+                }
+                for k, v in state.items()
+            }
+        except Exception:
+            quota_snapshot = {}
+
+        return {
+            "suggested_engine": engine,
+            "provider": provider,
+            "model": model,
+            "reason": reason,
+            "quota_snapshot": quota_snapshot,
+        }
 
 
 # 싱글톤 인스턴스

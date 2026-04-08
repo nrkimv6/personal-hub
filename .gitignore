@@ -35,3 +35,5 @@ data/image_classifier
 /check-machine.txt
 /check-machine-service-status.txt
 /data/slide_scanner/
+/data/llm_quota_state.json
+/data/llm_quota_state.json.lock

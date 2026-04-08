@@ -29,6 +29,7 @@ sys.path.insert(0, str(project_root))
 
 # 비동기 로거 설정
 from app.utils.async_logger import AsyncLoggerManager
+from app.shared.llm_registry import report_quota as _registry_report_quota
 
 # 워커 전용 비동기 로거 설정
 logger = AsyncLoggerManager.setup_worker_logger(
@@ -1617,6 +1618,16 @@ class LLMWorker:
                                 provider, quota_retry_ms, reason=result.get("error", "")
                             )
                             logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
+                            # O-4: registry quota state 자동 갱신
+                            try:
+                                _registry_report_quota(
+                                    provider, model if model else None,
+                                    weekly_used_pct=100,
+                                    short_cooldown_minutes=max(1, quota_retry_ms // 60000),
+                                    source="auto_quota_detect",
+                                )
+                            except Exception as _e:
+                                logger.warning(f"[auto_quota_detect] registry 갱신 실패: {_e}")
 
                         # 다른 타입은 실패 처리 (raw_response 보존)
                         service.mark_failed(request.id, result["error"], result.get("raw_response", ""))
@@ -1638,6 +1649,16 @@ class LLMWorker:
                             provider, quota_retry_ms, reason=result.get("error", "")
                         )
                         logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
+                        # O-4: registry quota state 자동 갱신
+                        try:
+                            _registry_report_quota(
+                                provider, model if model else None,
+                                weekly_used_pct=100,
+                                short_cooldown_minutes=max(1, quota_retry_ms // 60000),
+                                source="auto_quota_detect",
+                            )
+                        except Exception as _e:
+                            logger.warning(f"[auto_quota_detect] registry 갱신 실패: {_e}")
 
                     # raw_response도 없으면 실패 처리
                     service.mark_failed(request.id, result["error"])
