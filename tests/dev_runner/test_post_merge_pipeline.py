@@ -170,7 +170,9 @@ class TestDoInlineMergeSubprocess:
 
         with _merge_lock_patch(), \
              patch("_dr_plan_runner._cleanup_process_state"), \
-             patch("subprocess.run", return_value=proc_result):
+             patch("subprocess.run", return_value=proc_result), \
+             patch("_dr_merge._launch_conflict_resolver_process",
+                   return_value={"success": False, "message": "mocked"}):
             cl._do_inline_merge("r_exit3", redis)
 
         status_values = [v for k, v in set_calls if "merge_status" in k]
@@ -197,7 +199,9 @@ class TestDoInlineMergeSubprocess:
 
         with _merge_lock_patch(), \
              patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup_fail, \
-             patch("subprocess.run", return_value=proc_fail):
+             patch("subprocess.run", return_value=proc_fail), \
+             patch("_dr_merge._launch_general_merge_resolver_process",
+                   return_value={"success": False, "message": "mocked"}):
             cl._do_inline_merge("r_cleanup_fail", redis_fail)
 
         mock_cleanup_fail.assert_called_once()
@@ -292,7 +296,9 @@ class TestDoRetryMergeSubprocess:
 
         with _merge_lock_patch(), \
              patch("_dr_commands._cleanup_process_state"), \
-             patch("subprocess.run", return_value=proc_result):
+             patch("subprocess.run", return_value=proc_result), \
+             patch("_dr_merge._launch_conflict_resolver_process",
+                   return_value={"success": False, "message": "mocked"}):
             cl._do_retry_merge("r_retry_conflict", redis, "cmd_conflict")
 
         result_key = f"{cl.RESULTS_KEY}:cmd_conflict"
@@ -300,6 +306,39 @@ class TestDoRetryMergeSubprocess:
         assert len(result_pushes) > 0
         result_data = json.loads(result_pushes[-1])
         assert result_data.get("conflict") is True
+
+
+class TestCleanupNoPopenCreated:
+    def test_cleanup_runs_R_no_popen_created(self, cl):
+        """T3-회귀: launcher mock이 Popen 생성을 차단하는지 검증.
+
+        _do_inline_merge 실패 케이스(returncode=1)에서
+        _launch_general_merge_resolver_process를 mock하면
+        subprocess.Popen이 실제로 호출되지 않아야 한다.
+
+        이 TC가 실패(Popen.call_count > 0)하면 launcher mock이 없어서
+        실제 프로세스가 생성되고 있다는 의미 → timeout 재발 경보.
+        """
+        redis_fail = _make_redis_mock()
+        proc_fail = MagicMock()
+        proc_fail.returncode = 1
+
+        with _merge_lock_patch(), \
+             patch("_dr_plan_runner._cleanup_process_state"), \
+             patch("subprocess.run", return_value=proc_fail), \
+             patch("_dr_merge._launch_general_merge_resolver_process",
+                   return_value={"success": False, "message": "mocked"}) as mock_launcher, \
+             patch("subprocess.Popen") as mock_popen:
+            cl._do_inline_merge("r_no_popen", redis_fail)
+
+        # launcher mock이 적용되어 Popen이 호출되지 않아야 함
+        assert mock_popen.call_count == 0, (
+            f"subprocess.Popen이 {mock_popen.call_count}회 호출됨 — "
+            "_launch_general_merge_resolver_process mock이 Popen 차단에 실패했거나 "
+            "launcher mock 없이 실제 프로세스가 생성되고 있음 (timeout 재발 위험)"
+        )
+        # launcher mock은 정확히 1회 호출되어야 함
+        mock_launcher.assert_called_once()
 
 
 class TestDeletedFunctions:
