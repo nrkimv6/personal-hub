@@ -109,7 +109,7 @@ class TestSessionIdHTTP:
         runner_id_ref = []
 
         with _mock_start_send(fake_async, runner_id_ref), _mock_fields_fn():
-            resp = client.post(f"{BASE_URL}/run", json={"plan_file": "test.md"})
+            resp = client.post(f"{BASE_URL}/run", json={"plan_file": "test.md", "test_source": "test_post_run_returns_session_id_http"})
 
         assert resp.status_code == 200, resp.text
         data = resp.json()
@@ -145,7 +145,7 @@ class TestSessionIdHTTP:
         with _mock_start_send(fake_async, runner_id_ref), _mock_fields_fn():
             resp = client.post(
                 f"{BASE_URL}/run",
-                json={"plan_file": "test.md", "session_id": explicit_sid},
+                json={"plan_file": "test.md", "session_id": explicit_sid, "test_source": "test_post_run_explicit_session_id_http"},
             )
 
         assert resp.status_code == 200, resp.text
@@ -160,7 +160,7 @@ class TestSessionIdHTTP:
         with _mock_start_send(fake_async, runner_id_ref), _mock_fields_fn():
             resp = client.post(
                 f"{BASE_URL}/run",
-                json={"plan_file": "test.md", "session_id": "not-a-uuid"},
+                json={"plan_file": "test.md", "session_id": "not-a-uuid", "test_source": "test_post_run_invalid_session_id_http"},
             )
 
         assert resp.status_code == 200, resp.text
@@ -186,7 +186,7 @@ class TestSessionIdHTTP:
         ), _mock_fields_fn():
             resp = client.post(
                 f"{BASE_URL}/run",
-                json={"plan_file": "test.md", "fused_session": True},
+                json={"plan_file": "test.md", "fused_session": True, "test_source": "test_post_run_fused_session_flag_http"},
             )
 
         assert resp.status_code == 200, resp.text
@@ -223,7 +223,7 @@ class TestSessionIdHTTP:
             "app.modules.dev_runner.services.executor_service.executor_service._send_command",
             side_effect=_mock,
         ), _mock_fields_fn():
-            resp = client.post(f"{BASE_URL}/run", json={"plan_file": "test.md"})
+            resp = client.post(f"{BASE_URL}/run", json={"plan_file": "test.md", "test_source": "test_indirect_module_session_arg_propagated_http"})
 
         assert resp.status_code == 200
         assert "session_id" in captured_cmd

@@ -108,7 +108,7 @@ class TestSessionFusionE2E:
         runner_id_ref = []
 
         with _mock_start(fake_async, runner_id_ref), _mock_fields():
-            resp = client.post(f"{BASE_URL}/run", json={"plan_file": "test.md"})
+            resp = client.post(f"{BASE_URL}/run", json={"plan_file": "test.md", "test_source": "test_e2e_run_includes_session_id_in_status"})
 
         assert resp.status_code == 200, resp.text
         data = resp.json()
@@ -126,7 +126,7 @@ class TestSessionFusionE2E:
         with _mock_start(fake_async, runner_id_ref), _mock_fields():
             resp = client.post(
                 f"{BASE_URL}/run",
-                json={"plan_file": "test.md", "session_id": explicit_sid},
+                json={"plan_file": "test.md", "session_id": explicit_sid, "test_source": "test_e2e_explicit_session_id_preserved"},
             )
 
         assert resp.status_code == 200, resp.text
@@ -141,7 +141,7 @@ class TestSessionFusionE2E:
 
         with _mock_start(fake_async, runner_id_ref), _mock_fields():
             with caplog.at_level(logging.INFO):
-                resp = client.post(f"{BASE_URL}/run", json={"plan_file": "test.md"})
+                resp = client.post(f"{BASE_URL}/run", json={"plan_file": "test.md", "test_source": "test_e2e_session_id_in_log_line"})
 
         assert resp.status_code == 200
         session_logs = [r for r in caplog.records if "[session]" in r.getMessage()]
