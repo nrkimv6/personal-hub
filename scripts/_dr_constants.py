@@ -55,7 +55,7 @@ def _read_zombie_grace_seconds(default: int = 240) -> int:
 
 
 ZOMBIE_GRACE_SECONDS = _read_zombie_grace_seconds()  # 기본 240초, 테스트/운영에서 env로 오버라이드 가능
-SUBPROCESS_HEARTBEAT_TTL = 60  # subprocess heartbeat TTL(초) — listener 10초 주기 × 6회 miss 허용
+SUBPROCESS_HEARTBEAT_TTL = 120  # subprocess heartbeat TTL(초) — listener 10초 주기 × 12회 miss 허용, reconnect 안전 창 2배
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
