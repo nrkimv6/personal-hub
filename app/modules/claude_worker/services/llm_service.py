@@ -13,6 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
+from app.modules.claude_worker.services.profile_env import build_cli_env
 from app.shared.io import read_json, write_json_atomic
 from app.shared.llm_registry import (
     CALLER_TYPE_TO_STEP,
@@ -752,28 +753,8 @@ class LLMService:
                 f.write(prompt)
                 prompt_file = f.name
 
-            # PATH에 npm bin 경로 추가 (Windows)
-            env = os.environ.copy()
-            # Claude Code 세션 내에서 워커가 시작된 경우 nested session 방지
-            env.pop("CLAUDECODE", None)
-            # 중첩 세션 방지 — Claude CLI가 감지하는 환경변수 전부 제거
-            for var in ("CLAUDE_CODE_SESSION", "CLAUDE_CODE_ENTRYPOINT"):
-                env.pop(var, None)
-
-            if sys.platform == "win32":
-                npm_path = os.path.expanduser("~/AppData/Roaming/npm")
-                if npm_path not in env.get("PATH", ""):
-                    env["PATH"] = npm_path + ";" + env.get("PATH", "")
-
-                # HOME/USERPROFILE 환경 변수 확인 및 설정
-                # 시작프로그램에서 실행 시 HOME이 설정되지 않을 수 있음
-                userprofile = env.get("USERPROFILE", "")
-                home = env.get("HOME", "")
-                if not home and userprofile:
-                    env["HOME"] = userprofile
-                    logger.debug(f"HOME 환경변수 설정: {userprofile}")
-
-                logger.debug(f"Claude CLI 실행 환경: HOME={env.get('HOME')}, USERPROFILE={env.get('USERPROFILE')}")
+            # Claude CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
+            env = build_cli_env("claude")
 
             try:
                 # cli_options 기반 명령어 빌드
@@ -1054,23 +1035,8 @@ class LLMService:
                 f.write(prompt)
                 prompt_file = f.name
 
-            # PATH에 npm bin 경로 추가 (Windows)
-            env = os.environ.copy()
-            # Claude Code 세션 내에서 워커가 시작된 경우 nested session 방지
-            env.pop("CLAUDECODE", None)
-            if sys.platform == "win32":
-                npm_path = os.path.expanduser("~/AppData/Roaming/npm")
-                if npm_path not in env.get("PATH", ""):
-                    env["PATH"] = npm_path + ";" + env.get("PATH", "")
-
-                # HOME/USERPROFILE 환경 변수 확인 및 설정
-                userprofile = env.get("USERPROFILE", "")
-                home = env.get("HOME", "")
-                if not home and userprofile:
-                    env["HOME"] = userprofile
-                    logger.debug(f"HOME 환경변수 설정: {userprofile}")
-
-                logger.debug(f"Gemini CLI 실행 환경: HOME={env.get('HOME')}, USERPROFILE={env.get('USERPROFILE')}")
+            # Gemini CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
+            env = build_cli_env("gemini")
 
             try:
                 # 파일에서 프롬프트 읽어서 실행

@@ -541,6 +541,24 @@ export interface LLMDefaultsUpdateRequest {
   caller_defaults?: Record<string, LLMDefaultConfig>;
 }
 
+export interface LLMProfileConfig {
+  engine: string;
+  name: string;
+  config_dir: string | null;
+  extra_env: Record<string, string>;
+}
+
+export interface LLMProfilesResponse {
+  selected: Record<string, string>;
+  profiles: LLMProfileConfig[];
+  supported_engines: string[];
+}
+
+export interface LLMProfilesUpdateRequest {
+  selected?: Record<string, string>;
+  profiles: LLMProfileConfig[];
+}
+
 export const llmApi = {
   // 요청 목록 조회
   list: (params?: LLMRequestListParams, options?: RequestInit) => {
@@ -678,6 +696,32 @@ export const llmApi = {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
+
+  // Profile API
+  listProfiles: () => request<LLMProfilesResponse>('/llm/profiles'),
+
+  updateProfiles: (payload: LLMProfilesUpdateRequest) =>
+    request<LLMProfilesResponse>('/llm/profiles', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  selectProfile: (engine: string, name: string) =>
+    request<LLMProfilesResponse>(`/llm/profiles/${engine}/select`, {
+      method: 'POST',
+      body: JSON.stringify({ name })
+    }),
+
+  deleteProfile: (engine: string, name: string) =>
+    request<LLMProfilesResponse>(`/llm/profiles/${engine}/${name}`, {
+      method: 'DELETE'
+    }),
+
+  launchCli: (engine: string, name: string) =>
+    request<{ status: string; engine: string; profile: string }>(
+      `/llm/profiles/${engine}/${name}/launch-cli`,
+      { method: 'POST' }
+    ),
 };
 
 // ============================================================

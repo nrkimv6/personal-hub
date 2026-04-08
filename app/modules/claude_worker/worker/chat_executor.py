@@ -173,8 +173,11 @@ class ChatExecutor:
                 f.write(prompt)
                 prompt_file_path = f.name
 
-            # CLAUDECODE 환경변수 제거 (중첩 세션 방지)
-            env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+            # Claude CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
+            # base_env 로 기존 필터 결과를 전달해 해당 필터를 보존한다
+            from app.modules.claude_worker.services.profile_env import build_cli_env
+            filtered_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+            env = build_cli_env("claude", base_env=filtered_env)
 
             allowed_tools = cli_options.get("allowed_tools", "Bash,Read")
             cmd = ["claude", "--output-format", "stream-json", "--allowedTools", allowed_tools, "--print"]
