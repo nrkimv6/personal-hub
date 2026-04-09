@@ -4,6 +4,8 @@ Worker 프로세스 상태 조회 및 관리 (watchdog + worker pairs)
 import asyncio
 import ctypes
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from ..config import MANAGED_PROJECTS
@@ -145,39 +147,45 @@ class WorkerService:
         return {"success": len(killed) > 0, "message": " | ".join(parts)}
 
     async def restart_infra(self, name: str) -> dict:
-        """infra tier 프로세스 개별 재시작. Redis infra:commands 경유."""
-        pid_dir, items = self._get_monitor_page_workers()
-        if not items:
-            return {"success": False, "message": "워커 설정을 찾을 수 없습니다."}
-
-        infra_item = next(
-            (item for item in items if item.get("tier") == "infra" and item["name"] == name),
-            None,
-        )
-        if not infra_item:
-            return {"success": False, "message": f"infra 항목 없음: {name}"}
-
-        from app.shared.redis.client import RedisClient
-
-        redis_client = await RedisClient.get_client()
-        if not redis_client:
-            return {"success": False, "message": "Redis 연결 없음"}
-
+        """infra tier 프로세스 개별 재시작. browser_workers.py 직접 subprocess 호출."""
+        # command_listener는 config 없이 허용 (별도 재시작 경로)
         if name == "command_listener":
             action = "restart-listener"
-            command = json.dumps({"action": action, "source": "system-api"})
+            extra_args: list[str] = []
         else:
-            action = "restart-infra"
-            command = json.dumps({"action": action, "target": name, "source": "system-api"})
+            pid_dir, items = self._get_monitor_page_workers()
+            if not items:
+                return {"success": False, "message": "워커 설정을 찾을 수 없습니다."}
 
-        return await send_redis_command(
-            redis_client,
-            cmd_key="infra:commands",
-            result_key="infra:command_results",
-            command=command,
-            timeout=30,
-            timeout_msg="Infra Command Listener 응답 타임아웃 (30초)",
-        )
+            infra_item = next(
+                (item for item in items if item.get("tier") == "infra" and item["name"] == name),
+                None,
+            )
+            if not infra_item:
+                return {"success": False, "message": f"infra 항목 없음: {name}"}
+
+            action = "restart-infra"
+            extra_args = [name]
+
+        scripts_dir = Path(__file__).parent.parent.parent.parent / "scripts"
+        browser_workers = scripts_dir / "browser_workers.py"
+
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, str(browser_workers), action, *extra_args],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode == 0:
+                return {"success": True, "message": result.stdout.strip() or f"{action} 완료"}
+            else:
+                return {"success": False, "message": result.stderr.strip() or f"exit code {result.returncode}"}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "message": "프로세스 실행 타임아웃 (60초)"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
 
     async def stop_watchdogs(self) -> dict:
         """worker tier watchdog + 워커 프로세스를 kill. infra tier는 유지."""

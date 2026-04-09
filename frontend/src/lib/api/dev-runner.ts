@@ -285,6 +285,8 @@ export const devRunnerRunnerApi = {
 
 	stopAll: () => devRunnerRequest<{ stopped: number }>('/stop-all', { method: 'POST' }),
 
+	restartListener: () => devRunnerRequest<{ success: boolean; message: string }>('/restart-listener', { method: 'POST' }),
+
 	dismissTab: (runnerId: string) =>
 		devRunnerRequest<{ success: boolean; runner_id: string }>(
 			`/runners/${runnerId}/tab`,

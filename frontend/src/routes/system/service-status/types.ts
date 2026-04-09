@@ -125,6 +125,7 @@ export interface InfrastructureSectionProps {
   resetDevRunner: () => Promise<void>;
   startDevRunner: () => Promise<void>;
   removeStartup: (name: string) => Promise<void>;
+  restartCommandListener: () => Promise<void>;
 }
 
 export interface ProcessWatchSectionProps {

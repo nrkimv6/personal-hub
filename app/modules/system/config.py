@@ -40,13 +40,6 @@ MANAGED_PROJECTS = {
                     "watchdog_pid_file": "api_watchdog_admin.pid",
                     "worker_pid_file": None,
                 },
-                {
-                    "name": "infra_command_listener",
-                    "label": "인프라 리스너",
-                    "tier": "infra",
-                    "watchdog_pid_file": None,
-                    "worker_pid_file": "infra_command_listener_admin.pid",
-                },
             ]
         }
     },

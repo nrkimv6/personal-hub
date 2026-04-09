@@ -594,6 +594,13 @@
     }, '리셋 실패');
   }
 
+  async function restartCommandListener() {
+    await runWithActionLoading('restart-listener', async () => {
+      await devRunnerRunnerApi.restartListener();
+      await fetchExtraStatus();
+    }, '리스너 재시작 실패');
+  }
+
   async function restartRedis() {
     await runWithActionLoading('redis-restart', async () => {
       const result = await serviceDashboardApi.restartRedis();
@@ -695,6 +702,7 @@
       {resetDevRunner}
       {startDevRunner}
       {removeStartup}
+      {restartCommandListener}
     />
   {:else}
     <div class="bg-card rounded-lg border border-border shadow-card p-8 text-center">

@@ -1,16 +1,15 @@
 """
 restart_infra 통합 테스트 (T3)
 
-실제 파일시스템 사용, Redis는 mock
+실제 파일시스템 + config 사용, subprocess는 mock
 """
 
 import asyncio
 import copy
-import json
-import os
+import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -18,6 +17,14 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.modules.system.services.worker_service import WorkerService as SystemService
+
+
+def _sp_ok(stdout="완료"):
+    return MagicMock(returncode=0, stdout=stdout, stderr="")
+
+
+def _sp_fail(stderr="실패"):
+    return MagicMock(returncode=1, stdout="", stderr=stderr)
 
 
 class TestRestartInfraIntegration:
@@ -47,42 +54,33 @@ class TestRestartInfraIntegration:
     def test_infra_restart_command_listener_sends_correct_action(self):
         """T3: command_listener는 restart-listener 액션, 나머지는 restart-infra + target
 
-        실제 config의 infra 항목들을 순회하며 각각 올바른 Redis 명령이 생성되는지 검증.
+        실제 config의 infra 항목들을 순회하며 각각 올바른 subprocess 명령이 생성되는지 검증.
         """
         from app.modules.system.config import MANAGED_PROJECTS
 
         monitor = MANAGED_PROJECTS.get("monitor-page", {})
         items = monitor.get("workers", {}).get("items", [])
         infra_names = [i["name"] for i in items if i.get("tier") == "infra"]
-
-        redis_mock = AsyncMock()
-        redis_mock.delete = AsyncMock()
-        redis_mock.brpop = AsyncMock(return_value=(
-            "infra:command_results",
-            json.dumps({"success": True, "message": "완료"})
-        ))
+        # command_listener는 config에 없어도 허용되므로 추가
+        if "command_listener" not in infra_names:
+            infra_names.append("command_listener")
 
         for name in infra_names:
-            redis_mock.lpush = AsyncMock()
-
-            with patch("app.shared.redis.client.RedisClient") as mock_client:
-                mock_client.get_client = AsyncMock(return_value=redis_mock)
+            with patch("app.modules.system.services.worker_service.subprocess.run",
+                       return_value=_sp_ok()) as mock_run:
                 svc = SystemService()
                 result = asyncio.run(svc.restart_infra(name))
 
             assert result["success"] is True, f"{name}: {result['message']}"
 
-            call_args = redis_mock.lpush.call_args
-            key = call_args[0][0]
-            payload = json.loads(call_args[0][1])
-
-            assert key == "infra:commands"
+            args = mock_run.call_args[0][0]
+            assert "browser_workers.py" in args[1]
             if name == "command_listener":
-                assert payload["action"] == "restart-listener"
-                assert "target" not in payload
+                assert "restart-listener" in args
+                assert "command_listener" not in args
             else:
-                assert payload["action"] == "restart-infra"
-                assert payload["target"] == name
+                assert "restart-infra" in args
+                assert name in args
 
     def test_worker_tier_excluded_from_infra_restart(self):
         """T3: worker tier 항목은 restart_infra에서 거부됨 (실제 config 사용)"""
@@ -94,24 +92,18 @@ class TestRestartInfraIntegration:
 
         svc = SystemService()
         for name in worker_names:
-            result = asyncio.run(svc.restart_infra(name))
+            with patch("app.modules.system.services.worker_service.subprocess.run") as mock_run:
+                result = asyncio.run(svc.restart_infra(name))
             assert result["success"] is False, f"worker tier '{name}'이 infra restart 통과됨"
+            mock_run.assert_not_called()
 
-    def test_get_worker_status_includes_infra_command_listener(self, tmp_path):
-        """T3: config에 infra_command_listener 등록 확인 — get_worker_status에 포함됨"""
+    def test_config_no_infra_command_listener(self):
+        """T3: config에 infra_command_listener 항목 없음 확인 — 제거 완료 검증"""
         from app.modules.system.config import MANAGED_PROJECTS
 
-        fake = copy.deepcopy(MANAGED_PROJECTS)
-        fake["monitor-page"]["path"] = str(tmp_path)
-        (tmp_path / ".pids").mkdir(exist_ok=True)
+        monitor = MANAGED_PROJECTS.get("monitor-page", {})
+        items = monitor.get("workers", {}).get("items", [])
+        names = [i["name"] for i in items]
 
-        with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", fake):
-            svc = SystemService()
-            result = asyncio.run(svc.get_worker_status())
-
-        names = [e["name"] for e in result if e["project"] == "monitor-page"]
-        assert "infra_command_listener" in names, \
-            f"infra_command_listener가 worker status에 없음. 현재 목록: {names}"
-
-        infra_listener = next(e for e in result if e["name"] == "infra_command_listener")
-        assert infra_listener["tier"] == "infra"
+        assert "infra_command_listener" not in names, \
+            f"infra_command_listener가 config에 남아있음. 현재 목록: {names}"

@@ -1,6 +1,7 @@
-"""7.3: listener 재시작 API 검증 테스트"""
+"""7.3: listener 재시작 API 검증 테스트 (browser_workers.py 경유)"""
 
 import sys
+import subprocess
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
@@ -15,58 +16,51 @@ def mock_redis():
     return r
 
 
-def test_restart_listener_kills_old_pid(mock_redis):
-    """Redis에 PID 있을 때 → 해당 PID 종료 후 새 프로세스 spawn"""
+def _sp_ok():
+    return MagicMock(returncode=0, stdout="restart-listener 완료", stderr="")
+
+
+def _sp_fail():
+    return MagicMock(returncode=1, stdout="", stderr="browser_workers.py 오류")
+
+
+def test_restart_listener_uses_browser_workers(mock_redis):
+    """subprocess.run에 browser_workers.py restart-listener 전달 확인"""
     from app.modules.dev_runner.services.executor_service import ExecutorService
 
     svc = ExecutorService()
     svc.redis_client = mock_redis
 
+    # heartbeat 즉시 감지
     mock_redis.get.side_effect = lambda key: (
-        "12345" if key == "plan-runner:listener:pid" else
-        "2026-02-25T10:00:00" if key == "plan-runner:listener:heartbeat" else
-        None
+        "2026-02-25T10:00:00" if key == "plan-runner:listener:heartbeat" else None
     )
 
-    fake_proc = MagicMock()
-    fake_proc.pid = 99999
-
-    with patch("app.modules.dev_runner.services.executor_service.subprocess.Popen", return_value=fake_proc) as mock_popen, \
-         patch("app.modules.dev_runner.services.executor_service.sys.platform", "linux"), \
-         patch("app.modules.dev_runner.services.executor_service.os.kill") as mock_kill, \
+    with patch("app.modules.dev_runner.services.executor_service.subprocess.run",
+               return_value=_sp_ok()) as mock_run, \
          patch("app.modules.dev_runner.services.executor_service.time.sleep"):
         result = svc.restart_listener()
 
-    # 기존 PID 종료 시도
-    mock_kill.assert_called_once_with(12345, __import__("signal").SIGTERM)
-    # 새 프로세스 spawn
-    assert mock_popen.called
+    assert mock_run.called
+    args = mock_run.call_args[0][0]
+    assert "browser_workers.py" in args[1]
+    assert "restart-listener" in args
     assert result["success"] is True
-    assert result["new_pid"] == 99999
 
 
-def test_restart_listener_no_pid_still_spawns(mock_redis):
-    """Redis에 PID 없어도 새 listener spawn은 진행됨"""
+def test_restart_listener_subprocess_failure(mock_redis):
+    """subprocess.run 실패 시 success=False 즉시 반환"""
     from app.modules.dev_runner.services.executor_service import ExecutorService
 
     svc = ExecutorService()
     svc.redis_client = mock_redis
-    mock_redis.get.side_effect = lambda key: (
-        "2026-02-25T10:00:00" if key == "plan-runner:listener:heartbeat" else
-        None
-    )
 
-    fake_proc = MagicMock()
-    fake_proc.pid = 88888
-
-    with patch("app.modules.dev_runner.services.executor_service.subprocess.Popen", return_value=fake_proc), \
-         patch("app.modules.dev_runner.services.executor_service.os.kill") as mock_kill, \
-         patch("app.modules.dev_runner.services.executor_service.time.sleep"):
+    with patch("app.modules.dev_runner.services.executor_service.subprocess.run",
+               return_value=_sp_fail()):
         result = svc.restart_listener()
 
-    # kill 미호출 (PID 없음)
-    mock_kill.assert_not_called()
-    assert result["new_pid"] == 88888
+    assert result["success"] is False
+    assert "browser_workers.py 오류" in result["message"]
 
 
 def test_restart_listener_heartbeat_timeout(mock_redis):
@@ -78,16 +72,13 @@ def test_restart_listener_heartbeat_timeout(mock_redis):
     # heartbeat 키 항상 None (감지 안 됨)
     mock_redis.get.return_value = None
 
-    fake_proc = MagicMock()
-    fake_proc.pid = 77777
-
-    with patch("app.modules.dev_runner.services.executor_service.subprocess.Popen", return_value=fake_proc), \
+    with patch("app.modules.dev_runner.services.executor_service.subprocess.run",
+               return_value=_sp_ok()), \
          patch("app.modules.dev_runner.services.executor_service.time.sleep"):
         result = svc.restart_listener()
 
     assert result["success"] is False
     assert "heartbeat not detected" in result["message"]
-    assert result["new_pid"] == 77777
 
 
 def test_restart_listener_http_endpoint():
@@ -95,9 +86,6 @@ def test_restart_listener_http_endpoint():
     from app.main import app
 
     client = TestClient(app, raise_server_exceptions=False)
-
-    fake_proc = MagicMock()
-    fake_proc.pid = 55555
 
     mock_r = MagicMock()
     mock_r.ping.return_value = True
@@ -107,7 +95,8 @@ def test_restart_listener_http_endpoint():
     mock_r.delete.return_value = True
 
     with patch("app.modules.dev_runner.services.executor_service.executor_service.redis_client", mock_r), \
-         patch("app.modules.dev_runner.services.executor_service.subprocess.Popen", return_value=fake_proc), \
+         patch("app.modules.dev_runner.services.executor_service.subprocess.run",
+               return_value=_sp_ok()), \
          patch("app.modules.dev_runner.services.executor_service.time.sleep"):
         resp = client.post("/api/v1/dev-runner/restart-listener")
 
