@@ -129,14 +129,6 @@ class BrowserWorkerManager:
                 "role": "claude_watchdog",
             },
             {
-                "name": "Infra Command Listener",
-                "pid_file": f"infra_command_listener{self.pid_suffix}.pid",
-                "cmd": [str(self.python_exe),
-                        str(self.scripts_dir / "infra-command-listener.py")],
-                "env": {},
-                "role": "infra_listener",
-            },
-            {
                 "name": "Command Listener Watchdog",
                 "pid_file": f"command_listener_watchdog{self.pid_suffix}.pid",
                 "cmd": [_ps_alias("monitorpage-wdog-cmd.exe"), "-ExecutionPolicy", "Bypass", "-File",

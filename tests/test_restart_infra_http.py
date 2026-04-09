@@ -3,9 +3,8 @@ restart_infra HTTP 통합 테스트 (T5)
 
 TestClient로 infra restart API 엔드포인트 + worker_status tier 필드 검증
 """
-import json
-import pytest
-from unittest.mock import AsyncMock, patch
+import subprocess
+from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 
@@ -15,24 +14,19 @@ def client():
     return TestClient(app)
 
 
-class TestRestartInfraHttp:
+def _sp_ok(stdout="완료"):
+    return MagicMock(returncode=0, stdout=stdout, stderr="")
 
-    def _mock_redis(self, success: bool = True, message: str = "완료"):
-        redis_mock = AsyncMock()
-        redis_mock.delete = AsyncMock()
-        redis_mock.lpush = AsyncMock()
-        redis_mock.brpop = AsyncMock(return_value=(
-            "infra:command_results",
-            json.dumps({"success": success, "message": message})
-        ))
-        return redis_mock
+
+import pytest
+
+
+class TestRestartInfraHttp:
 
     def test_http_restart_infra_success(self, client):
         """T5: POST /api/v1/system/services/infra/api_watchdog/restart → 200 + success 필드"""
-        redis_mock = self._mock_redis(success=True)
-
-        with patch("app.shared.redis.client.RedisClient") as mock_client:
-            mock_client.get_client = AsyncMock(return_value=redis_mock)
+        with patch("app.modules.system.services.worker_service.subprocess.run",
+                   return_value=_sp_ok()) as mock_run:
             resp = client.post("/api/v1/system/services/infra/api_watchdog/restart")
 
         assert resp.status_code == 200

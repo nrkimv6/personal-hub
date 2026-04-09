@@ -1,9 +1,7 @@
 """subprocess 실행 서비스 - Redis 기반 크로스 세션 실행"""
 
 import json
-import os
 import re
-import signal
 import subprocess
 import sys
 import time
@@ -798,44 +796,34 @@ class ExecutorService:
         return {"stopped": stopped}
 
     def restart_listener(self) -> dict:
-        """command-listener 프로세스를 재시작합니다.
+        """command-listener를 browser_workers.py restart-listener 경유로 재시작합니다.
 
-        1. Redis에서 기존 PID 조회 → 존재 시 SIGTERM 전송
-        2. 새 listener 프로세스 spawn
-        3. 최대 10초 동안 heartbeat 키 감지 대기
+        1. browser_workers.py restart-listener 실행 (왓치독 포함 전체 체인 재시작)
+        2. 최대 10초 동안 heartbeat 키 감지 대기
         """
-        LISTENER_SCRIPT = Path(__file__).parent.parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+        BROWSER_WORKERS = Path(__file__).parent.parent.parent.parent / "scripts" / "browser_workers.py"
         HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
-        PID_KEY = "plan-runner:listener:pid"
 
-        # 기존 PID 종료
-        old_pid_str = self.redis_client.get(PID_KEY)
-        if old_pid_str:
-            try:
-                old_pid = int(old_pid_str)
-                os.kill(old_pid, signal.SIGTERM)
-                self.redis_client.delete(PID_KEY)
-            except (ProcessLookupError, PermissionError):
-                pass
-            time.sleep(1)
-
-        # 새 프로세스 spawn
         python_exe = sys.executable
-        proc = subprocess.Popen(
-            [python_exe, str(LISTENER_SCRIPT)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        result = subprocess.run(
+            [python_exe, str(BROWSER_WORKERS), "restart-listener"],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
+
+        if result.returncode != 0:
+            return {"success": False, "message": result.stderr.strip() or f"restart-listener exit code {result.returncode}"}
 
         # heartbeat 감지 대기 (최대 10초)
         deadline = time.time() + 10
         while time.time() < deadline:
             hb = self.redis_client.get(HEARTBEAT_KEY)
             if hb:
-                return {"success": True, "new_pid": proc.pid, "message": "listener restarted"}
+                return {"success": True, "message": "listener restarted"}
             time.sleep(0.5)
 
-        return {"success": False, "new_pid": proc.pid, "message": "heartbeat not detected within 10s"}
+        return {"success": False, "message": "heartbeat not detected within 10s"}
 
 
 # 싱글톤 인스턴스
