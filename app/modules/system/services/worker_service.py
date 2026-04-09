@@ -167,7 +167,7 @@ class WorkerService:
             action = "restart-infra"
             extra_args = [name]
 
-        scripts_dir = Path(__file__).parent.parent.parent.parent / "scripts"
+        scripts_dir = Path(__file__).parent.parent.parent.parent.parent / "scripts"
         browser_workers = scripts_dir / "browser_workers.py"
 
         try:

@@ -801,7 +801,7 @@ class ExecutorService:
         1. browser_workers.py restart-listener 실행 (왓치독 포함 전체 체인 재시작)
         2. 최대 10초 동안 heartbeat 키 감지 대기
         """
-        BROWSER_WORKERS = Path(__file__).parent.parent.parent.parent / "scripts" / "browser_workers.py"
+        BROWSER_WORKERS = Path(__file__).parent.parent.parent.parent.parent / "scripts" / "browser_workers.py"
         HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 
         python_exe = sys.executable
