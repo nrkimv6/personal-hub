@@ -19,7 +19,8 @@ def _make_svc(**overrides) -> DiagnosticsService:
 
 
 def test_run_diagnostics_right_all_ok(tmp_path):
-    """R(Right): 모든 조건 정상 → steps 5개 모두 ok=True."""
+    """R(Right): 모든 조건 정상 → steps 6개 모두 ok=True."""
+    from unittest.mock import patch as _patch
     log_file = tmp_path / "test.log"
     log_file.write_text("log content")
 
@@ -28,12 +29,19 @@ def test_run_diagnostics_right_all_ok(tmp_path):
         "plan-runner:listener:heartbeat": "1",
         "plan-runner:runners:runner1:stream_log_path": str(log_file),
     }.get(key))
+    # runner1 status != "running" → has_running=False → pmsg_ok=True (get_pmsg_count 불필요)
+    svc.redis_client.hget = MagicMock(return_value=None)
 
-    result = svc.run_diagnostics()
+    with _patch(
+        "app.modules.dev_runner.services.event_service.get_pmsg_count_last5min",
+        return_value=5,
+    ):
+        result = svc.run_diagnostics()
+
     steps = result["steps"]
 
-    assert len(steps) == 5
-    assert all(s["ok"] for s in steps)
+    assert len(steps) == 6
+    assert all(s["ok"] for s in steps), [s for s in steps if not s["ok"]]
 
 
 def test_run_diagnostics_error_redis_down():
