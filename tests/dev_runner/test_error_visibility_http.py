@@ -61,6 +61,12 @@ def plan_runner_mod():
     return _load_plan_runner_mod()
 
 
+@pytest.fixture(scope="module")
+def stream_cleanup_mod(plan_runner_mod):
+    import _dr_stream_cleanup
+    return _dr_stream_cleanup
+
+
 def _make_runner(runner_id="abc123", exit_reason=None, error=None):
     return {
         "runner_id": runner_id,
@@ -84,7 +90,7 @@ class TestErrorVisibilityHttp:
     """T5: 에러 종료 시 [ERROR] 메시지 publish + merge 노이즈 없음"""
 
     @pytest.mark.http
-    def test_run_plan_error_exit_stream_has_error_message(self, plan_runner_mod, client):
+    def test_run_plan_error_exit_stream_has_error_message(self, plan_runner_mod, stream_cleanup_mod, client):
         """T5: 에러 종료(stdout 없음) → Redis 채널에 [ERROR] {_failure_message} 발행됨."""
         runner_id = "t5-err-vis-001"
         fake_server = fakeredis.FakeServer()
@@ -108,11 +114,11 @@ class TestErrorVisibilityHttp:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state"), \
-             patch.object(plan_runner_mod, "_pick_error_detail_line", return_value=None), \
-             patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=[]), \
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+             patch.object(stream_cleanup_mod, "_pick_error_detail_line", return_value=None), \
+             patch.object(stream_cleanup_mod, "_load_log_tail_lines", return_value=[]), \
              patch.object(fr, "publish", side_effect=_capture_publish):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
@@ -133,7 +139,7 @@ class TestErrorVisibilityHttp:
         assert response.status_code == 200
 
     @pytest.mark.http
-    def test_run_plan_error_exit_no_merge_noise_in_stream(self, plan_runner_mod, client):
+    def test_run_plan_error_exit_no_merge_noise_in_stream(self, plan_runner_mod, stream_cleanup_mod, client):
         """T5: 에러 종료(merge_requested 없음) → Redis 채널에 'merge 분기 판정' 노이즈 없음."""
         runner_id = "t5-noise-001"
         fake_server = fakeredis.FakeServer()
@@ -158,11 +164,11 @@ class TestErrorVisibilityHttp:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state"), \
-             patch.object(plan_runner_mod, "_pick_error_detail_line", return_value=None), \
-             patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=[]), \
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+             patch.object(stream_cleanup_mod, "_pick_error_detail_line", return_value=None), \
+             patch.object(stream_cleanup_mod, "_load_log_tail_lines", return_value=[]), \
              patch.object(fr, "publish", side_effect=_capture_publish):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
