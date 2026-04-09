@@ -112,7 +112,7 @@ def save_requirements_sync_result(db: Session, request, result: dict) -> None:
 
         # docs/requirements/ 디렉토리 생성
         from pathlib import Path
-        base_dir = Path(__file__).parent.parent.parent.parent  # monitor-page root
+        base_dir = Path(__file__).parent.parent.parent.parent.parent  # monitor-page root
         req_dir = base_dir / "docs" / "requirements"
         req_dir.mkdir(parents=True, exist_ok=True)
 
