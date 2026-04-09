@@ -18,6 +18,7 @@ import redis.asyncio as aioredis
 from fastapi import HTTPException
 
 from app.config import logger
+from app.core.config import PROJECT_ROOT
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.plan_service import plan_service
 from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_history_path
@@ -808,10 +809,10 @@ class ExecutorService:
     def restart_listener(self) -> dict:
         """command-listener를 browser_workers.py restart-listener 경유로 재시작합니다.
 
-        1. browser_workers.py restart-listener 실행 (왓치독 포함 전체 체인 재시작)
+        1. browser_workers.py restart-listener 실행 (watchdog + dev-runner-command-listener 재시작)
         2. 최대 10초 동안 heartbeat 키 감지 대기
         """
-        BROWSER_WORKERS = Path(__file__).parent.parent.parent.parent.parent / "scripts" / "browser_workers.py"
+        BROWSER_WORKERS = PROJECT_ROOT / "scripts" / "browser_workers.py"
         HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 
         python_exe = sys.executable

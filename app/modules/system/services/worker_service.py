@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from app.core.config import PROJECT_ROOT
 from ..config import MANAGED_PROJECTS
 from .system_utils import send_redis_command
 
@@ -167,7 +168,7 @@ class WorkerService:
             action = "restart-infra"
             extra_args = [name]
 
-        scripts_dir = Path(__file__).parent.parent.parent.parent.parent / "scripts"
+        scripts_dir = PROJECT_ROOT / "scripts"
         browser_workers = scripts_dir / "browser_workers.py"
 
         try:
@@ -226,7 +227,8 @@ class WorkerService:
 
     async def start_watchdogs(self) -> dict:
         """Redis Command Listener를 통해 watchdog 시작 요청.
-        API는 Session 0(NSSM)이므로 직접 subprocess 불가 → Redis 경유.
+        GUI 프로세스(Playwright 워커)는 Session 0에서 spawn 불가 → Redis 경유.
+        headless 프로세스는 restart_infra()에서 직접 subprocess 호출.
         """
         from app.shared.redis.client import RedisClient
 
