@@ -825,10 +825,11 @@ class BrowserWorkerManager:
         print(f"  Restarting Command Listener")
         print(f"{'=' * 40}{RESET}\n")
 
-        # watchdog + worker PID kill
+        # watchdog + worker + dev_runner_command_listener PID kill
         listener_pids = [
             self.pid_dir / f"command_listener_watchdog{self.pid_suffix}.pid",
             self.pid_dir / f"command_listener{self.pid_suffix}.pid",
+            self.pid_dir / f"dev_runner_command_listener{self.pid_suffix}.pid",
         ]
         for pid_path in listener_pids:
             pid = read_pid_file(pid_path)
@@ -839,9 +840,9 @@ class BrowserWorkerManager:
 
         time.sleep(1)
 
-        # Command Listener Watchdog만 재시작
+        # Command Listener Watchdog + Dev Runner Command Listener 재시작
         for w in self.workers:
-            if w["role"] != "listener":
+            if w["role"] not in ("listener", "dev_listener"):
                 continue
             pid_path = self.pid_dir / w["pid_file"]
             pid = read_pid_file(pid_path)
