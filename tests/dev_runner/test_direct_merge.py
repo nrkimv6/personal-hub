@@ -177,8 +177,9 @@ class TestInlineMergeBranchFromRedis:
             captured["branch"] = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id_}:branch")
             return {"success": True, "message": "mocked", "merge_status": "merged", "action": action_name}
 
-        with patch.object(plan_runner_mod, "_execute_merge_with_lock", side_effect=mock_execute_merge):
-            with patch.object(plan_runner_mod, "_cleanup_process_state", MagicMock()):
+        import _dr_stream_cleanup as stream_cleanup_mod
+        with patch.object(stream_cleanup_mod, "_execute_merge_with_lock", side_effect=mock_execute_merge):
+            with patch.object(stream_cleanup_mod, "_cleanup_process_state", MagicMock()):
                 cl._do_inline_merge(runner_id, redis)
 
         return captured

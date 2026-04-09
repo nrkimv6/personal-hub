@@ -431,8 +431,8 @@ class TestDoInlineMergeTriggerPropagation:
         runner_id = "prop-trigger-01"
         _setup_restart_after_merge_runner(fake_redis, runner_id, trigger="user")
 
-        with patch("_dr_plan_runner._execute_merge_with_lock") as mock_merge, \
-             patch("_dr_plan_runner._cleanup_process_state"):
+        with patch("_dr_stream_cleanup._execute_merge_with_lock") as mock_merge, \
+             patch("_dr_stream_cleanup._cleanup_process_state"):
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, fake_redis)
 
@@ -449,8 +449,8 @@ class TestDoInlineMergeTriggerPropagation:
         runner_id = "prop-trigger-02"
         _setup_restart_after_merge_runner(fake_redis, runner_id, trigger="api")
 
-        with patch("_dr_plan_runner._execute_merge_with_lock"), \
-             patch("_dr_plan_runner._cleanup_process_state"):
+        with patch("_dr_stream_cleanup._execute_merge_with_lock"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"):
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, fake_redis)
 
@@ -465,8 +465,8 @@ class TestDoInlineMergeTriggerPropagation:
         runner_id = "prop-trigger-03"
         _setup_restart_after_merge_runner(fake_redis, runner_id, trigger=None)  # trigger 키 미설정
 
-        with patch("_dr_plan_runner._execute_merge_with_lock"), \
-             patch("_dr_plan_runner._cleanup_process_state"):
+        with patch("_dr_stream_cleanup._execute_merge_with_lock"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"):
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, fake_redis)
 
@@ -482,8 +482,8 @@ class TestDoInlineMergeTriggerPropagation:
         fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
         # restart_after_merge 키 미설정
 
-        with patch("_dr_plan_runner._execute_merge_with_lock"), \
-             patch("_dr_plan_runner._cleanup_process_state"):
+        with patch("_dr_stream_cleanup._execute_merge_with_lock"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"):
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, fake_redis)
 

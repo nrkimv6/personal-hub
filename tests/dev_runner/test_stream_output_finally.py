@@ -88,8 +88,8 @@ class TestStreamOutputFinallyPublishesMergeDecision:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state"), \
+             patch("_dr_stream_cleanup._do_inline_merge"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch.object(fr, "publish", side_effect=capture_publish):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
@@ -120,8 +120,8 @@ class TestStreamOutputFinallyPublishesMergeDecision:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state"), \
+             patch("_dr_stream_cleanup._do_inline_merge"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch.object(fr, "publish", side_effect=capture_publish):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
@@ -153,8 +153,8 @@ class TestStreamOutputFinallyPublishBeforeCompleted:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state", side_effect=fake_cleanup), \
+             patch("_dr_stream_cleanup._do_inline_merge"), \
+             patch("_dr_stream_cleanup._cleanup_process_state", side_effect=fake_cleanup), \
              patch.object(fr, "publish", side_effect=capture_publish):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
