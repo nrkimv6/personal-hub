@@ -151,3 +151,76 @@ class TestIntegrationRestartListener:
         assert 'not in ("listener", "dev_listener")' in source or \
                "not in ('listener', 'dev_listener')" in source, \
             f"restart_listener의 role 필터가 dev_listener를 포함하지 않음"
+
+
+# ─── Phase T4: E2E 테스트 (실서버, http_live 마커) ────────────────────────────
+
+@pytest.mark.http_live
+class TestE2ERestartListenerLive:
+    """실서버 API를 직접 호출하여 listener 재시작 + listener_alive 상태 변화 검증."""
+
+    def test_e2e_restart_infra_command_listener_live(self):
+        """T4: POST /system/services/infra/command_listener/restart → listener_alive: true."""
+        import httpx
+        base = "http://localhost:8001/api/v1"
+        # 재시작 요청
+        resp = httpx.post(f"{base}/system/services/infra/command_listener/restart", timeout=30)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True, f"restart 실패: {data}"
+        # 5초 대기 후 status 확인
+        import time
+        time.sleep(5)
+        status_resp = httpx.get(f"{base}/dev-runner/status", timeout=10)
+        assert status_resp.status_code == 200
+        status = status_resp.json()
+        assert status["listener_alive"] is True, f"listener_alive가 여전히 false: {status}"
+
+    def test_e2e_restart_listener_live(self):
+        """T4: POST /dev-runner/restart-listener → success + listener restarted."""
+        import httpx
+        base = "http://localhost:8001/api/v1"
+        resp = httpx.post(f"{base}/dev-runner/restart-listener", timeout=30)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True, f"restart-listener 실패: {data}"
+        assert "listener restarted" in data.get("message", ""), f"메시지 불일치: {data}"
+
+
+# ─── Phase T5: HTTP 통합 (TestClient 기반) ────────────────────────────────────
+
+@pytest.mark.http
+class TestHTTPRestartListenerDev:
+    """TestClient + subprocess mock 기반 HTTP 통합."""
+
+    @pytest.fixture
+    def client(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        with TestClient(app) as c:
+            yield c
+
+    def test_http_restart_infra_command_listener(self, client):
+        """T5: POST /system/services/infra/command_listener/restart → 200 + success."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="restart-listener 완료", stderr="")
+            resp = client.post("/api/v1/system/services/infra/command_listener/restart")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+    def test_http_restart_listener_success(self, client):
+        """T5: POST /dev-runner/restart-listener + heartbeat mock → 200 + success."""
+        with patch("subprocess.run") as mock_run, \
+             patch("redis.Redis.get", return_value=b"2026-04-10T00:00:00"):
+            mock_run.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
+            resp = client.post("/api/v1/dev-runner/restart-listener")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+    def test_http_restart_listener_failure(self, client):
+        """T5: POST /dev-runner/restart-listener + subprocess 실패 → success: false."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="에러 발생")
+            resp = client.post("/api/v1/dev-runner/restart-listener")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False

@@ -219,7 +219,7 @@ class TestRestartInfraE2EDirect:
         assert data["success"] is True
 
 
-# ─── HTTP 통합 (T5) ──────────────────────────────────────────────────────────
+# ─── HTTP 통합 (mock 기반 단위 테스트, 실제 T5 아님 — 실서버 T5는 test_restart_listener_dev_listener.py) ──
 
 class TestRestartListenerHttpDirect:
 
