@@ -15,7 +15,7 @@ from _dr_constants import (
     RUNNER_KEY_PREFIX,
     _LEGACY_ALL,
 )
-from _dr_merge import _execute_merge_with_lock, _pub_and_log
+from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_process_utils import _cleanup_process_state
 from _dr_subprocess import _ANSI_ESCAPE
@@ -463,52 +463,16 @@ def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
                         )
                 else:
                     # exit_code != 0: worktree 커밋 유무로 merge 여부 결정
-                    branch_for_check = ctx.redis_client.get(
-                        f"{RUNNER_KEY_PREFIX}:{ctx.runner_id}:branch"
-                    )
-                    if isinstance(branch_for_check, bytes):
-                        branch_for_check = branch_for_check.decode("utf-8")
-                    if branch_for_check:
-                        try:
-                            from _dr_constants import PROJECT_ROOT as _PR
-
-                            log_proc = subprocess.run(
-                                [
-                                    "git",
-                                    "log",
-                                    f"main..{branch_for_check}",
-                                    "--oneline",
-                                ],
-                                capture_output=True,
-                                text=True,
-                                cwd=str(_PR),
-                                timeout=15,
-                            )
-                            commit_count = len(
-                                [
-                                    l
-                                    for l in log_proc.stdout.splitlines()
-                                    if l.strip()
-                                ]
-                            )
-                            if commit_count > 0:
-                                merge_requested = True
-                                logger.info(
-                                    f"[_stream_output] exit_code={ctx.exit_code}이지만 worktree 커밋 {commit_count}개 존재 "
-                                    f"(runner_id={ctx.runner_id}, branch={branch_for_check}) — merge 시도"
-                                )
-                            else:
-                                logger.info(
-                                    f"[_stream_output] exit_code={ctx.exit_code}, worktree 커밋 없음 "
-                                    f"(runner_id={ctx.runner_id}, branch={branch_for_check}) — merge 스킵"
-                                )
-                        except Exception as _git_err:
-                            logger.warning(
-                                f"[_stream_output] git log 커밋 수 확인 실패: {_git_err} — merge 스킵"
-                            )
+                    if _has_worktree_commits(ctx.runner_id, ctx.redis_client):
+                        merge_requested = True
+                        logger.info(
+                            f"[_stream_output] exit_code={ctx.exit_code}이지만 worktree 커밋 존재 "
+                            f"(runner_id={ctx.runner_id}) — merge 시도"
+                        )
                     else:
                         logger.info(
-                            f"[_stream_output] exit_code={ctx.exit_code}, branch 키 없음 — merge 스킵"
+                            f"[_stream_output] exit_code={ctx.exit_code}, worktree 커밋 없음 "
+                            f"(runner_id={ctx.runner_id}) — merge 스킵"
                         )
             else:
                 # merge_requested 플래그 없음: exit_code=0 + completed 완료 시에도 워크트리 커밋 감지
@@ -555,3 +519,107 @@ def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
         )
 
     return merge_requested
+
+
+def _update_workflow_and_execute_cleanup(
+    ctx: _StreamCleanupCtx, merge_requested: bool
+) -> None:
+    """Workflow 상태 업데이트(구역 D) 및 merge/fallback 실행(구역 E)"""
+    # 구역 D: Workflow 상태 업데이트
+    if ctx.wf_manager and ctx.runner_id:
+        try:
+            wf = ctx.wf_manager.get_by_runner_id(ctx.runner_id)
+            if wf:
+                if ctx.exit_code == 0:
+                    if merge_requested:
+                        _pub_and_log(
+                            ctx.runner_id,
+                            "[_stream_output] merge_requested 플래그 감지 → merge 흐름 진입",
+                            ctx.redis_client,
+                            "CLEANUP",
+                        )
+                        ctx.wf_manager.update_status(wf["id"], "merge_pending")
+                    else:
+                        if ctx.completed_for_flow:
+                            _pub_and_log(
+                                ctx.runner_id,
+                                f"[_stream_output] merge_requested 플래그 없음 + exit_reason={ctx.exit_reason}, stop_stage={ctx.stop_stage} → completed 처리",
+                                ctx.redis_client,
+                                "CLEANUP",
+                            )
+                            ctx.wf_manager.update_status(wf["id"], "completed")
+                        else:
+                            _pub_and_log(
+                                ctx.runner_id,
+                                f"[_stream_output] exit_code=0이지만 exit_reason={ctx.exit_reason}, stop_stage={ctx.stop_stage} → failed 처리",
+                                ctx.redis_client,
+                                "CLEANUP",
+                            )
+                            ctx.wf_manager.update_status(
+                                wf["id"], "failed", error_message=ctx.failure_message
+                            )
+                elif ctx.exit_code is not None and ctx.exit_code != 0:
+                    ctx.wf_manager.update_status(
+                        wf["id"], "failed", error_message=ctx.failure_message
+                    )
+                else:
+                    logger.warning(
+                        f"[_stream_output] exit_code=None → workflow {wf['id']} failed 처리"
+                    )
+                    ctx.wf_manager.update_status(
+                        wf["id"], "failed", error_message=ctx.failure_message
+                    )
+        except Exception as wf_err:
+            logger.warning(f"[_stream_output] workflow update 실패 (무시): {wf_err}")
+
+    # 구역 E: merge 또는 fallback 실행
+    if merge_requested:
+        # merge 흐름 — cleanup은 merge 완료/실패 후 _do_inline_merge 내부에서 호출
+        _do_inline_merge(ctx.runner_id, ctx.redis_client)
+    else:
+        # v2 merge fallback: merge_requested 플래그 없이도 "이미 머지됐지만 done 처리가 안 된" 상태를 감지하는 안전장치
+        _v2_detect = None
+        if ctx.runner_id:
+            try:
+                _v2_detect = detect_merged_but_not_done(ctx.runner_id, ctx.redis_client)
+            except Exception as _det_err:
+                logger.debug(f"[_stream_output] v2 detect 실패 (무시): {_det_err}")
+        if _v2_detect:
+            logger.info(
+                f"[_stream_output] v2 merge 후처리 fallback 실행: "
+                f"runner_id={ctx.runner_id}, plan={_v2_detect['plan_file']}"
+            )
+            try:
+                def _pub_fallback(msg: str) -> None:
+                    _pub_and_log(ctx.runner_id, msg, ctx.redis_client, "MERGE-FALLBACK")
+
+                _done_result = _handle_post_merge_done(
+                    _v2_detect["plan_file"], ctx.runner_id, _pub_fallback, ctx.redis_client
+                )
+                if ctx.wf_manager and ctx.runner_id:
+                    try:
+                        _wf = ctx.wf_manager.get_by_runner_id(ctx.runner_id)
+                        if _wf:
+                            if not _done_result.get("success", True):
+                                _reason = _done_result.get("reason", "done_post_merge_failed")
+                                ctx.wf_manager.update_status(
+                                    _wf["id"],
+                                    "failed",
+                                    error_message=f"Fallback done failed: {_reason}",
+                                )
+                            elif ctx.completed_for_flow:
+                                ctx.wf_manager.update_status(_wf["id"], "completed")
+                            else:
+                                ctx.wf_manager.update_status(
+                                    _wf["id"], "failed", error_message=ctx.failure_message
+                                )
+                    except Exception as _wf_err:
+                        logger.debug(
+                            f"[_stream_output] fallback workflow update 실패 (무시): {_wf_err}"
+                        )
+            except Exception as _fallback_err:
+                logger.warning(
+                    f"[_stream_output] v2 merge fallback 실패 (cleanup은 계속): "
+                    f"runner_id={ctx.runner_id}, error={_fallback_err}"
+                )
+        _cleanup_process_state(ctx.runner_id, ctx.redis_client)
