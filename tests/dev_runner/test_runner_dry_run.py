@@ -248,3 +248,39 @@ class TestRunnerDryRun:
             # 검증 후 정리
             for rid in (runner_id_1, runner_id_2):
                 await client.post("/api/v1/dev-runner/stop", json={"runner_id": rid})
+
+    async def test_accepted_started_ordering(self, listener_process, isolated_redis, e2e_redis_cleanup, e2e_worktree_cleanup):
+        """accepted_at <= started_at 순서 보장 TC
+
+        accepted_at: start_plan_runner()에서 lpush 직후 저장 (listener 처리 시점)
+        started_at: _launch_plan_runner_process()에서 프로세스 spawn 직후 저장
+        → accepted_at이 먼저 기록되고, started_at이 이후에 기록되어야 함
+        """
+        from datetime import datetime
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            runner_id = await _post_dry_run(client)
+
+            # started_at까지 관측될 때까지 대기 (프로세스 spawn 후 저장)
+            started_at_str = _wait_for_redis_key(
+                isolated_redis, f"{RUNNER_KEY_PREFIX}:{runner_id}:started_at", timeout=30
+            )
+            assert started_at_str is not None, f"started_at 미관찰 (runner_id={runner_id}, 30초)"
+
+            accepted_at_str = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_at")
+            assert accepted_at_str is not None, f"accepted_at 미관찰 (runner_id={runner_id})"
+
+            try:
+                accepted_at_dt = datetime.fromisoformat(accepted_at_str)
+                started_at_dt = datetime.fromisoformat(started_at_str)
+            except ValueError as e:
+                raise AssertionError(f"timestamp 파싱 실패: {e}") from e
+
+            assert accepted_at_dt <= started_at_dt, (
+                f"accepted_at({accepted_at_str}) > started_at({started_at_str}): "
+                "관측 순서 계약 위반"
+            )
+
+            # 정리
+            await client.post("/api/v1/dev-runner/stop", json={"runner_id": runner_id})

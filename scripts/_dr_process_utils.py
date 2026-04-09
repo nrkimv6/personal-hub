@@ -179,6 +179,25 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     except Exception as e:
         logger.warning(f"[cleanup] RECENT 등록 실패 (runner_id={runner_id}): {e}")
 
+    # recent-meta: cleanup 후에도 trigger/accepted_at/started_at 조회 가능하도록 보존
+    try:
+        import json as _json
+        from _dr_constants import RECENT_META_TTL
+        _meta = {}
+        for _field in ("trigger", "accepted_at", "started_at"):
+            _val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{_field}")
+            if _val is not None:
+                _meta[_field] = _val
+        if _meta:
+            redis_client.setex(
+                f"plan-runner:recent-meta:{runner_id}",
+                RECENT_META_TTL,
+                _json.dumps(_meta, ensure_ascii=False),
+            )
+            logger.debug(f"[cleanup] recent-meta 저장 (runner_id={runner_id}, fields={list(_meta.keys())})")
+    except Exception as _rmeta_err:
+        logger.warning(f"[cleanup] recent-meta 저장 실패 (무시, runner_id={runner_id}): {_rmeta_err}")
+
     # RECENT/stopped 반영 이후 완료 신호 publish (SSE 상태/완료 순서 충돌 방지)
     try:
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"

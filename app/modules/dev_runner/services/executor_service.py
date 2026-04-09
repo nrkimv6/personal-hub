@@ -627,6 +627,16 @@ class ExecutorService:
                     merge_status = d["merge_status"]
                     branch = d["branch"]
                     trigger = d["trigger"]
+                    # trigger 미존재 시 recent-meta fallback (cleanup 후 타이밍 이슈 방어)
+                    if trigger is None:
+                        try:
+                            _recent_meta_raw = await self.async_redis.get(f"plan-runner:recent-meta:{rid}")
+                            if _recent_meta_raw:
+                                import json as _json
+                                _recent_meta = _json.loads(_recent_meta_raw)
+                                trigger = _recent_meta.get("trigger")
+                        except Exception:
+                            pass
                     exit_reason = d["exit_reason"]
                     stop_stage = d["stop_stage"]
                     error = d["error"]

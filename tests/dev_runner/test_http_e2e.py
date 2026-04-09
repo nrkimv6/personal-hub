@@ -110,25 +110,41 @@ class TestHttpE2EChain:
 
         assert runner_id is not None, "API가 runner_id를 반환하지 않음 (500/504 오류)"
 
-        # 2. 실행 상태 확인
-        # dry_run은 매우 빨리 종료되어 running 상태를 놓칠 수 있으므로
-        # running/pid 또는 terminal status 또는 recent_runners 등록을 허용한다.
+        # 2. accepted_at 관측 필수 계약 — listener가 명령을 처리했다는 직접 증거
+        # accepted_at은 start_plan_runner()에서 accepted push 직후 저장되므로
+        # runner_id가 반환됐다면 반드시 관측되어야 한다.
+        accepted_at = None
+        for _ in range(20):
+            accepted_at = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_at")
+            if accepted_at:
+                break
+            time.sleep(0.5)
+        assert accepted_at is not None, (
+            f"accepted_at 키 미관찰 (runner_id={runner_id}): "
+            "listener가 accepted 처리를 완료했어야 하지만 메타가 없음"
+        )
+        accepted_source = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_source")
+        assert accepted_source == "listener", f"accepted_source 불일치: {accepted_source!r}"
+
+        # 3. lifecycle 관측 (started_at 포함)
+        # dry_run은 빠르게 종료되어 running 상태를 놓칠 수 있으므로
+        # started_at / terminal status / recent_runners 등록 중 하나를 허용한다.
         observed = False
         for _ in range(20):
             status = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
             pid = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+            started_at = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:started_at")
             in_recent = isolated_redis.zscore(RECENT_RUNNERS_KEY, runner_id) is not None
-            if (status == "running" and pid) or status in ("completed", "stopped", "failed") or in_recent:
+            if (status == "running" and pid) or started_at or status in ("completed", "stopped", "failed") or in_recent:
                 observed = True
                 break
             time.sleep(1)
 
-        if not observed:
-            print(
-                "\n[INFO] runner lifecycle not observed in Redis window "
-                f"(runner_id={runner_id}) - accepted async path allowed"
-            )
-        print(f"\n[START OK] runner_id={runner_id}, PID={isolated_redis.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:pid')}")
+        assert observed, (
+            f"runner lifecycle 미관찰 (runner_id={runner_id}): "
+            "started_at / running / terminal status / recent 중 어느 것도 없음"
+        )
+        print(f"\n[START OK] runner_id={runner_id}, PID={isolated_redis.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:pid')}, accepted_at={accepted_at}")
 
         # 3. Stop runner
         resp = client.post(f"{BASE_URL}/stop/{runner_id}")
