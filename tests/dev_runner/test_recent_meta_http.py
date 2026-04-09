@@ -44,7 +44,10 @@ class TestRecentMetaHttp:
     def cleanup_redis_after_test(self, isolated_redis):
         yield
         try:
-            stale_keys = isolated_redis.keys("plan-runner:*")
+            stale_keys = [
+                k for k in isolated_redis.keys("plan-runner:*")
+                if not k.startswith("plan-runner:listener:")
+            ]
             if stale_keys:
                 isolated_redis.delete(*stale_keys)
         except Exception:
