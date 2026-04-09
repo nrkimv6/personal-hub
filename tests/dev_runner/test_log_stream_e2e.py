@@ -89,27 +89,43 @@ def test_e2e_log_stream_receives_published_lines(r):
 
 @pytest.mark.e2e
 def test_e2e_log_stream_fallback_on_no_pubsub(r, tmp_path):
-    """E2E: pub/sub publish 없이 파일 폴링 fallback으로 내용 수신 (5초 대기)"""
+    """E2E: pub/sub publish 없이 파일 폴링 fallback으로 신규 줄 수신 (5초 대기)
+
+    Phase 3 T3-B: EOF 초기화로 기존 내용은 재전송하지 않고, 연결 후 추가된 줄만 전송.
+    """
     runner_id = "t4-fallback-test"
     url = f"{ADMIN_API}/api/v1/dev-runner/logs/stream?runner_id={runner_id}"
 
-    # 임시 로그 파일 생성
+    # 기존 내용이 있는 로그 파일 생성 (EOF 초기화로 이 내용은 재전송되지 않음)
     log_file = tmp_path / "fallback_test.log"
-    log_file.write_text("fallback-line-1\n" * 15 + "fallback-line-2\n" * 5, encoding="utf-8")
+    log_file.write_text("old-line\n" * 5, encoding="utf-8")
 
-    # Redis에 stream_log_path 설정 (plan-runner:runners:{runner_id}:stream_log_path)
     correct_key = f"plan-runner:runners:{runner_id}:stream_log_path"
     r.set(correct_key, str(log_file))
+
+    def append_after_delay():
+        """SSE 연결 + fallback 전환(5초) 후 새 줄 추가"""
+        time.sleep(8.0)  # fallback 전환(5초) + EOF init 후 안정화
+        with open(log_file, "a", encoding="utf-8") as f:
+            for i in range(5):
+                f.write(f"fallback-line-{i}\n")
+                f.flush()
+                time.sleep(0.5)
+
+    t = threading.Thread(target=append_after_delay, daemon=True)
+    t.start()
+
     try:
-        # pub/sub publish 없이 SSE 연결 — 5초 후 파일 폴링 전환
-        collected = _collect_sse_data_lines(url, timeout=10.0)
+        # 총 18초 대기: 8초 append 시작 + 파일 폴링 반영 마진
+        collected = _collect_sse_data_lines(url, timeout=18.0)
+        t.join(timeout=5)
         if not collected:
             pytest.skip("Admin API emitted no SSE data in fallback window")
         if any("Redis 연결 불가" in c for c in collected):
             pytest.skip("Admin API Redis unavailable — skip fallback E2E")
 
-        # 파일 내용이 SSE로 전달되어야 함
+        # 연결 후 추가된 새 줄이 SSE로 전달되어야 함
         assert any("fallback-line" in c for c in collected), \
             f"파일 폴링 fallback 미작동: collected={collected}"
     finally:
-        r.delete(f"plan-runner:runners:{runner_id}:stream_log_path")
+        r.delete(correct_key)
