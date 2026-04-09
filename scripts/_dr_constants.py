@@ -30,6 +30,8 @@ def _resolve_recent_runners_ttl() -> int:
 
 
 RECENT_RUNNERS_TTL = _resolve_recent_runners_ttl()
+# recent-meta 보존 TTL — cleanup 후에도 trigger/accepted_at/started_at 조회 가능 시간 (1시간)
+RECENT_META_TTL = 3600
 ADMIN_API_PORT = int(os.environ.get("ADMIN_API_PORT", "8001"))
 
 # per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
@@ -38,6 +40,7 @@ RUNNER_KEY_SUFFIXES = (
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
     "subprocess_heartbeat",
+    "accepted_at", "accepted_source", "started_at",  # 관측 메타 키 (Phase 1)
 )
 def _read_zombie_grace_seconds(default: int = 240) -> int:
     """좀비 감지 유예 시간(env override) 파싱."""

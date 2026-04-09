@@ -607,6 +607,18 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     redis_client.expire(result_key, 60)
     logger.info(f"[start_plan_runner] accepted 응답 즉시 반환 (runner_id: {runner_id})")
 
+    # 관측 메타: accepted 시점 타임스탬프 + 처리 경로 + trigger 조기 저장
+    # trigger는 _launch_plan_runner_process에서도 덮어쓰지만, worktree 생성 실패 등으로
+    # 프로세스 spawn에 실패해도 trigger가 관측 가능하도록 accepted 시점에 미리 저장한다.
+    try:
+        _accepted_at_ts = accepted["executed_at"]
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_at", _accepted_at_ts)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_source", "listener")
+        _trigger_early = command.get("trigger", "unknown")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", _trigger_early)
+    except Exception as _meta_err:
+        logger.warning(f"[start_plan_runner] accepted 메타 저장 실패 (무시): {_meta_err}")
+
     # 백그라운드 스레드에서 worktree 생성 + 프로세스 시작
     thread = threading.Thread(
         target=_do_start_plan_runner,
@@ -847,6 +859,8 @@ def _launch_plan_runner_process(
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
         trigger = command.get("trigger", "unknown")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", trigger)
+        # 관측 메타: 실제 프로세스 spawn 성공 시점 저장 (accepted_at <= started_at 계약)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:started_at", datetime.now().isoformat())
 
         logger.info(f"plan-runner started (PID: {process.pid}, log: {log_file})")
 
