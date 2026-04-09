@@ -82,8 +82,11 @@ def _build_failure_error_message(
     exit_reason: str,
     stop_stage: Optional[str],
     detail: Optional[str],
+    lines_count: int = -1,
 ) -> str:
     parts = [f"exit_code={exit_code}", f"exit_reason={exit_reason}"]
+    if lines_count == 0:
+        parts.append(f"subprocess 즉시 종료 (exit_code={exit_code})")
     if stop_stage:
         parts.append(f"stop_stage={stop_stage}")
     if detail:

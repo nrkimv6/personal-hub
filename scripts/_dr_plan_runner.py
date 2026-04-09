@@ -6,8 +6,9 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import IO, Dict, Optional
 
+import psutil
 import redis
 
 from _dr_constants import (
@@ -109,8 +110,11 @@ def _build_failure_error_message(
     exit_reason: str,
     stop_stage: Optional[str],
     detail: Optional[str],
+    lines_count: int = -1,
 ) -> str:
     parts = [f"exit_code={exit_code}", f"exit_reason={exit_reason}"]
+    if lines_count == 0:
+        parts.append(f"subprocess 즉시 종료 (exit_code={exit_code})")
     if stop_stage:
         parts.append(f"stop_stage={stop_stage}")
     if detail:
@@ -253,7 +257,13 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     _cleanup_process_state(runner_id, redis_client)
 
 
-def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
+def _stream_output(
+    process: subprocess.Popen,
+    log_handle,
+    redis_client: redis.Redis,
+    runner_id: str = "",
+    stderr_handle: Optional[IO] = None,
+):
     """프로세스 stdout을 라인별로 읽어 파일 기록 + Redis publish 동시 수행
 
     노이즈 필터:
@@ -266,6 +276,47 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
     logger.info(f"[_stream_output] 시작 runner_id={runner_id!r}")
     _running_log_files = get_running_log_files()
     _wf_manager = get_wf_manager()
+
+    # ── Phase 1: 조기 사망 감지 ─────────────────────────────────────────
+    _start_time = time.time()
+    log_channel_init = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
+
+    # 진입 시점에서 이미 종료됐는지 즉시 확인
+    _initial_poll = process.poll()
+    if _initial_poll is not None:
+        _elapsed = time.time() - _start_time
+        _early_msg = f"[EARLY_EXIT] exit_code={_initial_poll}, elapsed={_elapsed:.1f}s (진입 즉시 감지)"
+        logger.warning(f"[_stream_output] {_early_msg} runner_id={runner_id!r}")
+        try:
+            log_handle.write(_early_msg + "\n")
+            log_handle.flush()
+        except Exception:
+            pass
+        try:
+            _publish_with_retry(redis_client, log_channel_init, _early_msg)
+        except Exception:
+            pass
+
+    # stdout readline 루프 진입 전 poll 재확인 (Python 초기화 실패 시 즉시 종료 패턴 방어)
+    # 500ms 단일 sleep 금지 → 50ms×10 분할 (pipe buffer 압박 방지)
+    if _initial_poll is None:
+        for _ in range(10):
+            time.sleep(0.05)
+            if process.poll() is not None:
+                _elapsed = time.time() - _start_time
+                _early_msg2 = f"[EARLY_EXIT] exit_code={process.poll()}, elapsed={_elapsed:.1f}s (readline 진입 전 감지)"
+                logger.warning(f"[_stream_output] {_early_msg2} runner_id={runner_id!r}")
+                try:
+                    log_handle.write(_early_msg2 + "\n")
+                    log_handle.flush()
+                except Exception:
+                    pass
+                try:
+                    _publish_with_retry(redis_client, log_channel_init, _early_msg2)
+                except Exception:
+                    pass
+                break
+    # ────────────────────────────────────────────────────────────────────
 
     suppressed_count = 0
     _last_flushed_pos: int = 0  # 파이프 루프에서 마지막으로 flush한 파일 위치 (drain 중복 방지용)
@@ -280,6 +331,33 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
     publish_ok = 0
     publish_fail = 0
     framer = MultilineFrameBuffer(max_chars=8192)
+
+    # ── Phase 3: stderr 별도 스레드 ──────────────────────────────────────
+    _stderr_thread: Optional[threading.Thread] = None
+
+    def _drain_stderr(stderr_fh) -> None:
+        """stderr 파이프를 읽어 log_handle에 [STDERR] prefix로 기록"""
+        try:
+            for _sline in stderr_fh:
+                _stripped_s = _sline.rstrip("\n")
+                if _stripped_s:
+                    _msg = f"[STDERR] {_stripped_s}"
+                    try:
+                        log_handle.write(_msg + "\n")
+                        log_handle.flush()
+                    except Exception:
+                        pass
+                    try:
+                        _publish_with_retry(redis_client, log_channel_init, _msg)
+                    except Exception:
+                        pass
+        except Exception as _se:
+            logger.debug(f"[_stream_output] stderr drain 중 예외 (무시): {_se}")
+
+    if stderr_handle is not None:
+        _stderr_thread = threading.Thread(target=_drain_stderr, args=(stderr_handle,), daemon=True)
+        _stderr_thread.start()
+    # ────────────────────────────────────────────────────────────────────
 
     def _publish_frame(frame_text: str) -> None:
         nonlocal suppressed_count, last_line, repeat_count, repeat_start, publish_ok, publish_fail
@@ -389,9 +467,62 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                     process.wait(timeout=5)
                 except Exception:
                     pass
+        # ── Phase 3: stderr 스레드 정리 ─────────────────────────────────
+        if _stderr_thread is not None:
+            _stderr_thread.join(timeout=5)
+            if _stderr_thread.is_alive():
+                logger.warning(f"[_stream_output] stderr 스레드 join(5s) 타임아웃 (runner_id={runner_id!r}) — 강제 포기")
+            # 잔여 stderr drain (스레드가 이미 읽었으므로 대부분 비어있음)
+            if stderr_handle is not None:
+                try:
+                    for _sl in stderr_handle:
+                        _msg = f"[STDERR] {_sl.rstrip()}"
+                        try:
+                            log_handle.write(_msg + "\n")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        # ────────────────────────────────────────────────────────────────
+
         exit_code = process.returncode
+        _elapsed_total = time.time() - _start_time
         logger.info(f"Output streaming thread finished (exit code: {exit_code})")
         logger.info(f"[_stream_output] finally 분기 시작 (runner_id={runner_id!r}, exit_code={exit_code})")
+
+        # ── Phase 1: lines=0 + 비정상 종료 시 상세 진단 ─────────────────
+        if _line_count == 0 and exit_code not in (0, None):
+            _diag_parts = [
+                f"[DIAG] lines=0, exit_code={exit_code}, elapsed={_elapsed_total:.1f}s",
+            ]
+            try:
+                _vmem = psutil.virtual_memory()
+                _diag_parts.append(
+                    f"mem_available={_vmem.available // (1024*1024)}MB, "
+                    f"mem_total={_vmem.total // (1024*1024)}MB"
+                )
+            except Exception as _me:
+                _diag_parts.append(f"mem_check_failed={_me}")
+            try:
+                _proc_mem = psutil.Process(process.pid).memory_info()
+                _diag_parts.append(f"proc_rss={_proc_mem.rss // (1024*1024)}MB")
+            except Exception:
+                pass  # NoSuchProcess 등 — subprocess 이미 종료됨
+            _diag_parts.append(f"cwd={process.args[0] if hasattr(process, 'args') else 'unknown'}")
+            _diag_msg = " | ".join(_diag_parts)
+            logger.warning(f"[_stream_output] {_diag_msg} runner_id={runner_id!r}")
+            try:
+                log_handle.write(_diag_msg + "\n")
+                log_handle.flush()
+            except Exception:
+                pass
+            _log_channel_diag = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
+            try:
+                _publish_with_retry(redis_client, _log_channel_diag, _diag_msg)
+            except Exception:
+                pass
+        # ────────────────────────────────────────────────────────────────
+
         _exit_reason = "completed"
         if runner_id:
             try:
@@ -458,6 +589,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             exit_reason=_exit_reason,
             stop_stage=_stop_stage,
             detail=_error_detail,
+            lines_count=_line_count,
         )
 
         if runner_id and not _completed_for_flow:
@@ -1011,7 +1143,20 @@ def _launch_plan_runner_process(
             f"execution_count={execution_count_text} | plan_key={plan_key_text}"
         )
         log_handle.write(run_meta_line + "\n")
+
+        # ── Phase 2: [ENV] 헤더 — 사후 분석용 환경/메모리 정보 ──────────
+        try:
+            _vmem_hdr = psutil.virtual_memory()
+            _env_line = (
+                f"[ENV] available_memory={_vmem_hdr.available // (1024*1024)}MB, "
+                f"total_memory={_vmem_hdr.total // (1024*1024)}MB, "
+                f"python={str(PLAN_RUNNER_PYTHON)}"
+            )
+        except Exception as _vmem_err:
+            _env_line = f"[ENV] mem_check_failed={_vmem_err}, python={str(PLAN_RUNNER_PYTHON)}"
+        log_handle.write(_env_line + "\n")
         log_handle.flush()
+        # ────────────────────────────────────────────────────────────────
 
         try:
             redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", run_meta_line)
@@ -1036,11 +1181,45 @@ def _launch_plan_runner_process(
         if branch:
             env["PLAN_RUNNER_BRANCH"] = branch
 
+        # ── Phase 2: 메모리 사전 검증 ────────────────────────────────────
+        try:
+            _pre_vmem = psutil.virtual_memory()
+            _avail_mb = _pre_vmem.available // (1024 * 1024)
+            _log_ch_pre = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+            if _avail_mb < 300:
+                _reject_msg = f"메모리 부족으로 plan-runner 실행 거부 (가용: {_avail_mb}MB < 300MB)"
+                logger.error(f"[_launch_plan_runner_process] {_reject_msg}")
+                try:
+                    log_handle.write(f"[REJECT] {_reject_msg}\n")
+                    log_handle.flush()
+                except Exception:
+                    pass
+                try:
+                    redis_client.publish(_log_ch_pre, f"[REJECT] {_reject_msg}")
+                except Exception:
+                    pass
+                try:
+                    log_handle.close()
+                except Exception:
+                    pass
+                return {"success": False, "message": _reject_msg}
+            elif _avail_mb < 500:
+                _warn_msg = f"[WARN] 가용 메모리 낮음 ({_avail_mb}MB < 500MB) — 실행 계속"
+                logger.warning(f"[_launch_plan_runner_process] {_warn_msg}")
+                try:
+                    log_handle.write(_warn_msg + "\n")
+                    log_handle.flush()
+                except Exception:
+                    pass
+        except Exception as _mem_chk_err:
+            logger.warning(f"[_launch_plan_runner_process] 메모리 확인 실패 (무시): {_mem_chk_err}")
+        # ────────────────────────────────────────────────────────────────
+
         process = subprocess.Popen(
             cmd,
             cwd=str(PLAN_RUNNER_MODULE_PATH),
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -1050,10 +1229,11 @@ def _launch_plan_runner_process(
         _running_processes[runner_id] = process
         _running_log_files[runner_id] = log_file
 
-        # 별도 스레드에서 stdout 을 파일 + Redis publish
+        # 별도 스레드에서 stdout 을 파일 + Redis publish (stderr는 별도 파이프로 분리)
         thread = threading.Thread(
             target=_stream_output,
             args=(process, log_handle, redis_client, runner_id),
+            kwargs={"stderr_handle": process.stderr},
             daemon=True,
         )
         thread.start()
