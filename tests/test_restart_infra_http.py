@@ -4,6 +4,7 @@ restart_infra HTTP 통합 테스트 (T5)
 TestClient로 infra restart API 엔드포인트 + worker_status tier 필드 검증
 """
 import subprocess
+import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
@@ -16,9 +17,6 @@ def client():
 
 def _sp_ok(stdout="완료"):
     return MagicMock(returncode=0, stdout=stdout, stderr="")
-
-
-import pytest
 
 
 class TestRestartInfraHttp:
