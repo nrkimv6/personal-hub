@@ -908,7 +908,9 @@ class TestStreamEventsFileFallback:
         """R: log_completed 수신 시 runner tail/dedup 상태가 즉시 정리된다."""
         runner_id = "fb-cleanup-01"
         log_file = tmp_path / "runner-cleanup.log"
-        log_file.write_text("boot\n", encoding="utf-8")
+        # 빈 파일로 시작 — _init_tail_offsets_for_active_runners 가 EOF(=0)로 초기화한 후
+        # connected/status 소비 뒤에 데이터를 써야 fallback이 delta를 읽을 수 있다.
+        log_file.write_text("", encoding="utf-8")
 
         sync_redis.sadd("plan-runner:active_runners", runner_id)
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
@@ -938,7 +940,11 @@ class TestStreamEventsFileFallback:
         _ = await gen.__anext__()  # connected
         _ = await gen.__anext__()  # status
 
-        _ = await asyncio.wait_for(gen.__anext__(), timeout=2.0)  # fallback log 이벤트(초기 파일 라인)
+        # EOF 초기화 후에 신규 데이터를 추가해야 fallback이 delta를 감지한다.
+        with open(log_file, "a", encoding="utf-8") as fh:
+            fh.write("boot\n")
+
+        _ = await asyncio.wait_for(gen.__anext__(), timeout=2.0)  # fallback log 이벤트
         assert runner_id in event_service._runner_tail_state
 
         emit_completed = True
