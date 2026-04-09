@@ -92,7 +92,7 @@ def _strict_redis_mock() -> MagicMock:
 
 # ========== TC ==========
 
-def test_stream_output_finally_merge_requested_flag(listener_mod, plan_runner_mod, fr):
+def test_stream_output_finally_merge_requested_flag(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """R(Right): merge_requested 플래그 있으면 _do_inline_merge() 호출"""
     runner_id = "t-stream-aabb"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
@@ -104,16 +104,16 @@ def test_stream_output_finally_merge_requested_flag(listener_mod, plan_runner_mo
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None):
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     mock_merge.assert_called_once_with(runner_id, fr)
     mock_cleanup.assert_not_called()
 
 
-def test_stream_output_finally_no_merge_flag(listener_mod, plan_runner_mod, fr):
+def test_stream_output_finally_no_merge_flag(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """R(Right): merge_requested 플래그 없으면 _cleanup_process_state() 호출"""
     runner_id = "t-stream-eeff"
     # 플래그 미설정
@@ -125,32 +125,32 @@ def test_stream_output_finally_no_merge_flag(listener_mod, plan_runner_mod, fr):
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None):
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     mock_cleanup.assert_called_once_with(runner_id, fr)
     mock_merge.assert_not_called()
 
 
-def test_stream_output_finally_empty_runner_id(listener_mod, plan_runner_mod, fr):
+def test_stream_output_finally_empty_runner_id(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """B(Boundary): runner_id='' 이면 merge 없이 cleanup만 호출"""
     process = _make_process(returncode=0)
     log_handle = _make_log_handle()
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=None), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None):
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None):
         listener_mod._stream_output(process, log_handle, fr, runner_id="")
 
     mock_cleanup.assert_called_once_with("", fr)
     mock_merge.assert_not_called()
 
 
-def test_stream_output_finally_nonzero_exit(listener_mod, plan_runner_mod, fr):
+def test_stream_output_finally_nonzero_exit(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """B(Boundary): exit_code=1 이면 workflow failed + cleanup 호출"""
     runner_id = "t-stream-dead"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")  # 플래그 있어도 머지 안 됨
@@ -161,9 +161,9 @@ def test_stream_output_finally_nonzero_exit(listener_mod, plan_runner_mod, fr):
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None):
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     wf_mgr.update_status.assert_called_with(
@@ -175,7 +175,7 @@ def test_stream_output_finally_nonzero_exit(listener_mod, plan_runner_mod, fr):
     mock_merge.assert_not_called()
 
 
-def test_stream_output_finally_redis_error(listener_mod, plan_runner_mod, fr):
+def test_stream_output_finally_redis_error(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """E(Error): Redis get 실패 시 warning 로그 출력 후 cleanup fallback"""
     runner_id = "t-stream-cafe"
 
@@ -188,10 +188,10 @@ def test_stream_output_finally_redis_error(listener_mod, plan_runner_mod, fr):
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "logger") as mock_logger:
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "logger") as mock_logger:
         listener_mod._stream_output(process, log_handle, broken_redis, runner_id=runner_id)
 
     # warning 로그 출력 확인
@@ -211,7 +211,7 @@ def test_stream_output_merge_strict_redis_default_none_B():
     assert value is None
 
 
-def test_stream_output_workflow_status_no_merge(listener_mod, plan_runner_mod, fr):
+def test_stream_output_workflow_status_no_merge(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """R(Right): merge_requested 없는 정상 종료 시 workflow status=completed"""
     runner_id = "t-stream-1122"
     # 플래그 미설정
@@ -223,15 +223,15 @@ def test_stream_output_workflow_status_no_merge(listener_mod, plan_runner_mod, f
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge"), \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None):
+         patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     wf_mgr.update_status.assert_called_with(wf["id"], "completed")
 
 
-def test_stream_output_sets_pre_merge_status(listener_mod, plan_runner_mod, fr):
+def test_stream_output_sets_pre_merge_status(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """R(Right): merge_requested=1 + exit_code=0 시 인라인 merge가 상태 전이를 담당"""
     runner_id = "t-premrg-aabb"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
@@ -242,9 +242,9 @@ def test_stream_output_sets_pre_merge_status(listener_mod, plan_runner_mod, fr):
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=None), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None):
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     mock_merge.assert_called_once_with(runner_id, fr)
@@ -252,7 +252,7 @@ def test_stream_output_sets_pre_merge_status(listener_mod, plan_runner_mod, fr):
     assert merge_status is None, f"merge_status는 _stream_output에서 직접 세팅하지 않아야 함, 실제: {merge_status!r}"
 
 
-def test_stream_output_no_pre_merge_when_no_flag(listener_mod, plan_runner_mod, fr):
+def test_stream_output_no_pre_merge_when_no_flag(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """B(Boundary): merge_requested 없음 + exit_code=0 → merge_status 설정 안 됨 (Fix 4)"""
     runner_id = "t-premrg-ccdd"
     # merge_requested 미설정
@@ -262,9 +262,9 @@ def test_stream_output_no_pre_merge_when_no_flag(listener_mod, plan_runner_mod, 
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=None), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge"), \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None):
+         patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     merge_status = fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
@@ -315,7 +315,7 @@ def test_cleanup_allows_worktree_removal_without_merge_signal(listener_mod, fr):
 
 # ========== 신규 TC: 에러 가시성 + merge 판정 로그 레벨 ==========
 
-def test_error_exit_no_stdout_publishes_failure_message(listener_mod, plan_runner_mod, fr):
+def test_error_exit_no_stdout_publishes_failure_message(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """R(Right): stdout 없는 에러 종료 → [ERROR] _failure_message 채널 publish"""
     runner_id = "t-err-vis-001"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "error")
@@ -328,12 +328,12 @@ def test_error_exit_no_stdout_publishes_failure_message(listener_mod, plan_runne
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge"), \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "_pick_error_detail_line", return_value=None), \
-         patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=[]), \
-         patch.object(plan_runner_mod, "_publish_with_retry", side_effect=lambda rc, ch, msg: published_messages.append(msg) or True):
+         patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_pick_error_detail_line", return_value=None), \
+         patch.object(stream_cleanup_mod, "_load_log_tail_lines", return_value=[]), \
+         patch.object(stream_cleanup_mod, "_publish_with_retry", side_effect=lambda rc, ch, msg: published_messages.append(msg) or True):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     error_msgs = [m for m in published_messages if m.startswith("[ERROR]")]
@@ -342,7 +342,7 @@ def test_error_exit_no_stdout_publishes_failure_message(listener_mod, plan_runne
         f"exit_code=15 포함 [ERROR] 메시지 없음. error_msgs={error_msgs}"
 
 
-def test_error_exit_with_detail_publishes_detail(listener_mod, plan_runner_mod, fr):
+def test_error_exit_with_detail_publishes_detail(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """R(Right): stdout에 에러 힌트 있음 → 기존대로 [ERROR] {_error_detail} publish (회귀 방지)"""
     runner_id = "t-err-vis-002"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "error")
@@ -355,12 +355,12 @@ def test_error_exit_with_detail_publishes_detail(listener_mod, plan_runner_mod, 
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge"), \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "_pick_error_detail_line", return_value="SomeError: details"), \
-         patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=["SomeError: details"]), \
-         patch.object(plan_runner_mod, "_publish_with_retry", side_effect=lambda rc, ch, msg: published_messages.append(msg) or True):
+         patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_pick_error_detail_line", return_value="SomeError: details"), \
+         patch.object(stream_cleanup_mod, "_load_log_tail_lines", return_value=["SomeError: details"]), \
+         patch.object(stream_cleanup_mod, "_publish_with_retry", side_effect=lambda rc, ch, msg: published_messages.append(msg) or True):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     error_msgs = [m for m in published_messages if m.startswith("[ERROR]")]
@@ -371,7 +371,7 @@ def test_error_exit_with_detail_publishes_detail(listener_mod, plan_runner_mod, 
         f"_failure_message 포맷이 잘못 publish됨: {error_msgs}"
 
 
-def test_no_merge_flag_uses_debug_log(listener_mod, plan_runner_mod, fr):
+def test_no_merge_flag_uses_debug_log(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """R(Right): merge_requested 키 없음 → CLEANUP 채널에 'merge 분기 판정' 미출력"""
     runner_id = "t-merge-log-001"
     # merge_requested 키 미세팅
@@ -384,11 +384,11 @@ def test_no_merge_flag_uses_debug_log(listener_mod, plan_runner_mod, fr):
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge"), \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "_pub_and_log", side_effect=lambda rid, msg, rc, tag: pub_and_log_calls.append(msg)), \
-         patch.object(plan_runner_mod, "logger") as mock_logger:
+         patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_pub_and_log", side_effect=lambda rid, msg, rc, tag: pub_and_log_calls.append(msg)), \
+         patch.object(stream_cleanup_mod, "logger") as mock_logger:
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     # _pub_and_log에 "merge 분기 판정" 문자열이 전달되지 않아야 함
@@ -400,7 +400,7 @@ def test_no_merge_flag_uses_debug_log(listener_mod, plan_runner_mod, fr):
         f"logger.debug에 merge 분기 판정 미기록. debug_calls={debug_calls}"
 
 
-def test_merge_flag_exists_publishes_cleanup_log(listener_mod, plan_runner_mod, fr):
+def test_merge_flag_exists_publishes_cleanup_log(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """R(Right): merge_requested 키 존재 → CLEANUP 채널에 'merge 분기 판정' 출력 유지"""
     runner_id = "t-merge-log-002"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
@@ -414,17 +414,17 @@ def test_merge_flag_exists_publishes_cleanup_log(listener_mod, plan_runner_mod, 
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge"), \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "_pub_and_log", side_effect=lambda rid, msg, rc, tag: pub_and_log_calls.append(msg)):
+         patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_pub_and_log", side_effect=lambda rid, msg, rc, tag: pub_and_log_calls.append(msg)):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     assert any("merge 분기 판정" in m for m in pub_and_log_calls), \
         f"merge_requested 있을 때 CLEANUP 채널 미출력. pub_and_log_calls={pub_and_log_calls}"
 
 
-def test_v2_fallback_runs_without_merge_flag(listener_mod, plan_runner_mod, fr):
+def test_v2_fallback_runs_without_merge_flag(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """B(Boundary): merge_requested 없어도 v2 fallback(detect_merged_but_not_done) 실행"""
     runner_id = "t-v2-fallback-001"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
@@ -436,16 +436,16 @@ def test_v2_fallback_runs_without_merge_flag(listener_mod, plan_runner_mod, fr):
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None) as mock_detect:
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None) as mock_detect:
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     mock_detect.assert_called_once_with(runner_id, fr)
     mock_merge.assert_not_called()
 
 
-def test_flag_undefined_on_redis_error_no_name_error(listener_mod, plan_runner_mod, fr):
+def test_flag_undefined_on_redis_error_no_name_error(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """E(Error): Redis get 실패 시 _flag=None fallback, NameError 없음"""
     runner_id = "t-flag-init-001"
 
@@ -460,10 +460,10 @@ def test_flag_undefined_on_redis_error_no_name_error(listener_mod, plan_runner_m
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge"), \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "_pub_and_log", side_effect=lambda rid, msg, rc, tag: pub_and_log_calls.append(msg)):
+         patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_pub_and_log", side_effect=lambda rid, msg, rc, tag: pub_and_log_calls.append(msg)):
         # NameError 없이 정상 종료해야 함
         listener_mod._stream_output(process, log_handle, broken_redis, runner_id=runner_id)
 
@@ -472,7 +472,7 @@ def test_flag_undefined_on_redis_error_no_name_error(listener_mod, plan_runner_m
         f"Redis 오류 시 _flag=None인데 CLEANUP 채널에 merge 분기 판정 publish됨: {pub_and_log_calls}"
 
 
-def test_completed_exit_with_no_stdout_no_error_publish(listener_mod, plan_runner_mod, fr):
+def test_completed_exit_with_no_stdout_no_error_publish(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """B(Boundary): exit_code=0 + completed → [ERROR] publish 안 함"""
     runner_id = "t-completed-001"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
@@ -485,12 +485,12 @@ def test_completed_exit_with_no_stdout_no_error_publish(listener_mod, plan_runne
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge"), \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "_pick_error_detail_line", return_value=None), \
-         patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=[]), \
-         patch.object(plan_runner_mod, "_publish_with_retry", side_effect=lambda rc, ch, msg: published_messages.append(msg) or True):
+         patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_pick_error_detail_line", return_value=None), \
+         patch.object(stream_cleanup_mod, "_load_log_tail_lines", return_value=[]), \
+         patch.object(stream_cleanup_mod, "_publish_with_retry", side_effect=lambda rc, ch, msg: published_messages.append(msg) or True):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     error_msgs = [m for m in published_messages if m.startswith("[ERROR]")]
@@ -499,7 +499,7 @@ def test_completed_exit_with_no_stdout_no_error_publish(listener_mod, plan_runne
 
 # ========== 신규 TC: exit_code=0 + completed 경로 워크트리 커밋 감지 ==========
 
-def test_auto_merge_on_completed_with_worktree_commits_R_success(listener_mod, plan_runner_mod, fr):
+def test_auto_merge_on_completed_with_worktree_commits_R_success(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """R(Right): exit_code=0 + completed + merge_requested 없음 + 워크트리 커밋 있음 → merge"""
     runner_id = "t-automrg-001"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
@@ -511,17 +511,17 @@ def test_auto_merge_on_completed_with_worktree_commits_R_success(listener_mod, p
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "_has_worktree_commits", return_value=True):
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_has_worktree_commits", return_value=True):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     mock_merge.assert_called_once_with(runner_id, fr)
     mock_cleanup.assert_not_called()
 
 
-def test_no_merge_on_completed_without_worktree_commits_B_no_commits(listener_mod, plan_runner_mod, fr):
+def test_no_merge_on_completed_without_worktree_commits_B_no_commits(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """B(Boundary): exit_code=0 + completed + merge_requested 없음 + 워크트리 커밋 없음 → merge 안 함"""
     runner_id = "t-automrg-002"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
@@ -532,17 +532,17 @@ def test_no_merge_on_completed_without_worktree_commits_B_no_commits(listener_mo
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "_has_worktree_commits", return_value=False):
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_has_worktree_commits", return_value=False):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     mock_merge.assert_not_called()
     mock_cleanup.assert_called_once_with(runner_id, fr)
 
 
-def test_no_merge_on_completed_without_branch_key_B_no_branch(listener_mod, plan_runner_mod, fr):
+def test_no_merge_on_completed_without_branch_key_B_no_branch(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """B(Boundary): exit_code=0 + completed + merge_requested 없음 + branch 키 없음 → merge 안 함"""
     runner_id = "t-automrg-003"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
@@ -554,9 +554,9 @@ def test_no_merge_on_completed_without_branch_key_B_no_branch(listener_mod, plan
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None):
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None):
         # _has_worktree_commits는 실제 호출 — FakeRedis에 branch 키 없으므로 False 반환
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
@@ -564,7 +564,7 @@ def test_no_merge_on_completed_without_branch_key_B_no_branch(listener_mod, plan
     mock_cleanup.assert_called_once_with(runner_id, fr)
 
 
-def test_merge_requested_flag_still_takes_precedence_I_flag_override(listener_mod, plan_runner_mod, fr):
+def test_merge_requested_flag_still_takes_precedence_I_flag_override(listener_mod, plan_runner_mod, stream_cleanup_mod, fr):
     """I(Inverse): merge_requested=1 플래그 있으면 _has_worktree_commits 호출 없이 merge"""
     runner_id = "t-automrg-004"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
@@ -576,10 +576,10 @@ def test_merge_requested_flag_still_takes_precedence_I_flag_override(listener_mo
 
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-         patch.object(plan_runner_mod, "_has_worktree_commits") as mock_hwc:
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_has_worktree_commits") as mock_hwc:
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     mock_merge.assert_called_once_with(runner_id, fr)
@@ -589,49 +589,49 @@ def test_merge_requested_flag_still_takes_precedence_I_flag_override(listener_mo
 
 # ========== 신규 TC: _has_worktree_commits 단위 테스트 ==========
 
-def test_has_worktree_commits_true_R_success(plan_runner_mod, fr):
+def test_has_worktree_commits_true_R_success(stream_cleanup_mod, fr):
     """R(Right): branch 키 있고 git log 결과 있으면 True"""
     runner_id = "t-hwc-001"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/some-branch")
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="abc1234 feat: impl\ndef5678 fix: test\n", returncode=0)
-        result = plan_runner_mod._has_worktree_commits(runner_id, fr)
+        result = stream_cleanup_mod._has_worktree_commits(runner_id, fr)
 
     assert result is True
 
 
-def test_has_worktree_commits_false_B_no_commits(plan_runner_mod, fr):
+def test_has_worktree_commits_false_B_no_commits(stream_cleanup_mod, fr):
     """B(Boundary): branch 키 있지만 git log 결과 비어있으면 False"""
     runner_id = "t-hwc-002"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/some-branch")
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="", returncode=0)
-        result = plan_runner_mod._has_worktree_commits(runner_id, fr)
+        result = stream_cleanup_mod._has_worktree_commits(runner_id, fr)
 
     assert result is False
 
 
-def test_has_worktree_commits_no_branch_E_missing_branch(plan_runner_mod, fr):
+def test_has_worktree_commits_no_branch_E_missing_branch(stream_cleanup_mod, fr):
     """E(Error): branch 키 없으면 subprocess 호출 없이 False"""
     runner_id = "t-hwc-003"
     # branch 키 미설정
 
     with patch("subprocess.run") as mock_run:
-        result = plan_runner_mod._has_worktree_commits(runner_id, fr)
+        result = stream_cleanup_mod._has_worktree_commits(runner_id, fr)
 
     assert result is False
     mock_run.assert_not_called()
 
 
-def test_has_worktree_commits_git_error_E_command_fail(plan_runner_mod, fr):
+def test_has_worktree_commits_git_error_E_command_fail(stream_cleanup_mod, fr):
     """E(Error): git log 실행 실패(Exception) → False 반환 (안전 기본값)"""
     runner_id = "t-hwc-004"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/some-branch")
 
     with patch("subprocess.run", side_effect=Exception("git not found")):
-        result = plan_runner_mod._has_worktree_commits(runner_id, fr)
+        result = stream_cleanup_mod._has_worktree_commits(runner_id, fr)
 
     assert result is False
 
@@ -661,7 +661,7 @@ def real_git_repo():
         yield tmpdir
 
 
-def test_completed_flow_triggers_merge_with_real_git(listener_mod, plan_runner_mod, fr, real_git_repo):
+def test_completed_flow_triggers_merge_with_real_git(listener_mod, plan_runner_mod, stream_cleanup_mod, fr, real_git_repo):
     """T3: 실제 git 저장소로 exit_code=0 + completed + 워크트리 커밋 → _do_inline_merge 호출 검증"""
     runner_id = "t-realgit-001"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
@@ -675,9 +675,9 @@ def test_completed_flow_triggers_merge_with_real_git(listener_mod, plan_runner_m
     from pathlib import Path
     with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
          patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-         patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-         patch.object(plan_runner_mod, "_cleanup_process_state"), \
-         patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
+         patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+         patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+         patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
          patch("_dr_constants.PROJECT_ROOT", Path(real_git_repo)):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
