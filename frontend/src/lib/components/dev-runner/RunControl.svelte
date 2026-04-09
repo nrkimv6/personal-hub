@@ -65,17 +65,21 @@
 		],
 		gemini: [
 			'gemini-3.1-pro-preview',
+			'gemini-3.1-pro',
 			'gemini-3-flash-preview',
 			'gemini-3-pro-preview',
+			'gemini-2.5-pro-preview-05-06',
 			'gemini-2.0-flash-thinking-exp',
 			'gemini-2.0-flash'
 		],
 		codex: [
-			'gpt-5.3-codex'
+			'gpt-5.4',
+			'gpt-5.3-codex',
+			'o3'
 		],
 		'cc-codex': [
-			'sonnet',
 			'opus',
+			'sonnet',
 			'haiku'
 		]
 	};
@@ -126,17 +130,16 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	}
 
 	function getModelOptions(engine: string): string[] {
+		const predefined = PREDEFINED_MODELS[engine] ?? [];
 		const config = engineConfigs?.[engine];
 		if (config) {
-			const merged = [config.default_model, ...Object.values(config.models ?? {})]
+			const fromConfig = [config.default_model, ...Object.values(config.models ?? {})]
 				.filter((model): model is string => Boolean(model && model.trim()));
-			const unique = Array.from(new Set(merged));
-			if (unique.length > 0) {
-				return unique;
-			}
+			const merged = [...fromConfig, ...predefined];
+			return Array.from(new Set(merged));
 		}
 
-		return PREDEFINED_MODELS[engine] ?? [];
+		return predefined;
 	}
 
 	function sortPhaseKeys(keys: string[]): string[] {
