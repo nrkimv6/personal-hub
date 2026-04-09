@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import time
@@ -44,9 +45,10 @@ REDIS_PORT = 6379
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
-LOG_CHANNEL = "plan-runner:logs"  # 하위호환 — plan_service 등 단일 채널 publish용
+SYSTEM_LOG_CHANNEL = "plan-runner:system"  # 전역 시스템 알림용, per-runner 로그 채널과 구분
 
 HEARTBEAT_INTERVAL = 30  # 초
+FILE_POLL_TIMEOUT = 5.0  # pub/sub 미수신 N초 후 파일 폴링 전환 (테스트에서 patch 가능)
 _ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
 
 
@@ -294,7 +296,6 @@ class LogService:
         # Phase 2: 파일 폴링 fallback
         _no_msg_since = time.monotonic()
         _file_pos = _file_pos_init
-        FILE_POLL_TIMEOUT = 5.0  # pub/sub 미수신 N초 후 파일 폴링 전환
         _poll_chunk_buffer = ""
         _poll_framer = _PollFrameBuffer()
 
@@ -334,7 +335,19 @@ class LogService:
                             log_file = self._find_current_log(runner_id)
                             if log_file and log_file.exists():
                                 if _file_pos == 0:
-                                    logger.warning(f"[SSE] pub/sub 미수신 {FILE_POLL_TIMEOUT:.0f}초 → 파일 폴링: {log_channel}")
+                                    # since_line=0: 파일 폴링 첫 진입 시 EOF seek으로 초기화 (기존 내용 중복 재전송 방지)
+                                    try:
+                                        with open(log_file, "r", encoding="utf-8", errors="replace") as _f_init:
+                                            _f_init.seek(0, 2)  # SEEK_END
+                                            _file_pos = _f_init.tell()
+                                    except Exception:
+                                        pass
+                                    logger.warning(
+                                        "[SSE][FALLBACK] %s",
+                                        json.dumps({"event": "fallback_mode", "channel": log_channel, "runner_id": runner_id}),
+                                    )
+                                    # R4: 클라이언트에 fallback_mode 이벤트 전송 (개발 모드용 배지)
+                                    yield "event: fallback_mode\ndata: file polling active\n\n"
                                 try:
                                     with open(log_file, "r", encoding="utf-8", errors="replace") as f:
                                         f.seek(_file_pos)
@@ -373,7 +386,11 @@ class LogService:
                             last_heartbeat = now
                         await asyncio.sleep(0.3)
 
-                except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
+                except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError) as _conn_err:
+                    logger.error(
+                        "[SSE][CONN_ERROR] %s",
+                        json.dumps({"event": "pubsub_disconnected", "channel": log_channel, "runner_id": runner_id, "error": str(_conn_err)}),
+                    )
                     await safe_close_pubsub(pubsub)
                     pubsub = None
                     was_disconnected = True
@@ -614,7 +631,7 @@ class LogService:
         """
         try:
             ts = datetime.now().strftime("%H:%M:%S")
-            self.redis_client.publish(LOG_CHANNEL, f"[{ts}] [{tag}] {message}")
+            self.redis_client.publish(SYSTEM_LOG_CHANNEL, f"[{ts}] [{tag}] {message}")
         except Exception:
             pass  # Redis 미연결 시 무시
 

@@ -825,3 +825,318 @@ class TestSinceLineIntegration:
         assert len(data_chunks) == 10
         assert "line 200" in data_chunks[0]
         assert "line 209" in data_chunks[9]
+
+
+# ─── Phase T1 (todo-2): 채널 상수·구독·fallback EOF 초기화 TC ─────────────────
+
+class TestSystemLogChannelConstant:
+    """SYSTEM_LOG_CHANNEL 상수 회귀 방지 TC"""
+
+    def test_system_log_channel_value(self):
+        """SYSTEM_LOG_CHANNEL == 'plan-runner:system' 단언 (상수 드리프트 방지)"""
+        from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL
+        assert SYSTEM_LOG_CHANNEL == "plan-runner:system", (
+            f"SYSTEM_LOG_CHANNEL이 'plan-runner:system'이 아님: {SYSTEM_LOG_CHANNEL!r}\n"
+            "bare 'plan-runner:logs' 채널과 다른 전용 채널을 사용해야 합니다."
+        )
+
+    def test_log_channel_prefix_unchanged(self):
+        """LOG_CHANNEL_PREFIX == 'plan-runner:logs' 유지 (per-runner 구독 형식 계약)"""
+        from app.modules.dev_runner.services.log_service import LOG_CHANNEL_PREFIX
+        assert LOG_CHANNEL_PREFIX == "plan-runner:logs"
+
+    def test_per_runner_channel_format(self):
+        """per-runner 채널 = LOG_CHANNEL_PREFIX + ':' + runner_id 형식 확인"""
+        from app.modules.dev_runner.services.log_service import LOG_CHANNEL_PREFIX
+        runner_id = "abc12345"
+        expected = f"plan-runner:logs:{runner_id}"
+        assert LOG_CHANNEL_PREFIX + ":" + runner_id == expected
+
+
+class TestStreamLogFileSubscribesPerRunnerChannel:
+    """stream_log_file() 채널 구독 계약 TC"""
+
+    def _make(self):
+        svc = _make_log_service()
+        return svc
+
+    def test_stream_log_file_subscribes_per_runner_channel(self):
+        """stream_log_file('runner123') → pubsub.subscribe('plan-runner:logs:runner123') 확인"""
+        import asyncio
+        from unittest.mock import AsyncMock, call
+
+        svc = self._make()
+        runner_id = "runner123"
+        expected_channel = f"plan-runner:logs:{runner_id}"
+
+        subscribed_channels = []
+
+        mock_pubsub = MagicMock()
+
+        async def mock_subscribe(ch):
+            subscribed_channels.append(ch)
+
+        async def mock_get_message(**kwargs):
+            # 즉시 __COMPLETED__ 반환하여 스트림 종료
+            if not subscribed_channels:
+                return None
+            return {"type": "message", "data": "__COMPLETED__"}
+
+        async def mock_aclose(): pass
+
+        mock_pubsub.subscribe = mock_subscribe
+        mock_pubsub.get_message = mock_get_message
+        mock_pubsub.aclose = mock_aclose
+
+        async def mock_ping(): return True
+        svc.async_redis.ping = AsyncMock(return_value=True)
+        svc.async_redis.pubsub = MagicMock(return_value=mock_pubsub)
+        svc._find_current_log = MagicMock(return_value=None)
+        svc._sync_resolver = MagicMock()
+
+        async def collect():
+            chunks = []
+            async for chunk in svc.stream_log_file(runner_id, since_line=0):
+                chunks.append(chunk)
+            return chunks
+
+        asyncio.run(collect())
+
+        assert expected_channel in subscribed_channels, (
+            f"subscribe 채널이 '{expected_channel}'이 아님. 실제: {subscribed_channels}\n"
+            "bare 'plan-runner:logs'가 아닌 per-runner 채널을 구독해야 합니다."
+        )
+
+    def test_stream_log_file_does_not_subscribe_bare_channel(self):
+        """stream_log_file은 bare 'plan-runner:logs' 채널을 구독하지 않아야 함"""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        svc = self._make()
+        subscribed_channels = []
+        mock_pubsub = MagicMock()
+
+        async def mock_subscribe(ch):
+            subscribed_channels.append(ch)
+
+        async def mock_get_message(**kwargs):
+            if not subscribed_channels:
+                return None
+            return {"type": "message", "data": "__COMPLETED__"}
+
+        async def mock_aclose(): pass
+
+        mock_pubsub.subscribe = mock_subscribe
+        mock_pubsub.get_message = mock_get_message
+        mock_pubsub.aclose = mock_aclose
+
+        svc.async_redis.ping = AsyncMock(return_value=True)
+        svc.async_redis.pubsub = MagicMock(return_value=mock_pubsub)
+        svc._find_current_log = MagicMock(return_value=None)
+        svc._sync_resolver = MagicMock()
+
+        async def collect():
+            chunks = []
+            async for chunk in svc.stream_log_file("any_runner", since_line=0):
+                chunks.append(chunk)
+            return chunks
+
+        asyncio.run(collect())
+
+        assert "plan-runner:logs" not in subscribed_channels, (
+            "bare 'plan-runner:logs' 채널을 구독 중 — 채널 불일치 버그 재발"
+        )
+
+
+def _make_log_service_with_resolver_mock():
+    """LogService 인스턴스 생성 (Redis + resolver 모두 mock).
+    resolver.find_current_log()가 None을 반환하므로 shim의 파일시스템 fallback으로 진입.
+    """
+    from app.modules.dev_runner.services.log_service import LogService
+    from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
+
+    svc = LogService.__new__(LogService)
+    svc.redis_client = MagicMock()
+    svc.async_redis = MagicMock()
+    # resolver mock (isinstance 체크 통과를 위해 spec 사용)
+    svc.resolver = MagicMock(spec=LogFileResolver)
+    svc.resolver.find_current_log.return_value = None
+    # _sync_resolver가 resolver를 교체하지 않도록 mock
+    svc._sync_resolver = MagicMock()
+    return svc
+
+
+class TestFindCurrentLogMtimeLatest:
+    """_find_current_log() mtime 최신 파일 반환 TC"""
+
+    def test_find_current_log_returns_latest_by_mtime(self, tmp_path):
+        """동일 runner_id 파일 2개 (mtime 다름) → mtime 최신 반환"""
+        import time as _time
+
+        svc = _make_log_service_with_resolver_mock()
+
+        runner_id = "testrunner"
+        old_file = tmp_path / f"plan-runner-stream-{runner_id}-20260401_100000.log"
+        new_file = tmp_path / f"plan-runner-stream-{runner_id}-20260401_120000.log"
+        old_file.write_text("old content\n", encoding="utf-8")
+        _time.sleep(0.05)  # mtime 차이 보장
+        new_file.write_text("new content\n", encoding="utf-8")
+
+        with patch.object(svc, "_get_log_dir", return_value=tmp_path):
+            result = svc._find_current_log(runner_id)
+
+        assert result == new_file, (
+            f"mtime 최신 파일({new_file.name})이 아닌 {result.name if result else None} 반환됨"
+        )
+
+    def test_find_current_log_with_runner_id_glob_match(self, tmp_path):
+        """plan-runner-stream-{runner_id}-{timestamp}.log 패턴 매칭 확인"""
+        svc = _make_log_service_with_resolver_mock()
+
+        runner_id = "715f9881"
+        matched_file = tmp_path / f"plan-runner-stream-{runner_id}-20260408_224528.log"
+        matched_file.write_text("log content\n", encoding="utf-8")
+        # 다른 runner_id 파일 (매칭 안 됨)
+        (tmp_path / "plan-runner-stream-other-20260408_224528.log").write_text("x\n", encoding="utf-8")
+
+        with patch.object(svc, "_get_log_dir", return_value=tmp_path):
+            result = svc._find_current_log(runner_id)
+
+        assert result == matched_file
+
+
+class TestFilePosEofInitialization:
+    """_file_pos EOF 초기화: since_line=0 파일 폴링 진입 시 기존 내용 재전송 방지 TC"""
+
+    def test_file_pos_eof_init_no_resend_existing_content(self, tmp_path):
+        """since_line=0 + 파일 기존 내용 존재 + 폴링 fallback → 기존 내용 재전송 안 함.
+
+        동작:
+        1. asyncio.sleep: 즉시 반환 패치 (hang 방지)
+        2. time.monotonic 카운터: 처음 2회=T0, 이후=T0+10 (FILE_POLL_TIMEOUT 즉시 초과)
+        3. pubsub: 6번째 call 시 __COMPLETED__ → 루프 종료
+        4. 기존 파일 내용이 chunks에 없으면 EOF 초기화 성공
+        """
+        import asyncio as _asyncio
+        from unittest.mock import AsyncMock, patch as _patch
+
+        svc = _make_log_service()
+
+        log_file = tmp_path / "plan-runner-stream-runner1-20260408.log"
+        log_file.write_text("existing line 1\nexisting line 2\n", encoding="utf-8")
+
+        pubsub_call = [0]
+        mock_pubsub = MagicMock()
+
+        async def mock_get_message(**kwargs):
+            pubsub_call[0] += 1
+            if pubsub_call[0] > 5:
+                return {"type": "message", "data": "__COMPLETED__"}
+            return None
+
+        async def mock_subscribe(ch): pass
+        async def mock_aclose(): pass
+
+        mock_pubsub.get_message = mock_get_message
+        mock_pubsub.subscribe = mock_subscribe
+        mock_pubsub.aclose = mock_aclose
+
+        svc.async_redis.ping = AsyncMock(return_value=True)
+        svc.async_redis.pubsub = MagicMock(return_value=mock_pubsub)
+        svc._find_current_log = MagicMock(return_value=log_file)
+        svc._sync_resolver = MagicMock()
+
+        _monotonic_calls = [0]
+        _T0 = 100.0
+
+        def mock_monotonic():
+            """처음 2회=T0 (last_heartbeat, _no_msg_since 초기화), 이후=T0+10 (timeout 초과)"""
+            _monotonic_calls[0] += 1
+            if _monotonic_calls[0] <= 2:
+                return _T0
+            return _T0 + 10.0
+
+        async def instant_sleep(delay=0, result=None, **kwargs):
+            """asyncio.sleep 즉시 반환 (실제 I/O wait 방지)"""
+            pass
+
+        async def collect():
+            chunks = []
+            with _patch(
+                "app.modules.dev_runner.services.log_service.time.monotonic",
+                side_effect=mock_monotonic,
+            ):
+                with _patch.object(_asyncio, "sleep", instant_sleep):
+                    async for chunk in svc.stream_log_file("runner1", since_line=0):
+                        chunks.append(chunk)
+            return chunks
+
+        chunks = _asyncio.run(collect())
+
+        # 기존 내용이 재전송되지 않아야 함 (EOF 초기화 성공)
+        data_chunks = [c for c in chunks if "existing line" in c]
+        assert len(data_chunks) == 0, (
+            f"기존 내용이 재전송됨 (EOF 초기화 미동작): {data_chunks}\n"
+            "since_line=0 파일 폴링 첫 진입 시 EOF seek이 누락됨"
+        )
+        # 스트림이 정상 완료됨 확인
+        completed = [c for c in chunks if "event: completed" in c]
+        assert len(completed) >= 1, f"event: completed 미수신. chunks={chunks}"
+
+
+class TestPlanServicePublishChannel:
+    """plan_service._publish_log() SYSTEM_LOG_CHANNEL 사용 확인 TC"""
+
+    def test_publish_log_uses_system_log_channel(self):
+        """_publish_log가 'plan-runner:system' 채널로 publish (bare 'plan-runner:logs' 아님)"""
+        import fakeredis
+        from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL
+
+        fr = fakeredis.FakeRedis(decode_responses=True)
+
+        # plan_service 모듈의 _redis_client를 fakeredis로 교체
+        import app.modules.dev_runner.services.plan_service as ps
+        original = ps._redis_client
+        ps._redis_client = fr
+
+        sub = fr.pubsub()
+        sub.subscribe(SYSTEM_LOG_CHANNEL)
+        sub.get_message()  # subscribe 확인 메시지 소비
+
+        try:
+            ps._publish_log("TEST", "hello system channel")
+        finally:
+            ps._redis_client = original
+
+        msg = sub.get_message()
+        assert msg is not None, "SYSTEM_LOG_CHANNEL에서 메시지 수신 안 됨"
+        assert msg["channel"] == SYSTEM_LOG_CHANNEL, (
+            f"publish 채널이 '{SYSTEM_LOG_CHANNEL}'이 아님: {msg['channel']!r}"
+        )
+        assert "hello system channel" in msg["data"], (
+            f"메시지 내용 불일치: {msg['data']!r}"
+        )
+
+    def test_publish_log_not_on_bare_logs_channel(self):
+        """_publish_log가 bare 'plan-runner:logs' 채널로 publish하지 않음 (채널 불일치 방지)"""
+        import fakeredis
+
+        fr = fakeredis.FakeRedis(decode_responses=True)
+        import app.modules.dev_runner.services.plan_service as ps
+        original = ps._redis_client
+        ps._redis_client = fr
+
+        bare_channel = "plan-runner:logs"
+        sub = fr.pubsub()
+        sub.subscribe(bare_channel)
+        sub.get_message()  # subscribe 확인 메시지 소비
+
+        try:
+            ps._publish_log("TEST", "should not appear on bare channel")
+        finally:
+            ps._redis_client = original
+
+        msg = sub.get_message()
+        assert msg is None, (
+            f"bare 'plan-runner:logs' 채널에 메시지 publish됨 — 채널 불일치 버그 재발: {msg!r}"
+        )

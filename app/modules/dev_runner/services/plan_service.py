@@ -14,7 +14,7 @@ from typing import List, Optional
 
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle
-from app.modules.dev_runner.services.log_service import LOG_CHANNEL, REDIS_HOST, REDIS_PORT
+from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL, REDIS_HOST, REDIS_PORT
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 from app.modules.dev_runner.schemas import (
     PlanFileResponse, PlanProgressResponse,
@@ -69,7 +69,7 @@ def _publish_log(tag: str, message: str):
         r = _get_redis()
         if r:
             ts = datetime.now().strftime("%H:%M:%S")
-            r.publish(LOG_CHANNEL, f"[{ts}] [{tag}] {message}")
+            r.publish(SYSTEM_LOG_CHANNEL, f"[{ts}] [{tag}] {message}")
     except Exception:
         pass  # Redis 미연결 시 무시
 

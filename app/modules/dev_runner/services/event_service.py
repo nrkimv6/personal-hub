@@ -72,6 +72,32 @@ HEARTBEAT_INTERVAL = 30  # 초
 FILE_POLL_TIMEOUT = 5.0
 FILE_POLL_INTERVAL = 1.0
 MAX_FALLBACK_READ_LINES = 400
+
+# ─── pmessage 수신 헬스 게이지 (in-memory, 5분 슬라이딩 윈도우) ─────────────────
+import collections as _collections
+
+_PMSG_WINDOW_SEC = 300  # 5분 슬라이딩 윈도우
+_pmsg_timestamps: "collections.deque[float]" = _collections.deque()  # 수신 시각 목록
+
+
+def _record_pmsg_received() -> None:
+    """pmessage 수신 시 호출 — 현재 시각을 슬라이딩 윈도우에 추가"""
+    now = time.monotonic()
+    _pmsg_timestamps.append(now)
+    # 오래된 항목 정리 (>5분)
+    while _pmsg_timestamps and now - _pmsg_timestamps[0] > _PMSG_WINDOW_SEC:
+        _pmsg_timestamps.popleft()
+
+
+def get_pmsg_count_last5min() -> int:
+    """최근 5분 내 `plan-runner:logs:*` pmessage 수신 건수 반환 (헬스체크용)"""
+    if not _pmsg_timestamps:
+        return 0
+    now = time.monotonic()
+    # 윈도우 내 항목만 카운트 (deque는 왼쪽이 가장 오래됨)
+    cutoff = now - _PMSG_WINDOW_SEC
+    count = sum(1 for t in _pmsg_timestamps if t >= cutoff)
+    return count
 MAX_FALLBACK_READ_CHARS = 65536
 TAIL_STATE_TTL_SEC = 600.0
 DEFAULT_DEDUP_WINDOW = 256
@@ -731,6 +757,8 @@ class EventService:
                     )
 
                     if log_message and log_message["type"] in ("message", "pmessage"):
+                        # pmessage 수신 게이지 기록 (헬스체크용)
+                        _record_pmsg_received()
                         if fallback_active:
                             fallback_active = False
                             fallback_exit_count += 1

@@ -85,6 +85,27 @@ class DiagnosticsService:
                 "detail": "미실행"
             })
 
+        # 6. pmessage 수신 게이지 (채널 불일치 헬스체크)
+        try:
+            from app.modules.dev_runner.services.event_service import get_pmsg_count_last5min
+            pmsg_count = get_pmsg_count_last5min()
+            running_runners = [
+                rid for rid in runner_ids
+                if self.redis_client.hget(f"{RUNNER_KEY_PREFIX}:{rid}:meta", "status") == "running"
+            ] if runner_ids else []
+            has_running = bool(running_runners)
+            pmsg_ok = (not has_running) or pmsg_count > 0
+            detail = f"최근 5분 pmessage: {pmsg_count}건"
+            if has_running and pmsg_count == 0:
+                detail += " — RUNNING 러너 있음에도 0건 (채널 불일치 의심)"
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "[HEALTH] pmessage 0건 — 채널 불일치 의심 (RUNNING runners: %s)", running_runners
+                )
+            steps.append({"step": 6, "name": "pmessage 수신 게이지", "ok": pmsg_ok, "detail": detail})
+        except Exception as e:
+            steps.append({"step": 6, "name": "pmessage 수신 게이지", "ok": False, "detail": f"조회 실패: {e}"})
+
         return {"steps": steps}
 
 
