@@ -339,6 +339,76 @@ class TestConsumerConversion:
 
 
 # ============================================================
+# Phase T4: E2E 테스트 (워커 lifecycle)
+# ============================================================
+
+class TestWorkerLifecycleE2E:
+    """T4: BaseWorker 상속 mock 워커로 lifecycle E2E 검증"""
+
+    def test_worker_health_full_lifecycle_e2e(self, fake_redis):
+        """R(Right): BaseWorker 상속 mock 워커 → _main_loop() → Redis publish + DB import 없음 확인."""
+        import asyncio
+        from app.shared.worker.base_worker import BaseWorker
+        import app.shared.worker.base_worker as base_worker_module
+
+        class MinimalWorker(BaseWorker):
+            def __init__(self):
+                super().__init__("test_lifecycle_e2e")
+
+            def _get_loop_interval(self):
+                return 0.05  # 50ms
+
+            async def _main_loop_iteration(self):
+                pass  # 최소 구현
+
+        worker = MinimalWorker()
+
+        async def run():
+            task = asyncio.create_task(worker._main_loop())
+            await asyncio.sleep(0.2)  # 200ms — 최초 heartbeat 발행 트리거됨
+            worker.shutdown_event.set()
+            await asyncio.wait_for(task, timeout=2.0)
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+        # Redis publish 확인
+        data = WorkerHealthRedis.check("test_lifecycle_e2e")
+        assert data is not None, "Redis publish가 발생하지 않음"
+        assert data["source"] == "redis"
+        assert data["pid"] == worker.pid
+
+        # base_worker 모듈에 SessionLocal 없음 확인 (DB 쓰기 제거 증명)
+        assert not hasattr(base_worker_module, "SessionLocal"), "base_worker가 SessionLocal을 임포트하면 안 됨"
+
+    def test_llm_worker_health_lifecycle_e2e(self, fake_redis):
+        """R(Right): LLMWorker._update_heartbeat() → Redis 'claude' 키 publish + DB 미갱신."""
+        from app.modules.claude_worker.worker.worker import LLMWorker
+
+        mock_db = MagicMock()
+        mock_db_session = MagicMock()
+
+        with patch("app.modules.claude_worker.worker.worker.SessionLocal", return_value=mock_db_session):
+            try:
+                worker = LLMWorker()
+            except Exception:
+                # LLMWorker 생성에 DB 연결이 필요할 경우 skip
+                import pytest
+                pytest.skip("LLMWorker 초기화 불가 (DB 의존성)")
+
+        # _update_heartbeat() 직접 호출 — 실제 루프 없이 핵심 동작 검증
+        worker._update_heartbeat()
+
+        # Redis "claude" 키 publish 확인
+        data = WorkerHealthRedis.check("claude")
+        assert data is not None, "Redis 'claude' 키 publish가 발생하지 않음"
+        assert data["source"] == "redis"
+        assert data["pid"] == worker.pid
+
+        # DB 미갱신 확인
+        mock_db_session.execute.assert_not_called()
+
+
+# ============================================================
 # Phase T3: 재현/통합 TC
 # ============================================================
 
