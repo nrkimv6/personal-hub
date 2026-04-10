@@ -38,19 +38,33 @@ def get_record_by_path(file_path: str, db: Session = Depends(get_db)):
     return record
 
 
+@router.get("/records/guide-status")
+def get_guide_status(include_history: bool = False, db: Session = Depends(get_db)):
+    """가이드별 staleness 정보 반환 (pending archive 건수 포함)"""
+    svc = PlanRecordService(db)
+    return svc.get_guide_status(include_history=include_history)
+
+
 @router.get("/records", response_model=list[PlanRecordResponse])
 def list_records(
     project: Optional[str] = None,
     status: Optional[str] = None,
     category: Optional[str] = None,
     tags: Optional[str] = None,
+    q: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
     tags_list = [t.strip() for t in tags.split(",")] if tags else None
     svc = PlanRecordService(db)
-    return svc.list_records(project=project, status=status, category=category, tags=tags_list, skip=skip, limit=limit)
+    return svc.list_records(
+        project=project, status=status, category=category, tags=tags_list,
+        q=q, date_from=date_from, date_to=date_to,
+        skip=skip, limit=limit,
+    )
 
 
 @router.get("/records/{record_id}", response_model=PlanRecordWithEventsResponse)
