@@ -244,7 +244,6 @@ def _launch_auto_impl_post_merge_process(runner_id: str, plan_file: str, redis_c
         str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "run",
         "--plan-file", plan_file,
         "--engine", engine,
-        "--skip-plan",
         "--max-cycles", "1",
     ]
 

@@ -679,9 +679,6 @@ def _launch_plan_runner_process(
     if command.get("dry_run"):
         cmd.append("--dry-run")
 
-    if command.get("skip_plan"):
-        cmd.append("--skip-plan")
-
     if command.get("parallel"):
         cmd.append("--parallel")
 
