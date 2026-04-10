@@ -430,8 +430,8 @@ class TestIntegration:
         # DB execute가 호출되지 않아야 함
         mock_db.execute.assert_not_called()
 
-        # Redis에는 publish되었는지 확인
-        redis_data = WorkerHealthRedis.check("naver_monitor")
+        # Redis에는 publish되었는지 확인 ("naver" 키로 publish됨 — fix 후)
+        redis_data = WorkerHealthRedis.check("naver")
         assert redis_data is not None
         assert redis_data["source"] == "redis"
         assert redis_data["pid"] == worker.pid
