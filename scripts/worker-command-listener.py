@@ -19,6 +19,7 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
 """
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -33,6 +34,8 @@ REDIS_PORT = 6379
 COMMANDS_KEY = "worker:commands"
 RESULTS_KEY = "worker:command_results"
 DESKTOP_NOTIFICATION_KEY = "monitor:notification:desktop"  # Session 0 → Session 1 Desktop 알림 릴레이
+LAUNCH_CLI_KEY = "worker:launch-cli"  # Session 0 → Session 1 CLI 콘솔 실행 릴레이
+LAUNCH_CLI_RESULTS_KEY = "worker:launch-cli:results"  # launch-cli 결과 큐
 BRPOP_TIMEOUT = 30  # 초 (0 = 무한 대기, 양수 = 타임아웃 후 루프 재시작)
 
 # Podman 자동 복구 설정
@@ -160,6 +163,58 @@ def send_desktop_notification(message: str) -> bool:
         return False
 
 
+def execute_launch_cli(payload: dict) -> dict:
+    """Session 1에서 CLI 콘솔 창을 실행합니다 (API Session 0에서 릴레이된 명령).
+
+    Args:
+        payload: launch-cli 페이로드 (engine, name, config_dir, extra_env, engine_cmd, env_key)
+
+    Returns:
+        dict: {success: bool, status: str, engine: str, profile: str} 또는 실패 시 error 포함
+    """
+    try:
+        env = os.environ.copy()
+
+        # config_dir 주입
+        env_key = payload.get("env_key")
+        config_dir = payload.get("config_dir")
+        if env_key and config_dir:
+            env[env_key] = config_dir
+        elif env_key and not config_dir:
+            env.pop(env_key, None)
+
+        # extra_env 병합
+        for k, v in (payload.get("extra_env") or {}).items():
+            env[k] = v
+
+        engine_cmd = payload.get("engine_cmd", "claude")
+
+        subprocess.Popen(
+            ["cmd", "/k", engine_cmd],
+            env=env,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            close_fds=True,
+        )
+
+        logger.info(f"launch-cli 실행 완료: engine={payload.get('engine')}, profile={payload.get('name')}")
+        return {
+            "success": True,
+            "status": "launched",
+            "engine": payload.get("engine"),
+            "profile": payload.get("name"),
+        }
+
+    except Exception as e:
+        logger.error(f"launch-cli 실행 실패: {e}")
+        return {
+            "success": False,
+            "status": "error",
+            "message": str(e),
+            "engine": payload.get("engine"),
+            "profile": payload.get("name"),
+        }
+
+
 def attempt_podman_recovery() -> bool:
     """Podman Machine SSH 터널 재수립 + Redis 컨테이너 복구.
 
@@ -219,6 +274,7 @@ def main():
     logger.info(f"명령 키: {COMMANDS_KEY}")
     logger.info(f"결과 키: {RESULTS_KEY}")
     logger.info(f"Desktop 알림 키: {DESKTOP_NOTIFICATION_KEY}")
+    logger.info(f"Launch CLI 키: {LAUNCH_CLI_KEY}")
     logger.info(f"스크립트: {BROWSER_WORKERS_SCRIPT}")
     logger.info("=" * 50)
 
@@ -239,9 +295,9 @@ def main():
             reconnect_delay = 1  # 연결 성공 시 리셋
             consecutive_failures = 0  # 연결 복구 시 리셋
 
-            # BRPOP 루프 (블로킹 대기) — worker:commands + notification:desktop 동시 대기
+            # BRPOP 루프 (블로킹 대기) — worker:commands + notification:desktop + launch-cli 동시 대기
             while True:
-                result = r.brpop([COMMANDS_KEY, DESKTOP_NOTIFICATION_KEY], timeout=BRPOP_TIMEOUT)
+                result = r.brpop([COMMANDS_KEY, DESKTOP_NOTIFICATION_KEY, LAUNCH_CLI_KEY], timeout=BRPOP_TIMEOUT)
 
                 if result is None:
                     # timeout 경과 — 루프 계속 (연결 유지 확인)
@@ -261,6 +317,19 @@ def main():
                             logger.warning(f"Desktop 알림 페이로드에 message 없음: {raw_data}")
                     except json.JSONDecodeError:
                         logger.warning(f"잘못된 Desktop 알림 형식: {raw_data}")
+                    continue
+
+                # launch-cli 처리 (Session 1 콘솔 릴레이)
+                if queue_key == LAUNCH_CLI_KEY:
+                    try:
+                        payload = json.loads(raw_data)
+                        logger.info(f"launch-cli 수신: engine={payload.get('engine')}, profile={payload.get('name')}")
+                        cli_result = execute_launch_cli(payload)
+                        cli_result["executed_at"] = datetime.now().isoformat()
+                        r.lpush(LAUNCH_CLI_RESULTS_KEY, json.dumps(cli_result, ensure_ascii=False))
+                        r.expire(LAUNCH_CLI_RESULTS_KEY, 30)
+                    except json.JSONDecodeError:
+                        logger.warning(f"잘못된 launch-cli 페이로드: {raw_data}")
                     continue
 
                 # 워커 명령 처리 (기존 로직)

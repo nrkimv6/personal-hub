@@ -718,7 +718,7 @@ export const llmApi = {
     }),
 
   launchCli: (engine: string, name: string) =>
-    request<{ status: string; engine: string; profile: string }>(
+    request<{ status: string; engine: string; profile: string; message?: string }>(
       `/llm/profiles/${engine}/${name}/launch-cli`,
       { method: 'POST' }
     ),

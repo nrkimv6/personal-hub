@@ -74,8 +74,14 @@
 		const key = `${engine}/${name}`;
 		launchingKey = key;
 		try {
-			await llmApi.launchCli(engine, name);
-			toast.success(`새 콘솔에서 ${engine} CLI 실행됨 — 로그인 후 창 닫기`);
+			const resp = await llmApi.launchCli(engine, name);
+			if (resp?.status === 'timeout') {
+				toast.warning('명령 전송됨, 리스너 응답 없음 — listener 실행 확인 필요');
+			} else if (resp?.status === 'redis_unavailable') {
+				toast.error(`Redis 연결 없음. ${resp.message ?? '수동 실행 필요'}`);
+			} else {
+				toast.success(`새 콘솔에서 ${engine} CLI 실행됨 — 로그인 후 창 닫기`);
+			}
 		} catch (e) {
 			toast.error(`CLI 실행 실패: ${String(e)}`);
 		} finally {
