@@ -3,6 +3,7 @@
 profile_routes.py의 async launch_cli 엔드포인트가
 Redis 큐에 올바른 payload를 전달하는지 검증한다.
 """
+import asyncio
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -157,3 +158,71 @@ def test_launch_cli_relay_error_redis_timeout(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data.get("status") == "timeout"
+
+
+# ── socket timeout 재발 방지 ──────────────────────────────────────────────────
+
+def test_launch_cli_B_socket_timeout(client):
+    """B(경계): brpop에서 asyncio.TimeoutError 발생 시 500이 아닌 status:error 반환."""
+    mock_redis = _make_redis_mock()
+    mock_redis.brpop = AsyncMock(side_effect=asyncio.TimeoutError("Timeout reading from localhost:6379"))
+
+    with patch("app.shared.redis.client.RedisClient.get_client", new=AsyncMock(return_value=mock_redis)):
+        resp = client.post("/api/v1/llm/profiles/claude/default/launch-cli")
+
+    assert resp.status_code == 200, f"500이 반환됨 (socket timeout 미처리): {resp.text}"
+    data = resp.json()
+    assert data.get("status") == "error"
+
+
+def test_launch_cli_B_connection_error(client):
+    """B(경계): brpop에서 ConnectionError 발생 시 500이 아닌 status:error 반환."""
+    mock_redis = _make_redis_mock()
+    mock_redis.brpop = AsyncMock(side_effect=ConnectionError("Redis connection closed"))
+
+    with patch("app.shared.redis.client.RedisClient.get_client", new=AsyncMock(return_value=mock_redis)):
+        resp = client.post("/api/v1/llm/profiles/claude/default/launch-cli")
+
+    assert resp.status_code == 200, f"500이 반환됨 (ConnectionError 미처리): {resp.text}"
+    data = resp.json()
+    assert data.get("status") == "error"
+
+
+def test_launch_cli_R_brpop_timeout_constant():
+    """Co(준수): _BRPOP_TIMEOUT_SEC < REDIS_CONNECTION_TIMEOUT (socket_timeout) 검증.
+
+    brpop timeout이 socket_timeout 이상이면 소켓 레벨 TimeoutError가 먼저 발생하여 500 에러.
+    """
+    from app.modules.claude_worker.routes.profile_routes import _BRPOP_TIMEOUT_SEC
+    from app.core.config import settings
+
+    assert _BRPOP_TIMEOUT_SEC < settings.REDIS_CONNECTION_TIMEOUT, (
+        f"_BRPOP_TIMEOUT_SEC({_BRPOP_TIMEOUT_SEC}) >= REDIS_CONNECTION_TIMEOUT({settings.REDIS_CONNECTION_TIMEOUT}). "
+        "socket_timeout보다 짧게 설정해야 소켓 레벨 TimeoutError가 먼저 발생하지 않음."
+    )
+
+
+# ── T3: 근본 원인 재현 TC ─────────────────────────────────────────────────────
+
+def test_launch_cli_T3_socket_timeout_returns_error_not_500(client):
+    """T3: 근본 원인 재현 — socket timeout 시 500이 아닌 200 + status:error 반환.
+
+    재현 조건: brpop에서 asyncio.TimeoutError 발생
+    (실제 운영 환경: socket_timeout=5s < brpop_timeout=10s 일 때 5초 후 발생)
+    수정 후: try-except로 예외 포획 → {"status": "error"} 반환
+    """
+    mock_redis = _make_redis_mock()
+    mock_redis.brpop = AsyncMock(
+        side_effect=asyncio.TimeoutError("Timeout reading from localhost:6379")
+    )
+
+    with patch("app.shared.redis.client.RedisClient.get_client", new=AsyncMock(return_value=mock_redis)):
+        resp = client.post("/api/v1/llm/profiles/claude/default/launch-cli")
+
+    # 핵심 검증: 500이 아니어야 한다
+    assert resp.status_code == 200, (
+        f"[T3 실패] socket timeout 시 500 발생. "
+        f"try-except 미처리 또는 예외 누락. 응답: {resp.text}"
+    )
+    data = resp.json()
+    assert data.get("status") == "error", f"[T3] status가 error가 아님: {data}"

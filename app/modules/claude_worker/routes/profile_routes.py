@@ -104,6 +104,10 @@ _ENGINE_CLI_COMMANDS: dict[str, str] = {
     "gemini": "gemini",
 }
 
+# socket_timeout(REDIS_CONNECTION_TIMEOUT=5s)보다 반드시 짧게 유지.
+# brpop timeout >= socket_timeout 이면 소켓 레벨 TimeoutError가 먼저 발생하여 500 에러.
+_BRPOP_TIMEOUT_SEC = 4
+
 
 @router.post("/profiles/{engine}/{name}/launch-cli")
 async def launch_cli(
@@ -158,14 +162,18 @@ async def launch_cli(
         "env_key": ENGINE_ENV_KEYS.get(engine),
     }, ensure_ascii=False)
 
-    # 이전 결과 비우기 (race condition 방지)
-    await redis_client.delete("worker:launch-cli:results")
+    try:
+        # 이전 결과 비우기 (race condition 방지)
+        await redis_client.delete("worker:launch-cli:results")
 
-    # 명령 전송
-    await redis_client.lpush("worker:launch-cli", launch_payload)
+        # 명령 전송
+        await redis_client.lpush("worker:launch-cli", launch_payload)
 
-    # 결과 대기
-    result = await redis_client.brpop("worker:launch-cli:results", timeout=10)
+        # 결과 대기 (_BRPOP_TIMEOUT_SEC < socket_timeout 유지 필수)
+        result = await redis_client.brpop("worker:launch-cli:results", timeout=_BRPOP_TIMEOUT_SEC)
+    except Exception as e:
+        # socket_timeout 초과, 연결 끊김 등 Redis 예외 → 500 방지
+        return {"status": "error", "message": f"Redis 오류: {e}"}
 
     if result is None:
         return {"status": "timeout", "message": "명령 전송됨, 리스너 응답 대기 타임아웃"}
