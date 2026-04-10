@@ -3,6 +3,8 @@ PostgreSQL SERIAL 시퀀스 동기화 테스트.
 
 Phase T1: 단위 테스트 (mock 기반)
 Phase T3: 재현/통합 테스트 (실제 PG 연결)
+Phase T4: E2E 테스트 (실제 서버 8001, pytest.mark.e2e)
+Phase T5: HTTP 통합 테스트 (실제 서버 8001, pytest.mark.http_live)
 """
 import os
 import sys
@@ -95,7 +97,7 @@ class TestSyncSerialSequences:
         # COALESCE(MAX(id), 0) 이므로 빈 테이블도 synced=1 반환
         assert result == 1
         calls = [str(c.args[0]) for c in mock_conn.execute.call_args_list if c.args]
-        assert any("COALESCE" in c for c in calls)
+        assert any("GREATEST" in c for c in calls)
 
     def test_sync_serial_sequences_error_nonexistent_table(self, caplog):
         """E(Error): PG_SERIAL_TABLES에 없는 테이블 → 예외 없이 정상 반환 + 경고 로그"""
@@ -294,3 +296,174 @@ class TestSequenceDesyncIntegration:
         # 정리
         with self.engine.begin() as conn:
             conn.execute(text(f"DROP TABLE IF EXISTS {table}"))
+
+
+# ── Phase T4: E2E 테스트 (실제 서버 8001) ────────────────────────────────
+
+_LIVE_BASE = "http://localhost:8001/api/v1/git-repos"
+
+
+def _server_available() -> bool:
+    try:
+        import requests
+        r = requests.get("http://localhost:8001/api/v1/dev-runner/runners", timeout=3)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def _live_api(method, path="", json=None, params=None):
+    import requests
+    url = f"{_LIVE_BASE}{path}"
+    return getattr(requests, method)(url, json=json, params=params, timeout=15)
+
+
+def _poll_task(task_id: str, interval: float = 0.5, max_retries: int = 40) -> dict:
+    import time
+    for _ in range(max_retries):
+        resp = _live_api("get", f"/tasks/{task_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        if data["status"] != "pending":
+            return data
+        time.sleep(interval)
+    raise TimeoutError(f"Task {task_id} timed out after {max_retries * interval}s")
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(not _server_available(), reason="실제 서버(8001) 미응답 — E2E 스킵")
+class TestSequenceSyncE2E:
+    """T4: 시퀀스 동기화 후 git_operation_logs INSERT 정상 동작 E2E 검증"""
+
+    @pytest.fixture(scope="class")
+    def test_repo(self):
+        """E2E 테스트용 레포 등록 → 사용 → 삭제."""
+        import subprocess, tempfile, shutil
+        tmpdir = tempfile.mkdtemp(prefix="seq_sync_e2e_")
+        repo_id = None
+        try:
+            subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmpdir, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmpdir, capture_output=True)
+            (Path(tmpdir) / "readme.txt").write_text("hello")
+            subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True)
+
+            resp = _live_api("post", "", json={"path": tmpdir, "alias": "seq_sync_e2e_test"})
+            assert resp.status_code == 200, f"레포 등록 실패: {resp.text}"
+            repo_id = resp.json()["id"]
+            yield {"id": repo_id, "path": tmpdir}
+        finally:
+            if repo_id:
+                _live_api("delete", f"/{repo_id}")
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_git_repos_e2e_after_sync(self, test_repo):
+        """
+        E2E: 시퀀스 동기화 후 git_operation_logs INSERT 정상 동작 확인.
+        unstage API → poll_task → status=completed (UniqueViolation 미발생)
+        """
+        import subprocess
+        repo_id = test_repo["id"]
+        repo_path = test_repo["path"]
+
+        (Path(repo_path) / "test_file.txt").write_text("changed")
+        subprocess.run(["git", "add", "test_file.txt"], cwd=repo_path, capture_output=True)
+
+        resp = _live_api("post", f"/{repo_id}/unstage", json={"files": ["test_file.txt"]})
+        assert resp.status_code == 200, f"unstage 실패: {resp.text}"
+        task_id = resp.json().get("task_id")
+        assert task_id
+
+        result = _poll_task(task_id)
+        assert result["status"] == "completed", f"task 완료 실패: {result}"
+
+
+# ── Phase T5: HTTP 통합 테스트 (실제 서버 8001) ───────────────────────────
+
+@pytest.mark.http_live
+@pytest.mark.skipif(not _server_available(), reason="실제 서버(8001) 미응답 — HTTP_LIVE 스킵")
+class TestSequenceSyncHttpLive:
+    """T5: HTTP 엔드포인트를 통한 log_operation INSERT 검증"""
+
+    @pytest.fixture(scope="class")
+    def test_repo(self):
+        """HTTP 테스트용 레포 등록 → 사용 → 삭제."""
+        import subprocess, tempfile, shutil
+        tmpdir = tempfile.mkdtemp(prefix="seq_sync_http_")
+        repo_id = None
+        try:
+            subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmpdir, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmpdir, capture_output=True)
+            (Path(tmpdir) / "readme.txt").write_text("init")
+            subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True)
+
+            resp = _live_api("post", "", json={"path": tmpdir, "alias": "seq_sync_http_test"})
+            assert resp.status_code == 200, f"레포 등록 실패: {resp.text}"
+            repo_id = resp.json()["id"]
+            yield {"id": repo_id, "path": tmpdir}
+        finally:
+            if repo_id:
+                _live_api("delete", f"/{repo_id}")
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_http_git_repos_unstage_creates_log(self, test_repo):
+        """
+        POST /api/v1/git-repos/{id}/unstage → 200 응답 → 워커 완료 후 git_operation_logs 레코드 확인.
+        시퀀스 동기화 후 UniqueViolation 없이 INSERT 성공 검증.
+        """
+        import subprocess
+        from sqlalchemy import create_engine, text as sa_text
+        repo_id = test_repo["id"]
+        repo_path = test_repo["path"]
+
+        (Path(repo_path) / "unstage_test.txt").write_text("data")
+        subprocess.run(["git", "add", "unstage_test.txt"], cwd=repo_path, capture_output=True)
+
+        resp = _live_api("post", f"/{repo_id}/unstage", json={"files": ["unstage_test.txt"]})
+        assert resp.status_code == 200, f"unstage API 실패: {resp.text}"
+        task_id = resp.json().get("task_id")
+        assert task_id
+
+        result = _poll_task(task_id)
+        assert result["status"] == "completed", f"task 미완료: {result}"
+
+        db_url = os.environ.get("DATABASE_URL", "postgresql://monitor_user:monitor_pass_2026@localhost:5432/monitor")
+        eng = create_engine(db_url)
+        with eng.connect() as conn:
+            count = conn.execute(sa_text(
+                "SELECT COUNT(*) FROM git_operation_logs WHERE repo_id = :rid AND operation = 'unstage'"
+            ), {"rid": repo_id}).scalar()
+        eng.dispose()
+        assert count >= 1, f"git_operation_logs에 unstage 레코드 없음 (count={count})"
+
+    def test_http_git_repos_commit_creates_log(self, test_repo):
+        """
+        POST /api/v1/git-repos/{id}/commit → 200 응답 → 워커 완료 후 git_operation_logs 레코드 확인.
+        """
+        import subprocess
+        from sqlalchemy import create_engine, text as sa_text
+        repo_id = test_repo["id"]
+        repo_path = test_repo["path"]
+
+        (Path(repo_path) / "commit_test.txt").write_text("commit data")
+        subprocess.run(["git", "add", "commit_test.txt"], cwd=repo_path, capture_output=True)
+
+        resp = _live_api("post", f"/{repo_id}/commit", json={"message": "T5 test commit"})
+        assert resp.status_code == 200, f"commit API 실패: {resp.text}"
+        task_id = resp.json().get("task_id")
+        assert task_id
+
+        result = _poll_task(task_id)
+        assert result["status"] == "completed", f"task 미완료: {result}"
+
+        db_url = os.environ.get("DATABASE_URL", "postgresql://monitor_user:monitor_pass_2026@localhost:5432/monitor")
+        eng = create_engine(db_url)
+        with eng.connect() as conn:
+            count = conn.execute(sa_text(
+                "SELECT COUNT(*) FROM git_operation_logs WHERE repo_id = :rid AND operation = 'commit'"
+            ), {"rid": repo_id}).scalar()
+        eng.dispose()
+        assert count >= 1, f"git_operation_logs에 commit 레코드 없음 (count={count})"
