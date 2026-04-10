@@ -1,0 +1,396 @@
+"""
+WorkerHealthRedis + check_pid_alive + 소비처 전환 단위 테스트
+
+Phase T1 TC:
+  Item 18: WorkerHealthRedis 단위 테스트
+  Item 19: check_pid_alive 단위 테스트
+  Item 20: 건강 체크 API 전환 테스트
+  Item 21: 소비처 전환 테스트
+"""
+import json
+import os
+import sys
+import pytest
+import fakeredis
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+# 프로젝트 루트 추가
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.shared.worker.health_redis import (
+    WorkerHealthRedis,
+    check_pid_alive,
+    HEALTH_KEY_PREFIX,
+    DEFAULT_TTL,
+    KNOWN_WORKER_TYPES,
+)
+
+
+# ============================================================
+# 공통 픽스처
+# ============================================================
+
+@pytest.fixture
+def fake_redis():
+    """fakeredis 인스턴스를 반환하고 WorkerHealthRedis에 주입한다."""
+    client = fakeredis.FakeRedis(decode_responses=False)
+    with patch("app.shared.worker.health_redis.RedisClient.get_sync_client", return_value=client):
+        yield client
+    client.flushall()
+
+
+@pytest.fixture
+def redis_down():
+    """Redis 연결 불가 상태를 시뮬레이션한다."""
+    with patch(
+        "app.shared.worker.health_redis.RedisClient.get_sync_client",
+        side_effect=ConnectionError("Redis 연결 실패"),
+    ):
+        yield
+
+
+# ============================================================
+# Item 18: WorkerHealthRedis 단위 테스트
+# ============================================================
+
+class TestWorkerHealthRedisPublish:
+    """WorkerHealthRedis.publish() 테스트"""
+
+    def test_health_redis_publish_right(self, fake_redis):
+        """R(Right): publish 후 check 반환값 필드 일치 + TTL 검증."""
+        pid = 1234
+        result = WorkerHealthRedis.publish("naver", pid, "running", memory_mb=100.0, active_tasks=3)
+        assert result is True
+
+        data = WorkerHealthRedis.check("naver")
+        assert data is not None
+        assert data["pid"] == pid
+        assert data["state"] == "running"
+        assert data["memory_mb"] == 100.0
+        assert data["active_tasks"] == 3
+        assert data["source"] == "redis"
+        assert data["ttl_remaining"] > 0
+        assert data["ttl_remaining"] <= DEFAULT_TTL
+
+    def test_health_redis_publish_updates_existing_boundary(self, fake_redis):
+        """B(Boundary): 동일 worker_type 2회 publish → 최신 값으로 덮어씀."""
+        WorkerHealthRedis.publish("naver", 1000, "running", memory_mb=50.0)
+        WorkerHealthRedis.publish("naver", 2000, "idle", memory_mb=75.0)
+
+        data = WorkerHealthRedis.check("naver")
+        assert data is not None
+        assert data["pid"] == 2000
+        assert data["state"] == "idle"
+        assert data["memory_mb"] == 75.0
+
+    def test_health_redis_publish_redis_down_error(self, redis_down):
+        """E(Error): Redis 연결 실패 시 False 반환 + 예외 전파 없음."""
+        result = WorkerHealthRedis.publish("naver", 1234, "running")
+        assert result is False  # 예외 없이 False 반환
+
+
+class TestWorkerHealthRedisCheck:
+    """WorkerHealthRedis.check() 테스트"""
+
+    def test_health_redis_check_nonexistent_right(self, fake_redis):
+        """R(Right): 미등록 워커 타입 check → None 반환."""
+        result = WorkerHealthRedis.check("unknown_worker_type")
+        assert result is None
+
+    def test_health_redis_check_expired_boundary(self, fake_redis):
+        """B(Boundary): 키 없음(만료) 상태 → None 반환."""
+        # publish 없이 직접 TTL=1 키 설정 후 삭제하여 만료 시뮬레이션
+        key = f"{HEALTH_KEY_PREFIX}naver"
+        fake_redis.set(key, json.dumps({"pid": 1, "state": "running", "memory_mb": 0, "active_tasks": 0, "updated_at": datetime.now().isoformat()}), ex=1)
+        fake_redis.delete(key)  # 즉시 삭제로 만료 시뮬레이션
+        result = WorkerHealthRedis.check("naver")
+        assert result is None
+
+    def test_health_redis_check_redis_down_error(self, redis_down):
+        """E(Error): Redis 연결 실패 시 None 반환 + 예외 전파 없음."""
+        result = WorkerHealthRedis.check("naver")
+        assert result is None
+
+    def test_health_redis_check_all_right(self, fake_redis):
+        """R(Right): 3종 publish 후 check_all → 3개 값, 미등록 1개 None."""
+        WorkerHealthRedis.publish("naver", 1001, "running")
+        WorkerHealthRedis.publish("scheduled", 1002, "running")
+        WorkerHealthRedis.publish("ondemand", 1003, "running")
+        # "claude"는 publish 안 함
+
+        result = WorkerHealthRedis.check_all()
+        assert result["naver"] is not None
+        assert result["scheduled"] is not None
+        assert result["ondemand"] is not None
+        assert result["claude"] is None
+        assert set(result.keys()) == set(KNOWN_WORKER_TYPES)
+
+    def test_health_redis_pid_fallback_right(self):
+        """R(Right): Redis 불가 상태에서 pid 인자 전달 → source: "pid_only", alive: True."""
+        current_pid = os.getpid()
+        with patch(
+            "app.shared.worker.health_redis.RedisClient.get_sync_client",
+            return_value=None,
+        ):
+            result = WorkerHealthRedis.check("naver", pid=current_pid)
+
+        assert result is not None
+        assert result["source"] == "pid_only"
+        assert result["alive"] is True
+        assert result["pid"] == current_pid
+
+
+# ============================================================
+# Item 19: check_pid_alive 단위 테스트
+# ============================================================
+
+class TestCheckPidAlive:
+    """check_pid_alive() 테스트"""
+
+    def test_pid_alive_current_process_right(self):
+        """R(Right): 현재 프로세스 PID → True."""
+        assert check_pid_alive(os.getpid()) is True
+
+    def test_pid_alive_nonexistent_pid_right(self):
+        """R(Right): 존재하지 않는 PID → False."""
+        # 99999는 일반적으로 존재하지 않는 PID
+        # 만약 실제로 존재한다면 다른 큰 값 사용
+        import psutil
+        pid = 99999
+        if psutil.pid_exists(pid):
+            pid = 99998  # fallback
+        assert check_pid_alive(pid) is False
+
+    def test_pid_alive_reuse_detection_boundary(self):
+        """B(Boundary): 현재 PID + started_at=10년 전 → create_time 불일치 → False."""
+        current_pid = os.getpid()
+        ten_years_ago = datetime.now() - timedelta(days=3650)
+        result = check_pid_alive(current_pid, started_at=ten_years_ago)
+        assert result is False
+
+    def test_pid_alive_no_started_at_right(self):
+        """R(Right): started_at=None → create_time 비교 스킵, PID 존재만 확인 → True."""
+        assert check_pid_alive(os.getpid(), started_at=None) is True
+
+
+# ============================================================
+# Item 20: 건강 체크 API 전환 테스트
+# ============================================================
+
+class TestHealthCheckApiConversion:
+    """Naver 워커 건강 체크 API 전환 테스트 (worker.py 로직)"""
+
+    def _make_db_row(self, pid=None, last_heartbeat=None):
+        """worker_status DB 행 모의 객체 생성."""
+        row = MagicMock()
+        row.__getitem__ = lambda self, idx: (
+            pid, "running", None, last_heartbeat, 0, None,
+            False, None, True, None, 0, False
+        )[idx]
+        return row
+
+    def test_worker_health_redis_healthy_right(self, fake_redis):
+        """R(Right): Redis에 naver 키 publish → is_healthy=True + seconds_since_heartbeat 존재."""
+        from app.routes.worker import get_worker_status_from_db
+
+        WorkerHealthRedis.publish("naver", os.getpid(), "running")
+
+        # SessionLocal을 mock으로 교체하여 get_worker_status_from_db() 실행
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=os.getpid())
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        assert result is not None
+        # Redis 값이 last_heartbeat으로 반영됨
+        assert result["last_heartbeat"] is not None
+        assert result["pid"] == os.getpid()
+
+    def test_worker_health_redis_expired_right(self, fake_redis):
+        """R(Right): Redis 키 없고 PID 없음 → last_heartbeat None."""
+        from app.routes.worker import get_worker_status_from_db
+
+        # Redis에 키 없음, DB 행에 old last_heartbeat
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=0, last_heartbeat="2000-01-01")
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        # Redis 키 없음 → last_heartbeat None
+        assert result is not None
+        assert result["last_heartbeat"] is None
+
+    def test_get_worker_status_hybrid_right(self, fake_redis):
+        """R(Right): DB에 pid + Redis heartbeat → last_heartbeat이 Redis updated_at 값."""
+        from app.routes.worker import get_worker_status_from_db
+
+        WorkerHealthRedis.publish("naver", 5678, "running")
+
+        redis_data = WorkerHealthRedis.check("naver")
+        expected_updated_at = redis_data["updated_at"]
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=5678, last_heartbeat="2000-01-01T00:00:00")
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        assert result is not None
+        assert result["last_heartbeat"] == expected_updated_at
+
+
+# ============================================================
+# Item 21: 소비처 전환 테스트
+# ============================================================
+
+class TestConsumerConversion:
+    """소비처(worker_status_service, llm_service) 전환 테스트"""
+
+    def _make_instagram_worker(self, db_session):
+        """테스트용 Instagram 워커 DB 레코드 생성."""
+        from app.models import InstagramWorkerStatus
+        import uuid
+
+        worker = InstagramWorkerStatus(
+            worker_id=str(uuid.uuid4()),
+            pid=os.getpid(),
+            started_at=datetime.now(),
+            last_heartbeat=datetime.now() - timedelta(hours=1),  # 오래된 값
+            current_state="idle",
+            is_alive=True,
+        )
+        db_session.add(worker)
+        db_session.flush()
+        return worker
+
+    def test_instagram_check_health_redis_right(self, fake_redis, test_db_session):
+        """R(Right): Redis에 "scheduled" 키 publish → check_health() status: "healthy"."""
+        from app.modules.instagram.services.worker_status_service import WorkerStatusService
+
+        self._make_instagram_worker(test_db_session)
+        WorkerHealthRedis.publish("scheduled", 9999, "running")
+
+        service = WorkerStatusService(test_db_session)
+        result = service.check_health()
+        assert result["status"] == "healthy"
+
+    def test_instagram_check_health_redis_expired_right(self, fake_redis, test_db_session):
+        """R(Right): Redis 키 없음 → check_health() status: "dead"."""
+        from app.modules.instagram.services.worker_status_service import WorkerStatusService
+
+        self._make_instagram_worker(test_db_session)
+        # Redis에 키 없음 (fake_redis가 비어 있음)
+
+        service = WorkerStatusService(test_db_session)
+        result = service.check_health()
+        assert result["status"] == "dead"
+
+    def test_llm_check_health_redis_right(self, fake_redis, test_db_session):
+        """R(Right): Redis에 "claude" 키 publish → check_worker_health() status: "healthy"."""
+        from app.modules.claude_worker.services.llm_service import LLMService
+        from app.modules.claude_worker.models.llm_request import LLMWorkerStatus
+        import uuid
+
+        # LLMWorkerStatus 레코드 생성
+        worker = LLMWorkerStatus(
+            worker_id=str(uuid.uuid4()),
+            pid=os.getpid(),
+            started_at=datetime.now(),
+            last_heartbeat=datetime.now(),
+            current_state="idle",
+            is_alive=True,
+            processed_count=0,
+            error_count=0,
+        )
+        test_db_session.add(worker)
+        test_db_session.flush()
+
+        WorkerHealthRedis.publish("claude", os.getpid(), "running")
+
+        service = LLMService(test_db_session)
+        result = service.check_worker_health()
+        assert result["status"] == "healthy"
+
+    def test_cleanup_stale_workers_uses_started_at_right(self, fake_redis, test_db_session):
+        """R(Right): started_at 25시간 전 + is_alive=False → 삭제 확인 (last_heartbeat 무관)."""
+        from app.modules.instagram.services.worker_status_service import WorkerStatusService
+        from app.models import InstagramWorkerStatus
+        import uuid
+
+        old_worker = InstagramWorkerStatus(
+            worker_id=str(uuid.uuid4()),
+            pid=9999,
+            started_at=datetime.now() - timedelta(hours=25),
+            last_heartbeat=datetime.now(),  # last_heartbeat는 최근이지만 started_at이 오래됨
+            current_state="stopped",
+            is_alive=False,
+        )
+        test_db_session.add(old_worker)
+        test_db_session.flush()
+
+        service = WorkerStatusService(test_db_session)
+        deleted = service.cleanup_stale_workers(max_age_hours=24)
+        assert deleted >= 1
+
+
+# ============================================================
+# Phase T3: 재현/통합 TC
+# ============================================================
+
+class TestIntegration:
+    """DB 쓰기 제거 + 하이브리드 읽기 통합 검증 (실제 SQLite + fakeredis)"""
+
+    def test_heartbeat_no_db_write_integration(self, fake_redis):
+        """NaverMonitorWorker._update_heartbeat() — DB write 없고 Redis publish만 발생 확인."""
+        from app.worker.naver_monitor_worker import NaverMonitorWorker
+        from unittest.mock import call
+
+        worker = NaverMonitorWorker()
+
+        # DB 세션 mock — _update_heartbeat()가 DB를 전혀 건드리지 않아야 함
+        mock_db = MagicMock()
+        with patch("app.routes.worker.SessionLocal", return_value=mock_db):
+            worker._update_heartbeat()
+
+        # DB execute가 호출되지 않아야 함
+        mock_db.execute.assert_not_called()
+
+        # Redis에는 publish되었는지 확인
+        redis_data = WorkerHealthRedis.check("naver_monitor")
+        assert redis_data is not None
+        assert redis_data["source"] == "redis"
+        assert redis_data["pid"] == worker.pid
+
+    def test_update_state_no_heartbeat_side_effect_integration(self, fake_redis, test_db_session):
+        """WorkerStatusService.update_state() 호출 후 last_heartbeat 미갱신 확인."""
+        from app.modules.instagram.services.worker_status_service import WorkerStatusService
+        from app.models import InstagramWorkerStatus
+        import uuid
+
+        OLD_HEARTBEAT = datetime.now() - timedelta(hours=2)
+        worker = InstagramWorkerStatus(
+            worker_id=str(uuid.uuid4()),
+            pid=os.getpid(),
+            started_at=datetime.now(),
+            last_heartbeat=OLD_HEARTBEAT,
+            current_state="idle",
+            is_alive=True,
+        )
+        test_db_session.add(worker)
+        test_db_session.flush()
+        wid = worker.worker_id
+
+        service = WorkerStatusService(test_db_session)
+        service.update_state(wid, state="crawling", account="test_account")
+
+        # last_heartbeat이 갱신되지 않았는지 확인
+        test_db_session.expire(worker)
+        test_db_session.refresh(worker)
+        diff = abs((worker.last_heartbeat - OLD_HEARTBEAT).total_seconds())
+        assert diff < 2, f"last_heartbeat이 갱신됨 (diff={diff}s)"
+        assert worker.current_state == "crawling"

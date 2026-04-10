@@ -151,7 +151,7 @@ class TestWorkerStatusServiceRight:
 # ============================================================
 
 class TestHealthCheckBoundary:
-    """헬스체크 경계값 테스트"""
+    """헬스체크 경계값 테스트 (Redis TTL 기반)"""
 
     def test_check_health_no_worker(self, service, mock_db):
         """워커가 없을 때 no_worker 상태"""
@@ -163,55 +163,57 @@ class TestHealthCheckBoundary:
         assert result["worker_id"] is None
         assert "No active worker" in result["message"]
 
-    def test_check_health_healthy_within_threshold(self, service, mock_db, mock_worker):
-        """HEALTHY_THRESHOLD 이내면 healthy"""
-        # 30초 전 heartbeat
-        mock_worker.last_heartbeat = datetime.now() - timedelta(seconds=30)
+    def test_check_health_healthy_redis_ttl_high(self, service, mock_db, mock_worker):
+        """Redis TTL > 15 → healthy"""
         mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_worker
 
-        result = service.check_health()
+        redis_data = {"source": "redis", "ttl_remaining": 25, "updated_at": "2026-04-10T00:00:00"}
+        with patch("app.modules.instagram.services.worker_status_service.WorkerHealthRedis.check", return_value=redis_data):
+            result = service.check_health()
 
         assert result["status"] == "healthy"
         assert result["heartbeat_age_seconds"] <= HEALTHY_THRESHOLD
 
-    def test_check_health_exactly_at_healthy_threshold(self, service, mock_db, mock_worker):
-        """정확히 HEALTHY_THRESHOLD일 때 healthy"""
-        mock_worker.last_heartbeat = datetime.now() - timedelta(seconds=HEALTHY_THRESHOLD)
+    def test_check_health_warning_redis_ttl_low(self, service, mock_db, mock_worker):
+        """Redis TTL > 0 but <= 15 → warning"""
         mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_worker
 
-        result = service.check_health()
-
-        assert result["status"] == "healthy"
-
-    def test_check_health_warning_above_healthy_threshold(self, service, mock_db, mock_worker):
-        """HEALTHY_THRESHOLD 초과, WARNING_THRESHOLD 이하면 warning"""
-        mock_worker.last_heartbeat = datetime.now() - timedelta(seconds=90)
-        mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_worker
-
-        result = service.check_health()
+        redis_data = {"source": "redis", "ttl_remaining": 5, "updated_at": "2026-04-10T00:00:00"}
+        with patch("app.modules.instagram.services.worker_status_service.WorkerHealthRedis.check", return_value=redis_data):
+            result = service.check_health()
 
         assert result["status"] == "warning"
-        assert result["heartbeat_age_seconds"] > HEALTHY_THRESHOLD
-        assert result["heartbeat_age_seconds"] <= WARNING_THRESHOLD
+        assert result["heartbeat_age_seconds"] > 0
 
-    def test_check_health_exactly_at_warning_threshold(self, service, mock_db, mock_worker):
-        """정확히 WARNING_THRESHOLD일 때 warning"""
-        mock_worker.last_heartbeat = datetime.now() - timedelta(seconds=WARNING_THRESHOLD)
+    def test_check_health_dead_redis_ttl_zero(self, service, mock_db, mock_worker):
+        """Redis TTL = 0 → dead"""
         mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_worker
 
-        result = service.check_health()
-
-        assert result["status"] == "warning"
-
-    def test_check_health_dead_above_warning_threshold(self, service, mock_db, mock_worker):
-        """WARNING_THRESHOLD 초과면 dead"""
-        mock_worker.last_heartbeat = datetime.now() - timedelta(seconds=150)
-        mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_worker
-
-        result = service.check_health()
+        redis_data = {"source": "redis", "ttl_remaining": 0, "updated_at": "2026-04-10T00:00:00"}
+        with patch("app.modules.instagram.services.worker_status_service.WorkerHealthRedis.check", return_value=redis_data):
+            result = service.check_health()
 
         assert result["status"] == "dead"
-        assert result["heartbeat_age_seconds"] > WARNING_THRESHOLD
+
+    def test_check_health_dead_no_redis_key(self, service, mock_db, mock_worker):
+        """Redis 키 없음 → dead"""
+        mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_worker
+
+        with patch("app.modules.instagram.services.worker_status_service.WorkerHealthRedis.check", return_value=None):
+            result = service.check_health()
+
+        assert result["status"] == "dead"
+        assert result["heartbeat_age_seconds"] == 999
+
+    def test_check_health_redis_ttl_boundary_exactly_16(self, service, mock_db, mock_worker):
+        """Redis TTL = 16 (> 15) → healthy"""
+        mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_worker
+
+        redis_data = {"source": "redis", "ttl_remaining": 16, "updated_at": "2026-04-10T00:00:00"}
+        with patch("app.modules.instagram.services.worker_status_service.WorkerHealthRedis.check", return_value=redis_data):
+            result = service.check_health()
+
+        assert result["status"] == "healthy"
 
 
 # ============================================================
@@ -236,17 +238,19 @@ class TestWorkerStatusTime:
         assert 3500 < result["uptime_seconds"] < 3700
 
     def test_get_status_with_computed_fields_calculates_heartbeat_age(self, service, mock_db, mock_worker):
-        """get_status_with_computed_fields가 heartbeat 경과 시간 계산"""
+        """get_status_with_computed_fields가 Redis TTL 기반 heartbeat 경과 시간 계산"""
         mock_worker.started_at = datetime.now() - timedelta(hours=1)
         mock_worker.last_heartbeat = datetime.now() - timedelta(seconds=30)
         mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_worker
 
-        result = service.get_status_with_computed_fields()
+        # TTL=25 → heartbeat_age = max(0, 30 - 25) = 5
+        redis_data = {"source": "redis", "ttl_remaining": 25, "updated_at": "2026-04-10T00:00:00"}
+        with patch("app.modules.instagram.services.worker_status_service.WorkerHealthRedis.check", return_value=redis_data):
+            result = service.get_status_with_computed_fields()
 
         assert result is not None
         assert "heartbeat_age_seconds" in result
-        # 30초 정도 (약간의 오차 허용)
-        assert 25 < result["heartbeat_age_seconds"] < 35
+        assert result["heartbeat_age_seconds"] == 5
 
     def test_get_status_with_computed_fields_returns_none_when_no_worker(self, service, mock_db):
         """워커가 없으면 None 반환"""
