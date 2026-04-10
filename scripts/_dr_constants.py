@@ -39,7 +39,7 @@ RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
-    "subprocess_heartbeat",
+    "subprocess_heartbeat", "reflect_final_path",
     "accepted_at", "accepted_source", "started_at",  # 관측 메타 키 (Phase 1)
 )
 def _read_zombie_grace_seconds(default: int = 240) -> int:
