@@ -265,50 +265,55 @@ def test_db_engine():
     """
     마이그레이션이 적용된 테스트 DB 엔진 (세션 범위)
 
-    모든 테스트에서 공유되는 테스트 전용 DB를 생성하고 마이그레이션을 적용합니다.
-    테스트 세션 종료 시 자동으로 정리됩니다.
+    DATABASE_URL 환경변수가 postgresql://로 시작하면 PG 엔진 사용,
+    기본값은 SQLite 테스트 DB (기존 동작 유지).
     """
     from app.database import Base
 
-    # TEST_DB_DIR 자동 생성 (worktree 환경에서 data 디렉토리 없을 수 있음)
-    TEST_DB_DIR.mkdir(parents=True, exist_ok=True)
+    _url = os.environ.get("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
+    _is_test_sqlite = _url.startswith("sqlite")
 
-    # 기존 테스트 DB 삭제
-    if TEST_DB_PATH.exists():
-        try:
-            os.remove(TEST_DB_PATH)
-        except PermissionError:
-            pass
+    if _is_test_sqlite:
+        # TEST_DB_DIR 자동 생성 (worktree 환경에서 data 디렉토리 없을 수 있음)
+        TEST_DB_DIR.mkdir(parents=True, exist_ok=True)
+        # 기존 테스트 DB 삭제
+        if TEST_DB_PATH.exists():
+            try:
+                os.remove(TEST_DB_PATH)
+            except PermissionError:
+                pass
 
     from sqlalchemy import event as sa_event
 
-    # 테스트 DB 엔진 생성
-    engine = create_engine(
-        f"sqlite:///{TEST_DB_PATH}",
-        connect_args={"check_same_thread": False}
-    )
+    if _is_test_sqlite:
+        engine = create_engine(_url, connect_args={"check_same_thread": False})
 
-    @sa_event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_conn, _record):
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+        @sa_event.listens_for(engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, _record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+    else:
+        # PostgreSQL: check_same_thread/PRAGMA 불필요
+        engine = create_engine(_url, pool_pre_ping=True)
 
     # 1. SQLAlchemy 모델로 기본 테이블 생성
     Base.metadata.create_all(bind=engine)
 
-    # 2. 마이그레이션 적용 (추가 컬럼, 인덱스 등)
-    apply_migrations(TEST_DB_PATH)
+    # 2. 마이그레이션 적용 (SQLite 전용 — PG는 Base.metadata.create_all로 충분)
+    if _is_test_sqlite:
+        apply_migrations(TEST_DB_PATH)
 
     yield engine
 
     # 정리
     engine.dispose()
-    try:
-        if TEST_DB_PATH.exists():
-            os.remove(TEST_DB_PATH)
-    except PermissionError:
-        pass
+    if _is_test_sqlite:
+        try:
+            if TEST_DB_PATH.exists():
+                os.remove(TEST_DB_PATH)
+        except PermissionError:
+            pass
 
 
 @pytest.fixture(scope="function")
