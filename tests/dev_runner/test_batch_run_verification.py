@@ -306,6 +306,28 @@ class TestLaunchCliArgs:
         idx = cmd.index("--session-id")
         assert cmd[idx + 1] == "abc-def-123"
 
+    def test_launch_cli_no_skip_plan_R(
+        self, listener_mod, fr, mock_popen, tmp_path, mock_worktree
+    ):
+        """R(Right): skip_plan=True 지정해도 cmd에 --skip-plan 없음 (CLI에서 제거된 옵션)"""
+        command = {
+            "action": "run",
+            "runner_id": RUNNER_ID,
+            "plan_file": "test.md",
+            "skip_plan": True,
+        }
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen) as mp:
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(
+                command, fr, RUNNER_ID, mock_worktree, "test.md", None
+            )
+
+        cmd = mp.call_args_list[0][0][0]
+        assert "--skip-plan" not in cmd
+
     def test_launch_cli_includes_fused_session(
         self, listener_mod, fr, mock_popen, tmp_path, mock_worktree
     ):
