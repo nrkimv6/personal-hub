@@ -106,42 +106,70 @@ _ENGINE_CLI_COMMANDS: dict[str, str] = {
 
 
 @router.post("/profiles/{engine}/{name}/launch-cli")
-def launch_cli(
+async def launch_cli(
     engine: str,
     name: str,
     admin: UserInfo = Depends(require_admin),
 ):
-    """CLI 직접 실행 (admin 전용) — 해당 profile env 로 새 콘솔 창을 띄운다.
+    """CLI 직접 실행 (admin 전용) — Redis 릴레이로 Session 1에서 콘솔 창을 띄운다.
 
+    Session 0(NSSM 서비스)에서 직접 subprocess 생성 시 창이 사용자 데스크톱에 보이지 않으므로,
+    worker:launch-cli 큐에 명령을 넣어 Session 1의 worker-command-listener가 실행하도록 위임.
     로그인 등 대화형 세션 목적. admin FastAPI app 에만 include_router 되므로
     public(8000)에서는 접근 불가.
     """
-    import subprocess
-    import sys
-    from app.modules.claude_worker.services.profile_env import build_cli_env
+    import json
+    from app.shared.redis.client import RedisClient
+    from app.modules.claude_worker.services.profile_env import ENGINE_ENV_KEYS
     from app.modules.claude_worker.services.profile_store import load_profiles
 
     if engine not in _ENGINE_CLI_COMMANDS:
         raise HTTPException(status_code=422, detail=f"unsupported engine: {engine!r}")
 
-    # profile 존재 검증
+    # profile 존재 검증 + config_dir/extra_env 추출
     payload = load_profiles()
-    profile_names = [p["name"] for p in payload.get("profiles", []) if p.get("engine") == engine]
-    if name not in profile_names:
+    profiles = payload.get("profiles", [])
+    profile = next(
+        (p for p in profiles if p.get("engine") == engine and p.get("name") == name),
+        None,
+    )
+    if profile is None:
         raise HTTPException(status_code=404, detail=f"profile {name!r} not found for engine {engine!r}")
 
     engine_cmd = _ENGINE_CLI_COMMANDS[engine]
-    env = build_cli_env(engine)
 
-    if sys.platform == "win32":
-        # CREATE_NEW_CONSOLE 으로 독립 콘솔 창 생성 (start 명령 사용 금지 — 이중 창 방지)
-        subprocess.Popen(
-            ["cmd", "/k", engine_cmd],
-            env=env,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-            close_fds=True,
-        )
-    else:
-        subprocess.Popen(["xterm", "-e", engine_cmd], env=env, close_fds=True)
+    # Redis 클라이언트 획득
+    redis_client = await RedisClient.get_client()
+    if not redis_client:
+        manual_cmd = f"set {ENGINE_ENV_KEYS.get(engine)}={profile.get('config_dir') or ''} && {engine_cmd}" if ENGINE_ENV_KEYS.get(engine) else engine_cmd
+        return {
+            "status": "redis_unavailable",
+            "message": f"Redis 연결 없음. 수동으로 실행하세요: {manual_cmd}",
+        }
 
-    return {"status": "launched", "engine": engine, "profile": name}
+    # payload 조립
+    launch_payload = json.dumps({
+        "action": "launch-cli",
+        "engine": engine,
+        "name": name,
+        "config_dir": profile.get("config_dir"),
+        "extra_env": profile.get("extra_env") or {},
+        "engine_cmd": engine_cmd,
+        "env_key": ENGINE_ENV_KEYS.get(engine),
+    }, ensure_ascii=False)
+
+    # 이전 결과 비우기 (race condition 방지)
+    await redis_client.delete("worker:launch-cli:results")
+
+    # 명령 전송
+    await redis_client.lpush("worker:launch-cli", launch_payload)
+
+    # 결과 대기
+    result = await redis_client.brpop("worker:launch-cli:results", timeout=10)
+
+    if result is None:
+        return {"status": "timeout", "message": "명령 전송됨, 리스너 응답 대기 타임아웃"}
+
+    _, result_data = result
+    result_json = json.loads(result_data if isinstance(result_data, str) else result_data.decode())
+    return result_json

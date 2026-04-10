@@ -2,10 +2,11 @@
 
 FastAPI TestClient를 사용하여 실제 HTTP 요청/응답을 검증합니다.
 llm_router만 포함한 minimal app 사용.
-mock 범위: subprocess.Popen 만.
+mock 범위: RedisClient (launch-cli 전환 이후 subprocess.Popen 직접 mock 불필요).
 """
+import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -172,16 +173,45 @@ def test_DELETE_api_v1_llm_profiles_R_selected_fallback(client):
 
 @pytest.mark.http
 def test_POST_launch_cli_R_admin(client):
-    """admin(localhost=TestClient) 으로 202 (Popen mock)."""
-    # default profile 이 있으면 됨
-    with patch("subprocess.Popen") as mock_popen:
-        mock_popen.return_value = MagicMock()
+    """admin(localhost=TestClient) 으로 200 + status=launched (Redis mock)."""
+    mock_redis = AsyncMock()
+    mock_redis.delete = AsyncMock()
+    mock_redis.lpush = AsyncMock()
+    mock_redis.brpop = AsyncMock(return_value=(
+        b"worker:launch-cli:results",
+        json.dumps({"success": True, "status": "launched", "engine": "claude", "profile": "default"}).encode()
+    ))
+    with patch("app.shared.redis.client.RedisClient.get_client", new=AsyncMock(return_value=mock_redis)):
         resp = client.post("/api/v1/llm/profiles/claude/default/launch-cli")
-    # launched 응답
     assert resp.status_code == 200
     data = resp.json()
     assert data.get("status") == "launched"
     assert data.get("engine") == "claude"
+
+
+@pytest.mark.http
+def test_POST_launch_cli_E_redis_unavailable(client):
+    """Redis 연결 없음 → status=redis_unavailable + message 포함."""
+    with patch("app.shared.redis.client.RedisClient.get_client", new=AsyncMock(return_value=None)):
+        resp = client.post("/api/v1/llm/profiles/claude/default/launch-cli")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("status") == "redis_unavailable"
+    assert "message" in data
+
+
+@pytest.mark.http
+def test_POST_launch_cli_B_timeout(client):
+    """Redis brpop 타임아웃 → status=timeout."""
+    mock_redis = AsyncMock()
+    mock_redis.delete = AsyncMock()
+    mock_redis.lpush = AsyncMock()
+    mock_redis.brpop = AsyncMock(return_value=None)
+    with patch("app.shared.redis.client.RedisClient.get_client", new=AsyncMock(return_value=mock_redis)):
+        resp = client.post("/api/v1/llm/profiles/claude/default/launch-cli")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("status") == "timeout"
 
 
 @pytest.mark.http
