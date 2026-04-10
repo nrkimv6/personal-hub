@@ -4,8 +4,8 @@
 	import { toast } from '$lib/stores/toast';
 	import { Plus, Trash2, Terminal, Check } from 'lucide-svelte';
 
-	let loading = true;
-	let saving = false;
+	let loading = $state(true);
+	let saving = $state(false);
 	let launchingKey = $state('');
 	let data = $state<LLMProfilesResponse | null>(null);
 	let drafts = $state<LLMProfileConfig[]>([]);
