@@ -34,6 +34,13 @@ MANAGED_PROJECTS = {
                     "worker_pid_file": "command_listener_admin.pid",
                 },
                 {
+                    "name": "dev_runner_listener",
+                    "label": "Dev Runner 리스너",
+                    "tier": "infra",
+                    "watchdog_pid_file": "dev_runner_watchdog_admin.pid",
+                    "worker_pid_file": "dev_runner_command_listener_admin.pid",
+                },
+                {
                     "name": "api_watchdog",
                     "label": "API 왓치독",
                     "tier": "infra",
