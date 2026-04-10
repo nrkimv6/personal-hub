@@ -2,8 +2,6 @@
 
 import json
 import re
-import subprocess
-import sys
 import time
 import traceback
 import uuid
@@ -807,34 +805,50 @@ class ExecutorService:
         return {"stopped": stopped}
 
     def restart_listener(self) -> dict:
-        """command-listener를 browser_workers.py restart-listener 경유로 재시작합니다.
+        """command-listener에 graceful-exit 시그널을 보내 재시작합니다.
 
-        1. browser_workers.py restart-listener 실행 (watchdog + dev-runner-command-listener 재시작)
-        2. 최대 10초 동안 heartbeat 키 감지 대기
+        Session 0(SYSTEM)에서 직접 subprocess를 spawn하지 않고,
+        Redis LPUSH로 graceful-exit 명령을 전달합니다.
+        dev-runner-command-listener가 명령을 수신하면 clean exit하고,
+        Session 1에서 실행 중인 watchdog가 자동으로 재시작합니다.
+
+        1. Redis LPUSH로 graceful-exit 명령 전송
+        2. heartbeat가 "restarting"으로 변경될 때까지 대기 (최대 5초)
+        3. heartbeat가 정상 ISO 타임스탬프로 복구될 때까지 대기 (최대 15초)
         """
-        BROWSER_WORKERS = PROJECT_ROOT / "scripts" / "browser_workers.py"
         HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 
-        python_exe = sys.executable
-        result = subprocess.run(
-            [python_exe, str(BROWSER_WORKERS), "restart-listener"],
-            capture_output=True,
-            text=True,
-            timeout=30,
+        # graceful-exit 시그널 전송
+        self.redis_client.lpush(
+            COMMANDS_KEY,
+            json.dumps({
+                "action": "graceful-exit",
+                "source": "restart-listener-api",
+                "timestamp": datetime.now().isoformat(),
+            }),
         )
 
-        if result.returncode != 0:
-            return {"success": False, "message": result.stderr.strip() or f"restart-listener exit code {result.returncode}"}
-
-        # heartbeat 감지 대기 (최대 10초)
-        deadline = time.time() + 10
+        # 단계 1: heartbeat → "restarting" 대기 (최대 5초)
+        deadline = time.time() + 5
         while time.time() < deadline:
             hb = self.redis_client.get(HEARTBEAT_KEY)
-            if hb:
+            hb_str = hb.decode() if isinstance(hb, bytes) else (hb or "")
+            if hb_str == "restarting":
+                break
+            time.sleep(0.5)
+        else:
+            return {"success": False, "message": "listener graceful-exit 미확인: heartbeat가 'restarting'으로 전환되지 않음 (5초 타임아웃)"}
+
+        # 단계 2: heartbeat → 정상 ISO 타임스탬프 복구 대기 (최대 15초)
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            hb = self.redis_client.get(HEARTBEAT_KEY)
+            hb_str = hb.decode() if isinstance(hb, bytes) else (hb or "")
+            if hb_str and hb_str != "restarting":
                 return {"success": True, "message": "listener restarted"}
             time.sleep(0.5)
 
-        return {"success": False, "message": "heartbeat not detected within 10s"}
+        return {"success": False, "message": "listener heartbeat not recovered within 15s after graceful-exit"}
 
 
 # 싱글톤 인스턴스

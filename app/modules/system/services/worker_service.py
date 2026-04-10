@@ -11,6 +11,7 @@ from pathlib import Path
 from app.core.config import PROJECT_ROOT
 from ..config import MANAGED_PROJECTS
 from .system_utils import send_redis_command
+from app.modules.dev_runner.services.executor_service import executor_service
 
 
 class WorkerService:
@@ -148,11 +149,16 @@ class WorkerService:
         return {"success": len(killed) > 0, "message": " | ".join(parts)}
 
     async def restart_infra(self, name: str) -> dict:
-        """infra tier 프로세스 개별 재시작. browser_workers.py 직접 subprocess 호출."""
-        # command_listener는 config 없이 허용 (별도 재시작 경로)
+        """infra tier 프로세스 개별 재시작.
+
+        command_listener: executor_service.restart_listener() 경유 (Redis 시그널).
+          → Session 0(SYSTEM)에서 subprocess를 직접 spawn하면 SYSTEM 권한이 상속되어
+            git dubious ownership 등 사용자 컨텍스트가 필요한 작업이 실패함.
+        기타 infra: browser_workers.py 직접 subprocess 호출.
+        """
         if name == "command_listener":
-            action = "restart-listener"
-            extra_args: list[str] = []
+            # Redis graceful-exit 시그널 → Session 1 watchdog가 재시작
+            return await asyncio.to_thread(executor_service.restart_listener)
         else:
             pid_dir, items = self._get_monitor_page_workers()
             if not items:

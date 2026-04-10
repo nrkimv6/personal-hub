@@ -51,10 +51,10 @@ def mock_manager(browser_workers_module, tmp_path):
                 "role": "listener",
             },
             {
-                "name": "Dev Runner Command Listener",
-                "pid_file": "dev_runner_command_listener_admin.pid",
-                "cmd": [sys.executable, "dev-runner-command-listener.py"],
-                "env": {},
+                "name": "Dev Runner Listener Watchdog",
+                "pid_file": "dev_runner_watchdog_admin.pid",
+                "cmd": ["powershell", "-ExecutionPolicy", "Bypass", "-File", "dev-runner-listener-watchdog.ps1"],
+                "env": {"APP_MODE": "admin"},
                 "role": "dev_listener",
             },
         ]

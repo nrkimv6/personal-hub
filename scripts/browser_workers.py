@@ -137,11 +137,11 @@ class BrowserWorkerManager:
                 "role": "listener",
             },
             {
-                "name": "Dev Runner Command Listener",
-                "pid_file": f"dev_runner_command_listener{self.pid_suffix}.pid",
-                "cmd": [str(self.python_exe),
-                        str(self.scripts_dir / "dev-runner-command-listener.py")],
-                "env": {},
+                "name": "Dev Runner Listener Watchdog",
+                "pid_file": f"dev_runner_watchdog{self.pid_suffix}.pid",
+                "cmd": [_ps_alias("monitorpage-wdog-devrunner.exe"), "-ExecutionPolicy", "Bypass", "-File",
+                        str(self.scripts_dir / "dev-runner-listener-watchdog.ps1")],
+                "env": {"APP_MODE": "admin"},
                 "role": "dev_listener",
             },
             {
@@ -159,6 +159,7 @@ class BrowserWorkerManager:
             f"unified_worker{self.pid_suffix}.pid",
             f"claude_worker{self.pid_suffix}.pid",
             f"command_listener{self.pid_suffix}.pid",
+            f"dev_runner_command_listener{self.pid_suffix}.pid",  # watchdog가 관리하는 worker PID
             f"chat_executor_admin.pid",
         ]
 
@@ -825,10 +826,11 @@ class BrowserWorkerManager:
         print(f"  Restarting Command Listener")
         print(f"{'=' * 40}{RESET}\n")
 
-        # watchdog + worker + dev_runner_command_listener PID kill
+        # watchdog + worker + dev_runner watchdog + dev_runner_command_listener PID kill
         listener_pids = [
             self.pid_dir / f"command_listener_watchdog{self.pid_suffix}.pid",
             self.pid_dir / f"command_listener{self.pid_suffix}.pid",
+            self.pid_dir / f"dev_runner_watchdog{self.pid_suffix}.pid",
             self.pid_dir / f"dev_runner_command_listener{self.pid_suffix}.pid",
         ]
         for pid_path in listener_pids:
