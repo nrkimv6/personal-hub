@@ -446,3 +446,144 @@ def test_extract_wiki_tags_integration():
         tags = extract_wiki_tags(fname, wl)
         assert isinstance(tags, list)
         assert len(tags) > 0  # 최소 ["untagged"] 이상
+
+
+# ========== Phase T4: E2E (TestClient) ==========
+
+@pytest.fixture(scope="module")
+def api_client(test_db_engine):
+    """TestClient + test_db_engine 오버라이드"""
+    from app.main import app
+    from app.database import get_db
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import sessionmaker
+
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
+
+    def override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+def test_e2e_guide_status_api(api_client):
+    """T4: GET /api/v1/plans/records/guide-status → 200 + [{guide, pending_count, ...}] 구조"""
+    resp = api_client.get("/api/v1/plans/records/guide-status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    for item in data:
+        assert "guide" in item
+        assert "pending_count" in item
+        assert isinstance(item["pending_count"], int)
+
+
+def test_e2e_plan_record_search(api_client, test_db_session):
+    """T4: GET /api/v1/plans/records?q=watchdog → 200 + summary 매칭 결과"""
+    from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+    from app.models.plan_record import PlanRecord
+
+    # 테스트 레코드 삽입
+    rec = PlanRecord(
+        filename_hash="test_search_watchdog_hash",
+        file_path="/plan/2026-04-10_watchdog-test.md",
+        summary="watchdog heartbeat 점검",
+    )
+    test_db_session.add(rec)
+    test_db_session.commit()
+
+    resp = api_client.get("/api/v1/plans/records?q=watchdog")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert any("watchdog" in (item.get("summary") or "").lower() for item in data)
+
+
+# ========== Phase T5: HTTP 통합 (http_live — 실서버) ==========
+
+import pytest as _pytest
+pytestmark_http_live = _pytest.mark.http_live
+
+
+@_pytest.mark.http_live
+def test_http_plan_records_search_keyword():
+    """T5: GET /api/v1/plans/records?q=redis → 200 + 결과는 리스트"""
+    import httpx
+    try:
+        resp = httpx.get("http://localhost:8001/api/v1/plans/records?q=redis", timeout=10)
+    except httpx.ConnectError:
+        _pytest.skip("실서버 미기동")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@_pytest.mark.http_live
+def test_http_plan_records_search_date():
+    """T5: GET /api/v1/plans/records?date_from=2026-04-01&date_to=2026-04-10 → 200"""
+    import httpx
+    try:
+        resp = httpx.get(
+            "http://localhost:8001/api/v1/plans/records?date_from=2026-04-01T00:00:00&date_to=2026-04-10T23:59:59",
+            timeout=10,
+        )
+    except httpx.ConnectError:
+        _pytest.skip("실서버 미기동")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+
+
+@_pytest.mark.http_live
+def test_http_plan_records_search_no_result():
+    """T5: GET /api/v1/plans/records?q=zzz_impossible → 200 + 빈 리스트 또는 결과 없음"""
+    import httpx
+    try:
+        resp = httpx.get(
+            "http://localhost:8001/api/v1/plans/records?q=zzz_impossible_xyzzy_12345",
+            timeout=10,
+        )
+    except httpx.ConnectError:
+        _pytest.skip("실서버 미기동")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) == 0
+
+
+@_pytest.mark.http_live
+def test_http_guide_status():
+    """T5: GET /api/v1/plans/records/guide-status → 200 + [{guide, pending_count}]"""
+    import httpx
+    try:
+        resp = httpx.get("http://localhost:8001/api/v1/plans/records/guide-status", timeout=10)
+    except httpx.ConnectError:
+        _pytest.skip("실서버 미기동")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    for item in data:
+        assert "guide" in item
+        assert "pending_count" in item
+
+
+@_pytest.mark.http_live
+def test_http_guide_status_empty():
+    """T5: PlanRecord 0건이어도 GET /api/v1/plans/records/guide-status → 200 + 리스트"""
+    import httpx
+    try:
+        resp = httpx.get("http://localhost:8001/api/v1/plans/records/guide-status", timeout=10)
+    except httpx.ConnectError:
+        _pytest.skip("실서버 미기동")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    # 모든 가이드의 pending_count는 int
+    for item in data:
+        assert isinstance(item.get("pending_count"), int)

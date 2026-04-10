@@ -322,3 +322,84 @@ class TestDevguideStalenessIntegration:
         assert updated is not None
         assert updated.category == "naver-booking"
         assert updated.summary == "현재 버그 수정"
+
+
+# ========== Phase T4: E2E (TestClient) ==========
+
+@pytest.fixture(scope="module")
+def api_client_staleness(test_db_engine):
+    """TestClient + test_db_engine 오버라이드 (staleness)"""
+    from app.main import app
+    from app.database import get_db
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import sessionmaker
+
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
+
+    def override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+def test_e2e_guide_status_with_history(api_client_staleness):
+    """T4: GET /api/v1/plans/records/guide-status?include_history=true → 200 + staleness_history 필드"""
+    resp = api_client_staleness.get("/api/v1/plans/records/guide-status?include_history=true")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    for item in data:
+        assert "guide" in item
+        assert "staleness_history" in item
+        assert isinstance(item["staleness_history"], list)
+
+
+# ========== Phase T5: HTTP 통합 (http_live) ==========
+
+import pytest as _pytest
+
+
+@_pytest.mark.http_live
+def test_http_guide_status_history():
+    """T5: GET /api/v1/plans/records/guide-status?include_history=true → 200 + staleness_history 배열"""
+    import httpx
+    try:
+        resp = httpx.get(
+            "http://localhost:8001/api/v1/plans/records/guide-status?include_history=true",
+            timeout=10,
+        )
+    except httpx.ConnectError:
+        _pytest.skip("실서버 미기동")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    for item in data:
+        assert "staleness_history" in item
+
+
+@_pytest.mark.http_live
+def test_http_schedule_run_devguide_staleness():
+    """T5: GET /api/tasks/schedules → devguide_staleness target_type 존재 또는 plan_requirements_sync 미존재"""
+    import httpx
+    try:
+        resp = httpx.get("http://localhost:8001/api/tasks/schedules", timeout=10)
+    except httpx.ConnectError:
+        _pytest.skip("실서버 미기동")
+    assert resp.status_code == 200
+    data = resp.json()
+    # devguide_staleness 타입 스케줄 존재 확인 (또는 requirements_sync 미존재)
+    if isinstance(data, list):
+        target_types = [item.get("target_type") for item in data if isinstance(item, dict)]
+    elif isinstance(data, dict):
+        items = data.get("items") or data.get("schedules") or data.get("data") or []
+        target_types = [item.get("target_type") for item in items if isinstance(item, dict)]
+    else:
+        target_types = []
+    assert "plan_requirements_sync" not in target_types or "devguide_staleness" in target_types
