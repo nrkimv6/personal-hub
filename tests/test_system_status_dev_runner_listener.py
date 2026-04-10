@@ -273,6 +273,45 @@ class TestIntegrationConfigPidNamesMatch:
         )
 
 
+# ─── Phase T4: E2E 테스트 (http_live) ───────────────────────────────────────────
+
+class TestE2eDevRunnerListenerLive:
+
+    @pytest.mark.http_live
+    def test_e2e_workers_api_includes_dev_runner_listener(self):
+        """T4: GET http://localhost:8001/api/v1/system/services/workers →
+        응답 JSON 배열에서 name=="dev_runner_listener" 항목 존재, tier=="infra",
+        watchdog/worker 필드 존재 확인"""
+        import urllib.request
+        import json as _json
+        url = "http://localhost:8001/api/v1/system/services/workers"
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = _json.loads(resp.read())
+
+        assert isinstance(data, list)
+        dev_runner = next((w for w in data if w["name"] == "dev_runner_listener"), None)
+        assert dev_runner is not None, (
+            f"dev_runner_listener가 실서버 응답에 없음. 전체 이름 목록: {[w['name'] for w in data]}"
+        )
+        assert dev_runner["tier"] == "infra"
+        assert "watchdog" in dev_runner
+        assert "worker" in dev_runner
+
+    @pytest.mark.http_live
+    def test_e2e_restart_infra_dev_runner_listener(self):
+        """T4: POST http://localhost:8001/api/v1/system/services/infra/dev_runner_listener/restart →
+        200 응답 확인"""
+        import urllib.request
+        import json as _json
+        url = "http://localhost:8001/api/v1/system/services/infra/dev_runner_listener/restart"
+        req = urllib.request.Request(url, method="POST", data=b"")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            assert resp.status == 200
+            data = _json.loads(resp.read())
+        assert "success" in data
+
+
 # ─── Phase T5: HTTP 통합 ─────────────────────────────────────────────────────────
 
 @pytest.fixture
