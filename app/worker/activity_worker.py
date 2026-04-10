@@ -17,7 +17,7 @@ import asyncio
 import logging
 import os
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 
 import httpx
 
@@ -58,13 +58,48 @@ class ActivityWorker(CrawlWorkerBase):
         )
         self._poll_interval = poll_interval
         self._processing = False
+        self._archive_batch_last_run: Optional[date] = None  # 오늘 날짜 저장 (중복 실행 방지)
 
     def _get_loop_interval(self) -> float:
         """메인 루프 간격 반환."""
         return self._poll_interval
 
+    async def _run_archive_batch_if_due(self) -> None:
+        """매일 03:00에 archive_batch_move 실행 (중복 실행 방지)."""
+        now = datetime.now()
+        today = now.date()
+        if now.hour != 3:
+            return
+        if self._archive_batch_last_run == today:
+            return
+
+        self._archive_batch_last_run = today
+        logger.info("[ActivityWorker] archive_batch_move 일일 실행 시작")
+        try:
+            from scripts.archive_batch_move import run_batch
+            import asyncio
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(None, run_batch)
+            total = sum(results.values())
+            logger.info("[ActivityWorker] archive_batch_move 완료: 총 %d건 이동", total)
+
+            # Redis pubsub 알림
+            try:
+                import redis as _redis
+                r = _redis.Redis(host="localhost", port=6379, decode_responses=True)
+                r.publish("system:archive_batch", f"completed:{today}:total={total}")
+                r.close()
+            except Exception as re:
+                logger.debug("[ActivityWorker] Redis 알림 실패 (무시): %s", re)
+
+        except Exception as e:
+            logger.error("[ActivityWorker] archive_batch_move 오류: %s", e, exc_info=True)
+
     async def _main_loop_iteration(self):
         """메인 루프 반복 - 요청 처리."""
+        # 매일 03:00 archive 배치 실행
+        await self._run_archive_batch_if_due()
+
         if self._processing:
             return
 

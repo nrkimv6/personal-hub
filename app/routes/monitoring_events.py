@@ -10,6 +10,7 @@ from sqlalchemy import func, desc, case
 
 from app.database import get_db
 from app.models.monitoring_event import MonitoringEvent
+from app.models.monitoring_event_archive import MonitoringEventArchive
 from app.models.monitor_schedule import MonitorSchedule
 from app.models.biz_item import BizItem
 from app.models.business import Business
@@ -143,6 +144,92 @@ def get_monitoring_events(
         page=page,
         page_size=page_size,
         total_pages=total_pages
+    )
+
+
+@router.get("/events/archive", response_model=MonitoringEventList)
+def get_monitoring_events_archive(
+    schedule_id: Optional[int] = Query(None, description="스케줄 ID로 필터링"),
+    status: Optional[str] = Query(None, description="상태로 필터링"),
+    event_type: Optional[str] = Query(None, description="이벤트 타입으로 필터링"),
+    date_from: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    page_size: int = Query(50, ge=1, le=200, description="페이지 크기"),
+    db: Session = Depends(get_db),
+):
+    """아카이브된 모니터링 이벤트 목록 조회.
+
+    monitoring_events_archive 파티션 테이블에서 과거 이벤트를 조회합니다.
+    schedule JOIN 없음 — biz_item_id/business_id 필터 미지원.
+    """
+    query = db.query(MonitoringEventArchive)
+
+    if schedule_id is not None:
+        query = query.filter(MonitoringEventArchive.schedule_id == schedule_id)
+
+    if status:
+        query = query.filter(MonitoringEventArchive.status == status)
+
+    if event_type:
+        query = query.filter(MonitoringEventArchive.event_type == event_type)
+
+    if date_from:
+        try:
+            from_dt = datetime.strptime(date_from, "%Y-%m-%d")
+            query = query.filter(MonitoringEventArchive.timestamp >= from_dt)
+        except ValueError:
+            pass
+
+    if date_to:
+        try:
+            to_dt = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+            query = query.filter(MonitoringEventArchive.timestamp < to_dt)
+        except ValueError:
+            pass
+
+    total = query.count()
+    offset = (page - 1) * page_size
+    events = query.order_by(desc(MonitoringEventArchive.timestamp)).offset(offset).limit(page_size).all()
+
+    result = []
+    for event in events:
+        event_dict = {
+            "id": event.id,
+            "schedule_id": event.schedule_id,
+            "timestamp": event.timestamp,
+            "event_type": event.event_type or "check",
+            "status": event.status or "success",
+            "available_count": event.available_count or 0,
+            "slots_info": event.slots_info,
+            "error_message": event.error_message,
+            "response_time_ms": event.response_time_ms,
+            "data_hash": event.data_hash,
+            "hash_changed": event.hash_changed or False,
+            "schedule_date": None,
+            "biz_item_name": None,
+            "business_name": None,
+            "naver_business_id": None,
+            "naver_biz_item_id": None,
+            "fetch_method": event.fetch_method,
+            "time_range": event.time_range,
+            "original_slot_count": event.original_slot_count,
+            "filtered_slot_count": event.filtered_slot_count,
+            "target_time_matched": event.target_time_matched or False,
+            "booking_triggered": event.booking_triggered or False,
+            "booking_success": event.booking_success,
+            "proxy_url": event.proxy_url,
+            "graphql_response": event.graphql_response,
+        }
+        result.append(MonitoringEventSchema(**event_dict))
+
+    total_pages = (total + page_size - 1) // page_size
+    return MonitoringEventList(
+        items=result,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
     )
 
 
