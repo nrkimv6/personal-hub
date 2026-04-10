@@ -58,7 +58,7 @@ try:
     logger.debug("llm_service import 완료")
 
     from app.modules.claude_worker.services.plan_analyze_handler import (
-        save_plan_archive_result, save_requirements_sync_result,
+        save_plan_archive_result,
         save_recurrence_check_result, save_recurrence_suggest_result
     )
     logger.debug("plan_analyze_handler import 완료")
@@ -1569,8 +1569,6 @@ class LLMWorker:
                     save_pytest_fix_result(db, request, result)
                 elif request.caller_type == "plan_archive_analyze":
                     save_plan_archive_result(db, request, result)
-                elif request.caller_type == "plan_requirements_sync":
-                    save_requirements_sync_result(db, request, result)
                 elif request.caller_type == "plan_recurrence_check":
                     save_recurrence_check_result(db, request, result)
                 elif request.caller_type == "plan_recurrence_suggest":

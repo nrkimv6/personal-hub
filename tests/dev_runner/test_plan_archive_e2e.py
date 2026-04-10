@@ -3,9 +3,8 @@ test_plan_archive_e2e.py — Plan Archive 파이프라인 E2E 테스트
 
 전체 흐름 검증:
 1. Listener: archive 파일 수신 → DB LLMRequest 생성 (파일 내용 포함 확인)
-2. Handler: analyze 결과 저장 → requirements_sync 트리거 확인
-3. Handler: requirements_sync 결과 저장 → 파일 생성 확인
-4. Scheduler: 03:30 안전망 동작 확인
+2. Handler: analyze 결과 저장 → staleness 감지 트리거 확인
+3. Scheduler: 03:30 devguide_staleness 동작 확인
 """
 import pytest
 import os
@@ -20,7 +19,6 @@ from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.worker.plan_archive_listener import PlanArchiveListener
 from app.modules.claude_worker.services.plan_analyze_handler import (
     save_plan_archive_result,
-    save_requirements_sync_result,
 )
 from app.worker.scheduled_worker import ScheduledCrawlWorker
 
@@ -101,109 +99,16 @@ class TestPlanArchiveE2E:
             "result": {"category": "e2e-cat", "summary": "5th summary", "tags": ["feat"]}
         }
 
-        save_plan_archive_result(db, mock_req, result)
+        # _maybe_flag_guide_staleness를 patch하여 호출 여부 검증
+        staleness_called = []
+        with patch(
+            "app.modules.claude_worker.services.plan_analyze_handler._maybe_flag_guide_staleness",
+            side_effect=lambda db, fp: staleness_called.append(fp) or True,
+        ):
+            save_plan_archive_result(db, mock_req, result)
 
-        # 4. 검증: requirements_sync 요청 생성 확인
-        sync_req = db.query(LLMRequest).filter_by(
-            caller_type="plan_requirements_sync",
-            caller_id="e2e-cat"
-        ).first()
-        assert sync_req is not None
-        assert "5th summary" in sync_req.prompt
-
-    def test_e2e_requirements_sync_file_written(self, db, tmp_path):
-        """R: save_requirements_sync_result() 호출 → docs/requirements/{category}.md 파일 생성 확인"""
-        # 1. Mock 요청/결과
-        mock_req = MagicMock()
-        mock_req.caller_id = "e2e-cat"
-        result = {
-            "success": True,
-            "result": {
-                "category": "e2e-cat",
-                "requirements": "# E2E Requirements\n\n- Feature 1\n- Feature 2"
-            }
-        }
-
-        # 2. Path 모킹하여 임시 디렉토리 쓰기 확인
-        # pathlib.Path를 직접 패치
-        with patch("pathlib.Path") as mock_path_cls:
-            mock_path_inst = MagicMock()
-            mock_path_cls.return_value = mock_path_inst
-            mock_path_inst.parent = mock_path_inst
-            mock_path_inst.__truediv__.return_value = mock_path_inst
-            
-            save_requirements_sync_result(db, mock_req, result)
-            
-            # 검증: write_text가 호출되었는지
-            assert mock_path_inst.write_text.called
-            args, _ = mock_path_inst.write_text.call_args
-            assert "# E2E Requirements" in args[0]
-
-    def test_e2e_scheduled_worker_03_30_fires(self, db):
-        """R: 03:30 스케줄러 → 미생성 category 일괄 처리 확인"""
-        worker = ScheduledCrawlWorker.__new__(ScheduledCrawlWorker)
-        worker.name = "e2e_scheduled"
-
-        # 1. 조건 충족하는 category 생성 (5개 이상)
-        for i in range(5):
-            db.add(PlanRecord(
-                filename_hash=f"sched_{i}",
-                file_path=f"file_{i}.md",
-                category="sched-cat",
-                summary="sum",
-                llm_processed_at=datetime.now(),
-                archived_at=datetime.now(),
-            ))
-        db.commit()
-
-        # 2. 현재 시간 mock (03:30)
-        now_mock = datetime(2026, 3, 9, 3, 30)
-        with patch("app.worker.scheduled_worker.datetime") as mock_datetime:
-            mock_datetime.now.return_value = now_mock
-            mock_datetime.date.return_value = now_mock.date()
-            
-            with patch("app.worker.scheduled_worker.SessionLocal", return_value=db):
-                # Act
-                worker._check_requirements_sync_schedule()
-                
-                # Assert: LLMRequest 생성 확인
-                req = db.query(LLMRequest).filter_by(
-                    caller_type="plan_requirements_sync",
-                    caller_id="sched-cat"
-                ).first()
-                assert req is not None
-
-    def test_e2e_scheduled_worker_no_double_run_same_day(self, db):
-        """B: 같은 날 2회 호출 → 1회만 실행"""
-        worker = ScheduledCrawlWorker.__new__(ScheduledCrawlWorker)
-        worker.name = "e2e_scheduled"
-
-        for i in range(5):
-            db.add(PlanRecord(
-                filename_hash=f"double_{i}",
-                file_path=f"file_{i}.md",
-                category="double-cat",
-                summary="sum",
-                llm_processed_at=datetime.now(),
-                archived_at=datetime.now(),
-            ))
-        db.commit()
-
-        now_mock = datetime(2026, 3, 9, 3, 30)
-        with patch("app.worker.scheduled_worker.datetime") as mock_datetime:
-            mock_datetime.now.return_value = now_mock
-            mock_datetime.date.return_value = now_mock.date()
-            
-            with patch("app.worker.scheduled_worker.SessionLocal", return_value=db):
-                # 1차 실행
-                worker._check_requirements_sync_schedule()
-                assert db.query(LLMRequest).filter_by(caller_id="double-cat").count() == 1
-                
-                # 2차 실행 (같은 날)
-                worker._check_requirements_sync_schedule()
-                # 갯수 그대로 1개여야 함
-                assert db.query(LLMRequest).filter_by(caller_id="double-cat").count() == 1
-
+        # 4. 검증: _maybe_flag_guide_staleness가 호출됐는지
+        assert len(staleness_called) > 0, "analyze 완료 후 _maybe_flag_guide_staleness가 호출되어야 함"
 
 class TestRecurrenceDetectionE2E:
     """반복 감지 전체 흐름 E2E 테스트"""

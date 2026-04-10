@@ -56,7 +56,7 @@ class PlanEvent(Base):
     __tablename__ = "plan_events"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    plan_record_id = Column(Integer, ForeignKey("plan_records.id"), nullable=False)
+    plan_record_id = Column(Integer, ForeignKey("plan_records.id"), nullable=True)  # nullable: 시스템 이벤트(devguide_staleness) 허용
     event_type = Column(String, nullable=False)  # created, archived, status_changed, memo_updated, path_changed, missing
     detail = Column(JSON)                        # {"from": "초안", "to": "구현중"} 등
     created_at = Column(DateTime, default=datetime.now, index=True)
