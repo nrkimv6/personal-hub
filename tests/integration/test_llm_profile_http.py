@@ -226,3 +226,24 @@ def test_POST_launch_cli_E_unknown_profile_name(client):
     """존재하지 않는 profile → 404."""
     resp = client.post("/api/v1/llm/profiles/claude/nonexistent/launch-cli")
     assert resp.status_code == 404
+
+
+@pytest.mark.http
+def test_POST_launch_cli_B_socket_timeout_returns_error(client):
+    """B(경계): brpop에서 asyncio.TimeoutError → 500이 아닌 200 + status:error.
+
+    재발 방어 TC: socket_timeout < brpop_timeout 불일치 시 발생하던 500 에러.
+    수정 후: try-except로 포획 → {"status": "error"} 반환.
+    """
+    import asyncio
+    mock_redis = AsyncMock()
+    mock_redis.delete = AsyncMock()
+    mock_redis.lpush = AsyncMock()
+    mock_redis.brpop = AsyncMock(
+        side_effect=asyncio.TimeoutError("Timeout reading from localhost:6379")
+    )
+    with patch("app.shared.redis.client.RedisClient.get_client", new=AsyncMock(return_value=mock_redis)):
+        resp = client.post("/api/v1/llm/profiles/claude/default/launch-cli")
+    assert resp.status_code == 200, f"socket timeout 시 500 발생 (try-except 미처리): {resp.text}"
+    data = resp.json()
+    assert data.get("status") == "error", f"status가 error가 아님: {data}"
