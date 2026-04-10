@@ -10,7 +10,7 @@ import os
 import subprocess
 
 from app.config import settings, logger
-from app.database import check_schema_drift, init_extra_tables
+from app.database import check_schema_drift, init_extra_tables, sync_serial_sequences
 
 
 async def cleanup_api_stale_resources():
@@ -83,6 +83,9 @@ async def lifespan(app: FastAPI):
     try:
         init_extra_tables()
         check_schema_drift()
+        synced = sync_serial_sequences()
+        if synced:
+            logger.info(f"SERIAL 시퀀스 동기화: {synced}건")
 
         # 이미지 분류 모듈 DB 초기화 - 비활성화 (매번 불필요하게 실행됨)
         # from app.modules.image_classifier.database import init_db as init_ic_db
