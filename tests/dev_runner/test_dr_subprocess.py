@@ -1,9 +1,27 @@
 import sys
 import os
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+
+from _dr_constants import PLAN_RUNNER_PYTHON
+
+
+def _get_help_output(subcmd: str) -> str:
+    """plan_runner {subcmd} --help 출력을 반환한다. cp949 인코딩 오류 방지를 위해 UTF-8 env 설정."""
+    result = subprocess.run(
+        [str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", subcmd, "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+    )
+    if result.returncode != 0:
+        import pytest
+        pytest.fail(f"plan_runner {subcmd} --help exited with {result.returncode}: {result.stderr}")
+    return result.stdout
 
 def test_make_plan_runner_env_base_keys_R():
     from _dr_subprocess import _make_plan_runner_env
@@ -217,3 +235,56 @@ def test_launch_general_merge_resolver_env_keeps_merge_error_R(monkeypatch):
     assert env["PLAN_RUNNER_MERGE_ERROR"] == "very long error message"
     assert "PLAN_RUNNER_BRANCH" not in env
     assert "PLAN_RUNNER_WORKTREE_PATH" not in env
+
+
+def test_plan_runner_run_options_all_exist_Co():
+    """Co(Conformance): _dr_subprocess.py + _dr_plan_runner.py가 사용하는 plan_runner run 옵션이
+    실제 CLI에 존재하는지 --help 출력으로 검증. wtools CLI 개편 시 stale 옵션 즉각 탐지."""
+    help_text = _get_help_output("run")
+    options = [
+        "--plan-file",
+        "--engine",
+        "--fix-engine",
+        "--max-cycles",
+        "--max-tokens",
+        "--until",
+        "--dry-run",
+        "--parallel",
+        "--projects",
+        "--extra-plan-dirs",
+        "--ignored-plans",
+        "--session-id",
+        "--fused-session",
+        "--worktree",
+    ]
+    for opt in options:
+        assert opt in help_text, f"{opt} not found in 'plan_runner run --help'"
+
+
+def test_plan_runner_auto_fix_options_all_exist_Co():
+    """Co(Conformance): _dr_subprocess.py가 사용하는 plan_runner auto-fix 옵션이
+    실제 CLI에 존재하는지 --help 출력으로 검증."""
+    help_text = _get_help_output("auto-fix")
+    options = [
+        "--max-attempts",
+        "--skip-test",
+        "--error-file",
+        "--engine",
+    ]
+    for opt in options:
+        assert opt in help_text, f"{opt} not found in 'plan_runner auto-fix --help'"
+
+
+def test_plan_runner_resolve_options_all_exist_Co():
+    """Co(Conformance): _dr_subprocess.py가 사용하는 plan_runner resolve 옵션이
+    실제 CLI에 존재하는지 --help 출력으로 검증."""
+    help_text = _get_help_output("resolve")
+    options = [
+        "--branch",
+        "--project-dir",
+        "--engine",
+        "--needs-remerge",
+        "--mode",
+    ]
+    for opt in options:
+        assert opt in help_text, f"{opt} not found in 'plan_runner resolve --help'"
