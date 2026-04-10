@@ -10,7 +10,7 @@ import os
 import subprocess
 
 from app.config import settings, logger
-from app.database import init_extra_tables
+from app.database import check_schema_drift, init_extra_tables
 
 
 async def cleanup_api_stale_resources():
@@ -82,6 +82,7 @@ async def lifespan(app: FastAPI):
     # 추가 테이블 초기화 (worker_status, booking_stats, booking_settings)
     try:
         init_extra_tables()
+        check_schema_drift()
 
         # 이미지 분류 모듈 DB 초기화 - 비활성화 (매번 불필요하게 실행됨)
         # from app.modules.image_classifier.database import init_db as init_ic_db
