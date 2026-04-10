@@ -23,6 +23,7 @@
 """
 import asyncio
 import os
+import time
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -30,6 +31,7 @@ from datetime import datetime
 from typing import Optional, Set, Dict, Callable, Awaitable, TYPE_CHECKING
 
 from app.shared.worker.exceptions import WorkerCriticalError
+from app.shared.worker.health_redis import WorkerHealthRedis, PUBLISH_INTERVAL
 
 if TYPE_CHECKING:
     from app.shared.browser.browser_manager import BrowserManager
@@ -84,6 +86,7 @@ class BaseWorker(ABC):
         self.start_time: Optional[datetime] = None
         self.worker_id: Optional[str] = None
         self._running = False
+        self._last_heartbeat_time: float = 0
 
         # 백그라운드 태스크 관리
         self._running_tasks: Set[asyncio.Task] = set()
@@ -218,12 +221,11 @@ class BaseWorker(ABC):
         pass
 
     def _update_heartbeat(self):
-        """워커 heartbeat 업데이트.
+        """워커 heartbeat를 Redis에 publish한다.
 
-        하위 클래스에서 필요시 오버라이드합니다.
+        하위 클래스에서 필요시 오버라이드하여 추가 데이터를 전달할 수 있다.
         """
-        # 기본 구현은 아무것도 하지 않음
-        pass
+        WorkerHealthRedis.publish(self.name, self.pid, "running")
 
     def _mark_worker_dead(self):
         """워커를 종료 상태로 표시.
@@ -248,8 +250,11 @@ class BaseWorker(ABC):
 
         while not self.shutdown_event.is_set():
             try:
-                # Heartbeat 업데이트
-                self._update_heartbeat()
+                # Heartbeat 업데이트 (15초마다 1회)
+                now = time.monotonic()
+                if now - self._last_heartbeat_time >= PUBLISH_INTERVAL:
+                    self._update_heartbeat()
+                    self._last_heartbeat_time = now
 
                 # 완료된 태스크 정리
                 self._cleanup_completed_tasks()

@@ -18,6 +18,7 @@ from pathlib import Path
 from app.config import settings, logger
 from app.database import SessionLocal
 from sqlalchemy import text
+from app.shared.worker.health_redis import WorkerHealthRedis, check_pid_alive
 
 router = APIRouter(prefix="/worker", tags=["Worker Management"])
 
@@ -81,11 +82,13 @@ def get_worker_status_from_db() -> dict:
         """)).fetchone()
 
         if result:
+            redis_health = WorkerHealthRedis.check("naver")
+            last_heartbeat = redis_health["updated_at"] if redis_health else None
             return {
                 "pid": result[0],
                 "status": result[1],
                 "start_time": result[2],
-                "last_heartbeat": result[3],
+                "last_heartbeat": last_heartbeat,
                 "active_tasks": result[4],
                 "error_message": result[5],
                 "global_pause": bool(result[6]) if result[6] is not None else False,
@@ -340,7 +343,6 @@ async def check_worker_health():
     """워커의 상태를 상세히 확인합니다."""
     status_data = get_worker_status_from_db()
     pid = status_data.get("pid")
-    last_heartbeat = status_data.get("last_heartbeat")
 
     health = {
         "is_running": False,
@@ -353,15 +355,14 @@ async def check_worker_health():
         health["details"]["pid"] = pid
         health["details"]["memory_mb"] = get_process_memory(pid)
 
-        # 하트비트 확인 (30초 이내면 정상)
-        if last_heartbeat:
-            try:
-                heartbeat_time = datetime.fromisoformat(last_heartbeat)
-                seconds_since_heartbeat = (datetime.now() - heartbeat_time).total_seconds()
-                health["details"]["seconds_since_heartbeat"] = int(seconds_since_heartbeat)
-                health["is_healthy"] = seconds_since_heartbeat < 30
-            except Exception:
-                health["is_healthy"] = False
+        # Redis TTL 기반 heartbeat 확인
+        redis_health = WorkerHealthRedis.check("naver", pid=pid)
+        if redis_health and redis_health.get("source") == "redis":
+            ttl = redis_health.get("ttl_remaining", 0)
+            health["details"]["seconds_since_heartbeat"] = max(0, 30 - ttl)
+            health["is_healthy"] = True
+        else:
+            health["is_healthy"] = False
     else:
         health["details"]["status"] = status_data.get("status", "unknown")
         if status_data.get("error_message"):
@@ -495,12 +496,14 @@ async def get_browser_status():
                 last_heartbeat=None
             )
 
+        redis_health = WorkerHealthRedis.check("naver")
+        last_heartbeat = redis_health["updated_at"] if redis_health else None
         return BrowserStatusResponse(
             available=bool(result[0]) if result[0] is not None else False,
             error=result[1],
             recovery_attempts=result[2] or 0,
             permanently_failed=bool(result[3]) if result[3] is not None else False,
-            last_heartbeat=result[4]
+            last_heartbeat=last_heartbeat
         )
     except Exception as e:
         logger.error(f"브라우저 상태 조회 실패: {str(e)}")

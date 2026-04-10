@@ -163,23 +163,6 @@ class CrawlWorkerBase(BaseWorker):
         finally:
             db.close()
 
-    def _update_heartbeat(self):
-        """워커 heartbeat를 업데이트합니다.
-
-        BaseWorker의 메서드를 오버라이드하여 WorkerStatusService 사용.
-        """
-        if not self.worker_id:
-            return
-
-        db = SessionLocal()
-        try:
-            service = WorkerStatusService(db)
-            service.update_heartbeat(self.worker_id)
-        except Exception as e:
-            logger.warning(f"[{self.name}] Heartbeat 업데이트 실패: {e}")
-        finally:
-            db.close()
-
     def _update_worker_state(self, state: str, account: str = None, run_id: int = None):
         """워커 상태를 업데이트합니다.
 

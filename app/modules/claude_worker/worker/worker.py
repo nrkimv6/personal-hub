@@ -18,6 +18,7 @@ import sys
 import os
 import signal
 import logging
+import time
 import uuid
 from datetime import datetime, date
 from pathlib import Path
@@ -1222,6 +1223,7 @@ class LLMWorker:
         self.pid = os.getpid()
         self.start_time: datetime = None
         self.worker_id: str = None
+        self._last_heartbeat_time: float = 0
 
     async def start(self):
         """워커 시작."""
@@ -1269,18 +1271,9 @@ class LLMWorker:
             db.close()
 
     def _update_heartbeat(self):
-        """하트비트 업데이트."""
-        if not self.worker_id:
-            return
-
-        db = SessionLocal()
-        try:
-            service = LLMService(db)
-            service.update_heartbeat(self.worker_id)
-        except Exception as e:
-            logger.warning(f"Heartbeat 업데이트 실패: {e}")
-        finally:
-            db.close()
+        """하트비트를 Redis에 publish한다."""
+        from app.shared.worker.health_redis import WorkerHealthRedis
+        WorkerHealthRedis.publish("claude", self.pid, "running")
 
     def _update_worker_state(self, state: str, request_id: int = None):
         """워커 상태 업데이트."""
@@ -1357,8 +1350,11 @@ class LLMWorker:
 
         while not self.shutdown_event.is_set():
             try:
-                # Heartbeat 업데이트
-                self._update_heartbeat()
+                # Heartbeat 업데이트 (15초마다 1회)
+                _now = time.monotonic()
+                if _now - self._last_heartbeat_time >= 15:
+                    self._update_heartbeat()
+                    self._last_heartbeat_time = _now
 
                 # Quota pause 자동 해제 체크
                 await self._check_quota_resume()
