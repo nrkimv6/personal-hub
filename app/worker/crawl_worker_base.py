@@ -201,6 +201,18 @@ class CrawlWorkerBase(BaseWorker):
         finally:
             db.close()
 
+    # ========== Heartbeat ==========
+
+    def _update_heartbeat(self):
+        """워커 heartbeat를 Redis에 publish한다.
+
+        BaseWorker._update_heartbeat()를 override하여 self.name 대신
+        self.worker_type을 키로 사용한다. 이를 통해 API 소비처의
+        KNOWN_WORKER_TYPES("scheduled", "ondemand" 등)와 키가 일치한다.
+        """
+        from app.shared.worker.health_redis import WorkerHealthRedis
+        WorkerHealthRedis.publish(self.worker_type, self.pid, "running")
+
     # ========== 정리 메서드 ==========
 
     @abstractmethod
