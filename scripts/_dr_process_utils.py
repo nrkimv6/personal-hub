@@ -174,8 +174,32 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
             redis_client.expire(key, RECENT_RUNNERS_TTL)
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
-        # invisible runner(trigger 미설정/비사용자)는 RECENT에 등록하지 않고 키 즉시 삭제
         _trigger_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+
+        # [fix] recent-meta: cleanup 후에도 trigger/accepted_at/started_at 조회 가능하도록 보존 (키 삭제 전에 수행)
+        try:
+            import json as _json
+            from _dr_constants import RECENT_META_TTL
+            _meta = {}
+            # trigger는 이미 _trigger_val로 조회했으므로 재사용
+            if _trigger_val is not None:
+                _meta["trigger"] = _trigger_val
+            # 나머지 필드 조회
+            for _field in ("accepted_at", "started_at"):
+                _val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{_field}")
+                if _val is not None:
+                    _meta[_field] = _val
+            if _meta:
+                redis_client.setex(
+                    f"plan-runner:recent-meta:{runner_id}",
+                    RECENT_META_TTL,
+                    _json.dumps(_meta, ensure_ascii=False),
+                )
+                logger.debug(f"[cleanup] recent-meta 저장 (runner_id={runner_id}, fields={list(_meta.keys())})")
+        except Exception as _rmeta_err:
+            logger.warning(f"[cleanup] recent-meta 저장 실패 (무시, runner_id={runner_id}): {_rmeta_err}")
+
+        # invisible runner(trigger 미설정/비사용자)는 RECENT에 등록하지 않고 키 즉시 삭제
         if _trigger_val in ("user", "user:all"):
             redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
             logger.info(f"[cleanup] RECENT 등록 완료: {runner_id}")
@@ -185,25 +209,6 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             logger.debug(f"[cleanup] invisible runner — RECENT 스킵, 키 삭제: {runner_id} (trigger={_trigger_val!r})")
     except Exception as e:
         logger.warning(f"[cleanup] RECENT 등록 실패 (runner_id={runner_id}): {e}")
-
-    # recent-meta: cleanup 후에도 trigger/accepted_at/started_at 조회 가능하도록 보존
-    try:
-        import json as _json
-        from _dr_constants import RECENT_META_TTL
-        _meta = {}
-        for _field in ("trigger", "accepted_at", "started_at"):
-            _val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{_field}")
-            if _val is not None:
-                _meta[_field] = _val
-        if _meta:
-            redis_client.setex(
-                f"plan-runner:recent-meta:{runner_id}",
-                RECENT_META_TTL,
-                _json.dumps(_meta, ensure_ascii=False),
-            )
-            logger.debug(f"[cleanup] recent-meta 저장 (runner_id={runner_id}, fields={list(_meta.keys())})")
-    except Exception as _rmeta_err:
-        logger.warning(f"[cleanup] recent-meta 저장 실패 (무시, runner_id={runner_id}): {_rmeta_err}")
 
     # RECENT/stopped 반영 이후 완료 신호 publish (SSE 상태/완료 순서 충돌 방지)
     try:
