@@ -46,7 +46,6 @@ CALLER_TYPE_TO_STEP: dict[str, str] = {
     "dev_runner": "implement",
     # 분석·중간
     "plan_archive_analyze": "plan_expand",
-    "plan_requirements_sync": "plan_verify",
     "plan_recurrence_check": "status_tracking",
     "plan_recurrence_suggest": "ideation",
     "topic_extract": "ideation",

@@ -44,8 +44,8 @@ class TestPlanArchiveE2E:
         assert "_process_plan_archive_schedule" in func_source, \
             "_dispatch_scheduled_runs에 _process_plan_archive_schedule 호출 없음"
 
-    def test_e2e_plan_requirements_sync_dispatched_from_db(self):
-        """R: task_schedules에 plan_requirements_sync 레코드 있을 때 dispatch 경로 진입 확인 (AST)."""
+    def test_e2e_devguide_staleness_dispatched_from_db(self):
+        """R: task_schedules에 devguide_staleness 레코드 있을 때 dispatch 경로 진입 확인 (AST)."""
         source = SCHEDULED_WORKER_PATH.read_text(encoding="utf-8")
         tree = ast.parse(source)
 
@@ -57,8 +57,8 @@ class TestPlanArchiveE2E:
 
         assert dispatch_func is not None
         func_source = ast.get_source_segment(source, dispatch_func) or ""
-        assert "_process_plan_requirements_sync_schedule" in func_source, \
-            "_dispatch_scheduled_runs에 _process_plan_requirements_sync_schedule 호출 없음"
+        assert "_process_devguide_staleness_schedule" in func_source, \
+            "_dispatch_scheduled_runs에 _process_devguide_staleness_schedule 호출 없음"
 
     @pytest.mark.asyncio
     async def test_e2e_run_recorded_as_completed(self):

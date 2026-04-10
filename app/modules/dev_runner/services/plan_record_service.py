@@ -421,6 +421,86 @@ class PlanRecordService:
 
         return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
 
+    def get_guide_status(self, include_history: bool = False) -> List[dict]:
+        """가이드별 staleness 정보 반환.
+
+        _meta.yaml에서 가이드 목록 + owns_archive_tags 로드 →
+        PlanRecord archived_at IS NOT NULL 전체 조회 →
+        파일명에서 extract_wiki_tags()로 태그 추출 →
+        last_archive_scan 이후 archived_at인 것 → pending_count.
+
+        include_history=True: PlanEvent(event_type="devguide_staleness") 최근 10건 포함.
+
+        Returns:
+            [{guide, last_updated, pending_count, pending_archives: [{file_path, summary, archived_at}]}]
+        """
+        try:
+            from app.shared.wiki_tags import extract_wiki_tags, load_whitelist, load_meta_yaml
+        except ImportError:
+            logger.warning("wiki_tags not available — returning empty guide status")
+            return []
+
+        meta = load_meta_yaml()
+        try:
+            whitelist = load_whitelist()
+        except Exception as e:
+            logger.warning(f"whitelist load failed: {e}")
+            whitelist = set()
+
+        records = self.db.query(PlanRecord).filter(PlanRecord.archived_at.isnot(None)).all()
+
+        result: List[dict] = []
+        for guide_name, guide_meta in meta.items():
+            owns = set(guide_meta.get("owns_archive_tags") or [])
+            last_scan_str = guide_meta.get("last_archive_scan") or ""
+            try:
+                last_scan = datetime.strptime(last_scan_str, "%Y-%m-%d") if last_scan_str else None
+            except ValueError:
+                last_scan = None
+
+            pending_archives: List[dict] = []
+            for rec in records:
+                if not owns:
+                    continue
+                filename = Path(rec.file_path).name
+                tags = set(extract_wiki_tags(filename, whitelist))
+                if not (tags & owns):
+                    continue
+                if last_scan and rec.archived_at and rec.archived_at <= last_scan:
+                    continue
+                pending_archives.append({
+                    "file_path": rec.file_path,
+                    "summary": rec.summary,
+                    "archived_at": rec.archived_at.isoformat() if rec.archived_at else None,
+                })
+
+            item: dict = {
+                "guide": guide_name,
+                "last_updated": last_scan_str,
+                "pending_count": len(pending_archives),
+                "pending_archives": pending_archives,
+            }
+
+            if include_history:
+                history = (
+                    self.db.query(PlanEvent)
+                    .filter(PlanEvent.event_type == "devguide_staleness")
+                    .order_by(PlanEvent.created_at.desc())
+                    .limit(10)
+                    .all()
+                )
+                item["staleness_history"] = [
+                    {
+                        "created_at": e.created_at.isoformat() if e.created_at else None,
+                        "pending_count": (e.detail or {}).get("pending_count"),
+                    }
+                    for e in history
+                ]
+
+            result.append(item)
+
+        return result
+
     def sync_all(self, registered_paths: List[dict]) -> dict:
         """수동 동기화: 등록된 폴더 전체 스캔 → 신규/이동/missing 감지
 

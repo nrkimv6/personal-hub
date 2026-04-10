@@ -77,11 +77,64 @@ def save_plan_archive_result(db: Session, request, result: dict) -> None:
         if category:
             _maybe_queue_requirements_sync(db, category)
 
+        # dev-guide staleness 자동 감지
+        _maybe_flag_guide_staleness(db, record.file_path)
+
         # 반복 감지 트리거
         if record.intent and record.scope:
             detect_recurrence(db, record)
     except Exception as e:
         logger.error(f"save_plan_archive_result error: {e}", exc_info=True)
+
+
+def build_devguide_staleness_report(db: Session) -> list:
+    """dev-guide staleness 리포트 생성.
+
+    PlanRecordService.get_guide_status()로 가이드별 pending_count 조회 →
+    pending > 0인 가이드만 필터.
+
+    Returns:
+        [{guide, pending_count, pending_archives: [{file_path, summary}]}]
+    """
+    try:
+        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+        statuses = PlanRecordService(db).get_guide_status()
+        return [
+            {
+                "guide": s["guide"],
+                "pending_count": s["pending_count"],
+                "pending_archives": [
+                    {"file_path": a["file_path"], "summary": a["summary"]}
+                    for a in s.get("pending_archives", [])
+                ],
+            }
+            for s in statuses
+            if s.get("pending_count", 0) > 0
+        ]
+    except Exception as e:
+        logger.error(f"build_devguide_staleness_report error: {e}", exc_info=True)
+        return []
+
+
+def save_devguide_staleness_result(db: Session, report: list) -> None:
+    """dev-guide staleness 리포트를 PlanEvent로 저장.
+
+    Args:
+        db: SQLAlchemy Session
+        report: build_devguide_staleness_report() 반환값
+    """
+    try:
+        from app.models.plan_record import PlanEvent
+        event = PlanEvent(
+            plan_record_id=None,  # 시스템 이벤트 — plan_record_id nullable 허용
+            event_type="devguide_staleness",
+            detail={"guides": report},
+        )
+        db.add(event)
+        db.commit()
+        logger.info(f"save_devguide_staleness_result: saved event with {len(report)} guides")
+    except Exception as e:
+        logger.error(f"save_devguide_staleness_result error: {e}", exc_info=True)
 
 
 def save_requirements_sync_result(db: Session, request, result: dict) -> None:
@@ -282,6 +335,75 @@ def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"_maybe_queue_requirements_sync error: {e}", exc_info=True)
+        return False
+
+
+def _maybe_flag_guide_staleness(db: Session, file_path: str) -> bool:
+    """archive 분석 완료 후 관련 가이드의 staleness 자동 감지.
+
+    file_path의 태그와 meta.yaml의 owns_archive_tags 교차 →
+    pending_count >= THRESHOLD 시 PlanEvent(devguide_staleness) 생성.
+
+    Args:
+        db: SQLAlchemy Session
+        file_path: 방금 archive된 plan 파일 경로
+
+    Returns:
+        True if PlanEvent가 새로 생성됨, False otherwise
+    """
+    THRESHOLD = 3
+    try:
+        from app.shared.wiki_tags import extract_wiki_tags, load_whitelist, load_meta_yaml
+        from app.models.plan_record import PlanEvent
+        from pathlib import Path as _Path
+        from sqlalchemy import and_
+
+        whitelist = load_whitelist()
+        meta = load_meta_yaml()
+        tags = set(extract_wiki_tags(_Path(file_path).name, whitelist))
+
+        created = False
+        for guide_name, guide_meta in meta.items():
+            owns = set(guide_meta.get("owns_archive_tags") or [])
+            if not (tags & owns):
+                continue
+            last_scan_str = guide_meta.get("last_archive_scan") or ""
+            try:
+                from datetime import datetime as _dt
+                last_scan = _dt.strptime(last_scan_str, "%Y-%m-%d") if last_scan_str else None
+            except ValueError:
+                last_scan = None
+
+            if not last_scan:
+                continue
+
+            # pending_count 계산: last_scan 이후 archived_at AND 태그 매칭
+            records = db.query(PlanRecord).filter(
+                and_(
+                    PlanRecord.archived_at.isnot(None),
+                    PlanRecord.archived_at > last_scan,
+                )
+            ).all()
+            pending_count = 0
+            for rec in records:
+                fname = _Path(rec.file_path).name
+                rtags = set(extract_wiki_tags(fname, whitelist))
+                if rtags & owns:
+                    pending_count += 1
+
+            if pending_count >= THRESHOLD:
+                event = PlanEvent(
+                    plan_record_id=None,
+                    event_type="devguide_staleness",
+                    detail={"guide": guide_name, "pending_count": pending_count},
+                )
+                db.add(event)
+                db.commit()
+                logger.info(f"_maybe_flag_guide_staleness: flagged guide={guide_name} pending={pending_count}")
+                created = True
+        return created
+    except Exception as e:
+        logger.error(f"_maybe_flag_guide_staleness error: {e}", exc_info=True)
         return False
 
 

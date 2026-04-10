@@ -61,7 +61,6 @@ KNOWN_CALLER_TYPES = [
     "writing_generate",
     "writing_refine",
     "plan_archive_analyze",
-    "plan_requirements_sync",
     "plan_recurrence_check",
     "plan_recurrence_suggest",
 ]

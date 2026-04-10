@@ -54,9 +54,9 @@
 	let pytestLlmModel = '';
 	let pytestCronTime = '02:00';
 
-	// plan_archive_analyze / plan_requirements_sync cron 시간
+	// plan_archive_analyze / devguide_staleness cron 시간
 	let planArchiveCronTime = '02:10';
-	let planRequirementsCronTime = '03:30';
+	let devguideStaleCronTime = '03:30';
 
 	// 수정 모달 cron 시간 (pytest / plan 타입 공용)
 	let editCronTime = '02:00';
@@ -108,7 +108,7 @@
 		{ value: 'writing_task', label: '글쓰기 태스크', icon: Pencil, color: 'purple' },
 		{ value: 'pytest_run', label: 'pytest 자동 실행', icon: FlaskConical, color: 'green' },
 		{ value: 'plan_archive_analyze', label: 'Plan Archive LLM 분석', icon: FolderArchive, color: 'blue' },
-		{ value: 'plan_requirements_sync', label: 'Plan 요구사항 동기화', icon: ClipboardList, color: 'indigo' }
+		{ value: 'devguide_staleness', label: 'Dev-Guide 갱신 점검', icon: ClipboardList, color: 'indigo' }
 	];
 
 	const dateFilterOptions = [
@@ -190,7 +190,7 @@
 			return;
 		}
 
-		if (type === 'plan_archive_analyze' || type === 'plan_requirements_sync') {
+		if (type === 'plan_archive_analyze' || type === 'devguide_staleness') {
 			// cron 시간만 입력 (step 2)
 			addStep = 2;
 			return;
@@ -244,11 +244,11 @@
 		error = null;
 
 		try {
-			const isCronType = selectedType === 'pytest_run' || selectedType === 'plan_archive_analyze' || selectedType === 'plan_requirements_sync';
+			const isCronType = selectedType === 'pytest_run' || selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness';
 		const cronTime =
 			selectedType === 'pytest_run' ? pytestCronTime :
 			selectedType === 'plan_archive_analyze' ? planArchiveCronTime :
-			selectedType === 'plan_requirements_sync' ? planRequirementsCronTime : '';
+			selectedType === 'devguide_staleness' ? devguideStaleCronTime : '';
 
 		const data: {
 				target_type: string;
@@ -322,8 +322,8 @@
 
 			editDisplayName = detail.display_name || '';
 
-			// cron 타입 (pytest_run, plan_archive_analyze, plan_requirements_sync) cron 시간 복원
-			const isCronSchedule = ['pytest_run', 'plan_archive_analyze', 'plan_requirements_sync'].includes(schedule.target_type);
+			// cron 타입 (pytest_run, plan_archive_analyze, devguide_staleness) cron 시간 복원
+			const isCronSchedule = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness'].includes(schedule.target_type);
 			if (isCronSchedule && detail.schedule_value?.time) {
 				editCronTime = detail.schedule_value.time as string;
 			} else {
@@ -401,7 +401,7 @@
 			}
 
 			// 시간 설정 (cron 타입 vs time_window 타입)
-			const isEditCronType = ['pytest_run', 'plan_archive_analyze', 'plan_requirements_sync'].includes(editSchedule.target_type);
+			const isEditCronType = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness'].includes(editSchedule.target_type);
 			updateData.schedule_value = isEditCronType
 				? { time: editCronTime }
 				: {
@@ -559,8 +559,8 @@
 				return { class: 'bg-green-100 text-green-800', text: 'pytest' };
 			case 'plan_archive_analyze':
 				return { class: 'bg-blue-100 text-blue-800', text: 'Plan분석' };
-			case 'plan_requirements_sync':
-				return { class: 'bg-indigo-100 text-indigo-800', text: 'Plan요구사항' };
+			case 'devguide_staleness':
+				return { class: 'bg-indigo-100 text-indigo-800', text: 'Dev-Guide점검' };
 			default:
 				return { class: 'bg-muted text-foreground', text: type };
 		}
@@ -907,7 +907,7 @@
 								</button>
 							</div>
 						</div>
-					{:else if selectedType === 'plan_archive_analyze' || selectedType === 'plan_requirements_sync'}
+					{:else if selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness'}
 				<!-- plan archive / requirements sync: cron 시간만 입력 -->
 				<p class="text-muted-foreground mb-4">매일 실행할 시각을 설정하세요</p>
 				<div class="space-y-4">
@@ -924,7 +924,7 @@
 							<input
 								id="plan-cron-time"
 								type="time"
-								bind:value={planRequirementsCronTime}
+								bind:value={devguideStaleCronTime}
 								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
 						{/if}
@@ -1314,7 +1314,7 @@
 						<!-- 실행 시간 설정 -->
 						<div class="border-t border-border pt-4">
 							<h3 class="font-medium text-foreground mb-3">실행 시간</h3>
-							{#if editSchedule && ['pytest_run', 'plan_archive_analyze', 'plan_requirements_sync'].includes(editSchedule.target_type)}
+							{#if editSchedule && ['pytest_run', 'plan_archive_analyze', 'devguide_staleness'].includes(editSchedule.target_type)}
 								<div>
 									<input
 										type="time"

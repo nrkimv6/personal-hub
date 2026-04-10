@@ -118,9 +118,6 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         # 스케줄 기반 실행 디스패치
         await self._dispatch_scheduled_runs()
 
-        # 03:30 안전망: plan_requirements_sync 미생성 category 일괄 처리
-        self._check_requirements_sync_schedule()
-
     def _cleanup_stale_requests(self):
         """오래된 running 상태 실행 정리."""
         db = SessionLocal()
@@ -212,13 +209,13 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             for schedule in plan_archive_schedules:
                 await self._process_plan_archive_schedule(db, schedule, schedule_service)
 
-            # plan_requirements_sync 타입의 활성 스케줄 조회
-            plan_req_sync_schedules = schedule_service.get_schedules_by_type(
-                TaskSchedule.TARGET_TYPE_PLAN_REQUIREMENTS_SYNC,
+            # devguide_staleness 타입의 활성 스케줄 조회
+            devguide_staleness_schedules = schedule_service.get_schedules_by_type(
+                TaskSchedule.TARGET_TYPE_DEVGUIDE_STALENESS,
                 enabled_only=True
             )
-            for schedule in plan_req_sync_schedules:
-                await self._process_plan_requirements_sync_schedule(db, schedule, schedule_service)
+            for schedule in devguide_staleness_schedules:
+                await self._process_devguide_staleness_schedule(db, schedule, schedule_service)
 
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
@@ -289,13 +286,13 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         finally:
             db.close()
 
-    async def _process_plan_requirements_sync_schedule(
+    async def _process_devguide_staleness_schedule(
         self,
         db,
         schedule: TaskSchedule,
         schedule_service: TaskScheduleService
     ):
-        """plan_requirements_sync 스케줄 처리."""
+        """devguide_staleness 스케줄 처리."""
         try:
             last_run = schedule_service.get_latest_run(schedule.id)
             last_run_at = last_run.started_at if last_run else None
@@ -303,7 +300,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             if not self._should_run_cron(schedule, last_run_at):
                 return
 
-            logger.info(f"[{self.name}] plan_requirements_sync 실행 시간 도래: schedule_id={schedule.id}")
+            logger.info(f"[{self.name}] devguide_staleness 실행 시간 도래: schedule_id={schedule.id}")
 
             if schedule_service.has_active_run(schedule.id):
                 logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
@@ -315,53 +312,46 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 config_snapshot={}
             )
 
-            task_name = f"plan_requirements_sync_{schedule.id}_run_{run.id}"
+            task_name = f"devguide_staleness_{schedule.id}_run_{run.id}"
             if not self._is_task_running(task_name):
                 self._create_task(
-                    self._execute_plan_requirements_sync_run(schedule, run),
+                    self._execute_devguide_staleness_run(schedule, run),
                     task_name
                 )
-                logger.info(f"[{self.name}] plan_requirements_sync 태스크 시작: run_id={run.id}")
+                logger.info(f"[{self.name}] devguide_staleness 태스크 시작: run_id={run.id}")
 
         except Exception as e:
             logger.error(
-                f"[{self.name}] plan_requirements_sync 스케줄 처리 오류: schedule_id={schedule.id}, error={e}",
+                f"[{self.name}] devguide_staleness 스케줄 처리 오류: schedule_id={schedule.id}, error={e}",
                 exc_info=True
             )
 
-    async def _execute_plan_requirements_sync_run(
+    async def _execute_devguide_staleness_run(
         self,
         schedule: TaskSchedule,
         run: TaskScheduleRun,
     ):
-        """category별 requirements_sync LLM 큐 등록 후 실행 완료 기록."""
-        from app.modules.claude_worker.services.plan_analyze_handler import _maybe_queue_requirements_sync
+        """dev-guide staleness 리포트 생성 + PlanEvent 저장 후 실행 완료 기록."""
+        from app.modules.claude_worker.services.plan_analyze_handler import (
+            build_devguide_staleness_report,
+            save_devguide_staleness_result,
+        )
         db = SessionLocal()
         try:
             schedule_service = TaskScheduleService(db)
-            from app.models.plan_record import PlanRecord
             loop = asyncio.get_event_loop()
 
             def _process():
-                categories = [
-                    row[0]
-                    for row in db.query(PlanRecord.category).filter(
-                        PlanRecord.category.isnot(None),
-                        PlanRecord.llm_processed_at.isnot(None),
-                    ).distinct().all()
-                ]
-                queued = 0
-                for category in categories:
-                    if _maybe_queue_requirements_sync(db, category):
-                        queued += 1
-                return queued
+                report = build_devguide_staleness_report(db)
+                save_devguide_staleness_result(db, report)
+                return len(report)
 
             count = await loop.run_in_executor(None, _process)
-            schedule_service.complete_run(run.id, result={"queued_categories": count})
+            schedule_service.complete_run(run.id, result={"stale_guides": count})
             schedule_service.update_schedule_after_run(schedule.id)
-            logger.info(f"[{self.name}] plan_requirements_sync 완료: {count}개 카테고리 큐 등록, run_id={run.id}")
+            logger.info(f"[{self.name}] devguide_staleness 완료: {count}개 가이드 staleness 감지, run_id={run.id}")
         except Exception as e:
-            logger.error(f"[{self.name}] _execute_plan_requirements_sync_run 오류: {e}", exc_info=True)
+            logger.error(f"[{self.name}] _execute_devguide_staleness_run 오류: {e}", exc_info=True)
             try:
                 schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, error_message=str(e))
@@ -1770,61 +1760,3 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             self._update_worker_state("idle")
             db.close()
 
-    def _check_requirements_sync_schedule(self) -> None:
-        """03:30 ± 5분 안전망: 오늘 미실행인 경우 미생성 category 일괄 처리.
-
-        TaskSchedule DB 설정과 무관하게, 매일 03:30 ± 5분 창에서 한 번만
-        _process_unqueued_requirements_sync()를 실행한다.
-        """
-        now = datetime.now()
-        target_hour = 3
-        target_minute = 30
-        window_minutes = 5
-
-        # 03:25 ~ 03:35 범위 내인지 확인
-        total_now = now.hour * 60 + now.minute
-        total_target = target_hour * 60 + target_minute
-        if abs(total_now - total_target) > window_minutes:
-            return
-
-        # 오늘 이미 실행했는지 확인
-        today_key = f"_requirements_sync_ran_{now.date()}"
-        if getattr(self, today_key, False):
-            return
-
-        logger.info(f"[{self.name}] 03:30 안전망 requirements_sync 실행 ({now.strftime('%H:%M')})")
-        setattr(self, today_key, True)
-        self._process_unqueued_requirements_sync()
-
-    def _process_unqueued_requirements_sync(self) -> None:
-        """모든 category에 대해 _maybe_queue_requirements_sync() 호출.
-
-        DB에서 처리 완료된 category 목록을 조회하고, 조건 미충족 category는
-        _maybe_queue_requirements_sync 내부에서 자동 스킵된다.
-        """
-        from app.modules.claude_worker.services.plan_analyze_handler import _maybe_queue_requirements_sync
-        from app.models.plan_record import PlanRecord
-
-        db = SessionLocal()
-        try:
-            categories = [
-                row[0]
-                for row in db.query(PlanRecord.category).filter(
-                    PlanRecord.category.isnot(None),
-                    PlanRecord.llm_processed_at.isnot(None),
-                ).distinct().all()
-            ]
-
-            queued = 0
-            for category in categories:
-                if _maybe_queue_requirements_sync(db, category):
-                    queued += 1
-
-            logger.info(
-                f"[{self.name}] _process_unqueued_requirements_sync 완료: "
-                f"{len(categories)}개 category 확인, {queued}개 큐 등록"
-            )
-        except Exception as e:
-            logger.error(f"[{self.name}] _process_unqueued_requirements_sync 오류: {e}", exc_info=True)
-        finally:
-            db.close()
