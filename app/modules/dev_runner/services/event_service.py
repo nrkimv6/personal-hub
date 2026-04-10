@@ -231,7 +231,8 @@ class EventService:
         """모든 active + RECENT visible runner 상태를 묶어서 반환"""
         try:
             active_ids: set = self._sync.smembers(ACTIVE_RUNNERS_KEY) or set()
-            recent_ids: list = self._sync.zrange(RECENT_RUNNERS_KEY, -MAX_RECENT_IN_SSE, -1) or []
+            # 전체 recent runner를 가져온 후 visible 필터링 (invisible runner가 많아도 visible이 누락되지 않도록)
+            recent_ids: list = self._sync.zrange(RECENT_RUNNERS_KEY, 0, -1) or []
             # 중복 제거 (ACTIVE가 RECENT에도 있을 수 있음)
             all_ids = active_ids | set(recent_ids)
             result = []
@@ -241,6 +242,8 @@ class EventService:
                     if not payload.get("visible", False):
                         continue
                     result.append(payload)
+                    if len(result) >= MAX_RECENT_IN_SSE:
+                        break
             return result
         except Exception:
             return []
@@ -873,8 +876,9 @@ class EventService:
                             last_heartbeat = now
                         await asyncio.sleep(0.1)
 
-                except (redis_sync.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
+                except (redis_sync.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError) as redis_err:
                     # ── Redis 연결 실패 → 정리 후 재시도
+                    logger.warning("[events] Redis 연결 실패: %s: %s", type(redis_err).__name__, redis_err)
                     if fallback_active:
                         fallback_active = False
                         fallback_exit_count += 1
