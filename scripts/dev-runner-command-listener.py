@@ -203,6 +203,41 @@ _cleanup_done = get_cleanup_done()
 _dead_process_first_seen = get_dead_process_first_seen()
 _zombie_first_seen = get_zombie_first_seen()
 
+# graceful-exit 플래그: Redis 시그널로 listener 재시작 요청 수신 시 True로 설정
+# main() BRPOP 루프에서 이 플래그를 확인하고 루프를 탈출하여 프로세스를 종료
+# watchdog(dev-runner-listener-watchdog.ps1)가 Session 1에서 재시작을 담당
+_graceful_exit_requested: bool = False
+
+
+def _handle_graceful_exit(redis_client: redis.Redis) -> Dict:
+    """graceful-exit 명령 처리: heartbeat를 "restarting"으로 설정 후 exit 플래그를 활성화.
+
+    watchdog(dev-runner-listener-watchdog.ps1)가 Session 1에서 프로세스를 재시작합니다.
+    """
+    global _graceful_exit_requested
+
+    # 활성 runner 확인 (경고만 출력, 거부하지 않음 — _reconnect_surviving_runners()가 복구)
+    _procs = get_running_processes()
+    active = [rid for rid, proc in _procs.items() if proc.poll() is None]
+    if active:
+        logger.warning(
+            f"graceful-exit: 활성 runner {len(active)}개 존재 {active}. "
+            "재시작 후 _reconnect_surviving_runners()가 자동 복구 예정."
+        )
+
+    # heartbeat → "restarting" (TTL 30s): 재시작 중임을 표시
+    # (즉시 삭제하면 모니터링이 dead로 오판할 수 있음)
+    try:
+        redis_client.set(HEARTBEAT_KEY, "restarting", ex=30)
+    except Exception as e:
+        logger.warning(f"graceful-exit: heartbeat 업데이트 실패 (계속 진행): {e}")
+
+    # BRPOP 루프 탈출 플래그 설정
+    _graceful_exit_requested = True
+    logger.info("graceful-exit: exit 플래그 설정 완료. BRPOP 루프 탈출 예정.")
+
+    return {"success": True, "message": "graceful-exit scheduled"}
+
 
 def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     """명령 실행
@@ -242,6 +277,8 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
         result = start_merge_orchestrator(redis_client)
     elif action == "stop-orchestrator":
         result = stop_merge_orchestrator(redis_client)
+    elif action == "graceful-exit":
+        result = _handle_graceful_exit(redis_client)
     else:
         result = {"success": False, "message": f"Unknown action: {action}"}
 
@@ -588,6 +625,11 @@ def main():
                 r.expire(result_key, 60)
 
                 logger.info(f"명령 결과 반환: {command_result}")
+
+                # graceful-exit 요청 시 BRPOP 루프 탈출
+                if _graceful_exit_requested:
+                    logger.info("graceful-exit 요청으로 BRPOP 루프 탈출")
+                    break
 
         except redis.ConnectionError as e:
             logger.warning(f"Redis connection error: {e}, retrying in {reconnect_delay}s")

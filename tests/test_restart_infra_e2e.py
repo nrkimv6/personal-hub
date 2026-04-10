@@ -46,16 +46,17 @@ class TestRestartInfraE2E:
         assert data["success"] is False
 
     def test_e2e_restart_infra_command_listener(self, client):
-        """T4: POST /api/v1/system/services/infra/command_listener/restart → restart-listener 액션"""
-        captured = {}
-
-        def fake_run(args, **kwargs):
-            captured["args"] = args
-            return _sp_ok()
-
-        with patch("app.modules.system.services.worker_service.subprocess.run", side_effect=fake_run):
+        """T4: POST /api/v1/system/services/infra/command_listener/restart
+        → executor_service.restart_listener() 경유, subprocess.run 미호출
+        (Redis 시그널 방식 전환 후: SYSTEM 컨텍스트로 subprocess 직접 호출 금지)
+        """
+        with patch("app.modules.system.services.worker_service.subprocess.run") as mock_run, \
+             patch(
+                 "app.modules.system.services.worker_service.executor_service.restart_listener",
+                 return_value={"success": True, "message": "listener restarted"},
+             ) as mock_rl:
             resp = client.post("/api/v1/system/services/infra/command_listener/restart")
 
         assert resp.status_code == 200
-        assert "restart-listener" in captured.get("args", [])
-        assert "command_listener" not in captured.get("args", [])
+        assert not mock_run.called, "subprocess.run이 호출됨 — SYSTEM 컨텍스트 오염 (Redis 시그널로 교체됨)"
+        assert mock_rl.called, "executor_service.restart_listener가 호출되지 않음"
