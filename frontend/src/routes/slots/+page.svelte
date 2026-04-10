@@ -3,8 +3,8 @@
 	import { goto } from '$app/navigation';
 
 	onMount(() => {
-		// 업체 관리 페이지로 리다이렉트 (슬롯 조회는 업체 관리에서 모달로 제공)
-		goto('/businesses', { replaceState: true });
+		// 슬롯 조회 페이지로 리다이렉트
+		goto('/naver/slots', { replaceState: true });
 	});
 </script>
 
