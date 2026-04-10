@@ -1348,18 +1348,21 @@ class LLMService:
         if not status:
             return {"status": "no_worker", "message": "활성 워커 없음"}
 
-        now = datetime.now()
-        if status.last_heartbeat:
-            seconds_since = (now - status.last_heartbeat).total_seconds()
+        from app.shared.worker.health_redis import WorkerHealthRedis
+        redis_health = WorkerHealthRedis.check("claude")
 
-            if seconds_since > HEARTBEAT_UNHEALTHY_THRESHOLD:
+        if redis_health and redis_health.get("source") == "redis":
+            ttl = redis_health.get("ttl_remaining", 0)
+            seconds_since = max(0, 30 - ttl)
+
+            if ttl <= 0:
                 return {
                     "status": "unhealthy",
-                    "message": f"마지막 heartbeat {seconds_since/60:.0f}분 전 - 재시작 필요",
+                    "message": "Redis heartbeat 만료 - 재시작 필요",
                     "worker_id": status.worker_id,
                     "seconds_since_heartbeat": int(seconds_since),
                 }
-            elif seconds_since > HEARTBEAT_WARNING_THRESHOLD:
+            elif ttl <= 15:
                 return {
                     "status": "warning",
                     "message": f"마지막 heartbeat {seconds_since:.0f}초 전 - 지연 발생",
@@ -1367,6 +1370,13 @@ class LLMService:
                     "state": status.current_state,
                     "seconds_since_heartbeat": int(seconds_since),
                 }
+        else:
+            return {
+                "status": "unhealthy",
+                "message": "Redis heartbeat 키 없음 - 재시작 필요",
+                "worker_id": status.worker_id,
+                "seconds_since_heartbeat": 999,
+            }
 
         return {
             "status": "healthy",
