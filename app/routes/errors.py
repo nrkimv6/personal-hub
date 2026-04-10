@@ -179,7 +179,7 @@ def get_error_stats(
     # 시간대별 통계 (최근 24시간만)
     hourly_since = datetime.utcnow() - timedelta(hours=min(hours, 24))
     hourly_stats = db.query(
-        func.strftime('%H', ErrorLog.created_at).label("hour"),
+        func.to_char(ErrorLog.created_at, 'HH24').label("hour"),
         func.count(ErrorLog.id).label("count"),
         func.sum(case((ErrorLog.severity == "critical", 1), else_=0)).label("critical"),
         func.sum(case((ErrorLog.severity == "error", 1), else_=0)).label("error"),

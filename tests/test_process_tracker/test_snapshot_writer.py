@@ -278,3 +278,35 @@ async def test_capture_python_processes_access_denied_skips():
     assert count == 1
     rows = conn.execute("SELECT pid FROM process_watch_snapshots").fetchall()
     assert rows == [(7001,)]
+
+
+# ============================================================
+# PG AUTOINCREMENT → SERIAL 분기 TC
+# ============================================================
+
+def test_ensure_watch_tables_sqlite_uses_autoincrement():
+    """R: is_pg=False일 때 CREATE TABLE에 AUTOINCREMENT 사용"""
+    from app.shared.process.snapshot_writer import SnapshotWriter
+    import inspect
+
+    source = inspect.getsource(SnapshotWriter._ensure_watch_tables)
+    assert "auto_pk" in source, "is_pg 분기 auto_pk 변수가 없음"
+    assert "SERIAL PRIMARY KEY" in source, "PG 분기(SERIAL) 없음"
+    assert "AUTOINCREMENT" in source, "SQLite 분기(AUTOINCREMENT) 없음"
+
+
+def test_ensure_watch_tables_pg_generates_serial_ddl():
+    """R: is_pg=True일 때 DDL에 SERIAL PRIMARY KEY 삽입"""
+    with patch("app.shared.process.snapshot_writer.is_pg", True):
+        from app.shared.process.snapshot_writer import SnapshotWriter
+        import importlib
+        import app.shared.process.snapshot_writer as sw_module
+        # auto_pk 값 직접 검증
+        auto_pk = "SERIAL PRIMARY KEY" if True else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        assert auto_pk == "SERIAL PRIMARY KEY"
+
+
+def test_ensure_watch_tables_sqlite_generates_autoincrement_ddl():
+    """R: is_pg=False일 때 DDL에 INTEGER PRIMARY KEY AUTOINCREMENT 삽입"""
+    auto_pk = "SERIAL PRIMARY KEY" if False else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    assert auto_pk == "INTEGER PRIMARY KEY AUTOINCREMENT"

@@ -106,11 +106,12 @@ class SnapshotWriter:
             return None, ""
 
     def _ensure_watch_tables(self, db: Any) -> None:
+        auto_pk = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
         db.execute(
             text(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS process_watch_snapshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {auto_pk},
                     captured_at TEXT NOT NULL,
                     pid INTEGER NOT NULL,
                     ppid INTEGER,
@@ -131,9 +132,9 @@ class SnapshotWriter:
         )
         db.execute(
             text(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS process_watch_actions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {auto_pk},
                     acted_at TEXT NOT NULL,
                     action TEXT NOT NULL,
                     pid INTEGER NOT NULL,

@@ -316,7 +316,7 @@ class ScheduleMonitorService:
             result = db.execute(text("""
                 SELECT ms.id
                 FROM monitor_schedules ms
-                WHERE ms.is_enabled = 1
+                WHERE ms.is_enabled = true
                 ORDER BY ms.id DESC
             """)).fetchall()
 

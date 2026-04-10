@@ -446,8 +446,8 @@ async def resume_monitoring():
         # running/queued 상태인 활성화된 스케줄을 pending으로 리셋하여 워커가 다시 시작하도록 함
         reset_result = db.execute(text("""
             UPDATE monitor_schedules
-            SET run_status = 'pending', is_active = 0
-            WHERE is_enabled = 1 AND run_status IN ('running', 'queued')
+            SET run_status = 'pending', is_active = false
+            WHERE is_enabled = true AND run_status IN ('running', 'queued')
         """))
         reset_count = reset_result.rowcount
 
