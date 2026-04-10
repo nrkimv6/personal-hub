@@ -191,7 +191,7 @@ class TestE2ERestartListenerLive:
 
 @pytest.mark.http
 class TestHTTPRestartListenerDev:
-    """TestClient + subprocess mock 기반 HTTP 통합."""
+    """TestClient + Redis mock 기반 HTTP 통합 (Redis graceful-exit 방식)."""
 
     @pytest.fixture
     def client(self):
@@ -202,25 +202,30 @@ class TestHTTPRestartListenerDev:
 
     def test_http_restart_infra_command_listener(self, client):
         """T5: POST /system/services/infra/command_listener/restart → 200 + success."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="restart-listener 완료", stderr="")
+        with patch(
+            "app.modules.system.services.worker_service.executor_service.restart_listener",
+            return_value={"success": True, "message": "listener restarted"},
+        ):
             resp = client.post("/api/v1/system/services/infra/command_listener/restart")
         assert resp.status_code == 200
         assert resp.json()["success"] is True
 
     def test_http_restart_listener_success(self, client):
-        """T5: POST /dev-runner/restart-listener + heartbeat mock → 200 + success."""
-        with patch("subprocess.run") as mock_run, \
-             patch("redis.Redis.get", return_value=b"2026-04-10T00:00:00"):
-            mock_run.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
+        """T5: POST /dev-runner/restart-listener + Redis 시그널 mock → 200 + success."""
+        with patch(
+            "app.modules.dev_runner.services.executor_service.ExecutorService.restart_listener",
+            return_value={"success": True, "message": "listener restarted"},
+        ):
             resp = client.post("/api/v1/dev-runner/restart-listener")
         assert resp.status_code == 200
         assert resp.json()["success"] is True
 
     def test_http_restart_listener_failure(self, client):
-        """T5: POST /dev-runner/restart-listener + subprocess 실패 → success: false."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="에러 발생")
+        """T5: POST /dev-runner/restart-listener + graceful-exit 실패 → success: false."""
+        with patch(
+            "app.modules.dev_runner.services.executor_service.ExecutorService.restart_listener",
+            return_value={"success": False, "message": "graceful-exit 타임아웃"},
+        ):
             resp = client.post("/api/v1/dev-runner/restart-listener")
         assert resp.status_code == 200
         assert resp.json()["success"] is False
