@@ -15,6 +15,7 @@ from typing import List, Optional
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle
 from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL, REDIS_HOST, REDIS_PORT
+from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 from app.modules.dev_runner.schemas import (
     PlanFileResponse, PlanProgressResponse,
@@ -986,7 +987,7 @@ class PlanService:
 
         # git add (존재하는 파일 먼저, 삭제된 파일은 별도 처리)
         add_proc = await asyncio.create_subprocess_exec(
-            "git", "add", *all_files,
+            "git", "-c", "safe.directory=*", "add", *all_files,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -1148,27 +1149,7 @@ class PlanService:
             can_done=can_done,
         )
 
-    def _check_branch_exists(self, branch: str) -> bool:
-        """git branch가 존재하는지 확인. subprocess 실패 시 False (안전 기본값)"""
-        try:
-            result = subprocess.run(
-                ["git", "branch", "--list", branch],
-                capture_output=True, text=True, timeout=5
-            )
-            return bool(result.stdout.strip())
-        except Exception:
-            return False
-
-    def _check_worktree_exists(self, worktree_path: str) -> bool:
-        """git worktree가 존재하는지 확인. subprocess 실패 시 False (안전 기본값)"""
-        try:
-            result = subprocess.run(
-                ["git", "worktree", "list", "--porcelain"],
-                capture_output=True, text=True, timeout=5
-            )
-            return worktree_path in result.stdout
-        except Exception:
-            return False
+    # _check_branch_exists, _check_worktree_exists → git_utils로 이전 (safe.directory 방어 포함)
 
     def _can_done(self, plan: PlanFileResponse) -> bool:
         """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료 OR 상태 헤더 완료 계열 OR 체크박스 없음"""
@@ -1186,10 +1167,10 @@ class PlanService:
                             break
                         top20 += line
                 branch_match = re.search(r'^>\s*branch:\s*(.+)', top20, re.MULTILINE)
-                if branch_match and self._check_branch_exists(branch_match.group(1).strip()):
+                if branch_match and check_branch_exists(branch_match.group(1).strip()):
                     return False
                 worktree_match = re.search(r'^>\s*worktree:\s*(.+)', top20, re.MULTILINE)
-                if worktree_match and self._check_worktree_exists(worktree_match.group(1).strip()):
+                if worktree_match and check_worktree_exists(worktree_match.group(1).strip()):
                     return False
                 # branch/worktree 없이 worktree-owner만 잔존한 경우 방어
                 if not branch_match and not worktree_match:
