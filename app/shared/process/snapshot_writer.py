@@ -11,7 +11,7 @@ import psutil
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, is_pg
 
 if TYPE_CHECKING:
     from app.shared.process.registry import ProcessRegistry
@@ -157,14 +157,24 @@ class SnapshotWriter:
 
     def _purge_watch_rows(self, db: Any) -> None:
         window = f"-{self._retention_days} days"
-        db.execute(
-            text("DELETE FROM process_watch_snapshots WHERE captured_at < datetime('now', :window)"),
-            {"window": window},
-        )
-        db.execute(
-            text("DELETE FROM process_watch_actions WHERE acted_at < datetime('now', :window)"),
-            {"window": window},
-        )
+        if is_pg:
+            db.execute(
+                text("DELETE FROM process_watch_snapshots WHERE captured_at < NOW() + :window::interval"),
+                {"window": window},
+            )
+            db.execute(
+                text("DELETE FROM process_watch_actions WHERE acted_at < NOW() + :window::interval"),
+                {"window": window},
+            )
+        else:
+            db.execute(
+                text("DELETE FROM process_watch_snapshots WHERE captured_at < datetime('now', :window)"),
+                {"window": window},
+            )
+            db.execute(
+                text("DELETE FROM process_watch_actions WHERE acted_at < datetime('now', :window)"),
+                {"window": window},
+            )
 
     def _rotate_jsonl_if_needed(self, path: Path) -> None:
         if not path.exists():
@@ -514,9 +524,14 @@ class SnapshotWriter:
         """오래된 스냅샷을 삭제한다."""
         try:
             with SessionLocal() as db:
-                db.execute(
-                    f"DELETE FROM process_snapshots WHERE captured_at < datetime('now', '-{days} days')"
-                )
+                if is_pg:
+                    db.execute(
+                        text(f"DELETE FROM process_snapshots WHERE captured_at < NOW() - INTERVAL '{days} days'")
+                    )
+                else:
+                    db.execute(
+                        text(f"DELETE FROM process_snapshots WHERE captured_at < datetime('now', '-{days} days')")
+                    )
                 self._purge_watch_rows(db)
                 db.commit()
         except Exception as exc:

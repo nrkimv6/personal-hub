@@ -394,7 +394,7 @@ async def pause_monitoring():
         # 일시중지 상태로 변경
         db.execute(text("""
             UPDATE worker_status
-            SET global_pause = 1, paused_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime')
+            SET global_pause = 1, paused_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = 1
         """))
         db.commit()
@@ -438,7 +438,7 @@ async def resume_monitoring():
         # 재개 상태로 변경
         db.execute(text("""
             UPDATE worker_status
-            SET global_pause = 0, paused_at = NULL, updated_at = datetime('now', 'localtime')
+            SET global_pause = 0, paused_at = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE id = 1
         """))
 
