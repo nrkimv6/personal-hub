@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from app.modules.dev_runner.schemas import PlanFileResponse
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle
+from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.log_service import publish_log, log_service
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 
@@ -276,7 +277,7 @@ class PlanDoneService:
 
         # git add
         add_proc = await asyncio.create_subprocess_exec(
-            "git", "add", *all_files,
+            "git", "-c", "safe.directory=*", "add", *all_files,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -437,27 +438,7 @@ class PlanDoneService:
             can_done=can_done,
         )
 
-    def _check_branch_exists(self, branch: str) -> bool:
-        """git branch\uac00 \uc874\uc7ac\ud558\ub294\uc9c0 \ud655\uc778. subprocess \uc2e4\ud328 \uc2dc False (\uc548\uc804 \uae30\ubcf8\uac12)"""
-        try:
-            result = subprocess.run(
-                ["git", "branch", "--list", branch],
-                capture_output=True, text=True, timeout=5
-            )
-            return bool(result.stdout.strip())
-        except Exception:
-            return False
-
-    def _check_worktree_exists(self, worktree_path: str) -> bool:
-        """git worktree\uac00 \uc874\uc7ac\ud558\ub294\uc9c0 \ud655\uc778. subprocess \uc2e4\ud328 \uc2dc False (\uc548\uc804 \uae30\ubcf8\uac12)"""
-        try:
-            result = subprocess.run(
-                ["git", "worktree", "list", "--porcelain"],
-                capture_output=True, text=True, timeout=5
-            )
-            return worktree_path in result.stdout
-        except Exception:
-            return False
+    # _check_branch_exists, _check_worktree_exists → git_utils로 이전 (safe.directory 방어 포함)
 
     def _can_done(self, plan: PlanFileResponse) -> bool:
         """plan\uc774 done \ucc98\ub9ac \uac00\ub2a5\ud55c\uc9c0 \ud310\ub2e8 \u2014 \uccb4\ud06c\ubc15\uc2a4 \uc804\uccb4 \uc644\ub8cc OR \uc0c1\ud0dc \ud5e4\ub354 \uc644\ub8cc \uacc4\uc5f4 OR \uccb4\ud06c\ubc15\uc2a4 \uc5c6\uc74c"""
@@ -475,10 +456,10 @@ class PlanDoneService:
                             break
                         top20 += line
                 branch_match = re.search(r'^>\s*branch:\s*(.+)', top20, re.MULTILINE)
-                if branch_match and self._check_branch_exists(branch_match.group(1).strip()):
+                if branch_match and check_branch_exists(branch_match.group(1).strip()):
                     return False
                 worktree_match = re.search(r'^>\s*worktree:\s*(.+)', top20, re.MULTILINE)
-                if worktree_match and self._check_worktree_exists(worktree_match.group(1).strip()):
+                if worktree_match and check_worktree_exists(worktree_match.group(1).strip()):
                     return False
         except Exception:
             pass  # \ud30c\uc77c \uc77d\uae30 \uc2e4\ud328 \uc2dc \uae30\uc874 \ub85c\uc9c1\uc73c\ub85c \uc9c4\ud589
