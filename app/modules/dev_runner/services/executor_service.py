@@ -28,7 +28,7 @@ from app.modules.dev_runner.services.redis_connection import (
     RedisConnection,
     REDIS_HOST, REDIS_PORT, REDIS_DB,
     COMMANDS_KEY, RESULTS_KEY, RUNNER_KEY_PREFIX,
-    ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL,
+    ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL, MAX_RECENT_RUNNERS,
     COMMAND_TIMEOUT, RUNNER_KEY_SUFFIXES,
     SESSION_ID_KEY_PREFIX,
 )
@@ -600,6 +600,8 @@ class ExecutorService:
                     # user/user:all: 만료되어도 dismiss 전까지 보존
                     continue
                 await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
+            # sorted set 크기 상한: invisible 정리 후 oldest-first로 MAX_RECENT_RUNNERS 초과분 제거
+            await self.async_redis.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
 
             # ACTIVE_RUNNERS_KEY + RECENT_RUNNERS_KEY 합집합으로 runner 목록 구성
             active_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)

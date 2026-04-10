@@ -49,6 +49,7 @@ RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
 MAX_RECENT_IN_SSE = 20  # SSE status 이벤트에 포함할 RECENT 러너 최대 수
+MAX_RECENT_RUNNERS = 100  # sorted set 크기 상한 (redis_connection.py와 동기화)
 REDIS_STATE_KEY = "plan-runner:state"
 PLAN_FILE_ALL = "__ALL_PLANS__"  # 전체실행 sentinel (command-listener와 공유)
 _LEGACY_ALL = "ALL"  # 하위 호환
@@ -226,6 +227,24 @@ class EventService:
         if refreshed and refreshed.get("error"):
             return refreshed
         return payload
+
+    def _cleanup_invisible_recent_runners(self) -> None:
+        """SSE 연결 초기화 시 RECENT set에서 invisible runner를 제거 + 크기 상한 적용.
+
+        invisible runner(trigger 미설정/비사용자)가 RECENT set을 점령하여
+        SSE status 이벤트의 runners 배열에서 visible runner가 누락되는 문제를 방지한다.
+        정리 순서: invisible 제거 → 크기 상한(MAX_RECENT_RUNNERS) 적용.
+        """
+        try:
+            recent_ids: list = self._sync.zrange(RECENT_RUNNERS_KEY, 0, -1) or []
+            for rid in recent_ids:
+                trigger = self._sync.get(f"{RUNNER_KEY_PREFIX}:{rid}:trigger")
+                if not is_visible_runner(trigger, rid):
+                    self._sync.zrem(RECENT_RUNNERS_KEY, rid)
+            # invisible 제거 후 크기 상한: oldest-first로 MAX_RECENT_RUNNERS 초과분 제거
+            self._sync.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
+        except Exception:
+            pass
 
     def _build_all_runners_status(self) -> list[dict]:
         """모든 active + RECENT visible runner 상태를 묶어서 반환"""
@@ -664,6 +683,9 @@ class EventService:
             await self._init_tail_offsets_for_active_runners()
         except Exception as _e:
             logger.warning("[events-init-offsets] 초기화 중 예외 (스트림 계속): %s", _e)
+
+        # SSE 연결 초기화 시 invisible runner 사전 정리 (RECENT set 오염 방지)
+        self._cleanup_invisible_recent_runners()
 
         # 초기 status 이벤트 1회 즉시 발행
         runners = self._build_all_runners_status()

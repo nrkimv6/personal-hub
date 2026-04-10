@@ -107,6 +107,19 @@ class RunnerState:
                     await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
                     return
                 await self.async_redis.set(self._runner_key(runner_id, "status"), "stopped")
+                # invisible runner(trigger 미설정/비사용자)는 RECENT에 등록하지 않고 키 즉시 삭제
+                trigger = await self.async_redis.get(self._runner_key(runner_id, "trigger"))
+                if not is_visible_runner(trigger, runner_id):
+                    _module_logger.debug(
+                        f"[dev-runner] invisible runner — RECENT 스킵, 키 삭제: {runner_id} (trigger={trigger!r})"
+                    )
+                    pipe = self.async_redis.pipeline()
+                    for key_suffix in RUNNER_KEY_SUFFIXES:
+                        pipe.delete(self._runner_key(runner_id, key_suffix))
+                    pipe.srem(ACTIVE_RUNNERS_KEY, runner_id)
+                    await pipe.execute()
+                    plan_service.invalidate_plans_cache()
+                    return
                 pipe = self.async_redis.pipeline()
                 for key_suffix in RUNNER_KEY_SUFFIXES:
                     if key_suffix in _PERSIST_SUFFIXES:
@@ -128,6 +141,18 @@ class RunnerState:
                         await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
                         continue
                     await self.async_redis.set(self._runner_key(rid, "status"), "stopped")
+                    # invisible runner(trigger 미설정/비사용자)는 RECENT에 등록하지 않고 키 즉시 삭제
+                    trigger = await self.async_redis.get(self._runner_key(rid, "trigger"))
+                    if not is_visible_runner(trigger, rid):
+                        _module_logger.debug(
+                            f"[dev-runner] invisible runner(배치) — RECENT 스킵, 키 삭제: {rid} (trigger={trigger!r})"
+                        )
+                        pipe = self.async_redis.pipeline()
+                        for key_suffix in RUNNER_KEY_SUFFIXES:
+                            pipe.delete(self._runner_key(rid, key_suffix))
+                        pipe.srem(ACTIVE_RUNNERS_KEY, rid)
+                        await pipe.execute()
+                        continue
                     pipe = self.async_redis.pipeline()
                     for key_suffix in RUNNER_KEY_SUFFIXES:
                         if key_suffix in _PERSIST_SUFFIXES:
@@ -207,10 +232,12 @@ class RunnerState:
                     # user/user:all trigger: dismiss 전까지 cleanup-stale로 삭제하지 않는다
                     preserved_recent += 1
                     continue
-                if recent_score > cutoff_ts:
-                    # 기타 stopped runner는 TTL 내에선 cleanup-stale로 삭제하지 않는다.
-                    preserved_recent += 1
-                    continue
+                # invisible stopped runner는 TTL 무관하게 즉시 정리 (recent set 오염 방지)
+                for key_suffix in RUNNER_KEY_SUFFIXES:
+                    await self.async_redis.delete(self._runner_key(rid, key_suffix))
+                await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
+                cleaned_recent += 1
+                continue
 
             plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))
 

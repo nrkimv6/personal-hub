@@ -174,8 +174,15 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
             redis_client.expire(key, RECENT_RUNNERS_TTL)
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
-        redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
-        logger.info(f"[cleanup] RECENT 등록 완료: {runner_id}")
+        # invisible runner(trigger 미설정/비사용자)는 RECENT에 등록하지 않고 키 즉시 삭제
+        _trigger_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+        if _trigger_val in ("user", "user:all"):
+            redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
+            logger.info(f"[cleanup] RECENT 등록 완료: {runner_id}")
+        else:
+            for _suffix in RUNNER_KEY_SUFFIXES:
+                redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{_suffix}")
+            logger.debug(f"[cleanup] invisible runner — RECENT 스킵, 키 삭제: {runner_id} (trigger={_trigger_val!r})")
     except Exception as e:
         logger.warning(f"[cleanup] RECENT 등록 실패 (runner_id={runner_id}): {e}")
 
