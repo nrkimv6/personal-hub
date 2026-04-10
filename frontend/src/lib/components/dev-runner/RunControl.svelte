@@ -390,6 +390,23 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		<div class="text-xs text-green-700 bg-green-50 rounded p-2">{syncMessage}</div>
 	{/if}
 
+	<!-- Infra Status Row -->
+	<div class="flex items-center gap-3 text-xs text-gray-500">
+		<div class="flex items-center gap-1.5">
+			<span class="w-2 h-2 rounded-full {status?.redis_connected ? 'bg-green-500' : 'bg-gray-300'}"></span>
+			<span>Redis</span>
+		</div>
+		<div class="flex items-center gap-1.5">
+			<span class="w-2 h-2 rounded-full {status?.listener_alive ? 'bg-green-500' : 'bg-gray-300'}"></span>
+			<span>Listener</span>
+		</div>
+		{#if status && (!status.redis_connected || !status.listener_alive)}
+			<span class="text-red-500">
+				{#if !status.redis_connected}Redis 미연결{:else}Listener 미실행{/if}
+			</span>
+		{/if}
+	</div>
+
 	<!-- Controls Row -->
 	<div class="flex items-center gap-2 flex-wrap">
 		<!-- 중지 버튼: running 탭이 하나라도 있을 때 표시 -->
@@ -407,7 +424,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		<button
 			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-mono font-semibold bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
 			onclick={handleStart}
-			disabled={actionLoading || (mode === 'single' && !selectedPlan)}
+			disabled={actionLoading || (mode === 'single' && !selectedPlan) || !status?.redis_connected || !status?.listener_alive}
 		>
 			<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
 			{actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행' : '시작'}
