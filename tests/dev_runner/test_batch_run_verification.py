@@ -332,9 +332,7 @@ class TestLaunchCliArgs:
 
 # ========== Phase 3: HTTP API 격리 테스트 ==========
 
-pytestmark_http = pytest.mark.http
-
-
+@pytest.mark.http
 class TestHttpRunParallel:
     """FastAPI TestClient로 parallel=True 요청이 정상 처리되는지 검증"""
 
