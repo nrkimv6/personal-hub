@@ -11,6 +11,7 @@ export interface RunRequest {
 	plan_file?: string | null;
 	engine?: string;
 	fix_engine?: string;
+	profile?: string | null;
 	max_cycles?: number;
 	max_tokens?: number;
 	until?: string | null;

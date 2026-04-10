@@ -1,4 +1,5 @@
 """_dr_subprocess.py — dev-runner subprocess 실행 헬퍼 모듈"""
+import json
 import logging
 import os
 import subprocess
@@ -18,12 +19,40 @@ logger = logging.getLogger(__name__)
 import re
 _ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
+# profile_extra_env에 덮어쓰기를 허용하지 않는 핵심 env 키
+# app.modules.claude_worker.services.profile_env.FORBIDDEN_EXTRA_ENV 대응 (scripts에서 app import 불가)
+# PYTHONIOENCODING/PYTHONUTF8/PYTHONUNBUFFERED 3개 추가 — _make_plan_runner_env에서 명시 설정 후 덮어쓰기 방지
+_FORBIDDEN_EXTRA_ENV = {
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "HOME",
+    "USERPROFILE",
+    "PYTHONIOENCODING",
+    "PYTHONUTF8",
+    "PYTHONUNBUFFERED",
+}
 
-def _make_plan_runner_env(runner_id: str, **extra: str) -> dict:
+
+def _make_plan_runner_env(
+    runner_id: str,
+    profile_env_key: str = None,
+    profile_config_dir: str = None,
+    profile_extra_env: dict = None,
+    **extra: str,
+) -> dict:
     """plan-runner 서브프로세스용 env를 구성한다.
 
     부모 프로세스의 PLAN_RUNNER_* 키는 stale 값 전파를 막기 위해 기본 제거한다.
     필요한 키는 각 호출부에서 allowlist 형태로 extra 인자로만 명시 주입한다.
+
+    Args:
+        runner_id: runner ID (PLAN_RUNNER_RUNNER_ID에 주입)
+        profile_env_key: config_dir 주입에 쓸 env 변수명 (예: "CLAUDE_CONFIG_DIR", None이면 스킵)
+        profile_config_dir: config dir 경로 (None이면 해당 env 키 제거)
+        profile_extra_env: 추가 env dict (FORBIDDEN_EXTRA_ENV 키 포함 시 ValueError)
+        **extra: 추가 env 변수 (str 값, **kwargs 형태)
     """
     env = os.environ.copy()
     for key in list(env.keys()):
@@ -36,6 +65,24 @@ def _make_plan_runner_env(runner_id: str, **extra: str) -> dict:
     env["PLAN_RUNNER_RUNNER_ID"] = runner_id
     env["REDIS_DB"] = str(get_redis_db())
     env.update(extra)
+
+    # profile config_dir 주입
+    if profile_env_key and profile_config_dir:
+        env[profile_env_key] = profile_config_dir
+    elif profile_env_key and not profile_config_dir:
+        # config_dir 없으면 기존 env에서 해당 키 제거 (기존 값 오염 방지)
+        env.pop(profile_env_key, None)
+
+    # profile extra_env merge (FORBIDDEN_EXTRA_ENV 키 방어)
+    if profile_extra_env:
+        for k, v in profile_extra_env.items():
+            if k in _FORBIDDEN_EXTRA_ENV:
+                raise ValueError(
+                    f"forbidden env key in profile_extra_env: {k!r}. "
+                    f"forbidden set: {sorted(_FORBIDDEN_EXTRA_ENV)}"
+                )
+            env[k] = v
+
     return env
 
 
@@ -129,6 +176,28 @@ def _get_fix_engine(redis_client, runner_id: str) -> str:
     return "claude"
 
 
+def _get_profile_env(redis_client, runner_id: str) -> tuple:
+    """runner의 profile env 정보를 Redis에서 읽어 반환한다.
+
+    Returns:
+        (profile_env_key, profile_config_dir, profile_extra_env) 튜플
+        값 없으면 (None, None, None) 반환
+    """
+    try:
+        pek = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_env_key") or None
+        pcd = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_config_dir") or None
+        pee_raw = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_extra_env")
+        pee = None
+        if pee_raw:
+            try:
+                pee = json.loads(pee_raw)
+            except Exception:
+                pee = None
+        return pek, pcd, pee
+    except Exception:
+        return None, None, None
+
+
 def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path: Path, redis_client, pub_fn=None, engine: str = "claude", needs_remerge: bool = False) -> dict:
     """plan-runner resolve 서브커맨드로 conflict 자동 해결 프로세스를 실행한다.
 
@@ -152,8 +221,12 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
     if needs_remerge:
         cmd.append("--needs-remerge")
 
+    pek, pcd, pee = _get_profile_env(redis_client, runner_id)
     env = _make_plan_runner_env(
         runner_id,
+        profile_env_key=pek,
+        profile_config_dir=pcd,
+        profile_extra_env=pee,
         PLAN_RUNNER_PROJECT_ROOT=str(PROJECT_ROOT),
         PLAN_RUNNER_WORK_DIR=str(worktree_path),
     )
@@ -204,8 +277,12 @@ def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, re
         "--engine", engine,
     ]
 
+    pek, pcd, pee = _get_profile_env(redis_client, runner_id)
     env = _make_plan_runner_env(
         runner_id,
+        profile_env_key=pek,
+        profile_config_dir=pcd,
+        profile_extra_env=pee,
         PLAN_RUNNER_PROJECT_ROOT=str(PROJECT_ROOT),
         PLAN_RUNNER_WORK_DIR=str(PROJECT_ROOT),
     )
@@ -253,8 +330,12 @@ def _launch_auto_impl_post_merge_process(runner_id: str, plan_file: str, redis_c
     except Exception:
         pass
 
+    pek, pcd, pee = _get_profile_env(redis_client, runner_id)
     env = _make_plan_runner_env(
         runner_id,
+        profile_env_key=pek,
+        profile_config_dir=pcd,
+        profile_extra_env=pee,
         PLAN_RUNNER_PROJECT_ROOT=str(PROJECT_ROOT),
         PLAN_RUNNER_WORK_DIR=worktree_path_str or str(PROJECT_ROOT),
     )
@@ -294,8 +375,12 @@ def _launch_general_merge_resolver_process(runner_id: str, branch: str, error_ms
         "--mode", "general-merge-error",
     ]
 
+    pek, pcd, pee = _get_profile_env(redis_client, runner_id)
     env = _make_plan_runner_env(
         runner_id,
+        profile_env_key=pek,
+        profile_config_dir=pcd,
+        profile_extra_env=pee,
         PLAN_RUNNER_PROJECT_ROOT=str(PROJECT_ROOT),
         PLAN_RUNNER_WORK_DIR=str(PROJECT_ROOT),
         PLAN_RUNNER_MERGE_ERROR=error_msg[:2000],

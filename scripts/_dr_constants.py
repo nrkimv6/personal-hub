@@ -41,6 +41,8 @@ RUNNER_KEY_SUFFIXES = (
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
     "subprocess_heartbeat", "reflect_final_path",
     "accepted_at", "accepted_source", "started_at",  # 관측 메타 키 (Phase 1)
+    # profile 관련 키 (신규 4개) — redis_connection.py의 RUNNER_KEY_SUFFIXES와 동기화 필수
+    "profile", "profile_env_key", "profile_config_dir", "profile_extra_env",
 )
 def _read_zombie_grace_seconds(default: int = 240) -> int:
     """좀비 감지 유예 시간(env override) 파싱."""

@@ -7,6 +7,8 @@
 		EngineConfig,
 		DevRunnerRunnerListItem
 	} from '$lib/api';
+	import { llmApi } from '$lib/api/system';
+	import type { LLMProfilesResponse } from '$lib/api/system';
 	import { onMount } from 'svelte';
 
 	interface Props {
@@ -23,6 +25,10 @@
 	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), mode = $bindable('single'), runnerTabs = [], hidePlanSelector = false }: Props = $props();
 	let selectedEngine = $state('claude');
 	let selectedFixEngine = $state('claude');
+	let profilesData = $state<LLMProfilesResponse | null>(null);
+	let selectedProfile = $state<string | null>(null);
+	let profilesForEngine = $derived(profilesData?.profiles.filter(p => p.engine === selectedEngine) ?? []);
+	let showProfileSelect = $derived(profilesForEngine.length > 1);
 	let engineConfigs = $state<AllEnginesConfig | null>(null);
 	let selectedEngineConfig = $derived(engineConfigs?.[selectedEngine] ?? null);
 	let selectedEngineModelOptions = $derived(getModelOptions(selectedEngine));
@@ -216,11 +222,22 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	onMount(() => {
 		fetchEngineConfigs();
 		fetchDefaultEngines();
+		llmApi.listProfiles().then(d => {
+			profilesData = d;
+			// 현재 선택된 엔진의 선택 프로필로 초기화
+			selectedProfile = d.selected[selectedEngine] ?? null;
+		}).catch(() => {});
 	});
 
 	$effect(() => {
 		if (!engineConfigs) return;
 		normalizeSelectedEngines();
+	});
+
+	// 엔진 변경 시 프로필 자동 갱신
+	$effect(() => {
+		if (!profilesData) return;
+		selectedProfile = profilesData.selected[selectedEngine] ?? null;
 	});
 
 	async function updateModel(phase: string, model: string) {
@@ -273,6 +290,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				plan_file: mode === 'single' ? selectedPlan : null,
 				engine: selectedEngine,
 				fix_engine: selectedFixEngine,
+				profile: selectedProfile,
 				max_cycles: maxCycles || 0,
 				until: until || null,
 				dry_run: dryRun,
@@ -492,6 +510,19 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 					{/each}
 				</select>
 			</div>
+			{#if showProfileSelect}
+				<div class="flex items-center gap-1">
+					<span class="text-[10px] text-gray-400 font-medium">Profile</span>
+					<select
+						class={`border rounded px-2 py-1 text-xs h-7 w-[100px] font-mono font-medium ${getEngineThemeClasses(selectedEngine)}`}
+						bind:value={selectedProfile}
+					>
+						{#each profilesForEngine as p}
+							<option value={p.name}>{p.name}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
 			{#if status?.running}
 				<span class={`inline-flex h-7 items-center rounded border px-2 text-[10px] font-mono ${getEngineThemeClasses(runningEngine)}`}>
 					Run {formatEngineLabel(runningEngine)}

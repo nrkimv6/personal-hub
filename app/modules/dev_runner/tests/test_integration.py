@@ -8,6 +8,7 @@ import pytest
 import fakeredis
 import fakeredis.aioredis
 
+from app.modules.claude_worker.services.profile_store import LLMProfile
 from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.state import get_state
 
@@ -272,3 +273,83 @@ class TestLogsRecent:
         assert "lines" in data
         assert "total_lines" in data
         assert isinstance(data["lines"], list)
+
+
+class TestExecutorResolveProfile:
+    """executor _resolve_profile 정적 메서드 검증 (T1)"""
+
+    async def test_profile_specified_in_command_payload(self, client, mock_executor_redis):
+        """R: profile 지정 시 command에 profile 관련 키 포함"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+
+        work_profile = LLMProfile(
+            engine="claude",
+            name="work",
+            config_dir="/work/claude",
+            extra_env={"CLAUDE_KEY": "wk"},
+        )
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch("app.modules.dev_runner.services.executor_service.get_profile_by_name", return_value=work_profile), \
+             patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={"plan_file": "test.md", "engine": "claude", "profile": "work"},
+            )
+
+        assert response.status_code == 200
+        queued = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert queued, "command queue가 비어 있음"
+        command = json.loads(queued[0])
+        assert command.get("profile") == "work"
+        assert command.get("profile_env_key") == "CLAUDE_CONFIG_DIR"
+        assert command.get("profile_config_dir") == "/work/claude"
+        assert command.get("profile_extra_env") == {"CLAUDE_KEY": "wk"}
+
+    async def test_profile_not_specified_uses_selected(self, client, mock_executor_redis):
+        """R: profile 미지정 시 전역 선택 프로필 config 포함"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+
+        selected_profile = LLMProfile(
+            engine="claude",
+            name="default",
+            config_dir=None,
+            extra_env={},
+        )
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch("app.modules.dev_runner.services.executor_service.get_selected_profile", return_value=selected_profile), \
+             patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={"plan_file": "test.md", "engine": "claude"},
+            )
+
+        assert response.status_code == 200
+        queued = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert queued
+        command = json.loads(queued[0])
+        assert command.get("profile") == "default"
+
+    async def test_codex_engine_profile_ignored(self, client, mock_executor_redis):
+        """B: codex 엔진은 PROFILE_SUPPORTED_ENGINES에 없어 profile 키 없음"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={"plan_file": "test.md", "engine": "codex", "profile": "work"},
+            )
+
+        assert response.status_code == 200
+        queued = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert queued
+        command = json.loads(queued[0])
+        # codex 엔진은 profile 관련 키가 command에 없어야 함
+        assert "profile" not in command
+        assert "profile_config_dir" not in command

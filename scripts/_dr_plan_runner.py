@@ -753,6 +753,9 @@ def _launch_plan_runner_process(
         import re as _re
         env = _make_plan_runner_env(
             runner_id,
+            profile_env_key=command.get("profile_env_key"),
+            profile_config_dir=command.get("profile_config_dir"),
+            profile_extra_env=command.get("profile_extra_env"),
             PLAN_RUNNER_WORK_DIR=str(worktree_path),
             PLAN_RUNNER_WORKTREE_PATH=str(worktree_path),
             PLAN_RUNNER_PROJECT_ROOT=str(project_root),
@@ -851,6 +854,12 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", command.get("engine", "claude"))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine", command.get("fix_engine", "claude"))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
+        # profile 정보 Redis에 저장 — merge/fix 후속 단계에서 복원용
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile", command.get("profile", ""))
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_env_key", command.get("profile_env_key") or "")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_config_dir", command.get("profile_config_dir") or "")
+        import json as _json
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_extra_env", _json.dumps(command.get("profile_extra_env") or {}))
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage")
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)

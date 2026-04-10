@@ -50,6 +50,10 @@ RUNNER_KEY_SUFFIXES = (
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
     "exit_reason", "subprocess_heartbeat", "reflect_final_path",
+    # 관측 메타 키 (기존 누락 3개 — _dr_constants.py와 동기화)
+    "accepted_at", "accepted_source", "started_at",
+    # profile 관련 키 (신규 4개)
+    "profile", "profile_env_key", "profile_config_dir", "profile_extra_env",
 )
 SESSION_ID_KEY_PREFIX = "plan-runner:session:"  # fused 세션 ID 저장 키 접두사 (runner_id → session_id 매핑)
 
