@@ -191,6 +191,44 @@ class TestGeminiDumptruck:
         })
         assert resp.status_code == 400
 
+    def test_http_quota_report_gemini_large_dump_delta_75(self, client):
+        """T3-A: 대용량 덤프 시뮬레이션 — delta_weekly_pct=75 (1.5M 토큰 규모) 정상 반영."""
+        resp = client.post("/api/v1/llm/quota/report", json={
+            "provider": "gemini",
+            "model": "gemini-3.1-pro",
+            "delta_weekly_pct": 75,
+        })
+        assert resp.status_code == 200
+
+        entries = client.get("/api/v1/llm/quota").json()["entries"]
+        assert "gemini/gemini-3.1-pro" in entries
+        assert entries["gemini/gemini-3.1-pro"]["weekly_used_pct"] == 75.0
+
+    def test_http_quota_report_gemini_fractional_delta(self, client):
+        """T3-B: 소수 delta (5.5%) — API가 float을 수용하고 정확히 반영하는지 확인."""
+        resp = client.post("/api/v1/llm/quota/report", json={
+            "provider": "gemini",
+            "model": "gemini-3.1-pro",
+            "delta_weekly_pct": 5.5,
+        })
+        assert resp.status_code == 200
+
+        entries = client.get("/api/v1/llm/quota").json()["entries"]
+        assert "gemini/gemini-3.1-pro" in entries
+        assert entries["gemini/gemini-3.1-pro"]["weekly_used_pct"] == pytest.approx(5.5)
+
+    def test_http_quota_report_gemini_min_delta_1pct(self, client):
+        """T3-C: 최솟값 delta (1%) — 극소규모 덤프 시 clamp 하한값 정상 반영."""
+        resp = client.post("/api/v1/llm/quota/report", json={
+            "provider": "gemini",
+            "model": "gemini-3.1-pro",
+            "delta_weekly_pct": 1,
+        })
+        assert resp.status_code == 200
+
+        entries = client.get("/api/v1/llm/quota").json()["entries"]
+        assert entries["gemini/gemini-3.1-pro"]["weekly_used_pct"] == 1.0
+
 
 class TestPostQuotaClear:
     def test_POST_quota_clear_resets_entries(self, client):
