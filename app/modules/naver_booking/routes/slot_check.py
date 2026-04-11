@@ -3,7 +3,7 @@
 작성일: 2025-12-16
 요구사항: REQ-MON-012 (슬롯 조회 API)
 
-scripts/check_slots.py의 기능을 API 엔드포인트로 제공합니다.
+scripts/diagnostics/check_slots.py의 기능을 API 엔드포인트로 제공합니다.
 """
 import asyncio
 import re

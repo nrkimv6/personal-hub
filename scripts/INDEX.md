@@ -154,52 +154,53 @@
 
 ## diagnostics/
 
-> 현재 위치: `scripts/`
+> 현재 위치: `scripts/diagnostics/` (`diagnose-api.ps1`, `register_process.py` 제외)
 > 예정 위치: `scripts/diagnostics/`
 > 위험도: 🟢 저 — 대부분 독립적
 > 대상: OS/프로세스/API 런타임 진단
+> Phase 2 제외: `diagnose-api.ps1` (api-watchdog.ps1에서 참조 → _todo-4에서 함께 이동), `register_process.py` (_todo-5에서 확인 후 이동)
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `_diag_find_cdb.ps1` | CDB(Windows 디버거) 설치 경로 탐색 |
-| ⏳ | `_diag_reboot.ps1` | 재부팅 원인 분석 |
-| ⏳ | `_diag_reboot2.ps1` | 재부팅 원인 분석 v2 |
-| ⏳ | `_diag_reboot3.ps1` | 재부팅 원인 분석 v3 |
-| ⏳ | `_check_plan_data.py` | plan DB 데이터 검증 |
-| ⏳ | `_check_visible.py` | visible 상태 검증 |
-| ⏳ | `analyze_duplicates.py` | DB 중복 분석 |
-| ⏳ | `analyze-dump.ps1` | 메모리 덤프 분석 |
-| ⏳ | `check_profile_config.py` | 브라우저 프로필 설정 검증 |
-| ⏳ | `check_requests.py` | 요청 로그 검사 |
-| ⏳ | `check_schedules.py` | 스케줄 상태 점검 |
-| ⏳ | `check_slots.py` | 슬롯 상태 점검 |
-| ⏳ | `debug_sse_log.py` | SSE 로그 디버그 |
-| ⏳ | `debug_sse_log2.py` | SSE 로그 디버그 v2 |
-| ⏳ | `diagnose-api.ps1` | API 진단 스크립트 |
-| ⏳ | `ps-python-processes.ps1` | 파이썬 프로세스 트리 출력 |
-| ⏳ | `show-processes.ps1` | 프로세스 요약 출력 |
-| ⏳ | `test_pg_connection.py` | PG 연결 확인 (진단용 — migrations 아님) |
+| ✅ | `_diag_find_cdb.ps1` | CDB(Windows 디버거) 설치 경로 탐색 |
+| ✅ | `_diag_reboot.ps1` | 재부팅 원인 분석 |
+| ✅ | `_diag_reboot2.ps1` | 재부팅 원인 분석 v2 |
+| ✅ | `_diag_reboot3.ps1` | 재부팅 원인 분석 v3 |
+| ✅ | `_check_plan_data.py` | plan DB 데이터 검증 |
+| ✅ | `_check_visible.py` | visible 상태 검증 |
+| ✅ | `analyze_duplicates.py` | DB 중복 분석 |
+| ✅ | `analyze-dump.ps1` | 메모리 덤프 분석 |
+| ✅ | `check_profile_config.py` | 브라우저 프로필 설정 검증 |
+| ✅ | `check_requests.py` | 요청 로그 검사 |
+| ✅ | `check_schedules.py` | 스케줄 상태 점검 |
+| ✅ | `check_slots.py` | 슬롯 상태 점검 |
+| ✅ | `debug_sse_log.py` | SSE 로그 디버그 |
+| ✅ | `debug_sse_log2.py` | SSE 로그 디버그 v2 |
+| ⏳ | `diagnose-api.ps1` | API 진단 스크립트 (api-watchdog 참조 → _todo-4) |
+| ✅ | `ps-python-processes.ps1` | 파이썬 프로세스 트리 출력 |
+| ✅ | `show-processes.ps1` | 프로세스 요약 출력 |
+| ✅ | `test_pg_connection.py` | PG 연결 확인 (진단용 — migrations 아님) |
 | ⏳ | `register_process.py` | 프로세스 등록/추적 유틸 |
 
 ---
 
 ## session_tools/
 
-> 현재 위치: `scripts/`
+> 현재 위치: `scripts/session_tools/` ✅
 > 예정 위치: `scripts/session_tools/`
 > 위험도: 🟢 저
 > 대상: `.claude/projects/*.jsonl` 세션 메타 파싱 (Claude Code 산출물)
 > 배경: 2026-04-11 재부팅 원인 분석 과정에서 `_tmp_*.py` 6개가 한 세션 내 2회 이상 재사용 발생 → 정식 카테고리로 승격. 접두사 제거 + `session_*` rename.
 > 수명 규칙: **archive 이관 제외** (장기 재사용 전제)
 
-| 상태 | 현 파일 | 예정 파일 | 설명 |
+| 상태 | 현 파일 | 원본 이름 | 설명 |
 |:-:|---|---|---|
-| ⏳ | `_tmp_dump_session.py` | `session_dump.py` | 세션 jsonl 전체 덤프 |
-| ⏳ | `_tmp_get_line.py` | `session_get_line.py` | 특정 라인 번호 덤프 |
-| ⏳ | `_tmp_search_sessions.py` | `session_search.py` | 키워드 기반 세션 검색 |
-| ⏳ | `_tmp_find_archive_db_session.py` | `session_find_by_file.py` | 파일명(archive db 등) 기반 세션 역추적 |
-| ⏳ | `_tmp_find_scripts_session.py` | `session_find_by_topic.py` | 주제(scripts 등) 기반 세션 역추적 |
-| ⏳ | `_tmp_scan_all_bsod.py` | `session_scan_by_time.py` | 시간 범위(BSOD 주변) 세션 스캔 |
+| ✅ | `session_dump.py` | `_tmp_dump_session.py` | 세션 jsonl 전체 덤프 |
+| ✅ | `session_get_line.py` | `_tmp_get_line.py` | 특정 라인 번호 덤프 |
+| ✅ | `session_search.py` | `_tmp_search_sessions.py` | 키워드 기반 세션 검색 |
+| ✅ | `session_find_by_file.py` | `_tmp_find_archive_db_session.py` | 파일명(archive db 등) 기반 세션 역추적 |
+| ✅ | `session_find_by_topic.py` | `_tmp_find_scripts_session.py` | 주제(scripts 등) 기반 세션 역추적 |
+| ✅ | `session_scan_by_time.py` | `_tmp_scan_all_bsod.py` | 시간 범위(BSOD 주변) 세션 스캔 |
 
 ---
 
@@ -247,20 +248,21 @@
 
 ## probes/
 
-> 현재 위치: `scripts/`
+> 현재 위치: `scripts/probes/` ✅
 > 예정 위치: `scripts/probes/`
 > 위험도: 🟢 저 — 모두 일회성 외부 서비스 탐사 스크립트
+> Phase 2 참고: `coupang_travel_api_feasibility.py` 이동 시 `tests/utils/test_coupang_travel_api_feasibility.py` import 경로 함께 수정
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `coupang_browser_profile_runner.py` | 쿠팡 브라우저 프로필 runner 탐사 |
-| ⏳ | `coupang_cdp_session_probe.py` | 쿠팡 CDP 세션 탐사 |
-| ⏳ | `coupang_credentials_probe.py` | 쿠팡 로그인 자격증명 탐사 |
-| ⏳ | `coupang_login_access_matrix.py` | 쿠팡 로그인 접근 매트릭스 |
-| ⏳ | `coupang_network_probe.py` | 쿠팡 네트워크 요청 탐사 |
-| ⏳ | `coupang_proxy_manager_probe.py` | 쿠팡 proxy manager 탐사 |
-| ⏳ | `coupang_travel_api_feasibility.py` | 쿠팡 travel API 가능성 조사 |
-| ⏳ | `naver_popup_ssr_probe.py` | 네이버 popup SSR 탐사 |
+| ✅ | `coupang_browser_profile_runner.py` | 쿠팡 브라우저 프로필 runner 탐사 |
+| ✅ | `coupang_cdp_session_probe.py` | 쿠팡 CDP 세션 탐사 |
+| ✅ | `coupang_credentials_probe.py` | 쿠팡 로그인 자격증명 탐사 |
+| ✅ | `coupang_login_access_matrix.py` | 쿠팡 로그인 접근 매트릭스 |
+| ✅ | `coupang_network_probe.py` | 쿠팡 네트워크 요청 탐사 |
+| ✅ | `coupang_proxy_manager_probe.py` | 쿠팡 proxy manager 탐사 |
+| ✅ | `coupang_travel_api_feasibility.py` | 쿠팡 travel API 가능성 조사 (test import 갱신됨) |
+| ✅ | `naver_popup_ssr_probe.py` | 네이버 popup SSR 탐사 |
 
 ---
 
@@ -285,30 +287,34 @@
 
 ## fixes/
 
-> 현재 위치: `scripts/`
+> 현재 위치: `scripts/fixes/` (`frontend_placeholder.py` 제외 → services/로 재분류)
 > 예정 위치: `scripts/fixes/`
 > 위험도: 🟢 저 — 일회성 픽스, 수명 후 archive/로 이동
 > 수명 규칙: 작업 완료 후 30일 내 `scripts/archive/`로 이관 (Phase 6에서 공식화)
+> Phase 2 재분류: `frontend_placeholder.py`는 `service_run.py:216`에서 런타임 import됨 → 일회성 아님 → `services/`로 이동(_todo-4)
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `_fix_dev_runner.ps1` | dev-runner 일회성 픽스 |
-| ⏳ | `_fix_plan_header.py` | plan 헤더 일괄 수정 |
-| ⏳ | `_fix_planlist.ps1` | plan 목록 일괄 수정 v1 |
-| ⏳ | `_fix_planlist2.ps1` | plan 목록 일괄 수정 v2 |
-| ⏳ | `_fix_tabs.ps1` | 탭 정렬 일괄 수정 |
-| ⏳ | `_fix_tracking.ps1` | tracking 상태 일괄 수정 v1 |
-| ⏳ | `_fix_tracking2.ps1` | tracking 상태 일괄 수정 v2 |
-| ⏳ | `fix_event_dates.py` | 이벤트 날짜 일회성 보정 |
-| ⏳ | `fix-button-case.py` | 버튼 케이스 일괄 수정 |
-| ⏳ | `fix-button-mismatch-final.py` | 버튼 불일치 최종 수정 |
-| ⏳ | `fix-button-tags.py` | 버튼 태그 일괄 수정 |
-| ⏳ | `fix-event-modifiers.py` | 이벤트 modifier 일괄 수정 |
-| ⏳ | `fix-variant-size.py` | variant size 일괄 수정 |
-| ⏳ | `create_icons.py` | 아이콘 생성 일회성 유틸 |
-| ⏳ | `extract_keywords.py` | 키워드 추출 일회성 유틸 |
-| ⏳ | `frontend_placeholder.py` | 프론트엔드 placeholder 주입 유틸 |
-| ⏳ | `disable_duplicate_events.py` | 중복 이벤트 비활성화 일회성 수정 |
+| ✅ | `_fix_dev_runner.ps1` | dev-runner 일회성 픽스 |
+| ✅ | `_fix_plan_header.py` | plan 헤더 일괄 수정 |
+| ✅ | `_fix_planlist.ps1` | plan 목록 일괄 수정 v1 |
+| ✅ | `_fix_planlist2.ps1` | plan 목록 일괄 수정 v2 |
+| ✅ | `_fix_tabs.ps1` | 탭 정렬 일괄 수정 |
+| ✅ | `_fix_tracking.ps1` | tracking 상태 일괄 수정 v1 |
+| ✅ | `_fix_tracking2.ps1` | tracking 상태 일괄 수정 v2 |
+| ✅ | `fix_event_dates.py` | 이벤트 날짜 일회성 보정 |
+| ✅ | `fix-button-case.py` | 버튼 케이스 일괄 수정 |
+| ✅ | `fix-button-mismatch-final.py` | 버튼 불일치 최종 수정 |
+| ✅ | `fix-button-tags.py` | 버튼 태그 일괄 수정 |
+| ✅ | `fix-event-modifiers.py` | 이벤트 modifier 일괄 수정 |
+| ✅ | `fix-variant-size.py` | variant size 일괄 수정 |
+| ✅ | `migrate-colors-phase1.py` | 프론트 색상 마이그레이션 Phase 1 |
+| ✅ | `migrate-colors-phase2.py` | 프론트 색상 마이그레이션 Phase 2 |
+| ✅ | `migrate-colors-phase3.py` | 프론트 색상 마이그레이션 Phase 3 |
+| ✅ | `create_icons.py` | 아이콘 생성 일회성 유틸 |
+| ✅ | `extract_keywords.py` | 키워드 추출 일회성 유틸 |
+| ⏳ | `frontend_placeholder.py` | 프론트엔드 placeholder 서버 (service_run 참조 → services/로 이관 예정) |
+| ✅ | `disable_duplicate_events.py` | 중복 이벤트 비활성화 일회성 수정 |
 
 ---
 
