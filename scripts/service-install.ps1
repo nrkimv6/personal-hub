@@ -9,6 +9,7 @@
 #   .\service-install.ps1 -Action stop              # Stop service
 #   .\service-install.ps1 -Action restart -WithLogs # Restart and open log window
 #   .\service-install.ps1 -Action uninstall         # Uninstall service
+#   NOTE: 기존 설치 서비스에 DependOnService를 소급 적용하려면 uninstall → install 또는 'nssm set MonitorPage-* DependOnService postgresql-scoop' 수동 실행 필요
 
 param(
     [Parameter(Mandatory=$true)]
@@ -32,6 +33,7 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 # Service configuration
 # Python service runner: service_run.py (service-run.ps1에서 마이그레이션됨)
 # See: docs/plan/2026-02-18_service-runner-python-migration.md
+$PostgresServiceName = "postgresql-scoop"
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
     $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
@@ -119,6 +121,16 @@ function Install-MonitorService {
 
     # Set startup type to Delayed Auto Start (start after boot completes)
     nssm set $svc.Name Start SERVICE_DELAYED_AUTO_START
+
+    # PG 서비스 의존성 (재부팅 시 PG 기동 대기)
+    $pgSvc = Get-Service -Name $PostgresServiceName -ErrorAction SilentlyContinue
+    if ($pgSvc) {
+        nssm set $svc.Name DependOnService $PostgresServiceName
+        Write-Host "    DependOnService: $PostgresServiceName" -ForegroundColor Gray
+    } else {
+        Write-Host "    [!] $PostgresServiceName service not found — skipping DependOnService" -ForegroundColor Yellow
+        Write-Host "        PG를 'pg_ctl register -N $PostgresServiceName ...'로 등록한 뒤 재설치하세요." -ForegroundColor Yellow
+    }
 
     # Set log files
     $stdoutLog = Join-Path $svc.LogDir "service_$($svc.Name).log"
