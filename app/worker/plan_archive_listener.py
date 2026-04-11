@@ -173,7 +173,7 @@ class PlanArchiveListener(BaseWorker):
                         lambda: self._handle_archived(filename),
                     )
         except Exception as e:
-            logger.error(f"[{self.name}] pub/sub 수신 오류: {e}", exc_info=True)
+            self._log_worker_error("pub/sub 수신", e)
             # 연결 오류 시 재연결을 위해 초기화
             await self._disconnect_redis()
 

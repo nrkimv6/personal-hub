@@ -435,3 +435,30 @@ def mock_telegram_settings():
         "bot_token": "test_bot_token",
         "chat_id": "test_chat_id"
     }
+
+
+# ── DbCircuitBreaker 싱글턴 상태 격리 (Phase 9a) ──────────────────────────────
+
+@pytest.fixture(autouse=True)
+def db_circuit_reset():
+    """각 테스트 전 db_circuit 싱글턴 상태 초기화.
+
+    db_circuit import 실패 시 기존 테스트에 영향 없도록 방어.
+    """
+    try:
+        from app.core.database import db_circuit, _CLOSED
+        with db_circuit._lock:
+            db_circuit._state = _CLOSED
+            db_circuit._fail_count = 0
+            db_circuit._last_fail_time = 0.0
+    except ImportError:
+        pass
+    yield
+    try:
+        from app.core.database import db_circuit, _CLOSED
+        with db_circuit._lock:
+            db_circuit._state = _CLOSED
+            db_circuit._fail_count = 0
+            db_circuit._last_fail_time = 0.0
+    except ImportError:
+        pass

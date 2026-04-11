@@ -93,7 +93,7 @@ class ActivityWorker(CrawlWorkerBase):
                 logger.debug("[ActivityWorker] Redis 알림 실패 (무시): %s", re)
 
         except Exception as e:
-            logger.error("[ActivityWorker] archive_batch_move 오류: %s", e, exc_info=True)
+            self._log_worker_error("archive_batch_move", e)
 
     async def _main_loop_iteration(self):
         """메인 루프 반복 - 요청 처리."""
@@ -115,14 +115,14 @@ class ActivityWorker(CrawlWorkerBase):
             try:
                 await self._process_request(request)
             except Exception as e:
-                logger.error(f"[ActivityWorker] 요청 처리 오류: {e}", exc_info=True)
+                self._log_worker_error("요청 처리", e)
                 self._mark_request_failed(request.id, str(e))
             finally:
                 self._processing = False
                 self._update_worker_state("idle")
 
         except Exception as e:
-            logger.error(f"[ActivityWorker] 루프 오류: {e}", exc_info=True)
+            self._log_worker_error("루프", e)
 
     def _get_pending_request(self) -> Optional[CrawlRequest]:
         """대기 중인 activity 요청 조회."""

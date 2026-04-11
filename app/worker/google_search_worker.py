@@ -167,7 +167,7 @@ class GoogleSearchWorker(BaseWorker):
             await self._execute_search(queue_item, db)
 
         except Exception as e:
-            logger.error(f"[{self.name}] Redis 큐 처리 오류: {e}", exc_info=True)
+            self._log_worker_error("Redis 큐 처리", e)
         finally:
             db.close()
 
@@ -202,7 +202,7 @@ class GoogleSearchWorker(BaseWorker):
             await self._execute_search(pending, db)
 
         except Exception as e:
-            logger.error(f"[{self.name}] Error processing queue: {e}", exc_info=True)
+            self._log_worker_error("DB 폴링 큐 처리", e)
         finally:
             db.close()
 

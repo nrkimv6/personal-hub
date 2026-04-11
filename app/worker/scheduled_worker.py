@@ -218,7 +218,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 await self._process_devguide_staleness_schedule(db, schedule, schedule_service)
 
         except Exception as e:
-            logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
+            self._log_worker_error("스케줄 디스패치", e)
         finally:
             db.close()
 
@@ -277,7 +277,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             schedule_service.update_schedule_after_run(schedule.id)
             logger.info(f"[{self.name}] plan_archive_analyze 완료: {count}개 LLM 큐 등록, run_id={run.id}")
         except Exception as e:
-            logger.error(f"[{self.name}] _execute_plan_archive_run 오류: {e}", exc_info=True)
+            self._log_worker_error("_execute_plan_archive_run", e)
             try:
                 schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, error_message=str(e))
@@ -351,7 +351,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             schedule_service.update_schedule_after_run(schedule.id)
             logger.info(f"[{self.name}] devguide_staleness 완료: {count}개 가이드 staleness 감지, run_id={run.id}")
         except Exception as e:
-            logger.error(f"[{self.name}] _execute_devguide_staleness_run 오류: {e}", exc_info=True)
+            self._log_worker_error("_execute_devguide_staleness_run", e)
             try:
                 schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, error_message=str(e))
@@ -435,7 +435,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 db.commit()
             return inserted
         except Exception as e:
-            logger.error(f"_process_unprocessed_plans error: {e}", exc_info=True)
+            self._log_worker_error("_process_unprocessed_plans", e)
             db.rollback()
             return 0
         finally:
@@ -506,7 +506,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     logger.info(f"[{self.name}] 스케줄 피드 크롤링 태스크 시작: run_id={run.id}")
 
         except Exception as e:
-            logger.error(f"[{self.name}] 스케줄 처리 오류: schedule_id={schedule.id}, error={e}", exc_info=True)
+            self._log_worker_error(f"스케줄 처리 (id={schedule.id})", e)
 
     async def _execute_feed_crawl(
         self,
