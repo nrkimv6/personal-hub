@@ -1,4 +1,4 @@
-"""Unit tests for scripts/archive_index_backfill.py (RIGHT-BICEP + CORRECT)."""
+"""Unit tests for scripts/migrations/archive_index_backfill.py (RIGHT-BICEP + CORRECT)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "scripts" / "migrations"))
 
 import archive_index_backfill as m  # noqa: E402
 

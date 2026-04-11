@@ -148,7 +148,7 @@ def check_profile_configuration():
         else:
             print("⚠ 새 프로필 디렉토리가 없습니다!")
             print(f"  마이그레이션 스크립트를 실행하세요:")
-            print(f"  python scripts/migrate_browser_profiles.py")
+            print(f"  python scripts/migrations/migrate_browser_profiles.py")
 
     except Exception as e:
         print(f"오류 발생: {e}")

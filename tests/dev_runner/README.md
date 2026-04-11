@@ -16,7 +16,7 @@ python -m pytest `
 Equivalent shortcut:
 
 ```powershell
-.\scripts\test.ps1 -DevRunnerRegression
+.\scripts\tests_scripts\test.ps1 -DevRunnerRegression
 ```
 
 ## Strict Redis mock rule

@@ -125,30 +125,27 @@
 
 ## migrations/
 
-> 현재 위치: `scripts/`
-> 예정 위치: `scripts/migrations/`
+> 현재 위치: `scripts/migrations/` ✅
 > 위험도: **🟡 중** — `docs/dev-guide/db-migration.md`, `app/migrations/`와 연관
-> 주요 외부 참조자: `CLAUDE.md` (migrate_sqlite_to_pg.py)
+> 주요 외부 참조자: `CLAUDE.md` (migrations/migrate_sqlite_to_pg.py), `docs/wiki-schema.md`, `docs/plan/2026-04-10_fix-pg-instagram-posts-remigrate.md`, `docs/plan/2026-04-11_archive-db-first-rotation-and-wtools-ingest-cleanup.md`
+> 제외: `queue_archived_plans.py` → `plan_runner/` (_todo-3 범위)
+> 제외: `migrate-colors-phase*.py` → `fixes/` (일회성 마이그레이션, _todo-2에서 이관 완료)
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `001_url_book_data.sql` | 초기 URL 북 데이터 시드 |
-| ⏳ | `2025-11-30_urls.sql` | 날짜 스냅 URL 데이터 |
-| ⏳ | `database.sql` | 초기 스키마 |
-| ⏳ | `apply_migration.py` | SQL 파일 적용 유틸 |
-| ⏳ | `migrate_db.py` | 스키마 마이그레이션 실행기 |
-| ⏳ | `migrate_sqlite_to_pg.py` | SQLite → PG 데이터 이관 (2026-04-10 실행 완료) |
-| ⏳ | `migrate_browser_profiles.py` | 브라우저 프로필 테이블 이관 |
-| ⏳ | `migrate-colors-phase1.py` | 컬러 스키마 마이그레이션 Phase 1 |
-| ⏳ | `migrate-colors-phase2.py` | 컬러 스키마 마이그레이션 Phase 2 |
-| ⏳ | `migrate-colors-phase3.py` | 컬러 스키마 마이그레이션 Phase 3 |
-| ⏳ | `create_archive_tables.py` | archive 전용 테이블 생성 |
-| ⏳ | `archive_batch_move.py` | 대량 archive 이관 배치 |
-| ⏳ | `archive_index_backfill.py` | archive 인덱스 backfill |
-| ⏳ | `queue_archived_plans.py` | 아카이브 plan 재큐잉 |
-| ⏳ | `verify_crawl_migration.py` | 크롤 데이터 마이그레이션 검증 |
-| ⏳ | `fix_pg_sequences.py` | PG serial sequence 동기화 (2026-04-11 plan 결과) |
-| ⏳ | `import_urls_bulk.py` | URL 대량 import |
+| ✅ | `001_url_book_data.sql` | 초기 URL 북 데이터 시드 |
+| ✅ | `2025-11-30_urls.sql` | 날짜 스냅 URL 데이터 |
+| ✅ | `database.sql` | 초기 스키마 |
+| ✅ | `apply_migration.py` | SQL 파일 적용 유틸 |
+| ✅ | `migrate_db.py` | 스키마 마이그레이션 실행기 |
+| ✅ | `migrate_sqlite_to_pg.py` | SQLite → PG 데이터 이관 (2026-04-10 실행 완료) |
+| ✅ | `migrate_browser_profiles.py` | 브라우저 프로필 테이블 이관 |
+| ✅ | `create_archive_tables.py` | archive 전용 테이블 생성 |
+| ✅ | `archive_batch_move.py` | 대량 archive 이관 배치 |
+| ✅ | `archive_index_backfill.py` | archive 인덱스 backfill |
+| ✅ | `verify_crawl_migration.py` | 크롤 데이터 마이그레이션 검증 |
+| ✅ | `fix_pg_sequences.py` | PG serial sequence 동기화 (2026-04-11 plan 결과) |
+| ✅ | `import_urls_bulk.py` | URL 대량 import |
 
 ---
 
@@ -206,43 +203,45 @@
 
 ## cleanup/
 
-> 현재 위치: `scripts/`
-> 예정 위치: `scripts/cleanup/`
+> 현재 위치: `scripts/cleanup/` (`kill-orphan-procs.ps1` 제외)
 > 위험도: **🟡 중** — 수동 실행 + 일부 daily_maintenance 연동
+> 제외: `kill-orphan-procs.ps1` — `.claude/skills/implement/SKILL.md`, `.claude/skills/done/SKILL.md`, `.claude/agents/auto-impl.md`, `.claude/agents/auto-done.md`에서 절대경로 `scripts/kill-orphan-procs.ps1` 참조. monitor-page에서 `.claude/*` 직접 수정 금지 규칙에 따라 wtools 스킬 업데이트 선행 필요. 현재 `scripts/` 루트 유지. (추가: `scripts/port-utils.ps1` 포함, 포트 정리 유틸)
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `cleanup_chrome.ps1` | Chrome 잔여 프로세스 정리 |
-| ⏳ | `cleanup_invisible_recent_runners.py` | invisible runner DB 정리 |
-| ⏳ | `cleanup_old_branches.py` | 오래된 impl/* 브랜치 정리 |
-| ⏳ | `cleanup_test_runners.py` | 테스트용 runner DB 정리 |
-| ⏳ | `cleanup-stale-worktrees.ps1` | stale 워크트리 정리 |
-| ⏳ | `clear_death_log.py` | death log 초기화 |
-| ⏳ | `kill_all.ps1` | 전체 프로세스 강제 종료 (start/stop 이후 정리용) |
-| ⏳ | `kill-orphan-procs.ps1` | 고아 pytest 프로세스 정리 (`/implement` 선제 정리) |
+| ✅ | `cleanup_chrome.ps1` | Chrome 잔여 프로세스 정리 |
+| ✅ | `cleanup_invisible_recent_runners.py` | invisible runner DB 정리 |
+| ✅ | `cleanup_old_branches.py` | 오래된 impl/* 브랜치 정리 |
+| ✅ | `cleanup_test_runners.py` | 테스트용 runner DB 정리 |
+| ✅ | `cleanup-stale-worktrees.ps1` | stale 워크트리 정리 |
+| ✅ | `clear_death_log.py` | death log 초기화 |
+| ✅ | `kill_all.ps1` | 전체 프로세스 강제 종료 (start/stop 이후 정리용) |
+| ✅ | `port-utils.ps1` | 좀비 포트 탐지/정리 공용 모듈 |
+| ⏳ | `kill-orphan-procs.ps1` | 고아 pytest 프로세스 정리 (`/implement` 선제 정리) — wtools 스킬 경로 수정 후 이관 |
 
 ---
 
 ## tests_scripts/
 
-> 현재 위치: `scripts/`
-> 예정 위치: `scripts/tests_scripts/`
+> 현재 위치: `scripts/tests_scripts/` ✅
 > 위험도: 🟢 저
 > 참고: `tests/` 는 pytest 본체, `tests_scripts/`는 **수동/보조 테스트 스크립트**
+> 주요 외부 참조자: `tests/dev_runner/README.md`, `tests/integration/__init__.py`, `tests/integration/test_api_integration.py`, `docs/dev-guide/troubleshooting.md` (경로 갱신됨)
+> pytest 수집 제외: `pytest.ini`의 `testpaths = tests`로 `scripts/tests_scripts/`는 자동 수집 안 됨 — 수동 실행 전용
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `test.ps1` | `run.ps1` 기반 수동 테스트 실행 |
-| ⏳ | `coverage.ps1` | 커버리지 측정 래퍼 |
-| ⏳ | `run-e2e-tests.ps1` | E2E 테스트 배치 실행 |
-| ⏳ | `recovery-process-watch-smoke.ps1` | 복구 프로세스 watch 스모크 |
-| ⏳ | `test-dev-runner-batch.ps1` | dev-runner 배치 스모크 |
-| ⏳ | `test_browser_profile.py` | 브라우저 프로필 수동 테스트 |
-| ⏳ | `test_classify.py` | 분류 수동 테스트 |
-| ⏳ | `test_classify_direct.py` | 분류 직접 호출 테스트 |
-| ⏳ | `test_phase4.py` | phase4 테스트 스크립트 |
-| ⏳ | `test_phase4_check.py` | phase4 검증 |
-| ⏳ | `test_phase4_run.py` | phase4 실행 |
+| ✅ | `test.ps1` | `run.ps1` 기반 수동 테스트 실행 |
+| ✅ | `coverage.ps1` | 커버리지 측정 래퍼 |
+| ✅ | `run-e2e-tests.ps1` | E2E 테스트 배치 실행 |
+| ✅ | `recovery-process-watch-smoke.ps1` | 복구 프로세스 watch 스모크 |
+| ✅ | `test-dev-runner-batch.ps1` | dev-runner 배치 스모크 |
+| ✅ | `test_browser_profile.py` | 브라우저 프로필 수동 테스트 |
+| ✅ | `test_classify.py` | 분류 수동 테스트 |
+| ✅ | `test_classify_direct.py` | 분류 직접 호출 테스트 |
+| ✅ | `test_phase4.py` | phase4 테스트 스크립트 |
+| ✅ | `test_phase4_check.py` | phase4 검증 |
+| ✅ | `test_phase4_run.py` | phase4 실행 |
 
 ---
 
@@ -320,15 +319,16 @@
 
 ## dumptruck/
 
-> 현재 위치: `scripts/` + `scripts/dumptruck_templates/`
+> 현재 위치: `scripts/` + `scripts/dumptruck_templates/` (**이관 보류**)
 > 예정 위치: `scripts/dumptruck/` (templates 포함)
 > 위험도: 🟢 저
-> 외부 참조자: `docs/dumptruck/` 생성 스킬
+> 외부 참조자: `.claude/skills/dumptruck/SKILL.md`에서 `scripts/dumptruck_run.ps1`, `scripts/dumptruck_builder.py` 절대경로 참조
+> 🔴 이관 보류: monitor-page에서 `.claude/skills/*` 직접 수정 금지 규칙에 따라 wtools 레포의 dumptruck 스킬 경로 업데이트가 선행되어야 한다. wtools 스킬 수정 + pull-sync 이후 별도 이관.
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `dumptruck_run.ps1` | Gemini Pro oneshot 실행 래퍼 |
-| ⏳ | `dumptruck_builder.py` | dumptruck 프롬프트 빌더 |
+| ⏳ | `dumptruck_run.ps1` | Gemini Pro oneshot 실행 래퍼 — wtools 스킬 업데이트 후 이관 |
+| ⏳ | `dumptruck_builder.py` | dumptruck 프롬프트 빌더 — wtools 스킬 업데이트 후 이관 |
 | ⏳ | `dumptruck_templates/architecture.md` | 아키텍처 분석 템플릿 |
 | ⏳ | `dumptruck_templates/conflict.md` | 충돌 분석 템플릿 |
 | ⏳ | `dumptruck_templates/logdump.md` | 로그 덤프 템플릿 |
@@ -338,20 +338,22 @@
 
 ## setup/
 
-> 현재 위치: `scripts/`
-> 예정 위치: `scripts/setup/`
+> 현재 위치: `scripts/setup/` ✅
 > 위험도: **🟡 중** — 시작 프로그램/작업 스케줄러에 등록됨
+> 주요 외부 참조자: `CLAUDE.md`(없음 — 간접), `CHANGELOG.md`, `GEMINI.md`, `docs/dev-guide/process-structure.md`, `docs/dev-guide/watchdog-architecture.md` (경로 갱신됨)
+> 비고: NSSM 서비스 경로는 변경 없음 (`setup/` 아래로 이동된 파일 중 NSSM 등록 대상은 없음). `startup-install.ps1`/`startup-browser-workers.ps1`는 시작 프로그램 바로가기 — 재설치 필요 시 `.\scripts\setup\startup-install.ps1 -Action install` 재실행.
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `_build_worktree.ps1` | 워크트리 빌드 (venv/node_modules) 헬퍼 |
-| ⏳ | `_setup_worktree_build.ps1` | 워크트리 빌드 환경 셋업 |
-| ⏳ | `setup-exe-aliases.ps1` | PowerShell exe alias 설치 |
-| ⏳ | `startup-install.ps1` | 사용자 시작 프로그램 등록 |
-| ⏳ | `startup-browser-workers.ps1` | 부팅 시 통합 워커 기동 |
-| ⏳ | `daily_maintenance.ps1` | 일일 유지보수 작업 (cleanup 연동) |
-| ⏳ | `claude-session-manager.ps1` | Claude Code 세션 관리 헬퍼 |
-| ⏳ | `auto-update.ps1` | 자동 업데이트 훅 |
+| ✅ | `_build_worktree.ps1` | 워크트리 빌드 (venv/node_modules) 헬퍼 |
+| ✅ | `_setup_worktree_build.ps1` | 워크트리 빌드 환경 셋업 |
+| ✅ | `setup-exe-aliases.ps1` | PowerShell exe alias 설치 |
+| ✅ | `startup-install.ps1` | 사용자 시작 프로그램 등록 |
+| ✅ | `startup-browser-workers.ps1` | 부팅 시 통합 워커 기동 |
+| ✅ | `daily_maintenance.ps1` | 일일 유지보수 작업 (cleanup 연동) |
+| ✅ | `claude-session-manager.ps1` | Claude Code 세션 관리 헬퍼 |
+| ✅ | `auto-update.ps1` | 자동 업데이트 훅 |
+| ✅ | `Send-TelegramAlert.ps1` | 텔레그램 알림 함수 (watchdog crash-loop 감지 등에서 dot-source) |
 
 ---
 
@@ -365,7 +367,7 @@
 |:-:|---|---|
 | (기존) | `archive/_copy_dev_to_admin.ps1` | dev → admin 복사 일회성 스크립트 (과거) |
 | (기존) | `archive/_rename_dev_to_admin.ps1` | dev → admin rename 일회성 스크립트 (과거) |
-| ⏳(이관) | `commit.ps1` | 레거시 — `D:\work\project\tools\common\commit.ps1`로 대체됨 → archive/로 이관 예정 (_todo-5) |
+| ✅ | `archive/commit.ps1` | 레거시 — `D:\work\project\tools\common\commit.ps1`로 대체. _todo-5에서 archive/로 이관 완료 |
 | ⏳(이관 검토) | `service-run.ps1.bak` | 백업본 — archive/ 또는 삭제 검토 (_todo-4) |
 
 ---
