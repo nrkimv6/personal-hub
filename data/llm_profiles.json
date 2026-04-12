@@ -1,0 +1,26 @@
+{
+  "selected": {
+    "claude": "personal",
+    "gemini": "default"
+  },
+  "profiles": [
+    {
+      "engine": "claude",
+      "name": "personal",
+      "config_dir": null,
+      "extra_env": {}
+    },
+    {
+      "engine": "claude",
+      "name": "work",
+      "config_dir": "C:/Users/Narang/.claude-work",
+      "extra_env": {}
+    },
+    {
+      "engine": "gemini",
+      "name": "default",
+      "config_dir": null,
+      "extra_env": {}
+    }
+  ]
+}
