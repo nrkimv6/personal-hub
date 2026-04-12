@@ -158,7 +158,7 @@ def redis_client_e2e():
 @pytest.fixture(scope="module")
 def listener_process_e2e(redis_client_e2e):
     """dev-runner-command-listener 프로세스 시작"""
-    script_path = Path("scripts/dev-runner-command-listener.py")
+    script_path = Path("scripts/plan_runner/dev-runner-command-listener.py")
     if not script_path.exists():
         pytest.skip("listener script not found")
 

@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 _LISTENER_PATH = (
-    Path(__file__).parent.parent.parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+    Path(__file__).parent.parent.parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 )
 
 

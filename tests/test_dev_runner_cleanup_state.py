@@ -17,7 +17,7 @@ import pytest
 # listener 모듈 import (파일명에 하이픈 포함)
 # ============================================================
 
-_LISTENER_PATH = Path(__file__).parent.parent / "scripts" / "dev-runner-command-listener.py"
+_LISTENER_PATH = Path(__file__).parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 
 def _load_listener():

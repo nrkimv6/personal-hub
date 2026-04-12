@@ -28,8 +28,8 @@ def _get_listener():
     if _listener_mod is not None:
         return _listener_mod
     # 워크트리 또는 원본에서 스크립트 로드
-    wt_path = Path(__file__).resolve().parents[1] / "scripts" / "dev-runner-command-listener.py"
-    script_path = wt_path if wt_path.exists() else Path("D:/work/project/tools/monitor-page/scripts/dev-runner-command-listener.py")
+    wt_path = Path(__file__).resolve().parents[1] / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
+    script_path = wt_path if wt_path.exists() else Path("D:/work/project/tools/monitor-page/scripts/plan_runner/dev-runner-command-listener.py")
     if not script_path.exists():
         pytest.skip(f"Listener script not found: {script_path}")
     spec = importlib.util.spec_from_file_location("dev_runner_orphan", str(script_path))

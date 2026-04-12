@@ -19,7 +19,7 @@ _SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-_SCRIPT_PATH = _SCRIPTS_DIR / "dev-runner-command-listener.py"
+_SCRIPT_PATH = _SCRIPTS_DIR / "plan_runner" / "dev-runner-command-listener.py"
 _mock_noise = types.ModuleType("listener_noise_filter")
 _mock_noise.NOISE_BLOCK_MARKERS = []
 _mock_noise.is_noise_line = lambda line: False

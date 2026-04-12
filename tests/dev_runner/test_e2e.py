@@ -46,7 +46,7 @@ E2E_PLAN_FILE = REPO_ROOT / "tests" / "dev_runner" / "fixtures" / "test_plan_e2e
 def dev_runner_listener():
     """Start the listener script as a background process for E2E tests (db=15 격리)"""
     import os as _os
-    script_path = Path("scripts/dev-runner-command-listener.py")
+    script_path = Path("scripts/plan_runner/dev-runner-command-listener.py")
 
     # Ensure Redis is running (db=15 격리)
     try:

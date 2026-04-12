@@ -37,6 +37,8 @@ from sqlalchemy.orm import sessionmaker
 # 프로젝트 루트 추가
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+# plan_runner 모듈 경로 (scripts/plan_runner/ 로 이동됨)
+sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "plan_runner"))
 
 # 테스트 DB 경로 (TEST_DB_DIR 환경변수로 워크트리 격리 지원)
 TEST_DB_DIR = Path(os.environ.get("TEST_DB_DIR", str(PROJECT_ROOT / "data")))

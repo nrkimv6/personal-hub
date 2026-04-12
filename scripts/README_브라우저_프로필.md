@@ -28,7 +28,7 @@ data/
 브라우저 프로필을 새 위치로 복사합니다:
 
 ```bash
-python scripts/migrate_browser_profiles.py
+python scripts/migrations/migrate_browser_profiles.py
 ```
 
 **주의사항:**

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # dev-runner-command-listener.py 경로 (하이픈 포함이므로 importlib.util 사용)
-_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 # noise_filter mock (의존성 격리)
 _mock_noise_module = types.ModuleType("listener_noise_filter")

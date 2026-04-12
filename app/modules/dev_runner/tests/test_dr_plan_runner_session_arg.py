@@ -11,8 +11,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-# scripts/ sys.path 추가
-_SCRIPTS_DIR = Path(__file__).resolve().parents[4] / "scripts"
+# scripts/plan_runner/ sys.path 추가 (plan_runner/로 이동됨)
+_SCRIPTS_DIR = Path(__file__).resolve().parents[4] / "scripts" / "plan_runner"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 

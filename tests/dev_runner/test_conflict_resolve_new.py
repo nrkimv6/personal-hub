@@ -13,7 +13,7 @@ if _scripts_dir not in sys.path:
 def _load_listener():
     import importlib.util
     from pathlib import Path
-    script_path = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+    script_path = Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
     spec = importlib.util.spec_from_file_location("dev_runner_command_listener", str(script_path))
     module = importlib.util.module_from_spec(spec)
     # Mock some module-level constants

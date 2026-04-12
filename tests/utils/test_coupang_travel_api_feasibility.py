@@ -5,7 +5,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.coupang_travel_api_feasibility import (  # noqa: E402
+from scripts.probes.coupang_travel_api_feasibility import (  # noqa: E402
     extract_api_product_id_from_html,
     extract_vendor_item_package_ids_from_html,
     load_coupang_cookies_from_storage_state,

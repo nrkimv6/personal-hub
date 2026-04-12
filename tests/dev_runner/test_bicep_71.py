@@ -61,7 +61,7 @@ def test_command_listener_poll_on_popen_only():
     """dev-runner-command-listener.py의 .poll()이 subprocess.Popen 객체에만 사용됨을 확인"""
     from pathlib import Path
 
-    listener_path = Path("scripts/dev-runner-command-listener.py")
+    listener_path = Path("scripts/plan_runner/dev-runner-command-listener.py")
     if not listener_path.exists():
         pytest.skip("listener 경로 없음")
 

@@ -50,7 +50,7 @@
 ## 4. 프로세스 및 운영 (Operations)
 
 ### 4.1 프로세스 별칭 (Exe Aliases)
-관리 편의를 위해 `python.exe`를 각 역할별 별칭(`monitorpage-*.exe`)으로 복사하여 사용합니다. (`scripts\setup-exe-aliases.ps1`)
+관리 편의를 위해 `python.exe`를 각 역할별 별칭(`monitorpage-*.exe`)으로 복사하여 사용합니다. (`scripts\setup\setup-exe-aliases.ps1`)
 
 | 프로세스 별칭 | 역할 |
 |:---|:---|

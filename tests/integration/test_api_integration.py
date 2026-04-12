@@ -7,7 +7,7 @@ API Integration Tests
 실행 방법:
     pytest tests/integration/
     또는
-    .\scripts\test.ps1 -Integration
+    .\scripts\tests_scripts\test.ps1 -Integration
 """
 
 import pytest
