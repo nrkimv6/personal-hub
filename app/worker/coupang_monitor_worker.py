@@ -152,13 +152,15 @@ class CoupangMonitorWorker(BaseWorker):
             self._set_schedule_active(schedule_id, True)
             active_marked = True
 
+            notify_times = ctx.get("times")
+
             # 1차 시도: HTTP 클라이언트 (aiohttp + 프록시 로테이션)
             changes = await self._check_via_http(
                 product_id=product_id,
                 vendor_item_package_id=vendor_item_package_id,
                 date=date,
                 schedule_id=schedule_id,
-                notify_times=ctx.get("times"),
+                notify_times=notify_times,
             )
 
             # HTTP 실패 시 2차: Playwright fallback
@@ -173,6 +175,7 @@ class CoupangMonitorWorker(BaseWorker):
                     date=date,
                     schedule_id=schedule_id,
                     service_account_id=service_account_id,
+                    notify_times=notify_times,
                 )
 
             if changes:
@@ -203,6 +206,7 @@ class CoupangMonitorWorker(BaseWorker):
         vendor_item_package_id: str,
         date: str,
         schedule_id: Optional[int],
+        notify_times: Optional[List] = None,
     ) -> Optional[List]:
         """
         HTTP 클라이언트(aiohttp + 프록시)로 상태 체크.
@@ -232,6 +236,7 @@ class CoupangMonitorWorker(BaseWorker):
             prefetched_items=items,
             prefetched_response_time_ms=response_time_ms,
             schedule_id=schedule_id,
+            notify_times=notify_times,
         )
 
     async def _check_via_playwright(
@@ -241,6 +246,7 @@ class CoupangMonitorWorker(BaseWorker):
         date: str,
         schedule_id: Optional[int],
         service_account_id: Optional[int],
+        notify_times: Optional[List] = None,
     ) -> Optional[List]:
         """
         Playwright 브라우저로 상태 체크 (HTTP 실패 시 fallback).
@@ -269,6 +275,7 @@ class CoupangMonitorWorker(BaseWorker):
             dates=[date],
             page=page,
             schedule_id=schedule_id,
+            notify_times=notify_times,
         )
 
     def _set_schedule_active(self, schedule_id: Optional[int], is_active: bool) -> None:
