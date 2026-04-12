@@ -11,7 +11,7 @@ import requests
 
 ADMIN_BASE = "http://localhost:8001"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "browser_workers.py"
+BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "services" / "browser_workers.py"
 
 
 def _assert_no_redis_connection_leak(
