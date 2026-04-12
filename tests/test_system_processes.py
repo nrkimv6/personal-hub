@@ -369,7 +369,7 @@ def test_http_system_mode_survives_restart_frontend_admin():
 
     assert before.status_code == 200
 
-    script = PROJECT_ROOT / "scripts" / "browser_workers.py"
+    script = PROJECT_ROOT / "scripts" / "services" / "browser_workers.py"
     result = subprocess.run(
         [sys.executable, str(script), "restart-frontend"],
         cwd=str(PROJECT_ROOT),

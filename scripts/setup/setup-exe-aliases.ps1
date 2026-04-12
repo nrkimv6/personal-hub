@@ -223,7 +223,7 @@ Write-Host "Done: created=$created, updated=$updated, skipped=$skipped" -Foregro
 Write-Host ""
 Write-Host "Usage in start scripts:" -ForegroundColor White
 Write-Host "  & `"$VenvScripts\monitorpage-api.exe`" app/main.py --port 8000" -ForegroundColor Gray
-Write-Host "  & `"$VenvScripts\monitorpage-worker.exe`" scripts/browser_workers.py" -ForegroundColor Gray
+Write-Host "  & `"$VenvScripts\monitorpage-worker.exe`" scripts/services/browser_workers.py" -ForegroundColor Gray
 Write-Host "  & `"$VenvScripts\monitorpage-claude.exe`" app/workers/claude_worker.py" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Run again after venv recreation or Python upgrade." -ForegroundColor Yellow

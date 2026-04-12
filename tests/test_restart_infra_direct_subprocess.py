@@ -148,7 +148,7 @@ class TestRestartInfraIntegrationDirect:
 
         # 실제 파일시스템에서 browser_workers.py 경로 확인
         scripts_dir = PROJECT_ROOT / "scripts"
-        browser_workers = scripts_dir / "browser_workers.py"
+        browser_workers = scripts_dir / "services" / "browser_workers.py"
         assert browser_workers.exists(), f"browser_workers.py가 없음: {browser_workers}"
 
         # 실제 config 사용, subprocess만 mock
@@ -167,7 +167,7 @@ class TestRestartInfraIntegrationDirect:
         from app.modules.dev_runner.services.executor_service import ExecutorService
 
         scripts_dir = PROJECT_ROOT / "scripts"
-        browser_workers = scripts_dir / "browser_workers.py"
+        browser_workers = scripts_dir / "services" / "browser_workers.py"
         assert browser_workers.exists(), f"browser_workers.py가 없음: {browser_workers}"
 
         svc = ExecutorService()
