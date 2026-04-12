@@ -243,6 +243,7 @@ class TestInvisiblePollutionIntegration:
             RUNNER_KEY_PREFIX as EVT_PREFIX,
             ACTIVE_RUNNERS_KEY as EVT_ACTIVE_KEY,
         )
+        from app.modules.dev_runner.services.event_payload import build_all_runners_status
         fake = fakeredis.FakeRedis(decode_responses=True)
 
         # invisible runner 25개 (score=최근, RECENT set 오염 시뮬레이션)
@@ -274,8 +275,8 @@ class TestInvisiblePollutionIntegration:
         remaining = fake.zrange(EVT_RECENT_KEY, 0, -1)
         assert len(remaining) == 3, f"cleanup 후 visible 3개만 남아야 함. 현재: {remaining}"
 
-        # _build_all_runners_status() 호출 (trigger=None 키 이슈 없이 가져와야 함)
-        runners = svc._build_all_runners_status()
+        # build_all_runners_status() 호출 (trigger=None 키 이슈 없이 가져와야 함)
+        runners = build_all_runners_status(svc._sync)
 
         # visible 3개 모두 포함되어야 함
         runner_ids_returned = {r["runner_id"] for r in runners if isinstance(r, dict)}

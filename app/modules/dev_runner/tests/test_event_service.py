@@ -16,7 +16,11 @@ from app.modules.dev_runner.services.event_service import (
     LOG_CHANNEL_PATTERN, MERGE_LOG_CHANNEL_PATTERN,
     _LOG_COMPLETED_SENTINEL, _MERGE_LOG_COMPLETED_SENTINEL,
     _build_log_line_payload, PLAN_FILE_ALL,
+    FILE_POLL_TIMEOUT, FILE_POLL_INTERVAL,
 )
+from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
+from app.modules.dev_runner.services.event_log_tailer import LogTailer
+from app.modules.dev_runner.config import config as _config
 from app.modules.dev_runner.services.event_routing import (
     classify_key, extract_runner_id_from_channel,
 )
@@ -53,6 +57,10 @@ def event_service(sync_redis, async_redis):
     svc = EventService.__new__(EventService)
     svc._sync = sync_redis
     svc._async = async_redis
+    _log_resolver = LogFileResolver(_config, sync_redis)
+    svc._log_tailer = LogTailer(sync_redis, _log_resolver)
+    svc._file_poll_timeout = FILE_POLL_TIMEOUT
+    svc._file_poll_interval_sec = FILE_POLL_INTERVAL
     return svc
 
 
@@ -1017,14 +1025,14 @@ class TestStreamEventsFileFallback:
             fh.write("boot\n")
 
         _ = await asyncio.wait_for(gen.__anext__(), timeout=2.0)  # fallback log 이벤트
-        assert runner_id in event_service._runner_tail_state
+        assert runner_id in event_service._log_tailer._runner_tail_state
 
         emit_completed = True
         completed_event = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
         await gen.aclose()
 
         assert completed_event.startswith("event: log_completed\n")
-        assert runner_id not in event_service._runner_tail_state
+        assert runner_id not in event_service._log_tailer._runner_tail_state
 
 
 # ─── MERGE 라인 이중 경로 검증 ───────────────────────────────────────────────
