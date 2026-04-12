@@ -1830,38 +1830,79 @@ class LLMService:
         page: int = 1,
         page_size: int = 50,
     ) -> dict:
-        """caller_id별 그룹화 요청 목록 — GROUP BY 집계 + 페이지 배치 상세조회.
+        """caller_id별로 그룹화된 요청 목록 조회.
 
-        summary는 only_without_success 필터 전 전체 caller 기준.
-        정렬은 DB ORDER BY에 위임(최신 requested_at 내림차순).
+        SQL GROUP BY 집계 + 페이지 caller에 대한 상세 배치 조회 방식.
+        전체 LLMRequest 로우를 메모리에 로드하지 않는다.
+
+        Args:
+            caller_type: 호출자 타입 필터
+            only_without_success: True면 성공한 적 없는 caller만 조회
+            page: 페이지 번호
+            page_size: 페이지 크기
+
+        Returns:
+            {
+                "items": [
+                    {
+                        "caller_type": str,
+                        "caller_id": str,
+                        "total_count": int,
+                        "completed_count": int,
+                        "failed_count": int,
+                        "pending_count": int,
+                        "has_success": bool,
+                        "last_status": str,
+                        "last_requested_at": str | None,  # ISO string
+                        "last_error": str | None,
+                        "request_ids": list[int],  # 실패한 요청 ID들
+                        "prompt": str | None,
+                    }
+                ],
+                "total": int,
+                "page": int,
+                "page_size": int,
+                "pages": int,
+                "summary": {
+                    "total_callers": int,
+                    "callers_with_success": int,
+                    "callers_without_success": int
+                }
+            }
         """
         from sqlalchemy import and_, or_
 
-        # 전체 집계: DB ORDER BY로 정렬 → summary 카운트 + 페이지 소스로 재사용
-        all_agg = (
-            self._build_caller_aggregate_query(caller_type)
-            .order_by(func.max(LLMRequest.requested_at).desc())
-            .all()
-        )
+        # 집계 쿼리 실행 — 로우 수 = distinct (caller_type, caller_id) 수
+        all_agg = self._build_caller_aggregate_query(caller_type).all()
 
+        # summary: only_without_success 필터 전(전체 caller 기준)
         total_callers = len(all_agg)
         callers_with_success = sum(1 for r in all_agg if r.has_success)
-        summary = {
-            "total_callers": total_callers,
-            "callers_with_success": callers_with_success,
-            "callers_without_success": total_callers - callers_with_success,
-        }
+        callers_without_success = total_callers - callers_with_success
 
-        # 필터 + 페이지 슬라이스 (all_agg는 이미 최신순 정렬됨)
+        # only_without_success 필터 및 최신순 정렬
         filtered = [r for r in all_agg if not r.has_success] if only_without_success else all_agg
+        filtered.sort(key=lambda r: r.last_at or datetime.min, reverse=True)
+
         total = len(filtered)
         pages = (total + page_size - 1) // page_size if total > 0 else 1
         paged = filtered[(page - 1) * page_size : page * page_size]
 
         if not paged:
-            return {"items": [], "total": total, "page": page, "page_size": page_size, "pages": pages, "summary": summary}
+            return {
+                "items": [],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "pages": pages,
+                "summary": {
+                    "total_callers": total_callers,
+                    "callers_with_success": callers_with_success,
+                    "callers_without_success": callers_without_success,
+                },
+            }
 
-        # 현재 페이지 caller 키셋으로 상세 배치 조회 (전체 row 미로드)
+        # 페이지 caller 키셋으로 상세 배치 조회 (최대 page_size건 OR 조건)
         caller_keys = [(r.caller_type, r.caller_id) for r in paged]
         conditions = [
             and_(LLMRequest.caller_type == ct, LLMRequest.caller_id == ci)
@@ -1870,41 +1911,70 @@ class LLMService:
         detail_rows = (
             self.db.query(LLMRequest)
             .filter(LLMRequest.deleted_at.is_(None), or_(*conditions))
-            .order_by(LLMRequest.caller_type, LLMRequest.caller_id, LLMRequest.requested_at.asc())
+            .order_by(
+                LLMRequest.caller_type,
+                LLMRequest.caller_id,
+                LLMRequest.requested_at.asc(),
+            )
             .all()
         )
 
-        # ASC 정렬 기준: 첫 row → prompt, 마지막 row → last_status/last_error
-        detail: dict = {}
+        # caller별 상세 매핑
+        # ASC 정렬이므로: 첫 row = prompt, 마지막 row = last_status/last_error
+        caller_detail: dict = {}
         for req in detail_rows:
             key = (req.caller_type, req.caller_id)
-            d = detail.setdefault(key, {"prompt": req.prompt, "last_status": req.status, "last_error": None, "request_ids": []})
-            d["last_status"] = req.status
+            if key not in caller_detail:
+                caller_detail[key] = {
+                    "prompt": req.prompt,  # ASC 첫 row의 prompt
+                    "last_status": req.status,
+                    "last_error": None,
+                    "request_ids": [],
+                }
+            d = caller_detail[key]
+            d["last_status"] = req.status  # ASC 마지막 row로 덮어쓰기
             if req.status == "failed":
                 d["request_ids"].append(req.id)
                 if req.error_message:
-                    d["last_error"] = req.error_message
+                    d["last_error"] = req.error_message  # ASC 마지막 failed row의 error
 
+        # 결과 조립
         items = []
         for r in paged:
             key = (r.caller_type, r.caller_id)
-            d = detail.get(key, {"prompt": None, "last_status": None, "last_error": None, "request_ids": []})
-            items.append({
-                "caller_type": r.caller_type,
-                "caller_id": r.caller_id,
-                "total_count": r.total_count,
-                "completed_count": r.completed_count,
-                "failed_count": r.failed_count,
-                "pending_count": r.pending_count,
-                "has_success": bool(r.has_success),
-                "last_status": d["last_status"],
-                "last_requested_at": r.last_at.isoformat() if r.last_at else None,
-                "last_error": d["last_error"],
-                "request_ids": d["request_ids"],
-                "prompt": d["prompt"],
-            })
+            detail = caller_detail.get(
+                key,
+                {"prompt": None, "last_status": None, "last_error": None, "request_ids": []},
+            )
+            items.append(
+                {
+                    "caller_type": r.caller_type,
+                    "caller_id": r.caller_id,
+                    "total_count": r.total_count,
+                    "completed_count": r.completed_count,
+                    "failed_count": r.failed_count,
+                    "pending_count": r.pending_count,
+                    "has_success": bool(r.has_success),
+                    "last_status": detail["last_status"],
+                    "last_requested_at": r.last_at.isoformat() if r.last_at else None,
+                    "last_error": detail["last_error"],
+                    "request_ids": detail["request_ids"],
+                    "prompt": detail["prompt"],
+                }
+            )
 
-        return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": pages, "summary": summary}
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+            "summary": {
+                "total_callers": total_callers,
+                "callers_with_success": callers_with_success,
+                "callers_without_success": callers_without_success,
+            },
+        }
 
     def retry_failed_callers_without_success(self, caller_type: str = None) -> dict:
         """성공한 적 없는 caller들의 실패 요청을 일괄 재시도.
