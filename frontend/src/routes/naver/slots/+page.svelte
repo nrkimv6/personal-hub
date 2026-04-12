@@ -2,6 +2,14 @@
 	import { slotApi } from '$lib/api';
 	import type { SlotCheckResponse, DateSlots, SlotInfo } from '$lib/types';
 	import { Search, ChevronRight, ChevronsDown, ChevronsUp } from 'lucide-svelte';
+	import {
+		getSlotBgColor,
+		getSlotTextColor,
+		getSlotBorderColor,
+		getProgress,
+		getProgressColor,
+		getDateStatusColor
+	} from '$lib/utils/slot-display';
 
 	let url = $state('');
 	let targetDate = $state('');
@@ -68,41 +76,7 @@
 		expandedDates = new Set();
 	}
 
-	function getSlotBgColor(slot: SlotInfo): string {
-		if (!slot.is_available) return 'bg-error-light';
-		if (slot.remaining <= 2) return 'bg-warning-light';
-		return 'bg-success-light';
-	}
 
-	function getSlotTextColor(slot: SlotInfo): string {
-		if (!slot.is_available) return 'text-error';
-		if (slot.remaining <= 2) return 'text-warning-foreground';
-		return 'text-success';
-	}
-
-	function getSlotBorderColor(slot: SlotInfo): string {
-		if (!slot.is_available) return 'border-red-200';
-		if (slot.remaining <= 2) return 'border-yellow-200';
-		return 'border-green-200';
-	}
-
-	function getProgressColor(booked: number, capacity: number): string {
-		const ratio = capacity > 0 ? booked / capacity : 1;
-		if (ratio >= 1) return 'bg-error';
-		if (ratio >= 0.8) return 'bg-warning';
-		return 'bg-success';
-	}
-
-	function getProgress(booked: number, capacity: number): number {
-		return capacity > 0 ? (booked / capacity) * 100 : 0;
-	}
-
-	function getDateStatusColor(dateSlots: DateSlots): string {
-		const { total_remaining, total_capacity } = dateSlots.summary;
-		if (total_remaining === 0) return 'text-error';
-		if (total_capacity > 0 && total_remaining / total_capacity < 0.2) return 'text-warning-foreground';
-		return 'text-success';
-	}
 </script>
 
 <div class="space-y-4">
