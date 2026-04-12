@@ -76,7 +76,7 @@ class ActivityWorker(CrawlWorkerBase):
         self._archive_batch_last_run = today
         logger.info("[ActivityWorker] archive_batch_move 일일 실행 시작")
         try:
-            from scripts.archive_batch_move import run_batch
+            from scripts.migrations.archive_batch_move import run_batch
             import asyncio
             loop = asyncio.get_event_loop()
             results = await loop.run_in_executor(None, run_batch)

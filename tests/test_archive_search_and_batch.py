@@ -143,7 +143,7 @@ class TestBatchScript:
 
     def test_batch_move_dry_run_no_changes(self):
         """R: dry-run 실행 시 실제 DB 변경 없음."""
-        from scripts.archive_batch_move import run_batch
+        from scripts.migrations.archive_batch_move import run_batch
         from sqlalchemy import text as sqla_text
 
         # dry-run 전 카운트
@@ -160,7 +160,7 @@ class TestBatchScript:
 
     def test_batch_move_excludes_fk_referenced(self):
         """E: FK 참조 행은 instagram_posts에서 이동 제외된다."""
-        from scripts.archive_batch_move import move_instagram_posts
+        from scripts.migrations.archive_batch_move import move_instagram_posts
         from sqlalchemy import text as sqla_text
 
         # events, uncategorized_posts, popups 테이블에서 참조 중인 id 조회
@@ -203,7 +203,7 @@ class TestBatchScript:
 
     def test_ensure_next_month_partition(self):
         """R: ensure_next_month_partitions 실행 시 에러 없음."""
-        from scripts.archive_batch_move import ensure_next_month_partitions
+        from scripts.migrations.archive_batch_move import ensure_next_month_partitions
         with engine.begin() as conn:
             # 이미 존재하면 IF NOT EXISTS로 스킵, 에러 없어야 함
             ensure_next_month_partitions(conn, dry_run=False)
@@ -242,7 +242,7 @@ class TestBatchMoveFullCycle:
 
     def test_full_cycle(self):
         """T3: 오래된 이벤트 INSERT → archive batch → archive에서 조회 확인."""
-        from scripts.archive_batch_move import move_monitoring_events, ensure_next_month_partitions
+        from scripts.migrations.archive_batch_move import move_monitoring_events, ensure_next_month_partitions
         from sqlalchemy import text as sqla_text
 
         # Dec 2025 파티션 사용 (기존 파티션 보장)

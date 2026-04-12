@@ -252,7 +252,7 @@ def test_guide_status_no_records(db):
 
 def test_backfill_guide_status_mode_right(tmp_path):
     """R(정상): extract_guide_summary 동작 확인"""
-    from scripts.archive_index_backfill import extract_guide_summary
+    from scripts.migrations.archive_index_backfill import extract_guide_summary
     guide_file = tmp_path / "test-guide.md"
     guide_file.write_text("# Test Guide\n\nThis is the first paragraph of the guide.\n", encoding="utf-8")
     result = extract_guide_summary(guide_file)
@@ -261,7 +261,7 @@ def test_backfill_guide_status_mode_right(tmp_path):
 
 def test_extract_guide_summary_right(tmp_path):
     """R(정상): H1 이후 첫 단락 80자 추출"""
-    from scripts.archive_index_backfill import extract_guide_summary
+    from scripts.migrations.archive_index_backfill import extract_guide_summary
     content = "# My Guide\n\n> blockquote skip\n\nActual paragraph content here.\n"
     guide_file = tmp_path / "guide.md"
     guide_file.write_text(content, encoding="utf-8")
@@ -271,7 +271,7 @@ def test_extract_guide_summary_right(tmp_path):
 
 def test_extract_guide_summary_boundary_empty(tmp_path):
     """B(경계): H1만 있고 본문 없는 파일 → 빈 문자열"""
-    from scripts.archive_index_backfill import extract_guide_summary
+    from scripts.migrations.archive_index_backfill import extract_guide_summary
     guide_file = tmp_path / "empty-guide.md"
     guide_file.write_text("# Only Heading\n\n> Only blockquote\n", encoding="utf-8")
     result = extract_guide_summary(guide_file)
@@ -280,7 +280,7 @@ def test_extract_guide_summary_boundary_empty(tmp_path):
 
 def test_backfill_auto_blocks_db_right(db, tmp_path):
     """R(정상): backfill_guide_blocks_db() → AUTO 블록에 PlanRecord.summary 포함"""
-    from scripts.archive_index_backfill import backfill_guide_blocks_db
+    from scripts.migrations.archive_index_backfill import backfill_guide_blocks_db
 
     guide_dir = tmp_path / "dev-guide"
     guide_dir.mkdir()
@@ -310,9 +310,9 @@ def test_backfill_auto_blocks_db_right(db, tmp_path):
     }
 
     with (
-        patch("scripts.archive_index_backfill._WIKI_TAGS_AVAILABLE", True),
-        patch("scripts.archive_index_backfill._extract_wiki_tags_shared", return_value=["watchdog"]),
-        patch("scripts.archive_index_backfill._load_wl_shared", return_value={"watchdog"}),
+        patch("scripts.migrations.archive_index_backfill._WIKI_TAGS_AVAILABLE", True),
+        patch("scripts.migrations.archive_index_backfill._extract_wiki_tags_shared", return_value=["watchdog"]),
+        patch("scripts.migrations.archive_index_backfill._load_wl_shared", return_value={"watchdog"}),
     ):
         result = backfill_guide_blocks_db(db, meta_yaml, guide_dir=guide_dir)
 
@@ -324,7 +324,7 @@ def test_backfill_auto_blocks_db_right(db, tmp_path):
 
 def test_backfill_auto_blocks_db_no_summary(db, tmp_path):
     """B(경계): summary=None 레코드 → one_liner fallback 사용"""
-    from scripts.archive_index_backfill import backfill_guide_blocks_db
+    from scripts.migrations.archive_index_backfill import backfill_guide_blocks_db
 
     # archive 파일 생성 (one_liner 추출용)
     archive_dir = tmp_path / "archive"
@@ -360,9 +360,9 @@ def test_backfill_auto_blocks_db_no_summary(db, tmp_path):
     }
 
     with (
-        patch("scripts.archive_index_backfill._WIKI_TAGS_AVAILABLE", True),
-        patch("scripts.archive_index_backfill._extract_wiki_tags_shared", return_value=["watchdog"]),
-        patch("scripts.archive_index_backfill._load_wl_shared", return_value={"watchdog"}),
+        patch("scripts.migrations.archive_index_backfill._WIKI_TAGS_AVAILABLE", True),
+        patch("scripts.migrations.archive_index_backfill._extract_wiki_tags_shared", return_value=["watchdog"]),
+        patch("scripts.migrations.archive_index_backfill._load_wl_shared", return_value={"watchdog"}),
     ):
         result = backfill_guide_blocks_db(db, meta_yaml, guide_dir=guide_dir)
 
@@ -395,7 +395,7 @@ def test_backfill_guide_status_real_files(db):
     """T3: 실제 docs/archive/ + docs/dev-guide/_meta.yaml + DB → guide-status INDEX.md 마커 블록 생성 검증"""
     import tempfile
     from pathlib import Path
-    from scripts.archive_index_backfill import backfill_guide_blocks_db, render_guide_status_index
+    from scripts.migrations.archive_index_backfill import backfill_guide_blocks_db, render_guide_status_index
     from app.modules.dev_runner.services.plan_record_service import PlanRecordService
 
     # 실제 meta.yaml 파싱
