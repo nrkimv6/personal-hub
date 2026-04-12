@@ -1140,3 +1140,183 @@ class TestPlanServicePublishChannel:
         assert msg is None, (
             f"bare 'plan-runner:logs' 채널에 메시지 publish됨 — 채널 불일치 버그 재발: {msg!r}"
         )
+
+
+# =============================================================================
+# FAILURE/HOLD 태그 Telegram 알림 TC
+# =============================================================================
+
+class TestTelegramNotificationOnFailureTag:
+    """FAILURE/HOLD tag Telegram notification TC"""
+
+    def test_failure_tag_triggers_telegram_R(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch as _patch
+        from app.modules.dev_runner.services.log_service import _send_failure_telegram, _telegram_debounce
+        _telegram_debounce.clear()
+        send_calls = []
+        async def run():
+            with _patch('app.shared.notification.notification_service.NotificationService') as mock_cls:
+                mock_inst = MagicMock()
+                mock_inst.send_telegram = AsyncMock(side_effect=lambda msg: send_calls.append(msg))
+                mock_cls.return_value = mock_inst
+                await _send_failure_telegram('runner#abc', 'FAILURE', 'rate_limit: AI 한도 소진')
+        asyncio.run(run())
+        assert len(send_calls) == 1
+
+    def test_hold_tag_triggers_telegram_R(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch as _patch
+        from app.modules.dev_runner.services.log_service import _send_failure_telegram, _telegram_debounce
+        _telegram_debounce.clear()
+        send_calls = []
+        async def run():
+            with _patch('app.shared.notification.notification_service.NotificationService') as mock_cls:
+                mock_inst = MagicMock()
+                mock_inst.send_telegram = AsyncMock(side_effect=lambda msg: send_calls.append(msg))
+                mock_cls.return_value = mock_inst
+                await _send_failure_telegram('runner#abc', 'HOLD', 'P0 예약 수정 후 진행')
+        asyncio.run(run())
+        assert len(send_calls) == 1
+
+    def test_failure_telegram_debounce_B(self):
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch as _patch
+        from app.modules.dev_runner.services.log_service import _send_failure_telegram, _telegram_debounce
+        _telegram_debounce.clear()
+        send_calls = []
+        async def run():
+            with _patch('app.shared.notification.notification_service.NotificationService') as mock_cls:
+                mock_inst = MagicMock()
+                mock_inst.send_telegram = AsyncMock(side_effect=lambda msg: send_calls.append(msg))
+                mock_cls.return_value = mock_inst
+                detail = 'rate_limit: AI 한도 소진'
+                await _send_failure_telegram('runner#abc', 'FAILURE', detail)
+                await _send_failure_telegram('runner#abc', 'FAILURE', detail)
+        asyncio.run(run())
+        assert len(send_calls) == 1, f'debounce 실패: {len(send_calls)}회 호출됨'
+
+
+class TestTelegramNotificationT3:
+    """T3: 실물 Redis pub/sub 통합 검증 — Telegram API (_send_failure_telegram)만 mock"""
+
+    def test_failure_tag_telegram_integration_T3(self):
+        """T3-01: 실물 Redis pub/sub에 [FAILURE] 태그 메시지 publish → _send_failure_telegram 호출 검증"""
+        import asyncio
+        import pytest
+        from unittest.mock import MagicMock, patch as _patch
+        import redis.asyncio as aioredis
+        from app.modules.dev_runner.services.log_service import LogService, LOG_CHANNEL_PREFIX
+        from app.modules.dev_runner.services.completion_reason import LOG_COMPLETED_SENTINEL
+
+        runner_id = "t3-test-failure-runner-x1"
+        channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+        send_failure_calls: list[tuple] = []
+
+        async def fake_send(rid: str, tag: str, detail: str) -> None:
+            send_failure_calls.append((rid, tag, detail))
+
+        async def run():
+            r = aioredis.Redis(host="localhost", port=6379, decode_responses=True)
+            try:
+                await r.ping()
+            except Exception:
+                return "skip"
+
+            svc = LogService.__new__(LogService)
+            svc.async_redis = r
+            svc.redis_client = MagicMock()
+            svc._find_current_log = MagicMock(return_value=None)
+
+            collected: list[str] = []
+
+            async def consume():
+                async for item in svc.stream_log_file(runner_id, since_line=0):
+                    collected.append(item)
+                    if "event: completed" in item:
+                        break
+
+            with _patch(
+                "app.modules.dev_runner.services.log_service._send_failure_telegram",
+                side_effect=fake_send,
+            ):
+                task = asyncio.create_task(consume())
+                await asyncio.sleep(0.3)  # 구독 대기
+                await r.publish(channel, "[FAILURE] rate_limit: AI 한도 소진")
+                await asyncio.sleep(0.5)  # 태그 감지 + create_task 실행 대기
+                await r.publish(channel, LOG_COMPLETED_SENTINEL)
+                try:
+                    await asyncio.wait_for(task, timeout=4.0)
+                except asyncio.TimeoutError:
+                    task.cancel()
+
+            await r.aclose()
+            return send_failure_calls
+
+        result = asyncio.run(run())
+        if result == "skip":
+            return  # Redis 미연결 — 로컬 환경 skip
+
+        assert len(result) >= 1, f"_send_failure_telegram 미호출 — pubsub 감지 실패 (calls={result})"
+        assert result[0][1] == "FAILURE", f"tag 불일치: {result[0][1]!r}"
+        assert "rate_limit" in result[0][2], f"detail 불일치: {result[0][2]!r}"
+
+    def test_hold_tag_telegram_integration_T3(self):
+        """T3-02: 실물 Redis pub/sub에 [HOLD] 태그 메시지 publish → _send_failure_telegram 호출 검증"""
+        import asyncio
+        from unittest.mock import MagicMock, patch as _patch
+        import redis.asyncio as aioredis
+        from app.modules.dev_runner.services.log_service import LogService, LOG_CHANNEL_PREFIX
+        from app.modules.dev_runner.services.completion_reason import LOG_COMPLETED_SENTINEL
+
+        runner_id = "t3-test-hold-runner-x1"
+        channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+        send_failure_calls: list[tuple] = []
+
+        async def fake_send(rid: str, tag: str, detail: str) -> None:
+            send_failure_calls.append((rid, tag, detail))
+
+        async def run():
+            r = aioredis.Redis(host="localhost", port=6379, decode_responses=True)
+            try:
+                await r.ping()
+            except Exception:
+                return "skip"
+
+            svc = LogService.__new__(LogService)
+            svc.async_redis = r
+            svc.redis_client = MagicMock()
+            svc._find_current_log = MagicMock(return_value=None)
+
+            collected: list[str] = []
+
+            async def consume():
+                async for item in svc.stream_log_file(runner_id, since_line=0):
+                    collected.append(item)
+                    if "event: completed" in item:
+                        break
+
+            with _patch(
+                "app.modules.dev_runner.services.log_service._send_failure_telegram",
+                side_effect=fake_send,
+            ):
+                task = asyncio.create_task(consume())
+                await asyncio.sleep(0.3)
+                await r.publish(channel, "[HOLD] P0 예약 완료 후 수동 진행 필요")
+                await asyncio.sleep(0.5)
+                await r.publish(channel, LOG_COMPLETED_SENTINEL)
+                try:
+                    await asyncio.wait_for(task, timeout=4.0)
+                except asyncio.TimeoutError:
+                    task.cancel()
+
+            await r.aclose()
+            return send_failure_calls
+
+        result = asyncio.run(run())
+        if result == "skip":
+            return  # Redis 미연결 — 로컬 환경 skip
+
+        assert len(result) >= 1, f"_send_failure_telegram 미호출 — pubsub 감지 실패 (calls={result})"
+        assert result[0][1] == "HOLD", f"tag 불일치: {result[0][1]!r}"
+        assert "P0" in result[0][2], f"detail 불일치: {result[0][2]!r}"

@@ -38,6 +38,45 @@ from app.modules.dev_runner.services.sse_helpers import (
 from app.modules.dev_runner.schemas import LogResponse, RunHistoryItem, RunHistoryResponse, FullLogResponse
 from app.modules.dev_runner.services.state import get_state
 from app.modules.dev_runner.services.visibility import is_visible_runner
+
+# FAILURE/HOLD 태그 감지 패턴
+_FAILURE_TAG_RE = re.compile(r'\[FAILURE\]\s*(.*)')
+_HOLD_TAG_RE = re.compile(r'\[HOLD\]\s*(.*)')
+
+# Telegram 중복 알림 방지 debounce (plan+reason → 마지막 전송 시각)
+_telegram_debounce: dict[str, float] = {}
+_TELEGRAM_DEBOUNCE_SECS = 60.0
+
+
+async def _send_failure_telegram(runner_id: str, tag: str, detail: str) -> None:
+    """FAILURE/HOLD 태그 감지 시 Telegram 알림 전송 (중복 방지 포함)."""
+    debounce_key = f"{runner_id}:{tag}:{detail[:40]}"
+    now = time.monotonic()
+    last_sent = _telegram_debounce.get(debounce_key, 0.0)
+    if now - last_sent < _TELEGRAM_DEBOUNCE_SECS:
+        return
+    _telegram_debounce[debounce_key] = now
+
+    try:
+        from app.shared.notification.notification_service import NotificationService
+        notif = NotificationService()
+        if tag == "FAILURE":
+            message = (
+                f"⚠️ <b>Plan Runner 실패</b>\n\n"
+                f"runner: {runner_id}\n"
+                f"사유: {detail}\n"
+                f"상태: 유지 (자동 변경 없음)"
+            )
+        else:  # HOLD
+            message = (
+                f"⏸️ <b>Plan 보류 중</b>\n\n"
+                f"runner: {runner_id}\n"
+                f"보류사유: {detail}\n"
+                f"상태: 보류 (수동 설정, skip)"
+            )
+        await notif.send_telegram(message)
+    except Exception as _e:
+        logger.warning(f"[TELEGRAM] {tag} 알림 전송 실패 (무시): {_e}")
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
 # Redis 설정
 REDIS_HOST = "localhost"
@@ -322,6 +361,14 @@ class LogService:
                             _, reason = parse_log_completed_payload(data)
                             yield f"event: completed\ndata: {reason}\n\n"
                             return
+                        # FAILURE/HOLD 태그 감지 → Telegram 알림 (비동기 fire-and-forget)
+                        _fm = _FAILURE_TAG_RE.search(data)
+                        if _fm:
+                            asyncio.create_task(_send_failure_telegram(runner_id, "FAILURE", _fm.group(1).strip()))
+                        else:
+                            _hm = _HOLD_TAG_RE.search(data)
+                            if _hm:
+                                asyncio.create_task(_send_failure_telegram(runner_id, "HOLD", _hm.group(1).strip()))
                         if multiline_frame_enabled:
                             yield _format_sse_data(_ANSI_ESCAPE_RE.sub("", data))
                         else:

@@ -276,3 +276,65 @@ async def test_t3_events_fallback_routes_by_runner_id(tmp_path):
     assert rid_b not in received_by_runner, (
         f"runner-B에 잘못 라우팅됨: {received_by_runner.get(rid_b)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# T4: FAILURE/HOLD 태그 SSE 스트림 포함 검증
+# ---------------------------------------------------------------------------
+
+@pytest.mark.e2e
+def test_e2e_failure_tag_appears_in_sse_stream(r):
+    """T4-01: Redis publish [FAILURE] 태그 → SSE /logs/stream data 라인에 포함됨 검증"""
+    runner_id = "t4-failure-tag-stream-test"
+    channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+    url = f"{ADMIN_API}/api/v1/dev-runner/logs/stream?runner_id={runner_id}"
+
+    published = []
+
+    def publish_after_delay():
+        time.sleep(1.5)
+        line = "[FAILURE] rate_limit: AI 한도 소진 — plan 상태 유지, 실패 이력 기록됨"
+        r.publish(channel, line)
+        published.append(line)
+
+    t = threading.Thread(target=publish_after_delay, daemon=True)
+    t.start()
+
+    collected = _collect_sse_data_lines(url, timeout=8.0)
+    t.join(timeout=5)
+
+    if not collected:
+        pytest.skip("Admin API emitted no SSE data — 서버 미실행 또는 연결 실패")
+
+    assert any("[FAILURE]" in c for c in collected), (
+        f"[FAILURE] 태그 라인이 SSE 스트림에 없음: collected={collected}, published={published}"
+    )
+
+
+@pytest.mark.e2e
+def test_e2e_hold_tag_appears_in_sse_stream(r):
+    """T4-02: Redis publish [HOLD] 태그 → SSE /logs/stream data 라인에 포함됨 검증"""
+    runner_id = "t4-hold-tag-stream-test"
+    channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+    url = f"{ADMIN_API}/api/v1/dev-runner/logs/stream?runner_id={runner_id}"
+
+    published = []
+
+    def publish_after_delay():
+        time.sleep(1.5)
+        line = "[HOLD] plan 보류 중: P0 예약 완료 후 수동 진행 — skip (plan.md)"
+        r.publish(channel, line)
+        published.append(line)
+
+    t = threading.Thread(target=publish_after_delay, daemon=True)
+    t.start()
+
+    collected = _collect_sse_data_lines(url, timeout=8.0)
+    t.join(timeout=5)
+
+    if not collected:
+        pytest.skip("Admin API emitted no SSE data — 서버 미실행 또는 연결 실패")
+
+    assert any("[HOLD]" in c for c in collected), (
+        f"[HOLD] 태그 라인이 SSE 스트림에 없음: collected={collected}, published={published}"
+    )
