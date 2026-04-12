@@ -38,6 +38,7 @@ class CoupangMonitorWorker(BaseWorker):
         self._monitor_service = None
         self._api_client = None
         self._http_client: Optional["CoupangHttpClient"] = None
+        self._popup_contexts: set = set()  # 팝업 차단 이벤트 등록된 context 추적
 
     def _get_loop_interval(self) -> float:
         return self.LOOP_INTERVAL
@@ -158,7 +159,6 @@ class CoupangMonitorWorker(BaseWorker):
                 vendor_item_package_id=vendor_item_package_id,
                 date=date,
                 schedule_id=schedule_id,
-                notify_times=ctx.get("times"),
             )
 
             # HTTP 실패 시 2차: Playwright fallback
@@ -252,24 +252,36 @@ class CoupangMonitorWorker(BaseWorker):
             logger.warning("[%s] BrowserManager 없음 — Playwright fallback 불가", self.name)
             return None
 
-        context = await self.browser.get_context(service_account_id)
-        pages = context.pages
-        if pages:
-            page = pages[0]
-        else:
-            page = await context.new_page()
+        if not self.browser.tab_pool_manager:
+            logger.warning("[%s] TabPoolManager 없음 — Playwright fallback 불가", self.name)
+            return None
 
-        expected_url = f"https://trip.coupang.com/tp/products/{product_id}"
-        if not page.url.startswith(expected_url):
-            await page.goto(expected_url)
+        page = None
+        try:
+            page = await self.browser.tab_pool_manager.get_tab(schedule_id, service_account_id)
 
-        return await self._monitor_service.check_and_notify(
-            product_id=product_id,
-            vendor_item_package_id=vendor_item_package_id,
-            dates=[date],
-            page=page,
-            schedule_id=schedule_id,
-        )
+            # 팝업 차단: 쿠팡 사이트 JS가 window.open()으로 여는 탭 자동 닫기
+            context = page.context
+            if context not in self._popup_contexts:
+                async def _on_popup(popup):
+                    await popup.close()
+                context.on("page", _on_popup)
+                self._popup_contexts.add(context)
+
+            expected_url = f"https://trip.coupang.com/tp/products/{product_id}"
+            if not page.url.startswith(expected_url):
+                await page.goto(expected_url)
+
+            return await self._monitor_service.check_and_notify(
+                product_id=product_id,
+                vendor_item_package_id=vendor_item_package_id,
+                dates=[date],
+                page=page,
+                schedule_id=schedule_id,
+            )
+        finally:
+            if page is not None:
+                await self.browser.tab_pool_manager.release_tab(page)
 
     def _set_schedule_active(self, schedule_id: Optional[int], is_active: bool) -> None:
         """스케줄 active 상태를 DB에 반영."""
