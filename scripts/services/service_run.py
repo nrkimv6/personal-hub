@@ -395,6 +395,39 @@ class ServiceRunner:
         write_pid_file(api_pid_file, os.getpid())
         self.log.info(f"API Server starting on port {self.api_port} (PID: {os.getpid()})...")
 
+        # API 포트 헬스 모니터 — server.run()이 반환하지 않으면서 포트가 죽는 상태 방어
+        import threading
+        def _port_health_monitor():
+            """API 포트가 죽으면 server.should_exit = True 설정하여 프로세스 종료 유도."""
+            INITIAL_WAIT = 60  # 서버 시작 대기
+            CHECK_INTERVAL = 15
+            FAIL_THRESHOLD = 4  # 4회 연속 실패(60초) 시 종료
+            time.sleep(INITIAL_WAIT)
+            consecutive_failures = 0
+            while not server.should_exit:
+                if is_port_listening(self.api_port):
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    self.log.warning(
+                        f"[HealthMonitor] API port {self.api_port} not listening "
+                        f"({consecutive_failures}/{FAIL_THRESHOLD})"
+                    )
+                    if consecutive_failures >= FAIL_THRESHOLD:
+                        self.log.error(
+                            f"[HealthMonitor] API port dead for {FAIL_THRESHOLD * CHECK_INTERVAL}s "
+                            f"but server.run() still blocking. Triggering shutdown for NSSM restart."
+                        )
+                        server.should_exit = True
+                        # safety: 30초 후에도 종료 안 되면 강제 종료
+                        time.sleep(35)
+                        self.log.error("[HealthMonitor] Forced exit after 35s timeout")
+                        os._exit(1)
+                time.sleep(CHECK_INTERVAL)
+
+        monitor_thread = threading.Thread(target=_port_health_monitor, name="api-port-monitor", daemon=True)
+        monitor_thread.start()
+
         # 블로킹 — uvicorn 이벤트 루프 실행
         server.run()
 

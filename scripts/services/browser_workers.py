@@ -323,6 +323,39 @@ class BrowserWorkerManager:
         except Exception:
             return False
 
+    # ── NSSM 서비스 재시작 (관리자 승격) ────────────────────────
+    def _nssm_restart_elevated(self, service_name: str) -> bool:
+        """관리자 권한으로 NSSM 서비스를 재시작한다. UAC 프롬프트가 표시될 수 있다."""
+        nssm_path = shutil.which("nssm")
+        if not nssm_path:
+            cprint("nssm not found in PATH", RED)
+            return False
+
+        cprint(f"Restarting NSSM service '{service_name}' (admin elevation)...", YELLOW)
+        try:
+            # PowerShell Start-Process -Verb RunAs로 관리자 승격
+            ps_cmd = (
+                f"Start-Process -FilePath '{nssm_path}' "
+                f"-ArgumentList 'restart','{service_name}' "
+                f"-Verb RunAs -Wait -WindowStyle Hidden"
+            )
+            result = subprocess.run(
+                ["powershell.exe", "-Command", ps_cmd],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                cprint(f"NSSM restart issued for {service_name}", GREEN)
+                return True
+            else:
+                cprint(f"NSSM restart failed (rc={result.returncode}): {result.stderr.strip()}", RED)
+                return False
+        except subprocess.TimeoutExpired:
+            cprint("NSSM restart timed out (UAC dialog may have been dismissed)", RED)
+            return False
+        except Exception as e:
+            cprint(f"NSSM restart failed: {e}", RED)
+            return False
+
     # ── restart-api ──────────────────────────────────────────────
     def restart_api(self):
         print(f"\n{YELLOW}{'=' * 40}")
@@ -349,35 +382,63 @@ class BrowserWorkerManager:
         url = f"http://localhost:{self.api_port}/api/v1/system/self-restart?delay=2&reason=browser_workers_py"
 
         # 1순위: Self-Restart API
+        killed = False
         try:
             req = urllib.request.Request(url, method="POST")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 if resp.status == 200:
                     cprint("Self-restart API called (graceful shutdown)", GREEN)
+                    killed = True
         except Exception as e:
             cprint(f"Self-restart API unavailable: {e}", YELLOW)
 
-            # 2순위: force kill → NSSM 자동 재시작
+            # 2순위: force kill (포트 기반) → NSSM 자동 재시작
             pids = find_pids_on_port(self.api_port)
             if pids:
                 for pid in pids:
                     cprint(f"Killing API process (PID: {pid})...")
                     kill_pid(pid)
                 cprint("API process stopped. NSSM will auto-restart.", YELLOW)
+                killed = True
             else:
                 cprint(f"No process found on port {self.api_port}", YELLOW)
 
-        # 헬스체크
-        cprint("Waiting for API to restart...")
-        time.sleep(5)
-        try:
-            with urllib.request.urlopen(
-                f"http://localhost:{self.api_port}/api/v1/system/status", timeout=5
-            ) as resp:
-                if resp.status == 200:
-                    cprint("API server is healthy", GREEN)
-        except Exception:
-            cprint("API not responding yet (may still be starting)", YELLOW)
+                # 3순위: NSSM 서비스 재시작 (관리자 승격)
+                # API가 죽었지만 서비스 러너(Session 0)가 좀비로 남아있으면
+                # NSSM이 재시작하지 않음. 관리자 권한으로 nssm restart 실행.
+                service_name = "MonitorPage-Admin" if self.pid_suffix == "_admin" else "MonitorPage-Public"
+                api_pid_file = self.pid_dir / f"api{self.pid_suffix}.pid"
+                stale_pid = read_pid_file(api_pid_file)
+                if stale_pid and is_process_alive(stale_pid):
+                    cprint(f"Service runner alive (PID: {stale_pid}) but API port dead", YELLOW)
+                    killed = self._nssm_restart_elevated(service_name)
+                elif stale_pid:
+                    cprint(f"Stale PID file (PID: {stale_pid}, already dead)", YELLOW)
+                    remove_pid_file(api_pid_file)
+                    # 서비스 러너도 죽어있으면 NSSM이 이미 재시작했을 수 있음
+                    # 그래도 재시작 시도
+                    killed = self._nssm_restart_elevated(service_name)
+
+        # 헬스체크 — NSSM 재시작은 AppThrottle(10초) + import(~30초) 소요
+        if killed:
+            cprint("Waiting for NSSM to restart API (up to 60s)...")
+            healthy = False
+            for i in range(12):
+                time.sleep(5)
+                try:
+                    with urllib.request.urlopen(
+                        f"http://localhost:{self.api_port}/api/v1/system/status", timeout=3
+                    ) as resp:
+                        if resp.status == 200:
+                            cprint(f"API server is healthy (took ~{(i + 1) * 5}s)", GREEN)
+                            healthy = True
+                            break
+                except Exception:
+                    pass
+            if not healthy:
+                cprint("API not responding after 60s - check NSSM service status", RED)
+        else:
+            cprint("No API process found to restart. Check NSSM service 'MonitorPage-Admin'.", RED)
 
     # ── restart-frontend ─────────────────────────────────────────
     def _frontend_mode(self, public: bool) -> tuple[str, int, int, Path, Path]:
