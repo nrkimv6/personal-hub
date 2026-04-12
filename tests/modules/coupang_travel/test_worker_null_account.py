@@ -1,8 +1,7 @@
 """
 워커 null account 처리 검증 (T1 — RIGHT-BICEP)
 
-service_account_id=None 전달 시 browser.get_context(None) 호출 확인.
-기존 test_coupang_e2e.py L318-335 패턴 참조.
+service_account_id=None 전달 시 tab_pool_manager.get_tab(schedule_id, None) 호출 확인.
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,22 +12,23 @@ def mock_worker():
     from app.worker.coupang_monitor_worker import CoupangMonitorWorker
 
     mock_browser = MagicMock()
-    mock_context = MagicMock()
     mock_page = MagicMock()
     mock_page.url = "https://trip.coupang.com/tp/products/99999"
-    mock_context.pages = [mock_page]
-    mock_browser.get_context = AsyncMock(return_value=mock_context)
+    mock_page.context = MagicMock()
+    mock_browser.tab_pool_manager = MagicMock()
+    mock_browser.tab_pool_manager.get_tab = AsyncMock(return_value=mock_page)
+    mock_browser.tab_pool_manager.release_tab = AsyncMock()
 
     worker = CoupangMonitorWorker(browser_manager=mock_browser)
     worker._monitor_service = AsyncMock()
     worker._monitor_service.check_and_notify = AsyncMock(return_value=[])
-    return worker, mock_browser, mock_context, mock_page
+    return worker, mock_browser, mock_page
 
 
 @pytest.mark.asyncio
 async def test_check_schedule_null_service_account_uses_default_context(mock_worker):
-    """R(Right): service_account_id=None 전달 시 browser.get_context(None) 호출됨."""
-    worker, mock_browser, _, _ = mock_worker
+    """R(Right): service_account_id=None 전달 시 tab_pool_manager.get_tab(101, None) 호출됨."""
+    worker, mock_browser, _ = mock_worker
 
     ctx = {
         "id": 101,
@@ -49,14 +49,13 @@ async def test_check_schedule_null_service_account_uses_default_context(mock_wor
     ):
         await worker._check_schedule(ctx)
 
-    # get_context가 None으로 호출되었는지 확인
-    mock_browser.get_context.assert_called_once_with(None)
+    mock_browser.tab_pool_manager.get_tab.assert_called_once_with(101, None)
 
 
 @pytest.mark.asyncio
 async def test_check_schedule_with_service_account_uses_account_context(mock_worker):
-    """R(Right): service_account_id=42 전달 시 browser.get_context(42) 호출됨."""
-    worker, mock_browser, _, _ = mock_worker
+    """R(Right): service_account_id=42 전달 시 tab_pool_manager.get_tab(102, 42) 호출됨."""
+    worker, mock_browser, _ = mock_worker
 
     ctx = {
         "id": 102,
@@ -77,5 +76,4 @@ async def test_check_schedule_with_service_account_uses_account_context(mock_wor
     ):
         await worker._check_schedule(ctx)
 
-    # get_context가 42로 호출되었는지 확인
-    mock_browser.get_context.assert_called_once_with(42)
+    mock_browser.tab_pool_manager.get_tab.assert_called_once_with(102, 42)

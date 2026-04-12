@@ -269,16 +269,16 @@ async def test_worker_http_first_playwright_fallback():
     mock_db.query.return_value.filter.return_value.first.return_value = mock_biz_item
     mock_db.close = MagicMock()
 
-    # Playwright browser mock
+    # Playwright browser mock (tab_pool_manager 사용)
     mock_page = AsyncMock()
     mock_page.url = "https://trip.coupang.com/tp/products/10000001"
     mock_page.goto = AsyncMock()
+    mock_page.context = MagicMock()
 
-    mock_context = AsyncMock()
-    mock_context.pages = [mock_page]
-
-    mock_browser = AsyncMock()
-    mock_browser.get_context = AsyncMock(return_value=mock_context)
+    mock_browser = MagicMock()
+    mock_browser.tab_pool_manager = MagicMock()
+    mock_browser.tab_pool_manager.get_tab = AsyncMock(return_value=mock_page)
+    mock_browser.tab_pool_manager.release_tab = AsyncMock()
 
     worker = CoupangMonitorWorker(browser_manager=mock_browser)
     worker._monitor_service = mock_monitor_service

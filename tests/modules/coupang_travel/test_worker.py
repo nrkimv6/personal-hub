@@ -97,16 +97,16 @@ async def test_monitor_service_uses_stable_vendor_key():
 
 @pytest.mark.asyncio
 async def test_worker_uses_service_account_context():
-    """R: 스케줄의 service_account_id로 browser.get_context 호출 확인"""
+    """R: 스케줄의 service_account_id로 tab_pool_manager.get_tab 호출 확인"""
     from app.worker.coupang_monitor_worker import CoupangMonitorWorker
-    from app.modules.coupang_travel.services.api_client import VendorItem
 
     mock_browser = AsyncMock()
-    mock_context = AsyncMock()
     mock_page = AsyncMock()
     mock_page.url = "https://trip.coupang.com/tp/products/123"
-    mock_context.pages = [mock_page]
-    mock_browser.get_context = AsyncMock(return_value=mock_context)
+    mock_page.context = MagicMock()
+    mock_browser.tab_pool_manager = MagicMock()
+    mock_browser.tab_pool_manager.get_tab = AsyncMock(return_value=mock_page)
+    mock_browser.tab_pool_manager.release_tab = AsyncMock()
 
     worker = CoupangMonitorWorker(browser_manager=mock_browser)
     worker._monitor_service = AsyncMock()
@@ -131,7 +131,7 @@ async def test_worker_uses_service_account_context():
     ):
         await worker._check_schedule(ctx)
 
-    mock_browser.get_context.assert_called_once_with(99)
+    mock_browser.tab_pool_manager.get_tab.assert_called_once_with(1, 99)
 
 
 @pytest.mark.asyncio
@@ -139,11 +139,12 @@ async def test_worker_passes_schedule_id_to_check_and_notify():
     from app.worker.coupang_monitor_worker import CoupangMonitorWorker
 
     mock_browser = AsyncMock()
-    mock_context = AsyncMock()
     mock_page = AsyncMock()
     mock_page.url = "https://trip.coupang.com/tp/products/123"
-    mock_context.pages = [mock_page]
-    mock_browser.get_context = AsyncMock(return_value=mock_context)
+    mock_page.context = MagicMock()
+    mock_browser.tab_pool_manager = MagicMock()
+    mock_browser.tab_pool_manager.get_tab = AsyncMock(return_value=mock_page)
+    mock_browser.tab_pool_manager.release_tab = AsyncMock()
 
     worker = CoupangMonitorWorker(browser_manager=mock_browser)
     worker._monitor_service = AsyncMock()
@@ -168,6 +169,7 @@ async def test_worker_passes_schedule_id_to_check_and_notify():
     ):
         await worker._check_schedule(ctx)
 
+    mock_browser.tab_pool_manager.get_tab.assert_called_once_with(7, 77)
     kwargs = worker._monitor_service.check_and_notify.call_args.kwargs
     assert kwargs["schedule_id"] == 7
 
@@ -177,11 +179,12 @@ async def test_worker_sets_active_true_false_around_check():
     from app.worker.coupang_monitor_worker import CoupangMonitorWorker
 
     mock_browser = AsyncMock()
-    mock_context = AsyncMock()
     mock_page = AsyncMock()
     mock_page.url = "https://trip.coupang.com/tp/products/123"
-    mock_context.pages = [mock_page]
-    mock_browser.get_context = AsyncMock(return_value=mock_context)
+    mock_page.context = MagicMock()
+    mock_browser.tab_pool_manager = MagicMock()
+    mock_browser.tab_pool_manager.get_tab = AsyncMock(return_value=mock_page)
+    mock_browser.tab_pool_manager.release_tab = AsyncMock()
 
     worker = CoupangMonitorWorker(browser_manager=mock_browser)
     worker._monitor_service = AsyncMock()
@@ -211,3 +214,4 @@ async def test_worker_sets_active_true_false_around_check():
     second_call = mock_schedule_service.set_active.call_args_list[1]
     assert first_call.args[1] == 8 and first_call.args[2] is True
     assert second_call.args[1] == 8 and second_call.args[2] is False
+    mock_browser.tab_pool_manager.release_tab.assert_called_once_with(mock_page)

@@ -305,11 +305,12 @@ async def test_coupang_worker_updates_active_flag_during_run():
     from app.worker.coupang_monitor_worker import CoupangMonitorWorker
 
     mock_browser = AsyncMock()
-    mock_context = AsyncMock()
     mock_page = AsyncMock()
     mock_page.url = "https://trip.coupang.com/tp/products/99999"
-    mock_context.pages = [mock_page]
-    mock_browser.get_context = AsyncMock(return_value=mock_context)
+    mock_page.context = MagicMock()
+    mock_browser.tab_pool_manager = MagicMock()
+    mock_browser.tab_pool_manager.get_tab = AsyncMock(return_value=mock_page)
+    mock_browser.tab_pool_manager.release_tab = AsyncMock()
 
     worker = CoupangMonitorWorker(browser_manager=mock_browser)
     worker._monitor_service = AsyncMock()
