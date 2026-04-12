@@ -57,16 +57,16 @@ class TestDirectMergePlanFileInSSE:
 
     def test_build_status_payload_dm_runner_keeps_plan_file_none(self):
         """T4-21: dm-* runner에서도 plan_file 미설정이면 None 유지"""
-        from app.modules.dev_runner.services.event_service import EventService
+        import fakeredis
+        from app.modules.dev_runner.services.event_payload import build_status_payload
+        from app.modules.dev_runner.services.event_routing import RUNNER_KEY_PREFIX
 
-        svc = EventService.__new__(EventService)
-        svc._sync = MagicMock()
-        svc._async = MagicMock()
+        sync_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "dm-http-test"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        # plan_file 미설정
 
-        # mget: [status, pid, current_cycle, start_time, plan_file, engine, branch]
-        svc._sync.mget.return_value = ["running", None, None, "2026-03-05T00:00:00", None, None, "plan/test"]
-
-        payload = svc._build_status_payload("dm-http-test")
+        payload = build_status_payload(sync_redis, runner_id)
         assert payload is not None
         assert payload["plan_file"] is None, \
             f"dm-* runner의 plan_file은 None이어야 함: {payload['plan_file']}"
@@ -101,16 +101,17 @@ class TestNormalRunnerPlanFileAllRegression:
 
     def test_normal_runner_plan_file_none_regression(self):
         """T4-23: 일반 runner에서 plan_file=None, branch=None → plan_file=None"""
-        from app.modules.dev_runner.services.event_service import EventService
+        import fakeredis
+        from app.modules.dev_runner.services.event_payload import build_status_payload
+        from app.modules.dev_runner.services.event_routing import RUNNER_KEY_PREFIX
 
-        svc = EventService.__new__(EventService)
-        svc._sync = MagicMock()
-        svc._async = MagicMock()
+        sync_redis = fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "normal-runner-01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", "1234")
+        # plan_file 미설정
 
-        # 일반 runner: plan_file=None, branch=None
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-05T00:00:00", None, "claude", None]
-
-        payload = svc._build_status_payload("normal-runner-01")
+        payload = build_status_payload(sync_redis, runner_id)
         assert payload is not None
         assert payload["plan_file"] is None, \
             f"일반 runner의 plan_file은 None이어야 함: {payload['plan_file']}"
