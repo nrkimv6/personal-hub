@@ -18,13 +18,16 @@ from app.shared.process.registry import ProcessRegistry
 if TYPE_CHECKING:
     pass
 
-# kill_pid 동적 임포트 (scripts/service_utils.py)
+# kill_pid 동적 임포트 (scripts/services/service_utils.py)
 def kill_pid(pid: int, timeout: int = 5) -> bool:
     """scripts.service_utils.kill_pid 위임 래퍼."""
     try:
         scripts_dir = str(Path(__file__).resolve().parents[3] / "scripts")
+        services_dir = str(Path(__file__).resolve().parents[3] / "scripts" / "services")
         if scripts_dir not in sys.path:
             sys.path.insert(0, scripts_dir)
+        if services_dir not in sys.path:
+            sys.path.insert(0, services_dir)
         from service_utils import kill_pid as _kp  # type: ignore
         return _kp(pid, timeout)
     except Exception as exc:

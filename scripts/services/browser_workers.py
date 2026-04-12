@@ -663,7 +663,7 @@ class BrowserWorkerManager:
                 print(f"    {YELLOW}[!] {pf} (PID: {pid}){RESET}")
 
         if has_legacy:
-            print(f"    {GRAY}Run 'python scripts/browser_workers.py restart' to clean up{RESET}")
+            print(f"    {GRAY}Run 'python scripts/services/browser_workers.py restart' to clean up{RESET}")
         print()
 
     # ── redis helpers ────────────────────────────────────────────
@@ -935,7 +935,7 @@ def main():
     if "--restart-frontend" in sys.argv[1:]:
         print(
             "error: '--restart-frontend' is not a valid option. "
-            "Use positional action: python scripts/browser_workers.py restart-frontend [--public]",
+            "Use positional action: python scripts/services/browser_workers.py restart-frontend [--public]",
             file=sys.stderr,
         )
         raise SystemExit(2)

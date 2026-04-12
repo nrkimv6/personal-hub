@@ -18,10 +18,10 @@ def _read_main_py() -> str:
 
 
 def _read_browser_workers_py() -> str:
-    """scripts/browser_workers.py 소스 반환."""
+    """scripts/services/browser_workers.py 소스 반환."""
     import os
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(base, "scripts", "browser_workers.py")
+    path = os.path.join(base, "scripts", "services", "browser_workers.py")
     with open(path, encoding="utf-8") as f:
         return f.read()
 

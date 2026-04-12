@@ -18,7 +18,7 @@ import pytest
 @pytest.fixture
 def browser_workers_module():
     """browser_workers.py를 임포트하여 모듈 반환."""
-    scripts_dir = Path(__file__).parent.parent / "scripts"
+    scripts_dir = Path(__file__).parent.parent / "scripts" / "services"
     sys.path.insert(0, str(scripts_dir))
     try:
         import browser_workers
@@ -118,7 +118,7 @@ class TestIntegrationRestartListener:
     def test_integration_path_resolves_to_existing_file(self):
         """T3: PROJECT_ROOT / 'scripts' / 'browser_workers.py' 경로가 실제 존재하는 파일인지 검증."""
         from app.core.config import PROJECT_ROOT
-        browser_workers_path = PROJECT_ROOT / "scripts" / "browser_workers.py"
+        browser_workers_path = PROJECT_ROOT / "scripts" / "services" / "browser_workers.py"
         assert browser_workers_path.exists(), f"browser_workers.py not found at {browser_workers_path}"
         assert browser_workers_path.is_file(), f"{browser_workers_path} is not a file"
 
@@ -127,12 +127,12 @@ class TestIntegrationRestartListener:
         from app.core.config import PROJECT_ROOT
         scripts_dir = PROJECT_ROOT / "scripts"
         assert scripts_dir.exists(), f"scripts dir not found at {scripts_dir}"
-        assert (scripts_dir / "browser_workers.py").exists()
+        assert (scripts_dir / "services" / "browser_workers.py").exists()
 
     def test_integration_executor_service_project_root_import(self):
         """T3: executor_service.py가 PROJECT_ROOT를 올바르게 import하여 browser_workers.py 경로를 해석하는지 검증."""
         from app.core.config import PROJECT_ROOT
-        browser_workers = PROJECT_ROOT / "scripts" / "browser_workers.py"
+        browser_workers = PROJECT_ROOT / "scripts" / "services" / "browser_workers.py"
         assert browser_workers.exists(), f"browser_workers.py not found at {browser_workers}"
 
     def test_integration_restart_listener_worker_roles(self, browser_workers_module):
