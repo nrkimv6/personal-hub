@@ -17,6 +17,12 @@ from typing import List, Optional, TYPE_CHECKING
 from urllib.parse import urlparse
 
 import aiohttp
+try:
+    from aiohttp_socks import ProxyConnector as _SocksProxyConnector
+    _SOCKS_AVAILABLE = True
+except ImportError:
+    _SocksProxyConnector = None
+    _SOCKS_AVAILABLE = False
 
 from app.modules.coupang_travel.services.api_client import VendorItem
 
@@ -35,7 +41,7 @@ _PROXY_TIMEOUT = 5.0       # 프록시 경유 시 (프록시 자체가 느릴 �
 _DIRECT_TIMEOUT = 30.0     # 직접 연결 시
 
 # 최대 재시도
-_MAX_RETRIES = 10
+_MAX_RETRIES = 5
 
 
 class CoupangHttpClient:
@@ -62,20 +68,35 @@ class CoupangHttpClient:
         # 쿠키가 이미 획득됐는지 추적 (product_id별)
         self._cookie_initialized: set = set()
 
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        """세션이 없거나 닫혔으면 새로 생성."""
+    @staticmethod
+    def _is_socks_proxy(proxy_url: Optional[str]) -> bool:
+        """SOCKS4/SOCKS5 프록시 여부 확인."""
+        if not proxy_url:
+            return False
+        return proxy_url.startswith(("socks4://", "socks5://", "socks4a://"))
+
+    async def _make_session(self, proxy_url: Optional[str] = None) -> aiohttp.ClientSession:
+        """
+        프록시 타입에 맞는 세션 반환.
+        - SOCKS 프록시: ProxyConnector 포함 임시 세션 (매 호출 신규 생성)
+        - HTTP 프록시 / 직접 연결: 재사용 세션
+        """
+        headers = {
+            "user-agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        }
+        if self._is_socks_proxy(proxy_url):
+            if not _SOCKS_AVAILABLE:
+                raise RuntimeError("aiohttp-socks가 설치되지 않아 SOCKS 프록시를 사용할 수 없습니다.")
+            connector = _SocksProxyConnector.from_url(proxy_url, ssl=False)
+            return aiohttp.ClientSession(connector=connector, headers=headers)
+        # HTTP 프록시 또는 직접 연결: 재사용 세션
         if self._session is None or self._session.closed:
             connector = aiohttp.TCPConnector(ssl=False)
-            self._session = aiohttp.ClientSession(
-                connector=connector,
-                headers={
-                    "user-agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/120.0.0.0 Safari/537.36"
-                    ),
-                },
-            )
+            self._session = aiohttp.ClientSession(connector=connector, headers=headers)
         return self._session
 
     async def _ensure_cookies(self, product_id: str, proxy_url: Optional[str] = None) -> None:
@@ -89,12 +110,17 @@ class CoupangHttpClient:
         if product_id in self._cookie_initialized:
             return
 
-        session = await self._ensure_session()
         url = f"{_BASE_URL}{_PRODUCT_PAGE_PATH.format(product_id=product_id)}"
         timeout = aiohttp.ClientTimeout(total=_PROXY_TIMEOUT if proxy_url else _DIRECT_TIMEOUT)
+        is_socks = self._is_socks_proxy(proxy_url)
+        session = await self._make_session(proxy_url)
+        # SOCKS 세션은 close가 필요하므로 컨텍스트 관리
+        close_session = is_socks
 
         try:
-            async with session.get(url, proxy=proxy_url, timeout=timeout, allow_redirects=True) as resp:
+            # SOCKS: proxy_url은 이미 커넥터에 포함되므로 proxy 파라미터 불필요
+            request_proxy = None if is_socks else proxy_url
+            async with session.get(url, proxy=request_proxy, timeout=timeout, allow_redirects=True) as resp:
                 logger.debug(
                     "[CoupangHttpClient] 쿠키 획득 GET %s → HTTP %d (proxy=%s)",
                     url, resp.status, proxy_url,
@@ -104,6 +130,9 @@ class CoupangHttpClient:
         except Exception as e:
             logger.warning("[CoupangHttpClient] 쿠키 획득 실패: %s", e)
             # 실패해도 진행 — 쿠키 없이도 vendor-items API가 응답하는지 시도
+        finally:
+            if close_session and not session.closed:
+                await session.close()
 
     async def fetch_vendor_items(
         self,
@@ -124,7 +153,6 @@ class CoupangHttpClient:
         Returns:
             VendorItem 리스트, 전체 실패 시 None
         """
-        session = await self._ensure_session()
         url = f"{_BASE_URL}{_VENDOR_ITEMS_PATH.format(product_id=product_id)}"
         referer = f"{_BASE_URL}{_PRODUCT_PAGE_PATH.format(product_id=product_id)}"
 
@@ -151,6 +179,9 @@ class CoupangHttpClient:
         tried_proxies: set = set()
         last_error: Optional[str] = None
 
+        # 쿠키 획득 1회 (직접 연결) — 루프 밖에서 미리 수행하여 프록시당 1 POST만 실행
+        await self._ensure_cookies(product_id, proxy_url=None)
+
         for attempt in range(_MAX_RETRIES + 1):
             proxy_url: Optional[str] = None
             if self._proxy_manager:
@@ -165,20 +196,23 @@ class CoupangHttpClient:
                         attempt, _MAX_RETRIES, proxy_url,
                     )
 
-            # 쿠키 획득 (최초 1회)
-            await self._ensure_cookies(product_id, proxy_url=proxy_url)
-
             timeout = aiohttp.ClientTimeout(
                 total=_PROXY_TIMEOUT if proxy_url else _DIRECT_TIMEOUT
             )
             request_start = time.time()
+            is_socks = self._is_socks_proxy(proxy_url)
+            request_session = await self._make_session(proxy_url)
+            # SOCKS 세션은 요청 후 닫아야 함
+            close_after = is_socks
 
             try:
-                async with session.post(
+                # SOCKS: proxy_url은 커넥터에 포함됨, HTTP: proxy 파라미터로 전달
+                request_proxy = None if is_socks else proxy_url
+                async with request_session.post(
                     url,
                     json=body,
                     headers=headers,
-                    proxy=proxy_url,
+                    proxy=request_proxy,
                     timeout=timeout,
                 ) as resp:
                     response_time = time.time() - request_start
@@ -259,6 +293,43 @@ class CoupangHttpClient:
                     "[CoupangHttpClient] 요청 실패 (attempt=%d, proxy=%s): %s",
                     attempt, proxy_url, e,
                 )
+
+            finally:
+                if close_after and not request_session.closed:
+                    await request_session.close()
+
+        # 프록시 전체 실패 후 직접 연결 1회 시도
+        if self._proxy_manager:
+            logger.warning("[CoupangHttpClient] 모든 프록시 실패 — 직접 연결(direct) 시도")
+            await self._ensure_cookies(product_id, proxy_url=None)
+            timeout = aiohttp.ClientTimeout(total=_DIRECT_TIMEOUT)
+            request_session = await self._make_session(proxy_url=None)
+            request_start = time.time()
+            try:
+                async with request_session.post(
+                    url, json=body, headers=headers, proxy=None, timeout=timeout
+                ) as resp:
+                    response_time = time.time() - request_start
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        items = _parse_vendor_items(data)
+                        if usage_request_id:
+                            self._usage_logger.log_attempt(
+                                request_id=usage_request_id,
+                                proxy_url="direct",
+                                success=True,
+                                http_status=200,
+                                response_time_ms=int(response_time * 1000),
+                            )
+                        logger.info("[CoupangHttpClient] 직접 연결 성공 (items=%d)", len(items))
+                        return items
+                    else:
+                        text = await resp.text()
+                        last_error = f"direct HTTP {resp.status}: {text[:100]}"
+                        logger.warning("[CoupangHttpClient] 직접 연결 실패: %s", last_error)
+            except Exception as e:
+                last_error = str(e)[:80]
+                logger.warning("[CoupangHttpClient] 직접 연결 예외: %s", e)
 
         logger.error(
             "[CoupangHttpClient] 최대 재시도 초과 (product_id=%s, date=%s, last_error=%s)",
