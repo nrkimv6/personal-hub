@@ -145,6 +145,12 @@ class LLMService:
 
     def __init__(self, db: Session):
         self.db = db
+        from app.modules.claude_worker.services.repositories import (
+            LLMRequestRepository,
+            LLMWorkerRepository,
+        )
+        self._repo = LLMRequestRepository(db)
+        self._worker_repo = LLMWorkerRepository(db)
 
     # ========== 기본값 관리 ==========
 
@@ -401,17 +407,7 @@ class LLMService:
             생성된 LLMRequest
         """
         # 중복 pending 요청 확인 (같은 queue_name 내에서만)
-        existing = (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.caller_type == caller_type,
-                LLMRequest.caller_id == caller_id,
-                LLMRequest.queue_name == queue_name,
-                LLMRequest.status == "pending",
-                LLMRequest.deleted_at.is_(None),
-            )
-            .first()
-        )
+        existing = self._repo.find_existing_pending(caller_type, caller_id, queue_name)
 
         if existing:
             logger.debug(f"이미 pending 요청 존재: {caller_type}:{caller_id} (queue={queue_name})")
@@ -436,7 +432,7 @@ class LLMService:
             queue_name=queue_name,
             mode=mode,
         )
-        self.db.add(request)
+        self._repo.add(request)
         self.db.commit()
         self.db.refresh(request)
 
@@ -445,7 +441,7 @@ class LLMService:
 
     def update_chat_session(self, request_id: int, chat_session_id: str) -> None:
         """chat_session_id DB 업데이트."""
-        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        request = self._repo.get_by_id(request_id)
         if request:
             request.chat_session_id = chat_session_id
             self.db.commit()
@@ -464,15 +460,7 @@ class LLMService:
         Returns:
             가장 최근 요청 또는 None
         """
-        return (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.caller_type == caller_type,
-                LLMRequest.caller_id == caller_id,
-            )
-            .order_by(LLMRequest.requested_at.desc())
-            .first()
-        )
+        return self._repo.find_latest_by_caller(caller_type, caller_id)
 
     def get_pending_request(self) -> Optional[LLMRequest]:
         """가장 오래된 pending 요청 조회 (워커용, 레거시 — get_next_request() 사용 권장).
@@ -480,15 +468,7 @@ class LLMService:
         Returns:
             pending 요청 또는 None
         """
-        return (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.status == "pending",
-                LLMRequest.deleted_at.is_(None),
-            )
-            .order_by(LLMRequest.requested_at.asc())
-            .first()
-        )
+        return self._repo.find_oldest_pending()
 
     def get_next_request(self, exclude_providers: list = None) -> Optional[LLMRequest]:
         """우선순위 기반으로 다음 처리할 요청 조회 (워커용).
@@ -506,18 +486,7 @@ class LLMService:
             exclude_providers = []
 
         for queue in QUEUE_PRIORITY:
-            query = (
-                self.db.query(LLMRequest)
-                .filter(
-                    LLMRequest.queue_name == queue,
-                    LLMRequest.status == "pending",
-                    LLMRequest.deleted_at.is_(None),
-                )
-            )
-            if exclude_providers:
-                query = query.filter(LLMRequest.provider.notin_(exclude_providers))
-
-            request = query.order_by(LLMRequest.requested_at.asc()).first()
+            request = self._repo.find_next_pending_in_queue(queue, exclude_providers)
             if request:
                 return request
         return None
@@ -534,10 +503,7 @@ class LLMService:
         """
         paused_until = datetime.now() + timedelta(milliseconds=retry_after_ms)
 
-        statuses = (
-            self.db.query(LLMWorkerStatus)
-            .all()
-        )
+        statuses = self._worker_repo.find_all()
         for status in statuses:
             status.quota_paused_provider = provider
             status.quota_paused_until = paused_until
@@ -551,11 +517,7 @@ class LLMService:
 
         만료되지 않은 경우 paused_until 반환, 만료/없으면 None.
         """
-        status = (
-            self.db.query(LLMWorkerStatus)
-            .filter(LLMWorkerStatus.quota_paused_provider == provider)
-            .first()
-        )
+        status = self._worker_repo.find_quota_pause(provider)
         if status and status.quota_paused_until:
             if status.quota_paused_until > datetime.now():
                 return status.quota_paused_until
@@ -563,11 +525,7 @@ class LLMService:
 
     def clear_provider_quota_pause(self, provider: str) -> bool:
         """provider quota pause 수동 해제."""
-        statuses = (
-            self.db.query(LLMWorkerStatus)
-            .filter(LLMWorkerStatus.quota_paused_provider == provider)
-            .all()
-        )
+        statuses = self._worker_repo.find_by_quota_provider(provider)
         if not statuses:
             return False
         for status in statuses:
@@ -584,19 +542,7 @@ class LLMService:
             전환된 요청 수
         """
         quota_messages = ["%TerminalQuotaError%", "%exhausted your capacity%"]
-        targets = (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.status == "failed",
-                LLMRequest.provider == provider,
-                LLMRequest.deleted_at.is_(None),
-            )
-            .filter(
-                (LLMRequest.error_message.like("%TerminalQuotaError%"))
-                | (LLMRequest.error_message.like("%exhausted your capacity%"))
-            )
-            .all()
-        )
+        targets = self._repo.find_quota_failed(provider)
         count = 0
         for req in targets:
             req.status = "pending"
@@ -611,15 +557,7 @@ class LLMService:
 
     def get_blocked_pending_count(self, provider: str) -> int:
         """pause 중인 provider로 막힌 pending 요청 수 조회."""
-        return (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.status == "pending",
-                LLMRequest.provider == provider,
-                LLMRequest.deleted_at.is_(None),
-            )
-            .count()
-        )
+        return self._repo.count_blocked_by_provider(provider)
 
     def get_queue_stats(self) -> dict:
         """큐별 상태 카운트 통계.
@@ -627,16 +565,7 @@ class LLMService:
         Returns:
             {"system": {"pending": N, "processing": N, ...}, "utility": {...}}
         """
-        rows = (
-            self.db.query(
-                LLMRequest.queue_name,
-                LLMRequest.status,
-                func.count(LLMRequest.id).label("cnt"),
-            )
-            .filter(LLMRequest.deleted_at.is_(None))
-            .group_by(LLMRequest.queue_name, LLMRequest.status)
-            .all()
-        )
+        rows = self._repo.get_queue_stats_rows()
 
         # 모든 큐에 대해 기본값 0으로 초기화
         result: dict = {}
@@ -655,20 +584,13 @@ class LLMService:
 
     def get_pending_count(self) -> int:
         """Pending 요청 수 조회."""
-        return (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.status == "pending",
-                LLMRequest.deleted_at.is_(None),
-            )
-            .count()
-        )
+        return self._repo.count_pending()
 
     # ========== 상태 변경 ==========
 
     def mark_processing(self, request_id: int) -> None:
         """요청을 processing 상태로 변경."""
-        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        request = self._repo.get_by_id(request_id)
         if request:
             request.status = "processing"
             self.db.commit()
@@ -680,7 +602,7 @@ class LLMService:
         raw_response: str = "",
     ) -> None:
         """요청을 completed 상태로 변경."""
-        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        request = self._repo.get_by_id(request_id)
         if request:
             request.status = "completed"
             request.processed_at = datetime.now()
@@ -691,7 +613,7 @@ class LLMService:
 
     def mark_failed(self, request_id: int, error_message: str, raw_response: str = "") -> None:
         """요청을 failed 상태로 변경."""
-        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        request = self._repo.get_by_id(request_id)
         if request:
             request.status = "failed"
             request.processed_at = datetime.now()
@@ -707,7 +629,7 @@ class LLMService:
         failed 상태인 요청만 pending으로 변경할 수 있습니다.
         completed 상태는 이미 처리 완료되었으므로 리셋 불가.
         """
-        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        request = self._repo.get_by_id(request_id)
         if request and request.status == "failed":
             request.status = "pending"
             request.error_message = None
@@ -1270,9 +1192,7 @@ class LLMService:
     def register_worker(self, worker_id: str, pid: int) -> LLMWorkerStatus:
         """워커 등록."""
         # 기존 워커 비활성화
-        self.db.query(LLMWorkerStatus).filter(
-            LLMWorkerStatus.is_alive == True
-        ).update({"is_alive": False})
+        self._worker_repo.deactivate_all_alive()
 
         now = datetime.now()
         status = LLMWorkerStatus(
@@ -1283,18 +1203,14 @@ class LLMService:
             current_state="idle",
             is_alive=True,
         )
-        self.db.add(status)
+        self._worker_repo.add(status)
         self.db.commit()
         self.db.refresh(status)
         return status
 
     def update_heartbeat(self, worker_id: str) -> None:
         """하트비트 업데이트."""
-        status = (
-            self.db.query(LLMWorkerStatus)
-            .filter(LLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
+        status = self._worker_repo.get_by_worker_id(worker_id)
         if status:
             status.last_heartbeat = datetime.now()
             self.db.commit()
@@ -1303,11 +1219,7 @@ class LLMService:
         self, worker_id: str, state: str, request_id: int = None
     ) -> None:
         """워커 상태 업데이트."""
-        status = (
-            self.db.query(LLMWorkerStatus)
-            .filter(LLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
+        status = self._worker_repo.get_by_worker_id(worker_id)
         if status:
             status.current_state = state
             status.current_request_id = request_id
@@ -1315,33 +1227,21 @@ class LLMService:
 
     def increment_processed(self, worker_id: str) -> None:
         """처리 카운트 증가."""
-        status = (
-            self.db.query(LLMWorkerStatus)
-            .filter(LLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
+        status = self._worker_repo.get_by_worker_id(worker_id)
         if status:
             status.processed_count += 1
             self.db.commit()
 
     def increment_error(self, worker_id: str) -> None:
         """에러 카운트 증가."""
-        status = (
-            self.db.query(LLMWorkerStatus)
-            .filter(LLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
+        status = self._worker_repo.get_by_worker_id(worker_id)
         if status:
             status.error_count += 1
             self.db.commit()
 
     def mark_worker_dead(self, worker_id: str) -> None:
         """워커 종료 표시."""
-        status = (
-            self.db.query(LLMWorkerStatus)
-            .filter(LLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
+        status = self._worker_repo.get_by_worker_id(worker_id)
         if status:
             status.is_alive = False
             status.current_state = "stopped"
@@ -1349,11 +1249,7 @@ class LLMService:
 
     def get_worker_status(self) -> Optional[LLMWorkerStatus]:
         """활성 워커 상태 조회."""
-        return (
-            self.db.query(LLMWorkerStatus)
-            .filter(LLMWorkerStatus.is_alive == True)
-            .first()
-        )
+        return self._worker_repo.get_alive()
 
     def check_worker_health(self) -> dict:
         """워커 건강 상태 확인.
@@ -1435,33 +1331,16 @@ class LLMService:
         Returns:
             {"items": [...], "total": n, "page": n, "page_size": n, "pages": n}
         """
-        query = self.db.query(LLMRequest)
-
-        if not include_deleted:
-            query = query.filter(LLMRequest.deleted_at.is_(None))
-        if status:
-            # 콤마로 구분된 여러 상태 지원
-            statuses = [s.strip() for s in status.split(",") if s.strip()]
-            if len(statuses) == 1:
-                query = query.filter(LLMRequest.status == statuses[0])
-            elif len(statuses) > 1:
-                query = query.filter(LLMRequest.status.in_(statuses))
-        if caller_type:
-            query = query.filter(LLMRequest.caller_type == caller_type)
-        if requested_by:
-            query = query.filter(LLMRequest.requested_by == requested_by)
-        if queue_name:
-            query = query.filter(LLMRequest.queue_name == queue_name)
-
-        total = query.count()
-        pages = (total + page_size - 1) // page_size
-
-        items = (
-            query.order_by(LLMRequest.requested_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .all()
+        items, total = self._repo.list_with_filters(
+            status=status,
+            caller_type=caller_type,
+            requested_by=requested_by,
+            include_deleted=include_deleted,
+            page=page,
+            page_size=page_size,
+            queue_name=queue_name,
         )
+        pages = (total + page_size - 1) // page_size
 
         return {
             "items": items,
@@ -1473,12 +1352,12 @@ class LLMService:
 
     def get_request_by_id(self, request_id: int) -> Optional[LLMRequest]:
         """단일 요청 조회."""
-        return self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        return self._repo.get_by_id(request_id)
 
     def update_request(self, request_id: int, cli_options=None, prompt=None):
         """pending/failed 요청의 cli_options 또는 prompt 갱신."""
         import json as _json
-        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        request = self._repo.get_by_id(request_id)
         if not request or request.status not in ("pending", "failed"):
             return None
         if cli_options is not None:
@@ -1495,7 +1374,7 @@ class LLMService:
         Returns:
             True if cancelled, False if not found or not pending
         """
-        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        request = self._repo.get_by_id(request_id)
         if request and request.status == "pending":
             request.status = "cancelled"
             request.processed_at = datetime.now()
@@ -1514,12 +1393,12 @@ class LLMService:
         Returns:
             True if deleted, False if not found
         """
-        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        request = self._repo.get_by_id(request_id)
         if not request:
             return False
 
         if hard_delete:
-            self.db.delete(request)
+            self._repo.delete(request)
         else:
             request.deleted_at = datetime.now()
         self.db.commit()
@@ -1540,7 +1419,7 @@ class LLMService:
         skipped = 0
 
         for request_id in request_ids:
-            request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+            request = self._repo.get_by_id(request_id)
             if not request:
                 skipped += 1
                 continue
@@ -1602,14 +1481,10 @@ class LLMService:
         if not start_date:
             start_date = end_date - timedelta(days=7)
 
-        # 날짜 범위 필터
-        query = self.db.query(LLMRequest).filter(
-            LLMRequest.requested_at >= datetime.combine(start_date, datetime.min.time()),
-            LLMRequest.requested_at <= datetime.combine(end_date, datetime.max.time()),
-            LLMRequest.deleted_at.is_(None),
+        all_requests = self._repo.find_by_date_range(
+            datetime.combine(start_date, datetime.min.time()),
+            datetime.combine(end_date, datetime.max.time()),
         )
-
-        all_requests = query.all()
 
         # 일별 그룹화
         daily_data = {}
@@ -1655,16 +1530,7 @@ class LLMService:
 
     def get_caller_stats(self) -> dict:
         """호출자별 통계."""
-        results = (
-            self.db.query(
-                LLMRequest.caller_type,
-                LLMRequest.status,
-                func.count(LLMRequest.id).label("count"),
-            )
-            .filter(LLMRequest.deleted_at.is_(None))
-            .group_by(LLMRequest.caller_type, LLMRequest.status)
-            .all()
-        )
+        results = self._repo.get_caller_stats_rows()
 
         stats = {}
         for caller_type, status, count in results:
@@ -1698,15 +1564,7 @@ class LLMService:
         threshold = datetime.now() - timedelta(minutes=timeout_minutes)
 
         # processing 상태이면서 requested_at이 threshold보다 오래된 요청
-        stale_requests = (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.status == "processing",
-                LLMRequest.requested_at < threshold,
-                LLMRequest.deleted_at.is_(None),
-            )
-            .all()
-        )
+        stale_requests = self._repo.find_stale_processing(threshold)
 
         count = 0
         for request in stale_requests:
@@ -1741,20 +1599,12 @@ class LLMService:
         threshold = datetime.now() - timedelta(days=days)
 
         # completed/failed/cancelled 상태이면서 processed_at이 threshold보다 오래된 요청
-        old_requests = (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.status.in_(["completed", "failed", "cancelled"]),
-                LLMRequest.processed_at < threshold,
-                LLMRequest.deleted_at.is_(None),
-            )
-            .all()
-        )
+        old_requests = self._repo.find_old_history(threshold)
 
         count = 0
         for request in old_requests:
             if hard_delete:
-                self.db.delete(request)
+                self._repo.delete(request)
             else:
                 request.deleted_at = datetime.now()
             count += 1
@@ -1778,51 +1628,8 @@ class LLMService:
     # ========== 호출자별 그룹화 ==========
 
     def _build_caller_aggregate_query(self, caller_type: str = None):
-        """caller별 집계 쿼리 빌더 (deleted_at IS NULL 포함).
-
-        Returns SQLAlchemy query yielding rows with:
-            caller_type, caller_id, total_count, completed_count,
-            failed_count, pending_count, last_at, has_success (0 or 1)
-        """
-        from sqlalchemy import case as sa_case
-
-        completed_sum = func.coalesce(
-            func.sum(sa_case((LLMRequest.status == "completed", 1), else_=0)), 0
-        )
-        failed_sum = func.coalesce(
-            func.sum(sa_case((LLMRequest.status == "failed", 1), else_=0)), 0
-        )
-        pending_sum = func.coalesce(
-            func.sum(
-                sa_case(
-                    (LLMRequest.status.in_(["pending", "processing"]), 1),
-                    else_=0,
-                )
-            ),
-            0,
-        )
-        has_success_max = func.coalesce(
-            func.max(sa_case((LLMRequest.status == "completed", 1), else_=0)), 0
-        )
-
-        q = (
-            self.db.query(
-                LLMRequest.caller_type,
-                LLMRequest.caller_id,
-                func.count().label("total_count"),
-                completed_sum.label("completed_count"),
-                failed_sum.label("failed_count"),
-                pending_sum.label("pending_count"),
-                func.max(LLMRequest.requested_at).label("last_at"),
-                has_success_max.label("has_success"),
-            )
-            .filter(LLMRequest.deleted_at.is_(None))
-            .group_by(LLMRequest.caller_type, LLMRequest.caller_id)
-            .order_by(func.max(LLMRequest.requested_at).desc())
-        )
-        if caller_type:
-            q = q.filter(LLMRequest.caller_type == caller_type)
-        return q
+        """caller별 집계 쿼리 빌더 — repo에 위임."""
+        return self._repo.build_caller_aggregate_query(caller_type)
 
     def list_requests_grouped_by_caller(
         self,
@@ -1870,16 +1677,7 @@ class LLMService:
             and_(LLMRequest.caller_type == ct, LLMRequest.caller_id == ci)
             for ct, ci in caller_keys
         ]
-        detail_rows = (
-            self.db.query(LLMRequest)
-            .filter(LLMRequest.deleted_at.is_(None), or_(*conditions))
-            .order_by(
-                LLMRequest.caller_type,
-                LLMRequest.caller_id,
-                LLMRequest.requested_at.asc(),
-            )
-            .all()
-        )
+        detail_rows = self._repo.find_by_caller_batch(conditions)
 
         # caller별 상세 매핑
         # ASC 정렬이므로: 첫 row = prompt, 마지막 row = last_status/last_error
@@ -1957,9 +1755,7 @@ class LLMService:
             if group["request_ids"]:
                 callers += 1
                 for request_id in group["request_ids"]:
-                    request = self.db.query(LLMRequest).filter(
-                        LLMRequest.id == request_id
-                    ).first()
+                    request = self._repo.get_by_id(request_id)
                     if request and request.status == "failed":
                         request.status = "pending"
                         request.error_message = None
@@ -1980,11 +1776,7 @@ class LLMService:
         """통계 조회. deleted_at 필터 없음 (soft-deleted 포함, 기존 동작 보존).
         COUNT 5회 → GROUP BY 1회로 통합.
         """
-        rows = (
-            self.db.query(LLMRequest.status, func.count())
-            .group_by(LLMRequest.status)
-            .all()
-        )
+        rows = self._repo.get_status_counts()
         counts = {s: n for s, n in rows}
         return {
             "total": sum(counts.values()),
@@ -2008,27 +1800,10 @@ class LLMService:
         threshold = datetime.now() - timedelta(hours=hours)
 
         # 완료된 요청만 조회
-        completed_requests = (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.status == "completed",
-                LLMRequest.requested_at >= threshold,
-                LLMRequest.processed_at.isnot(None),
-                LLMRequest.deleted_at.is_(None),
-            )
-            .all()
-        )
+        completed_requests = self._repo.find_completed_since(threshold)
 
         # 실패한 요청 수
-        failed_count = (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.status == "failed",
-                LLMRequest.requested_at >= threshold,
-                LLMRequest.deleted_at.is_(None),
-            )
-            .count()
-        )
+        failed_count = self._repo.count_failed_since(threshold)
 
         # 처리 시간 계산
         processing_times = []
