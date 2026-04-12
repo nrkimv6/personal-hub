@@ -53,7 +53,7 @@ def real_redis():
         r = redis_lib.Redis(decode_responses=True)
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available — 테스트 환경 미충족")
     yield r
     r.close()
 
@@ -75,7 +75,7 @@ def isolated_redis():
         r = redis_lib.Redis(host="localhost", port=6379, db=REDIS_TEST_DB, decode_responses=True)
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available — 테스트 환경 미충족")
     r.flushdb()
     yield r
     r.flushdb()

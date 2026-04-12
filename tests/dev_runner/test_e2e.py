@@ -56,7 +56,7 @@ def dev_runner_listener():
         r.delete("plan-runner:state:status")
         r.delete("plan-runner:listener:heartbeat")
     except redis.ConnectionError:
-        pytest.skip("Redis not available, skipping E2E tests")
+        pytest.fail("Redis not available — E2E 테스트 환경 미충족")
 
     # guard가 PLAN_RUNNER_REDIS_DB 환경변수를 검사하므로 db=15로 설정
     old_plan_runner_redis_db = _os.environ.get("PLAN_RUNNER_REDIS_DB")

@@ -376,7 +376,7 @@ def test_http_guide_status_history():
             timeout=10,
         )
     except httpx.ConnectError:
-        _pytest.skip("실서버 미기동")
+        _pytest.fail("실서버 미기동")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -391,7 +391,7 @@ def test_http_schedule_run_devguide_staleness():
     try:
         resp = httpx.get("http://localhost:8001/api/tasks/schedules", timeout=10)
     except httpx.ConnectError:
-        _pytest.skip("실서버 미기동")
+        _pytest.fail("실서버 미기동")
     assert resp.status_code == 200
     data = resp.json()
     # devguide_staleness 타입 스케줄 존재 확인 (또는 requirements_sync 미존재)

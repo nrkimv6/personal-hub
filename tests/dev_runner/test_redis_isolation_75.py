@@ -10,15 +10,6 @@ TEST_DB = 15   # 테스트 전용
 PROD_DB = 0    # 운영
 
 
-def _redis_available():
-    try:
-        redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=TEST_DB).ping()
-        return True
-    except Exception:
-        return False
-
-
-@pytest.mark.skipif(not _redis_available(), reason="Redis 미연결")
 def test_test_db_does_not_affect_prod_db():
     """db=15에 키 쓴 후 db=0에서 조회 시 키 없음 — DB 격리 기본 동작"""
     test_r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=TEST_DB, decode_responses=True)
@@ -36,7 +27,6 @@ def test_test_db_does_not_affect_prod_db():
         test_r.delete(test_key)
 
 
-@pytest.mark.skipif(not _redis_available(), reason="Redis 미연결")
 def test_flushdb_test_only_not_prod():
     """테스트 DB flushdb가 운영 DB에 영향 없음"""
     test_r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=TEST_DB, decode_responses=True)

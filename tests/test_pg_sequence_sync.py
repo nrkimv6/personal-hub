@@ -303,15 +303,6 @@ class TestSequenceDesyncIntegration:
 _LIVE_BASE = "http://localhost:8001/api/v1/git-repos"
 
 
-def _server_available() -> bool:
-    try:
-        import requests
-        r = requests.get("http://localhost:8001/api/v1/dev-runner/runners", timeout=3)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
 def _live_api(method, path="", json=None, params=None):
     import requests
     url = f"{_LIVE_BASE}{path}"
@@ -331,7 +322,6 @@ def _poll_task(task_id: str, interval: float = 0.5, max_retries: int = 40) -> di
 
 
 @pytest.mark.e2e
-@pytest.mark.skipif(not _server_available(), reason="실제 서버(8001) 미응답 — E2E 스킵")
 class TestSequenceSyncE2E:
     """T4: 시퀀스 동기화 후 git_operation_logs INSERT 정상 동작 E2E 검증"""
 
@@ -382,7 +372,6 @@ class TestSequenceSyncE2E:
 # ── Phase T5: HTTP 통합 테스트 (실제 서버 8001) ───────────────────────────
 
 @pytest.mark.http_live
-@pytest.mark.skipif(not _server_available(), reason="실제 서버(8001) 미응답 — HTTP_LIVE 스킵")
 class TestSequenceSyncHttpLive:
     """T5: HTTP 엔드포인트를 통한 log_operation INSERT 검증"""
 

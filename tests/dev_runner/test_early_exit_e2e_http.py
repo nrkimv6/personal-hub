@@ -61,7 +61,7 @@ class TestRunApiEarlyExitE2E:
               logs/recent에서 [EARLY_EXIT] 또는 [DIAG] 또는 [ENV] 로그 존재 확인.
         """
         if not _live_server_available():
-            pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+            pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
 
         # 존재하지 않는 plan_file로 요청 (즉시 실패 유도)
         run_payload = {
@@ -204,7 +204,7 @@ class TestRunApiEnvHeaderHttp:
         서버 기동 필수: dry_run=True로 실제 subprocess 시작, [ENV] 헤더가 로그에 기록됨.
         """
         if not _live_server_available():
-            pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+            pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
 
         test_source = f"t5envhdr"
         run_payload = {
@@ -263,7 +263,7 @@ class TestRunnersErrorFieldDiagnostic:
         3. 실패 runner가 없는 경우, 일부러 실패하는 run을 시작하여 생성
         """
         if not _live_server_available():
-            pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+            pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
 
         runners_resp = _live_get(f"{API_PREFIX}/runners")
         assert runners_resp.status_code == 200
