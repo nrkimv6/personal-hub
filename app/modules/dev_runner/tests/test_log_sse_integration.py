@@ -99,7 +99,8 @@ def test_status_payload_includes_cc_codex_engine_in_sse_meta():
     svc._sync = fake_sync
     svc._async = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
-    payload = svc._build_status_payload(rid)
+    from app.modules.dev_runner.services.event_payload import build_status_payload
+    payload = build_status_payload(svc._sync, rid)
 
     assert payload is not None
     assert payload["runner_id"] == rid
@@ -147,15 +148,13 @@ async def test_cc_codex_log_delivery_via_fallback_no_missing_lines(tmp_path):
     fake_async.pubsub = MagicMock(return_value=idle_pubsub)
     svc._async = fake_async
 
-    svc._runner_tail_state = {}
-    svc._completed_runners = {}
-    svc._tail_state_ttl_sec = 600.0
-    svc._completed_runner_ttl_sec = 120.0
-    svc._dedup_window = 256
+    from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
+    from app.modules.dev_runner.services.event_log_tailer import LogTailer
+    from app.modules.dev_runner.config import config as _config
+    _log_resolver = LogFileResolver(_config, fake_sync)
+    svc._log_tailer = LogTailer(fake_sync, _log_resolver)
     svc._file_poll_timeout = 0.0
     svc._file_poll_interval_sec = 0.0
-    svc._file_poll_max_lines = 400
-    svc._file_poll_max_chars = 65536
 
     cc_codex_lines = [f"[cc-codex] step {i}: processing task" for i in range(5)]
 

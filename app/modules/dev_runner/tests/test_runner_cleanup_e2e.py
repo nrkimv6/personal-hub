@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.event_service import EventService, RUNNER_KEY_PREFIX
+from app.modules.dev_runner.services.event_payload import build_status_payload
 
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_TTL = 86400
@@ -119,7 +120,7 @@ class TestRunnerCleanupE2E:
         svc._sync = fake_sync
         svc._async = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
-        payload = svc._build_status_payload(rid)
+        payload = build_status_payload(svc._sync, rid)
 
         assert payload is not None
         assert payload["status"] == "stopped", \
