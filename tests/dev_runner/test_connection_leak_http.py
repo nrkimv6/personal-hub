@@ -137,7 +137,7 @@ def test_redis_cleanup_dry_run_http():
     try:
         result = subprocess.run(
             ["D:\\work\\project\\tools\\monitor-page\\.venv\\Scripts\\python.exe",
-             "D:\\work\\project\\tools\\monitor-page\\scripts\\browser_workers.py",
+             "D:\\work\\project\\tools\\monitor-page\\scripts\\services\\browser_workers.py",
              "redis-cleanup"],
             capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace",
         )
