@@ -213,7 +213,7 @@ class ServiceRunner:
             stderr_log = open(self.log_dir / f"frontend_err_{timestamp}.log", "w", encoding="utf-8")
 
             # --- Placeholder & Warmup Start ---
-            from scripts.frontend_placeholder import PlaceholderServer
+            from scripts.fixes.frontend_placeholder import PlaceholderServer
             placeholder = PlaceholderServer(self.frontend_port, logger=self.log)
             placeholder.start()
 
