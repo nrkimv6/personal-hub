@@ -31,6 +31,7 @@ sys.path.insert(0, str(project_root))
 # 비동기 로거 설정
 from app.utils.async_logger import AsyncLoggerManager
 from app.shared.llm_registry import report_quota as _registry_report_quota
+from app.modules.claude_worker.services import provider_registry
 
 # 워커 전용 비동기 로거 설정
 logger = AsyncLoggerManager.setup_worker_logger(
@@ -1396,7 +1397,7 @@ class LLMWorker:
         db = SessionLocal()
         try:
             service = LLMService(db)
-            for provider in ["gemini", "claude"]:
+            for provider in provider_registry.get_quota_providers():
                 paused_until = service.get_provider_quota_pause(provider)
                 if paused_until is None:
                     # None이지만 DB에 pause 레코드가 있을 수 있으므로 (만료된 경우) clear 시도
@@ -1428,7 +1429,7 @@ class LLMWorker:
 
             # pause 중인 provider 조회
             exclude_providers = []
-            for provider in ["gemini", "claude"]:
+            for provider in provider_registry.get_quota_providers():
                 paused_until = service.get_provider_quota_pause(provider)
                 if paused_until:
                     exclude_providers.append(provider)

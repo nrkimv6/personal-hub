@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui';
 
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse } from '$lib/api';
+	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse, type ProviderInfo } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
 	import { createSelection } from '$lib/utils/selection.svelte';
 	import { toast } from '$lib/stores/toast';
@@ -69,9 +69,15 @@
 	let createSuccess = false;
 
 	// Provider별 모델 목록
-	const providerModels: Record<string, string[]> = {
-		claude: ['(기본)', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514'],
-		gemini: ['(기본)', 'gemini-2.5-pro', 'gemini-2.5-flash']
+	// Provider 목록 (API에서 동적 로드)
+	let providers = $state<ProviderInfo[]>([]);
+	let providersLoading = $state(true);
+	let providersError = $state<string | null>(null);
+
+	function getProviderModels(providerKey: string): string[] {
+		const p = providers.find(x => x.key === providerKey);
+		if (p && p.models.length > 0) return ['(기본)', ...p.models];
+		return ['(기본)'];
 	};
 
 	// Provider 변경 시 model 초기화
@@ -454,6 +460,9 @@
 	onMount(() => {
 		fetchData();
 		fetchQuotaStatus();
+		llmApi.getProviders()
+			.then(data => { providers = data; providersLoading = false; })
+			.catch(() => { providersError = 'Provider 목록 로드 실패'; providersLoading = false; });
 	});
 </script>
 
@@ -921,15 +930,22 @@
 					<div class="grid grid-cols-2 gap-4">
 						<div>
 							<label class="block text-sm font-medium text-foreground mb-1">Provider</label>
-							<select bind:value={createForm.provider} class="w-full px-3 py-2 border border-border rounded-lg">
-								<option value="claude">Claude</option>
-								<option value="gemini">Gemini</option>
-							</select>
+							{#if providersError}
+								<p class="text-sm text-red-500">{providersError}</p>
+							{:else if providersLoading}
+								<p class="text-sm text-muted-foreground">로딩 중...</p>
+							{:else}
+								<select bind:value={createForm.provider} class="w-full px-3 py-2 border border-border rounded-lg">
+									{#each providers as p}
+										<option value={p.key}>{p.display_name}</option>
+									{/each}
+								</select>
+							{/if}
 						</div>
 						<div>
 							<label class="block text-sm font-medium text-foreground mb-1">Model</label>
 							<select bind:value={createForm.model} class="w-full px-3 py-2 border border-border rounded-lg">
-								{#each providerModels[createForm.provider] as modelOption}
+								{#each getProviderModels(createForm.provider) as modelOption}
 									<option value={modelOption === '(기본)' ? '' : modelOption}>
 										{modelOption}
 									</option>

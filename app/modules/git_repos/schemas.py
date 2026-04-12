@@ -1,7 +1,9 @@
 """Git Repository Pydantic 스키마."""
 from datetime import datetime
-from typing import Optional, List, Literal
-from pydantic import BaseModel
+from typing import Optional, List
+from pydantic import BaseModel, validator
+
+from app.modules.claude_worker.services import provider_registry
 
 
 # ───────────────────────────────────────────
@@ -103,8 +105,14 @@ class BatchPushRequest(BaseModel):
 
 
 class GenerateMessageRequest(BaseModel):
-    provider: Literal["claude", "gemini"] = "claude"
+    provider: str = "claude"
     model: str = ""
+
+    @validator("provider")
+    def validate_provider(cls, v):
+        if not provider_registry.is_supported(v):
+            raise ValueError(f"지원되지 않는 provider: {v}")
+        return v
 
 
 # ───────────────────────────────────────────
@@ -146,7 +154,13 @@ class GitTaskResult(BaseModel):
 
 class AutoCleanupRequest(BaseModel):
     patterns: List[str] = ["tmp_*"]
-    provider: Literal["claude", "gemini"] = "claude"
+    provider: str = "claude"
+
+    @validator("provider")
+    def validate_provider(cls, v):
+        if not provider_registry.is_supported(v):
+            raise ValueError(f"지원되지 않는 provider: {v}")
+        return v
 
 
 class AutoCleanupTaskResponse(BaseModel):

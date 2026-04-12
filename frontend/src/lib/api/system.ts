@@ -559,7 +559,23 @@ export interface LLMProfilesUpdateRequest {
   profiles: LLMProfileConfig[];
 }
 
+export interface ProviderInfo {
+  key: string;
+  display_name: string;
+  default_model: string;
+  models: string[];
+  supports_chat: boolean;
+  supports_quota_pause: boolean;
+  enabled: boolean;
+  executor_key: string;
+}
+
 export const llmApi = {
+  // Provider 목록 조회 (enabled만 반환)
+  getProviders: (options?: RequestInit) =>
+    request<ProviderInfo[]>('/llm/providers', options),
+
+
   // 요청 목록 조회
   list: (params?: LLMRequestListParams, options?: RequestInit) => {
     const searchParams = new URLSearchParams();

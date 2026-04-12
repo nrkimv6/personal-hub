@@ -3,6 +3,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { gitReposApi } from '$lib/api/gitRepos';
+  import { llmApi, type ProviderInfo } from '$lib/api';
   import type { GitRepo, GitStatus, GitLogEntry, OperationLog, AutoCleanupResult } from '$lib/types/gitRepos';
   import { 
     ArrowLeft, 
@@ -42,7 +43,8 @@
   // 커밋
   let commitMsg = $state('');
   let generatingMsg = $state(false);
-  let llmProvider = $state<'claude' | 'gemini'>('claude');
+  let llmProvider = $state('claude');
+  let providers = $state<ProviderInfo[]>([]);
 
   // 자동 정리
   let cleanupRequestId = $state<number | null>(null);
@@ -60,6 +62,7 @@
 
   onMount(async () => {
     await loadAll();
+    llmApi.getProviders().then(data => { providers = data; }).catch(() => {});
   });
 
   async function loadAll() {
@@ -485,8 +488,14 @@
                 bind:value={llmProvider}
                 title="LLM 엔진 선택"
               >
-                <option value="claude">Claude Haiku</option>
-                <option value="gemini">Gemini Flash</option>
+                {#if providers.length > 0}
+                  {#each providers as p}
+                    <option value={p.key}>{p.display_name}</option>
+                  {/each}
+                {:else}
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                {/if}
               </select>
               <button
                 class="px-3 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50 flex items-center justify-center"
