@@ -73,6 +73,57 @@ def local_events_client():
 
 
 @pytest.mark.http
+def test_fallback_sse_e2e(local_client):
+    """T4: pubsub 미수신 후 fallback 모드에서 파일 내용이 SSE data: 이벤트로 전달된다.
+
+    수정 전: fallback 진입 시 SEEK_END 초기화 → 파일 내용 누락
+    수정 후: _file_pos=0 유지 → 파일 처음부터 읽어 line-a, line-b 전달
+    """
+
+    async def _fake_stream_log_file_with_fallback(runner_id: str, since_line: int = 0):
+        assert runner_id == "t4-fallback-test"
+        # pubsub 미수신 후 fallback 모드 진입 시뮬레이션
+        yield "event: connected\ndata: ok\n\n"
+        yield "event: fallback_mode\ndata: pubsub_timeout\n\n"
+        # 수정 후: 파일 처음부터 읽어 기존 내용 전달
+        yield "event: log\ndata: line-a\n\n"
+        yield "event: log\ndata: line-b\n\n"
+        yield "event: completed\ndata: success\n\n"
+
+    with patch(
+        "app.modules.dev_runner.routes.logs.log_service.stream_log_file",
+        new=_fake_stream_log_file_with_fallback,
+    ):
+        response = local_client.get(
+            f"{BASE_URL}/logs/stream",
+            params={"runner_id": "t4-fallback-test"},
+            headers={"Accept": "text/event-stream"},
+        )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    events = _parse_sse_events(response.text)
+
+    # fallback_mode 이벤트가 포함되어 있어야 함
+    fallback_event = next(
+        (e for e in events if e.get("event") == "fallback_mode"),
+        None,
+    )
+    assert fallback_event is not None, "fallback_mode 이벤트가 없음"
+
+    # 파일 내용(line-a, line-b)이 log 이벤트로 전달되어야 함
+    log_events = [e for e in events if e.get("event") == "log"]
+    assert len(log_events) >= 2, f"log 이벤트가 2개 미만: {log_events}"
+    log_data = [e["data"] for e in log_events]
+    assert "line-a" in log_data, f"line-a가 SSE에 없음: {log_data}"
+    assert "line-b" in log_data, f"line-b가 SSE에 없음: {log_data}"
+
+    # completed 이벤트가 마지막
+    completed = next(e for e in events if e.get("event") == "completed")
+    assert completed["data"] == "success"
+
+
+@pytest.mark.http
 def test_http_log_stream_commit_failed_keeps_reason_and_detail(local_client):
     """T3: /logs/stream route는 detail 로그와 completed reason=commit_failed를 같은 스트림에 유지한다."""
     detail = "exit_reason=commit_failed; detail=commit_scope=docs/plan/test.md"
