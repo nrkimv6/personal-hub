@@ -1818,6 +1818,7 @@ class LLMService:
             )
             .filter(LLMRequest.deleted_at.is_(None))
             .group_by(LLMRequest.caller_type, LLMRequest.caller_id)
+            .order_by(func.max(LLMRequest.requested_at).desc())
         )
         if caller_type:
             q = q.filter(LLMRequest.caller_type == caller_type)
@@ -1830,46 +1831,7 @@ class LLMService:
         page: int = 1,
         page_size: int = 50,
     ) -> dict:
-        """caller_id별로 그룹화된 요청 목록 조회.
-
-        SQL GROUP BY 집계 + 페이지 caller에 대한 상세 배치 조회 방식.
-        전체 LLMRequest 로우를 메모리에 로드하지 않는다.
-
-        Args:
-            caller_type: 호출자 타입 필터
-            only_without_success: True면 성공한 적 없는 caller만 조회
-            page: 페이지 번호
-            page_size: 페이지 크기
-
-        Returns:
-            {
-                "items": [
-                    {
-                        "caller_type": str,
-                        "caller_id": str,
-                        "total_count": int,
-                        "completed_count": int,
-                        "failed_count": int,
-                        "pending_count": int,
-                        "has_success": bool,
-                        "last_status": str,
-                        "last_requested_at": str | None,  # ISO string
-                        "last_error": str | None,
-                        "request_ids": list[int],  # 실패한 요청 ID들
-                        "prompt": str | None,
-                    }
-                ],
-                "total": int,
-                "page": int,
-                "page_size": int,
-                "pages": int,
-                "summary": {
-                    "total_callers": int,
-                    "callers_with_success": int,
-                    "callers_without_success": int
-                }
-            }
-        """
+        """caller_id별 그룹 요청 목록. GROUP BY 집계 + 배치 상세 2-query."""
         from sqlalchemy import and_, or_
 
         # 집계 쿼리 실행 — 로우 수 = distinct (caller_type, caller_id) 수
@@ -1879,10 +1841,14 @@ class LLMService:
         total_callers = len(all_agg)
         callers_with_success = sum(1 for r in all_agg if r.has_success)
         callers_without_success = total_callers - callers_with_success
+        summary = {
+            "total_callers": total_callers,
+            "callers_with_success": callers_with_success,
+            "callers_without_success": callers_without_success,
+        }
 
-        # only_without_success 필터 및 최신순 정렬
+        # only_without_success 필터 (ORDER BY는 DB에 위임됨)
         filtered = [r for r in all_agg if not r.has_success] if only_without_success else all_agg
-        filtered.sort(key=lambda r: r.last_at or datetime.min, reverse=True)
 
         total = len(filtered)
         pages = (total + page_size - 1) // page_size if total > 0 else 1
@@ -1895,11 +1861,7 @@ class LLMService:
                 "page": page,
                 "page_size": page_size,
                 "pages": pages,
-                "summary": {
-                    "total_callers": total_callers,
-                    "callers_with_success": callers_with_success,
-                    "callers_without_success": callers_without_success,
-                },
+                "summary": summary,
             }
 
         # 페이지 caller 키셋으로 상세 배치 조회 (최대 page_size건 OR 조건)
@@ -1924,13 +1886,12 @@ class LLMService:
         caller_detail: dict = {}
         for req in detail_rows:
             key = (req.caller_type, req.caller_id)
-            if key not in caller_detail:
-                caller_detail[key] = {
-                    "prompt": req.prompt,  # ASC 첫 row의 prompt
-                    "last_status": req.status,
-                    "last_error": None,
-                    "request_ids": [],
-                }
+            caller_detail.setdefault(key, {
+                "prompt": req.prompt,  # ASC 첫 row의 prompt
+                "last_status": req.status,
+                "last_error": None,
+                "request_ids": [],
+            })
             d = caller_detail[key]
             d["last_status"] = req.status  # ASC 마지막 row로 덮어쓰기
             if req.status == "failed":
@@ -1969,11 +1930,7 @@ class LLMService:
             "page": page,
             "page_size": page_size,
             "pages": pages,
-            "summary": {
-                "total_callers": total_callers,
-                "callers_with_success": callers_with_success,
-                "callers_without_success": callers_without_success,
-            },
+            "summary": summary,
         }
 
     def retry_failed_callers_without_success(self, caller_type: str = None) -> dict:
