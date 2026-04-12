@@ -88,6 +88,7 @@ class BrowserWorkerManager:
         self.pid_dir = PROJECT_ROOT / ".pids"
         self.log_dir = PROJECT_ROOT / "logs" / "admin"
         self.scripts_dir = PROJECT_ROOT / "scripts"
+        self.watchdogs_dir = PROJECT_ROOT / "scripts" / "watchdogs"
         self.frontend_dir = PROJECT_ROOT / "frontend"
         self.pid_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -116,7 +117,7 @@ class BrowserWorkerManager:
                 "name": "Worker Watchdog (all workers via WorkerOrchestrator)",
                 "pid_file": f"worker_watchdog{self.pid_suffix}.pid",
                 "cmd": [_ps_alias("monitorpage-wdog-worker.exe"), "-ExecutionPolicy", "Bypass", "-File",
-                        str(self.scripts_dir / "unified-worker-watchdog.ps1")],
+                        str(self.watchdogs_dir / "unified-worker-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
                 "role": "watchdog",
             },
@@ -124,7 +125,7 @@ class BrowserWorkerManager:
                 "name": "Claude Worker Watchdog",
                 "pid_file": f"claude_watchdog{self.pid_suffix}.pid",
                 "cmd": [_ps_alias("monitorpage-wdog-claude.exe"), "-ExecutionPolicy", "Bypass", "-File",
-                        str(self.scripts_dir / "claude-watchdog.ps1")],
+                        str(self.watchdogs_dir / "claude-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
                 "role": "claude_watchdog",
             },
@@ -132,7 +133,7 @@ class BrowserWorkerManager:
                 "name": "Command Listener Watchdog",
                 "pid_file": f"command_listener_watchdog{self.pid_suffix}.pid",
                 "cmd": [_ps_alias("monitorpage-wdog-cmd.exe"), "-ExecutionPolicy", "Bypass", "-File",
-                        str(self.scripts_dir / "command-listener-watchdog.ps1")],
+                        str(self.watchdogs_dir / "command-listener-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
                 "role": "listener",
             },
@@ -140,7 +141,7 @@ class BrowserWorkerManager:
                 "name": "Dev Runner Listener Watchdog",
                 "pid_file": f"dev_runner_watchdog{self.pid_suffix}.pid",
                 "cmd": [_ps_alias("monitorpage-wdog-devrunner.exe"), "-ExecutionPolicy", "Bypass", "-File",
-                        str(self.scripts_dir / "dev-runner-listener-watchdog.ps1")],
+                        str(self.watchdogs_dir / "dev-runner-listener-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
                 "role": "dev_listener",
             },
@@ -148,7 +149,7 @@ class BrowserWorkerManager:
                 "name": "Chat Executor Watchdog",
                 "pid_file": f"chat_executor_watchdog{self.pid_suffix}.pid",
                 "cmd": [_ps_alias("monitorpage-wdog-chat.exe"), "-ExecutionPolicy", "Bypass", "-File",
-                        str(self.scripts_dir / "llm-chat-executor-watchdog.ps1")],
+                        str(self.watchdogs_dir / "llm-chat-executor-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
                 "role": "watchdog",
             },
