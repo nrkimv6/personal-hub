@@ -1,4 +1,4 @@
-﻿# Unified Worker Watchdog Script
+# Unified Worker Watchdog Script
 # Monitors the unified worker process (all workers via WorkerOrchestrator) and automatically restarts if it crashes
 #
 # Workers managed:
@@ -23,7 +23,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 
 # Use APP_MODE environment variable to determine log directory
 $isAdmin = $env:APP_MODE -eq "admin"
@@ -105,7 +105,7 @@ function Start-UnifiedWorker {
     $actualPid | Out-File $WorkerPidFile -Encoding ascii
 
     # Register process in ProcessRegistry
-    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $actualPid --ppid $PID --name "unified-worker" --exe $VenvPython --role "worker" -ErrorAction SilentlyContinue
+    & $VenvPython "$ProjectRoot\scripts\services\register_process.py" --pid $actualPid --ppid $PID --name "unified-worker" --exe $VenvPython --role "worker" -ErrorAction SilentlyContinue
 
     Write-Log "Unified worker started with PID: $actualPid"
     Write-Log "  -> NaverMonitorWorker"

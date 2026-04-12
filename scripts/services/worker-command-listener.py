@@ -46,7 +46,7 @@ PODMAN_RECOVERY_COOLDOWN = 600  # 초 (10분) — 쿨다운 내 재시도 방지
 _last_podman_recovery_time: float = 0.0
 
 SCRIPT_DIR = Path(__file__).parent
-PROJECT_ROOT = SCRIPT_DIR.parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/services/ → scripts/ → project root
 BROWSER_WORKERS_SCRIPT = SCRIPT_DIR / "browser-workers.ps1"
 
 # 로깅 설정

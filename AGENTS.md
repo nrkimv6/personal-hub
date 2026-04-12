@@ -19,16 +19,16 @@
 
 ```powershell
 # API 재시작
-& "D:\work\project\tools\monitor-page\.venv\Scripts\python.exe" "D:\work\project\tools\monitor-page\scripts\browser_workers.py" restart-api
+& "D:\work\project\tools\monitor-page\.venv\Scripts\python.exe" "D:\work\project\tools\monitor-page\scripts\services\browser_workers.py" restart-api
 
 # 워커 재시작
-& "D:\work\project\tools\monitor-page\.venv\Scripts\python.exe" "D:\work\project\tools\monitor-page\scripts\browser_workers.py" restart
+& "D:\work\project\tools\monitor-page\.venv\Scripts\python.exe" "D:\work\project\tools\monitor-page\scripts\services\browser_workers.py" restart
 
 # Frontend 재시작 (Admin DEV)
-& "D:\work\project\tools\monitor-page\.venv\Scripts\python.exe" "D:\work\project\tools\monitor-page\scripts\browser_workers.py" restart-frontend
+& "D:\work\project\tools\monitor-page\.venv\Scripts\python.exe" "D:\work\project\tools\monitor-page\scripts\services\browser_workers.py" restart-frontend
 
 # Frontend 재시작 (Public PREVIEW)
-& "D:\work\project\tools\monitor-page\.venv\Scripts\python.exe" "D:\work\project\tools\monitor-page\scripts\browser_workers.py" restart-frontend --public
+& "D:\work\project\tools\monitor-page\.venv\Scripts\python.exe" "D:\work\project\tools\monitor-page\scripts\services\browser_workers.py" restart-frontend --public
 ```
 
 주의: `--restart-frontend`는 오입력. 위치 인자 `restart-frontend` 사용.

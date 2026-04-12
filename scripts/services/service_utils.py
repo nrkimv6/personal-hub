@@ -18,7 +18,7 @@ import psutil
 
 # 프로젝트 루트를 sys.path에 추가 (ProcessRegistry 임포트용)
 _SCRIPT_DIR = Path(__file__).resolve().parent
-_PROJECT_ROOT = _SCRIPT_DIR.parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent.parent  # scripts/services/ → scripts/ → project root
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 

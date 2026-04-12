@@ -1,13 +1,13 @@
 """Browser Workers 관리 CLI (browser-workers.ps1 Python 교체).
 
 Usage:
-  python scripts/browser_workers.py start
-  python scripts/browser_workers.py stop
-  python scripts/browser_workers.py restart
-  python scripts/browser_workers.py status
-  python scripts/browser_workers.py restart-api
-  python scripts/browser_workers.py restart-frontend
-  python scripts/browser_workers.py restart-frontend --public
+  python scripts/services/browser_workers.py start
+  python scripts/services/browser_workers.py stop
+  python scripts/services/browser_workers.py restart
+  python scripts/services/browser_workers.py status
+  python scripts/services/browser_workers.py restart-api
+  python scripts/services/browser_workers.py restart-frontend
+  python scripts/services/browser_workers.py restart-frontend --public
 """
 import argparse
 import asyncio

@@ -24,10 +24,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)  # scripts/services/ → scripts/ → project root
 
 # Import port utilities
-. "$ScriptDir\port-utils.ps1"
+. "$ProjectRoot\scripts\cleanup\port-utils.ps1"
 
 # Service configuration
 # Python service runner: service_run.py (service-run.ps1에서 마이그레이션됨)
@@ -306,7 +306,7 @@ function Open-ServiceLogs {
     # Determine if this is Admin service
     $isAdmin = $svc.Args -like "*-Admin*"
     $modeLabel = if ($isAdmin) { "ADMIN" } else { "PUBLIC" }
-    $logsScript = Join-Path $ScriptDir "logs.ps1"
+    $logsScript = Join-Path $ProjectRoot "scripts\logs\logs.ps1"
 
     # Build command string for wt (needs proper quoting)
     $adminFlag = if ($isAdmin) { " -Admin" } else { "" }

@@ -174,7 +174,7 @@ class WorkerService:
             action = "restart-infra"
             extra_args = [name]
 
-        scripts_dir = PROJECT_ROOT / "scripts"
+        scripts_dir = PROJECT_ROOT / "scripts" / "services"
         browser_workers = scripts_dir / "browser_workers.py"
 
         try:
@@ -240,7 +240,7 @@ class WorkerService:
 
         redis_client = await RedisClient.get_client()
         if not redis_client:
-            return {"success": False, "message": "Redis 연결 없음. CLI에서 실행: python scripts/browser_workers.py start"}
+            return {"success": False, "message": "Redis 연결 없음. CLI에서 실행: python scripts/services/browser_workers.py start"}
 
         import datetime
         command = json.dumps({
@@ -255,5 +255,5 @@ class WorkerService:
             result_key="worker:command_results",
             command=command,
             timeout=30,
-            timeout_msg="Command Listener 응답 타임아웃 (30초). CLI에서 실행: python scripts/browser_workers.py start",
+            timeout_msg="Command Listener 응답 타임아웃 (30초). CLI에서 실행: python scripts/services/browser_workers.py start",
         )

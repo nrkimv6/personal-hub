@@ -44,48 +44,46 @@
 
 ## services/
 
-> 현재 위치: `scripts/`
-> 예정 위치: `scripts/services/`
+> 현재 위치: `scripts/services/` ✅ (_todo-4 완료 2026-04-12)
 > 위험도: **🔴 고** — CLAUDE.md, NSSM, 스킬, 시작 프로그램에서 절대경로로 직접 참조
 > 주요 외부 참조자: `CLAUDE.md`, `app/modules/system/services/worker_service.py`, `frontend/src/routes/system/ServiceStatusTab.svelte`, `docs/dev-guide/process-structure.md`, `scripts/setup-exe-aliases.ps1`, `.claude/skills/merge-test/SKILL.md`, `.agents/skills/merge-test/SKILL.md`, `tests/test_system_processes.py`, `tests/test_refactor_zombie_dedup.py`, `tests/test_process_tracker/test_snapshot_writer.py`
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `browser_workers.py` | 통합 워커 CLI 엔트리 (start/stop/status/restart/restart-api/restart-frontend). NSSM 외 수동 관리 명령 |
-| ⏳ | `browser-workers.ps1` | `browser_workers.py`의 PowerShell 래퍼 |
-| ⏳ | `run.ps1` | API + Frontend 동시 실행 (NSSM 미사용 수동 실행 경로) |
-| ⏳ | `start.ps1` | 서비스 시작 래퍼 (NSSM 설정 및 수동 기동) |
-| ⏳ | `stop.ps1` | 서비스 중지 래퍼 |
-| ⏳ | `service-install.ps1` | NSSM 서비스 등록 스크립트 (API/Frontend) |
-| ⏳ | `service-run.ps1` | NSSM AppDirectory/Application이 가리키는 진입 스크립트 |
-| ⏳ | `service-run.ps1.bak` | 위 파일 백업본 — 이동 시 제거 검토 |
-| ⏳ | `service_run.py` | `service-run.ps1`의 Python 구현 엔트리 |
-| ⏳ | `service_utils.py` | `service_run.py`와 `browser_workers.py`가 공유하는 유틸 |
-| ⏳ | `worker-command-listener.py` | API→워커 명령 리스너 (Redis pub/sub 또는 stream 기반) |
+| ✅ | `browser_workers.py` | 통합 워커 CLI 엔트리 (start/stop/status/restart/restart-api/restart-frontend). NSSM 외 수동 관리 명령 |
+| ✅ | `browser-workers.ps1` | `browser_workers.py`의 PowerShell 래퍼 |
+| ✅ | `run.ps1` | API + Frontend 동시 실행 (NSSM 미사용 수동 실행 경로) |
+| ✅ | `start.ps1` | 서비스 시작 래퍼 (NSSM 설정 및 수동 기동) |
+| ✅ | `stop.ps1` | 서비스 중지 래퍼 |
+| ✅ | `service-install.ps1` | NSSM 서비스 등록 스크립트 (API/Frontend) |
+| ✅ | `service-run.ps1` | NSSM AppDirectory/Application이 가리키는 진입 스크립트 |
+| ✅ | `service-run.ps1.bak` | 위 파일 백업본 — 이동 시 제거 검토 |
+| ✅ | `service_run.py` | `service-run.ps1`의 Python 구현 엔트리 |
+| ✅ | `service_utils.py` | `service_run.py`와 `browser_workers.py`가 공유하는 유틸 |
+| ✅ | `worker-command-listener.py` | API→워커 명령 리스너 (Redis pub/sub 또는 stream 기반) |
 | ⏳ | `port-utils.ps1` | 포트 점유 확인 유틸 (서비스 기동 시 포트 검증) |
 
 ---
 
 ## watchdogs/
 
-> 현재 위치: `scripts/`
-> 예정 위치: `scripts/watchdogs/`
+> 현재 위치: `scripts/watchdogs/` ✅ (_todo-4 완료 2026-04-12)
 > 위험도: **🟡 중** — `docs/dev-guide/watchdog-architecture.md`, 시작 프로그램, NSSM에서 참조
 > 주요 외부 참조자: `docs/dev-guide/watchdog-architecture.md`, `tests/test_system_status_dev_runner_listener.py`, `app/modules/system/services/worker_service.py`
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `api-watchdog.ps1` | FastAPI 서버(:8000/:8001) 헬스체크 및 재기동 |
-| ⏳ | `claude-watchdog.ps1` | Claude worker 프로세스 감시 |
-| ⏳ | `command-listener-watchdog.ps1` | `worker-command-listener.py` 감시 |
-| ⏳ | `crawl-watchdog.ps1` | 크롤러 프로세스 감시 |
-| ⏳ | `dev-runner-listener-watchdog.ps1` | `dev-runner-command-listener.py` 감시 — 내부에서 `_dr_*` 경로 spawn |
-| ⏳ | `llm-chat-executor-watchdog.ps1` | LLM 채팅 executor 감시 |
-| ⏳ | `startup-api-watchdog.ps1` | 부팅 시 api-watchdog 기동 |
-| ⏳ | `unified-worker-watchdog.ps1` | 통합 워커 감시 |
-| ⏳ | `worker-watchdog.ps1` | 범용 워커 감시 |
-| ⏳ | `watchdog-utils.ps1` | 위 watchdog 스크립트 공통 유틸 (로깅/pid 관리) |
-| ⏳ | `cleanup-zombie-processes.ps1` | 좀비/고아 프로세스 정리 — watchdog와 함께 동작하므로 watchdogs/에 귀속 |
+| ✅ | `api-watchdog.ps1` | FastAPI 서버(:8000/:8001) 헬스체크 및 재기동 |
+| ✅ | `claude-watchdog.ps1` | Claude worker 프로세스 감시 |
+| ✅ | `command-listener-watchdog.ps1` | `worker-command-listener.py` 감시 |
+| ✅ | `crawl-watchdog.ps1` | 크롤러 프로세스 감시 |
+| ✅ | `dev-runner-listener-watchdog.ps1` | `dev-runner-command-listener.py` 감시 — 내부에서 `_dr_*` 경로 spawn |
+| ✅ | `llm-chat-executor-watchdog.ps1` | LLM 채팅 executor 감시 |
+| ✅ | `startup-api-watchdog.ps1` | 부팅 시 api-watchdog 기동 |
+| ✅ | `unified-worker-watchdog.ps1` | 통합 워커 감시 |
+| ✅ | `worker-watchdog.ps1` | 범용 워커 감시 |
+| ✅ | `watchdog-utils.ps1` | 위 watchdog 스크립트 공통 유틸 (로깅/pid 관리) |
+| ✅ | `cleanup-zombie-processes.ps1` | 좀비/고아 프로세스 정리 — watchdog와 함께 동작하므로 watchdogs/에 귀속 |
 
 ---
 
@@ -177,7 +175,7 @@
 | ✅ | `ps-python-processes.ps1` | 파이썬 프로세스 트리 출력 |
 | ✅ | `show-processes.ps1` | 프로세스 요약 출력 |
 | ✅ | `test_pg_connection.py` | PG 연결 확인 (진단용 — migrations 아님) |
-| ⏳ | `register_process.py` | 프로세스 등록/추적 유틸 |
+| ✅ | `register_process.py` | 프로세스 등록/추적 유틸 |
 
 ---
 
@@ -267,18 +265,17 @@
 
 ## logs/
 
-> 현재 위치: `scripts/`
-> 예정 위치: `scripts/logs/`
+> 현재 위치: `scripts/logs/` ✅ (_todo-4 완료 2026-04-12, listener_noise_filter.py → plan_runner/)
 > 위험도: **🔴 고** — `CLAUDE.md`, `docs/dev-guide/logs-ps1.md`, `docs/dev-guide/troubleshooting.md`, 다수 archive 문서에서 `.\scripts\logs.ps1 -Follow -Admin` 직접 호출
 > 주요 외부 참조자: `CLAUDE.md`, `docs/dev-guide/troubleshooting.md`, `docs/dev-guide/logs-ps1.md`, `tests/logs_follow_fallback.Tests.ps1`, `scripts/start.ps1`
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `logs.ps1` | 핵심 로그 뷰어 (`-Follow`, `-Admin`, `-Public`, `-TailLines`) |
-| ⏳ | `startup-logs.ps1` | 부팅 시 로그 로테이션/초기화 |
-| ⏳ | `split-cloudflared-log.ps1` | cloudflared 로그 분할 |
-| ⏳ | `setup-log-cleanup-task.ps1` | 로그 정리 작업 등록 (Task Scheduler) |
-| ⏳ | `cleanup-logs.ps1` | 로그 정리 스크립트 |
+| ✅ | `logs.ps1` | 핵심 로그 뷰어 (`-Follow`, `-Admin`, `-Public`, `-TailLines`) |
+| ✅ | `startup-logs.ps1` | 부팅 시 로그 로테이션/초기화 |
+| ✅ | `split-cloudflared-log.ps1` | cloudflared 로그 분할 |
+| ✅ | `setup-log-cleanup-task.ps1` | 로그 정리 작업 등록 (Task Scheduler) |
+| ✅ | `cleanup-logs.ps1` | 로그 정리 스크립트 |
 | ⏳ | `listener_noise_filter.py` | listener 로그 노이즈 필터 |
 | ⏳ | `Send-TelegramAlert.ps1` | 텔레그램 알림 전송 (운영 알림) |
 

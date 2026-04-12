@@ -16,7 +16,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 
 $isAdmin = $env:APP_MODE -eq "admin"
 if ($isAdmin) {
@@ -96,7 +96,7 @@ function Start-DevRunnerListener {
     $actualPid | Out-File $WorkerPidFile -Encoding ascii
 
     # ProcessRegistry 등록
-    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $actualPid --ppid $PID --name "dev-runner-listener" --exe $VenvPython --role "dev_listener" -ErrorAction SilentlyContinue
+    & $VenvPython "$ProjectRoot\scripts\services\register_process.py" --pid $actualPid --ppid $PID --name "dev-runner-listener" --exe $VenvPython --role "dev_listener" -ErrorAction SilentlyContinue
 
     Write-Log "dev-runner-command-listener started with PID: $actualPid"
     return $actualPid

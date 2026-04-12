@@ -1,4 +1,4 @@
-﻿# API Watchdog Script
+# API Watchdog Script
 # External health checker for API server with staged recovery
 #
 # Runs independently of API server to detect hangs that internal health monitor cannot detect
@@ -25,10 +25,10 @@ param(
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 
 # Load Telegram alert function
-. (Join-Path $ScriptDir "Send-TelegramAlert.ps1")
+. (Join-Path $ProjectRoot "scripts\setup\Send-TelegramAlert.ps1")
 
 # Configuration
 $port = if ($Admin) { 8001 } else { 8000 }
@@ -40,7 +40,7 @@ $healthEndpoint = "http://localhost:$port/api/v1/system/status"
 $failureCount = 0
 $lastSuccessTime = Get-Date
 $totalRestarts = 0
-$diagScriptPath = Join-Path $ScriptDir "diagnose-api.ps1"
+$diagScriptPath = Join-Path $ProjectRoot "scripts\diagnose-api.ps1"
 $diagJsonPath = Join-Path $ProjectRoot "frontend\static\diagnostics.json"
 $processStatusPath = Join-Path $ProjectRoot "frontend\static\process-status.json"
 

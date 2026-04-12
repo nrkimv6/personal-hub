@@ -14,7 +14,7 @@ param(
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $apiWatchdogScript = Join-Path $ScriptDir "api-watchdog.ps1"
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$LogFile = Join-Path (Split-Path -Parent $ScriptDir) "logs\admin\startup_api_watchdog_$timestamp.log"
+$LogFile = Join-Path (Split-Path -Parent (Split-Path -Parent $ScriptDir)) "logs\admin\startup_api_watchdog_$timestamp.log"
 
 function Write-Log {
     param([string]$Message)
@@ -74,7 +74,7 @@ if ($waited -ge $maxWait) {
 Write-Log "Starting API watchdog with auto-restart loop..."
 
 # PID 기록 (자기 자신 = supervisor)
-$pidFile = Join-Path (Split-Path -Parent $ScriptDir) ".pids\api_watchdog_admin.pid"
+$pidFile = Join-Path (Split-Path -Parent (Split-Path -Parent $ScriptDir)) ".pids\api_watchdog_admin.pid"
 $pidDir = Split-Path -Parent $pidFile
 if (-not (Test-Path $pidDir)) {
     New-Item -ItemType Directory -Path $pidDir -Force | Out-Null
