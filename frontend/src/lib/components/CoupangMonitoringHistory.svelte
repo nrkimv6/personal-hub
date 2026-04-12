@@ -150,8 +150,8 @@
         <input id="history-date-to" type="date" class="input" bind:value={filters.date_to} />
       </div>
       <div class="flex items-end gap-2">
-        <Button variant="primary" on:click={handleSearch}>검색</Button>
-        <Button variant="secondary" on:click={clearFilters}>초기화</Button>
+        <Button variant="primary" onclick={handleSearch}>검색</Button>
+        <Button variant="secondary" onclick={clearFilters}>초기화</Button>
       </div>
     </div>
   </div>
@@ -224,7 +224,7 @@
               variant="secondary"
               size="sm"
               disabled={page === 1}
-              on:click={() => {
+              onclick={() => {
                 page--;
                 void fetchData(true);
               }}
@@ -235,7 +235,7 @@
               variant="secondary"
               size="sm"
               disabled={page === totalPages}
-              on:click={() => {
+              onclick={() => {
                 page++;
                 void fetchData(true);
               }}

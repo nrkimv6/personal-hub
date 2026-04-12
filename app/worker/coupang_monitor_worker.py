@@ -40,12 +40,32 @@ class CoupangMonitorWorker(BaseWorker):
         from app.modules.coupang_travel.services.api_client import CoupangApiClient
         from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
         from app.shared.notification import NotificationService
+        from app.models.service_account import ServiceAccount
 
         self._api_client = CoupangApiClient()
         notification_service = NotificationService()
         self._monitor_service = CoupangMonitorService(self._api_client, notification_service)
 
-        logger.info("[%s] 초기화 완료", self.name)
+        db = SessionLocal()
+        try:
+            account_count = (
+                db.query(ServiceAccount)
+                .filter(ServiceAccount.service_type == "coupang")
+                .count()
+            )
+            active_schedules = schedule_service.get_all_with_context(
+                db, is_enabled=True, service_type="coupang"
+            )
+            schedule_count = len(active_schedules)
+        finally:
+            db.close()
+
+        logger.info(
+            "[%s] 초기화 완료 — 서비스 계정 %d건, 활성 스케줄 %d건",
+            self.name,
+            account_count,
+            schedule_count,
+        )
 
     async def _main_loop_iteration(self) -> None:
         """메인 루프 1회 반복 — 활성 쿠팡 스케줄 순회 + 상태 체크."""
@@ -62,6 +82,7 @@ class CoupangMonitorWorker(BaseWorker):
             db.close()
 
         if not schedules:
+            logger.debug("[%s] 활성 쿠팡 스케줄 없음, 스킵", self.name)
             return
 
         for ctx in schedules:

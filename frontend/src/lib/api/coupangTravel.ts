@@ -44,7 +44,7 @@ export interface CreateTargetRequest {
 export interface CreateScheduleRequest {
   biz_item_id: number;
   dates: string[];
-  service_account_id: number;
+  service_account_id?: number;
 }
 
 // ========== API ==========
@@ -92,6 +92,10 @@ export const coupangTravelApi = {
 
   async getStatus(options?: RequestInit): Promise<CoupangStatusSummary> {
     return request<CoupangStatusSummary>(`${BASE}/status`, options);
+  },
+
+  async cleanupSchedules(): Promise<{ deleted: number }> {
+    return request<{ deleted: number }>(`${BASE}/schedules/cleanup`, { method: 'POST' });
   },
 
   async listEvents(
