@@ -14,6 +14,7 @@ from app.database import get_db
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.routes.llm_routes import router as llm_router
 import app.modules.claude_worker.services.llm_service as llm_service_module
+import app.modules.claude_worker.services.llm_config_service as llm_config_service_module
 
 # LLM 라우터만 포함하는 minimal test app (playwright 등 무거운 의존성 제외)
 app = FastAPI()
@@ -47,9 +48,12 @@ def cleanup(test_db_session):
 
 @pytest.fixture(autouse=True)
 def isolate_llm_defaults_file(monkeypatch, tmp_path):
-    """테스트 간 LLM 기본값 파일 격리."""
+    """테스트 간 LLM 기본값 파일 격리.
+
+    LLM_DEFAULTS_FILE은 llm_config_service 모듈로 이전됨.
+    """
     monkeypatch.setattr(
-        llm_service_module,
+        llm_config_service_module,
         "LLM_DEFAULTS_FILE",
         tmp_path / "llm_defaults.json",
     )
@@ -268,9 +272,9 @@ class TestLlmDefaultsApi:
     """LLM 기본값 API 및 fallback 우선순위 테스트."""
 
     def test_defaults_path_seam_monkeypatch_priority(self, client, monkeypatch, tmp_path):
-        original_path = Path(llm_service_module.LLM_DEFAULTS_FILE)
+        original_path = llm_config_service_module.LLM_DEFAULTS_FILE
         custom_path = tmp_path / "custom_llm_defaults.json"
-        monkeypatch.setattr(llm_service_module, "LLM_DEFAULTS_FILE", custom_path)
+        monkeypatch.setattr(llm_config_service_module, "LLM_DEFAULTS_FILE", custom_path)
 
         resp = client.put(
             "/api/v1/llm/defaults",
@@ -286,8 +290,8 @@ class TestLlmDefaultsApi:
         external_cwd = tmp_path / "external-cwd"
         external_cwd.mkdir(parents=True, exist_ok=True)
 
-        monkeypatch.setattr(llm_service_module, "PROJECT_ROOT", project_root)
-        monkeypatch.setattr(llm_service_module, "LLM_DEFAULTS_FILE", Path("data/llm_defaults.json"))
+        monkeypatch.setattr(llm_config_service_module, "PROJECT_ROOT", project_root)
+        monkeypatch.setattr(llm_config_service_module, "LLM_DEFAULTS_FILE", Path("data/llm_defaults.json"))
         monkeypatch.chdir(external_cwd)
 
         resp = client.put(
@@ -304,7 +308,7 @@ class TestLlmDefaultsApi:
         def _raise_atomic(*args, **kwargs):  # noqa: ARG001
             raise OSError("atomic write failed")
 
-        monkeypatch.setattr(llm_service_module, "write_json_atomic", _raise_atomic)
+        monkeypatch.setattr(llm_config_service_module, "write_json_atomic", _raise_atomic)
 
         with pytest.raises(OSError):
             service.save_llm_defaults(

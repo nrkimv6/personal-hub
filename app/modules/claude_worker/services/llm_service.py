@@ -2,24 +2,14 @@
 
 import json
 import logging
-import os
-import re
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
-from app.shared.io import read_json, write_json_atomic
 from app.modules.claude_worker.services import provider_registry
-from app.shared.llm_registry import (
-    CALLER_TYPE_TO_STEP,
-    NoAvailableModelError,
-    pick_model,
-    report_quota,
-)
 
 logger = logging.getLogger("claude_worker.llm_service")
 
@@ -32,107 +22,6 @@ QUEUE_PRIORITY = ["system", "utility"]
 
 # Quota pause 기본 대기 시간 (ms) — 6시간
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000
-
-# LLM 기본값 설정 파일
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_LLM_DEFAULTS_FILE = PROJECT_ROOT / "data" / "llm_defaults.json"
-LEGACY_LLM_DEFAULTS_FILE = Path("data/llm_defaults.json")
-LLM_DEFAULTS_FILE = DEFAULT_LLM_DEFAULTS_FILE
-
-# provider 관련 상수는 provider_registry 에서 관리 (shadow 상수 제거됨)
-
-# 설정 UI 노출용 caller_type 목록 (코드 기준)
-KNOWN_CALLER_TYPES = [
-    "instagram",
-    "universal_crawl",
-    "image_classify",
-    "event_import",
-    "report",
-    "pytest_fix",
-    "dev_runner",
-    "git_repos",
-    "topic_extract",
-    "writing",
-    "writing_generate",
-    "writing_refine",
-    "plan_archive_analyze",
-    "plan_recurrence_check",
-    "plan_recurrence_suggest",
-]
-
-
-def _normalize_path(path: Path) -> str:
-    absolute = path if path.is_absolute() else (Path.cwd() / path)
-    return os.path.normcase(os.path.normpath(str(absolute)))
-
-
-def _same_path(lhs: Path, rhs: Path) -> bool:
-    return _normalize_path(lhs) == _normalize_path(rhs)
-
-
-def _resolve_llm_defaults_path() -> Path:
-    """테스트 monkeypatch seam(LLM_DEFAULTS_FILE)을 유지하면서 경로를 해석."""
-    configured = Path(LLM_DEFAULTS_FILE)
-    if configured.is_absolute():
-        return configured
-    return PROJECT_ROOT / configured
-
-
-def _is_default_llm_defaults_path(path: Path) -> bool:
-    return _same_path(path, DEFAULT_LLM_DEFAULTS_FILE)
-
-
-def _migrate_legacy_llm_defaults_if_needed(target_path: Path) -> None:
-    if not _is_default_llm_defaults_path(target_path):
-        logger.debug(f"[llm-defaults] 주입 경로 감지: 레거시 마이그레이션 스킵 ({target_path})")
-        return
-    if target_path.exists():
-        logger.debug(f"[llm-defaults] 기본 경로 파일 존재: 레거시 마이그레이션 스킵 ({target_path})")
-        return
-
-    legacy_path = (
-        LEGACY_LLM_DEFAULTS_FILE
-        if LEGACY_LLM_DEFAULTS_FILE.is_absolute()
-        else (Path.cwd() / LEGACY_LLM_DEFAULTS_FILE)
-    )
-    if not legacy_path.exists():
-        logger.debug(f"[llm-defaults] 레거시 파일 없음: 마이그레이션 스킵 ({legacy_path})")
-        return
-    if _same_path(legacy_path, target_path):
-        logger.debug(f"[llm-defaults] 레거시/기본 경로 동일: 마이그레이션 스킵 ({target_path})")
-        return
-
-    legacy_payload = read_json(legacy_path, default=None)
-    if not isinstance(legacy_payload, dict):
-        logger.warning(f"[llm-defaults] 레거시 설정 파일 손상: 마이그레이션 스킵 ({legacy_path})")
-        return
-
-    write_json_atomic(target_path, legacy_payload)
-    logger.info(f"[llm-defaults] 레거시 설정 마이그레이션 완료: {legacy_path} -> {target_path}")
-
-
-def _parse_quota_retry_ms(text: str) -> Optional[int]:
-    """stderr/stdout에서 quota 재시도 대기 시간(ms) 파싱.
-
-    1순위: retryDelayMs: 숫자 정규식 파싱
-    2순위: reset after Xh Ym Zs 텍스트 파싱
-    미감지: None 반환
-    """
-    if not text:
-        return None
-
-    # 1순위: retryDelayMs 파싱
-    m = re.search(r"retryDelayMs:\s*([\d.]+)", text)
-    if m:
-        return int(float(m.group(1)))
-
-    # 2순위: "reset after Xh Ym Zs" 파싱
-    m = re.search(r"reset after (\d+)h(\d+)m(\d+)s", text)
-    if m:
-        h, mn, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        return (h * 3600 + mn * 60 + s) * 1000
-
-    return None
 
 
 class LLMService:
@@ -147,142 +36,46 @@ class LLMService:
             LLMRequestRepository,
             LLMWorkerRepository,
         )
+        from app.modules.claude_worker.services.llm_config_service import LLMConfigService
         self._repo = LLMRequestRepository(db)
         self._worker_repo = LLMWorkerRepository(db)
+        self._config_svc = LLMConfigService()
 
-    # ========== 기본값 관리 ==========
+    # ========== 기본값 관리 (→ LLMConfigService 위임) ==========
 
     @staticmethod
     def get_supported_providers() -> List[str]:
-        return sorted(p.key for p in provider_registry.list_enabled())
+        from app.modules.claude_worker.services.llm_config_service import LLMConfigService
+        return LLMConfigService.get_supported_providers()
 
     @staticmethod
     def get_known_caller_types() -> List[str]:
-        return sorted(KNOWN_CALLER_TYPES)
+        from app.modules.claude_worker.services.llm_config_service import LLMConfigService
+        return LLMConfigService.get_known_caller_types()
 
     @staticmethod
     def _normalize_provider(value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            return None
-        normalized = value.strip()
-        return normalized or None
+        from app.modules.claude_worker.services.llm_config_service import LLMConfigService
+        return LLMConfigService._normalize_provider(value)
 
     @staticmethod
     def _normalize_model(value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            value = str(value)
-        normalized = value.strip()
-        # 빈 문자열은 "미지정"으로 간주
-        return normalized or None
+        from app.modules.claude_worker.services.llm_config_service import LLMConfigService
+        return LLMConfigService._normalize_model(value)
 
     @classmethod
     def _default_defaults_payload(cls) -> Dict[str, Any]:
-        return {
-            "global_default": {"provider": "claude", "model": ""},
-            "caller_defaults": {},
-        }
+        from app.modules.claude_worker.services.llm_config_service import LLMConfigService
+        return LLMConfigService._default_defaults_payload()
 
     def _sanitize_defaults_payload(self, raw: Any) -> Dict[str, Any]:
-        payload = self._default_defaults_payload()
-        if not isinstance(raw, dict):
-            return payload
-
-        raw_global = raw.get("global_default")
-        if isinstance(raw_global, dict):
-            provider = self._normalize_provider(raw_global.get("provider")) or "claude"
-            if not provider_registry.is_supported(provider):
-                provider = "claude"
-            model = raw_global.get("model")
-            if model is None:
-                model = ""
-            if not isinstance(model, str):
-                model = str(model)
-            payload["global_default"] = {
-                "provider": provider,
-                "model": model.strip(),
-            }
-
-        raw_callers = raw.get("caller_defaults")
-        if not isinstance(raw_callers, dict):
-            return payload
-
-        caller_defaults: Dict[str, Dict[str, str]] = {}
-        for caller_type, config in raw_callers.items():
-            caller = str(caller_type).strip()
-            if not caller or not isinstance(config, dict):
-                continue
-
-            provider = self._normalize_provider(config.get("provider"))
-            if provider is None or not provider_registry.is_supported(provider):
-                continue
-
-            model = config.get("model")
-            if model is None:
-                model = ""
-            if not isinstance(model, str):
-                model = str(model)
-
-            caller_defaults[caller] = {
-                "provider": provider,
-                "model": model.strip(),
-            }
-
-        payload["caller_defaults"] = caller_defaults
-        return payload
+        return self._config_svc._sanitize_defaults_payload(raw)
 
     def load_llm_defaults(self) -> Dict[str, Any]:
-        target_path = _resolve_llm_defaults_path()
-        _migrate_legacy_llm_defaults_if_needed(target_path)
-
-        if not target_path.exists():
-            return self._default_defaults_payload()
-
-        try:
-            data = read_json(target_path, default=None)
-            if not isinstance(data, dict):
-                raise ValueError("llm defaults payload is not an object")
-            return self._sanitize_defaults_payload(data)
-        except Exception:
-            logger.warning(f"[llm-defaults] 설정 파일 읽기 실패, 기본값 사용: {target_path}")
-            return self._default_defaults_payload()
+        return self._config_svc.load_llm_defaults()
 
     def save_llm_defaults(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        defaults = self._sanitize_defaults_payload(payload)
-
-        # 저장 요청에서 caller_defaults를 명시적으로 보낸 경우 provider 공백 항목 제거
-        if isinstance(payload, dict) and isinstance(payload.get("caller_defaults"), dict):
-            requested = payload.get("caller_defaults", {})
-            caller_defaults: Dict[str, Dict[str, str]] = {}
-            for caller_type, config in requested.items():
-                caller = str(caller_type).strip()
-                if not caller:
-                    continue
-                if not isinstance(config, dict):
-                    continue
-                provider = self._normalize_provider(config.get("provider"))
-                if provider is None:
-                    # provider가 비어 있으면 caller override 삭제(=global fallback)
-                    continue
-                if not provider_registry.is_supported(provider):
-                    raise ValueError(f"지원되지 않는 provider: {provider}")
-                model = config.get("model")
-                if model is None:
-                    model = ""
-                if not isinstance(model, str):
-                    model = str(model)
-                caller_defaults[caller] = {
-                    "provider": provider,
-                    "model": model.strip(),
-                }
-            defaults["caller_defaults"] = caller_defaults
-
-        target_path = _resolve_llm_defaults_path()
-        write_json_atomic(target_path, defaults)
-        return defaults
+        return self._config_svc.save_llm_defaults(payload)
 
     def resolve_provider_model(
         self,
@@ -290,88 +83,7 @@ class LLMService:
         provider: Optional[str] = None,
         model: Optional[str] = None,
     ) -> Tuple[str, str]:
-        """우선순위 1-D:
-        1순위: 호출자 명시 provider/model → 즉시 반환 (quota 확인 없음)
-        2순위: caller_defaults pin → 반환. oneshot 모델 pin 시 WARN
-        3순위: registry picker (step 기반) — openai 반환 시 재-pick (O-2)
-        4순위: global_default (quota 차단이면 에러 전파)
-        """
-        defaults = self.load_llm_defaults()
-        global_default = defaults.get("global_default", {})
-        caller_defaults = defaults.get("caller_defaults", {})
-        caller_default = caller_defaults.get(caller_type, {}) if isinstance(caller_defaults, dict) else {}
-
-        # ── 1순위: 호출자 명시 ────────────────────────────────────────────────
-        explicit_provider = self._normalize_provider(provider)
-        explicit_model = self._normalize_model(model)
-        if explicit_provider is not None and explicit_model is not None:
-            return explicit_provider, explicit_model
-
-        # ── 2순위: caller pin (명시 provider OR model 부분 지정 포함) ──────────
-        pin_provider = self._normalize_provider(caller_default.get("provider"))
-        pin_model = self._normalize_model(caller_default.get("model"))
-        if pin_provider and pin_model:
-            # O-5: pin된 모델이 oneshot 후보와 일치하면 WARN
-            try:
-                from app.shared.llm_registry import load_registry
-                registry = load_registry()
-                for candidates in registry.values():
-                    for cand in candidates:
-                        if cand.oneshot and cand.provider == pin_provider and cand.model == pin_model:
-                            logger.warning(
-                                f"[resolve] caller_pin {pin_provider}/{pin_model}이 "
-                                "oneshot 전용 registry 모델과 일치. 핑퐁 경로에서 호출됩니다."
-                            )
-                            break
-            except Exception:
-                pass
-            return pin_provider, pin_model
-
-        # ── 3순위: registry picker ───────────────────────────────────────────
-        step = CALLER_TYPE_TO_STEP.get(caller_type)
-        if step:
-            try:
-                picked_provider, picked_model = pick_model(step, oneshot=False)
-                # O-2: 실행 불가 provider(quota_pause=False) → exclude 재-pick
-                _quota_providers = set(provider_registry.get_quota_providers())
-                if picked_provider not in _quota_providers:
-                    logger.warning(
-                        f"[resolve] picker가 {picked_provider}/{picked_model} 반환 "
-                        f"(실행 불가, quota_providers={_quota_providers}). 재-pick."
-                    )
-                    _all_providers = {p.key for p in provider_registry.list_enabled()}
-                    picked_provider, picked_model = pick_model(
-                        step, oneshot=False, exclude_providers=_all_providers - _quota_providers
-                    )
-                return picked_provider, picked_model
-            except NoAvailableModelError as e:
-                logger.error(f"[resolve] picker 실패: {e}. global_default로 fallback.")
-            except Exception as e:
-                logger.error(f"[resolve] picker 예외: {e}. global_default로 fallback.")
-
-        # ── 4순위: global_default ─────────────────────────────────────────────
-        gd_provider = self._normalize_provider(global_default.get("provider")) or "claude"
-        gd_model = self._normalize_model(global_default.get("model")) or ""
-        # 4순위도 quota 재확인 (1-E step 3)
-        if gd_provider in set(provider_registry.get_quota_providers()):
-            try:
-                from app.shared.llm_registry import load_quota_state
-                state = load_quota_state()
-                key = f"{gd_provider}/{gd_model}" if gd_model else None
-                if key and key in state:
-                    quota = state[key]
-                    from app.shared.llm_registry import _now_kst
-                    now = _now_kst()
-                    if quota.is_in_cooldown(now) or quota.is_weekly_exhausted():
-                        raise NoAvailableModelError(
-                            caller_type,
-                            f"global_default {gd_provider}/{gd_model}도 quota 차단. 수동 보고 필요."
-                        )
-            except NoAvailableModelError:
-                raise
-            except Exception:
-                pass  # quota 조회 실패 시 global_default 그대로 사용
-        return gd_provider, gd_model
+        return self._config_svc.resolve_provider_model(caller_type, provider, model)
 
     # ========== 큐 관리 ==========
 
