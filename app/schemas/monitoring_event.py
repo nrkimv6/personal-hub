@@ -108,3 +108,42 @@ class MonitoringEventStats(BaseModel):
     error_count: int = 0
     avg_response_time_ms: Optional[float] = None
     last_check_time: Optional[datetime] = None
+
+
+# ── 취소표 통계 스키마 ────────────────────────────────────────────────────────
+
+class CancellationStatItem(BaseModel):
+    """취소표 통계 개별 항목 (일별 또는 시간대별)"""
+    date: Optional[str] = None          # group_by=day: YYYY-MM-DD
+    hour: Optional[int] = None          # group_by=hour: 0~23
+    count: int
+    biz_item_id: Optional[int] = None
+    biz_item_name: Optional[str] = None
+
+
+class CancellationStatsSummary(BaseModel):
+    """취소표 통계 요약"""
+    total: int = 0
+    avg_per_day: float = 0.0
+    peak_hour: Optional[int] = None     # 가장 많이 발생한 시간(시)
+
+
+class CancellationStatsResponse(BaseModel):
+    """취소표 시계열 통계 응답"""
+    items: List[CancellationStatItem]
+    summary: CancellationStatsSummary
+
+
+class CancellationByProductItem(BaseModel):
+    """상품별 취소표 요약 항목"""
+    biz_item_id: int
+    biz_item_name: str
+    business_name: str
+    total_count: int
+    last_detected: Optional[datetime] = None
+    avg_interval_hours: Optional[float] = None
+
+
+class CancellationByProductResponse(BaseModel):
+    """상품별 취소표 요약 응답"""
+    items: List[CancellationByProductItem]
