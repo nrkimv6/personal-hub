@@ -30,7 +30,7 @@ param(
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 
 # Log directory based on mode
 if ($Admin) {
@@ -436,7 +436,7 @@ function Get-ActivePlanRunners {
     param([string]$LogDir)
     $result = @()
 
-    $py = Join-Path (Split-Path -Parent $PSScriptRoot) ".venv\Scripts\python.exe"
+    $py = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) ".venv\Scripts\python.exe"
     if (-not (Test-Path $py)) { return $result }
 
     # 임시 파일로 Python 코드 전달 (PowerShell -c 인자 전달 시 따옴표 제거 방지)
