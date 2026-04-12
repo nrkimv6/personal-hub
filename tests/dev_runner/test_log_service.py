@@ -1006,16 +1006,25 @@ class TestFindCurrentLogMtimeLatest:
 
 
 class TestFilePosEofInitialization:
-    """_file_pos EOF 초기화: since_line=0 파일 폴링 진입 시 기존 내용 재전송 방지 TC"""
+    """_file_pos 초기화: since_line=0 파일 폴링 fallback 진입 시 파일 처음부터 읽기 TC
+
+    2026-04-10: EOF seek 제거 수정 — fallback 진입 시 _file_pos=0 유지(파일 처음부터 읽기).
+    이전 동작(EOF seek으로 기존 내용 누락)이 버그임을 확인하고 TC 기대값 반전.
+    """
 
     def test_file_pos_eof_init_no_resend_existing_content(self, tmp_path):
-        """since_line=0 + 파일 기존 내용 존재 + 폴링 fallback → 기존 내용 재전송 안 함.
+        """since_line=0 + 파일 기존 내용 존재 + 폴링 fallback → 기존 내용이 전달되어야 함.
+
+        수정 방향 (2026-04-10):
+        - EOF seek 블록 제거 → _file_pos=0 유지 → 파일 처음부터 읽기
+        - pubsub이 아무 내용도 전달 못한 경우 기존 파일 내용을 클라이언트에 전달해야 함
+        - trade-off: 중복 가능성 있으나 누락보다 낫다
 
         동작:
         1. asyncio.sleep: 즉시 반환 패치 (hang 방지)
         2. time.monotonic 카운터: 처음 2회=T0, 이후=T0+10 (FILE_POLL_TIMEOUT 즉시 초과)
         3. pubsub: 6번째 call 시 __COMPLETED__ → 루프 종료
-        4. 기존 파일 내용이 chunks에 없으면 EOF 초기화 성공
+        4. 기존 파일 내용이 chunks에 포함되어야 함 (파일 처음부터 읽기 성공)
         """
         import asyncio as _asyncio
         from unittest.mock import AsyncMock, patch as _patch
@@ -1073,11 +1082,17 @@ class TestFilePosEofInitialization:
 
         chunks = _asyncio.run(collect())
 
-        # 기존 내용이 재전송되지 않아야 함 (EOF 초기화 성공)
+        # 기존 내용이 전달되어야 함 (파일 처음부터 읽기 — EOF seek 제거 후 올바른 동작)
         data_chunks = [c for c in chunks if "existing line" in c]
-        assert len(data_chunks) == 0, (
-            f"기존 내용이 재전송됨 (EOF 초기화 미동작): {data_chunks}\n"
-            "since_line=0 파일 폴링 첫 진입 시 EOF seek이 누락됨"
+        assert len(data_chunks) >= 1, (
+            f"기존 내용이 전달되지 않음: chunks={chunks}\n"
+            "since_line=0 fallback 진입 시 파일 처음부터 읽어야 함 (EOF seek 제거됨)"
+        )
+        assert any("existing line 1" in c for c in data_chunks), (
+            f"existing line 1 누락: {data_chunks}"
+        )
+        assert any("existing line 2" in c for c in data_chunks), (
+            f"existing line 2 누락: {data_chunks}"
         )
         # 스트림이 정상 완료됨 확인
         completed = [c for c in chunks if "event: completed" in c]

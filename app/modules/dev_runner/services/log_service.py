@@ -335,6 +335,7 @@ class LogService:
         # Phase 2: 파일 폴링 fallback
         _no_msg_since = time.monotonic()
         _file_pos = _file_pos_init
+        _fallback_entered = False
         _poll_chunk_buffer = ""
         _poll_framer = _PollFrameBuffer()
 
@@ -381,20 +382,14 @@ class LogService:
                         if now - _no_msg_since >= FILE_POLL_TIMEOUT:
                             log_file = self._find_current_log(runner_id)
                             if log_file and log_file.exists():
-                                if _file_pos == 0:
-                                    # since_line=0: 파일 폴링 첫 진입 시 EOF seek으로 초기화 (기존 내용 중복 재전송 방지)
-                                    try:
-                                        with open(log_file, "r", encoding="utf-8", errors="replace") as _f_init:
-                                            _f_init.seek(0, 2)  # SEEK_END
-                                            _file_pos = _f_init.tell()
-                                    except Exception:
-                                        pass
+                                if not _fallback_entered:
                                     logger.warning(
                                         "[SSE][FALLBACK] %s",
                                         json.dumps({"event": "fallback_mode", "channel": log_channel, "runner_id": runner_id}),
                                     )
                                     # R4: 클라이언트에 fallback_mode 이벤트 전송 (개발 모드용 배지)
                                     yield "event: fallback_mode\ndata: file polling active\n\n"
+                                    _fallback_entered = True
                                 try:
                                     with open(log_file, "r", encoding="utf-8", errors="replace") as f:
                                         f.seek(_file_pos)

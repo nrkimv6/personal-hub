@@ -173,6 +173,54 @@ async def test_stream_log_file_fallback_dedup(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_stream_log_file_fallback_entered_flag(tmp_path):
+    """I(Inverse): _fallback_entered flag — fallback_mode 이벤트가 2회 폴링에서 정확히 1회만 yield"""
+    log_file = tmp_path / "flag.log"
+    log_file.write_text("line-x\nline-y\n", encoding="utf-8")
+
+    from app.modules.dev_runner.services.log_service import LogService
+
+    svc = MagicMock(spec=LogService)
+    svc.async_redis = AsyncMock()
+    svc.async_redis.ping = AsyncMock()
+
+    # 3번 None (파일 폴링 2회) 후 __COMPLETED__ 종료
+    _cc = [0]
+    async def get_message_side_effect(**kwargs):
+        _cc[0] += 1
+        if _cc[0] >= 4:
+            return {"type": "message", "data": "__COMPLETED__"}
+        return None
+
+    mock_pubsub = AsyncMock()
+    mock_pubsub.get_message = get_message_side_effect
+    mock_pubsub.subscribe = AsyncMock()
+    svc.async_redis.pubsub = MagicMock(return_value=mock_pubsub)
+    svc._find_current_log = MagicMock(return_value=log_file)
+
+    _ticks = [0]
+
+    def fake_monotonic():
+        _ticks[0] += 1
+        if _ticks[0] <= 2:
+            return 1000.0
+        return 1010.0  # 10초 경과 → fallback 진입
+
+    collected = []
+    with patch("app.modules.dev_runner.services.log_service.time") as mock_time:
+        mock_time.monotonic = fake_monotonic
+        async for chunk in LogService.stream_log_file(svc, "flag-runner"):
+            collected.append(chunk)
+
+    # fallback_mode 이벤트가 정확히 1회만 yield되어야 함
+    fallback_events = [c for c in collected if "event: fallback_mode" in c]
+    assert len(fallback_events) == 1, (
+        f"fallback_mode 이벤트가 {len(fallback_events)}회 yield됨 (기대: 1회)\n"
+        f"_fallback_entered flag 미동작: {collected}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_stream_log_file_fallback_multiline_frame_single_sse_event(tmp_path):
     """파일 폴링 fallback이 멀티라인 RESULT를 단일 SSE 이벤트로 보낸다."""
     log_file = tmp_path / "framed.log"
@@ -219,3 +267,80 @@ async def test_stream_log_file_fallback_multiline_frame_single_sse_event(tmp_pat
     assert len(result_chunks) == 1, f"RESULT가 분절됨: {collected}"
     assert "data: line-2" in result_chunks[0]
     assert "data: line-3" in result_chunks[0]
+
+
+# ---------------------------------------------------------------------------
+# T3: 근본 원인 재현 TC — 실제 파일시스템 + pubsub None 시나리오
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fallback_seek_end_regression(tmp_path):
+    """T3(재현): pubsub None 시 fallback 진입 후 기존 파일 내용이 클라이언트에 전달되는지.
+
+    버그 재현 조건:
+    - since_line=0 (기본값)
+    - pubsub이 첫 메시지 수신 전에 5초 타임아웃
+    - 로그 파일에 기존 내용이 존재
+
+    수정 전 동작 (버그): EOF seek으로 _file_pos=파일끝 → 기존 내용 전달 안 됨
+    수정 후 동작 (정상): _file_pos=0 유지 → 파일 처음부터 읽어 기존 내용 전달됨
+
+    mock: Redis pubsub만 사용, 파일시스템은 실물 (tmp_path).
+    """
+    log_file = tmp_path / "regression.log"
+    log_file.write_text(
+        "regression-line-1\nregression-line-2\nregression-line-3\n",
+        encoding="utf-8",
+    )
+
+    from app.modules.dev_runner.services.log_service import LogService
+
+    svc = MagicMock(spec=LogService)
+    svc.async_redis = AsyncMock()
+    svc.async_redis.ping = AsyncMock()
+
+    # pubsub은 아무 메시지도 전달하지 않다가 __COMPLETED__ 반환
+    _step = [0]
+    async def pubsub_none_then_complete(**kwargs):
+        _step[0] += 1
+        if _step[0] >= 3:
+            return {"type": "message", "data": "__COMPLETED__"}
+        return None  # pubsub 메시지 없음 → fallback 유발
+
+    mock_pubsub = AsyncMock()
+    mock_pubsub.get_message = pubsub_none_then_complete
+    mock_pubsub.subscribe = AsyncMock()
+    svc.async_redis.pubsub = MagicMock(return_value=mock_pubsub)
+    # _find_current_log는 실제 tmp_path 파일 반환 (파일시스템 실물)
+    svc._find_current_log = MagicMock(return_value=log_file)
+
+    _tick = [0]
+
+    def fake_monotonic():
+        _tick[0] += 1
+        if _tick[0] <= 2:
+            return 1000.0  # 초기화 시점
+        return 1010.0  # 10초 경과 → FILE_POLL_TIMEOUT 초과
+
+    collected = []
+    with patch("app.modules.dev_runner.services.log_service.time") as mock_time:
+        mock_time.monotonic = fake_monotonic
+        async for chunk in LogService.stream_log_file(svc, "regression-runner"):
+            collected.append(chunk)
+
+    data_chunks = [c for c in collected if c.startswith("data:")]
+    combined = " ".join(data_chunks)
+
+    # 수정 전 버그 재현 확인: 기존 파일 내용이 전달되어야 함
+    assert "regression-line-1" in combined, (
+        f"regression-line-1 누락 — EOF seek 버그 재발 가능성\n"
+        f"collected={collected}"
+    )
+    assert "regression-line-2" in combined, (
+        f"regression-line-2 누락 — EOF seek 버그 재발 가능성\n"
+        f"collected={collected}"
+    )
+    assert "regression-line-3" in combined, (
+        f"regression-line-3 누락 — EOF seek 버그 재발 가능성\n"
+        f"collected={collected}"
+    )
