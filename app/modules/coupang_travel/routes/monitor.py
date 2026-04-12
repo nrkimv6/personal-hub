@@ -4,6 +4,7 @@
 상품(target) 등록/조회/삭제 및 모니터링 일정 CRUD를 제공합니다.
 """
 import json
+from datetime import date as date_type
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -42,7 +43,7 @@ class CreateTargetResponse(BaseModel):
 class CreateScheduleRequest(BaseModel):
     biz_item_id: int
     dates: List[str]
-    service_account_id: int
+    service_account_id: Optional[int] = None
 
 
 class CreateScheduleResponse(BaseModel):
@@ -202,19 +203,20 @@ def create_schedules(body: CreateScheduleRequest, db: Session = Depends(get_db))
     if not biz_item:
         raise HTTPException(status_code=400, detail="BizItem not found")
 
-    # 계정 검증
-    account = db.query(ServiceAccount).filter(
-        ServiceAccount.id == body.service_account_id
-    ).first()
-    if not account:
-        raise HTTPException(status_code=400, detail="ServiceAccount not found")
-    if account.service_type != "coupang":
-        raise HTTPException(
-            status_code=400,
-            detail=f"ServiceAccount service_type must be 'coupang', got '{account.service_type}'"
-        )
-    if not account.is_logged_in:
-        raise HTTPException(status_code=400, detail="ServiceAccount is not logged in")
+    # 계정 검증 (service_account_id가 지정된 경우에만)
+    if body.service_account_id is not None:
+        account = db.query(ServiceAccount).filter(
+            ServiceAccount.id == body.service_account_id
+        ).first()
+        if not account:
+            raise HTTPException(status_code=400, detail="ServiceAccount not found")
+        if account.service_type != "coupang":
+            raise HTTPException(
+                status_code=400,
+                detail=f"ServiceAccount service_type must be 'coupang', got '{account.service_type}'"
+            )
+        if not account.is_logged_in:
+            raise HTTPException(status_code=400, detail="ServiceAccount is not logged in")
 
     created = 0
     for date in body.dates:
@@ -320,3 +322,25 @@ def get_coupang_status(db: Session = Depends(get_db)):
         enabled_schedules=int(stats.enabled_schedules or 0),
         active_schedules=int(stats.active_schedules or 0),
     )
+
+
+@router.post("/schedules/cleanup", status_code=status.HTTP_200_OK)
+def cleanup_schedules(db: Session = Depends(get_db)):
+    """과거 날짜 및 null 계정 쿠팡 스케줄 일괄 삭제."""
+    today = date_type.today().isoformat()
+    schedules_to_delete = (
+        db.query(MonitorSchedule)
+        .join(BizItem, MonitorSchedule.biz_item_id == BizItem.id)
+        .join(Business, BizItem.business_id == Business.id)
+        .filter(
+            Business.service_type == "coupang",
+            (MonitorSchedule.service_account_id.is_(None))
+            | (MonitorSchedule.date < today),
+        )
+        .all()
+    )
+    count = len(schedules_to_delete)
+    for schedule in schedules_to_delete:
+        db.delete(schedule)
+    db.commit()
+    return {"deleted": count}

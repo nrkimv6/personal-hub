@@ -43,7 +43,8 @@
   });
 
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
-  let abortController: AbortController | null = null;
+  let loadAllController: AbortController | null = null;
+  let pollingController: AbortController | null = null;
 
   const selection = createSelection();
 
@@ -69,16 +70,16 @@
 
   async function loadAll(showLoading = true): Promise<void> {
     if (showLoading) loading = true;
-    abortController?.abort();
-    abortController = new AbortController();
+    loadAllController?.abort();
+    loadAllController = new AbortController();
     error = '';
 
     try {
       const [targetData, scheduleData, accountData, statusData] = await Promise.all([
-        coupangTravelApi.listTargets({ signal: abortController.signal }),
-        coupangTravelApi.listSchedules({ signal: abortController.signal }),
-        serviceAccountApi.listActive('coupang', { signal: abortController.signal }),
-        coupangTravelApi.getStatus({ signal: abortController.signal })
+        coupangTravelApi.listTargets({ signal: loadAllController.signal }),
+        coupangTravelApi.listSchedules({ signal: loadAllController.signal }),
+        serviceAccountApi.listActive('coupang', { signal: loadAllController.signal }),
+        coupangTravelApi.getStatus({ signal: loadAllController.signal })
       ]);
       targets = targetData;
       schedules = scheduleData;
@@ -95,13 +96,13 @@
 
   async function fetchSchedulesAndStatus(showLoading = false): Promise<void> {
     if (showLoading) loading = true;
-    abortController?.abort();
-    abortController = new AbortController();
+    pollingController?.abort();
+    pollingController = new AbortController();
 
     try {
       const [scheduleData, statusData] = await Promise.all([
-        coupangTravelApi.listSchedules({ signal: abortController.signal }),
-        coupangTravelApi.getStatus({ signal: abortController.signal })
+        coupangTravelApi.listSchedules({ signal: pollingController.signal }),
+        coupangTravelApi.getStatus({ signal: pollingController.signal })
       ]);
       schedules = scheduleData;
       statusSummary = statusData;
@@ -128,8 +129,10 @@
       clearInterval(refreshInterval);
       refreshInterval = null;
     }
-    abortController?.abort();
-    abortController = null;
+    loadAllController?.abort();
+    loadAllController = null;
+    pollingController?.abort();
+    pollingController = null;
   }
 
   async function submitTarget(): Promise<void> {
@@ -171,18 +174,21 @@
     const targetId = Number(selectedTargetId);
     const accountId = Number(selectedAccountId);
 
-    if (!targetId || !newDate || !accountId) {
-      toast.error('상품, 날짜, 계정을 모두 선택해주세요.');
+    if (!targetId || !newDate) {
+      toast.error('상품과 날짜를 선택해주세요.');
       return;
     }
 
     submittingSchedule = true;
     try {
-      const result = await coupangTravelApi.createSchedules({
+      const scheduleBody: { biz_item_id: number; dates: string[]; service_account_id?: number } = {
         biz_item_id: targetId,
-        dates: [newDate],
-        service_account_id: accountId
-      });
+        dates: [newDate]
+      };
+      if (accountId) {
+        scheduleBody.service_account_id = accountId;
+      }
+      const result = await coupangTravelApi.createSchedules(scheduleBody);
       newDate = '';
       toast.success(`일정 ${result.created}건이 추가되었습니다.`);
       await fetchSchedulesAndStatus(false);
@@ -246,8 +252,19 @@
     toast.success(`일괄 ${actionLabel} 완료 (${successCount}건)`);
   }
 
-  onMount(() => {
-    void loadAll(true);
+  async function cleanupLegacySchedules(): Promise<void> {
+    if (!confirm('과거 날짜 및 계정 미연결 일정을 삭제합니다.')) return;
+    try {
+      const result = await coupangTravelApi.cleanupSchedules();
+      toast.success(`${result.deleted}건 정리되었습니다.`);
+      await fetchSchedulesAndStatus(false);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '정리 실패');
+    }
+  }
+
+  onMount(async () => {
+    await loadAll(true);
     refreshInterval = setInterval(() => {
       if (activeTab !== 'schedules') return;
       void fetchSchedulesAndStatus(false);
@@ -258,11 +275,7 @@
     cleanupPolling();
   });
 
-  $effect(() => {
-    if (activeTab === 'schedules') {
-      void fetchSchedulesAndStatus(false);
-    }
-  });
+
 </script>
 
 <div class="space-y-6">
@@ -347,6 +360,15 @@
 
     <section class="card">
       <h2 class="text-lg font-semibold mb-4">일정 추가</h2>
+      {#if accounts.length === 0}
+        <div class="mb-4 flex items-center justify-between rounded bg-amber-50 border border-amber-200 px-4 py-3">
+          <span class="text-sm text-amber-800">쿠팡 계정이 등록되어 있지 않습니다. 계정 없이도 일정을 추가할 수 있지만, 로그인이 필요할 경우 모니터링이 동작하지 않을 수 있습니다.</span>
+          <button
+            class="ml-4 shrink-0 rounded bg-amber-500 px-3 py-1 text-sm font-medium text-white hover:bg-amber-600"
+            onclick={() => { window.location.href = '/system?tab=browsers'; }}
+          >계정 등록</button>
+        </div>
+      {/if}
       <div class="grid gap-3 sm:grid-cols-3">
         <div>
           <label class="mb-1 block text-sm font-medium text-gray-700" for="target-select">상품 선택</label>
@@ -456,13 +478,14 @@
             <span class="ml-2 text-primary">({selection.count}건 선택)</span>
           {/if}
         </div>
-        {#if selection.count > 0}
-          <div class="flex gap-2">
+        <div class="flex gap-2">
+          {#if selection.count > 0}
             <button class="btn btn-secondary btn-sm" onclick={() => runBulkAction('enable')}>일괄 활성화</button>
             <button class="btn btn-secondary btn-sm" onclick={() => runBulkAction('disable')}>일괄 비활성화</button>
             <button class="btn btn-danger btn-sm" onclick={() => runBulkAction('delete')}>일괄 삭제</button>
-          </div>
-        {/if}
+          {/if}
+          <button class="btn btn-secondary btn-sm" onclick={cleanupLegacySchedules}>과거 일정 정리</button>
+        </div>
       </div>
 
       {#if loading}
