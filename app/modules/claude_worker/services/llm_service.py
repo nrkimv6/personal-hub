@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import re
-import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -13,7 +12,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
-from app.modules.claude_worker.services.profile_env import build_cli_env
 from app.shared.io import read_json, write_json_atomic
 from app.modules.claude_worker.services import provider_registry
 from app.shared.llm_registry import (
@@ -643,428 +641,22 @@ class LLMService:
     # ========== Claude 실행 ==========
 
     def execute_claude(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False, cli_options: dict = None) -> dict:
-        """Claude CLI 실행 (동기).
-
-        Args:
-            prompt: LLM 프롬프트
-            model: 모델명 (빈 문자열이면 기본 모델 사용)
-            timeout: 타임아웃 (초)
-            parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
-            enable_tools: True면 Read 도구 활성화 (이미지 분석 등), False면 도구 없이 실행
-            cli_options: CLI 옵션 dict (use_prompt_flag, output_format, json_schema, allowed_tools 등)
-
-        Returns:
-            {"success": True, "result": {...}, "raw_response": "..."}
-            또는
-            {"success": False, "error": "..."}
-        """
-        if cli_options is None:
-            cli_options = {}
-
-        try:
-            import sys
-            import tempfile
-            import os
-
-            # 프롬프트를 임시 파일에 저장하여 전달 (긴 프롬프트 및 특수문자 처리)
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(prompt)
-                prompt_file = f.name
-
-            # Claude CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
-            env = build_cli_env("claude")
-
-            try:
-                # cli_options 기반 명령어 빌드
-                exec_mode = cli_options.get("exec_mode", False)
-                output_format = cli_options.get("output_format")
-                json_schema = cli_options.get("json_schema")
-                allowed_tools = cli_options.get("allowed_tools")
-                schema_file = None
-
-                # cwd 처리 — 허용 경로 검증 후 subprocess cwd로 전달
-                cwd_opt = cli_options.get("cwd")
-                if cwd_opt:
-                    import pathlib
-                    ALLOWED_CWD_PREFIX = r"D:\work\project"
-                    cwd_path = pathlib.Path(cwd_opt)
-                    try:
-                        cwd_path.relative_to(ALLOWED_CWD_PREFIX)
-                    except ValueError:
-                        raise ValueError(f"허용되지 않은 cwd 경로: {cwd_opt} (허용: {ALLOWED_CWD_PREFIX} 하위만)")
-                    if not cwd_path.exists():
-                        raise ValueError(f"cwd 경로가 존재하지 않음: {cwd_opt}")
-                    cwd_value = str(cwd_path)
-                    logger.debug(f"Claude CLI cwd 설정: {cwd_value}")
-                else:
-                    cwd_value = None
-
-                if exec_mode:
-                    # ========== B 방식: exec 모드 ==========
-                    # 이미지 분류 등 복잡한 CLI 옵션용.
-                    # Bug #1 수정: Windows에서 claude는 .cmd 파일이므로 shell=True 필요.
-                    # Bug #2 수정: 긴 프롬프트(한글+경로)를 -p 직접 전달 대신
-                    #              임시파일 stdin으로 전달하여 인코딩/길이 문제 방지.
-                    # json_schema도 임시파일로 전달 (shell 이스케이프 문제 방지).
-                    schema_file_exec = None
-                    try:
-                        # json_schema → 임시파일
-                        if json_schema:
-                            schema_str = json.dumps(json_schema, ensure_ascii=False)
-                            with tempfile.NamedTemporaryFile(
-                                mode="w", suffix=".json", delete=False, encoding="utf-8"
-                            ) as sf:
-                                sf.write(schema_str)
-                                schema_file_exec = sf.name
-                            schema_opt = f'--json-schema "@{schema_file_exec}"'
-                        else:
-                            schema_opt = ""
-
-                        # CLI 옵션 문자열 조립
-                        tools_parts = []
-                        if allowed_tools:
-                            for tool in allowed_tools:
-                                tools_parts.append(f"--allowedTools {tool}")
-                        elif enable_tools:
-                            tools_parts.append("--allowedTools Read")
-
-                        model_opt = f"--model {model}" if model else ""
-                        format_opt = f"--output-format {output_format}" if output_format else ""
-                        opts = " ".join(p for p in [*tools_parts, model_opt, format_opt, schema_opt] if p)
-
-                        # 프롬프트를 stdin으로 전달 (type file | claude opts)
-                        if sys.platform == "win32":
-                            cmd = f'type "{prompt_file}" | claude {opts}'
-                        else:
-                            cmd = f'cat "{prompt_file}" | claude {opts}'
-
-                        logger.debug(f"Claude CLI exec(shell) 명령: {cmd[:200]}...")
-
-                        result = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            timeout=timeout,
-                            encoding="utf-8",
-                            shell=True,
-                            env=env,
-                            cwd=cwd_value,
-                        )
-                    finally:
-                        if schema_file_exec:
-                            try:
-                                os.unlink(schema_file_exec)
-                            except Exception:
-                                pass
-                else:
-                    # ========== A 방식: shell 모드 (stdin pipe, 2단계) ==========
-                    # 텍스트 프롬프트용. cmd.exe → type file | claude opts
-
-                    # 도구 옵션
-                    if allowed_tools:
-                        tools_opt = " ".join(f'--allowedTools {t}' for t in allowed_tools)
-                    elif enable_tools:
-                        tools_opt = '--tools "Read"'
-                    else:
-                        tools_opt = ''
-
-                    model_opt = f'--model {model}' if model else ''
-                    format_opt = f'--output-format {output_format}' if output_format else ''
-
-                    # json schema: 임시파일로 전달 (shell 이스케이프 문제 방지)
-                    if json_schema:
-                        schema_str = json.dumps(json_schema, ensure_ascii=False)
-                        with tempfile.NamedTemporaryFile(
-                            mode="w", suffix=".json", delete=False, encoding="utf-8"
-                        ) as sf:
-                            sf.write(schema_str)
-                            schema_file = sf.name
-                        if sys.platform == "win32":
-                            schema_opt = f'--json-schema "$(type \\"{schema_file}\\")"'
-                        else:
-                            schema_opt = f"--json-schema '$(cat \"{schema_file}\")'"
-                    else:
-                        schema_opt = ''
-
-                    opts = ' '.join(part for part in [tools_opt, model_opt, format_opt, schema_opt] if part)
-
-                    # stdin pipe: type file | claude opts (2단계: cmd.exe → claude)
-                    if sys.platform == "win32":
-                        cmd = f'type "{prompt_file}" | claude {opts}'
-                    else:
-                        cmd = f'cat "{prompt_file}" | claude {opts}'
-
-                    logger.debug(f"Claude CLI shell 명령: {cmd[:200]}...")
-
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout,
-                        encoding="utf-8",
-                        shell=True,
-                        env=env,
-                        cwd=cwd_value,
-                    )
-            finally:
-                # 임시 파일 삭제
-                os.unlink(prompt_file)
-                if schema_file:
-                    try:
-                        os.unlink(schema_file)
-                    except Exception:
-                        pass
-
-            if result.returncode != 0:
-                # stderr가 비어있을 수 있으므로 stdout도 확인
-                error_details = result.stderr.strip() if result.stderr else ""
-                if not error_details and result.stdout:
-                    error_details = result.stdout.strip()[:500]  # stdout에서 에러 메시지 추출
-                if not error_details:
-                    error_details = f"returncode={result.returncode}"
-
-                # Quota/rate limit 에러 감지
-                combined_output = (result.stderr or "") + (result.stdout or "")
-                quota_keywords = ["overloaded_error", "rate_limit_error"]
-                if any(kw in combined_output for kw in quota_keywords):
-                    retry_ms = _parse_quota_retry_ms(combined_output)
-                    if retry_ms is None:
-                        retry_ms = QUOTA_PAUSE_DEFAULT_MS
-                    return {
-                        "success": False,
-                        "error": f"Claude CLI error: {error_details}",
-                        "quota_retry_ms": retry_ms,
-                    }
-
-                return {
-                    "success": False,
-                    "error": f"Claude CLI error: {error_details}",
-                }
-
-            raw_response = result.stdout.strip()
-
-            # --output-format json + --json-schema 사용 시 structured_output 파싱
-            if output_format == "json" and json_schema:
-                try:
-                    raw_json = json.loads(raw_response)
-                    # structured_output 필드 우선
-                    if "structured_output" in raw_json and raw_json["structured_output"]:
-                        return {
-                            "success": True,
-                            "result": raw_json["structured_output"],
-                            "raw_response": raw_response,
-                        }
-                    # fallback: result 필드
-                    result_field = raw_json.get("result", "")
-                    if isinstance(result_field, dict):
-                        return {
-                            "success": True,
-                            "result": result_field,
-                            "raw_response": raw_response,
-                        }
-                    if isinstance(result_field, str) and result_field.strip().startswith("{"):
-                        try:
-                            return {
-                                "success": True,
-                                "result": json.loads(result_field),
-                                "raw_response": raw_response,
-                            }
-                        except json.JSONDecodeError:
-                            pass
-                    # Bug #3 수정: 전체 CLI JSON(type/cost_usd 등)을 result로 반환하면
-                    # classify.py에서 result_data.get("category") → "" 가 되어 분류 실패.
-                    # structured_output/result 모두 없는 경우 명시적 실패 반환.
-                    return {
-                        "success": False,
-                        "error": f"structured_output/result 필드 없음. raw: {str(raw_json)[:200]}",
-                        "raw_response": raw_response,
-                    }
-                except json.JSONDecodeError as e:
-                    return {
-                        "success": False,
-                        "error": f"structured output JSON 파싱 실패: {e}",
-                        "raw_response": raw_response,
-                    }
-
-            # JSON 파싱 (선택적)
-            if parse_json:
-                try:
-                    parsed = self._parse_json_response(raw_response)
-                    return {
-                        "success": True,
-                        "result": parsed,
-                        "raw_response": raw_response,
-                    }
-                except ValueError as e:
-                    return {
-                        "success": False,
-                        "error": f"JSON 파싱 실패: {e}",
-                        "raw_response": raw_response,
-                    }
-            else:
-                # JSON 파싱 없이 raw_response만 반환
-                return {
-                    "success": True,
-                    "result": None,
-                    "raw_response": raw_response,
-                }
-
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "error": f"Timeout ({timeout}s)",
-            }
-        except FileNotFoundError:
-            return {
-                "success": False,
-                "error": "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code",
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-            }
+        """Claude CLI 실행 (동기). → ClaudeExecutor 위임."""
+        from app.modules.claude_worker.services.executors import ExecutionDispatcher
+        return ExecutionDispatcher.dispatch(
+            "claude", prompt,
+            model=model, timeout=timeout, parse_json=parse_json,
+            enable_tools=enable_tools, cli_options=cli_options,
+        )
 
     def execute_gemini(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False, cli_options: dict = None) -> dict:
-        """Gemini CLI 실행 (동기).
-
-        Args:
-            prompt: LLM 프롬프트
-            model: 모델명 (빈 문자열이면 기본 모델 사용)
-            timeout: 타임아웃 (초)
-            parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
-            enable_tools: True면 파일 도구 활성화 (Gemini는 built-in으로 지원)
-            cli_options: CLI 옵션 dict. 현재 지원: image_path (str) — `@경로` 이미지 첨부
-
-        Returns:
-            {"success": True, "result": {...}, "raw_response": "..."}
-            또는
-            {"success": False, "error": "..."}
-        """
-        try:
-            import sys
-            import tempfile
-            import os
-
-            # 프롬프트를 임시 파일에 저장하여 전달 (긴 프롬프트 및 특수문자 처리)
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(prompt)
-                prompt_file = f.name
-
-            # Gemini CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
-            env = build_cli_env("gemini")
-
-            try:
-                # 파일에서 프롬프트 읽어서 실행
-                # Gemini는 built-in으로 file system tools를 지원함
-                # enable_tools는 현재 무시 (기본적으로 활성화되어 있음)
-                if model:
-                    model_opt = f'--model {model}'
-                else:
-                    model_opt = ''
-
-                # image_path가 있으면 @경로 이미지 첨부 인수 구성
-                image_path = (cli_options or {}).get("image_path")
-                img_arg = f' @"{image_path}"' if image_path else ""
-
-                if sys.platform == "win32":
-                    # Windows: shell=True 필요
-                    cmd = f'type "{prompt_file}" | gemini {model_opt}{img_arg}'
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout,
-                        encoding="utf-8",
-                        shell=True,
-                        env=env,
-                    )
-                else:
-                    # Unix: cat으로 파이프
-                    cmd = f'cat "{prompt_file}" | gemini {model_opt}{img_arg}'
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout,
-                        encoding="utf-8",
-                        shell=True,
-                        env=env,
-                    )
-            finally:
-                # 임시 파일 삭제
-                os.unlink(prompt_file)
-
-            if result.returncode != 0:
-                # stderr가 비어있을 수 있으므로 stdout도 확인
-                error_details = result.stderr.strip() if result.stderr else ""
-                if not error_details and result.stdout:
-                    error_details = result.stdout.strip()[:500]  # stdout에서 에러 메시지 추출
-                if not error_details:
-                    error_details = f"returncode={result.returncode}"
-
-                # Quota 에러 감지
-                combined_output = (result.stderr or "") + (result.stdout or "")
-                quota_keywords = ["TerminalQuotaError", "exhausted your capacity"]
-                if any(kw in combined_output for kw in quota_keywords):
-                    retry_ms = _parse_quota_retry_ms(combined_output)
-                    if retry_ms is None:
-                        retry_ms = QUOTA_PAUSE_DEFAULT_MS
-                    return {
-                        "success": False,
-                        "error": f"Gemini CLI error: {error_details}",
-                        "quota_retry_ms": retry_ms,
-                    }
-
-                return {
-                    "success": False,
-                    "error": f"Gemini CLI error: {error_details}",
-                }
-
-            raw_response = result.stdout.strip()
-
-            # JSON 파싱 (선택적)
-            if parse_json:
-                try:
-                    parsed = self._parse_json_response(raw_response)
-                    return {
-                        "success": True,
-                        "result": parsed,
-                        "raw_response": raw_response,
-                    }
-                except ValueError as e:
-                    return {
-                        "success": False,
-                        "error": f"JSON 파싱 실패: {e}",
-                        "raw_response": raw_response,
-                    }
-            else:
-                # JSON 파싱 없이 raw_response만 반환
-                return {
-                    "success": True,
-                    "result": None,
-                    "raw_response": raw_response,
-                }
-
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "error": f"Timeout ({timeout}s)",
-            }
-        except FileNotFoundError:
-            return {
-                "success": False,
-                "error": "Gemini CLI not found. Install with: npm install -g @google/generative-ai-cli",
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-            }
+        """Gemini CLI 실행 (동기). → GeminiExecutor 위임."""
+        from app.modules.claude_worker.services.executors import ExecutionDispatcher
+        return ExecutionDispatcher.dispatch(
+            "gemini", prompt,
+            model=model, timeout=timeout, parse_json=parse_json,
+            enable_tools=enable_tools, cli_options=cli_options,
+        )
 
     def execute_llm(
         self,
@@ -1076,116 +668,23 @@ class LLMService:
         enable_tools: bool = False,
         cli_options: dict = None,
     ) -> dict:
-        """LLM 통합 실행 메서드.
-
-        Args:
-            prompt: LLM 프롬프트
-            provider: Provider ('claude' 또는 'gemini')
-            model: 모델명 (빈 문자열이면 기본 모델 사용)
-            timeout: 타임아웃 (초)
-            parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
-            enable_tools: True면 도구 활성화 (Claude, Gemini 모두 지원)
-            cli_options: CLI 옵션 dict (use_prompt_flag, output_format, json_schema, allowed_tools 등)
-
-        Returns:
-            {"success": True, "result": {...}, "raw_response": "..."}
-            또는
-            {"success": False, "error": "..."}
-        """
-        meta = provider_registry.get_provider(provider)
-        if meta is None or not meta.enabled:
-            return {"success": False, "error": f"지원되지 않는 provider: {provider}"}
-
-        executor_key = meta.executor_key
-        if executor_key == "gemini":
-            return self.execute_gemini(prompt, model, timeout, parse_json, enable_tools, cli_options)
-        elif executor_key == "codex":
-            return self.execute_codex(prompt, model, timeout)
-        elif executor_key == "cc-codex":
-            return self.execute_cc_codex(prompt, model, timeout)
-        else:
-            # claude 및 기타 executor_key → Claude 경로
-            return self.execute_claude(prompt, model, timeout, parse_json, enable_tools, cli_options=cli_options)
+        """LLM 통합 실행. → ExecutionDispatcher.dispatch 위임."""
+        from app.modules.claude_worker.services.executors import ExecutionDispatcher
+        return ExecutionDispatcher.dispatch(
+            provider, prompt,
+            model=model, timeout=timeout, parse_json=parse_json,
+            enable_tools=enable_tools, cli_options=cli_options,
+        )
 
     def execute_codex(self, prompt: str, model: str = "", timeout: int = 120) -> dict:
-        """Codex LLMWorker provider 실행 스텁 (B4에서 실제 구현 예정).
-
-        dev-runner 엔진의 codex 경로와 독립 — 이 메서드에서 dev-runner 모듈을 import 금지.
-        """
-        # TODO(B4): codex CLI 호출 경로 신설
-        return {"success": False, "error": "codex provider 실행 경로 미구현 (B4)"}
+        """Codex CLI 실행. → CodexExecutor 위임."""
+        from app.modules.claude_worker.services.executors import ExecutionDispatcher
+        return ExecutionDispatcher.dispatch("codex", prompt, model=model, timeout=timeout)
 
     def execute_cc_codex(self, prompt: str, model: str = "", timeout: int = 120) -> dict:
-        """CC-Codex LLMWorker provider 실행 스텁 (B4에서 실제 구현 예정).
-
-        execute_codex()와 코드 공유 금지 — 별도 경로로 유지.
-        dev-runner 엔진의 cc-codex 경로와 독립.
-        """
-        # TODO(B4): cc-codex CLI 호출 경로 신설 (execute_codex와 완전 별도 경로)
-        return {"success": False, "error": "cc-codex provider 실행 경로 미구현 (B4)"}
-
-    def _parse_json_response(self, text: str) -> dict:
-        """Claude 응답에서 JSON 추출.
-
-        Args:
-            text: Claude 응답 텍스트
-
-        Returns:
-            파싱된 JSON dict
-
-        Raises:
-            ValueError: JSON 파싱 실패
-        """
-        errors = []
-
-        # Tier 1: ```json ... ``` 블록 추출
-        json_match = re.search(r"```json\s*([\s\S]*?)\s*```", text)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1))
-            except json.JSONDecodeError as e:
-                errors.append(f"markdown block: {e}")
-
-        # Tier 2: 순수 JSON 시도
-        stripped = text.strip()
-        if stripped.startswith("{"):
-            try:
-                return json.loads(stripped)
-            except json.JSONDecodeError as e:
-                errors.append(f"pure JSON: {e}")
-
-        # Tier 3: { } 블록 추출 (brace counting으로 정확한 범위)
-        start = text.find("{")
-        if start != -1:
-            depth = 0
-            in_string = False
-            escape = False
-            for i in range(start, len(text)):
-                ch = text[i]
-                if escape:
-                    escape = False
-                    continue
-                if ch == "\\":
-                    escape = True
-                    continue
-                if ch == '"' and not escape:
-                    in_string = not in_string
-                    continue
-                if in_string:
-                    continue
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            return json.loads(text[start:i + 1])
-                        except json.JSONDecodeError as e:
-                            errors.append(f"brace extraction: {e}")
-                        break
-
-        detail = "; ".join(errors) if errors else "no JSON structure found"
-        raise ValueError(f"No valid JSON found in response ({detail})")
+        """CC-Codex CLI 실행. → CCCodexExecutor 위임."""
+        from app.modules.claude_worker.services.executors import ExecutionDispatcher
+        return ExecutionDispatcher.dispatch("cc-codex", prompt, model=model, timeout=timeout)
 
     # ========== 워커 상태 관리 ==========
 
