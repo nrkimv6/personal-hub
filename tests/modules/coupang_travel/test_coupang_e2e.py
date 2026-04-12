@@ -337,3 +337,241 @@ async def test_coupang_worker_updates_active_flag_during_run():
     assert mock_schedule_service.set_active.call_count == 2
     assert mock_schedule_service.set_active.call_args_list[0].args[2] is True
     assert mock_schedule_service.set_active.call_args_list[1].args[2] is False
+
+
+# ── T4: 알림 시간대 필터링 E2E ────────────────────────────────────────────────
+
+@pytest.fixture
+def orm_db_session():
+    """ORM 기반 in-memory SQLite 세션 — schedule_service.get_all_with_context() 테스트용."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.models.base import Base
+    from app.models.browser_profile import BrowserProfile
+    from app.models.service_account import ServiceAccount
+    from app.models.business import Business
+    from app.models.biz_item import BizItem
+    from app.models.monitor_schedule import MonitorSchedule
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    tables = [
+        BrowserProfile.__table__,
+        ServiceAccount.__table__,
+        Business.__table__,
+        BizItem.__table__,
+        MonitorSchedule.__table__,
+    ]
+    Base.metadata.create_all(bind=engine, tables=tables)
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    yield db
+    db.close()
+    engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_coupang_e2e_notify_time_filter_pipeline():
+    """T4: notify_times 필터링 E2E — 10:00은 알림 없음, 16:00은 알림 1회."""
+    from datetime import datetime
+    from unittest.mock import patch
+    from app.modules.coupang_travel.services.api_client import CoupangApiClient
+    from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
+    from app.shared.notification import NotificationService
+
+    def _make_side_effect():
+        return [
+            [VendorItem(vendor_item_name="특실A", sale_status="OFF_SALE", stock_count=0)],
+            [VendorItem(vendor_item_name="특실A", sale_status="ON_SALE", stock_count=3)],
+        ]
+
+    # ─ 시나리오 1: 10:00 → 알림 시간 밖 → 알림 0회 ─
+    mock_api_1 = AsyncMock(spec=CoupangApiClient)
+    mock_api_1.fetch_vendor_items = AsyncMock(side_effect=_make_side_effect())
+    notif_1 = NotificationService()
+    sent_1 = []
+
+    async def fake_send_1(msg, send_desktop=False):
+        sent_1.append(msg)
+
+    service_1 = CoupangMonitorService(mock_api_1, notif_1, db_logging=False)
+
+    with patch.object(notif_1, "send_notification_message", side_effect=fake_send_1):
+        page = AsyncMock()
+        fixed_outside = datetime(2026, 4, 17, 10, 0, 0)
+        with patch("app.modules.coupang_travel.services.monitor_service.datetime") as mock_dt:
+            mock_dt.now.return_value = fixed_outside
+            await service_1.check_and_notify("99999", "pkg_test", ["2026-04-17"], page, notify_times=["14:00-19:00"])
+            changes_1 = await service_1.check_and_notify("99999", "pkg_test", ["2026-04-17"], page, notify_times=["14:00-19:00"])
+
+    assert len(changes_1) == 1, "변경은 감지되어야 함"
+    assert len(sent_1) == 0, f"10:00은 알림 시간 밖 → 알림 없어야 함, 실제: {len(sent_1)}"
+
+    # ─ 시나리오 2: 16:00 → 알림 시간 안 → 알림 1회 ─
+    mock_api_2 = AsyncMock(spec=CoupangApiClient)
+    mock_api_2.fetch_vendor_items = AsyncMock(side_effect=_make_side_effect())
+    notif_2 = NotificationService()
+    sent_2 = []
+
+    async def fake_send_2(msg, send_desktop=False):
+        sent_2.append(msg)
+
+    service_2 = CoupangMonitorService(mock_api_2, notif_2, db_logging=False)
+
+    with patch.object(notif_2, "send_notification_message", side_effect=fake_send_2):
+        page2 = AsyncMock()
+        fixed_inside = datetime(2026, 4, 17, 16, 0, 0)
+        with patch("app.modules.coupang_travel.services.monitor_service.datetime") as mock_dt2:
+            mock_dt2.now.return_value = fixed_inside
+            await service_2.check_and_notify("99999", "pkg_test", ["2026-04-17"], page2, notify_times=["14:00-19:00"])
+            changes_2 = await service_2.check_and_notify("99999", "pkg_test", ["2026-04-17"], page2, notify_times=["14:00-19:00"])
+
+    assert len(changes_2) == 1, "변경은 감지되어야 함"
+    assert len(sent_2) == 1, f"16:00은 알림 시간 안 → 알림 1회여야 함, 실제: {len(sent_2)}"
+
+
+def test_coupang_e2e_schedule_with_times_in_context(orm_db_session):
+    """T4: times 필드 포함 스케줄 → schedule_service.get_all_with_context()가 List[str]로 반환."""
+    from app.models.business import Business
+    from app.models.biz_item import BizItem
+    from app.models.monitor_schedule import MonitorSchedule
+    from app.services.schedule_service import schedule_service
+
+    db = orm_db_session
+
+    biz = Business(business_id="cp:times_test_99999", name="시간대테스트상품", service_type="coupang")
+    db.add(biz)
+    db.flush()
+
+    item = BizItem(business_id=biz.id, biz_item_id="times_test_99999", name="시간대테스트아이템")
+    db.add(item)
+    db.flush()
+
+    schedule = MonitorSchedule(
+        biz_item_id=item.id,
+        date="2026-04-17",
+        is_enabled=True,
+        times='["10:00","14:00-19:00"]',
+    )
+    db.add(schedule)
+    db.commit()
+
+    contexts = schedule_service.get_all_with_context(db, service_type="coupang")
+    assert len(contexts) == 1
+    ctx = contexts[0]
+    assert ctx["times"] == ["10:00", "14:00-19:00"], (
+        f"times가 List[str]로 파싱되어야 함, 실제: {ctx['times']!r}"
+    )
+
+
+# ── T4: 프록시 E2E 파이프라인 ───────────────────────────────────────────────────
+
+async def test_coupang_proxy_e2e():
+    """T4: mock ProxyManager + mock aiohttp → CoupangHttpClient → CoupangMonitorService 전체 흐름 검증.
+
+    검증 대상:
+    - HTTP 클라이언트가 ProxyManager에서 프록시를 획득하여 vendor-items API 호출
+    - 응답을 CoupangMonitorService.check_and_notify(prefetched_items=...) 경로로 전달
+    - ProxyUsageLogger.log_attempt() 호출 확인 (성공 경로)
+    - 상태 변경 감지 후 알림 발송 확인
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.modules.coupang_travel.services.api_client import VendorItem
+    from app.modules.coupang_travel.services.http_client import CoupangHttpClient
+    from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
+    from app.shared.notification import NotificationService
+
+    # ─ mock ProxyManager ─
+    mock_pm = MagicMock()
+    mock_pm.get_fresh_proxy = MagicMock(return_value="http://proxy1:8080")
+    mock_pm.mark_failed = MagicMock()
+
+    # ─ mock ProxyUsageLogger ─
+    mock_logger = MagicMock()
+    mock_logger.start_request = MagicMock(return_value="req-e2e-001")
+    mock_logger.log_attempt = MagicMock()
+
+    # ─ mock aiohttp 응답 ─
+    vendor_items_data = {
+        "travelItems": [
+            {
+                "vendorItems": [
+                    {"vendorItemName": "한라산E2E", "saleStatus": "AVAILABLE", "stockCount": 2},
+                ]
+            }
+        ]
+    }
+    get_resp = MagicMock()
+    get_resp.status = 200
+    get_resp.__aenter__ = AsyncMock(return_value=get_resp)
+    get_resp.__aexit__ = AsyncMock(return_value=None)
+
+    post_resp = MagicMock()
+    post_resp.status = 200
+    post_resp.json = AsyncMock(return_value=vendor_items_data)
+    post_resp.__aenter__ = AsyncMock(return_value=post_resp)
+    post_resp.__aexit__ = AsyncMock(return_value=None)
+
+    mock_session = MagicMock()
+    mock_session.closed = False
+    mock_session.get = MagicMock(return_value=get_resp)
+    mock_session.post = MagicMock(return_value=post_resp)
+
+    # ─ HTTP 클라이언트 초기화 ─
+    http_client = CoupangHttpClient(proxy_manager=mock_pm, proxy_usage_logger=mock_logger)
+    http_client._session = mock_session
+
+    # ─ HTTP 호출 ─
+    items = await http_client.fetch_vendor_items(
+        product_id="e2e_product",
+        vendor_item_package_id="pkg_e2e",
+        select_date="2026-05-01",
+        schedule_id=99,
+    )
+    assert items is not None
+    assert len(items) == 1
+    assert items[0].sale_status == "AVAILABLE"
+
+    # ProxyUsageLogger 호출 검증
+    mock_logger.start_request.assert_called_once()
+    mock_logger.log_attempt.assert_called_once()
+    log_call = mock_logger.log_attempt.call_args.kwargs
+    assert log_call["success"] is True
+
+    # ─ MonitorService에 prefetched_items 전달 → 상태 변경 감지 ─
+    mock_api = AsyncMock()
+    notif_svc = NotificationService()
+    notifications_sent = []
+
+    async def fake_send(msg, send_desktop=False):
+        notifications_sent.append(msg)
+
+    service = CoupangMonitorService(mock_api, notif_svc, db_logging=False)
+
+    with patch.object(notif_svc, "send_notification_message", side_effect=fake_send):
+        # 1차 호출: 상태 초기화 (알림 없음)
+        changes1 = await service.check_and_notify(
+            product_id="e2e_product",
+            vendor_item_package_id="pkg_e2e",
+            dates=["2026-05-01"],
+            prefetched_items=items,
+        )
+        assert changes1 == []  # 최초 → 알림 없음
+
+        # 2차 호출: 상태 변경 (SOLD_OUT)
+        changed_items = [VendorItem(vendor_item_name="한라산E2E", sale_status="SOLD_OUT", stock_count=0)]
+        changes2 = await service.check_and_notify(
+            product_id="e2e_product",
+            vendor_item_package_id="pkg_e2e",
+            dates=["2026-05-01"],
+            prefetched_items=changed_items,
+        )
+        assert len(changes2) == 1
+        assert changes2[0].new_status == "SOLD_OUT"
+        assert len(notifications_sent) == 1  # 알림 발송됨
