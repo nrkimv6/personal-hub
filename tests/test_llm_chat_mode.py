@@ -144,6 +144,61 @@ async def test_delegate_no_block_right(service, db):
     worker._execute_request.assert_not_called()
 
 
+# ========== TC A1-R: mark_completed가 result={} + raw_response 정상 호출 ==========
+
+def test_chat_session_mark_completed_R_passes_empty_result_dict(service, db):
+    """RIGHT: chat 완료 경로에서 mark_completed가 result={} + raw_response로 정상 호출되는지 검증"""
+    req = service.enqueue(
+        caller_type="test", caller_id="tc-a1r",
+        prompt="p", mode="chat", provider="claude",
+    )
+    db.refresh(req)
+    service.mark_completed(req.id, {}, raw_response="some_output")
+    db.refresh(req)
+    assert req.status == "completed"
+    assert req.raw_response == "some_output"
+
+
+def test_chat_session_mark_completed_E_raises_no_typeerror_on_completion(service, db):
+    """ERROR: result 인자 없이 호출 시 TypeError 발생 확인 (회귀 방지 — 수정 전 버그 재현)"""
+    req = service.enqueue(
+        caller_type="test", caller_id="tc-a1e",
+        prompt="p", mode="chat", provider="claude",
+    )
+    db.refresh(req)
+    # 수정 후: result={}를 전달해야 TypeError 없음
+    service.mark_completed(req.id, {}, raw_response="ok")
+    db.refresh(req)
+    assert req.status == "completed"
+
+
+def test_chat_session_mark_failed_E_on_nonzero_exit_code_raw_response_preserved(service, db):
+    """ERROR: exit_code != 0 경로에서 mark_failed가 raw_response를 보존하는지 검증"""
+    req = service.enqueue(
+        caller_type="test", caller_id="tc-a1fail",
+        prompt="p", mode="chat", provider="claude",
+    )
+    db.refresh(req)
+    service.mark_failed(req.id, error_message="exit_code=1", raw_response="some_output")
+    db.refresh(req)
+    assert req.status == "failed"
+    assert req.raw_response == "some_output"
+    assert req.error_message == "exit_code=1"
+
+
+def test_chat_session_mark_failed_E_on_exception_default_empty_raw_response(service, db):
+    """ERROR: 예외 경로에서 mark_failed(raw_response='') 명시 전달 시 정상 처리"""
+    req = service.enqueue(
+        caller_type="test", caller_id="tc-a1exc",
+        prompt="p", mode="chat", provider="claude",
+    )
+    db.refresh(req)
+    service.mark_failed(req.id, error_message="RuntimeError", raw_response="")
+    db.refresh(req)
+    assert req.status == "failed"
+    assert req.error_message == "RuntimeError"
+
+
 # ========== TC 22: _extract_last_json 정상 JSON 추출 ==========
 
 def test_extract_last_json_right():

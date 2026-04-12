@@ -47,6 +47,13 @@ MANAGED_PROJECTS = {
                     "watchdog_pid_file": "api_watchdog_admin.pid",
                     "worker_pid_file": None,
                 },
+                {
+                    "name": "chat_executor",
+                    "label": "Chat Executor",
+                    "tier": "worker",
+                    "watchdog_pid_file": "chat_executor_watchdog_admin.pid",
+                    "worker_pid_file": "chat_executor_admin.pid",
+                },
             ]
         }
     },

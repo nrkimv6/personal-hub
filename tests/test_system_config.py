@@ -23,6 +23,31 @@ from app.modules.system.services.worker_service import WorkerService as SystemSe
 # MANAGED_PROJECTS config 검증
 # ============================================================
 
+class TestChatExecutorConfig:
+    """chat_executor config 등록 검증 (A3)"""
+
+    def test_monitor_page_workers_items_Re_contains_chat_executor(self):
+        """REFERENCE/EXISTENCE: MANAGED_PROJECTS["monitor-page"]["workers"]["items"]에 chat_executor 항목 존재"""
+        items = MANAGED_PROJECTS["monitor-page"]["workers"]["items"]
+        names = [item["name"] for item in items]
+        assert "chat_executor" in names, f"chat_executor 항목 없음. 현재 items: {names}"
+
+    def test_monitor_page_workers_items_Co_chat_executor_tier_worker(self):
+        """CONFORMANCE: chat_executor의 tier == 'worker' 계약 검증"""
+        items = MANAGED_PROJECTS["monitor-page"]["workers"]["items"]
+        chat_item = next((i for i in items if i["name"] == "chat_executor"), None)
+        assert chat_item is not None
+        assert chat_item["tier"] == "worker"
+
+    def test_monitor_page_workers_items_Re_chat_executor_pid_file_names(self):
+        """REFERENCE: worker_pid_file == 'chat_executor_admin.pid', watchdog_pid_file == 'chat_executor_watchdog_admin.pid'"""
+        items = MANAGED_PROJECTS["monitor-page"]["workers"]["items"]
+        chat_item = next((i for i in items if i["name"] == "chat_executor"), None)
+        assert chat_item is not None
+        assert chat_item["worker_pid_file"] == "chat_executor_admin.pid"
+        assert chat_item["watchdog_pid_file"] == "chat_executor_watchdog_admin.pid"
+
+
 class TestSleepNowConfig:
     """sleep-now 설정 검증"""
 
