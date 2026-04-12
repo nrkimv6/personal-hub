@@ -189,3 +189,12 @@ def register_spa_routes(app: FastAPI, app_mode: str) -> None:
     @app.get("/plans/{path:path}")
     async def serve_plans_subpages(path: str):
         return FileResponse("app/static/index.html")
+
+    # 쿠팡 라우트
+    @app.get("/coupang")
+    async def serve_coupang():
+        return FileResponse("app/static/index.html")
+
+    @app.get("/coupang/{path:path}")
+    async def serve_coupang_subpages(path: str):
+        return FileResponse("app/static/index.html")
