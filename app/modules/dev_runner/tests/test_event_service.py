@@ -15,7 +15,7 @@ from app.modules.dev_runner.services.event_service import (
     EventService, RUNNER_KEY_PREFIX, REDIS_STATE_KEY,
     LOG_CHANNEL_PATTERN, MERGE_LOG_CHANNEL_PATTERN,
     _LOG_COMPLETED_SENTINEL, _MERGE_LOG_COMPLETED_SENTINEL,
-    _build_log_line_payload,
+    _build_log_line_payload, PLAN_FILE_ALL,
 )
 
 
@@ -113,7 +113,6 @@ class TestBuildStatusPayload:
 
     def test_build_status_payload_running_with_explicit_sentinel(self, event_service, sync_redis):
         """R: plan_file에 __ALL_PLANS__ 명시 → 그대로 전달"""
-        from app.modules.dev_runner.services.event_service import PLAN_FILE_ALL
         runner_id = "running01b"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", PLAN_FILE_ALL)
@@ -207,14 +206,53 @@ class TestBuildStatusPayload:
         assert payload["exit_reason"] == "commit_failed"
         assert payload["error"] == detail
 
+    def test_build_status_payload_plan_file_none_when_key_missing(self, event_service, sync_redis):
+        """R: trigger="user" + plan_file 키 미설정 → payload["plan_file"] is None, != PLAN_FILE_ALL
+
+        E2E 대체 TC: test_sse_filter_e2e.test_sse_initial_status_plan_file_none_not_sentinel 에서 이전.
+        프로덕션 Redis 오염 없이 fakeredis로 동등 검증.
+        """
+        runner_id = "user-pf-none-01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        # plan_file 키 미설정
+
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["plan_file"] is None
+        assert payload["plan_file"] != PLAN_FILE_ALL
+
+    def test_build_status_payload_plan_file_sentinel_preserved(self, event_service, sync_redis):
+        """R: trigger="user:all" + plan_file=PLAN_FILE_ALL 명시 → 그대로 반환
+
+        E2E 대체 TC: test_sse_filter_http.test_http_events_plan_file_sentinel_when_explicit 에서 이전.
+        프로덕션 Redis 오염 없이 fakeredis로 동등 검증.
+        """
+        runner_id = "userall-sentinel-01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user:all")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", PLAN_FILE_ALL)
+
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["plan_file"] == PLAN_FILE_ALL
+
 
 # ─── _build_all_runners_status 필터링 테스트 ─────────────────────────────────
 
 class TestBuildAllRunnersStatus:
-    def _register_runner(self, redis, runner_id: str, trigger: str | None = None, status: str = "running"):
+    def _register_runner(
+        self,
+        redis,
+        runner_id: str,
+        trigger: str | None = None,
+        status: str = "running",
+        plan_file: str | None = None,
+    ):
         redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", status)
         if trigger is not None:
             redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", trigger)
+        if plan_file is not None:
+            redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
         redis.sadd("plan-runner:active_runners", runner_id)
 
     def test_build_all_runners_excludes_tc_trigger(self, event_service, sync_redis):
@@ -281,6 +319,29 @@ class TestBuildAllRunnersStatus:
         ids = [r["runner_id"] for r in result]
         assert "vis_runner01" in ids
         assert "invis_runner01" not in ids
+
+    def test_build_all_runners_includes_stopped_user_trigger(self, event_service, sync_redis):
+        """R: trigger="user" + status="stopped" runner → _build_all_runners_status() 결과에 포함
+
+        E2E 대체 TC: test_sse_filter_e2e.test_sse_initial_status_includes_user_stopped_runner 에서 이전.
+        프로덕션 Redis 오염 없이 fakeredis로 동등 검증.
+        """
+        self._register_runner(sync_redis, "stopped_user01", trigger="user", status="stopped")
+        result = event_service._build_all_runners_status()
+        assert "stopped_user01" in [r["runner_id"] for r in result]
+
+    def test_build_all_runners_plan_file_null_for_visible_runner(self, event_service, sync_redis):
+        """R: trigger="user" + plan_file 미설정 → 결과에서 plan_file=None
+
+        E2E 대체 TC: test_sse_filter_http.test_http_events_plan_file_null_when_key_missing 에서 이전.
+        프로덕션 Redis 오염 없이 fakeredis로 동등 검증.
+        """
+        self._register_runner(sync_redis, "nopf_user01", trigger="user")
+        # plan_file 미설정 — _register_runner plan_file 파라미터 기본값 None
+        result = event_service._build_all_runners_status()
+        matching = [r for r in result if r["runner_id"] == "nopf_user01"]
+        assert len(matching) >= 1, "nopf_user01이 결과에 없음"
+        assert matching[0]["plan_file"] is None
 
 
 # ─── _build_tracking_payload 테스트 ─────────────────────────────────────────

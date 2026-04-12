@@ -7,6 +7,9 @@ Admin API GET /events 엔드포인트의 initial status 응답을 검증한다.
   - Redis 서버 실행 중 (localhost:6379)
 
 실행: /merge-test에서 main 머지 후 실행할 것
+
+⚠️ trigger="user"/"user:all"을 프로덕션 Redis에 직접 SET 금지 — 유령 탭 오염 원인.
+   visible runner 검증은 app/modules/dev_runner/tests/test_event_service.py에서 fakeredis로 수행.
 """
 
 import json
@@ -20,7 +23,6 @@ import requests
 ADMIN_API = "http://localhost:8001"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
-PLAN_FILE_ALL = "__ALL_PLANS__"
 
 SSE_EVENTS_URL = f"{ADMIN_API}/api/v1/dev-runner/events"
 
@@ -44,19 +46,6 @@ def _collect_initial_status_http(timeout: float = 5.0) -> list[dict]:
                     return json.loads(raw_line[5:].strip()).get("runners", [])
     except Exception:
         pass
-    return []
-
-
-def _wait_runner_in_initial_status(runner_id: str, timeout: float = 20.0) -> list[dict]:
-    """초기 status 이벤트를 재시도 수집해 특정 runner가 나타날 때까지 대기한다."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        remaining = max(1.0, deadline - time.monotonic())
-        runners = _collect_initial_status_http(timeout=min(5.0, remaining))
-        matching = [r for r in runners if r.get("runner_id") == runner_id]
-        if matching:
-            return matching
-        time.sleep(0.3)
     return []
 
 
@@ -103,58 +92,3 @@ class TestSseFilterHttp:
                 f"cleanup 후 {runner_id!r}이 {ACTIVE_RUNNERS_KEY}에 잔류"
             )
 
-    def test_http_events_plan_file_null_when_key_missing(self, redis_client):
-        """GET /events → plan_file 키 없는 running runner → JSON에서 plan_file=null (not __ALL_PLANS__)"""
-        # trigger="user" 이므로 화이트리스트 통과해야 함 — tc-pytest- 접두사 사용 금지 (이중 방어로 차단됨)
-        runner_id = f"user-e2e-{uuid.uuid4().hex[:8]}"
-        try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
-            # plan_file 키 미설정
-            redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
-            time.sleep(0.2)
-
-            matching = _wait_runner_in_initial_status(runner_id)
-
-            assert len(matching) >= 1, f"runner {runner_id!r}이 HTTP /events 결과에 없음"
-            plan_file = matching[0].get("plan_file")
-            assert plan_file is None, (
-                f"plan_file 키 없는 runner에서 plan_file={plan_file!r}. "
-                f"null이어야 함 (이전 버그: {PLAN_FILE_ALL!r})"
-            )
-        finally:
-            redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
-            for suffix in ("status", "trigger"):
-                redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}")
-            # cleanup 확인: 키 잔류 0건 보장
-            remaining = redis_client.keys(f"{RUNNER_KEY_PREFIX}:{runner_id}:*")
-            assert remaining == [], f"cleanup 후 키 잔류: {remaining}"
-            assert not redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id), (
-                f"cleanup 후 {runner_id!r}이 {ACTIVE_RUNNERS_KEY}에 잔류"
-            )
-
-    def test_http_events_plan_file_sentinel_when_explicit(self, redis_client):
-        """GET /events → plan_file=__ALL_PLANS__ 명시 → 그대로 __ALL_PLANS__ 반환"""
-        # trigger="user:all" 이므로 화이트리스트 통과해야 함 — tc-pytest- 접두사 사용 금지 (이중 방어로 차단됨)
-        runner_id = f"user-e2e-{uuid.uuid4().hex[:8]}"
-        try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user:all")
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", PLAN_FILE_ALL)
-            redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
-            time.sleep(0.2)
-
-            matching = _wait_runner_in_initial_status(runner_id)
-
-            assert len(matching) >= 1, f"runner {runner_id!r}이 HTTP /events 결과에 없음"
-            assert matching[0].get("plan_file") == PLAN_FILE_ALL
-        finally:
-            redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
-            for suffix in ("status", "trigger", "plan_file"):
-                redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}")
-            # cleanup 확인: 키 잔류 0건 보장
-            remaining = redis_client.keys(f"{RUNNER_KEY_PREFIX}:{runner_id}:*")
-            assert remaining == [], f"cleanup 후 키 잔류: {remaining}"
-            assert not redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id), (
-                f"cleanup 후 {runner_id!r}이 {ACTIVE_RUNNERS_KEY}에 잔류"
-            )
