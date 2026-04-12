@@ -425,3 +425,68 @@ class TestLlmDefaultsApi:
             },
         )
         assert response.status_code == 422
+
+
+# ─── T5-18: providers API HTTP 검증 ─────────────────────────────────────────
+
+class TestProvidersApiHttp:
+    """GET /api/v1/llm/providers — provider registry 기반 HTTP 검증 (T5)."""
+
+    def test_get_llm_providers_R_returns_expected_schema(self, client):
+        """R: GET /api/v1/llm/providers → 200 + 필수 필드 전수 확인."""
+        resp = client.get("/api/v1/llm/providers")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        required_fields = {"key", "display_name", "default_model", "models", "enabled", "executor_key"}
+        for entry in data:
+            missing = required_fields - set(entry.keys())
+            assert not missing, f"entry={entry['key']} 에 필드 누락: {missing}"
+
+    def test_post_llm_requests_R_accepts_codex_provider(self, client):
+        """R: provider=codex 생성 → 200/201 (pydantic validator 통과)."""
+        resp = client.post("/api/v1/llm/requests", json={
+            "caller_type": "test",
+            "caller_id": "t5-codex-001",
+            "prompt": "test codex",
+            "provider": "codex",
+            "model": "gpt-5.1-codex-mini",
+        })
+        assert resp.status_code in (200, 201), f"codex provider 거부됨: {resp.status_code} {resp.text}"
+        data = resp.json()
+        assert data["provider"] == "codex"
+
+    def test_post_llm_requests_R_accepts_cc_codex_provider(self, client):
+        """R: provider=cc-codex 생성 → 200/201."""
+        resp = client.post("/api/v1/llm/requests", json={
+            "caller_type": "test",
+            "caller_id": "t5-cc-codex-001",
+            "prompt": "test cc-codex",
+            "provider": "cc-codex",
+            "model": "gpt-5.3-codex",
+        })
+        assert resp.status_code in (200, 201), f"cc-codex provider 거부됨: {resp.status_code} {resp.text}"
+        data = resp.json()
+        assert data["provider"] == "cc-codex"
+
+    def test_post_llm_requests_E_rejects_unknown_provider_422(self, client):
+        """E: provider=unknown → 422 (pydantic validator 차단)."""
+        resp = client.post("/api/v1/llm/requests", json={
+            "caller_type": "test",
+            "caller_id": "t5-unknown-001",
+            "prompt": "test unknown",
+            "provider": "unknown_xyz",
+        })
+        assert resp.status_code == 422, f"unknown provider가 거부되지 않음: {resp.status_code}"
+
+    def test_get_llm_providers_Re_cc_codex_and_codex_distinct_executor_keys(self, client):
+        """Re: 응답 JSON에서 codex와 cc-codex의 executor_key가 서로 다른지 (회귀 방어)."""
+        resp = client.get("/api/v1/llm/providers")
+        assert resp.status_code == 200
+        by_key = {e["key"]: e for e in resp.json()}
+        if "codex" not in by_key or "cc-codex" not in by_key:
+            pytest.skip("codex 또는 cc-codex provider가 enabled 목록에 없음")
+        assert by_key["codex"]["executor_key"] != by_key["cc-codex"]["executor_key"], (
+            f"codex ({by_key['codex']['executor_key']}) 와 cc-codex ({by_key['cc-codex']['executor_key']}) "
+            "executor_key 동일 — registry 설정 오류"
+        )

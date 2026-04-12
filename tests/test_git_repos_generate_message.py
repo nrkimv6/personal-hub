@@ -208,3 +208,30 @@ class TestGenerateMessageNotFound:
             assert resp.status_code == 404
 
         app.dependency_overrides.clear()
+
+
+# ─── T5-19: git_repos provider API 회귀 (provider_registry 기반) ─────────────
+
+class TestGenerateMessageProviderRegistryRegression:
+    """TC-7 ~ TC-9: provider_registry 기반 codex/cc-codex 허용 + unknown 거부 (T5-19)."""
+
+    def test_generate_message_R_accepts_codex_provider(self):
+        """TC-7 (RIGHT): GenerateMessageRequest가 provider=codex를 허용하는지."""
+        from app.modules.git_repos.schemas import GenerateMessageRequest
+        req = GenerateMessageRequest(provider="codex", model="")
+        assert req.provider == "codex"
+
+    def test_generate_message_R_accepts_cc_codex_provider(self):
+        """TC-8 (RIGHT): GenerateMessageRequest가 provider=cc-codex를 허용하는지."""
+        from app.modules.git_repos.schemas import GenerateMessageRequest
+        req = GenerateMessageRequest(provider="cc-codex", model="")
+        assert req.provider == "cc-codex"
+
+    def test_generate_message_E_rejects_unknown_provider_422(self):
+        """TC-9 (ERROR): GenerateMessageRequest가 unknown provider를 ValidationError로 거부하는지."""
+        from pydantic import ValidationError
+        from app.modules.git_repos.schemas import GenerateMessageRequest
+        with pytest.raises(ValidationError) as exc_info:
+            GenerateMessageRequest(provider="unknown_provider_xyz", model="")
+        errors = exc_info.value.errors()
+        assert any("지원되지 않는 provider" in str(e) for e in errors)
