@@ -202,7 +202,7 @@
 							</td>
 							<td class="px-4 py-3 text-center">
 								{#if req.status === 'failed'}
-									<Button variant="secondary" size="xs" on:click={() => handleRetry(req.id)}
+									<Button variant="secondary" size="xs" onclick={() => handleRetry(req.id)}
 									>
 										재시도
 									</Button>

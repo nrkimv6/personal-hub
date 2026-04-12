@@ -199,7 +199,7 @@
 	<!-- 헤더 -->
 	<PageHeader title="크롤링 이력" subtitle="총 {total}건">
 		{#if $isAdmin}
-			<Button variant="primary" size="sm" on:click={() => (showAddModal = true)}>
+			<Button variant="primary" size="sm" onclick={() => (showAddModal = true)}>
 				+ URL 크롤링 요청
 			</Button>
 		{/if}
@@ -438,7 +438,7 @@
 			</div>
 
 			<div class="mt-6 flex gap-2 justify-end">
-				<Button variant="secondary" size="sm" on:click={() => (showAddModal = false)}>취소</Button>
+				<Button variant="secondary" size="sm" onclick={() => (showAddModal = false)}>취소</Button>
 				<button onclick={handleAddRequest} disabled={submitting} class="btn btn-primary btn-sm disabled:opacity-50">
 					{#if submitting}
 						<span class="flex items-center gap-2">
@@ -561,7 +561,7 @@
 						재시도
 					</button>
 				{/if}
-				<Button variant="secondary" size="sm" on:click={() => (showDetailModal = false)}>닫기</Button>
+				<Button variant="secondary" size="sm" onclick={() => (showDetailModal = false)}>닫기</Button>
 			</div>
 		</div>
 	</div>

@@ -547,11 +547,11 @@
 				</div>
 
 				<div class="mt-6 flex gap-2 justify-end">
-					<Button variant="secondary" size="sm" on:click={onClose}>취소</Button>
+					<Button variant="secondary" size="sm" onclick={onClose}>취소</Button>
 					<Button
 						variant="primary"
 						size="sm"
-						on:click={handleSave}
+						onclick={handleSave}
 						disabled={isSaving}
 					>
 						{#if isSaving}

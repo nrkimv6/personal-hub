@@ -288,8 +288,8 @@
 				<input id="monitoring-date-to" type="date" class="input" bind:value={filters.date_to} />
 			</div>
 			<div class="flex items-end gap-2">
-				<Button variant="primary" on:click={handleSearch}>검색</Button>
-				<Button variant="secondary" on:click={clearFilters}>초기화</Button>
+				<Button variant="primary" onclick={handleSearch}>검색</Button>
+				<Button variant="secondary" onclick={clearFilters}>초기화</Button>
 			</div>
 		</div>
 	</div>
@@ -337,7 +337,7 @@
 									{#if event.graphql_response}
 										<button
 											class="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary-light rounded transition-colors"
-											on:click={() => toggleEventExpand(event.id)}
+											onclick={() => toggleEventExpand(event.id)}
 											title={expandedEventIds[event.id] ? '접기' : '펼치기'}
 										>
 											<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -365,7 +365,7 @@
 									<Button
 										variant={copiedId === event.id ? 'success' : 'secondary'}
 										size="xs"
-										on:click={() => copyUrl(url, event.id)}
+										onclick={() => copyUrl(url, event.id)}
 										title={url}
 									>
 										{copiedId === event.id ? '복사됨' : '복사'}
@@ -479,7 +479,7 @@
 													<span class="text-sm font-medium text-foreground">GraphQL 응답</span>
 													<Button
 														variant="secondary" size="xs"
-														on:click={() => copyGraphqlResponse(event.graphql_response)}
+														onclick={() => copyGraphqlResponse(event.graphql_response)}
 													>
 														복사
 													</Button>
@@ -510,7 +510,7 @@
 				<div class="flex gap-2">
 					<Button variant="secondary" size="sm"
 						disabled={page === 1}
-						on:click={() => {
+						onclick={() => {
 							page--;
 							fetchData();
 						}}
@@ -520,7 +520,7 @@
 					<span class="px-3 py-1 text-sm">{page} / {totalPages}</span>
 					<Button variant="secondary" size="sm"
 						disabled={page === totalPages}
-						on:click={() => {
+						onclick={() => {
 							page++;
 							fetchData();
 						}}

@@ -94,11 +94,11 @@
       <div class="flex gap-2">
         <button
           class="px-2 py-1 rounded text-xs bg-muted hover:bg-secondary text-muted-foreground"
-          on:click={rollbackMemo}
+          onclick={rollbackMemo}
         >롤백</button>
         <button
           class="px-2 py-1 rounded text-xs bg-primary hover:bg-primary-hover text-primary-foreground"
-          on:click={confirmMemo}
+          onclick={confirmMemo}
         >저장</button>
       </div>
     </div>
@@ -106,7 +106,7 @@
       class="flex-1 w-full p-2 rounded bg-background text-foreground text-sm border border-border resize-none focus:outline-none focus:border-primary"
       placeholder="메모를 입력하세요..."
       bind:value={draftText}
-      on:input={handleInput}
+      oninput={handleInput}
       rows={8}
     ></textarea>
   </div>

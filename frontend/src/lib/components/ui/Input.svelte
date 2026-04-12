@@ -25,9 +25,5 @@
          disabled:bg-muted disabled:cursor-not-allowed disabled:opacity-50
          {error ? 'border-error focus-visible:ring-error' : 'border-input'}
          {sizes[size]}"
-  on:input
-  on:change
-  on:focus
-  on:blur
   {...$$restProps}
 />

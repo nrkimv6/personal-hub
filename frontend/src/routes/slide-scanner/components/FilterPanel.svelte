@@ -1,11 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
   import type { SlideFilterOptions } from '$lib/api/slide-scanner';
-
-  const dispatch = createEventDispatcher<{
-    change: { value: SlideFilterOptions };
-  }>();
 
   export let value: SlideFilterOptions = {
     white_balance: false,
@@ -13,10 +7,11 @@
     document_mode: false
   };
   export let disabled = false;
+  export let onchange: ((detail: { value: SlideFilterOptions }) => void) | undefined = undefined;
 
   function emit(next: SlideFilterOptions) {
     if (disabled) return;
-    dispatch('change', { value: next });
+    onchange?.({ value: next });
   }
 
   function toggleWhiteBalance() {

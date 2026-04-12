@@ -1,15 +1,12 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
   export let currentPage: number = 1;
   export let totalPages: number = 1;
   export let siblingsCount: number = 1;
-
-  const dispatch = createEventDispatcher();
+  export let onchange: ((page: number) => void) | undefined = undefined;
 
   function goToPage(page: number) {
     if (page >= 1 && page <= totalPages && page !== currentPage) {
-      dispatch('change', page);
+      onchange?.(page);
     }
   }
 
@@ -42,7 +39,7 @@
     class="px-3 py-1.5 text-sm rounded-md border border-border bg-background hover:bg-muted text-foreground
            disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
     disabled={currentPage === 1}
-    on:click={() => goToPage(currentPage - 1)}
+    onclick={() => goToPage(currentPage - 1)}
   >
     이전
   </button>
@@ -56,7 +53,7 @@
                {currentPage === page
                  ? 'bg-primary text-primary-foreground'
                  : 'hover:bg-muted text-foreground'}"
-        on:click={() => goToPage(page)}
+        onclick={() => goToPage(page)}
       >
         {page}
       </button>
@@ -67,7 +64,7 @@
     class="px-3 py-1.5 text-sm rounded-md border border-border bg-background hover:bg-muted text-foreground
            disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
     disabled={currentPage === totalPages}
-    on:click={() => goToPage(currentPage + 1)}
+    onclick={() => goToPage(currentPage + 1)}
   >
     다음
   </button>

@@ -1,17 +1,12 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
-  const dispatch = createEventDispatcher<{
-    prev: void;
-    next: void;
-    confirm: void;
-    saveAll: void;
-  }>();
-
   export let enabled = true;
   export let disabled = false;
   export let canPrev = false;
   export let canNext = false;
+  export let onprev: (() => void) | undefined = undefined;
+  export let onnext: (() => void) | undefined = undefined;
+  export let onconfirm: (() => void) | undefined = undefined;
+  export let onsaveall: (() => void) | undefined = undefined;
 
   function isEditableTarget(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
@@ -29,7 +24,7 @@
 
     if (ctrlOrMeta && key.toLowerCase() === 's') {
       event.preventDefault();
-      dispatch('saveAll');
+      onsaveall?.();
       return;
     }
 
@@ -39,29 +34,29 @@
 
     if (key === 'ArrowLeft' && canPrev) {
       event.preventDefault();
-      dispatch('prev');
+      onprev?.();
       return;
     }
 
     if (key === 'ArrowRight' && canNext) {
       event.preventDefault();
-      dispatch('next');
+      onnext?.();
       return;
     }
 
     if (key === ' ' || key === 'Spacebar') {
       event.preventDefault();
       if (canNext) {
-        dispatch('next');
+        onnext?.();
       }
       return;
     }
 
     if (key === 'Enter') {
       event.preventDefault();
-      dispatch('confirm');
+      onconfirm?.();
     }
   }
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />

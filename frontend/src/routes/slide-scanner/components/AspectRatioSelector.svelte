@@ -1,14 +1,9 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
   import type { AspectRatioValue } from '$lib/api/slide-scanner';
-
-  const dispatch = createEventDispatcher<{
-    change: { value: AspectRatioValue };
-  }>();
 
   export let value: AspectRatioValue = 'AUTO';
   export let disabled = false;
+  export let onchange: ((detail: { value: AspectRatioValue }) => void) | undefined = undefined;
 
   const options: Array<{ label: string; value: AspectRatioValue }> = [
     { label: 'Auto', value: 'AUTO' },
@@ -18,7 +13,7 @@
 
   function select(next: AspectRatioValue) {
     if (disabled) return;
-    dispatch('change', { value: next });
+    onchange?.({ value: next });
   }
 </script>
 

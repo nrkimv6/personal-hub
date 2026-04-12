@@ -79,7 +79,7 @@
 {:else if error}
   <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
     {error}
-    <button on:click={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
+    <button onclick={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
   </div>
 {:else if stats}
   <!-- 통계 카드 -->

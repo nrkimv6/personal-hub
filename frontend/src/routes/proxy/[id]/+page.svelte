@@ -107,7 +107,7 @@
 {:else if error}
   <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
     {error}
-    <button on:click={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
+    <button onclick={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
   </div>
 {:else if proxy}
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -257,14 +257,14 @@
         <div class="space-y-3">
           {#if proxy.status === 'blacklisted'}
             <button
-              on:click={() => handleStatusChange('active')}
+              onclick={() => handleStatusChange('active')}
               class="w-full px-4 py-2 bg-success text-white rounded-md hover:bg-success/90 transition-colors"
             >
               블랙리스트 해제
             </button>
           {:else}
             <button
-              on:click={() => handleStatusChange('blacklisted')}
+              onclick={() => handleStatusChange('blacklisted')}
               class="w-full px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors"
             >
               블랙리스트 등록
@@ -273,7 +273,7 @@
 
           {#if proxy.status === 'inactive'}
             <button
-              on:click={() => handleStatusChange('pending')}
+              onclick={() => handleStatusChange('pending')}
               class="w-full px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover transition-colors"
             >
               재검증 대기열 추가
@@ -281,7 +281,7 @@
           {/if}
 
           <button
-            on:click={handleDelete}
+            onclick={handleDelete}
             class="w-full px-4 py-2 bg-error text-white rounded-md hover:bg-error/90 transition-colors"
           >
             프록시 삭제

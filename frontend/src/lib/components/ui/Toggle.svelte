@@ -20,7 +20,7 @@
          disabled:opacity-50 disabled:cursor-not-allowed
          {checked ? 'bg-primary' : 'bg-muted'}
          {sizes[size].track}"
-  on:click={() => !disabled && (checked = !checked)}
+  onclick={() => !disabled && (checked = !checked)}
 >
   <span
     class="pointer-events-none inline-block rounded-full bg-background shadow-sm transform transition-transform

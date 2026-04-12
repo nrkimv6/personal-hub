@@ -157,7 +157,7 @@
       <h3 class="text-lg font-semibold text-foreground">
         자동 예약 대상 ({getAutoBookingSchedules().length})
       </h3>
-      <Button variant="secondary" size="sm" on:click={fetchSchedules}>
+      <Button variant="secondary" size="sm" onclick={fetchSchedules}>
         새로고침
       </Button>
     </div>
@@ -240,13 +240,13 @@
                 <td class="px-3 py-2">
                   <div class="flex justify-center gap-1">
                     <Button variant="secondary" size="xs"
-                      on:click={() => openEditModal(schedule)}
+                      onclick={() => openEditModal(schedule)}
                       title="수정"
                     >
                       수정
                     </Button>
                     <Button variant="secondary" size="xs"
-                      on:click={() => handleResetBookingCount(schedule)}
+                      onclick={() => handleResetBookingCount(schedule)}
                       title="예약 횟수 초기화"
                     >
                       0
@@ -254,7 +254,7 @@
                     <Button
                       variant={schedule.auto_booking_enabled ? 'warning' : 'success'}
                       size="xs"
-                      on:click={() => handleToggleAutoBooking(schedule)}
+                      onclick={() => handleToggleAutoBooking(schedule)}
                       title={schedule.auto_booking_enabled ? '자동예약 중지' : '자동예약 활성화'}
                     >
                       {schedule.auto_booking_enabled ? '⏸' : '▶'}
@@ -375,7 +375,7 @@
           <span class="text-sm font-medium text-foreground">모니터링 활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="secondary" on:click={() => editingSchedule = null}>
+          <Button type="button" variant="secondary" onclick={() => editingSchedule = null}>
             취소
           </Button>
           <Button type="submit" variant="primary">저장</Button>

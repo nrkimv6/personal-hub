@@ -385,7 +385,7 @@
 				<Button
 					variant="secondary"
 					size="sm"
-					on:click={() => {
+					onclick={() => {
 						page = Math.max(1, page - 1);
 						fetchHistory();
 						syncUrlParams();
@@ -400,7 +400,7 @@
 				<Button
 					variant="secondary"
 					size="sm"
-					on:click={() => {
+					onclick={() => {
 						page = Math.min(totalPages, page + 1);
 						fetchHistory();
 						syncUrlParams();

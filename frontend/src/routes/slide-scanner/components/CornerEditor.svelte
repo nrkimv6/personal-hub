@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onDestroy } from 'svelte';
+  import { onDestroy } from 'svelte';
 
   import type { SlidePoint } from '$lib/api/slide-scanner';
 
@@ -8,8 +8,7 @@
   export let imageUrl = '';
   export let points: SlidePoint[] = [];
   export let disabled = false;
-
-  const dispatch = createEventDispatcher<{ change: { points: SlidePoint[] } }>();
+  export let onchange: ((detail: { points: SlidePoint[] }) => void) | undefined = undefined;
 
   let imageEl: HTMLImageElement | null = null;
   let svgEl: SVGSVGElement | null = null;
@@ -132,7 +131,7 @@
     localPoints[activeIndex] = next;
     localPoints = [...localPoints];
     updateLoupeState(nextEvent, next);
-    dispatch('change', { points: localPoints });
+    onchange?.({ points: localPoints });
   }
 
   function handlePointerMove(event: PointerEvent) {

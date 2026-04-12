@@ -471,10 +471,10 @@
 	<div class="mb-6 flex justify-between items-center">
 		<h2 class="text-lg font-bold text-foreground">LLM 요청 관리</h2>
 		<div class="flex gap-2">
-			<Button variant="secondary" size="sm" on:click={runCleanup} title="Stale 정리 및 오래된 이력 삭제">
+			<Button variant="secondary" size="sm" onclick={runCleanup} title="Stale 정리 및 오래된 이력 삭제">
 				정리
 			</Button>
-			<Button variant="secondary" size="sm" on:click={() => fetchData()}>
+			<Button variant="secondary" size="sm" onclick={() => fetchData()}>
 				새로고침
 			</Button>
 		</div>
@@ -591,15 +591,15 @@
 					성공 없는 것만
 				</label>
 			{/if}
-			<Button variant="primary" size="sm" on:click={viewMode === 'grouped' ? handleGroupFilter : handleFilter}>필터</Button>
-			<Button variant="secondary" size="sm" on:click={clearFilters}>초기화</Button>
+			<Button variant="primary" size="sm" onclick={viewMode === 'grouped' ? handleGroupFilter : handleFilter}>필터</Button>
+			<Button variant="secondary" size="sm" onclick={clearFilters}>초기화</Button>
 
 			{#if activeTab === 'history'}
 				<div class="ml-auto flex items-center gap-2">
 					<Button
 						variant={viewMode === 'grouped' ? 'primary' : 'secondary'}
 						size="sm"
-						on:click={toggleViewMode}
+						onclick={toggleViewMode}
 					>
 						{viewMode === 'individual' ? '그룹 뷰' : '개별 뷰'}
 					</Button>
@@ -625,12 +625,12 @@
 				<div class="ml-auto flex gap-2">
 					{#if selectedGroupKeys.length > 0}
 						<span class="text-sm text-muted-foreground self-center">{selectedGroupKeys.length}개 선택</span>
-						<Button variant="secondary" size="sm" on:click={multiRetrySelectedGroups}>
+						<Button variant="secondary" size="sm" onclick={multiRetrySelectedGroups}>
 							선택 그룹 재시도
 						</Button>
 					{/if}
 					{#if groupedResponse.summary.callers_without_success > 0}
-						<Button variant="primary" size="sm" on:click={retryAllFailedWithoutSuccess}>
+						<Button variant="primary" size="sm" onclick={retryAllFailedWithoutSuccess}>
 							성공 없는 것 일괄 재시도
 						</Button>
 					{/if}
@@ -643,7 +643,7 @@
 			<div class="mb-4 flex gap-2 items-center">
 				<span class="text-sm text-muted-foreground">{selection.count}개 선택</span>
 				{#if activeTab === 'history'}
-					<Button variant="secondary" size="sm" on:click={batchRetry}>일괄 재시도</Button>
+					<Button variant="secondary" size="sm" onclick={batchRetry}>일괄 재시도</Button>
 				{/if}
 				<button onclick={batchDelete} class="btn btn-danger btn-sm">일괄 삭제</button>
 			</div>
@@ -1102,7 +1102,7 @@
 					>
 						삭제
 					</button>
-					<Button variant="secondary" size="sm" on:click={closeModal}>닫기</Button>
+					<Button variant="secondary" size="sm" onclick={closeModal}>닫기</Button>
 				</div>
 			</div>
 		</div>

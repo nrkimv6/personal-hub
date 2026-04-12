@@ -591,7 +591,7 @@
 <div>
 	<!-- 헤더 -->
 	<PageHeader title="스케줄 설정" subtitle="수집 스케줄을 관리합니다">
-		<Button variant="primary" on:click={openAddModal}>
+		<Button variant="primary" onclick={openAddModal}>
 			<Plus size={18} class="mr-1" /> 스케줄 추가
 		</Button>
 	</PageHeader>
@@ -673,7 +673,7 @@
 							</a>
 
 							<!-- 수정 버튼 (모든 타입) -->
-							<Button variant="secondary" size="sm" on:click={() => openEditModal(schedule)}
+							<Button variant="secondary" size="sm" onclick={() => openEditModal(schedule)}
 								title="스케줄 수정"
 							>
 								<Pencil size={14} /> 수정
@@ -681,7 +681,7 @@
 
 							<!-- Instagram 상세 설정 버튼 -->
 							{#if schedule.target_type === 'instagram_feed'}
-								<Button variant="secondary" size="sm" on:click={() => openInstagramSettings(schedule)}
+								<Button variant="secondary" size="sm" onclick={() => openInstagramSettings(schedule)}
 									title="Instagram 상세 설정"
 								>
 									IG설정
@@ -703,7 +703,7 @@
 							<Button
 								variant="primary"
 								size="sm"
-								on:click={() => runSchedule(schedule)}
+								onclick={() => runSchedule(schedule)}
 								disabled={runningId === schedule.id || !schedule.enabled}
 								title={!schedule.enabled ? '스케줄을 먼저 활성화하세요' : '즉시 실행'}
 							>
@@ -1133,7 +1133,7 @@
 					</button>
 
 					<div class="mt-6 flex justify-end gap-2">
-						<Button variant="secondary" on:click={closeAddModal}>
+						<Button variant="secondary" onclick={closeAddModal}>
 							취소
 						</Button>
 						<button
@@ -1368,7 +1368,7 @@
 						</div>
 						<!-- 저장 버튼 -->
 						<div class="flex justify-end gap-2 pt-2">
-							<Button variant="secondary" on:click={closeEditModal}>
+							<Button variant="secondary" onclick={closeEditModal}>
 								취소
 							</Button>
 							<button
@@ -1406,7 +1406,7 @@
 				</p>
 			</div>
 			<div class="px-6 py-4 border-t border-border flex justify-end gap-2">
-				<Button variant="secondary" on:click={closeDeleteModal} disabled={deleting}>
+				<Button variant="secondary" onclick={closeDeleteModal} disabled={deleting}>
 					취소
 				</Button>
 				<button
