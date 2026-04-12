@@ -65,12 +65,19 @@ class CoupangMonitorService:
         product_id: str,
         vendor_item_package_id: str,
         dates: List[str],
-        page: "Page",
+        page: Optional["Page"] = None,
         schedule_id: Optional[int] = None,
+        prefetched_items: Optional[List[VendorItem]] = None,
+        prefetched_response_time_ms: float = 0.0,
     ) -> List[StatusChange]:
         """각 date별 상태를 체크하고 변경 시 알림 발송.
 
         최초 호출(키 없음)은 상태 저장만 하고 알림은 보내지 않는다.
+
+        Args:
+            prefetched_items: HTTP 클라이언트로 미리 가져온 아이템 목록.
+                              제공 시 page 경로 skip. dates는 단일 date여야 함.
+            prefetched_response_time_ms: prefetched_items 획득에 걸린 시간.
 
         Returns:
             변경된 StatusChange 목록
@@ -78,14 +85,25 @@ class CoupangMonitorService:
         changes: List[StatusChange] = []
 
         for date in dates:
-            started_at = time.perf_counter()
-            items = await self._api_client.fetch_vendor_items(
-                product_id=product_id,
-                vendor_item_package_id=vendor_item_package_id,
-                select_date=date,
-                page=page,
-            )
-            response_time_ms = (time.perf_counter() - started_at) * 1000
+            if prefetched_items is not None:
+                # HTTP 클라이언트로 미리 가져온 아이템 사용
+                items = prefetched_items
+                response_time_ms = prefetched_response_time_ms
+            else:
+                if page is None:
+                    logger.error(
+                        "[CoupangMonitorService] page와 prefetched_items 모두 없음 (product_id=%s, date=%s)",
+                        product_id, date,
+                    )
+                    continue
+                started_at = time.perf_counter()
+                items = await self._api_client.fetch_vendor_items(
+                    product_id=product_id,
+                    vendor_item_package_id=vendor_item_package_id,
+                    select_date=date,
+                    page=page,
+                )
+                response_time_ms = (time.perf_counter() - started_at) * 1000
 
             if items is None:
                 logger.warning(

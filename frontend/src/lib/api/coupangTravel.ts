@@ -33,6 +33,8 @@ export interface CoupangStatusSummary {
   total_schedules: number;
   enabled_schedules: number;
   active_schedules: number;
+  proxy_enabled: boolean;
+  proxy_active_count: number;
 }
 
 export interface CreateTargetRequest {

@@ -3,11 +3,16 @@
 
 쿠팡 vendor-items API를 폴링하여 saleStatus/stockCount 변경 시 알림 발송.
 네이버 워커와 독립적으로 동작하며 browser_manager를 공유합니다.
+
+프록시 전략:
+  1차: CoupangHttpClient (aiohttp + ProxyManager) — 브라우저 불필요, 요청 단위 로테이션
+  2차: CoupangApiClient (Playwright fetch) — HTTP 전체 실패 시 fallback
 """
 from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from app.shared.worker.base_worker import BaseWorker
@@ -16,6 +21,7 @@ from app.services.schedule_service import ScheduleService
 
 if TYPE_CHECKING:
     from app.shared.browser.browser_manager import BrowserManager
+    from app.modules.coupang_travel.services.http_client import CoupangHttpClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +37,7 @@ class CoupangMonitorWorker(BaseWorker):
         super().__init__("coupang_monitor", browser_manager)
         self._monitor_service = None
         self._api_client = None
+        self._http_client: Optional["CoupangHttpClient"] = None
 
     def _get_loop_interval(self) -> float:
         return self.LOOP_INTERVAL
@@ -39,12 +46,25 @@ class CoupangMonitorWorker(BaseWorker):
         """워커 초기화 — 서비스 인스턴스 생성 및 초기 스케줄 로드."""
         from app.modules.coupang_travel.services.api_client import CoupangApiClient
         from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
+        from app.modules.coupang_travel.services.http_client import CoupangHttpClient
         from app.shared.notification import NotificationService
         from app.models.service_account import ServiceAccount
 
         self._api_client = CoupangApiClient()
         notification_service = NotificationService()
         self._monitor_service = CoupangMonitorService(self._api_client, notification_service)
+
+        # HTTP 클라이언트 초기화 (ProxyManager 연동)
+        proxy_manager = self._get_proxy_manager()
+        proxy_usage_logger = self._get_proxy_usage_logger()
+        self._http_client = CoupangHttpClient(
+            proxy_manager=proxy_manager,
+            proxy_usage_logger=proxy_usage_logger,
+        )
+        if proxy_manager:
+            logger.info("[%s] HTTP 클라이언트 초기화 완료 (프록시 활성)", self.name)
+        else:
+            logger.info("[%s] HTTP 클라이언트 초기화 완료 (프록시 없음, 직접 연결)", self.name)
 
         db = SessionLocal()
         try:
@@ -66,6 +86,22 @@ class CoupangMonitorWorker(BaseWorker):
             account_count,
             schedule_count,
         )
+
+    def _get_proxy_manager(self):
+        """ProxyManager 싱글톤 획득 (없으면 None)."""
+        try:
+            from app.services.proxy_manager_factory import get_proxy_manager
+            return get_proxy_manager()
+        except Exception:
+            return None
+
+    def _get_proxy_usage_logger(self):
+        """ProxyUsageLogger 싱글톤 획득 (없으면 None)."""
+        try:
+            from app.services.proxy_usage_logger import get_proxy_usage_logger
+            return get_proxy_usage_logger()
+        except Exception:
+            return None
 
     async def _main_loop_iteration(self) -> None:
         """메인 루프 1회 반복 — 활성 쿠팡 스케줄 순회 + 상태 체크."""
@@ -92,7 +128,7 @@ class CoupangMonitorWorker(BaseWorker):
             )
 
     async def _check_schedule(self, ctx: Dict) -> None:
-        """단일 스케줄 상태 체크."""
+        """단일 스케줄 상태 체크. HTTP 클라이언트 우선, 실패 시 Playwright fallback."""
         schedule_id = ctx.get("id")
         product_id = ctx.get("item_biz_item_id")
         date = ctx.get("date")
@@ -102,7 +138,6 @@ class CoupangMonitorWorker(BaseWorker):
             logger.warning("[%s] 스케줄 컨텍스트 불완전: %s", self.name, ctx.get("id"))
             return
 
-        # extra_desc_json에서 vendor_item_package_id 파싱
         vendor_item_package_id = self._extract_vendor_item_package_id(ctx)
         if not vendor_item_package_id:
             logger.warning(
@@ -112,34 +147,32 @@ class CoupangMonitorWorker(BaseWorker):
             )
             return
 
-        if not self.browser:
-            logger.warning("[%s] BrowserManager 없음", self.name)
-            return
-
         active_marked = False
         try:
             self._set_schedule_active(schedule_id, True)
             active_marked = True
 
-            context = await self.browser.get_context(service_account_id)
-            pages = context.pages
-            if pages:
-                page = pages[0]
-            else:
-                page = await context.new_page()
-
-            # 리퍼러 쿠키 세팅을 위해 상품 페이지로 이동 (이미 있으면 스킵)
-            expected_url = f"https://trip.coupang.com/tp/products/{product_id}"
-            if not page.url.startswith(expected_url):
-                await page.goto(expected_url)
-
-            changes = await self._monitor_service.check_and_notify(
+            # 1차 시도: HTTP 클라이언트 (aiohttp + 프록시 로테이션)
+            changes = await self._check_via_http(
                 product_id=product_id,
                 vendor_item_package_id=vendor_item_package_id,
-                dates=[date],
-                page=page,
+                date=date,
                 schedule_id=schedule_id,
             )
+
+            # HTTP 실패 시 2차: Playwright fallback
+            if changes is None:
+                logger.warning(
+                    "[%s] HTTP 클라이언트 실패 — Playwright fallback 시도 (schedule_id=%s)",
+                    self.name, schedule_id,
+                )
+                changes = await self._check_via_playwright(
+                    product_id=product_id,
+                    vendor_item_package_id=vendor_item_package_id,
+                    date=date,
+                    schedule_id=schedule_id,
+                    service_account_id=service_account_id,
+                )
 
             if changes:
                 logger.info(
@@ -163,6 +196,80 @@ class CoupangMonitorWorker(BaseWorker):
             if active_marked:
                 self._set_schedule_active(schedule_id, False)
 
+    async def _check_via_http(
+        self,
+        product_id: str,
+        vendor_item_package_id: str,
+        date: str,
+        schedule_id: Optional[int],
+    ) -> Optional[List]:
+        """
+        HTTP 클라이언트(aiohttp + 프록시)로 상태 체크.
+
+        Returns:
+            StatusChange 목록 (성공), None (전체 실패 → Playwright fallback 필요)
+        """
+        if self._http_client is None:
+            return None
+
+        started_at = time.perf_counter()
+        items = await self._http_client.fetch_vendor_items(
+            product_id=product_id,
+            vendor_item_package_id=vendor_item_package_id,
+            select_date=date,
+            schedule_id=schedule_id,
+        )
+        response_time_ms = (time.perf_counter() - started_at) * 1000
+
+        if items is None:
+            return None  # HTTP 실패 → caller가 fallback 처리
+
+        return await self._monitor_service.check_and_notify(
+            product_id=product_id,
+            vendor_item_package_id=vendor_item_package_id,
+            dates=[date],
+            prefetched_items=items,
+            prefetched_response_time_ms=response_time_ms,
+            schedule_id=schedule_id,
+        )
+
+    async def _check_via_playwright(
+        self,
+        product_id: str,
+        vendor_item_package_id: str,
+        date: str,
+        schedule_id: Optional[int],
+        service_account_id: Optional[int],
+    ) -> Optional[List]:
+        """
+        Playwright 브라우저로 상태 체크 (HTTP 실패 시 fallback).
+
+        Returns:
+            StatusChange 목록 (성공), None (BrowserManager 없거나 실패)
+        """
+        if not self.browser:
+            logger.warning("[%s] BrowserManager 없음 — Playwright fallback 불가", self.name)
+            return None
+
+        context = await self.browser.get_context(service_account_id)
+        pages = context.pages
+        if pages:
+            page = pages[0]
+        else:
+            page = await context.new_page()
+
+        expected_url = f"https://trip.coupang.com/tp/products/{product_id}"
+        if not page.url.startswith(expected_url):
+            await page.goto(expected_url)
+
+        return await self._monitor_service.check_and_notify(
+            product_id=product_id,
+            vendor_item_package_id=vendor_item_package_id,
+            dates=[date],
+            page=page,
+            schedule_id=schedule_id,
+        )
+
     def _set_schedule_active(self, schedule_id: Optional[int], is_active: bool) -> None:
         """스케줄 active 상태를 DB에 반영."""
         if schedule_id is None:
@@ -183,8 +290,6 @@ class CoupangMonitorWorker(BaseWorker):
 
     def _extract_vendor_item_package_id(self, ctx: Dict) -> Optional[str]:
         """컨텍스트에서 vendor_item_package_id 추출."""
-        # schedule_service._build_context_dict에는 extra_desc_json이 직접 없으므로
-        # DB에서 별도로 읽어야 하지만, 간략화를 위해 BizItem에서 직접 읽음
         biz_item_pk = ctx.get("biz_item_pk")
         if not biz_item_pk:
             return None

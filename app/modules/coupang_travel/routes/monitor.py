@@ -73,6 +73,8 @@ class CoupangStatusSummary(BaseModel):
     total_schedules: int
     enabled_schedules: int
     active_schedules: int
+    proxy_enabled: bool = False
+    proxy_active_count: int = 0
 
 
 def _get_coupang_schedule_or_404(schedule_id: int, db: Session) -> MonitorSchedule:
@@ -317,10 +319,24 @@ def get_coupang_status(db: Session = Depends(get_db)):
         .first()
     )
 
+    # 프록시 매니저 상태 조회
+    proxy_enabled = False
+    proxy_active_count = 0
+    try:
+        from app.services.proxy_manager_factory import get_proxy_manager
+        pm = get_proxy_manager()
+        if pm is not None:
+            proxy_enabled = bool(getattr(pm, "is_available", False) or getattr(pm, "_initialized", False))
+            proxy_active_count = len(getattr(pm, "active_pool", []) or getattr(pm, "_active_pool", []))
+    except Exception:
+        pass
+
     return CoupangStatusSummary(
         total_schedules=int(stats.total_schedules or 0),
         enabled_schedules=int(stats.enabled_schedules or 0),
         active_schedules=int(stats.active_schedules or 0),
+        proxy_enabled=proxy_enabled,
+        proxy_active_count=proxy_active_count,
     )
 
 
