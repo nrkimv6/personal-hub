@@ -244,30 +244,44 @@ class TestLLMServiceExecuteClaude:
 
 
 class TestLLMServiceParseJsonResponse:
-    """LLMService._parse_json_response 메서드 테스트."""
+    """LLMExecutorBase._parse_json_response 메서드 테스트.
 
-    def test_right_parses_json_block(self, llm_service):
+    _parse_json_response는 executors/base.py로 이전됨.
+    LLMService 픽스처 대신 LLMExecutorBase 직접 사용.
+    """
+
+    @pytest.fixture
+    def parser(self):
+        from app.modules.claude_worker.services.executors.base import LLMExecutorBase
+        from unittest.mock import MagicMock
+        # ABC이므로 concrete 서브클래스 생성
+        class _Concrete(LLMExecutorBase):
+            def execute(self, prompt, **kwargs):
+                return {}
+        return _Concrete()
+
+    def test_right_parses_json_block(self, parser):
         """```json 블록 파싱."""
         text = '```json\n{"key": "value"}\n```'
-        result = llm_service._parse_json_response(text)
+        result = parser._parse_json_response(text)
         assert result == {"key": "value"}
 
-    def test_right_parses_pure_json(self, llm_service):
+    def test_right_parses_pure_json(self, parser):
         """순수 JSON 파싱."""
         text = '{"key": "value"}'
-        result = llm_service._parse_json_response(text)
+        result = parser._parse_json_response(text)
         assert result == {"key": "value"}
 
-    def test_right_parses_json_in_text(self, llm_service):
+    def test_right_parses_json_in_text(self, parser):
         """텍스트 내 JSON 추출."""
         text = 'Here is the result: {"key": "value"} and more text'
-        result = llm_service._parse_json_response(text)
+        result = parser._parse_json_response(text)
         assert result == {"key": "value"}
 
-    def test_error_invalid_json(self, llm_service):
+    def test_error_invalid_json(self, parser):
         """잘못된 JSON 에러."""
         with pytest.raises(ValueError):
-            llm_service._parse_json_response("This is not JSON")
+            parser._parse_json_response("This is not JSON")
 
 
 class TestLLMServiceWorkerStatus:
