@@ -1,14 +1,11 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import { slideScannerApi, type MobileReviewItem } from '$lib/api/slide-scanner';
   import { toast } from '$lib/stores/toast';
   import MobileReviewCard from './MobileReviewCard.svelte';
 
   export let refreshKey = 0;
-
-  const dispatch = createEventDispatcher<{
-    moveToEditor: { itemId: number; slideId: number };
-  }>();
+  export let onmovetoeditor: ((detail: { itemId: number; slideId: number }) => void) | undefined = undefined;
 
   const PAGE_SIZE = 24;
   const DEFAULT_APPROVAL_FILTER = ['PENDING', 'APPROVED'] as const;
@@ -113,8 +110,8 @@
     await loadItems(false);
   }
 
-  async function handleApprove(event: CustomEvent<{ itemId: number }>) {
-    const { itemId } = event.detail;
+  async function handleApprove(detail: { itemId: number }) {
+    const { itemId } = detail;
     setActionStage(itemId, 'approve');
     try {
       const response = await slideScannerApi.approveMobileItem(itemId);
@@ -130,8 +127,8 @@
     }
   }
 
-  async function handleReject(event: CustomEvent<{ itemId: number; reason: string }>) {
-    const { itemId, reason } = event.detail;
+  async function handleReject(detail: { itemId: number; reason: string }) {
+    const { itemId, reason } = detail;
     setActionStage(itemId, 'reject');
     try {
       await slideScannerApi.rejectMobileItem(itemId, reason);
@@ -146,8 +143,8 @@
     }
   }
 
-  async function handleRemoteDelete(event: CustomEvent<{ itemId: number }>) {
-    const { itemId } = event.detail;
+  async function handleRemoteDelete(detail: { itemId: number }) {
+    const { itemId } = detail;
     setActionStage(itemId, 'remote delete');
     try {
       const response = await slideScannerApi.remoteDeleteMobileItem(itemId, false);
@@ -169,8 +166,8 @@
     }
   }
 
-  async function handleRetryRemoteDelete(event: CustomEvent<{ itemId: number }>) {
-    const { itemId } = event.detail;
+  async function handleRetryRemoteDelete(detail: { itemId: number }) {
+    const { itemId } = detail;
     setActionStage(itemId, 'remote delete retry');
     try {
       const response = await slideScannerApi.remoteDeleteMobileItem(itemId, true);
@@ -192,8 +189,8 @@
     }
   }
 
-  async function handleHandoff(event: CustomEvent<{ itemId: number }>) {
-    const { itemId } = event.detail;
+  async function handleHandoff(detail: { itemId: number }) {
+    const { itemId } = detail;
     setActionStage(itemId, 'handoff');
     try {
       const response = await slideScannerApi.handoffMobileItem(itemId);
@@ -209,8 +206,8 @@
     }
   }
 
-  function handleMoveToEditor(event: CustomEvent<{ itemId: number; slideId: number }>) {
-    dispatch('moveToEditor', event.detail);
+  function handleMoveToEditor(detail: { itemId: number; slideId: number }) {
+    onmovetoeditor?.(detail);
   }
 
   $: if (refreshKey !== observedRefreshKey) {
@@ -270,12 +267,12 @@
           busy={Boolean(actionStages[item.id])}
           busyStage={actionStages[item.id] || null}
           failureMessage={failureMessages[item.id] || null}
-          on:approve={handleApprove}
-          on:reject={handleReject}
-          on:remoteDelete={handleRemoteDelete}
-          on:retryRemoteDelete={handleRetryRemoteDelete}
-          on:handoff={handleHandoff}
-          on:moveToEditor={handleMoveToEditor}
+          onapprove={handleApprove}
+          onreject={handleReject}
+          onremotedelete={handleRemoteDelete}
+          onretryremotedelete={handleRetryRemoteDelete}
+          onhandoff={handleHandoff}
+          onmovetoeditor={handleMoveToEditor}
         />
       {/each}
     </div>

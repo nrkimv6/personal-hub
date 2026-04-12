@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
-  const dispatch = createEventDispatcher<{ select: File }>();
+  export let onselect: ((file: File) => void) | undefined = undefined;
   let isDragging = false;
   let fileInput: HTMLInputElement | null = null;
 
@@ -11,7 +9,7 @@
 
   function emitFile(file?: File) {
     if (!file) return;
-    dispatch('select', file);
+    onselect?.(file);
   }
 
   function handleDrop(event: DragEvent) {

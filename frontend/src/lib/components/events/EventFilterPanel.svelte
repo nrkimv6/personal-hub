@@ -390,7 +390,7 @@
 
 		<!-- 닫기 버튼 -->
 		<div class="pt-2 border-t border-border">
-			<Button variant="secondary" size="sm" on:click={() => onShowFiltersChange(false)} class="w-full">
+			<Button variant="secondary" size="sm" onclick={() => onShowFiltersChange(false)} class="w-full">
 				닫기
 			</Button>
 		</div>

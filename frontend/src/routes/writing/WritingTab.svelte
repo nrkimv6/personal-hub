@@ -600,14 +600,14 @@
 		<h2 class="text-lg font-bold text-foreground">글쓰기 워커</h2>
 		<div class="flex gap-2">
 			<Button
-				on:click={runWritingTask}
+				onclick={runWritingTask}
 				disabled={running}
 				variant="primary"
 				size="sm"
 			>
 				{running ? '실행 중...' : '수동 실행'}
 			</Button>
-			<Button on:click={() => switchTab(activeTab)} variant="secondary" size="sm">
+			<Button onclick={() => switchTab(activeTab)} variant="secondary" size="sm">
 				새로고침
 			</Button>
 		</div>
@@ -697,8 +697,8 @@
 				<option value="-1">비추천</option>
 				<option value="null">미평가</option>
 			</select>
-			<Button on:click={handleFilter} variant="primary" size="sm">필터</Button>
-			<Button on:click={clearFilters} variant="secondary" size="sm">초기화</Button>
+			<Button onclick={handleFilter} variant="primary" size="sm">필터</Button>
+			<Button onclick={clearFilters} variant="secondary" size="sm">초기화</Button>
 		</div>
 
 		{#if loading}
@@ -763,11 +763,11 @@
 						전체 {writingPager.total}개 중 {(writingPager.page - 1) * writingPager.pageSize + 1} - {Math.min(writingPager.page * writingPager.pageSize, writingPager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={prevPage} disabled={writingPager.page === 1} variant="secondary" size="sm">
+						<Button onclick={prevPage} disabled={writingPager.page === 1} variant="secondary" size="sm">
 							이전
 						</Button>
 						<span class="px-3 py-1.5 text-sm">{writingPager.page} / {writingPager.totalPages}</span>
-						<Button on:click={nextPage} disabled={writingPager.page >= writingPager.totalPages} variant="secondary" size="sm">
+						<Button onclick={nextPage} disabled={writingPager.page >= writingPager.totalPages} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
@@ -823,11 +823,11 @@
 						전체 {sourcePager.total}개 중 {(sourcePager.page - 1) * sourcePager.pageSize + 1} - {Math.min(sourcePager.page * sourcePager.pageSize, sourcePager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={sourcePrevPage} disabled={sourcePager.page === 1} variant="secondary" size="sm">
+						<Button onclick={sourcePrevPage} disabled={sourcePager.page === 1} variant="secondary" size="sm">
 							이전
 						</Button>
 						<span class="px-3 py-1.5 text-sm">{sourcePager.page} / {sourcePager.totalPages}</span>
-						<Button on:click={sourceNextPage} disabled={sourcePager.page >= sourcePager.totalPages} variant="secondary" size="sm">
+						<Button onclick={sourceNextPage} disabled={sourcePager.page >= sourcePager.totalPages} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
@@ -884,11 +884,11 @@
 					min="1"
 					class="w-20 px-2 py-1 border border-border rounded text-sm"
 				/>
-				<Button on:click={handleKeywordFilter} variant="primary" size="sm">필터</Button>
+				<Button onclick={handleKeywordFilter} variant="primary" size="sm">필터</Button>
 			</div>
 			<div class="flex gap-2">
 				<Button
-					on:click={() => runAnalysis('incremental')}
+					onclick={() => runAnalysis('incremental')}
 					disabled={analyzing}
 					variant="secondary"
 					size="sm"
@@ -896,14 +896,14 @@
 					{analyzing ? '분석 중...' : '증분 분석'}
 				</Button>
 				<Button
-					on:click={() => runAnalysis('full')}
+					onclick={() => runAnalysis('full')}
 					disabled={analyzing}
 					variant="secondary"
 					size="sm"
 				>
 					전체 분석
 				</Button>
-				<Button on:click={promoteBatch} variant="primary" size="sm">
+				<Button onclick={promoteBatch} variant="primary" size="sm">
 					일괄 승격
 				</Button>
 			</div>
@@ -986,13 +986,13 @@
 						전체 {keywordPager.total.toLocaleString()}개 중 {keywordPager.offset + 1} - {Math.min(keywordPager.offset + keywordPager.limit, keywordPager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={keywordPrevPage} disabled={keywordPager.offset === 0} variant="secondary" size="sm">
+						<Button onclick={keywordPrevPage} disabled={keywordPager.offset === 0} variant="secondary" size="sm">
 							이전
 						</Button>
 						<span class="px-3 py-1.5 text-sm">
 							{Math.floor(keywordPager.offset / keywordPager.limit) + 1} / {Math.ceil(keywordPager.total / keywordPager.limit)}
 						</span>
-						<Button on:click={keywordNextPage} disabled={!keywordPager.hasMore} variant="secondary" size="sm">
+						<Button onclick={keywordNextPage} disabled={!keywordPager.hasMore} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
@@ -1037,10 +1037,10 @@
 					<option value="auto">자동 추출</option>
 					<option value="manual">수동 추가</option>
 				</select>
-				<Button on:click={handleElementFilter} variant="primary" size="sm">필터</Button>
+				<Button onclick={handleElementFilter} variant="primary" size="sm">필터</Button>
 			</div>
 			<Button
-				on:click={extractTopics}
+				onclick={extractTopics}
 				disabled={extracting}
 				variant="secondary"
 				size="sm"
@@ -1105,11 +1105,11 @@
 						전체 {elementPager.total}개 중 {(elementPager.page - 1) * elementPager.pageSize + 1} - {Math.min(elementPager.page * elementPager.pageSize, elementPager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={elementPrevPage} disabled={elementPager.page === 1} variant="secondary" size="sm">
+						<Button onclick={elementPrevPage} disabled={elementPager.page === 1} variant="secondary" size="sm">
 							이전
 						</Button>
 						<span class="px-3 py-1.5 text-sm">{elementPager.page} / {elementPager.totalPages}</span>
-						<Button on:click={elementNextPage} disabled={elementPager.page >= elementPager.totalPages} variant="secondary" size="sm">
+						<Button onclick={elementNextPage} disabled={elementPager.page >= elementPager.totalPages} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
@@ -1121,7 +1121,7 @@
 		<div class="mb-4 flex justify-between items-center">
 			<h3 class="text-lg font-semibold text-foreground">글쓰기 배치</h3>
 			<Button
-				on:click={createBatch}
+				onclick={createBatch}
 				disabled={creatingBatch}
 				variant="primary"
 				size="sm"
@@ -1200,11 +1200,11 @@
 						전체 {batchPager.total}개 중 {(batchPager.page - 1) * batchPager.pageSize + 1} - {Math.min(batchPager.page * batchPager.pageSize, batchPager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={batchPrevPage} disabled={batchPager.page === 1} variant="secondary" size="sm">
+						<Button onclick={batchPrevPage} disabled={batchPager.page === 1} variant="secondary" size="sm">
 							이전
 						</Button>
 						<span class="px-3 py-1.5 text-sm">{batchPager.page} / {batchPager.totalPages}</span>
-						<Button on:click={batchNextPage} disabled={batchPager.page >= batchPager.totalPages} variant="secondary" size="sm">
+						<Button onclick={batchNextPage} disabled={batchPager.page >= batchPager.totalPages} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
@@ -1315,7 +1315,7 @@
 				{/if}
 
 				<div class="flex justify-end pt-4 border-t">
-					<Button on:click={closeBatchModal} variant="secondary" size="sm">닫기</Button>
+					<Button onclick={closeBatchModal} variant="secondary" size="sm">닫기</Button>
 				</div>
 			</div>
 		</div>
@@ -1380,7 +1380,7 @@
 				<!-- 평가 버튼 -->
 				<div class="mb-4 flex gap-2">
 					<Button
-						on:click={() => rateWriting(1)}
+						onclick={() => rateWriting(1)}
 						variant={selectedWriting.rating === 1 ? 'primary' : 'secondary'}
 						size="sm"
 						class="flex items-center gap-1"
@@ -1388,7 +1388,7 @@
 						<ThumbsUp size={16} /> 추천
 					</Button>
 					<Button
-						on:click={() => rateWriting(-1)}
+						onclick={() => rateWriting(-1)}
 						variant={selectedWriting.rating === -1 ? 'destructive' : 'secondary'}
 						size="sm"
 						class="flex items-center gap-1"
@@ -1397,7 +1397,7 @@
 					</Button>
 					{#if selectedWriting.rating !== null}
 						<Button
-							on:click={() => rateWriting(null)}
+							onclick={() => rateWriting(null)}
 							variant="secondary"
 							size="sm"
 						>
@@ -1423,8 +1423,8 @@
 							class="w-full px-3 py-2 border border-border rounded-lg resize-none text-sm"
 						></textarea>
 						<div class="mt-2 flex gap-2">
-							<Button on:click={saveEdit} variant="primary" size="sm">저장</Button>
-							<Button on:click={() => { editMode = false; editContent = selectedWriting?.content || ''; }} variant="secondary" size="sm">취소</Button>
+							<Button onclick={saveEdit} variant="primary" size="sm">저장</Button>
+							<Button onclick={() => { editMode = false; editContent = selectedWriting?.content || ''; }} variant="secondary" size="sm">취소</Button>
 						</div>
 					{:else}
 						<div class="p-4 bg-background rounded-lg whitespace-pre-wrap text-sm max-h-96 overflow-auto">
@@ -1446,8 +1446,8 @@
 				{/if}
 
 				<div class="flex gap-2 pt-4 border-t">
-					<Button on:click={deleteWriting} variant="destructive" size="sm">삭제</Button>
-					<Button on:click={closeModal} variant="secondary" size="sm" class="ml-auto">닫기</Button>
+					<Button onclick={deleteWriting} variant="destructive" size="sm">삭제</Button>
+					<Button onclick={closeModal} variant="secondary" size="sm" class="ml-auto">닫기</Button>
 				</div>
 			</div>
 		</div>
@@ -1498,8 +1498,8 @@
 				</div>
 
 				<div class="flex gap-2 pt-4 border-t">
-					<Button on:click={deleteSource} variant="destructive" size="sm">삭제</Button>
-					<Button on:click={closeSourceModal} variant="secondary" size="sm" class="ml-auto">닫기</Button>
+					<Button onclick={deleteSource} variant="destructive" size="sm">삭제</Button>
+					<Button onclick={closeSourceModal} variant="secondary" size="sm" class="ml-auto">닫기</Button>
 				</div>
 			</div>
 		</div>

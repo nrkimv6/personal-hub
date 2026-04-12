@@ -100,7 +100,7 @@
     <select
       class="text-xs bg-background border border-border text-foreground rounded px-2 py-1"
       bind:value={filterType}
-      on:change={() => loadEvents()}
+      onchange={() => loadEvents()}
     >
       <option value="">전체</option>
       {#each EVENT_TYPES as t}
@@ -109,7 +109,7 @@
     </select>
     <button
       class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-      on:click={() => loadEvents()}
+      onclick={() => loadEvents()}
     >새로고침</button>
   </div>
 
@@ -127,7 +127,7 @@
         <div>
           <button
             class="flex items-center gap-2 text-xs font-semibold text-muted-foreground mb-2 hover:text-foreground"
-            on:click={() => toggleMonth(group)}
+            onclick={() => toggleMonth(group)}
           >
             <span>{group.collapsed ? '▶' : '▼'}</span>
             <span>{group.month}</span>
@@ -174,7 +174,7 @@
         <button
           class="px-4 py-2 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground mx-auto block"
           disabled={loading}
-          on:click={() => loadEvents(true)}
+          onclick={() => loadEvents(true)}
         >
           {loading ? '로드 중...' : '더 보기 (50건)'}
         </button>

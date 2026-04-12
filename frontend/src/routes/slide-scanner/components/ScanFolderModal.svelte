@@ -1,14 +1,9 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
-  const dispatch = createEventDispatcher<{
-    close: void;
-    submit: { folderPath: string; recursive: boolean };
-  }>();
-
   export let open = false;
   export let busy = false;
   export let defaultPath = '';
+  export let onclose: (() => void) | undefined = undefined;
+  export let onsubmit: ((detail: { folderPath: string; recursive: boolean }) => void) | undefined = undefined;
 
   let folderPath = '';
   let recursive = true;
@@ -19,13 +14,13 @@
 
   function closeModal() {
     if (busy) return;
-    dispatch('close');
+    onclose?.();
   }
 
   function submit() {
     const normalized = folderPath.trim();
     if (!normalized || busy) return;
-    dispatch('submit', { folderPath: normalized, recursive });
+    onsubmit?.({ folderPath: normalized, recursive });
   }
 </script>
 

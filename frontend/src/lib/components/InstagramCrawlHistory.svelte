@@ -422,7 +422,7 @@
 		{#if totalPages > 1}
 			<div class="flex justify-center items-center gap-2 mt-6">
 				<Button
-					on:click={() => {
+					onclick={() => {
 						page = Math.max(1, page - 1);
 						fetchHistory();
 					}}
@@ -436,7 +436,7 @@
 					{page} / {totalPages}
 				</span>
 				<Button
-					on:click={() => {
+					onclick={() => {
 						page = Math.min(totalPages, page + 1);
 						fetchHistory();
 					}}
