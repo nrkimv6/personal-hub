@@ -109,7 +109,7 @@ class OrphanDetector:
             실제로 정리된 프로세스 정보 리스트
         """
         # 순환 import 방지를 위해 지연 임포트
-        from scripts.service_utils import kill_pid  # type: ignore
+        from scripts.services.service_utils import kill_pid  # type: ignore
 
         cleaned: list[dict] = []
         now = time.time()

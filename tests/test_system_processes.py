@@ -168,11 +168,11 @@ class TestKillProcess:
         mock_proc = MagicMock()
         mock_proc.name.return_value = "python.exe"
         mock_proc.exe.return_value = r"D:\Python39\python.exe"
-        mock_proc.cmdline.return_value = ["python", "test.py"]
+        mock_proc.cmdline.return_value = ["python", "app/main.py", "--port", "8001"]
         mock_proc.create_time.return_value = 1712100000.0
 
         with patch("app.routes.system.psutil.Process", return_value=mock_proc), \
-             patch("scripts.service_utils.kill_pid", return_value=True) as mock_kill:
+             patch("scripts.services.service_utils.kill_pid", return_value=True) as mock_kill:
             resp = client.post("/api/v1/system/kill-process", json={"pid": 12345})
             assert resp.status_code == 200
             data = resp.json()
