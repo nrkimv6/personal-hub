@@ -11,7 +11,7 @@
   import SlideCard from './SlideCard.svelte';
 
   type StatusFilter = 'ALL' | SlideStatus;
-  export let onopen: ((detail: { slideId: number; sequenceIds: number[] }) => void) | undefined = undefined;
+  const { onopen }: { onopen?: (detail: { slideId: number; sequenceIds: number[] }) => void } = $props();
 
   const pager = createOffsetPagination(24);
   const selection = createSelection();
