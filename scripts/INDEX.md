@@ -91,35 +91,35 @@
 
 ## plan_runner/
 
-> 현재 위치: `scripts/`
-> 예정 위치: `scripts/plan_runner/`
+> 현재 위치: `scripts/plan_runner/` ✅ (_todo-3 완료 2026-04-12)
 > 위험도: **🟡 중** — Python import 밀집 결합, `tests/dev_runner/` 회귀 테스트 다수
 > 엔트리: `_dr_plan_runner.py`
-> Import 전략: **옵션 B (sys.path 주입)** — 이동 후 `sys.path.insert(0, str(Path(__file__).parent))` 1줄 추가로 기존 flat import 유지, 호출부 변경 최소화
+> Import 전략: **옵션 B (sys.path 주입)** — 각 파일에 `sys.path.insert(0, str(Path(__file__).parent))` 주입, 기존 flat import 유지
 > 주요 외부 참조자: `tests/dev_runner/test_*.py` 40+개, `app/modules/dev_runner/services/plan_path_resolver.py`, `app/modules/dev_runner/tests/test_dr_plan_runner_session_arg.py`
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ⏳ | `_dr_plan_runner.py` | **엔트리** — plan 1개를 워크트리에서 실행하는 주 CLI |
-| ⏳ | `_dr_commands.py` | CLI 명령 디스패처 |
-| ⏳ | `_dr_constants.py` | 상수 정의 (상태, 경로, 타임아웃) |
-| ⏳ | `_dr_log_framing.py` | 로그 프레이밍 유틸 (start/end 마커) |
-| ⏳ | `_dr_merge.py` | merge 단계 로직 |
-| ⏳ | `_dr_plan_paths.py` | plan/archive 경로 해석 |
-| ⏳ | `_dr_process_utils.py` | 프로세스 spawn/kill 유틸 |
-| ⏳ | `_dr_runner_predicates.py` | 상태 전이 조건 판정 |
-| ⏳ | `_dr_runtime_utils.py` | 런타임 헬퍼 (env, cwd) |
-| ⏳ | `_dr_state.py` | 상태 머신 구현 |
-| ⏳ | `_dr_stream_cleanup.py` | 스트림 정리 단계 |
-| ⏳ | `_dr_subprocess.py` | subprocess 래퍼 |
-| ⏳ | `dev-runner-command-listener.py` | Redis stream 기반 명령 리스너 (API → plan-runner) — `_dr_*` 경로 spawn |
-| ⏳ | `merge_lock.py` | merge 레포 락 관리 |
-| ⏳ | `merge_queue.py` | merge 큐 (BRPOP 기반) |
-| ⏳ | `merge_workflow.py` | merge 워크플로우 orchestrator |
-| ⏳ | `plan_worktree_helpers.py` | plan 기반 worktree 생성/정리 헬퍼 — `_dr_*` import |
-| ⏳ | `workflow_manager.py` | 상위 워크플로우 매니저 |
-| ⏳ | `worktree_manager.py` | worktree 수명 관리 |
-| ⏳ | `conflict_resolver.py` | merge 충돌 자동 해결 |
+| ✅ | `_dr_plan_runner.py` | **엔트리** — plan 1개를 워크트리에서 실행하는 주 CLI |
+| ✅ | `_dr_commands.py` | CLI 명령 디스패처 |
+| ✅ | `_dr_constants.py` | 상수 정의 (상태, 경로, 타임아웃) |
+| ✅ | `_dr_log_framing.py` | 로그 프레이밍 유틸 (start/end 마커) |
+| ✅ | `_dr_merge.py` | merge 단계 로직 |
+| ✅ | `_dr_plan_paths.py` | plan/archive 경로 해석 |
+| ✅ | `_dr_process_utils.py` | 프로세스 spawn/kill 유틸 |
+| ✅ | `_dr_runner_predicates.py` | 상태 전이 조건 판정 |
+| ✅ | `_dr_runtime_utils.py` | 런타임 헬퍼 (env, cwd) |
+| ✅ | `_dr_state.py` | 상태 머신 구현 |
+| ✅ | `_dr_stream_cleanup.py` | 스트림 정리 단계 |
+| ✅ | `_dr_subprocess.py` | subprocess 래퍼 |
+| ✅ | `dev-runner-command-listener.py` | Redis stream 기반 명령 리스너 (API → plan-runner) — `_dr_*` 경로 spawn |
+| ✅ | `merge_lock.py` | merge 레포 락 관리 |
+| ✅ | `merge_queue.py` | merge 큐 (BRPOP 기반) |
+| ✅ | `merge_workflow.py` | merge 워크플로우 orchestrator |
+| ✅ | `plan_worktree_helpers.py` | plan 기반 worktree 생성/정리 헬퍼 — `_dr_*` import |
+| ✅ | `workflow_manager.py` | 상위 워크플로우 매니저 |
+| ✅ | `worktree_manager.py` | worktree 수명 관리 |
+| ✅ | `conflict_resolver.py` | merge 충돌 자동 해결 |
+| ✅ | `queue_archived_plans.py` | 아카이브된 plan 큐잉 유틸 |
 
 ---
 

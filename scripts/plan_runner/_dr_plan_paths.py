@@ -6,7 +6,13 @@
 - _auto* 계열 plan은 docs/history로 이동
 - 검토완료 이전(pre_review) / 이후(post_review) 단계 분류 공통화
 """
+
 from __future__ import annotations
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
 
 from dataclasses import dataclass
 from pathlib import Path

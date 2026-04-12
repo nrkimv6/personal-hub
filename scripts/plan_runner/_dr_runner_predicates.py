@@ -3,6 +3,12 @@
 이 모듈은 app.modules를 import하지 않으며, scripts 환경에서 단독 실행 가능하다.
 """
 
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
+
 import logging
 import time
 from datetime import datetime

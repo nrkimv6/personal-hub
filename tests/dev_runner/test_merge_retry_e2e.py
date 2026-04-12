@@ -19,7 +19,7 @@ sys.modules.setdefault("plan_runner.core.stages", _mock_stages_mod)
 sys.modules.setdefault("plan_runner", types.ModuleType("plan_runner"))
 sys.modules.setdefault("plan_runner.core", types.ModuleType("plan_runner.core"))
 
-_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 _mock_noise = types.ModuleType("listener_noise_filter")
 _mock_noise.NOISE_BLOCK_MARKERS = []

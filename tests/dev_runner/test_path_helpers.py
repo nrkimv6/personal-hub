@@ -13,7 +13,7 @@ from tests.dev_runner import _path_helpers
 def test_get_repo_root_right():
     """R: get_repo_root()는 현재 checkout 루트 경로를 반환해야 함."""
     repo_root = _path_helpers.get_repo_root()
-    assert (repo_root / "scripts" / "dev-runner-command-listener.py").exists()
+    assert (repo_root / "scripts" / "plan_runner" / "dev-runner-command-listener.py").exists()
     assert (repo_root / ".git").exists()
 
 

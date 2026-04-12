@@ -22,7 +22,7 @@ import pytest
 # ── 공통 헬퍼 ────────────────────────────────────────────────────────────────
 
 _LISTENER_PATH = (
-    Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+    Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 )
 
 _mock_noise_module = types.ModuleType("listener_noise_filter")

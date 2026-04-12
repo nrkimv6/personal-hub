@@ -22,6 +22,8 @@ from app.modules.dev_runner.services.redis_connection import RECENT_RUNNERS_TTL
 _SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_SCRIPTS_DIR / "plan_runner") not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR / "plan_runner"))
 
 from _dr_runtime_utils import _normalize_exit_reason
 

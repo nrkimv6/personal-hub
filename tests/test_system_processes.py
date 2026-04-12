@@ -58,7 +58,7 @@ class TestInferRole:
         assert self.infer("python proxy_manager.py") == "Proxy Manager"
 
     def test_dev_runner(self):
-        assert self.infer("python scripts/dev-runner-command-listener.py") == "Dev Runner"
+        assert self.infer("python scripts/plan_runner/dev-runner-command-listener.py") == "Dev Runner"
 
     def test_pytest_process(self):
         assert self.infer("python -m pytest tests/") == "pytest"

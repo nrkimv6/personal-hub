@@ -1,4 +1,10 @@
 """_dr_stream_cleanup.py — _stream_output finally 블록 리팩토링용 헬퍼 모듈"""
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
 import json
 import logging
 import subprocess

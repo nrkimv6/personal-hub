@@ -72,7 +72,7 @@ function Start-DevRunnerListener {
             Write-Log "ERROR: Virtual environment python not found!" "ERROR"
             return $null
         }
-        $ProcArgs = @("scripts\dev-runner-command-listener.py")
+        $ProcArgs = @("scripts\plan_runner\dev-runner-command-listener.py")
     }
 
     Write-Log "Using: $VenvPython"

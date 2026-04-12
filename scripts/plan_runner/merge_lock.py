@@ -9,6 +9,12 @@ Redis 키 구조:
   plan-runner:merge-wait-queue:{repo_id} → 대기 중인 runner_id 목록 (per-repo)
 """
 
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
+
 import os
 import time
 import logging

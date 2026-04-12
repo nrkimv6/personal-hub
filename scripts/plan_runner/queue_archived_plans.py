@@ -9,6 +9,12 @@ DB에서 llm_processed_at IS NULL AND archived_at IS NOT NULL 조회 →
     python scripts/queue_archived_plans.py --dry-run
     python scripts/queue_archived_plans.py --limit 50
 """
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
 import argparse
 import sys
 from pathlib import Path

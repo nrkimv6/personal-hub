@@ -1,4 +1,10 @@
 """_dr_state.py — dev-runner-command-listener 전역 상태 모듈"""
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
 from typing import Optional
 
 # WorkflowManager는 런타임에 set_wf_manager()로 주입됨 (순환 임포트 방지)

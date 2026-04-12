@@ -3,6 +3,12 @@ WorktreeManager — git worktree 생명주기 관리 유틸리티
 
 각 plan-runner 인스턴스를 격리된 git worktree에서 실행하기 위한 헬퍼 클래스.
 """
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
 import shutil
 import subprocess
 import logging

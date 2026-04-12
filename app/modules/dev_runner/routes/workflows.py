@@ -149,7 +149,7 @@ async def reset_workflow(workflow_id: int, cleanup_worktree: bool = False, db: S
 
     if cleanup_worktree and wf.worktree_path:
         try:
-            scripts_dir = str(Path(__file__).resolve().parents[4] / "scripts")
+            scripts_dir = str(Path(__file__).resolve().parents[4] / "scripts" / "plan_runner")
             if scripts_dir not in sys.path:
                 sys.path.insert(0, scripts_dir)
             from worktree_manager import WorktreeManager

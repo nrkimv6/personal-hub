@@ -2,6 +2,12 @@
 WorkflowManager — dev-runner 워크플로우 영속화 관리
 SQLite 직접 연결 (scripts/ 디렉토리는 독립 프로세스, SQLAlchemy 미사용)
 """
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
 import sqlite3
 import logging
 import os

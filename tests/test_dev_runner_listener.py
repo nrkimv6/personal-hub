@@ -31,7 +31,7 @@ def _load_listener_module():
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "dev_runner_command_listener",
-            SCRIPTS_DIR / "dev-runner-command-listener.py",
+            SCRIPTS_DIR / "plan_runner" / "dev-runner-command-listener.py",
         )
         module = importlib.util.module_from_spec(spec)
 

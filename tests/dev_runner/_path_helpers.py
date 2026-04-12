@@ -13,7 +13,7 @@ def get_repo_root() -> Path:
 
 def get_listener_script_path() -> Path:
     """현재 checkout의 listener 스크립트 경로 반환."""
-    return get_repo_root() / "scripts" / "dev-runner-command-listener.py"
+    return get_repo_root() / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 
 def get_project_python() -> str:

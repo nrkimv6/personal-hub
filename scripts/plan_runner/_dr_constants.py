@@ -1,4 +1,10 @@
-﻿"""_dr_constants.py — dev-runner-command-listener 상수 모듈"""
+"""_dr_constants.py — dev-runner-command-listener 상수 모듈"""
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
 import os
 from pathlib import Path
 

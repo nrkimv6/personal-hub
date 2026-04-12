@@ -1,4 +1,10 @@
 """_dr_plan_runner.py — dev-runner plan-runner 프로세스 실행 모듈"""
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
 import json
 import logging
 import subprocess

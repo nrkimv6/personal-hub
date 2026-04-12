@@ -20,7 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "_deprecated"))
 
-LISTENER_SCRIPT = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+LISTENER_SCRIPT = Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 
 def _load_listener_mod():

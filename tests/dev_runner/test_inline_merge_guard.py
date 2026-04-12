@@ -164,7 +164,7 @@ class TestWorkflowRunWithCommitsMerge:
 import importlib
 import importlib.util
 
-_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
+_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts" / "plan_runner"
 _listener_spec = importlib.util.spec_from_file_location(
     "dev_runner_command_listener",
     _SCRIPTS_DIR / "dev-runner-command-listener.py",

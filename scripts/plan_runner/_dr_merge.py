@@ -1,4 +1,10 @@
 """_dr_merge.py — dev-runner merge 실행 헬퍼 모듈"""
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
 import base64
 import functools
 import json

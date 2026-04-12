@@ -7,7 +7,13 @@ try_resolve()의 claude --print 호출은 사용 중단.
 Read/Edit/Bash tool 사용이 불가능하여 conflict markers를 실제로 수정할 수 없다.
 plan-runner resolve 서브커맨드(--dangerously-skip-permissions + stream-json)로 대체.
 """
+
 from __future__ import annotations
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
 
 import json
 import logging

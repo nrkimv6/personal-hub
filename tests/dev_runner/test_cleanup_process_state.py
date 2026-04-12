@@ -15,6 +15,9 @@ from unittest.mock import MagicMock, patch, call
 _SCRIPTS_DIR = str(Path(__file__).parent.parent.parent / "scripts")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
+_PLAN_RUNNER_DIR = str(Path(_SCRIPTS_DIR) / "plan_runner")
+if _PLAN_RUNNER_DIR not in sys.path:
+    sys.path.insert(0, _PLAN_RUNNER_DIR)
 
 try:
     import fakeredis
@@ -53,7 +56,7 @@ class TestCleanupProcessState:
         try:
             import importlib.util
             spec = importlib.util.spec_from_file_location(
-                "listener", Path(_SCRIPTS_DIR) / "dev-runner-command-listener.py"
+                "listener", Path(_SCRIPTS_DIR) / "plan_runner" / "dev-runner-command-listener.py"
             )
             # 스크립트 전체 실행은 부수 효과가 크므로, 상수만 정규식으로 파싱
         except Exception:
@@ -398,7 +401,7 @@ class TestCleanupProcessStatePersistSuffixes:
         for mod_name in ("_dr_constants", "_dr_state"):
             if mod_name not in sys.modules:
                 spec = importlib.util.spec_from_file_location(
-                    mod_name, Path(_SCRIPTS_DIR) / f"{mod_name}.py"
+                    mod_name, Path(_PLAN_RUNNER_DIR) / f"{mod_name}.py"
                 )
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[mod_name] = mod
@@ -406,7 +409,7 @@ class TestCleanupProcessStatePersistSuffixes:
 
         if "_dr_process_utils" not in sys.modules:
             spec = importlib.util.spec_from_file_location(
-                "_dr_process_utils", Path(_SCRIPTS_DIR) / "_dr_process_utils.py"
+                "_dr_process_utils", Path(_PLAN_RUNNER_DIR) / "_dr_process_utils.py"
             )
             mod = importlib.util.module_from_spec(spec)
             sys.modules["_dr_process_utils"] = mod
@@ -481,7 +484,7 @@ class TestRunnerKeySuffixesCompleteness:
             RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX,
         )
 
-        listener_path = Path(_SCRIPTS_DIR) / "dev-runner-command-listener.py"
+        listener_path = Path(_SCRIPTS_DIR) / "plan_runner" / "dev-runner-command-listener.py"
         source = listener_path.read_text(encoding="utf-8")
 
         # redis_client.set(f"...:{runner_id}:{suffix}" 또는 :{rid}: 패턴 스캔
@@ -520,7 +523,7 @@ class TestCleanupUnmergedCommitsGuard:
         for mod_name in ("_dr_constants", "_dr_state"):
             if mod_name not in sys.modules:
                 spec = importlib.util.spec_from_file_location(
-                    mod_name, Path(_SCRIPTS_DIR) / f"{mod_name}.py"
+                    mod_name, Path(_PLAN_RUNNER_DIR) / f"{mod_name}.py"
                 )
                 mod = importlib.util.module_from_spec(spec)
                 sys.modules[mod_name] = mod
@@ -530,7 +533,7 @@ class TestCleanupUnmergedCommitsGuard:
         if "_dr_process_utils" in sys.modules:
             del sys.modules["_dr_process_utils"]
         spec = importlib.util.spec_from_file_location(
-            "_dr_process_utils", Path(_SCRIPTS_DIR) / "_dr_process_utils.py"
+            "_dr_process_utils", Path(_PLAN_RUNNER_DIR) / "_dr_process_utils.py"
         )
         mod = importlib.util.module_from_spec(spec)
         sys.modules["_dr_process_utils"] = mod
@@ -665,7 +668,7 @@ class TestCleanupUnmergedCommitsGuardIntegration:
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "plan_worktree_helpers_real",
-            Path(_SCRIPTS_DIR) / "plan_worktree_helpers.py"
+            Path(_PLAN_RUNNER_DIR) / "plan_worktree_helpers.py"
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

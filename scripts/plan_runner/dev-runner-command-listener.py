@@ -16,6 +16,12 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
 아키텍처:
     API (Session 0) -> Redis LPUSH -> [이 리스너 (Session 1)] -> plan-runner CLI
 """
+
+import sys as _sys_inject
+from pathlib import Path as _Path_inject
+_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
+del _sys_inject, _Path_inject
+
 import argparse
 import json
 import logging

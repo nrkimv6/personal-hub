@@ -28,7 +28,7 @@ import browser_workers
 # dev-runner-command-listener.py는 하이픈으로 인해 일반 import 불가 — importlib 사용
 _listener_spec = importlib.util.spec_from_file_location(
     "dev_runner_command_listener",
-    SCRIPTS_DIR / "dev-runner-command-listener.py",
+    SCRIPTS_DIR / "plan_runner" / "dev-runner-command-listener.py",
 )
 dev_runner_command_listener = importlib.util.module_from_spec(_listener_spec)
 sys.modules["dev_runner_command_listener"] = dev_runner_command_listener

@@ -2,8 +2,6 @@
 
 > 생성일: 2026-02-27
 > 상태: 구현중
-> branch: plan/test_minimal_plan
-> worktree: .worktrees/test_minimal_plan
 > 진행률: 0/1 (0%)
 > 목적: E2E 테스트용 최소 plan 파일 — plan-runner가 처리 가능한 최소 구조
 
