@@ -17,12 +17,17 @@ ENGINE_ENV_KEYS: Dict[str, Optional[str]] = {
 }
 
 # extra_env 에 덮어쓰기를 허용하지 않는 시스템 핵심 키
+# subprocess UTF-8 env 덮어쓰기 방어 (_dr_subprocess._FORBIDDEN_EXTRA_ENV 와 동기화)
+# ⚠ scripts/_dr_subprocess._FORBIDDEN_EXTRA_ENV 를 수정할 때 이 집합도 함께 업데이트할 것
 FORBIDDEN_EXTRA_ENV = {
-    "PATH",
-    "PATHEXT",
-    "SYSTEMROOT",
     "COMSPEC",
     "HOME",
+    "PATH",
+    "PATHEXT",
+    "PYTHONIOENCODING",
+    "PYTHONUTF8",
+    "PYTHONUNBUFFERED",
+    "SYSTEMROOT",
     "USERPROFILE",
 }
 

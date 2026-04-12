@@ -157,3 +157,103 @@ def test_build_cli_env_Re_base_env_preserved(isolate_profiles):
     env = pe.build_cli_env("claude", base_env=base)
     assert env.get("CUSTOM_KEY") == "hello"
     assert env.get("ANOTHER") == "world"
+
+
+# ────────────────────────────────────────────
+# FORBIDDEN_EXTRA_ENV 집합 대칭성 검증
+# ────────────────────────────────────────────
+
+def test_forbidden_env_superset_of_subprocess_C_symmetric():
+    """C: profile_env.FORBIDDEN_EXTRA_ENV 가 _dr_subprocess._FORBIDDEN_EXTRA_ENV 를 완전히 포함함을 검증.
+
+    저장 시점 검증(profile_env)이 실행 시점 검증(_dr_subprocess)보다 엄격하거나 동일해야
+    "저장 성공 → 실행 실패" 경로가 소멸된다.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    # scripts/_dr_subprocess.py 를 직접 로드 (scripts/ 는 app import 불가 구조)
+    scripts_dir = Path(__file__).resolve().parents[3] / "scripts"
+    spec = importlib.util.spec_from_file_location(
+        "_dr_subprocess", scripts_dir / "_dr_subprocess.py"
+    )
+    dr_sub = importlib.util.module_from_spec(spec)
+
+    # _dr_subprocess imports redis, _dr_constants 등 실행환경 의존 → sys.modules mock
+    import sys
+    from unittest.mock import MagicMock
+
+    # 필요한 stub 모듈 준비
+    stub_names = ["redis", "_dr_constants", "_dr_state"]
+    stubs = {}
+    for mod_name in stub_names:
+        if mod_name not in sys.modules:
+            stub = MagicMock()
+            sys.modules[mod_name] = stub
+            stubs[mod_name] = stub
+
+    try:
+        spec.loader.exec_module(dr_sub)
+    finally:
+        # stub 모듈 정리
+        for mod_name, stub in stubs.items():
+            if sys.modules.get(mod_name) is stub:
+                del sys.modules[mod_name]
+
+    subprocess_forbidden: set = dr_sub._FORBIDDEN_EXTRA_ENV
+    assert subprocess_forbidden <= pe.FORBIDDEN_EXTRA_ENV, (
+        f"profile_env.FORBIDDEN_EXTRA_ENV 에 누락된 키: "
+        f"{subprocess_forbidden - pe.FORBIDDEN_EXTRA_ENV}"
+    )
+
+
+# ────────────────────────────────────────────
+# 신규 forbidden key — PYTHONIOENCODING / PYTHONUTF8 / PYTHONUNBUFFERED
+# ────────────────────────────────────────────
+
+def test_build_cli_env_E_forbidden_PYTHONIOENCODING(isolate_profiles):
+    """E: extra_env 에 PYTHONIOENCODING → ValueError (파일 직접 쓰기 우회)."""
+    import json
+    bad_payload = {
+        "selected": {"claude": "bad", "gemini": "default"},
+        "profiles": [
+            {"engine": "claude", "name": "bad", "config_dir": None,
+             "extra_env": {"PYTHONIOENCODING": "ascii"}},
+            {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}},
+        ],
+    }
+    isolate_profiles.write_text(json.dumps(bad_payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="forbidden env key"):
+        pe.build_cli_env("claude")
+
+
+def test_build_cli_env_E_forbidden_PYTHONUTF8(isolate_profiles):
+    """E: extra_env 에 PYTHONUTF8 → ValueError."""
+    import json
+    bad_payload = {
+        "selected": {"claude": "bad", "gemini": "default"},
+        "profiles": [
+            {"engine": "claude", "name": "bad", "config_dir": None,
+             "extra_env": {"PYTHONUTF8": "1"}},
+            {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}},
+        ],
+    }
+    isolate_profiles.write_text(json.dumps(bad_payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="forbidden env key"):
+        pe.build_cli_env("claude")
+
+
+def test_build_cli_env_E_forbidden_PYTHONUNBUFFERED(isolate_profiles):
+    """E: extra_env 에 PYTHONUNBUFFERED → ValueError."""
+    import json
+    bad_payload = {
+        "selected": {"claude": "bad", "gemini": "default"},
+        "profiles": [
+            {"engine": "claude", "name": "bad", "config_dir": None,
+             "extra_env": {"PYTHONUNBUFFERED": "1"}},
+            {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}},
+        ],
+    }
+    isolate_profiles.write_text(json.dumps(bad_payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="forbidden env key"):
+        pe.build_cli_env("claude")
