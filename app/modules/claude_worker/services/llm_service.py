@@ -15,9 +15,9 @@ from sqlalchemy.orm import Session
 from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
 from app.modules.claude_worker.services.profile_env import build_cli_env
 from app.shared.io import read_json, write_json_atomic
+from app.modules.claude_worker.services import provider_registry
 from app.shared.llm_registry import (
     CALLER_TYPE_TO_STEP,
-    SUPPORTED_EXECUTION_PROVIDERS as _EXECUTION_PROVIDERS,
     NoAvailableModelError,
     pick_model,
     report_quota,
@@ -41,10 +41,7 @@ DEFAULT_LLM_DEFAULTS_FILE = PROJECT_ROOT / "data" / "llm_defaults.json"
 LEGACY_LLM_DEFAULTS_FILE = Path("data/llm_defaults.json")
 LLM_DEFAULTS_FILE = DEFAULT_LLM_DEFAULTS_FILE
 
-# LLM worker가 실제 지원하는 provider
-SUPPORTED_LLM_PROVIDERS = {"claude", "gemini", "openai"}
-# claude_worker가 실제 CLI 실행 가능한 provider (openai는 실행 경로 없음 — O-2)
-SUPPORTED_EXECUTION_PROVIDERS = {"claude", "gemini"}
+# provider 관련 상수는 provider_registry 에서 관리 (shadow 상수 제거됨)
 
 # 설정 UI 노출용 caller_type 목록 (코드 기준)
 KNOWN_CALLER_TYPES = [
@@ -153,7 +150,7 @@ class LLMService:
 
     @staticmethod
     def get_supported_providers() -> List[str]:
-        return sorted(SUPPORTED_LLM_PROVIDERS)
+        return sorted(p.key for p in provider_registry.list_enabled())
 
     @staticmethod
     def get_known_caller_types() -> List[str]:
@@ -193,7 +190,7 @@ class LLMService:
         raw_global = raw.get("global_default")
         if isinstance(raw_global, dict):
             provider = self._normalize_provider(raw_global.get("provider")) or "claude"
-            if provider not in SUPPORTED_LLM_PROVIDERS:
+            if not provider_registry.is_supported(provider):
                 provider = "claude"
             model = raw_global.get("model")
             if model is None:
@@ -216,7 +213,7 @@ class LLMService:
                 continue
 
             provider = self._normalize_provider(config.get("provider"))
-            if provider is None or provider not in SUPPORTED_LLM_PROVIDERS:
+            if provider is None or not provider_registry.is_supported(provider):
                 continue
 
             model = config.get("model")
@@ -266,7 +263,7 @@ class LLMService:
                 if provider is None:
                     # provider가 비어 있으면 caller override 삭제(=global fallback)
                     continue
-                if provider not in SUPPORTED_LLM_PROVIDERS:
+                if not provider_registry.is_supported(provider):
                     raise ValueError(f"지원되지 않는 provider: {provider}")
                 model = config.get("model")
                 if model is None:
@@ -331,14 +328,16 @@ class LLMService:
         if step:
             try:
                 picked_provider, picked_model = pick_model(step, oneshot=False)
-                # O-2: openai는 claude_worker 실행 경로 없음 → exclude 재-pick
-                if picked_provider not in _EXECUTION_PROVIDERS:
+                # O-2: 실행 불가 provider(quota_pause=False) → exclude 재-pick
+                _quota_providers = set(provider_registry.get_quota_providers())
+                if picked_provider not in _quota_providers:
                     logger.warning(
                         f"[resolve] picker가 {picked_provider}/{picked_model} 반환 "
-                        f"(실행 불가, SUPPORTED_EXECUTION_PROVIDERS={_EXECUTION_PROVIDERS}). 재-pick."
+                        f"(실행 불가, quota_providers={_quota_providers}). 재-pick."
                     )
+                    _all_providers = {p.key for p in provider_registry.list_enabled()}
                     picked_provider, picked_model = pick_model(
-                        step, oneshot=False, exclude_providers=set(SUPPORTED_LLM_PROVIDERS) - _EXECUTION_PROVIDERS
+                        step, oneshot=False, exclude_providers=_all_providers - _quota_providers
                     )
                 return picked_provider, picked_model
             except NoAvailableModelError as e:
@@ -350,7 +349,7 @@ class LLMService:
         gd_provider = self._normalize_provider(global_default.get("provider")) or "claude"
         gd_model = self._normalize_model(global_default.get("model")) or ""
         # 4순위도 quota 재확인 (1-E step 3)
-        if gd_provider in _EXECUTION_PROVIDERS:
+        if gd_provider in set(provider_registry.get_quota_providers()):
             try:
                 from app.shared.llm_registry import load_quota_state
                 state = load_quota_state()
@@ -1171,12 +1170,37 @@ class LLMService:
             또는
             {"success": False, "error": "..."}
         """
-        if provider == "gemini":
-            # Gemini도 built-in file system tools 지원
+        meta = provider_registry.get_provider(provider)
+        if meta is None or not meta.enabled:
+            return {"success": False, "error": f"지원되지 않는 provider: {provider}"}
+
+        executor_key = meta.executor_key
+        if executor_key == "gemini":
             return self.execute_gemini(prompt, model, timeout, parse_json, enable_tools, cli_options)
+        elif executor_key == "codex":
+            return self.execute_codex(prompt, model, timeout)
+        elif executor_key == "cc-codex":
+            return self.execute_cc_codex(prompt, model, timeout)
         else:
-            # 기본값은 Claude
+            # claude 및 기타 executor_key → Claude 경로
             return self.execute_claude(prompt, model, timeout, parse_json, enable_tools, cli_options=cli_options)
+
+    def execute_codex(self, prompt: str, model: str = "", timeout: int = 120) -> dict:
+        """Codex LLMWorker provider 실행 스텁 (B4에서 실제 구현 예정).
+
+        dev-runner 엔진의 codex 경로와 독립 — 이 메서드에서 dev-runner 모듈을 import 금지.
+        """
+        # TODO(B4): codex CLI 호출 경로 신설
+        return {"success": False, "error": "codex provider 실행 경로 미구현 (B4)"}
+
+    def execute_cc_codex(self, prompt: str, model: str = "", timeout: int = 120) -> dict:
+        """CC-Codex LLMWorker provider 실행 스텁 (B4에서 실제 구현 예정).
+
+        execute_codex()와 코드 공유 금지 — 별도 경로로 유지.
+        dev-runner 엔진의 cc-codex 경로와 독립.
+        """
+        # TODO(B4): cc-codex CLI 호출 경로 신설 (execute_codex와 완전 별도 경로)
+        return {"success": False, "error": "cc-codex provider 실행 경로 미구현 (B4)"}
 
     def _parse_json_response(self, text: str) -> dict:
         """Claude 응답에서 JSON 추출.

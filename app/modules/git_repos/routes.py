@@ -332,12 +332,11 @@ diff:
 
 커밋 메시지만 출력하세요."""
 
-        # model 기본값 해석
-        _default_models = {
-            "claude": "claude-haiku-4-5-20251001",
-            "gemini": "gemini-2.0-flash",
-        }
-        resolved_model = body.model if body.model else _default_models[body.provider]
+        # model 기본값 해석 — registry 기반
+        from app.modules.claude_worker.services import provider_registry as _pr
+        _provider_meta = _pr.get_provider(body.provider)
+        _default_model = _provider_meta.default_model if _provider_meta else ""
+        resolved_model = body.model if body.model else _default_model
 
         llm_svc = LLMService(db)
         req = llm_svc.enqueue(

@@ -11,12 +11,13 @@ import redis.asyncio as aioredis
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin, UserInfo
 from app.database import get_db
-from app.modules.claude_worker.services.llm_service import LLMService, SUPPORTED_LLM_PROVIDERS
+from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services import provider_registry
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 from app.shared.llm_registry import (
     NoAvailableModelError,
@@ -50,6 +51,14 @@ class LLMRequestCreate(BaseModel):
     queue_name: str = "utility"
     cli_options: Optional[dict] = None
     mode: str = "single"
+
+    @validator("provider")
+    def validate_provider(cls, v):
+        if v is None:
+            return v
+        if not provider_registry.is_supported(v):
+            raise ValueError(f"지원되지 않는 provider: {v}")
+        return v
 
 
 class LLMRequestResponse(BaseModel):
@@ -181,6 +190,40 @@ def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
         return LLMRequestDetailResponse(**fields)
 
     return LLMRequestResponse(**fields)
+
+
+@router.get("/providers")
+def get_llm_providers():
+    """enabled 상태의 LLM Provider 목록 조회.
+
+    Returns:
+        [
+          {
+            "key": "claude",
+            "display_name": "Claude",
+            "default_model": "claude-opus-4-6",
+            "models": ["claude-opus-4-6", "claude-sonnet-4-6"],
+            "supports_chat": true,
+            "supports_quota_pause": true,
+            "enabled": true,
+            "executor_key": "claude"
+          },
+          ...
+        ]
+    """
+    return [
+        {
+            "key": p.key,
+            "display_name": p.display_name,
+            "default_model": p.default_model,
+            "models": p.models,
+            "supports_chat": p.supports_chat,
+            "supports_quota_pause": p.supports_quota_pause,
+            "enabled": p.enabled,
+            "executor_key": p.executor_key,
+        }
+        for p in provider_registry.list_enabled()
+    ]
 
 
 @router.get("/queue-stats")
@@ -542,7 +585,7 @@ def get_quota_status(db: Session = Depends(get_db)):
     """
     service = LLMService(db)
     result = {}
-    for provider in ["gemini", "claude"]:
+    for provider in provider_registry.get_quota_providers():
         paused_until = service.get_provider_quota_pause(provider)
         blocked = service.get_blocked_pending_count(provider)
         if paused_until:
@@ -730,7 +773,7 @@ async def report_quota_endpoint(body: QuotaReportRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    if body.provider not in SUPPORTED_LLM_PROVIDERS:
+    if not provider_registry.is_supported(body.provider):
         raise HTTPException(status_code=400, detail=f"지원되지 않는 provider: {body.provider}")
 
     try:

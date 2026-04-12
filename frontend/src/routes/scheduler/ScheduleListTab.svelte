@@ -3,7 +3,7 @@
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	import { onMount } from 'svelte';
-	import { collectApi } from '$lib/api';
+	import { collectApi, llmApi, type ProviderInfo } from '$lib/api';
 	import type { CrawlSchedule, ServiceAccountWithProfile } from '$lib/types';
 	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
 	import { 
@@ -50,6 +50,7 @@
 	let pytestTestPath = 'tests/';
 	let pytestExtraArgs = '';
 	let pytestAutoFixPlan = true;
+	let providers = $state<ProviderInfo[]>([]);
 	let pytestLlmProvider = 'claude';
 	let pytestLlmModel = '';
 	let pytestCronTime = '02:00';
@@ -583,6 +584,7 @@
 
 	onMount(() => {
 		fetchSchedules();
+		llmApi.getProviders().then(data => { providers = data; }).catch(() => {});
 	});
 </script>
 
@@ -879,8 +881,14 @@
 												bind:value={pytestLlmProvider}
 												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring text-sm"
 											>
-												<option value="claude">Claude (기본)</option>
-												<option value="gemini">Gemini</option>
+												{#if providers.length > 0}
+													{#each providers as p}
+														<option value={p.key}>{p.display_name}</option>
+													{/each}
+												{:else}
+													<option value="claude">Claude</option>
+													<option value="gemini">Gemini</option>
+												{/if}
 											</select>
 										</div>
 										<div>
@@ -1293,8 +1301,14 @@
 											bind:value={editLlmProvider}
 											class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 										>
-											<option value="claude">Claude (기본)</option>
-											<option value="gemini">Gemini</option>
+											{#if providers.length > 0}
+												{#each providers as p}
+													<option value={p.key}>{p.display_name}</option>
+												{/each}
+											{:else}
+												<option value="claude">Claude</option>
+												<option value="gemini">Gemini</option>
+											{/if}
 										</select>
 									</div>
 									<div>
