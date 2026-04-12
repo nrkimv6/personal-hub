@@ -149,11 +149,10 @@
 
 ## diagnostics/
 
-> 현재 위치: `scripts/diagnostics/` (`diagnose-api.ps1`, `register_process.py` 제외)
+> 현재 위치: `scripts/diagnostics/` ✅ (_todo-4 완료 2026-04-12)
 > 예정 위치: `scripts/diagnostics/`
 > 위험도: 🟢 저 — 대부분 독립적
 > 대상: OS/프로세스/API 런타임 진단
-> Phase 2 제외: `diagnose-api.ps1` (api-watchdog.ps1에서 참조 → _todo-4에서 함께 이동), `register_process.py` (_todo-5에서 확인 후 이동)
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
@@ -171,7 +170,7 @@
 | ✅ | `check_slots.py` | 슬롯 상태 점검 |
 | ✅ | `debug_sse_log.py` | SSE 로그 디버그 |
 | ✅ | `debug_sse_log2.py` | SSE 로그 디버그 v2 |
-| ⏳ | `diagnose-api.ps1` | API 진단 스크립트 (api-watchdog 참조 → _todo-4) |
+| ✅ | `diagnose-api.ps1` | API 진단 스크립트 — api-watchdog.ps1에서 참조, _todo-6에서 이관 완료 |
 | ✅ | `ps-python-processes.ps1` | 파이썬 프로세스 트리 출력 |
 | ✅ | `show-processes.ps1` | 프로세스 요약 출력 |
 | ✅ | `test_pg_connection.py` | PG 연결 확인 (진단용 — migrations 아님) |
@@ -283,11 +282,11 @@
 
 ## fixes/
 
-> 현재 위치: `scripts/fixes/` (`frontend_placeholder.py` 제외 → services/로 재분류)
+> 현재 위치: `scripts/fixes/` ✅ (_todo-6 완료 2026-04-12)
 > 예정 위치: `scripts/fixes/`
 > 위험도: 🟢 저 — 일회성 픽스, 수명 후 archive/로 이동
-> 수명 규칙: 작업 완료 후 30일 내 `scripts/archive/`로 이관 (Phase 6에서 공식화)
-> Phase 2 재분류: `frontend_placeholder.py`는 `service_run.py:216`에서 런타임 import됨 → 일회성 아님 → `services/`로 이동(_todo-4)
+> 수명 규칙: 작업 완료 후 30일 내 `scripts/archive/`로 이관 (→ [일회성 스크립트 수명 규칙](#일회성-스크립트-수명-규칙))
+> 재분류: `frontend_placeholder.py` → `scripts/fixes/` (service_run.py 참조이나 service_run 자체가 services/에 있어 함께 이관)
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
@@ -309,7 +308,7 @@
 | ✅ | `migrate-colors-phase3.py` | 프론트 색상 마이그레이션 Phase 3 |
 | ✅ | `create_icons.py` | 아이콘 생성 일회성 유틸 |
 | ✅ | `extract_keywords.py` | 키워드 추출 일회성 유틸 |
-| ⏳ | `frontend_placeholder.py` | 프론트엔드 placeholder 서버 (service_run 참조 → services/로 이관 예정) |
+| ✅ | `frontend_placeholder.py` | 프론트엔드 placeholder 서버 — service_run.py 참조, _todo-6에서 fixes/로 이관 완료 |
 | ✅ | `disable_duplicate_events.py` | 중복 이벤트 비활성화 일회성 수정 |
 
 ---
@@ -387,6 +386,16 @@
 | `README_브라우저_프로필.md` | 브라우저 프로필 사용 가이드 — 루트 유지 (문서) |
 | `INDEX.md` | 본 파일 — scripts/ 인덱스 |
 
+### 이관 보류 (wtools 선행 필요)
+
+아래 파일은 `.claude/skills/dumptruck/SKILL.md`가 절대경로로 참조하므로, wtools 레포에서 스킬 경로 업데이트 + pull-sync 이후에만 이관 가능.
+
+| 상태 | 파일 | 설명 |
+|:-:|---|---|
+| ⏳ | `dumptruck_run.ps1` | → `scripts/dumptruck/` 예정 |
+| ⏳ | `dumptruck_builder.py` | → `scripts/dumptruck/` 예정 |
+| ⏳ | `kill-orphan-procs.ps1` | → `scripts/cleanup/` 예정 (wtools kill-orphan 스킬 참조) |
+
 ---
 
 ## 미분류
@@ -397,13 +406,43 @@
 
 ## 새 스크립트 추가 시 규칙
 
-*(Phase 6에서 공식화 예정 — 아래는 placeholder)*
+1. **신규 파일은 반드시 카테고리 폴더에 생성** — `scripts/` 루트 직접 생성 금지
+2. **파일명 접두사 → 카테고리 폴더** 매핑 표를 참조해 적합한 폴더에 생성
 
-- 신규 파일은 반드시 카테고리 폴더에 생성 (루트 직접 생성 금지)
-- 파일명 접두사 → 카테고리 매핑 표는 Phase 6에서 추가
-- `_tmp_` 접두사 사용 금지 — 재사용 가능성 있으면 즉시 `session_tools/` 또는 정식 카테고리에 생성
-- 일회성 `_fix_*`/`_diag_*`는 작업 완료 후 30일 내 `scripts/archive/`로 이관
+| 접두사 / 패턴 | 카테고리 폴더 | 예시 |
+|---|---|---|
+| `_dr_*.py` | `plan_runner/` | `_dr_plan_runner.py` |
+| `*-watchdog.ps1` | `watchdogs/` | `api-watchdog.ps1` |
+| `migrate_*.py`, `migrate-*.py`, `*.sql` | `migrations/` | `migrate_sqlite_to_pg.py` |
+| `cleanup*`, `kill*`, `clear_*` | `cleanup/` | `cleanup-zombie-processes.ps1` |
+| `test_*.py`, `test-*.ps1`, `*-e2e-*` | `tests_scripts/` | `run-e2e-tests.ps1` |
+| `coupang_*`, `naver_*` | `probes/` | `coupang_network_probe.py` |
+| `_diag_*`, `debug_*`, `_check_*`, `diagnose-*`, `analyze-*`, `show-*`, `ps-*` | `diagnostics/` | `_diag_reboot.ps1` |
+| `session_*.py` (`.claude/projects/*.jsonl` 파싱) | `session_tools/` | `session_dump.py` |
+| `_fix_*`, `fix-*`, `fix_*` (일회성) | `fixes/` | `_fix_plan_header.py` |
+| `dumptruck_*` | `dumptruck/` | `dumptruck_run.ps1` |
+| `setup-*`, `startup-*`, `daily_*`, `auto-update*`, `_build_*`, `_setup_*` | `setup/` | `setup-exe-aliases.ps1` |
+| 서비스 런타임 (`start/stop/run/service*/browser_workers`) | `services/` | `browser_workers.py` |
+| 로그 도구 (`logs*`, `*-log*.ps1`, `*noise_filter*`) | `logs/` | `logs.ps1` |
+
+3. **`_tmp_` 접두사 사용 금지**
+   - 배경: 2026-04-11 사고 — "일회성"이라 생각한 7개 `_tmp_*.py`가 한 세션 내 2회 이상 재사용되며 루트를 오염시킴
+   - 대신: 2회 이상 재사용 가능성이 있으면 **즉시 카테고리 폴더에 의미 있는 이름**으로 생성
+   - 정말로 단발 실행 후 버릴 예정이면 `scripts/scratch/`(gitignore 대상) 또는 `/tmp`에 작성 — 저장소에 커밋 금지
+4. **INDEX.md에 한 줄 설명과 참조자(있다면) 등재 후 커밋**
 
 ---
 
-*상태: Phase 1 초안 (이동 없음) | 작성: 2026-04-11 | 마지막 갱신: 2026-04-12*
+## 일회성 스크립트 수명 규칙
+
+`fixes/`, `diagnostics/` 하위의 `_fix_*`, `_diag_*` 파일에 적용:
+
+1. 작업 완료 후 **30일 내 `scripts/archive/`로 이동**
+2. 이동 시 INDEX.md 해당 라인 삭제
+3. `scripts/archive/`의 파일은 복구 목적으로만 존재, 정기 실행 금지
+4. 새 `_fix_*`/`_diag_*` 생성 시 파일 상단 주석에 **"생성일 + 목적 + 예상 수명"** 기재
+5. **`session_tools/`는 수명 규칙 적용 제외** — 세션 메타 도구는 장기 재사용 전제, archive 이동 금지
+
+---
+
+*상태: Phase 1~6 완료 | 작성: 2026-04-11 | 마지막 갱신: 2026-04-12 (_todo-6)*

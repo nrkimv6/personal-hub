@@ -40,7 +40,7 @@ $healthEndpoint = "http://localhost:$port/api/v1/system/status"
 $failureCount = 0
 $lastSuccessTime = Get-Date
 $totalRestarts = 0
-$diagScriptPath = Join-Path $ProjectRoot "scripts\diagnose-api.ps1"
+$diagScriptPath = Join-Path $ProjectRoot "scripts\diagnostics\diagnose-api.ps1"
 $diagJsonPath = Join-Path $ProjectRoot "frontend\static\diagnostics.json"
 $processStatusPath = Join-Path $ProjectRoot "frontend\static\process-status.json"
 
