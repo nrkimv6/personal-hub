@@ -11,7 +11,7 @@ import redis.asyncio as aioredis
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin, UserInfo
@@ -51,6 +51,14 @@ class LLMRequestCreate(BaseModel):
     queue_name: str = "utility"
     cli_options: Optional[dict] = None
     mode: str = "single"
+
+    @validator("provider")
+    def validate_provider(cls, v):
+        if v is None:
+            return v
+        if not provider_registry.is_supported(v):
+            raise ValueError(f"지원되지 않는 provider: {v}")
+        return v
 
 
 class LLMRequestResponse(BaseModel):

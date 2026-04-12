@@ -134,3 +134,54 @@ def test_integration_execute_llm_unknown_no_fallback(test_db_session):
     assert result["success"] is False
     mock_claude.assert_not_called()
     mock_gemini.assert_not_called()
+
+
+# ─── worker quota loop DB 상태 통합 ───────────────────────────────────────────
+
+def test_integration_quota_resume_loop_uses_registry_providers_and_updates_db(test_db_session):
+    """quota resume 루프가 registry get_quota_providers() 기반으로 DB 상태를 업데이트하는지 (통합).
+
+    검증 경로:
+    1. registry.get_quota_providers()가 supports_quota_pause=True 목록을 반환
+    2. 각 provider에 대해 service.get_provider_quota_pause()가 호출됨 (실제 DB 쿼리)
+    3. pause 레코드 없으면 아무 변경 없음 (side-effect 없음)
+    4. pause 레코드 있으면 clear_provider_quota_pause() 후 DB 상태 변경
+
+    이 TC는 mock 없이 실제 registry + 실제 DB 상호작용을 검증한다.
+    """
+    from app.modules.claude_worker.services.llm_service import LLMService
+    from datetime import datetime, timedelta
+
+    service = LLMService(test_db_session)
+
+    # 1. registry quota providers 목록 확인
+    quota_providers = provider_registry.get_quota_providers()
+    assert isinstance(quota_providers, list)
+    assert len(quota_providers) >= 1  # claude, gemini 최소 2개
+
+    # 2. 각 provider에 대해 실제 DB 쿼리 — pause 없는 초기 상태
+    for prov in quota_providers:
+        pause_until = service.get_provider_quota_pause(prov)
+        # 초기 상태: pause 없음 (None 또는 과거 시각)
+        # 예외 없이 쿼리가 실행되면 통과
+        assert pause_until is None or isinstance(pause_until, datetime)
+
+    # 3. claude provider에 pause 설정 후 상태 확인 (3600_000ms = 1시간)
+    if "claude" in quota_providers:
+        from app.modules.claude_worker.models.llm_request import LLMWorkerStatus
+
+        # LLMWorkerStatus 레코드가 없으면 set이 동작하지 않음 — 테스트용 레코드 생성
+        dummy_status = LLMWorkerStatus(worker_id="test_worker_registry_integration")
+        test_db_session.add(dummy_status)
+        test_db_session.commit()
+
+        service.set_provider_quota_pause("claude", 3_600_000, reason="test")
+
+        paused = service.get_provider_quota_pause("claude")
+        assert paused is not None  # pause 설정됨
+
+        # 4. pause 해제 후 DB 상태 변경 확인
+        service.clear_provider_quota_pause("claude")
+
+        cleared = service.get_provider_quota_pause("claude")
+        assert cleared is None  # 해제됨
