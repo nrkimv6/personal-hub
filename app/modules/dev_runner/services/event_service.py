@@ -16,12 +16,12 @@ SSE 포맷으로 실시간 전달한다.
 import asyncio
 import glob
 import hashlib
-import json
 import logging
 import time
 from collections import deque
 from pathlib import Path
 from typing import AsyncGenerator, Optional
+
 
 import redis.asyncio as aioredis
 import redis as redis_sync
@@ -38,36 +38,38 @@ from app.modules.dev_runner.services.completion_reason import (
 from app.shared.redis.client import RedisClient
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 from app.modules.dev_runner.services.visibility import is_visible_runner
+from app.modules.dev_runner.services.event_routing import (  # noqa: F401 — re-export 포함
+    classify_key,
+    extract_runner_id,
+    extract_runner_id_from_channel,
+    REDIS_HOST,
+    REDIS_PORT,
+    RUNNER_KEY_PREFIX,
+    ACTIVE_RUNNERS_KEY,
+    RECENT_RUNNERS_KEY,
+    MAX_RECENT_IN_SSE,
+    MAX_RECENT_RUNNERS,
+    REDIS_STATE_KEY,
+    PLAN_FILE_ALL,
+    _LEGACY_ALL,
+    KEYEVENT_CHANNEL,
+    LOG_CHANNEL_PATTERN,
+    MERGE_LOG_CHANNEL_PATTERN,
+    KEY_EVENT_MAP,
+)
+from app.modules.dev_runner.services.event_sse import (  # noqa: F401 — re-export 포함
+    sse_format,
+    build_log_line_payload as _build_log_line_payload,
+)
+from app.modules.dev_runner.services.event_payload import (
+    build_status_payload,
+    build_all_runners_status,
+    build_tracking_payload,
+    read_runner_error_with_retry,
+    stabilize_commit_failed_status_payload,
+)
 
 logger = logging.getLogger(__name__)
-
-# ─── Redis 상수 ─────────────────────────────────────────────────────────────
-REDIS_HOST = "localhost"
-REDIS_PORT = 6379
-
-RUNNER_KEY_PREFIX = "plan-runner:runners"
-ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
-RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
-MAX_RECENT_IN_SSE = 20  # SSE status 이벤트에 포함할 RECENT 러너 최대 수
-MAX_RECENT_RUNNERS = 100  # sorted set 크기 상한 (redis_connection.py와 동기화)
-REDIS_STATE_KEY = "plan-runner:state"
-PLAN_FILE_ALL = "__ALL_PLANS__"  # 전체실행 sentinel (command-listener와 공유)
-_LEGACY_ALL = "ALL"  # 하위 호환
-
-# keyspace notification 채널 (DB 0)
-KEYEVENT_CHANNEL = "__keyevent@0__:set"
-
-# 로그 채널 패턴 (plan-runner:logs:{runner_id}, plan-runner:merge-log:{runner_id})
-LOG_CHANNEL_PATTERN = "plan-runner:logs:*"
-MERGE_LOG_CHANNEL_PATTERN = "plan-runner:merge-log:*"
-
-# 감시할 키 접두사 → 이벤트 타입 매핑
-# 키가 이 접두사로 시작하면 해당 이벤트를 발행한다.
-KEY_EVENT_MAP = {
-    f"{RUNNER_KEY_PREFIX}:": "status",            # plan-runner:runners:{id}:{field}
-    f"{REDIS_STATE_KEY}:current_task_text": "tracking",
-    f"{REDIS_STATE_KEY}:current_task_plan_file": "plan_changed",
-}
 
 HEARTBEAT_INTERVAL = 30  # 초
 FILE_POLL_TIMEOUT = 5.0
@@ -103,25 +105,6 @@ MAX_FALLBACK_READ_CHARS = 65536
 TAIL_STATE_TTL_SEC = 600.0
 DEFAULT_DEDUP_WINDOW = 256
 COMPLETED_RUNNER_TTL_SEC = 120.0
-
-
-def _build_log_line_payload(data: str) -> object:
-    """로그 payload 직렬화.
-
-    하위호환: 단일 라인은 기존처럼 string.
-    확장: 멀티라인은 {text, meta} 객체로 보내 UI가 줄바꿈 보존/보조메타를 활용할 수 있게 한다.
-    """
-    text = str(data or "")
-    if "\n" not in text:
-        return text
-    line_count = text.count("\n") + 1
-    return {
-        "text": text,
-        "meta": {
-            "multiline": True,
-            "line_count": line_count,
-        },
-    }
 
 
 class EventService:
@@ -163,71 +146,6 @@ class EventService:
             # CONFIG SET 권한 없는 환경(managed Redis 등)에서는 무시
             pass
 
-    # ── 현재 상태 조회 ───────────────────────────────────────────────────────
-
-    def _build_status_payload(self, runner_id: str) -> Optional[dict]:
-        """특정 runner의 현재 상태를 Redis에서 읽어 dict로 반환"""
-        try:
-            fields = [
-                "status",
-                "pid",
-                "current_cycle",
-                "start_time",
-                "plan_file",
-                "engine",
-                "branch",
-                "trigger",
-                "exit_reason",
-                "error",
-                "execution_count",
-            ]
-            values = self._sync.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
-            data = dict(zip(fields, values))
-            data["runner_id"] = runner_id
-            data["visible"] = is_visible_runner(data.get("trigger"), runner_id)
-            # plan_file이 None(Redis 키 미설정)이면 None 반환 — sentinel fallback 제거
-            # (프론트엔드에서 null과 sentinel을 구분하여 처리)
-            if not data.get("plan_file"):
-                data["plan_file"] = None
-            return data
-        except Exception:
-            return None
-
-    def _read_runner_error(self, runner_id: str) -> Optional[str]:
-        """runner error 값을 Redis에서 읽는다."""
-        try:
-            return self._sync.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:error")
-        except Exception:
-            return None
-
-    async def _read_runner_error_with_retry(
-        self,
-        runner_id: str,
-        retries: int = 1,
-        delay: float = 0.05,
-    ) -> Optional[str]:
-        """commit_failed 같은 순서 경쟁을 흡수하기 위해 error를 한 번 더 재조회한다."""
-        error = self._read_runner_error(runner_id)
-        if error:
-            return error
-        for _ in range(retries):
-            await asyncio.sleep(delay)
-            error = self._read_runner_error(runner_id)
-            if error:
-                return error
-        return None
-
-    async def _stabilize_commit_failed_status_payload(self, runner_id: str, payload: dict) -> dict:
-        """exit_reason=commit_failed일 때 error 키 반영이 늦어도 한 번 더 흡수한다."""
-        if payload.get("exit_reason") != "commit_failed" or payload.get("error"):
-            return payload
-
-        await asyncio.sleep(0.05)
-        refreshed = self._build_status_payload(runner_id)
-        if refreshed and refreshed.get("error"):
-            return refreshed
-        return payload
-
     def _cleanup_invisible_recent_runners(self) -> None:
         """SSE 연결 초기화 시 RECENT set에서 invisible runner를 제거 + 크기 상한 적용.
 
@@ -245,85 +163,6 @@ class EventService:
             self._sync.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
         except Exception:
             pass
-
-    def _build_all_runners_status(self) -> list[dict]:
-        """모든 active + RECENT visible runner 상태를 묶어서 반환"""
-        try:
-            active_ids: set = self._sync.smembers(ACTIVE_RUNNERS_KEY) or set()
-            # 전체 recent runner를 가져온 후 visible 필터링 (invisible runner가 많아도 visible이 누락되지 않도록)
-            recent_ids: list = self._sync.zrange(RECENT_RUNNERS_KEY, 0, -1) or []
-            # 중복 제거 (ACTIVE가 RECENT에도 있을 수 있음)
-            all_ids = active_ids | set(recent_ids)
-            result = []
-            for rid in all_ids:
-                payload = self._build_status_payload(rid)
-                if payload:
-                    if not payload.get("visible", False):
-                        continue
-                    result.append(payload)
-                    if len(result) >= MAX_RECENT_IN_SSE:
-                        break
-            return result
-        except Exception:
-            return []
-
-    def _build_tracking_payload(self) -> Optional[dict]:
-        """현재 추적 중인 태스크 정보를 Redis에서 읽어 dict로 반환"""
-        try:
-            keys = [
-                f"{REDIS_STATE_KEY}:current_task_text",
-                f"{REDIS_STATE_KEY}:current_task_confidence",
-                f"{REDIS_STATE_KEY}:current_task_line_num",
-                f"{REDIS_STATE_KEY}:current_task_plan_file",
-            ]
-            text, confidence, line_num, plan_file = self._sync.mget(keys)
-            if not text:
-                return None
-            return {
-                "text": text,
-                "confidence": confidence,
-                "line_num": int(line_num) if line_num else None,
-                "plan_file": plan_file,
-            }
-        except Exception:
-            return None
-
-    # ── 이벤트 타입 판별 ─────────────────────────────────────────────────────
-
-    def _classify_key(self, key: str) -> Optional[str]:
-        """변경된 Redis 키로부터 SSE 이벤트 타입 결정. 무관한 키는 None."""
-        # tracking / plan_changed 먼저 (더 구체적)
-        if key == f"{REDIS_STATE_KEY}:current_task_text":
-            return "tracking"
-        if key == f"{REDIS_STATE_KEY}:current_task_plan_file":
-            return "plan_changed"
-        # runner 상태 키: plan-runner:runners:{runner_id}:{field}
-        if key.startswith(f"{RUNNER_KEY_PREFIX}:"):
-            parts = key.split(":")
-            # parts: ["plan-runner", "runners", runner_id, field]
-            if len(parts) >= 4:
-                return "status"
-        return None
-
-    def _extract_runner_id(self, key: str) -> Optional[str]:
-        """키에서 runner_id 추출 (status 이벤트 전용)"""
-        # plan-runner:runners:{runner_id}:{field}
-        parts = key.split(":")
-        if len(parts) >= 4:
-            return parts[2]
-        return None
-
-    def _extract_runner_id_from_channel(self, channel: str) -> Optional[str]:
-        """로그 채널명에서 runner_id 추출.
-
-        Examples:
-            "plan-runner:logs:abc123"      → "abc123"
-            "plan-runner:merge-log:def456" → "def456"
-        """
-        if not channel or ":" not in channel:
-            return None
-        runner_id = channel.split(":")[-1]
-        return runner_id if runner_id else None
 
     # ── /events fallback 상태 관리 ───────────────────────────────────────────
 
@@ -409,7 +248,7 @@ class EventService:
         visible_running_ids: list[str] = []
         for rid in runner_ids:
             runner_id = str(rid)
-            payload = self._build_status_payload(runner_id)
+            payload = build_status_payload(self._sync, runner_id)
             if (
                 payload
                 and payload.get("visible", False)
@@ -654,12 +493,6 @@ class EventService:
             except Exception as e:
                 logger.warning("[events-init-offsets] runner=%s 처리 중 예외: %s", runner_id, e)
 
-    # ── SSE 포맷 헬퍼 ────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _sse(event: str, data: object) -> str:
-        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
-
     # ── 메인 스트림 ──────────────────────────────────────────────────────────
 
     async def stream_events(self) -> AsyncGenerator[str, None]:
@@ -688,20 +521,20 @@ class EventService:
         self._cleanup_invisible_recent_runners()
 
         # 초기 status 이벤트 1회 즉시 발행
-        runners = self._build_all_runners_status()
+        runners = build_all_runners_status(self._sync)
         stabilized_runners = []
         for payload in runners:
             runner_id = payload.get("runner_id") if isinstance(payload, dict) else None
             if runner_id:
-                payload = await self._stabilize_commit_failed_status_payload(runner_id, payload)
+                payload = await stabilize_commit_failed_status_payload(self._sync, runner_id, payload)
             stabilized_runners.append(payload)
         runners = stabilized_runners
-        yield self._sse("status", {"runners": runners})
+        yield sse_format("status", {"runners": runners})
 
         # 초기 tracking 이벤트
-        tracking = self._build_tracking_payload()
+        tracking = build_tracking_payload(self._sync)
         if tracking:
-            yield self._sse("tracking", tracking)
+            yield sse_format("tracking", tracking)
 
         pubsub: Optional[aioredis.client.PubSub] = None
         log_pubsub: Optional[aioredis.client.PubSub] = None
@@ -749,16 +582,16 @@ class EventService:
                                 )
                                 dedup_skip_counts = {}
                         changed_key = message["data"]
-                        event_type = self._classify_key(changed_key)
+                        event_type = classify_key(changed_key)
 
                         if event_type == "status":
-                            runner_id = self._extract_runner_id(changed_key)
+                            runner_id = extract_runner_id(changed_key)
                             if runner_id:
-                                payload = self._build_status_payload(runner_id)
+                                payload = build_status_payload(self._sync, runner_id)
                                 if payload:
-                                    payload = await self._stabilize_commit_failed_status_payload(runner_id, payload)
+                                    payload = await stabilize_commit_failed_status_payload(self._sync, runner_id, payload)
                                     if payload.get("visible", False):
-                                        yield self._sse("status", {"runners": [payload]})
+                                        yield sse_format("status", {"runners": [payload]})
                                     else:
                                         self._drop_tail_state(runner_id)
                                     if payload.get("status") != "running":
@@ -766,12 +599,12 @@ class EventService:
                                     else:
                                         self._completed_runners.pop(runner_id, None)
                         elif event_type == "tracking":
-                            payload = self._build_tracking_payload()
+                            payload = build_tracking_payload(self._sync)
                             if payload:
-                                yield self._sse("tracking", payload)
+                                yield sse_format("tracking", payload)
                         elif event_type == "plan_changed":
-                            payload = self._build_tracking_payload()
-                            yield self._sse("plan_changed", payload or {})
+                            payload = build_tracking_payload(self._sync)
+                            yield sse_format("plan_changed", payload or {})
 
                         last_heartbeat = time.monotonic()
                         consecutive_errors = 0
@@ -803,12 +636,12 @@ class EventService:
                         if not data:
                             pass  # 빈 데이터 무시
                         else:
-                            runner_id = self._extract_runner_id_from_channel(channel)
+                            runner_id = extract_runner_id_from_channel(channel)
                             if runner_id:
                                 is_merge = channel.startswith("plan-runner:merge-log:")
                                 if _is_merge_completed_payload(data):
                                     status, reason = _parse_merge_completed_payload(data)
-                                    yield self._sse(
+                                    yield sse_format(
                                         "merge_log_completed",
                                         {"runner_id": runner_id, "status": status, "reason": reason},
                                     )
@@ -816,7 +649,7 @@ class EventService:
                                     status, reason = _parse_log_completed_payload(data)
                                     payload = {"runner_id": runner_id, "status": status, "reason": reason}
                                     try:
-                                        error = await self._read_runner_error_with_retry(
+                                        error = await read_runner_error_with_retry(self._sync,
                                             runner_id,
                                             retries=2 if reason == "commit_failed" else 0,
                                         )
@@ -825,12 +658,12 @@ class EventService:
                                     if error:
                                         payload["error"] = error
                                     self._mark_runner_completed(runner_id)
-                                    yield self._sse(
+                                    yield sse_format(
                                         "log_completed",
                                         payload,
                                     )
                                 elif is_merge:
-                                    yield self._sse(
+                                    yield sse_format(
                                         "merge_log",
                                         {"runner_id": runner_id, "line": _build_log_line_payload(data)},
                                     )
@@ -841,7 +674,7 @@ class EventService:
                                             dedup_skip_counts.get(runner_id, 0) + 1
                                         )
                                         continue
-                                    yield self._sse(
+                                    yield sse_format(
                                         "log",
                                         {"runner_id": runner_id, "line": _build_log_line_payload(data)},
                                     )
@@ -878,7 +711,7 @@ class EventService:
                                     continue
                                 fallback_emitted = True
                                 for event_name, payload in fallback_events:
-                                    yield self._sse(event_name, payload)
+                                    yield sse_format(event_name, payload)
                             if dedup_skip_counts and (
                                 dedup_skip_last_logged_at == 0.0
                                 or (now - dedup_skip_last_logged_at) >= 15.0

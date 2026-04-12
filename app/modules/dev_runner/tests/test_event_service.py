@@ -17,6 +17,17 @@ from app.modules.dev_runner.services.event_service import (
     _LOG_COMPLETED_SENTINEL, _MERGE_LOG_COMPLETED_SENTINEL,
     _build_log_line_payload, PLAN_FILE_ALL,
 )
+from app.modules.dev_runner.services.event_routing import (
+    classify_key, extract_runner_id_from_channel,
+)
+from app.modules.dev_runner.services.event_sse import sse_format
+from app.modules.dev_runner.services.event_payload import (
+    build_status_payload,
+    build_all_runners_status,
+    build_tracking_payload,
+    read_runner_error_with_retry,
+    stabilize_commit_failed_status_payload,
+)
 
 
 # ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -45,30 +56,30 @@ def event_service(sync_redis, async_redis):
     return svc
 
 
-# ─── _classify_key 테스트 ────────────────────────────────────────────────────
+# ─── classify_key 테스트 ─────────────────────────────────────────────────────
 
 class TestClassifyKey:
     def test_status_key(self, event_service):
         key = f"{RUNNER_KEY_PREFIX}:abc123:status"
-        assert event_service._classify_key(key) == "status"
+        assert classify_key(key) == "status"
 
     def test_tracking_key(self, event_service):
         key = f"{REDIS_STATE_KEY}:current_task_text"
-        assert event_service._classify_key(key) == "tracking"
+        assert classify_key(key) == "tracking"
 
     def test_plan_changed_key(self, event_service):
         key = f"{REDIS_STATE_KEY}:current_task_plan_file"
-        assert event_service._classify_key(key) == "plan_changed"
+        assert classify_key(key) == "plan_changed"
 
     def test_unknown_key_returns_none(self, event_service):
-        assert event_service._classify_key("unrelated:key") is None
-        assert event_service._classify_key("plan-runner:listener:heartbeat") is None
+        assert classify_key("unrelated:key") is None
+        assert classify_key("plan-runner:listener:heartbeat") is None
 
     def test_active_runners_key_not_matched(self, event_service):
         # active_runners는 Set이므로 status가 아닌 None이어야 함
         # plan-runner:active_runners 는 RUNNER_KEY_PREFIX 와 다름
         key = "plan-runner:active_runners"
-        result = event_service._classify_key(key)
+        result = classify_key(key)
         # plan-runner:runners: 접두사가 아니므로 None
         assert result is None
 
@@ -82,7 +93,7 @@ class TestBuildStatusPayload:
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", "12345")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:current_cycle", "3")
 
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["runner_id"] == runner_id
         assert payload["status"] == "running"
@@ -90,7 +101,7 @@ class TestBuildStatusPayload:
         assert payload["current_cycle"] == "3"
 
     def test_missing_fields_return_none_values(self, event_service):
-        payload = event_service._build_status_payload("nonexistent")
+        payload = build_status_payload(event_service._sync,"nonexistent")
         assert payload is not None
         assert payload["status"] is None
         assert payload["pid"] is None
@@ -99,7 +110,7 @@ class TestBuildStatusPayload:
         """R: status=stopped + plan_file 키 없음 → plan_file is None (sentinel 아님)"""
         runner_id = "stopped01"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["plan_file"] is None
 
@@ -107,7 +118,7 @@ class TestBuildStatusPayload:
         """R: status=running + plan_file 키 없음 → None 반환 (sentinel fallback 제거)"""
         runner_id = "running01"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["plan_file"] is None
 
@@ -116,7 +127,7 @@ class TestBuildStatusPayload:
         runner_id = "running01b"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", PLAN_FILE_ALL)
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["plan_file"] == PLAN_FILE_ALL
 
@@ -125,7 +136,7 @@ class TestBuildStatusPayload:
         runner_id = "running01c"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "")
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["plan_file"] is None
 
@@ -134,7 +145,7 @@ class TestBuildStatusPayload:
         runner_id = "running02"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "feature-x.md")
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["plan_file"] == "feature-x.md"
 
@@ -143,7 +154,7 @@ class TestBuildStatusPayload:
         runner_id = "stopped02"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "impl/some-feature")
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["plan_file"] is None
 
@@ -152,7 +163,7 @@ class TestBuildStatusPayload:
         runner_id = "triggered01"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "manual")
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["trigger"] == "manual"
 
@@ -161,7 +172,7 @@ class TestBuildStatusPayload:
         runner_id = "triggered02"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         # trigger 키 미설정
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["trigger"] is None
 
@@ -170,14 +181,14 @@ class TestBuildStatusPayload:
         rid_user = "visible-user-01"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_user}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_user}:trigger", "user")
-        payload_user = event_service._build_status_payload(rid_user)
+        payload_user = build_status_payload(event_service._sync,rid_user)
         assert payload_user is not None
         assert payload_user["visible"] is True
 
         rid_api = "visible-api-01"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_api}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_api}:trigger", "api")
-        payload_api = event_service._build_status_payload(rid_api)
+        payload_api = build_status_payload(event_service._sync,rid_api)
         assert payload_api is not None
         assert payload_api["visible"] is False
 
@@ -188,7 +199,7 @@ class TestBuildStatusPayload:
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "error")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", "Process exited with code 15")
 
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["exit_reason"] == "error"
         assert payload["error"] == "Process exited with code 15"
@@ -201,7 +212,7 @@ class TestBuildStatusPayload:
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "commit_failed")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", detail)
 
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["exit_reason"] == "commit_failed"
         assert payload["error"] == detail
@@ -217,7 +228,7 @@ class TestBuildStatusPayload:
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
         # plan_file 키 미설정
 
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["plan_file"] is None
         assert payload["plan_file"] != PLAN_FILE_ALL
@@ -232,7 +243,7 @@ class TestBuildStatusPayload:
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user:all")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", PLAN_FILE_ALL)
 
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync,runner_id)
         assert payload is not None
         assert payload["plan_file"] == PLAN_FILE_ALL
 
@@ -258,56 +269,56 @@ class TestBuildAllRunnersStatus:
     def test_build_all_runners_excludes_tc_trigger(self, event_service, sync_redis):
         """R: trigger="tc:test" runner 등록 → _build_all_runners_status() 결과에 미포함"""
         self._register_runner(sync_redis, "tc_runner01", trigger="tc:test")
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "tc_runner01" not in ids
 
     def test_build_all_runners_includes_normal_trigger(self, event_service, sync_redis):
         """R: trigger="manual" runner → 화이트리스트에 없으므로 결과에 미포함"""
         self._register_runner(sync_redis, "manual_runner01", trigger="manual")
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "manual_runner01" not in ids
 
     def test_build_all_runners_includes_trigger_none(self, event_service, sync_redis):
         """B: trigger 키 없음(None) → 화이트리스트에 없으므로 미포함"""
         self._register_runner(sync_redis, "notrigger_runner01", trigger=None)
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "notrigger_runner01" not in ids
 
     def test_build_all_runners_includes_trigger_empty(self, event_service, sync_redis):
         """B: trigger="" → 화이트리스트에 없으므로 미포함"""
         self._register_runner(sync_redis, "emptytrigger_runner01", trigger="")
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "emptytrigger_runner01" not in ids
 
     def test_build_all_runners_includes_user_trigger(self, event_service, sync_redis):
         """R: trigger="user" runner → 결과에 포함"""
         self._register_runner(sync_redis, "user_runner01", trigger="user")
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "user_runner01" in ids
 
     def test_build_all_runners_includes_user_all_trigger(self, event_service, sync_redis):
         """R: trigger="user:all" runner → 결과에 포함"""
         self._register_runner(sync_redis, "userall_runner01", trigger="user:all")
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "userall_runner01" in ids
 
     def test_build_all_runners_excludes_api_trigger(self, event_service, sync_redis):
         """R: trigger="api" runner → 화이트리스트에 없으므로 미포함"""
         self._register_runner(sync_redis, "api_runner01", trigger="api")
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "api_runner01" not in ids
 
     def test_build_all_runners_excludes_trigger_tc_prefix_only(self, event_service, sync_redis):
         """B: trigger="tc:" (접두사만, 값 없음) → 필터링됨"""
         self._register_runner(sync_redis, "tconly_runner01", trigger="tc:")
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "tconly_runner01" not in ids
 
@@ -315,7 +326,7 @@ class TestBuildAllRunnersStatus:
         """R: tc: runner + 일반 runner 혼재 → 일반 runner만 반환"""
         self._register_runner(sync_redis, "vis_runner01", trigger="user")
         self._register_runner(sync_redis, "invis_runner01", trigger="tc:pytest")
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "vis_runner01" in ids
         assert "invis_runner01" not in ids
@@ -327,7 +338,7 @@ class TestBuildAllRunnersStatus:
         프로덕션 Redis 오염 없이 fakeredis로 동등 검증.
         """
         self._register_runner(sync_redis, "stopped_user01", trigger="user", status="stopped")
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         assert "stopped_user01" in [r["runner_id"] for r in result]
 
     def test_build_all_runners_plan_file_null_for_visible_runner(self, event_service, sync_redis):
@@ -338,7 +349,7 @@ class TestBuildAllRunnersStatus:
         """
         self._register_runner(sync_redis, "nopf_user01", trigger="user")
         # plan_file 미설정 — _register_runner plan_file 파라미터 기본값 None
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         matching = [r for r in result if r["runner_id"] == "nopf_user01"]
         assert len(matching) >= 1, "nopf_user01이 결과에 없음"
         assert matching[0]["plan_file"] is None
@@ -348,7 +359,7 @@ class TestBuildAllRunnersStatus:
 
 class TestBuildTrackingPayload:
     def test_returns_none_when_no_text(self, event_service):
-        assert event_service._build_tracking_payload() is None
+        assert build_tracking_payload(event_service._sync) is None
 
     def test_returns_dict_with_text(self, event_service, sync_redis):
         sync_redis.set(f"{REDIS_STATE_KEY}:current_task_text", "[ ] 테스트 태스크")
@@ -356,7 +367,7 @@ class TestBuildTrackingPayload:
         sync_redis.set(f"{REDIS_STATE_KEY}:current_task_line_num", "42")
         sync_redis.set(f"{REDIS_STATE_KEY}:current_task_plan_file", "/path/to/plan.md")
 
-        payload = event_service._build_tracking_payload()
+        payload = build_tracking_payload(event_service._sync)
         assert payload is not None
         assert payload["text"] == "[ ] 테스트 태스크"
         assert payload["confidence"] == "HIGH"
@@ -364,18 +375,18 @@ class TestBuildTrackingPayload:
         assert payload["plan_file"] == "/path/to/plan.md"
 
 
-# ─── _sse 포맷 테스트 ────────────────────────────────────────────────────────
+# ─── sse_format 테스트 ───────────────────────────────────────────────────────
 
 class TestSseFormat:
     def test_sse_format(self):
-        result = EventService._sse("status", {"running": True})
+        result = sse_format("status", {"running": True})
         assert result.startswith("event: status\n")
         assert "data: " in result
         assert result.endswith("\n\n")
 
     def test_sse_data_is_valid_json(self):
         payload = {"runners": [{"runner_id": "abc", "status": "running"}]}
-        result = EventService._sse("status", payload)
+        result = sse_format("status", payload)
         data_line = [l for l in result.splitlines() if l.startswith("data: ")][0]
         parsed = json.loads(data_line[6:])  # "data: " 제거
         assert parsed["runners"][0]["runner_id"] == "abc"
@@ -452,27 +463,27 @@ class TestStreamEventsIntegration:
         await gen.aclose()
 
 
-# ─── _extract_runner_id_from_channel 테스트 ──────────────────────────────────
+# ─── extract_runner_id_from_channel 테스트 ───────────────────────────────────
 
 class TestExtractRunnerIdFromChannel:
     def test_extract_runner_id_from_channel_right(self, event_service):
         """R: 정상 로그 채널 → runner_id 반환"""
-        result = event_service._extract_runner_id_from_channel("plan-runner:logs:abc123")
+        result = extract_runner_id_from_channel("plan-runner:logs:abc123")
         assert result == "abc123"
 
     def test_extract_runner_id_from_channel_merge(self, event_service):
         """R: 머지 로그 채널 → runner_id 반환"""
-        result = event_service._extract_runner_id_from_channel("plan-runner:merge-log:def456")
+        result = extract_runner_id_from_channel("plan-runner:merge-log:def456")
         assert result == "def456"
 
     def test_extract_runner_id_from_channel_boundary_empty(self, event_service):
         """B: 빈 문자열 및 콜론 없는 문자열 → None 반환"""
-        assert event_service._extract_runner_id_from_channel("") is None
-        assert event_service._extract_runner_id_from_channel("nocolon") is None
+        assert extract_runner_id_from_channel("") is None
+        assert extract_runner_id_from_channel("nocolon") is None
 
     def test_extract_runner_id_from_channel_boundary_trailing_colon(self, event_service):
         """B: 콜론으로 끝나는 채널 (runner_id 빈값) → None 반환"""
-        result = event_service._extract_runner_id_from_channel("plan-runner:logs:")
+        result = extract_runner_id_from_channel("plan-runner:logs:")
         assert result is None
 
 
@@ -1144,12 +1155,18 @@ class TestMergeLineChannelRouting:
         _, _, factory = _make_dual_pubsub_mocks(ks_messages=[ks_msg])
         async_redis.pubsub = MagicMock(side_effect=factory)
         event_service._async = async_redis
-        event_service._build_all_runners_status = MagicMock(return_value=[])
-        event_service._build_status_payload = MagicMock(side_effect=[initial_payload, refreshed_payload])
 
-        gen = event_service.stream_events()
-        events = await _collect_events(gen, 4)
-        await gen.aclose()
+        async def fake_stabilize(sync_redis, rid, payload):
+            if payload.get("exit_reason") == "commit_failed" and not payload.get("error"):
+                return refreshed_payload
+            return payload
+
+        with patch("app.modules.dev_runner.services.event_service.build_all_runners_status", return_value=[]):
+            with patch("app.modules.dev_runner.services.event_service.build_status_payload", return_value=initial_payload):
+                with patch("app.modules.dev_runner.services.event_service.stabilize_commit_failed_status_payload", side_effect=fake_stabilize):
+                    gen = event_service.stream_events()
+                    events = await _collect_events(gen, 4)
+                    await gen.aclose()
 
         status_events = [e for e in events if e.startswith("event: status\n")]
         assert status_events, f"status 이벤트가 없음: {events}"
@@ -1368,7 +1385,7 @@ class TestBuildAllRunnersStatusRecentInclusion:
         runner_id = "recent-vis-001"
         self._register_recent(sync_redis, runner_id, trigger="user")
 
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
 
         assert runner_id in ids, (
@@ -1381,7 +1398,7 @@ class TestBuildAllRunnersStatusRecentInclusion:
         runner_id = "recent-invis-001"
         self._register_recent(sync_redis, runner_id, trigger=None)
 
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
 
         assert runner_id not in ids, (
@@ -1401,7 +1418,7 @@ class TestBuildAllRunnersStatusRecentInclusion:
         # RECENT에도 동일 runner 등록
         sync_redis.zadd(RECENT_RUNNERS_KEY_FOR_TEST, {runner_id: time.time()})
 
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         count = ids.count(runner_id)
 
