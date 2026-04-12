@@ -59,6 +59,7 @@
 	let redisAvailable = $state(false);
 	let pendingStale = $state(false);
 	let exitBanner = $state<{ show: boolean; reason: string }>({ show: false, reason: 'completed' }); // runner 종료 배너
+	let failureBanner = $state<{ show: boolean; message: string } | null>(null); // FAILURE 태그 sticky 배너
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
 	const PREVIEW_LINE_LIMIT = 3;
@@ -79,6 +80,8 @@
 		DONE: { text: 'text-green-400', bg: 'bg-green-500/20' },
 		RESULT: { text: 'text-emerald-700', bg: 'bg-emerald-900/20' },
 		ERROR: { text: 'text-red-400', bg: 'bg-red-500/20' },
+		FAILURE: { text: 'text-red-300', bg: 'bg-red-600/38' },
+		HOLD: { text: 'text-yellow-300', bg: 'bg-yellow-600/20' },
 		INFO: { text: 'text-gray-500', bg: 'bg-transparent' },
 		SYSTEM: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
 		WARN: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
@@ -316,6 +319,11 @@
 		// SEPARATOR 감지 시 배치 리스트 초기화
 		if (text.includes(SEPARATOR_PATTERN) && !isStale) {
 			batchPlans = [];
+		}
+
+		// FAILURE 태그 감지 → sticky 배너 갱신
+		if (parsed.tag === 'FAILURE' && !isStale) {
+			failureBanner = { show: true, message: parsed.message };
 		}
 
 		pushLine(parsed);
@@ -738,6 +746,19 @@
 		</div>
 	{/if}
 
+	{#if failureBanner?.show}
+		<div class="sticky top-0 z-10 flex items-center justify-between gap-2 px-3 py-1.5 bg-red-900/80 border-l-4 border-red-500 text-red-200 text-xs font-mono">
+			<span class="font-bold text-red-300">[FAILURE]</span>
+			<span class="flex-1 min-w-0 truncate">{failureBanner.message}</span>
+			<button
+				type="button"
+				onclick={() => { if (failureBanner) failureBanner = { ...failureBanner, show: false }; }}
+				class="shrink-0 text-red-400 hover:text-red-200 leading-none"
+				aria-label="배너 닫기"
+			>✕</button>
+		</div>
+	{/if}
+
 	<!-- Log Content (Phase 2: text-sm for body) -->
 	<div
 		bind:this={logContainer}
@@ -896,12 +917,12 @@
 					{@const style = getTagStyle(line.tag)}
 					{@const lineExpanded = isExpanded(line.id)}
 					{@const lineCollapsed = shouldCollapseMessage(line.message)}
-					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
+					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : line.tag === 'FAILURE' ? 'bg-red-950/70 border-l-2 border-red-500 -mx-3 px-3 rounded' : line.tag === 'HOLD' ? 'bg-yellow-950/40 border-l-2 border-yellow-500 -mx-3 px-3 rounded' : ''}">
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 						</span>
-						<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">
+						<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {line.tag === 'FAILURE' ? 'text-red-300 font-bold' : line.tag === 'HOLD' ? 'text-yellow-300 font-bold' : line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">
 							{lineCollapsed && !lineExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
 						</span>
 						{#if lineCollapsed}
