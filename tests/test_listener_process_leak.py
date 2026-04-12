@@ -22,6 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
+sys.path.insert(0, str(SCRIPTS_DIR / "services"))  # browser_workers 이동: scripts/ → scripts/services/
 
 import browser_workers
 

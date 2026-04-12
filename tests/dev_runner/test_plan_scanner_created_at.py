@@ -7,7 +7,7 @@ plan: 2026-04-06_fix-dev-runner-todos-scroll-and-plan-list-sort.md
 import pytest
 import requests
 
-pytestmark = pytest.mark.http
+pytestmark = pytest.mark.http_live
 
 BASE_URL = "http://localhost:8001"
 

@@ -21,12 +21,12 @@ import urllib.error
 from datetime import datetime
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 os.chdir(PROJECT_ROOT)
 
 from app.shared.process.tracked_popen import tracked_popen_sync
-from scripts.service_utils import (
+from scripts.services.service_utils import (
     find_pids_on_port,
     is_port_listening,
     is_process_alive,

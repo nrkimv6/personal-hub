@@ -11,8 +11,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# scripts 디렉토리를 경로에 추가
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+# scripts 디렉토리를 경로에 추가 (browser_workers, service_utils 이동: scripts/ → scripts/services/)
+_scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+_services_dir = os.path.join(_scripts_dir, "services")
+sys.path.insert(0, _scripts_dir)
+sys.path.insert(0, _services_dir)
 
 import browser_workers
 import service_utils
