@@ -74,7 +74,7 @@ def llm_svc(db_session, registry_env):
     return LLMService(db=db_session)
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_enqueue_with_auto_resolve_uses_picker(llm_svc, db_session):
     """워커 enqueue → resolve → DB: picker 결과가 DB에 저장되는지 확인.
 
@@ -97,7 +97,7 @@ def test_enqueue_with_auto_resolve_uses_picker(llm_svc, db_session):
     assert req.status == "pending"
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_enqueue_respects_explicit_override(llm_svc, db_session):
     """명시 provider/model 전달 시 picker 우회: DB에 명시값 그대로 저장."""
     req = llm_svc.enqueue(
@@ -114,7 +114,7 @@ def test_enqueue_respects_explicit_override(llm_svc, db_session):
     assert req.model == "gemini-3-flash"
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_pick_model_oneshot_blocked_in_normal_env(monkeypatch):
     """E2E: DUMPTRUCK_MODE 미설정 + pick_model(oneshot=True) → RuntimeError.
 
@@ -129,7 +129,7 @@ def test_e2e_pick_model_oneshot_blocked_in_normal_env(monkeypatch):
         pick_model("plan_feat", oneshot=True)
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_pick_model_default_call_never_returns_gemini(monkeypatch):
     """E2E: 일반 pick_model() 호출은 gemini-3.1-pro를 절대 반환하지 않는다.
 

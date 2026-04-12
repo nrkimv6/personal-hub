@@ -18,7 +18,7 @@ def isolate_profiles(tmp_path, monkeypatch):
     yield tmp_path
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_profile_crud_flow_e2e(isolate_profiles):
     """저장 → 조회 → select → llm_service 실행 시 선택된 profile env 사용까지 전체 흐름."""
     # 1) profile 저장 (real fs write)
@@ -63,7 +63,7 @@ def test_profile_crud_flow_e2e(isolate_profiles):
     assert str(isolate_profiles / ".claude-work") in env_used["CLAUDE_CONFIG_DIR"]
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_profile_delete_selected_fallback_e2e(isolate_profiles):
     """selected profile 삭제 후 default 로 전환되고 이후 실행에 반영."""
     # work profile 저장 + 선택
@@ -112,7 +112,7 @@ def test_profile_delete_selected_fallback_e2e(isolate_profiles):
 # T3: 원본 버그 재현 fixture + 통합 TC
 # ────────────────────────────────────────────
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_save_profile_with_pythonioencoding_blocked_e2e(isolate_profiles):
     """T3: extra_env={"PYTHONIOENCODING": "ascii"} 포함 프로필을 save_profiles()로 저장 시도 → ValueError.
 
@@ -138,7 +138,7 @@ def test_save_profile_with_pythonioencoding_blocked_e2e(isolate_profiles):
         ps_real.save_profiles(bad_payload)
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_forbidden_env_set_symmetric_e2e(isolate_profiles):
     """T3: _dr_subprocess._FORBIDDEN_EXTRA_ENV ⊆ profile_env.FORBIDDEN_EXTRA_ENV 집합 포함 관계 검증.
 

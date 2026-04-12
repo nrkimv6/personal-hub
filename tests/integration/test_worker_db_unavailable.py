@@ -74,7 +74,7 @@ class _MinimalWorker:
 
 # ── T4 E2E 테스트 ──────────────────────────────────────────────────────────────
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_worker_survives_pg_unavailable_on_startup_e2e():
     """T4: circuit OPEN 상태에서 워커 루프가 5 사이클 동안 crash 없이 생존.
 
@@ -102,7 +102,7 @@ def test_worker_survives_pg_unavailable_on_startup_e2e():
     assert worker._cycle_count == 5, f"사이클 미완료: {worker._cycle_count}"
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_worker_heartbeat_published_during_db_open_e2e():
     """T4: circuit OPEN 상태에서도 워커가 heartbeat를 유지.
 
@@ -127,7 +127,7 @@ def test_worker_heartbeat_published_during_db_open_e2e():
     assert worker.iterations_called == 0
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_worker_recovers_when_pg_restored_e2e():
     """T4: db_circuit를 OPEN→HALF_OPEN→CLOSED 전이 시뮬레이션 + 워커 루프 재개.
 

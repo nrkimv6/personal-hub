@@ -11,7 +11,7 @@ from app.main import app
 client = TestClient(app)
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_process_watch_fingerprint_kill_mismatch_then_success():
     proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(120)"],
@@ -64,7 +64,7 @@ def test_process_watch_fingerprint_kill_mismatch_then_success():
             proc.wait(timeout=5)
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_process_watch_latest_has_source_and_age():
     resp = client.get("/api/v1/system/process-watch/latest?min_mb=0&limit=10")
     assert resp.status_code == 200

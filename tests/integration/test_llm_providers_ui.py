@@ -34,7 +34,7 @@ def providers_client():
 
 # ─── R: 정상 경로 ─────────────────────────────────────────────────────────────
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_providers_api_returns_200_and_list(providers_client):
     """R: GET /api/v1/llm/providers → 200 + list 반환."""
     resp = providers_client.get("/api/v1/llm/providers")
@@ -44,7 +44,7 @@ def test_e2e_providers_api_returns_200_and_list(providers_client):
     assert len(data) >= 1
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_providers_api_response_schema(providers_client):
     """R: 각 엔트리가 필수 필드(key/display_name/default_model/models/enabled/executor_key)를 가지는지."""
     resp = providers_client.get("/api/v1/llm/providers")
@@ -60,7 +60,7 @@ def test_e2e_providers_api_response_schema(providers_client):
         assert "supports_quota_pause" in entry
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_providers_api_returns_enabled_only(providers_client):
     """R: 응답에 enabled=True인 provider만 포함되는지 (disabled provider 제외)."""
     resp = providers_client.get("/api/v1/llm/providers")
@@ -69,7 +69,7 @@ def test_e2e_providers_api_returns_enabled_only(providers_client):
         assert entry["enabled"] is True, f"disabled provider 포함됨: {entry['key']}"
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_providers_api_includes_codex(providers_client):
     """R: enabled provider 목록에 codex가 포함되는지."""
     resp = providers_client.get("/api/v1/llm/providers")
@@ -78,7 +78,7 @@ def test_e2e_providers_api_includes_codex(providers_client):
     assert "codex" in keys, f"codex가 providers 목록에 없음. 현재 keys: {keys}"
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_providers_api_includes_cc_codex(providers_client):
     """R: enabled provider 목록에 cc-codex가 포함되는지."""
     resp = providers_client.get("/api/v1/llm/providers")
@@ -87,7 +87,7 @@ def test_e2e_providers_api_includes_cc_codex(providers_client):
     assert "cc-codex" in keys, f"cc-codex가 providers 목록에 없음. 현재 keys: {keys}"
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_providers_api_codex_and_cc_codex_distinct_executor_keys(providers_client):
     """Re: codex와 cc-codex의 executor_key가 서로 다른지 (회귀 방어)."""
     resp = providers_client.get("/api/v1/llm/providers")
@@ -101,7 +101,7 @@ def test_e2e_providers_api_codex_and_cc_codex_distinct_executor_keys(providers_c
     )
 
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_providers_api_openai_disabled_not_in_list(providers_client):
     """R: openai는 enabled=False이므로 목록에 없어야 함."""
     resp = providers_client.get("/api/v1/llm/providers")
@@ -112,7 +112,7 @@ def test_e2e_providers_api_openai_disabled_not_in_list(providers_client):
 
 # ─── B: Boundary — 빈 list 케이스 (monkeypatch) ─────────────────────────────
 
-@pytest.mark.e2e
+@pytest.mark.integration
 def test_e2e_providers_api_empty_registry_returns_empty_list(monkeypatch):
     """B: list_enabled()가 빈 리스트 반환 → API 응답도 []."""
     import app.modules.claude_worker.services.provider_registry as reg
