@@ -19,6 +19,12 @@ from app.config import logger
 from app.core.config import PROJECT_ROOT
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.plan_service import plan_service
+from app.modules.claude_worker.services.profile_store import (
+    get_selected as get_selected_profile,
+    get_by_name as get_profile_by_name,
+    SUPPORTED_ENGINES as PROFILE_SUPPORTED_ENGINES,
+)
+from app.modules.claude_worker.services.profile_env import ENGINE_ENV_KEYS
 from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_history_path
 from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.services.visibility import is_visible_runner
@@ -158,6 +164,42 @@ class ExecutorService:
 
         return resolved_engine, resolved_fix_engine
 
+    @staticmethod
+    def _resolve_profile(engine: str, profile_name: str | None) -> dict:
+        """engine + profile_name으로 profile env 정보 resolve.
+
+        Args:
+            engine: 실행 엔진 이름
+            profile_name: 프로필 이름 (None → 전역 선택 프로필)
+
+        Returns:
+            profile 관련 env dict:
+              {"profile": str, "profile_env_key": str|None,
+               "profile_config_dir": str|None, "profile_extra_env": dict}
+            engine이 PROFILE_SUPPORTED_ENGINES에 없으면 빈 dict 반환
+
+        Raises:
+            ValueError: profile_name 지정 시 해당 프로필이 없으면 전파
+        """
+        if engine not in PROFILE_SUPPORTED_ENGINES:
+            logger.warning(
+                f"[profile] engine={engine!r}는 프로필 미지원 (지원: {sorted(PROFILE_SUPPORTED_ENGINES)}), 스킵"
+            )
+            return {}
+
+        if profile_name:
+            profile = get_profile_by_name(engine, profile_name)
+        else:
+            profile = get_selected_profile(engine)
+
+        env_key = ENGINE_ENV_KEYS.get(engine)  # e.g. "CLAUDE_CONFIG_DIR" or None
+        return {
+            "profile": profile.name,
+            "profile_env_key": env_key,
+            "profile_config_dir": profile.config_dir,
+            "profile_extra_env": profile.extra_env or {},
+        }
+
     async def _get_runner_fields(self, rid: str, *fields: str) -> dict:
         result = {}
         for f in fields:
@@ -248,6 +290,13 @@ class ExecutorService:
 
         command["engine"] = resolved_engine
         command["fix_engine"] = resolved_fix_engine
+
+        # profile resolve — ValueError → 400 (프로필 미존재)
+        try:
+            profile_data = self._resolve_profile(resolved_engine, request.profile)
+            command.update(profile_data)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         # 옵션 추가
         if request.max_cycles is not None:

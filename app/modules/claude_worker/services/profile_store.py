@@ -160,6 +160,28 @@ def get_selected(engine: str) -> LLMProfile:
     return LLMProfile(engine=engine, name="default", config_dir=None)
 
 
+def get_by_name(engine: str, name: str) -> LLMProfile:
+    """이름으로 지정된 profile 반환.
+
+    Args:
+        engine: 엔진 이름 (SUPPORTED_ENGINES 내에만 허용)
+        name: 프로필 이름
+
+    Returns:
+        LLMProfile 인스턴스
+
+    Raises:
+        ValueError: engine 미지원 또는 name 미존재 시
+    """
+    if engine not in SUPPORTED_ENGINES:
+        raise ValueError(f"unsupported engine: {engine!r}")
+    payload = load_profiles()
+    for item in payload.get("profiles", []):
+        if item.get("engine") == engine and item.get("name") == name:
+            return LLMProfile.from_dict(item)
+    raise ValueError(f"profile {name!r} not found for engine {engine!r}")
+
+
 def select(engine: str, name: str) -> Dict[str, Any]:
     """engine 의 현재 선택 profile 변경 후 저장."""
     if engine not in SUPPORTED_ENGINES:

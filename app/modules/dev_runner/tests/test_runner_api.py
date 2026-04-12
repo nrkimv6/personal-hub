@@ -9,7 +9,10 @@ import pytest
 import redis
 import fakeredis
 import fakeredis.aioredis
+from pydantic import ValidationError
 
+from app.modules.claude_worker.services.profile_store import LLMProfile
+from app.modules.dev_runner.schemas import RunRequest
 from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.state import get_state
 
@@ -553,3 +556,102 @@ class TestResetState:
         status_response = await client.get("/api/v1/dev-runner/status")
         assert status_response.status_code == 200
         assert status_response.json()["running"] is False
+
+
+class TestRunRequestProfileField:
+    """RunRequest profile 필드 TC (T1)"""
+
+    def test_profile_field_right_valid(self):
+        """R: profile 필드 정상 지정"""
+        req = RunRequest(plan_file="test.md", engine="claude", profile="work")
+        assert req.profile == "work"
+
+    def test_profile_field_none_default(self):
+        """R: profile 미지정 시 None"""
+        req = RunRequest(plan_file="test.md", engine="claude")
+        assert req.profile is None
+
+    def test_profile_field_empty_string_normalized_to_none(self):
+        """B: profile="" 빈 문자열 → None으로 정규화"""
+        req = RunRequest(plan_file="test.md", engine="claude", profile="")
+        assert req.profile is None
+
+    def test_profile_field_whitespace_normalized_to_none(self):
+        """B: profile="  " 공백 문자열 → None으로 정규화"""
+        req = RunRequest(plan_file="test.md", engine="claude", profile="  ")
+        assert req.profile is None
+
+    def test_profile_field_non_string_raises(self):
+        """E: profile에 비문자열(int) 전달 → ValidationError"""
+        with pytest.raises((ValidationError, Exception)):
+            req = RunRequest(plan_file="test.md", engine="claude", profile=123)
+            # Pydantic v2는 str coerce할 수 있어 명시 확인
+            assert isinstance(req.profile, (str, type(None)))
+
+    async def test_run_request_profile_right_returns_200(self, client, mock_executor_redis):
+        """R: POST /run with profile → 200 + command에 profile_config_dir 포함"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+
+        work_profile = LLMProfile(
+            engine="claude",
+            name="work",
+            config_dir="/test/path",
+            extra_env={"TEST_KEY": "val"},
+        )
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch("app.modules.dev_runner.services.executor_service.get_profile_by_name", return_value=work_profile), \
+             patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={"plan_file": "test.md", "engine": "claude", "profile": "work"},
+            )
+
+        assert response.status_code == 200
+        queued = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert queued
+        command = json.loads(queued[0])
+        assert command.get("profile_config_dir") == "/test/path"
+        assert command.get("profile_extra_env") == {"TEST_KEY": "val"}
+        assert command.get("profile_env_key") == "CLAUDE_CONFIG_DIR"
+
+    async def test_run_request_nonexistent_profile_returns_400(self, client, mock_executor_redis):
+        """E: 존재하지 않는 profile → 400 에러"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+
+        with patch(
+            "app.modules.dev_runner.services.executor_service.get_profile_by_name",
+            side_effect=ValueError("profile 'nonexistent' not found for engine 'claude'"),
+        ):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={"plan_file": "test.md", "engine": "claude", "profile": "nonexistent"},
+            )
+
+        assert response.status_code == 400
+        assert "not found" in response.json().get("detail", "")
+
+    async def test_run_request_codex_engine_profile_ignored(self, client, mock_executor_redis):
+        """B: codex 엔진 + profile 지정 → 200 + profile 관련 키 없음"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={"plan_file": "test.md", "engine": "codex", "profile": "work"},
+            )
+
+        assert response.status_code == 200
+        queued = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert queued
+        command = json.loads(queued[0])
+        # codex 엔진은 프로필 미지원 → profile 관련 키 없음
+        assert "profile" not in command
+        assert "profile_config_dir" not in command
+        assert "profile_extra_env" not in command
