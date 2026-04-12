@@ -9,14 +9,32 @@ import tempfile
 from app.modules.claude_worker.services.executors.base import LLMExecutorBase
 from app.modules.claude_worker.services.profile_env import build_cli_env
 
-QUOTA_PAUSE_DEFAULT_MS = 60_000
+QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
 
 
-def _parse_quota_retry_ms(output: str):
-    """quota 에러 응답에서 retry_after_ms 추출. 없으면 None."""
+def _parse_quota_retry_ms(text: str):
+    """stderr/stdout에서 quota 재시도 대기 시간(ms) 파싱.
+
+    1순위: retryDelayMs: 숫자 정규식 파싱
+    2순위: reset after Xh Ym Zs 텍스트 파싱
+    미감지: None 반환
+    """
     import re
-    m = re.search(r'"retry_after_ms"\s*:\s*(\d+)', output)
-    return int(m.group(1)) if m else None
+    if not text:
+        return None
+
+    # 1순위: retryDelayMs 파싱
+    m = re.search(r"retryDelayMs:\s*([\d.]+)", text)
+    if m:
+        return int(float(m.group(1)))
+
+    # 2순위: "reset after Xh Ym Zs" 파싱
+    m = re.search(r"reset after (\d+)h(\d+)m(\d+)s", text)
+    if m:
+        h, mn, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return (h * 3600 + mn * 60 + s) * 1000
+
+    return None
 
 
 class ClaudeExecutor(LLMExecutorBase):

@@ -10,6 +10,17 @@ from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerSt
 
 logger = logging.getLogger("claude_worker.llm_service")
 
+# 하위호환 상수/함수 — 외부 참조자(test_llm_classifier_service.py 등)가 사용
+HEARTBEAT_WARNING_THRESHOLD = 120   # 2분: warning 상태
+HEARTBEAT_UNHEALTHY_THRESHOLD = 600  # 10분: unhealthy 상태
+QUEUE_PRIORITY = ["system", "utility"]
+QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000
+
+# 하위호환 re-export — test_quota_pause.py 등이 참조
+from app.modules.claude_worker.services.executors.claude_executor import (
+    _parse_quota_retry_ms,
+)
+
 
 class LLMService:
     """범용 LLM 서비스.

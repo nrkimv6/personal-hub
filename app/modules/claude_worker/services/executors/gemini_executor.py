@@ -6,17 +6,10 @@ import sys
 import tempfile
 
 from app.modules.claude_worker.services.executors.base import LLMExecutorBase
+from app.modules.claude_worker.services.executors.claude_executor import _parse_quota_retry_ms
 from app.modules.claude_worker.services.profile_env import build_cli_env
 
-QUOTA_PAUSE_DEFAULT_MS = 60_000
-
-
-def _parse_quota_retry_ms(output: str):
-    """quota 에러 응답에서 retry_after_ms 추출. 없으면 None."""
-    import re
-
-    m = re.search(r'"retry_after_ms"\s*:\s*(\d+)', output)
-    return int(m.group(1)) if m else None
+QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
 
 
 class GeminiExecutor(LLMExecutorBase):
