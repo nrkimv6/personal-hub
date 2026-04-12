@@ -72,7 +72,7 @@ HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 MERGE_ACTIVE_STATUSES = ("pre_merge", "queued", "merging", "pending_merge", "resolving", "testing", "fixing")
 
 SCRIPT_DIR = Path(__file__).parent
-PROJECT_ROOT = SCRIPT_DIR.parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/plan_runner/ → scripts/ → project root
 WORKTREE_BASE_DIR = PROJECT_ROOT / ".worktrees"
 WTOOLS_BASE_DIR = Path("D:/work/project/service/wtools")
 PLAN_RUNNER_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/plan-runner"

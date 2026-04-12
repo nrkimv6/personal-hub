@@ -50,7 +50,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 # 가상환경 Python 경로
 $PythonPath = Join-Path $ProjectRoot ".venv\Scripts\python.exe"

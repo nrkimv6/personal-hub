@@ -9,7 +9,7 @@ param(
 )
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 
 # 정리 대상 디렉토리 (logs/ + logs/admin/)
 $LogDirs = @(

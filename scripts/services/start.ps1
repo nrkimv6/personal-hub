@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $FrontendDir = Join-Path $ProjectRoot "frontend"
 
 # Port and mode settings - Dev mode uses different ports to avoid affecting production

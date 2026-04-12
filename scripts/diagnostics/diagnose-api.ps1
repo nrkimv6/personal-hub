@@ -26,7 +26,7 @@ param(
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $PythonExe = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 
 # Configuration

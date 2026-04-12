@@ -13,7 +13,7 @@ param(
 )
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $LogDir = Join-Path $ProjectRoot "logs"
 $InputFile = Join-Path $LogDir "cloudflared_err.log"
 

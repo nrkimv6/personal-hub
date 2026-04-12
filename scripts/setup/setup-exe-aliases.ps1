@@ -21,7 +21,7 @@ param(
 )
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $VenvScripts = Join-Path $ProjectRoot ".venv\Scripts"
 $PythonExe = Join-Path $VenvScripts "python.exe"
 $PowershellExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"

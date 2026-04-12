@@ -26,7 +26,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 
 if ($Public -and $Action -ne "restart-frontend") {
     Write-Error "-Public 옵션은 restart-frontend 액션에서만 사용할 수 있습니다. 예: .\\scripts\\browser-workers.ps1 -Action restart-frontend -Public"

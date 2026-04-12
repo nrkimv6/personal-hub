@@ -12,7 +12,7 @@ param(
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $browserWorkersScript = Join-Path $ScriptDir "browser-workers.ps1"
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$LogFile = Join-Path (Split-Path -Parent $ScriptDir) "logs\admin\startup_browser_workers_$timestamp.log"
+$LogFile = Join-Path (Split-Path -Parent (Split-Path -Parent $ScriptDir)) "logs\admin\startup_browser_workers_$timestamp.log"
 
 function Write-Log {
     param([string]$Message)
@@ -36,7 +36,7 @@ Write-Log "Startup browser workers script started"
 Write-Log "Starting Redis via Podman..."
 
 $redisStarted = $false
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 
 try {
     # Podman 소켓 실제 통신 검증 (podman machine list의 "Running"은 SSH 터널 상태를 반영하지 않음)
@@ -130,9 +130,9 @@ Write-Log "Starting browser workers..."
 
 # browser_workers.py 호출 (browser-workers.ps1에서 마이그레이션됨)
 # See: docs/plan/2026-02-18_service-runner-python-migration.md
-$VenvScripts = Join-Path (Split-Path -Parent $ScriptDir) ".venv\Scripts"
+$VenvScripts = Join-Path (Split-Path -Parent (Split-Path -Parent $ScriptDir)) ".venv\Scripts"
 if (-not (Test-Path $VenvScripts)) {
-    $VenvScripts = Join-Path (Split-Path -Parent $ScriptDir) "venv\Scripts"
+    $VenvScripts = Join-Path (Split-Path -Parent (Split-Path -Parent $ScriptDir)) "venv\Scripts"
 }
 $VenvPython = Join-Path $VenvScripts "python.exe"
 
