@@ -44,6 +44,7 @@ class CreateScheduleRequest(BaseModel):
     biz_item_id: int
     dates: List[str]
     service_account_id: Optional[int] = None
+    times: Optional[List[str]] = None
 
 
 class CreateScheduleResponse(BaseModel):
@@ -67,6 +68,7 @@ class ScheduleItem(BaseModel):
     item_name: Optional[str]
     business_name: Optional[str]
     service_account_id: Optional[int]
+    times: Optional[List[str]] = None
 
 
 class CoupangStatusSummary(BaseModel):
@@ -233,6 +235,7 @@ def create_schedules(body: CreateScheduleRequest, db: Session = Depends(get_db))
             date=date,
             service_account_id=body.service_account_id,
             is_enabled=True,
+            times=json.dumps(body.times, ensure_ascii=False) if body.times else None,
         )
         db.add(schedule)
         created += 1
@@ -256,6 +259,7 @@ def list_schedules(db: Session = Depends(get_db)):
             item_name=ctx.get("item_name"),
             business_name=ctx.get("business_name"),
             service_account_id=ctx.get("service_account_id"),
+            times=ctx.get("times"),
         ))
     return result
 

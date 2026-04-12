@@ -139,6 +139,7 @@ class CoupangMonitorWorker(BaseWorker):
                 dates=[date],
                 page=page,
                 schedule_id=schedule_id,
+                notify_times=ctx.get("times"),
             )
 
             if changes:

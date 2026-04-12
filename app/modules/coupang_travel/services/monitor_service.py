@@ -67,6 +67,7 @@ class CoupangMonitorService:
         dates: List[str],
         page: "Page",
         schedule_id: Optional[int] = None,
+        notify_times: Optional[List[str]] = None,
     ) -> List[StatusChange]:
         """각 date별 상태를 체크하고 변경 시 알림 발송.
 
@@ -133,6 +134,8 @@ class CoupangMonitorService:
                     changes.append(change)
                     date_changes.append(change)
                     self._previous_statuses[state_key] = current
+                    if not self._is_within_notify_times(notify_times):
+                        continue
                     await self._send_notification(change)
 
             slots_info = self._build_slots_info(items)
@@ -147,6 +150,38 @@ class CoupangMonitorService:
             )
 
         return changes
+
+    @staticmethod
+    def _is_within_notify_times(times: Optional[List[str]]) -> bool:
+        """현재 시각이 알림 허용 시간대 내에 있는지 판정.
+
+        times=None이면 항상 True (미설정 = 모든 시간에 알림).
+        개별 시간 "HH:MM" 정확 일치 + 범위 "HH:MM-HH:MM" 구간 포함(start <= now <= end) 지원.
+        인식할 수 없는 형식 항목은 True 반환 (안전 기본값 — 알림 억제보다 허용 우선).
+        """
+        import re
+        _time_re = re.compile(r'^\d{2}:\d{2}$')
+
+        if times is None:
+            return True
+        now_str = datetime.now().strftime("%H:%M")
+        for entry in times:
+            try:
+                if "-" in entry:
+                    parts = entry.split("-", 1)
+                    start, end = parts[0], parts[1]
+                    if not (_time_re.match(start) and _time_re.match(end)):
+                        return True  # 파싱 불가 → 안전 기본값
+                    if start <= now_str <= end:
+                        return True
+                else:
+                    if not _time_re.match(entry):
+                        return True  # 파싱 불가 → 안전 기본값
+                    if entry == now_str:
+                        return True
+            except Exception:
+                return True  # 예외 안전 기본값
+        return False
 
     @staticmethod
     def _is_item_available(item: VendorItem) -> bool:

@@ -33,6 +33,7 @@
   let selectedTargetId = $state('');
   let newDate = $state('');
   let selectedAccountId = $state('');
+  let newTimes = $state('');
   let submittingSchedule = $state(false);
 
   let scheduleFilters = $state({
@@ -181,15 +182,22 @@
 
     submittingSchedule = true;
     try {
-      const scheduleBody: { biz_item_id: number; dates: string[]; service_account_id?: number } = {
+      const scheduleBody: { biz_item_id: number; dates: string[]; service_account_id?: number; times?: string[] } = {
         biz_item_id: targetId,
         dates: [newDate]
       };
       if (accountId) {
         scheduleBody.service_account_id = accountId;
       }
+      const parsedTimes = newTimes.trim()
+        ? newTimes.split(',').map((t) => t.trim()).filter(Boolean)
+        : undefined;
+      if (parsedTimes) {
+        scheduleBody.times = parsedTimes;
+      }
       const result = await coupangTravelApi.createSchedules(scheduleBody);
       newDate = '';
+      newTimes = '';
       toast.success(`일정 ${result.created}건이 추가되었습니다.`);
       await fetchSchedulesAndStatus(false);
     } catch (e: unknown) {
@@ -404,6 +412,16 @@
               <option value={account.id}>{account.profile_name ?? account.identifier ?? `계정 #${account.id}`}</option>
             {/each}
           </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700" for="times-input">알림 시간대 (선택)</label>
+          <input
+            id="times-input"
+            type="text"
+            bind:value={newTimes}
+            placeholder="10:00,11:00,14:00-19:00"
+            class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+          />
         </div>
       </div>
       <button

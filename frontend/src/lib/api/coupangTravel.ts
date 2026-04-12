@@ -27,6 +27,7 @@ export interface CoupangSchedule {
   item_name: string | null;
   business_name: string | null;
   service_account_id: number | null;
+  times: string[] | null;
 }
 
 export interface CoupangStatusSummary {
@@ -45,6 +46,7 @@ export interface CreateScheduleRequest {
   biz_item_id: number;
   dates: string[];
   service_account_id?: number;
+  times?: string[];
 }
 
 // ========== API ==========
