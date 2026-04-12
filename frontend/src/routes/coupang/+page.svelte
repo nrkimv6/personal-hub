@@ -18,7 +18,9 @@
   let statusSummary = $state<CoupangStatusSummary>({
     total_schedules: 0,
     enabled_schedules: 0,
-    active_schedules: 0
+    active_schedules: 0,
+    proxy_enabled: false,
+    proxy_active_count: 0
   });
 
   let loading = $state(false);
@@ -318,6 +320,18 @@
       <div class="text-3xl font-bold text-success">{statusSummary.active_schedules}</div>
       <div class="text-sm text-muted-foreground">동작 중</div>
     </div>
+  </div>
+
+  <div class="flex items-center gap-2">
+    {#if statusSummary.proxy_enabled}
+      <span class="inline-flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
+        프록시 활성 ({statusSummary.proxy_active_count}개)
+      </span>
+    {:else}
+      <span class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
+        프록시 비활성 (직접 연결)
+      </span>
+    {/if}
   </div>
 
   <TabNav tabs={coupangTabs} bind:activeTab variant="primary" queryParam="tab" />
