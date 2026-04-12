@@ -1,5 +1,5 @@
 """
-E2E 테스트 (T4) — mock 외부 API, 내부 파이프라인 전체 검증
+통합 테스트 — mock 기반 내부 파이프라인 검증
 DB: 실제 SQLite(테스트용 in-memory 또는 테스트 DB)
 """
 import json
