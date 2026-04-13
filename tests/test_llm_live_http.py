@@ -24,7 +24,7 @@ def _get(path: str, timeout: int = 5, **kwargs) -> httpx.Response:
     try:
         return httpx.get(BASE_URL + path, timeout=timeout, **kwargs)
     except httpx.ConnectError:
-        pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
 
 
 def _post(path: str, timeout: int = 5, **kwargs) -> httpx.Response:
@@ -32,7 +32,7 @@ def _post(path: str, timeout: int = 5, **kwargs) -> httpx.Response:
     try:
         return httpx.post(BASE_URL + path, timeout=timeout, **kwargs)
     except httpx.ConnectError:
-        pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
 
 
 def _put(path: str, timeout: int = 5, **kwargs) -> httpx.Response:
@@ -40,7 +40,7 @@ def _put(path: str, timeout: int = 5, **kwargs) -> httpx.Response:
     try:
         return httpx.put(BASE_URL + path, timeout=timeout, **kwargs)
     except httpx.ConnectError:
-        pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
 
 
 # ---------------------------------------------------------------------------

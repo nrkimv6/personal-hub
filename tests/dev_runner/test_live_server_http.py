@@ -20,7 +20,7 @@ def test_live_health_check():
     try:
         resp = httpx.get(f"{BASE_URL}/", timeout=5)
     except httpx.ConnectError:
-        pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
     assert resp.status_code == 200
 
 
@@ -29,6 +29,6 @@ def test_live_runners_endpoint():
     try:
         resp = httpx.get(f"{BASE_URL}/api/v1/dev-runner/runners", timeout=5)
     except httpx.ConnectError:
-        pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)

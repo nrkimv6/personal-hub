@@ -57,15 +57,6 @@ def redis_client():
     r.close()
 
 
-def _is_api_available() -> bool:
-    try:
-        resp = requests.get(f"{ADMIN_API}/health", timeout=2)
-        return resp.status_code < 500
-    except Exception:
-        return False
-
-
-@pytest.mark.skipif(not _is_api_available(), reason="Admin API 서버 미실행")
 @pytest.mark.allow_prod_redis
 class TestSseFilterE2E:
     def test_sse_initial_status_excludes_tc_trigger_runner(self, redis_client):

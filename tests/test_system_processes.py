@@ -365,7 +365,7 @@ def test_http_system_mode_survives_restart_frontend_admin():
     try:
         before = requests.get(f"{base}/api/v1/system/mode", timeout=5)
     except Exception:
-        pytest.skip("Admin API not available")
+        pytest.fail("Admin API not available")
 
     assert before.status_code == 200
 

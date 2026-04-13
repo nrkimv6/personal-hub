@@ -20,14 +20,6 @@ LOG_CHANNEL_PREFIX = "plan-runner:logs"
 TEST_RUNNER_ID = "t4-reconnect-test-runner"
 
 
-def _check_admin_api():
-    try:
-        resp = requests.get(f"{ADMIN_API}/api/v1/dev-runner/status", timeout=3)
-        return resp.status_code == 200
-    except Exception:
-        return False
-
-
 def _collect_sse_events(url: str, target_events: set, timeout: float = 5.0) -> dict:
     """SSE 스트림에서 target_events에 해당하는 이벤트를 수집."""
     collected: dict = {e: [] for e in target_events}
@@ -57,7 +49,6 @@ def _collect_sse_events(url: str, target_events: set, timeout: float = 5.0) -> d
 
 
 @pytest.mark.e2e
-@pytest.mark.skipif(not _check_admin_api(), reason="Admin API not available (localhost:8001)")
 class TestSseLogStreamReconnectE2E:
     """T4: SSE 로그 스트림에서 connected 이벤트 수신 확인"""
 

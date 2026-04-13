@@ -28,7 +28,7 @@ def _skip_if_down() -> None:
     try:
         httpx.get(BASE_URL, timeout=5)
     except httpx.ConnectError:
-        pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
 
 
 def _create_target(name: str = "__test_live__") -> dict:

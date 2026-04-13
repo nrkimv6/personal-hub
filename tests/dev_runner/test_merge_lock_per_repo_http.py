@@ -20,20 +20,6 @@ pytestmark = [
 BASE_URL = os.environ.get("ADMIN_API_BASE", "http://localhost:8001/api/v1/dev-runner")
 
 
-def _api_available() -> bool:
-    try:
-        r = requests.get(f"{BASE_URL}/status", timeout=5)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-@pytest.fixture(scope="module", autouse=True)
-def require_api():
-    if not _api_available():
-        pytest.skip("Admin API 서버(port 8001) 미기동 — 실서버 테스트 스킵")
-
-
 def test_merge_lock_runners_endpoint_R():
     """R(Right): GET /runners → 200 + 기존 응답 구조 유지 (per-repo lock 적용 후 영향 없음)"""
     resp = requests.get(f"{BASE_URL}/runners", timeout=10)

@@ -118,7 +118,7 @@ async def test_reproduce_5th_visible_leak():
         r = sync_redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
         r.ping()
     except Exception:
-        pytest.skip("Redis 연결 불가 — 실제 Redis 필요 (로컬 개발 환경에서 실행)")
+        pytest.fail("Redis 연결 불가 — 실제 Redis 필요 (로컬 개발 환경에서 실행)")
 
     runner_id = f"tc-pytest-5th-leak-{uuid.uuid4().hex[:8]}"
 

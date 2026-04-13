@@ -175,26 +175,6 @@ class TestSyncSerialSequences:
 
 
 # ── Phase T3: 재현/통합 테스트 ───────────────────────────────────────────
-
-def _pg_available() -> bool:
-    """실제 PG 연결 가능 여부 확인"""
-    try:
-        from sqlalchemy import create_engine, text
-        db_url = os.environ.get(
-            "DATABASE_URL",
-            "postgresql://monitor_user:monitor_pass_2026@localhost:5432/monitor"
-        )
-        if not db_url.startswith("postgresql"):
-            return False
-        eng = create_engine(db_url, connect_args={"connect_timeout": 3})
-        with eng.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
-
-
-@pytest.mark.skipif(not _pg_available(), reason="실제 PostgreSQL 연결 불가 — 통합 TC 스킵")
 class TestSequenceDesyncIntegration:
     """T3: 시퀀스 불일치 재현 + sync_serial_sequences() 수정 검증"""
 

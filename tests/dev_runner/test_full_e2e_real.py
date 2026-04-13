@@ -130,7 +130,7 @@ def require_full_env():
         r.ping()
         r.close()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
 
     if not _config.PLAN_RUNNER_PYTHON.exists():
         pytest.skip(f"plan-runner venv not found: {_config.PLAN_RUNNER_PYTHON}")
@@ -143,7 +143,7 @@ def real_redis_db0():
         r = redis_lib.Redis(host="localhost", port=6379, db=0, decode_responses=True)
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
     yield r
     r.close()
 

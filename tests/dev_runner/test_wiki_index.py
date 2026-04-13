@@ -525,7 +525,7 @@ def test_http_plan_records_search_keyword():
     try:
         resp = httpx.get("http://localhost:8001/api/v1/plans/records?q=redis", timeout=10)
     except httpx.ConnectError:
-        _pytest.skip("실서버 미기동")
+        _pytest.fail("실서버 미기동")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -540,7 +540,7 @@ def test_http_plan_records_search_date():
             timeout=10,
         )
     except httpx.ConnectError:
-        _pytest.skip("실서버 미기동")
+        _pytest.fail("실서버 미기동")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -556,7 +556,7 @@ def test_http_plan_records_search_no_result():
             timeout=10,
         )
     except httpx.ConnectError:
-        _pytest.skip("실서버 미기동")
+        _pytest.fail("실서버 미기동")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -570,7 +570,7 @@ def test_http_guide_status():
     try:
         resp = httpx.get("http://localhost:8001/api/v1/plans/records/guide-status", timeout=10)
     except httpx.ConnectError:
-        _pytest.skip("실서버 미기동")
+        _pytest.fail("실서버 미기동")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -586,7 +586,7 @@ def test_http_guide_status_empty():
     try:
         resp = httpx.get("http://localhost:8001/api/v1/plans/records/guide-status", timeout=10)
     except httpx.ConnectError:
-        _pytest.skip("실서버 미기동")
+        _pytest.fail("실서버 미기동")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
