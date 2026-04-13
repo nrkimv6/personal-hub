@@ -184,11 +184,16 @@ class TestHealthCheckApiConversion:
     """Naver 워커 건강 체크 API 전환 테스트 (worker.py 로직)"""
 
     def _make_db_row(self, pid=None, last_heartbeat=None):
-        """worker_status DB 행 모의 객체 생성."""
+        """worker_status DB 행 모의 객체 생성.
+
+        컬럼 순서 (새 스키마, 10컬럼):
+        pid[0], status[1], active_tasks[2], last_heartbeat[3],
+        memory_usage_mb[4], started_at[5], active_tabs[6],
+        browser_contexts[7], global_pause[8], paused_at[9]
+        """
         row = MagicMock()
         row.__getitem__ = lambda self, idx: (
-            pid, "running", None, last_heartbeat, 0, None,
-            False, None, True, None, 0, False
+            pid, "running", None, last_heartbeat, 0, None, 0, 0, False, None
         )[idx]
         return row
 
@@ -242,6 +247,86 @@ class TestHealthCheckApiConversion:
 
         assert result is not None
         assert result["last_heartbeat"] == expected_updated_at
+
+    def test_get_worker_status_from_db_started_at_schema_R(self, fake_redis):
+        """R(Right): 새 스키마 기준 — 반환 dict에 started_at 키 존재, start_time 키 없음."""
+        from app.routes.worker import get_worker_status_from_db
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=1234)
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        assert "started_at" in result, "started_at 키가 반환 dict에 없음"
+        assert "start_time" not in result, "구 스키마 start_time 키가 잔존해 있음"
+        assert result["pid"] == 1234
+
+    def test_get_worker_status_from_db_no_browser_columns_B(self, fake_redis):
+        """B(Boundary): browser_available/browser_error 키가 없고 active_tabs/browser_contexts 키가 존재."""
+        from app.routes.worker import get_worker_status_from_db
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=9999)
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        # 구 키 제거 확인
+        for old_key in ("browser_available", "browser_error", "browser_recovery_attempts", "browser_permanently_failed"):
+            assert old_key not in result, f"구 스키마 키 '{old_key}'가 잔존해 있음"
+        # 새 키 존재 확인
+        assert "active_tabs" in result
+        assert "browser_contexts" in result
+        assert result["active_tabs"] == 0
+        assert result["browser_contexts"] == 0
+
+    def test_get_worker_status_from_db_exception_fallback_E(self, fake_redis):
+        """E(Error): DB 예외 시 status='unknown', started_at=None, active_tabs=0 반환."""
+        from app.routes.worker import get_worker_status_from_db
+
+        mock_session = MagicMock()
+        mock_session.execute.side_effect = Exception("DB 연결 실패")
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        assert result["status"] == "unknown"
+        assert result["started_at"] is None
+        assert result["active_tabs"] == 0
+        assert result["browser_contexts"] == 0
+        assert result["error_message"] is not None
+
+    def test_worker_status_stale_pid_redis_up_integration(self, fake_redis):
+        """T3: fakeredis에 heartbeat publish + mock DB에 죽은 PID →
+        status='crashed', last_heartbeat 값 존재.
+        실환경 재현: Redis up, worker down, stale PID 상태.
+        """
+        from app.routes.worker import get_worker_status_from_db, is_process_running
+
+        # Redis에 heartbeat publish (worker가 마지막으로 살아있을 때의 흔적)
+        stale_pid = 99999  # 실제로 죽어있는 PID
+        WorkerHealthRedis.publish("naver", stale_pid, "running")
+
+        # DB에는 stale PID가 남아있음
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(
+            pid=stale_pid, last_heartbeat="2000-01-01T00:00:00"
+        )
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            status_data = get_worker_status_from_db()
+
+        # Redis up → last_heartbeat이 Redis updated_at으로 채워짐
+        assert status_data["last_heartbeat"] is not None, (
+            "Redis heartbeat이 있으면 last_heartbeat이 채워져야 함"
+        )
+        assert status_data["pid"] == stale_pid
+
+        # is_process_running(stale_pid) → False (실제 프로세스 없음)
+        assert not is_process_running(stale_pid), (
+            "PID 99999은 실제로 없어야 함 (테스트 환경 전제)"
+        )
 
 
 # ============================================================

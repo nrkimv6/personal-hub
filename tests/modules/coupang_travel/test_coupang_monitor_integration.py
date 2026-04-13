@@ -344,7 +344,9 @@ async def test_coupang_worker_updates_active_flag_during_run():
 
 @pytest.fixture
 def orm_db_session():
-    """ORM 기반 in-memory SQLite 세션 — schedule_service.get_all_with_context() 테스트용."""
+    """ORM 기반 in-memory SQLite 세션 — schedule_service.get_all_with_context() 테스트용.
+    MonitoringEvent 포함 (get_all_with_context가 _get_last_events 서브쿼리를 사용하므로 필수).
+    """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
@@ -354,6 +356,7 @@ def orm_db_session():
     from app.models.business import Business
     from app.models.biz_item import BizItem
     from app.models.monitor_schedule import MonitorSchedule
+    from app.models.monitoring_event import MonitoringEvent
 
     engine = create_engine(
         "sqlite:///:memory:",
@@ -366,6 +369,7 @@ def orm_db_session():
         Business.__table__,
         BizItem.__table__,
         MonitorSchedule.__table__,
+        MonitoringEvent.__table__,
     ]
     Base.metadata.create_all(bind=engine, tables=tables)
 
@@ -468,6 +472,120 @@ def test_coupang_e2e_schedule_with_times_in_context(orm_db_session):
     assert ctx["times"] == ["10:00", "14:00-19:00"], (
         f"times가 List[str]로 파싱되어야 함, 실제: {ctx['times']!r}"
     )
+
+
+# ── T3: last_event 통합 TC ──────────────────────────────────────────────────────
+
+@pytest.fixture
+def orm_db_session_with_events():
+    """ORM 기반 in-memory SQLite — MonitoringEvent 포함 (T3 last_event 통합 검증용)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.models.base import Base
+    from app.models.browser_profile import BrowserProfile
+    from app.models.service_account import ServiceAccount
+    from app.models.business import Business
+    from app.models.biz_item import BizItem
+    from app.models.monitor_schedule import MonitorSchedule
+    from app.models.monitoring_event import MonitoringEvent
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    tables = [
+        BrowserProfile.__table__,
+        ServiceAccount.__table__,
+        Business.__table__,
+        BizItem.__table__,
+        MonitorSchedule.__table__,
+        MonitoringEvent.__table__,
+    ]
+    Base.metadata.create_all(bind=engine, tables=tables)
+
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    yield db
+    db.close()
+    engine.dispose()
+
+
+def test_get_all_with_context_last_event_fields_T3(orm_db_session_with_events):
+    """T3: schedule + event 삽입 후 get_all_with_context() 호출 →
+    last_event_at / last_event_status가 실제 값으로 반환됨 (mock 최소화, 인메모리 DB).
+    """
+    from app.models.business import Business
+    from app.models.biz_item import BizItem
+    from app.models.monitor_schedule import MonitorSchedule
+    from app.models.monitoring_event import MonitoringEvent
+    from app.services.schedule_service import schedule_service
+
+    db = orm_db_session_with_events
+
+    biz = Business(business_id="cp:t3_test_001", name="T3테스트상품", service_type="coupang")
+    db.add(biz)
+    db.flush()
+
+    item = BizItem(business_id=biz.id, biz_item_id="t3_item_001", name="T3아이템")
+    db.add(item)
+    db.flush()
+
+    schedule = MonitorSchedule(biz_item_id=item.id, date="2026-11-20", is_enabled=True)
+    db.add(schedule)
+    db.flush()
+
+    event = MonitoringEvent(
+        schedule_id=schedule.id,
+        event_type="check",
+        status="success",
+        available_count=2,
+    )
+    db.add(event)
+    db.commit()
+
+    contexts = schedule_service.get_all_with_context(db, service_type="coupang")
+    assert len(contexts) == 1
+    ctx = contexts[0]
+
+    assert "last_event_at" in ctx, "last_event_at 키가 없음"
+    assert "last_event_status" in ctx, "last_event_status 키가 없음"
+    assert ctx["last_event_at"] is not None, "이벤트가 있는데 last_event_at이 None"
+    assert ctx["last_event_status"] == "success", (
+        f"last_event_status가 'success'여야 함, 실제: {ctx['last_event_status']!r}"
+    )
+
+
+def test_get_all_with_context_no_event_null_T3(orm_db_session_with_events):
+    """T3: 이벤트 없는 schedule → last_event_at=None, last_event_status=None."""
+    from app.models.business import Business
+    from app.models.biz_item import BizItem
+    from app.models.monitor_schedule import MonitorSchedule
+    from app.services.schedule_service import schedule_service
+
+    db = orm_db_session_with_events
+
+    biz = Business(business_id="cp:t3_test_002", name="T3테스트상품2", service_type="coupang")
+    db.add(biz)
+    db.flush()
+
+    item = BizItem(business_id=biz.id, biz_item_id="t3_item_002", name="T3아이템2")
+    db.add(item)
+    db.flush()
+
+    schedule = MonitorSchedule(biz_item_id=item.id, date="2026-11-21", is_enabled=True)
+    db.add(schedule)
+    db.commit()
+
+    contexts = schedule_service.get_all_with_context(db, service_type="coupang")
+    assert len(contexts) == 1
+    ctx = contexts[0]
+
+    assert ctx.get("last_event_at") is None, (
+        f"이벤트 없는데 last_event_at={ctx.get('last_event_at')!r}"
+    )
+    assert ctx.get("last_event_status") is None
 
 
 # ── T4: 프록시 E2E 파이프라인 ───────────────────────────────────────────────────
