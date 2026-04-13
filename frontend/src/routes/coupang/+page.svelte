@@ -180,7 +180,7 @@
         if (result.worker_running) {
           toast.success(result.message);
         } else {
-          toast.warning(result.message);
+          toast.warning(`${result.message}${result.recovery_command ? `\n${result.recovery_command}` : ''}`);
         }
       }
       await loadAll(false);

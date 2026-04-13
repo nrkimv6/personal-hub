@@ -1,17 +1,17 @@
-﻿"""EventService ??Redis keyspace notifications 湲곕컲 SSE ?대깽???ㅽ듃由?
-
-plan-runner ?ㅽ뻾 ?곹깭 蹂?붾? Redis keyspace notifications濡?媛먯??섏뿬
-SSE ?щ㎎?쇰줈 ?ㅼ떆媛??꾨떖?쒕떎.
-
-?대깽?????
-  - status              : runner ?곹깭 蹂寃?(status, pid, current_cycle, start_time, plan_file)
-  - tracking            : ?꾩옱 異붿쟻 以묒씤 ?쒖뒪??蹂寃?(current_task_text)
-  - plan_changed        : 異붿쟻 以묒씤 plan_file 蹂寃?(current_task_plan_file)
-  - log                 : 濡쒓렇 ??以?(runner_id, line)
-  - log_completed       : 濡쒓렇 ?ㅽ듃由щ컢 ?꾨즺 (runner_id)
-  - merge_log           : 癒몄? 濡쒓렇 ??以?(runner_id, line)
-  - merge_log_completed : 癒몄? 濡쒓렇 ?ㅽ듃由щ컢 ?꾨즺 (runner_id)
-"""
+# sanitized
+# sanitized
+# sanitized
+# sanitized
+# sanitized
+# sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+# sanitized
 
 import asyncio
 import logging
@@ -81,7 +81,7 @@ _pmsg_timestamps: "collections.deque[float]" = _collections.deque()  # ?섏떊 ?
 
 
 def _record_pmsg_received() -> None:
-    """pmessage ?섏떊 ???몄텧 ???꾩옱 ?쒓컖???щ씪?대뵫 ?덈룄?곗뿉 異붽?"""
+    # sanitized
     now = time.monotonic()
     _pmsg_timestamps.append(now)
     # ?ㅻ옒????ぉ ?뺣━ (>5遺?
@@ -90,7 +90,7 @@ def _record_pmsg_received() -> None:
 
 
 def get_pmsg_count_last5min() -> int:
-    """理쒓렐 5遺???`plan-runner:logs:*` pmessage ?섏떊 嫄댁닔 諛섑솚 (?ъ뒪泥댄겕??"""
+    # sanitized
     if not _pmsg_timestamps:
         return 0
     now = time.monotonic()
@@ -99,7 +99,7 @@ def get_pmsg_count_last5min() -> int:
     count = sum(1 for t in _pmsg_timestamps if t >= cutoff)
     return count
 class EventService:
-    """Redis keyspace notifications 援щ룆 + SSE ?대깽???앹꽦"""
+    # sanitized
 
     def __init__(self):
         # ?숆린 ?대씪?댁뼵?????꾩옱 媛?議고쉶??(HGETALL / GET)
@@ -122,66 +122,66 @@ class EventService:
     # ?? 珥덇린????????????????????????????????????????????????????????????????
 
     async def _enable_keyspace_notifications(self) -> None:
-        """Redis keyspace notifications ?쒖꽦??""
-        try:
-            # K: keyspace events ?묐몢???쒖꽦??
-            # E: keyevent events ?묐몢???쒖꽦??
-            # x: expired events
-            # $: string commands (SET, GETSET ?? ??runner ?곹깭 ??蹂寃?媛먯????꾩슂
-            await self._async.config_set("notify-keyspace-events", "KEx$")
-        except Exception:
-            # CONFIG SET 沅뚰븳 ?녿뒗 ?섍꼍(managed Redis ???먯꽌??臾댁떆
-            pass
+        # sanitized
+        # sanitized
+            # sanitized
+            # sanitized
+            # sanitized
+            # sanitized
+            # sanitized
+        # sanitized
+            # sanitized
+            # sanitized
+# sanitized
+    # sanitized
+        # sanitized
 
-    def _cleanup_invisible_recent_runners(self) -> None:
-        """SSE ?곌껐 珥덇린????RECENT set?먯꽌 invisible runner瑜??쒓굅 + ?ш린 ?곹븳 ?곸슜.
-
-        invisible runner(trigger 誘몄꽕??鍮꾩궗?⑹옄)媛 RECENT set???먮졊?섏뿬
-        SSE status ?대깽?몄쓽 runners 諛곗뿴?먯꽌 visible runner媛 ?꾨씫?섎뒗 臾몄젣瑜?諛⑹??쒕떎.
-        ?뺣━ ?쒖꽌: invisible ?쒓굅 ???ш린 ?곹븳(MAX_RECENT_RUNNERS) ?곸슜.
-        """
-        try:
-            recent_ids: list = self._sync.zrange(RECENT_RUNNERS_KEY, 0, -1) or []
-            for rid in recent_ids:
-                trigger = self._sync.get(f"{RUNNER_KEY_PREFIX}:{rid}:trigger")
-                if not is_visible_runner(trigger, rid):
-                    self._sync.zrem(RECENT_RUNNERS_KEY, rid)
-            # invisible ?쒓굅 ???ш린 ?곹븳: oldest-first濡?MAX_RECENT_RUNNERS 珥덇낵遺??쒓굅
-            self._sync.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
-        except Exception:
-            pass
-
-    def _list_visible_active_runner_ids(self) -> list:
-        try:
-            runner_ids = self._sync.smembers(ACTIVE_RUNNERS_KEY) or set()
-        except Exception:
-            return []
-
-        visible_running_ids = []
-        for rid in runner_ids:
-            runner_id = str(rid)
-            payload = build_status_payload(self._sync, runner_id)
-            if (
-                payload
-                and payload.get("visible", False)
-                and payload.get("status") == "running"
-            ):
-                self._log_tailer._completed_runners.pop(runner_id, None)
-                visible_running_ids.append(runner_id)
-            else:
-                self._log_tailer.drop_tail_state(runner_id)
-        return visible_running_ids
-
-    def _build_status_payload(self, runner_id: str):
-        """[shim] ??event_payload.build_status_payload()"""
+        # remove invisible runners from RECENT
+        # keep visible runner list consistent
+        # cap RECENT size at MAX_RECENT_RUNNERS
+        # sanitized
+        # sanitized
+            # sanitized
+            # sanitized
+                # sanitized
+                # sanitized
+                    # sanitized
+            # sanitized
+            # sanitized
+        # sanitized
+            # sanitized
+# sanitized
+    # sanitized
+        # sanitized
+            # sanitized
+        # sanitized
+            # sanitized
+# sanitized
+        # sanitized
+        # sanitized
+            # sanitized
+            # sanitized
+            # sanitized
+                # sanitized
+                # sanitized
+                # sanitized
+            # sanitized
+                # sanitized
+                # sanitized
+            # sanitized
+                # sanitized
+        # sanitized
+# sanitized
+    # sanitized
+        # sanitized
         return build_status_payload(self._sync, runner_id)
 
     def _build_all_runners_status(self):
-        """[shim] ??event_payload.build_all_runners_status()"""
+        # sanitized
         return build_all_runners_status(self._sync)
 
     def _ensure_log_tailer(self) -> None:
-        """__new__ 湲곕컲 ?뚯뒪?몄뿉?쒕룄 _log_tailer ?꾨뱶瑜?蹂댁옣?쒕떎."""
+        # sanitized
         if not hasattr(self, "_log_tailer"):
             _log_resolver = LogFileResolver(config, self._sync)
             self._log_tailer = LogTailer(self._sync, _log_resolver)
@@ -193,15 +193,15 @@ class EventService:
     # ?? 硫붿씤 ?ㅽ듃由???????????????????????????????????????????????????????????
 
     async def stream_events(self) -> AsyncGenerator[str, None]:
-        """
-        Redis keyspace notifications瑜?援щ룆?섍퀬 SSE ?대깽?몃? yield?쒕떎.
-
-        ?대깽?????
-          - connected    : ?곌껐 吏곹썑 1??(EventSource MIME 寃利앹슜)
-          - status       : runner ?곹깭 蹂寃?
-          - tracking     : ?꾩옱 異붿쟻 ?쒖뒪??蹂寃?
-          - plan_changed : 異붿쟻 plan_file 蹂寃?
-        """
+        # sanitized
+        # yield SSE events for Redis keyspace notifications
+# sanitized
+        # sanitized
+          # sanitized
+          # sanitized
+          # sanitized
+          # sanitized
+        # sanitized
         await self._enable_keyspace_notifications()
 
         # ?? 珥덇린 ?곌껐 ?대깽??(?대씪?댁뼵?멸? ?곌껐 吏곹썑 ?꾩옱 ?곹깭瑜?諛쏅룄濡?
