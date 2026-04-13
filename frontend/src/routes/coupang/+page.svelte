@@ -9,10 +9,20 @@
     type CoupangSchedule,
     type CoupangStatusSummary
   } from '$lib/api/coupangTravel';
+  import { systemApi, workerApi } from '$lib/api';
   import { serviceAccountApi } from '$lib/api/common';
   import type { ServiceAccountWithProfile } from '$lib/types';
   import { createSelection } from '$lib/utils/selection.svelte';
   import { toast } from '$lib/stores/toast';
+
+  type WorkerStatus = Awaited<ReturnType<typeof workerApi.status>>;
+  type WorkerRecoveryAction = 'start' | 'restart' | 'restart-all';
+  type WorkerBanner = {
+    tone: 'danger' | 'warning' | 'info';
+    title: string;
+    message: string;
+    action: WorkerRecoveryAction | null;
+  };
 
   let targets = $state<CoupangTarget[]>([]);
   let schedules = $state<CoupangSchedule[]>([]);
@@ -27,7 +37,9 @@
 
   let loading = $state(false);
   let error = $state('');
-  let workerWarning = $state(false);
+  let workerStatus = $state<WorkerStatus | null>(null);
+  let workerHealth = $state<{ is_running: boolean; is_healthy: boolean; details: Record<string, unknown> } | null>(null);
+  let workerActionLoading = $state<WorkerRecoveryAction | null>(null);
   let activeTab = $state<'schedules' | 'history' | 'cancellation-history'>('schedules');
 
   let newUrl = $state('');
@@ -75,6 +87,110 @@
     })
   );
 
+  function getLatestEnabledEventAt(): string | null {
+    const enabledEvents = schedules
+      .filter((schedule) => schedule.is_enabled && schedule.last_event_at)
+      .map((schedule) => schedule.last_event_at as string);
+    if (enabledEvents.length === 0) return null;
+    return enabledEvents.reduce((latest, current) => (current > latest ? current : latest));
+  }
+
+  function getWorkerBanner(): WorkerBanner | null {
+    if (workerHealth) {
+      if (workerHealth.is_running === false) {
+        return {
+          tone: 'danger',
+          title: '워커 미기동',
+          message: '워커가 실행되지 않아 쿠팡 모니터링이 멈춰 있습니다.',
+          action: 'start'
+        };
+      }
+    } else {
+      if (!workerStatus) {
+        if (statusSummary.enabled_schedules > 0 && statusSummary.active_schedules === 0) {
+          return {
+            tone: 'warning',
+            title: '워커 상태를 확인할 수 없습니다',
+            message: '활성화된 일정이 있지만 워커 상태 조회가 실패했습니다. 워커와 API 상태를 함께 확인하세요.',
+            action: 'restart-all'
+          };
+        }
+        return null;
+      }
+
+      if (workerStatus.status === 'not_started') {
+        return {
+          tone: 'danger',
+          title: '워커 미기동',
+          message: '워커가 시작되지 않아 쿠팡 모니터링이 멈춰 있습니다.',
+          action: 'start'
+        };
+      }
+
+      if (workerStatus.status === 'crashed') {
+        return {
+          tone: 'danger',
+          title: '워커 비정상 종료',
+          message: '워커 프로세스가 종료되었습니다. 재시작이 필요합니다.',
+          action: 'restart'
+        };
+      }
+    }
+
+    if (workerStatus?.global_pause) {
+      return {
+        tone: 'warning',
+        title: '전역 일시중지',
+        message: '워커가 일시중지 상태입니다. 재개하거나 전체 재시작으로 상태를 정리하세요.',
+        action: 'restart-all'
+      };
+    }
+
+    if (statusSummary.enabled_schedules > 0 && statusSummary.active_schedules === 0) {
+      return {
+        tone: 'info',
+        title: '현재 실행 중인 일정이 없습니다',
+        message: '워커는 살아 있지만 활성화된 일정이 아직 실행 대기 상태입니다.',
+        action: null
+      };
+    }
+
+    return null;
+  }
+
+  async function runWorkerRecovery(action: WorkerRecoveryAction): Promise<void> {
+    workerActionLoading = action;
+    try {
+      if (action === 'start') {
+        const result = await workerApi.start();
+        if (result.success) {
+          toast.success(result.message);
+        } else {
+          toast.warning(result.message);
+        }
+      } else if (action === 'restart') {
+        const result = await workerApi.restart();
+        if (result.success) {
+          toast.success(result.message);
+        } else {
+          toast.warning(result.message);
+        }
+      } else {
+        const result = await systemApi.restartAll();
+        if (result.worker_running) {
+          toast.success(result.message);
+        } else {
+          toast.warning(result.message);
+        }
+      }
+      await loadAll(false);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '복구 작업 실패');
+    } finally {
+      workerActionLoading = null;
+    }
+  }
+
   async function loadAll(showLoading = true): Promise<void> {
     if (showLoading) loading = true;
     loadAllController?.abort();
@@ -82,17 +198,20 @@
     error = '';
 
     try {
-      const [targetData, scheduleData, accountData, statusData] = await Promise.all([
+      const [targetData, scheduleData, accountData, statusData, workerData] = await Promise.all([
         coupangTravelApi.listTargets({ signal: loadAllController.signal }),
         coupangTravelApi.listSchedules({ signal: loadAllController.signal }),
         serviceAccountApi.listActive('coupang', { signal: loadAllController.signal }),
-        coupangTravelApi.getStatus({ signal: loadAllController.signal })
+        coupangTravelApi.getStatus({ signal: loadAllController.signal }),
+        workerApi.status({ signal: loadAllController.signal })
       ]);
+      const workerHealthData = await workerApi.health({ signal: loadAllController.signal }).catch(() => null);
       targets = targetData;
       schedules = scheduleData;
       accounts = accountData;
       statusSummary = statusData;
-      workerWarning = statusData.active_schedules === 0 && statusData.enabled_schedules > 0;
+      workerStatus = workerData;
+      workerHealth = workerHealthData;
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') return;
       const message = e instanceof Error ? e.message : '쿠팡 데이터 로드 실패';
@@ -108,13 +227,16 @@
     pollingController = new AbortController();
 
     try {
-      const [scheduleData, statusData] = await Promise.all([
+      const [scheduleData, statusData, workerData] = await Promise.all([
         coupangTravelApi.listSchedules({ signal: pollingController.signal }),
-        coupangTravelApi.getStatus({ signal: pollingController.signal })
+        coupangTravelApi.getStatus({ signal: pollingController.signal }),
+        workerApi.status({ signal: pollingController.signal })
       ]);
+      const workerHealthData = await workerApi.health({ signal: pollingController.signal }).catch(() => null);
       schedules = scheduleData;
       statusSummary = statusData;
-      workerWarning = statusData.active_schedules === 0 && statusData.enabled_schedules > 0;
+      workerStatus = workerData;
+      workerHealth = workerHealthData;
       error = '';
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') return;
@@ -313,9 +435,56 @@
     </div>
   {/if}
 
-  {#if workerWarning}
-    <div class="rounded bg-amber-50 border border-amber-200 px-4 py-3 text-amber-800 text-sm" role="alert">
-      활성화된 일정이 있지만 현재 실행 중인 일정이 없습니다. Worker가 중지되었거나 스케줄이 대기 중일 수 있습니다.
+  {@const workerBanner = getWorkerBanner()}
+  {#if workerBanner}
+    <div
+      class={`rounded border px-4 py-3 text-sm ${
+        workerBanner.tone === 'danger'
+          ? 'border-red-200 bg-red-50 text-red-800'
+          : workerBanner.tone === 'warning'
+            ? 'border-amber-200 bg-amber-50 text-amber-800'
+            : 'border-sky-200 bg-sky-50 text-sky-800'
+      }`}
+      role="alert"
+    >
+      <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div class="space-y-1">
+          <div class="font-semibold">{workerBanner.title}</div>
+          <div>{workerBanner.message}</div>
+          {#if getLatestEnabledEventAt()}
+            <div class="text-xs opacity-80">최근 활성 일정 점검: {getLatestEnabledEventAt()}</div>
+          {/if}
+        </div>
+        {#if workerBanner.action}
+          <div class="flex flex-wrap gap-2">
+            {#if workerBanner.action === 'start'}
+              <button
+                class="btn btn-primary btn-sm"
+                disabled={workerActionLoading !== null}
+                onclick={() => runWorkerRecovery('start')}
+              >
+                {workerActionLoading === 'start' ? '처리 중...' : '워커 시작'}
+              </button>
+            {/if}
+            {#if workerBanner.action === 'restart'}
+              <button
+                class="btn btn-primary btn-sm"
+                disabled={workerActionLoading !== null}
+                onclick={() => runWorkerRecovery('restart')}
+              >
+                {workerActionLoading === 'restart' ? '처리 중...' : '워커 재시작'}
+              </button>
+            {/if}
+            <button
+              class="btn btn-secondary btn-sm"
+              disabled={workerActionLoading !== null}
+              onclick={() => runWorkerRecovery('restart-all')}
+            >
+              {workerActionLoading === 'restart-all' ? '처리 중...' : '전체 재시작'}
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 

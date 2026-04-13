@@ -183,7 +183,7 @@ class TestCheckPidAlive:
 class TestHealthCheckApiConversion:
     """Naver 워커 건강 체크 API 전환 테스트 (worker.py 로직)"""
 
-    def _make_db_row(self, pid=None, last_heartbeat=None):
+    def _make_db_row(self, pid=None, last_heartbeat=None, started_at=None, paused_at=None):
         """worker_status DB 행 모의 객체 생성.
 
         컬럼 순서 (새 스키마, 10컬럼):
@@ -191,11 +191,9 @@ class TestHealthCheckApiConversion:
         memory_usage_mb[4], started_at[5], active_tabs[6],
         browser_contexts[7], global_pause[8], paused_at[9]
         """
-        row = MagicMock()
-        row.__getitem__ = lambda self, idx: (
-            pid, "running", None, last_heartbeat, 0, None, 0, 0, False, None
-        )[idx]
-        return row
+        return (
+            pid, "running", None, last_heartbeat, 0, started_at, 0, 0, False, paused_at
+        )
 
     def test_worker_health_redis_healthy_right(self, fake_redis):
         """R(Right): Redis에 naver 키 publish → is_healthy=True + seconds_since_heartbeat 존재."""
@@ -281,6 +279,50 @@ class TestHealthCheckApiConversion:
         assert result["active_tabs"] == 0
         assert result["browser_contexts"] == 0
 
+    def test_worker_status_started_at_datetime_to_str_R(self, fake_redis):
+        """R(Right): started_at이 datetime이면 ISO 문자열로 정규화."""
+        from app.routes.worker import get_worker_status_from_db
+
+        started_at = datetime(2026, 4, 13, 9, 14, 0)
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(
+            pid=1234,
+            started_at=started_at,
+        )
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        assert result["started_at"] == started_at.isoformat()
+
+    def test_worker_status_paused_at_datetime_to_str_R(self, fake_redis):
+        """R(Right): paused_at이 datetime이면 ISO 문자열로 정규화."""
+        from app.routes.worker import get_worker_status_from_db
+
+        paused_at = datetime(2026, 4, 13, 10, 30, 0)
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(
+            pid=1234,
+            paused_at=paused_at,
+        )
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        assert result["paused_at"] == paused_at.isoformat()
+
+    def test_worker_status_paused_at_none_B(self, fake_redis):
+        """B(Boundary): paused_at이 None이면 None 그대로 반환."""
+        from app.routes.worker import get_worker_status_from_db
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=1234)
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        assert result["paused_at"] is None
+
     def test_get_worker_status_from_db_exception_fallback_E(self, fake_redis):
         """E(Error): DB 예외 시 status='unknown', started_at=None, active_tabs=0 반환."""
         from app.routes.worker import get_worker_status_from_db
@@ -296,6 +338,25 @@ class TestHealthCheckApiConversion:
         assert result["active_tabs"] == 0
         assert result["browser_contexts"] == 0
         assert result["error_message"] is not None
+
+    def test_worker_status_api_with_datetime_paused_at_integration(self, fake_redis):
+        """T3: DB datetime paused_at → get_worker_status_from_db 결과를 Pydantic 모델로 검증."""
+        from app.routes.worker import get_worker_status_from_db, WorkerStatusResponse
+
+        paused_at = datetime(2026, 4, 13, 10, 45, 0)
+        mock_session = MagicMock()
+        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(
+            pid=1234,
+            paused_at=paused_at,
+            started_at=datetime(2026, 4, 13, 9, 0, 0),
+        )
+
+        with patch("app.routes.worker.SessionLocal", return_value=mock_session):
+            result = get_worker_status_from_db()
+
+        response = WorkerStatusResponse(**result)
+        assert response.paused_at == paused_at.isoformat()
+        assert response.started_at == "2026-04-13T09:00:00"
 
     def test_worker_status_stale_pid_redis_up_integration(self, fake_redis):
         """T3: fakeredis에 heartbeat publish + mock DB에 죽은 PID →
