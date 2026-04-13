@@ -5,14 +5,14 @@
   import { gitReposApi } from '$lib/api/gitRepos';
   import { llmApi, type ProviderInfo } from '$lib/api';
   import type { GitRepo, GitStatus, GitLogEntry, OperationLog, AutoCleanupResult } from '$lib/types/gitRepos';
-  import { 
-    ArrowLeft, 
-    GitBranch, 
-    Eraser, 
-    CheckCircle, 
-    Loader2, 
-    Package, 
-    GitCommit, 
+  import {
+    ArrowLeft,
+    GitBranch,
+    Eraser,
+    CheckCircle,
+    Loader2,
+    Package,
+    GitCommit,
     Sparkles,
     RefreshCw,
     Download,
@@ -22,6 +22,7 @@
     Search,
     FileEdit
   } from 'lucide-svelte';
+  import TabNav from '$lib/components/layout/TabNav.svelte';
 
   // URL params
   const repoId = $derived(Number($page.params.id));
@@ -35,6 +36,12 @@
   let stagedDiff = $state('');
 
   let activeTab: 'changes' | 'log' | 'history' = $state('changes');
+
+  const repoTabs = [
+    { id: 'changes', label: '변경사항' },
+    { id: 'log', label: '커밋 로그' },
+    { id: 'history', label: '작업 이력' },
+  ];
   let loading = $state(true);
   let working = $state(false);
   let error = $state('');
@@ -413,14 +420,7 @@
     {/if}
 
     <!-- 탭 -->
-    <div class="flex gap-1 mb-5 border-b border-gray-200 dark:border-gray-700">
-      {#each [['changes', '변경사항'], ['log', '커밋 로그'], ['history', '작업 이력']] as [tab, label]}
-        <button
-          class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {activeTab === tab ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}"
-          onclick={() => (activeTab = tab as typeof activeTab)}
-        >{label}</button>
-      {/each}
-    </div>
+    <TabNav tabs={repoTabs} bind:activeTab variant="primary" />
 
     <!-- 탭 내용 -->
     {#if activeTab === 'changes'}

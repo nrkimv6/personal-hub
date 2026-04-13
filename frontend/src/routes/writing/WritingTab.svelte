@@ -4,6 +4,7 @@
 	import { writingApi, keywordApi, type GeneratedWriting, type WritingStats, type WritingSource, type KeywordStats, type KeywordStatsResponse, type Stopword, type WritingElement, type WritingElementStats, type WritingBatch, type WritingBatchStatus } from '$lib/api';
 	import { Button } from '$lib/components/ui';
 	import { createOffsetPagination, createPagePagination } from '$lib/utils/pagination.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	// 상태
 	let writings: GeneratedWriting[] = [];
@@ -40,6 +41,14 @@
 	// 탭
 	type Tab = 'writings' | 'sources' | 'keywords' | 'elements' | 'batches';
 	let activeTab: Tab = 'writings';
+
+	$: writingSubTabs = [
+		{ id: 'writings', label: '생성된 글', count: stats?.generated_count ?? 0 },
+		{ id: 'sources', label: '소스', count: stats?.source_count ?? 0 },
+		{ id: 'keywords', label: '키워드', count: keywordStats?.total_keywords ?? 0 },
+		{ id: 'elements', label: '소재', count: elementStats?.total ?? 0 },
+		{ id: 'batches', label: '배치', count: batchPager.total },
+	];
 
 	// 필터
 	let filterTaskType = '';
@@ -648,40 +657,7 @@
 	{/if}
 
 	<!-- 탭 -->
-	<div class="mb-4 border-b border-border">
-		<nav class="flex gap-4">
-			<button
-				onclick={() => switchTab('writings')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'writings' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				생성된 글 ({stats?.generated_count ?? 0})
-			</button>
-			<button
-				onclick={() => switchTab('sources')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'sources' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				소스 ({stats?.source_count ?? 0})
-			</button>
-			<button
-				onclick={() => switchTab('keywords')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'keywords' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				키워드 ({keywordStats?.total_keywords ?? 0})
-			</button>
-			<button
-				onclick={() => switchTab('elements')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'elements' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				소재 ({elementStats?.total ?? 0})
-			</button>
-			<button
-				onclick={() => switchTab('batches')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'batches' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				배치 ({batchPager.total})
-			</button>
-		</nav>
-	</div>
+	<TabNav tabs={writingSubTabs} bind:activeTab variant="secondary" />
 
 	{#if activeTab === 'writings'}
 		<!-- 필터 -->

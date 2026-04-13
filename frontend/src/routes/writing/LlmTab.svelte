@@ -7,6 +7,7 @@
 	import { createSelection } from '$lib/utils/selection.svelte';
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	// 상태
 	let requests: LLMRequest[] = [];
@@ -49,6 +50,13 @@
 	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능)
 	type Tab = 'queue' | 'history' | 'create' | 'performance';
 	let activeTab: Tab = 'queue';
+
+	const llmSubTabs = [
+		{ id: 'queue', label: '대기열 (pending/processing)' },
+		{ id: 'history', label: '이력 (completed/failed)' },
+		{ id: 'create', label: '수동 요청 생성' },
+		{ id: 'performance', label: '성능 분석' },
+	];
 
 	// 모달
 	let selectedRequest: LLMRequest | null = null;
@@ -524,34 +532,7 @@
 	{/if}
 
 	<!-- 탭 -->
-	<div class="mb-4 border-b border-border">
-		<nav class="flex gap-4">
-			<button
-				onclick={() => switchTab('queue')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				대기열 (pending/processing)
-			</button>
-			<button
-				onclick={() => switchTab('history')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				이력 (completed/failed)
-			</button>
-			<button
-				onclick={() => switchTab('create')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				수동 요청 생성
-			</button>
-			<button
-				onclick={() => switchTab('performance')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				성능 분석
-			</button>
-		</nav>
-	</div>
+	<TabNav tabs={llmSubTabs} bind:activeTab variant="secondary" />
 
 	{#if activeTab === 'queue' || activeTab === 'history'}
 		<!-- 필터 -->

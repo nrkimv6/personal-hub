@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	// Types
 	interface SleepStatus {
@@ -49,6 +50,15 @@
 
 	// Tab state
 	let activeTab = $state<'status' | 'settings'>('status');
+
+	const sleepTabs = [
+		{ id: 'status', label: '상태 모니터링' },
+		{ id: 'settings', label: '설정' },
+	];
+
+	$effect(() => {
+		if (activeTab === 'settings') initializeSettingsForm();
+	});
 
 	// Settings form state
 	let settingsPassword = $state('');
@@ -354,29 +364,7 @@
 	</div>
 
 	<!-- Tab Navigation -->
-	<div class="mb-6 border-b border-border">
-		<nav class="flex gap-6">
-			<button
-				onclick={() => (activeTab = 'status')}
-				class="pb-3 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'status'
-					? 'border-primary text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				상태 모니터링
-			</button>
-			<button
-				onclick={() => {
-					activeTab = 'settings';
-					initializeSettingsForm();
-				}}
-				class="pb-3 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'settings'
-					? 'border-primary text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				설정
-			</button>
-		</nav>
-	</div>
+	<TabNav tabs={sleepTabs} bind:activeTab variant="secondary" />
 
 	{#if loading && !status}
 		<div class="flex items-center justify-center h-64">
