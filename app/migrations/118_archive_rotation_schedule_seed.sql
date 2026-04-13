@@ -1,0 +1,18 @@
+-- Migration 118: archive_rotation_daily 스케줄 seed
+-- 매일 새벽 02:00에 archive 파일 로테이션 실행 (30건 축적 트리거)
+
+INSERT INTO task_schedules (
+    name, display_name, target_type, target_config,
+    schedule_type, schedule_value, enabled,
+    created_at, updated_at
+) VALUES (
+    'archive_rotation_daily',
+    'Archive 파일 로테이션 (매일 02:00)',
+    'archive_rotation',
+    '{}',
+    'cron',
+    '{"time": "02:00"}',
+    true,
+    now(),
+    now()
+) ON CONFLICT (name) DO NOTHING;

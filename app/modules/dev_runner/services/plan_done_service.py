@@ -312,7 +312,11 @@ class PlanDoneService:
                 with SessionLocal() as db:
                     svc = PlanRecordService(db)
                     svc.update_status(plan_path, "completed")
-                    svc.mark_archived(plan_path, str(archive_path))
+                    try:
+                        _raw = Path(archive_path).read_text(encoding="utf-8")
+                    except Exception:
+                        _raw = None
+                    svc.mark_archived(plan_path, str(archive_path), raw_content=_raw)
                     db.commit()
             except Exception as db_err:
                 logger.warning(f"plan_record DB \uae30\ub85d \uc2e4\ud328 (\ubb34\uc2dc): {db_err}")
