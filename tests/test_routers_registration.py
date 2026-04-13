@@ -29,3 +29,26 @@ class TestRegisterRoutersAddsRoutes:
             register_routers(app)
         except Exception as e:
             pytest.fail(f"register_routers 2회 호출 시 예외 발생: {e}")
+
+    def test_register_routers_registers_activity_v1_and_legacy_aliases(self):
+        """Activity routes are exposed under both source-of-truth and legacy prefixes."""
+        assert os.environ.get("TESTING") == "1"
+        from app.router_registry import register_routers
+
+        app = FastAPI()
+        register_routers(app)
+
+        paths = {route.path for route in app.routes}
+        expected = {
+            "/api/v1/activity/centers",
+            "/api/activity/centers",
+            "/api/v1/activity/courses",
+            "/api/activity/courses",
+            "/api/v1/activity/worker/status",
+            "/api/activity/worker/status",
+            "/api/v1/activity/crawl/sync-hub",
+            "/api/activity/crawl/sync-hub",
+        }
+
+        missing = expected - paths
+        assert not missing, f"activity router prefixes missing: {sorted(missing)}"
