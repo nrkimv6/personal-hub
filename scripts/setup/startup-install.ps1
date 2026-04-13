@@ -27,10 +27,154 @@ $WorkerShortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startu
 $ApiWatchdogShortcutName = "MonitorPage-APIWatchdog.lnk"
 $ApiWatchdogShortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\$ApiWatchdogShortcutName"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
-$StartupScript = Join-Path $ScriptDir "startup-logs.ps1"
-$WorkerStartupScript = Join-Path $ScriptDir "startup-browser-workers.ps1"
-$ApiWatchdogStartupScript = Join-Path $ScriptDir "startup-api-watchdog.ps1"
+
+function Get-ProjectRoot {
+    param([string]$CurrentScriptDir)
+
+    $normalized = $CurrentScriptDir.Trim().Replace('/', '\')
+    if ($normalized -match '\\\.worktrees\\') {
+        return Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $CurrentScriptDir)))
+    }
+
+    return Split-Path -Parent (Split-Path -Parent $CurrentScriptDir)
+}
+
+$ProjectRoot = Get-ProjectRoot -CurrentScriptDir $ScriptDir
+$StartupScript = Join-Path $ProjectRoot "scripts\logs\startup-logs.ps1"
+$WorkerStartupScript = Join-Path $ProjectRoot "scripts\setup\startup-browser-workers.ps1"
+$LegacyWorkerStartupScript = Join-Path $ProjectRoot "scripts\startup-browser-workers.ps1"
+$ApiWatchdogStartupScript = Join-Path $ProjectRoot "scripts\watchdogs\startup-api-watchdog.ps1"
+
+function Normalize-ShortcutPath {
+    param(
+        [string]$Path,
+        [string]$WorkingDirectory
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    $candidate = $Path.Trim().Trim('"').Replace('/', '\')
+
+    try {
+        if ([System.IO.Path]::IsPathRooted($candidate)) {
+            return ([System.IO.Path]::GetFullPath($candidate)).TrimEnd('\')
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+            $base = $WorkingDirectory.Trim().Trim('"').Replace('/', '\')
+            if ([System.IO.Path]::IsPathRooted($base)) {
+                return ([System.IO.Path]::GetFullPath((Join-Path $base $candidate))).TrimEnd('\')
+            }
+        }
+
+        return ([System.IO.Path]::GetFullPath($candidate)).TrimEnd('\')
+    } catch {
+        return $candidate
+    }
+}
+
+function Get-ShortcutInfo {
+    param([string]$ShortcutPath)
+
+    if (-not (Test-Path -LiteralPath $ShortcutPath)) {
+        return $null
+    }
+
+    try {
+        $WshShell = New-Object -ComObject WScript.Shell
+        $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
+
+        return [pscustomobject]@{
+            Path = $ShortcutPath
+            TargetPath = $Shortcut.TargetPath
+            Arguments = $Shortcut.Arguments
+            WorkingDirectory = $Shortcut.WorkingDirectory
+            Description = $Shortcut.Description
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Get-ShortcutFileArgumentPath {
+    param(
+        [string]$Arguments,
+        [string]$WorkingDirectory
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Arguments)) {
+        return $null
+    }
+
+    $match = [regex]::Match($Arguments, '(?i)(?:^|\s)-File\s+(?:"([^"]+)"|(\S+))')
+    if (-not $match.Success) {
+        return $null
+    }
+
+    $value = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+    return Normalize-ShortcutPath -Path $value -WorkingDirectory $WorkingDirectory
+}
+
+function Get-ShortcutPathStatus {
+    param(
+        $ShortcutInfo,
+        [string]$ExpectedScriptPath,
+        [string]$LegacyScriptPath
+    )
+
+    $expectedPath = Normalize-ShortcutPath -Path $ExpectedScriptPath
+    $legacyPath = Normalize-ShortcutPath -Path $LegacyScriptPath
+
+    if (-not $ShortcutInfo) {
+        return [pscustomobject]@{
+            Status = "missing"
+            ShortcutPath = $null
+            TargetPath = $null
+            Arguments = $null
+            WorkingDirectory = $null
+            ScriptPath = $null
+            ScriptPathExists = $false
+            ExpectedScriptPath = $expectedPath
+            LegacyScriptPath = $legacyPath
+            Reason = "shortcut missing"
+        }
+    }
+
+    $scriptPath = Get-ShortcutFileArgumentPath -Arguments $ShortcutInfo.Arguments -WorkingDirectory $ShortcutInfo.WorkingDirectory
+    $scriptPathExists = $false
+    if (-not [string]::IsNullOrWhiteSpace($scriptPath)) {
+        $scriptPathExists = Test-Path -LiteralPath $scriptPath
+    }
+
+    $status = "stale"
+    $reason = "unexpected script path"
+
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+        $reason = "missing -File argument"
+    } elseif (-not $scriptPathExists) {
+        $reason = "script path missing"
+    } elseif ((Normalize-ShortcutPath -Path $scriptPath) -ieq $expectedPath) {
+        $status = "registered"
+        $reason = "matches expected script path"
+    } elseif ((Normalize-ShortcutPath -Path $scriptPath) -ieq $legacyPath) {
+        $reason = "legacy script path"
+    }
+
+    return [pscustomobject]@{
+        Status = $status
+        ShortcutPath = $ShortcutInfo.Path
+        TargetPath = $ShortcutInfo.TargetPath
+        Arguments = $ShortcutInfo.Arguments
+        WorkingDirectory = $ShortcutInfo.WorkingDirectory
+        ScriptPath = $scriptPath
+        ScriptPathExists = $scriptPathExists
+        ExpectedScriptPath = $expectedPath
+        LegacyScriptPath = $legacyPath
+        Reason = $reason
+    }
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -51,6 +195,11 @@ switch ($Action) {
         
         $ExeApiWatchdog = Join-Path $VenvScripts "monitorpage-apiwatchdog.exe"
         if (-not (Test-Path $ExeApiWatchdog)) { $ExeApiWatchdog = "powershell.exe" }
+        $ExistingWorkerShortcut = Get-ShortcutInfo -ShortcutPath $WorkerShortcutPath
+        $WorkerShortcutStatus = Get-ShortcutPathStatus `
+            -ShortcutInfo $ExistingWorkerShortcut `
+            -ExpectedScriptPath $WorkerStartupScript `
+            -LegacyScriptPath $LegacyWorkerStartupScript
 
         # 로그 뷰어 바로가기 생성
         $WshShell = New-Object -ComObject WScript.Shell
@@ -67,6 +216,16 @@ switch ($Action) {
 
         # 브라우저 워커 바로가기 생성 (옵션)
         if ($IncludeWorkers) {
+            if ($WorkerShortcutStatus.Status -eq "stale") {
+                Write-Host "[!] Re-registering stale browser workers shortcut" -ForegroundColor Yellow
+                Write-Host "    Current file: $($WorkerShortcutStatus.ScriptPath)" -ForegroundColor Gray
+                Write-Host "    Expected:     $WorkerStartupScript" -ForegroundColor Gray
+            } elseif ($WorkerShortcutStatus.Status -eq "registered") {
+                Write-Host "[+] Browser workers shortcut already points to the current script; refreshing registration" -ForegroundColor Gray
+            } else {
+                Write-Host "[!] Browser workers startup not registered yet; creating shortcut" -ForegroundColor Yellow
+            }
+
             $WorkerShortcut = $WshShell.CreateShortcut($WorkerShortcutPath)
             $WorkerShortcut.TargetPath = $ExeStartup
             $WorkerShortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$WorkerStartupScript`""
@@ -200,8 +359,21 @@ switch ($Action) {
 
         # 브라우저 워커
         Write-Host "  Browser Workers:" -ForegroundColor White
-        if (Test-Path $WorkerShortcutPath) {
+        $workerShortcutInfo = Get-ShortcutInfo -ShortcutPath $WorkerShortcutPath
+        $workerShortcutStatus = Get-ShortcutPathStatus `
+            -ShortcutInfo $workerShortcutInfo `
+            -ExpectedScriptPath $WorkerStartupScript `
+            -LegacyScriptPath $LegacyWorkerStartupScript
+
+        if ($workerShortcutStatus.Status -eq "registered") {
             Write-Host "    [+] Registered" -ForegroundColor Green
+            Write-Host "        File: $($workerShortcutStatus.ScriptPath)" -ForegroundColor Gray
+        } elseif ($workerShortcutStatus.Status -eq "stale") {
+            Write-Host "    [!] Stale path" -ForegroundColor Red
+            Write-Host "        Current file: $($workerShortcutStatus.ScriptPath)" -ForegroundColor Gray
+            Write-Host "        Expected:     $WorkerStartupScript" -ForegroundColor Gray
+            Write-Host "        Target:       $($workerShortcutStatus.TargetPath)" -ForegroundColor Gray
+            Write-Host "        Arguments:    $($workerShortcutStatus.Arguments)" -ForegroundColor Gray
         } else {
             Write-Host "    [-] Not registered" -ForegroundColor Yellow
         }

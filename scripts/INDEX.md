@@ -337,7 +337,7 @@
 > 현재 위치: `scripts/setup/` ✅
 > 위험도: **🟡 중** — 시작 프로그램/작업 스케줄러에 등록됨
 > 주요 외부 참조자: `CLAUDE.md`(없음 — 간접), `CHANGELOG.md`, `GEMINI.md`, `docs/dev-guide/process-structure.md`, `docs/dev-guide/watchdog-architecture.md` (경로 갱신됨)
-> 비고: NSSM 서비스 경로는 변경 없음 (`setup/` 아래로 이동된 파일 중 NSSM 등록 대상은 없음). `startup-install.ps1`/`startup-browser-workers.ps1`는 시작 프로그램 바로가기 — 재설치 필요 시 `.\scripts\setup\startup-install.ps1 -Action install` 재실행.
+> 비고: NSSM 서비스 경로는 변경 없음 (`setup/` 아래로 이동된 파일 중 NSSM 등록 대상은 없음). `startup-install.ps1`/`startup-browser-workers.ps1`는 시작 프로그램 바로가기 — `-Action status`로 Browser Workers stale path를 확인하고, 재설치 필요 시 `.\scripts\setup\startup-install.ps1 -Action install -IncludeWorkers` 재실행.
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
