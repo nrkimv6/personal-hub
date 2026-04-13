@@ -614,10 +614,46 @@ export interface WorktreeInfo {
 	locked: boolean;
 	commits: WorktreeCommit[];
 	plan_file: string | null;
+	plan_mtime: string | null;
+}
+
+export interface MainDirtyStatus {
+	dirty_count: number;
+	files: string[];
+}
+
+export interface PlanOnlyBranch {
+	plan_file: string;
+	branch: string;
+	plan_mtime: string | null;
+}
+
+export interface BranchUnresolvedPlan {
+	plan_file: string;
+	reason: string;
+	plan_mtime: string | null;
+}
+
+export interface WorktreeListResponse {
+	worktrees: WorktreeInfo[];
+	plan_only: PlanOnlyBranch[];
+	branch_unresolved: BranchUnresolvedPlan[];
+	main_dirty: MainDirtyStatus;
+}
+
+export interface RepoOption {
+	id: number;
+	alias: string;
+	path: string;
 }
 
 export const devRunnerWorktreeApi = {
 	list: (): Promise<WorktreeInfo[]> => devRunnerRequest<WorktreeInfo[]>('/worktrees'),
+	listV2: (repoId?: number): Promise<WorktreeListResponse> => {
+		const query = repoId !== undefined ? `?repo_id=${repoId}` : '';
+		return devRunnerRequest<WorktreeListResponse>(`/worktrees/v2${query}`);
+	},
+	listRepos: (): Promise<RepoOption[]> => devRunnerRequest<RepoOption[]>('/worktrees/repos'),
 };
 
 export const devRunnerWorkflowApi = {

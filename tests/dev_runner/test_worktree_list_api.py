@@ -82,7 +82,7 @@ class TestGetAheadBehind:
 
         call_count = 0
 
-        async def mock_run(*args):
+        async def mock_run(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             # 첫 번째 호출: ahead, 두 번째 호출: behind
@@ -109,7 +109,7 @@ class TestGetWorktreeCommits:
 
         call_count = 0
 
-        async def mock_run(*args):
+        async def mock_run(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -159,14 +159,15 @@ class TestFindPlanFile:
             encoding="utf-8",
         )
 
-        monkeypatch.setattr(svc, "_REPO_ROOT", tmp_path)
-        result = svc.find_plan_file("impl/my-feature")
+        result, mtime = svc.find_plan_file("impl/my-feature", repo_root=tmp_path)
 
         assert result is not None
         assert "my-plan" in result
+        assert mtime is not None
+        assert mtime[4] == "-"  # ISO 8601 형식 간이 확인
 
     def test_right_no_match(self, tmp_path, monkeypatch):
-        """일치하는 파일 없음 → None 반환"""
+        """일치하는 파일 없음 → (None, None) 반환"""
         import app.modules.dev_runner.services.worktree_service as svc
 
         plan_dir = tmp_path / "docs" / "plan"
@@ -175,10 +176,10 @@ class TestFindPlanFile:
             "> branch: impl/other\n", encoding="utf-8"
         )
 
-        monkeypatch.setattr(svc, "_REPO_ROOT", tmp_path)
-        result = svc.find_plan_file("impl/nonexistent")
+        result, mtime = svc.find_plan_file("impl/nonexistent", repo_root=tmp_path)
 
         assert result is None
+        assert mtime is None
 
 
 class TestRunGitError:

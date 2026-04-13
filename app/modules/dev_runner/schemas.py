@@ -433,6 +433,31 @@ class WorktreeInfo(BaseModel):
     locked: bool
     commits: List[WorktreeCommit]
     plan_file: Optional[str]
+    plan_mtime: Optional[str] = None
+
+
+class MainDirtyStatus(BaseModel):
+    dirty_count: int = 0
+    files: List[str] = Field(default_factory=list)
+
+
+class PlanOnlyBranch(BaseModel):
+    plan_file: str
+    branch: str
+    plan_mtime: Optional[str] = None
+
+
+class BranchUnresolvedPlan(BaseModel):
+    plan_file: str
+    reason: str
+    plan_mtime: Optional[str] = None
+
+
+class WorktreeListResponse(BaseModel):
+    worktrees: List[WorktreeInfo] = Field(default_factory=list)
+    plan_only: List[PlanOnlyBranch] = Field(default_factory=list)
+    branch_unresolved: List[BranchUnresolvedPlan] = Field(default_factory=list)
+    main_dirty: MainDirtyStatus = Field(default_factory=MainDirtyStatus)
 
 
 __all__ = [
@@ -471,4 +496,8 @@ __all__ = [
     'CommitDiffStat',
     'WorktreeCommit',
     'WorktreeInfo',
+    'MainDirtyStatus',
+    'PlanOnlyBranch',
+    'BranchUnresolvedPlan',
+    'WorktreeListResponse',
 ]
