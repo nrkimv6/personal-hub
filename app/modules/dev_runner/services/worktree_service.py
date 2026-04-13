@@ -4,15 +4,15 @@ import asyncio
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional
 
 from app.modules.dev_runner.schemas import (
-    BranchUnresolvedPlan,
     CommitDiffStat,
-    MainDirtyStatus,
-    PlanOnlyBranch,
     WorktreeCommit,
     WorktreeInfo,
+    PlanOnlyBranch,
+    BranchUnresolvedPlan,
+    MainDirtyStatus,
     WorktreeListResponse,
 )
 
@@ -28,9 +28,6 @@ async def _run_git(*args: str, repo_root: Path = _REPO_ROOT) -> str:
     ⚠️ 중복 주의: scripts/worktree_manager.py:_run_git에도 동일한 safe.directory
     주입 로직이 있다. 하나를 수정할 때 반드시 다른 쪽도 함께 확인할 것.
     """
-    if not repo_root.exists() or not repo_root.is_dir():
-        return ""
-
     try:
         proc = await asyncio.create_subprocess_exec(
             "git", "-c", "safe.directory=*", *args,
@@ -85,26 +82,6 @@ def _maybe_append(block: dict, result: list) -> None:
     result.append(block)
 
 
-def _format_plan_mtime(plan_file: Path) -> Optional[str]:
-    """계획서 mtime -> ISO 문자열 변환."""
-    try:
-        return datetime.fromtimestamp(plan_file.stat().st_mtime).astimezone().isoformat(timespec="seconds")
-    except Exception:
-        return None
-
-
-def _read_plan_header_branch(top_lines: Sequence[str]) -> Optional[str]:
-    """상위 20줄에서 > branch: 헤더 반환."""
-    pattern = re.compile(r"^>\s*branch:\s*(.+)\s*$")
-    for line in top_lines:
-        match = pattern.match(line.rstrip())
-        if match:
-            value = match.group(1).strip()
-            if value:
-                return value
-    return None
-
-
 async def get_ahead_behind(branch: str, repo_root: Path = _REPO_ROOT) -> tuple[int, int]:
     """main 대비 ahead/behind 커밋 수 반환"""
     ahead_str, behind_str = await asyncio.gather(
@@ -145,7 +122,7 @@ async def get_worktree_commits(branch: str, repo_root: Path = _REPO_ROOT) -> lis
 
     # diff stat 병렬 조회
     diff_tasks = [
-        _run_git("diff-tree", "--no-commit-id", "-r", "--numstat", h)
+        _run_git("diff-tree", "--no-commit-id", "-r", "--numstat", h, repo_root=repo_root)
         for h in hashes
     ]
     diff_outputs = await asyncio.gather(*diff_tasks)
@@ -182,42 +159,11 @@ def _parse_numstat(output: str) -> list[CommitDiffStat]:
     return stats
 
 
-def _iter_dirty_paths_from_porcelain_z(status_output: str) -> list[str]:
-    """`git status --porcelain=v1 -z` 결과에서 최종 dirty 파일 경로 추출."""
-    tokens = status_output.split("\0")
-    files: list[str] = []
-    i = 0
-
-    while i < len(tokens):
-        token = tokens[i]
-        if not token:
-            i += 1
-            continue
-
-        if len(token) < 4 or token[2] != " ":
-            i += 1
-            continue
-
-        status = token[:2]
-        path = token[3:]
-
-        if status in {"R ", "C "} and i + 1 < len(tokens):
-            # rename/copy: token[0]가 source path, 다음 토큰이 destination path
-            i += 1
-            path = tokens[i]
-
-        if path:
-            files.append(path)
-
-        i += 1
-
-    return files
-
-
 def find_plan_file(branch: str, repo_root: Path = _REPO_ROOT) -> tuple[Optional[str], Optional[str]]:
-    """docs/plan/*.md 에서 > branch: {branch} 헤더를 찾아 경로 반환 (sync)
+    """docs/plan/*.md 에서 > branch: {branch} 헤더를 찾아 (경로, mtime_iso) 반환 (sync)
 
     기존 plan_scanner/plan_path_resolver에 유사 로직 없으므로 자체 구현.
+    매칭 실패 시 (None, None) 반환.
     """
     plan_dir = repo_root / "docs" / "plan"
     if not plan_dir.exists():
@@ -227,13 +173,12 @@ def find_plan_file(branch: str, repo_root: Path = _REPO_ROOT) -> tuple[Optional[
     for md_file in plan_dir.glob("*.md"):
         try:
             with open(md_file, encoding="utf-8") as f:
-                lines = []
                 for i, line in enumerate(f):
                     if i >= 20:
                         break
-                    lines.append(line)
-                if any(pattern.match(line.rstrip()) for line in lines):
-                    return str(md_file.relative_to(repo_root)), _format_plan_mtime(md_file)
+                    if pattern.match(line.rstrip()):
+                        mtime_iso = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
+                        return str(md_file.relative_to(repo_root)), mtime_iso
         except (OSError, UnicodeDecodeError):
             continue
     return None, None
@@ -243,82 +188,97 @@ def list_plan_only_branches(
     existing_branches: set[str],
     repo_root: Path = _REPO_ROOT,
 ) -> tuple[list[PlanOnlyBranch], list[BranchUnresolvedPlan]]:
-    """`docs/plan` 스캔 결과로 active 되지 않은 plan-only/branch 미매칭을 계산"""
+    """docs/plan/*.md 스캔 → worktree 없는 plan 브랜치 목록 반환 (sync)
+
+    > branch: 헤더가 있고 existing_branches에 없는 것 → PlanOnlyBranch
+    > branch: 헤더가 없는 것 → BranchUnresolvedPlan (reason: missing > branch header)
+    """
     plan_dir = repo_root / "docs" / "plan"
     if not plan_dir.exists():
         return [], []
 
+    branch_pattern = re.compile(r"^>\s*branch:\s*(.+)$")
     plan_only: list[PlanOnlyBranch] = []
     branch_unresolved: list[BranchUnresolvedPlan] = []
 
-    for md_file in plan_dir.glob("*.md"):
+    for md_file in sorted(plan_dir.glob("*.md")):
         try:
+            mtime_iso = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
+            relative_path = str(md_file.relative_to(repo_root))
+            found_branch: Optional[str] = None
+
             with open(md_file, encoding="utf-8") as f:
-                top_lines: list[str] = []
-                for idx, line in enumerate(f):
-                    if idx >= 20:
+                for i, line in enumerate(f):
+                    if i >= 30:
                         break
-                    top_lines.append(line)
+                    m = branch_pattern.match(line.rstrip())
+                    if m:
+                        found_branch = m.group(1).strip()
+                        break
+
+            if found_branch is None:
+                branch_unresolved.append(BranchUnresolvedPlan(
+                    plan_file=relative_path,
+                    reason="missing > branch header",
+                    plan_mtime=mtime_iso,
+                ))
+            elif found_branch not in existing_branches:
+                plan_only.append(PlanOnlyBranch(
+                    plan_file=relative_path,
+                    branch=found_branch,
+                    plan_mtime=mtime_iso,
+                ))
+
         except (OSError, UnicodeDecodeError):
             continue
-
-        branch = _read_plan_header_branch(top_lines)
-        relative_path = md_file.relative_to(repo_root)
-        plan_mtime = _format_plan_mtime(md_file)
-        if not branch:
-            branch_unresolved.append(
-            BranchUnresolvedPlan(
-                plan_file=str(relative_path),
-                reason="missing > branch header",
-                plan_mtime=plan_mtime,
-            )
-            )
-            continue
-
-        if branch not in existing_branches:
-            plan_only.append(
-                PlanOnlyBranch(
-                    plan_file=str(relative_path),
-                    branch=branch,
-                    plan_mtime=plan_mtime,
-                )
-            )
 
     return plan_only, branch_unresolved
 
 
 async def get_main_dirty(repo_root: Path = _REPO_ROOT) -> MainDirtyStatus:
-    """main 브랜치 작업트리 기준 dirty 파일 목록."""
-    status_output = await _run_git("status", "--porcelain=v1", "-z", repo_root=repo_root)
-    if not status_output:
+    """main 브랜치 dirty 파일 목록 반환 — git status --porcelain=v1 -z 파싱"""
+    output = await _run_git("status", "--porcelain=v1", "-z", repo_root=repo_root)
+    if not output:
         return MainDirtyStatus()
 
-    files = _iter_dirty_paths_from_porcelain_z(status_output)
-
-    unique_files = []
-    seen: set[str] = set()
-    for item in files:
-        if item in seen:
+    files: list[str] = []
+    records = output.split("\0")
+    i = 0
+    while i < len(records):
+        record = records[i]
+        if not record:
+            i += 1
             continue
-        seen.add(item)
-        unique_files.append(item)
+        if len(record) < 3:
+            i += 1
+            continue
+        xy = record[:2]
+        path = record[3:]
+        # rename/copy: 다음 토큰이 대상 경로
+        if xy[0] in ("R", "C"):
+            i += 1
+            if i < len(records) and records[i]:
+                files.append(records[i])
+            else:
+                files.append(path)
+        else:
+            files.append(path)
+        i += 1
 
-    return MainDirtyStatus(dirty_count=len(unique_files), files=unique_files)
+    return MainDirtyStatus(dirty_count=len(files), files=files)
 
 
 async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListResponse:
-    """전체 워크트리 + plan-only + 미해결 plan + main dirty 통합 응답."""
+    """전체 워크트리 정보 조합 — ahead/behind + 커밋 목록은 병렬, find_plan_file은 asyncio.to_thread"""
     raw_worktrees = await list_worktrees(repo_root=repo_root)
-    existing_branches = {wt["branch"] for wt in raw_worktrees if wt.get("branch")}
 
     async def _build(wt: dict) -> WorktreeInfo:
         branch = wt["branch"]
-        (ahead, behind), commits, plan_match = await asyncio.gather(
+        (ahead, behind), commits, (plan_file, plan_mtime) = await asyncio.gather(
             get_ahead_behind(branch, repo_root=repo_root),
             get_worktree_commits(branch, repo_root=repo_root),
             asyncio.to_thread(find_plan_file, branch, repo_root),
         )
-        plan_file, plan_mtime = plan_match
         created_at = commits[-1].date if commits else None
         return WorktreeInfo(
             branch=branch,
@@ -332,13 +292,21 @@ async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListRespons
             plan_mtime=plan_mtime,
         )
 
-    plan_only, branch_unresolved = await asyncio.to_thread(list_plan_only_branches, existing_branches, repo_root)
-    worktrees = await asyncio.gather(*[_build(wt) for wt in raw_worktrees]) if raw_worktrees else []
-    main_dirty = await get_main_dirty(repo_root=repo_root)
+    worktrees: list[WorktreeInfo] = []
+    if raw_worktrees:
+        worktrees = list(await asyncio.gather(*[_build(wt) for wt in raw_worktrees]))
+
+    existing_branches = {wt.branch for wt in worktrees}
+
+    plan_only_result, main_dirty = await asyncio.gather(
+        asyncio.to_thread(list_plan_only_branches, existing_branches, repo_root),
+        get_main_dirty(repo_root=repo_root),
+    )
+    plan_only_list, branch_unresolved_list = plan_only_result
 
     return WorktreeListResponse(
-        worktrees=list(worktrees),
-        plan_only=plan_only,
-        branch_unresolved=branch_unresolved,
+        worktrees=worktrees,
+        plan_only=plan_only_list,
+        branch_unresolved=branch_unresolved_list,
         main_dirty=main_dirty,
     )

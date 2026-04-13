@@ -131,7 +131,7 @@ class PlanItemResponse(BaseModel):
     level: int  # 0=상위(번호), 1=하위(대시)
     text: str
     checked: bool
-    children: List['PlanItemResponse'] = Field(default_factory=list)
+    children: List['PlanItemResponse'] = []
     file_path: Optional[str] = None  # 파일 경로 언급 시
 
 
@@ -249,7 +249,7 @@ class PlanRecordResponse(BaseModel):
 
 class PlanRecordWithEventsResponse(PlanRecordResponse):
     """계획서 레코드 + 이벤트 목록"""
-    events: List[PlanEventResponse] = Field(default_factory=list)
+    events: List[PlanEventResponse] = []
 
 
 class MemoUpdateRequest(BaseModel):
@@ -437,27 +437,23 @@ class WorktreeInfo(BaseModel):
 
 
 class MainDirtyStatus(BaseModel):
-    """main 브랜치 더티 상태"""
     dirty_count: int = 0
     files: List[str] = Field(default_factory=list)
 
 
 class PlanOnlyBranch(BaseModel):
-    """활성 워크트리와 매칭되지 않은 계획서"""
     plan_file: str
     branch: str
     plan_mtime: Optional[str] = None
 
 
 class BranchUnresolvedPlan(BaseModel):
-    """branch 헤더 누락 등으로 추적 불가 계획서"""
     plan_file: str
     reason: str
     plan_mtime: Optional[str] = None
 
 
 class WorktreeListResponse(BaseModel):
-    """워크트리 목록 + plan-only + 미해결 항목 + main dirty 상태 통합 응답"""
     worktrees: List[WorktreeInfo] = Field(default_factory=list)
     plan_only: List[PlanOnlyBranch] = Field(default_factory=list)
     branch_unresolved: List[BranchUnresolvedPlan] = Field(default_factory=list)

@@ -10,42 +10,48 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.modules.dev_runner.schemas import WorktreeInfo, WorktreeListResponse
 from app.modules.dev_runner.services.worktree_service import get_all_worktrees
-from app.modules.git_repos.services.repo_service import GitRepoService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _resolve_repo_root(
-    repo_id: Optional[int],
-    db: Session,
-) -> Optional[Path]:
-    """repo_id가 있으면 저장된 레포 경로를 Path로 반환."""
+def _resolve_repo_root(repo_id: Optional[int], db: Session) -> Optional[Path]:
+    """repo_id가 있으면 DB에서 경로 조회, 없으면 None 반환"""
     if repo_id is None:
         return None
-
-    repo = GitRepoService().get_repo(db, repo_id)
-    if not repo:
+    try:
+        from app.modules.git_repos.services.repo_service import GitRepoService
+        repo = GitRepoService().get_repo(db, repo_id)
+    except Exception:
+        raise HTTPException(status_code=500, detail="레포지토리 조회 중 오류가 발생했습니다.")
+    if repo is None:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
     return Path(repo.path)
 
 
+@router.get("/repos")
+async def list_repos(db: Session = Depends(get_db)):
+    """등록된 git 레포 목록 반환 — 프론트 레포 선택 드롭다운용"""
+    try:
+        from app.modules.git_repos.services.repo_service import GitRepoService
+        repos = GitRepoService().list_repos(db)
+        return [{"id": r.id, "alias": r.alias, "path": r.path} for r in repos]
+    except Exception as e:
+        logger.exception("레포 목록 조회 실패")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("", response_model=List[WorktreeInfo])
-async def list_worktrees(
+async def list_worktrees_v1(
     repo_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
-    """현재 레포의 워크트리 목록 + 브랜치별 커밋/diff stat/연결 계획서 반환."""
+    """현재 레포의 워크트리 목록 반환 (v1 호환: list 형태)"""
     try:
         repo_root = _resolve_repo_root(repo_id, db)
-        response = (
-            await get_all_worktrees(repo_root=repo_root)
-            if repo_root is not None
-            else await get_all_worktrees()
-        )
-        if isinstance(response, list):
-            return response
-        return response.worktrees
+        kwargs = {"repo_root": repo_root} if repo_root else {}
+        resp = await get_all_worktrees(**kwargs)
+        return resp.worktrees
     except HTTPException:
         raise
     except Exception as e:
@@ -58,25 +64,13 @@ async def list_worktrees_v2(
     repo_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
-    """멀티 레포 조회 API. repo_id가 없으면 현재 레포 기준."""
+    """전체 워크트리 상태 반환 (v2: plan_only·branch_unresolved·main_dirty 포함)"""
     try:
         repo_root = _resolve_repo_root(repo_id, db)
-        if repo_root is None:
-            response = await get_all_worktrees()
-            if isinstance(response, list):
-                return WorktreeListResponse(worktrees=response)
-            return response
-        return await get_all_worktrees(repo_root=repo_root)
+        kwargs = {"repo_root": repo_root} if repo_root else {}
+        return await get_all_worktrees(**kwargs)
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("워크트리 v2 목록 조회 실패")
+        logger.exception("워크트리 목록 조회 실패 (v2)")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/repos")
-async def list_worktree_repos(db: Session = Depends(get_db)):
-    """등록 레포지토리 목록(멀티 레포 선택용)."""
-    svc = GitRepoService()
-    repos = svc.list_repos(db)
-    return [{"id": repo.id, "alias": repo.alias, "path": repo.path} for repo in repos]

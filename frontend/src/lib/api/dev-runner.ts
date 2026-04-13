@@ -617,6 +617,11 @@ export interface WorktreeInfo {
 	plan_mtime: string | null;
 }
 
+export interface MainDirtyStatus {
+	dirty_count: number;
+	files: string[];
+}
+
 export interface PlanOnlyBranch {
 	plan_file: string;
 	branch: string;
@@ -629,11 +634,6 @@ export interface BranchUnresolvedPlan {
 	plan_mtime: string | null;
 }
 
-export interface MainDirtyStatus {
-	dirty_count: number;
-	files: string[];
-}
-
 export interface WorktreeListResponse {
 	worktrees: WorktreeInfo[];
 	plan_only: PlanOnlyBranch[];
@@ -643,16 +643,16 @@ export interface WorktreeListResponse {
 
 export interface RepoOption {
 	id: number;
-	alias: string | null;
+	alias: string;
 	path: string;
 }
 
 export const devRunnerWorktreeApi = {
 	list: (): Promise<WorktreeInfo[]> => devRunnerRequest<WorktreeInfo[]>('/worktrees'),
-	listV2: (repoId?: number): Promise<WorktreeListResponse> =>
-		repoId
-			? devRunnerRequest<WorktreeListResponse>(`/worktrees/v2?repo_id=${repoId}`)
-			: devRunnerRequest<WorktreeListResponse>('/worktrees/v2'),
+	listV2: (repoId?: number): Promise<WorktreeListResponse> => {
+		const query = repoId !== undefined ? `?repo_id=${repoId}` : '';
+		return devRunnerRequest<WorktreeListResponse>(`/worktrees/v2${query}`);
+	},
 	listRepos: (): Promise<RepoOption[]> => devRunnerRequest<RepoOption[]>('/worktrees/repos'),
 };
 
