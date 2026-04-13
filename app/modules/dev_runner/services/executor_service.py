@@ -235,10 +235,11 @@ class ExecutorService:
         # 동시 실행 개수 제한 확인
         count = await self.async_redis.scard(ACTIVE_RUNNERS_KEY)
         settings = settings_service.get()
-        if count >= settings.max_concurrent_runners:
+        max_concurrent_runners = config.MAX_CONCURRENT_RUNNERS
+        if count >= max_concurrent_runners:
             raise HTTPException(
                 status_code=429,
-                detail=f"최대 {settings.max_concurrent_runners}개 동시 실행 가능 (현재 {count}개)"
+                detail=f"최대 {max_concurrent_runners}개 동시 실행 가능 (현재 {count}개)"
             )
 
         resolved_engine, resolved_fix_engine = self.resolve_run_engines(request, settings)
