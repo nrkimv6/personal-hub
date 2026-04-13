@@ -118,6 +118,13 @@ class LLMStatsResponse(BaseModel):
     failed: int
 
 
+class LLMBootstrapResponse(BaseModel):
+    list: LLMRequestListResponse
+    stats: LLMStatsResponse
+    queue_stats: Dict[str, Dict[str, int]]
+    worker_status: LLMWorkerStatusResponse
+
+
 class BatchRetryRequest(BaseModel):
     request_ids: List[int]
 
@@ -235,6 +242,36 @@ def get_queue_stats(db: Session = Depends(get_db)):
     """
     service = LLMService(db)
     return service.get_queue_stats()
+
+
+@router.get("/bootstrap", response_model=LLMBootstrapResponse)
+def get_llm_bootstrap(
+    status: Optional[str] = Query(None, description="상태 필터 (콤마로 구분하여 여러 상태 지정 가능, 예: completed,failed,cancelled)"),
+    caller_type: Optional[str] = Query(None, description="호출자 타입 필터"),
+    requested_by: Optional[str] = Query(None, description="요청자 필터"),
+    include_deleted: bool = Query(False, description="삭제된 요청 포함"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    page_size: int = Query(20, ge=1, le=100, description="페이지 크기"),
+    queue_name: Optional[str] = Query(None, description="큐 이름 필터 (utility / system)"),
+    db: Session = Depends(get_db),
+):
+    """LLM /llm 초기 진입용 묶음 응답."""
+    service = LLMService(db)
+    result = service.get_bootstrap_data(
+        status=status,
+        caller_type=caller_type,
+        requested_by=requested_by,
+        include_deleted=include_deleted,
+        page=page,
+        page_size=page_size,
+        queue_name=queue_name,
+    )
+    return LLMBootstrapResponse(
+        list=LLMRequestListResponse(**result["list"]),
+        stats=LLMStatsResponse(**result["stats"]),
+        queue_stats=result["queue_stats"],
+        worker_status=LLMWorkerStatusResponse(**result["worker_status"]),
+    )
 
 
 @router.get("/defaults", response_model=LLMDefaultsResponse)
