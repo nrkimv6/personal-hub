@@ -72,6 +72,10 @@
     llmApi.getProviders().then(data => { providers = data; }).catch(() => {});
   });
 
+  async function loadRepo() {
+    repo = await gitReposApi.getRepo(repoId);
+  }
+
   async function loadAll() {
     loading = true;
     error = '';
@@ -82,8 +86,10 @@
         { interval: 500, maxRetries: 30 }
       );
 
+      await loadRepo();
       await Promise.all([loadStatus(), loadLog(), loadOperations()]);
     } catch (e) {
+      repo = null;
       error = e instanceof Error ? e.message : '로드 실패';
     } finally {
       loading = false;
@@ -330,7 +336,7 @@
       <ArrowLeft size={16} /> 목록
     </button>
     {#if repo}
-      {@const r = repo as GitRepo}
+      {@const r = repo}
       <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100">
         {r.alias || r.path.split(/[/\\]/).pop()}
       </h1>
@@ -351,7 +357,7 @@
   {:else if error}
     <div class="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400">{error}</div>
     {:else if repo}
-      {@const r = repo as any}
+      {@const r = repo}
       <!-- 상단 액션 버튼 -->
     <div class="flex gap-2 mb-5">
       <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1" onclick={handleFetch} disabled={working}>

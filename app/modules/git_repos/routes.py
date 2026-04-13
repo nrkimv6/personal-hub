@@ -139,6 +139,16 @@ async def get_task_result(task_id: str):
 # 상태 조회 엔드포인트
 # ───────────────────────────────────────────
 
+@router.get("/{repo_id}", response_model=schemas.RepoResponse)
+async def get_repo(repo_id: int, db: Session = Depends(get_db)):
+    """레포지토리 단건 조회."""
+    svc = GitRepoService()
+    repo = svc.get_repo(db, repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
+    return repo
+
+
 @router.get("/{repo_id}/status", response_model=schemas.RepoStatus)
 async def get_status(repo_id: int, db: Session = Depends(get_db)):
     """레포지토리 상세 상태 조회 (파일 목록, branch, ahead/behind)."""

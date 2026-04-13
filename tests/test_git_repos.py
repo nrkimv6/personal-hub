@@ -651,6 +651,18 @@ class TestAPIRouteCRUD:
         resp = api_client.post("/api/v1/git-repos", json={"path": "C:\\no\\such\\path"})
         assert resp.status_code == 400
 
+    def test_get_repo(self, api_client, temp_git_repo):
+        """단건 조회 → 등록된 레포 데이터 반환 (Right)."""
+        create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo, "alias": "detail-test"})
+        repo_id = create.json()["id"]
+
+        resp = api_client.get(f"/api/v1/git-repos/{repo_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == repo_id
+        assert data["alias"] == "detail-test"
+        assert data["path"] == temp_git_repo
+
     def test_update_repo(self, api_client, temp_git_repo):
         """수정 → 값 반영 (Right)."""
         create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
@@ -915,6 +927,9 @@ class TestAPIRouteNonexistent:
     SLOW 엔드포인트는 repo 검증 후 큐 발행하므로 404 반환.
     Redis 미연결 시 503 반환 가능.
     """
+
+    def test_get_repo_404(self, api_client):
+        assert api_client.get("/api/v1/git-repos/99999").status_code == 404
 
     def test_status_404(self, api_client):
         assert api_client.get("/api/v1/git-repos/99999/status").status_code == 404
