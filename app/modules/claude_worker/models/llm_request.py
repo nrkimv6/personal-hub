@@ -65,6 +65,9 @@ class LLMRequest(Base):
     stream_log_path = Column(String(500), nullable=True)
     # chat 모드에서 스트리밍 로그 파일 경로
 
+    # Claude 세션 ID — CLI stdout JSON의 session_id (JSONL 파일명 UUID와 동일)
+    claude_session_id = Column(String(36), nullable=True, index=True)
+
     # Soft delete
     deleted_at = Column(DateTime)
 

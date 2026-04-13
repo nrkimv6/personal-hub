@@ -269,6 +269,21 @@ class ExecutorService:
         else:
             session_id = str(uuid.uuid4())
 
+        # plan_records에 claude_session_id 저장 (plan_file 기반 조회)
+        if request.plan_file:
+            try:
+                from app.database import SessionLocal
+                from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+                _db = SessionLocal()
+                try:
+                    _svc = PlanRecordService(_db)
+                    _record = _svc.get_or_create(request.plan_file)
+                    _svc.update_claude_session_id(_record.id, session_id)
+                finally:
+                    _db.close()
+            except Exception as _e:
+                logger.warning(f"[session] plan_record claude_session_id 저장 실패: {_e}")
+
         # Redis 명령 생성
         command = {
             "action": "run",

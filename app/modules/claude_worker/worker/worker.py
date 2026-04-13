@@ -1576,6 +1576,7 @@ class LLMWorker:
                     request.id,
                     result["result"],
                     result.get("raw_response", ""),
+                    result.get("claude_session_id"),
                 )
                 self._increment_processed()
                 logger.info(f"LLM 실행 완료: id={request.id}")
@@ -1628,6 +1629,7 @@ class LLMWorker:
                             request.id,
                             {},  # 빈 결과
                             result.get("raw_response", ""),
+                            result.get("claude_session_id"),
                         )
                         self._increment_processed()
                         logger.info(f"LLM 실행 완료 (JSON 없음, raw_response 사용): id={request.id}")

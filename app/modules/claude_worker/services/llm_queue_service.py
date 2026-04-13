@@ -176,6 +176,7 @@ class LLMQueueService:
         request_id: int,
         result: dict,
         raw_response: str = "",
+        claude_session_id: Optional[str] = None,
     ) -> None:
         """요청을 completed 상태로 변경."""
         request = self._repo.get_by_id(request_id)
@@ -185,6 +186,8 @@ class LLMQueueService:
             request.result = json.dumps(result, ensure_ascii=False)
             request.raw_response = raw_response
             request.error_message = None
+            if claude_session_id:
+                request.claude_session_id = claude_session_id
             self.db.commit()
 
     def mark_failed(self, request_id: int, error_message: str, raw_response: str = "") -> None:
