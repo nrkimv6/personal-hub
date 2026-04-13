@@ -124,9 +124,12 @@ class PopupFetcher:
         if not hasattr(self._proxy_manager, "get_fresh_proxy"):
             return None
         try:
-            proxy_url = self._proxy_manager.get_fresh_proxy(exclude=tried_proxies)
+            proxy_url = self._proxy_manager.get_fresh_proxy(
+                exclude=tried_proxies,
+                request_method="get",
+            )
         except TypeError:
-            proxy_url = self._proxy_manager.get_fresh_proxy()
+            proxy_url = self._proxy_manager.get_fresh_proxy(request_method="get")
         except Exception:
             return None
 

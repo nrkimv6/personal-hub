@@ -41,6 +41,11 @@
 - 커밋 스크립트 사용:
   `& "D:\work\project\tools\common\commit.ps1" "type: message"`
 
+## Proxy Operations
+
+- 공유 프록시는 `proxy_list_get.txt` / `proxy_list_post.txt`를 우선 읽고, 파일이 없으면 `proxy_list.txt`로 fallback한다.
+- `status.json` 운영 점검 시에는 `method_summary`와 `active_24h_by_method`를 함께 확인한다.
+
 ## Skill Authoring Guardrail
 
 - 스킬 파일에 단일 파일 기준의 고정 설명/제한(예: 특정 파일 N줄 이하 유지, 특정 파일만 구조 강제) 작성 금지.

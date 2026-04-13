@@ -90,11 +90,13 @@ class TestProxyUsageLoggerRight:
             schedule_id=1,
             target_url="https://booking.naver.com/test",
             fetch_method="graphql_api",
+            http_method="post",
         )
 
         assert request_id is not None
         assert len(request_id) == 36  # UUID 길이
         assert request_id in logger._pending_requests
+        assert logger._pending_requests[request_id]["http_method"] == "post"
 
     def test_right_log_attempt_success(self):
         """성공 시도 로깅 검증"""
