@@ -122,66 +122,66 @@ class EventService:
     # ?? 珥덇린????????????????????????????????????????????????????????????????
 
     async def _enable_keyspace_notifications(self) -> None:
-        # sanitized
-        # sanitized
-            # sanitized
-            # sanitized
-            # sanitized
-            # sanitized
-            # sanitized
-        # sanitized
-            # sanitized
-            # sanitized
-# sanitized
-    # sanitized
-        # sanitized
+        """Redis keyspace notifications를 활성화한다."""
+        try:
+            # K: keyspace events 전체 활성화
+            # E: keyevent events 전체 활성화
+            # x: expired events
+            # $: string commands (SET, GETSET 등) - runner 상태 변화 감지에 필요
+            await self._async.config_set("notify-keyspace-events", "KEx$")
+        except Exception:
+            # CONFIG SET 권한이 없는 환경(managed Redis 등)에서는 무시
+            pass
 
-        # remove invisible runners from RECENT
-        # keep visible runner list consistent
-        # cap RECENT size at MAX_RECENT_RUNNERS
-        # sanitized
-        # sanitized
-            # sanitized
-            # sanitized
-                # sanitized
-                # sanitized
-                    # sanitized
-            # sanitized
-            # sanitized
-        # sanitized
-            # sanitized
-# sanitized
-    # sanitized
-        # sanitized
-            # sanitized
-        # sanitized
-            # sanitized
-# sanitized
-        # sanitized
-        # sanitized
-            # sanitized
-            # sanitized
-            # sanitized
-                # sanitized
-                # sanitized
-                # sanitized
-            # sanitized
-                # sanitized
-                # sanitized
-            # sanitized
-                # sanitized
-        # sanitized
-# sanitized
-    # sanitized
-        # sanitized
+    def _cleanup_invisible_recent_runners(self) -> None:
+        """SSE 연결 초기화 시 RECENT set에서 invisible runner를 제거 + 상한을 적용.
+
+        invisible runner(trigger 미설정/비사용자)가 RECENT set에 쌓여서
+        SSE status 이벤트의 runners 배열에서 visible runner가 누락되는 문제를 방지한다.
+        정리 순서: invisible 제거 후 size 상한(MAX_RECENT_RUNNERS) 적용.
+        """
+        try:
+            recent_ids: list = self._sync.zrange(RECENT_RUNNERS_KEY, 0, -1) or []
+            for rid in recent_ids:
+                trigger = self._sync.get(f"{RUNNER_KEY_PREFIX}:{rid}:trigger")
+                if not is_visible_runner(trigger, rid):
+                    self._sync.zrem(RECENT_RUNNERS_KEY, rid)
+            # invisible 제거 후 상한: oldest-first로 MAX_RECENT_RUNNERS 초과분 제거
+            self._sync.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
+        except Exception:
+            pass
+
+    def _list_visible_active_runner_ids(self) -> list:
+        try:
+            runner_ids = self._sync.smembers(ACTIVE_RUNNERS_KEY) or set()
+        except Exception:
+            return []
+
+        visible_running_ids = []
+        for rid in runner_ids:
+            runner_id = str(rid)
+            payload = build_status_payload(self._sync, runner_id)
+            if (
+                payload
+                and payload.get("visible", False)
+                and payload.get("status") == "running"
+            ):
+                self._log_tailer._completed_runners.pop(runner_id, None)
+                visible_running_ids.append(runner_id)
+            else:
+                self._log_tailer.drop_tail_state(runner_id)
+        return visible_running_ids
+
+    def _build_status_payload(self, runner_id: str):
+        """[shim] event_payload.build_status_payload()"""
         return build_status_payload(self._sync, runner_id)
 
     def _build_all_runners_status(self):
-        # sanitized
+        """[shim] event_payload.build_all_runners_status()"""
         return build_all_runners_status(self._sync)
 
     def _ensure_log_tailer(self) -> None:
-        # sanitized
+        """__new__ 기반 테스트에서도 _log_tailer 초기 상태를 보장한다."""
         if not hasattr(self, "_log_tailer"):
             _log_resolver = LogFileResolver(config, self._sync)
             self._log_tailer = LogTailer(self._sync, _log_resolver)
