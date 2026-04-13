@@ -26,6 +26,7 @@ import argparse
 import json
 import logging
 import os
+import msvcrt
 import sys
 import time
 from datetime import datetime
@@ -213,6 +214,27 @@ _zombie_first_seen = get_zombie_first_seen()
 # main() BRPOP 루프에서 이 플래그를 확인하고 루프를 탈출하여 프로세스를 종료
 # watchdog(dev-runner-listener-watchdog.ps1)가 Session 1에서 재시작을 담당
 _graceful_exit_requested: bool = False
+_LOCK_FILE_PATH = PROJECT_ROOT / "pids" / "dev_runner_command_listener.lock"
+_lock_fd = None
+
+
+def _acquire_lock() -> bool:
+    """단일 listener 실행을 위한 lock file 획득."""
+    global _lock_fd
+
+    _LOCK_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if _lock_fd is not None:
+        return True
+
+    fd = open(_LOCK_FILE_PATH, "a+", encoding="utf-8")
+    try:
+        msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        fd.close()
+        return False
+
+    _lock_fd = fd
+    return True
 
 
 def _handle_graceful_exit(redis_client: redis.Redis) -> Dict:

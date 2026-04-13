@@ -182,7 +182,7 @@ def test_cmdline_hash_stable_for_same_cmdline():
     """동일 cmdline 입력은 항상 동일한 hash를 반환한다."""
     from app.shared.process.snapshot_writer import SnapshotWriter
 
-    cmdline = "python scripts/browser_workers.py restart-api"
+    cmdline = "python scripts/services/browser_workers.py restart-api"
     h1 = SnapshotWriter._cmdline_hash(cmdline)
     h2 = SnapshotWriter._cmdline_hash(cmdline)
 
@@ -209,7 +209,7 @@ async def test_capture_python_processes_collects_parent_chain():
             "ppid": 5000,
             "cmdline": [
                 "python",
-                r"D:\work\project\tools\monitor-page\scripts\browser_workers.py",
+                r"D:\work\project\tools\monitor-page\scripts\services\browser_workers.py",
                 "start",
             ],
             "memory_info": mem,

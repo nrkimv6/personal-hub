@@ -1,12 +1,13 @@
 """
-restart_infra 직접 subprocess 호출 테스트 (T1/T3)
+restart_infra / restart_listener direct tests (T1/T3)
 
 worker_service.restart_infra() 및 executor_service.restart_listener()가
-browser_workers.py를 직접 subprocess로 호출하는지 검증.
-Redis 의존 없음.
+browser_workers.py facade 또는 Redis graceful-exit 경로를 올바르게 사용
+하는지 검증한다.
 """
 
 import asyncio
+import itertools
 import subprocess
 import sys
 from pathlib import Path
@@ -33,20 +34,19 @@ def _sp_fail(stderr="실패"):
 
 class TestRestartInfraDirectSubprocess:
 
-    def test_restart_infra_command_listener_uses_subprocess_R(self):
-        """R(정상): restart_infra("command_listener") → subprocess.run에 browser_workers.py, restart-listener 포함"""
+    def test_restart_infra_command_listener_uses_redis_signal_R(self):
+        """R(정상): restart_infra("command_listener") → executor_service.restart_listener() 경유."""
         from app.modules.system.services.worker_service import WorkerService
 
-        with patch("app.modules.system.services.worker_service.subprocess.run",
-                   return_value=_sp_ok()) as mock_run:
+        with patch(
+            "app.modules.system.services.worker_service.executor_service.restart_listener",
+            return_value={"success": True, "message": "listener restarted"},
+        ) as mock_restart:
             svc = WorkerService()
             result = run(svc.restart_infra("command_listener"))
 
         assert result["success"] is True
-        args = mock_run.call_args[0][0]
-        assert "browser_workers.py" in args[1]
-        assert "restart-listener" in args
-        assert "command_listener" not in args
+        mock_restart.assert_called_once()
 
     def test_restart_infra_api_watchdog_uses_subprocess_R(self):
         """R(정상): restart_infra("api_watchdog") → subprocess.run에 browser_workers.py, restart-infra, api_watchdog 포함"""
@@ -115,26 +115,23 @@ class TestRestartInfraDirectSubprocess:
 
 class TestRestartListenerSubprocess:
 
-    def test_restart_listener_uses_browser_workers_R(self):
-        """R(정상): restart_listener() → subprocess.run에 browser_workers.py, restart-listener 포함"""
+    def test_restart_listener_uses_redis_signal_R(self):
+        """R(정상): restart_listener() → graceful-exit Redis 시그널 전송."""
         from app.modules.dev_runner.services.executor_service import ExecutorService
 
         svc = ExecutorService()
         mock_r = MagicMock()
-        mock_r.get.side_effect = lambda key: (
-            "2026-02-25T10:00:00" if key == "plan-runner:listener:heartbeat" else None
-        )
+        mock_r.get.side_effect = [None, b"restarting", b"2026-02-25T10:00:00"]
         svc.redis_client = mock_r
 
-        with patch("app.modules.dev_runner.services.executor_service.subprocess.run",
-                   return_value=_sp_ok()) as mock_run, \
-             patch("app.modules.dev_runner.services.executor_service.time.sleep"):
+        with patch("subprocess.run") as mock_run, \
+             patch("time.sleep"), \
+             patch("time.time", side_effect=itertools.count()):
             result = svc.restart_listener()
 
         assert result["success"] is True
-        args = mock_run.call_args[0][0]
-        assert "browser_workers.py" in args[1]
-        assert "restart-listener" in args
+        assert not mock_run.called
+        assert mock_r.lpush.called
 
 
 # ─── 통합 TC (T3) ────────────────────────────────────────────────────────────
@@ -142,28 +139,27 @@ class TestRestartListenerSubprocess:
 class TestRestartInfraIntegrationDirect:
 
     def test_integration_restart_listener_end_to_end(self):
-        """T3: 실제 browser_workers.py 경로 존재 확인 + subprocess mock으로 전체 흐름 검증"""
+        """T3: 실제 browser_workers.py 경로 존재 확인 + Redis 기반 command_listener 경로 검증."""
         from app.modules.system.services.worker_service import WorkerService
-        from app.modules.system.config import MANAGED_PROJECTS
 
         # 실제 파일시스템에서 browser_workers.py 경로 확인
         scripts_dir = PROJECT_ROOT / "scripts"
         browser_workers = scripts_dir / "services" / "browser_workers.py"
         assert browser_workers.exists(), f"browser_workers.py가 없음: {browser_workers}"
 
-        # 실제 config 사용, subprocess만 mock
-        with patch("app.modules.system.services.worker_service.subprocess.run",
-                   return_value=_sp_ok()) as mock_run:
+        # command_listener는 Redis graceful-exit 경유
+        with patch(
+            "app.modules.system.services.worker_service.executor_service.restart_listener",
+            return_value={"success": True, "message": "listener restarted"},
+        ) as mock_restart:
             svc = WorkerService()
             result = run(svc.restart_infra("command_listener"))
 
         assert result["success"] is True
-        # browser_workers.py 경로가 실제 경로를 가리키는지 확인
-        called_args = mock_run.call_args[0][0]
-        assert Path(called_args[1]).name == "browser_workers.py"
+        mock_restart.assert_called_once()
 
     def test_integration_executor_restart_listener(self):
-        """T3: 실제 browser_workers.py 경로 + subprocess mock으로 executor_service 흐름 검증"""
+        """T3: 실제 browser_workers.py 경로 + Redis graceful-exit 흐름 검증."""
         from app.modules.dev_runner.services.executor_service import ExecutorService
 
         scripts_dir = PROJECT_ROOT / "scripts"
@@ -172,20 +168,17 @@ class TestRestartInfraIntegrationDirect:
 
         svc = ExecutorService()
         mock_r = MagicMock()
-        mock_r.get.side_effect = lambda key: (
-            "2026-02-25T10:00:00" if key == "plan-runner:listener:heartbeat" else None
-        )
+        mock_r.get.side_effect = [None, b"restarting", b"2026-02-25T10:00:00"]
         svc.redis_client = mock_r
 
-        with patch("app.modules.dev_runner.services.executor_service.subprocess.run",
-                   return_value=_sp_ok()) as mock_run, \
-             patch("app.modules.dev_runner.services.executor_service.time.sleep"):
+        with patch("subprocess.run") as mock_run, \
+             patch("time.sleep"), \
+             patch("time.time", side_effect=itertools.count()):
             result = svc.restart_listener()
 
         assert result["success"] is True
-        called_args = mock_run.call_args[0][0]
-        assert Path(called_args[1]).name == "browser_workers.py"
-        assert "restart-listener" in called_args
+        assert not mock_run.called
+        assert mock_r.lpush.called
 
 
 # ─── E2E (T4) ────────────────────────────────────────────────────────────────

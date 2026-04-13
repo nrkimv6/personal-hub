@@ -12,5 +12,4 @@ from .runtime import (
     cprint,
     _kill_by_cmdline,
 )
-from .manager import BrowserWorkerManager, main
-
+from .manager import BrowserWorkerManager

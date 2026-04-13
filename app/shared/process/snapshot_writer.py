@@ -79,6 +79,7 @@ class SnapshotWriter:
     def _infer_scope(name: str, exe: str, cmdline: str) -> str:
         joined = " ".join((name or "", exe or "", cmdline or "")).lower().replace("\\", "/")
         project_hint = str(_PROJECT_ROOT).lower().replace("\\", "/")
+        # browser_workers.py는 CLI facade로 유지되며, 프로세스 식별 앵커도 그대로 사용한다.
         monitor_keywords = (
             "monitor-page",
             "browser_workers.py",

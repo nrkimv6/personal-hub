@@ -128,7 +128,7 @@ if ($waited -ge $maxWait) {
 
 Write-Log "Starting browser workers..."
 
-# browser_workers.py 호출 (browser-workers.ps1에서 마이그레이션됨)
+# browser_workers.py facade 호출 (내부 구현은 browser_worker_runtime/로 분리됨)
 # See: docs/plan/2026-02-18_service-runner-python-migration.md
 $VenvScripts = Join-Path (Split-Path -Parent (Split-Path -Parent $ScriptDir)) ".venv\Scripts"
 if (-not (Test-Path $VenvScripts)) {
