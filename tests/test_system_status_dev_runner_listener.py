@@ -33,6 +33,7 @@ def _sp_fail(stderr="실패"):
 
 
 # ─── Phase T1: TC 작성 ─────────────────────────────────────────────────────────
+# browser_workers.py는 CLI facade이므로 경로 테스트는 facade 유지 기준으로 본다.
 
 class TestManagedProjectsConfig:
 
@@ -159,7 +160,7 @@ class TestRestartInfraDevRunnerListener:
 
     def test_restart_infra_dev_runner_listener_calls_subprocess_R(self):
         """R(정상): restart_infra("dev_runner_listener") → subprocess.run args에
-        browser_workers.py, restart-infra, dev_runner_listener 포함"""
+        browser_workers.py facade, restart-infra, dev_runner_listener 포함"""
         from app.modules.system.services.worker_service import WorkerService
 
         with patch("app.modules.system.services.worker_service.subprocess.run",
@@ -202,13 +203,13 @@ class TestIntegrationConfigPidNamesMatch:
 
     def test_integration_config_pid_names_match_browser_workers(self):
         """T3: MANAGED_PROJECTS["monitor-page"]["workers"]["items"]의 worker_pid_file 값들이
-        browser_workers.py의 BrowserWorkerManager.worker_pid_files에 모두 포함되는지 교차 검증.
+        browser_workers.py facade의 BrowserWorkerManager.worker_pid_files에 모두 포함되는지 교차 검증.
         향후 워커 추가 시 누락 방지."""
         from app.modules.system.config import MANAGED_PROJECTS
 
         items = MANAGED_PROJECTS["monitor-page"]["workers"]["items"]
 
-        # browser_workers.py를 직접 import (pid_suffix="_admin" 기준)
+        # browser_workers.py facade를 직접 import (pid_suffix="_admin" 기준)
         scripts_dir = PROJECT_ROOT / "scripts"
         sys.path.insert(0, str(scripts_dir))
         from browser_workers import BrowserWorkerManager
@@ -222,15 +223,15 @@ class TestIntegrationConfigPidNamesMatch:
                 continue
             assert wpf in mgr.worker_pid_files, (
                 f"MANAGED_PROJECTS의 worker_pid_file '{wpf}' (name={item['name']})이 "
-                f"browser_workers.py의 worker_pid_files에 없음: {mgr.worker_pid_files}"
+                f"browser_workers.py facade의 worker_pid_files에 없음: {mgr.worker_pid_files}"
             )
 
     def test_integration_watchdog_pid_names_match_browser_workers(self):
         """T3: MANAGED_PROJECTS["monitor-page"]["workers"]["items"]의 dev_runner_listener
-        watchdog_pid_file이 browser_workers.py의 BrowserWorkerManager.workers 리스트의
+        watchdog_pid_file이 browser_workers.py facade의 BrowserWorkerManager.workers 리스트의
         pid_file에 존재하는지 교차 검증. restart_infra("dev_runner_listener") 매칭 실패 방지.
 
-        참고: api_watchdog는 NSSM 관리 항목으로 browser_workers.py self.workers에 미포함
+        참고: api_watchdog는 NSSM 관리 항목으로 browser_workers.py facade self.workers에 미포함
         (별도 처리 경로). 이 테스트는 dev_runner_listener만 검증한다.
         """
         from app.modules.system.config import MANAGED_PROJECTS
@@ -245,7 +246,7 @@ class TestIntegrationConfigPidNamesMatch:
         mgr = BrowserWorkerManager()
         worker_pid_files = {w["pid_file"] for w in mgr.workers}
 
-        # dev_runner_listener만 검증 (api_watchdog는 NSSM 관리, browser_workers 외부)
+        # dev_runner_listener만 검증 (api_watchdog는 NSSM 관리, browser_workers facade 외부)
         browser_workers_infra = ["dev_runner_listener", "command_listener", "unified_worker", "claude_worker"]
         for item in items:
             if item["name"] not in browser_workers_infra:
@@ -255,15 +256,15 @@ class TestIntegrationConfigPidNamesMatch:
                 continue
             assert wdog_pf in worker_pid_files, (
                 f"MANAGED_PROJECTS의 watchdog_pid_file '{wdog_pf}' (name={item['name']})이 "
-                f"browser_workers.py의 workers pid_file 목록에 없음: {worker_pid_files}. "
+                f"browser_workers.py facade의 workers pid_file 목록에 없음: {worker_pid_files}. "
                 f"restart_infra('{item['name']}')가 watchdog를 찾지 못함"
             )
 
     def test_integration_dev_runner_listener_pid_written_by_watchdog(self):
-        """T3: scripts/dev-runner-listener-watchdog.ps1 파일이 존재하고,
+        """T3: scripts/watchdogs/dev-runner-listener-watchdog.ps1 파일이 존재하고,
         dev_runner_command_listener 관련 PID 파일명 문자열이 포함되는지 검증.
         PID 파일명 drift 방지."""
-        watchdog_script = PROJECT_ROOT / "scripts" / "dev-runner-listener-watchdog.ps1"
+        watchdog_script = PROJECT_ROOT / "scripts" / "watchdogs" / "dev-runner-listener-watchdog.ps1"
         assert watchdog_script.exists(), f"watchdog 스크립트가 없음: {watchdog_script}"
 
         content = watchdog_script.read_text(encoding="utf-8", errors="replace")

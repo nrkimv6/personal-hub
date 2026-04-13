@@ -131,7 +131,7 @@ class OrphanDetector:
                 continue
 
             # watchdog/listener 역할 프로세스는 cleanup 대상에서 제외
-            # (browser_workers.py 재시작 시 ppid가 바뀌어 오판될 수 있음)
+            # (browser_workers.py facade 재시작 시 ppid가 바뀌어 오판될 수 있음)
             role = entry.get("role", "")
             _WATCHDOG_ROLES = {
                 "watchdog", "claude_watchdog", "cmd_listener_watchdog",

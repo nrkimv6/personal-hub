@@ -50,7 +50,7 @@
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
-| ✅ | `browser_workers.py` | 통합 워커 CLI 엔트리 (start/stop/status/restart/restart-api/restart-frontend). NSSM 외 수동 관리 명령 |
+| ✅ | `browser_workers.py` | 통합 워커 CLI facade (start/stop/status/restart/restart-api/restart-frontend). 내부 구현은 `browser_worker_runtime/`로 분리 |
 | ✅ | `browser-workers.ps1` | `browser_workers.py`의 PowerShell 래퍼 |
 | ✅ | `run.ps1` | API + Frontend 동시 실행 (NSSM 미사용 수동 실행 경로) |
 | ✅ | `start.ps1` | 서비스 시작 래퍼 (NSSM 설정 및 수동 기동) |

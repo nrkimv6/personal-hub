@@ -555,14 +555,14 @@
 
   async function startWatchdogs() {
     if (redisStatus && !redisStatus.connected) {
-      alert('Redis가 연결되지 않았습니다.\nwatchdog 시작은 Redis Command Listener를 경유합니다.\n\nCLI에서 실행: python scripts/browser_workers.py start');
+      alert('Redis가 연결되지 않았습니다.\nwatchdog 시작은 Redis Command Listener를 경유합니다.\n\nCLI에서 실행: python scripts/services/browser_workers.py start');
       return;
     }
 
     await runWithActionLoading('watchdogs-start', async () => {
       await serviceDashboardApi.startWatchdogs();
       await fetchStatus();
-    }, '시작 실패\n\nCLI에서 실행: python scripts/browser_workers.py start');
+    }, '시작 실패\n\nCLI에서 실행: python scripts/services/browser_workers.py start');
   }
 
   async function startDevRunner() {
@@ -606,7 +606,7 @@
       const result = await serviceDashboardApi.restartRedis();
       alert(result.message);
       await fetchExtraStatus();
-    }, '재시작 실패\n\nCLI: browser_workers.py redis-restart');
+    }, '재시작 실패\n\nCLI: scripts/services/browser_workers.py redis-restart');
   }
 
   onMount(() => {

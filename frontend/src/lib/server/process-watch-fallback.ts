@@ -84,6 +84,7 @@ function inferScope(name: string, exe: string, cmdline: string): string {
   const joined = `${name || ''} ${exe || ''} ${cmdline || ''}`.toLowerCase().replaceAll('\\', '/');
   const rootHint = PROJECT_ROOT.toLowerCase().replaceAll('\\', '/');
   if (joined.includes(rootHint)) return 'monitor_page';
+  // browser_workers.py는 CLI facade 경로로 유지한다.
   if (joined.includes('monitor-page') || joined.includes('browser_workers.py') || joined.includes('app/main.py')) {
     return 'monitor_page';
   }

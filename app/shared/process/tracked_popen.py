@@ -77,7 +77,7 @@ def tracked_popen_sync(
     role: str = "unknown",
     **kwargs,
 ) -> subprocess.Popen:
-    """동기 버전 tracked_popen — browser_workers.py 등 동기 스크립트용.
+    """동기 버전 tracked_popen — browser_workers.py facade 등 동기 스크립트용.
 
     새 이벤트 루프를 생성하여 비동기 등록을 실행.
     Redis 실패 시 경고만 출력하고 Popen 객체를 반환.

@@ -154,7 +154,7 @@ class WorkerService:
         command_listener: executor_service.restart_listener() 경유 (Redis 시그널).
           → Session 0(SYSTEM)에서 subprocess를 직접 spawn하면 SYSTEM 권한이 상속되어
             git dubious ownership 등 사용자 컨텍스트가 필요한 작업이 실패함.
-        기타 infra: browser_workers.py 직접 subprocess 호출.
+        기타 infra: browser_workers.py facade를 직접 subprocess 호출.
         """
         if name == "command_listener":
             # Redis graceful-exit 시그널 → Session 1 watchdog가 재시작
