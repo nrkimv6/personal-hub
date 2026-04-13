@@ -227,23 +227,31 @@ class TestStartRun:
         data = response.json()
         assert data["plan_file"] == "docs/plan/2026-02-27_test.md"
 
-    async def test_double_start_returns_409(self, client, mock_executor_redis):
-        """max_concurrent_runners(3) 초과 시 429 반환 — 실질적 duplicate-start 방지"""
+    async def test_double_start_returns_429(self, client, mock_executor_redis):
+        """max_concurrent_runners 초과 시 429 반환 — 동시 실행 제한 short-circuit 검증"""
         from app.modules.dev_runner.services.executor_service import ACTIVE_RUNNERS_KEY, RUNNER_KEY_PREFIX
         fake_async = mock_executor_redis["async"]
         await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
-        # 3개 runner 추가 (max_concurrent_runners=3 초과 → 429)
+        mocked_settings = SimpleNamespace(
+            max_concurrent_runners=3,
+            default_engine="claude",
+            default_fix_engine="claude",
+        )
+        # 설정 파일 값과 무관하게 over-limit 분기를 강제 재현한다.
         for i in range(3):
             rid = f"existing-runner-{i}"
             await fake_async.sadd(ACTIVE_RUNNERS_KEY, rid)
             await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
             await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", str(10000 + i))
 
-        with patch.object(executor_service, '_is_pid_alive', return_value=True):
+        with patch.object(executor_service, '_is_pid_alive', return_value=True), \
+             patch.object(fake_async, 'brpop', new=AsyncMock(return_value=None)) as mock_brpop, \
+             patch("app.modules.dev_runner.services.executor_service.settings_service.get", return_value=mocked_settings):
             response = await client.post("/api/v1/dev-runner/run", json={
                 "plan_file": "test-plan.md"
             })
         assert response.status_code == 429
+        mock_brpop.assert_not_awaited()
 
     async def test_start_redis_down_503(self, client, mock_executor_redis):
         # ConnectionError 테스트: ping에서 실패하도록 mock
