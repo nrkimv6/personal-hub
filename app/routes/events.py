@@ -1,4 +1,4 @@
-"""
+﻿"""
 이벤트 API 라우트 - 독립 이벤트 관리
 
 GET 엔드포인트는 공개, CUD 엔드포인트는 관리자 인증 필요
@@ -86,6 +86,60 @@ def get_events(
         page_size=page_size,
     )
 
+
+@router.get("/check-duplicate-url", response_model=Optional[EventResponse])
+def check_duplicate_url(
+    url: str = Query(..., description="확인할 URL"),
+    exclude_id: Optional[int] = Query(None, description="제외할 이벤트 ID"),
+    db: Session = Depends(get_db),
+):
+    """
+    동일 URL로 등록된 이벤트가 있는지 확인합니다.
+    """
+    existing = event_service.check_duplicate_url(db, url, exclude_id)
+    if not existing:
+        return None
+    return event_service._to_response(db, existing)
+
+@router.post("/import-from-instagram", response_model=EventResponse, status_code=201)
+def import_from_instagram(
+    data: EventImportFromInstagram,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
+    """
+    Instagram 게시물에서 이벤트를 생성합니다. (관리자 전용)
+
+    - LLM 분류 결과(llm_tag, llm_urls, llm_event_* 등)를 기반으로 이벤트 자동 생성
+    - 이미 연결된 이벤트가 있으면 해당 이벤트 반환
+    """
+    event = event_service.import_from_instagram(db, data)
+    if not event:
+        raise HTTPException(status_code=404, detail="Instagram post not found")
+    return event
+
+@router.post("/import-from-url", response_model=EventImportFromUrlResponse)
+def import_from_url(
+    data: EventImportFromUrl,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
+    """
+    URL에서 이벤트 정보를 추출합니다. (관리자 전용)
+
+    - Playwright로 페이지 로드
+    - 페이지 유형별 최적화된 추출기 사용 (Google Forms, Naver Form, Naver Blog 등)
+    - LLM으로 이벤트 정보 분석
+    - auto_save=True면 Event 자동 생성
+
+    지원 페이지 유형:
+    - google_forms: Google Forms 설문
+    - naver_form: Naver Form 설문
+    - naver_blog_pc: Naver Blog PC 버전
+    - naver_blog_mobile: Naver Blog 모바일 버전
+    - generic: 기타 일반 웹페이지 (시맨틱 태그/OG 메타데이터 기반)
+    """
+    return event_service.import_from_url(db, data)
 
 @router.get("/{event_id}", response_model=EventResponse)
 def get_event(event_id: int, db: Session = Depends(get_db)):
@@ -193,61 +247,10 @@ def toggle_offline(
     return result
 
 
-@router.post("/import-from-instagram", response_model=EventResponse, status_code=201)
-def import_from_instagram(
-    data: EventImportFromInstagram,
-    db: Session = Depends(get_db),
-    admin: UserInfo = Depends(require_admin),
-):
-    """
-    Instagram 게시물에서 이벤트를 생성합니다. (관리자 전용)
-
-    - LLM 분류 결과(llm_tag, llm_urls, llm_event_* 등)를 기반으로 이벤트 자동 생성
-    - 이미 연결된 이벤트가 있으면 해당 이벤트 반환
-    """
-    event = event_service.import_from_instagram(db, data)
-    if not event:
-        raise HTTPException(status_code=404, detail="Instagram post not found")
-    return event
 
 
-@router.post("/import-from-url", response_model=EventImportFromUrlResponse)
-def import_from_url(
-    data: EventImportFromUrl,
-    db: Session = Depends(get_db),
-    admin: UserInfo = Depends(require_admin),
-):
-    """
-    URL에서 이벤트 정보를 추출합니다. (관리자 전용)
-
-    - Playwright로 페이지 로드
-    - 페이지 유형별 최적화된 추출기 사용 (Google Forms, Naver Form, Naver Blog 등)
-    - LLM으로 이벤트 정보 분석
-    - auto_save=True면 Event 자동 생성
-
-    지원 페이지 유형:
-    - google_forms: Google Forms 설문
-    - naver_form: Naver Form 설문
-    - naver_blog_pc: Naver Blog PC 버전
-    - naver_blog_mobile: Naver Blog 모바일 버전
-    - generic: 기타 일반 웹페이지 (시맨틱 태그/OG 메타데이터 기반)
-    """
-    return event_service.import_from_url(db, data)
 
 
-@router.get("/check-duplicate-url", response_model=Optional[EventResponse])
-def check_duplicate_url(
-    url: str = Query(..., description="확인할 URL"),
-    exclude_id: Optional[int] = Query(None, description="제외할 이벤트 ID"),
-    db: Session = Depends(get_db),
-):
-    """
-    동일 URL로 등록된 이벤트가 있는지 확인합니다.
-    """
-    existing = event_service.check_duplicate_url(db, url, exclude_id)
-    if not existing:
-        return None
-    return event_service._to_response(db, existing)
 
 
 @router.get("/{event_id}/instagram-source")
@@ -256,3 +259,4 @@ def get_instagram_source(event_id: int, db: Session = Depends(get_db)):
     이벤트의 Instagram 출처 정보를 조회합니다. (lazy loading용)
     """
     return event_service.get_instagram_source(db, event_id)
+
