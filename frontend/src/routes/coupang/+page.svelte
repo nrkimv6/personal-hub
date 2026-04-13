@@ -95,6 +95,8 @@
     return enabledEvents.reduce((latest, current) => (current > latest ? current : latest));
   }
 
+  const latestEnabledEventAt = $derived(getLatestEnabledEventAt());
+
   function getWorkerBanner(): WorkerBanner | null {
     if (workerHealth) {
       if (workerHealth.is_running === false) {
@@ -157,6 +159,8 @@
 
     return null;
   }
+
+  const workerBanner = $derived(getWorkerBanner());
 
   async function runWorkerRecovery(action: WorkerRecoveryAction): Promise<void> {
     workerActionLoading = action;
@@ -435,7 +439,6 @@
     </div>
   {/if}
 
-  {@const workerBanner = getWorkerBanner()}
   {#if workerBanner}
     <div
       class={`rounded border px-4 py-3 text-sm ${
@@ -451,8 +454,8 @@
         <div class="space-y-1">
           <div class="font-semibold">{workerBanner.title}</div>
           <div>{workerBanner.message}</div>
-          {#if getLatestEnabledEventAt()}
-            <div class="text-xs opacity-80">최근 활성 일정 점검: {getLatestEnabledEventAt()}</div>
+          {#if latestEnabledEventAt}
+            <div class="text-xs opacity-80">최근 활성 일정 점검: {latestEnabledEventAt}</div>
           {/if}
         </div>
         {#if workerBanner.action}
