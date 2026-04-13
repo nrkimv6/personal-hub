@@ -148,7 +148,9 @@ class TestIntegrationRestartListener:
     def test_integration_restart_listener_filter_includes_dev_listener(self, browser_workers_module):
         """T3: restart_listener()의 role 필터가 dev_listener를 포함하는지 소스 코드로 검증."""
         import inspect
-        source = inspect.getsource(browser_workers_module.BrowserWorkerManager.restart_listener)
+        from scripts.services.browser_worker_runtime import listener_infra_actions
+
+        source = inspect.getsource(listener_infra_actions.restart_listener)
         assert 'not in ("listener", "dev_listener")' in source or \
                "not in ('listener', 'dev_listener')" in source, \
             f"restart_listener의 role 필터가 dev_listener를 포함하지 않음"
