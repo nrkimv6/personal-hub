@@ -75,6 +75,28 @@ async def _collect_events(gen, count: int, timeout: float = 2.0) -> list[str]:
 
 class TestStreamEventsIntegration:
     @pytest.mark.asyncio
+    async def test_enable_keyspace_notifications_right_sets_notify_keyspace_events(self, event_service, async_redis):
+        """R: keyspace notifications 설정이 KEx$로 수행되는지 검증."""
+        mock_config_set = AsyncMock(return_value=True)
+        async_redis.config_set = mock_config_set
+        event_service._async = async_redis
+
+        await event_service._enable_keyspace_notifications()
+
+        mock_config_set.assert_awaited_once_with("notify-keyspace-events", "KEx$")
+
+    @pytest.mark.asyncio
+    async def test_enable_keyspace_notifications_error_ignores_config_failure(self, event_service, async_redis):
+        """E: Redis CONFIG SET 실패가 스트림 초기화를 죽이지 않는지 검증."""
+        async def _raise(*args, **kwargs):
+            raise RuntimeError("config disabled")
+
+        async_redis.config_set = AsyncMock(side_effect=_raise)
+        event_service._async = async_redis
+
+        await event_service._enable_keyspace_notifications()
+
+    @pytest.mark.asyncio
     async def test_initial_events_yielded(self, event_service, sync_redis, async_redis):
         """연결 직후 connected + status 이벤트가 yield 되는지 확인"""
         mock_pubsub = AsyncMock()
@@ -92,6 +114,9 @@ class TestStreamEventsIntegration:
 
         second = await gen.__anext__()
         assert second.startswith("event: status\n")
+
+        assert "event: connected" in first
+        assert "event: status" in second
 
         await gen.aclose()
 
