@@ -318,6 +318,19 @@
 										{session.agent_name}
 									</span>
 								{/if}
+								{#if session.db_request_ids?.length > 0}
+									<span
+										class="px-1.5 py-0.5 rounded text-xs bg-emerald-100 text-emerald-700"
+										title="DB 요청 ID: {session.db_request_ids.join(', ')}"
+									>
+										DB #{session.db_request_ids[0]}{session.db_request_ids.length > 1 ? ` +${session.db_request_ids.length - 1}` : ''}
+									</span>
+									{#if session.db_source_type && session.db_source_type !== session.source_type}
+										<span class="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700" title="JSONL={session.source_type}, DB={session.db_source_type}">
+											타입 불일치
+										</span>
+									{/if}
+								{/if}
 								{#if summary}
 									{#if summary.status === 'pending' || summary.status === 'processing'}
 										<span class="px-1.5 py-0.5 rounded text-xs bg-yellow-100 text-yellow-700">요약 중...</span>

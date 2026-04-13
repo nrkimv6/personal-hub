@@ -40,6 +40,8 @@ class SessionMetaResponse(BaseModel):
     cwd: Optional[str] = None
     git_branch: Optional[str] = None
     first_message: Optional[str] = None
+    db_request_ids: List[int] = []
+    db_source_type: Optional[str] = None
 
 
 class SummarizeResponse(BaseModel):
@@ -79,6 +81,7 @@ def list_sessions(
     limit: int = Query(20, ge=1, le=200),
     since: Optional[str] = Query(None, description="ISO8601 datetime"),
     source_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
 ):
     """세션 목록 조회."""
     sessions_dir = CLAUDE_PROJECTS_DIR / encoded_project
@@ -150,6 +153,32 @@ def list_sessions(
                 break
         except OSError as e:
             logger.warning(f"세션 파일 읽기 실패: {jsonl_file} — {e}")
+
+    # llm_requests DB 조인 — claude_session_id 매칭
+    if results:
+        try:
+            from app.modules.claude_worker.models.llm_request import LLMRequest
+            result_ids = [r.id for r in results]
+            db_rows = (
+                db.query(LLMRequest.claude_session_id, LLMRequest.id, LLMRequest.caller_type)
+                .filter(LLMRequest.claude_session_id.in_(result_ids))
+                .all()
+            )
+            # session_id → {request_ids, caller_types}
+            db_map: dict[str, tuple[list[int], Optional[str]]] = {}
+            for row in db_rows:
+                sid = row.claude_session_id
+                if sid not in db_map:
+                    db_map[sid] = ([], row.caller_type)
+                db_map[sid][0].append(row.id)
+
+            for res in results:
+                if res.id in db_map:
+                    req_ids, caller_type = db_map[res.id]
+                    res.db_request_ids = req_ids
+                    res.db_source_type = caller_type
+        except Exception as e:
+            logger.warning(f"llm_requests DB 조인 실패: {e}")
 
     return results
 

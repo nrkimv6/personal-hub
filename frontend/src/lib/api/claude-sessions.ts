@@ -13,6 +13,8 @@ export interface SessionMeta {
   cwd: string | null;
   git_branch: string | null;
   first_message: string | null;
+  db_request_ids: number[];
+  db_source_type: string | null;
 }
 
 export interface SummaryResult {
