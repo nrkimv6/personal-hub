@@ -29,7 +29,7 @@ def r_live():
     try:
         client.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
     yield client
     client.close()
 

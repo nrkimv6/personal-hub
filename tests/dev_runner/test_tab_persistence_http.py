@@ -24,14 +24,6 @@ ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
 
 
-def _is_api_available() -> bool:
-    try:
-        resp = requests.get(f"{ADMIN_API}/health", timeout=2)
-        return resp.status_code < 500
-    except Exception:
-        return False
-
-
 def _collect_initial_status_http(timeout: float = 5.0) -> list[dict]:
     """SSE /events 연결 후 초기 status 이벤트의 runners 목록 반환"""
     try:
@@ -80,8 +72,6 @@ class TestRunnersEndpoint503Http:
             f"응답: {response.text}"
         )
 
-
-@pytest.mark.skipif(not _is_api_available(), reason="Admin API 서버 미실행")
 @pytest.mark.http_live
 @pytest.mark.allow_prod_redis
 class TestSseRecentVisibleHttpLive:

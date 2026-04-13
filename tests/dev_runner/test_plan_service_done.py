@@ -293,7 +293,7 @@ def test_batch_done_endpoint_responds_http():
     try:
         r = requests.post(f"{ADMIN_API}/api/v1/dev-runner/plans/batch-done", timeout=10)
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-        pytest.skip("Admin API (port 8001) not available or timed out — skip T4")
+        pytest.fail("Admin API (port 8001) not available or timed out — skip T4")
 
     assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text[:200]}"
     body = r.json()
@@ -310,7 +310,7 @@ def test_batch_done_skips_live_worktree_http():
     try:
         r = requests.post(f"{ADMIN_API}/api/v1/dev-runner/plans/batch-done", timeout=10)
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-        pytest.skip("Admin API (port 8001) not available or timed out — skip T4")
+        pytest.fail("Admin API (port 8001) not available or timed out — skip T4")
 
     assert r.status_code == 200
     body = r.json()

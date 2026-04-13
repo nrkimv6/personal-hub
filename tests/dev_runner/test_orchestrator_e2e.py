@@ -89,7 +89,7 @@ class TestOrchestratorE2E:
         try:
             from plan_runner.core.merge import MergeOrchestrator, MergeRequest, MergeResult
         except ImportError:
-            pytest.skip("plan_runner not available in monitor-page context")
+            pytest.fail("plan_runner not available in monitor-page context")
 
         fake_sync = fakeredis.FakeRedis(decode_responses=True)
 

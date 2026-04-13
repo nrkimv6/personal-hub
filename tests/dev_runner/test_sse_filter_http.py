@@ -49,14 +49,6 @@ def _collect_initial_status_http(timeout: float = 5.0) -> list[dict]:
     return []
 
 
-def _is_api_available() -> bool:
-    try:
-        resp = requests.get(f"{ADMIN_API}/health", timeout=2)
-        return resp.status_code < 500
-    except Exception:
-        return False
-
-
 @pytest.fixture
 def redis_client():
     r = redis_lib.Redis(host="localhost", port=6379, db=0, decode_responses=True)
@@ -64,7 +56,6 @@ def redis_client():
     r.close()
 
 
-@pytest.mark.skipif(not _is_api_available(), reason="Admin API 서버 미실행")
 @pytest.mark.allow_prod_redis
 class TestSseFilterHttp:
     def test_http_events_initial_status_excludes_tc_trigger(self, redis_client):

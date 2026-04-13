@@ -34,7 +34,7 @@ def r_live():
     try:
         client.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
     yield client
     client.close()
 
@@ -204,7 +204,7 @@ def test_http_log_stream_connected_event():
             assert event_type == "connected", f"첫 이벤트가 connected가 아님: {event_type}"
             assert data_value == "ok", f"data가 ok가 아님: {data_value}"
     except requests.exceptions.Timeout:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +288,7 @@ def test_http_log_stream_endpoint_accessible():
             assert "text/event-stream" in content_type, \
                 f"Content-Type이 text/event-stream이 아님: {content_type}"
     except requests.exceptions.Timeout:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
 
 
 # ---------------------------------------------------------------------------
@@ -310,9 +310,9 @@ def test_http_log_history_returns_valid_structure():
             if run.get("runner_id", "").startswith("lg-"):
                 assert len(run["runner_id"]) > 3, f"pseudo runner_id 형식 이상: {run['runner_id']}"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
 
 
 @pytest.mark.http_live
@@ -338,9 +338,9 @@ def test_http_log_full_legacy_pseudo_id():
         assert "lines" in data, f"lines 키 없음"
         assert isinstance(data["lines"], list), f"lines가 list가 아님"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
 
 
 @pytest.mark.http_live
@@ -365,9 +365,9 @@ def test_http_log_recent_legacy_pseudo_id():
         data = recent_resp.json()
         assert "lines" in data, f"lines 키 없음"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
 
 
 @pytest.mark.http_live
@@ -384,9 +384,9 @@ def test_http_log_full_nonexist_runner():
         assert data.get("lines") == [], f"빈 lines가 아님: {data.get('lines')}"
         assert data.get("total_lines") == 0, f"total_lines가 0이 아님: {data.get('total_lines')}"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +403,7 @@ def test_http_log_recent_returns_from_line():
     try:
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
 
     runner_id = "t5-from-line-test"
     with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False, encoding="utf-8") as f:
@@ -424,9 +424,9 @@ def test_http_log_recent_returns_from_line():
         assert data["from_line"] == 100, f"from_line 기대 100, 실제 {data['from_line']}"
         assert len(data["lines"]) == 100
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
     finally:
         r.delete(f"plan-runner:runners:{runner_id}:stream_log_path")
         r.close()
@@ -445,7 +445,7 @@ def test_http_log_stream_since_line_param():
     try:
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
 
     runner_id = "t5-since-line-test"
     with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False, encoding="utf-8") as f:
@@ -483,9 +483,9 @@ def test_http_log_stream_since_line_param():
         # 첫 수신 줄은 line 95부터
         assert "line 95" in lines_received[0], f"첫 줄이 line 95가 아님: {lines_received[0]}"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
     finally:
         r.delete(f"plan-runner:runners:{runner_id}:stream_log_path")
         r.close()
@@ -504,7 +504,7 @@ def test_http_log_recent_small_stream_file():
     try:
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
 
     runner_id = "t5-small-stream-test"
     with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False, encoding="utf-8") as sf:
@@ -531,9 +531,9 @@ def test_http_log_recent_small_stream_file():
         assert "old line" not in combined, f"이전 실행 로그가 반환됨: {combined[:100]}"
         assert "START" in combined or len(data["lines"]) == 0, f"stream 파일 내용 아님: {combined[:100]}"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
     finally:
         r.delete(f"plan-runner:runners:{runner_id}:stream_log_path")
         r.delete(f"plan-runner:runners:{runner_id}:log_file_path")
@@ -554,7 +554,7 @@ def test_http_log_recent_legacy_pseudo_id_after_size_removal():
     try:
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
 
     # 레거시 파일 생성 (runner_id 없는 형식) — log_service에서 직접 확인
     log_dir = None
@@ -599,9 +599,9 @@ def test_http_log_recent_legacy_pseudo_id_after_size_removal():
         data = recent_resp.json()
         assert len(data["lines"]) > 0, "레거시 파일 recent 응답이 빈 lines"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
     finally:
         try:
             os.unlink(legacy_path)
@@ -619,7 +619,7 @@ def test_http_log_recent_codex_runtime_failure_signature():
     try:
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
 
     runner_id = "t5-codex-runtime-failure"
     with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False, encoding="utf-8") as f:
@@ -640,9 +640,9 @@ def test_http_log_recent_codex_runtime_failure_signature():
         assert "unknown variant `xhigh`" in merged
         assert "model_reasoning_effort" in merged
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
     finally:
         r.delete(f"plan-runner:runners:{runner_id}:stream_log_path")
         r.close()
@@ -667,9 +667,9 @@ def test_http_logs_history_visible_only_true():
         assert "runs" in data, f"runs 키 없음: {data.keys()}"
         assert isinstance(data["runs"], list), "runs가 list가 아님"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
 
 
 @pytest.mark.http_live
@@ -683,9 +683,9 @@ def test_http_logs_history_visible_only_default_false():
         assert "runs" in data, f"runs 키 없음: {data.keys()}"
         assert isinstance(data["runs"], list), "runs가 list가 아님"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")
 
 
 @pytest.mark.http_live
@@ -701,6 +701,6 @@ def test_http_logs_full_chunk_response():
         assert "total_lines" in data, f"total_lines 키 없음: {data.keys()}"
         assert "offset" in data, f"offset 키 없음: {data.keys()}"
     except requests.exceptions.ConnectionError:
-        pytest.skip("API server not responding")
+        pytest.fail("API server not responding")
     except requests.exceptions.Timeout:
-        pytest.skip("API server timeout")
+        pytest.fail("API server timeout")

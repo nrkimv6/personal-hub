@@ -614,7 +614,7 @@ class TestLaunchConflictResolverEngine:
     def test_RIGHT_conflict_resolver_cmd_includes_engine(self):
         """R(Right): conflict resolver 실행 시 --engine 인자 포함"""
         if not (_HAS_MODULE and hasattr(_listener, "_launch_conflict_resolver_process")):
-            pytest.skip("_launch_conflict_resolver_process not available")
+            pytest.fail("_launch_conflict_resolver_process not available")
 
         captured_cmds = []
 
@@ -641,7 +641,7 @@ class TestLaunchConflictResolverEngine:
     def test_BOUNDARY_resolver_engine_default_claude(self):
         """B(Boundary): engine 미지정 시 기본값 'claude'"""
         if not (_HAS_MODULE and hasattr(_listener, "_launch_conflict_resolver_process")):
-            pytest.skip("_launch_conflict_resolver_process not available")
+            pytest.fail("_launch_conflict_resolver_process not available")
 
         captured_cmds = []
 
@@ -667,7 +667,7 @@ class TestLaunchConflictResolverEngine:
     def test_RIGHT_auto_fix_cmd_includes_engine(self):
         """R(Right): auto-fix 실행 시 --engine 인자 포함"""
         if not (_HAS_MODULE and hasattr(_listener, "_launch_auto_fix_process")):
-            pytest.skip("_launch_auto_fix_process not available")
+            pytest.fail("_launch_auto_fix_process not available")
 
         captured_cmds = []
 

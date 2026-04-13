@@ -24,21 +24,6 @@ ARCHIVE_DIR = Path(__file__).parent.parent.parent / "docs" / "archive"
 STRICT_CONTRACT = os.environ.get("DONE_API_CONTRACT_STRICT", "").strip() == "1"
 
 
-def _api_available() -> bool:
-    try:
-        r = requests.get(f"{BASE_URL}/plans", timeout=5)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-def _request_or_skip(method: str, url: str, timeout: int):
-    try:
-        return requests.request(method=method, url=url, timeout=timeout)
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
-        pytest.skip(f"Admin API 서버(8001) 연결 불가/타임아웃: {exc}")
-
-
 @pytest.fixture(scope="module")
 def tmp_plan_file():
     """테스트용 임시 plan 파일 생성 (docs/plan/ 아래에 배치)"""
@@ -62,15 +47,13 @@ def tmp_plan_file():
         archive_path.unlink()
 
 
-@pytest.mark.skipif(not _api_available(), reason="Admin API 서버(8001)가 응답하지 않음 — 서버 기동 후 실행")
 def test_post_done_returns_200_R(tmp_plan_file):
     """R: POST /api/plans/{path}/done → 200 응답"""
     encoded = base64.urlsafe_b64encode(tmp_plan_file.encode()).decode()
-    resp = _request_or_skip("POST", f"{BASE_URL}/plans/{encoded}/done", timeout=120)
+    resp = requests.post(f"{BASE_URL}/plans/{encoded}/done", timeout=120)
     assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
 
 
-@pytest.mark.skipif(not _api_available(), reason="Admin API 서버(8001)가 응답하지 않음 — 서버 기동 후 실행")
 def test_done_moves_file_to_archive_R(tmp_plan_file):
     """R: done 처리 후 plan 파일이 docs/archive/로 이동됨 (test_post_done_returns_200_R 이후 상태 검증)"""
     fname = Path(tmp_plan_file).name
@@ -79,20 +62,18 @@ def test_done_moves_file_to_archive_R(tmp_plan_file):
     # 파일이 plan/ 에 아직 있으면 이 테스트에서 done 호출
     if Path(tmp_plan_file).exists():
         encoded = base64.urlsafe_b64encode(tmp_plan_file.encode()).decode()
-        _request_or_skip("POST", f"{BASE_URL}/plans/{encoded}/done", timeout=120)
+        requests.post(f"{BASE_URL}/plans/{encoded}/done", timeout=120)
     assert archive_path.exists(), f"archive 파일이 없음: {archive_path}"
     assert not Path(tmp_plan_file).exists(), f"plan 파일이 아직 plan/ 에 있음: {tmp_plan_file}"
 
 
-@pytest.mark.skipif(not _api_available(), reason="Admin API 서버(8001)가 응답하지 않음 — 서버 기동 후 실행")
 def test_done_nonexistent_plan_returns_error_E():
     """E: 존재하지 않는 plan 경로 → 4xx 응답"""
     encoded = base64.urlsafe_b64encode(b"/nonexistent/path/to/plan.md").decode()
-    resp = _request_or_skip("POST", f"{BASE_URL}/plans/{encoded}/done", timeout=10)
+    resp = requests.post(f"{BASE_URL}/plans/{encoded}/done", timeout=10)
     assert 400 <= resp.status_code < 500, f"expected 4xx, got {resp.status_code}"
 
 
-@pytest.mark.skipif(not _api_available(), reason="Admin API 서버(8001)가 응답하지 않음 — 서버 기동 후 실행")
 @pytest.mark.skipif(STRICT_CONTRACT, reason="strict 모드에서는 strict 전용 케이스만 실행")
 def test_done_resolver_error_contract_compat_E():
     """E(compat): docs/plan 외 경로 done 호출 시 hard-fail/legacy fallback 둘 다 허용."""
@@ -130,7 +111,6 @@ def test_done_resolver_error_contract_compat_E():
             archive_path.unlink()
 
 
-@pytest.mark.skipif(not _api_available(), reason="Admin API 서버(8001)가 응답하지 않음 — 서버 기동 후 실행")
 @pytest.mark.skipif(not STRICT_CONTRACT, reason="DONE_API_CONTRACT_STRICT=1 환경에서만 strict 계약 검증")
 def test_done_resolver_error_contract_strict_E():
     """E(strict): docs/plan 외 경로 done 호출은 hard-fail(success=false, no move)이어야 한다."""

@@ -95,7 +95,7 @@ def redis_db15():
         r = redis_lib.Redis(host="localhost", port=6379, db=REDIS_TEST_DB, decode_responses=True)
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
     r.flushdb()
     yield r
     r.flushdb()

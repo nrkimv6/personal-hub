@@ -27,7 +27,7 @@ def redis_client():
     try:
         r.ping()
     except redis.ConnectionError:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
     yield r
     r.close()
 

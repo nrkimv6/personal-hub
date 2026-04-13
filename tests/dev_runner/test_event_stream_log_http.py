@@ -87,14 +87,6 @@ def r():
     client.close()
 
 
-def _check_admin_api():
-    try:
-        resp = requests.get(f"{ADMIN_API}/api/v1/dev-runner/status", timeout=3)
-        return resp.status_code == 200
-    except Exception:
-        return False
-
-
 @pytest.fixture
 def local_client():
     app = FastAPI()
@@ -141,7 +133,6 @@ def test_http_events_log_completed_commit_failed_preserves_error_detail(local_cl
     assert payload["error"] == detail
 
 
-@pytest.mark.skipif(not _check_admin_api(), reason="Admin API not available (localhost:8001)")
 @pytest.mark.integration
 class TestEventStreamLogIntegration:
     """T3/T4: /events SSE에서 log/merge_log 이벤트 수신 확인"""

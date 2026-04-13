@@ -81,19 +81,47 @@ def test_no_skipif_redis_available_right():
     )
 
 
+def test_no_skipif_api_and_pg_available_right():
+    """skipif + API/PG helper 조합이 tests/ 전체에서 0건인지 확인."""
+    import re
+
+    this_file = Path(__file__)
+    pattern = re.compile(r"@pytest\.mark\.skipif\(not _(api_available|is_api_available|check_admin_api|pg_available)\(")
+    matches = []
+    for f in TESTS_ROOT.rglob("*.py"):
+        if f == this_file:
+            continue
+        try:
+            content = f.read_text(encoding="utf-8", errors="replace")
+            for lineno, line in enumerate(content.splitlines(), 1):
+                if pattern.search(line):
+                    matches.append(f"{f.relative_to(TESTS_ROOT)}: {lineno}: {line.strip()}")
+        except Exception:
+            pass
+
+    assert matches == [], (
+        f"skipif+api/pg helper 잔존 {len(matches)}건:\n" + "\n".join(matches)
+    )
+
+
 def test_no_helper_function_defs_right():
-    """Grep으로 def _server_available|def _redis_available 가 제거 대상 5개 파일에서 0건인지 확인."""
+    """Grep으로 제거 대상 helper 함수가 선택된 파일들에서 0건인지 확인."""
     import re
 
     target_files = [
-        TESTS_ROOT / "dev_runner" / "test_connection_leak_e2e.py",
-        TESTS_ROOT / "dev_runner" / "test_connection_leak_http.py",
-        TESTS_ROOT / "dev_runner" / "test_connection_leak_integration.py",
-        TESTS_ROOT / "dev_runner" / "test_redis_isolation_75.py",
+        TESTS_ROOT / "dev_runner" / "test_post_merge_done_http.py",
+        TESTS_ROOT / "dev_runner" / "test_v2_merge_fallback_http.py",
+        TESTS_ROOT / "dev_runner" / "test_event_stream_log_http.py",
+        TESTS_ROOT / "dev_runner" / "test_redis_reconnect_e2e.py",
+        TESTS_ROOT / "dev_runner" / "test_sse_filter_e2e.py",
+        TESTS_ROOT / "dev_runner" / "test_sse_filter_http.py",
+        TESTS_ROOT / "dev_runner" / "test_tab_persistence_http.py",
+        TESTS_ROOT / "dev_runner" / "test_merge_lock_per_repo_http.py",
+        TESTS_ROOT / "test_database_pg_compat.py",
         TESTS_ROOT / "test_pg_sequence_sync.py",
     ]
 
-    pattern = re.compile(r"def _server_available|def _redis_available")
+    pattern = re.compile(r"def _api_available|def _is_api_available|def _check_admin_api|def _pg_available")
     matches = []
     for f in target_files:
         if not f.exists():
@@ -104,7 +132,7 @@ def test_no_helper_function_defs_right():
                 matches.append(f"{f.name}: {lineno}: {line.strip()}")
 
     assert matches == [], (
-        f"_server_available/_redis_available 함수 정의 잔존 {len(matches)}건:\n"
+        f"_api_available/_is_api_available/_check_admin_api/_pg_available 함수 정의 잔존 {len(matches)}건:\n"
         + "\n".join(matches)
     )
 

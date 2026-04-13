@@ -104,7 +104,7 @@ class TestRecoverPendingMergeIntegration:
         try:
             r.ping()
         except Exception:
-            pytest.skip("Redis DB15 연결 불가 — 통합 TC 스킵")
+            pytest.fail("Redis DB15 연결 불가 — 통합 TC 스킵")
         yield r
         # 테스트 후 정리
         keys = r.keys(f"{RUNNER_KEY_PREFIX}:test_*")
