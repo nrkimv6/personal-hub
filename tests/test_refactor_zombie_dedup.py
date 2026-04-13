@@ -18,10 +18,10 @@ def _read_main_py() -> str:
 
 
 def _read_browser_workers_py() -> str:
-    """scripts/services/browser_workers.py 소스 반환."""
+    """scripts/services/browser_worker_runtime/manager.py 소스 반환."""
     import os
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(base, "scripts", "services", "browser_workers.py")
+    path = os.path.join(base, "scripts", "services", "browser_worker_runtime", "manager.py")
     with open(path, encoding="utf-8") as f:
         return f.read()
 
@@ -56,12 +56,12 @@ class TestBrowserWorkersPubsubFlagCheck:
 
         # 수정된 패턴이 있어야 함
         assert '"S" in c.get("flags"' in src or '"S" in c.get(' in src, (
-            "browser_workers.py에 '\"S\" in flags' 패턴이 없음. "
+            "browser_worker_runtime/manager.py에 '\"S\" in flags' 패턴이 없음. "
             "pubsub_count 판정이 수정되지 않음."
         )
 
         # 구버전 패턴이 없어야 함
         assert 'startswith("S")' not in src, (
-            "browser_workers.py에 flags.startswith('S') 패턴이 남아 있음. "
+            "browser_worker_runtime/manager.py에 flags.startswith('S') 패턴이 남아 있음. "
             "'\"S\" in flags'로 변경되어야 함."
         )

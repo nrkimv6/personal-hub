@@ -31,11 +31,12 @@ def browser_workers_module():
 def mock_manager(browser_workers_module, tmp_path):
     """BrowserWorkerManager를 pid_dir=tmp_path로 생성 (프로세스 실행 없이)."""
     bw = browser_workers_module
-    with patch.object(bw, "tracked_popen_sync") as mock_popen, \
-         patch.object(bw, "read_pid_file", return_value=None), \
-         patch.object(bw, "is_process_alive", return_value=False), \
-         patch.object(bw, "kill_pid"), \
-         patch.object(bw, "remove_pid_file"), \
+    from scripts.services.browser_worker_runtime import manager as bw_impl
+    with patch.object(bw_impl, "tracked_popen_sync") as mock_popen, \
+         patch.object(bw_impl, "read_pid_file", return_value=None), \
+         patch.object(bw_impl, "is_process_alive", return_value=False), \
+         patch.object(bw_impl, "kill_pid"), \
+         patch.object(bw_impl, "remove_pid_file"), \
          patch("time.sleep"):
         mgr = bw.BrowserWorkerManager.__new__(bw.BrowserWorkerManager)
         mgr.pid_dir = tmp_path
@@ -61,7 +62,7 @@ def mock_manager(browser_workers_module, tmp_path):
         mock_proc = MagicMock()
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
-        yield mgr, mock_popen, bw
+        yield mgr, mock_popen, bw_impl
 
 
 # ─── Phase T1: 단위 테스트 ──────────────────────────────────────────────────
