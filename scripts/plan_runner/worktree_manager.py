@@ -1,7 +1,7 @@
-"""
-WorktreeManager — git worktree 생명주기 관리 유틸리티
+﻿"""
+WorktreeManager ??git worktree ?앸챸二쇨린 愿由??좏떥由ы떚
 
-각 plan-runner 인스턴스를 격리된 git worktree에서 실행하기 위한 헬퍼 클래스.
+媛?plan-runner ?몄뒪?댁뒪瑜?寃⑸━??git worktree?먯꽌 ?ㅽ뻾?섍린 ?꾪븳 ?ы띁 ?대옒??
 """
 
 import sys as _sys_inject
@@ -19,24 +19,19 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def _run_git(
-    args: list,
-    cwd: Optional[str] = None,
-    inject_safe_directory: bool = True,
-    **kwargs,
-) -> subprocess.CompletedProcess:
-    """git subprocess 헬퍼 — `-c safe.directory=*` 자동 주입.
+def _run_git(args: list, cwd: Optional[str] = None, **kwargs) -> subprocess.CompletedProcess:
+    """git subprocess ?ы띁 ??`-c safe.directory=*` ?먮룞 二쇱엯.
 
-    NSSM 서비스(SYSTEM 계정)에서 실행 시 git 2.35.2+의 CVE-2022-24765 대응 정책으로
-    폴더 소유권 불일치가 감지되어 거부되는 문제를 방지한다.
+    NSSM ?쒕퉬??SYSTEM 怨꾩젙)?먯꽌 ?ㅽ뻾 ??git 2.35.2+??CVE-2022-24765 ????뺤콉?쇰줈
+    ?대뜑 ?뚯쑀沅?遺덉씪移섍? 媛먯??섏뼱 嫄곕??섎뒗 臾몄젣瑜?諛⑹??쒕떎.
 
-    cwd=None 시 프로세스 현재 디렉토리를 사용 (list_worktrees 등 cwd 불필요한 호출 호환).
+    cwd=None ???꾨줈?몄뒪 ?꾩옱 ?붾젆?좊━瑜??ъ슜 (list_worktrees ??cwd 遺덊븘?뷀븳 ?몄텧 ?명솚).
 
-    ⚠️ 중복 주의: app/modules/dev_runner/services/git_utils.py에도 동일한 safe.directory
-    주입 로직이 있다. scripts/와 app/ 간 import 불가로 중복이 불가피하므로, 하나를 수정할 때
-    반드시 다른 쪽도 함께 확인할 것.
+    ?좑툘 以묐났 二쇱쓽: app/modules/dev_runner/services/git_utils.py?먮룄 ?숈씪??safe.directory
+    二쇱엯 濡쒖쭅???덈떎. scripts/? app/ 媛?import 遺덇?濡?以묐났??遺덇??쇳븯誘濡? ?섎굹瑜??섏젙????
+    諛섎뱶???ㅻⅨ 履쎈룄 ?④퍡 ?뺤씤??寃?
     """
-    cmd = (["git", "-c", "safe.directory=*"] if inject_safe_directory else ["git"]) + args
+    cmd = ["git", "-c", "safe.directory=*"] + args
     return subprocess.run(cmd, cwd=cwd, **kwargs)
 
 
@@ -45,55 +40,51 @@ class WorktreeError(Exception):
 
 
 def _is_linked_worktree(project_root: Path) -> bool:
-    """현재 project_root가 linked worktree인지 판별."""
-    # 메인 worktree는 .git 디렉토리, linked worktree는 .git 파일(포인터) 형태다.
+    """?꾩옱 project_root媛 linked worktree?몄? ?먮퀎."""
+    # 硫붿씤 worktree??.git ?붾젆?좊━, linked worktree??.git ?뚯씪(?ъ씤?? ?뺥깭??
     return (project_root / ".git").is_file()
 
 
 def ensure_main_branch(project_root: Path) -> None:
-    """메인 레포가 main 브랜치인지 확인하고, 아니면 main으로 복귀.
+    """硫붿씤 ?덊룷媛 main 釉뚮옖移섏씤吏 ?뺤씤?섍퀬, ?꾨땲硫?main?쇰줈 蹂듦?.
 
-    main이면 즉시 return (no-op).
-    uncommitted changes가 있어 checkout 불가능하면 WorktreeError 발생.
+    main?대㈃ 利됱떆 return (no-op).
+    uncommitted changes媛 ?덉뼱 checkout 遺덇??ν븯硫?WorktreeError 諛쒖깮.
     """
     result = _run_git(
         ["rev-parse", "--abbrev-ref", "HEAD"],
         cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
     )
-    branch = result.stdout.strip()
+    branch = result.stdout.strip(); print(f"DEBUG: branch={branch!r}, rc={result.returncode}")
     if branch == "main":
         return
-    logger.warning(f"[WorktreeManager] 메인 레포가 {branch}에 있음, main으로 복귀")
+    logger.warning(f"[WorktreeManager] 硫붿씤 ?덊룷媛 {branch}???덉쓬, main?쇰줈 蹂듦?")
     checkout = _run_git(
         ["checkout", "main"],
-        cwd=str(project_root),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        inject_safe_directory=False,
+        cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
     )
     if checkout.returncode != 0:
         stderr = (checkout.stderr or "").strip()
-        # linked worktree에서는 main이 다른 worktree에 checkout되어 있으면
-        # 현재 worktree에서 main checkout이 구조적으로 불가능하다.
+        # linked worktree?먯꽌??main???ㅻⅨ worktree??checkout?섏뼱 ?덉쑝硫?
+        # ?꾩옱 worktree?먯꽌 main checkout??援ъ“?곸쑝濡?遺덇??ν븯??
         if _is_linked_worktree(project_root) and "is already used by worktree at" in stderr:
             logger.info(
-                "[WorktreeManager] linked worktree에서 main checkout 스킵 "
-                "(main은 다른 worktree에서 사용 중): %s",
+                "[WorktreeManager] linked worktree?먯꽌 main checkout ?ㅽ궢 "
+                "(main? ?ㅻⅨ worktree?먯꽌 ?ъ슜 以?: %s",
                 project_root,
             )
             return
-        raise WorktreeError(f"메인 레포를 main으로 복귀 실패 (현재: {branch}): {checkout.stderr}")
+        raise WorktreeError(f"硫붿씤 ?덊룷瑜?main?쇰줈 蹂듦? ?ㅽ뙣 (?꾩옱: {branch}): {checkout.stderr}")
 
 
 def parse_plan_filename(plan_file: str) -> tuple:
-    """plan 파일명에서 날짜와 slug 분리
+    """plan ?뚯씪紐낆뿉???좎쭨? slug 遺꾨━
 
-    '2026-02-27_activity-hub-fix.md' → ('2026-02-27', 'activity-hub-fix')
-    날짜 접두사가 없으면 ('', stem) 반환
+    '2026-02-27_activity-hub-fix.md' ??('2026-02-27', 'activity-hub-fix')
+    ?좎쭨 ?묐몢?ш? ?놁쑝硫?('', stem) 諛섑솚
     """
     stem = Path(plan_file).stem
-    # YYYY-MM-DD_ 패턴 감지
+    # YYYY-MM-DD_ ?⑦꽩 媛먯?
     import re
     m = re.match(r'^(\d{4}-\d{2}-\d{2})_(.+)$', stem)
     if m:
@@ -102,9 +93,9 @@ def parse_plan_filename(plan_file: str) -> tuple:
 
 
 def branch_from_plan(plan_file: str) -> str:
-    """plan 파일명에서 브랜치명 생성
+    """plan ?뚯씪紐낆뿉??釉뚮옖移섎챸 ?앹꽦
 
-    '2026-02-27_activity-hub-fix.md' → 'plan/2026-02-27_activity-hub-fix'
+    '2026-02-27_activity-hub-fix.md' ??'plan/2026-02-27_activity-hub-fix'
     """
     stem = Path(plan_file).stem
     return f"plan/{stem}"
@@ -124,14 +115,14 @@ class MergeResult:
 class WorktreeManager:
     @staticmethod
     def validate(worktree_path: Path) -> bool:
-        """worktree가 실제로 유효한지 검증.
+        """worktree媛 ?ㅼ젣濡??좏슚?쒖? 寃利?
 
-        유효 조건:
-        1. 디렉토리 존재
-        2. .git 파일(worktree 링크) 존재
-        3. git rev-parse --git-dir 성공
+        ?좏슚 議곌굔:
+        1. ?붾젆?좊━ 議댁옱
+        2. .git ?뚯씪(worktree 留곹겕) 議댁옱
+        3. git rev-parse --git-dir ?깃났
 
-        깨진 worktree(디렉토리만 있고 .git 없음)는 False 반환.
+        源⑥쭊 worktree(?붾젆?좊━留??덇퀬 .git ?놁쓬)??False 諛섑솚.
         """
         if not worktree_path.is_dir():
             return False
@@ -145,26 +136,26 @@ class WorktreeManager:
 
     @staticmethod
     def _apply_sparse_checkout(worktree_path: Path) -> None:
-        """worktree에 sparse-checkout 적용: docs/plan/, docs/archive/ 제외"""
-        # sparse-checkout 활성화 (이미 활성이어도 멱등)
+        """worktree??sparse-checkout ?곸슜: docs/plan/, docs/archive/ ?쒖쇅"""
+        # sparse-checkout ?쒖꽦??(?대? ?쒖꽦?댁뼱??硫깅벑)
         _run_git(
             ["sparse-checkout", "init", "--no-cone"],
             cwd=str(worktree_path), capture_output=True
         )
-        # 패턴 설정: 전체 포함, docs/plan/ + docs/archive/ 제외
+        # ?⑦꽩 ?ㅼ젙: ?꾩껜 ?ы븿, docs/plan/ + docs/archive/ ?쒖쇅
         _run_git(
             ["sparse-checkout", "set", "--no-cone",
              "/*", "!/docs/plan/", "!/docs/archive/"],
             cwd=str(worktree_path), capture_output=True
         )
-        logger.info(f"[WorktreeManager] sparse-checkout 적용: {worktree_path} (docs/plan, docs/archive 제외)")
+        logger.info(f"[WorktreeManager] sparse-checkout ?곸슜: {worktree_path} (docs/plan, docs/archive ?쒖쇅)")
 
     @staticmethod
     def create(runner_id: str, base_dir: Path, plan_file: Optional[str] = None) -> tuple:
-        """git worktree add 실행 후 (worktree_path, branch) 반환
+        """git worktree add ?ㅽ뻾 ??(worktree_path, branch) 諛섑솚
 
-        plan_file 지정 시: branch='plan/{stem}', path=base_dir/{stem}
-        미지정 시: branch='runner/{runner_id}', path=base_dir/{runner_id}
+        plan_file 吏???? branch='plan/{stem}', path=base_dir/{stem}
+        誘몄????? branch='runner/{runner_id}', path=base_dir/{runner_id}
         """
         if not runner_id:
             raise WorktreeError("runner_id cannot be empty")
@@ -178,7 +169,7 @@ class WorktreeManager:
         try:
             base_dir.mkdir(parents=True, exist_ok=True)
             ensure_main_branch(base_dir.parent)
-            # 브랜치 존재 여부 사전 확인: 존재 시 -b 없이 재사용
+            # 釉뚮옖移?議댁옱 ?щ? ?ъ쟾 ?뺤씤: 議댁옱 ??-b ?놁씠 ?ъ궗??
             branch_check = _run_git(
                 ["branch", "--list", branch],
                 cwd=str(base_dir.parent), capture_output=True, text=True, encoding="utf-8"
@@ -202,20 +193,20 @@ class WorktreeManager:
                     "missing but already registered worktree",
                 )
                 if any(marker in result.stderr for marker in _stale_markers):
-                    # 워크트리 디렉토리가 실제로 존재하면 재사용 (커밋 보존)
+                    # ?뚰겕?몃━ ?붾젆?좊━媛 ?ㅼ젣濡?議댁옱?섎㈃ ?ъ궗??(而ㅻ컠 蹂댁〈)
                     if worktree_path.is_dir():
                         if WorktreeManager.validate(worktree_path):
-                            logger.info(f"[WorktreeManager] 기존 worktree 재사용: {branch}")
+                            logger.info(f"[WorktreeManager] 湲곗〈 worktree ?ъ궗?? {branch}")
                             WorktreeManager._apply_sparse_checkout(worktree_path)
                             return worktree_path, branch
-                        # .git 없는 깨진 worktree → 정리 후 재생성
-                        logger.warning(f"[WorktreeManager] 깨진 worktree 정리 후 재생성: {branch} ({worktree_path})")
+                        # .git ?녿뒗 源⑥쭊 worktree ???뺣━ ???ъ깮??
+                        logger.warning(f"[WorktreeManager] 源⑥쭊 worktree ?뺣━ ???ъ깮?? {branch} ({worktree_path})")
                         shutil.rmtree(str(worktree_path))
                         _run_git(
                             ["worktree", "prune", "--expire", "now"],
                             cwd=str(base_dir.parent), capture_output=True,
                         )
-                    # 디렉토리 없음 + 브랜치만 남은 경우: 미머지 커밋 확인 후 분기
+                    # ?붾젆?좊━ ?놁쓬 + 釉뚮옖移섎쭔 ?⑥? 寃쎌슦: 誘몃㉧吏 而ㅻ컠 ?뺤씤 ??遺꾧린
                     _run_git(
                         ["worktree", "prune", "--expire", "now"],
                         cwd=str(base_dir.parent), capture_output=True,
@@ -226,50 +217,50 @@ class WorktreeManager:
                     )
                     has_unmerged = unmerged.returncode == 0 and unmerged.stdout.strip()
                     if has_unmerged:
-                        # 미머지 커밋 있음: branch -D 스킵, 기존 브랜치로 워크트리 연결
+                        # 誘몃㉧吏 而ㅻ컠 ?덉쓬: branch -D ?ㅽ궢, 湲곗〈 釉뚮옖移섎줈 ?뚰겕?몃━ ?곌껐
                         result = _run_git(
                             ["worktree", "add", str(worktree_path), branch],
                             cwd=str(base_dir.parent), capture_output=True, text=True, encoding="utf-8",
                         )
                         if result.returncode != 0:
-                            raise WorktreeError(f"git worktree add 실패 (기존 브랜치 재사용 시도): stderr={result.stderr.strip()}, stdout={result.stdout.strip()}")
-                        logger.warning(f"[WorktreeManager] 미머지 커밋 보존 — 기존 브랜치 재사용: {branch}")
+                            raise WorktreeError(f"git worktree add ?ㅽ뙣 (湲곗〈 釉뚮옖移??ъ궗???쒕룄): stderr={result.stderr.strip()}, stdout={result.stdout.strip()}")
+                        logger.warning(f"[WorktreeManager] 誘몃㉧吏 而ㅻ컠 蹂댁〈 ??湲곗〈 釉뚮옖移??ъ궗?? {branch}")
                     else:
-                        # 미머지 커밋 없음(이미 머지됨 or 빈 브랜치): 기존 동작 유지
+                        # 誘몃㉧吏 而ㅻ컠 ?놁쓬(?대? 癒몄???or 鍮?釉뚮옖移?: 湲곗〈 ?숈옉 ?좎?
                         branch_del = _run_git(
                             ["branch", "-D", branch],
                             cwd=str(base_dir.parent), capture_output=True, text=True, encoding="utf-8",
                         )
                         if branch_del.returncode != 0:
-                            logger.warning(f"[WorktreeManager] branch -D 실패: {branch} — {branch_del.stderr.strip()}")
+                            logger.warning(f"[WorktreeManager] branch -D ?ㅽ뙣: {branch} ??{branch_del.stderr.strip()}")
                         result = _run_git(
                             ["worktree", "add", str(worktree_path), "-b", branch],
                             cwd=str(base_dir.parent), capture_output=True, text=True, encoding="utf-8",
                         )
                         if result.returncode != 0:
-                            raise WorktreeError(f"git worktree add 실패 (재시도 후): stderr={result.stderr.strip()}, stdout={result.stdout.strip()}")
-                        logger.warning(f"[WorktreeManager] dangling 브랜치 정리 후 재생성: {branch}")
+                            raise WorktreeError(f"git worktree add ?ㅽ뙣 (?ъ떆????: stderr={result.stderr.strip()}, stdout={result.stdout.strip()}")
+                        logger.warning(f"[WorktreeManager] dangling 釉뚮옖移??뺣━ ???ъ깮?? {branch}")
                 else:
-                    raise WorktreeError(f"git worktree add 실패: stderr={result.stderr.strip()}, stdout={result.stdout.strip()}")
+                    raise WorktreeError(f"git worktree add ?ㅽ뙣: stderr={result.stderr.strip()}, stdout={result.stdout.strip()}")
             WorktreeManager._apply_sparse_checkout(worktree_path)
             if not WorktreeManager.validate(worktree_path):
-                raise WorktreeError(f"worktree 생성 후 검증 실패 (.git 누락): {worktree_path}")
-            logger.info(f"[WorktreeManager] 생성: {worktree_path} (브랜치: {branch})")
+                raise WorktreeError(f"worktree ?앹꽦 ??寃利??ㅽ뙣 (.git ?꾨씫): {worktree_path}")
+            logger.info(f"[WorktreeManager] ?앹꽦: {worktree_path} (釉뚮옖移? {branch})")
             return worktree_path, branch
         except WorktreeError:
             raise
         except Exception as e:
-            raise WorktreeError(f"worktree 생성 중 오류: {e}")
+            raise WorktreeError(f"worktree ?앹꽦 以??ㅻ쪟: {e}")
 
     @staticmethod
     def remove(runner_id: str, base_dir: Path, plan_file: Optional[str] = None, branch: Optional[str] = None, delete_branch: bool = True) -> bool:
-        """git worktree remove + (선택적) git branch -D
+        """git worktree remove + (?좏깮?? git branch -D
 
-        우선순위: branch 파라미터 > plan_file > runner_id 기반
-        delete_branch=False: worktree 디렉토리만 제거, branch는 보존 (merge 전 사전 제거 시 사용)
+        ?곗꽑?쒖쐞: branch ?뚮씪誘명꽣 > plan_file > runner_id 湲곕컲
+        delete_branch=False: worktree ?붾젆?좊━留??쒓굅, branch??蹂댁〈 (merge ???ъ쟾 ?쒓굅 ???ъ슜)
         """
         if branch:
-            # branch 파라미터가 있으면 그대로 사용, worktree_path는 base_dir/{branch_slug}로 추론
+            # branch ?뚮씪誘명꽣媛 ?덉쑝硫?洹몃?濡??ъ슜, worktree_path??base_dir/{branch_slug}濡?異붾줎
             branch_slug = branch.replace("/", "_")
             worktree_path = base_dir / branch_slug
         elif plan_file:
@@ -285,28 +276,28 @@ class WorktreeManager:
                 cwd=str(base_dir.parent), capture_output=True, text=True, encoding="utf-8"
             )
             if result.returncode != 0 and "is not a working tree" not in result.stderr:
-                logger.warning(f"[WorktreeManager] worktree 삭제 경고: {result.stderr}")
+                logger.warning(f"[WorktreeManager] worktree ??젣 寃쎄퀬: {result.stderr}")
             if delete_branch:
                 _run_git(
                     ["branch", "-D", branch],
                     cwd=str(base_dir.parent), capture_output=True, text=True, encoding="utf-8"
                 )
-            logger.info(f"[WorktreeManager] 제거: {runner_id} (delete_branch={delete_branch})")
+            logger.info(f"[WorktreeManager] ?쒓굅: {runner_id} (delete_branch={delete_branch})")
             return True
         except Exception as e:
-            logger.error(f"[WorktreeManager] 제거 실패: {e}")
-            return True  # 멱등 처리
+            logger.error(f"[WorktreeManager] ?쒓굅 ?ㅽ뙣: {e}")
+            return True  # 硫깅벑 泥섎━
 
     @staticmethod
     def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None, branch: Optional[str] = None) -> MergeResult:
-        """worktree 변경사항을 main 브랜치에 머지
+        """worktree 蹂寃쎌궗??쓣 main 釉뚮옖移섏뿉 癒몄?
 
-        우선순위: branch 파라미터 > plan_file > runner_id 기반
-        dirty working tree는 merge 전 stash, 결과에 따라 pop.
-        예외 발생 시에도 finally에서 main 브랜치 복귀 보장.
+        ?곗꽑?쒖쐞: branch ?뚮씪誘명꽣 > plan_file > runner_id 湲곕컲
+        dirty working tree??merge ??stash, 寃곌낵???곕씪 pop.
+        ?덉쇅 諛쒖깮 ?쒖뿉??finally?먯꽌 main 釉뚮옖移?蹂듦? 蹂댁옣.
         """
         if branch:
-            pass  # 그대로 사용
+            pass  # 洹몃?濡??ъ슜
         elif plan_file:
             stem = Path(plan_file).stem
             branch = f"plan/{stem}"
@@ -314,17 +305,17 @@ class WorktreeManager:
             branch = f"runner/{runner_id}"
         stashed = False
         try:
-            # main 체크아웃
+            # main 泥댄겕?꾩썐
             ensure_main_branch(project_root)
-            # is-ancestor 사전 체크 — 이미 머지된 브랜치면 skip
+            # is-ancestor ?ъ쟾 泥댄겕 ???대? 癒몄???釉뚮옖移섎㈃ skip
             ancestor_check = _run_git(
                 ["merge-base", "--is-ancestor", branch, "HEAD"],
                 cwd=str(project_root), capture_output=True
             )
             if ancestor_check.returncode == 0:
-                logger.info(f"[WorktreeManager] 이미 머지됨 — skip: {branch}")
-                return MergeResult(success=True, conflict=False, already_merged=True, message="이미 머지됨 — skip")
-            # pre-merge stash: dirty working tree 감지
+                logger.info(f"[WorktreeManager] ?대? 癒몄?????skip: {branch}")
+                return MergeResult(success=True, conflict=False, already_merged=True, message="?대? 癒몄?????skip")
+            # pre-merge stash: dirty working tree 媛먯?
             status_r = _run_git(
                 ["status", "--porcelain"],
                 cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
@@ -338,42 +329,29 @@ class WorktreeManager:
                 logger.info(f"[WorktreeManager] pre-merge stash: rc={stash_r.returncode}, stashed={stashed}")
             result = _run_git(
                 ["merge", branch, "--no-ff", "-m", f"merge: {branch}"],
-                cwd=str(project_root),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                inject_safe_directory=False,
+                cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
             )
             if result.returncode == 0:
-                # 머지 성공 → stash pop (있으면)
+                # 癒몄? ?깃났 ??stash pop (?덉쑝硫?
                 stash_pop_conflict = False
                 if stashed:
                     pop_r = _run_git(
                         ["stash", "pop"],
-                        cwd=str(project_root),
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        inject_safe_directory=False,
+                        cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
                     )
                     if pop_r.returncode != 0:
                         stash_pop_conflict = True
-                        logger.warning(f"[WorktreeManager] stash pop 충돌 — drop 실행: {pop_r.stderr[:200]}")
-                        _run_git(
-                            ["stash", "drop"],
-                            cwd=str(project_root),
-                            capture_output=True,
-                            inject_safe_directory=False,
-                        )
+                        logger.warning(f"[WorktreeManager] stash pop 異⑸룎 ??drop ?ㅽ뻾: {pop_r.stderr[:200]}")
+                        _run_git(["stash", "drop"], cwd=str(project_root), capture_output=True)
                     stashed = False
-                logger.info(f"[WorktreeManager] 머지 성공: {branch}")
-                return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="머지 성공")
+                logger.info(f"[WorktreeManager] 癒몄? ?깃났: {branch}")
+                return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="癒몄? ?깃났")
             else:
                 conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
                 overwritten = "would be overwritten" in result.stderr or "would be overwritten" in result.stdout
-                # "overwritten" 감지 시 auto-commit 후 1회 retry
+                # "overwritten" 媛먯? ??auto-commit ??1??retry
                 if overwritten and not conflict:
-                    logger.warning(f"[merge_to_main] 'overwritten' 감지 — auto-commit 후 retry")
+                    logger.warning(f"[merge_to_main] 'overwritten' 媛먯? ??auto-commit ??retry")
                     _run_git(["add", "-A"], cwd=str(project_root), capture_output=True)
                     _run_git(
                         ["commit", "-m", "chore: pre-merge safety commit (retry)"],
@@ -381,67 +359,45 @@ class WorktreeManager:
                     )
                     result = _run_git(
                         ["merge", branch, "--no-ff", "-m", f"merge: {branch}"],
-                        cwd=str(project_root),
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        inject_safe_directory=False,
+                        cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
                     )
                     if result.returncode == 0:
                         stash_pop_conflict = False
                         if stashed:
                             pop_r = _run_git(
                                 ["stash", "pop"],
-                                cwd=str(project_root),
-                                capture_output=True,
-                                text=True,
-                                encoding="utf-8",
-                                inject_safe_directory=False,
+                                cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
                             )
                             if pop_r.returncode != 0:
                                 stash_pop_conflict = True
-                                logger.warning(f"[WorktreeManager] stash pop 충돌 — drop 실행: {pop_r.stderr[:200]}")
-                                _run_git(
-                                    ["stash", "drop"],
-                                    cwd=str(project_root),
-                                    capture_output=True,
-                                    inject_safe_directory=False,
-                                )
+                                logger.warning(f"[WorktreeManager] stash pop 異⑸룎 ??drop ?ㅽ뻾: {pop_r.stderr[:200]}")
+                                _run_git(["stash", "drop"], cwd=str(project_root), capture_output=True)
                             stashed = False
-                        logger.info(f"[WorktreeManager] 머지 성공 (auto-commit 후 retry): {branch}")
-                        return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="머지 성공 (auto-commit 후 retry)")
-                    # retry도 실패 시 아래 conflict/error 처리 계속
+                        logger.info(f"[WorktreeManager] 癒몄? ?깃났 (auto-commit ??retry): {branch}")
+                        return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="癒몄? ?깃났 (auto-commit ??retry)")
+                    # retry???ㅽ뙣 ???꾨옒 conflict/error 泥섎━ 怨꾩냽
                     conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
                     overwritten = "would be overwritten" in result.stderr or "would be overwritten" in result.stdout
-                # CONFLICT 줄만 추출하여 message에 포함 (resolve에서 컨텍스트로 활용)
+                # CONFLICT 以꾨쭔 異붿텧?섏뿬 message???ы븿 (resolve?먯꽌 而⑦뀓?ㅽ듃濡??쒖슜)
                 conflict_lines = [l.strip() for l in result.stdout.splitlines() if l.strip().startswith("CONFLICT")]
                 detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr.strip() + "\n" + result.stdout.strip()).strip()[:500]
-                # 항상 abort 후 stash pop
+                # ??긽 abort ??stash pop
                 _run_git(["merge", "--abort"], cwd=str(project_root), capture_output=True)
                 if stashed:
                     pop_r = _run_git(
                         ["stash", "pop"],
-                        cwd=str(project_root),
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        inject_safe_directory=False,
+                        cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
                     )
                     if pop_r.returncode != 0:
-                        logger.warning(f"[WorktreeManager] abort 후 stash pop 실패 — drop: {pop_r.stderr[:200]}")
-                        _run_git(
-                            ["stash", "drop"],
-                            cwd=str(project_root),
-                            capture_output=True,
-                            inject_safe_directory=False,
-                        )
+                        logger.warning(f"[WorktreeManager] abort ??stash pop ?ㅽ뙣 ??drop: {pop_r.stderr[:200]}")
+                        _run_git(["stash", "drop"], cwd=str(project_root), capture_output=True)
                     stashed = False
                 return MergeResult(success=False, conflict=conflict, overwritten=overwritten, message=detail)
         except Exception as e:
             return MergeResult(success=False, conflict=False, exception=str(e), message=str(e))
         finally:
-            # 예외 발생 시에도 main 복귀 보장 (stash pop은 위에서 이미 처리)
-            # 예외는 억제 — 이미 except에서 MergeResult를 반환했거나 상위로 전파 중
+            # ?덉쇅 諛쒖깮 ?쒖뿉??main 蹂듦? 蹂댁옣 (stash pop? ?꾩뿉???대? 泥섎━)
+            # ?덉쇅???듭젣 ???대? except?먯꽌 MergeResult瑜?諛섑솚?덇굅???곸쐞濡??꾪뙆 以?
             try:
                 _run_git(["checkout", "main"], cwd=str(project_root), capture_output=True)
             except Exception:
@@ -449,7 +405,7 @@ class WorktreeManager:
 
     @staticmethod
     def list_worktrees() -> list:
-        """git worktree list --porcelain 파싱"""
+        """git worktree list --porcelain ?뚯떛"""
         try:
             result = _run_git(
                 ["worktree", "list", "--porcelain"],
@@ -473,5 +429,7 @@ class WorktreeManager:
                 worktrees.append(current)
             return worktrees
         except Exception as e:
-            logger.error(f"[WorktreeManager] list 실패: {e}")
+            logger.error(f"[WorktreeManager] list ?ㅽ뙣: {e}")
             return []
+
+

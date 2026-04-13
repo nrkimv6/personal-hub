@@ -1,4 +1,4 @@
-"""좀비 runner heartbeat 감지/복구 TC."""
+﻿"""좀비 runner heartbeat 감지/복구 TC."""
 
 import importlib.util
 import sys
@@ -438,9 +438,10 @@ def test_initial_heartbeat_uses_shared_ttl():
     import inspect
     import importlib.util
     from pathlib import Path
-    scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+    from tests.dev_runner._path_helpers import get_plan_runner_script_path
+    script_path = get_plan_runner_script_path()
     spec = importlib.util.spec_from_file_location(
-        "_dr_plan_runner_ttl_check", str(scripts_dir / "_dr_plan_runner.py")
+        "_dr_plan_runner_ttl_check", str(script_path)
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -491,3 +492,4 @@ def test_alive_process_never_zombie_even_without_output(listener_mod, state_mod,
     finally:
         proc.terminate()
         proc.wait(timeout=5)
+

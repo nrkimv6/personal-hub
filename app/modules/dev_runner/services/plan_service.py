@@ -1,4 +1,4 @@
-"""plan 문서 관리 서비스"""
+﻿"""plan 문서 관리 서비스"""
 
 import asyncio
 import json
@@ -1106,6 +1106,8 @@ class PlanService:
         )
 
     # _check_branch_exists, _check_worktree_exists → git_utils로 이전 (safe.directory 방어 포함)
+    def _check_branch_exists(self, branch: str) -> bool: return check_branch_exists(branch)
+    def _check_worktree_exists(self, worktree: str) -> bool: return check_worktree_exists(worktree)
 
     def _can_done(self, plan: PlanFileResponse) -> bool:
         """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료 OR 상태 헤더 완료 계열 OR 체크박스 없음"""
@@ -1122,12 +1124,14 @@ class PlanService:
                         if i >= 20:
                             break
                         top20 += line
-                branch_match = re.search(r'^>\s*branch:\s*(.+)', top20, re.MULTILINE)
-                if branch_match and check_branch_exists(branch_match.group(1).strip()):
-                    return False
-                worktree_match = re.search(r'^>\s*worktree:\s*(.+)', top20, re.MULTILINE)
-                if worktree_match and check_worktree_exists(worktree_match.group(1).strip()):
-                    return False
+                        branch_match = re.search(r'^>\s*branch:\s*(.+)', top20, re.MULTILINE)
+                        if branch_match and self._check_branch_exists(branch_match.group(1).strip()):
+                            return False
+
+                        wt_match = re.search(r'^>\s*worktree:\s*(.+)', top20, re.MULTILINE)
+                        if wt_match and self._check_worktree_exists(wt_match.group(1).strip()):
+                            return False
+
                 # branch/worktree 없이 worktree-owner만 잔존한 경우 방어
                 if not branch_match and not worktree_match:
                     owner_match = re.search(r'^>\s*worktree-owner:\s*(.+)', top20, re.MULTILINE)
@@ -1468,3 +1472,4 @@ class PlanService:
 plan_service = PlanService()
 
 __all__ = ['plan_service', 'PlanService']
+

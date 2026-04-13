@@ -1,16 +1,16 @@
-"""EventService — Redis keyspace notifications 기반 SSE 이벤트 스트림
+﻿"""EventService ??Redis keyspace notifications 湲곕컲 SSE ?대깽???ㅽ듃由?
 
-plan-runner 실행 상태 변화를 Redis keyspace notifications로 감지하여
-SSE 포맷으로 실시간 전달한다.
+plan-runner ?ㅽ뻾 ?곹깭 蹂?붾? Redis keyspace notifications濡?媛먯??섏뿬
+SSE ?щ㎎?쇰줈 ?ㅼ떆媛??꾨떖?쒕떎.
 
-이벤트 타입:
-  - status              : runner 상태 변경 (status, pid, current_cycle, start_time, plan_file)
-  - tracking            : 현재 추적 중인 태스크 변경 (current_task_text)
-  - plan_changed        : 추적 중인 plan_file 변경 (current_task_plan_file)
-  - log                 : 로그 한 줄 (runner_id, line)
-  - log_completed       : 로그 스트리밍 완료 (runner_id)
-  - merge_log           : 머지 로그 한 줄 (runner_id, line)
-  - merge_log_completed : 머지 로그 스트리밍 완료 (runner_id)
+?대깽?????
+  - status              : runner ?곹깭 蹂寃?(status, pid, current_cycle, start_time, plan_file)
+  - tracking            : ?꾩옱 異붿쟻 以묒씤 ?쒖뒪??蹂寃?(current_task_text)
+  - plan_changed        : 異붿쟻 以묒씤 plan_file 蹂寃?(current_task_plan_file)
+  - log                 : 濡쒓렇 ??以?(runner_id, line)
+  - log_completed       : 濡쒓렇 ?ㅽ듃由щ컢 ?꾨즺 (runner_id)
+  - merge_log           : 癒몄? 濡쒓렇 ??以?(runner_id, line)
+  - merge_log_completed : 癒몄? 濡쒓렇 ?ㅽ듃由щ컢 ?꾨즺 (runner_id)
 """
 
 import asyncio
@@ -34,7 +34,7 @@ from app.modules.dev_runner.services.completion_reason import (
 from app.shared.redis.client import RedisClient
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 from app.modules.dev_runner.services.visibility import is_visible_runner
-from app.modules.dev_runner.services.event_routing import (  # noqa: F401 — re-export 포함
+from app.modules.dev_runner.services.event_routing import (  # noqa: F401 ??re-export ?ы븿
     classify_key,
     extract_runner_id,
     extract_runner_id_from_channel,
@@ -53,7 +53,7 @@ from app.modules.dev_runner.services.event_routing import (  # noqa: F401 — re
     MERGE_LOG_CHANNEL_PATTERN,
     KEY_EVENT_MAP,
 )
-from app.modules.dev_runner.services.event_sse import (  # noqa: F401 — re-export 포함
+from app.modules.dev_runner.services.event_sse import (  # noqa: F401 ??re-export ?ы븿
     sse_format,
     build_log_line_payload as _build_log_line_payload,
 )
@@ -69,76 +69,76 @@ from app.modules.dev_runner.services.event_log_tailer import LogTailer
 
 logger = logging.getLogger(__name__)
 
-HEARTBEAT_INTERVAL = 30  # 초
+HEARTBEAT_INTERVAL = 30  # 珥?
 FILE_POLL_TIMEOUT = 5.0
 FILE_POLL_INTERVAL = 1.0
 
-# ─── pmessage 수신 헬스 게이지 (in-memory, 5분 슬라이딩 윈도우) ─────────────────
+# ??? pmessage ?섏떊 ?ъ뒪 寃뚯씠吏 (in-memory, 5遺??щ씪?대뵫 ?덈룄?? ?????????????????
 import collections as _collections
 
-_PMSG_WINDOW_SEC = 300  # 5분 슬라이딩 윈도우
-_pmsg_timestamps: "collections.deque[float]" = _collections.deque()  # 수신 시각 목록
+_PMSG_WINDOW_SEC = 300  # 5遺??щ씪?대뵫 ?덈룄??
+_pmsg_timestamps: "collections.deque[float]" = _collections.deque()  # ?섏떊 ?쒓컖 紐⑸줉
 
 
 def _record_pmsg_received() -> None:
-    """pmessage 수신 시 호출 — 현재 시각을 슬라이딩 윈도우에 추가"""
+    """pmessage ?섏떊 ???몄텧 ???꾩옱 ?쒓컖???щ씪?대뵫 ?덈룄?곗뿉 異붽?"""
     now = time.monotonic()
     _pmsg_timestamps.append(now)
-    # 오래된 항목 정리 (>5분)
+    # ?ㅻ옒????ぉ ?뺣━ (>5遺?
     while _pmsg_timestamps and now - _pmsg_timestamps[0] > _PMSG_WINDOW_SEC:
         _pmsg_timestamps.popleft()
 
 
 def get_pmsg_count_last5min() -> int:
-    """최근 5분 내 `plan-runner:logs:*` pmessage 수신 건수 반환 (헬스체크용)"""
+    """理쒓렐 5遺???`plan-runner:logs:*` pmessage ?섏떊 嫄댁닔 諛섑솚 (?ъ뒪泥댄겕??"""
     if not _pmsg_timestamps:
         return 0
     now = time.monotonic()
-    # 윈도우 내 항목만 카운트 (deque는 왼쪽이 가장 오래됨)
+    # ?덈룄??????ぉ留?移댁슫??(deque???쇱そ??媛???ㅻ옒??
     cutoff = now - _PMSG_WINDOW_SEC
     count = sum(1 for t in _pmsg_timestamps if t >= cutoff)
     return count
 class EventService:
-    """Redis keyspace notifications 구독 + SSE 이벤트 생성"""
+    """Redis keyspace notifications 援щ룆 + SSE ?대깽???앹꽦"""
 
     def __init__(self):
-        # 동기 클라이언트 — 현재 값 조회용 (HGETALL / GET)
+        # ?숆린 ?대씪?댁뼵?????꾩옱 媛?議고쉶??(HGETALL / GET)
         sync_client = RedisClient.get_sync_client()
         self._sync = sync_client if sync_client is not None else redis_sync.Redis(
             host=REDIS_HOST, port=REDIS_PORT, decode_responses=True, socket_connect_timeout=5,
         )
-        # 비동기 클라이언트 — keyspace notification 구독용 (ConnectionPool로 연결 수 제한)
+        # 鍮꾨룞湲??대씪?댁뼵????keyspace notification 援щ룆??(ConnectionPool濡??곌껐 ???쒗븳)
         self._async_pool = aioredis.ConnectionPool(
             host=REDIS_HOST, port=REDIS_PORT, decode_responses=True,
             socket_connect_timeout=5, max_connections=50,
         )
         self._async = aioredis.Redis(connection_pool=self._async_pool)
-        # LogTailer — tail state, dedup, 완료 추적, 파일 폴링
+        # LogTailer ??tail state, dedup, ?꾨즺 異붿쟻, ?뚯씪 ?대쭅
         _log_resolver = LogFileResolver(config, self._sync)
         self._log_tailer = LogTailer(self._sync, _log_resolver)
         self._file_poll_timeout = FILE_POLL_TIMEOUT
         self._file_poll_interval_sec = FILE_POLL_INTERVAL
 
-    # ── 초기화 ──────────────────────────────────────────────────────────────
+    # ?? 珥덇린????????????????????????????????????????????????????????????????
 
     async def _enable_keyspace_notifications(self) -> None:
-        """Redis keyspace notifications 활성화"""
+        """Redis keyspace notifications ?쒖꽦??""
         try:
-            # K: keyspace events 접두사 활성화
-            # E: keyevent events 접두사 활성화
+            # K: keyspace events ?묐몢???쒖꽦??
+            # E: keyevent events ?묐몢???쒖꽦??
             # x: expired events
-            # $: string commands (SET, GETSET 등) — runner 상태 키 변경 감지에 필요
+            # $: string commands (SET, GETSET ?? ??runner ?곹깭 ??蹂寃?媛먯????꾩슂
             await self._async.config_set("notify-keyspace-events", "KEx$")
         except Exception:
-            # CONFIG SET 권한 없는 환경(managed Redis 등)에서는 무시
+            # CONFIG SET 沅뚰븳 ?녿뒗 ?섍꼍(managed Redis ???먯꽌??臾댁떆
             pass
 
     def _cleanup_invisible_recent_runners(self) -> None:
-        """SSE 연결 초기화 시 RECENT set에서 invisible runner를 제거 + 크기 상한 적용.
+        """SSE ?곌껐 珥덇린????RECENT set?먯꽌 invisible runner瑜??쒓굅 + ?ш린 ?곹븳 ?곸슜.
 
-        invisible runner(trigger 미설정/비사용자)가 RECENT set을 점령하여
-        SSE status 이벤트의 runners 배열에서 visible runner가 누락되는 문제를 방지한다.
-        정리 순서: invisible 제거 → 크기 상한(MAX_RECENT_RUNNERS) 적용.
+        invisible runner(trigger 誘몄꽕??鍮꾩궗?⑹옄)媛 RECENT set???먮졊?섏뿬
+        SSE status ?대깽?몄쓽 runners 諛곗뿴?먯꽌 visible runner媛 ?꾨씫?섎뒗 臾몄젣瑜?諛⑹??쒕떎.
+        ?뺣━ ?쒖꽌: invisible ?쒓굅 ???ш린 ?곹븳(MAX_RECENT_RUNNERS) ?곸슜.
         """
         try:
             recent_ids: list = self._sync.zrange(RECENT_RUNNERS_KEY, 0, -1) or []
@@ -146,7 +146,7 @@ class EventService:
                 trigger = self._sync.get(f"{RUNNER_KEY_PREFIX}:{rid}:trigger")
                 if not is_visible_runner(trigger, rid):
                     self._sync.zrem(RECENT_RUNNERS_KEY, rid)
-            # invisible 제거 후 크기 상한: oldest-first로 MAX_RECENT_RUNNERS 초과분 제거
+            # invisible ?쒓굅 ???ш린 ?곹븳: oldest-first濡?MAX_RECENT_RUNNERS 珥덇낵遺??쒓굅
             self._sync.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
         except Exception:
             pass
@@ -173,15 +173,15 @@ class EventService:
         return visible_running_ids
 
     def _build_status_payload(self, runner_id: str):
-        """[shim] → event_payload.build_status_payload()"""
+        """[shim] ??event_payload.build_status_payload()"""
         return build_status_payload(self._sync, runner_id)
 
     def _build_all_runners_status(self):
-        """[shim] → event_payload.build_all_runners_status()"""
+        """[shim] ??event_payload.build_all_runners_status()"""
         return build_all_runners_status(self._sync)
 
     def _ensure_log_tailer(self) -> None:
-        """__new__ 기반 테스트에서도 _log_tailer 필드를 보장한다."""
+        """__new__ 湲곕컲 ?뚯뒪?몄뿉?쒕룄 _log_tailer ?꾨뱶瑜?蹂댁옣?쒕떎."""
         if not hasattr(self, "_log_tailer"):
             _log_resolver = LogFileResolver(config, self._sync)
             self._log_tailer = LogTailer(self._sync, _log_resolver)
@@ -190,35 +190,35 @@ class EventService:
         if not hasattr(self, "_file_poll_interval_sec"):
             self._file_poll_interval_sec = FILE_POLL_INTERVAL
 
-    # ── 메인 스트림 ──────────────────────────────────────────────────────────
+    # ?? 硫붿씤 ?ㅽ듃由???????????????????????????????????????????????????????????
 
     async def stream_events(self) -> AsyncGenerator[str, None]:
         """
-        Redis keyspace notifications를 구독하고 SSE 이벤트를 yield한다.
+        Redis keyspace notifications瑜?援щ룆?섍퀬 SSE ?대깽?몃? yield?쒕떎.
 
-        이벤트 타입:
-          - connected    : 연결 직후 1회 (EventSource MIME 검증용)
-          - status       : runner 상태 변경
-          - tracking     : 현재 추적 태스크 변경
-          - plan_changed : 추적 plan_file 변경
+        ?대깽?????
+          - connected    : ?곌껐 吏곹썑 1??(EventSource MIME 寃利앹슜)
+          - status       : runner ?곹깭 蹂寃?
+          - tracking     : ?꾩옱 異붿쟻 ?쒖뒪??蹂寃?
+          - plan_changed : 異붿쟻 plan_file 蹂寃?
         """
         await self._enable_keyspace_notifications()
 
-        # ── 초기 연결 이벤트 (클라이언트가 연결 직후 현재 상태를 받도록)
+        # ?? 珥덇린 ?곌껐 ?대깽??(?대씪?댁뼵?멸? ?곌껐 吏곹썑 ?꾩옱 ?곹깭瑜?諛쏅룄濡?
         yield "event: connected\ndata: ok\n\n"
 
-        # API 재시작 후 SSE 재연결 시 fallback 중복 재전송 방지: tail offset을 EOF로 초기화
-        # (클라이언트 catchUp()이 파일 현재 내용을 로드하므로 서버 fallback은 이후 신규 라인만 담당)
+        # API ?ъ떆????SSE ?ъ뿰寃???fallback 以묐났 ?ъ쟾??諛⑹?: tail offset??EOF濡?珥덇린??
+        # (?대씪?댁뼵??catchUp()???뚯씪 ?꾩옱 ?댁슜??濡쒕뱶?섎?濡??쒕쾭 fallback? ?댄썑 ?좉퇋 ?쇱씤留??대떦)
         try:
             _init_visible = self._list_visible_active_runner_ids()
             await self._log_tailer.init_offsets_for_active_runners(_init_visible)
         except Exception as _e:
-            logger.warning("[events-init-offsets] 초기화 중 예외 (스트림 계속): %s", _e)
+            logger.warning("[events-init-offsets] 珥덇린??以??덉쇅 (?ㅽ듃由?怨꾩냽): %s", _e)
 
-        # SSE 연결 초기화 시 invisible runner 사전 정리 (RECENT set 오염 방지)
+        # SSE ?곌껐 珥덇린????invisible runner ?ъ쟾 ?뺣━ (RECENT set ?ㅼ뿼 諛⑹?)
         self._cleanup_invisible_recent_runners()
 
-        # 초기 status 이벤트 1회 즉시 발행
+        # 珥덇린 status ?대깽??1??利됱떆 諛쒗뻾
         runners = build_all_runners_status(self._sync)
         stabilized_runners = []
         for payload in runners:
@@ -229,7 +229,7 @@ class EventService:
         runners = stabilized_runners
         yield sse_format("status", {"runners": runners})
 
-        # 초기 tracking 이벤트
+        # 珥덇린 tracking ?대깽??
         tracking = build_tracking_payload(self._sync)
         if tracking:
             yield sse_format("tracking", tracking)
@@ -251,7 +251,7 @@ class EventService:
         try:
             while True:
                 try:
-                    # ── pubsub 연결 (또는 재연결)
+                    # ?? pubsub ?곌껐 (?먮뒗 ?ъ뿰寃?
                     if pubsub is None:
                         pubsub = self._async.pubsub()
                         await pubsub.psubscribe(KEYEVENT_CHANNEL)
@@ -260,7 +260,7 @@ class EventService:
                         log_pubsub = self._async.pubsub()
                         await log_pubsub.psubscribe(LOG_CHANNEL_PATTERN, MERGE_LOG_CHANNEL_PATTERN)
 
-                    # ── keyspace 메시지 폴링
+                    # ?? keyspace 硫붿떆吏 ?대쭅
                     message = await pubsub.get_message(
                         ignore_subscribe_messages=True, timeout=0.25
                     )
@@ -307,13 +307,13 @@ class EventService:
                         last_heartbeat = time.monotonic()
                         consecutive_errors = 0
 
-                    # ── 로그 채널 메시지 폴링
+                    # ?? 濡쒓렇 梨꾨꼸 硫붿떆吏 ?대쭅
                     log_message = await log_pubsub.get_message(
                         ignore_subscribe_messages=True, timeout=0.25
                     )
 
                     if log_message and log_message["type"] in ("message", "pmessage"):
-                        # pmessage 수신 게이지 기록 (헬스체크용)
+                        # pmessage ?섏떊 寃뚯씠吏 湲곕줉 (?ъ뒪泥댄겕??
                         _record_pmsg_received()
                         if fallback_active:
                             fallback_active = False
@@ -332,7 +332,7 @@ class EventService:
                         data = log_message.get("data")
 
                         if not data:
-                            pass  # 빈 데이터 무시
+                            pass  # 鍮??곗씠??臾댁떆
                         else:
                             runner_id = extract_runner_id_from_channel(channel)
                             if runner_id:
@@ -430,8 +430,8 @@ class EventService:
                         await asyncio.sleep(0.1)
 
                 except (redis_sync.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError) as redis_err:
-                    # ── Redis 연결 실패 → 정리 후 재시도
-                    logger.warning("[events] Redis 연결 실패: %s: %s", type(redis_err).__name__, redis_err)
+                    # ?? Redis ?곌껐 ?ㅽ뙣 ???뺣━ ???ъ떆??
+                    logger.warning("[events] Redis ?곌껐 ?ㅽ뙣: %s: %s", type(redis_err).__name__, redis_err)
                     if fallback_active:
                         fallback_active = False
                         fallback_exit_count += 1
@@ -477,13 +477,13 @@ class EventService:
             await safe_close_pubsub(log_pubsub)
 
 
-# ── 모듈 레벨 싱글톤 ─────────────────────────────────────────────────────────
+# ?? 紐⑤뱢 ?덈꺼 ?깃????????????????????????????????????????????????????????????
 event_service = EventService()
 
 __all__ = [
     "event_service",
     "EventService",
-    # re-export: 외부 import 호환 (from event_service import X)
+    # re-export: ?몃? import ?명솚 (from event_service import X)
     "RUNNER_KEY_PREFIX",
     "ACTIVE_RUNNERS_KEY",
     "RECENT_RUNNERS_KEY",
@@ -501,3 +501,4 @@ __all__ = [
     "_MERGE_LOG_COMPLETED_SENTINEL",
     "get_pmsg_count_last5min",
 ]
+
