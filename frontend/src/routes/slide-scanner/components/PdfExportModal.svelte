@@ -1,5 +1,5 @@
 <script lang="ts">
-  export interface PdfExportItem {
+  interface PdfExportItem {
     id: number;
     file_name: string;
     captured_at?: string | null;

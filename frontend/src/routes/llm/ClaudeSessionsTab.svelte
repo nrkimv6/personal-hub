@@ -2,7 +2,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { RefreshCw, List, MessageSquare, Clock, GitBranch, Folder, ChevronDown } from 'lucide-svelte';
 	import { createOffsetPagination } from '$lib/utils/pagination.svelte';
-	import { claudeSessionsApi, type SessionMeta, type SummaryResult, type ProjectInfo } from '$lib/api';
+	import { claudeSessionsApi, type SessionMeta, type SummaryResult } from '$lib/api';
+	import type { ClaudeSessionProjectInfo as ProjectInfo } from '$lib/api';
 	import { toast } from '$lib/stores/toast';
 
 	// 페이지네이션

@@ -350,8 +350,9 @@
     </div>
   {:else if error}
     <div class="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400">{error}</div>
-  {:else}
-    <!-- 상단 액션 버튼 -->
+    {:else if repo}
+      {@const r = repo as any}
+      <!-- 상단 액션 버튼 -->
     <div class="flex gap-2 mb-5">
       <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1" onclick={handleFetch} disabled={working}>
         <RefreshCw size={14} /> 페치
@@ -365,11 +366,11 @@
       <button class="px-3 py-1.5 text-sm rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1" onclick={handleAutoCleanup} disabled={working}>
         <Eraser size={14} /> 자동 정리
       </button>
-      {#if repo?.last_ahead != null && repo.last_ahead > 0}
-        <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{repo.last_ahead} ahead</span>
+      {#if r.last_ahead != null && r.last_ahead > 0}
+        <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{r.last_ahead} ahead</span>
       {/if}
-      {#if repo?.last_behind != null && repo.last_behind > 0}
-        <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{repo.last_behind} behind</span>
+      {#if r.last_behind != null && r.last_behind > 0}
+        <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{r.last_behind} behind</span>
       {/if}
     </div>
 

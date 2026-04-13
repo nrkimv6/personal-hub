@@ -956,7 +956,7 @@
 							<div class="space-y-2 max-h-64 overflow-y-auto">
 								{#each serviceAccounts as account}
 									<button
-										onclick={() => selectTarget({ id: account.id, name: account.profile_name || account.identifier })}
+										onclick={() => selectTarget({ id: account.id, name: account.profile_name ?? account.identifier ?? '' })}
 										class="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-blue-500 hover:bg-primary-light transition-colors text-left"
 									>
 										<div class="w-10 h-10 bg-pink-light rounded-full flex items-center justify-center text-pink">

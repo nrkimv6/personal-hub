@@ -70,6 +70,7 @@
     resetDevRunner: () => Promise<void>;
     startDevRunner: () => Promise<void>;
     removeStartup: (name: string) => Promise<void>;
+    restartCommandListener: () => Promise<void>;
   }
 
   let {
@@ -120,7 +121,8 @@
     stopDevRunner,
     resetDevRunner,
     startDevRunner,
-    removeStartup
+    removeStartup,
+    restartCommandListener
   }: Props = $props();
 </script>
 
@@ -200,5 +202,6 @@
     {resetDevRunner}
     {startDevRunner}
     {removeStartup}
+    {restartCommandListener}
   />
 </div>

@@ -72,7 +72,7 @@
 		request_source: 'manual_test',
 		provider: 'claude',
 		model: '',
-		cli_options: null as Record<string, unknown> | null,
+		cli_options: undefined as Record<string, unknown> | undefined,
 		userInput: ''
 	});
 	let createLoading = false;
@@ -136,7 +136,7 @@
 		if (preset.provider) createForm.provider = preset.provider;
 		if (preset.model) createForm.model = preset.model;
 		if (preset.caller_type) createForm.caller_type = preset.caller_type;
-		createForm.cli_options = preset.cliOptions ?? null;
+		createForm.cli_options = preset.cliOptions ?? undefined;
 		// 프리셋 변경 시 사용자 입력은 보존 (이미 작성한 텍스트 유실 방지)
 		// 직접 입력 ↔ 프리셋 전환 시에만 prompt 초기화
 		if (preset.label === '(직접 입력)') {
@@ -495,7 +495,7 @@
 				request_source: 'manual_test',
 				provider: 'claude',
 				model: '',
-				cli_options: null,
+				cli_options: undefined,
 				userInput: ''
 			};
 			selectedPreset = presets[0];

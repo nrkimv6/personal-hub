@@ -46,6 +46,7 @@
   let selectedPost: CollectedPost | null = null;
   let selectedPostLlmResult: LLMRequest | null = null;
   let loadingLlm = false;
+  let currentImageIndex = $state(0);
 
   // 뷰 모드
   type ViewMode = 'grid' | 'list';
@@ -85,10 +86,12 @@
   };
 
   // 피드 타입인지 (추가 옵션 표시용)
-  $: isFeedType = parsedUrl && ['account_profile', 'account_reels', 'hashtag', 'reels_explore'].includes(parsedUrl.url_type);
+  let isFeedType = $derived.by(() =>
+    Boolean(parsedUrl && ['account_profile', 'account_reels', 'hashtag', 'reels_explore'].includes(parsedUrl.url_type))
+  );
 
-  $: canPrevPage = pager.page > 1;
-  $: canNextPage = pager.page < pager.totalPages;
+  let canPrevPage = $derived.by(() => pager.page > 1);
+  let canNextPage = $derived.by(() => pager.page < pager.totalPages);
 
   async function fetchPosts() {
     loading = true;
@@ -1095,11 +1098,11 @@
       <!-- 버튼 -->
       <div class="flex gap-2 justify-end">
         <Button onclick={closeUrlCrawlModal} variant="secondary">취소</Button>
-        <Button
-          onclick={submitUrlCrawl}
-          disabled={isUrlCrawling || !urlCrawlInput.trim() || !urlCrawlAccountId || (parsedUrl && !parsedUrl.is_supported)}
-          variant="primary"
-        >
+      <Button
+        onclick={submitUrlCrawl}
+        disabled={isUrlCrawling || !urlCrawlInput.trim() || !urlCrawlAccountId || Boolean(parsedUrl && !parsedUrl.is_supported)}
+        variant="primary"
+      >
           {isUrlCrawling ? '요청 중...' : '수집 요청'}
         </Button>
       </div>

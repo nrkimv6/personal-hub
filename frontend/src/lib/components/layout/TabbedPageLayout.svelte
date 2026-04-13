@@ -32,6 +32,7 @@
     subtitle,
     tabs = [],
     activeTab = $bindable(),
+    children,
     queryParam = 'tab',
     replaceState = true,
     size = 'default',

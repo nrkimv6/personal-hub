@@ -28,9 +28,9 @@
 	let postsLimit = 50;
 	let postsTotal = 0;
 
-	$: scheduleId = parseInt($page.params.id);
-	$: totalPages = Math.ceil(total / limit);
-	$: postsTotalPages = Math.ceil(postsTotal / postsLimit);
+	let scheduleId = $derived.by(() => parseInt($page.params.id ?? '0', 10));
+	let totalPages = $derived.by(() => Math.ceil(total / limit));
+	let postsTotalPages = $derived.by(() => Math.ceil(postsTotal / postsLimit));
 
 	async function fetchSchedule() {
 		try {

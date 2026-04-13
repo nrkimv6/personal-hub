@@ -119,6 +119,7 @@
 	let bulkCategoryId = $state<number | ''>('');
 	let bulkApplying = $state(false);
 
+	const filteredFolders = $derived(folders);
 	const allSelected = $derived(
 		filteredFolders.length > 0 && filteredFolders.every((f) => selectedFolderIds.has(f.id))
 	);
@@ -179,7 +180,6 @@
 	const unmappedCount = $derived(totalCount - mappedCount);
 	const mappingPct = $derived(totalCount > 0 ? Math.round((mappedCount / totalCount) * 100) : 0);
 
-	const filteredFolders = $derived(folders);
 	const totalPages = $derived(Math.ceil(totalFolderCount / pageSize) || 1);
 
 	// === 마운트 ===

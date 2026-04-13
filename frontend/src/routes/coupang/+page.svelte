@@ -9,7 +9,8 @@
     type CoupangSchedule,
     type CoupangStatusSummary
   } from '$lib/api/coupangTravel';
-  import { serviceAccountApi, type ServiceAccountWithProfile } from '$lib/api/common';
+  import { serviceAccountApi } from '$lib/api/common';
+  import type { ServiceAccountWithProfile } from '$lib/types';
   import { createSelection } from '$lib/utils/selection.svelte';
   import { toast } from '$lib/stores/toast';
 

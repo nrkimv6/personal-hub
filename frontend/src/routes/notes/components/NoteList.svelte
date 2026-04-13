@@ -409,7 +409,7 @@
         <X class="w-10 h-10 text-destructive/50" />
         <p class="text-destructive text-sm">{error}</p>
         <button
-          onclick={load}
+          onclick={() => load()}
           class="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary-hover transition-colors"
         >다시 시도</button>
       </div>

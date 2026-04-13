@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { Component } from 'svelte';
 	import GoogleResultsTab from './GoogleResultsTab.svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
@@ -41,7 +42,7 @@
 		last_search_id?: string;
 		last_run_at?: string;
 		last_result_count?: number;
-		search_params?: { lr?: string; cr?: string; as_sitesearch?: string; num?: number } | null;
+		search_params?: { lr?: string; cr?: string; as_sitesearch?: string; num?: number; exclude_keywords?: string[] } | null;
 		created_at: string;
 		updated_at: string;
 	}
@@ -206,9 +207,9 @@
 	}
 
 	// 탭 정의
-	const googleMainTabs = [
-		{ id: 'search', label: '검색 실행', icon: Search },
-		{ id: 'results', label: '검색결과 관리', icon: ClipboardList }
+	const googleMainTabs: { id: string; label: string; icon: string | Component }[] = [
+		{ id: 'search', label: '검색 실행', icon: Search as unknown as Component },
+		{ id: 'results', label: '검색결과 관리', icon: ClipboardList as unknown as Component }
 	];
 	const googleSubTabs = [
 		{ id: 'saved', label: '저장된 검색' },

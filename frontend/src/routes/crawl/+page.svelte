@@ -556,8 +556,9 @@
 			</div>
 
 			<div class="mt-6 flex gap-2 justify-end">
-				{#if (selectedRequest.status === 'failed' || selectedRequest.status === 'completed') && $isAdmin}
-					<button onclick={() => handleRetry(selectedRequest.id)} class="btn btn-outline btn-sm">
+				{#if selectedRequest && (selectedRequest.status === 'failed' || selectedRequest.status === 'completed') && $isAdmin}
+					{@const request = selectedRequest}
+					<button onclick={() => handleRetry(request.id)} class="btn btn-outline btn-sm">
 						재시도
 					</button>
 				{/if}

@@ -21,7 +21,7 @@
 		format: string;
 	};
 
-	let reportId: string = $derived($page.params.id);
+	let reportId: string = $derived($page.params.id ?? '');
 	let report: Report | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
