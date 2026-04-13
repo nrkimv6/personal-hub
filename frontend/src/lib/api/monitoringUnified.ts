@@ -7,7 +7,7 @@
 import { scheduleApi } from './naver-booking';
 import { coupangTravelApi } from './coupangTravel';
 import { getConfigs, toggleConfig } from './kakaoMonitor';
-import { request } from './client';
+import { activityApi, formatActivityRegion } from './activity';
 import { eventApi } from './system';
 import type { UnifiedMonitorItem, MonitorStatus, MonitorType } from '$lib/types/monitoring';
 
@@ -72,20 +72,14 @@ export async function fetchKakaoItems(): Promise<UnifiedMonitorItem[]> {
 	}));
 }
 
-interface ActivityCenter {
-	id: number;
-	name: string;
-	region?: string;
-}
-
 export async function fetchActivityItems(): Promise<UnifiedMonitorItem[]> {
-	const centers = await request<ActivityCenter[]>('/activity/centers');
+	const centers = (await activityApi.listCenters({ page_size: 100 })).items;
 	return centers.map((c) => ({
 		id: `activity-${c.id}`,
 		type: 'activity' as MonitorType,
 		name: c.name,
 		status: 'idle' as MonitorStatus,
-		summary: c.region ?? undefined,
+		summary: formatActivityRegion(c),
 		detailHref: '/activity',
 		toggleable: false
 	}));
