@@ -257,8 +257,8 @@ def list_schedules(db: Session = Depends(get_db)):
         result.append(ScheduleItem(
             id=ctx["id"],
             date=ctx["date"],
-            is_enabled=ctx["is_enabled"],
-            is_active=ctx.get("is_active", False),
+            is_enabled=bool(ctx["is_enabled"]),
+            is_active=bool(ctx.get("is_active")),
             product_id=ctx.get("item_biz_item_id"),
             item_name=ctx.get("item_name"),
             business_name=ctx.get("business_name"),
@@ -350,7 +350,7 @@ def get_coupang_status(db: Session = Depends(get_db)):
 
 @router.post("/schedules/cleanup", status_code=status.HTTP_200_OK)
 def cleanup_schedules(db: Session = Depends(get_db)):
-    """과거 날짜 및 null 계정 쿠팡 스케줄 일괄 삭제."""
+    """과거 날짜 쿠팡 스케줄만 일괄 삭제."""
     today = date_type.today().isoformat()
     schedules_to_delete = (
         db.query(MonitorSchedule)
@@ -358,8 +358,7 @@ def cleanup_schedules(db: Session = Depends(get_db)):
         .join(Business, BizItem.business_id == Business.id)
         .filter(
             Business.service_type == "coupang",
-            (MonitorSchedule.service_account_id.is_(None))
-            | (MonitorSchedule.date < today),
+            MonitorSchedule.date < today,
         )
         .all()
     )

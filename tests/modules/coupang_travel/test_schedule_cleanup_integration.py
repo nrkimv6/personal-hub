@@ -51,7 +51,7 @@ def test_cleanup_integration_with_real_db(integration_db):
     db.add(biz_item)
     db.flush()
 
-    # 레거시 스케줄: null 계정 + 과거 날짜
+    # 레거시 스케줄: 과거 날짜
     legacy_schedule = MonitorSchedule(
         biz_item_id=biz_item.id,
         date="2025-01-01",
@@ -60,11 +60,20 @@ def test_cleanup_integration_with_real_db(integration_db):
     )
     db.add(legacy_schedule)
 
-    # 유효 스케줄: 미래 날짜 (이번 테스트에서는 생성하지 않음 — null 계정이므로 정리 대상)
+    # 유효 스케줄: 미래 날짜 + null 계정 (이제 cleanup 보존 대상)
+    future_schedule = MonitorSchedule(
+        biz_item_id=biz_item.id,
+        date=(date.today() + timedelta(days=7)).isoformat(),
+        service_account_id=None,
+        is_enabled=True,
+    )
+    db.add(future_schedule)
     db.commit()
 
     inserted_id = legacy_schedule.id
     assert inserted_id is not None, "레거시 스케줄이 DB에 삽입되어야 함"
+    future_id = future_schedule.id
+    assert future_id is not None, "미래 스케줄이 DB에 삽입되어야 함"
 
     # 2. cleanup 로직 직접 실행 (라우터 함수의 쿼리 재현)
     today = date.today().isoformat()
@@ -74,8 +83,7 @@ def test_cleanup_integration_with_real_db(integration_db):
         .join(Business, BizItem.business_id == Business.id)
         .filter(
             Business.service_type == "coupang",
-            (MonitorSchedule.service_account_id.is_(None))
-            | (MonitorSchedule.date < today),
+            MonitorSchedule.date < today,
         )
         .filter(BizItem.id == biz_item.id)  # 테스트 데이터만
         .all()
@@ -94,7 +102,14 @@ def test_cleanup_integration_with_real_db(integration_db):
     ).first()
     assert remaining is None, f"레거시 스케줄(id={inserted_id})이 삭제되어야 함"
 
-    # 5. Teardown — 테스트 Business/BizItem 정리
+    future_remaining = db.query(MonitorSchedule).filter(
+        MonitorSchedule.id == future_id
+    ).first()
+    assert future_remaining is not None, "미래 null-account 스케줄은 삭제되면 안 됨"
+
+    # 5. Teardown — 테스트 데이터 정리
+    db.delete(future_remaining)
+    db.flush()
     db.delete(biz_item)
     db.flush()
     db.delete(business)

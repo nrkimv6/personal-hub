@@ -46,17 +46,6 @@ def _run_cleanup_logic(schedules_to_return):
 # ──────────────────────────────────────────────
 
 class TestCleanupRight:
-    def test_cleanup_removes_null_account_schedules(self):
-        """R(Right): service_account_id=null인 쿠팡 스케줄이 cleanup 대상에 포함된다."""
-        future_date = (date.today() + timedelta(days=30)).isoformat()
-        sched, _, _ = _build_mock_schedule(
-            1, service_account_id=None, date_val=future_date
-        )
-        # null 계정이면 cleanup 대상
-        assert sched.service_account_id is None
-        count = _run_cleanup_logic([sched])
-        assert count == 1
-
     def test_cleanup_removes_past_date_schedules(self):
         """R(Right): date < today인 쿠팡 스케줄이 cleanup 대상에 포함된다."""
         past_date = "2025-01-01"
@@ -72,7 +61,7 @@ class TestCleanupRight:
         schedules = [
             _build_mock_schedule(1, service_account_id=None, date_val="2025-01-01")[0],
             _build_mock_schedule(2, service_account_id=None, date_val="2025-01-02")[0],
-            _build_mock_schedule(3, service_account_id=42, date_val="2025-06-01")[0],
+            _build_mock_schedule(3, service_account_id=42, date_val="2025-01-03")[0],
         ]
         count = _run_cleanup_logic(schedules)
         assert count == 3
@@ -94,6 +83,17 @@ class TestCleanupBoundary:
         assert sched.date >= date.today().isoformat()
         # cleanup에서 제외되어야 하므로, 이런 스케줄이 0건 반환되어야 함
         count = _run_cleanup_logic([])  # 필터링 후 0건
+        assert count == 0
+
+    def test_cleanup_preserves_future_null_account_schedules(self):
+        """B(Boundary): 미래 날짜 + null 계정 스케줄도 cleanup 대상이 아니다."""
+        future_date = (date.today() + timedelta(days=7)).isoformat()
+        sched, _, _ = _build_mock_schedule(
+            11, service_account_id=None, date_val=future_date
+        )
+        assert sched.service_account_id is None
+        assert sched.date >= date.today().isoformat()
+        count = _run_cleanup_logic([])
         assert count == 0
 
     def test_cleanup_ignores_naver_schedules(self):
