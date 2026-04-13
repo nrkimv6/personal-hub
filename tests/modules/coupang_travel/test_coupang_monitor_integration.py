@@ -588,6 +588,63 @@ def test_get_all_with_context_no_event_null_T3(orm_db_session_with_events):
     assert ctx.get("last_event_status") is None
 
 
+# ── T4: last_event 혼합 상태 ─────────────────────────────────────────────────────
+
+def test_schedule_last_event_mixed_status_e2e(orm_db_session_with_events):
+    """T4: schedule 2개, event 각각 success/error → last_event_status 독립 반환."""
+    from app.models.business import Business
+    from app.models.biz_item import BizItem
+    from app.models.monitor_schedule import MonitorSchedule
+    from app.models.monitoring_event import MonitoringEvent
+    from app.services.schedule_service import schedule_service
+
+    db = orm_db_session_with_events
+
+    # Schedule A — success 이벤트
+    biz_a = Business(business_id="cp:t4_mixed_001", name="T4혼합상품A", service_type="coupang")
+    db.add(biz_a)
+    db.flush()
+    item_a = BizItem(business_id=biz_a.id, biz_item_id="t4_item_001a", name="T4아이템A")
+    db.add(item_a)
+    db.flush()
+    sched_a = MonitorSchedule(biz_item_id=item_a.id, date="2026-12-01", is_enabled=True)
+    db.add(sched_a)
+    db.flush()
+    db.add(MonitoringEvent(schedule_id=sched_a.id, event_type="check", status="success", available_count=1))
+
+    # Schedule B — error 이벤트
+    biz_b = Business(business_id="cp:t4_mixed_002", name="T4혼합상품B", service_type="coupang")
+    db.add(biz_b)
+    db.flush()
+    item_b = BizItem(business_id=biz_b.id, biz_item_id="t4_item_001b", name="T4아이템B")
+    db.add(item_b)
+    db.flush()
+    sched_b = MonitorSchedule(biz_item_id=item_b.id, date="2026-12-02", is_enabled=True)
+    db.add(sched_b)
+    db.flush()
+    db.add(MonitoringEvent(schedule_id=sched_b.id, event_type="check", status="error", available_count=0))
+
+    db.commit()
+
+    contexts = schedule_service.get_all_with_context(db, service_type="coupang")
+    assert len(contexts) == 2, f"schedule 2개여야 함, 실제: {len(contexts)}"
+
+    ctx_by_id = {c["id"]: c for c in contexts}
+
+    ctx_a = ctx_by_id[sched_a.id]
+    ctx_b = ctx_by_id[sched_b.id]
+
+    assert ctx_a["last_event_status"] == "success", (
+        f"A의 last_event_status가 'success'여야 함, 실제: {ctx_a['last_event_status']!r}"
+    )
+    assert ctx_a["last_event_at"] is not None
+
+    assert ctx_b["last_event_status"] == "error", (
+        f"B의 last_event_status가 'error'여야 함, 실제: {ctx_b['last_event_status']!r}"
+    )
+    assert ctx_b["last_event_at"] is not None
+
+
 # ── T4: 프록시 E2E 파이프라인 ───────────────────────────────────────────────────
 
 async def test_coupang_proxy_e2e():

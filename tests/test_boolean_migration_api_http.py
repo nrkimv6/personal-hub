@@ -45,3 +45,19 @@ def test_worker_status_200_after_migration(client):
     assert resp.status_code == 200, (
         f"worker/status 500 에러: {resp.status_code} {resp.text[:200]}"
     )
+
+
+def test_worker_status_200_schema_after_fix(client):
+    """T5: GET /api/v1/worker/status → 200 + 스키마 검증
+    수정 후 스키마: started_at 존재, start_time/browser_available 제거됨.
+    """
+    resp = client.get(f"{BASE_URL}/api/v1/worker/status", timeout=10)
+    assert resp.status_code == 200, (
+        f"worker/status 500 에러: {resp.status_code} {resp.text[:200]}"
+    )
+    data = resp.json()
+    assert "started_at" in data, f"started_at 필드가 응답에 없음: {list(data.keys())}"
+    assert "start_time" not in data, f"start_time은 제거된 필드인데 응답에 존재: {list(data.keys())}"
+    assert "browser_available" not in data, (
+        f"browser_available은 제거된 필드인데 응답에 존재: {list(data.keys())}"
+    )
