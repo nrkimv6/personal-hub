@@ -46,7 +46,20 @@
 
 	// 앱 모드와 관리자 여부에 따라 메뉴 필터링
 	function getVisibleEntries(entries: NavEntry[], admin: boolean): NavEntry[] {
-		if (admin) return entries;
+		if (admin) {
+			// 관리자: publicOnly 항목은 사이드바에서 숨김
+			return entries
+				.map((entry) => {
+					if (isNavGroup(entry)) {
+						return { ...entry, items: entry.items.filter((item) => !item.publicOnly) };
+					}
+					return entry;
+				})
+				.filter((entry) => {
+					if (isNavGroup(entry)) return (entry as NavGroup).items.length > 0;
+					return true;
+				});
+		}
 		return entries
 			.map((entry) => {
 				if (isNavGroup(entry)) {

@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import TabNav from '$lib/components/layout/TabNav.svelte';
   import CoupangMonitoringHistory from '$lib/components/CoupangMonitoringHistory.svelte';
+  import CancellationHistoryTab from '$lib/components/coupang/CancellationHistoryTab.svelte';
   import {
     coupangTravelApi,
     type CoupangTarget,
@@ -25,7 +26,7 @@
 
   let loading = $state(false);
   let error = $state('');
-  let activeTab = $state<'schedules' | 'history'>('schedules');
+  let activeTab = $state<'schedules' | 'history' | 'cancellation-history'>('schedules');
 
   let newUrl = $state('');
   let newVendorItemPackageId = $state('');
@@ -53,7 +54,8 @@
 
   const coupangTabs = $derived([
     { id: 'schedules', label: '일정', count: schedules.length || undefined },
-    { id: 'history', label: '이력' }
+    { id: 'history', label: '이력' },
+    { id: 'cancellation-history', label: '취소표 이력' }
   ]);
 
   const filteredSchedules = $derived(
@@ -595,5 +597,9 @@
 
   {#if activeTab === 'history'}
     <CoupangMonitoringHistory />
+  {/if}
+
+  {#if activeTab === 'cancellation-history'}
+    <CancellationHistoryTab />
   {/if}
 </div>
