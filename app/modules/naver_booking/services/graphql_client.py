@@ -429,7 +429,8 @@ class NaverGraphQLClient:
             usage_request_id = _proxy_usage_logger.start_request(
                 schedule_id=schedule_id,
                 target_url=f"{NAVER_GRAPHQL_ENDPOINT}?opName={operation_name}",
-                fetch_method="graphql_api"
+                fetch_method="graphql_api",
+                http_method="post",
             )
 
         for attempt in range(max_retries + 1):
@@ -437,7 +438,10 @@ class NaverGraphQLClient:
             proxy_url = None
             if self._proxy_manager:
                 # is_available 체크 제거: get_fresh_proxy() 내부에서 풀 갱신 시도
-                proxy_url = self._proxy_manager.get_fresh_proxy(exclude=tried_proxies)
+                proxy_url = self._proxy_manager.get_fresh_proxy(
+                    exclude=tried_proxies,
+                    request_method="post",
+                )
                 if proxy_url:
                     tried_proxies.add(proxy_url)
                 if attempt == 0:
@@ -475,7 +479,11 @@ class NaverGraphQLClient:
                         logger.warning(
                             f"[NaverGraphQL] HTTP {response.status} - 프록시 실패: {proxy_url}"
                         )
-                        self._proxy_manager.mark_failed(proxy_url, f"HTTP {response.status}")
+                        self._proxy_manager.mark_failed(
+                            proxy_url,
+                            f"HTTP {response.status}",
+                            request_method="post",
+                        )
                         last_error = f"HTTP {response.status}"
                         # 프록시 사용 이력 기록 (실패)
                         if usage_request_id and proxy_url:
@@ -546,7 +554,11 @@ class NaverGraphQLClient:
                     logger.warning(
                         f"[NaverGraphQL] 프록시 타임아웃 ({response_time:.1f}s > {request_timeout}s): {proxy_url}"
                     )
-                    self._proxy_manager.mark_slow(proxy_url, response_time)
+                    self._proxy_manager.mark_slow(
+                        proxy_url,
+                        response_time,
+                        request_method="post",
+                    )
                     last_error = f"timeout:{response_time:.1f}s"
                     # 프록시 사용 이력 기록 (실패 - 타임아웃)
                     if usage_request_id and proxy_url:
@@ -569,7 +581,11 @@ class NaverGraphQLClient:
                 # 프록시 연결 실패 시 블랙리스트 등록 후 재시도
                 response_time = time.time() - request_start_time
                 if proxy_url and self._proxy_manager:
-                    self._proxy_manager.mark_failed(proxy_url, str(e)[:50])
+                    self._proxy_manager.mark_failed(
+                        proxy_url,
+                        str(e)[:50],
+                        request_method="post",
+                    )
                 logger.error(f"[NaverGraphQL] Request error for {operation_name}: {e}")
                 last_error = str(e)[:50]
                 # 프록시 사용 이력 기록 (실패 - 연결 에러)
@@ -1035,7 +1051,10 @@ class NaverGraphQLClient:
             proxy_url = None
             if self._proxy_manager:
                 # is_available 체크 제거: get_fresh_proxy() 내부에서 풀 갱신 시도
-                proxy_url = self._proxy_manager.get_fresh_proxy(exclude=tried_proxies)
+                proxy_url = self._proxy_manager.get_fresh_proxy(
+                    exclude=tried_proxies,
+                    request_method="get",
+                )
                 if proxy_url:
                     tried_proxies.add(proxy_url)
                 if attempt > 0:
@@ -1070,7 +1089,11 @@ class NaverGraphQLClient:
                     # 403/429 - 프록시 실패로 재시도
                     if response.status in (403, 429):
                         if proxy_url and self._proxy_manager:
-                            self._proxy_manager.mark_failed(proxy_url, f"HTTP {response.status}")
+                            self._proxy_manager.mark_failed(
+                                proxy_url,
+                                f"HTTP {response.status}",
+                                request_method="get",
+                            )
                         last_error = f"HTTP {response.status}"
                         continue
 
@@ -1081,13 +1104,21 @@ class NaverGraphQLClient:
 
             except asyncio.TimeoutError:
                 if proxy_url and self._proxy_manager:
-                    self._proxy_manager.mark_failed(proxy_url, "timeout")
+                    self._proxy_manager.mark_failed(
+                        proxy_url,
+                        "timeout",
+                        request_method="get",
+                    )
                 last_error = "timeout"
                 continue
 
             except aiohttp.ClientError as e:
                 if proxy_url and self._proxy_manager:
-                    self._proxy_manager.mark_failed(proxy_url, str(e)[:30])
+                    self._proxy_manager.mark_failed(
+                        proxy_url,
+                        str(e)[:30],
+                        request_method="get",
+                    )
                 last_error = str(e)[:30]
                 continue
 

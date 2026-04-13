@@ -174,6 +174,7 @@ class CoupangHttpClient:
                 schedule_id=schedule_id,
                 target_url=url,
                 fetch_method="coupang_http_api",
+                http_method="post",
             )
 
         tried_proxies: set = set()
@@ -185,7 +186,10 @@ class CoupangHttpClient:
         for attempt in range(_MAX_RETRIES + 1):
             proxy_url: Optional[str] = None
             if self._proxy_manager:
-                proxy_url = self._proxy_manager.get_fresh_proxy(exclude=tried_proxies)
+                proxy_url = self._proxy_manager.get_fresh_proxy(
+                    exclude=tried_proxies,
+                    request_method="post",
+                )
                 if proxy_url:
                     tried_proxies.add(proxy_url)
                 if attempt == 0:
@@ -222,7 +226,11 @@ class CoupangHttpClient:
                             "[CoupangHttpClient] HTTP %d — 프록시 실패: %s",
                             resp.status, proxy_url,
                         )
-                        self._proxy_manager.mark_failed(proxy_url, f"HTTP {resp.status}")
+                        self._proxy_manager.mark_failed(
+                            proxy_url,
+                            f"HTTP {resp.status}",
+                            request_method="post",
+                        )
                         last_error = f"HTTP {resp.status}"
                         if usage_request_id:
                             self._usage_logger.log_attempt(
@@ -261,7 +269,11 @@ class CoupangHttpClient:
                 response_time = time.time() - request_start
                 last_error = "timeout"
                 if proxy_url and self._proxy_manager:
-                    self._proxy_manager.mark_failed(proxy_url, "timeout")
+                    self._proxy_manager.mark_failed(
+                        proxy_url,
+                        "timeout",
+                        request_method="post",
+                    )
                 if usage_request_id and proxy_url:
                     self._usage_logger.log_attempt(
                         request_id=usage_request_id,
@@ -279,7 +291,11 @@ class CoupangHttpClient:
                 response_time = time.time() - request_start
                 last_error = str(e)[:80]
                 if proxy_url and self._proxy_manager:
-                    self._proxy_manager.mark_failed(proxy_url, last_error)
+                    self._proxy_manager.mark_failed(
+                        proxy_url,
+                        last_error,
+                        request_method="post",
+                    )
                 if usage_request_id and proxy_url:
                     self._usage_logger.log_attempt(
                         request_id=usage_request_id,

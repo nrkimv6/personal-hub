@@ -149,7 +149,11 @@ async def test_http_client_proxy_rotation_ERROR():
     assert items is not None
     assert len(items) == 2
     # proxy1에 대해 mark_failed 호출 검증
-    mock_pm.mark_failed.assert_called_once_with("http://proxy1:8080", "HTTP 403")
+    mock_pm.mark_failed.assert_called_once_with(
+        "http://proxy1:8080",
+        "HTTP 403",
+        request_method="post",
+    )
 
 
 async def test_http_client_proxy_exhausted_BOUNDARY():
@@ -205,7 +209,11 @@ async def test_http_client_proxy_timeout_ERROR():
     assert items is not None
     assert len(items) == 2
     # proxy1 타임아웃 → mark_failed("timeout")
-    mock_pm.mark_failed.assert_called_once_with("http://proxy1:8080", "timeout")
+    mock_pm.mark_failed.assert_called_once_with(
+        "http://proxy1:8080",
+        "timeout",
+        request_method="post",
+    )
 
 
 async def test_http_client_usage_log_RIGHT():
@@ -234,6 +242,7 @@ async def test_http_client_usage_log_RIGHT():
         schedule_id=42,
         target_url="https://trip.coupang.com/api/products/prod_D/vendor-items",
         fetch_method="coupang_http_api",
+        http_method="post",
     )
     # log_attempt 1회 (성공)
     mock_logger.log_attempt.assert_called_once()

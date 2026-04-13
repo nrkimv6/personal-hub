@@ -28,23 +28,43 @@ class Proxy(ProxyBase):
 
     # 상태: pending/active/inactive/blacklisted
     status = Column(String, default="pending")
+    get_status = Column(String)
+    post_status = Column(String)
 
     # 통계
     total_checks = Column(Integer, default=0)
+    get_total_checks = Column(Integer, default=0)
+    post_total_checks = Column(Integer, default=0)
     success_count = Column(Integer, default=0)
+    get_success_count = Column(Integer, default=0)
+    post_success_count = Column(Integer, default=0)
     fail_count = Column(Integer, default=0)  # 연속 실패 횟수
+    get_fail_count = Column(Integer, default=0)
+    post_fail_count = Column(Integer, default=0)
     avg_response_time = Column(Float)
+    get_avg_response_time = Column(Float)
+    post_avg_response_time = Column(Float)
     min_response_time = Column(Float)
+    get_min_response_time = Column(Float)
+    post_min_response_time = Column(Float)
     max_response_time = Column(Float)
+    get_max_response_time = Column(Float)
+    post_max_response_time = Column(Float)
 
     # 우선순위 점수 (0~100)
     priority_score = Column(Float, default=0)
+    get_priority_score = Column(Float, default=0)
+    post_priority_score = Column(Float, default=0)
 
     # 타임스탬프 (로컬 시간)
     first_seen_at = Column(DateTime, default=datetime.now)
     last_seen_at = Column(DateTime)
     last_checked_at = Column(DateTime)
+    get_last_checked_at = Column(DateTime)
+    post_last_checked_at = Column(DateTime)
     last_success_at = Column(DateTime)
+    get_last_success_at = Column(DateTime)
+    post_last_success_at = Column(DateTime)
 
     # 메타
     source = Column(String)
@@ -66,6 +86,15 @@ class Proxy(ProxyBase):
             return round(self.success_count / self.total_checks * 100, 1)
         return None
 
+    def get_metric(self, metric: str, request_method: str = "get"):
+        """메서드별 메트릭 조회."""
+        method = "post" if (request_method or "get").lower() == "post" else "get"
+        method_field = f"{method}_{metric}"
+        value = getattr(self, method_field, None)
+        if value is not None:
+            return value
+        return getattr(self, metric, None)
+
 
 class ProxyCheckHistory(ProxyBase):
     """프록시 검증 이력 테이블"""
@@ -77,6 +106,8 @@ class ProxyCheckHistory(ProxyBase):
 
     # 검증 결과
     is_valid = Column(Boolean, nullable=False)
+    request_method = Column(String, default="get")
+    validation_url = Column(String)
     response_time = Column(Float)  # 응답 시간 (초)
     error_type = Column(String)  # timeout/connection_refused/http_error/unknown
     error_message = Column(Text)

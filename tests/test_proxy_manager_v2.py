@@ -499,6 +499,81 @@ class TestGetStatus:
         assert status["pool_size"] == proxy_manager_v2.pool_size
 
 
+class TestMethodSpecificBuckets:
+    """메서드별 상태 버킷 테스트"""
+
+    @pytest.mark.asyncio
+    async def test_right_post_fresh_proxy_uses_post_pool(self, mock_db_service):
+        """[Right] POST 프록시는 POST bucket을 사용"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        get_proxy = ProxyInfo(
+            id=1,
+            url="http://10.0.10.1:8080",
+            protocol="http",
+            host="10.0.10.1",
+            port=8080,
+            priority_score=10.0,
+            avg_response_time=0.2,
+        )
+        post_proxy = ProxyInfo(
+            id=2,
+            url="http://10.0.20.1:8080",
+            protocol="http",
+            host="10.0.20.1",
+            port=8080,
+            priority_score=20.0,
+            avg_response_time=0.3,
+        )
+
+        def response_side_effect(*args, **kwargs):
+            if kwargs.get("limit") == 0:
+                return []
+            if kwargs.get("request_method") == "post":
+                return [post_proxy]
+            return [get_proxy]
+
+        mock_db_service.get_proxies_by_response_time.side_effect = response_side_effect
+        mock_db_service.get_top_proxies_for_pool.side_effect = response_side_effect
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            pool_size=1,
+            weighted_selection=False,
+        )
+        await manager.initialize()
+
+        proxy_url = manager.get_fresh_proxy(request_method="post")
+
+        assert proxy_url == post_proxy.to_aiohttp_proxy()
+        status = manager.get_status("post")
+        assert status["request_method"] == "post"
+        assert status["pool_size"] == 1
+        assert status["proxies"][0]["id"] == post_proxy.id
+
+    def test_right_post_blacklist_does_not_touch_get_bucket(self, mock_db_service):
+        """[Right] POST 블랙리스트가 GET bucket과 분리됨"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        manager = ProxyManagerV2(db_service=mock_db_service, pool_size=5)
+        post_proxy = ProxyInfo(
+            id=99,
+            url="http://10.0.30.1:8080",
+            protocol="http",
+            host="10.0.30.1",
+            port=8080,
+        )
+        manager._method_states["post"].active_pool = [post_proxy]
+        manager._method_states["get"].active_pool = []
+
+        for _ in range(3):
+            manager.mark_failed(post_proxy.url, "HTTP 403", request_method="post")
+
+        assert 99 in manager._method_states["post"].session_blacklist
+        assert 99 not in manager._session_blacklist
+        assert manager._method_states["get"].session_blacklist == {}
+
+
 class TestGetFreshProxy:
     """get_fresh_proxy 테스트 (기존 ProxyManager 호환 인터페이스)"""
 

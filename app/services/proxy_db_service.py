@@ -38,14 +38,34 @@ class ProxyDBService:
     def __init__(self, db: Session):
         self.db = db
 
-    # ============== 통계 ==============
+    def _normalize_request_method(self, request_method: Optional[str] = "get") -> str:
+        """요청 메서드 정규화."""
+        method = (request_method or "get").strip().lower()
+        return "post" if method == "post" else "get"
 
-    def get_stats(self) -> ProxyStatsResponse:
-        """전체 프록시 통계 조회"""
-        # 상태별 집계
+    def _proxy_metric_column(self, metric: str, request_method: Optional[str] = "get"):
+        """메서드별 프록시 컬럼 반환."""
+        method = self._normalize_request_method(request_method)
+        return getattr(Proxy, f"{method}_{metric}", getattr(Proxy, metric))
+
+    def _history_metric_column(self, metric: str, request_method: Optional[str] = "get"):
+        """메서드별 검증 이력 컬럼 반환."""
+        method = self._normalize_request_method(request_method)
+        return getattr(ProxyCheckHistory, f"{method}_{metric}", getattr(ProxyCheckHistory, metric, None))
+
+    def _build_method_snapshot(self, request_method: str) -> Dict[str, Any]:
+        """메서드별 통계 스냅샷."""
+        method = self._normalize_request_method(request_method)
+        status_col = self._proxy_metric_column("status", method)
+        total_checks_col = self._proxy_metric_column("total_checks", method)
+        success_col = self._proxy_metric_column("success_count", method)
+        fail_col = self._proxy_metric_column("fail_count", method)
+        avg_rt_col = self._proxy_metric_column("avg_response_time", method)
+        priority_col = self._proxy_metric_column("priority_score", method)
+
         status_counts = (
-            self.db.query(Proxy.status, func.count(Proxy.id))
-            .group_by(Proxy.status)
+            self.db.query(status_col, func.count(Proxy.id))
+            .group_by(status_col)
             .all()
         )
         status_dict = {status: count for status, count in status_counts}
@@ -56,27 +76,95 @@ class ProxyDBService:
         inactive = status_dict.get("inactive", 0)
         blacklisted = status_dict.get("blacklisted", 0)
 
-        # 활성 프록시의 평균 응답 시간
         avg_response = (
-            self.db.query(func.avg(Proxy.avg_response_time))
-            .filter(Proxy.status == "active")
+            self.db.query(func.avg(avg_rt_col))
+            .filter(status_col == "active")
             .scalar()
         )
-
-        # 전체 성공률
         total_success = (
-            self.db.query(func.sum(Proxy.success_count))
-            .filter(Proxy.status == "active")
+            self.db.query(func.sum(success_col))
+            .filter(status_col == "active")
             .scalar() or 0
         )
         total_checks = (
-            self.db.query(func.sum(Proxy.total_checks))
-            .filter(Proxy.status == "active")
+            self.db.query(func.sum(total_checks_col))
+            .filter(status_col == "active")
             .scalar() or 0
         )
         overall_success_rate = (
             round(total_success / total_checks * 100, 1) if total_checks > 0 else None
         )
+
+        return {
+            "total": total,
+            "active": active,
+            "pending": pending,
+            "inactive": inactive,
+            "blacklisted": blacklisted,
+            "avg_response_time": round(avg_response, 3) if avg_response else None,
+            "overall_success_rate": overall_success_rate,
+            "active_success_count": total_success,
+            "active_total_checks": total_checks,
+            "priority_score_hint": self.db.query(func.avg(priority_col)).scalar(),
+        }
+
+    def _update_proxy_method_stats(
+        self,
+        proxy: Proxy,
+        request_method: str,
+        is_valid: bool,
+        response_time: Optional[float] = None,
+    ) -> None:
+        """프록시의 메서드별 통계를 갱신한다."""
+        method = self._normalize_request_method(request_method)
+        now = datetime.now()
+
+        total_field = f"{method}_total_checks"
+        success_field = f"{method}_success_count"
+        fail_field = f"{method}_fail_count"
+        avg_field = f"{method}_avg_response_time"
+        min_field = f"{method}_min_response_time"
+        max_field = f"{method}_max_response_time"
+        status_field = f"{method}_status"
+        last_checked_field = f"{method}_last_checked_at"
+        last_success_field = f"{method}_last_success_at"
+        priority_field = f"{method}_priority_score"
+
+        setattr(proxy, total_field, (getattr(proxy, total_field, 0) or 0) + 1)
+        setattr(proxy, last_checked_field, now)
+
+        if is_valid:
+            setattr(proxy, success_field, (getattr(proxy, success_field, 0) or 0) + 1)
+            setattr(proxy, fail_field, 0)
+            setattr(proxy, last_success_field, now)
+            if getattr(proxy, status_field, None) in (None, "pending"):
+                setattr(proxy, status_field, "active")
+
+            if response_time is not None:
+                current_min = getattr(proxy, min_field, None)
+                current_max = getattr(proxy, max_field, None)
+                current_avg = getattr(proxy, avg_field, None)
+                if current_min is None or response_time < current_min:
+                    setattr(proxy, min_field, response_time)
+                if current_max is None or response_time > current_max:
+                    setattr(proxy, max_field, response_time)
+                if current_avg is None:
+                    setattr(proxy, avg_field, response_time)
+                else:
+                    setattr(proxy, avg_field, current_avg * 0.8 + response_time * 0.2)
+        else:
+            setattr(proxy, fail_field, (getattr(proxy, fail_field, 0) or 0) + 1)
+            if getattr(proxy, fail_field) >= 7:
+                setattr(proxy, status_field, "inactive")
+
+        setattr(proxy, priority_field, self.calculate_priority_score(proxy, request_method=method))
+
+    # ============== 통계 ==============
+
+    def get_stats(self, request_method: str = "get") -> ProxyStatsResponse:
+        """전체 프록시 통계 조회"""
+        method = self._normalize_request_method(request_method)
+        snapshot = self._build_method_snapshot(method)
 
         # 프로토콜별 분포
         protocol_counts = (
@@ -89,7 +177,7 @@ class ProxyDBService:
         # 국가별 분포 (상위 10개)
         country_counts = (
             self.db.query(Proxy.country, func.count(Proxy.id))
-            .filter(Proxy.country.isnot(None), Proxy.status == "active")
+            .filter(Proxy.country.isnot(None), self._proxy_metric_column("status", method) == "active")
             .group_by(Proxy.country)
             .order_by(desc(func.count(Proxy.id)))
             .limit(10)
@@ -106,12 +194,16 @@ class ProxyDBService:
         kst_today = datetime.now().date()
         kst_today_start_utc = datetime.combine(kst_today, datetime.min.time()) - timedelta(hours=9)
 
+        history_status_col = self._history_metric_column("request_method", method)
         today_history = (
             self.db.query(
                 func.count(ProxyCheckHistory.id),
                 func.sum(func.cast(ProxyCheckHistory.is_valid, Integer))
             )
-            .filter(ProxyCheckHistory.checked_at >= kst_today_start_utc)
+            .filter(
+                ProxyCheckHistory.checked_at >= kst_today_start_utc,
+                history_status_col == method,
+            )
             .first()
         )
         today_checks = today_history[0] or 0
@@ -121,28 +213,35 @@ class ProxyDBService:
         )
 
         return ProxyStatsResponse(
-            total=total,
-            active=active,
-            pending=pending,
-            inactive=inactive,
-            blacklisted=blacklisted,
-            avg_response_time=round(avg_response, 3) if avg_response else None,
-            overall_success_rate=overall_success_rate,
+            total=snapshot["total"],
+            active=snapshot["active"],
+            pending=snapshot["pending"],
+            inactive=snapshot["inactive"],
+            blacklisted=snapshot["blacklisted"],
+            avg_response_time=snapshot["avg_response_time"],
+            overall_success_rate=snapshot["overall_success_rate"],
             by_protocol=by_protocol,
             by_country=by_country,
             today_checks=today_checks,
             today_success_rate=today_success_rate,
+            request_method=method,
+            by_method={
+                "get": self._build_method_snapshot("get"),
+                "post": self._build_method_snapshot("post"),
+            },
         )
 
     # ============== 목록 조회 ==============
 
     def get_list(self, params: ProxyListParams) -> ProxyListResponse:
         """프록시 목록 조회 (필터, 정렬, 페이징)"""
+        request_method = self._normalize_request_method(getattr(params, "request_method", "get"))
         query = self.db.query(Proxy)
+        status_col = self._proxy_metric_column("status", request_method)
 
         # 필터링
         if params.status:
-            query = query.filter(Proxy.status == params.status)
+            query = query.filter(status_col == params.status)
         if params.protocol:
             query = query.filter(Proxy.protocol == params.protocol)
         if params.country:
@@ -161,21 +260,21 @@ class ProxyDBService:
 
         # 정렬
         # inactive/blacklisted 상태는 항상 맨 아래로, NULL 응답시간도 맨 아래로
-        sort_column = getattr(Proxy, params.sort_by, Proxy.priority_score)
+        sort_column = self._proxy_metric_column(params.sort_by, request_method)
 
         # 상태 우선순위: active(0), pending(1), inactive(2), blacklisted(3)
         status_priority = case(
-            (Proxy.status == "active", 0),
-            (Proxy.status == "pending", 1),
-            (Proxy.status == "inactive", 2),
-            (Proxy.status == "blacklisted", 3),
+            (status_col == "active", 0),
+            (status_col == "pending", 1),
+            (status_col == "inactive", 2),
+            (status_col == "blacklisted", 3),
             else_=4
         )
 
         if params.sort_by == "avg_response_time":
             # 응답시간 정렬 시: 상태 우선순위 -> NULL 여부 -> 응답시간
             null_priority = case(
-                (Proxy.avg_response_time.is_(None), 1),
+                (self._proxy_metric_column("avg_response_time", request_method).is_(None), 1),
                 else_=0
             )
             if params.sort_order == "desc":
@@ -204,7 +303,7 @@ class ProxyDBService:
         total_pages = (total + params.page_size - 1) // params.page_size
 
         return ProxyListResponse(
-            items=[ProxyResponse.model_validate(p) for p in proxies],
+            items=[ProxyResponse.from_proxy(p, request_method=request_method) for p in proxies],
             total=total,
             page=params.page,
             page_size=params.page_size,
@@ -217,7 +316,12 @@ class ProxyDBService:
         """ID로 프록시 조회"""
         return self.db.query(Proxy).filter(Proxy.id == proxy_id).first()
 
-    def get_detail(self, proxy_id: int, history_limit: int = 50) -> Optional[ProxyDetailResponse]:
+    def get_detail(
+        self,
+        proxy_id: int,
+        history_limit: int = 50,
+        request_method: str = "get",
+    ) -> Optional[ProxyDetailResponse]:
         """프록시 상세 조회 (검증 이력 포함)"""
         proxy = (
             self.db.query(Proxy)
@@ -229,16 +333,20 @@ class ProxyDBService:
         if not proxy:
             return None
 
+        method = self._normalize_request_method(request_method)
         # 검증 이력 제한
         history = (
             self.db.query(ProxyCheckHistory)
-            .filter(ProxyCheckHistory.proxy_id == proxy_id)
+            .filter(
+                ProxyCheckHistory.proxy_id == proxy_id,
+                self._history_metric_column("request_method", method) == method,
+            )
             .order_by(desc(ProxyCheckHistory.checked_at))
             .limit(history_limit)
             .all()
         )
 
-        response = ProxyDetailResponse.model_validate(proxy)
+        response = ProxyDetailResponse.from_proxy(proxy, request_method=method)
         response.check_history = history
         return response
 
@@ -307,9 +415,12 @@ class ProxyDBService:
 
     def add_check_history(self, history_data: ProxyCheckHistoryCreate) -> ProxyCheckHistory:
         """검증 이력 추가 및 프록시 통계 업데이트"""
+        method = self._normalize_request_method(getattr(history_data, "request_method", "get"))
         history = ProxyCheckHistory(
             proxy_id=history_data.proxy_id,
             is_valid=history_data.is_valid,
+            request_method=method,
+            validation_url=getattr(history_data, "validation_url", None),
             response_time=history_data.response_time,
             error_type=history_data.error_type,
             error_message=history_data.error_message,
@@ -359,8 +470,16 @@ class ProxyDBService:
                 if proxy.fail_count >= 7:
                     proxy.status = "inactive"
 
+            # 메서드별 통계도 함께 갱신
+            self._update_proxy_method_stats(
+                proxy,
+                method,
+                is_valid=history_data.is_valid,
+                response_time=history_data.response_time,
+            )
+
             # 우선순위 점수 재계산
-            proxy.priority_score = self.calculate_priority_score(proxy)
+            proxy.priority_score = self.calculate_priority_score(proxy, request_method="get")
 
         self.db.commit()
         self.db.refresh(history)
@@ -435,7 +554,7 @@ class ProxyDBService:
 
     # ============== 유틸리티 ==============
 
-    def calculate_priority_score(self, proxy: Proxy) -> float:
+    def calculate_priority_score(self, proxy: Proxy, request_method: str = "get") -> float:
         """
         우선순위 점수 계산 (0~100)
 
@@ -445,27 +564,42 @@ class ProxyDBService:
         - 안정성 (20%): 연속 실패 횟수 기반 (0회면 만점)
         - 신선도 (10%): 최근 확인된 프록시 우대 (24시간 이내 만점)
         """
+        method = self._normalize_request_method(request_method)
+        success_count = getattr(proxy, f"{method}_success_count", None)
+        if success_count is None:
+            success_count = proxy.success_count
+        total_checks = getattr(proxy, f"{method}_total_checks", None)
+        if total_checks is None:
+            total_checks = proxy.total_checks
+        fail_count = getattr(proxy, f"{method}_fail_count", None)
+        if fail_count is None:
+            fail_count = proxy.fail_count
+        avg_response_time = getattr(proxy, f"{method}_avg_response_time", None)
+        if avg_response_time is None:
+            avg_response_time = proxy.avg_response_time
+        last_checked_at = getattr(proxy, f"{method}_last_checked_at", None) or proxy.last_checked_at
+
         score = 0.0
 
         # 1. 성공률 (40점)
-        if proxy.total_checks > 0:
-            success_rate = proxy.success_count / proxy.total_checks
+        if total_checks and total_checks > 0:
+            success_rate = success_count / total_checks
             score += success_rate * 40
 
         # 2. 응답속도 (30점)
-        if proxy.avg_response_time is not None:
+        if avg_response_time is not None:
             # 1초 이하: 30점, 5초 이상: 0점, 선형 보간
-            speed_score = max(0, min(30, (5 - proxy.avg_response_time) / 4 * 30))
+            speed_score = max(0, min(30, (5 - avg_response_time) / 4 * 30))
             score += speed_score
 
         # 3. 안정성 (20점)
         # 연속 실패 1회당 -5점
-        stability = max(0, 20 - proxy.fail_count * 5)
+        stability = max(0, 20 - fail_count * 5)
         score += stability
 
         # 4. 신선도 (10점)
-        if proxy.last_checked_at:
-            hours_ago = (datetime.now() - proxy.last_checked_at).total_seconds() / 3600
+        if last_checked_at:
+            hours_ago = (datetime.now() - last_checked_at).total_seconds() / 3600
             # 24시간 이내: 10점, 48시간 이상: 0점
             freshness = max(0, min(10, (48 - hours_ago) / 48 * 10))
             score += freshness
@@ -546,12 +680,20 @@ class ProxyDBService:
         self.db.commit()
         return result
 
-    def get_top_proxies(self, limit: int = 10, status: str = "active") -> List[Proxy]:
+    def get_top_proxies(
+        self,
+        limit: int = 10,
+        status: str = "active",
+        request_method: str = "get",
+    ) -> List[Proxy]:
         """상위 프록시 조회 (우선순위순)"""
+        method = self._normalize_request_method(request_method)
+        status_col = self._proxy_metric_column("status", method)
+        priority_col = self._proxy_metric_column("priority_score", method)
         return (
             self.db.query(Proxy)
-            .filter(Proxy.status == status)
-            .order_by(desc(Proxy.priority_score))
+            .filter(status_col == status)
+            .order_by(desc(priority_col))
             .limit(limit)
             .all()
         )
@@ -564,6 +706,7 @@ class ProxyDBService:
         status: str = "active",
         exclude_ids: Optional[List[int]] = None,
         min_success_rate: float = 0.5,
+        request_method: str = "get",
     ) -> List[ProxyInfo]:
         """
         응답시간 범위로 프록시 조회
@@ -579,7 +722,15 @@ class ProxyDBService:
         Returns:
             ProxyInfo 리스트 (우선순위 내림차순)
         """
-        query = self.db.query(Proxy).filter(Proxy.status == status)
+        method = self._normalize_request_method(request_method)
+        status_col = self._proxy_metric_column("status", method)
+        total_checks_col = self._proxy_metric_column("total_checks", method)
+        success_count_col = self._proxy_metric_column("success_count", method)
+        fail_count_col = self._proxy_metric_column("fail_count", method)
+        avg_rt_col = self._proxy_metric_column("avg_response_time", method)
+        priority_col = self._proxy_metric_column("priority_score", method)
+
+        query = self.db.query(Proxy).filter(status_col == status)
 
         # 제외할 프록시 ID 필터
         if exclude_ids:
@@ -589,26 +740,26 @@ class ProxyDBService:
         # min_response_time: 초과 조건 (>)
         if min_response_time is not None:
             query = query.filter(
-                Proxy.avg_response_time.isnot(None),
-                Proxy.avg_response_time > min_response_time,
+                avg_rt_col.isnot(None),
+                avg_rt_col > min_response_time,
             )
 
         # max_response_time: 이하 조건 (<=)
         if max_response_time is not None:
             query = query.filter(
-                Proxy.avg_response_time.isnot(None),
-                Proxy.avg_response_time <= max_response_time,
+                avg_rt_col.isnot(None),
+                avg_rt_col <= max_response_time,
             )
 
         # 최소 성공률 필터
         if min_success_rate > 0:
             query = query.filter(
-                Proxy.total_checks > 0,
-                (Proxy.success_count * 1.0 / Proxy.total_checks) >= min_success_rate,
+                total_checks_col > 0,
+                (success_count_col * 1.0 / total_checks_col) >= min_success_rate,
             )
 
         proxies = (
-            query.order_by(desc(Proxy.priority_score))
+            query.order_by(desc(priority_col))
             .limit(limit)
             .all()
         )
@@ -622,11 +773,12 @@ class ProxyDBService:
                 port=p.port,
                 username=p.username,
                 password=p.password,
-                priority_score=p.priority_score or 0.0,
-                avg_response_time=p.avg_response_time,
-                success_count=p.success_count or 0,
-                fail_count=p.fail_count or 0,
-                total_checks=p.total_checks or 0,
+                priority_score=getattr(p, f"{method}_priority_score", None) or p.priority_score or 0.0,
+                avg_response_time=getattr(p, f"{method}_avg_response_time", None) if getattr(p, f"{method}_avg_response_time", None) is not None else p.avg_response_time,
+                success_count=getattr(p, f"{method}_success_count", None) or p.success_count or 0,
+                fail_count=getattr(p, f"{method}_fail_count", None) or p.fail_count or 0,
+                total_checks=getattr(p, f"{method}_total_checks", None) or p.total_checks or 0,
+                request_method=method,
             )
             for p in proxies
         ]
@@ -639,6 +791,7 @@ class ProxyDBService:
         min_checks: int = 0,
         exclude_ids: Optional[List[int]] = None,
         max_response_time: Optional[float] = None,
+        request_method: str = "get",
     ) -> List[ProxyInfo]:
         """
         ProxyManagerV2용 상위 프록시 조회
@@ -654,7 +807,14 @@ class ProxyDBService:
         Returns:
             ProxyInfo 리스트 (우선순위 내림차순)
         """
-        query = self.db.query(Proxy).filter(Proxy.status == status)
+        method = self._normalize_request_method(request_method)
+        status_col = self._proxy_metric_column("status", method)
+        total_checks_col = self._proxy_metric_column("total_checks", method)
+        success_count_col = self._proxy_metric_column("success_count", method)
+        avg_rt_col = self._proxy_metric_column("avg_response_time", method)
+        priority_col = self._proxy_metric_column("priority_score", method)
+
+        query = self.db.query(Proxy).filter(status_col == status)
 
         # 제외할 프록시 ID 필터
         if exclude_ids:
@@ -664,26 +824,26 @@ class ProxyDBService:
         if max_response_time is not None:
             query = query.filter(
                 or_(
-                    Proxy.avg_response_time.is_(None),
-                    Proxy.avg_response_time <= max_response_time,
+                    avg_rt_col.is_(None),
+                    avg_rt_col <= max_response_time,
                 )
             )
 
         # 최소 검증 횟수 필터
         if min_checks > 0:
-            query = query.filter(Proxy.total_checks >= min_checks)
+            query = query.filter(total_checks_col >= min_checks)
 
         # 최소 성공률 필터 (검증 횟수가 있는 경우만)
         if min_success_rate > 0:
             query = query.filter(
                 or_(
-                    Proxy.total_checks == 0,  # 아직 검증 안 된 프록시 포함
-                    (Proxy.success_count * 1.0 / Proxy.total_checks) >= min_success_rate,
+                    total_checks_col == 0,  # 아직 검증 안 된 프록시 포함
+                    (success_count_col * 1.0 / total_checks_col) >= min_success_rate,
                 )
             )
 
         proxies = (
-            query.order_by(desc(Proxy.priority_score))
+            query.order_by(desc(priority_col))
             .limit(limit)
             .all()
         )
@@ -697,11 +857,12 @@ class ProxyDBService:
                 port=p.port,
                 username=p.username,
                 password=p.password,
-                priority_score=p.priority_score or 0.0,
-                avg_response_time=p.avg_response_time,
-                success_count=p.success_count or 0,
-                fail_count=p.fail_count or 0,
-                total_checks=p.total_checks or 0,
+                priority_score=getattr(p, f"{method}_priority_score", None) or p.priority_score or 0.0,
+                avg_response_time=getattr(p, f"{method}_avg_response_time", None) if getattr(p, f"{method}_avg_response_time", None) is not None else p.avg_response_time,
+                success_count=getattr(p, f"{method}_success_count", None) or p.success_count or 0,
+                fail_count=getattr(p, f"{method}_fail_count", None) or p.fail_count or 0,
+                total_checks=getattr(p, f"{method}_total_checks", None) or p.total_checks or 0,
+                request_method=method,
             )
             for p in proxies
         ]
@@ -716,6 +877,7 @@ class ProxyDBService:
         detected_ip: Optional[str] = None,
         is_anonymous: Optional[bool] = None,
         http_status: Optional[int] = None,
+        request_method: str = "get",
     ) -> bool:
         """
         프록시 검증 결과 기록 (ProxyManagerV2용 간편 인터페이스)
@@ -745,6 +907,7 @@ class ProxyDBService:
                 detected_ip=detected_ip,
                 is_anonymous=is_anonymous,
                 http_status=http_status,
+                request_method=request_method,
             )
             self.add_check_history(history_data)
             return True
@@ -752,8 +915,9 @@ class ProxyDBService:
             logger.error(f"Failed to record check result for proxy {proxy_id}: {e}")
             return False
 
-    def get_proxy_info_by_id(self, proxy_id: int) -> Optional[ProxyInfo]:
+    def get_proxy_info_by_id(self, proxy_id: int, request_method: str = "get") -> Optional[ProxyInfo]:
         """ID로 ProxyInfo 조회"""
+        method = self._normalize_request_method(request_method)
         proxy = self.get_by_id(proxy_id)
         if not proxy:
             return None
@@ -766,11 +930,12 @@ class ProxyDBService:
             port=proxy.port,
             username=proxy.username,
             password=proxy.password,
-            priority_score=proxy.priority_score or 0.0,
-            avg_response_time=proxy.avg_response_time,
-            success_count=proxy.success_count or 0,
-            fail_count=proxy.fail_count or 0,
-            total_checks=proxy.total_checks or 0,
+            priority_score=getattr(proxy, f"{method}_priority_score", None) or proxy.priority_score or 0.0,
+            avg_response_time=getattr(proxy, f"{method}_avg_response_time", None) if getattr(proxy, f"{method}_avg_response_time", None) is not None else proxy.avg_response_time,
+            success_count=getattr(proxy, f"{method}_success_count", None) or proxy.success_count or 0,
+            fail_count=getattr(proxy, f"{method}_fail_count", None) or proxy.fail_count or 0,
+            total_checks=getattr(proxy, f"{method}_total_checks", None) or proxy.total_checks or 0,
+            request_method=method,
         )
 
     def cleanup_old_history(self, days: int = 90) -> int:

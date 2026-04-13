@@ -129,6 +129,7 @@ class ProxyUsageLogger:
         schedule_id: int,
         target_url: str,
         fetch_method: str,
+        http_method: Optional[str] = "get",
     ) -> str:
         """
         새 요청 시작 (request_id 반환)
@@ -137,6 +138,7 @@ class ProxyUsageLogger:
             schedule_id: 모니터 스케줄 ID
             target_url: 요청 대상 URL
             fetch_method: 요청 방식 (graphql_api, anonymous_api, etc.)
+            http_method: 실제 HTTP 메서드 (get/post)
 
         Returns:
             request_id: 요청 식별자 (재시도 그룹핑용)
@@ -146,6 +148,7 @@ class ProxyUsageLogger:
             "schedule_id": schedule_id,
             "target_url": target_url,
             "fetch_method": fetch_method,
+            "http_method": (http_method or "get").strip().lower(),
             "started_at": datetime.now(),
             "attempts": [],
         }
@@ -230,6 +233,7 @@ class ProxyUsageLogger:
                 "schedule_id": request["schedule_id"],
                 "target_url": request["target_url"],
                 "fetch_method": request["fetch_method"],
+                "http_method": request.get("http_method", "get"),
                 "request_id": request_id,
                 "monitoring_event_id": request.get("monitoring_event_id"),
                 "proxy_url": attempt.proxy_url,
@@ -305,6 +309,7 @@ class ProxyUsageLogger:
                     response_time_ms=entry.get("response_time_ms"),
                     target_url=entry.get("target_url"),
                     fetch_method=entry.get("fetch_method"),
+                    http_method=entry.get("http_method"),
                     timestamp=entry["timestamp"],
                 )
                 for entry in entries
