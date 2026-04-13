@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import DevRunnerTab from './DevRunnerTab.svelte';
 	import GitReposTab from './GitReposTab.svelte';
 	import PlanListTab from '../plans/PlanListTab.svelte';
@@ -46,17 +46,9 @@
 		{ id: 'worktrees', label: '워크트리' },
 	];
 
-	function setMainTab(tab: MainTab) {
-		const url = new URL($page.url);
-		if (tab === 'dev-runner') {
-			url.searchParams.delete('tab');
-			url.searchParams.delete('subtab');
-		} else {
-			url.searchParams.set('tab', tab);
-			if (tab !== 'plans') url.searchParams.delete('subtab');
-		}
-		goto(url.toString(), { replaceState: true, keepFocus: true });
-	}
+	const pageTitle = $derived(
+		mainTab === 'git-repos' ? 'Git 관리' : mainTab === 'plans' ? '계획서 관리' : '개발 파이프라인'
+	);
 </script>
 
 <svelte:head>
@@ -64,9 +56,9 @@
 </svelte:head>
 
 <div class="flex flex-col h-full overflow-hidden">
-	<div class="flex items-center gap-4 px-4 lg:px-6 h-12 border-b shrink-0">
-		<h1 class="text-lg font-bold tracking-tight text-foreground">개발 파이프라인</h1>
-		<TabNav tabs={autoTabs} bind:activeTab={mainTab} variant="primary" size="compact" queryParam="tab" />
+	<div class="p-4 lg:p-6 space-y-4">
+		<PageHeader title={pageTitle} />
+		<TabNav tabs={autoTabs} bind:activeTab={mainTab} variant="primary" queryParam="tab" />
 	</div>
 
 	<div class="flex-1 overflow-hidden">
@@ -77,12 +69,10 @@
 				<GitReposTab />
 			</div>
 		{:else if mainTab === 'plans'}
-			<div class="flex flex-col h-full overflow-hidden">
+			<div class="space-y-4 flex flex-col h-full overflow-hidden">
 				<!-- 계획서 서브탭 -->
-				<div class="px-4 pt-3 pb-2 border-b border-border shrink-0">
-					<TabNav tabs={plansSubTabs} bind:activeTab={plansSubTab} variant="secondary" size="compact" queryParam="subtab" />
-				</div>
-				<div class="flex-1 overflow-auto p-4">
+				<TabNav tabs={plansSubTabs} bind:activeTab={plansSubTab} variant="secondary" size="compact" queryParam="subtab" />
+				<div class="flex-1 overflow-auto">
 					{#if plansSubTab === 'plans'}
 						<PlanListTab />
 					{:else if plansSubTab === 'archive'}
