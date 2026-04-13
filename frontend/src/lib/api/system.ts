@@ -579,10 +579,31 @@ export interface ProviderInfo {
   executor_key: string;
 }
 
+export interface LLMBootstrapResponse {
+  list: LLMRequestListResponse;
+  stats: LLMStats;
+  queue_stats: LLMQueueStats;
+  worker_status: LLMWorkerStatus;
+}
+
 export const llmApi = {
   // Provider 목록 조회 (enabled만 반환)
   getProviders: (options?: RequestInit) =>
     request<ProviderInfo[]>('/llm/providers', options),
+
+  // 초기 진입용 묶음 조회
+  bootstrap: (params?: LLMRequestListParams, options?: RequestInit) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.append('status', params.status);
+    if (params?.caller_type) searchParams.append('caller_type', params.caller_type);
+    if (params?.requested_by) searchParams.append('requested_by', params.requested_by);
+    if (params?.queue_name) searchParams.append('queue_name', params.queue_name);
+    if (params?.include_deleted) searchParams.append('include_deleted', String(params.include_deleted));
+    if (params?.page) searchParams.append('page', String(params.page));
+    if (params?.page_size) searchParams.append('page_size', String(params.page_size));
+    const query = searchParams.toString();
+    return request<LLMBootstrapResponse>(`/llm/bootstrap${query ? `?${query}` : ''}`, options);
+  },
 
 
   // 요청 목록 조회

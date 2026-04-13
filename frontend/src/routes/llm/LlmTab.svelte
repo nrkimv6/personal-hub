@@ -2,9 +2,7 @@
 	import { Button } from '$lib/components/ui';
 
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap, type ProviderInfo } from '$lib/api';
-	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
-	import ClaudeSessionsTab from './ClaudeSessionsTab.svelte';
+	import { llmApi, type LLMBootstrapResponse, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap, type ProviderInfo } from '$lib/api';
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 
@@ -61,6 +59,10 @@
 	let quotaStatus: QuotaStatusMap = {};
 	let countdownSeconds: number = 0;
 	let countdownTimer: ReturnType<typeof setInterval> | null = null;
+	let createMetaLoaded = false;
+	let createMetaLoading = false;
+	let performanceTabComponent: any = null;
+	let claudeSessionsTabComponent: any = null;
 
 	// 수동 요청 생성 폼
 	let createForm = $state({
@@ -161,31 +163,61 @@
 		return undefined;
 	}
 
+	async function loadCreateMeta() {
+		if (createMetaLoaded || createMetaLoading) return;
+		createMetaLoading = true;
+		providersLoading = true;
+		providersError = null;
+		try {
+			await fetchQuotaStatus(true);
+			providers = await llmApi.getProviders();
+			createMetaLoaded = true;
+		} catch (e) {
+			providersError = e instanceof Error ? e.message : 'Provider 목록 로드 실패';
+		} finally {
+			providersLoading = false;
+			createMetaLoading = false;
+		}
+	}
+
+	async function loadPerformanceTabComponent() {
+		if (performanceTabComponent) return;
+		try {
+			performanceTabComponent = (await import('$lib/components/LLMPerformance.svelte')).default;
+		} catch (e) {
+			console.error('성능 탭 컴포넌트 로드 실패:', e);
+		}
+	}
+
+	async function loadClaudeSessionsTabComponent() {
+		if (claudeSessionsTabComponent) return;
+		try {
+			claudeSessionsTabComponent = (await import('./ClaudeSessionsTab.svelte')).default;
+		} catch (e) {
+			console.error('Claude 세션 탭 컴포넌트 로드 실패:', e);
+		}
+	}
+
 	async function fetchData() {
 		loading = true;
 		error = null;
 		try {
-			const [listRes, statsRes, workerRes, queueStatsRes] = await Promise.all([
-				llmApi.list({
-					status: getStatusFilter(),
-					caller_type: filterCallerType || undefined,
-					requested_by: filterRequestedBy || undefined,
-					queue_name: filterQueueName || undefined,
-					page: currentPage,
-					page_size: pageSize
-				}),
-				llmApi.getStats(),
-				llmApi.getWorkerStatus(),
-				llmApi.getQueueStats()
-			]);
+			const bootstrapRes: LLMBootstrapResponse = await llmApi.bootstrap({
+				status: getStatusFilter(),
+				caller_type: filterCallerType || undefined,
+				requested_by: filterRequestedBy || undefined,
+				queue_name: filterQueueName || undefined,
+				page: currentPage,
+				page_size: pageSize
+			});
 
 			// 서버에서 이미 status 필터링된 결과 사용
-			requests = listRes.items;
-			total = listRes.total;
-			pages = listRes.pages || 1;
-			stats = statsRes;
-			workerStatus = workerRes;
-			queueStats = queueStatsRes;
+			requests = bootstrapRes.list.items;
+			total = bootstrapRes.list.total;
+			pages = bootstrapRes.list.pages || 1;
+			stats = bootstrapRes.stats;
+			workerStatus = bootstrapRes.worker_status;
+			queueStats = bootstrapRes.queue_stats;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
 		} finally {
@@ -625,20 +657,24 @@
 			currentPage = 1;
 			selectedIds = [];
 			selectAll = false;
-			fetchData();
+			void fetchData();
 		}
 		if (tab === 'history') {
-			fetchHistoryStats();
+			void fetchHistoryStats();
+		}
+		if (tab === 'create') {
+			void loadCreateMeta();
+		}
+		if (tab === 'performance') {
+			void loadPerformanceTabComponent();
+		}
+		if (tab === 'claude-sessions') {
+			void loadClaudeSessionsTabComponent();
 		}
 	}
 
 	onMount(() => {
-		fetchData();
-		fetchQuotaStatus();
-		// Provider 목록 로드
-		llmApi.getProviders()
-			.then(data => { providers = data; providersLoading = false; })
-			.catch(() => { providersError = 'Provider 목록 로드 실패'; providersLoading = false; });
+		void fetchData();
 	});
 </script>
 
@@ -1258,9 +1294,21 @@
 			</div>
 		</div>
 	{:else if activeTab === 'performance'}
-		<LLMPerformance />
+		{#if performanceTabComponent}
+			<svelte:component this={performanceTabComponent} />
+		{:else}
+			<div class="flex justify-center items-center h-64">
+				<div class="text-sm text-muted-foreground">성능 탭 로딩 중...</div>
+			</div>
+		{/if}
 	{:else if activeTab === 'claude-sessions'}
-		<ClaudeSessionsTab />
+		{#if claudeSessionsTabComponent}
+			<svelte:component this={claudeSessionsTabComponent} />
+		{:else}
+			<div class="flex justify-center items-center h-64">
+				<div class="text-sm text-muted-foreground">Claude 세션 탭 로딩 중...</div>
+			</div>
+		{/if}
 	{/if}
 </div>
 

@@ -220,6 +220,33 @@ class LLMService:
     def check_worker_health(self) -> dict:
         return self._worker_svc.check_worker_health()
 
+    def get_bootstrap_data(
+        self,
+        status=None,
+        caller_type=None,
+        requested_by=None,
+        include_deleted=False,
+        page=1,
+        page_size=20,
+        queue_name=None,
+    ) -> Dict[str, Any]:
+        """LLM /llm 화면 초기 진입용 묶음 데이터 조회."""
+        request_list = self.list_requests(
+            status=status,
+            caller_type=caller_type,
+            requested_by=requested_by,
+            include_deleted=include_deleted,
+            page=page,
+            page_size=page_size,
+            queue_name=queue_name,
+        )
+        return {
+            "list": request_list,
+            "stats": self.get_stats(),
+            "queue_stats": self.get_queue_stats(),
+            "worker_status": self.check_worker_health(),
+        }
+
     # ========== 요청 관리 (→ LLMRequestCrudService 위임) ==========
 
     def list_requests(self, status=None, caller_type=None, requested_by=None, include_deleted=False, page=1, page_size=20, queue_name=None) -> dict:
