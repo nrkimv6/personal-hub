@@ -42,6 +42,22 @@ class TestFindPlanFileMtime:
         assert result is None
         assert mtime is None
 
+    def test_find_plan_file_prefers_plans_worktree_over_legacy_RIGHT(self, tmp_path):
+        """같은 branch가 두 경로에 있으면 .worktrees/plans 경로를 우선 사용"""
+        legacy_dir = tmp_path / "docs" / "plan"
+        legacy_dir.mkdir(parents=True)
+        (legacy_dir / "legacy.md").write_text("> branch: impl/same\n", encoding="utf-8")
+
+        plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        (plans_dir / "plans.md").write_text("> branch: impl/same\n", encoding="utf-8")
+
+        result, mtime = svc.find_plan_file("impl/same", repo_root=tmp_path)
+
+        assert result is not None
+        assert result.replace("\\", "/").startswith(".worktrees/plans/docs/plan/")
+        assert mtime is not None
+
 
 class TestListPlanOnlyBranches:
     def test_list_plan_only_branches_filters_existing_RIGHT(self, tmp_path):
@@ -85,6 +101,19 @@ class TestListPlanOnlyBranches:
 
         assert any("no-header" in b.plan_file for b in branch_unresolved)
         assert any(b.reason == "missing > branch header" for b in branch_unresolved)
+
+    def test_list_plan_only_branches_scans_plans_worktree_RIGHT(self, tmp_path):
+        """legacy docs/plan이 없어도 .worktrees/plans/docs/plan 스캔 결과를 반환"""
+        plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        (plans_dir / "plans-only.md").write_text("> branch: impl/plans-only\n", encoding="utf-8")
+
+        plan_only, branch_unresolved = svc.list_plan_only_branches(
+            existing_branches=set(), repo_root=tmp_path
+        )
+
+        assert any(p.branch == "impl/plans-only" for p in plan_only)
+        assert branch_unresolved == []
 
 
 class TestGetMainDirty:

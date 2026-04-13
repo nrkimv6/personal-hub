@@ -19,6 +19,28 @@ from app.modules.dev_runner.schemas import (
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent.parent  # monitor-page 루트
 
 
+def _iter_plan_dirs(repo_root: Path) -> list[Path]:
+    """활성 plan 디렉토리 후보를 우선순위 순서대로 반환.
+
+    우선순위:
+    1) .worktrees/plans/docs/plan (plan SSOT)
+    2) docs/plan (legacy fallback)
+    """
+    candidates = [
+        repo_root / ".worktrees" / "plans" / "docs" / "plan",
+        repo_root / "docs" / "plan",
+    ]
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+
+
 async def _run_git(*args: str, repo_root: Path = _REPO_ROOT) -> str:
     """git 명령 실행 헬퍼 — 실패 시 빈 문자열 반환.
 
@@ -160,27 +182,26 @@ def _parse_numstat(output: str) -> list[CommitDiffStat]:
 
 
 def find_plan_file(branch: str, repo_root: Path = _REPO_ROOT) -> tuple[Optional[str], Optional[str]]:
-    """docs/plan/*.md 에서 > branch: {branch} 헤더를 찾아 (경로, mtime_iso) 반환 (sync)
+    """활성 plan 루트에서 > branch: {branch} 헤더를 찾아 (경로, mtime_iso) 반환 (sync)
 
     기존 plan_scanner/plan_path_resolver에 유사 로직 없으므로 자체 구현.
     매칭 실패 시 (None, None) 반환.
     """
-    plan_dir = repo_root / "docs" / "plan"
-    if not plan_dir.exists():
-        return None, None
-
     pattern = re.compile(rf"^>\s*branch:\s*{re.escape(branch)}\s*$")
-    for md_file in plan_dir.glob("*.md"):
-        try:
-            with open(md_file, encoding="utf-8") as f:
-                for i, line in enumerate(f):
-                    if i >= 20:
-                        break
-                    if pattern.match(line.rstrip()):
-                        mtime_iso = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
-                        return str(md_file.relative_to(repo_root)), mtime_iso
-        except (OSError, UnicodeDecodeError):
+    for plan_dir in _iter_plan_dirs(repo_root):
+        if not plan_dir.exists():
             continue
+        for md_file in sorted(plan_dir.glob("*.md")):
+            try:
+                with open(md_file, encoding="utf-8") as f:
+                    for i, line in enumerate(f):
+                        if i >= 20:
+                            break
+                        if pattern.match(line.rstrip()):
+                            mtime_iso = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
+                            return str(md_file.relative_to(repo_root)), mtime_iso
+            except (OSError, UnicodeDecodeError):
+                continue
     return None, None
 
 
@@ -188,49 +209,52 @@ def list_plan_only_branches(
     existing_branches: set[str],
     repo_root: Path = _REPO_ROOT,
 ) -> tuple[list[PlanOnlyBranch], list[BranchUnresolvedPlan]]:
-    """docs/plan/*.md 스캔 → worktree 없는 plan 브랜치 목록 반환 (sync)
+    """활성 plan 루트 스캔 → worktree 없는 plan 브랜치 목록 반환 (sync)
 
     > branch: 헤더가 있고 existing_branches에 없는 것 → PlanOnlyBranch
     > branch: 헤더가 없는 것 → BranchUnresolvedPlan (reason: missing > branch header)
     """
-    plan_dir = repo_root / "docs" / "plan"
-    if not plan_dir.exists():
-        return [], []
-
     branch_pattern = re.compile(r"^>\s*branch:\s*(.+)$")
     plan_only: list[PlanOnlyBranch] = []
     branch_unresolved: list[BranchUnresolvedPlan] = []
+    seen_paths: set[str] = set()
 
-    for md_file in sorted(plan_dir.glob("*.md")):
-        try:
-            mtime_iso = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
-            relative_path = str(md_file.relative_to(repo_root))
-            found_branch: Optional[str] = None
-
-            with open(md_file, encoding="utf-8") as f:
-                for i, line in enumerate(f):
-                    if i >= 30:
-                        break
-                    m = branch_pattern.match(line.rstrip())
-                    if m:
-                        found_branch = m.group(1).strip()
-                        break
-
-            if found_branch is None:
-                branch_unresolved.append(BranchUnresolvedPlan(
-                    plan_file=relative_path,
-                    reason="missing > branch header",
-                    plan_mtime=mtime_iso,
-                ))
-            elif found_branch not in existing_branches:
-                plan_only.append(PlanOnlyBranch(
-                    plan_file=relative_path,
-                    branch=found_branch,
-                    plan_mtime=mtime_iso,
-                ))
-
-        except (OSError, UnicodeDecodeError):
+    for plan_dir in _iter_plan_dirs(repo_root):
+        if not plan_dir.exists():
             continue
+        for md_file in sorted(plan_dir.glob("*.md")):
+            try:
+                mtime_iso = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
+                relative_path = str(md_file.relative_to(repo_root))
+                if relative_path in seen_paths:
+                    continue
+                seen_paths.add(relative_path)
+                found_branch: Optional[str] = None
+
+                with open(md_file, encoding="utf-8") as f:
+                    for i, line in enumerate(f):
+                        if i >= 30:
+                            break
+                        m = branch_pattern.match(line.rstrip())
+                        if m:
+                            found_branch = m.group(1).strip()
+                            break
+
+                if found_branch is None:
+                    branch_unresolved.append(BranchUnresolvedPlan(
+                        plan_file=relative_path,
+                        reason="missing > branch header",
+                        plan_mtime=mtime_iso,
+                    ))
+                elif found_branch not in existing_branches:
+                    plan_only.append(PlanOnlyBranch(
+                        plan_file=relative_path,
+                        branch=found_branch,
+                        plan_mtime=mtime_iso,
+                    ))
+
+            except (OSError, UnicodeDecodeError):
+                continue
 
     return plan_only, branch_unresolved
 

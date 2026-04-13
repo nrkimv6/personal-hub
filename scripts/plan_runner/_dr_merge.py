@@ -70,7 +70,7 @@ def detect_merged_but_not_done(runner_id: str, redis_client: redis.Redis) -> Opt
     감지 경로:
     1. Redis merge_status == "merged" (v2에서 세팅 시)
     2. git log에서 branch merge commit이 main에 존재
-    3. plan 파일이 docs/plan/에 잔존하고 상태가 머지대기/통합테스트중
+    3. 활성 plan 경로에 파일이 잔존하고 상태가 머지대기/통합테스트중
 
     Args:
         runner_id: plan-runner ID
@@ -79,7 +79,7 @@ def detect_merged_but_not_done(runner_id: str, redis_client: redis.Redis) -> Opt
     Returns:
         감지 시 {"plan_file": str, "branch": str}, 미감지 시 None
     """
-    from plan_worktree_helpers import is_plan_archived
+    from plan_worktree_helpers import is_plan_archived, resolve_active_plan_file
 
     # done_completed 플래그 확인 — plan-runner가 이미 done 완료 시 fallback 불필요
     # (fix: v2-pipeline-transition-safety Phase 2)
@@ -99,23 +99,29 @@ def detect_merged_but_not_done(runner_id: str, redis_client: redis.Redis) -> Opt
         logger.debug(f"[detect_merged] runner {runner_id}: plan_file 없음 또는 ALL → 스킵")
         return None
 
+    resolved_plan = resolve_active_plan_file(plan_file, project_root=PROJECT_ROOT)
+    effective_plan_file = str(resolved_plan) if resolved_plan else plan_file
+
     # pre-review stopped는 fallback 대상에서 제외
-    if _is_pre_review_stopped(runner_id, redis_client, plan_file):
+    if _is_pre_review_stopped(runner_id, redis_client, effective_plan_file):
         logger.info(f"[detect_merged] runner {runner_id}: stop_stage=pre_review → fallback 스킵")
         return None
 
     # 이미 archive됐으면 중복 방지
     try:
-        if is_plan_archived(plan_file):
+        if is_plan_archived(effective_plan_file):
             logger.debug(f"[detect_merged] runner {runner_id}: plan이 이미 archive됨 → 스킵")
             return None
     except Exception:
         pass
 
     # plan 파일이 존재하고 상태가 머지대기/통합테스트중인지 확인
-    plan_path = Path(plan_file)
+    plan_path = Path(effective_plan_file)
     if not plan_path.exists():
-        logger.info(f"[detect_merged] runner {runner_id}: plan 이미 archive됨 — fallback 불필요")
+        logger.info(
+            f"[detect_merged] runner {runner_id}: 활성 plan 파일 미발견 "
+            f"(input={plan_file}, resolved={effective_plan_file})"
+        )
         return None
 
     try:
@@ -168,9 +174,9 @@ def detect_merged_but_not_done(runner_id: str, redis_client: redis.Redis) -> Opt
     if redis_merged or git_merged:
         logger.info(
             f"[detect_merged] runner {runner_id}: merge 후 후처리 누락 감지 "
-            f"(redis_merged={redis_merged}, git_merged={git_merged}, plan={plan_file})"
+            f"(redis_merged={redis_merged}, git_merged={git_merged}, plan={effective_plan_file})"
         )
-        return {"plan_file": plan_file, "branch": branch or ""}
+        return {"plan_file": effective_plan_file, "branch": branch or ""}
 
     logger.debug(
         f"[detect_merged] runner {runner_id}: merge 감지 안됨 "
