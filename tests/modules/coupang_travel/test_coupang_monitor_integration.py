@@ -340,6 +340,43 @@ async def test_coupang_worker_updates_active_flag_during_run():
     assert mock_schedule_service.set_active.call_args_list[1].args[2] is False
 
 
+def test_coupang_worker_init_clears_stale_is_active_R(db_session):
+    """R(Right): 워커 초기화 시 coupang 스케줄의 stale is_active를 정리."""
+    from sqlalchemy import text
+    from app.worker.coupang_monitor_worker import CoupangMonitorWorker
+
+    db_session.execute(text(
+        "INSERT INTO businesses (business_id, name, service_type) VALUES ('cp:stale', '쿠팡상품', 'coupang')"
+    ))
+    business_id = db_session.execute(text(
+        "SELECT id FROM businesses WHERE business_id='cp:stale'"
+    )).scalar()
+    db_session.execute(text(
+        "INSERT INTO biz_items (business_id, biz_item_id, name, extra_desc_json) VALUES (:bid, 'stale-item', '쿠팡상품', :extra)"
+    ), {
+        "bid": business_id,
+        "extra": json.dumps({"vendor_item_package_id": "pkg_stale", "product_id": "stale-item"}),
+    })
+    item_id = db_session.execute(text(
+        "SELECT id FROM biz_items WHERE biz_item_id='stale-item'"
+    )).scalar()
+    db_session.execute(text(
+        "INSERT INTO monitor_schedules (biz_item_id, date, is_enabled, is_active, run_status) VALUES (:iid, '2026-04-15', 1, 1, 'running')"
+    ), {"iid": item_id})
+    db_session.commit()
+
+    worker = CoupangMonitorWorker()
+    with patch("app.worker.coupang_monitor_worker.SessionLocal", return_value=db_session):
+        cleaned = worker._cleanup_stale_active_schedules()
+
+    assert cleaned == 1
+    row = db_session.execute(text(
+        "SELECT is_active, run_status FROM monitor_schedules WHERE biz_item_id=:iid"
+    ), {"iid": item_id}).fetchone()
+    assert row[0] == 0
+    assert row[1] == "idle"
+
+
 # ── T4: 알림 시간대 필터링 E2E ────────────────────────────────────────────────
 
 @pytest.fixture

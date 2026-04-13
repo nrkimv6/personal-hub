@@ -15,6 +15,8 @@ import logging
 import time
 from typing import Dict, List, Optional, TYPE_CHECKING
 
+from sqlalchemy import text
+
 from app.shared.worker.base_worker import BaseWorker
 from app.database import SessionLocal
 from app.services.schedule_service import ScheduleService
@@ -67,6 +69,8 @@ class CoupangMonitorWorker(BaseWorker):
         else:
             logger.info("[%s] HTTP 클라이언트 초기화 완료 (프록시 없음, 직접 연결)", self.name)
 
+        stale_active_count = self._cleanup_stale_active_schedules()
+
         db = SessionLocal()
         try:
             account_count = (
@@ -87,6 +91,12 @@ class CoupangMonitorWorker(BaseWorker):
             account_count,
             schedule_count,
         )
+        if stale_active_count:
+            logger.info(
+                "[%s] stale is_active 스케줄 %d건 정리 완료",
+                self.name,
+                stale_active_count,
+            )
 
     def _get_proxy_manager(self):
         """ProxyManager 싱글톤 획득 (없으면 None)."""
@@ -103,6 +113,31 @@ class CoupangMonitorWorker(BaseWorker):
             return get_proxy_usage_logger()
         except Exception:
             return None
+
+    def _cleanup_stale_active_schedules(self) -> int:
+        """워커 시작 시점에 남아 있는 coupang 활성 플래그를 정리합니다."""
+        db = SessionLocal()
+        try:
+            result = db.execute(text("""
+                UPDATE monitor_schedules
+                SET is_active = false,
+                    run_status = 'idle'
+                WHERE is_active = true
+                  AND biz_item_id IN (
+                    SELECT bi.id
+                    FROM biz_items bi
+                    JOIN businesses b ON bi.business_id = b.id
+                    WHERE b.service_type = 'coupang'
+                  )
+            """))
+            db.commit()
+            return result.rowcount or 0
+        except Exception as e:
+            db.rollback()
+            logger.warning("[%s] stale active schedule cleanup 실패: %s", self.name, e, exc_info=True)
+            return 0
+        finally:
+            db.close()
 
     async def _main_loop_iteration(self) -> None:
         """메인 루프 1회 반복 — 활성 쿠팡 스케줄 순회 + 상태 체크."""

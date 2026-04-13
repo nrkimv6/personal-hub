@@ -1,4 +1,17 @@
-﻿
+# sanitized
+# sanitized
+# sanitized
+# sanitized
+# sanitized
+# sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+  # sanitized
+# sanitized
 
 import asyncio
 import logging
@@ -68,7 +81,7 @@ _pmsg_timestamps: "collections.deque[float]" = _collections.deque()  # ?섏떊 ?
 
 
 def _record_pmsg_received() -> None:
-    
+    # sanitized
     now = time.monotonic()
     _pmsg_timestamps.append(now)
     # ?ㅻ옒????ぉ ?뺣━ (>5遺?
@@ -77,7 +90,7 @@ def _record_pmsg_received() -> None:
 
 
 def get_pmsg_count_last5min() -> int:
-    
+    # sanitized
     if not _pmsg_timestamps:
         return 0
     now = time.monotonic()
@@ -86,7 +99,7 @@ def get_pmsg_count_last5min() -> int:
     count = sum(1 for t in _pmsg_timestamps if t >= cutoff)
     return count
 class EventService:
-    
+    # sanitized
 
     def __init__(self):
         # ?숆린 ?대씪?댁뼵?????꾩옱 媛?議고쉶??(HGETALL / GET)
@@ -106,57 +119,69 @@ class EventService:
         self._file_poll_timeout = FILE_POLL_TIMEOUT
         self._file_poll_interval_sec = FILE_POLL_INTERVAL
 
-    def _cleanup_invisible_recent_runners(self) -> None:
-        # Remove invisible runners from RECENT and keep the list bounded.
-        try:
-            recent_ids: list = self._sync.zrange(RECENT_RUNNERS_KEY, 0, -1) or []
-            for rid in recent_ids:
-                trigger = self._sync.get(f"{RUNNER_KEY_PREFIX}:{rid}:trigger")
-                if not is_visible_runner(trigger, rid):
-                    self._sync.zrem(RECENT_RUNNERS_KEY, rid)
-            self._sync.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
-        except Exception:
-            pass
+    # ?? 珥덇린????????????????????????????????????????????????????????????????
 
-    def _list_visible_active_runner_ids(self) -> list:
-        try:
-            runner_ids = self._sync.smembers(ACTIVE_RUNNERS_KEY) or set()
-        except Exception:
-            return []
+    async def _enable_keyspace_notifications(self) -> None:
+        # sanitized
+        # sanitized
+            # sanitized
+            # sanitized
+            # sanitized
+            # sanitized
+            # sanitized
+        # sanitized
+            # sanitized
+            # sanitized
+# sanitized
+    # sanitized
+        # sanitized
 
-        visible_running_ids = []
-        for rid in runner_ids:
-            runner_id = str(rid)
-            payload = build_status_payload(self._sync, runner_id)
-            if (
-                payload
-                and payload.get("visible", False)
-                and payload.get("status") == "running"
-            ):
-                self._log_tailer._completed_runners.pop(runner_id, None)
-                visible_running_ids.append(runner_id)
-            else:
-                self._log_tailer.drop_tail_state(runner_id)
-        return visible_running_ids
-
-    def _build_status_payload(self, runner_id: str):
+        # remove invisible runners from RECENT
+        # keep visible runner list consistent
+        # cap RECENT size at MAX_RECENT_RUNNERS
+        # sanitized
+        # sanitized
+            # sanitized
+            # sanitized
+                # sanitized
+                # sanitized
+                    # sanitized
+            # sanitized
+            # sanitized
+        # sanitized
+            # sanitized
+# sanitized
+    # sanitized
+        # sanitized
+            # sanitized
+        # sanitized
+            # sanitized
+# sanitized
+        # sanitized
+        # sanitized
+            # sanitized
+            # sanitized
+            # sanitized
+                # sanitized
+                # sanitized
+                # sanitized
+            # sanitized
+                # sanitized
+                # sanitized
+            # sanitized
+                # sanitized
+        # sanitized
+# sanitized
+    # sanitized
+        # sanitized
         return build_status_payload(self._sync, runner_id)
 
     def _build_all_runners_status(self):
+        # sanitized
         return build_all_runners_status(self._sync)
 
     def _ensure_log_tailer(self) -> None:
-        # stream_events()가 호출될 때마다 tailer 의존성이 살아 있는지 보장한다.
-        if not hasattr(self, "_log_tailer") or self._log_tailer is None:
-            _log_resolver = LogFileResolver(config, self._sync)
-            self._log_tailer = LogTailer(self._sync, _log_resolver)
-        if not hasattr(self, "_file_poll_timeout"):
-            self._file_poll_timeout = FILE_POLL_TIMEOUT
-        if not hasattr(self, "_file_poll_interval_sec"):
-            self._file_poll_interval_sec = FILE_POLL_INTERVAL
-
-    async def _enable_keyspace_notifications(self) -> None:
-        # Ensure the log tailer exists before streaming starts.
+        # sanitized
         if not hasattr(self, "_log_tailer"):
             _log_resolver = LogFileResolver(config, self._sync)
             self._log_tailer = LogTailer(self._sync, _log_resolver)
@@ -165,11 +190,18 @@ class EventService:
         if not hasattr(self, "_file_poll_interval_sec"):
             self._file_poll_interval_sec = FILE_POLL_INTERVAL
 
-    # Main SSE stream helpers.
+    # ?? 硫붿씤 ?ㅽ듃由???????????????????????????????????????????????????????????
 
     async def stream_events(self) -> AsyncGenerator[str, None]:
-        # Yield SSE events derived from Redis keyspace notifications.
-        # Event types: connected, status, tracking, plan_changed.
+        # sanitized
+        # yield SSE events for Redis keyspace notifications
+# sanitized
+        # sanitized
+          # sanitized
+          # sanitized
+          # sanitized
+          # sanitized
+        # sanitized
         await self._enable_keyspace_notifications()
 
         # ?? 珥덇린 ?곌껐 ?대깽??(?대씪?댁뼵?멸? ?곌껐 吏곹썑 ?꾩옱 ?곹깭瑜?諛쏅룄濡?

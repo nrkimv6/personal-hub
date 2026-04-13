@@ -61,7 +61,14 @@ export const systemApi = {
 
   // 전체 재시작
   restartAll: () =>
-    request<{ status: string; stopped_count: number; started_count: number }>(
+    request<{
+      status: string;
+      worker_running: boolean;
+      stopped_count: number;
+      started_count: number;
+      message: string;
+      recovery_command?: string | null;
+    }>(
       '/system/restart-all',
       { method: 'POST' }
     ),
@@ -88,10 +95,10 @@ export const systemApi = {
 
 export const workerApi = {
   // 상태 조회
-  status: () => request<{
+  status: (options?: RequestInit) => request<{
     pid: number | null;
     status: string;
-    start_time: string | null;
+    started_at: string | null;
     last_heartbeat: string | null;
     active_tasks: number;
     error_message: string | null;
@@ -99,7 +106,9 @@ export const workerApi = {
     memory_usage_mb: number | null;
     global_pause: boolean;
     paused_at: string | null;
-  }>('/worker/status'),
+    active_tabs: number;
+    browser_contexts: number;
+  }>('/worker/status', options),
 
   // 시작
   start: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/start', {
@@ -136,11 +145,11 @@ export const workerApi = {
   },
 
   // 헬스 체크
-  health: () => request<{
+  health: (options?: RequestInit) => request<{
     is_running: boolean;
     is_healthy: boolean;
     details: Record<string, unknown>;
-  }>('/worker/health')
+  }>('/worker/health', options)
 };
 
 // ============================================================

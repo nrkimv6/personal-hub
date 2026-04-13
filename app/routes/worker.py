@@ -7,7 +7,7 @@ API 서버(Session 0)에서 직접 워커 프로세스를 생성하지 않습니
 """
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 import json
 import sys
@@ -66,6 +66,37 @@ class WorkerLogsResponse(BaseModel):
 
 # ============= Helper Functions =============
 
+def _to_iso_timestamp(value):
+    """DB timestamp 값을 ISO 문자열 또는 원본 문자열로 정규화합니다."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return isoformat()
+        except Exception:
+            pass
+    return str(value)
+
+
+def calculate_uptime(start_time_value: Any) -> Optional[int]:
+    """시작 시간부터 현재까지의 시간(초)을 계산합니다."""
+    if not start_time_value:
+        return None
+    try:
+        if isinstance(start_time_value, datetime):
+            start_time = start_time_value
+        else:
+            start_time = datetime.fromisoformat(str(start_time_value))
+        now = datetime.now(start_time.tzinfo) if start_time.tzinfo else datetime.now()
+        uptime = now - start_time
+        return max(0, int(uptime.total_seconds()))
+    except Exception:
+        return None
+
+
 def get_worker_status_from_db() -> dict:
     """데이터베이스에서 워커 상태를 조회합니다."""
     db = SessionLocal()
@@ -80,6 +111,8 @@ def get_worker_status_from_db() -> dict:
         if result:
             redis_health = WorkerHealthRedis.check("naver")
             last_heartbeat = redis_health["updated_at"] if redis_health else None
+            started_at = _to_iso_timestamp(result[5])
+            paused_at = _to_iso_timestamp(result[9])
             uptime_seconds = calculate_uptime(result[5])
             return {
                 "pid": result[0],
@@ -87,12 +120,12 @@ def get_worker_status_from_db() -> dict:
                 "active_tasks": result[2] or 0,
                 "last_heartbeat": last_heartbeat,
                 "memory_usage_mb": result[4],
-                "started_at": result[5],
+                "started_at": started_at,
                 "uptime_seconds": uptime_seconds,
                 "active_tabs": result[6] or 0,
                 "browser_contexts": result[7] or 0,
                 "global_pause": bool(result[8]) if result[8] is not None else False,
-                "paused_at": result[9],
+                "paused_at": paused_at,
                 "error_message": None,
             }
         return {
@@ -147,18 +180,6 @@ def get_process_memory(pid: int) -> Optional[float]:
         memory_info = process.memory_info()
         return memory_info.rss / (1024 * 1024)
     except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return None
-
-
-def calculate_uptime(start_time_str: str) -> Optional[int]:
-    """시작 시간부터 현재까지의 시간(초)을 계산합니다."""
-    if not start_time_str:
-        return None
-    try:
-        start_time = datetime.fromisoformat(start_time_str)
-        uptime = datetime.now() - start_time
-        return int(uptime.total_seconds())
-    except Exception:
         return None
 
 
