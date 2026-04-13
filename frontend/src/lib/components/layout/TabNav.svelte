@@ -118,7 +118,9 @@
 
   function handleTabClick(tab: Tab) {
     if (queryParam) {
-      goto(`${$page.url.pathname}?${queryParam}=${tab.id}`, { replaceState });
+      const nextUrl = new URL($page.url);
+      nextUrl.searchParams.set(queryParam, tab.id);
+      goto(`${nextUrl.pathname}${nextUrl.search}`, { replaceState });
     } else {
       activeTab = tab.id;
     }

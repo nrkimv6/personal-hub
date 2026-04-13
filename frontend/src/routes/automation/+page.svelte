@@ -20,12 +20,13 @@
 
 	$effect(() => {
 		const tabParam = $page.url.searchParams.get('tab');
+		const subParam = $page.url.searchParams.get('subtab') as PlansSubTab | null;
+		const hasValidPlansSubtab = !!(subParam && ['plans', 'archive', 'history', 'worktrees'].includes(subParam));
 		if (tabParam === 'git-repos') {
 			mainTab = 'git-repos';
-		} else if (tabParam === 'plans') {
+		} else if (tabParam === 'plans' || (!tabParam && hasValidPlansSubtab)) {
 			mainTab = 'plans';
-			const subParam = $page.url.searchParams.get('subtab') as PlansSubTab | null;
-			plansSubTab = subParam && ['plans', 'archive', 'history', 'worktrees'].includes(subParam) ? subParam : 'plans';
+			plansSubTab = hasValidPlansSubtab ? subParam! : 'plans';
 		} else {
 			mainTab = 'dev-runner';
 		}
