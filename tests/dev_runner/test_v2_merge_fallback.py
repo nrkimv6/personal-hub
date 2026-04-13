@@ -153,6 +153,27 @@ def test_detect_merged_but_not_done_no_plan_file_E():
     assert result is None
 
 
+def test_detect_merged_but_not_done_prefers_plans_worktree_path_R(tmp_path):
+    """R: Redis plan_file가 legacy docs/plan이어도 plans/worktree 경로를 우선 사용."""
+    legacy_plan = tmp_path / "docs" / "plan" / "test.md"
+    legacy_plan.parent.mkdir(parents=True)
+    legacy_plan.write_text("> 상태: 구현중\n- [ ] todo\n", encoding="utf-8")
+
+    plans_plan = tmp_path / ".worktrees" / "plans" / "docs" / "plan" / "test.md"
+    plans_plan.parent.mkdir(parents=True)
+    plans_plan.write_text("> 상태: 머지대기\n- [ ] todo\n", encoding="utf-8")
+
+    r = _make_redis_mock(merge_status="merged", plan_file=str(legacy_plan), branch="plan/test-branch")
+    mod = _load_dr_merge()
+    mod.PROJECT_ROOT = tmp_path
+
+    with patch("plan_worktree_helpers.is_plan_archived", return_value=False):
+        result = mod.detect_merged_but_not_done("runner-plans", r)
+
+    assert result is not None
+    assert result["plan_file"] == str(plans_plan.resolve())
+
+
 def test_detect_merged_but_not_done_redis_error_E():
     """E(Error): Redis 연결 실패 시 예외 전파 않고 None 반환"""
     r = _strict_redis_mock()

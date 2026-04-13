@@ -78,6 +78,15 @@ def _find_docs_segment(path: Path) -> int:
     return -1
 
 
+def _is_plans_worktree_path(path: Path, docs_idx: int) -> bool:
+    parts = _parts_lower(path)
+    return (
+        docs_idx >= 2
+        and parts[docs_idx - 2] == ".worktrees"
+        and parts[docs_idx - 1] == "plans"
+    )
+
+
 def _status_from_head(content: str) -> str:
     for line in content.splitlines()[:40]:
         m = re.match(r">\s*상태:\s*(.+)", line.strip())
@@ -121,6 +130,7 @@ def resolve_plan_target(plan_file: str | Path, purpose: str = "archive") -> Path
     docs_dir = Path(*source.parts[: docs_idx + 1])  # .../docs
     parent_before_docs = source.parts[docs_idx - 1] if docs_idx > 0 else ""
     is_common = parent_before_docs.lower() == "common"
+    is_plans_worktree = _is_plans_worktree_path(source, docs_idx)
     is_auto = _is_auto_plan_name(source.name)
 
     if is_auto:
@@ -129,7 +139,10 @@ def resolve_plan_target(plan_file: str | Path, purpose: str = "archive") -> Path
         target_kind: TargetKind = "history"
     else:
         target_dir = docs_dir / "archive"
-        rule_id = "common_plan_archive" if is_common else "project_plan_archive"
+        if is_plans_worktree:
+            rule_id = "plans_worktree_archive"
+        else:
+            rule_id = "common_plan_archive" if is_common else "project_plan_archive"
         target_kind = "archive"
 
     target = target_dir / source.name

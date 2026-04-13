@@ -21,6 +21,72 @@ from _dr_plan_paths import is_archive_or_history_path
 logger = logging.getLogger(__name__)
 
 
+def _extract_plan_filename_tail(plan_file: str) -> Optional[Path]:
+    """plan 경로 문자열에서 docs/plan 이하 상대 경로를 추출한다.
+
+    common/docs/plan은 project plans 워크트리로 매핑하면 안 되므로 제외한다.
+    """
+    normalized = plan_file.replace("\\", "/").strip()
+    lower = normalized.lower()
+    if "/common/docs/plan/" in lower or lower.startswith("common/docs/plan/"):
+        return None
+
+    markers = (
+        "/.worktrees/plans/docs/plan/",
+        ".worktrees/plans/docs/plan/",
+        "/docs/plan/",
+        "docs/plan/",
+    )
+    for marker in markers:
+        idx = lower.find(marker.lower())
+        if idx < 0:
+            continue
+        tail = normalized[idx + len(marker):].strip("/")
+        if not tail:
+            return None
+        return Path(*[part for part in tail.split("/") if part])
+    return None
+
+
+def resolve_active_plan_file(plan_file: str, project_root: "Path | None" = None) -> Optional[Path]:
+    """활성 plan 파일 경로를 해석한다.
+
+    우선순위:
+    1) project_root/.worktrees/plans/docs/plan/{filename_tail} (존재 시 SSOT)
+    2) 입력 plan_file의 실제 경로
+    3) project_root/docs/plan/{filename_tail} (legacy fallback)
+    """
+    if not plan_file:
+        return None
+
+    candidates: list[Path] = []
+    root = Path(project_root).resolve() if project_root else None
+    tail = _extract_plan_filename_tail(plan_file)
+
+    if root and tail:
+        plans_ssot = root / ".worktrees" / "plans" / "docs" / "plan" / tail
+        legacy_docs = root / "docs" / "plan" / tail
+        candidates.extend([plans_ssot, legacy_docs])
+
+    path_obj = Path(plan_file)
+    if path_obj.is_absolute():
+        candidates.insert(1 if candidates else 0, path_obj)
+    elif root:
+        candidates.insert(1 if candidates else 0, root / path_obj)
+    else:
+        candidates.insert(0, path_obj)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate.resolve()) if candidate.exists() else str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
 def is_worktree_active(plan_file: str, project_root: "Path | None" = None) -> tuple:
     """plan 파일 헤더에서 worktree 경로를 읽고 실제 존재 여부 확인.
 
