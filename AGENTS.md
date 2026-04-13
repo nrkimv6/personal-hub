@@ -17,6 +17,36 @@
 - 스킬 원본 수정: monitor-page의 `.claude/skills`, `.claude/agents` 직접 수정 금지  
   `D:\work\project\service\wtools\.claude\`에서 수정 후 동기화
 
+## Plans Worktree (병행 운영 중)
+
+계획서·아카이브는 orphan `plans` 브랜치의 고정 워크트리로 관리됩니다.
+
+| 항목 | 경로 |
+|------|------|
+| 활성 plan 경로 | `.worktrees/plans/docs/plan/` |
+| archive 경로 | `.worktrees/plans/docs/archive/` |
+| 브랜치 | `plans` (orphan — main과 공통 조상 없음) |
+
+**병행 운영 안내**: main의 `docs/plan/`, `docs/archive/`는 병행 운영 중 그대로 유지 (plan-isolation-4-cutover 완료 후 제거 예정).
+
+### 세션 시작 시 ensure 명령
+
+```powershell
+# PowerShell: plans 워크트리가 없으면 복구
+if (-not (git worktree list | Select-String "\.worktrees[\\/]plans")) {
+    git worktree add .worktrees/plans plans
+}
+```
+
+```bash
+# Bash: plans 워크트리가 없으면 복구
+git worktree list | grep -q ".worktrees/plans" || git worktree add .worktrees/plans plans
+```
+
+### P1-2 Tier 결정 (Claude 앱 환경)
+
+사용자 수동 검증 전까지 **Tier 2 가정**: Claude 앱에서는 plan 조회/생성만 허용, 구현/머지는 PC CLI에서. `git show plans:<파일경로>` 읽기 폴백 사용.
+
 ## Operational Commands
 
 ```powershell
