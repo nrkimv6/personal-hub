@@ -50,6 +50,35 @@ from _dr_stream_cleanup import (
 
 logger = logging.getLogger(__name__)
 
+def _register_canonical_alias() -> None:
+    """unique loader name으로 import돼도 canonical alias를 최신 모듈로 맞춘다."""
+    import sys as _sys
+
+    module = _sys.modules.get(__name__)
+    if module is None:
+        import inspect as _inspect
+
+        frame = _inspect.currentframe()
+        try:
+            while frame is not None:
+                candidate = frame.f_locals.get("module")
+                if getattr(candidate, "__dict__", None) is globals():
+                    module = candidate
+                    break
+                frame = frame.f_back
+        finally:
+            del frame
+    if module is None:
+        return
+
+    if __name__ not in _sys.modules:
+        _sys.modules[__name__] = module
+    if __name__ != "_dr_plan_runner":
+        _sys.modules["_dr_plan_runner"] = module
+
+
+_register_canonical_alias()
+
 try:
     from listener_noise_filter import NOISE_BLOCK_MARKERS as _NOISE_BLOCK_MARKERS, is_noise_line as _is_noise_line
 except ImportError:

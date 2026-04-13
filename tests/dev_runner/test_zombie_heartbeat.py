@@ -1,7 +1,5 @@
 ﻿"""좀비 runner heartbeat 감지/복구 TC."""
 
-import importlib.util
-import sys
 import time
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -9,7 +7,10 @@ from unittest.mock import MagicMock, patch
 import fakeredis
 import pytest
 
-from tests.dev_runner._path_helpers import get_listener_script_path, skip_if_missing
+from tests.dev_runner._path_helpers import (
+    bootstrap_plan_runner_modules,
+    load_listener_module,
+)
 
 
 _listener_mod = None
@@ -19,13 +20,8 @@ def _get_listener():
     global _listener_mod
     if _listener_mod is not None:
         return _listener_mod
-    script_path = get_listener_script_path()
-    skip_if_missing(script_path, "Listener script")
-    spec = importlib.util.spec_from_file_location("dev_runner_command_listener_zombie", str(script_path))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    _listener_mod = mod
-    return mod
+    _listener_mod = load_listener_module("dev_runner_command_listener_zombie")
+    return _listener_mod
 
 
 @pytest.fixture(scope="module")
@@ -35,12 +31,14 @@ def listener_mod():
 
 @pytest.fixture(scope="module")
 def process_utils_mod():
-    return sys.modules["_dr_process_utils"]
+    _state_mod, process_utils = bootstrap_plan_runner_modules()
+    return process_utils
 
 
 @pytest.fixture(scope="module")
 def state_mod():
-    return sys.modules["_dr_state"]
+    state, _process_utils_mod = bootstrap_plan_runner_modules()
+    return state
 
 
 @pytest.fixture(autouse=True)
