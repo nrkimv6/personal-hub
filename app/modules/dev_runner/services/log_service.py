@@ -383,6 +383,15 @@ class LogService:
                             log_file = self._find_current_log(runner_id)
                             if log_file and log_file.exists():
                                 if not _fallback_entered:
+                                    # fallback 첫 진입 시점의 기존 파일 내용을 재전송하지 않도록
+                                    # 현재 EOF를 기준 위치로 잡는다.
+                                    if _file_pos == 0:
+                                        try:
+                                            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                                                f.seek(0, 2)
+                                                _file_pos = f.tell()
+                                        except Exception:
+                                            _file_pos = 0
                                     logger.warning(
                                         "[SSE][FALLBACK] %s",
                                         json.dumps({"event": "fallback_mode", "channel": log_channel, "runner_id": runner_id}),

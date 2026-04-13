@@ -189,10 +189,22 @@ def _get_profile_env(redis_client, runner_id: str) -> tuple:
         (profile_env_key, profile_config_dir, profile_extra_env) 튜플
         값 없으면 (None, None, None) 반환
     """
+    def _normalize_redis_value(value):
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            try:
+                return value.decode("utf-8")
+            except Exception:
+                return None
+        if isinstance(value, str):
+            return value
+        return None
+
     try:
-        pek = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_env_key") or None
-        pcd = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_config_dir") or None
-        pee_raw = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_extra_env")
+        pek = _normalize_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_env_key"))
+        pcd = _normalize_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_config_dir"))
+        pee_raw = _normalize_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_extra_env"))
         pee = None
         if pee_raw:
             try:

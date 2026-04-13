@@ -228,11 +228,29 @@ class RunnerState:
             status = await self.async_redis.get(self._runner_key(rid, "status"))
             if status == "stopped":
                 trigger = await self.async_redis.get(self._runner_key(rid, "trigger"))
+                plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))
+                if plan_file:
+                    try:
+                        if Path(plan_file).exists():
+                            preserved_recent += 1
+                            continue
+                        target = resolve_plan_target(plan_file, purpose="archive")
+                        if Path(target.target).exists():
+                            preserved_recent += 1
+                            continue
+                    except PathRuleError:
+                        # 규칙 해석 실패 경로는 visible 여부를 기준으로만 판단
+                        pass
                 if is_visible_runner(trigger, rid):
                     # user/user:all trigger: dismiss 전까지 cleanup-stale로 삭제하지 않는다
                     preserved_recent += 1
                     continue
-                # invisible stopped runner는 TTL 무관하게 즉시 정리 (recent set 오염 방지)
+                if recent_score >= cutoff_ts:
+                    preserved_recent += 1
+                    continue
+                # TTL 초과 + file_lost 만 정리
+                bugs += 1
+                logger.warning(f"[dev-runner] cleanup: runner {rid} plan 파일 소실 (file_lost)")
                 for key_suffix in RUNNER_KEY_SUFFIXES:
                     await self.async_redis.delete(self._runner_key(rid, key_suffix))
                 await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)

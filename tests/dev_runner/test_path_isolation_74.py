@@ -25,6 +25,7 @@ def test_external_plan_path_accepted(monkeypatch):
         "2026-02-25T10:00:00" if key == "plan-runner:listener:heartbeat" else
         None  # status not running
     ))
+    mock_r.set = AsyncMock(return_value=True)
     mock_r.lpush = AsyncMock(return_value=1)
     mock_r.scard = AsyncMock(return_value=0)
     mock_r.delete = AsyncMock(return_value=1)

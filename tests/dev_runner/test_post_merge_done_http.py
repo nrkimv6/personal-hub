@@ -93,7 +93,7 @@ def test_done_resolver_error_contract_compat_E():
     )
     try:
         encoded = base64.urlsafe_b64encode(str(src_path).encode()).decode()
-        resp = _request_or_skip("POST", f"{BASE_URL}/plans/{encoded}/done", timeout=60)
+        resp = requests.post(f"{BASE_URL}/plans/{encoded}/done", timeout=60)
         assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         if body.get("success") is False:
@@ -130,7 +130,7 @@ def test_done_resolver_error_contract_strict_E():
     )
     try:
         encoded = base64.urlsafe_b64encode(str(src_path).encode()).decode()
-        resp = _request_or_skip("POST", f"{BASE_URL}/plans/{encoded}/done", timeout=60)
+        resp = requests.post(f"{BASE_URL}/plans/{encoded}/done", timeout=60)
         assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body.get("success") is False

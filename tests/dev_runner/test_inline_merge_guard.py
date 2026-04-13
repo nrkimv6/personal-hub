@@ -70,12 +70,12 @@ class TestMergeToMainStderrStdoutBoth:
     def test_merge_to_main_stderr_stdout_both(self, tmp_path):
         def _mock_run(cmd, **kwargs):
             cmd_list = list(cmd)
-            if cmd_list[:2] == ["git", "checkout"]:
+            if "checkout" in cmd_list and "main" in cmd_list:
                 return MagicMock(returncode=0, stdout="", stderr="", text=True)
             if "--is-ancestor" in cmd_list:
                 # ancestor_check.returncode=1 → 이미 머지됨 아님 → merge 시도
                 return MagicMock(returncode=1, stdout="", stderr="", text=True)
-            if cmd_list[:2] == ["git", "merge"] and "--abort" not in cmd_list:
+            if "merge" in cmd_list and "--abort" not in cmd_list:
                 return MagicMock(
                     returncode=1,
                     stdout="output B\n",

@@ -305,6 +305,13 @@ def test_db_engine():
     # 2. 마이그레이션 적용 (SQLite 전용 — PG는 Base.metadata.create_all로 충분)
     if _is_test_sqlite:
         apply_migrations(TEST_DB_PATH)
+        from sqlalchemy import inspect as sa_inspect, text as sa_text
+
+        inspector = sa_inspect(engine)
+        plan_record_columns = {col["name"] for col in inspector.get_columns("plan_records")}
+        if "claude_session_id" not in plan_record_columns:
+            with engine.begin() as conn:
+                conn.execute(sa_text("ALTER TABLE plan_records ADD COLUMN claude_session_id VARCHAR(36)"))
 
     yield engine
 

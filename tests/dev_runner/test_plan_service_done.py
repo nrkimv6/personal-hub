@@ -78,7 +78,7 @@ def test_archive_plan_also_archives_todo_right(tmp_path, service):
     assert len(mv_calls) == 2, f"git mv 2회 호출 기대, 실제: {len(mv_calls)}"
     # 두 번째 호출에 _todo.md 포함 확인
     second_call_args = mv_calls[1]
-    assert "_todo" in second_call_args[2] or "_todo" in second_call_args[3], \
+    assert any("_todo" in str(arg) for arg in second_call_args), \
         f"두 번째 git mv에 _todo.md 경로 기대: {second_call_args}"
     assert todo_archive_path is not None
 

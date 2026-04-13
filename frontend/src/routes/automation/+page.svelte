@@ -10,7 +10,7 @@
 	import WorktreeTab from '../plans/WorktreeTab.svelte';
 
 	type MainTab = 'dev-runner' | 'git-repos' | 'plans';
-	let mainTab: MainTab = $state('dev-runner');
+	let mainTab = $state<MainTab>('dev-runner');
 	let initialPlan = $state('');
 	let initialRunner = $state('');
 

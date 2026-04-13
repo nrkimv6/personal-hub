@@ -13,7 +13,8 @@
     exact?: boolean;
   };
 
-  interface Props {`n    children?: import('svelte').Snippet<[]>;
+  interface Props {
+    children?: import('svelte').Snippet<[]>;
     title: string;
     subtitle?: string;
     tabs?: Tab[];

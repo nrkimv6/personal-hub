@@ -14,6 +14,26 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "services" / "browser_workers.py"
 
 
+def _is_http_env_available() -> bool:
+    try:
+        requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=1)
+    except Exception:
+        return False
+    try:
+        r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+        r.ping()
+        r.close()
+    except Exception:
+        return False
+    return True
+
+
+pytestmark = pytest.mark.skipif(
+    not _is_http_env_available(),
+    reason="admin api 또는 Redis가 실행 중이 아닙니다.",
+)
+
+
 def _assert_no_redis_connection_leak(
     r: redis.Redis,
     before: int,
