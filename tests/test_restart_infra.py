@@ -49,17 +49,16 @@ class TestRestartInfra:
         assert "api_watchdog" in args
 
     def test_restart_infra_command_listener(self):
-        """R(정상): restart_infra("command_listener") → restart-listener 액션, name 미포함"""
-        sp_result = _make_subprocess_result(returncode=0, stdout="완료")
+        """R(정상): restart_infra("command_listener") → executor_service.restart_listener() 경유"""
+        restart_result = {"success": True, "message": "완료"}
 
-        with patch("app.modules.system.services.worker_service.subprocess.run", return_value=sp_result) as mock_run:
+        with patch("app.modules.system.services.worker_service.executor_service.restart_listener", return_value=restart_result) as mock_restart:
             svc = SystemService()
             result = run(svc.restart_infra("command_listener"))
 
         assert result["success"] is True
-        args = mock_run.call_args[0][0]
-        assert "restart-listener" in args
-        assert "command_listener" not in args
+        mock_restart.assert_called_once()
+        assert result["message"] == "완료"
 
     def test_restart_infra_invalid_name(self):
         """E(에러): 존재하지 않는 name → success=False, subprocess 미호출"""
