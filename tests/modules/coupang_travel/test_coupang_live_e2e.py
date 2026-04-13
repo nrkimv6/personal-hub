@@ -5,11 +5,12 @@
 
 실행:
     pytest tests/modules/coupang_travel/test_coupang_live_e2e.py -m http_live -v
+    pytest tests/modules/coupang_travel/test_coupang_live_e2e.py -m "http_live and destructive_live" --run-destructive-live -v
 """
 import pytest
 import httpx
 
-pytestmark = pytest.mark.http_live
+pytestmark = [pytest.mark.http_live, pytest.mark.destructive_live]
 
 BASE_URL = "http://localhost:8001"
 COUPANG = f"{BASE_URL}/api/v1/coupang"

@@ -5,6 +5,7 @@
 
 실행:
     pytest tests/modules/coupang_travel/test_coupang_live_http.py -m http_live -v
+    pytest tests/modules/coupang_travel/test_coupang_live_http.py -m "http_live and destructive_live" --run-destructive-live -v
 """
 import pytest
 import httpx
@@ -55,6 +56,7 @@ def _delete_target(biz_item_id: int) -> None:
 # Phase 2-7: 상품 API 정상 응답
 # ──────────────────────────────────────────────
 
+@pytest.mark.destructive_live
 def test_live_post_target_201():
     """R: 유효한 쿠팡 URL로 상품 등록 → 201 + id/product_id 반환."""
     _skip_if_down()
@@ -102,6 +104,7 @@ def test_live_post_target_invalid_url_400():
     assert resp.status_code == 400
 
 
+@pytest.mark.destructive_live
 def test_live_delete_target_404():
     """E: 존재하지 않는 biz_item_id 삭제 → 404."""
     _skip_if_down()
@@ -113,6 +116,7 @@ def test_live_delete_target_404():
 # Phase 2-9: 스케줄 API 정상 응답
 # ──────────────────────────────────────────────
 
+@pytest.mark.destructive_live
 def test_live_post_schedule_201():
     """R: 유효 상품에 미래 날짜 스케줄 생성 → 201 + created >= 1."""
     _skip_if_down()
@@ -132,6 +136,7 @@ def test_live_post_schedule_201():
             _delete_target(biz_item_id)  # cascade로 스케줄도 삭제
 
 
+@pytest.mark.destructive_live
 def test_live_post_schedule_no_account_201():
     """R: service_account_id 생략(비로그인 모드) → 201, service_account_id=null."""
     _skip_if_down()
@@ -179,6 +184,7 @@ def test_live_enable_schedule_404():
     assert resp.status_code == 404
 
 
+@pytest.mark.destructive_live
 def test_live_delete_schedule_404():
     """E: 존재하지 않는 스케줄 삭제 → 404."""
     _skip_if_down()
@@ -204,6 +210,7 @@ def test_live_get_status_200():
     assert isinstance(data["active_schedules"], int)
 
 
+@pytest.mark.destructive_live
 def test_live_cleanup_returns_deleted_field():
     """B: POST /schedules/cleanup → 200 + deleted 필드(int) 존재."""
     _skip_if_down()
@@ -226,6 +233,7 @@ def test_live_list_active_coupang_accounts():
     assert isinstance(resp.json(), list)
 
 
+@pytest.mark.destructive_live
 def test_live_create_coupang_account_flow():
     """R: 프로필에 쿠팡 계정 생성→active 목록 확인→삭제 플로우."""
     _skip_if_down()
