@@ -34,6 +34,35 @@ def _post(client: requests.Session, path: str, timeout: int = 10, **kwargs):
     return _request(client, "POST", path, timeout=timeout, **kwargs)
 
 
+@pytest.fixture(scope="module")
+def paused_state(client):
+    """paused_at 검증용으로 일시중지 상태를 만들고 종료 시 원복한다."""
+    status_resp = _get(client, "/api/v1/worker/status")
+    assert status_resp.status_code == 200, (
+        f"worker/status 사전 조회 실패: {status_resp.status_code} {status_resp.text[:200]}"
+    )
+    should_resume = not bool(status_resp.json().get("global_pause"))
+
+    if should_resume:
+        pause_resp = _post(client, "/api/v1/worker/pause")
+        assert pause_resp.status_code == 200, (
+            f"worker/pause 실패: {pause_resp.status_code} {pause_resp.text[:200]}"
+        )
+        assert pause_resp.json().get("success") is True, pause_resp.text
+
+    try:
+        yield
+    finally:
+        if should_resume:
+            resume_resp = _post(client, "/api/v1/worker/resume")
+            assert resume_resp.status_code == 200, (
+                f"worker/resume 실패: {resume_resp.status_code} {resume_resp.text[:200]}"
+            )
+            resume_data = resume_resp.json()
+            if not resume_data.get("success"):
+                assert "이미 실행 중" in resume_data.get("message", ""), resume_resp.text
+
+
 def test_dashboard_unified_200_after_migration(client):
     """T5: GET /api/v1/dashboard/unified → 200 OK
     monitor_schedules.is_enabled = true 쿼리 포함 — 마이그레이션 전 integer = boolean 에러로 500 발생했을 경로
@@ -80,7 +109,7 @@ def test_worker_status_200_schema_after_fix(client):
     )
 
 
-def test_worker_status_200_with_paused_at_datetime(client):
+def test_worker_status_200_with_paused_at_datetime(client, paused_state):
     """T5: GET /api/v1/worker/status → paused_at datetime이 문자열로 내려와야 함."""
     resp = _get(client, "/api/v1/worker/status")
     assert resp.status_code == 200, (
@@ -91,7 +120,7 @@ def test_worker_status_200_with_paused_at_datetime(client):
     assert isinstance(data["paused_at"], str), f"paused_at이 문자열이 아님: {type(data['paused_at'])}"
 
 
-def test_system_status_200_with_paused_at_datetime(client):
+def test_system_status_200_with_paused_at_datetime(client, paused_state):
     """T5: GET /api/v1/system/status → paused_at datetime이 문자열로 내려와야 함."""
     resp = _get(client, "/api/v1/system/status")
     assert resp.status_code == 200, (
