@@ -11,6 +11,11 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
+from tests.dev_runner._path_helpers import (
+    bootstrap_plan_runner_modules,
+    get_plan_runner_impl_script_path,
+)
+
 # listener 스크립트를 sys.path에 추가
 _SCRIPTS_DIR = str(Path(__file__).parent.parent.parent / "scripts")
 if _SCRIPTS_DIR not in sys.path:
@@ -421,18 +426,12 @@ class TestCleanupProcessStatePersistSuffixes:
             sys.modules["listener_noise_filter"] = mock_noise
 
         # _dr_constants, _dr_state 먼저 로드 (_dr_process_utils 의존)
-        for mod_name in ("_dr_constants", "_dr_state"):
-            if mod_name not in sys.modules:
-                spec = importlib.util.spec_from_file_location(
-                    mod_name, Path(_PLAN_RUNNER_DIR) / f"{mod_name}.py"
-                )
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[mod_name] = mod
-                spec.loader.exec_module(mod)
+        bootstrap_plan_runner_modules()
 
         if "_dr_process_utils" not in sys.modules:
             spec = importlib.util.spec_from_file_location(
-                "_dr_process_utils", Path(_PLAN_RUNNER_DIR) / "_dr_process_utils.py"
+                "_dr_process_utils",
+                get_plan_runner_impl_script_path().with_name("_dr_process_utils.py"),
             )
             mod = importlib.util.module_from_spec(spec)
             sys.modules["_dr_process_utils"] = mod
@@ -543,20 +542,14 @@ class TestCleanupUnmergedCommitsGuard:
             mock_noise.is_noise_line = lambda line: False
             sys.modules["listener_noise_filter"] = mock_noise
 
-        for mod_name in ("_dr_constants", "_dr_state"):
-            if mod_name not in sys.modules:
-                spec = importlib.util.spec_from_file_location(
-                    mod_name, Path(_PLAN_RUNNER_DIR) / f"{mod_name}.py"
-                )
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[mod_name] = mod
-                spec.loader.exec_module(mod)
+        bootstrap_plan_runner_modules()
 
         # 재로드: 이 테스트 클래스에서 수정된 _dr_process_utils를 사용
         if "_dr_process_utils" in sys.modules:
             del sys.modules["_dr_process_utils"]
         spec = importlib.util.spec_from_file_location(
-            "_dr_process_utils", Path(_PLAN_RUNNER_DIR) / "_dr_process_utils.py"
+            "_dr_process_utils",
+            get_plan_runner_impl_script_path().with_name("_dr_process_utils.py"),
         )
         mod = importlib.util.module_from_spec(spec)
         sys.modules["_dr_process_utils"] = mod

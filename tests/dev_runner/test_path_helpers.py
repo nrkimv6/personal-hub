@@ -27,6 +27,29 @@ def test_get_listener_script_path_right():
     assert "D:/work/project/tools/monitor-page" not in source
 
 
+def test_get_plan_runner_entry_script_path_right():
+    """R: entry shim 경로는 scripts/_dr_plan_runner.py를 가리켜야 함."""
+    entry_path = _path_helpers.get_plan_runner_entry_script_path()
+
+    assert entry_path.exists()
+    assert entry_path.name == "_dr_plan_runner.py"
+    assert entry_path.parent.name == "scripts"
+
+
+def test_get_plan_runner_impl_script_path_right():
+    """R: canonical impl 경로는 scripts/plan_runner/_dr_plan_runner.py를 가리켜야 함."""
+    impl_path = _path_helpers.get_plan_runner_impl_script_path()
+
+    assert impl_path.exists()
+    assert impl_path.name == "_dr_plan_runner.py"
+    assert impl_path.parent.name == "plan_runner"
+
+
+def test_get_plan_runner_script_path_aliases_impl():
+    """B: 기존 호환 helper는 canonical impl 경로를 그대로 반환해야 함."""
+    assert _path_helpers.get_plan_runner_script_path() == _path_helpers.get_plan_runner_impl_script_path()
+
+
 def test_get_project_python_boundary(monkeypatch, tmp_path):
     """B: .venv 경로가 없으면 sys.executable로 fallback해야 함."""
     monkeypatch.setattr(_path_helpers, "get_repo_root", lambda: tmp_path)

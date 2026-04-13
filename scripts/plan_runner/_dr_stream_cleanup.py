@@ -77,9 +77,10 @@ def _resolve_hook(name: str, default):
     if current is not default:
         return current
 
-    _plan_runner_mod = _sys.modules.get("_dr_plan_runner")
-    if _plan_runner_mod is not None:
-        other = getattr(_plan_runner_mod, name, default)
+    for _mod_name, _mod in list(_sys.modules.items()):
+        if not _mod_name.startswith("_dr_plan_runner"):
+            continue
+        other = getattr(_mod, name, default)
         if other is not default:
             return other
 

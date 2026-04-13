@@ -11,9 +11,7 @@ Phase T4: TestClient 기반 E2E 테스트
     → dev-runner-command-listener가 SYSTEM으로 실행 → git dubious ownership 오류
   - 수정: Redis LPUSH("graceful-exit") → Session 1 watchdog가 재시작
 """
-import importlib.util
 import json
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +19,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from tests.dev_runner._path_helpers import get_listener_script_path, skip_if_missing
+from tests.dev_runner._path_helpers import load_listener_module
 
 # ─── dev-runner-command-listener 모듈 로드 (하이픈 파일명 → importlib) ───────
 
@@ -32,13 +30,8 @@ def _get_listener_mod():
     global _listener_mod
     if _listener_mod is not None:
         return _listener_mod
-    script_path = get_listener_script_path()
-    skip_if_missing(script_path, "dev-runner-command-listener")
-    spec = importlib.util.spec_from_file_location("dev_runner_command_listener", str(script_path))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    _listener_mod = mod
-    return mod
+    _listener_mod = load_listener_module("dev_runner_command_listener")
+    return _listener_mod
 
 
 # ─── Phase T1: executor_service 단위 테스트 ─────────────────────────────────
