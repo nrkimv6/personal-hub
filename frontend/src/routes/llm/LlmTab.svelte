@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap, type ProviderInfo } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
+	import ClaudeSessionsTab from './ClaudeSessionsTab.svelte';
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 
@@ -48,8 +49,8 @@
 	let selectedIds: number[] = [];
 	let selectAll = false;
 
-	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능)
-	type Tab = 'queue' | 'history' | 'create' | 'performance';
+	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능), claude-sessions(세션 뷰어)
+	type Tab = 'queue' | 'history' | 'create' | 'performance' | 'claude-sessions';
 	let activeTab: Tab = 'queue';
 
 	// 모달
@@ -741,6 +742,12 @@
 			>
 				성능 분석
 			</button>
+			<button
+				onclick={() => switchTab('claude-sessions')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'claude-sessions' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+			>
+				Claude 세션
+			</button>
 		</nav>
 	</div>
 
@@ -1252,6 +1259,8 @@
 		</div>
 	{:else if activeTab === 'performance'}
 		<LLMPerformance />
+	{:else if activeTab === 'claude-sessions'}
+		<ClaudeSessionsTab />
 	{/if}
 </div>
 

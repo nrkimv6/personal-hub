@@ -34,15 +34,18 @@ class SessionMeta:
 def encode_project_path(abs_path: str) -> str:
     """절대 경로를 ~/.claude/projects/ 인코딩 형식으로 변환.
 
-    D:\\work\\foo → D--work-foo
-    /d/work/foo  → d--work-foo
+    Claude 실제 인코딩 규칙:
+      D:\\work\\foo → D--work-foo  (콜론→-, 역슬래시→-)
+      /d/work/foo  → d-work-foo   (슬래시→-, 앞 - strip)
+
+    Windows 경로에서 D:\\ → D + - (콜론) + - (백슬래시) = D--
     """
     path = abs_path
-    # 콜론 제거 (Windows 드라이브 구분자)
-    path = path.replace(":", "")
-    # 역슬래시와 슬래시를 -- 로 치환
-    path = path.replace("\\", "--").replace("/", "--")
-    # 앞뒤 -- 정리
+    # 콜론과 구분자를 각각 단일 - 로 치환
+    path = path.replace(":", "-")
+    path = path.replace("\\", "-")
+    path = path.replace("/", "-")
+    # 앞뒤 - 정리
     path = path.strip("-")
     return path
 
