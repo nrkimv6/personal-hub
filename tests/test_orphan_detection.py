@@ -68,7 +68,7 @@ def test_detect_orphan_workflow_running_R(listener, fr, mock_wf_manager):
         {"id": 1, "runner_id": "abc12345", "slug": "test-plan", "status": "running"}
     ] if status == "running" else [])
 
-    with patch.object(listener, "_wf_manager", mock_wf_manager):
+    with patch("_dr_state._wf_manager", mock_wf_manager):
         result = listener._detect_orphan_workflows(fr)
 
     assert result == 1
@@ -83,7 +83,7 @@ def test_detect_orphan_workflow_merge_pending_R(listener, fr, mock_wf_manager):
         {"id": 2, "runner_id": "def67890", "slug": "merge-plan", "status": "merge_pending"}
     ] if status == "merge_pending" else [])
 
-    with patch.object(listener, "_wf_manager", mock_wf_manager):
+    with patch("_dr_state._wf_manager", mock_wf_manager):
         result = listener._detect_orphan_workflows(fr)
 
     assert result == 1
@@ -99,7 +99,7 @@ def test_detect_orphan_workflow_active_skipped_B(listener, fr, mock_wf_manager):
         {"id": 1, "runner_id": "abc12345", "slug": "test-plan", "status": "running"}
     ] if status == "running" else [])
 
-    with patch.object(listener, "_wf_manager", mock_wf_manager):
+    with patch("_dr_state._wf_manager", mock_wf_manager):
         result = listener._detect_orphan_workflows(fr)
 
     assert result == 0
@@ -108,7 +108,7 @@ def test_detect_orphan_workflow_active_skipped_B(listener, fr, mock_wf_manager):
 
 def test_detect_orphan_workflow_no_manager_B(listener, fr):
     """_wf_manager=None → return 0, 예외 없음"""
-    with patch.object(listener, "_wf_manager", None):
+    with patch("_dr_state._wf_manager", None):
         result = listener._detect_orphan_workflows(fr)
     assert result == 0
 
@@ -117,7 +117,7 @@ def test_cleanup_process_state_merge_pending_R(listener, fr, mock_wf_manager):
     """_cleanup_process_state: merge_pending 상태도 failed 처리"""
     mock_wf_manager.get_by_runner_id.return_value = {"id": 3, "status": "merge_pending", "runner_id": "r1"}
 
-    with patch.object(listener, "_wf_manager", mock_wf_manager), \
+    with patch("_dr_state._wf_manager", mock_wf_manager), \
          patch.object(listener, "_running_processes", {}), \
          patch.object(listener, "_running_log_files", {}), \
          patch.object(listener, "_stream_threads", {}), \
@@ -140,8 +140,8 @@ def test_detect_orphan_plans_no_match_R(listener, fr, mock_wf_manager, tmp_path)
 
     mock_wf_manager.list_workflows = Mock(return_value=[])
 
-    with patch.object(listener, "_wf_manager", mock_wf_manager), \
-         patch.object(listener, "PROJECT_ROOT", tmp_path):
+    with patch("_dr_state._wf_manager", mock_wf_manager), \
+         patch("_dr_process_utils.PROJECT_ROOT", tmp_path):
         # worktree 헤더 없으므로 cleaned_count=0이지만 경고는 찍힘
         result = listener._cleanup_orphan_plans(fr)
 
@@ -159,11 +159,33 @@ def test_detect_orphan_plans_healthy_B(listener, fr, mock_wf_manager, tmp_path):
         {"id": 1, "runner_id": "r1", "plan_file": "2026-01-01_test.md", "status": "running"}
     ])
 
-    with patch.object(listener, "_wf_manager", mock_wf_manager), \
-         patch.object(listener, "PROJECT_ROOT", tmp_path):
+    with patch("_dr_state._wf_manager", mock_wf_manager), \
+         patch("_dr_process_utils.PROJECT_ROOT", tmp_path):
         result = listener._cleanup_orphan_plans(fr)
 
     assert result == 0
+
+
+def test_detect_orphan_plans_scans_plans_worktree_R(listener, fr, mock_wf_manager, tmp_path):
+    """R(Right): .worktrees/plans/docs/plan만 있어도 orphan cleanup 대상이 된다."""
+    plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "2026-01-01_test.md").write_text(
+        "> 상태: 구현중\n> branch: plan/test-plan\n> worktree: .worktrees/plans\n# Test\n",
+        encoding="utf-8",
+    )
+
+    mock_wf_manager.list_workflows = Mock(return_value=[])
+
+    with patch("_dr_state._wf_manager", mock_wf_manager), \
+         patch("_dr_process_utils.PROJECT_ROOT", tmp_path), \
+         patch("plan_worktree_helpers.is_worktree_active", return_value=(True, "plan/test-plan", tmp_path / ".worktrees" / "plans")), \
+         patch("plan_worktree_helpers.has_unmerged_commits", return_value=False), \
+         patch("worktree_manager.WorktreeManager.remove") as mock_remove:
+        result = listener._cleanup_orphan_plans(fr)
+
+    assert result == 1
+    mock_remove.assert_called_once()
 
 
 # ─── archive 경로 거부 ─────────────────────────────────
@@ -230,8 +252,8 @@ def test_archived_plan_worktree_cleanup_integration(tmp_path):
     mock_wf_manager = Mock()
     mock_wf_manager.list_workflows = Mock(return_value=[])
 
-    with patch.object(listener, "_wf_manager", mock_wf_manager), \
-         patch.object(listener, "PROJECT_ROOT", tmp_path), \
+    with patch("_dr_state._wf_manager", mock_wf_manager), \
+         patch("_dr_process_utils.PROJECT_ROOT", tmp_path), \
          patch.object(listener, "WORKTREE_BASE_DIR", tmp_path / ".worktrees"):
         result = listener._cleanup_orphan_plans(mock_redis)
 

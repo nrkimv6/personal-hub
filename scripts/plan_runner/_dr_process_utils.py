@@ -618,7 +618,7 @@ def _detect_orphan_workflows(redis_client: redis.Redis) -> int:
                     continue
                 _wf_manager.update_status(
                     wf["id"], "failed",
-                    error_message="orphan: not in active_runners on listener restart"
+                    error_message="orphan: listener 재시작 시 active_runners에 없음"
                 )
                 cleaned += 1
     except Exception as e:
@@ -638,55 +638,60 @@ def _cleanup_orphan_plans(redis_client: redis.Redis) -> int:
     if _wf_manager is None:
         return 0
     cleaned_count = 0
-    plan_dir = PROJECT_ROOT / "docs" / "plan"
-    if not plan_dir.is_dir():
+    plan_dirs = [
+        PROJECT_ROOT / ".worktrees" / "plans" / "docs" / "plan",
+        PROJECT_ROOT / ".worktrees" / "plans" / "docs" / "archive",
+        PROJECT_ROOT / "docs" / "plan",
+        PROJECT_ROOT / "docs" / "archive",
+    ]
+    existing_plan_dirs = [p for p in plan_dirs if p.is_dir()]
+    if not existing_plan_dirs:
         return 0
     try:
         all_workflows = _wf_manager.list_workflows()
-        for plan_file in plan_dir.glob("*.md"):
-            try:
-                with open(plan_file, "r", encoding="utf-8") as f:
-                    head_lines = [f.readline() for _ in range(20)]
-            except Exception:
-                continue
-            status = ""
-            for line in head_lines:
-                _m = _re.search(r">\s*status:\s*(.+)", line or "", _re.IGNORECASE)
-                if not _m:
-                    _m = _re.search(r">\s*?곹깭:\s*(.+)", line or "")
-                if _m:
-                    status = _m.group(1).strip()
-                    break
-            
-            # Simple status check - avoid complex Korean regex logic for safety
-            if "援ы쁽以? not in status and "援ы쁽?꾨즺" not in status:
-                continue
-            
-            filename = plan_file.name
-            matching = [
-                w for w in all_workflows
-                if w.get("plan_file") and filename in w["plan_file"] and w.get("status") == "running"
-            ]
-            is_orphan = False
-            if not matching:
-                is_orphan = True
-            else:
-                for w in matching:
-                    rid = w.get("runner_id")
-                    if rid and not redis_client.sismember(ACTIVE_RUNNERS_KEY, rid):
-                        is_orphan = True
-
-            if is_orphan:
+        for plan_dir in existing_plan_dirs:
+            glob_fn = plan_dir.rglob if "archive" in str(plan_dir).replace("\\", "/") else plan_dir.glob
+            for plan_file in glob_fn("*.md"):
                 try:
-                    active, branch, wt_abs = is_worktree_active(str(plan_file), PROJECT_ROOT)
-                    if active and branch:
-                        if not has_unmerged_commits(branch, PROJECT_ROOT):
-                            _orphan_base = get_plan_git_root(str(plan_file)) / ".worktrees"
-                            WorktreeManager.remove("", _orphan_base, plan_file=str(plan_file))
-                            _remove_plan_header_fields(str(plan_file))
-                            cleaned_count += 1
+                    status = read_plan_status(plan_file)
                 except Exception:
-                    pass
+                    continue
+
+                stage = classify_plan_stage(status)
+                is_impl = status in ("구현중", "구현완료")
+                if not is_impl and stage != "pre_review":
+                    continue
+
+                filename = plan_file.name
+                matching = [
+                    w for w in all_workflows
+                    if w.get("plan_file") and filename in w["plan_file"] and w.get("status") == "running"
+                ]
+                is_orphan = False
+                if not matching:
+                    logger.warning(f"[orphan-plan] {filename}: 상태=구현중/완료이지만 Workflow DB에 running 레코드 없음")
+                    is_orphan = True
+                else:
+                    for w in matching:
+                        rid = w.get("runner_id")
+                        if rid and not redis_client.sismember(ACTIVE_RUNNERS_KEY, rid):
+                            logger.warning(f"[orphan-plan] {filename}: runner {rid}가 active_runners에 없음")
+                            is_orphan = True
+
+                if is_orphan:
+                    try:
+                        active, branch, wt_abs = is_worktree_active(str(plan_file), PROJECT_ROOT)
+                        if active and branch:
+                            if not has_unmerged_commits(branch, PROJECT_ROOT):
+                                _orphan_base = get_plan_git_root(str(plan_file)) / ".worktrees"
+                                WorktreeManager.remove("", _orphan_base, plan_file=str(plan_file))
+                                _remove_plan_header_fields(str(plan_file))
+                                logger.info(f"[orphan-plan] {filename}: worktree/branch 정리 완료 (branch={branch})")
+                                cleaned_count += 1
+                            else:
+                                logger.warning(f"[orphan-plan] {filename}: 독자 커밋 존재 — 수동 확인 필요 (branch={branch})")
+                    except Exception:
+                        pass
     except Exception as e:
         logger.warning(f"[orphan-plan] plan orphan detection failed: {e}")
     return cleaned_count
