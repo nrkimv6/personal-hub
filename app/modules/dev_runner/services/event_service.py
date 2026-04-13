@@ -176,6 +176,10 @@ class EventService:
         """[shim] → event_payload.build_status_payload()"""
         return build_status_payload(self._sync, runner_id)
 
+    def _build_all_runners_status(self):
+        """[shim] → event_payload.build_all_runners_status()"""
+        return build_all_runners_status(self._sync)
+
     def _ensure_log_tailer(self) -> None:
         """__new__ 기반 테스트에서도 _log_tailer 필드를 보장한다."""
         if not hasattr(self, "_log_tailer"):

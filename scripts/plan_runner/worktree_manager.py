@@ -19,7 +19,12 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def _run_git(args: list, cwd: Optional[str] = None, **kwargs) -> subprocess.CompletedProcess:
+def _run_git(
+    args: list,
+    cwd: Optional[str] = None,
+    inject_safe_directory: bool = True,
+    **kwargs,
+) -> subprocess.CompletedProcess:
     """git subprocess 헬퍼 — `-c safe.directory=*` 자동 주입.
 
     NSSM 서비스(SYSTEM 계정)에서 실행 시 git 2.35.2+의 CVE-2022-24765 대응 정책으로
@@ -31,7 +36,7 @@ def _run_git(args: list, cwd: Optional[str] = None, **kwargs) -> subprocess.Comp
     주입 로직이 있다. scripts/와 app/ 간 import 불가로 중복이 불가피하므로, 하나를 수정할 때
     반드시 다른 쪽도 함께 확인할 것.
     """
-    cmd = ["git", "-c", "safe.directory=*"] + args
+    cmd = (["git", "-c", "safe.directory=*"] if inject_safe_directory else ["git"]) + args
     return subprocess.run(cmd, cwd=cwd, **kwargs)
 
 
@@ -61,7 +66,11 @@ def ensure_main_branch(project_root: Path) -> None:
     logger.warning(f"[WorktreeManager] 메인 레포가 {branch}에 있음, main으로 복귀")
     checkout = _run_git(
         ["checkout", "main"],
-        cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        inject_safe_directory=False,
     )
     if checkout.returncode != 0:
         stderr = (checkout.stderr or "").strip()
@@ -329,7 +338,11 @@ class WorktreeManager:
                 logger.info(f"[WorktreeManager] pre-merge stash: rc={stash_r.returncode}, stashed={stashed}")
             result = _run_git(
                 ["merge", branch, "--no-ff", "-m", f"merge: {branch}"],
-                cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                inject_safe_directory=False,
             )
             if result.returncode == 0:
                 # 머지 성공 → stash pop (있으면)
@@ -337,12 +350,21 @@ class WorktreeManager:
                 if stashed:
                     pop_r = _run_git(
                         ["stash", "pop"],
-                        cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
+                        cwd=str(project_root),
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        inject_safe_directory=False,
                     )
                     if pop_r.returncode != 0:
                         stash_pop_conflict = True
                         logger.warning(f"[WorktreeManager] stash pop 충돌 — drop 실행: {pop_r.stderr[:200]}")
-                        _run_git(["stash", "drop"], cwd=str(project_root), capture_output=True)
+                        _run_git(
+                            ["stash", "drop"],
+                            cwd=str(project_root),
+                            capture_output=True,
+                            inject_safe_directory=False,
+                        )
                     stashed = False
                 logger.info(f"[WorktreeManager] 머지 성공: {branch}")
                 return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="머지 성공")
@@ -359,19 +381,32 @@ class WorktreeManager:
                     )
                     result = _run_git(
                         ["merge", branch, "--no-ff", "-m", f"merge: {branch}"],
-                        cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
+                        cwd=str(project_root),
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        inject_safe_directory=False,
                     )
                     if result.returncode == 0:
                         stash_pop_conflict = False
                         if stashed:
                             pop_r = _run_git(
                                 ["stash", "pop"],
-                                cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
+                                cwd=str(project_root),
+                                capture_output=True,
+                                text=True,
+                                encoding="utf-8",
+                                inject_safe_directory=False,
                             )
                             if pop_r.returncode != 0:
                                 stash_pop_conflict = True
                                 logger.warning(f"[WorktreeManager] stash pop 충돌 — drop 실행: {pop_r.stderr[:200]}")
-                                _run_git(["stash", "drop"], cwd=str(project_root), capture_output=True)
+                                _run_git(
+                                    ["stash", "drop"],
+                                    cwd=str(project_root),
+                                    capture_output=True,
+                                    inject_safe_directory=False,
+                                )
                             stashed = False
                         logger.info(f"[WorktreeManager] 머지 성공 (auto-commit 후 retry): {branch}")
                         return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="머지 성공 (auto-commit 후 retry)")
@@ -386,11 +421,20 @@ class WorktreeManager:
                 if stashed:
                     pop_r = _run_git(
                         ["stash", "pop"],
-                        cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
+                        cwd=str(project_root),
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        inject_safe_directory=False,
                     )
                     if pop_r.returncode != 0:
                         logger.warning(f"[WorktreeManager] abort 후 stash pop 실패 — drop: {pop_r.stderr[:200]}")
-                        _run_git(["stash", "drop"], cwd=str(project_root), capture_output=True)
+                        _run_git(
+                            ["stash", "drop"],
+                            cwd=str(project_root),
+                            capture_output=True,
+                            inject_safe_directory=False,
+                        )
                     stashed = False
                 return MergeResult(success=False, conflict=conflict, overwritten=overwritten, message=detail)
         except Exception as e:

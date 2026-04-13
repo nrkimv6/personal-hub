@@ -5,6 +5,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+_PLAN_RUNNER_DIR = Path(__file__).resolve().parents[2] / "scripts" / "plan_runner"
+if str(_PLAN_RUNNER_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLAN_RUNNER_DIR))
+
+try:
+    import _dr_state  # noqa: F401
+except Exception:
+    pass
+
 
 def get_repo_root() -> Path:
     """tests/dev_runner 기준 현재 checkout의 repo root 반환."""

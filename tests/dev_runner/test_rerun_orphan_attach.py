@@ -256,13 +256,12 @@ class TestTailLogReplay:
         def _fake_publish(redis_client, channel, data):
             published.append(data)
 
-        procs = get_running_processes()
-        procs[runner_id] = dummy
-        try:
-            with patch("_dr_process_utils._publish_with_retry", side_effect=_fake_publish):
-                _tail_log_and_publish(runner_id, str(log_file), r, replay_from_start=True)
-        finally:
-            procs.pop(runner_id, None)
+        procs = {runner_id: dummy}
+        with patch.dict(_tail_log_and_publish.__globals__, {
+            "get_running_processes": lambda: procs,
+            "_publish_with_retry": _fake_publish,
+        }):
+            _tail_log_and_publish(runner_id, str(log_file), r, replay_from_start=True)
 
         # 10줄 모두 publish됨
         content = " ".join(published)
@@ -284,13 +283,12 @@ class TestTailLogReplay:
         def _fake_publish(redis_client, channel, data):
             published.append(data)
 
-        procs = get_running_processes()
-        procs[runner_id] = dummy
-        try:
-            with patch("_dr_process_utils._publish_with_retry", side_effect=_fake_publish):
-                _tail_log_and_publish(runner_id, str(log_file), r, replay_from_start=False)
-        finally:
-            procs.pop(runner_id, None)
+        procs = {runner_id: dummy}
+        with patch.dict(_tail_log_and_publish.__globals__, {
+            "get_running_processes": lambda: procs,
+            "_publish_with_retry": _fake_publish,
+        }):
+            _tail_log_and_publish(runner_id, str(log_file), r, replay_from_start=False)
 
         # 기존 10줄은 발행되지 않아야 함 (EOF에서 시작)
         assert len(published) == 0, f"기존 줄이 발행됨: {published}"

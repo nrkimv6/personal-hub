@@ -236,11 +236,12 @@ class RunnerState:
                             continue
                         target = resolve_plan_target(plan_file, purpose="archive")
                         if Path(target.target).exists():
-                            preserved_recent += 1
-                            continue
+                            reason = "archived"
+                        else:
+                            reason = "file_lost"
                     except PathRuleError:
-                        # 규칙 해석 실패 경로는 visible 여부를 기준으로만 판단
-                        pass
+                        # 규칙 해석 실패 경로는 file_lost로 정리하되 bug는 증가시키지 않는다.
+                        reason = "file_lost"
                 if is_visible_runner(trigger, rid):
                     # user/user:all trigger: dismiss 전까지 cleanup-stale로 삭제하지 않는다
                     preserved_recent += 1
@@ -248,9 +249,10 @@ class RunnerState:
                 if recent_score >= cutoff_ts:
                     preserved_recent += 1
                     continue
-                # TTL 초과 + file_lost 만 정리
-                bugs += 1
-                logger.warning(f"[dev-runner] cleanup: runner {rid} plan 파일 소실 (file_lost)")
+                # TTL 초과 + archived/file_lost recent 만 정리
+                if reason == "file_lost":
+                    bugs += 1
+                    logger.warning(f"[dev-runner] cleanup: runner {rid} plan 파일 소실 (file_lost)")
                 for key_suffix in RUNNER_KEY_SUFFIXES:
                     await self.async_redis.delete(self._runner_key(rid, key_suffix))
                 await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)

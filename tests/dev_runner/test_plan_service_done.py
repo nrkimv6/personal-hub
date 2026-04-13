@@ -152,7 +152,7 @@ def test_can_done_live_branch_returns_false_error(tmp_path, service):
 
     plan = make_plan_response(str(plan_file))
 
-    with patch.object(service, "_check_branch_exists", return_value=True):
+    with patch("app.modules.dev_runner.services.plan_service.check_branch_exists", return_value=True):
         result = service._can_done(plan)
 
     assert result is False
@@ -172,8 +172,8 @@ def test_can_done_live_worktree_returns_false_error(tmp_path, service):
 
     plan = make_plan_response(str(plan_file))
 
-    with patch.object(service, "_check_branch_exists", return_value=False), \
-         patch.object(service, "_check_worktree_exists", return_value=True):
+    with patch("app.modules.dev_runner.services.plan_service.check_branch_exists", return_value=False), \
+         patch("app.modules.dev_runner.services.plan_service.check_worktree_exists", return_value=True):
         result = service._can_done(plan)
 
     assert result is False
@@ -212,7 +212,7 @@ def test_can_done_dead_branch_proceeds_right(tmp_path, service):
 
     plan = make_plan_response(str(plan_file))
 
-    with patch.object(service, "_check_branch_exists", return_value=False):
+    with patch("app.modules.dev_runner.services.plan_service.check_branch_exists", return_value=False):
         result = service._can_done(plan)
 
     assert result is True
@@ -271,8 +271,10 @@ def test_can_done_guide_status_false_boundary(tmp_path, service):
 
 def test_check_branch_exists_subprocess_error_boundary(service):
     """B: git 명령 실패(FileNotFoundError) 시 → False (안전 기본값)"""
-    with patch("subprocess.run", side_effect=FileNotFoundError("git not found")):
-        result = service._check_branch_exists("any-branch")
+    from app.modules.dev_runner.services.git_utils import check_branch_exists
+
+    with patch("app.modules.dev_runner.services.git_utils.subprocess.run", side_effect=FileNotFoundError("git not found")):
+        result = check_branch_exists("any-branch")
 
     assert result is False
 
@@ -293,7 +295,7 @@ def test_batch_done_endpoint_responds_http():
     try:
         r = requests.post(f"{ADMIN_API}/api/v1/dev-runner/plans/batch-done", timeout=10)
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-        pytest.fail("Admin API (port 8001) not available or timed out — skip T4")
+        pytest.skip("Admin API (port 8001) not available or timed out — skip T4")
 
     assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text[:200]}"
     body = r.json()
@@ -310,7 +312,7 @@ def test_batch_done_skips_live_worktree_http():
     try:
         r = requests.post(f"{ADMIN_API}/api/v1/dev-runner/plans/batch-done", timeout=10)
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-        pytest.fail("Admin API (port 8001) not available or timed out — skip T4")
+        pytest.skip("Admin API (port 8001) not available or timed out — skip T4")
 
     assert r.status_code == 200
     body = r.json()

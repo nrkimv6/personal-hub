@@ -110,7 +110,7 @@ class TestDoInlineMergeSubprocess:
         proc_result.returncode = 0
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_result) as mock_run:
             cl._do_inline_merge("r1", redis)
 
@@ -136,7 +136,7 @@ class TestDoInlineMergeSubprocess:
         proc_result.returncode = 0
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_result):
             cl._do_inline_merge("r_exit0", redis)
 
@@ -153,7 +153,7 @@ class TestDoInlineMergeSubprocess:
         proc_result.returncode = 1
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("_dr_merge._launch_general_merge_resolver_process", return_value={"success": False, "message": "fail"}), \
              patch("subprocess.run", return_value=proc_result):
             cl._do_inline_merge("r_exit1", redis)
@@ -172,7 +172,7 @@ class TestDoInlineMergeSubprocess:
         proc_result.returncode = 3
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_result), \
              patch("_dr_merge._launch_conflict_resolver_process",
                    return_value={"success": False, "message": "mocked"}):
@@ -189,7 +189,7 @@ class TestDoInlineMergeSubprocess:
         proc_ok.returncode = 0
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup_ok, \
+             patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup_ok, \
              patch("subprocess.run", return_value=proc_ok):
             cl._do_inline_merge("r_cleanup_ok", redis_ok)
 
@@ -201,7 +201,7 @@ class TestDoInlineMergeSubprocess:
         proc_fail.returncode = 1
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup_fail, \
+             patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup_fail, \
              patch("subprocess.run", return_value=proc_fail), \
              patch("_dr_merge._launch_general_merge_resolver_process",
                    return_value={"success": False, "message": "mocked"}):
@@ -219,7 +219,7 @@ class TestDoInlineMergeSubprocess:
         proc_result.returncode = 0
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_result):
             cl._do_inline_merge("r_no_restart", redis)
 
@@ -235,7 +235,7 @@ class TestDoInlineMergeSubprocess:
         proc_result.returncode = 0
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_result):
             cl._do_inline_merge("r_results", redis)
 
@@ -327,7 +327,7 @@ class TestCleanupNoPopenCreated:
         proc_fail.returncode = 1
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_fail), \
              patch("_dr_merge._launch_general_merge_resolver_process",
                    return_value={"success": False, "message": "mocked"}) as mock_launcher, \
@@ -386,7 +386,7 @@ class TestInlineMergeE2ESubprocessFlow:
 
         with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
              patch("subprocess.run", return_value=proc_result), \
-             patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+             patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup:
             cl._do_inline_merge(runner_id, fake_r)
 
         # merge_status = "merged" 확인
@@ -462,7 +462,7 @@ class TestExitCode2AutoImplPostMerge:
         proc_result.returncode = 2
 
         with _merge_lock_patch(), \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_result), \
              patch.object(dr_merge_mod, "_launch_auto_impl_post_merge_process", return_value={"success": False, "message": "fail"}) as mock_fix:
             cl._execute_merge_with_lock("r_exit2", redis)
@@ -599,4 +599,5 @@ class TestExitCode2IntegrationFakeRedis:
         result_data = json.loads(results[0])
         assert result_data["runner_id"] == runner_id
         assert result_data["success"] is False
+
 

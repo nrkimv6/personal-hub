@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 
 # _dr_plan_runner.py에서 이동된 상수
 _COMPLETED_EXIT_REASONS = {"completed"}  # 정상 완료로 처리되는 exit_reason 집합
+_DEFAULT_DETECT_MERGED_BUT_NOT_DONE = detect_merged_but_not_done
+_DEFAULT_HANDLE_POST_MERGE_DONE = _handle_post_merge_done
+_DEFAULT_CLEANUP_PROCESS_STATE = _cleanup_process_state
 _ERROR_DETAIL_NOISE_PREFIXES = (
     "[NOISE]",
     ": heartbeat",
@@ -65,6 +68,22 @@ except ImportError:
         return False
 
     _NOISE_BLOCK_MARKERS = []
+
+
+def _resolve_hook(name: str, default):
+    import sys as _sys
+
+    current = globals().get(name, default)
+    if current is not default:
+        return current
+
+    _plan_runner_mod = _sys.modules.get("_dr_plan_runner")
+    if _plan_runner_mod is not None:
+        other = getattr(_plan_runner_mod, name, default)
+        if other is not default:
+            return other
+
+    return default
 
 
 @dataclass
@@ -202,6 +221,10 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
 
     _execute_merge_with_lock()으로 공통 로직을 위임하고, cleanup만 처리한다.
     """
+    _cleanup_process_state_fn = _resolve_hook(
+        "_cleanup_process_state", _DEFAULT_CLEANUP_PROCESS_STATE
+    )
+
     # merge_requested 플래그 삭제 (중복 진입 방지)
     try:
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
@@ -282,7 +305,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             f"[_do_inline_merge] restart_after_merge 처리 실패 (무시): {_re}"
         )
 
-    _cleanup_process_state(runner_id, redis_client)
+    _cleanup_process_state_fn(runner_id, redis_client)
 
 
 def _resolve_exit_status(ctx: _StreamCleanupCtx) -> None:
@@ -531,6 +554,16 @@ def _update_workflow_and_execute_cleanup(
     ctx: _StreamCleanupCtx, merge_requested: bool
 ) -> None:
     """Workflow 상태 업데이트(구역 D) 및 merge/fallback 실행(구역 E)"""
+    _detect_merged_but_not_done = _resolve_hook(
+        "detect_merged_but_not_done", _DEFAULT_DETECT_MERGED_BUT_NOT_DONE
+    )
+    _handle_post_merge_done_fn = _resolve_hook(
+        "_handle_post_merge_done", _DEFAULT_HANDLE_POST_MERGE_DONE
+    )
+    _cleanup_process_state_fn = _resolve_hook(
+        "_cleanup_process_state", _DEFAULT_CLEANUP_PROCESS_STATE
+    )
+
     # 구역 D: Workflow 상태 업데이트
     if ctx.wf_manager and ctx.runner_id:
         try:
@@ -587,7 +620,7 @@ def _update_workflow_and_execute_cleanup(
         _v2_detect = None
         if ctx.runner_id:
             try:
-                _v2_detect = detect_merged_but_not_done(ctx.runner_id, ctx.redis_client)
+                _v2_detect = _detect_merged_but_not_done(ctx.runner_id, ctx.redis_client)
             except Exception as _det_err:
                 logger.debug(f"[_stream_output] v2 detect 실패 (무시): {_det_err}")
         if _v2_detect:
@@ -599,7 +632,7 @@ def _update_workflow_and_execute_cleanup(
                 def _pub_fallback(msg: str) -> None:
                     _pub_and_log(ctx.runner_id, msg, ctx.redis_client, "MERGE-FALLBACK")
 
-                _done_result = _handle_post_merge_done(
+                _done_result = _handle_post_merge_done_fn(
                     _v2_detect["plan_file"], ctx.runner_id, _pub_fallback, ctx.redis_client
                 )
                 if ctx.wf_manager and ctx.runner_id:
@@ -628,4 +661,4 @@ def _update_workflow_and_execute_cleanup(
                     f"[_stream_output] v2 merge fallback 실패 (cleanup은 계속): "
                     f"runner_id={ctx.runner_id}, error={_fallback_err}"
                 )
-        _cleanup_process_state(ctx.runner_id, ctx.redis_client)
+        _cleanup_process_state_fn(ctx.runner_id, ctx.redis_client)

@@ -181,6 +181,10 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             redis_client.expire(key, RECENT_RUNNERS_TTL)
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
         _trigger_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+        _merge_requested = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+        merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        if isinstance(merge_status, bytes):
+            merge_status = merge_status.decode("utf-8", errors="replace")
 
         # [fix] recent-meta: cleanup 후에도 trigger/accepted_at/started_at 조회 가능하도록 보존 (키 삭제 전에 수행)
         try:
@@ -190,6 +194,8 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             # trigger는 이미 _trigger_val로 조회했으므로 재사용
             if _trigger_val is not None:
                 _meta["trigger"] = _trigger_val
+            if _merge_requested is not None:
+                _meta["merge_requested"] = _merge_requested
             # 나머지 필드 조회
             for _field in ("accepted_at", "started_at"):
                 _val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{_field}")
@@ -206,11 +212,19 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             logger.warning(f"[cleanup] recent-meta 저장 실패 (무시, runner_id={runner_id}): {_rmeta_err}")
 
         # invisible runner(trigger 미설정/비사용자)는 RECENT에 등록하지 않고 키 즉시 삭제
-        if _trigger_val in ("user", "user:all"):
+        if _trigger_val in ("user", "user:all") or _merge_requested == "1":
             redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
             logger.info(f"[cleanup] RECENT 등록 완료: {runner_id}")
         else:
             for _suffix in RUNNER_KEY_SUFFIXES:
+                if _suffix == "merge_status" and merge_status in (
+                    "pending_merge",
+                    "queued",
+                    "merging",
+                    "testing",
+                    "conflict",
+                ):
+                    continue
                 redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{_suffix}")
             logger.debug(f"[cleanup] invisible runner — RECENT 스킵, 키 삭제: {runner_id} (trigger={_trigger_val!r})")
     except Exception as e:
@@ -232,13 +246,17 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         from plan_worktree_helpers import is_plan_in_progress as _is_plan_in_progress
         from plan_worktree_helpers import has_unmerged_commits as _has_unmerged_commits
 
-        merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
         plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file_val = None
         _cleanup_worktree_base = (get_plan_git_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
 
         _preserve_worktree = False
+        merge_requested = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+        if merge_requested == "1":
+            _preserve_worktree = True
+            logger.info(f"워크트리 보존 (merge requested): {runner_id}")
+            redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         if plan_file_val and _is_plan_in_progress(plan_file_val):
             _preserve_worktree = True
             logger.info(f"워크트리 보존 (plan 구현중): {runner_id}")
@@ -258,7 +276,9 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                 )
                 redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
 
-        if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
+        if merge_status == "conflict":
+            logger.info(f"워크트리 보존 (merge conflict): {runner_id}")
+        elif not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
             try:
                 WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
             except Exception as wt_e:
