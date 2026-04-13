@@ -91,6 +91,27 @@ ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
 
 
+def pytest_addoption(parser):
+    """destructive_live 테스트는 명시적 opt-in이 있어야만 실행한다."""
+    parser.addoption(
+        "--run-destructive-live",
+        action="store_true",
+        default=False,
+        help="Run live tests that mutate shared admin data or perform destructive teardown.",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """--run-destructive-live가 없으면 destructive_live 마커를 전부 skip 처리한다."""
+    if config.getoption("run_destructive_live"):
+        return
+
+    skip_destructive = pytest.mark.skip(reason="--run-destructive-live required")
+    for item in items:
+        if item.get_closest_marker("destructive_live"):
+            item.add_marker(skip_destructive)
+
+
 @pytest.fixture(autouse=True)
 def redis_runner_cleanup():
     """테스트 전/후 Redis runner 키 자동 정리 fixture.
