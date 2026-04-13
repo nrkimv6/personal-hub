@@ -122,7 +122,7 @@ class PlanRecordService:
         record.updated_at = datetime.now()
         return record
 
-    def mark_archived(self, file_path: str, new_path: str) -> Optional[PlanRecord]:
+    def mark_archived(self, file_path: str, new_path: str, raw_content: Optional[str] = None) -> Optional[PlanRecord]:
         """archive 완료 기록: archived_at 기록, file_path 갱신, archived 이벤트"""
         filename_hash = _compute_filename_hash(file_path)
         record = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
@@ -139,6 +139,8 @@ class PlanRecordService:
         record.archived_at = datetime.now()
         record.status = 'archived'
         record.updated_at = datetime.now()
+        if raw_content:
+            record.raw_content = raw_content
         _add_event(self.db, record, "archived", {"archive_path": new_path})
         return record
 
@@ -186,6 +188,64 @@ class PlanRecordService:
         """개별 레코드 조회 (events 포함)"""
         return self.db.query(PlanRecord).filter_by(id=record_id).first()
 
+    def restore_file(self, record_id: int) -> Optional[PlanRecord]:
+        """raw_content → 파일 복원, file_removed_at 초기화, restored 이벤트 기록"""
+        record = self.db.query(PlanRecord).filter_by(id=record_id).first()
+        if not record:
+            return None
+        if not record.raw_content:
+            return None
+        restore_path = Path(record.file_path)
+        restore_path.parent.mkdir(parents=True, exist_ok=True)
+        restore_path.write_text(record.raw_content, encoding="utf-8")
+        record.file_removed_at = None
+        record.updated_at = datetime.now()
+        _add_event(self.db, record, "restored", {"path": str(restore_path)})
+        return record
+
+    def ingest_single(
+        self,
+        file_path: str,
+        project: Optional[str] = None,
+        raw_content: Optional[str] = None,
+        title: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> PlanRecord:
+        """단건 archive ingest (wtools HTTP 호출용): upsert + raw_content 저장"""
+        filename_hash = _compute_filename_hash(file_path)
+        record = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
+        if record:
+            # update
+            if project:
+                record.project = project
+            if raw_content:
+                record.raw_content = raw_content
+            if title:
+                record.title = title
+            if status:
+                record.status = status
+            record.updated_at = datetime.now()
+            _add_event(self.db, record, "ingested", {"source": "ingest_single", "updated": True})
+        else:
+            # create
+            if title is None:
+                title = self._extract_title_from_md(file_path) if Path(file_path).exists() else None
+            if project is None:
+                project = self._detect_project_from_path(file_path)
+            record = PlanRecord(
+                filename_hash=filename_hash,
+                file_path=file_path,
+                title=title,
+                project=project,
+                status=status or "archived",
+                archived_at=datetime.now(),
+                raw_content=raw_content,
+            )
+            self.db.add(record)
+            self.db.flush()
+            _add_event(self.db, record, "ingested", {"source": "ingest_single", "created": True})
+        return record
+
     def update_claude_session_id(self, record_id: int, session_id: str) -> None:
         """plan_records에 claude_session_id 저장 (dev-runner executor 발급 UUID)."""
         record = self.db.query(PlanRecord).filter_by(id=record_id).first()
@@ -204,8 +264,12 @@ class PlanRecordService:
         date_to: Optional[datetime] = None,
         skip: int = 0,
         limit: int = 50,
+        deep: bool = False,
     ) -> List[PlanRecord]:
-        """레코드 목록 조회 (페이지네이션 + 필터 + keyword/date_range 검색)"""
+        """레코드 목록 조회 (페이지네이션 + 필터 + keyword/date_range 검색)
+
+        deep=True 시 raw_content까지 full-text 검색 (summary/title + raw_content OR)
+        """
         from sqlalchemy import or_
         query = self.db.query(PlanRecord)
         if project:
@@ -221,12 +285,13 @@ class PlanRecordService:
             for tag in tags:
                 query = query.filter(PlanRecord.tags.contains(tag))
         if q:
-            query = query.filter(
-                or_(
-                    PlanRecord.summary.ilike(f"%{q}%"),
-                    PlanRecord.title.ilike(f"%{q}%"),
-                )
-            )
+            conditions = [
+                PlanRecord.summary.ilike(f"%{q}%"),
+                PlanRecord.title.ilike(f"%{q}%"),
+            ]
+            if deep:
+                conditions.append(PlanRecord.raw_content.ilike(f"%{q}%"))
+            query = query.filter(or_(*conditions))
         if date_from:
             query = query.filter(PlanRecord.archived_at >= date_from)
         if date_to:

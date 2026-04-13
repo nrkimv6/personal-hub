@@ -68,6 +68,13 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         if scope is not None:
             record.scope = json.dumps(scope, ensure_ascii=False) if isinstance(scope, list) else scope
 
+        if not record.raw_content and record.file_path:
+            try:
+                content = Path(record.file_path).read_text(encoding="utf-8")
+                record.raw_content = content
+            except Exception:
+                pass
+
         record.llm_processed_at = datetime.now()
         record.updated_at = datetime.now()
         db.commit()

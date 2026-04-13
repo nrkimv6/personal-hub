@@ -1020,7 +1020,11 @@ class PlanService:
                 with SessionLocal() as db:
                     svc = PlanRecordService(db)
                     svc.update_status(plan_path, "completed")
-                    svc.mark_archived(plan_path, str(archive_path))
+                    try:
+                        _raw = Path(archive_path).read_text(encoding="utf-8")
+                    except Exception:
+                        _raw = None
+                    svc.mark_archived(plan_path, str(archive_path), raw_content=_raw)
                     db.commit()
             except Exception as db_err:
                 logger.warning(f"plan_record DB 기록 실패 (무시): {db_err}")

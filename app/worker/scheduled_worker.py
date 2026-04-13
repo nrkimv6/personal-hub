@@ -217,6 +217,14 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             for schedule in devguide_staleness_schedules:
                 await self._process_devguide_staleness_schedule(db, schedule, schedule_service)
 
+            # archive_rotation 타입의 활성 스케줄 조회
+            archive_rotation_schedules = schedule_service.get_schedules_by_type(
+                TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
+                enabled_only=True
+            )
+            for schedule in archive_rotation_schedules:
+                await self._process_archive_rotation_schedule(db, schedule, schedule_service)
+
         except Exception as e:
             self._log_worker_error("스케줄 디스패치", e)
         finally:
@@ -352,6 +360,76 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             logger.info(f"[{self.name}] devguide_staleness 완료: {count}개 가이드 staleness 감지, run_id={run.id}")
         except Exception as e:
             self._log_worker_error("_execute_devguide_staleness_run", e)
+            try:
+                schedule_service = TaskScheduleService(db)
+                schedule_service.fail_run(run.id, error_message=str(e))
+            except Exception:
+                pass
+        finally:
+            db.close()
+
+    async def _process_archive_rotation_schedule(
+        self,
+        db,
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
+    ):
+        """archive_rotation 스케줄 처리."""
+        try:
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_at = last_run.started_at if last_run else None
+
+            if not self._should_run_cron(schedule, last_run_at):
+                return
+
+            logger.info(f"[{self.name}] archive_rotation 실행 시간 도래: schedule_id={schedule.id}")
+
+            if schedule_service.has_active_run(schedule.id):
+                logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                return
+
+            run = schedule_service.start_run(
+                schedule_id=schedule.id,
+                worker_id=self.name,
+                config_snapshot={}
+            )
+
+            task_name = f"archive_rotation_{schedule.id}_run_{run.id}"
+            if not self._is_task_running(task_name):
+                self._create_task(
+                    self._execute_archive_rotation_run(schedule, run),
+                    task_name
+                )
+                logger.info(f"[{self.name}] archive_rotation 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(
+                f"[{self.name}] archive_rotation 스케줄 처리 오류: schedule_id={schedule.id}, error={e}",
+                exc_info=True
+            )
+
+    async def _execute_archive_rotation_run(
+        self,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
+    ):
+        """archive 파일 로테이션 실행 (30건 축적 트리거) 후 완료 기록."""
+        db = SessionLocal()
+        try:
+            schedule_service = TaskScheduleService(db)
+            loop = asyncio.get_event_loop()
+
+            def _process():
+                from scripts.services.rotate_archive_files import rotate
+                return rotate(apply=True)
+
+            result = await loop.run_in_executor(None, _process)
+            rotated = result.get("rotated", 0)
+            schedule_service.complete_run(run.id, result=result)
+            schedule_service.update_schedule_after_run(schedule.id)
+            logger.info(f"[{self.name}] archive_rotation 완료: {rotated}건 로테이션, run_id={run.id}")
+        except Exception as e:
+            self._log_worker_error("_execute_archive_rotation_run", e)
             try:
                 schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, error_message=str(e))
