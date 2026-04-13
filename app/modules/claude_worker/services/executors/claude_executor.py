@@ -12,6 +12,14 @@ from app.modules.claude_worker.services.profile_env import build_cli_env
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
 
 
+def _extract_session_id(raw: str) -> "str | None":
+    """raw_response JSON에서 session_id 추출. 없거나 파싱 실패 시 None 반환."""
+    try:
+        return json.loads(raw).get("session_id")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+
 def _parse_quota_retry_ms(text: str):
     """stderr/stdout에서 quota 재시도 대기 시간(ms) 파싱.
 
@@ -70,6 +78,10 @@ class ClaudeExecutor(LLMExecutorBase):
         """
         if cli_options is None:
             cli_options = {}
+
+        # session_id 추출을 위해 --output-format json 강제 (R-1: plain --print에는 session_id 없음)
+        if "output_format" not in cli_options:
+            cli_options = {**cli_options, "output_format": "json"}
 
         try:
             # 프롬프트를 임시 파일에 저장하여 전달 (긴 프롬프트 및 특수문자 처리)
@@ -248,6 +260,7 @@ class ClaudeExecutor(LLMExecutorBase):
                             "success": True,
                             "result": raw_json["structured_output"],
                             "raw_response": raw_response,
+                            "claude_session_id": _extract_session_id(raw_response),
                         }
                     result_field = raw_json.get("result", "")
                     if isinstance(result_field, dict):
@@ -255,6 +268,7 @@ class ClaudeExecutor(LLMExecutorBase):
                             "success": True,
                             "result": result_field,
                             "raw_response": raw_response,
+                            "claude_session_id": _extract_session_id(raw_response),
                         }
                     if isinstance(result_field, str) and result_field.strip().startswith("{"):
                         try:
@@ -262,6 +276,7 @@ class ClaudeExecutor(LLMExecutorBase):
                                 "success": True,
                                 "result": json.loads(result_field),
                                 "raw_response": raw_response,
+                                "claude_session_id": _extract_session_id(raw_response),
                             }
                         except json.JSONDecodeError:
                             pass
@@ -281,7 +296,12 @@ class ClaudeExecutor(LLMExecutorBase):
             if parse_json:
                 try:
                     parsed = self._parse_json_response(raw_response)
-                    return {"success": True, "result": parsed, "raw_response": raw_response}
+                    return {
+                        "success": True,
+                        "result": parsed,
+                        "raw_response": raw_response,
+                        "claude_session_id": _extract_session_id(raw_response),
+                    }
                 except ValueError as e:
                     return {
                         "success": False,
@@ -289,7 +309,12 @@ class ClaudeExecutor(LLMExecutorBase):
                         "raw_response": raw_response,
                     }
             else:
-                return {"success": True, "result": None, "raw_response": raw_response}
+                return {
+                    "success": True,
+                    "result": None,
+                    "raw_response": raw_response,
+                    "claude_session_id": _extract_session_id(raw_response),
+                }
 
         except subprocess.TimeoutExpired:
             return {"success": False, "error": f"Timeout ({timeout}s)"}

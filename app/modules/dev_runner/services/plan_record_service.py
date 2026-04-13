@@ -186,6 +186,13 @@ class PlanRecordService:
         """개별 레코드 조회 (events 포함)"""
         return self.db.query(PlanRecord).filter_by(id=record_id).first()
 
+    def update_claude_session_id(self, record_id: int, session_id: str) -> None:
+        """plan_records에 claude_session_id 저장 (dev-runner executor 발급 UUID)."""
+        record = self.db.query(PlanRecord).filter_by(id=record_id).first()
+        if record:
+            record.claude_session_id = session_id
+            self.db.commit()
+
     def list_records(
         self,
         project: Optional[str] = None,

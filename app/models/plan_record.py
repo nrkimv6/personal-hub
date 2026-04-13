@@ -35,6 +35,7 @@ class PlanRecord(Base):
     chain_root_hash = Column(String(64), nullable=True)            # 체인 첫 번째 plan의 filename_hash
     recurrence_suggestion = Column(Text, nullable=True)            # LLM 생성 근본원인/개선 제안 (JSON)
     llm_processed_at = Column(DateTime)                          # LLM 분석 완료 시각
+    claude_session_id = Column(String(36), nullable=True)         # dev-runner 발급 UUID (CLI --session-id와 동일)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
