@@ -23,7 +23,7 @@ from app.database import get_db
 @pytest.fixture
 def db_session_and_app(tmp_path):
     """자체 SQLite 엔진 + TestClient 픽스처."""
-    engine = create_engine("sqlite:///:memory:")
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
     _Session = sessionmaker(bind=engine)
     db = _Session()
