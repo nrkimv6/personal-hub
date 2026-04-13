@@ -12,6 +12,8 @@
 - `.git` 보호: 삭제/강제 초기화/일괄 되돌리기 금지
 - 파괴적 git 금지: `git clean -fd`, `git reset --hard`, `git checkout .`, `git restore .`
 - 서비스 충돌 방지: `run.ps1`, `stop.ps1` 직접 실행 금지 (NSSM과 충돌)
+- frontend verify 경계: `implement`/worktree 단계에서는 `frontend verify(sync/check/build)` 금지, `/merge-test` + main에서만 허용한다. 예시로 `npm run build`, `npm run check`, `npm run check:watch`, `svelte-kit sync`, `svelte-check`, `vite build`, `node ... svelte-kit.js sync`가 모두 포함된다.
+- `_build_worktree.ps1`는 setup 전용 helper 예외이며, implement 중 임의 probe 근거로 사용하면 안 된다.
 - 스킬 원본 수정: monitor-page의 `.claude/skills`, `.claude/agents` 직접 수정 금지  
   `D:\work\project\service\wtools\.claude\`에서 수정 후 동기화
 
