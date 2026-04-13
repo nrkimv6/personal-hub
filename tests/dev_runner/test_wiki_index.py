@@ -7,9 +7,15 @@ Phase T3: 실제 파일 기반 통합 검증
 import pytest
 from datetime import datetime, date, timedelta
 from pathlib import Path
+import sys
 from unittest.mock import patch, MagicMock, mock_open
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+# scripts/migrations 하위 모듈 로드를 위한 path 주입
+_MIGRATIONS_DIR = str(Path(__file__).resolve().parents[2] / "scripts" / "migrations")
+if _MIGRATIONS_DIR not in sys.path:
+    sys.path.insert(0, _MIGRATIONS_DIR)
 
 from app.shared.wiki_tags import extract_wiki_tags, load_whitelist, load_meta_yaml
 from app.models.plan_record import PlanRecord, PlanEvent

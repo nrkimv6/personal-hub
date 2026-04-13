@@ -237,7 +237,8 @@ function Start-BrowserWorkers {
         }
 
         if (Test-Path $VenvPython) {
-            $devRunnerListenerScript = Join-Path $ScriptDir "dev-runner-command-listener.py"
+            $PlanRunnerDir = Join-Path $ProjectRoot "scripts\plan_runner"
+            $devRunnerListenerScript = Join-Path $PlanRunnerDir "dev-runner-command-listener.py"
             $devRunnerListenerProcess = Start-Process -FilePath $VenvPython `
                 -ArgumentList $devRunnerListenerScript `
                 -WorkingDirectory $ProjectRoot `

@@ -82,7 +82,7 @@ class TestGetAheadBehind:
 
         call_count = 0
 
-        async def mock_run(*args):
+        async def mock_run(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             # 첫 번째 호출: ahead, 두 번째 호출: behind
@@ -109,7 +109,7 @@ class TestGetWorktreeCommits:
 
         call_count = 0
 
-        async def mock_run(*args):
+        async def mock_run(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -159,11 +159,12 @@ class TestFindPlanFile:
             encoding="utf-8",
         )
 
-        monkeypatch.setattr(svc, "_REPO_ROOT", tmp_path)
-        result = svc.find_plan_file("impl/my-feature")
+        result, mtime = svc.find_plan_file("impl/my-feature", repo_root=tmp_path)
 
         assert result is not None
         assert "my-plan" in result
+        assert mtime is not None
+        assert re.match(r"^\d{4}-\d{2}-\d{2}T", mtime)
 
     def test_right_no_match(self, tmp_path, monkeypatch):
         """일치하는 파일 없음 → None 반환"""
@@ -175,10 +176,60 @@ class TestFindPlanFile:
             "> branch: impl/other\n", encoding="utf-8"
         )
 
-        monkeypatch.setattr(svc, "_REPO_ROOT", tmp_path)
-        result = svc.find_plan_file("impl/nonexistent")
+        result, mtime = svc.find_plan_file("impl/nonexistent", repo_root=tmp_path)
 
         assert result is None
+        assert mtime is None
+
+
+class TestPlanOnlyBranches:
+    def test_right_filters_existing_branches(self, tmp_path):
+        from app.modules.dev_runner.services.worktree_service import list_plan_only_branches
+
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+
+        (plan_dir / "2026-04-01_plan-a.md").write_text(
+            "# plan a\n\n> branch: impl/a\n",
+            encoding="utf-8",
+        )
+        (plan_dir / "2026-04-02_plan-b.md").write_text(
+            "# plan b\n\n> branch: impl/b\n",
+            encoding="utf-8",
+        )
+        (plan_dir / "2026-04-03_no-branch.md").write_text(
+            "# plan c\n\n작성\n",
+            encoding="utf-8",
+        )
+
+        plan_only, unresolved = list_plan_only_branches(
+            {"impl/a"},
+            repo_root=tmp_path,
+        )
+
+        assert len(plan_only) == 1
+        assert plan_only[0].branch == "impl/b"
+        assert len(unresolved) == 1
+        assert unresolved[0].reason == "missing > branch header"
+
+    def test_all_existing_returns_empty(self, tmp_path):
+        from app.modules.dev_runner.services.worktree_service import list_plan_only_branches
+
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "2026-04-01_plan-a.md").write_text(
+            "# plan a\n\n> branch: impl/a\n",
+            encoding="utf-8",
+        )
+        (plan_dir / "2026-04-02_plan-b.md").write_text(
+            "# plan b\n\n> branch: impl/b\n",
+            encoding="utf-8",
+        )
+
+        plan_only, unresolved = list_plan_only_branches({"impl/a", "impl/b"}, repo_root=tmp_path)
+
+        assert plan_only == []
+        assert unresolved == []
 
 
 class TestRunGitError:
@@ -198,6 +249,88 @@ class TestRunGitError:
             result = await _run_git("invalid-command")
 
         assert result == ""
+
+
+class TestMainDirty:
+    @pytest.mark.asyncio
+    async def test_get_main_dirty_parses_rename_path(self):
+        from app.modules.dev_runner.services.worktree_service import get_main_dirty
+
+        with patch(
+            "app.modules.dev_runner.services.worktree_service._run_git",
+            new=AsyncMock(return_value="R  old_name.py\0new_name.py\0"),
+        ):
+            result = await get_main_dirty()
+
+        assert result.dirty_count == 1
+        assert result.files == ["new_name.py"]
+
+    @pytest.mark.asyncio
+    async def test_get_main_dirty_parses_space_name(self):
+        from app.modules.dev_runner.services.worktree_service import get_main_dirty
+
+        with patch(
+            "app.modules.dev_runner.services.worktree_service._run_git",
+            new=AsyncMock(return_value=" M src/space name.py\0?? new file.py\0"),
+        ):
+            result = await get_main_dirty()
+
+        assert result.dirty_count == 2
+        assert "src/space name.py" in result.files
+        assert "new file.py" in result.files
+
+    @pytest.mark.asyncio
+    async def test_get_main_dirty_empty_output(self):
+        from app.modules.dev_runner.services.worktree_service import get_main_dirty
+
+        with patch(
+            "app.modules.dev_runner.services.worktree_service._run_git",
+            new=AsyncMock(return_value=""),
+        ):
+            result = await get_main_dirty()
+
+        assert result.dirty_count == 0
+        assert result.files == []
+
+
+class TestGetAllWorktrees:
+    @pytest.mark.asyncio
+    async def test_empty_raw_returns_plan_only(self):
+        from app.modules.dev_runner.schemas import MainDirtyStatus, PlanOnlyBranch
+        import app.modules.dev_runner.services.worktree_service as svc
+
+        with patch(
+            "app.modules.dev_runner.services.worktree_service.list_worktrees",
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            "app.modules.dev_runner.services.worktree_service.list_plan_only_branches",
+            new=lambda *_args: ([PlanOnlyBranch(plan_file="2026-04-01_plan-a.md", branch="impl/a", plan_mtime=None)], []),
+        ), patch(
+            "app.modules.dev_runner.services.worktree_service.get_main_dirty",
+            new=AsyncMock(return_value=MainDirtyStatus(dirty_count=0, files=[])),
+        ):
+            result = await svc.get_all_worktrees()
+
+        assert result.worktrees == []
+        assert len(result.plan_only) == 1
+        assert result.plan_only[0].branch == "impl/a"
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_repo_root_returns_empty_response(self, tmp_path):
+        from app.modules.dev_runner.services.worktree_service import get_all_worktrees
+
+        missing = tmp_path / "missing"
+        missing.mkdir()
+        target = missing / "repo"
+        # 폴더 자체를 제거해 존재하지 않는 루트 경로 시뮬레이션
+        target.rmdir() if target.exists() else None
+
+        result = await get_all_worktrees(repo_root=target)
+
+        assert result.worktrees == []
+        assert result.plan_only == []
+        assert result.branch_unresolved == []
+        assert result.main_dirty.dirty_count == 0
 
 
 # ──────────────────────────────────────────────

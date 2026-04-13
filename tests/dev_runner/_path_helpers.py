@@ -16,6 +16,11 @@ def get_listener_script_path() -> Path:
     return get_repo_root() / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 
+def get_plan_runner_script_path() -> Path:
+    """현재 checkout의 plan_runner 스크립트 경로 반환."""
+    return get_repo_root() / "scripts" / "plan_runner" / "_dr_plan_runner.py"
+
+
 def get_project_python() -> str:
     """프로젝트 python 실행 경로 반환 (.venv 우선, 없으면 현재 인터프리터)."""
     venv_python = get_repo_root() / ".venv" / "Scripts" / "python.exe"

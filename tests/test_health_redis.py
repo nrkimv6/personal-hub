@@ -369,7 +369,7 @@ class TestWorkerLifecycleE2E:
             worker.shutdown_event.set()
             await asyncio.wait_for(task, timeout=2.0)
 
-        asyncio.get_event_loop().run_until_complete(run())
+        asyncio.run(run())
 
         # Redis publish 확인
         data = WorkerHealthRedis.check("test_lifecycle_e2e")

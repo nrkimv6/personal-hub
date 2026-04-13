@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-TESTS_ROOT = Path(__file__).resolve().parents[2]
+TESTS_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _grep_in_tests(pattern: str) -> list[str]:

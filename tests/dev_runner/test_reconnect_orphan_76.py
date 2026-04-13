@@ -26,7 +26,7 @@ ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 _SCRIPTS_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "scripts")
 )
-_LISTENER_PATH = os.path.join(_SCRIPTS_DIR, "dev-runner-command-listener.py")
+_LISTENER_PATH = os.path.join(_SCRIPTS_DIR, "plan_runner", "dev-runner-command-listener.py")
 
 
 def _load_listener_module():

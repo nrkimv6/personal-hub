@@ -122,7 +122,8 @@ class TestCheckWorktreeExists:
 # ─── worktree_service._run_git async 방어 ────────────────────────────────────
 
 class TestWorktreeServiceRunGit:
-    def test_worktree_service_run_git_safe_directory_R(self):
+    @pytest.mark.asyncio
+    async def test_worktree_service_run_git_safe_directory_R(self):
         """R(Right): worktree_service._run_git → create_subprocess_exec에 safe.directory=* 포함"""
         from app.modules.dev_runner.services import worktree_service
 
@@ -132,7 +133,7 @@ class TestWorktreeServiceRunGit:
 
         with patch("app.modules.dev_runner.services.worktree_service.asyncio.create_subprocess_exec",
                    return_value=mock_proc) as mock_exec:
-            asyncio.get_event_loop().run_until_complete(worktree_service._run_git("status"))
+            await worktree_service._run_git("status")
             called_args = mock_exec.call_args[0]
             # called_args: ("git", "-c", "safe.directory=*", "status")
             assert called_args[1] == "-c"

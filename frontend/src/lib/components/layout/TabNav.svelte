@@ -1,9 +1,15 @@
 <script lang="ts">
   /**
    * 통합 TabNav 컴포넌트
-   * - variant='primary': 언더라인 스타일 (기존 PrimaryTabNav)
-   * - variant='secondary': 배경색 스타일 (기존 SecondaryTabNav)
-   * - variant='underline': 간단한 언더라인 스타일
+   * - variant='primary': 언더라인 탭(기존 PrimaryTabNav)
+   *   - 활성: border-primary, text-primary
+   *   - 비활성: text-muted-foreground + hover:text-primary
+   * - variant='secondary': 캡슐형 배경 탭(기존 SecondaryTabNav)
+   *   - 활성: bg-card, text-primary, shadow-sm
+   *   - 비활성: text-muted-foreground, hover:text-primary
+   * - variant='underline': compact한 간단 언더라인
+   * - 기본 래퍼: variant='primary'|'underline' -> border-b mb-4 + nav
+   *   variant='secondary' -> bg-muted rounded-lg p-1 mb-4 inline-flex
    * - queryParam: URL 쿼리파라미터 동기화 (예: 'tab' → ?tab=gallery)
    * - urlBased: URL pathname 기반 활성 탭 판단
    * - replaceState: goto() 호출 시 히스토리 교체 여부 (기본 true)
@@ -32,6 +38,7 @@
     queryParam?: string;
     replaceState?: boolean;
     size?: 'default' | 'compact';
+    onTabChange?: (tabId: string) => void;
   }
 
   let {
@@ -42,6 +49,7 @@
     queryParam,
     replaceState = true,
     size = 'default',
+    onTabChange,
   }: Props = $props();
 
   // queryParam 모드: URL searchParams → activeTab 양방향 동기화
@@ -114,6 +122,8 @@
     } else {
       activeTab = tab.id;
     }
+
+    onTabChange?.(tab.id);
   }
 
   // size별 탭 패딩/폰트 클래스

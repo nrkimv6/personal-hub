@@ -97,7 +97,7 @@ def test_worker_skips_iteration_when_circuit_open_right():
 
     worker = FakeWorker()
     # _wait_for_next_cycle이 즉시 종료하도록 설정
-    asyncio.get_event_loop().run_until_complete(worker._main_loop())
+    asyncio.run(worker._main_loop())
 
     assert worker.iteration_count == 0
 
@@ -111,7 +111,7 @@ def test_worker_resumes_on_db_recovery_right():
         db_circuit._fail_count = 0
 
     worker = FakeWorker()
-    asyncio.get_event_loop().run_until_complete(worker._main_loop())
+    asyncio.run(worker._main_loop())
 
     assert worker.iteration_count >= 1
 
@@ -151,7 +151,7 @@ def test_worker_consecutive_errors_not_incremented_on_db_guard_right():
         db_circuit._last_fail_time = time.monotonic()
 
     worker = FakeWorker()
-    asyncio.get_event_loop().run_until_complete(worker._main_loop())
+    asyncio.run(worker._main_loop())
 
     assert worker._consecutive_errors == 0
 
@@ -170,7 +170,7 @@ def test_worker_logs_recovery_info_once_on_db_resume_right():
     info_calls = []
     with patch("app.shared.worker.base_worker.logger") as mock_logger:
         mock_logger.info.side_effect = lambda *a, **kw: info_calls.append(a)
-        asyncio.get_event_loop().run_until_complete(worker._main_loop())
+        asyncio.run(worker._main_loop())
 
     # "DB 접근 재개" 포함 로그 1회
     recovery_logs = [c for c in info_calls if "접근 재개" in str(c)]
@@ -239,6 +239,6 @@ def test_worker_heartbeat_published_during_open_state_right():
         heartbeat_called.append(True)
     worker._update_heartbeat = mock_heartbeat
 
-    asyncio.get_event_loop().run_until_complete(worker._main_loop())
+    asyncio.run(worker._main_loop())
 
     assert len(heartbeat_called) >= 1

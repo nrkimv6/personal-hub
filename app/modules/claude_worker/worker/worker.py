@@ -103,7 +103,7 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
     try:
         post = db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
         if not post:
-            logger.warning(f"Instagram post not found: {post_id}")
+            logger.error(f"Instagram post not found: {post_id}")
             return False
 
         # 이벤트 기간 파싱
@@ -1497,6 +1497,37 @@ class LLMWorker:
             service.mark_processing(request.id)
             self._update_worker_state("processing", request.id)
 
+            # caller_id 사전 검증 (Phase 2)
+            if request.caller_type in ["instagram", "universal_crawl"]:
+                try:
+                    caller_id_int = int(request.caller_id)
+                    if request.caller_type == "instagram":
+                        from app.models import InstagramPost
+                        post = db.query(InstagramPost).filter(InstagramPost.id == caller_id_int).first()
+                        if not post:
+                            logger.warning(f"사전 검증 실패: Instagram post {caller_id_int} 없음 (id={request.id})")
+                            service.mark_failed(request.id, f"Instagram post not found: {caller_id_int}")
+                            self._update_worker_state("idle", None)
+                            return
+                        if not post.caption:
+                            logger.warning(f"사전 검증 실패: Instagram post {caller_id_int} 캡션 없음 (id={request.id})")
+                            service.mark_failed(request.id, f"Instagram post has no caption: {caller_id_int}")
+                            self._update_worker_state("idle", None)
+                            return
+                    elif request.caller_type == "universal_crawl":
+                        from app.models.universal_crawl import CrawledPage
+                        page = db.query(CrawledPage).filter(CrawledPage.id == caller_id_int).first()
+                        if not page:
+                            logger.warning(f"사전 검증 실패: CrawledPage {caller_id_int} 없음 (id={request.id})")
+                            service.mark_failed(request.id, f"CrawledPage not found: {caller_id_int}")
+                            self._update_worker_state("idle", None)
+                            return
+                except ValueError:
+                    logger.warning(f"사전 검증 실패: 유효하지 않은 caller_id '{request.caller_id}' (id={request.id})")
+                    service.mark_failed(request.id, f"Invalid caller_id (non-numeric): {request.caller_id}")
+                    self._update_worker_state("idle", None)
+                    return
+
             logger.info(f"LLM 실행 시작: id={request.id}, queue={request.queue_name}, caller_type={request.caller_type}")
 
             # cli_options 파싱 (JSON 문자열 → dict)
@@ -1550,30 +1581,35 @@ class LLMWorker:
                 logger.info(f"LLM 실행 완료: id={request.id}")
 
                 # caller_type별 결과 저장
+                save_success = True
                 if request.caller_type == "instagram":
-                    save_instagram_result(db, int(request.caller_id), result["result"])
+                    save_success = save_instagram_result(db, int(request.caller_id), result["result"])
                 elif request.caller_type == "universal_crawl":
-                    save_universal_crawl_result(db, int(request.caller_id), result["result"])
+                    save_success = save_universal_crawl_result(db, int(request.caller_id), result["result"])
                 elif request.caller_type == "topic_extract":
-                    save_topic_extract_result(db, request.caller_id, result["result"])
+                    save_success = save_topic_extract_result(db, request.caller_id, result["result"])
                 elif request.caller_type == "writing":
-                    save_writing_result(db, request, result)
+                    save_success = save_writing_result(db, request, result)
                 elif request.caller_type == "writing_generate":
-                    save_writing_generate_result(db, request, result)
+                    save_success = save_writing_generate_result(db, request, result)
                 elif request.caller_type == "writing_refine":
-                    save_writing_refine_result(db, request, result)
+                    save_success = save_writing_refine_result(db, request, result)
                 elif request.caller_type == "event_import":
-                    save_event_import_result(db, request, result)
+                    save_success = save_event_import_result(db, request, result)
                 elif request.caller_type == "report":
-                    save_report_result(db, request, result)
+                    save_success = save_report_result(db, request, result)
                 elif request.caller_type == "pytest_fix":
-                    save_pytest_fix_result(db, request, result)
+                    save_success = save_pytest_fix_result(db, request, result)
                 elif request.caller_type == "plan_archive_analyze":
-                    save_plan_archive_result(db, request, result)
+                    save_success = save_plan_archive_result(db, request, result)
                 elif request.caller_type == "plan_recurrence_check":
-                    save_recurrence_check_result(db, request, result)
+                    save_success = save_recurrence_check_result(db, request, result)
                 elif request.caller_type == "plan_recurrence_suggest":
-                    save_recurrence_suggest_result(db, request, result)
+                    save_success = save_recurrence_suggest_result(db, request, result)
+
+                if not save_success:
+                    logger.error(f"결과 저장 실패 (상태 전환: completed -> failed): id={request.id}, caller_type={request.caller_type}")
+                    service.mark_failed(request.id, f"Save result failed for {request.caller_type}")
             else:
                 # JSON 파싱 실패지만 raw_response가 있는 경우
                 if "raw_response" in result and result.get("raw_response"):
@@ -1597,14 +1633,19 @@ class LLMWorker:
                         logger.info(f"LLM 실행 완료 (JSON 없음, raw_response 사용): id={request.id}")
 
                         # caller_type별 결과 저장
+                        save_success = True
                         if request.caller_type == "writing_generate":
-                            save_writing_generate_result(db, request, fallback_result)
+                            save_success = save_writing_generate_result(db, request, fallback_result)
                         elif request.caller_type == "writing_refine":
-                            save_writing_refine_result(db, request, fallback_result)
+                            save_success = save_writing_refine_result(db, request, fallback_result)
                         elif request.caller_type == "report":
-                            save_report_result(db, request, fallback_result)
+                            save_success = save_report_result(db, request, fallback_result)
                         elif request.caller_type == "pytest_fix":
-                            save_pytest_fix_result(db, request, fallback_result)
+                            save_success = save_pytest_fix_result(db, request, fallback_result)
+
+                        if not save_success:
+                            logger.error(f"결과 저장 실패 (fallback 경로, 상태 전환: completed -> failed): id={request.id}, caller_type={request.caller_type}")
+                            service.mark_failed(request.id, f"Save result failed for {request.caller_type} (fallback)")
                     else:
                         # Quota 에러 감지 및 provider pause 설정
                         quota_retry_ms = result.get("quota_retry_ms")

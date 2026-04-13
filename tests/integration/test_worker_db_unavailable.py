@@ -91,7 +91,7 @@ def test_worker_survives_pg_unavailable_on_startup_e2e():
     worker = _MinimalWorker(cycle_limit=5)
 
     try:
-        asyncio.get_event_loop().run_until_complete(worker._main_loop())
+        asyncio.run(worker._main_loop())
     except Exception as e:
         pytest.fail(f"워커 루프가 예외로 종료됨: {e}")
 
@@ -117,7 +117,7 @@ def test_worker_heartbeat_published_during_db_open_e2e():
 
     worker = _MinimalWorker(cycle_limit=10)
 
-    asyncio.get_event_loop().run_until_complete(worker._main_loop())
+    asyncio.run(worker._main_loop())
 
     # heartbeat는 _update_heartbeat 호출 기록으로 확인
     # BaseWorker._main_loop 내부에서 _update_heartbeat가 호출되어야 함
@@ -156,7 +156,7 @@ def test_worker_recovers_when_pg_restored_e2e():
 
     # 4) CLOSED 상태에서 워커 루프 → _main_loop_iteration 호출됨
     worker = _MinimalWorker(cycle_limit=3)
-    asyncio.get_event_loop().run_until_complete(worker._main_loop())
+    asyncio.run(worker._main_loop())
 
     assert worker.iterations_called > 0, (
         "CLOSED 복구 후 _main_loop_iteration 미호출 — backoff guard가 잘못 유지됨"

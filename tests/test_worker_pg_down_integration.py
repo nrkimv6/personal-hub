@@ -90,7 +90,7 @@ def test_worker_does_not_flood_logs_when_pg_down_integration():
     with patch("app.shared.worker.base_worker.logger") as mock_logger:
         mock_logger.warning.side_effect = lambda *a, **kw: warning_msgs.append(a)
         mock_logger.error.side_effect = lambda *a, **kw: error_msgs.append(kw)
-        asyncio.get_event_loop().run_until_complete(worker._main_loop())
+        asyncio.run(worker._main_loop())
 
     # PG down 시 WARNING ≤2건 (30초 rate-limit), traceback ERROR 0건
     tb_errors = [e for e in error_msgs if e.get("exc_info")]
