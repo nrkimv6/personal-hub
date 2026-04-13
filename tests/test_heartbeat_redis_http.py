@@ -38,16 +38,16 @@ class TestWorkerHealthEndpoint:
             mock_status.return_value = {
                 "pid": None,
                 "status": "stopped",
-                "start_time": None,
+                "started_at": None,
                 "last_heartbeat": None,
                 "active_tasks": 0,
+                "memory_usage_mb": None,
+                "uptime_seconds": None,
+                "active_tabs": 0,
+                "browser_contexts": 0,
                 "error_message": None,
                 "global_pause": False,
                 "paused_at": None,
-                "browser_available": False,
-                "browser_error": None,
-                "browser_recovery_attempts": 0,
-                "browser_permanently_failed": False,
             }
             response = client.get("/api/v1/worker/health")
 
@@ -66,16 +66,16 @@ class TestWorkerHealthEndpoint:
             mock_status.return_value = {
                 "pid": 12345,
                 "status": "running",
-                "start_time": None,
+                "started_at": None,
                 "last_heartbeat": None,
                 "active_tasks": 0,
+                "memory_usage_mb": None,
+                "uptime_seconds": None,
+                "active_tabs": 0,
+                "browser_contexts": 0,
                 "error_message": None,
                 "global_pause": False,
                 "paused_at": None,
-                "browser_available": False,
-                "browser_error": None,
-                "browser_recovery_attempts": 0,
-                "browser_permanently_failed": False,
             }
             response = client.get("/api/v1/worker/health")
 
@@ -97,16 +97,16 @@ class TestWorkerHealthEndpoint:
             mock_status.return_value = {
                 "pid": 12345,
                 "status": "running",
-                "start_time": None,
+                "started_at": "2026-04-10T00:00:00",
                 "last_heartbeat": "2026-04-10T00:00:00",
                 "active_tasks": 2,
+                "memory_usage_mb": 100.0,
+                "uptime_seconds": 3600,
+                "active_tabs": 1,
+                "browser_contexts": 1,
                 "error_message": None,
                 "global_pause": False,
                 "paused_at": None,
-                "browser_available": True,
-                "browser_error": None,
-                "browser_recovery_attempts": 0,
-                "browser_permanently_failed": False,
             }
             response = client.get("/api/v1/worker/health")
 
@@ -126,25 +126,87 @@ class TestWorkerBrowserStatusEndpoint:
     """GET /worker/browser-status — 정상 응답 확인"""
 
     def test_worker_browser_status_heartbeat_http(self, client):
-        """R(Right): GET /worker/browser-status → 200 + 응답 구조 확인."""
-        with patch("app.routes.worker.get_worker_status_from_db") as mock_status:
+        """R(Right): GET /worker/browser-status → 200 + 응답 구조 확인.
+
+        새 구현: Redis heartbeat + PID liveness 기반 available 판정.
+        """
+        redis_data = {"source": "redis", "ttl_remaining": 25, "updated_at": "2026-04-10T10:00:00"}
+        with patch("app.routes.worker.get_worker_status_from_db") as mock_status, \
+             patch("app.routes.worker.WorkerHealthRedis.check", return_value=redis_data), \
+             patch("app.routes.worker.is_process_running", return_value=True):
             mock_status.return_value = {
                 "pid": 12345,
                 "status": "running",
-                "start_time": "2026-04-10T00:00:00",
-                "last_heartbeat": "2026-04-10T10:00:00",  # Redis 기반 값
+                "started_at": "2026-04-10T00:00:00",
+                "last_heartbeat": "2026-04-10T10:00:00",
                 "active_tasks": 1,
+                "memory_usage_mb": 80.0,
+                "uptime_seconds": 36000,
+                "active_tabs": 2,
+                "browser_contexts": 1,
                 "error_message": None,
                 "global_pause": False,
                 "paused_at": None,
-                "browser_available": True,
-                "browser_error": None,
-                "browser_recovery_attempts": 0,
-                "browser_permanently_failed": False,
             }
             response = client.get("/api/v1/worker/browser-status")
 
         assert response.status_code == 200
+        data = response.json()
+        assert data["available"] is True
+        assert data["last_heartbeat"] == "2026-04-10T10:00:00"
+
+
+    def test_worker_browser_status_redis_available_R(self, client):
+        """R(Right): Redis heartbeat 존재 + PID 살아 있음 → available=True, last_heartbeat 값 존재."""
+        redis_data = {"source": "redis", "ttl_remaining": 25, "updated_at": "2026-04-11T12:00:00"}
+        with patch("app.routes.worker.WorkerHealthRedis.check", return_value=redis_data), \
+             patch("app.routes.worker.is_process_running", return_value=True), \
+             patch("app.routes.worker.get_worker_status_from_db") as mock_status:
+            mock_status.return_value = {
+                "pid": 9999,
+                "status": "running",
+                "started_at": None,
+                "last_heartbeat": "2026-04-11T12:00:00",
+                "active_tasks": 0,
+                "memory_usage_mb": None,
+                "uptime_seconds": None,
+                "active_tabs": 0,
+                "browser_contexts": 0,
+                "error_message": None,
+                "global_pause": False,
+                "paused_at": None,
+            }
+            response = client.get("/api/v1/worker/browser-status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["available"] is True
+        assert data["last_heartbeat"] == "2026-04-11T12:00:00"
+
+    def test_worker_browser_status_redis_down_E(self, client):
+        """E(Error): Redis heartbeat 없음 → available=False, last_heartbeat=None, 200 응답."""
+        with patch("app.routes.worker.WorkerHealthRedis.check", return_value=None), \
+             patch("app.routes.worker.get_worker_status_from_db") as mock_status:
+            mock_status.return_value = {
+                "pid": None,
+                "status": "not_started",
+                "started_at": None,
+                "last_heartbeat": None,
+                "active_tasks": 0,
+                "memory_usage_mb": None,
+                "uptime_seconds": None,
+                "active_tabs": 0,
+                "browser_contexts": 0,
+                "error_message": None,
+                "global_pause": False,
+                "paused_at": None,
+            }
+            response = client.get("/api/v1/worker/browser-status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["available"] is False
+        assert data["last_heartbeat"] is None
 
 
 # ============================================================

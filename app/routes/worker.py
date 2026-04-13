@@ -29,7 +29,7 @@ class WorkerStatusResponse(BaseModel):
     """워커 상태 응답"""
     pid: Optional[int] = None
     status: str
-    start_time: Optional[str] = None
+    started_at: Optional[str] = None
     last_heartbeat: Optional[str] = None
     active_tasks: int = 0
     error_message: Optional[str] = None
@@ -37,11 +37,8 @@ class WorkerStatusResponse(BaseModel):
     memory_usage_mb: Optional[float] = None
     global_pause: bool = False
     paused_at: Optional[str] = None
-    # 브라우저 상태 (graceful degradation)
-    browser_available: bool = False
-    browser_error: Optional[str] = None
-    browser_recovery_attempts: int = 0
-    browser_permanently_failed: bool = False
+    active_tabs: int = 0
+    browser_contexts: int = 0
 
 
 class BrowserStatusResponse(BaseModel):
@@ -74,9 +71,8 @@ def get_worker_status_from_db() -> dict:
     db = SessionLocal()
     try:
         result = db.execute(text("""
-            SELECT pid, status, start_time, last_heartbeat, active_tasks, error_message,
-                   global_pause, paused_at,
-                   browser_available, browser_error, browser_recovery_attempts, browser_permanently_failed
+            SELECT pid, status, active_tasks, last_heartbeat, memory_usage_mb,
+                   started_at, active_tabs, browser_contexts, global_pause, paused_at
             FROM worker_status
             WHERE id = 1
         """)).fetchone()
@@ -84,50 +80,50 @@ def get_worker_status_from_db() -> dict:
         if result:
             redis_health = WorkerHealthRedis.check("naver")
             last_heartbeat = redis_health["updated_at"] if redis_health else None
+            uptime_seconds = calculate_uptime(result[5])
             return {
                 "pid": result[0],
                 "status": result[1],
-                "start_time": result[2],
+                "active_tasks": result[2] or 0,
                 "last_heartbeat": last_heartbeat,
-                "active_tasks": result[4],
-                "error_message": result[5],
-                "global_pause": bool(result[6]) if result[6] is not None else False,
-                "paused_at": result[7],
-                # 브라우저 상태
-                "browser_available": bool(result[8]) if result[8] is not None else False,
-                "browser_error": result[9],
-                "browser_recovery_attempts": result[10] or 0,
-                "browser_permanently_failed": bool(result[11]) if result[11] is not None else False
+                "memory_usage_mb": result[4],
+                "started_at": result[5],
+                "uptime_seconds": uptime_seconds,
+                "active_tabs": result[6] or 0,
+                "browser_contexts": result[7] or 0,
+                "global_pause": bool(result[8]) if result[8] is not None else False,
+                "paused_at": result[9],
+                "error_message": None,
             }
         return {
             "pid": None,
             "status": "not_started",
-            "start_time": None,
-            "last_heartbeat": None,
             "active_tasks": 0,
-            "error_message": None,
+            "last_heartbeat": None,
+            "memory_usage_mb": None,
+            "started_at": None,
+            "uptime_seconds": None,
+            "active_tabs": 0,
+            "browser_contexts": 0,
             "global_pause": False,
             "paused_at": None,
-            "browser_available": False,
-            "browser_error": None,
-            "browser_recovery_attempts": 0,
-            "browser_permanently_failed": False
+            "error_message": None,
         }
     except Exception as e:
         logger.error(f"워커 상태 조회 실패: {str(e)}")
         return {
             "pid": None,
             "status": "unknown",
-            "start_time": None,
-            "last_heartbeat": None,
             "active_tasks": 0,
-            "error_message": str(e),
+            "last_heartbeat": None,
+            "memory_usage_mb": None,
+            "started_at": None,
+            "uptime_seconds": None,
+            "active_tabs": 0,
+            "browser_contexts": 0,
             "global_pause": False,
             "paused_at": None,
-            "browser_available": False,
-            "browser_error": None,
-            "browser_recovery_attempts": 0,
-            "browser_permanently_failed": False
+            "error_message": str(e),
         }
     finally:
         db.close()
@@ -237,7 +233,7 @@ async def get_worker_status():
     # 추가 정보
     if pid and is_process_running(pid):
         status_data["memory_usage_mb"] = get_process_memory(pid)
-        status_data["uptime_seconds"] = calculate_uptime(status_data.get("start_time"))
+        status_data["uptime_seconds"] = calculate_uptime(status_data.get("started_at"))
 
     return WorkerStatusResponse(**status_data)
 
@@ -475,44 +471,17 @@ async def resume_monitoring():
 @router.get("/browser-status", response_model=BrowserStatusResponse)
 async def get_browser_status():
     """워커의 브라우저 서비스 상태를 조회합니다.
-
-    브라우저 서비스가 사용 가능한지, 오류가 있는지,
-    복구 시도 횟수와 복구 포기 상태를 반환합니다.
+    Redis heartbeat 기반으로 판정 — worker_status DB 컬럼 미존재 대응.
     """
-    db = SessionLocal()
-    try:
-        result = db.execute(text("""
-            SELECT browser_available, browser_error, browser_recovery_attempts,
-                   browser_permanently_failed, last_heartbeat
-            FROM worker_status WHERE id = 1
-        """)).fetchone()
-
-        if not result:
-            return BrowserStatusResponse(
-                available=False,
-                error="워커 상태 정보 없음",
-                recovery_attempts=0,
-                permanently_failed=False,
-                last_heartbeat=None
-            )
-
-        redis_health = WorkerHealthRedis.check("naver")
-        last_heartbeat = redis_health["updated_at"] if redis_health else None
-        return BrowserStatusResponse(
-            available=bool(result[0]) if result[0] is not None else False,
-            error=result[1],
-            recovery_attempts=result[2] or 0,
-            permanently_failed=bool(result[3]) if result[3] is not None else False,
-            last_heartbeat=last_heartbeat
-        )
-    except Exception as e:
-        logger.error(f"브라우저 상태 조회 실패: {str(e)}")
-        return BrowserStatusResponse(
-            available=False,
-            error=f"조회 실패: {str(e)}",
-            recovery_attempts=0,
-            permanently_failed=False,
-            last_heartbeat=None
-        )
-    finally:
-        db.close()
+    redis_health = WorkerHealthRedis.check("naver")
+    last_heartbeat = redis_health["updated_at"] if redis_health else None
+    status_data = get_worker_status_from_db()
+    pid = status_data.get("pid")
+    available = bool(redis_health and pid and is_process_running(pid))
+    return BrowserStatusResponse(
+        available=available,
+        error=status_data.get("error_message"),
+        recovery_attempts=0,
+        permanently_failed=False,
+        last_heartbeat=last_heartbeat
+    )

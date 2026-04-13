@@ -69,12 +69,14 @@ class ScheduleItem(BaseModel):
     business_name: Optional[str]
     service_account_id: Optional[int]
     times: Optional[List[str]] = None
+    last_event_at: Optional[str] = None
+    last_event_status: Optional[str] = None
 
 
 class CoupangStatusSummary(BaseModel):
     total_schedules: int
-    enabled_schedules: int
-    active_schedules: int
+    enabled_schedules: int  # is_enabled=True인 일정 수 (활성화된 일정, 실행 중 여부와 무관)
+    active_schedules: int  # is_enabled=True AND is_active=True인 일정 수 (실제 실행 중)
     proxy_enabled: bool = False
     proxy_active_count: int = 0
 
@@ -262,6 +264,8 @@ def list_schedules(db: Session = Depends(get_db)):
             business_name=ctx.get("business_name"),
             service_account_id=ctx.get("service_account_id"),
             times=ctx.get("times"),
+            last_event_at=ctx.get("last_event_at"),
+            last_event_status=ctx.get("last_event_status"),
         ))
     return result
 

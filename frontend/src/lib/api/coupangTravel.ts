@@ -28,6 +28,8 @@ export interface CoupangSchedule {
   business_name: string | null;
   service_account_id: number | null;
   times: string[] | null;
+  last_event_at: string | null;
+  last_event_status: string | null;
 }
 
 export interface CoupangStatusSummary {

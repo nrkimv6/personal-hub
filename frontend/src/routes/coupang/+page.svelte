@@ -26,6 +26,7 @@
 
   let loading = $state(false);
   let error = $state('');
+  let workerWarning = $state(false);
   let activeTab = $state<'schedules' | 'history' | 'cancellation-history'>('schedules');
 
   let newUrl = $state('');
@@ -90,6 +91,7 @@
       schedules = scheduleData;
       accounts = accountData;
       statusSummary = statusData;
+      workerWarning = statusData.active_schedules === 0 && statusData.enabled_schedules > 0;
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') return;
       const message = e instanceof Error ? e.message : '쿠팡 데이터 로드 실패';
@@ -111,6 +113,7 @@
       ]);
       schedules = scheduleData;
       statusSummary = statusData;
+      workerWarning = statusData.active_schedules === 0 && statusData.enabled_schedules > 0;
       error = '';
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') return;
@@ -309,6 +312,12 @@
     </div>
   {/if}
 
+  {#if workerWarning}
+    <div class="rounded bg-amber-50 border border-amber-200 px-4 py-3 text-amber-800 text-sm" role="alert">
+      활성화된 일정이 있지만 현재 실행 중인 일정이 없습니다. Worker가 중지되었거나 스케줄이 대기 중일 수 있습니다.
+    </div>
+  {/if}
+
   <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
     <div class="card text-center">
       <div class="text-3xl font-bold text-foreground">{statusSummary.total_schedules}</div>
@@ -316,11 +325,11 @@
     </div>
     <div class="card text-center">
       <div class="text-3xl font-bold text-primary">{statusSummary.enabled_schedules}</div>
-      <div class="text-sm text-muted-foreground">활성 일정</div>
+      <div class="text-sm text-muted-foreground">활성화됨</div>
     </div>
     <div class="card text-center">
       <div class="text-3xl font-bold text-success">{statusSummary.active_schedules}</div>
-      <div class="text-sm text-muted-foreground">동작 중</div>
+      <div class="text-sm text-muted-foreground">현재 실행 중</div>
     </div>
   </div>
 
@@ -548,6 +557,8 @@
                 <th>날짜</th>
                 <th>상태</th>
                 <th>동작</th>
+                <th>최근 점검</th>
+                <th>최근 상태</th>
                 <th>관리</th>
               </tr>
             </thead>
@@ -579,6 +590,22 @@
                       <span class="badge badge-success">동작중</span>
                     {:else}
                       <span class="badge badge-gray">대기</span>
+                    {/if}
+                  </td>
+                  <td class="text-xs text-muted-foreground">
+                    {#if schedule.last_event_at}
+                      {new Date(schedule.last_event_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    {:else}
+                      -
+                    {/if}
+                  </td>
+                  <td>
+                    {#if schedule.last_event_status}
+                      <span class={`badge badge-${schedule.last_event_status === 'success' || schedule.last_event_status === 'available' ? 'success' : schedule.last_event_status === 'error' ? 'danger' : 'gray'}`}>
+                        {schedule.last_event_status}
+                      </span>
+                    {:else}
+                      <span class="badge badge-gray">-</span>
                     {/if}
                   </td>
                   <td>
