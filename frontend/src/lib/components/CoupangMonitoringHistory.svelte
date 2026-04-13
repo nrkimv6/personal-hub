@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { Badge, Button } from '$lib/components/ui';
   import { coupangTravelApi } from '$lib/api/coupangTravel';
+  import { isAbortError } from '$lib/utils/isAbortError.js';
   import type { MonitoringEvent } from '$lib/types';
 
   let monitoringEvents: MonitoringEvent[] = [];
@@ -26,17 +27,20 @@
     return new Date().toISOString().split('T')[0];
   }
 
-  function cleanupPolling(): void {
+  function stopPolling(): void {
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
     }
+  }
+
+  function abortInFlightRequest(): void {
     abortController?.abort();
     abortController = null;
   }
 
   function startPolling(): void {
-    cleanupPolling();
+    stopPolling();
     pollTimer = setInterval(() => {
       void fetchData(false);
     }, 5000);
@@ -44,7 +48,7 @@
 
   async function fetchData(showLoading = true): Promise<void> {
     if (showLoading) loading = true;
-    abortController?.abort();
+    abortInFlightRequest();
     abortController = new AbortController();
 
     try {
@@ -63,7 +67,7 @@
       totalPages = eventsData.total_pages;
       error = null;
     } catch (e: unknown) {
-      if (e instanceof Error && e.name === 'AbortError') {
+      if (isAbortError(e)) {
         return;
       }
       error = e instanceof Error ? e.message : '쿠팡 모니터링 이력 로드 실패';
@@ -124,7 +128,8 @@
   });
 
   onDestroy(() => {
-    cleanupPolling();
+    stopPolling();
+    abortInFlightRequest();
   });
 </script>
 
