@@ -1089,6 +1089,11 @@ export interface NssmService {
   status: string;
   start_type: string;
   display_name: string;
+  frontend_port?: number | null;
+  frontend_pid?: number | null;
+  frontend_listener_pid?: number | null;
+  frontend_health?: 'healthy' | 'degraded' | 'down' | string;
+  degraded_reason?: string | null;
 }
 
 export interface StartupProgram {

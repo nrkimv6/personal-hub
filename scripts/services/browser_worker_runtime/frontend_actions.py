@@ -12,6 +12,7 @@ from pathlib import Path
 import psutil
 
 from scripts.services.browser_worker_runtime.runtime import GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
+from scripts.services.service_utils import sync_frontend_pid_file
 
 
 def _manager():
@@ -127,10 +128,10 @@ def _run_frontend_build_if_needed(manager, public: bool) -> bool:
     cprint(f"Frontend build failed (rc={build_result.returncode}): {short_err}", RED)
 
     if not (manager.frontend_dir / "build").exists():
-        cprint("No previous build artifact found — cannot run PUBLIC PREVIEW", RED)
+        cprint("No previous build found — Frontend unavailable, API-only mode", RED)
         return False
 
-    cprint("Using previous build artifact for fallback preview", YELLOW)
+    cprint("Using previous build for preview", YELLOW)
     return True
 
 
@@ -200,13 +201,14 @@ def restart_frontend(manager, public: bool = False) -> bool:
         cprint("Waiting 5s for frontend to initialize...")
         time.sleep(5)
 
-        new_listener_pid = mgr.pick_listener_pid(frontend_port)
-        if new_listener_pid is not None:
-            mgr.write_pid_file(pid_file, new_listener_pid)
-        elif mgr.is_process_alive(proc.pid):
-            mgr.write_pid_file(pid_file, proc.pid)
-        else:
-            mgr.remove_pid_file(pid_file)
+        new_listener_pid = sync_frontend_pid_file(
+            pid_file,
+            frontend_port,
+            proc.pid if mgr.is_process_alive(proc.pid) else None,
+            listener_pid_resolver=mgr.pick_listener_pid,
+            writer=mgr.write_pid_file,
+            remover=mgr.remove_pid_file,
+        )
 
         if manager._has_port_collision_error(stderr_log_path, frontend_port):
             cprint(

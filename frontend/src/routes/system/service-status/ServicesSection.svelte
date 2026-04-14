@@ -1,6 +1,7 @@
 <script lang="ts">
   import StatusDot from '$lib/components/ui/StatusDot.svelte';
   import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
+  import type { NssmService } from '$lib/api';
   import type { ServicesSectionProps } from './types';
 
   let {
@@ -18,6 +19,19 @@
     stopService,
     startService
   }: ServicesSectionProps = $props();
+
+  function getServiceStatusLabel(svc: NssmService): string {
+    if (svc.status === 'Unregistered') return '미등록';
+    if (svc.frontend_health === 'down') return `${svc.status} · down`;
+    if (svc.frontend_health === 'degraded' || svc.degraded_reason) return `${svc.status} · degraded`;
+    return svc.status;
+  }
+
+  function getServiceDegradedLabel(svc: NssmService): string | null {
+    if (!svc.degraded_reason) return null;
+    const port = svc.frontend_port ? `:${svc.frontend_port}` : '';
+    return `frontend${port} ${svc.degraded_reason}`;
+  }
 </script>
 
 <div class="bg-card rounded-lg border border-border shadow-card p-4">
@@ -79,8 +93,13 @@
           <span class="font-medium text-sm text-foreground truncate">{svc.display_name}</span>
           <span class="font-mono text-[11px] text-muted-foreground truncate hidden sm:inline">{svc.name}</span>
           <div class="ml-auto flex items-center gap-2 shrink-0">
-            <StatusBadge variant={serviceVariant(svc)} size="sm">{svc.status === 'Unregistered' ? '미등록' : svc.status}</StatusBadge>
+            <StatusBadge variant={serviceVariant(svc)} size="sm">{getServiceStatusLabel(svc)}</StatusBadge>
             <span class="text-[10px] text-muted-foreground">{svc.start_type}</span>
+            {#if getServiceDegradedLabel(svc)}
+              <span class="text-[10px] text-warning hidden md:inline" title={svc.degraded_reason ?? undefined}>
+                {getServiceDegradedLabel(svc)}
+              </span>
+            {/if}
             {#if svc.status === 'Running'}
               <button
                 onclick={() => showConfirm('서비스 중지', `"${svc.display_name}" 서비스를 중지합니다.`, () => stopService(svc.name), true, '중지')}
