@@ -28,6 +28,7 @@
   const pager = createPagePagination(20);
   let abortController: AbortController | null = null;
   let status = $state<CoupangStatusSummary | null>(null);
+  let filtersExpanded = $state(false);
 
   function getDefaultDateFrom(): string {
     const d = new Date();
@@ -35,7 +36,8 @@
     return d.toISOString().split('T')[0];
   }
 
-  let dateFrom = $state(getDefaultDateFrom());
+  const defaultDateFrom = getDefaultDateFrom();
+  let dateFrom = $state(defaultDateFrom);
   let dateTo = $state('');
   let selectedSlotTimes = $state<string[]>([]);
 
@@ -47,6 +49,16 @@
     status?.worker_health.updated_at ?? status?.worker_health.last_event_at ?? null
   );
   const lastCheckedTone = $derived(status?.worker_health.updated_at ? 'text-sky-600' : 'text-amber-600');
+  const filterSummaryText = $derived.by(() => {
+    const parts: string[] = [];
+    if (dateFrom !== defaultDateFrom || dateTo) {
+      parts.push(dateTo ? `${dateFrom || '-'} ~ ${dateTo}` : `${dateFrom}부터`);
+    }
+    if (selectedSlotTimes.length > 0) {
+      parts.push(`옵션 ${selectedSlotTimes.length}개`);
+    }
+    return parts.join(' · ') || '기본 범위';
+  });
   const visibleSlotTimes = $derived.by(() => {
     const seen = new Set<string>();
     return [...slotTimeOptions, ...selectedSlotTimes].filter((slotTime) => {
@@ -137,7 +149,7 @@
 
   function reset(): void {
     selectedSlotTimes = [];
-    dateFrom = getDefaultDateFrom();
+    dateFrom = defaultDateFrom;
     dateTo = '';
     void loadAll();
   }
@@ -192,58 +204,70 @@
       </div>
     </div>
 
-    <div class="grid gap-3 md:grid-cols-3">
-      <div class="md:col-span-1">
-        <label class="mb-1 block text-xs font-medium text-muted-foreground" for="date-from">시작일</label>
-        <input id="date-from" type="date" class="input w-full" bind:value={dateFrom} />
-      </div>
-      <div class="md:col-span-1">
-        <label class="mb-1 block text-xs font-medium text-muted-foreground" for="date-to">종료일</label>
-        <input id="date-to" type="date" class="input w-full" bind:value={dateTo} />
-      </div>
-      <div class="flex items-end gap-2 md:col-span-1">
-        <button class="btn btn-primary btn-sm" onclick={search} disabled={loading}>
-          {loading ? '조회 중...' : '조회'}
-        </button>
-        <button class="btn btn-secondary btn-sm" onclick={reset} disabled={loading}>초기화</button>
-      </div>
-    </div>
+    <details class="overflow-hidden rounded-lg border border-border bg-muted/20" bind:open={filtersExpanded}>
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 hover:bg-muted/40">
+        <div class="min-w-0">
+          <div class="text-sm font-medium text-foreground">조회/옵션 필터</div>
+          <div class="truncate text-[11px] text-muted-foreground">{filterSummaryText}</div>
+        </div>
+        <span class="shrink-0 text-xs text-muted-foreground">{filtersExpanded ? '접기' : '펼치기'}</span>
+      </summary>
 
-    <div class="space-y-2">
-      <div class="flex items-center justify-between gap-2">
-        <div class="text-xs font-medium text-muted-foreground">옵션 시간 필터</div>
-        <div class="text-[11px] text-muted-foreground">
-          {selectedSlotTimes.length > 0 ? `${selectedSlotTimes.length}개 선택` : '전체'}
+      <div class="space-y-4 border-t border-border px-3 py-3">
+        <div class="grid gap-3 md:grid-cols-3">
+          <div class="md:col-span-1">
+            <label class="mb-1 block text-xs font-medium text-muted-foreground" for="date-from">시작일</label>
+            <input id="date-from" type="date" class="input w-full" bind:value={dateFrom} />
+          </div>
+          <div class="md:col-span-1">
+            <label class="mb-1 block text-xs font-medium text-muted-foreground" for="date-to">종료일</label>
+            <input id="date-to" type="date" class="input w-full" bind:value={dateTo} />
+          </div>
+          <div class="flex items-end gap-2 md:col-span-1">
+            <button class="btn btn-primary btn-sm" onclick={search} disabled={loading}>
+              {loading ? '조회 중...' : '조회'}
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick={reset} disabled={loading}>초기화</button>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs font-medium text-muted-foreground">옵션 시간 필터</div>
+            <div class="text-[11px] text-muted-foreground">
+              {selectedSlotTimes.length > 0 ? `${selectedSlotTimes.length}개 선택` : '전체'}
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              class="rounded-full border px-2.5 py-1 text-xs font-medium transition
+                {selectedSlotTimes.length === 0
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'}"
+              onclick={() => { selectedSlotTimes = []; }}
+              disabled={loading}
+            >
+              전체
+            </button>
+            {#each visibleSlotTimes as slotTime (slotTime)}
+              <button
+                class="rounded-full border px-2.5 py-1 text-xs font-medium transition
+                  {isSelectedSlotTime(slotTime)
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'}"
+                onclick={() => toggleSlotTime(slotTime)}
+                disabled={loading}
+              >
+                {slotTime}
+              </button>
+            {/each}
+          </div>
+          <p class="text-[11px] text-muted-foreground">
+            당일 도래한 옵션은 공개 이력에서 제외된다.
+          </p>
         </div>
       </div>
-      <div class="flex flex-wrap gap-2">
-        <button
-          class="rounded-full border px-2.5 py-1 text-xs font-medium transition
-            {selectedSlotTimes.length === 0
-              ? 'border-primary bg-primary text-primary-foreground'
-              : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'}"
-          onclick={() => { selectedSlotTimes = []; }}
-          disabled={loading}
-        >
-          전체
-        </button>
-        {#each visibleSlotTimes as slotTime (slotTime)}
-          <button
-            class="rounded-full border px-2.5 py-1 text-xs font-medium transition
-              {isSelectedSlotTime(slotTime)
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'}"
-            onclick={() => toggleSlotTime(slotTime)}
-            disabled={loading}
-          >
-            {slotTime}
-          </button>
-        {/each}
-      </div>
-      <p class="text-[11px] text-muted-foreground">
-        당일 도래한 옵션은 공개 이력에서 제외된다.
-      </p>
-    </div>
+    </details>
   </section>
 
   {#if error}
