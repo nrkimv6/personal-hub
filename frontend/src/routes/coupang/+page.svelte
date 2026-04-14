@@ -9,14 +9,13 @@
     type CoupangSchedule,
     type CoupangStatusSummary
   } from '$lib/api/coupangTravel';
-  import { systemApi, workerApi } from '$lib/api';
+  import { workerApi } from '$lib/api';
   import { serviceAccountApi } from '$lib/api/common';
   import type { ServiceAccountWithProfile } from '$lib/types';
   import { createSelection } from '$lib/utils/selection.svelte';
   import { toast } from '$lib/stores/toast';
 
-  type WorkerStatus = Awaited<ReturnType<typeof workerApi.status>>;
-  type WorkerRecoveryAction = 'start' | 'restart' | 'restart-all';
+  type WorkerRecoveryAction = 'start' | 'restart';
   type WorkerBanner = {
     tone: 'danger' | 'warning' | 'info';
     title: string;
@@ -32,13 +31,17 @@
     enabled_schedules: 0,
     active_schedules: 0,
     proxy_enabled: false,
-    proxy_active_count: 0
+    proxy_active_count: 0,
+    worker_health: {
+      status: 'not_started',
+      message: '',
+      updated_at: null,
+      last_event_at: null
+    }
   });
 
   let loading = $state(false);
   let error = $state('');
-  let workerStatus = $state<WorkerStatus | null>(null);
-  let workerHealth = $state<{ is_running: boolean; is_healthy: boolean; details: Record<string, unknown> } | null>(null);
   let workerActionLoading = $state<WorkerRecoveryAction | null>(null);
   let activeTab = $state<'schedules' | 'history' | 'cancellation-history'>('schedules');
 
@@ -98,53 +101,26 @@
   const latestEnabledEventAt = $derived(getLatestEnabledEventAt());
 
   function getWorkerBanner(): WorkerBanner | null {
-    if (workerHealth) {
-      if (workerHealth.is_running === false) {
-        return {
-          tone: 'danger',
-          title: '워커 미기동',
-          message: '워커가 실행되지 않아 쿠팡 모니터링이 멈춰 있습니다.',
-          action: 'start'
-        };
-      }
-    } else {
-      if (!workerStatus) {
-        if (statusSummary.enabled_schedules > 0 && statusSummary.active_schedules === 0) {
-          return {
-            tone: 'warning',
-            title: '워커 상태를 확인할 수 없습니다',
-            message: '활성화된 일정이 있지만 워커 상태 조회가 실패했습니다. 워커와 API 상태를 함께 확인하세요.',
-            action: 'restart-all'
-          };
-        }
-        return null;
-      }
-
-      if (workerStatus.status === 'not_started') {
-        return {
-          tone: 'danger',
-          title: '워커 미기동',
-          message: '워커가 시작되지 않아 쿠팡 모니터링이 멈춰 있습니다.',
-          action: 'start'
-        };
-      }
-
-      if (workerStatus.status === 'crashed') {
-        return {
-          tone: 'danger',
-          title: '워커 비정상 종료',
-          message: '워커 프로세스가 종료되었습니다. 재시작이 필요합니다.',
-          action: 'restart'
-        };
-      }
+    if (loading) {
+      return null;
     }
 
-    if (workerStatus?.global_pause) {
+    const workerHealth = statusSummary.worker_health;
+    if (workerHealth.status === 'not_started') {
+      return {
+        tone: 'danger',
+        title: '워커 미기동',
+        message: workerHealth.message || '쿠팡 워커가 아직 실행되지 않았습니다.',
+        action: 'start'
+      };
+    }
+
+    if (workerHealth.status === 'stale') {
       return {
         tone: 'warning',
-        title: '전역 일시중지',
-        message: '워커가 일시중지 상태입니다. 재개하거나 전체 재시작으로 상태를 정리하세요.',
-        action: 'restart-all'
+        title: '워커 정체',
+        message: workerHealth.message || '쿠팡 워커 heartbeat가 지연되고 있습니다.',
+        action: 'restart'
       };
     }
 
@@ -179,13 +155,6 @@
         } else {
           toast.warning(result.message);
         }
-      } else {
-        const result = await systemApi.restartAll();
-        if (result.worker_running) {
-          toast.success(result.message);
-        } else {
-          toast.warning(`${result.message}${result.recovery_command ? `\n${result.recovery_command}` : ''}`);
-        }
       }
       await loadAll(false);
     } catch (e: unknown) {
@@ -202,20 +171,16 @@
     error = '';
 
     try {
-      const [targetData, scheduleData, accountData, statusData, workerData] = await Promise.all([
+      const [targetData, scheduleData, accountData, statusData] = await Promise.all([
         coupangTravelApi.listTargets({ signal: loadAllController.signal }),
         coupangTravelApi.listSchedules({ signal: loadAllController.signal }),
         serviceAccountApi.listActive('coupang', { signal: loadAllController.signal }),
-        coupangTravelApi.getStatus({ signal: loadAllController.signal }),
-        workerApi.status({ signal: loadAllController.signal })
+        coupangTravelApi.getStatus({ signal: loadAllController.signal })
       ]);
-      const workerHealthData = await workerApi.health({ signal: loadAllController.signal }).catch(() => null);
       targets = targetData;
       schedules = scheduleData;
       accounts = accountData;
       statusSummary = statusData;
-      workerStatus = workerData;
-      workerHealth = workerHealthData;
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') return;
       const message = e instanceof Error ? e.message : '쿠팡 데이터 로드 실패';
@@ -231,16 +196,12 @@
     pollingController = new AbortController();
 
     try {
-      const [scheduleData, statusData, workerData] = await Promise.all([
+      const [scheduleData, statusData] = await Promise.all([
         coupangTravelApi.listSchedules({ signal: pollingController.signal }),
-        coupangTravelApi.getStatus({ signal: pollingController.signal }),
-        workerApi.status({ signal: pollingController.signal })
+        coupangTravelApi.getStatus({ signal: pollingController.signal })
       ]);
-      const workerHealthData = await workerApi.health({ signal: pollingController.signal }).catch(() => null);
       schedules = scheduleData;
       statusSummary = statusData;
-      workerStatus = workerData;
-      workerHealth = workerHealthData;
       error = '';
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') return;
@@ -257,6 +218,22 @@
 
   function clearMessages(): void {
     error = '';
+  }
+
+  function getLastEventBadgeClass(status: string): string {
+    if (status === 'error') return 'badge-danger';
+    if (status === 'no_slots') return 'badge-gray';
+    return 'badge-success';
+  }
+
+  function getLastEventLabel(status: string): string {
+    const labels: Record<string, string> = {
+      success: '예약가능',
+      available: '예약가능',
+      no_slots: '매진',
+      error: '오류'
+    };
+    return labels[status] || status;
   }
 
   function cleanupPolling(): void {
@@ -478,13 +455,6 @@
                 {workerActionLoading === 'restart' ? '처리 중...' : '워커 재시작'}
               </button>
             {/if}
-            <button
-              class="btn btn-secondary btn-sm"
-              disabled={workerActionLoading !== null}
-              onclick={() => runWorkerRecovery('restart-all')}
-            >
-              {workerActionLoading === 'restart-all' ? '처리 중...' : '전체 재시작'}
-            </button>
           </div>
         {/if}
       </div>
@@ -774,8 +744,8 @@
                   </td>
                   <td>
                     {#if schedule.last_event_status}
-                      <span class={`badge badge-${schedule.last_event_status === 'success' || schedule.last_event_status === 'available' ? 'success' : schedule.last_event_status === 'error' ? 'danger' : 'gray'}`}>
-                        {schedule.last_event_status}
+                      <span class={`badge ${getLastEventBadgeClass(schedule.last_event_status)}`}>
+                        {getLastEventLabel(schedule.last_event_status)}
                       </span>
                     {:else}
                       <span class="badge badge-gray">-</span>
