@@ -1,10 +1,18 @@
 import type { MonitoringEvent } from '$lib/types';
 
-const MEGABEAUTY_PREFIX = /2026\s*쿠팡\s*메가뷰티쇼/g;
+const COUPANG_HISTORY_PREFIXES = [
+  /메가뷰티쇼\s*버추얼스토어\s*/g,
+  /2026\s*쿠팡\s*메가뷰티쇼\s*/g,
+  /2026\s*메가뷰티쇼\s*버추얼스토어\s*/g,
+  /쿠팡\s*메가뷰티쇼\s*/g
+];
 
-function normalizeHistoryText(value: string | null | undefined): string {
-  return (value ?? '')
-    .replace(MEGABEAUTY_PREFIX, '')
+export function normalizeHistoryText(value: string | null | undefined): string {
+  let normalized = value ?? '';
+  for (const pattern of COUPANG_HISTORY_PREFIXES) {
+    normalized = normalized.replace(pattern, '');
+  }
+  return normalized
     .replace(/\s+/g, ' ')
     .trim();
 }

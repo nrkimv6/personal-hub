@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { MonitoringEvent } from '$lib/types';
+  import { normalizeHistoryText } from '$lib/utils/coupangHistoryDisplay';
 
   interface Props {
     events: MonitoringEvent[];
@@ -20,11 +21,7 @@
   }
 
   function getDisplayItemName(name: string | null | undefined): string {
-    const cleaned = (name ?? '')
-      .replace(/2026\s*쿠팡\s*메가뷰티쇼/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return cleaned || '메가뷰티쇼';
+    return normalizeHistoryText(name) || '메가뷰티쇼';
   }
 </script>
 

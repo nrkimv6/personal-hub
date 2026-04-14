@@ -4,7 +4,10 @@
 
 import { request } from './client';
 import type { MonitoringEventListParams } from './naver-booking';
-import type { MonitoringEventList } from '$lib/types';
+import type {
+  MonitoringEventList,
+  CoupangPublicHistoryResponse
+} from '$lib/types';
 
 const BASE = '/coupang';
 
@@ -202,6 +205,29 @@ export const coupangTravelApi = {
     const query = searchParams.toString();
     return request<CancellationByProductResponse>(
       `/monitoring/events/cancellation-by-product${query ? `?${query}` : ''}`,
+      options
+    );
+  },
+
+  async getPublicHistoryTransitions(
+    params?: {
+      schedule_date_from?: string;
+      schedule_date_to?: string;
+      slot_times?: string;
+      page?: number;
+      page_size?: number;
+    },
+    options?: RequestInit
+  ): Promise<CoupangPublicHistoryResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.schedule_date_from) searchParams.append('schedule_date_from', params.schedule_date_from);
+    if (params?.schedule_date_to) searchParams.append('schedule_date_to', params.schedule_date_to);
+    if (params?.slot_times) searchParams.append('slot_times', params.slot_times);
+    if (params?.page) searchParams.append('page', String(params.page));
+    if (params?.page_size) searchParams.append('page_size', String(params.page_size));
+    const query = searchParams.toString();
+    return request<CoupangPublicHistoryResponse>(
+      `/monitoring/events/coupang-public-history${query ? `?${query}` : ''}`,
       options
     );
   }

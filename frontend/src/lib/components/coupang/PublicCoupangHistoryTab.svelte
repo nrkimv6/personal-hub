@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { coupangTravelApi, type CancellationStatsResponse } from '$lib/api/coupangTravel';
-  import type { MonitoringEvent } from '$lib/types';
+  import { coupangTravelApi } from '$lib/api/coupangTravel';
+  import type { CoupangPublicHistoryResponse } from '$lib/types';
   import { isAbortError } from '$lib/utils/isAbortError.js';
   import { createPagePagination } from '$lib/utils/pagination.svelte';
   import PublicCoupangHistoryCard from '$lib/components/coupang/PublicCoupangHistoryCard.svelte';
@@ -9,11 +9,23 @@
 
   let loading = $state(true);
   let error = $state('');
-  let stats = $state<CancellationStatsResponse>({ items: [], summary: { total: 0, avg_per_day: 0, peak_hour: null } });
-  let events = $state<MonitoringEvent[]>([]);
-  let selectedHours = $state<number[]>([]);
-  let dateFrom = $state(getDefaultDateFrom());
-  let dateTo = $state('');
+  let response = $state<CoupangPublicHistoryResponse>({
+    items: [],
+    summary: {
+      total: 0,
+      cancellation_count: 0,
+      sold_out_count: 0,
+      sale_observed_count: 0,
+      open_count: 0,
+      avg_observed_sale_seconds: null,
+      last_transition_at: null
+    },
+    slot_time_options: [],
+    total: 0,
+    page: 1,
+    page_size: 20,
+    total_pages: 0
+  });
 
   const pager = createPagePagination(20);
   let abortController: AbortController | null = null;
@@ -24,13 +36,29 @@
     return d.toISOString().split('T')[0];
   }
 
+  let dateFrom = $state(getDefaultDateFrom());
+  let dateTo = $state('');
+  let selectedSlotTimes = $state<string[]>([]);
+
+  const items = $derived(response.items);
+  const summary = $derived(response.summary);
+  const slotTimeOptions = $derived(response.slot_time_options);
+  const visibleSlotTimes = $derived.by(() => {
+    const seen = new Set<string>();
+    return [...slotTimeOptions, ...selectedSlotTimes].filter((slotTime) => {
+      if (!slotTime || seen.has(slotTime)) return false;
+      seen.add(slotTime);
+      return true;
+    });
+  });
+
   function abortInFlightRequest(): void {
     abortController?.abort();
     abortController = null;
   }
 
-  function getHoursParam(): string | undefined {
-    return selectedHours.length > 0 ? selectedHours.join(',') : undefined;
+  function getSlotTimesParam(): string | undefined {
+    return selectedSlotTimes.length > 0 ? selectedSlotTimes.join(',') : undefined;
   }
 
   function formatShortDateTime(value: string | null): string {
@@ -44,32 +72,33 @@
     });
   }
 
-  function formatHour(hour: number | null | undefined): string {
-    return hour == null ? '-' : `${hour}시`;
+  function formatDuration(seconds: number | null | undefined): string {
+    if (seconds == null || Number.isNaN(seconds)) return '-';
+    const rounded = Math.max(0, Math.round(seconds));
+    if (rounded < 60) return `약 ${rounded}초`;
+    const minutes = Math.floor(rounded / 60);
+    const rest = rounded % 60;
+    return rest > 0 ? `약 ${minutes}분 ${rest}초` : `약 ${minutes}분`;
   }
 
-  async function loadEvents(): Promise<void> {
-    const hoursParam = getHoursParam();
-    const result = await coupangTravelApi.listEvents({
-      status: 'available',
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
-      hours: hoursParam,
-      page: pager.page,
-      page_size: pager.pageSize
-    }, abortController ? { signal: abortController.signal } : undefined);
-    events = result.items;
+  function formatPageLabel(): string {
+    if (pager.total === 0) return '0건';
+    return `${pager.total.toLocaleString()}건`;
+  }
+
+  async function loadHistory(): Promise<void> {
+    const result = await coupangTravelApi.getPublicHistoryTransitions(
+      {
+        schedule_date_from: dateFrom || undefined,
+        schedule_date_to: dateTo || undefined,
+        slot_times: getSlotTimesParam(),
+        page: pager.page,
+        page_size: pager.pageSize
+      },
+      abortController ? { signal: abortController.signal } : undefined
+    );
+    response = result;
     pager.total = result.total;
-  }
-
-  async function loadStats(): Promise<void> {
-    const hoursParam = getHoursParam();
-    stats = await coupangTravelApi.getCancellationStats({
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
-      hours: hoursParam,
-      group_by: 'day'
-    }, abortController ? { signal: abortController.signal } : undefined);
   }
 
   async function loadAll(): Promise<void> {
@@ -80,10 +109,10 @@
     abortController = new AbortController();
 
     try {
-      await Promise.all([loadStats(), loadEvents()]);
+      await loadHistory();
     } catch (e: unknown) {
       if (!isAbortError(e)) {
-        error = e instanceof Error ? e.message : '취소이력 로드 실패';
+        error = e instanceof Error ? e.message : '공개 전환 이력 로드 실패';
       }
     } finally {
       loading = false;
@@ -102,10 +131,10 @@
     abortController = new AbortController();
 
     try {
-      await loadEvents();
+      await loadHistory();
     } catch (e: unknown) {
       if (!isAbortError(e)) {
-        error = e instanceof Error ? e.message : '이력 페이지 로드 실패';
+        error = e instanceof Error ? e.message : '공개 이력 페이지 로드 실패';
       }
     } finally {
       loading = false;
@@ -113,20 +142,20 @@
   }
 
   function reset(): void {
-    selectedHours = [];
+    selectedSlotTimes = [];
     dateFrom = getDefaultDateFrom();
     dateTo = '';
     void loadAll();
   }
 
-  function toggleHour(hour: number): void {
-    selectedHours = selectedHours.includes(hour)
-      ? selectedHours.filter((value) => value !== hour)
-      : [...selectedHours, hour];
+  function toggleSlotTime(slotTime: string): void {
+    selectedSlotTimes = selectedSlotTimes.includes(slotTime)
+      ? selectedSlotTimes.filter((value) => value !== slotTime)
+      : [...selectedSlotTimes, slotTime];
   }
 
-  function isSelectedHour(hour: number): boolean {
-    return selectedHours.includes(hour);
+  function isSelectedSlotTime(slotTime: string): boolean {
+    return selectedSlotTimes.includes(slotTime);
   }
 
   onMount(() => {
@@ -143,9 +172,11 @@
     <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
       <div class="space-y-1">
         <h2 class="text-lg font-semibold text-foreground">쿠팡 취소표 이력</h2>
-        <p class="text-sm text-muted-foreground">공개 페이지에서 감지된 취소표 이력을 모바일 기준으로 확인한다.</p>
-        {#if events.length > 0}
-          <p class="text-xs text-muted-foreground">최근 감지 {formatShortDateTime(events[0]?.timestamp ?? null)}</p>
+        <p class="text-sm text-muted-foreground">
+          공개 페이지는 옵션 날짜+시간 기준 전환 이력만 보여준다. 판매 소요시간은 폴링 기반 관측치다.
+        </p>
+        {#if summary.last_transition_at}
+          <p class="text-xs text-muted-foreground">최근 전환 {formatShortDateTime(summary.last_transition_at)}</p>
         {/if}
       </div>
       <button class="btn btn-secondary btn-sm self-start" onclick={() => void loadAll()} disabled={loading}>
@@ -153,14 +184,23 @@
       </button>
     </div>
 
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-foreground">{stats.summary.total.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">총 감지 횟수</div>
+        <div class="text-3xl font-bold text-foreground">{summary.total.toLocaleString()}</div>
+        <div class="mt-1 text-xs text-muted-foreground">총 전환</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-warning">{formatHour(stats.summary.peak_hour)}</div>
-        <div class="mt-1 text-xs text-muted-foreground">피크 시간</div>
+        <div class="text-3xl font-bold text-emerald-600">{summary.cancellation_count.toLocaleString()}</div>
+        <div class="mt-1 text-xs text-muted-foreground">취소표발생</div>
+      </div>
+      <div class="card py-4 text-center">
+        <div class="text-3xl font-bold text-rose-600">{summary.sold_out_count.toLocaleString()}</div>
+        <div class="mt-1 text-xs text-muted-foreground">다시 매진</div>
+      </div>
+      <div class="card py-4 text-center">
+        <div class="text-3xl font-bold text-sky-600">{formatDuration(summary.avg_observed_sale_seconds)}</div>
+        <div class="mt-1 text-xs text-muted-foreground">평균 판매 관측</div>
+        <div class="mt-1 text-[11px] text-muted-foreground">잔여석 {summary.open_count.toLocaleString()}건</div>
       </div>
     </div>
 
@@ -182,31 +222,39 @@
     </div>
 
     <div class="space-y-2">
-      <div class="text-xs font-medium text-muted-foreground">시간 단위 필터</div>
+      <div class="flex items-center justify-between gap-2">
+        <div class="text-xs font-medium text-muted-foreground">옵션 시간 필터</div>
+        <div class="text-[11px] text-muted-foreground">
+          {selectedSlotTimes.length > 0 ? `${selectedSlotTimes.length}개 선택` : '전체'}
+        </div>
+      </div>
       <div class="flex flex-wrap gap-2">
         <button
           class="rounded-full border px-2.5 py-1 text-xs font-medium transition
-            {selectedHours.length === 0
+            {selectedSlotTimes.length === 0
               ? 'border-primary bg-primary text-primary-foreground'
               : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'}"
-          onclick={() => { selectedHours = []; }}
+          onclick={() => { selectedSlotTimes = []; }}
           disabled={loading}
         >
           전체
         </button>
-        {#each Array.from({ length: 24 }, (_, hour) => hour) as hour}
+        {#each visibleSlotTimes as slotTime (slotTime)}
           <button
             class="rounded-full border px-2.5 py-1 text-xs font-medium transition
-              {isSelectedHour(hour)
+              {isSelectedSlotTime(slotTime)
                 ? 'border-primary bg-primary text-primary-foreground'
                 : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'}"
-            onclick={() => toggleHour(hour)}
+            onclick={() => toggleSlotTime(slotTime)}
             disabled={loading}
           >
-            {hour}시
+            {slotTime}
           </button>
         {/each}
       </div>
+      <p class="text-[11px] text-muted-foreground">
+        당일 도래한 옵션은 공개 이력에서 제외된다.
+      </p>
     </div>
   </section>
 
@@ -218,23 +266,24 @@
     <div class="flex h-40 items-center justify-center">
       <div class="h-10 w-10 animate-spin rounded-full border-b-2 border-primary"></div>
     </div>
-  {:else if events.length === 0}
+  {:else if items.length === 0}
     <div class="card py-10 text-center text-sm text-muted-foreground">
-      조건에 맞는 취소이력이 없습니다.
+      조건에 맞는 공개 전환 이력이 없습니다.
     </div>
   {:else}
     <section class="space-y-3">
       <div class="flex items-center justify-between">
         <h3 class="text-sm font-semibold text-foreground">
-          감지 이력
-          {#if pager.total > 0}
-            <span class="ml-1 font-normal text-muted-foreground">({pager.total.toLocaleString()}건)</span>
-          {/if}
+          전환 이력
+          <span class="ml-1 font-normal text-muted-foreground">({formatPageLabel()})</span>
         </h3>
+        <p class="text-xs text-muted-foreground">
+          목록은 날짜+시간 기준이며, 판매 시간은 관측치다.
+        </p>
       </div>
 
-      <PublicCoupangHistoryCard {events} />
-      <PublicCoupangHistoryTable {events} />
+      <PublicCoupangHistoryCard {items} />
+      <PublicCoupangHistoryTable {items} />
 
       {#if pager.totalPages > 1}
         <div class="mt-4 flex items-center justify-center gap-1">

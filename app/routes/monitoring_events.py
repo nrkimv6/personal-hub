@@ -2,7 +2,9 @@
 모니터링 이벤트 API 라우트
 모니터링 체크 내역 조회 및 통계
 """
-from typing import Optional, List
+import json
+import re
+from typing import Optional, List, Any
 from datetime import datetime, timedelta, date
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session, joinedload
@@ -23,9 +25,279 @@ from app.schemas.monitoring_event import (
     CancellationStatsResponse,
     CancellationByProductItem,
     CancellationByProductResponse,
+    CoupangPublicHistoryItem,
+    CoupangPublicHistorySummary,
+    CoupangPublicHistoryResponse,
 )
 
 router = APIRouter(prefix="/api/v1/monitoring", tags=["monitoring"])
+
+_COUPANG_PREFIXES = (
+    "메가뷰티쇼 버추얼스토어 ",
+    "2026 쿠팡 메가뷰티쇼 ",
+    "2026 메가뷰티쇼 버추얼스토어 ",
+    "쿠팡 메가뷰티쇼 ",
+)
+_COUPANG_TIME_LABEL_RE = re.compile(r"(오전|오후)\s*\d{1,2}\s*시")
+
+
+def _parse_comma_separated_text(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _normalize_coupang_slot_label(value: Optional[str]) -> str:
+    if not value:
+        return ""
+
+    normalized = str(value).strip()
+    for prefix in _COUPANG_PREFIXES:
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):].strip()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _extract_coupang_slot_time_label(label: Optional[str]) -> Optional[str]:
+    if not label:
+        return None
+    match = _COUPANG_TIME_LABEL_RE.search(label)
+    if not match:
+        return None
+    return re.sub(r"\s+", " ", match.group(0)).strip()
+
+
+def _parse_coupang_slots_info(raw_slots: Any) -> List[dict]:
+    if raw_slots is None:
+        return []
+    if isinstance(raw_slots, str):
+        try:
+            raw_slots = json.loads(raw_slots)
+        except (json.JSONDecodeError, TypeError):
+            return []
+    if not isinstance(raw_slots, list):
+        return []
+
+    slots: List[dict] = []
+    for slot in raw_slots:
+        if isinstance(slot, dict):
+            slots.append(slot)
+    return slots
+
+
+def _is_coupang_slot_available(slot: dict) -> bool:
+    sale_status = str(slot.get("saleStatus") or slot.get("sale_status") or "").strip().upper()
+    stock_count_raw = slot.get("stockCount", slot.get("stock_count"))
+    try:
+        stock_count = int(stock_count_raw)
+    except (TypeError, ValueError):
+        stock_count = 0
+
+    if stock_count > 0:
+        return True
+    return sale_status in {"AVAILABLE", "ON_SALE", "SALE"}
+
+
+def _normalize_coupang_slot(slot: dict, schedule_date: Optional[str] = None) -> dict:
+    raw_label = slot.get("vendorItemName") or slot.get("vendor_item_name") or ""
+    normalized_label = _normalize_coupang_slot_label(raw_label)
+    slot_time_label = _extract_coupang_slot_time_label(normalized_label)
+    sale_status = str(slot.get("saleStatus") or slot.get("sale_status") or "").strip().upper()
+    stock_count_raw = slot.get("stockCount", slot.get("stock_count"))
+    try:
+        stock_count = int(stock_count_raw) if stock_count_raw is not None else None
+    except (TypeError, ValueError):
+        stock_count = None
+
+    is_available = _is_coupang_slot_available(slot)
+    slot_key = _build_coupang_slot_key(schedule_date, normalized_label)
+
+    return {
+        "raw_label": raw_label,
+        "normalized_label": normalized_label,
+        "slot_time_label": slot_time_label,
+        "sale_status": sale_status,
+        "stock_count": stock_count,
+        "is_available": is_available,
+        "slot_key": slot_key,
+    }
+
+
+def _build_coupang_slot_key(schedule_date: Optional[str], normalized_label: str) -> str:
+    return f"{schedule_date or ''}|{normalized_label or ''}"
+
+
+def _should_include_public_coupang_schedule(schedule_date: Optional[str], now: datetime) -> bool:
+    if not schedule_date:
+        return False
+    try:
+        schedule_day = date.fromisoformat(schedule_date)
+    except ValueError:
+        return False
+
+    return schedule_day > now.date()
+
+
+def _get_open_observation_end(schedule_date: Optional[str], now: datetime) -> datetime:
+    if not schedule_date:
+        return now
+    try:
+        schedule_day = datetime.strptime(schedule_date, "%Y-%m-%d")
+    except ValueError:
+        return now
+    cutoff = schedule_day - timedelta(minutes=1)
+    return min(now, cutoff)
+
+
+def _make_public_history_item(
+    event: MonitoringEvent,
+    schedule_date: Optional[str],
+    biz_item_name: Optional[str],
+    business_name: Optional[str],
+    slot: dict,
+    transition_type: str,
+    transition_label: str,
+    delta_count: int = 1,
+    previous_stock_count: Optional[int] = None,
+    observed_sale_seconds: Optional[float] = None,
+    observed_open_seconds: Optional[float] = None,
+) -> CoupangPublicHistoryItem:
+    return CoupangPublicHistoryItem(
+        id=event.id,
+        schedule_id=event.schedule_id,
+        timestamp=event.timestamp,
+        schedule_date=schedule_date,
+        biz_item_name=biz_item_name,
+        business_name=business_name,
+        slot_key=slot.get("slot_key") or _build_coupang_slot_key(schedule_date, slot.get("normalized_label", "")),
+        option_label=slot.get("normalized_label") or "",
+        slot_time_label=slot.get("slot_time_label"),
+        transition_type=transition_type,
+        transition_label=transition_label,
+        delta_count=delta_count,
+        stock_count=slot.get("stock_count"),
+        previous_stock_count=previous_stock_count,
+        observed_sale_seconds=observed_sale_seconds,
+        observed_open_seconds=observed_open_seconds,
+    )
+
+
+def _compute_coupang_slot_transitions(events: List[MonitoringEvent], now: datetime) -> List[CoupangPublicHistoryItem]:
+    items: List[CoupangPublicHistoryItem] = []
+    latest_state: dict[str, dict[str, Any]] = {}
+
+    for event in events:
+        schedule = event.schedule
+        schedule_date = schedule.date if schedule else None
+        if not _should_include_public_coupang_schedule(schedule_date, now):
+            continue
+
+        slots = _parse_coupang_slots_info(event.slots_info)
+        if not slots:
+            continue
+
+        biz_item = schedule.biz_item if schedule else None
+        business = biz_item.business if biz_item else None
+        cutoff = _get_open_observation_end(schedule_date, now)
+
+        for raw_slot in slots:
+            slot = _normalize_coupang_slot(raw_slot, schedule_date)
+            if not slot["normalized_label"]:
+                continue
+
+            key = slot["slot_key"]
+            prev = latest_state.get(key)
+            current_available = slot["is_available"]
+            current_stock = slot["stock_count"]
+
+            if prev is not None:
+                prev_available = prev["is_available"]
+                prev_stock = prev["stock_count"]
+                prev_timestamp = prev["timestamp"]
+
+                if not prev_available and current_available:
+                    items.append(
+                        _make_public_history_item(
+                            event,
+                            schedule_date,
+                            biz_item.name if biz_item else None,
+                            business.name if business else None,
+                            slot,
+                            transition_type="cancellation",
+                            transition_label="취소표발생",
+                            delta_count=1,
+                            previous_stock_count=prev_stock,
+                        )
+                    )
+                elif prev_available and not current_available:
+                    items.append(
+                        _make_public_history_item(
+                            event,
+                            schedule_date,
+                            biz_item.name if biz_item else None,
+                            business.name if business else None,
+                            slot,
+                            transition_type="sold_out",
+                            transition_label="다시 매진",
+                            delta_count=1,
+                            previous_stock_count=prev_stock,
+                        )
+                    )
+                elif prev_available and current_available and prev_stock is not None and current_stock is not None:
+                    delta = prev_stock - current_stock
+                    if delta > 0:
+                        observed_sale_seconds = (event.timestamp - prev_timestamp).total_seconds() if delta == 1 else None
+                        items.append(
+                            _make_public_history_item(
+                                event,
+                                schedule_date,
+                                biz_item.name if biz_item else None,
+                                business.name if business else None,
+                                slot,
+                                transition_type="sale_observed" if delta == 1 else "bulk_sale",
+                                transition_label="판매 관측" if delta == 1 else "재고감소",
+                                delta_count=delta,
+                                previous_stock_count=prev_stock,
+                                observed_sale_seconds=observed_sale_seconds,
+                            )
+                        )
+
+            latest_state[key] = {
+                "event": event,
+                "timestamp": event.timestamp,
+                "is_available": current_available,
+                "stock_count": current_stock,
+                "slot": slot,
+                "schedule_date": schedule_date,
+                "cutoff": cutoff,
+                "biz_item_name": biz_item.name if biz_item else None,
+                "business_name": business.name if business else None,
+            }
+
+    for key, state in latest_state.items():
+        if not state["is_available"]:
+            continue
+        slot = state["slot"]
+        schedule_date = state["schedule_date"]
+        cutoff = state["cutoff"]
+        observed_open_seconds = max(0.0, (cutoff - state["timestamp"]).total_seconds())
+        items.append(
+            _make_public_history_item(
+                event=state["event"],
+                schedule_date=schedule_date,
+                biz_item_name=state["biz_item_name"],
+                business_name=state["business_name"],
+                slot=slot,
+                transition_type="open",
+                transition_label="잔여석발생",
+                delta_count=0,
+                previous_stock_count=slot.get("stock_count"),
+                observed_open_seconds=observed_open_seconds,
+            )
+        )
+
+    return items
 
 
 def _parse_hours_filter(hours: Optional[str]) -> List[int]:
@@ -589,6 +861,79 @@ def get_cancellation_by_product(
         )
 
     return CancellationByProductResponse(items=items)
+
+
+@router.get("/events/coupang-public-history", response_model=CoupangPublicHistoryResponse)
+def get_coupang_public_history(
+    schedule_date_from: Optional[str] = Query(None, description="시작 스케줄 날짜 (YYYY-MM-DD)"),
+    schedule_date_to: Optional[str] = Query(None, description="종료 스케줄 날짜 (YYYY-MM-DD)"),
+    slot_times: Optional[str] = Query(None, description="시간 라벨 필터 — 쉼표 구분 문자열 (예: 오전 10시,오후 1시)"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    page_size: int = Query(50, ge=1, le=200, description="페이지 크기"),
+    db: Session = Depends(get_db),
+):
+    """쿠팡 공개 전환 이력 조회."""
+    query = (
+        db.query(MonitoringEvent)
+        .options(
+            joinedload(MonitoringEvent.schedule)
+            .joinedload(MonitorSchedule.biz_item)
+            .joinedload(BizItem.business)
+        )
+        .join(MonitorSchedule, MonitoringEvent.schedule_id == MonitorSchedule.id)
+        .join(BizItem, MonitorSchedule.biz_item_id == BizItem.id)
+        .join(Business, BizItem.business_id == Business.id)
+        .filter(Business.service_type == "coupang")
+    )
+
+    if schedule_date_from:
+        query = query.filter(MonitorSchedule.date >= schedule_date_from)
+
+    if schedule_date_to:
+        query = query.filter(MonitorSchedule.date <= schedule_date_to)
+
+    events = query.order_by(MonitoringEvent.timestamp.asc(), MonitoringEvent.id.asc()).all()
+    items = _compute_coupang_slot_transitions(events, datetime.now())
+
+    slot_time_filters = set(_parse_comma_separated_text(slot_times))
+    if slot_time_filters:
+        items = [item for item in items if item.slot_time_label in slot_time_filters]
+
+    items.sort(key=lambda item: (item.timestamp, item.id, item.slot_key), reverse=True)
+
+    total = len(items)
+    offset = (page - 1) * page_size
+    page_items = items[offset:offset + page_size]
+    total_pages = (total + page_size - 1) // page_size if total else 0
+
+    cancellation_count = sum(1 for item in items if item.transition_type == "cancellation")
+    sold_out_count = sum(1 for item in items if item.transition_type == "sold_out")
+    sale_observed_count = sum(1 for item in items if item.transition_type == "sale_observed")
+    open_count = sum(1 for item in items if item.transition_type == "open")
+    sale_seconds = [item.observed_sale_seconds for item in items if item.observed_sale_seconds is not None]
+    avg_observed_sale_seconds = round(sum(sale_seconds) / len(sale_seconds), 2) if sale_seconds else None
+    last_transition_at = max((item.timestamp for item in items), default=None)
+    slot_time_options = sorted({item.slot_time_label for item in items if item.slot_time_label})
+
+    summary = CoupangPublicHistorySummary(
+        total=total,
+        cancellation_count=cancellation_count,
+        sold_out_count=sold_out_count,
+        sale_observed_count=sale_observed_count,
+        open_count=open_count,
+        avg_observed_sale_seconds=avg_observed_sale_seconds,
+        last_transition_at=last_transition_at,
+    )
+
+    return CoupangPublicHistoryResponse(
+        items=page_items,
+        summary=summary,
+        slot_time_options=slot_time_options,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.get("/events/{event_id}", response_model=MonitoringEventSchema)

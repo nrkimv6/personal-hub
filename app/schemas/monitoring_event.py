@@ -2,7 +2,7 @@
 MonitoringEvent 스키마 (Pydantic)
 """
 import json
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Optional, List, Any
 
@@ -88,6 +88,48 @@ class MonitoringEvent(MonitoringEventBase):
 class MonitoringEventList(BaseModel):
     """MonitoringEvent 목록 응답"""
     items: List[MonitoringEvent]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class CoupangPublicHistoryItem(BaseModel):
+    """쿠팡 공개 전환 이력 개별 항목"""
+    id: int
+    schedule_id: int
+    timestamp: datetime
+    schedule_date: Optional[str] = None
+    biz_item_name: Optional[str] = None
+    business_name: Optional[str] = None
+    slot_key: str
+    option_label: str
+    slot_time_label: Optional[str] = None
+    transition_type: str
+    transition_label: str
+    delta_count: int = 1
+    stock_count: Optional[int] = None
+    previous_stock_count: Optional[int] = None
+    observed_sale_seconds: Optional[float] = None
+    observed_open_seconds: Optional[float] = None
+
+
+class CoupangPublicHistorySummary(BaseModel):
+    """쿠팡 공개 전환 이력 요약"""
+    total: int = 0
+    cancellation_count: int = 0
+    sold_out_count: int = 0
+    sale_observed_count: int = 0
+    open_count: int = 0
+    avg_observed_sale_seconds: Optional[float] = None
+    last_transition_at: Optional[datetime] = None
+
+
+class CoupangPublicHistoryResponse(BaseModel):
+    """쿠팡 공개 전환 이력 응답"""
+    items: List[CoupangPublicHistoryItem]
+    summary: CoupangPublicHistorySummary
+    slot_time_options: List[str] = Field(default_factory=list)
     total: int
     page: int
     page_size: int
