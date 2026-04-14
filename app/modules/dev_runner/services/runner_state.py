@@ -245,9 +245,6 @@ class RunnerState:
                     # user/user:all trigger: dismiss ?꾧퉴吏 cleanup-stale濡???젣?섏? ?딅뒗??
                     preserved_recent += 1
                     continue
-                if recent_score >= cutoff_ts:
-                    preserved_recent += 1
-                    continue
                 # TTL 珥덇낵 + archived/file_lost recent 留??뺣━
                 if reason == "file_lost":
                     bugs += 1

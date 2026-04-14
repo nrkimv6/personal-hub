@@ -102,11 +102,11 @@ def test_plan_file_path_uses_fixture_R():
 
 
 # ---------------------------------------------------------------------------
-# T1: T5 테스트 클래스가 isolated_redis를 사용하는지 확인
+# T1: T5 테스트 클래스가 isolated_redis_db15를 사용하는지 확인
 # ---------------------------------------------------------------------------
 
 def test_remove_pipeline_t5_uses_isolated_redis_R():
-    """R: TestRemovePipelineT5 클래스가 isolated_redis fixture를 사용함을 확인"""
+    """R: TestRemovePipelineT5 클래스가 isolated_redis_db15 fixture를 사용함을 확인"""
     import pathlib
 
     base = pathlib.Path(__file__).parent.parent.parent
@@ -114,5 +114,5 @@ def test_remove_pipeline_t5_uses_isolated_redis_R():
 
     content = target.read_text(encoding="utf-8")
     assert "class TestRemovePipelineT5" in content, "T5 테스트가 class로 래핑되어야 함"
-    assert "isolated_redis" in content, "isolated_redis fixture가 사용되어야 함"
+    assert "isolated_redis_db15" in content, "isolated_redis_db15 fixture가 사용되어야 함"
     assert "setup_async_redis_db15" in content, "async_redis db=15 교체 fixture가 있어야 함"

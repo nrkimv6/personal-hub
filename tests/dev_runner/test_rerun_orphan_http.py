@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from _dr_constants import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
 
 from tests.dev_runner.conftest_e2e import (
-    isolated_redis,
+    isolated_redis_db15,
     listener_process,
     REDIS_TEST_DB,
 )
@@ -51,7 +51,7 @@ class TestRerunOrphanAttachHTTP:
     """HTTP 통합: POST /run attach 응답 검증"""
 
     def test_run_endpoint_attached_response(
-        self, http_client_for_orphan, isolated_redis, listener_process
+        self, http_client_for_orphan, isolated_redis_db15, listener_process
     ):
         """attach: 동일 plan 실행 중 POST /run → 200 + attached=True"""
         # listener_process.pid를 살아있는 PID로 활용
@@ -60,7 +60,7 @@ class TestRerunOrphanAttachHTTP:
         plan_file = "tests/dev_runner/fixtures/test_minimal_plan.md"
 
         # Redis에 running 상태 등록
-        _seed_running_runner(isolated_redis, existing_runner_id, plan_file, live_pid)
+        _seed_running_runner(isolated_redis_db15, existing_runner_id, plan_file, live_pid)
 
         # POST /run (같은 plan_file)
         resp = http_client_for_orphan.post(
@@ -81,15 +81,15 @@ class TestRerunOrphanAttachHTTP:
         assert body.get("running") is True, f"running=True 기대: {body}"
 
     def test_run_endpoint_normal_after_stop(
-        self, http_client_for_orphan, isolated_redis, listener_process
+        self, http_client_for_orphan, isolated_redis_db15, listener_process
     ):
         """신규: stop 후 재실행 → attached=False + 새 runner_id"""
         plan_file = "tests/dev_runner/fixtures/test_minimal_plan_b.md"
         stopped_id = f"http-stopped-{uuid.uuid4().hex[:8]}"
 
         # stopped 상태 (ACTIVE_RUNNERS에 없음)
-        isolated_redis.set(f"{RUNNER_KEY}:{stopped_id}:status", "stopped")
-        isolated_redis.set(f"{RUNNER_KEY}:{stopped_id}:plan_file", plan_file)
+        isolated_redis_db15.set(f"{RUNNER_KEY}:{stopped_id}:status", "stopped")
+        isolated_redis_db15.set(f"{RUNNER_KEY}:{stopped_id}:plan_file", plan_file)
         # ACTIVE_RUNNERS에 추가 안 함
 
         resp = http_client_for_orphan.post(

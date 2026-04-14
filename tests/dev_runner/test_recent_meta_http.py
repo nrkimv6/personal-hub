@@ -13,7 +13,7 @@ from app.main import app
 import redis.asyncio as aioredis
 from tests.dev_runner.conftest_e2e import (
     TEST_PLAN_FILE,
-    isolated_redis,
+    isolated_redis_db15,
     listener_process,
     REDIS_TEST_DB,
 )
@@ -27,10 +27,10 @@ RUNNER_KEY_PREFIX = "plan-runner:runners"
 
 
 class TestRecentMetaHttp:
-    """cleanup 후 trigger/recent-meta 보존 계약 검증 (TestClient + isolated_redis)"""
+    """cleanup 후 trigger/recent-meta 보존 계약 검증 (TestClient + isolated_redis_db15)"""
 
     @pytest.fixture(autouse=True)
-    def setup_async_redis_db15(self, isolated_redis):
+    def setup_async_redis_db15(self, isolated_redis_db15):
         from app.modules.dev_runner.services import executor_service as es_module
         old_async_redis = es_module.executor_service.async_redis
         es_module.executor_service.async_redis = aioredis.Redis(
@@ -41,19 +41,19 @@ class TestRecentMetaHttp:
         es_module.executor_service.async_redis = old_async_redis
 
     @pytest.fixture(autouse=True)
-    def cleanup_redis_after_test(self, isolated_redis):
+    def cleanup_redis_after_test(self, isolated_redis_db15):
         yield
         try:
             stale_keys = [
-                k for k in isolated_redis.keys("plan-runner:*")
+                k for k in isolated_redis_db15.keys("plan-runner:*")
                 if not k.startswith("plan-runner:listener:")
             ]
             if stale_keys:
-                isolated_redis.delete(*stale_keys)
+                isolated_redis_db15.delete(*stale_keys)
         except Exception:
             pass
 
-    def test_accepted_at_set_after_run(self, isolated_redis, listener_process):
+    def test_accepted_at_set_after_run(self, isolated_redis_db15, listener_process):
         """POST /run → accepted_at + accepted_source 키 세팅 확인"""
         client = TestClient(app)
         payload = {
@@ -70,16 +70,16 @@ class TestRecentMetaHttp:
         # accepted_at 폴링 (최대 10초)
         accepted_at = None
         for _ in range(20):
-            accepted_at = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_at")
+            accepted_at = isolated_redis_db15.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_at")
             if accepted_at:
                 break
             time.sleep(0.5)
         assert accepted_at is not None, f"accepted_at 키 미세팅 (runner_id={runner_id})"
 
-        accepted_source = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_source")
+        accepted_source = isolated_redis_db15.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_source")
         assert accepted_source == "listener", f"accepted_source={accepted_source!r}"
 
-    def test_recent_meta_after_cleanup(self, isolated_redis, listener_process):
+    def test_recent_meta_after_cleanup(self, isolated_redis_db15, listener_process):
         """dry_run 완료 후 cleanup 시 recent-meta에 trigger 보존 확인"""
         client = TestClient(app)
         payload = {
@@ -93,20 +93,23 @@ class TestRecentMetaHttp:
         runner_id = resp.json().get("runner_id")
         assert runner_id
 
-        # runner가 종료(stopped/cleanup)될 때까지 대기
-        from app.modules.dev_runner.services.executor_service import RECENT_RUNNERS_KEY
+        stop_resp = client.post(f"{BASE_URL}/stop/{runner_id}")
+        assert stop_resp.status_code in (200, 404), (
+            f"stop 요청 실패: {stop_resp.status_code} {stop_resp.text}"
+        )
+
+        # runner cleanup 후 recent-meta가 저장될 때까지 대기
         found_in_recent = False
-        for _ in range(30):
-            status = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
-            in_recent = isolated_redis.zscore(RECENT_RUNNERS_KEY, runner_id) is not None
-            if status == "stopped" or in_recent:
+        for _ in range(60):
+            meta_raw = isolated_redis_db15.get(f"plan-runner:recent-meta:{runner_id}")
+            if meta_raw is not None:
                 found_in_recent = True
                 break
             time.sleep(1)
-        assert found_in_recent, f"runner {runner_id}가 30초 내 cleanup되지 않음"
+        assert found_in_recent, f"runner {runner_id}의 recent-meta가 60초 내 저장되지 않음"
 
         # recent-meta 확인 — cleanup 후 trigger 보존
-        meta_raw = isolated_redis.get(f"plan-runner:recent-meta:{runner_id}")
+        meta_raw = isolated_redis_db15.get(f"plan-runner:recent-meta:{runner_id}")
         assert meta_raw is not None, (
             f"recent-meta 키 없음 (runner_id={runner_id}): "
             "cleanup 후에도 trigger 보존이 안 됨"

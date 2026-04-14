@@ -62,6 +62,7 @@ class ServiceRunner:
     # ── 메인 실행 흐름 ──────────────────────────────────────────
     def run(self):
         os.environ["PYTHONIOENCODING"] = "utf-8"
+        os.environ["APP_MODE"] = self.app_mode
 
         self.log.info("=" * 50)
         self.log.info("Monitor Page Service Starting")
@@ -369,7 +370,6 @@ class ServiceRunner:
 
         # 단계별 import (hang 진단용)
         t = time.time()
-        self.log.info(f"Import context: cwd={os.getcwd()} | sys.path[0]={sys.path[0]} | __file__={__file__}")
         self.log.info("Importing app.config...")
         from app.config import settings  # noqa: F401
         self.log.info(f"  app.config imported ({time.time() - t:.1f}s)")
