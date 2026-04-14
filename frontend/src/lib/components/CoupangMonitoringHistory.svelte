@@ -92,16 +92,15 @@
   }
 
   function getStatusBadgeVariant(status: string): 'success' | 'info' | 'secondary' | 'error' {
-    if (status === 'success') return 'success';
-    if (status === 'available') return 'info';
+    if (status === 'success' || status === 'available') return 'success';
     if (status === 'error') return 'error';
     return 'secondary';
   }
 
   function getStatusLabel(status: string): string {
     const labels: Record<string, string> = {
-      success: '성공',
-      available: '예약 가능',
+      success: '예약가능',
+      available: '예약가능',
       no_slots: '매진',
       error: '오류'
     };
@@ -123,8 +122,11 @@
   }
 
   onMount(() => {
-    void fetchData(true);
-    startPolling();
+    void (async () => {
+      await coupangTravelApi.getStatus().catch(() => null);
+      await fetchData(true);
+      startPolling();
+    })();
   });
 
   onDestroy(() => {
@@ -140,8 +142,7 @@
         <label for="history-status" class="block text-sm font-medium text-foreground mb-1">상태</label>
         <select id="history-status" class="input" bind:value={filters.status}>
           <option value="">전체</option>
-          <option value="success">성공</option>
-          <option value="available">예약 가능</option>
+          <option value="available">예약가능</option>
           <option value="no_slots">매진</option>
           <option value="error">오류</option>
         </select>

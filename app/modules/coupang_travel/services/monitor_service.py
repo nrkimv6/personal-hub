@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_NON_AVAILABLE_STATUSES = {"SOLDOUT", "SOLD_OUT", "STOP_SALE", "OFF_SALE"}
+
 
 @dataclass
 class VendorItemStatus:
@@ -203,7 +205,8 @@ class CoupangMonitorService:
 
     @staticmethod
     def _is_item_available(item: VendorItem) -> bool:
-        return item.sale_status.upper() == "ON_SALE" and item.stock_count > 0
+        sale_status = (item.sale_status or "").upper()
+        return item.stock_count > 0 and sale_status not in _NON_AVAILABLE_STATUSES
 
     @staticmethod
     def _build_slots_info(items: List[VendorItem]) -> List[dict]:
@@ -228,8 +231,6 @@ class CoupangMonitorService:
             return "error"
         if any(self._is_item_available(item) for item in items):
             return "available"
-        if changes:
-            return "success"
         return "no_slots"
 
     def _log_monitoring_event(

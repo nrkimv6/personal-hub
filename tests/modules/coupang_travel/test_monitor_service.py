@@ -98,6 +98,40 @@ async def test_check_and_notify_no_change():
 
 
 @pytest.mark.asyncio
+async def test_check_and_notify_blank_sale_status_counts_available():
+    service, api_client, _ = make_service()
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="", stock_count=1)
+    ])
+
+    with patch("app.modules.coupang_travel.services.monitor_service.EventLogger.log_monitoring_event") as log_event:
+        await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page(), schedule_id=13)
+
+    assert log_event.call_count == 1
+    kwargs = log_event.call_args.kwargs
+    assert kwargs["status"] == "available"
+    assert kwargs["event_type"] == "slot_detected"
+    assert kwargs["available_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_explicit_soldout_keeps_no_slots():
+    service, api_client, _ = make_service()
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLDOUT", stock_count=1)
+    ])
+
+    with patch("app.modules.coupang_travel.services.monitor_service.EventLogger.log_monitoring_event") as log_event:
+        await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page(), schedule_id=14)
+
+    assert log_event.call_count == 1
+    kwargs = log_event.call_args.kwargs
+    assert kwargs["status"] == "no_slots"
+    assert kwargs["event_type"] == "check"
+    assert kwargs["available_count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_check_and_notify_logs_event_with_schedule_id():
     service, api_client, _ = make_service()
     api_client.fetch_vendor_items = AsyncMock(return_value=[

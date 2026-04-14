@@ -377,6 +377,88 @@ def test_coupang_worker_init_clears_stale_is_active_R(db_session):
     assert row[1] == "idle"
 
 
+def test_coupang_worker_health_recent_event_healthy(orm_db_session_with_events, monkeypatch):
+    """T3: heartbeat가 없어도 최근 이벤트가 있으면 worker_health는 healthy."""
+    from datetime import datetime, timedelta
+    from app.models.business import Business
+    from app.models.biz_item import BizItem
+    from app.models.monitor_schedule import MonitorSchedule
+    from app.models.monitoring_event import MonitoringEvent
+    from app.modules.coupang_travel.routes import monitor as coupang_monitor_route
+
+    db = orm_db_session_with_events
+
+    biz = Business(business_id="cp:health_recent", name="건강한쿠팡", service_type="coupang")
+    db.add(biz)
+    db.flush()
+    item = BizItem(business_id=biz.id, biz_item_id="health_recent_item", name="건강한아이템")
+    db.add(item)
+    db.flush()
+    schedule = MonitorSchedule(biz_item_id=item.id, date="2026-12-10", is_enabled=True)
+    db.add(schedule)
+    db.flush()
+    db.add(MonitoringEvent(
+        schedule_id=schedule.id,
+        event_type="check",
+        status="no_slots",
+        available_count=0,
+        timestamp=datetime.now() - timedelta(seconds=30),
+    ))
+    db.commit()
+
+    monkeypatch.setattr(coupang_monitor_route.WorkerHealthRedis, "check", lambda worker_type: None)
+
+    health = coupang_monitor_route._build_worker_health(db)
+    assert health.status == "healthy"
+    assert health.last_event_at is not None
+    assert "최근" in health.message or "정상" in health.message
+
+
+def test_coupang_worker_health_stale_then_not_started(orm_db_session_with_events, monkeypatch):
+    """T3: 오래된 이벤트는 stale, 이벤트도 없으면 not_started."""
+    from datetime import datetime, timedelta
+    from app.models.business import Business
+    from app.models.biz_item import BizItem
+    from app.models.monitor_schedule import MonitorSchedule
+    from app.models.monitoring_event import MonitoringEvent
+    from app.modules.coupang_travel.routes import monitor as coupang_monitor_route
+
+    db = orm_db_session_with_events
+    monkeypatch.setattr(coupang_monitor_route.WorkerHealthRedis, "check", lambda worker_type: None)
+
+    biz = Business(business_id="cp:health_stale", name="오래된쿠팡", service_type="coupang")
+    db.add(biz)
+    db.flush()
+    item = BizItem(business_id=biz.id, biz_item_id="health_stale_item", name="오래된아이템")
+    db.add(item)
+    db.flush()
+    schedule = MonitorSchedule(biz_item_id=item.id, date="2026-12-11", is_enabled=True)
+    db.add(schedule)
+    db.flush()
+    db.add(MonitoringEvent(
+        schedule_id=schedule.id,
+        event_type="check",
+        status="no_slots",
+        available_count=0,
+        timestamp=datetime.now() - timedelta(seconds=120),
+    ))
+    db.commit()
+
+    stale_health = coupang_monitor_route._build_worker_health(db)
+    assert stale_health.status == "stale"
+    assert stale_health.last_event_at is not None
+
+    db.query(MonitoringEvent).delete()
+    db.query(MonitorSchedule).delete()
+    db.query(BizItem).delete()
+    db.query(Business).delete()
+    db.commit()
+
+    not_started_health = coupang_monitor_route._build_worker_health(db)
+    assert not_started_health.status == "not_started"
+    assert not_started_health.last_event_at is None
+
+
 # ── T4: 알림 시간대 필터링 E2E ────────────────────────────────────────────────
 
 @pytest.fixture

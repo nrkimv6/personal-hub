@@ -32,12 +32,20 @@ export interface CoupangSchedule {
   last_event_status: string | null;
 }
 
+export interface CoupangWorkerHealth {
+  status: 'healthy' | 'stale' | 'not_started';
+  message: string;
+  updated_at: string | null;
+  last_event_at: string | null;
+}
+
 export interface CoupangStatusSummary {
   total_schedules: number;
   enabled_schedules: number;
   active_schedules: number;
   proxy_enabled: boolean;
   proxy_active_count: number;
+  worker_health: CoupangWorkerHealth;
 }
 
 export interface CreateTargetRequest {
