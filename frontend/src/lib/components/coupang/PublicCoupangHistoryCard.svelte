@@ -8,22 +8,19 @@
 
   let { items }: Props = $props();
 
-  function statusTone(statusLabel: string): string {
-    switch (statusLabel) {
-      case '다시 매진':
-        return 'bg-rose-100 text-rose-700';
-      case '현재 열림':
-        return 'bg-sky-100 text-sky-700';
-      default:
-        return 'bg-muted text-muted-foreground';
-    }
+  function closedStatusTone(): string {
+    return 'bg-rose-100 text-rose-700';
+  }
+
+  function openStatusTone(): string {
+    return 'bg-sky-100 text-sky-700';
   }
 
   function durationLabel(item: CoupangPublicHistoryItem): string {
     if (item.status_label === '다시 매진') {
-      return `다시 매진까지 ${formatDuration(item.closed_duration_seconds)}`;
+      return formatDuration(item.closed_duration_seconds);
     }
-    return `현재 열림 ${formatDuration(item.open_duration_seconds)}`;
+    return formatDuration(item.open_duration_seconds);
   }
 </script>
 
@@ -36,9 +33,14 @@
           <p class="mt-1 text-xs text-muted-foreground">발견 {formatKoreanDateTime(item.timestamp, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
         </div>
 
-        <span class={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusTone(item.status_label)}`}>
-          {item.status_label}
-        </span>
+        {#if item.status_label === '다시 매진'}
+          <div class="flex shrink-0 items-center gap-1">
+            <span class={`rounded-full px-2 py-0.5 text-xs font-medium ${closedStatusTone()}`}>빈자리</span>
+            <span class={`rounded-full px-2 py-0.5 text-xs font-medium ${closedStatusTone()}`}>매진</span>
+          </div>
+        {:else}
+          <span class={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${openStatusTone()}`}>열림</span>
+        {/if}
       </div>
 
       <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
