@@ -161,9 +161,9 @@ def _get_open_observation_end(schedule_date: Optional[str], now: datetime) -> da
 
 def _build_coupang_public_history_item(state: dict[str, Any]) -> CoupangPublicHistoryItem:
     return CoupangPublicHistoryItem(
-        id=state["last_event_id"],
+        id=state["detected_event_id"],
         schedule_id=state["schedule_id"],
-        timestamp=state["last_timestamp"],
+        timestamp=state["detected_timestamp"],
         schedule_date=state["schedule_date"],
         biz_item_name=state["biz_item_name"],
         business_name=state["business_name"],
@@ -219,8 +219,8 @@ def _compute_coupang_slot_histories(events: List[MonitoringEvent], now: datetime
                     "remaining_open_count": 0,
                     "sale_durations": [],
                     "open_durations": [],
-                    "last_event_id": event.id,
-                    "last_timestamp": event.timestamp,
+                    "detected_event_id": event.id,
+                    "detected_timestamp": event.timestamp,
                     "last_transition_label": "",
                     "is_available": current_available,
                     "stock_count": current_stock,
@@ -240,6 +240,8 @@ def _compute_coupang_slot_histories(events: List[MonitoringEvent], now: datetime
                             opened_seats.append(event.timestamp)
                         state["cancellation_count"] += current_stock
                         state["last_transition_label"] = "취소표발생"
+                        state["detected_event_id"] = event.id
+                        state["detected_timestamp"] = event.timestamp
                 elif prev_available and current_stock is not None and prev_stock is not None:
                     delta = current_stock - prev_stock
                     if delta > 0 and current_available:
@@ -247,6 +249,8 @@ def _compute_coupang_slot_histories(events: List[MonitoringEvent], now: datetime
                             opened_seats.append(event.timestamp)
                         state["cancellation_count"] += delta
                         state["last_transition_label"] = "취소표발생"
+                        state["detected_event_id"] = event.id
+                        state["detected_timestamp"] = event.timestamp
                     elif delta < 0:
                         sold_count = 0
                         for _ in range(abs(delta)):
@@ -257,7 +261,7 @@ def _compute_coupang_slot_histories(events: List[MonitoringEvent], now: datetime
                             sold_count += 1
                         if sold_count > 0:
                             state["sold_count"] += sold_count
-                        state["last_transition_label"] = "판매 관측" if current_available else "다시 매진"
+                            state["last_transition_label"] = "판매 관측" if current_available else "다시 매진"
                     elif not current_available:
                         state["last_transition_label"] = "다시 매진"
                 elif not current_available and prev_available:
@@ -268,8 +272,6 @@ def _compute_coupang_slot_histories(events: List[MonitoringEvent], now: datetime
             state["schedule_date"] = schedule_date
             state["biz_item_name"] = biz_item.name if biz_item else None
             state["business_name"] = business.name if business else None
-            state["last_event_id"] = event.id
-            state["last_timestamp"] = event.timestamp
             state["is_available"] = current_available
             state["stock_count"] = current_stock
             state["cutoff"] = cutoff
