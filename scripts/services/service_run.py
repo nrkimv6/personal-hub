@@ -35,6 +35,7 @@ from scripts.services.service_utils import (
 )
 
 import psutil
+from app.core.runtime_fingerprint import get_runtime_fingerprint_snapshot
 
 
 class ServiceRunner:
@@ -94,6 +95,13 @@ class ServiceRunner:
         session_id = get_session_id()
         self.log.info(f"PID: {os.getpid()} | Session: {session_id} | Python: {sys.version.split()[0]}")
         self.log.info(f"CWD: {os.getcwd()}")
+        fingerprint = get_runtime_fingerprint_snapshot()
+        self.log.info(
+            "Runtime fingerprint: "
+            f"{fingerprint['runtime_fingerprint'][:12]}... | "
+            f"source={fingerprint['source_fingerprint'][:12]}... | "
+            f"files={len(fingerprint['source_files'])}"
+        )
         if session_id == 0:
             self.log.info("Session 0 detected - Telegram notifications active (HTTP API works in Session 0); Desktop notifications will be relayed via Redis to Session 1")
         # DNS 테스트

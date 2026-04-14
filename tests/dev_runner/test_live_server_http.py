@@ -32,3 +32,16 @@ def test_live_runners_endpoint():
         pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+def test_live_runtime_fingerprint_endpoint():
+    """R: /api/v1/system/runtime-fingerprint 엔드포인트 200 응답 + 진단 필드 확인"""
+    try:
+        resp = httpx.get(f"{BASE_URL}/api/v1/system/runtime-fingerprint", timeout=5)
+    except httpx.ConnectError:
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "runtime_fingerprint" in data
+    assert "source_fingerprint" in data
+    assert isinstance(data.get("source_files"), list)
