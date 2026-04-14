@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 import urllib.request
 
+from app.core.runtime_fingerprint import build_runtime_fingerprint_snapshot
 from scripts.services.browser_worker_runtime.runtime import GREEN, RED, RESET, YELLOW, cprint
 
 
@@ -57,6 +59,23 @@ def _nssm_restart_elevated(manager, service_name: str) -> bool:
         return False
 
 
+def _manager_app_mode(manager) -> str:
+    return getattr(manager, "app_mode", "admin" if getattr(manager, "pid_suffix", "") == "_admin" else "public")
+
+
+def _fetch_json(url: str, timeout: int = 3) -> dict[str, object] | None:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            payload = resp.read().decode("utf-8")
+            if not payload:
+                return {}
+            return json.loads(payload)
+    except Exception:
+        return None
+
+
 def restart_api(manager):
     mgr = _manager()
     print(f"\n{YELLOW}{'=' * 40}")
@@ -75,6 +94,10 @@ def restart_api(manager):
             cprint("Failed to restart winmgmt (may need admin rights). Proceeding anyway.", YELLOW)
     else:
         cprint("WMI OK", GREEN)
+
+    app_mode = _manager_app_mode(manager)
+    expected_snapshot = build_runtime_fingerprint_snapshot(app_mode=app_mode)
+    expected_fingerprint = str(expected_snapshot["runtime_fingerprint"])
 
     url = f"http://localhost:{manager.api_port}/api/v1/system/self-restart?delay=2&reason=browser_workers_py"
     killed = False
@@ -110,14 +133,27 @@ def restart_api(manager):
     if killed:
         cprint("Waiting for NSSM to restart API (up to 60s)...")
         healthy = False
+        fingerprint_url = f"http://localhost:{manager.api_port}/api/v1/system/runtime-fingerprint"
+        status_url = f"http://localhost:{manager.api_port}/api/v1/system/status"
         for i in range(12):
             time.sleep(5)
+            fingerprint_data = _fetch_json(fingerprint_url, timeout=3)
+            if fingerprint_data is not None:
+                actual_fingerprint = str(fingerprint_data.get("runtime_fingerprint", ""))
+                if actual_fingerprint == expected_fingerprint:
+                    cprint(f"API runtime fingerprint matched (took ~{(i + 1) * 5}s)", GREEN)
+                    healthy = True
+                    break
+                cprint(
+                    "Runtime fingerprint mismatch: "
+                    f"expected={expected_fingerprint[:12]}... actual={actual_fingerprint[:12]}...",
+                    YELLOW,
+                )
+                continue
             try:
-                with urllib.request.urlopen(
-                    f"http://localhost:{manager.api_port}/api/v1/system/status", timeout=3
-                ) as resp:
+                with urllib.request.urlopen(status_url, timeout=3) as resp:
                     if resp.status == 200:
-                        cprint(f"API server is healthy (took ~{(i + 1) * 5}s)", GREEN)
+                        cprint(f"API server is healthy (legacy /system/status fallback, took ~{(i + 1) * 5}s)", GREEN)
                         healthy = True
                         break
             except Exception:
