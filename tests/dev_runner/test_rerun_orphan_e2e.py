@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from _dr_constants import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, RESULTS_KEY, COMMANDS_KEY
 
 from tests.dev_runner.conftest_e2e import (
-    isolated_redis,
+    isolated_redis_db15,
     listener_process,
     REDIS_TEST_DB,
 )
@@ -67,7 +67,7 @@ def _send_run_command(r: redis_lib.Redis, plan_file: str, new_runner_id: str, ti
 class TestRerunOrphanAttachE2E:
     """E2E: 기존 워커 실행 중 재실행 → attach 응답"""
 
-    def test_run_api_returns_attached_when_plan_running(self, isolated_redis, listener_process):
+    def test_run_api_returns_attached_when_plan_running(self, isolated_redis_db15, listener_process):
         """attach: 동일 plan 실행 중 재실행 → attached=True + 기존 runner_id 반환"""
         # listener_process.pid를 살아있는 PID로 사용 (실제 프로세스)
         live_pid = listener_process.pid
@@ -75,11 +75,11 @@ class TestRerunOrphanAttachE2E:
         plan_file = "tests/dev_runner/fixtures/test_minimal_plan.md"
 
         # 1. Redis에 running 상태 runner 직접 등록
-        _seed_running_runner(isolated_redis, existing_runner_id, plan_file, live_pid)
+        _seed_running_runner(isolated_redis_db15, existing_runner_id, plan_file, live_pid)
 
         # 2. 같은 plan_file로 새 run command 전송
         new_runner_id = f"e2e-new-{uuid.uuid4().hex[:8]}"
-        result = _send_run_command(isolated_redis, plan_file, new_runner_id, timeout=15)
+        result = _send_run_command(isolated_redis_db15, plan_file, new_runner_id, timeout=15)
 
         # 3. attached 응답 검증
         assert result.get("success") is True, f"success 기대 True: {result}"
@@ -88,19 +88,19 @@ class TestRerunOrphanAttachE2E:
             f"기존 runner_id 기대: {existing_runner_id}, 실제: {result.get('runner_id')}"
         )
 
-    def test_run_api_creates_new_after_full_stop(self, isolated_redis, listener_process):
+    def test_run_api_creates_new_after_full_stop(self, isolated_redis_db15, listener_process):
         """신규: stop 완료 후 재실행 → attached=False + 새 runner_id"""
         # stop 완료 상태: ACTIVE_RUNNERS에 없음
         stopped_runner_id = f"e2e-stopped-{uuid.uuid4().hex[:8]}"
         plan_file = "tests/dev_runner/fixtures/test_minimal_plan_a.md"
 
         # stopped 상태는 ACTIVE_RUNNERS에 없음 (stop 후 srem)
-        isolated_redis.set(f"{RUNNER_KEY}:{stopped_runner_id}:status", "stopped")
-        isolated_redis.set(f"{RUNNER_KEY}:{stopped_runner_id}:plan_file", plan_file)
+        isolated_redis_db15.set(f"{RUNNER_KEY}:{stopped_runner_id}:status", "stopped")
+        isolated_redis_db15.set(f"{RUNNER_KEY}:{stopped_runner_id}:plan_file", plan_file)
         # ACTIVE_RUNNERS에 추가하지 않음
 
         new_runner_id = f"e2e-newrun-{uuid.uuid4().hex[:8]}"
-        result = _send_run_command(isolated_redis, plan_file, new_runner_id, timeout=15)
+        result = _send_run_command(isolated_redis_db15, plan_file, new_runner_id, timeout=15)
 
         # accepted 응답 (attached 아님) 또는 background thread 시작
         assert result.get("success") is True, f"success 기대 True: {result}"

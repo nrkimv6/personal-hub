@@ -24,7 +24,7 @@ import redis
 
 import redis.asyncio as aioredis
 from tests.dev_runner.conftest_e2e import (
-    isolated_redis,
+    isolated_redis_db15,
     listener_process,
     TEST_PLAN_FILE,
     LISTENER_SCRIPT,
@@ -45,17 +45,17 @@ BASE_URL = "/api/v1/dev-runner"
 
 
 # ---------------------------------------------------------------------------
-# T5: HTTP 통합 (TestClient 기반) — isolated_redis로 db=15 격리
+# T5: HTTP 통합 (TestClient 기반) — isolated_redis_db15로 db=15 격리
 # ---------------------------------------------------------------------------
 
 class TestRemovePipelineT5:
-    """T5: TestClient 기반 HTTP 테스트 — isolated_redis + listener_process(db=15) 격리 필수"""
+    """T5: TestClient 기반 HTTP 테스트 — isolated_redis_db15 + listener_process(db=15) 격리 필수"""
 
     @pytest.fixture(autouse=True)
-    def setup_async_redis_db15(self, isolated_redis):
+    def setup_async_redis_db15(self, isolated_redis_db15):
         """executor_service의 async_redis를 db=15로 교체 (TestClient 이벤트루프 호환)
 
-        isolated_redis.reconnect()는 redis_client를 교체하지만 async_redis는
+        isolated_redis_db15.reconnect()는 redis_client를 교체하지만 async_redis는
         TestClient 이벤트루프 컨텍스트에서 여전히 db=0을 바라볼 수 있음.
         명시적으로 교체하여 listener(db=15)와 동일한 DB를 바라보게 함.
         """
@@ -69,12 +69,12 @@ class TestRemovePipelineT5:
         es_module.executor_service.async_redis = old_async_redis
 
     @pytest.fixture(autouse=True)
-    def stop_runners_after_test(self, isolated_redis, listener_process):
+    def stop_runners_after_test(self, isolated_redis_db15, listener_process):
         """각 테스트 후 생성된 runner 정리 (다음 테스트 간섭 방지)"""
         client = TestClient(app)
         yield
         try:
-            active = isolated_redis.smembers("plan-runner:active-runners")
+            active = isolated_redis_db15.smembers("plan-runner:active-runners")
             for rid in active:
                 try:
                     client.post(f"{BASE_URL}/stop/{rid}")
@@ -83,7 +83,7 @@ class TestRemovePipelineT5:
         except Exception:
             pass
 
-    def test_T5_start_run_without_pipeline_R(self, isolated_redis, listener_process):
+    def test_T5_start_run_without_pipeline_R(self, isolated_redis_db15, listener_process):
         """R(정상): pipeline 필드 없이 POST /run → 200 또는 runner_id 포함 응답"""
         client = TestClient(app)
         payload = {
@@ -100,7 +100,7 @@ class TestRemovePipelineT5:
         data = response.json()
         assert "runner_id" in data, f"runner_id 없음: {data}"
 
-    def test_T5_start_run_with_pipeline_field_ignored_B(self, isolated_redis, listener_process):
+    def test_T5_start_run_with_pipeline_field_ignored_B(self, isolated_redis_db15, listener_process):
         """B(경계): pipeline 필드 포함 payload → 422 아님 (미지 필드 무시), 200 응답"""
         client = TestClient(app)
         payload = {
@@ -122,7 +122,7 @@ class TestRemovePipelineT5:
             data = response.json()
             assert "runner_id" in data, f"200이지만 runner_id 없음: {data}"
 
-    def test_T5_run_schema_has_no_pipeline_field_E(self, isolated_redis, listener_process):
+    def test_T5_run_schema_has_no_pipeline_field_E(self, isolated_redis_db15, listener_process):
         """E(에러): /run 엔드포인트 OpenAPI 스키마에 pipeline 필드 없음"""
         client = TestClient(app)
         response = client.get("/openapi.json")
@@ -150,7 +150,7 @@ def redis_client_e2e():
     try:
         r.ping()
     except redis.ConnectionError:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
     yield r
     r.close()
 
@@ -158,7 +158,7 @@ def redis_client_e2e():
 @pytest.fixture(scope="module")
 def listener_process_e2e(redis_client_e2e):
     """dev-runner-command-listener 프로세스 시작"""
-    script_path = Path("scripts/dev-runner-command-listener.py")
+    script_path = Path("scripts/plan_runner/dev-runner-command-listener.py")
     if not script_path.exists():
         pytest.skip("listener script not found")
 

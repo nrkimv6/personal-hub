@@ -101,7 +101,7 @@
 			<div class="flex flex-wrap gap-1 text-xs text-orange-600">
 				{#each chainRecords as r, i}
 					<span>
-						{i + 1}회 {formatDate(r.applied_at ?? r.archived_at ?? r.created_at)}
+						{i + 1}회 {formatDate(r.archived_at ?? r.created_at)}
 						{#if i < chainRecords.length - 1}<span class="text-orange-400">→</span>{:else}<span class="text-orange-400 font-semibold">(현재)</span>{/if}
 					</span>
 				{/each}

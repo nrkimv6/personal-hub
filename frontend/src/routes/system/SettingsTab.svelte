@@ -2,49 +2,23 @@
 	import NotificationSettings from '$lib/components/NotificationSettings.svelte';
 	import SchedulerSettings from '$lib/components/SchedulerSettings.svelte';
 	import AiDefaultsSettings from '$lib/components/system/AiDefaultsSettings.svelte';
+	import AiProfilesSettings from '$lib/components/system/AiProfilesSettings.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
-	type Tab = 'notification' | 'scheduler' | 'ai-defaults';
+	type Tab = 'notification' | 'scheduler' | 'ai-defaults' | 'ai-profiles';
 	let activeTab: Tab = 'notification';
 
-	function switchTab(tab: Tab) {
-		activeTab = tab;
-	}
+	const settingsTabs: { id: Tab; label: string }[] = [
+		{ id: 'notification', label: '알림' },
+		{ id: 'scheduler', label: '스케줄러' },
+		{ id: 'ai-defaults', label: 'AI 기본값' },
+		{ id: 'ai-profiles', label: 'AI 프로필' },
+	];
 </script>
 
 <div>
 
-	<!-- 탭 -->
-	<div class="mb-6 border-b border-border">
-		<nav class="flex gap-4">
-			<button
-				onclick={() => switchTab('notification')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab ===
-				'notification'
-					? 'border-blue-600 text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				알림
-			</button>
-			<button
-				onclick={() => switchTab('scheduler')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab ===
-				'scheduler'
-					? 'border-blue-600 text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				스케줄러
-			</button>
-			<button
-				onclick={() => switchTab('ai-defaults')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab ===
-				'ai-defaults'
-					? 'border-blue-600 text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				AI 기본값
-			</button>
-		</nav>
-	</div>
+	<TabNav tabs={settingsTabs} bind:activeTab variant="secondary" />
 
 	{#if activeTab === 'notification'}
 		<NotificationSettings />
@@ -52,5 +26,7 @@
 		<SchedulerSettings />
 	{:else if activeTab === 'ai-defaults'}
 		<AiDefaultsSettings />
+	{:else if activeTab === 'ai-profiles'}
+		<AiProfilesSettings />
 	{/if}
 </div>

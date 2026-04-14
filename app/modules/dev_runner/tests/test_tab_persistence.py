@@ -56,6 +56,7 @@ class TestStoppedRunnerRemainsInRecent:
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", "test.md")
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "12345")
+        fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:trigger", "user")  # visible runner: RECENT 보존 대상
 
         # 강제 정리 (runner 종료 시뮬레이션)
         await executor_service._force_cleanup_state(rid)
@@ -80,6 +81,7 @@ class TestStoppedRunnerRemainsInRecent:
         for rid in rids:
             fake.sadd(ACTIVE_RUNNERS_KEY, rid)
             fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+            fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:trigger", "user")  # visible runner: RECENT 보존 대상
 
         # runner_id 없이 호출 = 전체 정리
         await executor_service._force_cleanup_state()
@@ -232,6 +234,7 @@ class TestCleanupStaleKeepsStoppedRunner:
         fake.zadd(RECENT_RUNNERS_KEY, {rid: time.time()})
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
         fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", "docs/plan/missing-plan.md")
+        fake.set(f"{RUNNER_KEY_PREFIX}:{rid}:trigger", "user")  # visible runner: dismiss 전까지 보존
 
         result = await executor_service.cleanup_stale_runners()
         assert result["cleaned_recent"] == 0

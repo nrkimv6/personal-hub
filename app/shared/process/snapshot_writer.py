@@ -11,7 +11,7 @@ import psutil
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, is_pg
 
 if TYPE_CHECKING:
     from app.shared.process.registry import ProcessRegistry
@@ -79,6 +79,7 @@ class SnapshotWriter:
     def _infer_scope(name: str, exe: str, cmdline: str) -> str:
         joined = " ".join((name or "", exe or "", cmdline or "")).lower().replace("\\", "/")
         project_hint = str(_PROJECT_ROOT).lower().replace("\\", "/")
+        # browser_workers.py는 CLI facade로 유지되며, 프로세스 식별 앵커도 그대로 사용한다.
         monitor_keywords = (
             "monitor-page",
             "browser_workers.py",
@@ -106,11 +107,12 @@ class SnapshotWriter:
             return None, ""
 
     def _ensure_watch_tables(self, db: Any) -> None:
+        auto_pk = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
         db.execute(
             text(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS process_watch_snapshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {auto_pk},
                     captured_at TEXT NOT NULL,
                     pid INTEGER NOT NULL,
                     ppid INTEGER,
@@ -131,9 +133,9 @@ class SnapshotWriter:
         )
         db.execute(
             text(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS process_watch_actions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {auto_pk},
                     acted_at TEXT NOT NULL,
                     action TEXT NOT NULL,
                     pid INTEGER NOT NULL,
@@ -157,14 +159,24 @@ class SnapshotWriter:
 
     def _purge_watch_rows(self, db: Any) -> None:
         window = f"-{self._retention_days} days"
-        db.execute(
-            text("DELETE FROM process_watch_snapshots WHERE captured_at < datetime('now', :window)"),
-            {"window": window},
-        )
-        db.execute(
-            text("DELETE FROM process_watch_actions WHERE acted_at < datetime('now', :window)"),
-            {"window": window},
-        )
+        if is_pg:
+            db.execute(
+                text("DELETE FROM process_watch_snapshots WHERE captured_at < NOW() + :window::interval"),
+                {"window": window},
+            )
+            db.execute(
+                text("DELETE FROM process_watch_actions WHERE acted_at < NOW() + :window::interval"),
+                {"window": window},
+            )
+        else:
+            db.execute(
+                text("DELETE FROM process_watch_snapshots WHERE captured_at < datetime('now', :window)"),
+                {"window": window},
+            )
+            db.execute(
+                text("DELETE FROM process_watch_actions WHERE acted_at < datetime('now', :window)"),
+                {"window": window},
+            )
 
     def _rotate_jsonl_if_needed(self, path: Path) -> None:
         if not path.exists():
@@ -514,9 +526,14 @@ class SnapshotWriter:
         """오래된 스냅샷을 삭제한다."""
         try:
             with SessionLocal() as db:
-                db.execute(
-                    f"DELETE FROM process_snapshots WHERE captured_at < datetime('now', '-{days} days')"
-                )
+                if is_pg:
+                    db.execute(
+                        text(f"DELETE FROM process_snapshots WHERE captured_at < NOW() - INTERVAL '{days} days'")
+                    )
+                else:
+                    db.execute(
+                        text(f"DELETE FROM process_snapshots WHERE captured_at < datetime('now', '-{days} days')")
+                    )
                 self._purge_watch_rows(db)
                 db.commit()
         except Exception as exc:

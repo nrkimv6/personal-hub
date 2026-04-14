@@ -12,7 +12,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
-_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 _mock_noise = types.ModuleType("listener_noise_filter")
 _mock_noise.NOISE_BLOCK_MARKERS = []

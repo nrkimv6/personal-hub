@@ -37,6 +37,8 @@ from sqlalchemy.orm import sessionmaker
 # 프로젝트 루트 추가
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+# plan_runner 모듈 경로 (scripts/plan_runner/ 로 이동됨)
+sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "plan_runner"))
 
 # 테스트 DB 경로 (TEST_DB_DIR 환경변수로 워크트리 격리 지원)
 TEST_DB_DIR = Path(os.environ.get("TEST_DB_DIR", str(PROJECT_ROOT / "data")))
@@ -87,6 +89,27 @@ def apply_migrations(db_path: Path) -> None:
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
+
+
+def pytest_addoption(parser):
+    """destructive_live 테스트는 명시적 opt-in이 있어야만 실행한다."""
+    parser.addoption(
+        "--run-destructive-live",
+        action="store_true",
+        default=False,
+        help="Run live tests that mutate shared admin data or perform destructive teardown.",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """--run-destructive-live가 없으면 destructive_live 마커를 전부 skip 처리한다."""
+    if config.getoption("run_destructive_live"):
+        return
+
+    skip_destructive = pytest.mark.skip(reason="--run-destructive-live required")
+    for item in items:
+        if item.get_closest_marker("destructive_live"):
+            item.add_marker(skip_destructive)
 
 
 @pytest.fixture(autouse=True)
@@ -265,50 +288,62 @@ def test_db_engine():
     """
     마이그레이션이 적용된 테스트 DB 엔진 (세션 범위)
 
-    모든 테스트에서 공유되는 테스트 전용 DB를 생성하고 마이그레이션을 적용합니다.
-    테스트 세션 종료 시 자동으로 정리됩니다.
+    DATABASE_URL 환경변수가 postgresql://로 시작하면 PG 엔진 사용,
+    기본값은 SQLite 테스트 DB (기존 동작 유지).
     """
     from app.database import Base
 
-    # TEST_DB_DIR 자동 생성 (worktree 환경에서 data 디렉토리 없을 수 있음)
-    TEST_DB_DIR.mkdir(parents=True, exist_ok=True)
+    _url = os.environ.get("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
+    _is_test_sqlite = _url.startswith("sqlite")
 
-    # 기존 테스트 DB 삭제
-    if TEST_DB_PATH.exists():
-        try:
-            os.remove(TEST_DB_PATH)
-        except PermissionError:
-            pass
+    if _is_test_sqlite:
+        # TEST_DB_DIR 자동 생성 (worktree 환경에서 data 디렉토리 없을 수 있음)
+        TEST_DB_DIR.mkdir(parents=True, exist_ok=True)
+        # 기존 테스트 DB 삭제
+        if TEST_DB_PATH.exists():
+            try:
+                os.remove(TEST_DB_PATH)
+            except PermissionError:
+                pass
 
     from sqlalchemy import event as sa_event
 
-    # 테스트 DB 엔진 생성
-    engine = create_engine(
-        f"sqlite:///{TEST_DB_PATH}",
-        connect_args={"check_same_thread": False}
-    )
+    if _is_test_sqlite:
+        engine = create_engine(_url, connect_args={"check_same_thread": False})
 
-    @sa_event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_conn, _record):
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+        @sa_event.listens_for(engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, _record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+    else:
+        # PostgreSQL: check_same_thread/PRAGMA 불필요
+        engine = create_engine(_url, pool_pre_ping=True)
 
     # 1. SQLAlchemy 모델로 기본 테이블 생성
     Base.metadata.create_all(bind=engine)
 
-    # 2. 마이그레이션 적용 (추가 컬럼, 인덱스 등)
-    apply_migrations(TEST_DB_PATH)
+    # 2. 마이그레이션 적용 (SQLite 전용 — PG는 Base.metadata.create_all로 충분)
+    if _is_test_sqlite:
+        apply_migrations(TEST_DB_PATH)
+        from sqlalchemy import inspect as sa_inspect, text as sa_text
+
+        inspector = sa_inspect(engine)
+        plan_record_columns = {col["name"] for col in inspector.get_columns("plan_records")}
+        if "claude_session_id" not in plan_record_columns:
+            with engine.begin() as conn:
+                conn.execute(sa_text("ALTER TABLE plan_records ADD COLUMN claude_session_id VARCHAR(36)"))
 
     yield engine
 
     # 정리
     engine.dispose()
-    try:
-        if TEST_DB_PATH.exists():
-            os.remove(TEST_DB_PATH)
-    except PermissionError:
-        pass
+    if _is_test_sqlite:
+        try:
+            if TEST_DB_PATH.exists():
+                os.remove(TEST_DB_PATH)
+        except PermissionError:
+            pass
 
 
 @pytest.fixture(scope="function")
@@ -430,3 +465,30 @@ def mock_telegram_settings():
         "bot_token": "test_bot_token",
         "chat_id": "test_chat_id"
     }
+
+
+# ── DbCircuitBreaker 싱글턴 상태 격리 (Phase 9a) ──────────────────────────────
+
+@pytest.fixture(autouse=True)
+def db_circuit_reset():
+    """각 테스트 전 db_circuit 싱글턴 상태 초기화.
+
+    db_circuit import 실패 시 기존 테스트에 영향 없도록 방어.
+    """
+    try:
+        from app.core.database import db_circuit, _CLOSED
+        with db_circuit._lock:
+            db_circuit._state = _CLOSED
+            db_circuit._fail_count = 0
+            db_circuit._last_fail_time = 0.0
+    except ImportError:
+        pass
+    yield
+    try:
+        from app.core.database import db_circuit, _CLOSED
+        with db_circuit._lock:
+            db_circuit._state = _CLOSED
+            db_circuit._fail_count = 0
+            db_circuit._last_fail_time = 0.0
+    except ImportError:
+        pass

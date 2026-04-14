@@ -14,7 +14,7 @@ except ImportError:
     HAS_FAKEREDIS = False
 
 _SCRIPTS_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "scripts")
+    os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "cleanup")
 )
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)

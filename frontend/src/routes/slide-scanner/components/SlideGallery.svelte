@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { onMount } from 'svelte';
 
   import { slideScannerApi, type SlideListItem, type SlideStatus } from '$lib/api/slide-scanner';
   import { createOffsetPagination } from '$lib/utils/pagination.svelte';
@@ -11,9 +11,7 @@
   import SlideCard from './SlideCard.svelte';
 
   type StatusFilter = 'ALL' | SlideStatus;
-  const dispatch = createEventDispatcher<{
-    open: { slideId: number; sequenceIds: number[] };
-  }>();
+  const { onopen }: { onopen?: (detail: { slideId: number; sequenceIds: number[] }) => void } = $props();
 
   const pager = createOffsetPagination(24);
   const selection = createSelection();
@@ -121,14 +119,14 @@
     }
   }
 
-  async function handleScanSubmit(event: CustomEvent<{ folderPath: string; recursive: boolean }>) {
+  async function handleScanSubmit(detail: { folderPath: string; recursive: boolean }) {
     scanning = true;
     errorMessage = '';
     noticeMessage = '';
 
     try {
-      const result = await slideScannerApi.scanFolder(event.detail.folderPath, {
-        recursive: event.detail.recursive
+      const result = await slideScannerApi.scanFolder(detail.folderPath, {
+        recursive: detail.recursive
       });
       noticeMessage =
         `스캔 완료: 등록 ${result.created}건, 중복 ${result.skipped}건, 실패 ${result.failed}건`;
@@ -192,7 +190,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
-  async function handlePdfSubmit(event: CustomEvent<{ filename: string }>) {
+  async function handlePdfSubmit(detail: { filename: string }) {
     const ids = selectedSlides.map((slide) => slide.id);
     if (ids.length === 0) return;
 
@@ -200,7 +198,7 @@
     errorMessage = '';
     noticeMessage = '';
     try {
-      const result = await slideScannerApi.exportPdf(ids, event.detail.filename);
+      const result = await slideScannerApi.exportPdf(ids, detail.filename);
       downloadBlob(result.blob, result.filename);
       noticeMessage = `PDF 내보내기 완료: ${ids.length}건`;
       showPdfModal = false;
@@ -211,8 +209,8 @@
     }
   }
 
-  function toggleSelection(event: CustomEvent<{ id: number }>) {
-    selection.toggle(event.detail.id);
+  function toggleSelection(detail: { id: number }) {
+    selection.toggle(detail.id);
   }
 
   function applySearch() {
@@ -224,8 +222,8 @@
     searchQuery = '';
   }
 
-  function openInEditor(event: CustomEvent<{ id: number }>) {
-    dispatch('open', { slideId: event.detail.id, sequenceIds: [...allCurrentIds] });
+  function openInEditor(detail: { id: number }) {
+    onopen?.({ slideId: detail.id, sequenceIds: [...allCurrentIds] });
   }
 
   onMount(() => {
@@ -299,10 +297,10 @@
     {archiving}
     {exportingPdf}
     disabled={slides.length === 0}
-    on:toggleAll={() => selection.selectAll(allCurrentIds)}
-    on:transform={() => void handleBatchTransform()}
-    on:archive={() => void handleArchive()}
-    on:exportPdf={() => (showPdfModal = true)}
+    ontoggleall={() => selection.selectAll(allCurrentIds)}
+    ontransform={() => void handleBatchTransform()}
+    onarchive={() => void handleArchive()}
+    onexportpdf={() => (showPdfModal = true)}
   />
 
   {#if noticeMessage}
@@ -327,8 +325,8 @@
         <SlideCard
           {slide}
           selected={selection.has(slide.id)}
-          on:toggle={toggleSelection}
-          on:open={openInEditor}
+          ontoggle={toggleSelection}
+          onopen={openInEditor}
         />
       {/each}
     </div>
@@ -346,14 +344,14 @@
 <ScanFolderModal
   open={showScanModal}
   busy={scanning}
-  on:close={() => (showScanModal = false)}
-  on:submit={handleScanSubmit}
+  onclose={() => (showScanModal = false)}
+  onsubmit={handleScanSubmit}
 />
 
 <PdfExportModal
   open={showPdfModal}
   busy={exportingPdf}
   {selectedSlides}
-  on:close={() => (showPdfModal = false)}
-  on:submit={handlePdfSubmit}
+  onclose={() => (showPdfModal = false)}
+  onsubmit={handlePdfSubmit}
 />

@@ -110,6 +110,11 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             logger.debug(f"[{self.name}] Redis 큐가 없어 pending 복구 스킵")
             return
 
+        from app.core.database import db_circuit
+        if not db_circuit.is_available():
+            logger.info("[%s] DB 불가 — pending 복구 스킵", self.name)
+            return
+
         db = SessionLocal()
         try:
             request_service = CrawlRequestService(db)
@@ -155,7 +160,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                 logger.info(f"[{self.name}] 복구할 pending 요청 없음 (전체: {len(pending_requests)}, Activity 스킵: {skipped_activity}, 푸시 실패: {failed_push})")
 
         except Exception as e:
-            logger.error(f"[{self.name}] Pending 요청 복구 오류: {e}", exc_info=True)
+            self._log_worker_error("pending 복구", e)
         finally:
             db.close()
 
@@ -271,7 +276,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                 )
 
             except Exception as e:
-                logger.error(f"[{self.name}] Redis 큐 처리 오류: {e}", exc_info=True)
+                self._log_worker_error("Redis 큐 처리", e)
             finally:
                 db.close()
 
@@ -312,7 +317,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                 )
 
         except Exception as e:
-            logger.error(f"[{self.name}] Pending 요청 디스패치 오류: {e}", exc_info=True)
+            self._log_worker_error("Pending 요청 디스패치", e)
         finally:
             db.close()
 

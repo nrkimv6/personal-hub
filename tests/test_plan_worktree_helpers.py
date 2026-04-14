@@ -21,6 +21,7 @@ from plan_worktree_helpers import (
     is_worktree_active,
     is_plan_archived,
     has_unmerged_commits,
+    resolve_active_plan_file,
 )
 
 
@@ -112,6 +113,30 @@ def test_is_plan_archived_backslash_B():
 def test_is_plan_archived_empty_E():
     """E: 빈 문자열 → False"""
     assert is_plan_archived("") is False
+
+
+def test_resolve_active_plan_file_prefers_plans_worktree_R(tmp_path):
+    """R: legacy/docs와 plans/worktree가 같이 있으면 plans/worktree를 우선 선택"""
+    legacy = tmp_path / "docs" / "plan" / "2026-01-01_test.md"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("# legacy\n", encoding="utf-8")
+
+    plans = tmp_path / ".worktrees" / "plans" / "docs" / "plan" / "2026-01-01_test.md"
+    plans.parent.mkdir(parents=True, exist_ok=True)
+    plans.write_text("# plans\n", encoding="utf-8")
+
+    resolved = resolve_active_plan_file(str(legacy), project_root=tmp_path)
+    assert resolved == plans.resolve()
+
+
+def test_resolve_active_plan_file_fallback_to_legacy_B(tmp_path):
+    """B: plans/worktree가 없으면 legacy docs/plan 경로를 반환"""
+    legacy = tmp_path / "docs" / "plan" / "2026-01-02_test.md"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("# legacy only\n", encoding="utf-8")
+
+    resolved = resolve_active_plan_file(str(legacy), project_root=tmp_path)
+    assert resolved == legacy.resolve()
 
 
 # ---------------------------------------------------------------------------

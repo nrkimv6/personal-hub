@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { Badge, Button } from '$lib/components/ui';
   import { coupangTravelApi } from '$lib/api/coupangTravel';
+  import { isAbortError } from '$lib/utils/isAbortError.js';
   import type { MonitoringEvent } from '$lib/types';
 
   let monitoringEvents: MonitoringEvent[] = [];
@@ -26,17 +27,20 @@
     return new Date().toISOString().split('T')[0];
   }
 
-  function cleanupPolling(): void {
+  function stopPolling(): void {
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
     }
+  }
+
+  function abortInFlightRequest(): void {
     abortController?.abort();
     abortController = null;
   }
 
   function startPolling(): void {
-    cleanupPolling();
+    stopPolling();
     pollTimer = setInterval(() => {
       void fetchData(false);
     }, 5000);
@@ -44,7 +48,7 @@
 
   async function fetchData(showLoading = true): Promise<void> {
     if (showLoading) loading = true;
-    abortController?.abort();
+    abortInFlightRequest();
     abortController = new AbortController();
 
     try {
@@ -63,7 +67,7 @@
       totalPages = eventsData.total_pages;
       error = null;
     } catch (e: unknown) {
-      if (e instanceof Error && e.name === 'AbortError') {
+      if (isAbortError(e)) {
         return;
       }
       error = e instanceof Error ? e.message : '쿠팡 모니터링 이력 로드 실패';
@@ -88,16 +92,15 @@
   }
 
   function getStatusBadgeVariant(status: string): 'success' | 'info' | 'secondary' | 'error' {
-    if (status === 'success') return 'success';
-    if (status === 'available') return 'info';
+    if (status === 'success' || status === 'available') return 'success';
     if (status === 'error') return 'error';
     return 'secondary';
   }
 
   function getStatusLabel(status: string): string {
     const labels: Record<string, string> = {
-      success: '성공',
-      available: '예약 가능',
+      success: '예약가능',
+      available: '예약가능',
       no_slots: '매진',
       error: '오류'
     };
@@ -119,12 +122,16 @@
   }
 
   onMount(() => {
-    void fetchData(true);
-    startPolling();
+    void (async () => {
+      await coupangTravelApi.getStatus().catch(() => null);
+      await fetchData(true);
+      startPolling();
+    })();
   });
 
   onDestroy(() => {
-    cleanupPolling();
+    stopPolling();
+    abortInFlightRequest();
   });
 </script>
 
@@ -135,8 +142,7 @@
         <label for="history-status" class="block text-sm font-medium text-foreground mb-1">상태</label>
         <select id="history-status" class="input" bind:value={filters.status}>
           <option value="">전체</option>
-          <option value="success">성공</option>
-          <option value="available">예약 가능</option>
+          <option value="available">예약가능</option>
           <option value="no_slots">매진</option>
           <option value="error">오류</option>
         </select>
@@ -150,8 +156,8 @@
         <input id="history-date-to" type="date" class="input" bind:value={filters.date_to} />
       </div>
       <div class="flex items-end gap-2">
-        <Button variant="primary" on:click={handleSearch}>검색</Button>
-        <Button variant="secondary" on:click={clearFilters}>초기화</Button>
+        <Button variant="primary" onclick={handleSearch}>검색</Button>
+        <Button variant="secondary" onclick={clearFilters}>초기화</Button>
       </div>
     </div>
   </div>
@@ -224,7 +230,7 @@
               variant="secondary"
               size="sm"
               disabled={page === 1}
-              on:click={() => {
+              onclick={() => {
                 page--;
                 void fetchData(true);
               }}
@@ -235,7 +241,7 @@
               variant="secondary"
               size="sm"
               disabled={page === totalPages}
-              on:click={() => {
+              onclick={() => {
                 page++;
                 void fetchData(true);
               }}

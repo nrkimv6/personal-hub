@@ -1,4 +1,4 @@
-"""
+﻿"""
 에러 로그 API 라우트
 에러 목록 조회, 통계, 해결 처리
 """
@@ -179,7 +179,7 @@ def get_error_stats(
     # 시간대별 통계 (최근 24시간만)
     hourly_since = datetime.utcnow() - timedelta(hours=min(hours, 24))
     hourly_stats = db.query(
-        func.strftime('%H', ErrorLog.created_at).label("hour"),
+        func.to_char(ErrorLog.created_at, 'HH24').label("hour"),
         func.count(ErrorLog.id).label("count"),
         func.sum(case((ErrorLog.severity == "critical", 1), else_=0)).label("critical"),
         func.sum(case((ErrorLog.severity == "error", 1), else_=0)).label("error"),
@@ -226,6 +226,51 @@ def get_error_types(
     return [t[0] for t in types if t[0]]
 
 
+@router.post("/resolve-bulk")
+def resolve_errors_bulk(
+    error_ids: List[int] = Body(..., embed=True),
+    resolved_by: Optional[str] = Body(None, embed=True),
+    notes: Optional[str] = Body(None, embed=True),
+    db: Session = Depends(get_db)
+):
+    """여러 에러를 한번에 해결됨으로 처리합니다."""
+    now = datetime.utcnow()
+
+    updated = db.query(ErrorLog).filter(
+        ErrorLog.id.in_(error_ids)
+    ).update({
+        ErrorLog.resolved: True,
+        ErrorLog.resolved_at: now,
+        ErrorLog.resolved_by: resolved_by,
+        ErrorLog.notes: notes,
+    }, synchronize_session=False)
+
+    db.commit()
+
+    return {"updated": updated, "error_ids": error_ids}
+
+
+
+@router.delete("/cleanup")
+def cleanup_old_errors(
+    days: int = Query(30, ge=1, le=365, description="보관 기간 (일)"),
+    resolved_only: bool = Query(True, description="해결된 에러만 삭제"),
+    db: Session = Depends(get_db)
+):
+    """오래된 에러를 정리합니다."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    query = db.query(ErrorLog).filter(ErrorLog.created_at < cutoff)
+
+    if resolved_only:
+        query = query.filter(ErrorLog.resolved == True)
+
+    count = query.count()
+    query.delete(synchronize_session=False)
+    db.commit()
+
+    return {"deleted": count, "cutoff_date": cutoff.isoformat()}
+
 @router.get("/{error_id}", response_model=ErrorLogResponse)
 def get_error_detail(
     error_id: int,
@@ -268,46 +313,4 @@ def resolve_error(
     return ErrorLogResponse.model_validate(error)
 
 
-@router.post("/resolve-bulk")
-def resolve_errors_bulk(
-    error_ids: List[int] = Body(..., embed=True),
-    resolved_by: Optional[str] = Body(None, embed=True),
-    notes: Optional[str] = Body(None, embed=True),
-    db: Session = Depends(get_db)
-):
-    """여러 에러를 한번에 해결됨으로 처리합니다."""
-    now = datetime.utcnow()
 
-    updated = db.query(ErrorLog).filter(
-        ErrorLog.id.in_(error_ids)
-    ).update({
-        ErrorLog.resolved: True,
-        ErrorLog.resolved_at: now,
-        ErrorLog.resolved_by: resolved_by,
-        ErrorLog.notes: notes,
-    }, synchronize_session=False)
-
-    db.commit()
-
-    return {"updated": updated, "error_ids": error_ids}
-
-
-@router.delete("/cleanup")
-def cleanup_old_errors(
-    days: int = Query(30, ge=1, le=365, description="보관 기간 (일)"),
-    resolved_only: bool = Query(True, description="해결된 에러만 삭제"),
-    db: Session = Depends(get_db)
-):
-    """오래된 에러를 정리합니다."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
-
-    query = db.query(ErrorLog).filter(ErrorLog.created_at < cutoff)
-
-    if resolved_only:
-        query = query.filter(ErrorLog.resolved == True)
-
-    count = query.count()
-    query.delete(synchronize_session=False)
-    db.commit()
-
-    return {"deleted": count, "cutoff_date": cutoff.isoformat()}

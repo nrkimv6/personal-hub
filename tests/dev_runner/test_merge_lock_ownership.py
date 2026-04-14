@@ -32,10 +32,13 @@ sys.modules.setdefault("plan_runner.core", types.ModuleType("plan_runner.core"))
 SCRIPTS_DIR = Path(__file__).parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+_PLAN_RUNNER_DIR = SCRIPTS_DIR / "plan_runner"
+if str(_PLAN_RUNNER_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLAN_RUNNER_DIR))
 
 _listener_spec = importlib.util.spec_from_file_location(
     "dev_runner_command_listener",
-    SCRIPTS_DIR / "dev-runner-command-listener.py",
+    _PLAN_RUNNER_DIR / "dev-runner-command-listener.py",
 )
 listener = importlib.util.module_from_spec(_listener_spec)
 _listener_spec.loader.exec_module(listener)

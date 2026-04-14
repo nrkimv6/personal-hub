@@ -157,7 +157,7 @@
         id="search"
         type="text"
         bind:value={searchQuery}
-        on:keyup={(e) => e.key === 'Enter' && handleFilterChange()}
+        onkeyup={(e) => e.key === 'Enter' && handleFilterChange()}
         placeholder="IP, 호스트 검색..."
         class="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
       />
@@ -167,7 +167,7 @@
       <select
         id="status"
         bind:value={statusFilter}
-        on:change={handleFilterChange}
+        onchange={handleFilterChange}
         class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
       >
         {#each statusOptions as opt}
@@ -180,7 +180,7 @@
       <select
         id="protocol"
         bind:value={protocolFilter}
-        on:change={handleFilterChange}
+        onchange={handleFilterChange}
         class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
       >
         {#each protocolOptions as opt}
@@ -193,7 +193,7 @@
       <select
         id="sort"
         bind:value={sortBy}
-        on:change={() => loadData()}
+        onchange={() => loadData()}
         class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
       >
         {#each sortOptions as opt}
@@ -202,7 +202,7 @@
       </select>
     </div>
     <button
-      on:click={handleFilterChange}
+      onclick={handleFilterChange}
       class="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover transition-colors"
     >
       검색
@@ -218,7 +218,7 @@
 {:else if error}
   <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
     {error}
-    <button on:click={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
+    <button onclick={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
   </div>
 {:else}
   <!-- 결과 정보 -->
@@ -235,7 +235,7 @@
           <tr>
             <th
               class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
-              on:click={() => handleSort('host')}
+              onclick={() => handleSort('host')}
             >
               프록시{getSortIcon('host')}
             </th>
@@ -247,25 +247,25 @@
             </th>
             <th
               class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
-              on:click={() => handleSort('avg_response_time')}
+              onclick={() => handleSort('avg_response_time')}
             >
               응답시간{getSortIcon('avg_response_time')}
             </th>
             <th
               class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
-              on:click={() => handleSort('success_count')}
+              onclick={() => handleSort('success_count')}
             >
               성공률{getSortIcon('success_count')}
             </th>
             <th
               class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
-              on:click={() => handleSort('priority_score')}
+              onclick={() => handleSort('priority_score')}
             >
               점수{getSortIcon('priority_score')}
             </th>
             <th
               class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
-              on:click={() => handleSort('last_checked_at')}
+              onclick={() => handleSort('last_checked_at')}
             >
               마지막 검증{getSortIcon('last_checked_at')}
             </th>
@@ -322,7 +322,7 @@
                   </a>
                   {#if proxy.status === 'blacklisted'}
                     <button
-                      on:click={() => handleStatusChange(proxy, 'active')}
+                      onclick={() => handleStatusChange(proxy, 'active')}
                       class="p-1 text-muted-foreground hover:text-success transition-colors"
                       title="블랙리스트 해제"
                     >
@@ -332,7 +332,7 @@
                     </button>
                   {:else}
                     <button
-                      on:click={() => handleStatusChange(proxy, 'blacklisted')}
+                      onclick={() => handleStatusChange(proxy, 'blacklisted')}
                       class="p-1 text-muted-foreground hover:text-error transition-colors"
                       title="블랙리스트 등록"
                     >
@@ -342,7 +342,7 @@
                     </button>
                   {/if}
                   <button
-                    on:click={() => handleDelete(proxy)}
+                    onclick={() => handleDelete(proxy)}
                     class="p-1 text-muted-foreground hover:text-error transition-colors"
                     title="삭제"
                   >
@@ -372,28 +372,28 @@
         </div>
         <div class="flex gap-2">
           <button
-            on:click={() => handlePageChange(1)}
+            onclick={() => handlePageChange(1)}
             disabled={page === 1}
             class="px-3 py-1 text-sm border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             처음
           </button>
           <button
-            on:click={() => handlePageChange(page - 1)}
+            onclick={() => handlePageChange(page - 1)}
             disabled={page === 1}
             class="px-3 py-1 text-sm border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             이전
           </button>
           <button
-            on:click={() => handlePageChange(page + 1)}
+            onclick={() => handlePageChange(page + 1)}
             disabled={page === totalPages}
             class="px-3 py-1 text-sm border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             다음
           </button>
           <button
-            on:click={() => handlePageChange(totalPages)}
+            onclick={() => handlePageChange(totalPages)}
             disabled={page === totalPages}
             class="px-3 py-1 text-sm border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >

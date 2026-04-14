@@ -38,12 +38,19 @@
     }
   }
 
-  onMount(async () => {
+  onMount(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+
     // API startup 완료 대기 후 데이터 요청 (콜드 스타트 대응)
-    await waitForApiReady();
-    fetchData();
-    const interval = setInterval(fetchData, REFRESH_INTERVAL);
-    return () => clearInterval(interval);
+    void (async () => {
+      await waitForApiReady();
+      fetchData();
+      interval = setInterval(fetchData, REFRESH_INTERVAL);
+    })();
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   });
 </script>
 

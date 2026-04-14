@@ -27,12 +27,25 @@ export interface CoupangSchedule {
   item_name: string | null;
   business_name: string | null;
   service_account_id: number | null;
+  times: string[] | null;
+  last_event_at: string | null;
+  last_event_status: string | null;
+}
+
+export interface CoupangWorkerHealth {
+  status: 'healthy' | 'stale' | 'not_started';
+  message: string;
+  updated_at: string | null;
+  last_event_at: string | null;
 }
 
 export interface CoupangStatusSummary {
   total_schedules: number;
   enabled_schedules: number;
   active_schedules: number;
+  proxy_enabled: boolean;
+  proxy_active_count: number;
+  worker_health: CoupangWorkerHealth;
 }
 
 export interface CreateTargetRequest {
@@ -44,7 +57,50 @@ export interface CreateTargetRequest {
 export interface CreateScheduleRequest {
   biz_item_id: number;
   dates: string[];
-  service_account_id: number;
+  service_account_id?: number;
+  times?: string[];
+}
+
+// ── 취소표 통계 타입 ──────────────────────────────────────────────────────────
+
+export interface CancellationStatsParams {
+  date_from?: string;
+  date_to?: string;
+  biz_item_id?: number;
+  hours?: string;        // 쉼표 구분 (예: "13,15,18")
+  group_by?: 'day' | 'hour';
+}
+
+export interface CancellationStatItem {
+  date?: string | null;
+  hour?: number | null;
+  count: number;
+  biz_item_id?: number | null;
+  biz_item_name?: string | null;
+}
+
+export interface CancellationStatsSummary {
+  total: number;
+  avg_per_day: number;
+  peak_hour?: number | null;
+}
+
+export interface CancellationStatsResponse {
+  items: CancellationStatItem[];
+  summary: CancellationStatsSummary;
+}
+
+export interface CancellationByProductItem {
+  biz_item_id: number;
+  biz_item_name: string;
+  business_name: string;
+  total_count: number;
+  last_detected?: string | null;
+  avg_interval_hours?: number | null;
+}
+
+export interface CancellationByProductResponse {
+  items: CancellationByProductItem[];
 }
 
 // ========== API ==========
@@ -94,6 +150,10 @@ export const coupangTravelApi = {
     return request<CoupangStatusSummary>(`${BASE}/status`, options);
   },
 
+  async cleanupSchedules(): Promise<{ deleted: number }> {
+    return request<{ deleted: number }>(`${BASE}/schedules/cleanup`, { method: 'POST' });
+  },
+
   async listEvents(
     params?: Omit<MonitoringEventListParams, 'service_type'>,
     options?: RequestInit
@@ -111,5 +171,37 @@ export const coupangTravelApi = {
     searchParams.append('service_type', 'coupang');
     const query = searchParams.toString();
     return request<MonitoringEventList>(`/monitoring/events${query ? `?${query}` : ''}`, options);
+  },
+
+  async getCancellationStats(
+    params?: CancellationStatsParams,
+    options?: RequestInit
+  ): Promise<CancellationStatsResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.date_from) searchParams.append('date_from', params.date_from);
+    if (params?.date_to) searchParams.append('date_to', params.date_to);
+    if (params?.biz_item_id != null) searchParams.append('biz_item_id', String(params.biz_item_id));
+    if (params?.hours) searchParams.append('hours', params.hours);
+    if (params?.group_by) searchParams.append('group_by', params.group_by);
+    const query = searchParams.toString();
+    return request<CancellationStatsResponse>(
+      `/monitoring/events/cancellation-stats${query ? `?${query}` : ''}`,
+      options
+    );
+  },
+
+  async getCancellationByProduct(
+    params?: Omit<CancellationStatsParams, 'group_by'>,
+    options?: RequestInit
+  ): Promise<CancellationByProductResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.date_from) searchParams.append('date_from', params.date_from);
+    if (params?.date_to) searchParams.append('date_to', params.date_to);
+    if (params?.hours) searchParams.append('hours', params.hours);
+    const query = searchParams.toString();
+    return request<CancellationByProductResponse>(
+      `/monitoring/events/cancellation-by-product${query ? `?${query}` : ''}`,
+      options
+    );
   }
 };

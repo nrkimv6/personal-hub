@@ -498,7 +498,7 @@
 								<Button
 									variant="primary"
 									size="sm"
-									on:click={() => window.open(getInstagramUrl() || '', '_blank')}
+									onclick={() => window.open(getInstagramUrl() || '', '_blank')}
 								>
 									Instagram에서 보기
 								</Button>
@@ -850,7 +850,7 @@
 									<Button
 										variant="primary"
 										size="sm"
-										on:click={() => window.open(getInstagramUrl() || '', '_blank')}
+										onclick={() => window.open(getInstagramUrl() || '', '_blank')}
 									>
 										Instagram에서 보기
 									</Button>

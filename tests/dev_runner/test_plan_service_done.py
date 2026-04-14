@@ -78,7 +78,7 @@ def test_archive_plan_also_archives_todo_right(tmp_path, service):
     assert len(mv_calls) == 2, f"git mv 2회 호출 기대, 실제: {len(mv_calls)}"
     # 두 번째 호출에 _todo.md 포함 확인
     second_call_args = mv_calls[1]
-    assert "_todo" in second_call_args[2] or "_todo" in second_call_args[3], \
+    assert any("_todo" in str(arg) for arg in second_call_args), \
         f"두 번째 git mv에 _todo.md 경로 기대: {second_call_args}"
     assert todo_archive_path is not None
 
@@ -152,7 +152,7 @@ def test_can_done_live_branch_returns_false_error(tmp_path, service):
 
     plan = make_plan_response(str(plan_file))
 
-    with patch.object(service, "_check_branch_exists", return_value=True):
+    with patch("app.modules.dev_runner.services.plan_service.check_branch_exists", return_value=True):
         result = service._can_done(plan)
 
     assert result is False
@@ -172,8 +172,8 @@ def test_can_done_live_worktree_returns_false_error(tmp_path, service):
 
     plan = make_plan_response(str(plan_file))
 
-    with patch.object(service, "_check_branch_exists", return_value=False), \
-         patch.object(service, "_check_worktree_exists", return_value=True):
+    with patch("app.modules.dev_runner.services.plan_service.check_branch_exists", return_value=False), \
+         patch("app.modules.dev_runner.services.plan_service.check_worktree_exists", return_value=True):
         result = service._can_done(plan)
 
     assert result is False
@@ -212,7 +212,7 @@ def test_can_done_dead_branch_proceeds_right(tmp_path, service):
 
     plan = make_plan_response(str(plan_file))
 
-    with patch.object(service, "_check_branch_exists", return_value=False):
+    with patch("app.modules.dev_runner.services.plan_service.check_branch_exists", return_value=False):
         result = service._can_done(plan)
 
     assert result is True
@@ -271,8 +271,10 @@ def test_can_done_guide_status_false_boundary(tmp_path, service):
 
 def test_check_branch_exists_subprocess_error_boundary(service):
     """B: git 명령 실패(FileNotFoundError) 시 → False (안전 기본값)"""
-    with patch("subprocess.run", side_effect=FileNotFoundError("git not found")):
-        result = service._check_branch_exists("any-branch")
+    from app.modules.dev_runner.services.git_utils import check_branch_exists
+
+    with patch("app.modules.dev_runner.services.git_utils.subprocess.run", side_effect=FileNotFoundError("git not found")):
+        result = check_branch_exists("any-branch")
 
     assert result is False
 

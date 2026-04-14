@@ -192,7 +192,7 @@ class TestRetryMergeE2E:
         if cache_key in sys.modules:
             mod = sys.modules[cache_key]
         else:
-            spec = importlib.util.spec_from_file_location(cache_key, SCRIPTS_DIR / "dev-runner-command-listener.py")
+            spec = importlib.util.spec_from_file_location(cache_key, SCRIPTS_DIR / "plan_runner" / "dev-runner-command-listener.py")
             mod = importlib.util.module_from_spec(spec)
             sys.modules[cache_key] = mod
             try:

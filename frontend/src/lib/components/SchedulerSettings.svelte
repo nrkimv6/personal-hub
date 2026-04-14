@@ -197,7 +197,7 @@
 									<Button
 										variant={task.enabled ? 'warning' : 'success'}
 										size="sm"
-										on:click={() => toggleTask(task)}
+										onclick={() => toggleTask(task)}
 										disabled={actionLoading[task.name]}
 									>
 										{task.enabled ? '비활성화' : '활성화'}

@@ -18,6 +18,7 @@ import sys
 import os
 import signal
 import logging
+import time
 import uuid
 from datetime import datetime, date
 from pathlib import Path
@@ -29,6 +30,8 @@ sys.path.insert(0, str(project_root))
 
 # 비동기 로거 설정
 from app.utils.async_logger import AsyncLoggerManager
+from app.shared.llm_registry import report_quota as _registry_report_quota
+from app.modules.claude_worker.services import provider_registry
 
 # 워커 전용 비동기 로거 설정
 logger = AsyncLoggerManager.setup_worker_logger(
@@ -56,7 +59,7 @@ try:
     logger.debug("llm_service import 완료")
 
     from app.modules.claude_worker.services.plan_analyze_handler import (
-        save_plan_archive_result, save_requirements_sync_result,
+        save_plan_archive_result,
         save_recurrence_check_result, save_recurrence_suggest_result
     )
     logger.debug("plan_analyze_handler import 완료")
@@ -100,7 +103,7 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
     try:
         post = db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
         if not post:
-            logger.warning(f"Instagram post not found: {post_id}")
+            logger.error(f"Instagram post not found: {post_id}")
             return False
 
         # 이벤트 기간 파싱
@@ -1221,6 +1224,7 @@ class LLMWorker:
         self.pid = os.getpid()
         self.start_time: datetime = None
         self.worker_id: str = None
+        self._last_heartbeat_time: float = 0
 
     async def start(self):
         """워커 시작."""
@@ -1268,18 +1272,9 @@ class LLMWorker:
             db.close()
 
     def _update_heartbeat(self):
-        """하트비트 업데이트."""
-        if not self.worker_id:
-            return
-
-        db = SessionLocal()
-        try:
-            service = LLMService(db)
-            service.update_heartbeat(self.worker_id)
-        except Exception as e:
-            logger.warning(f"Heartbeat 업데이트 실패: {e}")
-        finally:
-            db.close()
+        """하트비트를 Redis에 publish한다."""
+        from app.shared.worker.health_redis import WorkerHealthRedis
+        WorkerHealthRedis.publish("claude", self.pid, "running")
 
     def _update_worker_state(self, state: str, request_id: int = None):
         """워커 상태 업데이트."""
@@ -1356,8 +1351,11 @@ class LLMWorker:
 
         while not self.shutdown_event.is_set():
             try:
-                # Heartbeat 업데이트
-                self._update_heartbeat()
+                # Heartbeat 업데이트 (15초마다 1회)
+                _now = time.monotonic()
+                if _now - self._last_heartbeat_time >= 15:
+                    self._update_heartbeat()
+                    self._last_heartbeat_time = _now
 
                 # Quota pause 자동 해제 체크
                 await self._check_quota_resume()
@@ -1399,7 +1397,7 @@ class LLMWorker:
         db = SessionLocal()
         try:
             service = LLMService(db)
-            for provider in ["gemini", "claude"]:
+            for provider in provider_registry.get_quota_providers():
                 paused_until = service.get_provider_quota_pause(provider)
                 if paused_until is None:
                     # None이지만 DB에 pause 레코드가 있을 수 있으므로 (만료된 경우) clear 시도
@@ -1431,7 +1429,7 @@ class LLMWorker:
 
             # pause 중인 provider 조회
             exclude_providers = []
-            for provider in ["gemini", "claude"]:
+            for provider in provider_registry.get_quota_providers():
                 paused_until = service.get_provider_quota_pause(provider)
                 if paused_until:
                     exclude_providers.append(provider)
@@ -1499,6 +1497,37 @@ class LLMWorker:
             service.mark_processing(request.id)
             self._update_worker_state("processing", request.id)
 
+            # caller_id 사전 검증 (Phase 2)
+            if request.caller_type in ["instagram", "universal_crawl"]:
+                try:
+                    caller_id_int = int(request.caller_id)
+                    if request.caller_type == "instagram":
+                        from app.models import InstagramPost
+                        post = db.query(InstagramPost).filter(InstagramPost.id == caller_id_int).first()
+                        if not post:
+                            logger.warning(f"사전 검증 실패: Instagram post {caller_id_int} 없음 (id={request.id})")
+                            service.mark_failed(request.id, f"Instagram post not found: {caller_id_int}")
+                            self._update_worker_state("idle", None)
+                            return
+                        if not post.caption:
+                            logger.warning(f"사전 검증 실패: Instagram post {caller_id_int} 캡션 없음 (id={request.id})")
+                            service.mark_failed(request.id, f"Instagram post has no caption: {caller_id_int}")
+                            self._update_worker_state("idle", None)
+                            return
+                    elif request.caller_type == "universal_crawl":
+                        from app.models.universal_crawl import CrawledPage
+                        page = db.query(CrawledPage).filter(CrawledPage.id == caller_id_int).first()
+                        if not page:
+                            logger.warning(f"사전 검증 실패: CrawledPage {caller_id_int} 없음 (id={request.id})")
+                            service.mark_failed(request.id, f"CrawledPage not found: {caller_id_int}")
+                            self._update_worker_state("idle", None)
+                            return
+                except ValueError:
+                    logger.warning(f"사전 검증 실패: 유효하지 않은 caller_id '{request.caller_id}' (id={request.id})")
+                    service.mark_failed(request.id, f"Invalid caller_id (non-numeric): {request.caller_id}")
+                    self._update_worker_state("idle", None)
+                    return
+
             logger.info(f"LLM 실행 시작: id={request.id}, queue={request.queue_name}, caller_type={request.caller_type}")
 
             # cli_options 파싱 (JSON 문자열 → dict)
@@ -1547,37 +1576,41 @@ class LLMWorker:
                     request.id,
                     result["result"],
                     result.get("raw_response", ""),
+                    result.get("claude_session_id"),
                 )
                 self._increment_processed()
                 logger.info(f"LLM 실행 완료: id={request.id}")
 
                 # caller_type별 결과 저장
+                save_success = True
                 if request.caller_type == "instagram":
-                    save_instagram_result(db, int(request.caller_id), result["result"])
+                    save_success = save_instagram_result(db, int(request.caller_id), result["result"])
                 elif request.caller_type == "universal_crawl":
-                    save_universal_crawl_result(db, int(request.caller_id), result["result"])
+                    save_success = save_universal_crawl_result(db, int(request.caller_id), result["result"])
                 elif request.caller_type == "topic_extract":
-                    save_topic_extract_result(db, request.caller_id, result["result"])
+                    save_success = save_topic_extract_result(db, request.caller_id, result["result"])
                 elif request.caller_type == "writing":
-                    save_writing_result(db, request, result)
+                    save_success = save_writing_result(db, request, result)
                 elif request.caller_type == "writing_generate":
-                    save_writing_generate_result(db, request, result)
+                    save_success = save_writing_generate_result(db, request, result)
                 elif request.caller_type == "writing_refine":
-                    save_writing_refine_result(db, request, result)
+                    save_success = save_writing_refine_result(db, request, result)
                 elif request.caller_type == "event_import":
-                    save_event_import_result(db, request, result)
+                    save_success = save_event_import_result(db, request, result)
                 elif request.caller_type == "report":
-                    save_report_result(db, request, result)
+                    save_success = save_report_result(db, request, result)
                 elif request.caller_type == "pytest_fix":
-                    save_pytest_fix_result(db, request, result)
+                    save_success = save_pytest_fix_result(db, request, result)
                 elif request.caller_type == "plan_archive_analyze":
-                    save_plan_archive_result(db, request, result)
-                elif request.caller_type == "plan_requirements_sync":
-                    save_requirements_sync_result(db, request, result)
+                    save_success = save_plan_archive_result(db, request, result)
                 elif request.caller_type == "plan_recurrence_check":
-                    save_recurrence_check_result(db, request, result)
+                    save_success = save_recurrence_check_result(db, request, result)
                 elif request.caller_type == "plan_recurrence_suggest":
-                    save_recurrence_suggest_result(db, request, result)
+                    save_success = save_recurrence_suggest_result(db, request, result)
+
+                if not save_success:
+                    logger.error(f"결과 저장 실패 (상태 전환: completed -> failed): id={request.id}, caller_type={request.caller_type}")
+                    service.mark_failed(request.id, f"Save result failed for {request.caller_type}")
             else:
                 # JSON 파싱 실패지만 raw_response가 있는 경우
                 if "raw_response" in result and result.get("raw_response"):
@@ -1596,19 +1629,25 @@ class LLMWorker:
                             request.id,
                             {},  # 빈 결과
                             result.get("raw_response", ""),
+                            result.get("claude_session_id"),
                         )
                         self._increment_processed()
                         logger.info(f"LLM 실행 완료 (JSON 없음, raw_response 사용): id={request.id}")
 
                         # caller_type별 결과 저장
+                        save_success = True
                         if request.caller_type == "writing_generate":
-                            save_writing_generate_result(db, request, fallback_result)
+                            save_success = save_writing_generate_result(db, request, fallback_result)
                         elif request.caller_type == "writing_refine":
-                            save_writing_refine_result(db, request, fallback_result)
+                            save_success = save_writing_refine_result(db, request, fallback_result)
                         elif request.caller_type == "report":
-                            save_report_result(db, request, fallback_result)
+                            save_success = save_report_result(db, request, fallback_result)
                         elif request.caller_type == "pytest_fix":
-                            save_pytest_fix_result(db, request, fallback_result)
+                            save_success = save_pytest_fix_result(db, request, fallback_result)
+
+                        if not save_success:
+                            logger.error(f"결과 저장 실패 (fallback 경로, 상태 전환: completed -> failed): id={request.id}, caller_type={request.caller_type}")
+                            service.mark_failed(request.id, f"Save result failed for {request.caller_type} (fallback)")
                     else:
                         # Quota 에러 감지 및 provider pause 설정
                         quota_retry_ms = result.get("quota_retry_ms")
@@ -1617,6 +1656,16 @@ class LLMWorker:
                                 provider, quota_retry_ms, reason=result.get("error", "")
                             )
                             logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
+                            # O-4: registry quota state 자동 갱신
+                            try:
+                                _registry_report_quota(
+                                    provider, model if model else None,
+                                    weekly_used_pct=100,
+                                    short_cooldown_minutes=max(1, quota_retry_ms // 60000),
+                                    source="auto_quota_detect",
+                                )
+                            except Exception as _e:
+                                logger.warning(f"[auto_quota_detect] registry 갱신 실패: {_e}")
 
                         # 다른 타입은 실패 처리 (raw_response 보존)
                         service.mark_failed(request.id, result["error"], result.get("raw_response", ""))
@@ -1638,6 +1687,16 @@ class LLMWorker:
                             provider, quota_retry_ms, reason=result.get("error", "")
                         )
                         logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
+                        # O-4: registry quota state 자동 갱신
+                        try:
+                            _registry_report_quota(
+                                provider, model if model else None,
+                                weekly_used_pct=100,
+                                short_cooldown_minutes=max(1, quota_retry_ms // 60000),
+                                source="auto_quota_detect",
+                            )
+                        except Exception as _e:
+                            logger.warning(f"[auto_quota_detect] registry 갱신 실패: {_e}")
 
                     # raw_response도 없으면 실패 처리
                     service.mark_failed(request.id, result["error"])

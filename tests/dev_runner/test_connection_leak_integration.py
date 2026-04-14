@@ -6,20 +6,7 @@ import pytest
 import redis.asyncio as aioredis
 
 
-def _redis_available() -> bool:
-    """Redis 접속 가능 여부."""
-    try:
-        import redis
-        r = redis.Redis(host="localhost", port=6379, socket_connect_timeout=2)
-        r.ping()
-        r.close()
-        return True
-    except Exception:
-        return False
-
-
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _redis_available(), reason="Redis not available")
 async def test_pubsub_cleanup_integration_real_redis():
     """실제 Redis에 pubsub 구독 후 unsubscribe/aclose 시 채널 subscriber가 0으로 복구되는지 확인."""
     r = aioredis.Redis(host="localhost", port=6379, decode_responses=True)
@@ -51,7 +38,6 @@ async def test_pubsub_cleanup_integration_real_redis():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _redis_available(), reason="Redis not available")
 async def test_sse_disconnect_no_connection_leak_integration():
     """event_service stream_events() 시작 → generator aclose → 연결 수 증가하지 않음 확인."""
     r = aioredis.Redis(host="localhost", port=6379, decode_responses=True)

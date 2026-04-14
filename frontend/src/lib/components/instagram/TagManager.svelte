@@ -148,10 +148,10 @@
 <div class="mb-6 flex justify-between items-center">
 	<h2 class="text-xl font-bold text-foreground">태그 관리</h2>
 	<div class="flex gap-2">
-		<Button variant="secondary" size="sm" on:click={reclassifyAll} disabled={reclassifying}>
+		<Button variant="secondary" size="sm" onclick={reclassifyAll} disabled={reclassifying}>
 			{reclassifying ? '재분류 중...' : '전체 재분류'}
 		</Button>
-		<Button variant="primary" size="sm" on:click={() => (showCreateTagModal = true)}>
+		<Button variant="primary" size="sm" onclick={() => (showCreateTagModal = true)}>
 			+ 새 태그
 		</Button>
 	</div>
@@ -243,7 +243,7 @@
 							<input type="checkbox" bind:checked={newKeywordCaseSensitive} />
 							대소문자 구분
 						</label>
-						<Button variant="primary" size="sm" on:click={addKeyword}>추가</Button>
+						<Button variant="primary" size="sm" onclick={addKeyword}>추가</Button>
 					</div>
 				</div>
 
@@ -362,10 +362,10 @@
 				</div>
 
 				<div class="mt-6 flex justify-end gap-2">
-					<Button variant="secondary" size="sm" on:click={() => (showCreateTagModal = false)}>
+					<Button variant="secondary" size="sm" onclick={() => (showCreateTagModal = false)}>
 						취소
 					</Button>
-					<Button variant="primary" size="sm" on:click={createTag}>생성</Button>
+					<Button variant="primary" size="sm" onclick={createTag}>생성</Button>
 				</div>
 			</div>
 		</div>

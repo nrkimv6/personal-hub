@@ -11,9 +11,11 @@ Features:
 - 직전 풀/느린 프록시 제외
 """
 import asyncio
+import inspect
 import logging
 import random
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Set, TYPE_CHECKING
 
@@ -24,6 +26,20 @@ if TYPE_CHECKING:
     from app.utils.async_db_writer import AsyncDBWriter
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _ProxyBucketState:
+    active_pool: List[ProxyInfo] = field(default_factory=list)
+    last_refresh: Optional[datetime] = None
+    usage_stats: Dict[int, ProxyUsageStats] = field(default_factory=dict)
+    previous_pool_ids: Set[int] = field(default_factory=set)
+    slow_proxies: Set[int] = field(default_factory=set)
+    slow_count: Dict[int, int] = field(default_factory=dict)
+    session_blacklist: Dict[int, str] = field(default_factory=dict)
+    proxy_last_used: Dict[int, float] = field(default_factory=dict)
+    current_index: int = 0
+    url_to_id: Dict[str, int] = field(default_factory=dict)
 
 
 class ProxyManagerV2:
@@ -125,6 +141,136 @@ class ProxyManagerV2:
         self._cumulative_failure_threshold: float = 0.8  # 누적 실패율 임계값 (80%)
         self._cumulative_failure_min_attempts: int = 5  # 최소 시도 횟수
 
+        # 메서드별 상태 버킷
+        self._method_states: Dict[str, _ProxyBucketState] = {
+            "get": _ProxyBucketState(),
+            "post": _ProxyBucketState(),
+        }
+
+    def _normalize_request_method(self, request_method: Optional[str]) -> str:
+        method = (request_method or "get").strip().lower()
+        return "post" if method == "post" else "get"
+
+    def _get_method_state(self, request_method: Optional[str]) -> _ProxyBucketState:
+        return self._method_states[self._normalize_request_method(request_method)]
+
+    def _db_get_proxies_by_response_time(self, **kwargs):
+        request_method = kwargs.pop("request_method", None)
+        method = self._db_service.get_proxies_by_response_time
+        candidate = getattr(method, "side_effect", None)
+        target = candidate if callable(candidate) else method
+
+        if request_method is not None:
+            try:
+                signature = inspect.signature(target)
+            except (TypeError, ValueError):
+                signature = None
+
+            if signature is not None:
+                accepts_request_method = (
+                    "request_method" in signature.parameters
+                    or any(
+                        param.kind == inspect.Parameter.VAR_KEYWORD
+                        for param in signature.parameters.values()
+                    )
+                )
+                if accepts_request_method:
+                    return method(request_method=request_method, **kwargs)
+
+        return method(**kwargs)
+
+    def _db_get_top_proxies_for_pool(self, **kwargs):
+        request_method = kwargs.pop("request_method", None)
+        method = self._db_service.get_top_proxies_for_pool
+        candidate = getattr(method, "side_effect", None)
+        target = candidate if callable(candidate) else method
+
+        if request_method is not None:
+            try:
+                signature = inspect.signature(target)
+            except (TypeError, ValueError):
+                signature = None
+
+            if signature is not None:
+                accepts_request_method = (
+                    "request_method" in signature.parameters
+                    or any(
+                        param.kind == inspect.Parameter.VAR_KEYWORD
+                        for param in signature.parameters.values()
+                    )
+                )
+                if accepts_request_method:
+                    return method(request_method=request_method, **kwargs)
+
+        return method(**kwargs)
+
+    def _state_is_cooldown_passed(self, state: _ProxyBucketState, proxy_id: int) -> bool:
+        last_used = state.proxy_last_used.get(proxy_id)
+        if last_used is None:
+            return True
+        return (time.time() - last_used) >= self._proxy_cooldown_seconds
+
+    def _state_mark_proxy_used(self, state: _ProxyBucketState, proxy_id: int) -> None:
+        state.proxy_last_used[proxy_id] = time.time()
+
+    def _state_cleanup_cooldown_records(self, state: _ProxyBucketState) -> None:
+        current_time = time.time()
+        expired_ids = [
+            proxy_id for proxy_id, last_used in state.proxy_last_used.items()
+            if (current_time - last_used) > self._proxy_cooldown_seconds * 10
+        ]
+        for proxy_id in expired_ids:
+            del state.proxy_last_used[proxy_id]
+
+    def _state_move_to_back(self, state: _ProxyBucketState, proxy: ProxyInfo) -> None:
+        try:
+            idx = None
+            for i, p in enumerate(state.active_pool):
+                if p.id == proxy.id:
+                    idx = i
+                    break
+            if idx is not None:
+                state.active_pool.append(state.active_pool.pop(idx))
+        except (ValueError, IndexError):
+            pass
+
+    def _state_get_or_create_stats(self, state: _ProxyBucketState, proxy_id: int) -> ProxyUsageStats:
+        if proxy_id not in state.usage_stats:
+            state.usage_stats[proxy_id] = ProxyUsageStats(proxy_id=proxy_id)
+        return state.usage_stats[proxy_id]
+
+    def _state_update_local_proxy(
+        self,
+        state: _ProxyBucketState,
+        proxy_id: int,
+        is_valid: bool,
+        response_time: Optional[float] = None,
+    ) -> None:
+        for i, proxy in enumerate(state.active_pool):
+            if proxy.id == proxy_id:
+                if is_valid:
+                    proxy.success_count += 1
+                    proxy.fail_count = 0
+                    proxy.total_checks += 1
+                    if response_time:
+                        if proxy.avg_response_time:
+                            proxy.avg_response_time = (
+                                proxy.avg_response_time * 0.8 + response_time * 0.2
+                            )
+                        else:
+                            proxy.avg_response_time = response_time
+                else:
+                    proxy.fail_count += 1
+                    proxy.total_checks += 1
+                    if proxy.fail_count >= self._consecutive_fail_threshold:
+                        state.session_blacklist[proxy_id] = "consecutive_failures"
+                        state.active_pool.pop(i)
+                        logger.warning(
+                            f"Proxy {proxy_id} session-blacklisted: consecutive failures "
+                            f"(threshold: {self._consecutive_fail_threshold})"
+                        )
+                break
+
     @property
     def is_available(self) -> bool:
         """프록시 사용 가능 여부
@@ -162,7 +308,7 @@ class ProxyManagerV2:
             logger.error(f"Failed to initialize ProxyManagerV2: {e}")
             return False
 
-    async def _refresh_pool(self) -> None:
+    async def _refresh_pool(self, request_method: str = "get") -> None:
         """
         활성 풀 갱신 (응답시간 기반 70/30 비율 적용)
 
@@ -196,23 +342,25 @@ class ProxyManagerV2:
                 normal_count = self._pool_size - fast_count  # 30%
 
                 # 2-1. Fast 프록시 조회 (응답시간 <= 0.5초)
-                fast_proxies = self._db_service.get_proxies_by_response_time(
+                fast_proxies = self._db_get_proxies_by_response_time(
                     max_response_time=self._fast_response_threshold,
                     limit=fast_count,
                     status="active",
                     exclude_ids=exclude_ids if exclude_ids else None,
                     min_success_rate=self._min_success_rate,
+                    request_method=request_method,
                 )
 
                 # 2-2. Normal 프록시 조회 (0.5초 < 응답시간 <= 2.0초)
                 used_ids = exclude_ids + [p.id for p in fast_proxies]
-                normal_proxies = self._db_service.get_proxies_by_response_time(
+                normal_proxies = self._db_get_proxies_by_response_time(
                     min_response_time=self._fast_response_threshold,
                     max_response_time=self._normal_response_threshold,
                     limit=normal_count,
                     status="active",
                     exclude_ids=used_ids if used_ids else None,
                     min_success_rate=self._min_success_rate,
+                    request_method=request_method,
                 )
 
                 # 2-3. 부족분 처리
@@ -222,23 +370,25 @@ class ProxyManagerV2:
                 if shortage > 0:
                     # fast가 부족하면 normal 범위에서 추가
                     if len(fast_proxies) < fast_count:
-                        extra_normal = self._db_service.get_proxies_by_response_time(
+                        extra_normal = self._db_get_proxies_by_response_time(
                             min_response_time=self._fast_response_threshold,
                             max_response_time=self._normal_response_threshold,
                             limit=shortage,
                             status="active",
                             exclude_ids=[p.id for p in proxies] + exclude_ids,
                             min_success_rate=self._min_success_rate,
+                            request_method=request_method,
                         )
                         proxies.extend(extra_normal)
                         shortage = self._pool_size - len(proxies)
 
                     # 여전히 부족하면 pending 상태 프록시 추가
                     if shortage > 0:
-                        pending_proxies = self._db_service.get_top_proxies_for_pool(
+                        pending_proxies = self._db_get_top_proxies_for_pool(
                             limit=shortage,
                             status="pending",
                             exclude_ids=[p.id for p in proxies] + exclude_ids,
+                            request_method=request_method,
                         )
                         proxies.extend(pending_proxies)
 
@@ -274,8 +424,60 @@ class ProxyManagerV2:
         if elapsed >= self._pool_refresh_interval:
             await self._refresh_pool()
 
-    def _sync_refresh_pool(self) -> None:
+    def _sync_refresh_pool(self, request_method: str = "get") -> None:
         """동기적으로 풀 갱신 (풀 고갈 시 호출, 70/30 비율 적용)"""
+        if self._normalize_request_method(request_method) != "get":
+            state = self._get_method_state(request_method)
+            try:
+                exclude_ids = list(state.slow_proxies) if state.slow_proxies else []
+
+                fast_count = int(self._pool_size * self._fast_proxy_ratio)
+                normal_count = self._pool_size - fast_count
+
+                fast_proxies = self._db_get_proxies_by_response_time(
+                    max_response_time=self._fast_response_threshold,
+                    limit=fast_count,
+                    status="active",
+                    exclude_ids=exclude_ids if exclude_ids else None,
+                    min_success_rate=self._min_success_rate,
+                    request_method=request_method,
+                )
+
+                used_ids = exclude_ids + [p.id for p in fast_proxies]
+                normal_proxies = self._db_get_proxies_by_response_time(
+                    min_response_time=self._fast_response_threshold,
+                    max_response_time=self._normal_response_threshold,
+                    limit=normal_count,
+                    status="active",
+                    exclude_ids=used_ids if used_ids else None,
+                    min_success_rate=self._min_success_rate,
+                    request_method=request_method,
+                )
+
+                proxies = fast_proxies + normal_proxies
+                shortage = self._pool_size - len(proxies)
+
+                if shortage > 0:
+                    pending_proxies = self._db_get_top_proxies_for_pool(
+                        limit=shortage,
+                        status="pending",
+                        exclude_ids=[p.id for p in proxies] + exclude_ids,
+                        request_method=request_method,
+                    )
+                    proxies.extend(pending_proxies)
+
+                state.active_pool = proxies
+                state.last_refresh = datetime.now()
+                state.current_index = 0
+
+                logger.info(
+                    f"Pool sync-refreshed: {len(proxies)} proxies "
+                    f"(fast: {len(fast_proxies)}, normal: {len(normal_proxies)})"
+                )
+            except Exception as e:
+                logger.error(f"Failed to sync-refresh proxy pool: {e}")
+            return
+
         try:
             # 긴급 갱신이므로 직전 풀 제외 없이 조회 (느린 프록시만 제외)
             exclude_ids = list(self._slow_proxies) if self._slow_proxies else []
@@ -285,23 +487,25 @@ class ProxyManagerV2:
             normal_count = self._pool_size - fast_count  # 30%
 
             # Fast 프록시 조회 (응답시간 <= 0.5초)
-            fast_proxies = self._db_service.get_proxies_by_response_time(
+            fast_proxies = self._db_get_proxies_by_response_time(
                 max_response_time=self._fast_response_threshold,
                 limit=fast_count,
                 status="active",
                 exclude_ids=exclude_ids if exclude_ids else None,
                 min_success_rate=self._min_success_rate,
+                request_method=request_method,
             )
 
             # Normal 프록시 조회 (0.5초 < 응답시간 <= 2.0초)
             used_ids = exclude_ids + [p.id for p in fast_proxies]
-            normal_proxies = self._db_service.get_proxies_by_response_time(
+            normal_proxies = self._db_get_proxies_by_response_time(
                 min_response_time=self._fast_response_threshold,
                 max_response_time=self._normal_response_threshold,
                 limit=normal_count,
                 status="active",
                 exclude_ids=used_ids if used_ids else None,
                 min_success_rate=self._min_success_rate,
+                request_method=request_method,
             )
 
             # 부족분 처리
@@ -310,10 +514,11 @@ class ProxyManagerV2:
 
             if shortage > 0:
                 # pending 상태 프록시 추가
-                pending_proxies = self._db_service.get_top_proxies_for_pool(
+                pending_proxies = self._db_get_top_proxies_for_pool(
                     limit=shortage,
                     status="pending",
                     exclude_ids=[p.id for p in proxies] + exclude_ids,
+                    request_method=request_method,
                 )
                 proxies.extend(pending_proxies)
 
@@ -675,7 +880,11 @@ class ProxyManagerV2:
                         )
                 break
 
-    def get_fresh_proxy(self, exclude: Optional[Set[str]] = None) -> Optional[str]:
+    def get_fresh_proxy(
+        self,
+        exclude: Optional[Set[str]] = None,
+        request_method: str = "get",
+    ) -> Optional[str]:
         """
         새 프록시 URL 반환 (재시도용, 기존 ProxyManager 호환, 쿨다운 적용)
 
@@ -690,28 +899,66 @@ class ProxyManagerV2:
         """
         exclude = exclude or set()
 
-        # 풀이 비었거나 너무 적으면 동기적으로 갱신 시도
-        if len(self._active_pool) < 3:
-            self._sync_refresh_pool()
+        if self._normalize_request_method(request_method) == "get":
+            if len(self._active_pool) < 3:
+                self._sync_refresh_pool()
 
-        if not self._active_pool:
-            return None
+            if not self._active_pool:
+                return None
 
-        # exclude에 포함되지 않고 쿨다운 지난 프록시 필터링
-        # 세션 블랙리스트도 제외 (2025-12-20)
-        available = [
-            p for p in self._active_pool
-            if p.to_aiohttp_proxy() not in exclude
-            and self._is_cooldown_passed(p.id)
-            and p.id not in self._session_blacklist
-        ]
-
-        if not available:
-            # 쿨다운 무시하고 exclude와 세션 블랙리스트만 적용 (2025-12-20)
             available = [
                 p for p in self._active_pool
                 if p.to_aiohttp_proxy() not in exclude
+                and self._is_cooldown_passed(p.id)
                 and p.id not in self._session_blacklist
+            ]
+
+            if not available:
+                available = [
+                    p for p in self._active_pool
+                    if p.to_aiohttp_proxy() not in exclude
+                    and p.id not in self._session_blacklist
+                ]
+                if available:
+                    logger.warning(
+                        f"All non-excluded proxies in cooldown, ignoring cooldown"
+                    )
+
+            if not available:
+                logger.warning(
+                    f"No fresh proxy available (exclude: {len(exclude)}, pool: {len(self._active_pool)})"
+                )
+                return None
+
+            if self._weighted_selection:
+                weights = [max(p.priority_score, 1.0) for p in available]
+                proxy = random.choices(available, weights=weights, k=1)[0]
+            else:
+                proxy = available[0]
+
+            self._mark_proxy_used(proxy.id)
+            self._move_to_back(proxy)
+            return proxy.to_aiohttp_proxy()
+
+        state = self._get_method_state(request_method)
+        if len(state.active_pool) < 3:
+            self._sync_refresh_pool(request_method=request_method)
+
+        if not state.active_pool:
+            return None
+
+        available = [
+            p for p in state.active_pool
+            if p.to_aiohttp_proxy() not in exclude
+            and self._state_is_cooldown_passed(state, p.id)
+            and p.id not in state.session_blacklist
+        ]
+
+        if not available:
+            available = [
+                p for p in state.active_pool
+                if p.to_aiohttp_proxy() not in exclude
+                and p.id not in state.session_blacklist
             ]
             if available:
                 logger.warning(
@@ -719,28 +966,22 @@ class ProxyManagerV2:
                 )
 
         if not available:
-            # 모든 프록시가 exclude에 포함된 경우
             logger.warning(
-                f"No fresh proxy available (exclude: {len(exclude)}, pool: {len(self._active_pool)})"
+                f"No fresh proxy available (exclude: {len(exclude)}, pool: {len(state.active_pool)})"
             )
             return None
 
-        # 가중치 선택 또는 라운드로빈
         if self._weighted_selection:
             weights = [max(p.priority_score, 1.0) for p in available]
             proxy = random.choices(available, weights=weights, k=1)[0]
         else:
             proxy = available[0]
 
-        # 프록시 사용 시간 기록
-        self._mark_proxy_used(proxy.id)
-
-        # 선택된 프록시를 풀의 맨 뒤로 이동
-        self._move_to_back(proxy)
-
+        self._state_mark_proxy_used(state, proxy.id)
+        self._state_move_to_back(state, proxy)
         return proxy.to_aiohttp_proxy()
 
-    def mark_failed(self, proxy_url: str, reason: str) -> None:
+    def mark_failed(self, proxy_url: str, reason: str, request_method: str = "get") -> None:
         """
         기존 ProxyManager 호환 인터페이스
 
@@ -748,21 +989,39 @@ class ProxyManagerV2:
             proxy_url: 프록시 URL
             reason: 실패 사유
         """
-        for proxy in self._active_pool:
+        if self._normalize_request_method(request_method) == "get":
+            for proxy in self._active_pool:
+                if proxy.url == proxy_url or proxy.to_aiohttp_proxy() == proxy_url:
+                    proxy.fail_count += 1
+                    if proxy.fail_count >= self._consecutive_fail_threshold:
+                        self._session_blacklist[proxy.id] = reason
+                        self._active_pool.remove(proxy)
+                        logger.warning(
+                            f"Proxy {proxy.id} session-blacklisted: {reason} "
+                            f"(threshold: {self._consecutive_fail_threshold})"
+                        )
+                    break
+            return
+
+        state = self._get_method_state(request_method)
+        for proxy in state.active_pool:
             if proxy.url == proxy_url or proxy.to_aiohttp_proxy() == proxy_url:
-                # 동기 호출이므로 DB 기록은 생략, 로컬만 업데이트
                 proxy.fail_count += 1
                 if proxy.fail_count >= self._consecutive_fail_threshold:
-                    # 세션 블랙리스트에 영구 등록 (2025-12-20)
-                    self._session_blacklist[proxy.id] = reason
-                    self._active_pool.remove(proxy)
+                    state.session_blacklist[proxy.id] = reason
+                    state.active_pool.remove(proxy)
                     logger.warning(
                         f"Proxy {proxy.id} session-blacklisted: {reason} "
                         f"(threshold: {self._consecutive_fail_threshold})"
                     )
                 break
 
-    def mark_slow(self, proxy_url: str, response_time: float) -> int:
+    def mark_slow(
+        self,
+        proxy_url: str,
+        response_time: float,
+        request_method: str = "get",
+    ) -> int:
         """
         느린 프록시 처리 - 4단계 점진적 페널티
 
@@ -777,73 +1036,112 @@ class ProxyManagerV2:
                 3: 다음 풀에서도 제외 (_slow_proxies)
                 4: DB에 느림 표시 (향후 구현)
         """
-        # 프록시 찾기 (풀에서)
+        if self._normalize_request_method(request_method) == "get":
+            matched_proxy = None
+            proxy_id = None
+
+            for proxy in self._active_pool:
+                if proxy.url == proxy_url or proxy.to_aiohttp_proxy() == proxy_url:
+                    matched_proxy = proxy
+                    proxy_id = proxy.id
+                    break
+
+            if not matched_proxy:
+                if not hasattr(self, "_url_to_id"):
+                    self._url_to_id: Dict[str, int] = {}
+
+                if proxy_url in self._url_to_id:
+                    proxy_id = self._url_to_id[proxy_url]
+                else:
+                    return 0
+
+            if not hasattr(self, "_url_to_id"):
+                self._url_to_id: Dict[str, int] = {}
+            if proxy_id:
+                self._url_to_id[proxy_url] = proxy_id
+
+            self._slow_count[proxy_id] = self._slow_count.get(proxy_id, 0) + 1
+            count = self._slow_count[proxy_id]
+
+            if count == 1:
+                if matched_proxy:
+                    self._move_to_back(matched_proxy)
+                logger.info(
+                    f"Proxy {proxy_id} slow (1/4): {response_time:.2f}s → moved to back"
+                )
+                return 1
+
+            elif count == 2:
+                self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
+                logger.warning(
+                    f"Proxy {proxy_id} slow (2/4): {response_time:.2f}s → removed from pool"
+                )
+                return 2
+
+            elif count == 3:
+                self._slow_proxies.add(proxy_id)
+                self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
+                logger.warning(
+                    f"Proxy {proxy_id} slow (3/4): {response_time:.2f}s → excluded from next pool"
+                )
+                return 3
+
+            self._slow_proxies.add(proxy_id)
+            logger.warning(
+                f"Proxy {proxy_id} slow (4/4): {response_time:.2f}s → marked for DB update"
+            )
+            return 4
+
+        state = self._get_method_state(request_method)
         matched_proxy = None
         proxy_id = None
 
-        for proxy in self._active_pool:
+        for proxy in state.active_pool:
             if proxy.url == proxy_url or proxy.to_aiohttp_proxy() == proxy_url:
                 matched_proxy = proxy
                 proxy_id = proxy.id
                 break
 
-        # 풀에 없으면 이미 추적 중인 프록시인지 확인 (URL -> ID 매핑 필요)
         if not matched_proxy:
-            # _slow_count에서 이미 추적 중인 프록시 찾기
-            # URL을 ID로 매핑하기 위해 _url_to_id 캐시 활용
-            if not hasattr(self, '_url_to_id'):
-                self._url_to_id: Dict[str, int] = {}
-
-            if proxy_url in self._url_to_id:
-                proxy_id = self._url_to_id[proxy_url]
+            if proxy_url in state.url_to_id:
+                proxy_id = state.url_to_id[proxy_url]
             else:
-                # 알 수 없는 프록시
                 return 0
 
-        # URL -> ID 매핑 저장
-        if not hasattr(self, '_url_to_id'):
-            self._url_to_id: Dict[str, int] = {}
         if proxy_id:
-            self._url_to_id[proxy_url] = proxy_id
+            state.url_to_id[proxy_url] = proxy_id
 
-        # 카운트 증가
-        self._slow_count[proxy_id] = self._slow_count.get(proxy_id, 0) + 1
-        count = self._slow_count[proxy_id]
+        state.slow_count[proxy_id] = state.slow_count.get(proxy_id, 0) + 1
+        count = state.slow_count[proxy_id]
 
         if count == 1:
-            # 1단계: 풀 맨 뒤로 이동
             if matched_proxy:
-                self._move_to_back(matched_proxy)
+                self._state_move_to_back(state, matched_proxy)
             logger.info(
                 f"Proxy {proxy_id} slow (1/4): {response_time:.2f}s → moved to back"
             )
             return 1
 
-        elif count == 2:
-            # 2단계: 현재 풀에서 제거
-            self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
+        if count == 2:
+            state.active_pool = [p for p in state.active_pool if p.id != proxy_id]
             logger.warning(
                 f"Proxy {proxy_id} slow (2/4): {response_time:.2f}s → removed from pool"
             )
             return 2
 
-        elif count == 3:
-            # 3단계: 다음 풀에서도 제외
-            self._slow_proxies.add(proxy_id)
-            self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
+        if count == 3:
+            state.slow_proxies.add(proxy_id)
+            state.active_pool = [p for p in state.active_pool if p.id != proxy_id]
             logger.warning(
                 f"Proxy {proxy_id} slow (3/4): {response_time:.2f}s → excluded from next pool"
             )
             return 3
 
-        else:
-            # 4단계 이상: DB에 느림 표시 (향후 구현)
-            self._slow_proxies.add(proxy_id)
-            logger.warning(
-                f"Proxy {proxy_id} slow (4/4): {response_time:.2f}s → marked for DB update"
-            )
-            # TODO: DB에 느림 상태 기록 (tags에 'slow' 추가 등)
-            return 4
+        state.slow_proxies.add(proxy_id)
+        logger.warning(
+            f"Proxy {proxy_id} slow (4/4): {response_time:.2f}s → marked for DB update"
+        )
+        return 4
 
     def enable(self) -> None:
         """프록시 활성화"""
@@ -855,30 +1153,63 @@ class ProxyManagerV2:
         self._enabled = False
         logger.info("ProxyManagerV2 disabled")
 
-    def get_status(self) -> dict:
+    def get_status(self, request_method: str = "get") -> dict:
         """
         현재 상태 반환 (기존 ProxyManager 호환)
 
         Returns:
             상태 정보 dict
         """
+        if self._normalize_request_method(request_method) == "get":
+            return {
+                "enabled": self._enabled,
+                "initialized": self._initialized,
+                "request_method": request_method,
+                "pool_size": len(self._active_pool),
+                "target_pool_size": self._pool_size,
+                "min_success_rate": self._min_success_rate,
+                "max_response_time": self._max_response_time,
+                "last_refresh": self._last_refresh.isoformat() if self._last_refresh else None,
+                "adaptive_timeout_enabled": self._adaptive_timeout_enabled,
+                "weighted_selection": self._weighted_selection,
+                "pending_stats_count": len(self._usage_stats),
+                "slow_proxies_count": len(self._slow_proxies),
+                "slow_count_details": dict(self._slow_count),
+                "previous_pool_size": len(self._previous_pool_ids),
+                "session_blacklist_count": len(self._session_blacklist),
+                "session_blacklist_details": dict(self._session_blacklist),
+                "consecutive_fail_threshold": self._consecutive_fail_threshold,
+                "proxies": [
+                    {
+                        "id": p.id,
+                        "url": f"{p.protocol}://{p.host}:{p.port}",
+                        "priority_score": p.priority_score,
+                        "avg_response_time": p.avg_response_time,
+                        "success_rate": p.success_rate,
+                        "fail_count": p.fail_count,
+                    }
+                    for p in self._active_pool
+                ],
+            }
+
+        state = self._get_method_state(request_method)
         return {
             "enabled": self._enabled,
             "initialized": self._initialized,
-            "pool_size": len(self._active_pool),
+            "request_method": self._normalize_request_method(request_method),
+            "pool_size": len(state.active_pool),
             "target_pool_size": self._pool_size,
             "min_success_rate": self._min_success_rate,
             "max_response_time": self._max_response_time,
-            "last_refresh": self._last_refresh.isoformat() if self._last_refresh else None,
+            "last_refresh": state.last_refresh.isoformat() if state.last_refresh else None,
             "adaptive_timeout_enabled": self._adaptive_timeout_enabled,
             "weighted_selection": self._weighted_selection,
-            "pending_stats_count": len(self._usage_stats),
-            "slow_proxies_count": len(self._slow_proxies),
-            "slow_count_details": dict(self._slow_count),  # proxy_id → 느림 횟수
-            "previous_pool_size": len(self._previous_pool_ids),
-            # 세션 블랙리스트 정보 추가 (2025-12-20)
-            "session_blacklist_count": len(self._session_blacklist),
-            "session_blacklist_details": dict(self._session_blacklist),  # proxy_id → 사유
+            "pending_stats_count": len(state.usage_stats),
+            "slow_proxies_count": len(state.slow_proxies),
+            "slow_count_details": dict(state.slow_count),
+            "previous_pool_size": len(state.previous_pool_ids),
+            "session_blacklist_count": len(state.session_blacklist),
+            "session_blacklist_details": dict(state.session_blacklist),
             "consecutive_fail_threshold": self._consecutive_fail_threshold,
             "proxies": [
                 {
@@ -889,7 +1220,7 @@ class ProxyManagerV2:
                     "success_rate": p.success_rate,
                     "fail_count": p.fail_count,
                 }
-                for p in self._active_pool
+                for p in state.active_pool
             ],
         }
 

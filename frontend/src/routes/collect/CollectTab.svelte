@@ -46,6 +46,7 @@
   let selectedPost: CollectedPost | null = null;
   let selectedPostLlmResult: LLMRequest | null = null;
   let loadingLlm = false;
+  let currentImageIndex = $state(0);
 
   // 뷰 모드
   type ViewMode = 'grid' | 'list';
@@ -85,10 +86,12 @@
   };
 
   // 피드 타입인지 (추가 옵션 표시용)
-  $: isFeedType = parsedUrl && ['account_profile', 'account_reels', 'hashtag', 'reels_explore'].includes(parsedUrl.url_type);
+  let isFeedType = $derived.by(() =>
+    Boolean(parsedUrl && ['account_profile', 'account_reels', 'hashtag', 'reels_explore'].includes(parsedUrl.url_type))
+  );
 
-  $: canPrevPage = pager.page > 1;
-  $: canNextPage = pager.page < pager.totalPages;
+  let canPrevPage = $derived.by(() => pager.page > 1);
+  let canNextPage = $derived.by(() => pager.page < pager.totalPages);
 
   async function fetchPosts() {
     loading = true;
@@ -523,7 +526,7 @@
             class="input input-sm flex-1"
             onkeydown={(e) => e.key === 'Enter' && handleSearch()}
           />
-          <Button on:click={handleSearch} variant="primary" size="sm">검색</Button>
+          <Button onclick={handleSearch} variant="primary" size="sm">검색</Button>
         </div>
       </div>
     </div>
@@ -536,7 +539,7 @@
       <span class="text-sm text-muted-foreground">총 {pager.total}개</span>
       {#if isSelectMode}
         <span class="text-sm text-primary font-medium">{selection.count}개 선택됨</span>
-        <Button on:click={() => selection.selectAll(posts.map(p => p.source_id).filter((id): id is number => id !== null))} variant="secondary" size="xs">
+        <Button onclick={() => selection.selectAll(posts.map(p => p.source_id).filter((id): id is number => id !== null))} variant="secondary" size="xs">
           {selection.isAllSelected(posts.map(p => p.source_id).filter((id): id is number => id !== null)) ? '전체 해제' : '전체 선택'}
         </Button>
       {/if}
@@ -548,7 +551,7 @@
       {#if isSelectMode && selection.count > 0}
         <div class="relative">
           <Button
-            on:click={() => showBatchActionMenu = !showBatchActionMenu}
+            onclick={() => showBatchActionMenu = !showBatchActionMenu}
             variant="primary"
             size="sm"
             disabled={isBatchProcessing}
@@ -582,7 +585,7 @@
 
       <!-- 선택 모드 토글 -->
       <Button
-        on:click={toggleSelectMode}
+        onclick={toggleSelectMode}
         variant={isSelectMode ? 'primary' : 'secondary'}
         size="sm"
       >
@@ -590,7 +593,7 @@
       </Button>
 
       <!-- URL 수집 버튼 -->
-      <Button on:click={openUrlCrawlModal} variant="secondary" size="sm">
+      <Button onclick={openUrlCrawlModal} variant="secondary" size="sm">
         URL 수집
       </Button>
 
@@ -812,7 +815,7 @@
     {#if pager.totalPages > 1}
       <div class="flex justify-center items-center gap-4 mt-6">
         <Button
-          on:click={prevPage}
+          onclick={prevPage}
           disabled={!canPrevPage}
           variant="secondary"
           size="sm"
@@ -823,7 +826,7 @@
           {pager.page} / {pager.totalPages}
         </span>
         <Button
-          on:click={nextPage}
+          onclick={nextPage}
           disabled={!canNextPage}
           variant="secondary"
           size="sm"
@@ -971,17 +974,17 @@
           </a>
           {#if selectedPost.source_type === 'instagram' && selectedPost.source_id}
             {@const postSourceId = selectedPost.source_id}
-            <Button on:click={() => recrawlPost(postSourceId)} variant="secondary" size="sm">
+            <Button onclick={() => recrawlPost(postSourceId)} variant="secondary" size="sm">
               재크롤링
             </Button>
-            <Button on:click={() => requestLlmAnalysis(postSourceId)} variant="secondary" size="sm">
+            <Button onclick={() => requestLlmAnalysis(postSourceId)} variant="secondary" size="sm">
               AI 분석
             </Button>
-            <Button on:click={() => deletePost(postSourceId)} variant="destructive" size="sm">
+            <Button onclick={() => deletePost(postSourceId)} variant="destructive" size="sm">
               삭제
             </Button>
           {/if}
-          <Button on:click={closeDetail} variant="secondary" size="sm">닫기</Button>
+          <Button onclick={closeDetail} variant="secondary" size="sm">닫기</Button>
         </div>
       </div>
     </div>
@@ -1094,12 +1097,12 @@
 
       <!-- 버튼 -->
       <div class="flex gap-2 justify-end">
-        <Button on:click={closeUrlCrawlModal} variant="secondary">취소</Button>
-        <Button
-          on:click={submitUrlCrawl}
-          disabled={isUrlCrawling || !urlCrawlInput.trim() || !urlCrawlAccountId || (parsedUrl && !parsedUrl.is_supported)}
-          variant="primary"
-        >
+        <Button onclick={closeUrlCrawlModal} variant="secondary">취소</Button>
+      <Button
+        onclick={submitUrlCrawl}
+        disabled={isUrlCrawling || !urlCrawlInput.trim() || !urlCrawlAccountId || Boolean(parsedUrl && !parsedUrl.is_supported)}
+        variant="primary"
+      >
           {isUrlCrawling ? '요청 중...' : '수집 요청'}
         </Button>
       </div>
@@ -1126,8 +1129,8 @@
         이 작업은 되돌릴 수 없습니다.
       </p>
       <div class="flex gap-2 justify-end">
-        <Button on:click={() => showDeleteConfirmModal = false} variant="secondary">취소</Button>
-        <Button on:click={runBatchDelete} variant="destructive">삭제</Button>
+        <Button onclick={() => showDeleteConfirmModal = false} variant="secondary">취소</Button>
+        <Button onclick={runBatchDelete} variant="destructive">삭제</Button>
       </div>
     </div>
   </div>

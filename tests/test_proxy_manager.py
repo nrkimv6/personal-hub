@@ -134,6 +134,44 @@ class TestProxyManagerCrossCheck:
                 except PermissionError:
                     pass
 
+    def test_load_proxy_list_uses_method_specific_files(self):
+        """메서드별 프록시 파일 우선순위 확인"""
+        temp_dir = tempfile.TemporaryDirectory()
+        try:
+            base_path = Path(temp_dir.name) / "proxy_list.txt"
+            get_file = base_path.with_name("proxy_list_get.txt")
+            post_file = base_path.with_name("proxy_list_post.txt")
+
+            get_file.write_text("http://1.1.1.1:80\n", encoding="utf-8")
+            post_file.write_text("http://2.2.2.2:80\n", encoding="utf-8")
+
+            manager = ProxyManager(proxy_file=base_path)
+
+            assert manager.load_proxy_list("get") is True
+            assert manager.proxy_list == ["http://1.1.1.1:80"]
+
+            assert manager.load_proxy_list("post") is True
+            assert manager._get_state("post").proxy_list == ["http://2.2.2.2:80"]
+        finally:
+            temp_dir.cleanup()
+
+    def test_load_proxy_list_falls_back_to_shared_file(self):
+        """메서드별 파일이 없으면 공유 파일로 fallback"""
+        temp_dir = tempfile.TemporaryDirectory()
+        try:
+            base_path = Path(temp_dir.name) / "proxy_list.txt"
+            base_path.write_text("http://3.3.3.3:80\n", encoding="utf-8")
+
+            manager = ProxyManager(proxy_file=base_path)
+
+            assert manager.load_proxy_list("get") is True
+            assert manager.proxy_list == ["http://3.3.3.3:80"]
+
+            assert manager.load_proxy_list("post") is True
+            assert manager._get_state("post").proxy_list == ["http://3.3.3.3:80"]
+        finally:
+            temp_dir.cleanup()
+
     def test_blacklist_count_consistency(self):
         """블랙리스트 카운트 일관성"""
         manager = ProxyManager(blacklist_duration=300)

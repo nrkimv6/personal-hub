@@ -11,8 +11,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# scripts 디렉토리를 경로에 추가
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+# scripts 디렉토리를 경로에 추가 (browser_workers, service_utils 이동: scripts/ → scripts/services/)
+_scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+_services_dir = os.path.join(_scripts_dir, "services")
+sys.path.insert(0, _scripts_dir)
+sys.path.insert(0, _services_dir)
 
 import browser_workers
 import service_utils
@@ -165,15 +168,15 @@ class TestRestartFrontendBehavior:
         ), patch.object(
             mgr, "_has_port_collision_error", return_value=False
         ), patch(
-            "browser_workers.tracked_popen_sync", return_value=mock_proc
+            "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
         ) as mock_popen, patch(
-            "browser_workers.pick_listener_pid", side_effect=[1111, 2222]
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", side_effect=[1111, 2222]
         ), patch(
-            "browser_workers.time.sleep", return_value=None
+            "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
-            "browser_workers.urllib.request.urlopen", return_value=_Response(200)
+            "scripts.services.browser_worker_runtime.manager.urllib.request.urlopen", return_value=_Response(200)
         ), patch(
-            "browser_workers.write_pid_file"
+            "scripts.services.browser_worker_runtime.manager.write_pid_file"
         ):
             ok = mgr.restart_frontend(public=False)
 
@@ -196,15 +199,15 @@ class TestRestartFrontendBehavior:
         ) as mock_build, patch.object(
             mgr, "_has_port_collision_error", return_value=False
         ), patch(
-            "browser_workers.tracked_popen_sync", return_value=mock_proc
+            "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
         ) as mock_popen, patch(
-            "browser_workers.pick_listener_pid", side_effect=[None, 3333]
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", side_effect=[None, 3333]
         ), patch(
-            "browser_workers.time.sleep", return_value=None
+            "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
-            "browser_workers.urllib.request.urlopen", return_value=_Response(200)
+            "scripts.services.browser_worker_runtime.manager.urllib.request.urlopen", return_value=_Response(200)
         ), patch(
-            "browser_workers.write_pid_file"
+            "scripts.services.browser_worker_runtime.manager.write_pid_file"
         ):
             ok = mgr.restart_frontend(public=True)
 
@@ -224,9 +227,9 @@ class TestRestartFrontendBehavior:
         ), patch.object(mgr, "_cleanup_frontend_runtime"), patch.object(mgr, "_prepare_frontend_env"), patch.object(
             mgr, "_run_frontend_build_if_needed", return_value=False
         ), patch(
-            "browser_workers.tracked_popen_sync"
+            "scripts.services.browser_worker_runtime.manager.tracked_popen_sync"
         ) as mock_popen, patch(
-            "browser_workers.time.sleep", return_value=None
+            "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ):
             ok = mgr.restart_frontend(public=True)
 
@@ -243,7 +246,7 @@ class TestRestartFrontendBehavior:
         mock_result.stderr = "build failed"
         mock_result.stdout = ""
 
-        with patch("browser_workers.subprocess.run", return_value=mock_result):
+        with patch("scripts.services.browser_worker_runtime.manager.subprocess.run", return_value=mock_result):
             assert mgr._run_frontend_build_if_needed(public=True) is True
 
     def test_restart_frontend_error_port_in_use_not_success(self, tmp_path):
@@ -259,13 +262,13 @@ class TestRestartFrontendBehavior:
         ), patch.object(
             mgr, "_has_port_collision_error", return_value=True
         ), patch(
-            "browser_workers.tracked_popen_sync", return_value=mock_proc
+            "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
         ), patch(
-            "browser_workers.pick_listener_pid", side_effect=[1234, 5678]
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", side_effect=[1234, 5678]
         ), patch(
-            "browser_workers.time.sleep", return_value=None
+            "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
-            "browser_workers.urllib.request.urlopen", return_value=_Response(200)
+            "scripts.services.browser_worker_runtime.manager.urllib.request.urlopen", return_value=_Response(200)
         ) as mock_urlopen:
             ok = mgr.restart_frontend(public=False)
 
@@ -300,13 +303,13 @@ class TestListenerPidAndStatus:
         admin_pid_file = mgr.pid_dir / "frontend_admin.pid"
 
         with patch.object(mgr, "_print_redis_status"), patch(
-            "browser_workers.read_pid_file", return_value=None
+            "scripts.services.browser_worker_runtime.manager.read_pid_file", return_value=None
         ), patch(
-            "browser_workers.is_port_listening", side_effect=[True, False]
+            "scripts.services.browser_worker_runtime.manager.is_port_listening", side_effect=[True, False]
         ), patch(
-            "browser_workers.pick_listener_pid", return_value=7777
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", return_value=7777
         ), patch(
-            "browser_workers.write_pid_file"
+            "scripts.services.browser_worker_runtime.manager.write_pid_file"
         ) as mock_write:
             mgr.status()
 

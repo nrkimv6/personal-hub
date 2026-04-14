@@ -18,13 +18,16 @@ from app.shared.process.registry import ProcessRegistry
 if TYPE_CHECKING:
     pass
 
-# kill_pid 동적 임포트 (scripts/service_utils.py)
+# kill_pid 동적 임포트 (scripts/services/service_utils.py)
 def kill_pid(pid: int, timeout: int = 5) -> bool:
     """scripts.service_utils.kill_pid 위임 래퍼."""
     try:
         scripts_dir = str(Path(__file__).resolve().parents[3] / "scripts")
+        services_dir = str(Path(__file__).resolve().parents[3] / "scripts" / "services")
         if scripts_dir not in sys.path:
             sys.path.insert(0, scripts_dir)
+        if services_dir not in sys.path:
+            sys.path.insert(0, services_dir)
         from service_utils import kill_pid as _kp  # type: ignore
         return _kp(pid, timeout)
     except Exception as exc:
@@ -106,7 +109,7 @@ class OrphanDetector:
             실제로 정리된 프로세스 정보 리스트
         """
         # 순환 import 방지를 위해 지연 임포트
-        from scripts.service_utils import kill_pid  # type: ignore
+        from scripts.services.service_utils import kill_pid  # type: ignore
 
         cleaned: list[dict] = []
         now = time.time()
@@ -128,7 +131,7 @@ class OrphanDetector:
                 continue
 
             # watchdog/listener 역할 프로세스는 cleanup 대상에서 제외
-            # (browser_workers.py 재시작 시 ppid가 바뀌어 오판될 수 있음)
+            # (browser_workers.py facade 재시작 시 ppid가 바뀌어 오판될 수 있음)
             role = entry.get("role", "")
             _WATCHDOG_ROLES = {
                 "watchdog", "claude_watchdog", "cmd_listener_watchdog",

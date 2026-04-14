@@ -46,7 +46,7 @@ E2E_PLAN_FILE = REPO_ROOT / "tests" / "dev_runner" / "fixtures" / "test_plan_e2e
 def dev_runner_listener():
     """Start the listener script as a background process for E2E tests (db=15 격리)"""
     import os as _os
-    script_path = Path("scripts/dev-runner-command-listener.py")
+    script_path = Path("scripts/plan_runner/dev-runner-command-listener.py")
 
     # Ensure Redis is running (db=15 격리)
     try:
@@ -56,7 +56,7 @@ def dev_runner_listener():
         r.delete("plan-runner:state:status")
         r.delete("plan-runner:listener:heartbeat")
     except redis.ConnectionError:
-        pytest.skip("Redis not available, skipping E2E tests")
+        pytest.fail("Redis not available — E2E 테스트 환경 미충족")
 
     # guard가 PLAN_RUNNER_REDIS_DB 환경변수를 검사하므로 db=15로 설정
     old_plan_runner_redis_db = _os.environ.get("PLAN_RUNNER_REDIS_DB")

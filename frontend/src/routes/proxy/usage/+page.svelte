@@ -109,7 +109,7 @@
 {:else if error}
   <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
     {error}
-    <button on:click={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
+    <button onclick={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
   </div>
 {:else}
   <!-- 필터 및 액션 -->
@@ -119,7 +119,7 @@
         <span>기간:</span>
         <select
           bind:value={hoursFilter}
-          on:change={loadData}
+          onchange={loadData}
           class="px-3 py-1.5 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         >
           <option value={1}>1시간</option>
@@ -131,7 +131,7 @@
       </label>
     </div>
     <button
-      on:click={handleCleanup}
+      onclick={handleCleanup}
       class="px-4 py-2 text-sm text-error border border-red-300 rounded-md hover:bg-error-light transition-colors"
     >
       오래된 로그 정리

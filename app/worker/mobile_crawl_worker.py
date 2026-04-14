@@ -88,7 +88,7 @@ class MobileCrawlWorker(BaseWorker):
 
         except Exception as e:
             db.rollback()
-            logger.error(f"[MobileCrawlWorker] 스케줄 확인 중 오류: {str(e)}", exc_info=True)
+            self._log_worker_error("스케줄 확인", e)
             raise
         finally:
             db.close()

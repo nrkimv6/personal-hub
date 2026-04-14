@@ -35,6 +35,7 @@ sys.modules.setdefault("listener_noise_filter", _mock_noise)
 
 import _dr_plan_runner as plan_runner_mod  # noqa: E402
 import _dr_merge as dr_merge_mod  # noqa: E402
+import _dr_stream_cleanup as stream_cleanup_mod  # noqa: E402
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 _GIT_ENV = {
@@ -145,8 +146,8 @@ class TestAutoMergeE2E:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
              patch("_dr_constants.PROJECT_ROOT", Path(repo_dir)), \
              patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
@@ -182,9 +183,9 @@ class TestAutoMergeE2E:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-             patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup, \
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
              patch("subprocess.run", return_value=empty_git_proc):
             plan_runner_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
 
@@ -217,8 +218,8 @@ class TestAutoMergeE2E:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_cleanup_process_state"), \
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
              patch("_dr_constants.PROJECT_ROOT", Path(repo_dir)), \
              patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \

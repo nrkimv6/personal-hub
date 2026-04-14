@@ -48,8 +48,8 @@ class TestRestartAfterMergeTriggerIntegration:
         shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
 
         # _execute_merge_with_lock mock (merge 성공 시뮬레이션, 실제 git 실행 방지)
-        with patch("_dr_plan_runner._execute_merge_with_lock") as mock_merge, \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+        with patch("_dr_stream_cleanup._execute_merge_with_lock") as mock_merge, \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("_dr_plan_runner._pub_and_log"):
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, shared_redis)
@@ -89,8 +89,8 @@ class TestRestartAfterMergeTriggerIntegration:
         shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
         # trigger 키 미설정 (소실 시나리오)
 
-        with patch("_dr_plan_runner._execute_merge_with_lock"), \
-             patch("_dr_plan_runner._cleanup_process_state"), \
+        with patch("_dr_stream_cleanup._execute_merge_with_lock"), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("_dr_plan_runner._pub_and_log"):
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, shared_redis)

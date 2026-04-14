@@ -47,6 +47,7 @@ class ProxyInfo:
     success_count: int = 0
     fail_count: int = 0
     total_checks: int = 0
+    request_method: str = "get"
 
     def to_aiohttp_proxy(self) -> str:
         """aiohttp용 프록시 URL 반환"""
@@ -85,6 +86,7 @@ class ProxyInfo:
             success_count=row.get("success_count", 0),
             fail_count=row.get("fail_count", 0),
             total_checks=row.get("total_checks", 0),
+            request_method=row.get("request_method", "get"),
         )
 
 
@@ -161,6 +163,8 @@ class ProxyCheckHistoryBase(BaseModel):
     http_status: Optional[int] = None
     detected_ip: Optional[str] = None
     is_anonymous: Optional[bool] = None
+    request_method: Optional[str] = None
+    validation_url: Optional[str] = None
 
 
 class ProxyCheckHistoryCreate(ProxyCheckHistoryBase):
@@ -207,12 +211,29 @@ class ProxyUpdate(BaseModel):
 class ProxyResponse(ProxyBase):
     """프록시 응답 스키마"""
     id: int
+    request_method: str = "get"
     status: str
     total_checks: int
     success_count: int
     fail_count: int
     avg_response_time: Optional[float] = None
     priority_score: float
+    get_status: Optional[str] = None
+    post_status: Optional[str] = None
+    get_total_checks: Optional[int] = None
+    post_total_checks: Optional[int] = None
+    get_success_count: Optional[int] = None
+    post_success_count: Optional[int] = None
+    get_fail_count: Optional[int] = None
+    post_fail_count: Optional[int] = None
+    get_avg_response_time: Optional[float] = None
+    post_avg_response_time: Optional[float] = None
+    get_min_response_time: Optional[float] = None
+    post_min_response_time: Optional[float] = None
+    get_max_response_time: Optional[float] = None
+    post_max_response_time: Optional[float] = None
+    get_priority_score: Optional[float] = None
+    post_priority_score: Optional[float] = None
     first_seen_at: Optional[datetime] = None
     last_checked_at: Optional[datetime] = None
     last_success_at: Optional[datetime] = None
@@ -225,6 +246,58 @@ class ProxyResponse(ProxyBase):
             return round(self.success_count / self.total_checks * 100, 1)
         return None
 
+    @classmethod
+    def from_proxy(cls, proxy: Any, request_method: str = "get") -> "ProxyResponse":
+        """ORM 프록시에서 메서드별 응답 생성."""
+        method = "post" if (request_method or "get").lower() == "post" else "get"
+        status_value = getattr(proxy, f"{method}_status", None)
+        total_checks_value = getattr(proxy, f"{method}_total_checks", None)
+        success_count_value = getattr(proxy, f"{method}_success_count", None)
+        fail_count_value = getattr(proxy, f"{method}_fail_count", None)
+        avg_response_time_value = getattr(proxy, f"{method}_avg_response_time", None)
+        priority_score_value = getattr(proxy, f"{method}_priority_score", None)
+        last_checked_at_value = getattr(proxy, f"{method}_last_checked_at", None)
+        last_success_at_value = getattr(proxy, f"{method}_last_success_at", None)
+        data = {
+            "id": proxy.id,
+            "url": proxy.url,
+            "protocol": proxy.protocol,
+            "host": proxy.host,
+            "port": proxy.port,
+            "username": proxy.username,
+            "password": proxy.password,
+            "source": getattr(proxy, "source", None),
+            "country": getattr(proxy, "country", None),
+            "tags": getattr(proxy, "tags", None),
+            "request_method": method,
+            "status": status_value if status_value is not None else proxy.status,
+            "total_checks": total_checks_value if total_checks_value is not None else (proxy.total_checks or 0),
+            "success_count": success_count_value if success_count_value is not None else (proxy.success_count or 0),
+            "fail_count": fail_count_value if fail_count_value is not None else (proxy.fail_count or 0),
+            "avg_response_time": avg_response_time_value if avg_response_time_value is not None else proxy.avg_response_time,
+            "priority_score": priority_score_value if priority_score_value is not None else (proxy.priority_score or 0.0),
+            "get_status": getattr(proxy, "get_status", None),
+            "post_status": getattr(proxy, "post_status", None),
+            "get_total_checks": getattr(proxy, "get_total_checks", None),
+            "post_total_checks": getattr(proxy, "post_total_checks", None),
+            "get_success_count": getattr(proxy, "get_success_count", None),
+            "post_success_count": getattr(proxy, "post_success_count", None),
+            "get_fail_count": getattr(proxy, "get_fail_count", None),
+            "post_fail_count": getattr(proxy, "post_fail_count", None),
+            "get_avg_response_time": getattr(proxy, "get_avg_response_time", None),
+            "post_avg_response_time": getattr(proxy, "post_avg_response_time", None),
+            "get_min_response_time": getattr(proxy, "get_min_response_time", None),
+            "post_min_response_time": getattr(proxy, "post_min_response_time", None),
+            "get_max_response_time": getattr(proxy, "get_max_response_time", None),
+            "post_max_response_time": getattr(proxy, "post_max_response_time", None),
+            "get_priority_score": getattr(proxy, "get_priority_score", None),
+            "post_priority_score": getattr(proxy, "post_priority_score", None),
+            "first_seen_at": proxy.first_seen_at,
+            "last_checked_at": last_checked_at_value if last_checked_at_value is not None else proxy.last_checked_at,
+            "last_success_at": last_success_at_value if last_success_at_value is not None else proxy.last_success_at,
+        }
+        return cls.model_validate(data)
+
     class Config:
         from_attributes = True
 
@@ -235,6 +308,17 @@ class ProxyDetailResponse(ProxyResponse):
     max_response_time: Optional[float] = None
     last_seen_at: Optional[datetime] = None
     check_history: List[ProxyCheckHistoryResponse] = []
+
+    @classmethod
+    def from_proxy(cls, proxy: Any, request_method: str = "get") -> "ProxyDetailResponse":
+        response = cls.model_validate(ProxyResponse.from_proxy(proxy, request_method=request_method))
+        method = "post" if (request_method or "get").lower() == "post" else "get"
+        min_response_time_value = getattr(proxy, f"{method}_min_response_time", None)
+        max_response_time_value = getattr(proxy, f"{method}_max_response_time", None)
+        response.min_response_time = min_response_time_value if min_response_time_value is not None else proxy.min_response_time
+        response.max_response_time = max_response_time_value if max_response_time_value is not None else proxy.max_response_time
+        response.last_seen_at = proxy.last_seen_at
+        return response
 
     class Config:
         from_attributes = True
@@ -304,6 +388,8 @@ class ProxyStatsResponse(BaseModel):
     by_country: List[Dict[str, Any]] = Field(default_factory=list, description="국가별 분포 (상위 10개)")
     today_checks: int = Field(0, description="오늘 검증 횟수")
     today_success_rate: Optional[float] = Field(None, description="오늘 성공률 (%)")
+    request_method: str = Field("get", description="조회 기준 메서드")
+    by_method: Dict[str, Any] = Field(default_factory=dict, description="메서드별 통계")
 
 
 class ProxyListParams(BaseModel):
@@ -316,6 +402,7 @@ class ProxyListParams(BaseModel):
     sort_order: str = Field("desc", description="정렬 방향 (asc/desc)")
     page: int = Field(1, ge=1, description="페이지 번호")
     page_size: int = Field(50, ge=1, le=100, description="페이지당 항목 수")
+    request_method: str = Field("get", description="조회 기준 메서드")
 
 
 class ProxyListResponse(BaseModel):

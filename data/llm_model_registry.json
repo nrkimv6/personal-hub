@@ -1,0 +1,40 @@
+{
+  "steps": {
+    "ideation": [
+      {"provider": "claude", "model": "claude-haiku-4-5"},
+      {"provider": "gemini", "model": "gemini-3-flash"},
+      {"provider": "openai", "model": "gpt-5.4-mini"}
+    ],
+    "plan_feat": [
+      {"provider": "claude", "model": "claude-sonnet-4-6"},
+      {"provider": "openai", "model": "gpt-5.4"},
+      {"provider": "gemini", "model": "gemini-3.1-pro", "oneshot": true}
+    ],
+    "plan_fix": [
+      {"provider": "claude", "model": "claude-opus-4-6"},
+      {"provider": "openai", "model": "gpt-5.4"},
+      {"provider": "gemini", "model": "gemini-3.1-pro", "oneshot": true}
+    ],
+    "plan_expand": [
+      {"provider": "claude", "model": "claude-opus-4-6"},
+      {"provider": "gemini", "model": "gemini-3.1-pro", "oneshot": true}
+    ],
+    "plan_verify": [
+      {"provider": "claude", "model": "claude-opus-4-6"},
+      {"provider": "gemini", "model": "gemini-3.1-pro", "oneshot": true}
+    ],
+    "implement": [
+      {"provider": "claude", "model": "claude-sonnet-4-6"},
+      {"provider": "openai", "model": "gpt-5.1-codex-mini"},
+      {"provider": "openai", "model": "gpt-5.3-codex"}
+    ],
+    "merge_conflict": [
+      {"provider": "claude", "model": "claude-opus-4-6"},
+      {"provider": "gemini", "model": "gemini-3.1-pro", "oneshot": true}
+    ],
+    "status_tracking": [
+      {"provider": "claude", "model": "claude-haiku-4-5"},
+      {"provider": "gemini", "model": "gemini-3-flash"}
+    ]
+  }
+}

@@ -18,9 +18,18 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 import redis
 
+try:
+    import fakeredis
+    HAS_FAKEREDIS = True
+except ImportError:
+    HAS_FAKEREDIS = False
+
 SCRIPTS_DIR = Path(__file__).parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+_PLAN_RUNNER_DIR = SCRIPTS_DIR / "plan_runner"
+if str(_PLAN_RUNNER_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLAN_RUNNER_DIR))
 
 REDIS_DB = 15
 
@@ -46,7 +55,7 @@ def restore_real_merge_queue():
     sys.modules["merge_queue"]를 잘못된 키를 반환하는 mock으로 교체한다.
     이 fixture는 각 테스트 전에 실제 merge_queue.py를 로드하여 sys.modules를 복원한다.
     """
-    spec = importlib.util.spec_from_file_location("merge_queue", SCRIPTS_DIR / "merge_queue.py")
+    spec = importlib.util.spec_from_file_location("merge_queue", _PLAN_RUNNER_DIR / "merge_queue.py")
     real_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(real_mod)
     old = sys.modules.get("merge_queue")
@@ -60,7 +69,11 @@ def restore_real_merge_queue():
 
 @pytest.fixture
 def redis_client():
-    r = redis.Redis(host="localhost", port=6379, db=REDIS_DB, decode_responses=True)
+    if HAS_FAKEREDIS:
+        r = fakeredis.FakeRedis(decode_responses=True)
+        _patch_eval_for_fakeredis(r)
+    else:
+        r = redis.Redis(host="localhost", port=6379, db=REDIS_DB, decode_responses=True)
     for key in r.scan_iter("plan-runner:merge-queue*"):
         r.delete(key)
     for key in r.scan_iter("plan-runner:merge-turn*"):
@@ -74,6 +87,24 @@ def redis_client():
         r.delete(key)
     for key in r.scan_iter("plan-runner:runners*"):
         r.delete(key)
+
+
+def _patch_eval_for_fakeredis(client):
+    """fakeredis에서 merge_queue.acquire_merge_turn가 사용하는 eval을 간단히 에뮬레이트."""
+    original_eval = client.eval
+
+    def _eval(script, numkeys, *args):
+        if numkeys != 1 or not args:
+            return original_eval(script, numkeys, *args)
+        key = args[0]
+        value = args[1] if len(args) > 1 else None
+        items = client.lrange(key, 0, -1)
+        if value in items:
+            return 0
+        client.rpush(key, value)
+        return 1
+
+    client.eval = _eval
 
 
 class TestCleanupLockRelease:

@@ -14,18 +14,28 @@ import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-_DATE_PATTERN = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+# 하이픈 구분: plan-runner-2026-04-07-..., worker-2026-04-07.log
+# 밑줄 구분: api_20260407_120000.log (연월일이 붙어있는 형식)
+_DATE_PATTERN = re.compile(r"(\d{4})-(\d{2})-(\d{2})|(\d{4})(\d{2})(\d{2})")
 
 STALE_THRESHOLD_HOURS = 1  # 날짜 없는 파일의 stale 기준 (시간)
 
 
 def _extract_date(filename: str) -> date | None:
-    """파일명에서 YYYY-MM-DD 날짜를 추출한다. 없으면 None."""
+    """파일명에서 날짜를 추출한다. 없으면 None.
+
+    지원 형식:
+    - 하이픈 구분: YYYY-MM-DD  (예: plan-runner-2026-04-07-abc.log)
+    - 밑줄/연속 구분: YYYYMMDD  (예: api_20260407_120000.log)
+    """
     m = _DATE_PATTERN.search(filename)
     if not m:
         return None
     try:
-        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if m.group(1):  # 하이픈 형식: (\d{4})-(\d{2})-(\d{2})
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        else:  # 밑줄/연속 형식: (\d{4})(\d{2})(\d{2})
+            return date(int(m.group(4)), int(m.group(5)), int(m.group(6)))
     except ValueError:
         return None
 

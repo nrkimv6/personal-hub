@@ -11,10 +11,18 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
+from tests.dev_runner._path_helpers import (
+    bootstrap_plan_runner_modules,
+    get_plan_runner_impl_script_path,
+)
+
 # listener 스크립트를 sys.path에 추가
 _SCRIPTS_DIR = str(Path(__file__).parent.parent.parent / "scripts")
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
+_PLAN_RUNNER_DIR = str(Path(_SCRIPTS_DIR) / "plan_runner")
+if _PLAN_RUNNER_DIR not in sys.path:
+    sys.path.insert(0, _PLAN_RUNNER_DIR)
 
 try:
     import fakeredis
@@ -53,7 +61,7 @@ class TestCleanupProcessState:
         try:
             import importlib.util
             spec = importlib.util.spec_from_file_location(
-                "listener", Path(_SCRIPTS_DIR) / "dev-runner-command-listener.py"
+                "listener", Path(_SCRIPTS_DIR) / "plan_runner" / "dev-runner-command-listener.py"
             )
             # 스크립트 전체 실행은 부수 효과가 크므로, 상수만 정규식으로 파싱
         except Exception:
@@ -251,13 +259,15 @@ class TestForceCleanupStateDefense:
 
     @pytest.mark.asyncio
     async def test_force_cleanup_registers_when_status_exists(self, executor_service_with_fake_redis):
-        """R: status 키가 있는 runner는 RECENT에 정상 등록돼야 한다"""
+        """R: visible runner(trigger=user)이고 status 키가 있으면 RECENT에 정상 등록돼야 한다"""
         from app.modules.dev_runner.services.executor_service import (
             RUNNER_KEY_PREFIX, RECENT_RUNNERS_KEY, ACTIVE_RUNNERS_KEY,
         )
         svc, fake_r = executor_service_with_fake_redis
         runner_id = "t-clnproc-valid"
         await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        # trigger=user 설정을 통해 visible runner임을 명시
+        await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
         await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
         await svc._force_cleanup_state(runner_id)
@@ -265,6 +275,25 @@ class TestForceCleanupStateDefense:
         members = await fake_r.zrange(RECENT_RUNNERS_KEY, 0, -1)
         assert runner_id in members, f"status 있는 runner '{runner_id}'가 RECENT에 미등록"
         assert await fake_r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status") == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_force_cleanup_invisible_runner_not_registered_in_recent(self, executor_service_with_fake_redis):
+        """R: invisible runner(trigger 미설정)는 status 키가 있어도 RECENT에 등록되지 않아야 한다"""
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_PREFIX, RECENT_RUNNERS_KEY, ACTIVE_RUNNERS_KEY,
+        )
+        svc, fake_r = executor_service_with_fake_redis
+        runner_id = "t-clnproc-invisible"
+        await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        # trigger를 설정하지 않음 -> invisible runner
+        await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        await svc._force_cleanup_state(runner_id)
+
+        members = await fake_r.zrange(RECENT_RUNNERS_KEY, 0, -1)
+        assert runner_id not in members, f"invisible runner '{runner_id}'가 RECENT에 등록됨"
+        # 키가 삭제됐는지 확인 (invisible 경로는 키 즉시 삭제)
+        assert await fake_r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status") is None
 
 
 # ──────────────────────────────────────────────
@@ -294,6 +323,7 @@ class TestForceCleanupStateLogs:
         svc, fake_r = svc_with_fake_redis
         runner_id = "t-log-entry-001"
         await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
         await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
         with caplog.at_level(logging.INFO, logger="app.modules.dev_runner.services.executor_service"):
@@ -327,6 +357,7 @@ class TestForceCleanupStateLogs:
         svc, fake_r = svc_with_fake_redis
         runner_id = "t-log-done-001"
         await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
         await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
         with caplog.at_level(logging.INFO, logger="app.modules.dev_runner.services.executor_service"):
@@ -395,18 +426,12 @@ class TestCleanupProcessStatePersistSuffixes:
             sys.modules["listener_noise_filter"] = mock_noise
 
         # _dr_constants, _dr_state 먼저 로드 (_dr_process_utils 의존)
-        for mod_name in ("_dr_constants", "_dr_state"):
-            if mod_name not in sys.modules:
-                spec = importlib.util.spec_from_file_location(
-                    mod_name, Path(_SCRIPTS_DIR) / f"{mod_name}.py"
-                )
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[mod_name] = mod
-                spec.loader.exec_module(mod)
+        bootstrap_plan_runner_modules()
 
         if "_dr_process_utils" not in sys.modules:
             spec = importlib.util.spec_from_file_location(
-                "_dr_process_utils", Path(_SCRIPTS_DIR) / "_dr_process_utils.py"
+                "_dr_process_utils",
+                get_plan_runner_impl_script_path().with_name("_dr_process_utils.py"),
             )
             mod = importlib.util.module_from_spec(spec)
             sys.modules["_dr_process_utils"] = mod
@@ -481,7 +506,7 @@ class TestRunnerKeySuffixesCompleteness:
             RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX,
         )
 
-        listener_path = Path(_SCRIPTS_DIR) / "dev-runner-command-listener.py"
+        listener_path = Path(_SCRIPTS_DIR) / "plan_runner" / "dev-runner-command-listener.py"
         source = listener_path.read_text(encoding="utf-8")
 
         # redis_client.set(f"...:{runner_id}:{suffix}" 또는 :{rid}: 패턴 스캔
@@ -517,20 +542,14 @@ class TestCleanupUnmergedCommitsGuard:
             mock_noise.is_noise_line = lambda line: False
             sys.modules["listener_noise_filter"] = mock_noise
 
-        for mod_name in ("_dr_constants", "_dr_state"):
-            if mod_name not in sys.modules:
-                spec = importlib.util.spec_from_file_location(
-                    mod_name, Path(_SCRIPTS_DIR) / f"{mod_name}.py"
-                )
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[mod_name] = mod
-                spec.loader.exec_module(mod)
+        bootstrap_plan_runner_modules()
 
         # 재로드: 이 테스트 클래스에서 수정된 _dr_process_utils를 사용
         if "_dr_process_utils" in sys.modules:
             del sys.modules["_dr_process_utils"]
         spec = importlib.util.spec_from_file_location(
-            "_dr_process_utils", Path(_SCRIPTS_DIR) / "_dr_process_utils.py"
+            "_dr_process_utils",
+            get_plan_runner_impl_script_path().with_name("_dr_process_utils.py"),
         )
         mod = importlib.util.module_from_spec(spec)
         sys.modules["_dr_process_utils"] = mod
@@ -665,7 +684,7 @@ class TestCleanupUnmergedCommitsGuardIntegration:
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "plan_worktree_helpers_real",
-            Path(_SCRIPTS_DIR) / "plan_worktree_helpers.py"
+            Path(_PLAN_RUNNER_DIR) / "plan_worktree_helpers.py"
         )
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

@@ -1,11 +1,6 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
-  const dispatch = createEventDispatcher<{
-    change: { value: string | null };
-  }>();
-
   export let value: string | null = null;
+  export let onchange: ((detail: { value: string | null }) => void) | undefined = undefined;
   export let suggestions: string[] = [];
   export let disabled = false;
   export let saving = false;
@@ -27,14 +22,14 @@
   function submit() {
     if (disabled || saving) return;
     dirty = false;
-    dispatch('change', { value: normalize(draft) });
+    onchange?.({ value: normalize(draft) });
   }
 
   function clear() {
     if (disabled || saving) return;
     draft = '';
     dirty = false;
-    dispatch('change', { value: null });
+    onchange?.({ value: null });
   }
 </script>
 

@@ -61,6 +61,25 @@ class TestNotificationServiceInit:
             assert service.enable_telegram is True
             assert service.enable_desktop is True
 
+    def test_right_init_filters_stale_notification_states(self):
+        """startup/shutdown 같은 stale 상태는 로드 시 제거된다."""
+        with patch('app.shared.notification.notification_service.get_db') as mock_get_db, \
+             patch('app.shared.notification.notification_service.settings') as mock_settings:
+
+            mock_db = MagicMock()
+            mock_db.execute.return_value.fetchone.return_value = (1, 1, '["available", "startup", "popup_new", "shutdown"]')
+            mock_get_db.return_value = iter([mock_db])
+
+            mock_settings.TELEGRAM_BOT_TOKEN = "test_token"
+            mock_settings.TELEGRAM_CHAT_ID = "test_chat_id"
+            mock_settings.ENABLE_DESKTOP_NOTIFICATION = True
+            mock_settings.RECENT_MESSAGES_MAX = 100
+
+            from app.shared.notification.notification_service import NotificationService
+            service = NotificationService()
+
+            assert service.notify_states == ["available", "popup_new"]
+
 
 class TestShouldNotify:
     """should_notify 메서드 테스트"""

@@ -3,68 +3,14 @@
 	import { toast } from '$lib/stores/toast';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
-	import { fetchWithTimeout } from '$lib/api/client';
-
-	// 타입 정의
-	interface WorkerStatus {
-		is_running: boolean;
-		last_activity: string | null;
-		pending_requests: number;
-		processing_requests: number;
-		recent_runs: number;
-	}
-
-	interface Center {
-		id: number;
-		name: string;
-		center_type: string;
-		region: string;
-		district: string | null;
-		is_active: boolean;
-		last_crawled_at: string | null;
-		crawl_method: string;
-		created_at: string;
-	}
-
-	interface CrawlRequest {
-		id: number;
-		url: string;
-		status: string;
-		requested_at: string;
-		processed_at: string | null;
-		error_message: string | null;
-	}
-
-	interface Course {
-		id: number;
-		name: string;
-		center_name: string;
-		category: string | null;
-		fee: number | null;
-		day_of_week: string | null;
-		time_start: string | null;
-		time_end: string | null;
-		course_start: string | null;
-		course_end: string | null;
-		instructor_name: string | null;
-		source_url: string | null;
-		collected_at: string;
-	}
-
-	// API 함수
-	const API_BASE = '/api/activity';
-
-	async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-		const response = await fetchWithTimeout(`${API_BASE}${endpoint}`, {
-			headers: { 'Content-Type': 'application/json', ...options.headers },
-			...options
-		});
-		if (!response.ok) {
-			const error = await response.json().catch(() => ({ detail: response.statusText }));
-			throw new Error(error.detail || '요청 실패');
-		}
-		return response.json();
-	}
+	import {
+		activityApi,
+		formatActivityCenterType,
+		type ActivityCenter,
+		type ActivityCourse,
+		type ActivityCrawlRequest,
+		type ActivityWorkerStatus
+	} from '$lib/api/activity';
 
 	// 탭 상태
 	let activeTab: 'centers' | 'courses' = $state('centers');
@@ -74,13 +20,13 @@
 	let error = $state('');
 
 	// 센터 관련 상태
-	let workerStatus: WorkerStatus | null = $state(null);
-	let centers: Center[] = $state([]);
-	let requests: CrawlRequest[] = $state([]);
+	let workerStatus: ActivityWorkerStatus | null = $state(null);
+	let centers: ActivityCenter[] = $state([]);
+	let requests: ActivityCrawlRequest[] = $state([]);
 	let syncing = $state(false);
 
 	// 강좌 관련 상태
-	let courses: Course[] = $state([]);
+	let courses: ActivityCourse[] = $state([]);
 	let courseTotal = $state(0);
 	let coursePage = $state(1);
 	let coursePageSize = $state(20);
@@ -91,7 +37,7 @@
 	async function syncToActivityHub() {
 		syncing = true;
 		try {
-			await apiRequest('/crawl/sync-hub', { method: 'POST' });
+			await activityApi.syncToActivityHub();
 			toast.success('Activity-Hub 동기화가 시작되었습니다.');
 			setTimeout(() => loadWorkerStatus(), 2000);
 		} catch (e) {
@@ -104,7 +50,7 @@
 	// 워커 상태 로드
 	async function loadWorkerStatus() {
 		try {
-			workerStatus = await apiRequest<WorkerStatus>('/worker/status');
+			workerStatus = await activityApi.getWorkerStatus();
 		} catch (e) {
 			console.error('워커 상태 로드 실패:', e);
 		}
@@ -113,7 +59,7 @@
 	// 센터 목록 로드
 	async function loadCenters() {
 		try {
-			const response = await apiRequest<{ items: Center[]; total: number }>('/centers/?limit=50');
+			const response = await activityApi.listCenters({ page_size: 50 });
 			centers = response.items;
 		} catch (e) {
 			console.error('센터 목록 로드 실패:', e);
@@ -123,7 +69,7 @@
 	// 요청 목록 로드
 	async function loadRequests() {
 		try {
-			requests = await apiRequest<CrawlRequest[]>('/worker/requests?limit=10');
+			requests = await activityApi.listRequests(10);
 		} catch (e) {
 			console.error('요청 목록 로드 실패:', e);
 		}
@@ -132,16 +78,12 @@
 	// 강좌 목록 로드
 	async function loadCourses() {
 		try {
-			const params = new URLSearchParams({
-				page: coursePage.toString(),
-				page_size: coursePageSize.toString()
+			const response = await activityApi.listCourses({
+				page: coursePage,
+				page_size: coursePageSize,
+				keyword: courseKeyword || undefined,
+				category: courseCategory || undefined
 			});
-			if (courseKeyword) params.append('keyword', courseKeyword);
-			if (courseCategory) params.append('category', courseCategory);
-
-			const response = await apiRequest<{ items: Course[]; total: number; page: number }>(
-				`/courses?${params}`
-			);
 			courses = response.items;
 			courseTotal = response.total;
 		} catch (e) {
@@ -152,10 +94,7 @@
 	// 크롤링 요청 생성
 	async function requestCrawl(centerId: number) {
 		try {
-			await apiRequest('/worker/request', {
-				method: 'POST',
-				body: JSON.stringify({ center_id: centerId })
-			});
+			await activityApi.requestCrawl(centerId);
 			await loadRequests();
 			await loadWorkerStatus();
 		} catch (e) {
@@ -201,18 +140,6 @@
 			default:
 				return { bg: 'bg-muted', text: 'text-foreground', label: status };
 		}
-	}
-
-	function getCenterTypeName(type: string): string {
-		const types: Record<string, string> = {
-			culture: '문화센터',
-			sports: '체육센터',
-			youth: '청소년센터',
-			welfare: '복지관',
-			department: '백화점',
-			mart: '마트'
-		};
-		return types[type] || type;
 	}
 
 	function getCategoryName(cat: string | null): string {
@@ -403,7 +330,7 @@
 								<tr class="border-b hover:bg-muted">
 									<td class="py-2">{center.id}</td>
 									<td class="py-2 font-medium">{center.name}</td>
-									<td class="py-2">{getCenterTypeName(center.center_type)}</td>
+									<td class="py-2">{formatActivityCenterType(center.center_type)}</td>
 									<td class="py-2">{center.crawl_method}</td>
 									<td class="py-2 text-muted-foreground">{formatDate(center.last_crawled_at)}</td>
 									<td class="py-2">

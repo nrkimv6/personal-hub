@@ -239,13 +239,14 @@ def redis_cleanup():
         new_ids = (after_active - before_active) | (after_recent - before_recent)
         for runner_id in new_ids:
             test_source = r.get(f"plan-runner:runners:{runner_id}:test_source") or "(unknown)"
-            # PID kill (프로세스 잔류 방지) — PID 기록 지연 대응: 최대 5초 retry
-            pid_str = None
-            for _ in range(10):  # 최대 5초 대기
+            # PID kill (프로세스 잔류 방지)
+            # http TestClient 기반 테스트는 실제 서브프로세스가 없어 PID가 기록되지 않음.
+            # PID 즉시 확인 후 없으면 1회 짧은 대기 — E2E(실제 프로세스)만 장기 대기 필요.
+            pid_str = r.get(f"plan-runner:runners:{runner_id}:pid")
+            if not pid_str:
+                # 1회 단기 대기 후 재확인 (빠른 프로세스가 PID를 늦게 기록하는 경우 대비)
+                _time.sleep(0.2)
                 pid_str = r.get(f"plan-runner:runners:{runner_id}:pid")
-                if pid_str:
-                    break
-                _time.sleep(0.5)
             if pid_str:
                 try:
                     _pid_i = int(pid_str)
@@ -270,13 +271,14 @@ def redis_cleanup():
             if keys:
                 r.delete(*keys)
             # race condition 대응: PID kill 후 listener가 recent_runners에 재등록할 수 있음
-            # 2초 대기 후 재확인 + 재삭제
-            _time.sleep(2)
-            r.srem("plan-runner:active_runners", runner_id)
-            r.zrem("plan-runner:recent_runners", runner_id)
-            stale_keys = r.keys(f"plan-runner:runners:{runner_id}:*")
-            if stale_keys:
-                r.delete(*stale_keys)
+            # 실제 PID가 있었던 경우(실제 프로세스)만 2초 대기 후 재확인 — TestClient 테스트는 스킵
+            if pid_str:
+                _time.sleep(2)
+                r.srem("plan-runner:active_runners", runner_id)
+                r.zrem("plan-runner:recent_runners", runner_id)
+                stale_keys = r.keys(f"plan-runner:runners:{runner_id}:*")
+                if stale_keys:
+                    r.delete(*stale_keys)
 
         # merge-queue:* 키 정리
         for key in r.scan_iter("plan-runner:merge-queue:*"):

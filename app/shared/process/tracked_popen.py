@@ -8,13 +8,16 @@ from pathlib import Path
 
 from app.shared.process.registry import ProcessRegistry
 
-# scripts/service_utils.py의 kill_pid를 동적으로 임포트
+# scripts/services/service_utils.py의 kill_pid를 동적으로 임포트
 def kill_pid(pid: int, timeout: int = 5) -> bool:
     """service_utils.kill_pid 위임 래퍼."""
     try:
         scripts_dir = str(Path(__file__).resolve().parents[3] / "scripts")
+        services_dir = str(Path(__file__).resolve().parents[3] / "scripts" / "services")
         if scripts_dir not in sys.path:
             sys.path.insert(0, scripts_dir)
+        if services_dir not in sys.path:
+            sys.path.insert(0, services_dir)
         from service_utils import kill_pid as _kill_pid  # type: ignore
         return _kill_pid(pid, timeout)
     except Exception as exc:
@@ -74,7 +77,7 @@ def tracked_popen_sync(
     role: str = "unknown",
     **kwargs,
 ) -> subprocess.Popen:
-    """동기 버전 tracked_popen — browser_workers.py 등 동기 스크립트용.
+    """동기 버전 tracked_popen — browser_workers.py facade 등 동기 스크립트용.
 
     새 이벤트 루프를 생성하여 비동기 등록을 실행.
     Redis 실패 시 경고만 출력하고 Popen 객체를 반환.

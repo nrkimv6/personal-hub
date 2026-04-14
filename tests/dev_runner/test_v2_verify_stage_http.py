@@ -327,13 +327,13 @@ class TestV2VerifyModelConfig:
         assert source in {"models", "default", "explicit"}
 
     def test_v2_verify_model_config_http(self, client):
-        """R: engines.json에 auto-verify 키가 있고 impl.py가 해당 키를 참조하는지 API 환경 검증"""
+        """R: engines.json에 auto-verify 키가 있고 현재 엔진 값과 일치하는지 API 환경 검증"""
         data = _load_engines_data()
         claude_models = data.get("claude", {}).get("models", {})
         assert "auto-verify" in claude_models, \
             f"engines.json claude.models에 auto-verify 키 없음 (현재 키: {list(claude_models.keys())})"
-        assert claude_models["auto-verify"] == "opus", \
-            f"auto-verify 모델 값 오류: {claude_models['auto-verify']!r} (기대: 'opus')"
+        assert claude_models["auto-verify"] == "sonnet", \
+            f"auto-verify 모델 값 오류: {claude_models['auto-verify']!r} (기대: 'sonnet')"
 
         codex_models = data.get("codex", {}).get("models", {})
         assert "auto-verify" in codex_models, \
@@ -349,7 +349,7 @@ class TestV2VerifyPromptFormat:
         """R: auto-verify 프롬프트 STATUS 줄이 중괄호 포맷인지 API 환경에서 검증"""
         from pathlib import Path
 
-        impl_py = Path(__file__).parents[4] / "service" / "wtools" / "common" / "tools" / "plan-runner" / "cli" / "impl.py"
+        impl_py = Path(__file__).parents[4] / "service" / "wtools" / "common" / "tools" / "plan-runner" / "cli" / "impl_pipeline_base.py"
         if not impl_py.exists():
             pytest.skip(f"impl.py 없음: {impl_py}")
 

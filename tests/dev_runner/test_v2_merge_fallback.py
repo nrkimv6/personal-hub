@@ -153,6 +153,27 @@ def test_detect_merged_but_not_done_no_plan_file_E():
     assert result is None
 
 
+def test_detect_merged_but_not_done_prefers_plans_worktree_path_R(tmp_path):
+    """R: Redis plan_file가 legacy docs/plan이어도 plans/worktree 경로를 우선 사용."""
+    legacy_plan = tmp_path / "docs" / "plan" / "test.md"
+    legacy_plan.parent.mkdir(parents=True)
+    legacy_plan.write_text("> 상태: 구현중\n- [ ] todo\n", encoding="utf-8")
+
+    plans_plan = tmp_path / ".worktrees" / "plans" / "docs" / "plan" / "test.md"
+    plans_plan.parent.mkdir(parents=True)
+    plans_plan.write_text("> 상태: 머지대기\n- [ ] todo\n", encoding="utf-8")
+
+    r = _make_redis_mock(merge_status="merged", plan_file=str(legacy_plan), branch="plan/test-branch")
+    mod = _load_dr_merge()
+    mod.PROJECT_ROOT = tmp_path
+
+    with patch("plan_worktree_helpers.is_plan_archived", return_value=False):
+        result = mod.detect_merged_but_not_done("runner-plans", r)
+
+    assert result is not None
+    assert result["plan_file"] == str(plans_plan.resolve())
+
+
 def test_detect_merged_but_not_done_redis_error_E():
     """E(Error): Redis 연결 실패 시 예외 전파 않고 None 반환"""
     r = _strict_redis_mock()
@@ -252,9 +273,9 @@ def test_stream_output_v2_fallback_trigger_R(tmp_path):
     get_running_log_files()["runner-t1"] = tmp_path / "test.log"
     (tmp_path / "test.log").write_text("", encoding="utf-8")
 
-    with patch("_dr_plan_runner.detect_merged_but_not_done", return_value=detect_result) as mock_detect, \
-         patch("_dr_plan_runner._handle_post_merge_done") as mock_done, \
-         patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+    with patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=detect_result) as mock_detect, \
+         patch("_dr_stream_cleanup._handle_post_merge_done") as mock_done, \
+         patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup:
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t1")
 
@@ -281,9 +302,9 @@ def test_stream_output_v2_fallback_skip_B(tmp_path):
     get_running_log_files()["runner-t2"] = tmp_path / "test2.log"
     (tmp_path / "test2.log").write_text("", encoding="utf-8")
 
-    with patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None) as mock_detect, \
-         patch("_dr_plan_runner._handle_post_merge_done") as mock_done, \
-         patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+    with patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None) as mock_detect, \
+         patch("_dr_stream_cleanup._handle_post_merge_done") as mock_done, \
+         patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup:
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t2")
 
@@ -311,9 +332,9 @@ def test_stream_output_v2_fallback_error_still_cleanup_E(tmp_path):
     get_running_log_files()["runner-t3"] = tmp_path / "test3.log"
     (tmp_path / "test3.log").write_text("", encoding="utf-8")
 
-    with patch("_dr_plan_runner.detect_merged_but_not_done", return_value=detect_result), \
-         patch("_dr_plan_runner._handle_post_merge_done", side_effect=RuntimeError("done 실패")), \
-         patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+    with patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=detect_result), \
+         patch("_dr_stream_cleanup._handle_post_merge_done", side_effect=RuntimeError("done 실패")), \
+         patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup:
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t3")
 
@@ -347,9 +368,9 @@ def test_stream_output_exit_reason_rate_limit_marks_failed_R(tmp_path):
 
     with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
          patch("_dr_plan_runner.get_running_log_files", return_value={}), \
-         patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
-         patch("_dr_plan_runner._cleanup_process_state"), \
-         patch("_dr_plan_runner._do_inline_merge"):
+         patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_stream_cleanup._cleanup_process_state"), \
+         patch("_dr_stream_cleanup._do_inline_merge"):
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t4")
 
@@ -384,9 +405,9 @@ def test_stream_output_merge_requested_but_rate_limit_skips_merge_R(tmp_path):
 
     with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
          patch("_dr_plan_runner.get_running_log_files", return_value={}), \
-         patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
-         patch("_dr_plan_runner._cleanup_process_state"), \
-         patch("_dr_plan_runner._do_inline_merge") as mock_inline_merge:
+         patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_stream_cleanup._cleanup_process_state"), \
+         patch("_dr_stream_cleanup._do_inline_merge") as mock_inline_merge:
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t5")
 
@@ -422,9 +443,9 @@ def test_stream_output_exit_reason_lookup_error_marks_failed_R(tmp_path):
 
     with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
          patch("_dr_plan_runner.get_running_log_files", return_value={}), \
-         patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
-         patch("_dr_plan_runner._cleanup_process_state"), \
-         patch("_dr_plan_runner._do_inline_merge"):
+         patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_stream_cleanup._cleanup_process_state"), \
+         patch("_dr_stream_cleanup._do_inline_merge"):
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t6")
 
@@ -463,9 +484,9 @@ def test_stream_output_missing_exit_reason_marks_failed_R(tmp_path):
 
     with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
          patch("_dr_plan_runner.get_running_log_files", return_value={}), \
-         patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
-         patch("_dr_plan_runner._cleanup_process_state"), \
-         patch("_dr_plan_runner._do_inline_merge"):
+         patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_stream_cleanup._cleanup_process_state"), \
+         patch("_dr_stream_cleanup._do_inline_merge"):
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, "runner-t7")
 
@@ -981,9 +1002,9 @@ def test_stream_output_merge_requested_pre_review_stopped_blocks_inline_merge_R(
     get_running_log_files()[runner_id] = tmp_path / "pre.log"
     (tmp_path / "pre.log").write_text("", encoding="utf-8")
 
-    with patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
-         patch("_dr_plan_runner._do_inline_merge") as mock_inline_merge, \
-         patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+    with patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_stream_cleanup._do_inline_merge") as mock_inline_merge, \
+         patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup:
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, runner_id)
 
@@ -1021,9 +1042,9 @@ def test_stream_output_merge_requested_post_review_stopped_keeps_inline_merge_R(
     get_running_log_files()[runner_id] = tmp_path / "post.log"
     (tmp_path / "post.log").write_text("", encoding="utf-8")
 
-    with patch("_dr_plan_runner.detect_merged_but_not_done", return_value=None), \
-         patch("_dr_plan_runner._do_inline_merge") as mock_inline_merge, \
-         patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+    with patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_stream_cleanup._do_inline_merge") as mock_inline_merge, \
+         patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup:
         from _dr_plan_runner import _stream_output
         _stream_output(mock_proc, log_handle, mock_redis, runner_id)
 

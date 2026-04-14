@@ -18,7 +18,7 @@ from app.modules.claude_worker.services.llm_service import LLMService
 logger = logging.getLogger(__name__)
 
 
-def save_plan_archive_result(db: Session, request, result: dict) -> None:
+def save_plan_archive_result(db: Session, request, result: dict) -> bool:
     """plan_archive_analyze caller_type 결과 저장
 
     LLM 결과에서 category, tags, summary, superseded_by 추출 →
@@ -34,7 +34,7 @@ def save_plan_archive_result(db: Session, request, result: dict) -> None:
         record = db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
         if not record:
             logger.error(f"save_plan_archive_result: record not found for hash={filename_hash}")
-            return
+            return False
 
         llm_result = result.get("result") or {}
 
@@ -68,6 +68,13 @@ def save_plan_archive_result(db: Session, request, result: dict) -> None:
         if scope is not None:
             record.scope = json.dumps(scope, ensure_ascii=False) if isinstance(scope, list) else scope
 
+        if not record.raw_content and record.file_path:
+            try:
+                content = Path(record.file_path).read_text(encoding="utf-8")
+                record.raw_content = content
+            except Exception:
+                pass
+
         record.llm_processed_at = datetime.now()
         record.updated_at = datetime.now()
         db.commit()
@@ -77,14 +84,74 @@ def save_plan_archive_result(db: Session, request, result: dict) -> None:
         if category:
             _maybe_queue_requirements_sync(db, category)
 
+        # dev-guide staleness 자동 감지
+        _maybe_flag_guide_staleness(db, record.file_path)
+
         # 반복 감지 트리거
         if record.intent and record.scope:
             detect_recurrence(db, record)
+        
+        return True
     except Exception as e:
         logger.error(f"save_plan_archive_result error: {e}", exc_info=True)
+        db.rollback()
+        return False
 
 
-def save_requirements_sync_result(db: Session, request, result: dict) -> None:
+def build_devguide_staleness_report(db: Session) -> list:
+    """dev-guide staleness 리포트 생성.
+
+    PlanRecordService.get_guide_status()로 가이드별 pending_count 조회 →
+    pending > 0인 가이드만 필터.
+
+    Returns:
+        [{guide, pending_count, pending_archives: [{file_path, summary}]}]
+    """
+    try:
+        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+        statuses = PlanRecordService(db).get_guide_status()
+        return [
+            {
+                "guide": s["guide"],
+                "pending_count": s["pending_count"],
+                "pending_archives": [
+                    {"file_path": a["file_path"], "summary": a["summary"]}
+                    for a in s.get("pending_archives", [])
+                ],
+            }
+            for s in statuses
+            if s.get("pending_count", 0) > 0
+        ]
+    except Exception as e:
+        logger.error(f"build_devguide_staleness_report error: {e}", exc_info=True)
+        return []
+
+
+def save_devguide_staleness_result(db: Session, report: list) -> bool:
+    """dev-guide staleness 리포트를 PlanEvent로 저장.
+
+    Args:
+        db: SQLAlchemy Session
+        report: build_devguide_staleness_report() 반환값
+    """
+    try:
+        from app.models.plan_record import PlanEvent
+        event = PlanEvent(
+            plan_record_id=None,  # 시스템 이벤트 — plan_record_id nullable 허용
+            event_type="devguide_staleness",
+            detail={"guides": report},
+        )
+        db.add(event)
+        db.commit()
+        logger.info(f"save_devguide_staleness_result: saved event with {len(report)} guides")
+        return True
+    except Exception as e:
+        logger.error(f"save_devguide_staleness_result error: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
+def save_requirements_sync_result(db: Session, request, result: dict) -> bool:
     """plan_requirements_sync caller_type 결과 저장
 
     LLM 결과에서 요구사항 텍스트 추출 →
@@ -108,19 +175,21 @@ def save_requirements_sync_result(db: Session, request, result: dict) -> None:
 
         if not requirements_text:
             logger.warning(f"save_requirements_sync_result: empty requirements for category={category}")
-            return
+            return False
 
         # docs/requirements/ 디렉토리 생성
         from pathlib import Path
-        base_dir = Path(__file__).parent.parent.parent.parent  # monitor-page root
+        base_dir = Path(__file__).parent.parent.parent.parent.parent  # monitor-page root
         req_dir = base_dir / "docs" / "requirements"
         req_dir.mkdir(parents=True, exist_ok=True)
 
         req_file = req_dir / f"{category}.md"
         req_file.write_text(requirements_text, encoding="utf-8")
         logger.info(f"save_requirements_sync_result: written {req_file}")
+        return True
     except Exception as e:
         logger.error(f"save_requirements_sync_result error: {e}", exc_info=True)
+        return False
 
 
 def build_plan_analyze_prompt(
@@ -285,6 +354,75 @@ def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
         return False
 
 
+def _maybe_flag_guide_staleness(db: Session, file_path: str) -> bool:
+    """archive 분석 완료 후 관련 가이드의 staleness 자동 감지.
+
+    file_path의 태그와 meta.yaml의 owns_archive_tags 교차 →
+    pending_count >= THRESHOLD 시 PlanEvent(devguide_staleness) 생성.
+
+    Args:
+        db: SQLAlchemy Session
+        file_path: 방금 archive된 plan 파일 경로
+
+    Returns:
+        True if PlanEvent가 새로 생성됨, False otherwise
+    """
+    THRESHOLD = 3
+    try:
+        from app.shared.wiki_tags import extract_wiki_tags, load_whitelist, load_meta_yaml
+        from app.models.plan_record import PlanEvent
+        from pathlib import Path as _Path
+        from sqlalchemy import and_
+
+        whitelist = load_whitelist()
+        meta = load_meta_yaml()
+        tags = set(extract_wiki_tags(_Path(file_path).name, whitelist))
+
+        created = False
+        for guide_name, guide_meta in meta.items():
+            owns = set(guide_meta.get("owns_archive_tags") or [])
+            if not (tags & owns):
+                continue
+            last_scan_str = guide_meta.get("last_archive_scan") or ""
+            try:
+                from datetime import datetime as _dt
+                last_scan = _dt.strptime(last_scan_str, "%Y-%m-%d") if last_scan_str else None
+            except ValueError:
+                last_scan = None
+
+            if not last_scan:
+                continue
+
+            # pending_count 계산: last_scan 이후 archived_at AND 태그 매칭
+            records = db.query(PlanRecord).filter(
+                and_(
+                    PlanRecord.archived_at.isnot(None),
+                    PlanRecord.archived_at > last_scan,
+                )
+            ).all()
+            pending_count = 0
+            for rec in records:
+                fname = _Path(rec.file_path).name
+                rtags = set(extract_wiki_tags(fname, whitelist))
+                if rtags & owns:
+                    pending_count += 1
+
+            if pending_count >= THRESHOLD:
+                event = PlanEvent(
+                    plan_record_id=None,
+                    event_type="devguide_staleness",
+                    detail={"guide": guide_name, "pending_count": pending_count},
+                )
+                db.add(event)
+                db.commit()
+                logger.info(f"_maybe_flag_guide_staleness: flagged guide={guide_name} pending={pending_count}")
+                created = True
+        return created
+    except Exception as e:
+        logger.error(f"_maybe_flag_guide_staleness error: {e}", exc_info=True)
+        return False
+
+
 # ──────────────────────────────────────────────
 # Phase 2: 반복 감지 로직
 # ──────────────────────────────────────────────
@@ -433,7 +571,7 @@ scope 겹침이 있더라도 intent가 완전히 다른 문제라면 is_recurren
     return prompt
 
 
-def save_recurrence_check_result(db: Session, request, result: dict) -> None:
+def save_recurrence_check_result(db: Session, request, result: dict) -> bool:
     """plan_recurrence_check caller_type 결과 저장
 
     is_recurrence=True 시 superseded_by, chain_root_hash, recurrence_count 설정
@@ -443,7 +581,7 @@ def save_recurrence_check_result(db: Session, request, result: dict) -> None:
         record = db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
         if not record:
             logger.error(f"save_recurrence_check_result: record not found hash={filename_hash}")
-            return
+            return False
 
         llm_result = result.get("result") or {}
         if isinstance(llm_result, str):
@@ -483,8 +621,12 @@ def save_recurrence_check_result(db: Session, request, result: dict) -> None:
                 logger.warning(f"save_recurrence_check_result: matched_record not found hash={matched_hash}")
         else:
             logger.info(f"save_recurrence_check_result: no recurrence detected hash={filename_hash[:8]}")
+        
+        return True
     except Exception as e:
         logger.error(f"save_recurrence_check_result error: {e}", exc_info=True)
+        db.rollback()
+        return False
 
 
 # ──────────────────────────────────────────────
@@ -594,7 +736,7 @@ def build_recurrence_suggest_prompt(chain_records: list) -> str:
     return prompt
 
 
-def save_recurrence_suggest_result(db: Session, request, result: dict) -> None:
+def save_recurrence_suggest_result(db: Session, request, result: dict) -> bool:
     """plan_recurrence_suggest caller_type 결과 저장
 
     chain_root_hash 기준으로 recurrence_count 가장 높은 record에 저장
@@ -617,7 +759,7 @@ def save_recurrence_suggest_result(db: Session, request, result: dict) -> None:
 
         if not latest_record:
             logger.error(f"save_recurrence_suggest_result: no record found for root={chain_root}")
-            return
+            return False
 
         llm_result = result.get("result") or {}
         if isinstance(llm_result, str):
@@ -635,5 +777,8 @@ def save_recurrence_suggest_result(db: Session, request, result: dict) -> None:
         latest_record.updated_at = datetime.now()
         db.commit()
         logger.info(f"save_recurrence_suggest_result: saved for record id={latest_record.id}")
+        return True
     except Exception as e:
         logger.error(f"save_recurrence_suggest_result error: {e}", exc_info=True)
+        db.rollback()
+        return False

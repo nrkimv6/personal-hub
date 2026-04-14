@@ -11,7 +11,27 @@ import requests
 
 ADMIN_BASE = "http://localhost:8001"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "browser_workers.py"
+BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "services" / "browser_workers.py"
+
+
+def _is_http_env_available() -> bool:
+    try:
+        requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=1)
+    except Exception:
+        return False
+    try:
+        r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+        r.ping()
+        r.close()
+    except Exception:
+        return False
+    return True
+
+
+pytestmark = pytest.mark.skipif(
+    not _is_http_env_available(),
+    reason="admin api 또는 Redis가 실행 중이 아닙니다.",
+)
 
 
 def _assert_no_redis_connection_leak(
@@ -35,26 +55,6 @@ def _assert_no_redis_connection_leak(
     )
 
 
-def _server_available() -> bool:
-    try:
-        r = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=3)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-def _redis_available() -> bool:
-    try:
-        r = redis.Redis(host="localhost", port=6379, socket_connect_timeout=2)
-        r.ping()
-        r.close()
-        return True
-    except Exception:
-        return False
-
-
-@pytest.mark.skipif(not _server_available(), reason="Admin API not available")
-@pytest.mark.skipif(not _redis_available(), reason="Redis not available")
 def test_sse_events_connection_cleanup_http():
     """GET /api/v1/dev-runner/events SSE 연결 → 초기 이벤트 수신 → close → 연결 수 검증."""
     r = redis.Redis(host="localhost", port=6379, decode_responses=True)
@@ -87,8 +87,6 @@ def test_sse_events_connection_cleanup_http():
     r.close()
 
 
-@pytest.mark.skipif(not _server_available(), reason="Admin API not available")
-@pytest.mark.skipif(not _redis_available(), reason="Redis not available")
 def test_sse_log_stream_nonexistent_runner_http():
     """GET /api/v1/dev-runner/logs/stream?runner_id=nonexistent → close → 누수 없음."""
     r = redis.Redis(host="localhost", port=6379, decode_responses=True)
@@ -115,7 +113,6 @@ def test_sse_log_stream_nonexistent_runner_http():
     r.close()
 
 
-@pytest.mark.skipif(not _server_available(), reason="Admin API not available")
 def test_diagnostics_redis_connection_count_http():
     """GET /api/v1/dev-runner/logs/diagnostics → 'Redis 연결 수' step 포함 확인."""
     resp = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/logs/diagnostics", timeout=10)
@@ -130,14 +127,13 @@ def test_diagnostics_redis_connection_count_http():
     assert any(c.isdigit() for c in conn_step["detail"]), f"연결 수 값 없음: {conn_step['detail']}"
 
 
-@pytest.mark.skipif(not _server_available(), reason="Admin API not available")
 def test_redis_cleanup_dry_run_http():
     """redis-cleanup CLI 커맨드 dry-run 검증."""
     import subprocess
     try:
         result = subprocess.run(
             ["D:\\work\\project\\tools\\monitor-page\\.venv\\Scripts\\python.exe",
-             "D:\\work\\project\\tools\\monitor-page\\scripts\\browser_workers.py",
+             "D:\\work\\project\\tools\\monitor-page\\scripts\\services\\browser_workers.py",
              "redis-cleanup"],
             capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace",
         )
@@ -149,7 +145,6 @@ def test_redis_cleanup_dry_run_http():
     assert "좀비" in output or "Zombie" in output or "redis-cleanup" in output.lower() or "Cleanup" in output
 
 
-@pytest.mark.skipif(not _server_available(), reason="Admin API not available")
 def test_http_frontend_restart_frontend_admin_keeps_api_alive():
     """restart-frontend(admin) 이후 /dev-runner/runners가 200 유지되는지 검증."""
     before = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=5)

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import {
     slideScannerApi,
     type MobileSyncDevice,
@@ -7,7 +7,7 @@
   } from '$lib/api/slide-scanner';
   import { toast } from '$lib/stores/toast';
 
-  const dispatch = createEventDispatcher<{ syncCompleted: void }>();
+  export let onsynccompleted: (() => void) | undefined = undefined;
 
   let devices: MobileSyncDevice[] = [];
   let syncStatus: MobileSyncStatusResponse | null = null;
@@ -56,7 +56,7 @@
       const nowFinishedAt = response.last_finished_at ?? '';
       if (wasRunning && !nowRunning && nowFinishedAt && nowFinishedAt !== lastFinishedAt) {
         lastFinishedAt = nowFinishedAt;
-        dispatch('syncCompleted');
+        onsynccompleted?.();
       }
       wasRunning = nowRunning;
     } catch (error) {

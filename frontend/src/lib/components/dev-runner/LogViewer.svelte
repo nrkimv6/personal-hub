@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
+	import { shouldShowMergeCompletionBanner } from '$lib/utils/dev-runner-merge-banner';
 
 	interface Props {
 		runnerId: string;
@@ -58,6 +59,7 @@
 	let redisAvailable = $state(false);
 	let pendingStale = $state(false);
 	let exitBanner = $state<{ show: boolean; reason: string }>({ show: false, reason: 'completed' }); // runner 종료 배너
+	let failureBanner = $state<{ show: boolean; message: string } | null>(null); // FAILURE 태그 sticky 배너
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
 	const PREVIEW_LINE_LIMIT = 3;
@@ -78,6 +80,8 @@
 		DONE: { text: 'text-green-400', bg: 'bg-green-500/20' },
 		RESULT: { text: 'text-emerald-700', bg: 'bg-emerald-900/20' },
 		ERROR: { text: 'text-red-400', bg: 'bg-red-500/20' },
+		FAILURE: { text: 'text-red-300', bg: 'bg-red-600/38' },
+		HOLD: { text: 'text-yellow-300', bg: 'bg-yellow-600/20' },
 		INFO: { text: 'text-gray-500', bg: 'bg-transparent' },
 		SYSTEM: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
 		WARN: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
@@ -317,6 +321,11 @@
 			batchPlans = [];
 		}
 
+		// FAILURE 태그 감지 → sticky 배너 갱신
+		if (parsed.tag === 'FAILURE' && !isStale) {
+			failureBanner = { show: true, message: parsed.message };
+		}
+
 		pushLine(parsed);
 	}
 
@@ -413,6 +422,12 @@
 		// Redis 재연결 시 connected 이벤트로 복구
 		eventSource.addEventListener('connected', () => {
 			redisAvailable = true;
+			// running 상태에서 connected 재수신 시 잘못된 exitBanner를 클리어한다.
+			// (skip-only 사이클이 FAILED sentinel을 publish한 경우 다음 사이클 시작 전 배너 제거)
+			// 진짜 종료 후 stale connected 이벤트로 배너가 사라지는 부작용 방지를 위해 running 조건 사용.
+			if (running && exitBanner.show) {
+				exitBanner = { show: false, reason: 'completed' };
+			}
 		});
 		// runner 종료 신호 — 배너 표시 후 재연결 중지
 		eventSource.addEventListener('completed', (event: MessageEvent) => {
@@ -581,13 +596,40 @@
 
 	// ── managed 모드 공개 API ───────────────────────────────────────────────────
 
+	let _catchUpInProgress = false;
+	let _pendingInjectBuffer: string[] = [];
+
 	export function injectLine(payload: string | { text: string; meta?: Record<string, unknown> }) {
-		if (typeof payload === 'string') {
-			addLine(payload, false);
+		const text = typeof payload === 'string' ? payload : payload?.text;
+		if (typeof text !== 'string') return;
+		if (_catchUpInProgress) {
+			_pendingInjectBuffer.push(text);
 			return;
 		}
-		if (payload && typeof payload.text === 'string') {
-			addLine(payload.text, false);
+		addLine(text, false);
+	}
+
+	export async function catchUp(): Promise<void> {
+		if (mode !== 'managed' || _catchUpInProgress) return;
+		_catchUpInProgress = true;
+		try {
+			await loadRecent();
+			// loadRecent 후 파일의 마지막 라인 이후에 도착한 펜딩 라인만 flush
+			if (_pendingInjectBuffer.length > 0) {
+				const lastFileLine = lines.length > 0 ? lines[lines.length - 1].raw : null;
+				let startIdx = 0;
+				if (lastFileLine) {
+					const matchIdx = _pendingInjectBuffer.lastIndexOf(lastFileLine);
+					if (matchIdx >= 0) startIdx = matchIdx + 1;
+				}
+				for (let i = startIdx; i < _pendingInjectBuffer.length; i++) {
+					addLine(_pendingInjectBuffer[i], false);
+				}
+			}
+		} finally {
+			_pendingInjectBuffer = [];
+			_catchUpInProgress = false;
+			requestAnimationFrame(() => scrollToBottom());
 		}
 	}
 
@@ -598,14 +640,12 @@
 		connected = 'disconnected';
 	}
 
-	function shouldShowMergeCompletionBanner(reason?: string | null, status?: string | null): boolean {
-		if (status === 'failed') return true;
-		if (!reason) return false;
-		const normalized = getExitReasonDisplay(reason).reason;
-		return !['completed', 'stopped', 'archived', 'on_hold', 'unknown'].includes(normalized);
-	}
-
 	export function injectMergeCompleted(reason?: string, status?: string) {
+		// running 상태에서는 배너 표시 건너뜀 — 잘못된 FAILED sentinel이 흘러와도 깜빡임 방지
+		if (running) {
+			onMergeCompleted?.(reason, status);
+			return;
+		}
 		onMergeCompleted?.(reason, status);
 		if (shouldShowMergeCompletionBanner(reason, status)) {
 			injectCompleted(reason ?? 'merge_failed');
@@ -703,6 +743,19 @@
 		{@const exitDisplay = getExitReasonDisplay(exitBanner.reason)}
 		<div class={exitDisplay.bannerClass}>
 			<span>{exitDisplay.bannerText}</span>
+		</div>
+	{/if}
+
+	{#if failureBanner?.show}
+		<div class="sticky top-0 z-10 flex items-center justify-between gap-2 px-3 py-1.5 bg-red-900/80 border-l-4 border-red-500 text-red-200 text-xs font-mono">
+			<span class="font-bold text-red-300">[FAILURE]</span>
+			<span class="flex-1 min-w-0 truncate">{failureBanner.message}</span>
+			<button
+				type="button"
+				onclick={() => { if (failureBanner) failureBanner = { ...failureBanner, show: false }; }}
+				class="shrink-0 text-red-400 hover:text-red-200 leading-none"
+				aria-label="배너 닫기"
+			>✕</button>
 		</div>
 	{/if}
 
@@ -864,12 +917,12 @@
 					{@const style = getTagStyle(line.tag)}
 					{@const lineExpanded = isExpanded(line.id)}
 					{@const lineCollapsed = shouldCollapseMessage(line.message)}
-					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
+					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : line.tag === 'FAILURE' ? 'bg-red-950/70 border-l-2 border-red-500 -mx-3 px-3 rounded' : line.tag === 'HOLD' ? 'bg-yellow-950/40 border-l-2 border-yellow-500 -mx-3 px-3 rounded' : ''}">
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 						</span>
-						<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">
+						<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {line.tag === 'FAILURE' ? 'text-red-300 font-bold' : line.tag === 'HOLD' ? 'text-yellow-300 font-bold' : line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">
 							{lineCollapsed && !lineExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
 						</span>
 						{#if lineCollapsed}

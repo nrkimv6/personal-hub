@@ -3,6 +3,7 @@
 	import ProxyDashboard from '$lib/components/browsers/ProxyDashboard.svelte';
 	import ProxyList from '$lib/components/browsers/ProxyList.svelte';
 	import ProxyUsage from '$lib/components/browsers/ProxyUsage.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	type TabType = 'profiles' | 'proxy' | 'proxy-list' | 'usage';
 	let activeTab: TabType = 'profiles';
@@ -17,21 +18,7 @@
 
 <div>
 
-	<!-- 탭 네비게이션 -->
-	<div class="border-b border-border mb-6">
-		<nav class="flex space-x-8">
-			{#each tabs as tab}
-				<button
-					class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === tab.id
-						? 'border-blue-500 text-primary'
-						: 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
-					onclick={() => (activeTab = tab.id)}
-				>
-					{tab.label}
-				</button>
-			{/each}
-		</nav>
-	</div>
+	<TabNav {tabs} bind:activeTab variant="secondary" />
 
 	<!-- 탭 컨텐츠 -->
 	{#if activeTab === 'profiles'}

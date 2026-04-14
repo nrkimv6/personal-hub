@@ -29,6 +29,11 @@ export const gitReposApi = {
     return request<GitRepo[]>(BASE);
   },
 
+  /** 레포지토리 단건 조회 */
+  getRepo(id: number): Promise<GitRepo> {
+    return request<GitRepo>(`${BASE}/${id}`);
+  },
+
   /** 레포지토리 등록 */
   createRepo(data: GitRepoCreate): Promise<GitRepo> {
     return request<GitRepo>(BASE, {

@@ -48,7 +48,9 @@ router = APIRouter(prefix="/api/v1/proxy", tags=["proxy"])
 
 
 @router.get("/status")
-async def get_proxy_status() -> Dict[str, Any]:
+async def get_proxy_status(
+    method: str = Query("get", description="조회 기준 메서드 (get/post)"),
+) -> Dict[str, Any]:
     """
     프록시 매니저 상태를 조회합니다.
 
@@ -68,10 +70,12 @@ async def get_proxy_status() -> Dict[str, Any]:
         return {
             "enabled": settings.PROXY_ENABLED,
             "initialized": False,
+            "request_method": method,
+            "by_method": {},
             "message": "프록시 매니저가 초기화되지 않았습니다"
         }
 
-    status = proxy_manager.get_status()
+    status = proxy_manager.get_status(method)
     status["enabled"] = settings.PROXY_ENABLED
     return status
 
@@ -110,7 +114,9 @@ async def initialize_proxy() -> Dict[str, Any]:
 
 
 @router.post("/refresh")
-async def refresh_proxy_pool() -> Dict[str, Any]:
+async def refresh_proxy_pool(
+    method: str = Query("get", description="조회 기준 메서드 (get/post)"),
+) -> Dict[str, Any]:
     """
     프록시 풀을 새로고침합니다.
 
@@ -126,13 +132,13 @@ async def refresh_proxy_pool() -> Dict[str, Any]:
 
     try:
         # 파일 리로드 및 풀 새로고침
-        await proxy_manager.check_and_reload()
-        await proxy_manager.refresh_active_pool()
+        await proxy_manager.check_and_reload(method)
+        await proxy_manager.refresh_active_pool(request_method=method)
 
         return {
             "success": True,
             "message": "프록시 풀이 새로고침되었습니다",
-            "status": proxy_manager.get_status()
+            "status": proxy_manager.get_status(method)
         }
 
     except Exception as e:
@@ -160,7 +166,9 @@ async def disable_proxy() -> Dict[str, Any]:
 
 
 @router.get("/list")
-async def get_proxy_list() -> Dict[str, Any]:
+async def get_proxy_list(
+    method: str = Query("get", description="조회 기준 메서드 (get/post)"),
+) -> Dict[str, Any]:
     """
     현재 로드된 프록시 목록을 조회합니다. (파일 기반, legacy)
     """
@@ -173,17 +181,21 @@ async def get_proxy_list() -> Dict[str, Any]:
         )
 
     return {
+        "request_method": method,
         "total": len(proxy_manager.proxy_list),
         "active_pool": proxy_manager.active_pool,
         "blacklisted": list(proxy_manager.blacklist.keys()),
-        "all_proxies": proxy_manager.proxy_list
+        "all_proxies": proxy_manager.proxy_list,
     }
 
 
 # ============== DB 기반 API ==============
 
 @router.get("/db/stats", response_model=ProxyStatsResponse)
-async def get_proxy_db_stats(db: Session = Depends(get_proxy_db)) -> ProxyStatsResponse:
+async def get_proxy_db_stats(
+    method: str = Query("get", description="조회 기준 메서드 (get/post)"),
+    db: Session = Depends(get_proxy_db),
+) -> ProxyStatsResponse:
     """
     프록시 전체 통계를 조회합니다. (DB 기반)
 
@@ -201,7 +213,7 @@ async def get_proxy_db_stats(db: Session = Depends(get_proxy_db)) -> ProxyStatsR
         - today_success_rate: 오늘 성공률
     """
     service = get_proxy_db_service(db)
-    return service.get_stats()
+    return service.get_stats(request_method=method)
 
 
 @router.get("/db/list", response_model=ProxyListResponse)
@@ -214,6 +226,7 @@ async def get_proxy_db_list(
     sort_order: str = Query("desc", description="정렬 방향 (asc/desc)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     page_size: int = Query(50, ge=1, le=100, description="페이지당 항목 수"),
+    method: str = Query("get", description="조회 기준 메서드 (get/post)"),
     db: Session = Depends(get_proxy_db),
 ) -> ProxyListResponse:
     """
@@ -228,6 +241,7 @@ async def get_proxy_db_list(
         sort_order=sort_order,
         page=page,
         page_size=page_size,
+        request_method=method,
     )
     service = get_proxy_db_service(db)
     return service.get_list(params)
@@ -237,14 +251,15 @@ async def get_proxy_db_list(
 async def get_top_proxies(
     limit: int = Query(10, ge=1, le=100, description="조회할 프록시 수"),
     status: str = Query("active", description="상태 필터"),
+    method: str = Query("get", description="조회 기준 메서드 (get/post)"),
     db: Session = Depends(get_proxy_db),
 ) -> List[ProxyResponse]:
     """
     상위 프록시 목록을 조회합니다. (우선순위순)
     """
     service = get_proxy_db_service(db)
-    proxies = service.get_top_proxies(limit=limit, status=status)
-    return [ProxyResponse.model_validate(p) for p in proxies]
+    proxies = service.get_top_proxies(limit=limit, status=status, request_method=method)
+    return [ProxyResponse.from_proxy(p, request_method=method) for p in proxies]
 
 
 @router.get("/db/runs", response_model=List[ProxyCollectionRunResponse])
@@ -265,13 +280,14 @@ async def get_collection_runs(
 async def get_proxy_detail(
     proxy_id: int,
     history_limit: int = Query(50, ge=1, le=200, description="검증 이력 조회 수"),
+    method: str = Query("get", description="조회 기준 메서드 (get/post)"),
     db: Session = Depends(get_proxy_db),
 ) -> ProxyDetailResponse:
     """
     프록시 상세 정보를 조회합니다. (검증 이력 포함)
     """
     service = get_proxy_db_service(db)
-    detail = service.get_detail(proxy_id, history_limit=history_limit)
+    detail = service.get_detail(proxy_id, history_limit=history_limit, request_method=method)
 
     if not detail:
         raise HTTPException(status_code=404, detail="프록시를 찾을 수 없습니다")

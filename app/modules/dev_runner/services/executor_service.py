@@ -1,11 +1,7 @@
 """subprocess 실행 서비스 - Redis 기반 크로스 세션 실행"""
 
 import json
-import os
 import re
-import signal
-import subprocess
-import sys
 import time
 import traceback
 import uuid
@@ -20,8 +16,15 @@ import redis.asyncio as aioredis
 from fastapi import HTTPException
 
 from app.config import logger
+from app.core.config import PROJECT_ROOT
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.plan_service import plan_service
+from app.modules.claude_worker.services.profile_store import (
+    get_selected as get_selected_profile,
+    get_by_name as get_profile_by_name,
+    SUPPORTED_ENGINES as PROFILE_SUPPORTED_ENGINES,
+)
+from app.modules.claude_worker.services.profile_env import ENGINE_ENV_KEYS
 from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_history_path
 from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.services.visibility import is_visible_runner
@@ -31,8 +34,9 @@ from app.modules.dev_runner.services.redis_connection import (
     RedisConnection,
     REDIS_HOST, REDIS_PORT, REDIS_DB,
     COMMANDS_KEY, RESULTS_KEY, RUNNER_KEY_PREFIX,
-    ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL,
+    ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL, MAX_RECENT_RUNNERS,
     COMMAND_TIMEOUT, RUNNER_KEY_SUFFIXES,
+    SESSION_ID_KEY_PREFIX,
 )
 from app.modules.dev_runner.services.runner_state import RunnerState
 from app.modules.dev_runner.services.merge_service import MergeService
@@ -160,6 +164,42 @@ class ExecutorService:
 
         return resolved_engine, resolved_fix_engine
 
+    @staticmethod
+    def _resolve_profile(engine: str, profile_name: str | None) -> dict:
+        """engine + profile_name으로 profile env 정보 resolve.
+
+        Args:
+            engine: 실행 엔진 이름
+            profile_name: 프로필 이름 (None → 전역 선택 프로필)
+
+        Returns:
+            profile 관련 env dict:
+              {"profile": str, "profile_env_key": str|None,
+               "profile_config_dir": str|None, "profile_extra_env": dict}
+            engine이 PROFILE_SUPPORTED_ENGINES에 없으면 빈 dict 반환
+
+        Raises:
+            ValueError: profile_name 지정 시 해당 프로필이 없으면 전파
+        """
+        if engine not in PROFILE_SUPPORTED_ENGINES:
+            logger.warning(
+                f"[profile] engine={engine!r}는 프로필 미지원 (지원: {sorted(PROFILE_SUPPORTED_ENGINES)}), 스킵"
+            )
+            return {}
+
+        if profile_name:
+            profile = get_profile_by_name(engine, profile_name)
+        else:
+            profile = get_selected_profile(engine)
+
+        env_key = ENGINE_ENV_KEYS.get(engine)  # e.g. "CLAUDE_CONFIG_DIR" or None
+        return {
+            "profile": profile.name,
+            "profile_env_key": env_key,
+            "profile_config_dir": profile.config_dir,
+            "profile_extra_env": profile.extra_env or {},
+        }
+
     async def _get_runner_fields(self, rid: str, *fields: str) -> dict:
         result = {}
         for f in fields:
@@ -195,10 +235,11 @@ class ExecutorService:
         # 동시 실행 개수 제한 확인
         count = await self.async_redis.scard(ACTIVE_RUNNERS_KEY)
         settings = settings_service.get()
-        if count >= settings.max_concurrent_runners:
+        max_concurrent_runners = config.MAX_CONCURRENT_RUNNERS
+        if count >= max_concurrent_runners:
             raise HTTPException(
                 status_code=429,
-                detail=f"최대 {settings.max_concurrent_runners}개 동시 실행 가능 (현재 {count}개)"
+                detail=f"최대 {max_concurrent_runners}개 동시 실행 가능 (현재 {count}개)"
             )
 
         resolved_engine, resolved_fix_engine = self.resolve_run_engines(request, settings)
@@ -216,6 +257,33 @@ class ExecutorService:
             trigger = f"tc:{request.test_source}"
         else:
             trigger = request.trigger or "api"
+
+        # session_id: 유효한 UUID면 사용, 없거나 잘못된 형식이면 자동 발급
+        raw_session_id = (request.session_id or "").strip()
+        if raw_session_id:
+            try:
+                uuid.UUID(raw_session_id)
+                session_id = raw_session_id
+            except ValueError:
+                logger.warning(f"[session] invalid session_id format={raw_session_id!r}, issuing new UUID")
+                session_id = str(uuid.uuid4())
+        else:
+            session_id = str(uuid.uuid4())
+
+        # plan_records에 claude_session_id 저장 (plan_file 기반 조회)
+        if request.plan_file:
+            try:
+                from app.database import SessionLocal
+                from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+                _db = SessionLocal()
+                try:
+                    _svc = PlanRecordService(_db)
+                    _record = _svc.get_or_create(request.plan_file)
+                    _svc.update_claude_session_id(_record.id, session_id)
+                finally:
+                    _db.close()
+            except Exception as _e:
+                logger.warning(f"[session] plan_record claude_session_id 저장 실패: {_e}")
 
         # Redis 명령 생성
         command = {
@@ -238,6 +306,13 @@ class ExecutorService:
 
         command["engine"] = resolved_engine
         command["fix_engine"] = resolved_fix_engine
+
+        # profile resolve — ValueError → 400 (프로필 미존재)
+        try:
+            profile_data = self._resolve_profile(resolved_engine, request.profile)
+            command.update(profile_data)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         # 옵션 추가
         if request.max_cycles is not None:
@@ -267,6 +342,15 @@ class ExecutorService:
         if request.test_source:
             command["test_source"] = request.test_source
 
+        # fused 세션 ID 주입
+        command["session_id"] = session_id
+        if request.fused_session:
+            command["fused_session"] = True
+
+        logger.info(
+            f"[session] runner_id={runner_id} session_id={session_id} fused={request.fused_session}"
+        )
+
         # registered_paths에서 wtools 외부 경로 추출 (asyncio.to_thread로 이벤트 루프 블로킹 방지)
         if request.parallel:
             import asyncio
@@ -279,6 +363,11 @@ class ExecutorService:
                 command["ignored_plans"] = ",".join(ignored_paths)
 
         try:
+            # session_id를 Redis에 저장 (TTL 24h)
+            await self.async_redis.set(
+                f"{SESSION_ID_KEY_PREFIX}{runner_id}", session_id, ex=86400
+            )
+
             result_data = await self._send_command(command)
             if result_data is None:
                 await self._cleanup_runner_state(runner_id, reason="start_timeout")
@@ -313,6 +402,13 @@ class ExecutorService:
                         existing_exec_count = int(existing_exec_count_raw)
                     except (TypeError, ValueError):
                         existing_exec_count = None
+                # 같은 runner_id로 중복 start 시 기존 session_id 재사용 (정책: 세션 연속성 유지)
+                existing_session_id = await self.async_redis.get(f"{SESSION_ID_KEY_PREFIX}{existing_id}")
+                if not existing_session_id:
+                    logger.warning(
+                        f"[session] attached runner_id={existing_id} session_id not found in Redis, issuing new UUID"
+                    )
+                    existing_session_id = str(uuid.uuid4())
                 return RunStatusResponse(
                     running=True,
                     runner_id=existing_id,
@@ -325,6 +421,7 @@ class ExecutorService:
                     execution_count=existing_exec_count,
                     listener_alive=True,
                     redis_connected=True,
+                    session_id=existing_session_id,
                 )
 
             # Redis에서 per-runner 상태 조회
@@ -351,6 +448,7 @@ class ExecutorService:
                 execution_count=execution_count,
                 listener_alive=True,
                 redis_connected=True,
+                session_id=session_id,
             )
 
         except redis.ConnectionError:
@@ -537,6 +635,9 @@ class ExecutorService:
             except (TypeError, ValueError):
                 execution_count = None
 
+        # session_id 조회: 없으면 None (기존 runner 하위 호환)
+        session_id = await self.async_redis.get(f"{SESSION_ID_KEY_PREFIX}{runner_id}")
+
         return RunStatusResponse(
             runner_id=runner_id,
             running=running,
@@ -548,6 +649,7 @@ class ExecutorService:
             execution_count=execution_count,
             listener_alive=True,
             redis_connected=True,
+            session_id=session_id,
         )
 
     async def get_all_runners(self) -> list:
@@ -563,6 +665,8 @@ class ExecutorService:
                     # user/user:all: 만료되어도 dismiss 전까지 보존
                     continue
                 await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
+            # sorted set 크기 상한: invisible 정리 후 oldest-first로 MAX_RECENT_RUNNERS 초과분 제거
+            await self.async_redis.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
 
             # ACTIVE_RUNNERS_KEY + RECENT_RUNNERS_KEY 합집합으로 runner 목록 구성
             active_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
@@ -589,6 +693,16 @@ class ExecutorService:
                     merge_status = d["merge_status"]
                     branch = d["branch"]
                     trigger = d["trigger"]
+                    # trigger 미존재 시 recent-meta fallback (cleanup 후 타이밍 이슈 방어)
+                    if trigger is None:
+                        try:
+                            _recent_meta_raw = await self.async_redis.get(f"plan-runner:recent-meta:{rid}")
+                            if _recent_meta_raw:
+                                import json as _json
+                                _recent_meta = _json.loads(_recent_meta_raw)
+                                trigger = _recent_meta.get("trigger")
+                        except Exception:
+                            pass
                     exit_reason = d["exit_reason"]
                     stop_stage = d["stop_stage"]
                     error = d["error"]
@@ -758,44 +872,50 @@ class ExecutorService:
         return {"stopped": stopped}
 
     def restart_listener(self) -> dict:
-        """command-listener 프로세스를 재시작합니다.
+        """command-listener에 graceful-exit 시그널을 보내 재시작합니다.
 
-        1. Redis에서 기존 PID 조회 → 존재 시 SIGTERM 전송
-        2. 새 listener 프로세스 spawn
-        3. 최대 10초 동안 heartbeat 키 감지 대기
+        Session 0(SYSTEM)에서 직접 subprocess를 spawn하지 않고,
+        Redis LPUSH로 graceful-exit 명령을 전달합니다.
+        dev-runner-command-listener가 명령을 수신하면 clean exit하고,
+        Session 1에서 실행 중인 watchdog가 자동으로 재시작합니다.
+
+        1. Redis LPUSH로 graceful-exit 명령 전송
+        2. heartbeat가 "restarting"으로 변경될 때까지 대기 (최대 5초)
+        3. heartbeat가 정상 ISO 타임스탬프로 복구될 때까지 대기 (최대 15초)
         """
-        LISTENER_SCRIPT = Path(__file__).parent.parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
         HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
-        PID_KEY = "plan-runner:listener:pid"
 
-        # 기존 PID 종료
-        old_pid_str = self.redis_client.get(PID_KEY)
-        if old_pid_str:
-            try:
-                old_pid = int(old_pid_str)
-                os.kill(old_pid, signal.SIGTERM)
-                self.redis_client.delete(PID_KEY)
-            except (ProcessLookupError, PermissionError):
-                pass
-            time.sleep(1)
-
-        # 새 프로세스 spawn
-        python_exe = sys.executable
-        proc = subprocess.Popen(
-            [python_exe, str(LISTENER_SCRIPT)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        # graceful-exit 시그널 전송
+        self.redis_client.lpush(
+            COMMANDS_KEY,
+            json.dumps({
+                "action": "graceful-exit",
+                "source": "restart-listener-api",
+                "timestamp": datetime.now().isoformat(),
+            }),
         )
 
-        # heartbeat 감지 대기 (최대 10초)
-        deadline = time.time() + 10
+        # 단계 1: heartbeat → "restarting" 대기 (최대 5초)
+        deadline = time.time() + 5
         while time.time() < deadline:
             hb = self.redis_client.get(HEARTBEAT_KEY)
-            if hb:
-                return {"success": True, "new_pid": proc.pid, "message": "listener restarted"}
+            hb_str = hb.decode() if isinstance(hb, bytes) else (hb or "")
+            if hb_str == "restarting":
+                break
+            time.sleep(0.5)
+        else:
+            return {"success": False, "message": "listener graceful-exit 미확인: heartbeat가 'restarting'으로 전환되지 않음 (5초 타임아웃)"}
+
+        # 단계 2: heartbeat → 정상 ISO 타임스탬프 복구 대기 (최대 15초)
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            hb = self.redis_client.get(HEARTBEAT_KEY)
+            hb_str = hb.decode() if isinstance(hb, bytes) else (hb or "")
+            if hb_str and hb_str != "restarting":
+                return {"success": True, "message": "listener restarted"}
             time.sleep(0.5)
 
-        return {"success": False, "new_pid": proc.pid, "message": "heartbeat not detected within 10s"}
+        return {"success": False, "message": "listener heartbeat not recovered within 15s after graceful-exit"}
 
 
 # 싱글톤 인스턴스

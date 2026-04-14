@@ -129,10 +129,11 @@
 		<div class="card-body">
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 				<div class="form-control">
-					<label class="label">
+					<label class="label" for="target-filter">
 						<span class="label-text">대상</span>
 					</label>
 					<select
+						id="target-filter"
 						bind:value={targetFilter}
 						class="select select-bordered"
 					>

@@ -30,7 +30,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from plan_worktree_helpers import get_plan_completion
 
 # listener 로드용 mock
-_SCRIPT_PATH = _SCRIPTS_DIR / "dev-runner-command-listener.py"
+_SCRIPT_PATH = _SCRIPTS_DIR / "plan_runner" / "dev-runner-command-listener.py"
 _mock_noise = types.ModuleType("listener_noise_filter")
 _mock_noise.NOISE_BLOCK_MARKERS = []
 _mock_noise.is_noise_line = lambda line: False

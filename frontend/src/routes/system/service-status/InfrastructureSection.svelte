@@ -16,7 +16,8 @@
     stopDevRunner,
     resetDevRunner,
     startDevRunner,
-    removeStartup
+    removeStartup,
+    restartCommandListener
   }: InfrastructureSectionProps = $props();
 </script>
 
@@ -128,6 +129,11 @@
         <div class="mt-1 text-[10px] text-warning px-1 flex items-center gap-1">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><line x1="12" y1="8" x2="12" y2="12" stroke-width="2"/><line x1="12" y1="16" x2="12.01" y2="16" stroke-width="2"/></svg>
           Command Listener 미실행
+          <button
+            onclick={() => restartCommandListener()}
+            disabled={actionLoading === 'restart-listener'}
+            class="ml-1 h-4 px-1 text-[9px] rounded border border-warning text-warning hover:bg-warning hover:text-warning-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >재시작</button>
         </div>
       {/if}
     </div>

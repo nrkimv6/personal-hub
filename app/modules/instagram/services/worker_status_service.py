@@ -8,6 +8,8 @@ import os
 
 from sqlalchemy.orm import Session
 
+from app.shared.worker.health_redis import WorkerHealthRedis
+
 from app.models import InstagramWorkerStatus, TaskScheduleRun, CrawlRequest
 
 logger = logging.getLogger("instagram.worker_status")
@@ -158,7 +160,6 @@ class WorkerStatusService:
             worker.current_state = state
             worker.current_account = account
             worker.current_run_id = run_id
-            worker.last_heartbeat = datetime.now()
             self.db.commit()
             logger.debug(f"Worker state updated: {state}, account={account}")
 
@@ -195,7 +196,7 @@ class WorkerStatusService:
         """
         return self.db.query(InstagramWorkerStatus).filter(
             InstagramWorkerStatus.is_alive == True
-        ).order_by(InstagramWorkerStatus.last_heartbeat.desc()).first()
+        ).order_by(InstagramWorkerStatus.started_at.desc()).first()
 
     def check_health(self) -> dict:
         """워커 헬스체크를 수행합니다.
@@ -221,23 +222,32 @@ class WorkerStatusService:
                 "message": "No active worker found",
             }
 
-        now = datetime.now()
-        age_seconds = int((now - worker.last_heartbeat).total_seconds())
+        # Redis TTL 기반 판정 (worker_type 필드 없으므로 scheduled/ondemand 순차 조회)
+        redis_health = WorkerHealthRedis.check("scheduled") or WorkerHealthRedis.check("ondemand")
 
-        if age_seconds <= HEALTHY_THRESHOLD:
-            status = "healthy"
-            message = "Worker is running normally"
-        elif age_seconds <= WARNING_THRESHOLD:
-            status = "warning"
-            message = f"Worker heartbeat delayed ({age_seconds}s ago)"
+        if redis_health and redis_health.get("source") == "redis":
+            ttl = redis_health.get("ttl_remaining", 0)
+            if ttl > 15:
+                status = "healthy"
+                message = "Worker is running normally"
+            elif ttl > 0:
+                status = "warning"
+                message = f"Worker heartbeat delayed (TTL: {ttl}s remaining)"
+            else:
+                status = "dead"
+                message = "Worker appears to be dead (Redis key expired)"
+            age_seconds = max(0, 30 - ttl)
+            last_heartbeat = redis_health.get("updated_at") or worker.last_heartbeat
         else:
             status = "dead"
-            message = f"Worker appears to be dead (last heartbeat {age_seconds}s ago)"
+            message = "Worker appears to be dead (no Redis key)"
+            age_seconds = 999
+            last_heartbeat = worker.last_heartbeat
 
         return {
             "status": status,
             "worker_id": worker.worker_id,
-            "last_heartbeat": worker.last_heartbeat,
+            "last_heartbeat": last_heartbeat,
             "heartbeat_age_seconds": age_seconds,
             "current_state": worker.current_state,
             "message": message,
@@ -259,13 +269,22 @@ class WorkerStatusService:
 
         now = datetime.now()
         uptime_seconds = int((now - worker.started_at).total_seconds())
-        heartbeat_age_seconds = int((now - worker.last_heartbeat).total_seconds())
+
+        # Redis TTL 기반 heartbeat_age_seconds
+        redis_health = WorkerHealthRedis.check("scheduled") or WorkerHealthRedis.check("ondemand")
+        if redis_health and redis_health.get("source") == "redis":
+            ttl = redis_health.get("ttl_remaining", 0)
+            heartbeat_age_seconds = max(0, 30 - ttl)
+            last_heartbeat = redis_health.get("updated_at") or worker.last_heartbeat
+        else:
+            heartbeat_age_seconds = 999
+            last_heartbeat = worker.last_heartbeat
 
         return {
             "worker_id": worker.worker_id,
             "pid": worker.pid,
             "started_at": worker.started_at,
-            "last_heartbeat": worker.last_heartbeat,
+            "last_heartbeat": last_heartbeat,
             "current_state": worker.current_state,
             "current_account": worker.current_account,
             "current_run_id": worker.current_run_id,
@@ -287,7 +306,7 @@ class WorkerStatusService:
 
         deleted = self.db.query(InstagramWorkerStatus).filter(
             InstagramWorkerStatus.is_alive == False,
-            InstagramWorkerStatus.last_heartbeat < cutoff
+            InstagramWorkerStatus.started_at < cutoff
         ).delete()
 
         self.db.commit()

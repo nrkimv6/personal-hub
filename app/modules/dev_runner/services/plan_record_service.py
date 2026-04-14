@@ -11,7 +11,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 from sqlalchemy.orm import Session
 
@@ -122,7 +122,7 @@ class PlanRecordService:
         record.updated_at = datetime.now()
         return record
 
-    def mark_archived(self, file_path: str, new_path: str) -> Optional[PlanRecord]:
+    def mark_archived(self, file_path: str, new_path: str, raw_content: Optional[str] = None) -> Optional[PlanRecord]:
         """archive 완료 기록: archived_at 기록, file_path 갱신, archived 이벤트"""
         filename_hash = _compute_filename_hash(file_path)
         record = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
@@ -139,6 +139,8 @@ class PlanRecordService:
         record.archived_at = datetime.now()
         record.status = 'archived'
         record.updated_at = datetime.now()
+        if raw_content:
+            record.raw_content = raw_content
         _add_event(self.db, record, "archived", {"archive_path": new_path})
         return record
 
@@ -186,32 +188,198 @@ class PlanRecordService:
         """개별 레코드 조회 (events 포함)"""
         return self.db.query(PlanRecord).filter_by(id=record_id).first()
 
+    def restore_file(self, record_id: int) -> Optional[PlanRecord]:
+        """raw_content → 파일 복원, file_removed_at 초기화, restored 이벤트 기록"""
+        record = self.db.query(PlanRecord).filter_by(id=record_id).first()
+        if not record:
+            return None
+        if not record.raw_content:
+            return None
+        restore_path = Path(record.file_path)
+        restore_path.parent.mkdir(parents=True, exist_ok=True)
+        restore_path.write_text(record.raw_content, encoding="utf-8")
+        record.file_removed_at = None
+        record.updated_at = datetime.now()
+        _add_event(self.db, record, "restored", {"path": str(restore_path)})
+        return record
+
+    def ingest_single(
+        self,
+        file_path: str,
+        project: Optional[str] = None,
+        raw_content: Optional[str] = None,
+        title: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> PlanRecord:
+        """단건 archive ingest (wtools HTTP 호출용): upsert + raw_content 저장"""
+        filename_hash = _compute_filename_hash(file_path)
+        record = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
+        if record:
+            # update
+            if project:
+                record.project = project
+            if raw_content:
+                record.raw_content = raw_content
+            if title:
+                record.title = title
+            if status:
+                record.status = status
+            record.updated_at = datetime.now()
+            _add_event(self.db, record, "ingested", {"source": "ingest_single", "updated": True})
+        else:
+            # create
+            if title is None:
+                title = self._extract_title_from_md(file_path) if Path(file_path).exists() else None
+            if project is None:
+                project = self._detect_project_from_path(file_path)
+            record = PlanRecord(
+                filename_hash=filename_hash,
+                file_path=file_path,
+                title=title,
+                project=project,
+                status=status or "archived",
+                archived_at=datetime.now(),
+                raw_content=raw_content,
+            )
+            self.db.add(record)
+            self.db.flush()
+            _add_event(self.db, record, "ingested", {"source": "ingest_single", "created": True})
+        return record
+
+    def update_claude_session_id(self, record_id: int, session_id: str) -> None:
+        """plan_records에 claude_session_id 저장 (dev-runner executor 발급 UUID)."""
+        record = self.db.query(PlanRecord).filter_by(id=record_id).first()
+        if record:
+            record.claude_session_id = session_id
+            self.db.commit()
+
     def list_records(
         self,
         project: Optional[str] = None,
         status: Optional[str] = None,
         category: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        q: Optional[str] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
         skip: int = 0,
         limit: int = 50,
+        deep: bool = False,
     ) -> List[PlanRecord]:
-        """레코드 목록 조회 (페이지네이션 + 필터)"""
-        q = self.db.query(PlanRecord)
+        """레코드 목록 조회 (페이지네이션 + 필터 + keyword/date_range 검색)
+
+        deep=True 시 raw_content까지 full-text 검색 (summary/title + raw_content OR)
+        """
+        from sqlalchemy import or_
+        query = self.db.query(PlanRecord)
         if project:
-            q = q.filter(PlanRecord.project == project)
+            query = query.filter(PlanRecord.project == project)
         if status:
             if status == 'archived':
-                q = q.filter(PlanRecord.archived_at.isnot(None))
+                query = query.filter(PlanRecord.archived_at.isnot(None))
             else:
-                q = q.filter(PlanRecord.status == status)
+                query = query.filter(PlanRecord.status == status)
         if category:
-            q = q.filter(PlanRecord.category == category)
+            query = query.filter(PlanRecord.category == category)
         if tags:
-            from sqlalchemy import func
             for tag in tags:
-                q = q.filter(PlanRecord.tags.contains(tag))
-        q = q.order_by(PlanRecord.updated_at.desc())
-        return q.offset(skip).limit(limit).all()
+                query = query.filter(PlanRecord.tags.contains(tag))
+        if q:
+            conditions = [
+                PlanRecord.summary.ilike(f"%{q}%"),
+                PlanRecord.title.ilike(f"%{q}%"),
+            ]
+            if deep:
+                conditions.append(PlanRecord.raw_content.ilike(f"%{q}%"))
+            query = query.filter(or_(*conditions))
+        if date_from:
+            query = query.filter(PlanRecord.archived_at >= date_from)
+        if date_to:
+            query = query.filter(PlanRecord.archived_at <= date_to)
+        query = query.order_by(PlanRecord.updated_at.desc())
+        return query.offset(skip).limit(limit).all()
+
+    def get_guide_status(self, include_history: bool = False) -> List[dict]:
+        """가이드별 staleness 정보 반환.
+
+        _meta.yaml에서 가이드 목록 + owns_archive_tags 로드 →
+        PlanRecord archived_at IS NOT NULL 전체 조회 →
+        파일명에서 extract_wiki_tags()로 태그 추출 →
+        last_archive_scan 이후 archived_at인 것 → pending_count.
+
+        include_history=True: PlanEvent(event_type="devguide_staleness") 최근 10건 포함.
+
+        Returns:
+            [{guide, last_updated, pending_count, pending_archives: [{file_path, summary, archived_at}]}]
+        """
+        try:
+            from app.shared.wiki_tags import extract_wiki_tags, load_whitelist, load_meta_yaml
+        except ImportError:
+            logger.warning("wiki_tags not available — returning empty guide status")
+            return []
+
+        meta = load_meta_yaml()
+        try:
+            whitelist = load_whitelist()
+        except Exception as e:
+            logger.warning(f"whitelist load failed: {e}")
+            whitelist = set()
+
+        # archived PlanRecord 전체 조회
+        records = self.db.query(PlanRecord).filter(PlanRecord.archived_at.isnot(None)).all()
+
+        result: List[dict] = []
+        for guide_name, guide_meta in meta.items():
+            owns = set(guide_meta.get("owns_archive_tags") or [])
+            last_scan_str = guide_meta.get("last_archive_scan") or ""
+            try:
+                last_scan = datetime.strptime(last_scan_str, "%Y-%m-%d") if last_scan_str else None
+            except ValueError:
+                last_scan = None
+
+            pending_archives: List[dict] = []
+            for rec in records:
+                if not owns:
+                    continue
+                filename = Path(rec.file_path).name
+                tags = set(extract_wiki_tags(filename, whitelist))
+                if not (tags & owns):
+                    continue
+                # last_archive_scan 이후 archived_at인 것만 pending
+                if last_scan and rec.archived_at and rec.archived_at <= last_scan:
+                    continue
+                pending_archives.append({
+                    "file_path": rec.file_path,
+                    "summary": rec.summary,
+                    "archived_at": rec.archived_at.isoformat() if rec.archived_at else None,
+                })
+
+            item: dict = {
+                "guide": guide_name,
+                "last_updated": last_scan_str,
+                "pending_count": len(pending_archives),
+                "pending_archives": pending_archives,
+            }
+
+            if include_history:
+                history = (
+                    self.db.query(PlanEvent)
+                    .filter(PlanEvent.event_type == "devguide_staleness")
+                    .order_by(PlanEvent.created_at.desc())
+                    .limit(10)
+                    .all()
+                )
+                item["staleness_history"] = [
+                    {
+                        "created_at": e.created_at.isoformat() if e.created_at else None,
+                        "pending_count": (e.detail or {}).get("pending_count"),
+                    }
+                    for e in history
+                ]
+
+            result.append(item)
+
+        return result
 
     def list_events(
         self,
@@ -324,6 +492,86 @@ class PlanRecordService:
             errors.append(f"commit error: {e}")
 
         return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+
+    def get_guide_status(self, include_history: bool = False) -> List[dict]:
+        """가이드별 staleness 정보 반환.
+
+        _meta.yaml에서 가이드 목록 + owns_archive_tags 로드 →
+        PlanRecord archived_at IS NOT NULL 전체 조회 →
+        파일명에서 extract_wiki_tags()로 태그 추출 →
+        last_archive_scan 이후 archived_at인 것 → pending_count.
+
+        include_history=True: PlanEvent(event_type="devguide_staleness") 최근 10건 포함.
+
+        Returns:
+            [{guide, last_updated, pending_count, pending_archives: [{file_path, summary, archived_at}]}]
+        """
+        try:
+            from app.shared.wiki_tags import extract_wiki_tags, load_whitelist, load_meta_yaml
+        except ImportError:
+            logger.warning("wiki_tags not available — returning empty guide status")
+            return []
+
+        meta = load_meta_yaml()
+        try:
+            whitelist = load_whitelist()
+        except Exception as e:
+            logger.warning(f"whitelist load failed: {e}")
+            whitelist = set()
+
+        records = self.db.query(PlanRecord).filter(PlanRecord.archived_at.isnot(None)).all()
+
+        result: List[dict] = []
+        for guide_name, guide_meta in meta.items():
+            owns = set(guide_meta.get("owns_archive_tags") or [])
+            last_scan_str = guide_meta.get("last_archive_scan") or ""
+            try:
+                last_scan = datetime.strptime(last_scan_str, "%Y-%m-%d") if last_scan_str else None
+            except ValueError:
+                last_scan = None
+
+            pending_archives: List[dict] = []
+            for rec in records:
+                if not owns:
+                    continue
+                filename = Path(rec.file_path).name
+                tags = set(extract_wiki_tags(filename, whitelist))
+                if not (tags & owns):
+                    continue
+                if last_scan and rec.archived_at and rec.archived_at <= last_scan:
+                    continue
+                pending_archives.append({
+                    "file_path": rec.file_path,
+                    "summary": rec.summary,
+                    "archived_at": rec.archived_at.isoformat() if rec.archived_at else None,
+                })
+
+            item: dict = {
+                "guide": guide_name,
+                "last_updated": last_scan_str,
+                "pending_count": len(pending_archives),
+                "pending_archives": pending_archives,
+            }
+
+            if include_history:
+                history = (
+                    self.db.query(PlanEvent)
+                    .filter(PlanEvent.event_type == "devguide_staleness")
+                    .order_by(PlanEvent.created_at.desc())
+                    .limit(10)
+                    .all()
+                )
+                item["staleness_history"] = [
+                    {
+                        "created_at": e.created_at.isoformat() if e.created_at else None,
+                        "pending_count": (e.detail or {}).get("pending_count"),
+                    }
+                    for e in history
+                ]
+
+            result.append(item)
+
+        return result
 
     def sync_all(self, registered_paths: List[dict]) -> dict:
         """수동 동기화: 등록된 폴더 전체 스캔 → 신규/이동/missing 감지

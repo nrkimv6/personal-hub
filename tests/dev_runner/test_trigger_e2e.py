@@ -27,7 +27,7 @@ def redis_client():
     try:
         r.ping()
     except redis.ConnectionError:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
     yield r
     r.close()
 
@@ -35,7 +35,7 @@ def redis_client():
 @pytest.fixture(scope="module")
 def listener_process(redis_client):
     """dev-runner-command-listener 프로세스 시작"""
-    script_path = Path("scripts/dev-runner-command-listener.py")
+    script_path = Path("scripts/plan_runner/dev-runner-command-listener.py")
     if not script_path.exists():
         pytest.skip("listener script not found")
 
@@ -100,16 +100,26 @@ def test_e2e_trigger_user_single(redis_client, listener_process):
     result_data = json.loads(raw_result)
     assert result_data.get("success"), f"command 실패: {result_data}"
 
-    # Redis에 trigger 저장됐는지 확인 (비동기 실행 지연/조기정리 고려해 짧게 폴링)
+    # Redis에 trigger 저장됐는지 확인 — live key 우선, cleanup 후 recent-meta fallback
     trigger_val = None
-    deadline = time.time() + 5.0
+    deadline = time.time() + 20.0
     while time.time() < deadline:
         trigger_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
         if trigger_val is not None:
             break
         time.sleep(0.2)
     if trigger_val is None:
-        pytest.skip("trigger 키가 관찰되기 전에 runner가 정리됨 (환경 타이밍 이슈)")
+        # recent-meta fallback: cleanup 후에도 보존된 메타에서 trigger 조회
+        import json as _json
+        _meta_raw = redis_client.get(f"plan-runner:recent-meta:{runner_id}")
+        if _meta_raw:
+            try:
+                trigger_val = _json.loads(_meta_raw).get("trigger")
+            except Exception:
+                pass
+    assert trigger_val is not None, (
+        f"trigger를 live key와 recent-meta 모두에서 관찰하지 못함 (runner_id={runner_id})"
+    )
     assert trigger_val == "user", f"Redis trigger 값 오류: {trigger_val}"
 
 
@@ -144,14 +154,24 @@ def test_e2e_trigger_tc_source(redis_client, listener_process):
     result_data = json.loads(raw_result)
     assert result_data.get("success"), f"command 실패: {result_data}"
 
-    # Redis에 trigger 저장됐는지 확인 (비동기 실행 지연/조기정리 고려해 짧게 폴링)
+    # Redis에 trigger 저장됐는지 확인 — live key 우선, cleanup 후 recent-meta fallback
     trigger_val = None
-    deadline = time.time() + 5.0
+    deadline = time.time() + 20.0
     while time.time() < deadline:
         trigger_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
         if trigger_val is not None:
             break
         time.sleep(0.2)
     if trigger_val is None:
-        pytest.skip("trigger 키가 관찰되기 전에 runner가 정리됨 (환경 타이밍 이슈)")
+        # recent-meta fallback: cleanup 후에도 보존된 메타에서 trigger 조회
+        import json as _json
+        _meta_raw = redis_client.get(f"plan-runner:recent-meta:{runner_id}")
+        if _meta_raw:
+            try:
+                trigger_val = _json.loads(_meta_raw).get("trigger")
+            except Exception:
+                pass
+    assert trigger_val is not None, (
+        f"trigger를 live key와 recent-meta 모두에서 관찰하지 못함 (runner_id={runner_id})"
+    )
     assert trigger_val == "tc:my_e2e_test", f"Redis trigger 값 오류: {trigger_val}"

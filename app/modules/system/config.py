@@ -34,6 +34,13 @@ MANAGED_PROJECTS = {
                     "worker_pid_file": "command_listener_admin.pid",
                 },
                 {
+                    "name": "dev_runner_listener",
+                    "label": "Dev Runner 리스너",
+                    "tier": "infra",
+                    "watchdog_pid_file": "dev_runner_watchdog_admin.pid",
+                    "worker_pid_file": "dev_runner_command_listener_admin.pid",
+                },
+                {
                     "name": "api_watchdog",
                     "label": "API 왓치독",
                     "tier": "infra",
@@ -41,11 +48,11 @@ MANAGED_PROJECTS = {
                     "worker_pid_file": None,
                 },
                 {
-                    "name": "infra_command_listener",
-                    "label": "인프라 리스너",
-                    "tier": "infra",
-                    "watchdog_pid_file": None,
-                    "worker_pid_file": "infra_command_listener_admin.pid",
+                    "name": "chat_executor",
+                    "label": "Chat Executor",
+                    "tier": "worker",
+                    "watchdog_pid_file": "chat_executor_watchdog_admin.pid",
+                    "worker_pid_file": "chat_executor_admin.pid",
                 },
             ]
         }

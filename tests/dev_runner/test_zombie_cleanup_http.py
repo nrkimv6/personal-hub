@@ -116,7 +116,7 @@ def fake_services(test_db_engine):
 
 
 def test_zombie_cleanup_reflected_in_runner_status_api(client, fake_services):
-    """zombie cleanup 후 GET /runners 응답에 stopped + zombie 사유가 반영된다."""
+    """zombie cleanup 후 GET /runners 응답에서 해당 runner가 제거된다."""
     listener_mod = _load_listener_module()
     state_mod = sys.modules["_dr_state"]
     fake_sync = fake_services["sync"]
@@ -136,9 +136,9 @@ def test_zombie_cleanup_reflected_in_runner_status_api(client, fake_services):
     assert resp.status_code == 200
     payload = resp.json()
     target = next((item for item in payload if item.get("runner_id") == runner_id), None)
-    assert target is not None, f"runner {runner_id}가 /runners 응답에 없음"
-    assert target["running"] is False
-    assert "zombie" in (target.get("exit_reason") or "")
+    assert target is None, (
+        f"zombie cleanup 후 runner {runner_id}가 /runners 응답에 남아 있음: {payload}"
+    )
 
 
 def test_zombie_cleanup_workflow_status_api(client, fake_services, test_db_engine):

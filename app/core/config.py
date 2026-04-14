@@ -27,8 +27,8 @@ class Settings(BaseSettings):
             return v.strip()
         return v
     
-    # 데이터베이스 설정
-    DATABASE_URL: str = "sqlite:///./data/monitor.db"  # database 이동
+    # 데이터베이스 설정 (2026-04-10: SQLite → PostgreSQL 전환)
+    DATABASE_URL: str = "postgresql://monitor_user:monitor_pass_2026@localhost:5432/monitor"
     
     # 모니터링 설정
     MAX_WORKERS: int = 3

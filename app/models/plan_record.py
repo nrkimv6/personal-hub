@@ -35,6 +35,9 @@ class PlanRecord(Base):
     chain_root_hash = Column(String(64), nullable=True)            # 체인 첫 번째 plan의 filename_hash
     recurrence_suggestion = Column(Text, nullable=True)            # LLM 생성 근본원인/개선 제안 (JSON)
     llm_processed_at = Column(DateTime)                          # LLM 분석 완료 시각
+    claude_session_id = Column(String(36), nullable=True)         # dev-runner 발급 UUID (CLI --session-id와 동일)
+    raw_content = Column(Text, nullable=True)                     # archive 파일 본문 전체 (DB-first 진실원본)
+    file_removed_at = Column(DateTime, nullable=True)             # 로테이션으로 파일 제거된 시각
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -56,7 +59,7 @@ class PlanEvent(Base):
     __tablename__ = "plan_events"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    plan_record_id = Column(Integer, ForeignKey("plan_records.id"), nullable=False)
+    plan_record_id = Column(Integer, ForeignKey("plan_records.id"), nullable=True)  # nullable: 시스템 이벤트(devguide_staleness) 허용
     event_type = Column(String, nullable=False)  # created, archived, status_changed, memo_updated, path_changed, missing
     detail = Column(JSON)                        # {"from": "초안", "to": "구현중"} 등
     created_at = Column(DateTime, default=datetime.now, index=True)

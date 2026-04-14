@@ -25,6 +25,7 @@ def test_external_plan_path_accepted(monkeypatch):
         "2026-02-25T10:00:00" if key == "plan-runner:listener:heartbeat" else
         None  # status not running
     ))
+    mock_r.set = AsyncMock(return_value=True)
     mock_r.lpush = AsyncMock(return_value=1)
     mock_r.scard = AsyncMock(return_value=0)
     mock_r.delete = AsyncMock(return_value=1)
@@ -53,7 +54,8 @@ def test_external_plan_path_accepted(monkeypatch):
 
 def test_cwd_set_to_plan_runner_module_path():
     """_dr_plan_runner.py가 subprocess 실행 시 cwd가 plan-runner 모듈 경로로 설정됨"""
-    listener_path = Path("scripts/_dr_plan_runner.py")
+    from tests.dev_runner import _path_helpers
+    listener_path = _path_helpers.get_plan_runner_script_path()
     source = listener_path.read_text(encoding="utf-8", errors="ignore")
 
     # cwd가 PLAN_RUNNER_MODULE_PATH로 설정됨을 확인
@@ -64,8 +66,9 @@ def test_cwd_set_to_plan_runner_module_path():
 def test_listener_passes_plan_file_as_absolute_path():
     """_dr_plan_runner.py의 start_plan_runner가 plan_file을 --plan-file 인자로 전달함"""
     from pathlib import Path
+    from tests.dev_runner import _path_helpers
 
-    listener_path = Path("scripts/_dr_plan_runner.py")
+    listener_path = _path_helpers.get_plan_runner_script_path()
     source = listener_path.read_text(encoding="utf-8", errors="ignore")
 
     assert '"--plan-file"' in source or "'--plan-file'" in source, \

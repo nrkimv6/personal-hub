@@ -38,6 +38,17 @@ def test_resolve_project_plan_to_archive_R(tmp_path):
     assert resolved.target.parts[-3:] == ("docs", "archive", "2026-04-03_test.md")
 
 
+def test_resolve_plans_worktree_plan_to_archive_R(tmp_path):
+    plan = tmp_path / ".worktrees" / "plans" / "docs" / "plan" / "2026-04-03_test.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text("> 상태: 구현중\n", encoding="utf-8")
+
+    resolved = resolve_plan_target(plan, purpose="archive")
+    assert resolved.target_kind == "archive"
+    assert resolved.rule_id == "plans_worktree_archive"
+    assert resolved.target.parts[-5:] == (".worktrees", "plans", "docs", "archive", "2026-04-03_test.md")
+
+
 def test_resolve_auto_plan_to_history_R(tmp_path):
     plan = tmp_path / "docs" / "plan" / "2026-04-03_auto-next-check.md"
     plan.parent.mkdir(parents=True)

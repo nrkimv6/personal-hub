@@ -4,9 +4,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-_SCRIPTS_DIR = str(Path(__file__).resolve().parents[4] / "scripts")
-if _SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPTS_DIR)
+_SCRIPTS_PLAN_RUNNER_DIR = str(Path(__file__).resolve().parents[4] / "scripts" / "plan_runner")
+if _SCRIPTS_PLAN_RUNNER_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_PLAN_RUNNER_DIR)
 
 from _dr_plan_paths import (  # type: ignore
     PathResolution,

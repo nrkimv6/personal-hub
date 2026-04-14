@@ -918,12 +918,12 @@ class TestFetchScheduleDual:
         call_times = []
 
         async def mock_graphql(*args, **kwargs):
-            call_times.append(("graphql", asyncio.get_event_loop().time()))
+            call_times.append(("graphql", asyncio.get_running_loop().time()))
             await asyncio.sleep(0.1)
             return sample_schedule_info
 
         async def mock_page(*args, **kwargs):
-            call_times.append(("page", asyncio.get_event_loop().time()))
+            call_times.append(("page", asyncio.get_running_loop().time()))
             await asyncio.sleep(0.1)
             return True  # 상품 활성
 

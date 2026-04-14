@@ -16,8 +16,6 @@ class NotificationSettings(BaseModel):
             "booking_success",
             "booking_failed",
             "error",
-            "startup",
-            "shutdown",
             "popup_new",
         ],
         description="알림 받을 상태 목록"

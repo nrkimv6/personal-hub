@@ -40,7 +40,7 @@ def _load_listener_module():
         return sys.modules[cache_key]
     spec = importlib.util.spec_from_file_location(
         cache_key,
-        SCRIPTS_DIR / "dev-runner-command-listener.py",
+        SCRIPTS_DIR / "plan_runner" / "dev-runner-command-listener.py",
     )
     mod = importlib.util.module_from_spec(spec)
     # Redis/환경 의존 초기화를 막기 위해 sys.modules에 먼저 등록

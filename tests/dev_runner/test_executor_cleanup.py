@@ -329,7 +329,7 @@ def real_redis_sync():
         r.flushdb()
         r.close()
     except (redis.ConnectionError, ConnectionRefusedError):
-        pytest.skip("실제 Redis 연결 불가 — 통합 테스트 스킵")
+        pytest.fail("실제 Redis 연결 불가 — 통합 테스트 스킵")
 
 
 @pytest.fixture

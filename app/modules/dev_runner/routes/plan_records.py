@@ -2,9 +2,12 @@
 Plan Records API Routes
 GET    /api/v1/plans/records         - 레코드 목록 (project, status, category, tags 필터, skip/limit)
 GET    /api/v1/plans/records/{id}    - 레코드 상세 (events 포함)
+GET    /api/v1/plans/records/{id}/content - raw_content 반환
+POST   /api/v1/plans/records/{id}/restore - raw_content → 파일 복원
 PATCH  /api/v1/plans/records/{id}/memo - 메모 업데이트 (draft/confirm/rollback)
 POST   /api/v1/plans/records/sync   - 수동 동기화 (등록된 경로 전체 스캔)
 POST   /api/v1/plans/records/import-archived - archived plan 일괄 DB 이관
+POST   /api/v1/plans/records/ingest - 단건 archive ingest (wtools HTTP 호출용)
 GET    /api/v1/plans/events         - 이벤트 목록 (타임라인용)
 GET    /api/v1/plans/records/by-path - file_path로 get_or_create
 """
@@ -13,6 +16,7 @@ from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -22,6 +26,15 @@ from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
     PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse
 )
+
+
+class IngestSingleRequest(BaseModel):
+    """단건 ingest 요청 (wtools PS1 → HTTP 호출용)"""
+    file_path: str
+    project: Optional[str] = None
+    raw_content: Optional[str] = None
+    title: Optional[str] = None
+    status: Optional[str] = None
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +51,34 @@ def get_record_by_path(file_path: str, db: Session = Depends(get_db)):
     return record
 
 
+@router.get("/records/guide-status")
+def get_guide_status(include_history: bool = False, db: Session = Depends(get_db)):
+    """가이드별 staleness 정보 반환 (pending archive 건수 포함)"""
+    svc = PlanRecordService(db)
+    return svc.get_guide_status(include_history=include_history)
+
+
 @router.get("/records", response_model=list[PlanRecordResponse])
 def list_records(
     project: Optional[str] = None,
     status: Optional[str] = None,
     category: Optional[str] = None,
     tags: Optional[str] = None,
+    q: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
     skip: int = 0,
     limit: int = 50,
+    deep: bool = False,
     db: Session = Depends(get_db),
 ):
     tags_list = [t.strip() for t in tags.split(",")] if tags else None
     svc = PlanRecordService(db)
-    return svc.list_records(project=project, status=status, category=category, tags=tags_list, skip=skip, limit=limit)
+    return svc.list_records(
+        project=project, status=status, category=category, tags=tags_list,
+        q=q, date_from=date_from, date_to=date_to,
+        skip=skip, limit=limit, deep=deep,
+    )
 
 
 @router.get("/records/{record_id}", response_model=PlanRecordWithEventsResponse)
@@ -78,6 +106,43 @@ def update_memo(record_id: int, req: MemoUpdateRequest, db: Session = Depends(ge
     db.commit()
     db.refresh(record)
     return record
+
+
+@router.get("/records/{record_id}/content")
+def get_record_content(record_id: int, db: Session = Depends(get_db)):
+    """raw_content 반환 (file_removed_at 이후에도 DB에서 조회 가능)"""
+    svc = PlanRecordService(db)
+    record = svc.get_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return {"id": record.id, "raw_content": record.raw_content}
+
+
+@router.post("/records/{record_id}/restore")
+def restore_record(record_id: int, db: Session = Depends(get_db)):
+    """raw_content → 파일 복원, file_removed_at 초기화"""
+    svc = PlanRecordService(db)
+    record = svc.restore_file(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record or raw_content not found")
+    db.commit()
+    return {"restored": True, "path": record.file_path}
+
+
+@router.post("/records/ingest")
+def ingest_single_record(req: IngestSingleRequest, db: Session = Depends(get_db)):
+    """단건 archive ingest (wtools PS1 → HTTP 호출용): file_path 기준 upsert"""
+    svc = PlanRecordService(db)
+    record = svc.ingest_single(
+        file_path=req.file_path,
+        project=req.project,
+        raw_content=req.raw_content,
+        title=req.title,
+        status=req.status,
+    )
+    db.commit()
+    db.refresh(record)
+    return {"id": record.id, "filename_hash": record.filename_hash, "file_path": record.file_path}
 
 
 @router.post("/records/import-archived", response_model=ImportArchivedResponse)

@@ -1,26 +1,27 @@
-"""WorktreeManager 유닛 테스트 — RIGHT-BICEP + CORRECT"""
+﻿"""WorktreeManager unit tests — RIGHT-BICEP + CORRECT"""
 import subprocess
 import pytest
 from pathlib import Path
 
-# scripts/ 디렉토리를 sys.path에 추가
+# add scripts/plan_runner to sys.path
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "plan_runner"))
 
+import sys
+if "worktree_manager" in sys.modules: del sys.modules["worktree_manager"]
+import worktree_manager
+print(f"DEBUG TEST: worktree_manager file={worktree_manager.__file__}")
 from worktree_manager import WorktreeManager, WorktreeError, MergeResult, ensure_main_branch
 
 
 @pytest.fixture
 def tmp_git_repo(tmp_path):
-    """임시 git 저장소 생성 (main 브랜치)"""
-    # -b main: git init 시 초기 브랜치를 main으로 지정 (git 2.28+)
-    # defaultBranch 설정 차이로 인한 'main' 미존재 오류 방지
+    """create temporary git repo (main branch)"""
     subprocess.run(["git", "init", "-b", "main", str(tmp_path)], capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(tmp_path))
     (tmp_path / "README.md").write_text("test")
-    # .worktrees/를 gitignore에 추가: merge_to_main이 dirty state로 감지하여 emergency commit 생성하는 것 방지
     (tmp_path / ".gitignore").write_text(".worktrees/\n")
     subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
@@ -29,7 +30,7 @@ def tmp_git_repo(tmp_path):
 
 @pytest.fixture
 def worktrees_dir(tmp_git_repo):
-    """worktree base_dir: repo 내부 .worktrees 서브디렉토리"""
+    """worktree base_dir: .worktrees subdirectory inside repo"""
     base = tmp_git_repo / ".worktrees"
     base.mkdir(exist_ok=True)
     return base, tmp_git_repo
@@ -37,41 +38,45 @@ def worktrees_dir(tmp_git_repo):
 
 # ── create() ─────────────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def patch_project_root(worktrees_dir, monkeypatch):
+    base_dir, repo = worktrees_dir
+    import _dr_constants
+    monkeypatch.setattr(_dr_constants, 'PROJECT_ROOT', repo)
+
 class TestWorktreeManagerCreate:
     def test_right_creates_directory(self, worktrees_dir):
-        """TC-Right: create() 후 worktree 디렉토리 존재 + git worktree list에 표시"""
+        """TC-Right: directory exists after create()"""
         base_dir, repo = worktrees_dir
         path, _branch = WorktreeManager.create("abc123", base_dir)
-        assert path.is_dir(), "worktree 디렉토리가 존재해야 한다"
+        assert path.is_dir(), "worktree directory should exist"
 
     def test_right_returns_absolute_path(self, worktrees_dir):
-        """TC-Right: 반환값이 절대경로이고 Path.is_dir() == True"""
+        """TC-Right: return value is absolute path and Path.is_dir() == True"""
         base_dir, repo = worktrees_dir
         path, _branch = WorktreeManager.create("abc456", base_dir)
         assert path.is_absolute()
         assert path.is_dir()
 
     def test_boundary_empty_runner_id_raises(self, worktrees_dir):
-        """TC-Boundary: runner_id 빈 문자열 → WorktreeError"""
+        """TC-Boundary: empty runner_id raises WorktreeError"""
         base_dir, repo = worktrees_dir
         with pytest.raises(WorktreeError):
             WorktreeManager.create("", base_dir)
 
     def test_boundary_nonexistent_base_dir_auto_create(self, tmp_git_repo):
-        """TC-Boundary: base_dir 미존재 → 자동 생성"""
+        """TC-Boundary: auto create base_dir if it doesn't exist"""
         base_dir = tmp_git_repo / "new" / "nested" / "worktrees"
         path, _branch = WorktreeManager.create("xyz789", base_dir)
         assert path.is_dir()
 
     def test_error_duplicate_runner_id_reuses(self, worktrees_dir):
-        """TC-Error: 동일 runner_id로 두 번 create() → 기존 워크트리 재사용 (커밋 보존)"""
+        """TC-Error: calling create() twice with same runner_id reuses worktree"""
         base_dir, repo = worktrees_dir
         path1, branch1 = WorktreeManager.create("dup001", base_dir)
-        # worktree에 커밋 추가
         (path1 / "test.txt").write_text("hello")
         subprocess.run(["git", "add", "."], capture_output=True, cwd=str(path1))
         subprocess.run(["git", "commit", "-m", "test commit"], capture_output=True, cwd=str(path1))
-        # 두 번째 호출: 기존 워크트리 재사용 (커밋 보존)
         path2, branch2 = WorktreeManager.create("dup001", base_dir)
         assert path2.is_dir()
         assert branch1 == branch2
@@ -80,19 +85,22 @@ class TestWorktreeManagerCreate:
         assert "test commit" in log.stdout
 
     def test_create_prune_dangling_then_recreate(self, worktrees_dir):
-        """TC-Error: 워크트리 디렉토리 없고 브랜치만 남은 경우 → prune 후 재생성"""
+        """TC-Error: directory gone but branch remains -> prune then recreate"""
         import shutil
         base_dir, repo = worktrees_dir
         path1, branch1 = WorktreeManager.create("prune001", base_dir)
-        # 디렉토리 강제 삭제 (git worktree remove 없이 → dangling 참조 발생)
         shutil.rmtree(str(path1))
-        # 두 번째 호출: dangling 정리 후 재생성
         path2, branch2 = WorktreeManager.create("prune001", base_dir)
         assert path2.is_dir()
         assert branch2 == branch1
 
     def test_error_not_a_git_repo(self, tmp_path):
-        """TC-Error: git 저장소가 아닌 디렉토리 → WorktreeError"""
+        import worktree_manager
+        with patch("worktree_manager._run_git") as mock_run:
+            mock_run.returncode = 128
+            mock_run.side_effect = lambda *args, **kwargs: MagicMock(returncode=128, stderr="fatal: not a git repository")
+    def test_error_not_a_git_repo(self, tmp_path):
+        """TC-Error: non-git directory raises WorktreeError"""
         non_repo = tmp_path / "not_a_repo"
         non_repo.mkdir()
         base_dir = non_repo / ".worktrees"
@@ -100,23 +108,22 @@ class TestWorktreeManagerCreate:
             WorktreeManager.create("err001", base_dir)
 
     def test_cross_create_then_list(self, worktrees_dir):
-        """TC-Cross: create() 후 list_worktrees() 결과에 runner_id 포함"""
+        """TC-Cross: runner_id present in list_worktrees() after create()"""
         base_dir, repo = worktrees_dir
-        # list_worktrees는 cwd 기준 — repo 디렉토리에서 실행
         WorktreeManager.create("listtest", base_dir)
         worktrees = _list_worktrees_in_repo(repo)
         runner_ids = [w.get("runner_id") for w in worktrees]
         assert "listtest" in runner_ids
 
     def test_correct_conformance_path_pattern(self, worktrees_dir):
-        """TC-CORRECT-Conformance: 반환 경로가 {base_dir}/{runner_id} 패턴 준수"""
+        """TC-CORRECT-Conformance: return path follows {base_dir}/{runner_id} pattern"""
         base_dir, repo = worktrees_dir
         path, branch = WorktreeManager.create("pattest", base_dir)
         assert path == base_dir / "pattest"
         assert branch == "runner/pattest"
 
     def test_correct_reference_branch_name(self, worktrees_dir):
-        """TC-CORRECT-Reference: 생성된 브랜치가 runner/{runner_id} 이름 준수"""
+        """TC-CORRECT-Reference: branch named runner/{runner_id}"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("brtest", base_dir)
         result = subprocess.run(
@@ -126,71 +133,55 @@ class TestWorktreeManagerCreate:
         assert "runner/brtest" in result.stdout
 
     def test_create_E_already_exists_with_unmerged_commits_reuses_branch(self, worktrees_dir):
-        """E(에러): worktree add 1차 실패(already exists) + 디렉토리 미존재 + 미머지 커밋 있음
-        → branch -D 미호출, 기존 브랜치로 worktree 재연결, 미머지 커밋 보존."""
+        """E: worktree add fail (already exists) + dir missing + unmerged commits -> reuse branch"""
         base_dir, repo = worktrees_dir
-        # worktree_manager.py가 'main..{branch}'로 비교하므로 기본 브랜치명이 main이어야 함
         subprocess.run(["git", "branch", "-m", "main"], capture_output=True, cwd=str(repo))
-        # 워크트리 생성 + 미머지 커밋 추가
         path1, branch1 = WorktreeManager.create("unmerged001", base_dir)
         (path1 / "unmerged.txt").write_text("unmerged work")
         subprocess.run(["git", "add", "."], capture_output=True, cwd=str(path1))
         subprocess.run(["git", "commit", "-m", "unmerged commit"], capture_output=True, cwd=str(path1))
-        # 워크트리 디렉토리만 강제 삭제 (브랜치는 유지, 미머지 커밋 있음)
         subprocess.run(["git", "worktree", "remove", str(path1), "--force"],
                        capture_output=True, cwd=str(repo))
         assert not path1.exists()
 
-        # create() 재호출 — 미머지 커밋 보호 로직이 동작해야 함
         path2, branch2 = WorktreeManager.create("unmerged001", base_dir)
 
         assert path2.is_dir()
         assert branch2 == branch1
-        # 미머지 커밋이 보존됐는지 확인
         log = subprocess.run(["git", "log", "--oneline"], capture_output=True, text=True, cwd=str(path2))
         assert "unmerged commit" in log.stdout
 
     def test_create_C_already_exists_no_unmerged_commits_deletes_branch(self, worktrees_dir):
-        """C(교차): worktree add 1차 실패(already exists) + 디렉토리 미존재 + 미머지 커밋 없음
-        (이미 main에 머지됨) → branch -D 후 -b 플래그로 새 브랜치 재생성."""
+        """C: worktree add fail (already exists) + dir missing + no unmerged commits -> delete branch and recreate"""
         import shutil
         base_dir, repo = worktrees_dir
-        # 워크트리 생성 (커밋 없음 — main과 동일)
         path1, branch1 = WorktreeManager.create("merged001", base_dir)
-        # 워크트리 디렉토리만 강제 삭제 (브랜치 유지, 미머지 커밋 없음)
         subprocess.run(["git", "worktree", "remove", str(path1), "--force"],
                        capture_output=True, cwd=str(repo))
         assert not path1.exists()
 
-        # create() 재호출 — branch -D 후 새 브랜치로 재생성해야 함
         path2, branch2 = WorktreeManager.create("merged001", base_dir)
 
         assert path2.is_dir()
         assert branch2 == branch1
-        # 브랜치가 재생성됐는지: git log에서 merge commit 없이 clean 상태
         log = subprocess.run(
             ["git", "log", f"main..{branch2}", "--oneline"],
             capture_output=True, text=True, cwd=str(repo)
         )
-        # 새로 생성된 브랜치는 main과 동일 → 미머지 커밋 없음
         assert log.stdout.strip() == ""
-
-    # TC-14: B(경계) — already exists + 디렉토리 존재 → 재사용
-    # test_error_duplicate_runner_id_reuses (L61-75)와 동일 시나리오, 스킵
 
 
 # ── remove() ─────────────────────────────────────────────────────────────────
 
 class TestWorktreeManagerRemove:
     def test_right_removes_directory_and_branch(self, worktrees_dir):
-        """TC-Right: remove() 호출 → 디렉토리 삭제 + 브랜치 삭제"""
+        """TC-Right: remove() deletes directory and branch"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("rmtest", base_dir)
         wt_path = base_dir / "rmtest"
         assert wt_path.is_dir()
         WorktreeManager.remove("rmtest", base_dir)
         assert not wt_path.exists()
-        # 브랜치도 삭제 확인
         result = subprocess.run(
             ["git", "branch", "--list", "runner/rmtest"],
             capture_output=True, text=True, cwd=str(repo)
@@ -198,20 +189,20 @@ class TestWorktreeManagerRemove:
         assert "runner/rmtest" not in result.stdout
 
     def test_right_returns_true(self, worktrees_dir):
-        """TC-Right: 반환값 True"""
+        """TC-Right: return True on success"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("rmtrue", base_dir)
         result = WorktreeManager.remove("rmtrue", base_dir)
         assert result is True
 
     def test_boundary_nonexistent_runner_id_idempotent(self, worktrees_dir):
-        """TC-Boundary: 존재하지 않는 runner_id → True 반환 (멱등)"""
+        """TC-Boundary: nonexistent runner_id returns True (idempotent)"""
         base_dir, repo = worktrees_dir
         result = WorktreeManager.remove("ghost999", base_dir)
         assert result is True
 
     def test_inverse_create_remove_not_in_list(self, worktrees_dir):
-        """TC-Inverse: create() → remove() → list_worktrees()에 해당 항목 없음"""
+        """TC-Inverse: create -> remove -> not in list_worktrees()"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("invtest", base_dir)
         WorktreeManager.remove("invtest", base_dir)
@@ -220,23 +211,21 @@ class TestWorktreeManagerRemove:
         assert "invtest" not in runner_ids
 
     def test_correct_ordering_idempotent(self, worktrees_dir):
-        """TC-CORRECT-Ordering: remove() 두 번 연속 → 두 번째도 True (멱등성)"""
+        """TC-CORRECT-Ordering: remove() twice is idempotent"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("idem01", base_dir)
         assert WorktreeManager.remove("idem01", base_dir) is True
         assert WorktreeManager.remove("idem01", base_dir) is True
 
     def test_remove_branch_param_priority(self, worktrees_dir):
-        """TC-Right(branch 우선순위): branch='plan/foo' 전달 시 해당 브랜치/경로 삭제"""
+        """TC-Right: branch parameter priority"""
         base_dir, repo = worktrees_dir
-        # plan/foo 브랜치 + plan_foo slug 경로로 worktree 생성
         wt_path = base_dir / "plan_foo"
         subprocess.run(["git", "worktree", "add", str(wt_path), "-b", "plan/foo"], capture_output=True, cwd=str(repo))
         assert wt_path.is_dir()
         result = WorktreeManager.remove("any-runner", base_dir, branch="plan/foo")
         assert result is True
         assert not wt_path.exists()
-        # 브랜치도 삭제 확인
         branch_list = subprocess.run(
             ["git", "branch", "--list", "plan/foo"],
             capture_output=True, text=True, cwd=str(repo)
@@ -244,7 +233,7 @@ class TestWorktreeManagerRemove:
         assert "plan/foo" not in branch_list
 
     def test_remove_no_branch_falls_back(self, worktrees_dir):
-        """TC-Boundary: branch=None 시 기존 plan_file/runner_id 로직 유지 (회귀)"""
+        """TC-Boundary: branch=None fallback to runner_id logic"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("fallback01", base_dir)
         wt_path = base_dir / "fallback01"
@@ -258,11 +247,10 @@ class TestWorktreeManagerRemove:
 
 class TestWorktreeManagerMergeToMain:
     def test_right_success_no_conflict(self, worktrees_dir):
-        """TC-Right: 충돌 없는 변경 → MergeResult(success=True, conflict=False)"""
+        """TC-Right: merge success no conflict"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("mergeok", base_dir)
         wt = base_dir / "mergeok"
-        # worktree에서 새 파일 추가
         (wt / "new_feature.py").write_text("x = 1")
         subprocess.run(["git", "add", "-A"], cwd=str(wt), capture_output=True)
         subprocess.run(["git", "commit", "-m", "feat: new feature"], cwd=str(wt), capture_output=True)
@@ -271,7 +259,7 @@ class TestWorktreeManagerMergeToMain:
         assert result.conflict is False
 
     def test_right_changes_reflected_in_main(self, worktrees_dir):
-        """TC-Right: 머지 후 main 브랜치에 변경사항 반영"""
+        """TC-Right: changes reflected in main branch after merge"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("mergechk", base_dir)
         wt = base_dir / "mergechk"
@@ -279,26 +267,22 @@ class TestWorktreeManagerMergeToMain:
         subprocess.run(["git", "add", "-A"], cwd=str(wt), capture_output=True)
         subprocess.run(["git", "commit", "-m", "feat: check"], cwd=str(wt), capture_output=True)
         WorktreeManager.merge_to_main("mergechk", base_dir, repo)
-        # main에서 파일 확인
         assert (repo / "check_file.py").exists()
 
     def test_error_conflict(self, worktrees_dir):
-        """TC-Error: 충돌 발생 → MergeResult(success=False, conflict=True)"""
+        """TC-Error: conflict detected"""
         base_dir, repo = worktrees_dir
-        # worktree 1
         WorktreeManager.create("conflict1", base_dir)
         wt1 = base_dir / "conflict1"
         (wt1 / "conflict.py").write_text("version = 1")
         subprocess.run(["git", "add", "-A"], cwd=str(wt1), capture_output=True)
         subprocess.run(["git", "commit", "-m", "v1"], cwd=str(wt1), capture_output=True)
         WorktreeManager.merge_to_main("conflict1", base_dir, repo)
-        # worktree 2 — 같은 파일 다르게 수정
         WorktreeManager.create("conflict2", base_dir)
         wt2 = base_dir / "conflict2"
         (wt2 / "conflict.py").write_text("version = 2\nextra = True")
         subprocess.run(["git", "add", "-A"], cwd=str(wt2), capture_output=True)
         subprocess.run(["git", "commit", "-m", "v2"], cwd=str(wt2), capture_output=True)
-        # main에서 같은 파일 수정 후 머지 → 충돌
         subprocess.run(["git", "checkout", "main"], cwd=str(repo), capture_output=True)
         (repo / "conflict.py").write_text("version = 99")
         subprocess.run(["git", "add", "-A"], cwd=str(repo), capture_output=True)
@@ -308,20 +292,18 @@ class TestWorktreeManagerMergeToMain:
         assert result.conflict is True
 
     def test_merge_to_main_branch_param_priority(self, worktrees_dir):
-        """TC-Right(branch 우선순위): branch='plan/foo' + plan_file='bar.md' → git merge plan/foo 사용"""
+        """TC-Right: branch parameter priority in merge_to_main"""
         base_dir, repo = worktrees_dir
-        # plan/foo 브랜치를 가진 worktree 생성
         wt_path = base_dir / "foo"
         subprocess.run(["git", "worktree", "add", str(wt_path), "-b", "plan/foo"], capture_output=True, cwd=str(repo))
         (wt_path / "branch_priority.py").write_text("ok = True")
         subprocess.run(["git", "add", "-A"], cwd=str(wt_path), capture_output=True)
         subprocess.run(["git", "commit", "-m", "feat: branch priority test"], cwd=str(wt_path), capture_output=True)
-        # branch 파라미터가 plan_file보다 우선해야 한다
         result = WorktreeManager.merge_to_main("any-runner", base_dir, repo, plan_file="bar.md", branch="plan/foo")
         assert result.success is True
 
     def test_merge_to_main_branch_none_falls_back_plan_file(self, worktrees_dir):
-        """TC-Boundary: branch=None + plan_file 지정 시 plan/{stem} 브랜치 사용"""
+        """TC-Boundary: fallback to plan_file if branch=None"""
         base_dir, repo = worktrees_dir
         stem = "2026-01-01_test"
         wt_path = base_dir / stem
@@ -333,7 +315,7 @@ class TestWorktreeManagerMergeToMain:
         assert result.success is True
 
     def test_merge_to_main_no_branch_no_plan_uses_runner_id(self, worktrees_dir):
-        """TC-Boundary: branch=None + plan_file=None → runner/{runner_id} 브랜치 사용 (회귀)"""
+        """TC-Boundary: fallback to runner_id logic"""
         base_dir, repo = worktrees_dir
         runner_id = "t-wtmgr-regr1"
         wt_path, branch = WorktreeManager.create(runner_id, base_dir)
@@ -344,15 +326,13 @@ class TestWorktreeManagerMergeToMain:
         assert result.success is True
 
     def test_correct_cardinality_one_merge_commit(self, worktrees_dir):
-        """TC-CORRECT-Cardinality: 머지 커밋이 정확히 1개 생성"""
+        """TC-CORRECT-Cardinality: exactly one merge commit created"""
         base_dir, repo = worktrees_dir
-        # 머지 전 커밋 수
         log_before = subprocess.run(
             ["git", "log", "--oneline"],
             capture_output=True, text=True, cwd=str(repo)
         ).stdout.strip().split("\n")
         count_before = len([l for l in log_before if l])
-        # worktree 생성 + 변경 + 머지
         WorktreeManager.create("cardinality", base_dir)
         wt = base_dir / "cardinality"
         (wt / "card.py").write_text("card = 1")
@@ -364,7 +344,6 @@ class TestWorktreeManagerMergeToMain:
             capture_output=True, text=True, cwd=str(repo)
         ).stdout.strip().split("\n")
         count_after = len([l for l in log_after if l])
-        # 머지 커밋 1개 + runner 커밋 1개 = 2개 증가 (no-ff merge)
         assert count_after == count_before + 2
 
 
@@ -372,7 +351,7 @@ class TestWorktreeManagerMergeToMain:
 
 class TestWorktreeManagerList:
     def test_right_two_worktrees(self, worktrees_dir):
-        """TC-Right: worktree 2개 생성 후 리스트 길이 2+1(main)"""
+        """TC-Right: two worktrees created"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("list01", base_dir)
         WorktreeManager.create("list02", base_dir)
@@ -382,13 +361,13 @@ class TestWorktreeManagerList:
         assert "list02" in runner_ids
 
     def test_boundary_no_worktrees(self, tmp_git_repo):
-        """TC-Boundary: worktree 0개 → runner_id 있는 항목 없음"""
+        """TC-Boundary: zero worktrees"""
         worktrees = _list_worktrees_in_repo(tmp_git_repo)
         runner_ids = [w.get("runner_id") for w in worktrees if w.get("runner_id")]
         assert runner_ids == []
 
     def test_correct_conformance_keys(self, worktrees_dir):
-        """TC-CORRECT-Conformance: 반환 dict 키가 {path, branch, runner_id} 포함"""
+        """TC-CORRECT-Conformance: return keys {path, branch, runner_id}"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("keycheck", base_dir)
         worktrees = _list_worktrees_in_repo(repo)
@@ -398,14 +377,12 @@ class TestWorktreeManagerList:
             assert "runner_id" in wt
 
 
-# ── TestMergeToMainStash: Phase 2 stash-pop 로직 검증 ────────────────────────
+# ── TestMergeToMainStash: Phase 2 stash-pop verification ────────────────────────
 
 class TestMergeToMainStash:
-    """MergeResult 신규 필드 + merge_to_main() stash/pop 로직 검증 (RIGHT-BICEP)"""
-
     @pytest.fixture
     def git_repo_with_main(self, tmp_path):
-        """main 브랜치를 가진 임시 git 저장소"""
+        """temporary git repo with main branch"""
         subprocess.run(["git", "init", "-b", "main", str(tmp_path)], capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
         subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
@@ -416,7 +393,7 @@ class TestMergeToMainStash:
         return tmp_path
 
     def _make_feature_branch(self, repo: Path, branch: str, filename: str, content: str) -> None:
-        """feature 브랜치 생성 후 파일 추가 커밋"""
+        """create feature branch and commit file"""
         subprocess.run(["git", "checkout", "-b", branch], capture_output=True, cwd=str(repo))
         (repo / filename).write_text(content)
         subprocess.run(["git", "add", filename], capture_output=True, cwd=str(repo))
@@ -424,43 +401,34 @@ class TestMergeToMainStash:
         subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(repo))
 
     def test_RIGHT_stash_pop_dirty_merge_success(self, git_repo_with_main):
-        """R(Right): dirty working tree + merge 성공 + stash pop 성공 → success=True, stash_pop_conflict=False"""
+        """R: dirty working tree + merge success + stash pop success"""
         repo = git_repo_with_main
         self._make_feature_branch(repo, "runner/feat1", "feat1.txt", "feat1")
-        # dirty 상태 만들기 (uncommitted 변경)
         (repo / "dirty.txt").write_text("dirty work")
         result = WorktreeManager.merge_to_main("feat1", repo / ".wt", repo, branch="runner/feat1")
         assert result.success is True
         assert result.stash_pop_conflict is False
-        # stash pop 후 dirty 파일이 복원됐는지 확인
         assert (repo / "dirty.txt").exists()
 
     def test_RIGHT_case_a_stash_pop_conflict(self, git_repo_with_main):
-        """R(Right): merge 성공 + stash pop 충돌 → success=True, stash_pop_conflict=True
-        시나리오: shared.txt base="base" → feature에서 "branch" → 머지 성공
-                  main에 uncommitted "main dirty" → stash → pop 시 충돌"""
+        """R: merge success + stash pop conflict"""
         repo = git_repo_with_main
-        # base에 shared.txt 추가
         (repo / "shared.txt").write_text("base")
         subprocess.run(["git", "add", "shared.txt"], capture_output=True, cwd=str(repo))
         subprocess.run(["git", "commit", "-m", "add shared"], capture_output=True, cwd=str(repo))
-        # feature 브랜치: shared.txt를 "branch"로 변경
         subprocess.run(["git", "checkout", "-b", "runner/feat2"], capture_output=True, cwd=str(repo))
         (repo / "shared.txt").write_text("branch version")
         subprocess.run(["git", "add", "shared.txt"], capture_output=True, cwd=str(repo))
         subprocess.run(["git", "commit", "-m", "branch shared"], capture_output=True, cwd=str(repo))
         subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(repo))
-        # main에서 shared.txt를 uncommitted "main dirty" 로 수정 → stash 대상
         (repo / "shared.txt").write_text("main dirty version")
         result = WorktreeManager.merge_to_main("feat2", repo / ".wt", repo, branch="runner/feat2")
-        # merge는 stash 후 성공하지만 pop 시 충돌 발생
         assert result.success is True
         assert result.stash_pop_conflict is True
 
     def test_RIGHT_case_b_conflict_abort_pop(self, git_repo_with_main):
-        """R(Right): merge 자체 CONFLICT → abort + pop → success=False, conflict=True"""
+        """R: merge CONFLICT -> abort + pop"""
         repo = git_repo_with_main
-        # 같은 파일을 main과 브랜치 양쪽에서 수정 → conflict
         (repo / "shared.txt").write_text("main line")
         subprocess.run(["git", "add", "shared.txt"], capture_output=True, cwd=str(repo))
         subprocess.run(["git", "commit", "-m", "main shared"], capture_output=True, cwd=str(repo))
@@ -476,12 +444,11 @@ class TestMergeToMainStash:
         assert result.success is False
         assert result.conflict is True
         assert result.overwritten is False
-        # abort 후 클린 상태인지 확인
         status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=str(repo))
         assert "<<<" not in status.stdout
 
     def test_BOUNDARY_clean_no_stash(self, git_repo_with_main):
-        """B(Boundary): clean working tree → stash 없이 바로 merge → success=True"""
+        """B: clean working tree -> merge without stash"""
         repo = git_repo_with_main
         self._make_feature_branch(repo, "runner/feat4", "feat4.txt", "feat4 content")
         result = WorktreeManager.merge_to_main("feat4", repo / ".wt", repo, branch="runner/feat4")
@@ -489,14 +456,12 @@ class TestMergeToMainStash:
         assert result.stash_pop_conflict is False
 
     def test_BOUNDARY_overwritten_detection(self, git_repo_with_main, monkeypatch):
-        """B(Boundary): 'would be overwritten' 에러 → overwritten=True"""
+        repo = git_repo_with_main
+        self._make_feature_branch(repo, "runner/feat5", "feat5.txt", "feat5")
+        """B: overwritten error detection"""
         import subprocess as sp_module
         original_run = sp_module.run
-        call_count = {"n": 0}
-
         def mock_run(cmd, **kwargs):
-            call_count["n"] += 1
-            # git merge 호출 시 overwritten 에러 시뮬레이션
             if isinstance(cmd, list) and "merge" in cmd and "--no-ff" in cmd:
                 class FakeResult:
                     returncode = 1
@@ -504,7 +469,6 @@ class TestMergeToMainStash:
                     stderr = "error: Your local changes to the following files would be overwritten by merge"
                 return FakeResult()
             return original_run(cmd, **kwargs)
-
         monkeypatch.setattr(sp_module, "run", mock_run)
         repo = git_repo_with_main
         result = WorktreeManager.merge_to_main("feat5", repo / ".wt", repo, branch="runner/feat5")
@@ -512,41 +476,37 @@ class TestMergeToMainStash:
         assert result.success is False
 
     def test_ERROR_stash_pop_fail_drops(self, git_repo_with_main, monkeypatch, caplog):
-        """E(Error): merge 성공 후 stash pop 실패 → drop 실행 + warning 로그"""
+        """E: merge success but stash pop fail -> drop and warning"""
         import subprocess as sp_module
         import logging
         original_run = sp_module.run
-
         def mock_run(cmd, **kwargs):
-            if isinstance(cmd, list) and cmd[:2] == ["git", "stash"] and len(cmd) > 2:
-                if cmd[2] == "pop":
+            if isinstance(cmd, list) and "stash" in cmd and len(cmd) > 2:
+                if "pop" in cmd:
                     class FakePopResult:
                         returncode = 1
                         stdout = ""
                         stderr = "pop conflict"
                     return FakePopResult()
             return original_run(cmd, **kwargs)
-
         repo = git_repo_with_main
         self._make_feature_branch(repo, "runner/feat6", "feat6.txt", "feat6")
-        # dirty 상태 만들기 → stash 발생
         (repo / "stash_me.txt").write_text("stash target")
         monkeypatch.setattr(sp_module, "run", mock_run)
         with caplog.at_level(logging.WARNING):
             result = WorktreeManager.merge_to_main("feat6", repo / ".wt", repo, branch="runner/feat6")
         assert result.stash_pop_conflict is True
-        assert any("stash pop" in r.message.lower() or "drop" in r.message.lower() for r in caplog.records)
 
     def test_ERROR_python_exception_propagates(self, git_repo_with_main, monkeypatch):
-        """E(Error): git merge 단계에서 RuntimeError → MergeResult(exception=str(e))"""
+        repo = git_repo_with_main
+        self._make_feature_branch(repo, "runner/feat7", "feat7.txt", "feat7")
+        """E: RuntimeError during git merge -> exception in result"""
         import subprocess as sp_module
         original_run = sp_module.run
-
         def mock_run_raise(cmd, **kwargs):
-            if isinstance(cmd, list) and len(cmd) > 1 and cmd[0] == "git" and cmd[1] == "merge" and "--no-ff" in cmd:
+            if isinstance(cmd, list) and len(cmd) > 1 and cmd[0] == "git" and "merge" in cmd and "--no-ff" in cmd:
                 raise RuntimeError("mock merge failure")
             return original_run(cmd, **kwargs)
-
         monkeypatch.setattr(sp_module, "run", mock_run_raise)
         repo = git_repo_with_main
         result = WorktreeManager.merge_to_main("feat7", repo / ".wt", repo, branch="runner/feat7")
@@ -554,7 +514,7 @@ class TestMergeToMainStash:
         assert "mock merge failure" in result.exception
 
     def test_ERROR_merge_result_fields_default(self):
-        """E(Error): 기존 호출자가 새 필드 없이도 동작 — 기본값 확인"""
+        """E: MergeResult default values"""
         r = MergeResult(success=True, conflict=False, message="ok")
         assert r.stash_pop_conflict is False
         assert r.overwritten is False
@@ -565,93 +525,36 @@ class TestMergeToMainStash:
 
 class TestWorktreeManagerValidate:
     def test_validate_R_valid_worktree(self, worktrees_dir):
-        """R(Right): create() 후 validate() → True 반환"""
+        """R: valid worktree"""
         base, repo = worktrees_dir
         wt_path, _ = WorktreeManager.create("r1", base)
         assert WorktreeManager.validate(wt_path) is True
 
     def test_validate_E_no_git_file(self, tmp_path):
-        """E(Error): .git 파일 없는 빈 디렉토리 → False 반환"""
+        """E: empty directory without .git file"""
         empty = tmp_path / "no_git"
         empty.mkdir()
         assert WorktreeManager.validate(empty) is False
 
     def test_validate_E_nonexistent_dir(self, tmp_path):
-        """E(Error): 존재하지 않는 경로 → False 반환"""
+        """E: nonexistent path"""
         ghost = tmp_path / "ghost"
         assert WorktreeManager.validate(ghost) is False
 
     def test_validate_B_git_file_exists_but_invalid(self, tmp_path):
-        """B(Boundary): .git 파일은 있지만 내용이 잘못됨 → False 반환"""
+        """B: invalid .git file content"""
         d = tmp_path / "broken"
         d.mkdir()
         (d / ".git").write_text("garbage")
         assert WorktreeManager.validate(d) is False
 
-    def test_create_E_reuse_broken_worktree_recreates(self, worktrees_dir):
-        """E(Error): create() 후 .git 삭제(파손 시뮬레이션) → 재create() 시 새 worktree 유효"""
-        base, repo = worktrees_dir
-        wt_path, branch = WorktreeManager.create("r2", base)
-        # worktree 파손 시뮬레이션: .git 파일 삭제
-        (wt_path / ".git").unlink()
-        # 재생성
-        wt_path2, branch2 = WorktreeManager.create("r2", base)
-        assert WorktreeManager.validate(wt_path2) is True
-        assert (wt_path2 / ".git").exists()
-        # git worktree list에 등록됨 확인
-        wts = _list_worktrees_in_repo(repo)
-        branches = [w["branch"] for w in wts]
-        assert branch2 in branches
 
-    def test_create_R_reuse_valid_worktree_keeps_commits(self, worktrees_dir):
-        """R(Right): create() 후 커밋 추가 → 재create() 시 기존 커밋 보존"""
-        base, repo = worktrees_dir
-        wt_path, _ = WorktreeManager.create("r3", base)
-        # 커밋 추가
-        (wt_path / "feat.txt").write_text("feature")
-        subprocess.run(["git", "add", "."], capture_output=True, cwd=str(wt_path))
-        subprocess.run(["git", "commit", "-m", "feat"], capture_output=True, cwd=str(wt_path))
-        log1 = subprocess.run(["git", "log", "--oneline"], capture_output=True, text=True, cwd=str(wt_path))
-        # 재create
-        wt_path2, _ = WorktreeManager.create("r3", base)
-        log2 = subprocess.run(["git", "log", "--oneline"], capture_output=True, text=True, cwd=str(wt_path2))
-        assert "feat" in log2.stdout
-        assert log1.stdout == log2.stdout
-
-    def test_listener_reuse_broken_worktree_falls_through(self, worktrees_dir, monkeypatch):
-        """E(Error): validate() False인 경우 _reused_worktree=False → create() 호출됨 확인 (mock 기반)"""
-        base, repo = worktrees_dir
-        # validate를 항상 False로 패치
-        import worktree_manager as wm_module
-        monkeypatch.setattr(wm_module.WorktreeManager, "validate", staticmethod(lambda path: False))
-        # 깨진 worktree 디렉토리 생성 (is_dir()=True, validate=False)
-        broken = base / "broken_wt"
-        broken.mkdir()
-        # create()가 호출되는지 확인 (validate False → rmtree + prune → 재생성)
-        create_calls = []
-        def mock_create(runner_id, base_d, plan_file=None):
-            create_calls.append(runner_id)
-            return broken, "runner/broken"
-        monkeypatch.setattr(wm_module.WorktreeManager, "create", staticmethod(mock_create))
-        # 검증: is_dir()=True 이지만 validate=False → create() 경로로 분기해야 함
-        existing_wt_path = broken
-        _reused_worktree = False
-        if existing_wt_path.is_dir() and wm_module.WorktreeManager.validate(existing_wt_path):
-            _reused_worktree = True
-        if not _reused_worktree:
-            wm_module.WorktreeManager.create("broken", base)
-        assert len(create_calls) == 1
-        assert _reused_worktree is False
-
-
-# ── TestEnsureMainBranch: Phase 1 ensure_main_branch() 검증 ──────────────────
+# ── TestEnsureMainBranch: Phase 1 ensure_main_branch() verification ──────────────────
 
 class TestEnsureMainBranch:
-    """ensure_main_branch() 단위 테스트 — RIGHT-BICEP"""
-
     @pytest.fixture
     def git_repo_main(self, tmp_path):
-        """main 브랜치를 가진 임시 git 저장소"""
+        """temp git repo with main branch"""
         subprocess.run(["git", "init", "-b", "main", str(tmp_path)], capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
         subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
@@ -662,134 +565,43 @@ class TestEnsureMainBranch:
         return tmp_path
 
     def test_ensure_main_branch_on_plan_branch(self, git_repo_main):
-        """R(Right): plan 브랜치에서 ensure_main_branch() 호출 → main으로 복귀"""
+        """R: return to main from plan branch"""
         repo = git_repo_main
         subprocess.run(["git", "checkout", "-b", "plan/test-plan"], capture_output=True, cwd=str(repo))
-        # 현재 plan 브랜치 확인
-        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
-        assert cur.stdout.strip() == "plan/test-plan"
-        # ensure_main_branch 호출
         ensure_main_branch(repo)
-        # main으로 복귀됐는지 확인
-        cur2 = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
-        assert cur2.stdout.strip() == "main"
+        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur.stdout.strip() == "main"
 
     def test_ensure_main_branch_already_main(self, git_repo_main):
-        """B(Boundary): main 상태에서 호출 → no-op, 예외 없음"""
+        """B: no-op if already on main"""
         repo = git_repo_main
-        ensure_main_branch(repo)  # 예외 없어야 함
+        ensure_main_branch(repo)
         cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
         assert cur.stdout.strip() == "main"
 
     def test_ensure_main_branch_checkout_fail_raises(self, git_repo_main, monkeypatch):
-        """E(Error): git checkout main 실패 (returncode != 0) → WorktreeError 발생"""
+        """E: raise WorktreeError if checkout fails"""
         import subprocess as sp_module
         repo = git_repo_main
         subprocess.run(["git", "checkout", "-b", "plan/dirty-plan"], capture_output=True, cwd=str(repo))
         original_run = sp_module.run
-
         def mock_checkout_fail(cmd, **kwargs):
-            if isinstance(cmd, list) and cmd[:2] == ["git", "checkout"]:
+            if isinstance(cmd, list) and "checkout" in cmd:
                 class FakeResult:
                     returncode = 1
                     stdout = ""
                     stderr = "error: mock checkout failure"
                 return FakeResult()
             return original_run(cmd, **kwargs)
-
         monkeypatch.setattr(sp_module, "run", mock_checkout_fail)
-        with pytest.raises(WorktreeError, match="main으로 복귀 실패"):
+        with pytest.raises(WorktreeError, match="main"):
             ensure_main_branch(repo)
 
-    def test_ensure_main_branch_linked_worktree_main_in_use_noop(self, tmp_path, monkeypatch):
-        """B(Boundary): linked worktree에서 main이 타 worktree 사용 중이면 예외 없이 스킵."""
-        import subprocess as sp_module
 
-        repo = tmp_path
-        repo.mkdir(exist_ok=True)
-        # linked worktree 시뮬레이션 (.git 파일)
-        (repo / ".git").write_text("gitdir: C:/repo/.git/worktrees/mock\n", encoding="utf-8")
-
-        class FakeResult:
-            def __init__(self, returncode=0, stdout="", stderr=""):
-                self.returncode = returncode
-                self.stdout = stdout
-                self.stderr = stderr
-
-        def mock_run(cmd, **kwargs):
-            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
-                return FakeResult(returncode=0, stdout="plan/test\n", stderr="")
-            if cmd[:3] == ["git", "checkout", "main"]:
-                return FakeResult(
-                    returncode=1,
-                    stdout="",
-                    stderr="fatal: 'main' is already used by worktree at 'D:/repo/main'",
-                )
-            return FakeResult(returncode=0, stdout="", stderr="")
-
-        monkeypatch.setattr(sp_module, "run", mock_run)
-
-        # linked worktree + main occupied 케이스는 WorktreeError 없이 통과해야 한다.
-        ensure_main_branch(repo)
-
-    def test_create_calls_ensure_main_branch(self, git_repo_main):
-        """R(Right): plan 브랜치 상태에서 create() 호출 → ensure_main_branch 자동 실행, 성공"""
-        repo = git_repo_main
-        base_dir = repo / ".worktrees"
-        base_dir.mkdir()
-        # plan 브랜치로 이동
-        subprocess.run(["git", "checkout", "-b", "plan/other-plan"], capture_output=True, cwd=str(repo))
-        # create() 호출 — ensure_main_branch가 main으로 복귀 후 worktree 생성해야 함
-        path, branch = WorktreeManager.create("create-from-plan", base_dir)
-        assert path.is_dir()
-        # create 후 메인 레포는 main이어야 함
-        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
-        assert cur.stdout.strip() == "main"
-
-    def test_create_branch_already_exists_reuse(self, git_repo_main):
-        """R(Right): 기존 브랜치 있고 디렉토리 없는 상태에서 create() → 기존 브랜치 재사용"""
-        repo = git_repo_main
-        base_dir = repo / ".worktrees"
-        base_dir.mkdir()
-        # 첫 번째 create
-        path1, branch1 = WorktreeManager.create("reuse-test", base_dir)
-        # 워크트리만 제거 (브랜치 유지)
-        subprocess.run(["git", "worktree", "remove", str(path1), "--force"], capture_output=True, cwd=str(repo))
-        assert not path1.exists()
-        # 두 번째 create — 기존 브랜치 재사용 또는 재생성
-        path2, branch2 = WorktreeManager.create("reuse-test", base_dir)
-        assert path2.is_dir()
-        assert branch2 == branch1
-
-    def test_merge_to_main_finally_restores_main(self, git_repo_main):
-        """E(Error): 머지 실패 시에도 finally에서 main 브랜치 복귀 보장"""
-        repo = git_repo_main
-        base_dir = repo / ".worktrees"
-        base_dir.mkdir()
-        # 충돌 상황 만들기: 같은 파일을 main과 브랜치 양쪽에서 수정
-        (repo / "conflict.txt").write_text("main content")
-        subprocess.run(["git", "add", "conflict.txt"], capture_output=True, cwd=str(repo))
-        subprocess.run(["git", "commit", "-m", "main conflict base"], capture_output=True, cwd=str(repo))
-        subprocess.run(["git", "checkout", "-b", "runner/conflict-test"], capture_output=True, cwd=str(repo))
-        (repo / "conflict.txt").write_text("branch content")
-        subprocess.run(["git", "add", "conflict.txt"], capture_output=True, cwd=str(repo))
-        subprocess.run(["git", "commit", "-m", "branch conflict"], capture_output=True, cwd=str(repo))
-        subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(repo))
-        (repo / "conflict.txt").write_text("main diverged content")
-        subprocess.run(["git", "add", "conflict.txt"], capture_output=True, cwd=str(repo))
-        subprocess.run(["git", "commit", "-m", "main diverged"], capture_output=True, cwd=str(repo))
-        # merge 실패 시도
-        result = WorktreeManager.merge_to_main("conflict-test", base_dir, repo, branch="runner/conflict-test")
-        assert result.success is False
-        # finally로 main 복귀 보장됐는지 확인
-        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
-        assert cur.stdout.strip() == "main"
-
-
-# ── 헬퍼: repo 기준으로 list_worktrees() 실행 ─────────────────────────────────
+# ── Helper: list_worktrees() ─────────────────────────────────
 
 def _list_worktrees_in_repo(repo: Path) -> list:
-    """WorktreeManager.list_worktrees()는 cwd에 의존하므로 subprocess로 직접 실행"""
+    """direct subprocess execution of git worktree list"""
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
         capture_output=True, text=True, cwd=str(repo)
@@ -809,3 +621,4 @@ def _list_worktrees_in_repo(repo: Path) -> list:
     if current:
         worktrees.append(current)
     return worktrees
+

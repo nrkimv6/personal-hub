@@ -61,7 +61,14 @@ export const systemApi = {
 
   // 전체 재시작
   restartAll: () =>
-    request<{ status: string; stopped_count: number; started_count: number }>(
+    request<{
+      status: string;
+      worker_running: boolean;
+      stopped_count: number;
+      started_count: number;
+      message: string;
+      recovery_command?: string | null;
+    }>(
       '/system/restart-all',
       { method: 'POST' }
     ),
@@ -82,16 +89,43 @@ export const systemApi = {
   }
 };
 
+export interface BootHistoryItem {
+  pid: number;
+  started_at: string;
+  ended_at: string | null;
+  end_cause: string | null;
+  end_details: string | null;
+  exit_code: number | null;
+  uptime_seconds: number;
+  restart_gap_seconds: number | null;
+  last_request: string | null;
+  restarted: boolean;
+  needs_attention: boolean;
+  current: boolean;
+  status: 'running' | 'restarted' | 'stopped';
+  inferred_end: boolean;
+}
+
+export interface BootHistoryResponse {
+  total: number;
+  system_boot_at: string | null;
+  items: BootHistoryItem[];
+}
+
+export const bootHistoryApi = {
+  list: (limit: number = 50) => request<BootHistoryResponse>(`/system/boot-history?limit=${limit}`)
+};
+
 // ============================================================
 // 워커 API
 // ============================================================
 
 export const workerApi = {
   // 상태 조회
-  status: () => request<{
+  status: (options?: RequestInit) => request<{
     pid: number | null;
     status: string;
-    start_time: string | null;
+    started_at: string | null;
     last_heartbeat: string | null;
     active_tasks: number;
     error_message: string | null;
@@ -99,7 +133,9 @@ export const workerApi = {
     memory_usage_mb: number | null;
     global_pause: boolean;
     paused_at: string | null;
-  }>('/worker/status'),
+    active_tabs: number;
+    browser_contexts: number;
+  }>('/worker/status', options),
 
   // 시작
   start: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/start', {
@@ -136,11 +172,11 @@ export const workerApi = {
   },
 
   // 헬스 체크
-  health: () => request<{
+  health: (options?: RequestInit) => request<{
     is_running: boolean;
     is_healthy: boolean;
     details: Record<string, unknown>;
-  }>('/worker/health')
+  }>('/worker/health', options)
 };
 
 // ============================================================
@@ -541,7 +577,62 @@ export interface LLMDefaultsUpdateRequest {
   caller_defaults?: Record<string, LLMDefaultConfig>;
 }
 
+export interface LLMProfileConfig {
+  engine: string;
+  name: string;
+  config_dir: string | null;
+  extra_env: Record<string, string>;
+}
+
+export interface LLMProfilesResponse {
+  selected: Record<string, string>;
+  profiles: LLMProfileConfig[];
+  supported_engines: string[];
+}
+
+export interface LLMProfilesUpdateRequest {
+  selected?: Record<string, string>;
+  profiles: LLMProfileConfig[];
+}
+
+export interface ProviderInfo {
+  key: string;
+  display_name: string;
+  default_model: string;
+  models: string[];
+  supports_chat: boolean;
+  supports_quota_pause: boolean;
+  enabled: boolean;
+  executor_key: string;
+}
+
+export interface LLMBootstrapResponse {
+  list: LLMRequestListResponse;
+  stats: LLMStats;
+  queue_stats: LLMQueueStats;
+  worker_status: LLMWorkerStatus;
+}
+
 export const llmApi = {
+  // Provider 목록 조회 (enabled만 반환)
+  getProviders: (options?: RequestInit) =>
+    request<ProviderInfo[]>('/llm/providers', options),
+
+  // 초기 진입용 묶음 조회
+  bootstrap: (params?: LLMRequestListParams, options?: RequestInit) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.append('status', params.status);
+    if (params?.caller_type) searchParams.append('caller_type', params.caller_type);
+    if (params?.requested_by) searchParams.append('requested_by', params.requested_by);
+    if (params?.queue_name) searchParams.append('queue_name', params.queue_name);
+    if (params?.include_deleted) searchParams.append('include_deleted', String(params.include_deleted));
+    if (params?.page) searchParams.append('page', String(params.page));
+    if (params?.page_size) searchParams.append('page_size', String(params.page_size));
+    const query = searchParams.toString();
+    return request<LLMBootstrapResponse>(`/llm/bootstrap${query ? `?${query}` : ''}`, options);
+  },
+
+
   // 요청 목록 조회
   list: (params?: LLMRequestListParams, options?: RequestInit) => {
     const searchParams = new URLSearchParams();
@@ -678,6 +769,32 @@ export const llmApi = {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
+
+  // Profile API
+  listProfiles: () => request<LLMProfilesResponse>('/llm/profiles'),
+
+  updateProfiles: (payload: LLMProfilesUpdateRequest) =>
+    request<LLMProfilesResponse>('/llm/profiles', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  selectProfile: (engine: string, name: string) =>
+    request<LLMProfilesResponse>(`/llm/profiles/${engine}/select`, {
+      method: 'POST',
+      body: JSON.stringify({ name })
+    }),
+
+  deleteProfile: (engine: string, name: string) =>
+    request<LLMProfilesResponse>(`/llm/profiles/${engine}/${name}`, {
+      method: 'DELETE'
+    }),
+
+  launchCli: (engine: string, name: string) =>
+    request<{ status: string; engine: string; profile: string; message?: string }>(
+      `/llm/profiles/${engine}/${name}/launch-cli`,
+      { method: 'POST' }
+    ),
 };
 
 // ============================================================
@@ -972,6 +1089,11 @@ export interface NssmService {
   status: string;
   start_type: string;
   display_name: string;
+  frontend_port?: number | null;
+  frontend_pid?: number | null;
+  frontend_listener_pid?: number | null;
+  frontend_health?: 'healthy' | 'degraded' | 'down' | string;
+  degraded_reason?: string | null;
 }
 
 export interface StartupProgram {

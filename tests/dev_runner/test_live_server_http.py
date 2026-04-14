@@ -10,6 +10,8 @@
 import pytest
 import httpx
 
+from app.core.runtime_fingerprint import build_runtime_fingerprint_snapshot
+
 pytestmark = pytest.mark.http_live
 
 BASE_URL = "http://localhost:8001"
@@ -20,7 +22,7 @@ def test_live_health_check():
     try:
         resp = httpx.get(f"{BASE_URL}/", timeout=5)
     except httpx.ConnectError:
-        pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
     assert resp.status_code == 200
 
 
@@ -29,6 +31,21 @@ def test_live_runners_endpoint():
     try:
         resp = httpx.get(f"{BASE_URL}/api/v1/dev-runner/runners", timeout=5)
     except httpx.ConnectError:
-        pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+def test_live_runtime_fingerprint_endpoint():
+    """R: /api/v1/system/runtime-fingerprint 엔드포인트 200 응답 + 진단 필드 확인"""
+    try:
+        resp = httpx.get(f"{BASE_URL}/api/v1/system/runtime-fingerprint", timeout=5)
+    except httpx.ConnectError:
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+    assert resp.status_code == 200
+    data = resp.json()
+    expected = build_runtime_fingerprint_snapshot()
+    assert "runtime_fingerprint" in data
+    assert "source_fingerprint" in data
+    assert isinstance(data.get("source_files"), list)
+    assert data["source_fingerprint"] == expected["source_fingerprint"]

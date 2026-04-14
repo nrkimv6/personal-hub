@@ -23,13 +23,16 @@
 """
 import asyncio
 import os
+import time
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from datetime import datetime
 from typing import Optional, Set, Dict, Callable, Awaitable, TYPE_CHECKING
 
+from app.core.database import db_circuit, is_connection_error
 from app.shared.worker.exceptions import WorkerCriticalError
+from app.shared.worker.health_redis import WorkerHealthRedis, PUBLISH_INTERVAL
 
 if TYPE_CHECKING:
     from app.shared.browser.browser_manager import BrowserManager
@@ -84,6 +87,7 @@ class BaseWorker(ABC):
         self.start_time: Optional[datetime] = None
         self.worker_id: Optional[str] = None
         self._running = False
+        self._last_heartbeat_time: float = 0
 
         # 백그라운드 태스크 관리
         self._running_tasks: Set[asyncio.Task] = set()
@@ -93,6 +97,11 @@ class BaseWorker(ABC):
         self._max_consecutive_errors: int = self.DEFAULT_MAX_CONSECUTIVE_ERRORS
         self._last_error: Optional[Exception] = None
         self._task_error_counts: Dict[str, int] = defaultdict(int)
+
+        # DB 불가 backoff 관련
+        self._last_db_unavailable_log_time: float = 0.0
+        self._was_db_unavailable: bool = False
+        self._error_log_rate: Dict[str, float] = {}
 
     @property
     def is_running(self) -> bool:
@@ -218,12 +227,11 @@ class BaseWorker(ABC):
         pass
 
     def _update_heartbeat(self):
-        """워커 heartbeat 업데이트.
+        """워커 heartbeat를 Redis에 publish한다.
 
-        하위 클래스에서 필요시 오버라이드합니다.
+        하위 클래스에서 필요시 오버라이드하여 추가 데이터를 전달할 수 있다.
         """
-        # 기본 구현은 아무것도 하지 않음
-        pass
+        WorkerHealthRedis.publish(self.name, self.pid, "running")
 
     def _mark_worker_dead(self):
         """워커를 종료 상태로 표시.
@@ -248,8 +256,26 @@ class BaseWorker(ABC):
 
         while not self.shutdown_event.is_set():
             try:
-                # Heartbeat 업데이트
-                self._update_heartbeat()
+                # Heartbeat 업데이트 (15초마다 1회)
+                now = time.monotonic()
+                if now - self._last_heartbeat_time >= PUBLISH_INTERVAL:
+                    try:
+                        self._update_heartbeat()
+                    except Exception:
+                        pass  # Redis도 다운됐을 때 조용히 실패
+                    self._last_heartbeat_time = now
+
+                # DB 불가 시 backoff 가드
+                if not db_circuit.is_available():
+                    self._was_db_unavailable = True
+                    self._log_db_unavailable_once()
+                    await self._wait_for_next_cycle(10.0)
+                    continue
+
+                # DB 복구 감지 로그
+                if self._was_db_unavailable:
+                    logger.info("[%s] DB 접근 재개", self.name)
+                    self._was_db_unavailable = False
 
                 # 완료된 태스크 정리
                 self._cleanup_completed_tasks()
@@ -373,6 +399,41 @@ class BaseWorker(ABC):
             "consecutive_errors": self._consecutive_errors,
             "task_error_counts": dict(self._task_error_counts),
         }
+
+    # ========== DB 불가 backoff 헬퍼 ==========
+
+    def _log_db_unavailable_once(self) -> None:
+        """DB 불가 상태 경고를 30초당 1회만 로깅."""
+        now = time.monotonic()
+        if now - self._last_db_unavailable_log_time >= 30.0:
+            logger.warning("[%s] DB 불가 — circuit OPEN, 10초 후 재시도", self.name)
+            self._last_db_unavailable_log_time = now
+
+    def _log_worker_error(self, task_desc: str, exc: Exception) -> None:
+        """워커 에러 로깅.
+
+        PG connection 에러는 30초당 1회 WARNING(traceback 없음).
+        그 외 에러는 기존대로 ERROR + exc_info=True.
+
+        Args:
+            task_desc: 작업 설명 (rate-limit 키로 사용)
+            exc: 발생한 예외
+        """
+        if is_connection_error(exc):
+            now = time.monotonic()
+            last = self._error_log_rate.get(task_desc, 0.0)
+            if now - last >= 30.0:
+                logger.warning(
+                    "[%s] DB 연결 오류 (%s): %s",
+                    self.name, task_desc, exc,
+                )
+                self._error_log_rate[task_desc] = now
+        else:
+            logger.error(
+                "[%s] 오류 (%s): %s",
+                self.name, task_desc, exc,
+                exc_info=True,
+            )
 
     # ========== 예외 처리 헬퍼 ==========
 

@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from freezegun import freeze_time
 
-from app.log_viewer.stale import is_stale
+from app.log_viewer.stale import _extract_date, is_stale
 
 
 def _make_file(tmp_path: Path, name: str, content: str = "log") -> Path:
@@ -202,3 +202,39 @@ class TestNoDateFallback:
         """날짜 없는 순수 이름 파일 + reference None → stale"""
         f = _make_file(tmp_path, "worker.log")
         assert is_stale(f, today=date(2026, 3, 27)) is True
+
+
+# ---------------------------------------------------------------------------
+# _extract_date: 밑줄 형식 지원 TC (Phase T1 — Phase 22 대응)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractDateUnderscore:
+    def test_extract_date_underscore_format(self):
+        """R: api_20260407_120000.log → date(2026, 4, 7) 반환."""
+        result = _extract_date("api_20260407_120000.log")
+        assert result == date(2026, 4, 7)
+
+    def test_extract_date_hyphen_format_regression(self):
+        """B: 기존 하이픈 형식 plan-runner-2026-04-07-abc.log → 회귀 없음."""
+        result = _extract_date("plan-runner-2026-04-07-abc.log")
+        assert result == date(2026, 4, 7)
+
+    def test_extract_date_underscore_stale_yesterday(self, tmp_path):
+        """R: 어제 밑줄형식 파일 → is_stale=True (stale 판정 정상 동작)."""
+        from datetime import timedelta
+        yesterday = date.today() - timedelta(days=1)
+        fname = f"api_{yesterday.strftime('%Y%m%d')}_120000.log"
+        f = _make_file(tmp_path, fname)
+        assert is_stale(f) is True
+
+    def test_extract_date_underscore_today_not_stale(self, tmp_path):
+        """R: 오늘 밑줄형식 파일 → is_stale=False."""
+        fname = f"api_{date.today().strftime('%Y%m%d')}_120000.log"
+        f = _make_file(tmp_path, fname)
+        assert is_stale(f) is False
+
+    def test_extract_date_no_match(self):
+        """E: 날짜 패턴 없는 파일명 → None 반환."""
+        assert _extract_date("worker.log") is None
+        assert _extract_date("stdout_api.log") is None

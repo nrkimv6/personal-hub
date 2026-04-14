@@ -24,14 +24,6 @@ ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
 
 
-def _is_api_available() -> bool:
-    try:
-        resp = requests.get(f"{ADMIN_API}/health", timeout=2)
-        return resp.status_code < 500
-    except Exception:
-        return False
-
-
 def _collect_initial_status_http(timeout: float = 5.0) -> list[dict]:
     """SSE /events 연결 후 초기 status 이벤트의 runners 목록 반환"""
     try:
@@ -80,8 +72,6 @@ class TestRunnersEndpoint503Http:
             f"응답: {response.text}"
         )
 
-
-@pytest.mark.skipif(not _is_api_available(), reason="Admin API 서버 미실행")
 @pytest.mark.http_live
 @pytest.mark.allow_prod_redis
 class TestSseRecentVisibleHttpLive:
@@ -119,5 +109,55 @@ class TestSseRecentVisibleHttpLive:
         finally:
             r.zrem(RECENT_RUNNERS_KEY, runner_id)
             for suffix in ("status", "trigger", "plan_file"):
+                r.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}")
+            r.close()
+
+
+@pytest.mark.http_live
+@pytest.mark.allow_prod_redis
+class TestSseMergeRecoveryFieldsHttpLive:
+    """T5 (http_live): SSE initial status에 merge 복구 필드 포함 검증"""
+
+    def test_sse_events_initial_status_includes_merge_recovery_fields_http_live(self):
+        """T5: ACTIVE runner seed 후 initial status에 worktree/merge/stop 필드가 유지되는지 확인"""
+        r = redis_lib.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        runner_id = f"user-merge-{uuid.uuid4().hex[:8]}"
+        score = time.time()
+        expected_worktree = f"D:/tmp/.worktrees/{runner_id}"
+
+        try:
+            r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+            r.zadd(RECENT_RUNNERS_KEY, {runner_id: score})
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", expected_worktree)
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage", "post_review")
+
+            deadline = time.monotonic() + 10.0
+            matched = None
+            while time.monotonic() < deadline and matched is None:
+                runners = _collect_initial_status_http(timeout=5.0)
+                for item in runners:
+                    if item.get("runner_id") == runner_id:
+                        matched = item
+                        break
+                if matched is None:
+                    time.sleep(0.5)
+
+            runner_ids = [r_item.get("runner_id") for r_item in _collect_initial_status_http()]
+            assert matched is not None, (
+                f"ACTIVE runner({runner_id})가 SSE initial status에 없음\n"
+                f"  수신된 runner_ids: {runner_ids}\n"
+                f"  이 실패는 live /events initial status 회귀를 의미합니다."
+            )
+            assert matched["worktree_path"] == expected_worktree
+            assert matched["merge_status"] == "conflict"
+            assert matched["stop_stage"] == "post_review"
+        finally:
+            r.srem(ACTIVE_RUNNERS_KEY, runner_id)
+            r.zrem(RECENT_RUNNERS_KEY, runner_id)
+            for suffix in ("status", "trigger", "plan_file", "worktree_path", "merge_status", "stop_stage"):
                 r.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}")
             r.close()

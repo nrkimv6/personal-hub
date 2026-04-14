@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import time
@@ -37,6 +38,45 @@ from app.modules.dev_runner.services.sse_helpers import (
 from app.modules.dev_runner.schemas import LogResponse, RunHistoryItem, RunHistoryResponse, FullLogResponse
 from app.modules.dev_runner.services.state import get_state
 from app.modules.dev_runner.services.visibility import is_visible_runner
+
+# FAILURE/HOLD 태그 감지 패턴
+_FAILURE_TAG_RE = re.compile(r'\[FAILURE\]\s*(.*)')
+_HOLD_TAG_RE = re.compile(r'\[HOLD\]\s*(.*)')
+
+# Telegram 중복 알림 방지 debounce (plan+reason → 마지막 전송 시각)
+_telegram_debounce: dict[str, float] = {}
+_TELEGRAM_DEBOUNCE_SECS = 60.0
+
+
+async def _send_failure_telegram(runner_id: str, tag: str, detail: str) -> None:
+    """FAILURE/HOLD 태그 감지 시 Telegram 알림 전송 (중복 방지 포함)."""
+    debounce_key = f"{runner_id}:{tag}:{detail[:40]}"
+    now = time.monotonic()
+    last_sent = _telegram_debounce.get(debounce_key, 0.0)
+    if now - last_sent < _TELEGRAM_DEBOUNCE_SECS:
+        return
+    _telegram_debounce[debounce_key] = now
+
+    try:
+        from app.shared.notification.notification_service import NotificationService
+        notif = NotificationService()
+        if tag == "FAILURE":
+            message = (
+                f"⚠️ <b>Plan Runner 실패</b>\n\n"
+                f"runner: {runner_id}\n"
+                f"사유: {detail}\n"
+                f"상태: 유지 (자동 변경 없음)"
+            )
+        else:  # HOLD
+            message = (
+                f"⏸️ <b>Plan 보류 중</b>\n\n"
+                f"runner: {runner_id}\n"
+                f"보류사유: {detail}\n"
+                f"상태: 보류 (수동 설정, skip)"
+            )
+        await notif.send_telegram(message)
+    except Exception as _e:
+        logger.warning(f"[TELEGRAM] {tag} 알림 전송 실패 (무시): {_e}")
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
 # Redis 설정
 REDIS_HOST = "localhost"
@@ -44,9 +84,10 @@ REDIS_PORT = 6379
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
-LOG_CHANNEL = "plan-runner:logs"  # 하위호환 — plan_service 등 단일 채널 publish용
+SYSTEM_LOG_CHANNEL = "plan-runner:system"  # 전역 시스템 알림용, per-runner 로그 채널과 구분
 
 HEARTBEAT_INTERVAL = 30  # 초
+FILE_POLL_TIMEOUT = 5.0  # pub/sub 미수신 N초 후 파일 폴링 전환 (테스트에서 patch 가능)
 _ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
 
 
@@ -294,7 +335,7 @@ class LogService:
         # Phase 2: 파일 폴링 fallback
         _no_msg_since = time.monotonic()
         _file_pos = _file_pos_init
-        FILE_POLL_TIMEOUT = 5.0  # pub/sub 미수신 N초 후 파일 폴링 전환
+        _fallback_entered = False
         _poll_chunk_buffer = ""
         _poll_framer = _PollFrameBuffer()
 
@@ -321,6 +362,14 @@ class LogService:
                             _, reason = parse_log_completed_payload(data)
                             yield f"event: completed\ndata: {reason}\n\n"
                             return
+                        # FAILURE/HOLD 태그 감지 → Telegram 알림 (비동기 fire-and-forget)
+                        _fm = _FAILURE_TAG_RE.search(data)
+                        if _fm:
+                            asyncio.create_task(_send_failure_telegram(runner_id, "FAILURE", _fm.group(1).strip()))
+                        else:
+                            _hm = _HOLD_TAG_RE.search(data)
+                            if _hm:
+                                asyncio.create_task(_send_failure_telegram(runner_id, "HOLD", _hm.group(1).strip()))
                         if multiline_frame_enabled:
                             yield _format_sse_data(_ANSI_ESCAPE_RE.sub("", data))
                         else:
@@ -333,8 +382,23 @@ class LogService:
                         if now - _no_msg_since >= FILE_POLL_TIMEOUT:
                             log_file = self._find_current_log(runner_id)
                             if log_file and log_file.exists():
-                                if _file_pos == 0:
-                                    logger.warning(f"[SSE] pub/sub 미수신 {FILE_POLL_TIMEOUT:.0f}초 → 파일 폴링: {log_channel}")
+                                if not _fallback_entered:
+                                    # fallback 첫 진입 시점의 기존 파일 내용을 재전송하지 않도록
+                                    # 현재 EOF를 기준 위치로 잡는다.
+                                    if _file_pos == 0:
+                                        try:
+                                            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                                                f.seek(0, 2)
+                                                _file_pos = f.tell()
+                                        except Exception:
+                                            _file_pos = 0
+                                    logger.warning(
+                                        "[SSE][FALLBACK] %s",
+                                        json.dumps({"event": "fallback_mode", "channel": log_channel, "runner_id": runner_id}),
+                                    )
+                                    # R4: 클라이언트에 fallback_mode 이벤트 전송 (개발 모드용 배지)
+                                    yield "event: fallback_mode\ndata: file polling active\n\n"
+                                    _fallback_entered = True
                                 try:
                                     with open(log_file, "r", encoding="utf-8", errors="replace") as f:
                                         f.seek(_file_pos)
@@ -373,7 +437,11 @@ class LogService:
                             last_heartbeat = now
                         await asyncio.sleep(0.3)
 
-                except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
+                except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError) as _conn_err:
+                    logger.error(
+                        "[SSE][CONN_ERROR] %s",
+                        json.dumps({"event": "pubsub_disconnected", "channel": log_channel, "runner_id": runner_id, "error": str(_conn_err)}),
+                    )
                     await safe_close_pubsub(pubsub)
                     pubsub = None
                     was_disconnected = True
@@ -614,7 +682,7 @@ class LogService:
         """
         try:
             ts = datetime.now().strftime("%H:%M:%S")
-            self.redis_client.publish(LOG_CHANNEL, f"[{ts}] [{tag}] {message}")
+            self.redis_client.publish(SYSTEM_LOG_CHANNEL, f"[{ts}] [{tag}] {message}")
         except Exception:
             pass  # Redis 미연결 시 무시
 

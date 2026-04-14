@@ -41,6 +41,7 @@ RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
 RECENT_RUNNERS_TTL = _resolve_recent_runners_ttl()  # 기본 24시간
+MAX_RECENT_RUNNERS = 100  # sorted set 크기 상한: 이 수를 초과하면 score 최소(가장 오래된)부터 제거
 COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생성 시간 고려
 # per-runner 키 suffix 전체 목록 (listener와 공유되는 단일 진실 원천)
 # scripts/dev-runner-command-listener.py도 동일 상수를 별도 정의하여 참조
@@ -48,8 +49,13 @@ RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
-    "exit_reason", "subprocess_heartbeat",
+    "exit_reason", "subprocess_heartbeat", "reflect_final_path",
+    # 관측 메타 키 (기존 누락 3개 — _dr_constants.py와 동기화)
+    "accepted_at", "accepted_source", "started_at",
+    # profile 관련 키 (신규 4개)
+    "profile", "profile_env_key", "profile_config_dir", "profile_extra_env",
 )
+SESSION_ID_KEY_PREFIX = "plan-runner:session:"  # fused 세션 ID 저장 키 접두사 (runner_id → session_id 매핑)
 
 
 class RedisConnection:

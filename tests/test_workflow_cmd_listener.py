@@ -29,7 +29,7 @@ def _get_listener():
     global _listener_mod
     if _listener_mod is not None:
         return _listener_mod
-    script_path = Path("D:/work/project/tools/monitor-page/scripts/dev-runner-command-listener.py")
+    script_path = Path("D:/work/project/tools/monitor-page/scripts/plan_runner/dev-runner-command-listener.py")
     if not script_path.exists():
         pytest.skip(f"Listener script not found: {script_path}")
     spec = importlib.util.spec_from_file_location("dev_runner_cmd_listener_wf", str(script_path))

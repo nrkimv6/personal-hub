@@ -144,3 +144,141 @@ def test_cleanup_pattern_ssot(tmp_path: Path):
     assert "force_cleanup|_cleanup_process" not in follow_block, (
         "logs.ps1 Follow 블록에 cleanup 패턴 하드코딩이 남아있음"
     )
+
+
+# ---------------------------------------------------------------------------
+# T3-46: 부팅 직후 파일 미존재 → StaticSourceWatcher 자동 감지 (근본 원인 재현)
+# ---------------------------------------------------------------------------
+
+
+def test_follow_all_sources_picks_up_late_created_file(tmp_path: Path, monkeypatch):
+    """T3: 빈 logs/ 시작 → StaticSourceWatcher refresh 후 새 파일 감지 + tailer 등록.
+
+    근본 원인 재현:
+      - 수정 전: follow_all_sources 시작 시 파일 없으면 영구 누락
+      - 수정 후: StaticSourceWatcher가 이후 생성된 파일을 감지하여 자동 등록
+    """
+    from datetime import date
+
+    from app.log_viewer import cli as cli_mod
+    from app.log_viewer import follower as follower_mod
+    from app.log_viewer.config import get_sources
+    from app.log_viewer.finder import find_latest_log
+    from app.log_viewer.follower import MultiTailer, StaticSourceWatcher
+    from app.log_viewer.stale import is_stale
+
+    # MONITOR_LOG_DIR로 빈 tmp_path 주입
+    monkeypatch.setenv("MONITOR_LOG_DIR", str(tmp_path))
+    (tmp_path / "admin").mkdir()
+    monkeypatch.setattr(follower_mod.StaticSourceWatcher, "_REFRESH_INTERVAL", 0.0)
+
+    dirs = cli_mod._resolve_dirs(admin=True)
+    sources = list(get_sources(admin=True))
+    tailer = MultiTailer()
+
+    # 초기 스캔 (follow_all_sources 시작과 동일) — 파일 없음, 아무것도 등록 안 됨
+    for src in sources:
+        patterns = [f"{p}*" for p in src.patterns]
+        path = find_latest_log(patterns, dirs)
+        if path is not None and not is_stale(path):
+            tailer.add_source(src.name, path, src.color)
+
+    assert len(tailer._sources) == 0, f"초기 등록 없어야 함, got: {list(tailer._sources)}"
+
+    watcher = StaticSourceWatcher(sources, dirs)
+
+    # 아직 파일 없음 → watcher도 등록 안 됨
+    watcher.refresh(tailer)
+    assert "MERGE-ORCH" not in tailer._sources
+
+    # 부팅 후 파일 생성 시뮬레이션
+    today_str = date.today().strftime("%Y%m%d")
+    log_file = tmp_path / f"merge-orchestrator_{today_str}_120000.log"
+    log_file.write_text("startup_merged\n", encoding="utf-8")
+
+    # StaticSourceWatcher 재스캔 (throttle=0으로 설정됨)
+    watcher._last_refresh = -float("inf")
+    watcher.refresh(tailer)
+
+    assert "MERGE-ORCH" in tailer._sources, (
+        "StaticSourceWatcher가 늦게 생성된 파일을 감지하지 못했음 (수정 전 버그 재발)"
+    )
+
+    # initial_tail로 이미 기록된 줄도 반환
+    lines = tailer.poll_once()
+    assert any(ln.text == "startup_merged" for ln in lines), (
+        f"initial_tail 줄 반환 안 됨. lines={[ln.text for ln in lines]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# T3-47: 어제 파일 점착 → stale 필터로 차단, 오늘 파일로 교체 (모순점 1 재현)
+# ---------------------------------------------------------------------------
+
+
+def test_follow_all_sources_skips_stale_yesterday_file(tmp_path: Path, monkeypatch):
+    """T3: 어제 파일만 존재 시 stale 필터로 등록 차단 → 오늘 파일 생성 후 watcher가 교체.
+
+    모순점 1 재현:
+      - 수정 전: find_latest_log가 어제 파일을 반환 → 영원히 어제 파일을 tail
+      - 수정 후: is_stale로 차단 → StaticSourceWatcher가 오늘 파일 생성 시 교체 등록
+    """
+    from datetime import date, timedelta
+
+    from app.log_viewer import cli as cli_mod
+    from app.log_viewer import follower as follower_mod
+    from app.log_viewer.config import get_sources
+    from app.log_viewer.finder import find_latest_log
+    from app.log_viewer.follower import MultiTailer, StaticSourceWatcher
+    from app.log_viewer.stale import is_stale
+
+    monkeypatch.setenv("MONITOR_LOG_DIR", str(tmp_path))
+    (tmp_path / "admin").mkdir()
+    monkeypatch.setattr(follower_mod.StaticSourceWatcher, "_REFRESH_INTERVAL", 0.0)
+
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    today_str = today.strftime("%Y%m%d")
+    yesterday_str = yesterday.strftime("%Y%m%d")
+
+    # 어제 파일만 존재
+    old_file = tmp_path / f"merge-orchestrator_{yesterday_str}_180000.log"
+    old_file.write_text("old_line\n", encoding="utf-8")
+
+    dirs = cli_mod._resolve_dirs(admin=True)
+    sources = list(get_sources(admin=True))
+    tailer = MultiTailer()
+
+    # 초기 스캔: 어제 파일 발견 → is_stale로 차단 (수정 후 동작)
+    merge_src = next((s for s in sources if s.name == "MERGE-ORCH"), None)
+    assert merge_src is not None, "MERGE-ORCH 소스가 config에 없음"
+    patterns = [f"{p}*" for p in merge_src.patterns]
+    path = find_latest_log(patterns, dirs)
+    assert path is not None, "어제 파일이 find_latest_log에서 발견되지 않음"
+    assert is_stale(path), f"어제 파일이 stale로 판정되지 않음: {path.name}"
+    # stale이므로 등록 안 함 (follow_all_sources의 수정된 로직)
+    # tailer에 add_source 호출 안 함 → MERGE-ORCH 없어야 함
+    assert "MERGE-ORCH" not in tailer._sources
+
+    # watcher도 stale로 차단
+    watcher = StaticSourceWatcher(sources, dirs)
+    watcher.refresh(tailer)
+    assert "MERGE-ORCH" not in tailer._sources, "어제 파일이 stale임에도 등록됨"
+
+    # 오늘 파일 생성
+    new_file = tmp_path / f"merge-orchestrator_{today_str}_090000.log"
+    new_file.write_text("today_line\n", encoding="utf-8")
+
+    # watcher 재스캔 → 오늘 파일 발견 + 등록
+    watcher._last_refresh = -float("inf")
+    watcher.refresh(tailer)
+
+    assert "MERGE-ORCH" in tailer._sources, (
+        "StaticSourceWatcher가 오늘 파일을 감지하지 못했음 (어제 파일 점착 미해결)"
+    )
+
+    # 오늘 파일의 라인이 initial_tail로 반환돼야 함
+    lines = tailer.poll_once()
+    assert any(ln.text == "today_line" for ln in lines), (
+        f"오늘 파일 initial_tail 줄 반환 안 됨. lines={[ln.text for ln in lines]}"
+    )

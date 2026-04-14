@@ -1,4 +1,4 @@
-"""Runner 상태 관리 — PID 검증, stale cleanup, force cleanup, dismiss"""
+﻿"""Runner ?곹깭 愿由???PID 寃利? stale cleanup, force cleanup, dismiss"""
 
 import logging
 import time
@@ -8,7 +8,7 @@ from typing import Dict
 
 from app.config import logger
 
-# 모듈 전용 logger (테스트에서 caplog로 캡처 가능)
+# 紐⑤뱢 ?꾩슜 logger (?뚯뒪?몄뿉??caplog濡?罹≪쿂 媛??
 _module_logger = logging.getLogger("app.modules.dev_runner.services.executor_service")
 from app.modules.dev_runner.services.plan_path_resolver import (
     PathRuleError,
@@ -21,22 +21,22 @@ from app.modules.dev_runner.services.redis_connection import (
 )
 from app.modules.dev_runner.services.visibility import is_visible_runner
 
-# stopped user 러너 보존 계약: dismiss 전까지 이 키들은 TTL 없이 영구 보존
+# stopped user ?щ꼫 蹂댁〈 怨꾩빟: dismiss ?꾧퉴吏 ???ㅻ뱾? TTL ?놁씠 ?곴뎄 蹂댁〈
 _PERSIST_SUFFIXES = frozenset({"plan_file", "branch", "trigger"})
 
 
 class RunnerState:
-    """Runner Redis 상태 관리 (PID 보정, stale/force cleanup, dismiss)."""
+    """Runner Redis ?곹깭 愿由?(PID 蹂댁젙, stale/force cleanup, dismiss)."""
 
     def __init__(self, async_redis, runner_key_fn, is_pid_alive_fn=None, force_cleanup_fn=None):
-        """async_redis: aioredis 클라이언트, runner_key_fn: (rid, suffix) -> str 함수."""
+        """async_redis: aioredis ?대씪?댁뼵?? runner_key_fn: (rid, suffix) -> str ?⑥닔."""
         self.async_redis = async_redis
         self._runner_key = runner_key_fn
         self._is_pid_alive_fn = is_pid_alive_fn or self._is_pid_alive
         self._force_cleanup_fn = force_cleanup_fn or self._force_cleanup_state
 
     def _is_pid_alive(self, pid: int) -> bool:
-        """PID가 실제로 살아있는지 확인 (Windows: GetExitCodeProcess로 검증)"""
+        """PID媛 ?ㅼ젣濡??댁븘?덈뒗吏 ?뺤씤 (Windows: GetExitCodeProcess濡?寃利?"""
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32
@@ -55,11 +55,11 @@ class RunnerState:
     async def _correct_pid_state(
         self, rid: str, status: str, pid_str: str | None, caller: str = ""
     ) -> tuple[bool, str | None]:
-        """PID 기반 양방향 보정 공통 메서드.
+        """PID 湲곕컲 ?묐갑??蹂댁젙 怨듯넻 硫붿꽌??
 
-        Bug 2: status="running" 인데 PID dead → _force_cleanup_state 호출 + (False, None)
-        Bug 1: status≠"running" 인데 PID alive → Redis 복원 + (True, pid_str)
-        completed 가드: status="completed" + PID alive → 오보정 방지, 그대로 반환
+        Bug 2: status="running" ?몃뜲 PID dead ??_force_cleanup_state ?몄텧 + (False, None)
+        Bug 1: status??running" ?몃뜲 PID alive ??Redis 蹂듭썝 + (True, pid_str)
+        completed 媛?? status="completed" + PID alive ???ㅻ낫??諛⑹?, 洹몃?濡?諛섑솚
         """
         if not pid_str:
             return (status == "running", pid_str)
@@ -69,7 +69,7 @@ class RunnerState:
             pid_alive = self._is_pid_alive_fn(pid_int)  # noqa: E501 (injected or default)
             if running and not pid_alive:
                 logger.warning(
-                    f"[dev-runner] {caller}: runner {rid} PID {pid_str} 종료됨 → stale 정리"
+                    f"[dev-runner] {caller}: runner {rid} PID {pid_str} 醫낅즺????stale ?뺣━"
                 )
                 await self._force_cleanup_fn(rid)
                 return (False, None)
@@ -77,7 +77,7 @@ class RunnerState:
                 if status == "completed":
                     return (running, pid_str)
                 logger.warning(
-                    f"[dev-runner] {caller}: runner {rid} PID {pid_str} alive but status={status!r} → 복원"
+                    f"[dev-runner] {caller}: runner {rid} PID {pid_str} alive but status={status!r} ??蹂듭썝"
                 )
                 await self.async_redis.set(self._runner_key(rid, "status"), "running")
                 await self.async_redis.sadd(ACTIVE_RUNNERS_KEY, rid)
@@ -85,32 +85,45 @@ class RunnerState:
             return (running, pid_str)
         except (ValueError, Exception) as e:
             logger.debug(
-                f"[dev-runner] {caller}: PID 보정 실패 (무시, rid={rid}): {e}"
+                f"[dev-runner] {caller}: PID 蹂댁젙 ?ㅽ뙣 (臾댁떆, rid={rid}): {e}"
             )
             return (running, pid_str)
 
     async def _force_cleanup_state(self, runner_id: str = ""):
-        """Redis 상태 강제 정리 (listener 무응답 시 fallback)
+        """Redis ?곹깭 媛뺤젣 ?뺣━ (listener 臾댁쓳????fallback)
 
-        종료된 runner는 즉시 삭제하지 않고 RECENT_RUNNERS_KEY에 보존하여
-        다른 클라이언트에서도 탭을 복원할 수 있도록 한다.
+        醫낅즺??runner??利됱떆 ??젣?섏? ?딄퀬 RECENT_RUNNERS_KEY??蹂댁〈?섏뿬
+        ?ㅻⅨ ?대씪?댁뼵?몄뿉?쒕룄 ??쓣 蹂듭썝?????덈룄濡??쒕떎.
 
-        방어 로직: status 키가 없는 runner (listener가 이미 정리 완료)는 RECENT에 등록하지 않는다.
-        이를 통해 listener cleanup 후 API cleanup이 중복 호출될 때 plan_file=None 유령 탭 생성을 방지.
+        諛⑹뼱 濡쒖쭅: status ?ㅺ? ?녿뒗 runner (listener媛 ?대? ?뺣━ ?꾨즺)??RECENT???깅줉?섏? ?딅뒗??
+        ?대? ?듯빐 listener cleanup ??API cleanup??以묐났 ?몄텧????plan_file=None ?좊졊 ???앹꽦??諛⑹?.
         """
         try:
             if runner_id:
-                _module_logger.info(f"[dev-runner] force_cleanup_state 시작: {runner_id}")
+                _module_logger.info(f"[dev-runner] force_cleanup_state ?쒖옉: {runner_id}")
                 existing_status = await self.async_redis.get(self._runner_key(runner_id, "status"))
                 if existing_status is None:
-                    _module_logger.debug(f"[dev-runner] status 키 없음: {runner_id} — RECENT 등록 스킵")
+                    _module_logger.debug(f"[dev-runner] status ???놁쓬: {runner_id} ??RECENT ?깅줉 ?ㅽ궢")
                     await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
                     return
                 await self.async_redis.set(self._runner_key(runner_id, "status"), "stopped")
+                # invisible runner(trigger 誘몄꽕??鍮꾩궗?⑹옄)??RECENT???깅줉?섏? ?딄퀬 ??利됱떆 ??젣
+                trigger = await self.async_redis.get(self._runner_key(runner_id, "trigger"))
+                if not is_visible_runner(trigger, runner_id):
+                    _module_logger.debug(
+                        f"[dev-runner] invisible runner ??RECENT ?ㅽ궢, ????젣: {runner_id} (trigger={trigger!r})"
+                    )
+                    pipe = self.async_redis.pipeline()
+                    for key_suffix in RUNNER_KEY_SUFFIXES:
+                        pipe.delete(self._runner_key(runner_id, key_suffix))
+                    pipe.srem(ACTIVE_RUNNERS_KEY, runner_id)
+                    await pipe.execute()
+                    plan_service.invalidate_plans_cache()
+                    return
                 pipe = self.async_redis.pipeline()
                 for key_suffix in RUNNER_KEY_SUFFIXES:
                     if key_suffix in _PERSIST_SUFFIXES:
-                        # dismiss 전까지 영구 보존: plan_file/branch/trigger에 TTL 설정 안 함
+                        # dismiss ?꾧퉴吏 ?곴뎄 蹂댁〈: plan_file/branch/trigger??TTL ?ㅼ젙 ????
                         pipe.persist(self._runner_key(runner_id, key_suffix))
                     else:
                         pipe.expire(self._runner_key(runner_id, key_suffix), RECENT_RUNNERS_TTL)
@@ -118,7 +131,7 @@ class RunnerState:
                 pipe.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
                 await pipe.execute()
                 plan_service.invalidate_plans_cache()
-                _module_logger.info(f"[dev-runner] force_cleanup_state 완료: {runner_id} RECENT 이동")
+                _module_logger.info(f"[dev-runner] force_cleanup_state ?꾨즺: {runner_id} RECENT ?대룞")
             else:
                 runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
                 stop_ts = time.time()
@@ -128,6 +141,18 @@ class RunnerState:
                         await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
                         continue
                     await self.async_redis.set(self._runner_key(rid, "status"), "stopped")
+                    # invisible runner(trigger 誘몄꽕??鍮꾩궗?⑹옄)??RECENT???깅줉?섏? ?딄퀬 ??利됱떆 ??젣
+                    trigger = await self.async_redis.get(self._runner_key(rid, "trigger"))
+                    if not is_visible_runner(trigger, rid):
+                        _module_logger.debug(
+                            f"[dev-runner] invisible runner(諛곗튂) ??RECENT ?ㅽ궢, ????젣: {rid} (trigger={trigger!r})"
+                        )
+                        pipe = self.async_redis.pipeline()
+                        for key_suffix in RUNNER_KEY_SUFFIXES:
+                            pipe.delete(self._runner_key(rid, key_suffix))
+                        pipe.srem(ACTIVE_RUNNERS_KEY, rid)
+                        await pipe.execute()
+                        continue
                     pipe = self.async_redis.pipeline()
                     for key_suffix in RUNNER_KEY_SUFFIXES:
                         if key_suffix in _PERSIST_SUFFIXES:
@@ -142,7 +167,7 @@ class RunnerState:
             pass
 
     async def cleanup_stale_runners(self) -> Dict:
-        """active_runners + recent_runners 중 stale 항목을 정리.
+        """active_runners + recent_runners 以?stale ??ぉ???뺣━.
 
         Returns:
             {
@@ -178,7 +203,7 @@ class RunnerState:
                     should_clean = True
 
             if should_clean:
-                _module_logger.warning(f"[dev-runner] stale active runner 발견: {rid} — 정리 시작")
+                _module_logger.warning(f"[dev-runner] stale active runner 諛쒓껄: {rid} ???뺣━ ?쒖옉")
                 await self._force_cleanup_state(rid)
                 cleaned_active_ids.add(rid)
                 cleaned_active += 1
@@ -203,14 +228,32 @@ class RunnerState:
             status = await self.async_redis.get(self._runner_key(rid, "status"))
             if status == "stopped":
                 trigger = await self.async_redis.get(self._runner_key(rid, "trigger"))
+                plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))
+                reason = "file_lost"  # 湲곕낯媛? ?뚯씪 ?놁쓬
+                if plan_file:
+                    try:
+                        if Path(plan_file).exists():
+                            preserved_recent += 1
+                            continue
+                        target = resolve_plan_target(plan_file, purpose="archive")
+                        if Path(target.target).exists():
+                            reason = "archived"
+                    except PathRuleError:
+                        pass
+
                 if is_visible_runner(trigger, rid):
-                    # user/user:all trigger: dismiss 전까지 cleanup-stale로 삭제하지 않는다
+                    # user/user:all trigger: dismiss ?꾧퉴吏 cleanup-stale濡???젣?섏? ?딅뒗??
                     preserved_recent += 1
                     continue
-                if recent_score > cutoff_ts:
-                    # 기타 stopped runner는 TTL 내에선 cleanup-stale로 삭제하지 않는다.
-                    preserved_recent += 1
-                    continue
+                # TTL 珥덇낵 + archived/file_lost recent 留??뺣━
+                if reason == "file_lost":
+                    bugs += 1
+                    logger.warning(f"[dev-runner] cleanup: runner {rid} plan ?뚯씪 ?뚯떎 (file_lost)")
+                for key_suffix in RUNNER_KEY_SUFFIXES:
+                    await self.async_redis.delete(self._runner_key(rid, key_suffix))
+                await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
+                cleaned_recent += 1
+                continue
 
             plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))
 
@@ -226,7 +269,7 @@ class RunnerState:
                     else:
                         reason = "file_lost"
                 except PathRuleError:
-                    # 규칙 해석 실패 경로는 보수적으로 file_lost 취급
+                    # 洹쒖튃 ?댁꽍 ?ㅽ뙣 寃쎈줈??蹂댁닔?곸쑝濡?file_lost 痍④툒
                     reason = "file_lost"
             else:
                 reason = "file_lost"
@@ -251,7 +294,7 @@ class RunnerState:
 
             if reason == "file_lost":
                 bugs += 1
-                logger.warning(f"[dev-runner] cleanup: runner {rid} plan 파일 소실 (file_lost)")
+                logger.warning(f"[dev-runner] cleanup: runner {rid} plan ?뚯씪 ?뚯떎 (file_lost)")
 
         total = cleaned_active + cleaned_recent
         if total:
@@ -272,7 +315,7 @@ class RunnerState:
         }
 
     async def dismiss_runner(self, runner_id: str) -> bool:
-        """탭 hard delete 전용 경로: RECENT와 per-runner 키를 즉시 삭제한다."""
+        """??hard delete ?꾩슜 寃쎈줈: RECENT? per-runner ?ㅻ? 利됱떆 ??젣?쒕떎."""
         try:
             await self.async_redis.zrem(RECENT_RUNNERS_KEY, runner_id)
             for key_suffix in RUNNER_KEY_SUFFIXES:
@@ -281,3 +324,4 @@ class RunnerState:
             return True
         except Exception:
             return False
+

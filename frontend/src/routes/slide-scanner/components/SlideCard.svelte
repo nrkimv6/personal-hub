@@ -1,22 +1,18 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
   import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
   import type { SlideListItem } from '$lib/api/slide-scanner';
 
-  const dispatch = createEventDispatcher<{
-    toggle: { id: number };
-    open: { id: number };
-  }>();
-
   export let slide: SlideListItem;
   export let selected = false;
+  export let ontoggle: ((detail: { id: number }) => void) | undefined = undefined;
+  export let onopen: ((detail: { id: number }) => void) | undefined = undefined;
 
   function toggleSelection() {
-    dispatch('toggle', { id: slide.id });
+    ontoggle?.({ id: slide.id });
   }
 
   function openDetail() {
-    dispatch('open', { id: slide.id });
+    onopen?.({ id: slide.id });
   }
 
   function statusVariant(status: SlideListItem['status']) {

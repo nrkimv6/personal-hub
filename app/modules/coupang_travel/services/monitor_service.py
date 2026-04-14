@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_NON_AVAILABLE_STATUSES = {"SOLDOUT", "SOLD_OUT", "STOP_SALE", "OFF_SALE"}
+
 
 @dataclass
 class VendorItemStatus:
@@ -65,12 +67,20 @@ class CoupangMonitorService:
         product_id: str,
         vendor_item_package_id: str,
         dates: List[str],
-        page: "Page",
+        page: Optional["Page"] = None,
         schedule_id: Optional[int] = None,
+        notify_times: Optional[List[str]] = None,
+        prefetched_items: Optional[List[VendorItem]] = None,
+        prefetched_response_time_ms: float = 0.0,
     ) -> List[StatusChange]:
         """각 date별 상태를 체크하고 변경 시 알림 발송.
 
         최초 호출(키 없음)은 상태 저장만 하고 알림은 보내지 않는다.
+
+        Args:
+            prefetched_items: HTTP 클라이언트로 미리 가져온 아이템 목록.
+                              제공 시 page 경로 skip. dates는 단일 date여야 함.
+            prefetched_response_time_ms: prefetched_items 획득에 걸린 시간.
 
         Returns:
             변경된 StatusChange 목록
@@ -78,14 +88,25 @@ class CoupangMonitorService:
         changes: List[StatusChange] = []
 
         for date in dates:
-            started_at = time.perf_counter()
-            items = await self._api_client.fetch_vendor_items(
-                product_id=product_id,
-                vendor_item_package_id=vendor_item_package_id,
-                select_date=date,
-                page=page,
-            )
-            response_time_ms = (time.perf_counter() - started_at) * 1000
+            if prefetched_items is not None:
+                # HTTP 클라이언트로 미리 가져온 아이템 사용
+                items = prefetched_items
+                response_time_ms = prefetched_response_time_ms
+            else:
+                if page is None:
+                    logger.error(
+                        "[CoupangMonitorService] page와 prefetched_items 모두 없음 (product_id=%s, date=%s)",
+                        product_id, date,
+                    )
+                    continue
+                started_at = time.perf_counter()
+                items = await self._api_client.fetch_vendor_items(
+                    product_id=product_id,
+                    vendor_item_package_id=vendor_item_package_id,
+                    select_date=date,
+                    page=page,
+                )
+                response_time_ms = (time.perf_counter() - started_at) * 1000
 
             if items is None:
                 logger.warning(
@@ -133,6 +154,8 @@ class CoupangMonitorService:
                     changes.append(change)
                     date_changes.append(change)
                     self._previous_statuses[state_key] = current
+                    if not self._is_within_notify_times(notify_times):
+                        continue
                     await self._send_notification(change)
 
             slots_info = self._build_slots_info(items)
@@ -149,8 +172,41 @@ class CoupangMonitorService:
         return changes
 
     @staticmethod
+    def _is_within_notify_times(times: Optional[List[str]]) -> bool:
+        """현재 시각이 알림 허용 시간대 내에 있는지 판정.
+
+        times=None이면 항상 True (미설정 = 모든 시간에 알림).
+        개별 시간 "HH:MM" 정확 일치 + 범위 "HH:MM-HH:MM" 구간 포함(start <= now <= end) 지원.
+        인식할 수 없는 형식 항목은 True 반환 (안전 기본값 — 알림 억제보다 허용 우선).
+        """
+        import re
+        _time_re = re.compile(r'^\d{2}:\d{2}$')
+
+        if times is None:
+            return True
+        now_str = datetime.now().strftime("%H:%M")
+        for entry in times:
+            try:
+                if "-" in entry:
+                    parts = entry.split("-", 1)
+                    start, end = parts[0], parts[1]
+                    if not (_time_re.match(start) and _time_re.match(end)):
+                        return True  # 파싱 불가 → 안전 기본값
+                    if start <= now_str <= end:
+                        return True
+                else:
+                    if not _time_re.match(entry):
+                        return True  # 파싱 불가 → 안전 기본값
+                    if entry == now_str:
+                        return True
+            except Exception:
+                return True  # 예외 안전 기본값
+        return False
+
+    @staticmethod
     def _is_item_available(item: VendorItem) -> bool:
-        return item.sale_status.upper() == "ON_SALE" and item.stock_count > 0
+        sale_status = (item.sale_status or "").upper()
+        return item.stock_count > 0 and sale_status not in _NON_AVAILABLE_STATUSES
 
     @staticmethod
     def _build_slots_info(items: List[VendorItem]) -> List[dict]:
@@ -175,8 +231,6 @@ class CoupangMonitorService:
             return "error"
         if any(self._is_item_available(item) for item in items):
             return "available"
-        if changes:
-            return "success"
         return "no_slots"
 
     def _log_monitoring_event(

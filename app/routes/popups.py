@@ -1,4 +1,4 @@
-"""
+﻿"""
 팝업 API 라우트 - 팝업스토어 관리
 
 GET 엔드포인트는 공개, CUD 엔드포인트는 관리자 인증 필요
@@ -60,6 +60,23 @@ def get_popups(
         page_size=page_size,
     )
 
+
+@router.post("/import-from-instagram", response_model=PopupResponse, status_code=201)
+def import_from_instagram(
+    data: PopupImportFromInstagram,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
+    """
+    Instagram 게시물에서 팝업을 생성합니다. (관리자 전용)
+
+    - LLM 분류 결과를 기반으로 팝업 자동 생성
+    - 이미 연결된 팝업이 있으면 해당 팝업 반환
+    """
+    popup = popup_service.import_from_instagram(db, data)
+    if not popup:
+        raise HTTPException(status_code=404, detail="Instagram post not found")
+    return popup
 
 @router.get("/{popup_id}", response_model=PopupResponse)
 def get_popup(popup_id: int, db: Session = Depends(get_db)):
@@ -145,22 +162,6 @@ def toggle_visited(
     return popup
 
 
-@router.post("/import-from-instagram", response_model=PopupResponse, status_code=201)
-def import_from_instagram(
-    data: PopupImportFromInstagram,
-    db: Session = Depends(get_db),
-    admin: UserInfo = Depends(require_admin),
-):
-    """
-    Instagram 게시물에서 팝업을 생성합니다. (관리자 전용)
-
-    - LLM 분류 결과를 기반으로 팝업 자동 생성
-    - 이미 연결된 팝업이 있으면 해당 팝업 반환
-    """
-    popup = popup_service.import_from_instagram(db, data)
-    if not popup:
-        raise HTTPException(status_code=404, detail="Instagram post not found")
-    return popup
 
 
 @router.get("/{popup_id}/instagram-source")
@@ -169,3 +170,4 @@ def get_instagram_source(popup_id: int, db: Session = Depends(get_db)):
     팝업의 Instagram 출처 정보를 조회합니다. (lazy loading용)
     """
     return popup_service.get_instagram_source(db, popup_id)
+

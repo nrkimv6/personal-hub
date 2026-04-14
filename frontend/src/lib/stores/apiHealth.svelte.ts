@@ -2,7 +2,7 @@
  * 전역 API 연결 상태 Store
  *
  * API 서버 재시작 감지 및 복귀 알림을 담당합니다.
- * - disconnected 상태 감지 (연속 2회 에러 시)
+ * - disconnected 상태 감지 (연속 5회 에러 시)
  * - 백그라운드 재연결 폴링 (2초 간격)
  * - 복귀 시 'api:reconnected' 이벤트 발행
  */
@@ -57,7 +57,7 @@ function createApiHealthStore() {
 
 	function reportConnectionError() {
 		errorCount++;
-		if (errorCount >= 2 && state === 'connected') {
+		if (errorCount >= 5 && state === 'connected') {
 			state = 'disconnected';
 			disconnectedAt = Date.now();
 			startReconnectPolling();

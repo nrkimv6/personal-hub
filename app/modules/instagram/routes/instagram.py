@@ -939,17 +939,17 @@ def _create_browser_command(
     """브라우저 명령 생성 (워커에서 처리)"""
     request_json = json.dumps(request_data) if request_data else None
 
-    db.execute(text("""
+    result = db.execute(text("""
         INSERT INTO browser_commands (command_type, service_account_id, status, request_data)
         VALUES (:command_type, :service_account_id, 'pending', :request_data)
+        RETURNING id
     """), {
         "command_type": command_type,
         "service_account_id": service_account_id,
         "request_data": request_json
     })
+    last_id = result.scalar()
     db.commit()
-
-    last_id = db.execute(text("SELECT last_insert_rowid()")).scalar()
     return last_id
 
 

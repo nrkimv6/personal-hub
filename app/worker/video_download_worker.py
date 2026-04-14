@@ -129,7 +129,7 @@ class VideoDownloadWorker(BaseWorker):
                 )
 
         except Exception as e:
-            logger.error(f"[{self.name}] Pending 요청 디스패치 오류: {e}", exc_info=True)
+            self._log_worker_error("Pending 요청 디스패치", e)
         finally:
             db.close()
 

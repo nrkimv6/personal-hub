@@ -17,8 +17,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# listener_noise_filter는 scripts/ 디렉토리에 위치
-_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
+# listener_noise_filter는 scripts/plan_runner/ 디렉토리에 위치
+_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts" / "plan_runner"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 

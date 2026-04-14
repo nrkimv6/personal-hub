@@ -3,6 +3,7 @@
  */
 
 import { apiHealth } from '../stores/apiHealth.svelte';
+import { classifyRequestFailure } from './requestFailure.js';
 
 // 브라우저 환경 체크
 const isBrowser = typeof window !== 'undefined';
@@ -112,7 +113,7 @@ export async function fetchWithTimeout(
     return response;
   } catch (error) {
     clearTimeout(timeoutId);
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (isAbortError(error)) {
       // 사용자 abort vs 타임아웃 구분
       if (options.signal?.aborted) {
         throw error; // 사용자가 직접 abort한 경우 원래 에러 전달
@@ -183,17 +184,16 @@ export async function request<T>(
   try {
     response = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' });
   } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
-    // 타임아웃 에러 감지
-    if (error.message.includes('타임아웃')) {
-      globalErrorHandler?.(error.message, 'timeout');
-      throw error;
+    const failure = classifyRequestFailure(err, url);
+    if (failure.kind === 'abort') {
+      throw failure.error;
+    }
+    if (failure.kind === 'timeout') {
+      globalErrorHandler?.(failure.error.message, 'timeout');
+      throw failure.error;
     }
     // 네트워크 에러 (API 서버 연결 불가 - 좀비 포트 가능성)
-    const connError = new ApiConnectionError(
-      'API 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.',
-      error
-    );
+    const connError = new ApiConnectionError(failure.message, failure.error);
     apiHealth.reportConnectionError();
     globalErrorHandler?.(connError.message, 'connection');
     throw connError;

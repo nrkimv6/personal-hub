@@ -19,7 +19,12 @@
 	let { show, editingEvent, importedData = null, activeTab = 'event', onClose, onSave }: Props = $props();
 
 	// 폼 상태
-	let eventForm: EventUpdate = $state({
+	type EventForm = EventUpdate & {
+		title: string;
+		event_type: NonNullable<EventUpdate['event_type']>;
+	};
+
+	let eventForm: EventForm = $state({
 		title: '',
 		event_type: 'event'
 	});
@@ -74,16 +79,16 @@
 	}
 
 	// URL 배열 → event_url + additional_urls 변환
-	function urlsToFormData(urls: string[]): { event_url: string | null; additional_urls: string[] } {
+	function urlsToFormData(urls: string[]): { event_url?: string; additional_urls: string[] } {
 		const filtered = urls.filter(u => u.trim());
 		return {
-			event_url: filtered[0] || null,
+			event_url: filtered[0] || undefined,
 			additional_urls: filtered.slice(1)
 		};
 	}
 
 	// event_url + additional_urls → URL 배열 변환
-	function formDataToUrls(eventUrl: string | null, additionalUrls: string[] | undefined): string[] {
+	function formDataToUrls(eventUrl: string | null | undefined, additionalUrls: string[] | undefined): string[] {
 		const urls: string[] = [];
 		if (eventUrl) urls.push(eventUrl);
 		if (additionalUrls?.length) urls.push(...additionalUrls);
@@ -127,8 +132,8 @@
 					location_address: editingEvent.location_address || '',
 					announcement_date: editingEvent.announcement_date || '',
 					prizes: editingEvent.prizes || [],
-					winner_count: editingEvent.winner_count,
-					purchase_required: editingEvent.purchase_required,
+					winner_count: editingEvent.winner_count ?? undefined,
+					purchase_required: editingEvent.purchase_required ?? undefined,
 					user_note: editingEvent.user_note || '',
 					body_text: editingEvent.body_text || ''
 				};
@@ -147,8 +152,8 @@
 					location_address: importedData.location_address || '',
 					announcement_date: importedData.announcement_date || '',
 					prizes: importedData.prizes || [],
-					winner_count: importedData.winner_count,
-					purchase_required: importedData.purchase_required,
+					winner_count: importedData.winner_count ?? undefined,
+					purchase_required: importedData.purchase_required ?? undefined,
 					source_type: importedData.source_type,
 					source_url: importedData.source_url,
 					input_source: importedData.input_source,
@@ -179,7 +184,8 @@
 	});
 
 	async function handleSave() {
-		if (!eventForm.title.trim()) {
+		const title = eventForm.title ?? '';
+		if (!title.trim()) {
 			alert('제목을 입력해주세요.');
 			return;
 		}
@@ -191,19 +197,20 @@
 			// 빈 문자열을 null로 변환 (날짜 및 선택 필드)
 			const formData = {
 				...eventForm,
+				title: title.trim(),
 				prizes: textToPrizes(prizesText),
-				event_start: eventForm.event_start || null,
-				event_end: eventForm.event_end || null,
-				announcement_date: eventForm.announcement_date || null,
+				event_start: eventForm.event_start || undefined,
+				event_end: eventForm.event_end || undefined,
+				announcement_date: eventForm.announcement_date || undefined,
 				event_url,
 				additional_urls,
-				organizer: eventForm.organizer || null,
-				summary: eventForm.summary || null,
-				location_venue: eventForm.location_venue || null,
-				location_address: eventForm.location_address || null,
-				user_note: eventForm.user_note || null,
-				purchase_required: eventForm.purchase_required || null,
-				body_text: eventForm.body_text || null
+				organizer: eventForm.organizer || undefined,
+				summary: eventForm.summary || undefined,
+				location_venue: eventForm.location_venue || undefined,
+				location_address: eventForm.location_address || undefined,
+				user_note: eventForm.user_note || undefined,
+				purchase_required: eventForm.purchase_required || undefined,
+				body_text: eventForm.body_text || undefined
 			};
 			await onSave(formData, !!editingEvent);
 			onClose();
@@ -547,11 +554,11 @@
 				</div>
 
 				<div class="mt-6 flex gap-2 justify-end">
-					<Button variant="secondary" size="sm" on:click={onClose}>취소</Button>
+					<Button variant="secondary" size="sm" onclick={onClose}>취소</Button>
 					<Button
 						variant="primary"
 						size="sm"
-						on:click={handleSave}
+						onclick={handleSave}
 						disabled={isSaving}
 					>
 						{#if isSaving}

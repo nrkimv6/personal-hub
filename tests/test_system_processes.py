@@ -58,7 +58,7 @@ class TestInferRole:
         assert self.infer("python proxy_manager.py") == "Proxy Manager"
 
     def test_dev_runner(self):
-        assert self.infer("python scripts/dev-runner-command-listener.py") == "Dev Runner"
+        assert self.infer("python scripts/plan_runner/dev-runner-command-listener.py") == "Dev Runner"
 
     def test_pytest_process(self):
         assert self.infer("python -m pytest tests/") == "pytest"
@@ -168,11 +168,11 @@ class TestKillProcess:
         mock_proc = MagicMock()
         mock_proc.name.return_value = "python.exe"
         mock_proc.exe.return_value = r"D:\Python39\python.exe"
-        mock_proc.cmdline.return_value = ["python", "test.py"]
+        mock_proc.cmdline.return_value = ["python", "app/main.py", "--port", "8001"]
         mock_proc.create_time.return_value = 1712100000.0
 
         with patch("app.routes.system.psutil.Process", return_value=mock_proc), \
-             patch("scripts.service_utils.kill_pid", return_value=True) as mock_kill:
+             patch("scripts.services.service_utils.kill_pid", return_value=True) as mock_kill:
             resp = client.post("/api/v1/system/kill-process", json={"pid": 12345})
             assert resp.status_code == 200
             data = resp.json()
@@ -365,11 +365,11 @@ def test_http_system_mode_survives_restart_frontend_admin():
     try:
         before = requests.get(f"{base}/api/v1/system/mode", timeout=5)
     except Exception:
-        pytest.skip("Admin API not available")
+        pytest.fail("Admin API not available")
 
     assert before.status_code == 200
 
-    script = PROJECT_ROOT / "scripts" / "browser_workers.py"
+    script = PROJECT_ROOT / "scripts" / "services" / "browser_workers.py"
     result = subprocess.run(
         [sys.executable, str(script), "restart-frontend"],
         cwd=str(PROJECT_ROOT),

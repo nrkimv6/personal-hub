@@ -187,7 +187,7 @@
 							<Button
 								variant={schedule.enabled ? 'destructive' : 'primary'}
 								size="sm"
-								on:click={() => handleToggle(schedule.id, !schedule.enabled)}
+								onclick={() => handleToggle(schedule.id, !schedule.enabled)}
 							>
 								{schedule.enabled ? '비활성화' : '활성화'}
 							</Button>

@@ -10,6 +10,7 @@ from datetime import datetime, date
 from app.models.monitor_schedule import MonitorSchedule
 from app.models.biz_item import BizItem
 from app.models.business import Business
+from app.models.monitoring_event import MonitoringEvent
 from app.schemas.monitor_schedule import (
     MonitorScheduleCreate,
     MonitorScheduleUpdate,
@@ -128,16 +129,71 @@ class ScheduleService:
             query = query.filter(Business.service_type == service_type)
 
         results = query.order_by(MonitorSchedule.date.desc()).all()
-        return self._build_context_list(results)
+        schedule_ids = [schedule.id for schedule, item, business in results]
+        last_events = self._get_last_events(db, schedule_ids)
+        return self._build_context_list(results, last_events)
 
-    def _build_context_list(self, results) -> List[Dict[str, Any]]:
+    def _get_last_events(self, db: Session, schedule_ids: list) -> dict:
+        """schedule_id 목록에 대해 최신 monitoring_event의 timestamp와 status를 반환.
+
+        Returns:
+            {schedule_id: (last_event_at_iso_str, last_event_status)} dict
+        """
+        if not schedule_ids:
+            return {}
+
+        from sqlalchemy import func
+
+        # Step 1: schedule_id별 MAX(timestamp)
+        max_ts_sq = (
+            db.query(
+                MonitoringEvent.schedule_id,
+                func.max(MonitoringEvent.timestamp).label("max_ts")
+            )
+            .filter(MonitoringEvent.schedule_id.in_(schedule_ids))
+            .group_by(MonitoringEvent.schedule_id)
+            .subquery()
+        )
+
+        # Step 2: 해당 timestamp의 status 조회
+        events = (
+            db.query(
+                MonitoringEvent.schedule_id,
+                MonitoringEvent.timestamp,
+                MonitoringEvent.status
+            )
+            .join(
+                max_ts_sq,
+                (MonitoringEvent.schedule_id == max_ts_sq.c.schedule_id) &
+                (MonitoringEvent.timestamp == max_ts_sq.c.max_ts)
+            )
+            .all()
+        )
+
+        return {
+            e.schedule_id: (
+                e.timestamp.isoformat() if e.timestamp else None,
+                e.status
+            )
+            for e in events
+        }
+
+    def _build_context_list(self, results, last_events: dict = None) -> List[Dict[str, Any]]:
         """결과 목록을 컨텍스트 딕셔너리 목록으로 변환"""
+        if last_events is None:
+            last_events = {}
         schedules_with_context = []
         for schedule, item, business in results:
-            schedules_with_context.append(self._build_context_dict(schedule, item, business))
+            last_event_at, last_event_status = last_events.get(schedule.id, (None, None))
+            schedules_with_context.append(
+                self._build_context_dict(schedule, item, business,
+                                          last_event_at=last_event_at,
+                                          last_event_status=last_event_status)
+            )
         return schedules_with_context
 
-    def _build_context_dict(self, schedule, item, business) -> Dict[str, Any]:
+    def _build_context_dict(self, schedule, item, business,
+                             last_event_at=None, last_event_status=None) -> Dict[str, Any]:
         """단일 결과를 컨텍스트 딕셔너리로 변환"""
         # interval 계산: custom_interval이면 저장된 값, 아니면 날짜 기반 기본값
         if schedule.custom_interval and schedule.interval is not None:
@@ -189,6 +245,9 @@ class ScheduleService:
             "last_check": schedule.updated_at,
             "last_check_time": getattr(schedule, 'last_check_time', None),
             "next_run_time": getattr(schedule, 'next_run_time', None),
+            # 최신 실행 흔적
+            "last_event_at": last_event_at,
+            "last_event_status": last_event_status,
         }
 
     def get_enabled_with_context(self, db: Session) -> List[Dict[str, Any]]:

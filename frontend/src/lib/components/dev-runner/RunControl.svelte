@@ -7,6 +7,8 @@
 		EngineConfig,
 		DevRunnerRunnerListItem
 	} from '$lib/api';
+	import { llmApi } from '$lib/api/system';
+	import type { LLMProfilesResponse } from '$lib/api/system';
 	import { onMount } from 'svelte';
 
 	interface Props {
@@ -23,6 +25,10 @@
 	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), mode = $bindable('single'), runnerTabs = [], hidePlanSelector = false }: Props = $props();
 	let selectedEngine = $state('claude');
 	let selectedFixEngine = $state('claude');
+	let profilesData = $state<LLMProfilesResponse | null>(null);
+	let selectedProfile = $state<string | null>(null);
+	let profilesForEngine = $derived(profilesData?.profiles.filter(p => p.engine === selectedEngine) ?? []);
+	let showProfileSelect = $derived(profilesForEngine.length > 1);
 	let engineConfigs = $state<AllEnginesConfig | null>(null);
 	let selectedEngineConfig = $derived(engineConfigs?.[selectedEngine] ?? null);
 	let selectedEngineModelOptions = $derived(getModelOptions(selectedEngine));
@@ -65,17 +71,21 @@
 		],
 		gemini: [
 			'gemini-3.1-pro-preview',
+			'gemini-3.1-pro',
 			'gemini-3-flash-preview',
 			'gemini-3-pro-preview',
+			'gemini-2.5-pro-preview-05-06',
 			'gemini-2.0-flash-thinking-exp',
 			'gemini-2.0-flash'
 		],
 		codex: [
-			'gpt-5.3-codex'
+			'gpt-5.4',
+			'gpt-5.3-codex',
+			'o3'
 		],
 		'cc-codex': [
-			'sonnet',
 			'opus',
+			'sonnet',
 			'haiku'
 		]
 	};
@@ -126,17 +136,16 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	}
 
 	function getModelOptions(engine: string): string[] {
+		const predefined = PREDEFINED_MODELS[engine] ?? [];
 		const config = engineConfigs?.[engine];
 		if (config) {
-			const merged = [config.default_model, ...Object.values(config.models ?? {})]
+			const fromConfig = [config.default_model, ...Object.values(config.models ?? {})]
 				.filter((model): model is string => Boolean(model && model.trim()));
-			const unique = Array.from(new Set(merged));
-			if (unique.length > 0) {
-				return unique;
-			}
+			const merged = [...fromConfig, ...predefined];
+			return Array.from(new Set(merged));
 		}
 
-		return PREDEFINED_MODELS[engine] ?? [];
+		return predefined;
 	}
 
 	function sortPhaseKeys(keys: string[]): string[] {
@@ -213,11 +222,22 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	onMount(() => {
 		fetchEngineConfigs();
 		fetchDefaultEngines();
+		llmApi.listProfiles().then(d => {
+			profilesData = d;
+			// 현재 선택된 엔진의 선택 프로필로 초기화
+			selectedProfile = d.selected[selectedEngine] ?? null;
+		}).catch(() => {});
 	});
 
 	$effect(() => {
 		if (!engineConfigs) return;
 		normalizeSelectedEngines();
+	});
+
+	// 엔진 변경 시 프로필 자동 갱신
+	$effect(() => {
+		if (!profilesData) return;
+		selectedProfile = profilesData.selected[selectedEngine] ?? null;
 	});
 
 	async function updateModel(phase: string, model: string) {
@@ -270,6 +290,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				plan_file: mode === 'single' ? selectedPlan : null,
 				engine: selectedEngine,
 				fix_engine: selectedFixEngine,
+				profile: selectedProfile,
 				max_cycles: maxCycles || 0,
 				until: until || null,
 				dry_run: dryRun,
@@ -387,6 +408,23 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		<div class="text-xs text-green-700 bg-green-50 rounded p-2">{syncMessage}</div>
 	{/if}
 
+	<!-- Infra Status Row -->
+	<div class="flex items-center gap-3 text-xs text-gray-500">
+		<div class="flex items-center gap-1.5">
+			<span class="w-2 h-2 rounded-full {status?.redis_connected ? 'bg-green-500' : 'bg-gray-300'}"></span>
+			<span>Redis</span>
+		</div>
+		<div class="flex items-center gap-1.5">
+			<span class="w-2 h-2 rounded-full {status?.listener_alive ? 'bg-green-500' : 'bg-gray-300'}"></span>
+			<span>Listener</span>
+		</div>
+		{#if status && (!status.redis_connected || !status.listener_alive)}
+			<span class="text-red-500">
+				{#if !status.redis_connected}Redis 미연결{:else}Listener 미실행{/if}
+			</span>
+		{/if}
+	</div>
+
 	<!-- Controls Row -->
 	<div class="flex items-center gap-2 flex-wrap">
 		<!-- 중지 버튼: running 탭이 하나라도 있을 때 표시 -->
@@ -404,7 +442,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		<button
 			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-mono font-semibold bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
 			onclick={handleStart}
-			disabled={actionLoading || (mode === 'single' && !selectedPlan)}
+			disabled={actionLoading || (mode === 'single' && !selectedPlan) || !status?.redis_connected || !status?.listener_alive}
 		>
 			<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
 			{actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행' : '시작'}
@@ -472,6 +510,19 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 					{/each}
 				</select>
 			</div>
+			{#if showProfileSelect}
+				<div class="flex items-center gap-1">
+					<span class="text-[10px] text-gray-400 font-medium">Profile</span>
+					<select
+						class={`border rounded px-2 py-1 text-xs h-7 w-[100px] font-mono font-medium ${getEngineThemeClasses(selectedEngine)}`}
+						bind:value={selectedProfile}
+					>
+						{#each profilesForEngine as p}
+							<option value={p.name}>{p.name}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
 			{#if status?.running}
 				<span class={`inline-flex h-7 items-center rounded border px-2 text-[10px] font-mono ${getEngineThemeClasses(runningEngine)}`}>
 					Run {formatEngineLabel(runningEngine)}

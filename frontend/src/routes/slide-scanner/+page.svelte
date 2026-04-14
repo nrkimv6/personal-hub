@@ -102,13 +102,13 @@
     }
   }
 
-  async function handleSelect(event: CustomEvent<File>) {
+  async function handleSelect(file: File) {
     loading = true;
     errorMessage = '';
     infoMessage = '';
     resultUrl = null;
     try {
-      await handleSelectFile(event.detail);
+      await handleSelectFile(file);
     } catch (error) {
       errorMessage = parseError(error);
     } finally {
@@ -116,15 +116,15 @@
     }
   }
 
-  function handlePointsChange(event: CustomEvent<{ points: SlidePoint[] }>) {
-    points = event.detail.points;
+  function handlePointsChange(detail: { points: SlidePoint[] }) {
+    points = detail.points;
   }
 
-  function handleFiltersChange(event: CustomEvent<{ filters: SlideFilterOptions }>) {
-    filters = normalizeFilters(event.detail.filters);
+  function handleFiltersChange(detail: { filters: SlideFilterOptions }) {
+    filters = normalizeFilters(detail.filters);
   }
 
-  async function handleTagChange(event: CustomEvent<{ tag: string | null }>) {
+  async function handleTagChange(detail: { tag: string | null }) {
     if (!currentSlide) return;
 
     tagSaving = true;
@@ -132,7 +132,7 @@
     infoMessage = '';
     try {
       const updated = await slideScannerApi.updateSlide(currentSlide.id, {
-        tag: event.detail.tag
+        tag: detail.tag
       });
       currentSlide = {
         ...currentSlide,
@@ -214,17 +214,17 @@
     }
   }
 
-  async function handleGalleryOpen(event: CustomEvent<{ slideId: number; sequenceIds: number[] }>) {
+  async function handleGalleryOpen(detail: { slideId: number; sequenceIds: number[] }) {
     errorMessage = '';
     infoMessage = '';
     resultUrl = null;
     activeTab = 'editor';
 
-    sequenceIds = event.detail.sequenceIds;
-    sequenceIndex = sequenceIds.indexOf(event.detail.slideId);
+    sequenceIds = detail.sequenceIds;
+    sequenceIndex = sequenceIds.indexOf(detail.slideId);
 
     try {
-      await loadSlideForEditor(event.detail.slideId);
+      await loadSlideForEditor(detail.slideId);
     } catch (error) {
       errorMessage = parseError(error);
     }
@@ -251,14 +251,14 @@
     }
   }
 
-  async function handleMoveToEditor(event: CustomEvent<{ itemId: number; slideId: number }>) {
+  async function handleMoveToEditor(detail: { itemId: number; slideId: number }) {
     loading = true;
     errorMessage = '';
     infoMessage = '';
     resultUrl = null;
 
     try {
-      await loadSlideForEditor(event.detail.slideId);
+      await loadSlideForEditor(detail.slideId);
       activeTab = 'editor';
       await goto('?tab=editor', { replaceState: false, noScroll: true, keepFocus: true });
       toast.success('handoff 완료 슬라이드를 보정 에디터로 열었습니다.');
@@ -295,12 +295,12 @@
   <TabNav tabs={tabs} bind:activeTab queryParam="tab" variant="primary" replaceState={false} />
 
   {#if activeTab === 'gallery'}
-    <SlideGallery on:open={handleGalleryOpen} />
+    <SlideGallery onopen={handleGalleryOpen} />
   {:else if activeTab === 'mobile-review'}
-    <MobileSyncPanel on:syncCompleted={handleSyncCompleted} />
-    <MobileReviewQueue refreshKey={mobileRefreshKey} on:moveToEditor={handleMoveToEditor} />
+    <MobileSyncPanel onsynccompleted={handleSyncCompleted} />
+    <MobileReviewQueue refreshKey={mobileRefreshKey} onmovetoeditor={handleMoveToEditor} />
   {:else}
-    <ImageUploader on:select={handleSelect} />
+    <ImageUploader onselect={handleSelect} />
 
     {#if loading}
       <p class="text-sm text-muted-foreground">이미지를 불러오는 중...</p>
@@ -318,7 +318,7 @@
       <AspectRatioSelector
         value={aspectRatio}
         disabled={loading || transforming || savingAll}
-        on:change={(event) => (aspectRatio = event.detail.value)}
+        onchange={(detail) => (aspectRatio = detail.value)}
       />
     </div>
 
@@ -338,15 +338,15 @@
       tag={currentSlide?.tag ?? null}
       {tagSuggestions}
       {tagSaving}
-      on:changePoints={handlePointsChange}
-      on:changeFilters={handleFiltersChange}
-      on:changeTag={(event) => void handleTagChange(event)}
-      on:prev={() => void moveSequence(-1)}
-      on:next={() => void moveSequence(1)}
-      on:ocr={() => void handleOcr()}
-      on:review={() => void handleReview()}
-      on:transform={() => void handleTransform()}
-      on:saveAll={() => void handleSaveAll()}
+      onchangepoints={handlePointsChange}
+      onchangefilters={handleFiltersChange}
+      onchangetag={(detail) => void handleTagChange(detail)}
+      onprev={() => void moveSequence(-1)}
+      onnext={() => void moveSequence(1)}
+      onocr={() => void handleOcr()}
+      onreview={() => void handleReview()}
+      ontransform={() => void handleTransform()}
+      onsaveall={() => void handleSaveAll()}
     />
 
     <ResultPreview {resultUrl} />

@@ -21,9 +21,9 @@ def _run_pytest(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[st
     )
 
 
-def _run_collect_only(path: str, marker: str) -> subprocess.CompletedProcess[str]:
+def _run_collect_only(path: str, marker: str, *extra_args: str) -> subprocess.CompletedProcess[str]:
     try:
-        return _run_pytest(path, "--collect-only", "-m", marker, "-q", "--no-header", timeout=90)
+        return _run_pytest(path, "--collect-only", "-m", marker, "-q", "--no-header", *extra_args, timeout=90)
     except subprocess.TimeoutExpired as exc:
         pytest.skip(f"collect-only timeout: {path} -m {marker} ({exc.timeout}s)")
 
@@ -35,6 +35,13 @@ class TestPytestMarkInfra:
         assert "@pytest.mark.http" in result.stdout, f"http marker not found: {result.stdout[:500]}"
         assert "@pytest.mark.http_live" in result.stdout, f"http_live marker not found: {result.stdout[:500]}"
         assert "@pytest.mark.e2e" in result.stdout, f"e2e marker not found: {result.stdout[:500]}"
+
+    def test_registered_markers_include_destructive_live(self):
+        """TC-Right: pytest.ini에 destructive_live marker가 등록되어 있다."""
+        result = _run_pytest("--markers")
+        assert "@pytest.mark.destructive_live" in result.stdout, (
+            f"destructive_live marker not found: {result.stdout[:500]}"
+        )
 
     def test_http_marker_collects_testclient_suite(self):
         """TC-Right: TestClient 기반 HTTP 파일은 -m http에서 수집된다."""
@@ -65,6 +72,60 @@ class TestPytestMarkInfra:
         result = _run_collect_only("tests/dev_runner/test_live_server_http.py", "http_live")
         assert result.returncode == 0, result.stdout + result.stderr
         assert "tests/dev_runner/test_live_server_http.py" in result.stdout
+
+    def test_read_only_coupang_live_http_case_still_collects_under_http_live(self):
+        """TC-Right: 쿠팡 live HTTP read-only 케이스는 기본 http_live 수집 대상이다."""
+        result = _run_collect_only(
+            "tests/modules/coupang_travel/test_coupang_live_http.py",
+            "http_live",
+            "-k",
+            "get_status_200",
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "test_live_get_status_200" in result.stdout
+
+    def test_http_live_marker_unaffected_for_cancellation_stats(self):
+        """TC-Right: 무관한 쿠팡 live HTTP 파일은 기존 http_live 계약을 유지한다."""
+        result = _run_collect_only(
+            "tests/modules/coupang_travel/test_cancellation_stats_live_http.py",
+            "http_live",
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "test_live_cancellation_stats_200" in result.stdout
+
+    def test_destructive_live_case_skips_without_flag(self):
+        """TC-Right: destructive HTTP 케이스는 --run-destructive-live 없으면 skip된다."""
+        result = _run_pytest(
+            "tests/modules/coupang_travel/test_coupang_live_http.py",
+            "-m",
+            "http_live and destructive_live",
+            "-k",
+            "cleanup_returns_deleted_field",
+            "-rs",
+            "-q",
+            "--no-header",
+            timeout=90,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "--run-destructive-live required" in combined, combined
+        assert "1 skipped" in combined, combined
+
+    def test_destructive_live_e2e_file_skips_without_flag(self):
+        """TC-Right: destructive E2E 파일 전체는 flag 없으면 skip된다."""
+        result = _run_pytest(
+            "tests/modules/coupang_travel/test_coupang_live_e2e.py",
+            "-m",
+            "http_live",
+            "-rs",
+            "-q",
+            "--no-header",
+            timeout=90,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "--run-destructive-live required" in combined, combined
+        assert "4 skipped" in combined, combined
 
     def test_log_stream_live_file_collects_under_http_live(self):
         """TC-Right: test_log_stream_http.py 전체는 http_live에서만 수집된다."""

@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS notification_settings (
 );
 
 INSERT OR IGNORE INTO notification_settings (id, enable_telegram, enable_desktop, notify_states)
-VALUES (1, 1, 1, '["available", "booking_success", "booking_failed", "error", "startup", "shutdown"]');
+VALUES (1, 1, 1, '["available", "booking_success", "booking_failed", "error", "popup_new"]');
 
 UPDATE notification_settings
 SET notify_states = CASE

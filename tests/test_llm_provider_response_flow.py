@@ -85,23 +85,38 @@ class TestExecuteLlmProviderRouting(unittest.TestCase):
 # 2. _parse_json_response() JSON 파싱 테스트
 # ===========================================================================
 
+def _make_parser():
+    """LLMExecutorBase 구체 인스턴스 생성 (ABC이므로 서브클래스 필요)."""
+    from app.modules.claude_worker.services.executors.base import LLMExecutorBase
+
+    class _Concrete(LLMExecutorBase):
+        def execute(self, prompt, **kwargs):
+            return {}
+
+    return _Concrete()
+
+
 class TestParseJsonResponse(unittest.TestCase):
-    """_parse_json_response() 각 케이스 단위 테스트 (실제 호출)."""
+    """LLMExecutorBase._parse_json_response() 각 케이스 단위 테스트.
+
+    _parse_json_response는 executors/base.py로 이전됨.
+    LLMService 대신 LLMExecutorBase 직접 사용.
+    """
 
     def setUp(self):
-        self.service = _make_service()
+        self.parser = _make_parser()
 
     def test_tc_code_block_gemini_style(self):
         """TC-CodeBlock: Gemini가 ```json ... ``` 블록으로 응답 → 올바른 dict 추출."""
         text = '```json\n{"tag": "이벤트", "summary": "봄 할인"}\n```'
-        result = self.service._parse_json_response(text)
+        result = self.parser._parse_json_response(text)
         self.assertEqual(result["tag"], "이벤트")
         self.assertEqual(result["summary"], "봄 할인")
 
     def test_tc_pure_json(self):
         """TC-PureJson: 순수 {"key": "value"} 응답 → 올바른 dict 추출."""
         text = '{"tag": "팝업", "summary": "신상품 팝업 스토어"}'
-        result = self.service._parse_json_response(text)
+        result = self.parser._parse_json_response(text)
         self.assertEqual(result["tag"], "팝업")
         self.assertEqual(result["summary"], "신상품 팝업 스토어")
 
@@ -112,7 +127,7 @@ class TestParseJsonResponse(unittest.TestCase):
             '{"tag": "기타", "summary": "일반 홍보 게시물"}\n\n'
             "이상입니다."
         )
-        result = self.service._parse_json_response(text)
+        result = self.parser._parse_json_response(text)
         self.assertEqual(result["tag"], "기타")
         self.assertEqual(result["summary"], "일반 홍보 게시물")
 
@@ -120,7 +135,7 @@ class TestParseJsonResponse(unittest.TestCase):
         """TC-Fail: JSON 없는 텍스트 → ValueError 발생."""
         text = "이 텍스트에는 JSON이 전혀 없습니다. 분류 불가능한 응답입니다."
         with self.assertRaises((ValueError, json.JSONDecodeError)):
-            self.service._parse_json_response(text)
+            self.parser._parse_json_response(text)
 
 
 # ===========================================================================
@@ -341,10 +356,11 @@ class TestGeminiCliOptions(unittest.TestCase):
         설계 의도:
             Claude는 --output-format json 옵션으로 구조화된 JSON을 직접 반환할 수 있지만,
             Gemini는 항상 raw text로 응답하고 _parse_json_response()가 JSON을 추출한다.
-            이 테스트는 그 파싱 경로가 실제로 동작함을 검증한다.
+            _parse_json_response는 LLMExecutorBase로 이전됨.
         """
+        parser = _make_parser()
         raw_gemini_response = '```json\n{"tag": "팝업", "summary": "신규 팝업"}\n```'
-        parsed = self.service._parse_json_response(raw_gemini_response)
+        parsed = parser._parse_json_response(raw_gemini_response)
 
         self.assertEqual(parsed["tag"], "팝업")
         self.assertEqual(parsed["summary"], "신규 팝업")

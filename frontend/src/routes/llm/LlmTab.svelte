@@ -2,8 +2,7 @@
 	import { Button } from '$lib/components/ui';
 
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap } from '$lib/api';
-	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
+	import { llmApi, type LLMBootstrapResponse, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap, type ProviderInfo } from '$lib/api';
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 
@@ -48,8 +47,8 @@
 	let selectedIds: number[] = [];
 	let selectAll = false;
 
-	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능)
-	type Tab = 'queue' | 'history' | 'create' | 'performance';
+	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능), claude-sessions(세션 뷰어)
+	type Tab = 'queue' | 'history' | 'create' | 'performance' | 'claude-sessions';
 	let activeTab: Tab = 'queue';
 
 	// 모달
@@ -60,6 +59,10 @@
 	let quotaStatus: QuotaStatusMap = {};
 	let countdownSeconds: number = 0;
 	let countdownTimer: ReturnType<typeof setInterval> | null = null;
+	let createMetaLoaded = false;
+	let createMetaLoading = false;
+	let performanceTabComponent: any = null;
+	let claudeSessionsTabComponent: any = null;
 
 	// 수동 요청 생성 폼
 	let createForm = $state({
@@ -71,18 +74,24 @@
 		request_source: 'manual_test',
 		provider: 'claude',
 		model: '',
-		cli_options: null as Record<string, unknown> | null,
+		cli_options: undefined as Record<string, unknown> | undefined,
 		userInput: ''
 	});
 	let createLoading = false;
 	let createError = $state<string | null>(null);
 	let createSuccess = false;
 
-	// Provider별 모델 목록
-	const providerModels: Record<string, string[]> = {
-		claude: ['(기본)', 'sonnet', 'opus', 'haiku'],
-		gemini: ['(기본)', 'gemini-2.5-pro', 'gemini-2.5-flash']
-	};
+	// Provider 목록 (API에서 동적 로드)
+	let providers = $state<ProviderInfo[]>([]);
+	let providersLoading = $state(true);
+	let providersError = $state<string | null>(null);
+
+	// Provider별 모델 목록 (API 로드 전 fallback)
+	function getProviderModels(providerKey: string): string[] {
+		const p = providers.find(x => x.key === providerKey);
+		if (p && p.models.length > 0) return ['(기본)', ...p.models];
+		return ['(기본)'];
+	}
 
 	// 프리셋 타입 정의
 	interface Preset {
@@ -129,7 +138,7 @@
 		if (preset.provider) createForm.provider = preset.provider;
 		if (preset.model) createForm.model = preset.model;
 		if (preset.caller_type) createForm.caller_type = preset.caller_type;
-		createForm.cli_options = preset.cliOptions ?? null;
+		createForm.cli_options = preset.cliOptions ?? undefined;
 		// 프리셋 변경 시 사용자 입력은 보존 (이미 작성한 텍스트 유실 방지)
 		// 직접 입력 ↔ 프리셋 전환 시에만 prompt 초기화
 		if (preset.label === '(직접 입력)') {
@@ -154,31 +163,61 @@
 		return undefined;
 	}
 
+	async function loadCreateMeta() {
+		if (createMetaLoaded || createMetaLoading) return;
+		createMetaLoading = true;
+		providersLoading = true;
+		providersError = null;
+		try {
+			await fetchQuotaStatus(true);
+			providers = await llmApi.getProviders();
+			createMetaLoaded = true;
+		} catch (e) {
+			providersError = e instanceof Error ? e.message : 'Provider 목록 로드 실패';
+		} finally {
+			providersLoading = false;
+			createMetaLoading = false;
+		}
+	}
+
+	async function loadPerformanceTabComponent() {
+		if (performanceTabComponent) return;
+		try {
+			performanceTabComponent = (await import('$lib/components/LLMPerformance.svelte')).default;
+		} catch (e) {
+			console.error('성능 탭 컴포넌트 로드 실패:', e);
+		}
+	}
+
+	async function loadClaudeSessionsTabComponent() {
+		if (claudeSessionsTabComponent) return;
+		try {
+			claudeSessionsTabComponent = (await import('./ClaudeSessionsTab.svelte')).default;
+		} catch (e) {
+			console.error('Claude 세션 탭 컴포넌트 로드 실패:', e);
+		}
+	}
+
 	async function fetchData() {
 		loading = true;
 		error = null;
 		try {
-			const [listRes, statsRes, workerRes, queueStatsRes] = await Promise.all([
-				llmApi.list({
-					status: getStatusFilter(),
-					caller_type: filterCallerType || undefined,
-					requested_by: filterRequestedBy || undefined,
-					queue_name: filterQueueName || undefined,
-					page: currentPage,
-					page_size: pageSize
-				}),
-				llmApi.getStats(),
-				llmApi.getWorkerStatus(),
-				llmApi.getQueueStats()
-			]);
+			const bootstrapRes: LLMBootstrapResponse = await llmApi.bootstrap({
+				status: getStatusFilter(),
+				caller_type: filterCallerType || undefined,
+				requested_by: filterRequestedBy || undefined,
+				queue_name: filterQueueName || undefined,
+				page: currentPage,
+				page_size: pageSize
+			});
 
 			// 서버에서 이미 status 필터링된 결과 사용
-			requests = listRes.items;
-			total = listRes.total;
-			pages = listRes.pages || 1;
-			stats = statsRes;
-			workerStatus = workerRes;
-			queueStats = queueStatsRes;
+			requests = bootstrapRes.list.items;
+			total = bootstrapRes.list.total;
+			pages = bootstrapRes.list.pages || 1;
+			stats = bootstrapRes.stats;
+			workerStatus = bootstrapRes.worker_status;
+			queueStats = bootstrapRes.queue_stats;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
 		} finally {
@@ -488,7 +527,7 @@
 				request_source: 'manual_test',
 				provider: 'claude',
 				model: '',
-				cli_options: null,
+				cli_options: undefined,
 				userInput: ''
 			};
 			selectedPreset = presets[0];
@@ -618,16 +657,24 @@
 			currentPage = 1;
 			selectedIds = [];
 			selectAll = false;
-			fetchData();
+			void fetchData();
 		}
 		if (tab === 'history') {
-			fetchHistoryStats();
+			void fetchHistoryStats();
+		}
+		if (tab === 'create') {
+			void loadCreateMeta();
+		}
+		if (tab === 'performance') {
+			void loadPerformanceTabComponent();
+		}
+		if (tab === 'claude-sessions') {
+			void loadClaudeSessionsTabComponent();
 		}
 	}
 
 	onMount(() => {
-		fetchData();
-		fetchQuotaStatus();
+		void fetchData();
 	});
 </script>
 
@@ -636,10 +683,10 @@
 	<div class="mb-6 flex justify-between items-center">
 		<h2 class="text-lg font-bold text-foreground">LLM 요청 관리</h2>
 		<div class="flex gap-2">
-			<Button variant="secondary" size="sm" on:click={runCleanup} title="Stale 정리 및 오래된 이력 삭제">
+			<Button variant="secondary" size="sm" onclick={runCleanup} title="Stale 정리 및 오래된 이력 삭제">
 				정리
 			</Button>
-			<Button variant="secondary" size="sm" on:click={() => fetchData()}>
+			<Button variant="secondary" size="sm" onclick={() => fetchData()}>
 				새로고침
 			</Button>
 		</div>
@@ -709,27 +756,33 @@
 		<nav class="flex gap-4">
 			<button
 				onclick={() => switchTab('queue')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				대기열 (pending/processing)
 			</button>
 			<button
 				onclick={() => switchTab('history')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				이력 (completed/failed)
 			</button>
 			<button
 				onclick={() => switchTab('create')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				수동 요청 생성
 			</button>
 			<button
 				onclick={() => switchTab('performance')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				성능 분석
+			</button>
+			<button
+				onclick={() => switchTab('claude-sessions')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'claude-sessions' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+			>
+				Claude 세션
 			</button>
 		</nav>
 	</div>
@@ -787,15 +840,15 @@
 					성공 없는 것만
 				</label>
 			{/if}
-			<Button variant="primary" size="sm" on:click={viewMode === 'grouped' ? handleGroupFilter : handleFilter}>필터</Button>
-			<Button variant="secondary" size="sm" on:click={clearFilters}>초기화</Button>
+			<Button variant="primary" size="sm" onclick={viewMode === 'grouped' ? handleGroupFilter : handleFilter}>필터</Button>
+			<Button variant="secondary" size="sm" onclick={clearFilters}>초기화</Button>
 
 			{#if activeTab === 'history'}
 				<div class="ml-auto flex items-center gap-2">
 					<Button
 						variant={viewMode === 'grouped' ? 'primary' : 'secondary'}
 						size="sm"
-						on:click={toggleViewMode}
+						onclick={toggleViewMode}
 					>
 						{viewMode === 'individual' ? '그룹 뷰' : '개별 뷰'}
 					</Button>
@@ -821,12 +874,12 @@
 				<div class="ml-auto flex gap-2">
 					{#if selectedGroupKeys.length > 0}
 						<span class="text-sm text-muted-foreground self-center">{selectedGroupKeys.length}개 선택</span>
-						<Button variant="secondary" size="sm" on:click={multiRetrySelectedGroups}>
+						<Button variant="secondary" size="sm" onclick={multiRetrySelectedGroups}>
 							선택 그룹 재시도
 						</Button>
 					{/if}
 					{#if groupedResponse.summary.callers_without_success > 0}
-						<Button variant="primary" size="sm" on:click={retryAllFailedWithoutSuccess}>
+						<Button variant="primary" size="sm" onclick={retryAllFailedWithoutSuccess}>
 							성공 없는 것 일괄 재시도
 						</Button>
 					{/if}
@@ -839,7 +892,7 @@
 			<div class="mb-4 flex gap-2 items-center">
 				<span class="text-sm text-muted-foreground">{selectedIds.length}개 선택</span>
 				{#if activeTab === 'history'}
-					<Button variant="secondary" size="sm" on:click={batchRetry}>일괄 재시도</Button>
+					<Button variant="secondary" size="sm" onclick={batchRetry}>일괄 재시도</Button>
 				{/if}
 				<button onclick={batchDelete} class="btn btn-danger btn-sm">일괄 삭제</button>
 			</div>
@@ -1164,15 +1217,22 @@
 					<div class="grid grid-cols-2 gap-4">
 						<div>
 							<label class="block text-sm font-medium text-foreground mb-1">Provider</label>
-							<select bind:value={createForm.provider} class="w-full px-3 py-2 border border-border rounded-lg">
-								<option value="claude">Claude</option>
-								<option value="gemini">Gemini</option>
-							</select>
+							{#if providersError}
+								<p class="text-sm text-red-500">{providersError}</p>
+							{:else if providersLoading}
+								<p class="text-sm text-muted-foreground">로딩 중...</p>
+							{:else}
+								<select bind:value={createForm.provider} class="w-full px-3 py-2 border border-border rounded-lg">
+									{#each providers as p}
+										<option value={p.key}>{p.display_name}</option>
+									{/each}
+								</select>
+							{/if}
 						</div>
 						<div>
 							<label class="block text-sm font-medium text-foreground mb-1">Model</label>
 							<select bind:value={createForm.model} class="w-full px-3 py-2 border border-border rounded-lg">
-								{#each providerModels[createForm.provider] as modelOption}
+								{#each getProviderModels(createForm.provider) as modelOption}
 									<option value={modelOption === '(기본)' ? '' : modelOption}>
 										{modelOption}
 									</option>
@@ -1234,7 +1294,21 @@
 			</div>
 		</div>
 	{:else if activeTab === 'performance'}
-		<LLMPerformance />
+		{#if performanceTabComponent}
+			<svelte:component this={performanceTabComponent} />
+		{:else}
+			<div class="flex justify-center items-center h-64">
+				<div class="text-sm text-muted-foreground">성능 탭 로딩 중...</div>
+			</div>
+		{/if}
+	{:else if activeTab === 'claude-sessions'}
+		{#if claudeSessionsTabComponent}
+			<svelte:component this={claudeSessionsTabComponent} />
+		{:else}
+			<div class="flex justify-center items-center h-64">
+				<div class="text-sm text-muted-foreground">Claude 세션 탭 로딩 중...</div>
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -1396,7 +1470,7 @@
 					>
 						삭제
 					</button>
-					<Button variant="secondary" size="sm" on:click={closeModal}>닫기</Button>
+					<Button variant="secondary" size="sm" onclick={closeModal}>닫기</Button>
 				</div>
 			</div>
 		</div>

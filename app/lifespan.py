@@ -10,7 +10,7 @@ import os
 import subprocess
 
 from app.config import settings, logger
-from app.database import init_extra_tables
+from app.database import check_schema_drift, init_extra_tables, sync_serial_sequences
 
 
 async def cleanup_api_stale_resources():
@@ -82,6 +82,10 @@ async def lifespan(app: FastAPI):
     # 추가 테이블 초기화 (worker_status, booking_stats, booking_settings)
     try:
         init_extra_tables()
+        check_schema_drift()
+        synced = sync_serial_sequences()
+        if synced:
+            logger.info(f"SERIAL 시퀀스 동기화: {synced}건")
 
         # 이미지 분류 모듈 DB 초기화 - 비활성화 (매번 불필요하게 실행됨)
         # from app.modules.image_classifier.database import init_db as init_ic_db
@@ -136,24 +140,6 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("워커는 Session 1에서 독립 관리됩니다 (startup-browser-workers.ps1)")
         logger.info("워커 명령은 Redis를 통해 전달됩니다 (worker:commands)")
-
-        # API 서버 시작 알림 (Session 0에서 네트워크 제한으로 hang 가능 → 5초 타임아웃)
-        try:
-            from app.services.notification_service import NotificationService
-            notification_service = NotificationService()
-            if notification_service.should_notify("startup"):
-                await asyncio.wait_for(
-                    notification_service.send_notification_message(
-                        f"✅ <b>API 서버 시작</b>\n\n"
-                        f"PID: {os.getpid()}\n"
-                        f"워커 관리: Redis 명령 방식 (Session 1 독립)"
-                    ),
-                    timeout=5
-                )
-        except asyncio.TimeoutError:
-            logger.warning("시작 알림 전송 타임아웃 (5초) — 스킵")
-        except Exception as e:
-            logger.error(f"시작 알림 전송 실패: {str(e)}")
 
         # 헬스 모니터 시작 (Session 0에서는 비활성화 — subprocess/network hang 방지)
         from app.shared.notification.notification_service import _IN_SESSION_0
@@ -264,33 +250,6 @@ async def lifespan(app: FastAPI):
             logger.info("dev-runner 프로세스 종료 완료")
     except Exception as e:
         logger.error(f"dev-runner 프로세스 종료 실패: {str(e)}")
-
-    # API 서버 종료 알림
-    try:
-        from app.services.notification_service import NotificationService
-        notification_service = NotificationService()
-        # should_notify()가 DB 접근으로 30초 대기할 수 있음 → 3초 타임아웃으로 단축
-        try:
-            should_send = await asyncio.wait_for(
-                asyncio.to_thread(notification_service.should_notify, "shutdown"),
-                timeout=3
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.warning(f"종료 알림 조건 확인 타임아웃/실패 (3초) — 알림 스킵: {e}")
-            should_send = False
-        if should_send:
-            try:
-                await asyncio.wait_for(
-                    notification_service.send_notification_message(
-                        f"🛑 <b>API 서버 종료</b>\n\n"
-                        f"PID: {os.getpid()}"
-                    ),
-                    timeout=5
-                )
-            except asyncio.TimeoutError:
-                logger.warning("종료 알림 전송 타임아웃 (5초) — 스킵")
-    except Exception as e:
-        logger.error(f"종료 알림 전송 실패: {str(e)}")
 
     # 헬스 모니터 태스크 취소 및 세션 정리
     if app.state.health_monitor_task:

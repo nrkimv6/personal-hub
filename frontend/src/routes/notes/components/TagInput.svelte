@@ -1,7 +1,7 @@
 <script lang="ts">
   import { notesApi } from '$lib/api/notes';
   import type { TagDef } from '$lib/api/notes';
-  import { Plus } from 'lucide-svelte';
+  import { Plus, X } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
 
   interface Props {

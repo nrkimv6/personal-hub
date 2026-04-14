@@ -139,6 +139,16 @@ async def get_task_result(task_id: str):
 # 상태 조회 엔드포인트
 # ───────────────────────────────────────────
 
+@router.get("/{repo_id}", response_model=schemas.RepoResponse)
+async def get_repo(repo_id: int, db: Session = Depends(get_db)):
+    """레포지토리 단건 조회."""
+    svc = GitRepoService()
+    repo = svc.get_repo(db, repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
+    return repo
+
+
 @router.get("/{repo_id}/status", response_model=schemas.RepoStatus)
 async def get_status(repo_id: int, db: Session = Depends(get_db)):
     """레포지토리 상세 상태 조회 (파일 목록, branch, ahead/behind)."""
@@ -332,12 +342,11 @@ diff:
 
 커밋 메시지만 출력하세요."""
 
-        # model 기본값 해석
-        _default_models = {
-            "claude": "claude-haiku-4-5-20251001",
-            "gemini": "gemini-2.0-flash",
-        }
-        resolved_model = body.model if body.model else _default_models[body.provider]
+        # model 기본값 해석 — registry 기반
+        from app.modules.claude_worker.services import provider_registry as _pr
+        _provider_meta = _pr.get_provider(body.provider)
+        _default_model = _provider_meta.default_model if _provider_meta else ""
+        resolved_model = body.model if body.model else _default_model
 
         llm_svc = LLMService(db)
         req = llm_svc.enqueue(

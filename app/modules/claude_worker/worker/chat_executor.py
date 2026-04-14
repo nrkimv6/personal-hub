@@ -32,6 +32,8 @@ import redis
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
 LOG_DIR = PROJECT_ROOT / "logs" / "admin"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+PID_DIR = PROJECT_ROOT / ".pids"
+PID_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,7 +45,7 @@ logger = logging.getLogger("chat_executor")
 COMMANDS_KEY = "llm-chat:commands"
 LOG_CHANNEL_PREFIX = "llm-chat:stream"
 HEARTBEAT_KEY = "llm-chat:executor:heartbeat"
-PID_FILE = LOG_DIR / "chat_executor_admin.pid"
+PID_FILE = PID_DIR / "chat_executor_admin.pid"
 
 _ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
@@ -173,8 +175,11 @@ class ChatExecutor:
                 f.write(prompt)
                 prompt_file_path = f.name
 
-            # CLAUDECODE 환경변수 제거 (중첩 세션 방지)
-            env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+            # Claude CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
+            # base_env 로 기존 필터 결과를 전달해 해당 필터를 보존한다
+            from app.modules.claude_worker.services.profile_env import build_cli_env
+            filtered_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+            env = build_cli_env("claude", base_env=filtered_env)
 
             allowed_tools = cli_options.get("allowed_tools", "Bash,Read")
             cmd = ["claude", "--output-format", "stream-json", "--allowedTools", allowed_tools, "--print"]
@@ -214,7 +219,7 @@ class ChatExecutor:
             if service:
                 last_json = _extract_last_json(collected)
                 if exit_code == 0:
-                    service.mark_completed(request_id, raw_response=last_json or "\n".join(collected[-20:]))
+                    service.mark_completed(request_id, {}, raw_response=last_json or "\n".join(collected[-20:]))
                 else:
                     service.mark_failed(
                         request_id,
@@ -232,7 +237,7 @@ class ChatExecutor:
             logger.error(f"chat session error request_id={request_id}: {e}", exc_info=True)
             if service:
                 try:
-                    service.mark_failed(request_id, error_message=str(e))
+                    service.mark_failed(request_id, error_message=str(e), raw_response="")
                 except Exception:
                     pass
             try:

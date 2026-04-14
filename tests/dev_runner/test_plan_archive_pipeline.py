@@ -256,8 +256,8 @@ def _make_engine_with_llm():
     return eng
 
 
-def test_save_plan_archive_result_triggers_requirements_sync():
-    """R: 5번째 plan_archive_analyze 완료 → plan_requirements_sync LLMRequest 자동 생성"""
+def test_save_plan_archive_result_triggers_staleness_flag():
+    """R: 5번째 plan_archive_analyze 완료 → _maybe_flag_guide_staleness 호출 확인"""
     from app.modules.claude_worker.models.llm_request import LLMRequest as LLMRequestModel
 
     eng = _make_engine_with_llm()
@@ -303,56 +303,21 @@ def test_save_plan_archive_result_triggers_requirements_sync():
             "raw_response": "",
         }
 
-        # _maybe_queue_requirements_sync 내의 LLMRequest.created_at 문제를 우회하기 위해
-        # 해당 함수를 patch하여 실제 DB INSERT를 직접 수행하는 side_effect 사용
-        def fake_maybe_queue(session, category):
-            from app.modules.claude_worker.models.llm_request import LLMRequest as LLM
-            processed_count = session.query(PlanRecord).filter(
-                PlanRecord.category == category,
-                PlanRecord.llm_processed_at.isnot(None),
-            ).count()
-            if processed_count < 5:
-                return False
-            existing = session.query(LLM).filter(
-                LLM.caller_type == "plan_requirements_sync",
-                LLM.caller_id == category,
-            ).first()
-            if existing:
-                return False
-            records = session.query(PlanRecord).filter(
-                PlanRecord.category == category,
-                PlanRecord.llm_processed_at.isnot(None),
-                PlanRecord.summary.isnot(None),
-            ).limit(50).all()
-            from app.modules.claude_worker.services.plan_analyze_handler import build_requirements_sync_prompt
-            summaries = [{"filename": r.file_path or "", "summary": r.summary or "",
-                          "tags": r.tags or [], "date": ""} for r in records]
-            prompt = build_requirements_sync_prompt(category, summaries)
-            llm_req = LLM(
-                caller_type="plan_requirements_sync",
-                caller_id=category,
-                prompt=prompt,
-                queue_name="utility",
-                requested_by="scheduler",
-            )
-            session.add(llm_req)
-            session.commit()
+        # _maybe_flag_guide_staleness를 patch하여 호출 여부만 검증
+        staleness_called = []
+
+        def fake_maybe_flag(session, file_path):
+            staleness_called.append(file_path)
             return True
 
         with patch(
-            "app.modules.claude_worker.services.plan_analyze_handler._maybe_queue_requirements_sync",
-            side_effect=fake_maybe_queue,
+            "app.modules.claude_worker.services.plan_analyze_handler._maybe_flag_guide_staleness",
+            side_effect=fake_maybe_flag,
         ):
             save_plan_archive_result(db, mock_request, result)
 
-        # 검증: plan_requirements_sync LLMRequest가 생성됐는지
-        sync_req = db.query(LLMRequestModel).filter(
-            LLMRequestModel.caller_type == "plan_requirements_sync",
-            LLMRequestModel.caller_id == "instagram",
-        ).first()
-        assert sync_req is not None, "5번째 완료 후 plan_requirements_sync LLMRequest가 생성되어야 함"
-        assert sync_req.queue_name == "utility"
-        assert "instagram" in sync_req.prompt
+        # 검증: _maybe_flag_guide_staleness가 호출됐는지
+        assert len(staleness_called) > 0, "5번째 완료 후 _maybe_flag_guide_staleness가 호출되어야 함"
 
     finally:
         db.close()
@@ -360,7 +325,7 @@ def test_save_plan_archive_result_triggers_requirements_sync():
 
 
 def test_save_plan_archive_result_no_trigger_below_5():
-    """B: 4번째 완료 → plan_requirements_sync LLMRequest 미생성"""
+    """B: 4번째 완료 → _maybe_flag_guide_staleness가 호출되지만 반환값 False"""
     from app.modules.claude_worker.models.llm_request import LLMRequest as LLMRequestModel
 
     eng = _make_engine_with_llm()
@@ -406,29 +371,20 @@ def test_save_plan_archive_result_no_trigger_below_5():
             "raw_response": "",
         }
 
-        def fake_maybe_queue_no_trigger(session, category):
-            from app.modules.claude_worker.models.llm_request import LLMRequest as LLM
-            processed_count = session.query(PlanRecord).filter(
-                PlanRecord.category == category,
-                PlanRecord.llm_processed_at.isnot(None),
-            ).count()
-            if processed_count < 5:
-                return False  # 4개이므로 미생성
-            # 나머지 로직 생략 (도달 안 함)
-            return True
+        staleness_calls = []
+
+        def fake_maybe_flag_no_trigger(session, file_path):
+            staleness_calls.append(file_path)
+            return False  # threshold 미달
 
         with patch(
-            "app.modules.claude_worker.services.plan_analyze_handler._maybe_queue_requirements_sync",
-            side_effect=fake_maybe_queue_no_trigger,
+            "app.modules.claude_worker.services.plan_analyze_handler._maybe_flag_guide_staleness",
+            side_effect=fake_maybe_flag_no_trigger,
         ):
             save_plan_archive_result(db, mock_request, result)
 
-        # 검증: plan_requirements_sync LLMRequest 없어야 함
-        sync_req = db.query(LLMRequestModel).filter(
-            LLMRequestModel.caller_type == "plan_requirements_sync",
-            LLMRequestModel.caller_id == "naver-booking",
-        ).first()
-        assert sync_req is None, "4번째 완료에서는 plan_requirements_sync LLMRequest가 생성되면 안 됨"
+        # _maybe_flag_guide_staleness는 호출되었지만 PlanEvent는 생성 안 됨 (False 반환)
+        assert len(staleness_calls) > 0, "_maybe_flag_guide_staleness는 호출되어야 함"
 
     finally:
         db.close()

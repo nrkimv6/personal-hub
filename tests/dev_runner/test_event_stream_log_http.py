@@ -7,8 +7,10 @@ SSE /events 스트림에서 log/log_completed/merge_log 이벤트 수신을 확�
 import json
 import threading
 import time
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import fakeredis
+import fakeredis.aioredis
 import pytest
 import redis
 import requests
@@ -87,14 +89,6 @@ def r():
     client.close()
 
 
-def _check_admin_api():
-    try:
-        resp = requests.get(f"{ADMIN_API}/api/v1/dev-runner/status", timeout=3)
-        return resp.status_code == 200
-    except Exception:
-        return False
-
-
 @pytest.fixture
 def local_client():
     app = FastAPI()
@@ -141,7 +135,64 @@ def test_http_events_log_completed_commit_failed_preserves_error_detail(local_cl
     assert payload["error"] == detail
 
 
-@pytest.mark.skipif(not _check_admin_api(), reason="Admin API not available (localhost:8001)")
+@pytest.mark.http
+def test_http_events_initial_status_includes_merge_recovery_fields(local_client):
+    """T5: /events 초기 status가 merge 복구 필드를 포함한다."""
+    from app.modules.dev_runner.services.event_service import event_service
+
+    fake_server = fakeredis.FakeServer()
+    fake_sync = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+    fake_async = fakeredis.aioredis.FakeRedis(server=fake_server, decode_responses=True)
+    runner_id = "http-merge-recovery-01"
+    expected_worktree = f"D:/tmp/.worktrees/{runner_id}"
+
+    fake_sync.sadd("plan-runner:active_runners", runner_id)
+    fake_sync.set(f"plan-runner:runners:{runner_id}:status", "running")
+    fake_sync.set(f"plan-runner:runners:{runner_id}:trigger", "user")
+    fake_sync.set(f"plan-runner:runners:{runner_id}:plan_file", "docs/plan/test.md")
+    fake_sync.set(f"plan-runner:runners:{runner_id}:worktree_path", expected_worktree)
+    fake_sync.set(f"plan-runner:runners:{runner_id}:merge_status", "conflict")
+    fake_sync.set(f"plan-runner:runners:{runner_id}:stop_stage", "post_review")
+
+    original_sync = event_service._sync
+    original_async = event_service._async
+    real_stream_events = event_service.stream_events
+
+    async def _finite_stream_events():
+        gen = real_stream_events()
+        try:
+            yield await gen.__anext__()
+            yield await gen.__anext__()
+        finally:
+            await gen.aclose()
+
+    event_service._sync = fake_sync
+    event_service._async = fake_async
+    try:
+        with patch.object(event_service, "_enable_keyspace_notifications", new=AsyncMock(return_value=None)), \
+             patch.object(event_service, "_list_visible_active_runner_ids", return_value=[]), \
+             patch.object(event_service, "_cleanup_invisible_recent_runners", return_value=None), \
+             patch.object(event_service._log_tailer, "init_offsets_for_active_runners", new=AsyncMock(return_value=None)), \
+             patch("app.modules.dev_runner.routes.events.event_service.stream_events", new=_finite_stream_events):
+            response = local_client.get(
+                f"{BASE_URL}/events",
+                headers={"Accept": "text/event-stream"},
+            )
+    finally:
+        event_service._sync = original_sync
+        event_service._async = original_async
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    events = _parse_sse_events(response.text)
+    status_event = next(event for event in events if event.get("event") == "status")
+    payload = json.loads(status_event["data"])
+    matched = next(item for item in payload["runners"] if item.get("runner_id") == runner_id)
+    assert matched["worktree_path"] == expected_worktree
+    assert matched["merge_status"] == "conflict"
+    assert matched["stop_stage"] == "post_review"
+
+
 @pytest.mark.integration
 class TestEventStreamLogIntegration:
     """T3/T4: /events SSE에서 log/merge_log 이벤트 수신 확인"""
@@ -267,3 +318,40 @@ class TestEventStreamLogIntegration:
         payload = json.loads(collected["merge_log"][0])
         assert payload["runner_id"] == TEST_RUNNER_ID
         assert payload["line"] == test_line
+
+    def test_sse_events_stream_merge_log_completed(self, r):
+        """T4/T5: merge-log sentinel publish → SSE에서 event: merge_log_completed 수신"""
+        url = f"{ADMIN_API}/api/v1/dev-runner/events"
+        channel = f"{MERGE_LOG_CHANNEL}:{TEST_RUNNER_ID}"
+
+        collected: dict[str, list[str]] = {"merge_log_completed": []}
+
+        def collect():
+            try:
+                with requests.get(url, stream=True, timeout=6) as resp:
+                    current_event = "message"
+                    for raw_line in resp.iter_lines(decode_unicode=True):
+                        if not raw_line:
+                            current_event = "message"
+                            continue
+                        if raw_line.startswith("event:"):
+                            current_event = raw_line[6:].strip()
+                        elif raw_line.startswith("data:"):
+                            data = raw_line[5:].strip()
+                            if current_event == "merge_log_completed":
+                                collected["merge_log_completed"].append(data)
+                                return
+            except Exception:
+                pass
+
+        t = threading.Thread(target=collect, daemon=True)
+        t.start()
+        time.sleep(3.0)
+        r.publish(channel, "__MERGE_COMPLETED__")
+        t.join(timeout=5)
+
+        assert collected["merge_log_completed"], "event: merge_log_completed 미수신"
+        payload = json.loads(collected["merge_log_completed"][0])
+        assert payload["runner_id"] == TEST_RUNNER_ID
+        assert payload["status"] == "success"
+        assert payload["reason"] == "completed"

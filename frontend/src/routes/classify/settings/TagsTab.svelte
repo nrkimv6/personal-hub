@@ -333,7 +333,7 @@
                     id="folder-template"
                     type="text"
                     bind:value={folderRuleForm.folder_template}
-                    placeholder="{category}/{year}/{tag}"
+                    placeholder="&#123;category&#125;/&#123;year&#125;/&#123;tag&#125;"
                     class="h-8 w-full rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   <p class="mt-1 text-[10px] text-muted-foreground">

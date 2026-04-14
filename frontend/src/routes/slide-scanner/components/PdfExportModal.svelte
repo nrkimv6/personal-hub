@@ -1,12 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
-  const dispatch = createEventDispatcher<{
-    close: void;
-    submit: { filename: string };
-  }>();
-
-  export interface PdfExportItem {
+  interface PdfExportItem {
     id: number;
     file_name: string;
     captured_at?: string | null;
@@ -15,6 +8,8 @@
   export let open = false;
   export let busy = false;
   export let selectedSlides: PdfExportItem[] = [];
+  export let onclose: (() => void) | undefined = undefined;
+  export let onsubmit: ((detail: { filename: string }) => void) | undefined = undefined;
 
   let filename = '';
   let initialized = false;
@@ -38,13 +33,13 @@
 
   function closeModal() {
     if (busy) return;
-    dispatch('close');
+    onclose?.();
   }
 
   function submit() {
     const normalized = filename.trim();
     if (!normalized || busy || selectedSlides.length === 0) return;
-    dispatch('submit', { filename: normalized });
+    onsubmit?.({ filename: normalized });
   }
 
   function formatCapturedAt(value: string | null | undefined): string {

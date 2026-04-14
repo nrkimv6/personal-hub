@@ -1,7 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { Component } from 'svelte';
 	import GoogleResultsTab from './GoogleResultsTab.svelte';
-  import { fetchWithTimeout } from '$lib/api/client';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import { fetchWithTimeout } from '$lib/api/client';
+	import {
+		Search,
+		ClipboardList,
+		Star,
+		Pencil,
+		Clock,
+		BarChart3,
+		X,
+		ChevronUp,
+		ChevronDown
+	} from 'lucide-svelte';
 
 	// 최상위 탭: 검색 실행 / 검색결과 관리
 	type MainTab = 'search' | 'results';
@@ -28,7 +42,7 @@
 		last_search_id?: string;
 		last_run_at?: string;
 		last_result_count?: number;
-		search_params?: { lr?: string; cr?: string; as_sitesearch?: string; num?: number } | null;
+		search_params?: { lr?: string; cr?: string; as_sitesearch?: string; num?: number; exclude_keywords?: string[] } | null;
 		created_at: string;
 		updated_at: string;
 	}
@@ -126,8 +140,7 @@
 	let saveName = $state('');
 	let saveAsFavorite = $state(false);
 	let editingSavedSearch: SavedSearch | null = $state(null);
-
-	let activeTab: 'saved' | 'history' | 'schedule-results' = $state('saved');
+	let subTab: 'saved' | 'history' | 'schedule-results' = $state('saved');
 
 	// 스케줄 상태
 	let schedules: Schedule[] = $state([]);
@@ -193,13 +206,16 @@
 		return Object.keys(params).length > 0 ? params : undefined;
 	}
 
-	// 탭 전환 헬퍼 (URL 파라미터 영속화)
-	function setActiveTab(tab: typeof activeTab) {
-		activeTab = tab;
-		const url = new URL(window.location.href);
-		url.searchParams.set('tab', tab);
-		window.history.replaceState(null, '', url.toString());
-	}
+	// 탭 정의
+	const googleMainTabs: { id: string; label: string; icon: string | Component }[] = [
+		{ id: 'search', label: '검색 실행', icon: Search as unknown as Component },
+		{ id: 'results', label: '검색결과 관리', icon: ClipboardList as unknown as Component }
+	];
+	const googleSubTabs = [
+		{ id: 'saved', label: '저장된 검색' },
+		{ id: 'history', label: '최근 검색' },
+		{ id: 'schedule-results', label: '스케줄 결과' }
+	];
 
 	// 검색 기능 (비동기 폴링 방식)
 	async function search() {
@@ -603,55 +619,34 @@
 		dateFilter = searchHistory.date_filter || '';
 	}
 
-	// 최상위 탭 전환 (URL 파라미터 영속화)
-	function setMainTab(tab: MainTab) {
-		mainTab = tab;
-		const url = new URL(window.location.href);
-		if (tab === 'search') {
-			url.searchParams.delete('tab');
-		} else {
-			url.searchParams.set('tab', tab);
+
+	$effect(() => {
+		if (mainTab === 'search' && subTab === 'schedule-results') {
+			loadScheduleRecentResults();
 		}
-		window.history.replaceState(null, '', url.toString());
-	}
-
-	import PageHeader from '$lib/components/layout/PageHeader.svelte';
-	import TabNav from '$lib/components/layout/TabNav.svelte';
-	import { 
-		Search, 
-		ClipboardList, 
-		Star, 
-		Pencil, 
-		Clock, 
-		BarChart3, 
-		X, 
-		ChevronUp, 
-		ChevronDown 
-	} from 'lucide-svelte';
-
-	const googleMainTabs = [
-		{ id: 'search', label: '검색 실행', icon: Search },
-		{ id: 'results', label: '검색결과 관리', icon: ClipboardList }
-	];
+	});
 
 	onMount(() => {
-		// URL 파라미터에서 탭 상태 복원
 		const urlParams = new URLSearchParams(window.location.search);
 		const tabParam = urlParams.get('tab');
 		if (tabParam === 'results') {
 			mainTab = 'results';
-		} else if (tabParam === 'saved' || tabParam === 'history' || tabParam === 'schedule-results') {
-			activeTab = tabParam;
+		} else {
+			mainTab = 'search';
+			if (tabParam === 'saved' || tabParam === 'history' || tabParam === 'schedule-results') {
+				subTab = tabParam;
+			} else {
+				const urlSubTab = urlParams.get('subtab');
+				subTab =
+					urlSubTab === 'saved' || urlSubTab === 'history' || urlSubTab === 'schedule-results'
+						? urlSubTab
+						: 'saved';
+			}
 		}
 
 		loadSavedSearches();
 		loadHistory();
 		loadSchedules();
-
-		// schedule-results 탭이면 데이터 로드
-		if (activeTab === 'schedule-results') {
-			loadScheduleRecentResults();
-		}
 	});
 </script>
 
@@ -664,7 +659,7 @@
 	</style>
 </svelte:head>
 
-<div class="container mx-auto p-4 space-y-4">
+<div class="p-4 lg:p-6 space-y-4">
 	<PageHeader title="구글 검색" subtitle="Google 검색 결과를 수집하고 관리합니다" />
 
 	<TabNav tabs={googleMainTabs} bind:activeTab={mainTab} variant="primary" queryParam="tab" />
@@ -790,45 +785,12 @@
 	<div class="grid grid-cols-1 gap-6 lg:grid-cols-4">
 		<!-- 사이드바: 저장된 검색 + 히스토리 (모바일에서 먼저 표시) -->
 		<div class="order-1 max-h-72 overflow-y-auto lg:order-2 lg:max-h-none lg:overflow-y-visible">
-			<!-- 탭 헤더 -->
-			<div class="mb-4 flex border-b">
-				<button
-					onclick={() => setActiveTab('saved')}
-					class="flex-1 border-b-2 py-2 text-sm font-medium transition-colors"
-					class:border-blue-500={activeTab === 'saved'}
-					class:text-primary={activeTab === 'saved'}
-					class:border-transparent={activeTab !== 'saved'}
-					class:text-muted-foreground={activeTab !== 'saved'}
-				>
-					저장된 검색
-				</button>
-				<button
-					onclick={() => setActiveTab('history')}
-					class="flex-1 border-b-2 py-2 text-sm font-medium transition-colors"
-					class:border-blue-500={activeTab === 'history'}
-					class:text-primary={activeTab === 'history'}
-					class:border-transparent={activeTab !== 'history'}
-					class:text-muted-foreground={activeTab !== 'history'}
-				>
-					최근 검색
-				</button>
-				<button
-					onclick={() => {
-						setActiveTab('schedule-results');
-						loadScheduleRecentResults();
-					}}
-					class="flex-1 border-b-2 py-2 text-sm font-medium transition-colors"
-					class:border-blue-500={activeTab === 'schedule-results'}
-					class:text-primary={activeTab === 'schedule-results'}
-					class:border-transparent={activeTab !== 'schedule-results'}
-					class:text-muted-foreground={activeTab !== 'schedule-results'}
-				>
-					스케줄 결과
-				</button>
+			<div class="mb-4">
+				<TabNav tabs={googleSubTabs} bind:activeTab={subTab} variant="secondary" size="compact" queryParam="subtab" />
 			</div>
 
 			<!-- 저장된 검색 목록 -->
-			{#if activeTab === 'saved'}
+			{#if subTab === 'saved'}
 				<div class="rounded-lg bg-white shadow">
 					{#if savedSearches.length === 0}
 						<div class="p-4 text-sm text-muted-foreground">저장된 검색이 없습니다.</div>
@@ -930,7 +892,7 @@
 			{/if}
 
 			<!-- 검색 히스토리 -->
-			{#if activeTab === 'history'}
+			{#if subTab === 'history'}
 				<div class="rounded-lg bg-white shadow">
 					{#if history.length === 0}
 						<div class="p-4 text-sm text-muted-foreground">검색 기록이 없습니다.</div>
@@ -958,7 +920,7 @@
 			{/if}
 
 			<!-- 스케줄 결과 -->
-			{#if activeTab === 'schedule-results'}
+			{#if subTab === 'schedule-results'}
 				<div class="rounded-lg bg-white shadow">
 					{#if scheduleRecentResults.length === 0}
 						<div class="p-4 text-sm text-muted-foreground">스케줄이 없습니다.</div>

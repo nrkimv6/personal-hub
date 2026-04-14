@@ -184,7 +184,7 @@
 		try {
 			const resp = await getPosts({
 				config_id: filterConfigId ?? undefined,
-				skip: (pager.currentPage - 1) * 20,
+				skip: (pager.page - 1) * 20,
 				limit: 20,
 			});
 			posts = resp.items;
@@ -414,7 +414,7 @@
 			<div class="flex justify-center gap-2">
 				{#each Array.from({ length: pager.totalPages }, (_, i) => i + 1) as page}
 					<button onclick={() => { pager.goTo(page); loadPosts(); }}
-						class="px-3 py-1 rounded text-sm {pager.currentPage === page ? 'bg-blue-500 text-white' : 'bg-gray-100'}">
+						class="px-3 py-1 rounded text-sm {pager.page === page ? 'bg-blue-500 text-white' : 'bg-gray-100'}">
 						{page}
 					</button>
 				{/each}

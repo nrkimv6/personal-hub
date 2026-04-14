@@ -8,6 +8,14 @@
 		BizItem,
 		MonitoringEventStats
 	} from '$lib/types';
+	import {
+		getSlotBgColor,
+		getSlotTextColor,
+		getSlotBorderColor,
+		getProgress,
+		getProgressColor,
+		getDateStatusColor
+	} from '$lib/utils/slot-display';
 
 	interface Props {
 		show: boolean;
@@ -123,46 +131,6 @@
 
 	function collapseAll() {
 		expandedDates = new Set();
-	}
-
-	// 슬롯 상태에 따른 색상
-	function getSlotBgColor(slot: SlotInfo): string {
-		if (!slot.is_available) return 'bg-error-light';
-		if (slot.remaining <= 2) return 'bg-warning-light';
-		return 'bg-success-light';
-	}
-
-	function getSlotTextColor(slot: SlotInfo): string {
-		if (!slot.is_available) return 'text-error';
-		if (slot.remaining <= 2) return 'text-warning-foreground';
-		return 'text-success';
-	}
-
-	function getSlotBorderColor(slot: SlotInfo): string {
-		if (!slot.is_available) return 'border-red-200';
-		if (slot.remaining <= 2) return 'border-yellow-200';
-		return 'border-green-200';
-	}
-
-	// 진행률 계산
-	function getProgress(booked: number, capacity: number): number {
-		return capacity > 0 ? (booked / capacity) * 100 : 0;
-	}
-
-	// 진행률 바 색상
-	function getProgressColor(booked: number, capacity: number): string {
-		const ratio = capacity > 0 ? booked / capacity : 1;
-		if (ratio >= 1) return 'bg-error';
-		if (ratio >= 0.8) return 'bg-warning';
-		return 'bg-success';
-	}
-
-	// 날짜 요약 상태
-	function getDateStatusColor(dateSlots: DateSlots): string {
-		const { total_remaining, total_capacity } = dateSlots.summary;
-		if (total_remaining === 0) return 'text-error';
-		if (total_remaining / total_capacity < 0.2) return 'text-warning-foreground';
-		return 'text-success';
 	}
 
 	// URL 복사

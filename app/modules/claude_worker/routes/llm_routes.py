@@ -5,18 +5,30 @@ import json
 import logging
 from collections import deque
 from datetime import date, datetime
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional
 
 import redis.asyncio as aioredis
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_admin, UserInfo
 from app.database import get_db
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services import provider_registry
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
+from app.shared.llm_registry import (
+    NoAvailableModelError,
+    apply_decay,
+    load_quota_state,
+    load_registry,
+    pick_model,
+    report_quota,
+    save_quota_state,
+    _now_kst,
+)
 
 logger = logging.getLogger("claude_worker.api")
 
@@ -39,6 +51,14 @@ class LLMRequestCreate(BaseModel):
     queue_name: str = "utility"
     cli_options: Optional[dict] = None
     mode: str = "single"
+
+    @validator("provider")
+    def validate_provider(cls, v):
+        if v is None:
+            return v
+        if not provider_registry.is_supported(v):
+            raise ValueError(f"지원되지 않는 provider: {v}")
+        return v
 
 
 class LLMRequestResponse(BaseModel):
@@ -96,6 +116,13 @@ class LLMStatsResponse(BaseModel):
     processing: int
     completed: int
     failed: int
+
+
+class LLMBootstrapResponse(BaseModel):
+    list: LLMRequestListResponse
+    stats: LLMStatsResponse
+    queue_stats: Dict[str, Dict[str, int]]
+    worker_status: LLMWorkerStatusResponse
 
 
 class BatchRetryRequest(BaseModel):
@@ -172,6 +199,40 @@ def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
     return LLMRequestResponse(**fields)
 
 
+@router.get("/providers")
+def get_llm_providers():
+    """enabled 상태의 LLM Provider 목록 조회.
+
+    Returns:
+        [
+          {
+            "key": "claude",
+            "display_name": "Claude",
+            "default_model": "claude-opus-4-6",
+            "models": ["claude-opus-4-6", "claude-sonnet-4-6"],
+            "supports_chat": true,
+            "supports_quota_pause": true,
+            "enabled": true,
+            "executor_key": "claude"
+          },
+          ...
+        ]
+    """
+    return [
+        {
+            "key": p.key,
+            "display_name": p.display_name,
+            "default_model": p.default_model,
+            "models": p.models,
+            "supports_chat": p.supports_chat,
+            "supports_quota_pause": p.supports_quota_pause,
+            "enabled": p.enabled,
+            "executor_key": p.executor_key,
+        }
+        for p in provider_registry.list_enabled()
+    ]
+
+
 @router.get("/queue-stats")
 def get_queue_stats(db: Session = Depends(get_db)):
     """큐별 상태 통계 조회.
@@ -181,6 +242,36 @@ def get_queue_stats(db: Session = Depends(get_db)):
     """
     service = LLMService(db)
     return service.get_queue_stats()
+
+
+@router.get("/bootstrap", response_model=LLMBootstrapResponse)
+def get_llm_bootstrap(
+    status: Optional[str] = Query(None, description="상태 필터 (콤마로 구분하여 여러 상태 지정 가능, 예: completed,failed,cancelled)"),
+    caller_type: Optional[str] = Query(None, description="호출자 타입 필터"),
+    requested_by: Optional[str] = Query(None, description="요청자 필터"),
+    include_deleted: bool = Query(False, description="삭제된 요청 포함"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    page_size: int = Query(20, ge=1, le=100, description="페이지 크기"),
+    queue_name: Optional[str] = Query(None, description="큐 이름 필터 (utility / system)"),
+    db: Session = Depends(get_db),
+):
+    """LLM /llm 초기 진입용 묶음 응답."""
+    service = LLMService(db)
+    result = service.get_bootstrap_data(
+        status=status,
+        caller_type=caller_type,
+        requested_by=requested_by,
+        include_deleted=include_deleted,
+        page=page,
+        page_size=page_size,
+        queue_name=queue_name,
+    )
+    return LLMBootstrapResponse(
+        list=LLMRequestListResponse(**result["list"]),
+        stats=LLMStatsResponse(**result["stats"]),
+        queue_stats=result["queue_stats"],
+        worker_status=LLMWorkerStatusResponse(**result["worker_status"]),
+    )
 
 
 @router.get("/defaults", response_model=LLMDefaultsResponse)
@@ -531,7 +622,7 @@ def get_quota_status(db: Session = Depends(get_db)):
     """
     service = LLMService(db)
     result = {}
-    for provider in ["gemini", "claude"]:
+    for provider in provider_registry.get_quota_providers():
         paused_until = service.get_provider_quota_pause(provider)
         blocked = service.get_blocked_pending_count(provider)
         if paused_until:
@@ -658,3 +749,123 @@ def get_chat_logs(
         "lines": (req.raw_response or "").splitlines()[-lines:],
         "status": req.status,
     }
+
+
+# ========== Quota Admin API ==========
+
+class QuotaReportRequest(BaseModel):
+    provider: str
+    model: Optional[str] = None
+    weekly_used_pct: Optional[float] = None
+    delta_weekly_pct: Optional[float] = None
+    weekly_reset_at: Optional[datetime] = None
+    short_cooldown_minutes: Optional[int] = None
+
+    def validate_exclusive(self):
+        if self.weekly_used_pct is not None and self.delta_weekly_pct is not None:
+            raise ValueError("weekly_used_pct와 delta_weekly_pct는 동시에 지정할 수 없습니다.")
+
+
+class QuotaClearRequest(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+
+
+@router.get("/quota")
+async def get_quota():
+    """현재 quota 상태 + step별 picker 결과 반환."""
+    try:
+        now = _now_kst()
+        state = load_quota_state(apply_decay_in_memory=True, now=now)
+        registry = load_registry()
+
+        entries = {
+            key: {
+                "weekly_used_pct": quota.weekly_used_pct,
+                "weekly_reset_at": quota.weekly_reset_at.isoformat() if quota.weekly_reset_at else None,
+                "short_cooldown_until": quota.short_cooldown_until.isoformat() if quota.short_cooldown_until else None,
+                "updated_at": quota.updated_at.isoformat() if quota.updated_at else None,
+            }
+            for key, quota in state.items()
+        }
+
+        picker_by_step: Dict[str, Optional[dict]] = {}
+        for step in registry:
+            try:
+                p, m = pick_model(step, oneshot=False, now=now)
+                picker_by_step[step] = {"provider": p, "model": m}
+            except NoAvailableModelError:
+                picker_by_step[step] = None
+
+        return {"entries": entries, "picker_by_step": picker_by_step}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/quota/report")
+async def report_quota_endpoint(body: QuotaReportRequest):
+    """quota 상태 수동 보고/갱신."""
+    try:
+        body.validate_exclusive()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not provider_registry.is_supported(body.provider):
+        raise HTTPException(status_code=400, detail=f"지원되지 않는 provider: {body.provider}")
+
+    try:
+        report_quota(
+            provider=body.provider,
+            model=body.model,
+            weekly_used_pct=body.weekly_used_pct,
+            delta_weekly_pct=body.delta_weekly_pct,
+            weekly_reset_at=body.weekly_reset_at,
+            short_cooldown_minutes=body.short_cooldown_minutes,
+            source="manual_api",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # 갱신 후 현재 state 반환
+    state = load_quota_state(apply_decay_in_memory=True)
+    return {
+        "ok": True,
+        "entries": {
+            key: {
+                "weekly_used_pct": q.weekly_used_pct,
+                "weekly_reset_at": q.weekly_reset_at.isoformat() if q.weekly_reset_at else None,
+                "short_cooldown_until": q.short_cooldown_until.isoformat() if q.short_cooldown_until else None,
+            }
+            for key, q in state.items()
+        },
+    }
+
+
+@router.post("/quota/clear")
+async def clear_quota(body: QuotaClearRequest):
+    """quota 상태 초기화 (테스트/수동 복구용)."""
+    try:
+        state = load_quota_state(apply_decay_in_memory=False)
+
+        if body.provider is None:
+            # 전체 리셋
+            cleared_keys = list(state.keys())
+            state = {}
+        elif body.model is None:
+            # provider 하위 전체
+            cleared_keys = [k for k in state if k.startswith(f"{body.provider}/")]
+            for k in cleared_keys:
+                del state[k]
+        else:
+            key = f"{body.provider}/{body.model}"
+            cleared_keys = [key] if key in state else []
+            state.pop(key, None)
+
+        save_quota_state(state)
+        return {"ok": True, "cleared": cleared_keys}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+

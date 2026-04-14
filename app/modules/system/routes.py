@@ -1,6 +1,7 @@
 """
 System dashboard API routes
 Provides endpoints for querying and managing Windows services, startup programs, and scheduled tasks
+# dry-run: plan-isolation skill migration — 2026-04-14
 """
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
@@ -209,7 +210,7 @@ async def restart_redis():
     """Redis 컨테이너 재시작 (podman-compose 경유)
 
     Note: Session 0 (NSSM)에서 실행 시 실패할 수 있음.
-    실패 시 CLI에서 browser_workers.py redis-restart 사용.
+    실패 시 CLI에서 `scripts/services/browser_workers.py redis-restart` 사용.
     """
     result = await _redis.restart_redis()
     if not result["success"]:

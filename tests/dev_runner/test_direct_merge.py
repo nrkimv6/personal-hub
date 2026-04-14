@@ -10,7 +10,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
 
-_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 _mock_noise = types.ModuleType("listener_noise_filter")
 _mock_noise.NOISE_BLOCK_MARKERS = []
@@ -177,8 +177,9 @@ class TestInlineMergeBranchFromRedis:
             captured["branch"] = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id_}:branch")
             return {"success": True, "message": "mocked", "merge_status": "merged", "action": action_name}
 
-        with patch.object(plan_runner_mod, "_execute_merge_with_lock", side_effect=mock_execute_merge):
-            with patch.object(plan_runner_mod, "_cleanup_process_state", MagicMock()):
+        import _dr_stream_cleanup as stream_cleanup_mod
+        with patch.object(stream_cleanup_mod, "_execute_merge_with_lock", side_effect=mock_execute_merge):
+            with patch.object(stream_cleanup_mod, "_cleanup_process_state", MagicMock()):
                 cl._do_inline_merge(runner_id, redis)
 
         return captured

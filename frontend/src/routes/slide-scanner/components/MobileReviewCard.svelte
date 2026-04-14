@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
   import { slideScannerApi, type MobileReviewItem } from '$lib/api/slide-scanner';
   import { toast } from '$lib/stores/toast';
 
@@ -7,15 +6,12 @@
   export let busy = false;
   export let busyStage: string | null = null;
   export let failureMessage: string | null = null;
-
-  const dispatch = createEventDispatcher<{
-    approve: { itemId: number };
-    reject: { itemId: number; reason: string };
-    remoteDelete: { itemId: number };
-    retryRemoteDelete: { itemId: number };
-    handoff: { itemId: number };
-    moveToEditor: { itemId: number; slideId: number };
-  }>();
+  export let onapprove: ((detail: { itemId: number }) => void) | undefined = undefined;
+  export let onreject: ((detail: { itemId: number; reason: string }) => void) | undefined = undefined;
+  export let onremotedelete: ((detail: { itemId: number }) => void) | undefined = undefined;
+  export let onretryremotedelete: ((detail: { itemId: number }) => void) | undefined = undefined;
+  export let onhandoff: ((detail: { itemId: number }) => void) | undefined = undefined;
+  export let onmovetoeditor: ((detail: { itemId: number; slideId: number }) => void) | undefined = undefined;
 
   let rejectReason = '';
   let imageBroken = false;
@@ -27,7 +23,7 @@
   }
 
   function handleApprove() {
-    dispatch('approve', { itemId: item.id });
+    onapprove?.({ itemId: item.id });
   }
 
   function handleReject() {
@@ -36,20 +32,20 @@
       toast.warning('반려 사유를 입력하세요.');
       return;
     }
-    dispatch('reject', { itemId: item.id, reason });
+    onreject?.({ itemId: item.id, reason });
     rejectReason = '';
   }
 
   function handleRemoteDelete() {
-    dispatch('remoteDelete', { itemId: item.id });
+    onremotedelete?.({ itemId: item.id });
   }
 
   function handleRetryRemoteDelete() {
-    dispatch('retryRemoteDelete', { itemId: item.id });
+    onretryremotedelete?.({ itemId: item.id });
   }
 
   function handleHandoff() {
-    dispatch('handoff', { itemId: item.id });
+    onhandoff?.({ itemId: item.id });
   }
 
   function handleMoveToEditor() {
@@ -57,7 +53,7 @@
       toast.warning('slide_id가 없어 에디터를 열 수 없습니다.');
       return;
     }
-    dispatch('moveToEditor', { itemId: item.id, slideId: item.slide_id });
+    onmovetoeditor?.({ itemId: item.id, slideId: item.slide_id });
   }
 
   $: canApprove = item.can_approve;

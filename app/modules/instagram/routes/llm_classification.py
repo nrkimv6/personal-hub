@@ -252,18 +252,29 @@ async def get_llm_worker_status(
     if not worker:
         raise HTTPException(status_code=404, detail="활성 워커가 없습니다")
 
+    from app.shared.worker.health_redis import WorkerHealthRedis
+    redis_health = WorkerHealthRedis.check("claude")
+
     now = datetime.now()
+    if redis_health and redis_health.get("source") == "redis":
+        ttl = redis_health.get("ttl_remaining", 0)
+        heartbeat_age_seconds = max(0, 30 - ttl)
+        last_heartbeat = redis_health.get("updated_at") or worker.last_heartbeat
+    else:
+        heartbeat_age_seconds = 999
+        last_heartbeat = worker.last_heartbeat
+
     return LLMWorkerStatusSchema(
         worker_id=worker.worker_id,
         pid=worker.pid,
         started_at=worker.started_at,
-        last_heartbeat=worker.last_heartbeat,
+        last_heartbeat=last_heartbeat,
         current_state=worker.current_state,
         is_alive=worker.is_alive,
         processed_count=worker.processed_count,
         error_count=worker.error_count,
         uptime_seconds=int((now - worker.started_at).total_seconds()) if worker.started_at else None,
-        heartbeat_age_seconds=int((now - worker.last_heartbeat).total_seconds()) if worker.last_heartbeat else None,
+        heartbeat_age_seconds=heartbeat_age_seconds,
     )
 
 

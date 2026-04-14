@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -55,6 +58,11 @@ def plan_runner_mod():
     return _load_plan_runner_mod()
 
 
+@pytest.fixture(scope="module")
+def stream_cleanup_mod(plan_runner_mod):
+    return sys.modules["_dr_stream_cleanup"]
+
+
 @pytest.fixture
 def fake_server():
     return fakeredis.FakeServer()
@@ -92,7 +100,7 @@ def _publish_cleanup_sentinel(rid: str, redis_client):
 
 
 class TestStreamOutputFinallyIntegration:
-    def test_stream_output_finally_merge_logs_in_pubsub(self, plan_runner_mod, fr, fr_sub):
+    def test_stream_output_finally_merge_logs_in_pubsub(self, plan_runner_mod, stream_cleanup_mod, fr, fr_sub):
         """finally 블록에서 merge_requested 플래그 있을 때 merge 분기 로그가 pub/sub 구독자로 전달된다."""
         runner_id = "t3-finally-pubsub-001"
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -122,9 +130,9 @@ class TestStreamOutputFinallyIntegration:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state"):
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state"):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
         t.join(timeout=2.5)
@@ -139,7 +147,7 @@ class TestStreamOutputFinallyIntegration:
 
         pubsub.close()
 
-    def test_stream_output_finally_rate_limit_reason_keeps_non_completed(self, plan_runner_mod, fr):
+    def test_stream_output_finally_rate_limit_reason_keeps_non_completed(self, plan_runner_mod, stream_cleanup_mod, fr):
         """exit_reason=rate_limit이면 workflow completed 금지 + completed 이벤트 reason 일치."""
         runner_id = "t3-finally-rate-limit-001"
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -158,9 +166,9 @@ class TestStreamOutputFinallyIntegration:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state", side_effect=_publish_cleanup_sentinel), \
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state", side_effect=_publish_cleanup_sentinel), \
              patch.object(fr, "publish", side_effect=_capture_publish):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
@@ -177,7 +185,7 @@ class TestStreamOutputFinallyIntegration:
             for channel, msg in published
         ), f"__COMPLETED::rate_limit__ publish 누락. published={published}"
 
-    def test_stream_output_finally_missing_exit_reason_publishes_error(self, plan_runner_mod, fr):
+    def test_stream_output_finally_missing_exit_reason_publishes_error(self, plan_runner_mod, stream_cleanup_mod, fr):
         """exit_reason 누락 시 completed fallback 대신 error sentinel을 publish한다."""
         runner_id = "t3-finally-missing-001"
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -195,9 +203,9 @@ class TestStreamOutputFinallyIntegration:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state", side_effect=_publish_cleanup_sentinel), \
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state", side_effect=_publish_cleanup_sentinel), \
              patch.object(fr, "publish", side_effect=_capture_publish):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
@@ -209,7 +217,7 @@ class TestStreamOutputFinallyIntegration:
             for channel, msg in published
         ), f"__COMPLETED::error__ publish 누락. published={published}"
 
-    def test_stream_output_finally_commit_failed_preserves_scope_detail(self, plan_runner_mod, fr):
+    def test_stream_output_finally_commit_failed_preserves_scope_detail(self, plan_runner_mod, stream_cleanup_mod, fr):
         """commit_failed 종료 시 detail 라인과 summary 메시지가 둘 다 보존된다."""
         import tempfile
 
@@ -238,9 +246,9 @@ class TestStreamOutputFinallyIntegration:
         try:
             with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
                  patch.object(plan_runner_mod, "get_running_log_files", return_value={runner_id: log_path}), \
-                 patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-                 patch.object(plan_runner_mod, "_do_inline_merge"), \
-                 patch.object(plan_runner_mod, "_cleanup_process_state", return_value=None), \
+                 patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+                 patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+                 patch.object(stream_cleanup_mod, "_cleanup_process_state", return_value=None), \
                  patch.object(fr, "publish", side_effect=_capture_publish):
                 plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
@@ -265,7 +273,7 @@ class TestStreamOutputFinallyIntegration:
             except Exception:
                 pass
 
-    def test_immediate_exit_error_visibility_integration(self, plan_runner_mod, fr, fr_sub):
+    def test_immediate_exit_error_visibility_integration(self, plan_runner_mod, stream_cleanup_mod, fr, fr_sub):
         """T3: 즉시 종료(stdout 없음, exit_code=15) 시 [ERROR] 메시지가 채널에 발행되고, merge 노이즈 없음."""
         runner_id = "t3-err-vis-integ-001"
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -293,11 +301,11 @@ class TestStreamOutputFinallyIntegration:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state"), \
-             patch.object(plan_runner_mod, "_pick_error_detail_line", return_value=None), \
-             patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=[]):
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+             patch.object(stream_cleanup_mod, "_pick_error_detail_line", return_value=None), \
+             patch.object(stream_cleanup_mod, "_load_log_tail_lines", return_value=[]):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
         t.join(timeout=2.5)
@@ -313,7 +321,7 @@ class TestStreamOutputFinallyIntegration:
         assert not any("merge 분기 판정" in m for m in received), \
             f"merge 분기 판정 노이즈가 채널에 publish됨. received={received}"
 
-    def test_error_exit_with_detail_integration(self, plan_runner_mod, fr, fr_sub):
+    def test_error_exit_with_detail_integration(self, plan_runner_mod, stream_cleanup_mod, fr, fr_sub):
         """T3 회귀: _error_detail 존재 시 기존 [ERROR] {detail} 포맷 유지."""
         runner_id = "t3-err-detail-integ-001"
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -341,11 +349,11 @@ class TestStreamOutputFinallyIntegration:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge"), \
-             patch.object(plan_runner_mod, "_cleanup_process_state"), \
-             patch.object(plan_runner_mod, "_pick_error_detail_line", return_value="SomeError: integration test"), \
-             patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=["SomeError: integration test"]):
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge"), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
+             patch.object(stream_cleanup_mod, "_pick_error_detail_line", return_value="SomeError: integration test"), \
+             patch.object(stream_cleanup_mod, "_load_log_tail_lines", return_value=["SomeError: integration test"]):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
         t.join(timeout=2.5)
@@ -362,7 +370,7 @@ class TestStreamOutputFinallyIntegration:
 class TestStreamOutputE2EFlow:
     """T4: finally 블록 전체 흐름 E2E 검증"""
 
-    def test_error_exit_no_stdout_full_finally_flow(self, plan_runner_mod, fr, fr_sub):
+    def test_error_exit_no_stdout_full_finally_flow(self, plan_runner_mod, stream_cleanup_mod, fr, fr_sub):
         """T4: 에러 종료 시 finally 블록 전체 흐름 — [ERROR] publish + workflow failed + cleanup."""
         runner_id = "t4-full-flow-001"
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -392,11 +400,11 @@ class TestStreamOutputE2EFlow:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-             patch.object(plan_runner_mod, "_cleanup_process_state", side_effect=lambda rid, rc, **kw: cleanup_called.append(rid)), \
-             patch.object(plan_runner_mod, "_pick_error_detail_line", return_value=None), \
-             patch.object(plan_runner_mod, "_load_log_tail_lines", return_value=[]):
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state", side_effect=lambda rid, rc, **kw: cleanup_called.append(rid)), \
+             patch.object(stream_cleanup_mod, "_pick_error_detail_line", return_value=None), \
+             patch.object(stream_cleanup_mod, "_load_log_tail_lines", return_value=[]):
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
         t.join(timeout=2.5)
@@ -418,7 +426,7 @@ class TestStreamOutputE2EFlow:
         # (4) _do_inline_merge 미호출
         mock_merge.assert_not_called()
 
-    def test_merge_flag_with_completed_full_flow(self, plan_runner_mod, fr, fr_sub):
+    def test_merge_flag_with_completed_full_flow(self, plan_runner_mod, stream_cleanup_mod, fr, fr_sub):
         """T4 회귀: merge_requested=True + completed 시 merge 흐름 + CLEANUP 로그 발행 유지."""
         runner_id = "t4-merge-flow-001"
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -447,9 +455,9 @@ class TestStreamOutputE2EFlow:
 
         with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
              patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
-             patch.object(plan_runner_mod, "detect_merged_but_not_done", return_value=None), \
-             patch.object(plan_runner_mod, "_do_inline_merge") as mock_merge, \
-             patch.object(plan_runner_mod, "_cleanup_process_state") as mock_cleanup:
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup:
             plan_runner_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
         t.join(timeout=2.5)
@@ -464,3 +472,120 @@ class TestStreamOutputE2EFlow:
 
         # (3) _cleanup_process_state 미호출 (merge 흐름에서는 merge 내부에서 처리)
         mock_cleanup.assert_not_called()
+
+
+# ========== Phase T3: _determine_merge_requested 실 git 통합 TC ==========
+
+@pytest.fixture
+def real_git_repo_with_commits():
+    """main + feature 브랜치(커밋 1개 앞)를 가진 임시 git 저장소 반환"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "test",
+            "GIT_AUTHOR_EMAIL": "t@t.com",
+            "GIT_COMMITTER_NAME": "test",
+            "GIT_COMMITTER_EMAIL": "t@t.com",
+        }
+        # git init (main)
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmpdir, capture_output=True, env=env, check=False)
+        readme = os.path.join(tmpdir, "README.md")
+        with open(readme, "w") as f:
+            f.write("init")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True, env=env)
+        # feature 브랜치 + 추가 커밋
+        subprocess.run(["git", "checkout", "-b", "plan/test-feature"], cwd=tmpdir, capture_output=True, env=env)
+        with open(readme, "a") as f:
+            f.write("\nfeature")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "feat: add feature"], cwd=tmpdir, capture_output=True, env=env)
+        yield tmpdir
+
+
+@pytest.fixture
+def real_git_repo_no_extra_commit():
+    """main + feature 브랜치(main과 동일 커밋)를 가진 임시 git 저장소 반환"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "test",
+            "GIT_AUTHOR_EMAIL": "t@t.com",
+            "GIT_COMMITTER_NAME": "test",
+            "GIT_COMMITTER_EMAIL": "t@t.com",
+        }
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmpdir, capture_output=True, env=env, check=False)
+        readme = os.path.join(tmpdir, "README.md")
+        with open(readme, "w") as f:
+            f.write("init")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True, env=env)
+        # feature 브랜치 생성만 (추가 커밋 없음 — main과 동일)
+        subprocess.run(["git", "checkout", "-b", "plan/test-feature"], cwd=tmpdir, capture_output=True, env=env)
+        yield tmpdir
+
+
+def _get_stream_cleanup_mod():
+    """_dr_stream_cleanup 모듈을 반환한다 (이미 로드된 경우 재사용)"""
+    if "_dr_stream_cleanup" in sys.modules:
+        return sys.modules["_dr_stream_cleanup"]
+    scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import _dr_stream_cleanup
+    return _dr_stream_cleanup
+
+
+def test_determine_merge_requested_real_git_worktree_commit_T3(real_git_repo_with_commits):
+    """T3: 실 git repo — feature 브랜치에 커밋 있음 + flag=None + exit_code=0 + completed → True"""
+    stream_cleanup = _get_stream_cleanup_mod()
+    server = fakeredis.FakeServer()
+    fr = fakeredis.FakeRedis(server=server, decode_responses=True)
+
+    runner_id = "t3-dmr-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/test-feature")
+    # merge_requested 키 미설정 (flag=None)
+
+    ctx = stream_cleanup._StreamCleanupCtx(
+        runner_id=runner_id,
+        redis_client=fr,
+        log_channel="plan-runner:log",
+        exit_code=0,
+        exit_reason="completed",
+        completed_for_flow=True,
+    )
+
+    with patch("_dr_stream_cleanup._pub_and_log"), \
+         patch("_dr_constants.PROJECT_ROOT", Path(real_git_repo_with_commits)):
+        result = stream_cleanup._determine_merge_requested(ctx)
+
+    assert result is True, (
+        f"실 git repo에 커밋 있음 + flag=None + exit_code=0 + completed → True여야 함, 실제: {result}"
+    )
+
+
+def test_determine_merge_requested_real_git_no_extra_commit_T3(real_git_repo_no_extra_commit):
+    """T3: 실 git repo — feature 브랜치가 main과 동일 (추가 커밋 없음) + flag=None → False"""
+    stream_cleanup = _get_stream_cleanup_mod()
+    server = fakeredis.FakeServer()
+    fr = fakeredis.FakeRedis(server=server, decode_responses=True)
+
+    runner_id = "t3-dmr-002"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/test-feature")
+
+    ctx = stream_cleanup._StreamCleanupCtx(
+        runner_id=runner_id,
+        redis_client=fr,
+        log_channel="plan-runner:log",
+        exit_code=0,
+        exit_reason="completed",
+        completed_for_flow=True,
+    )
+
+    with patch("_dr_stream_cleanup._pub_and_log"), \
+         patch("_dr_constants.PROJECT_ROOT", Path(real_git_repo_no_extra_commit)):
+        result = stream_cleanup._determine_merge_requested(ctx)
+
+    assert result is False, (
+        f"main과 동일한 커밋 상태 → False여야 함, 실제: {result}"
+    )

@@ -11,6 +11,9 @@ import fakeredis
 from app.modules.dev_runner.services.event_service import (
     EventService, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, PLAN_FILE_ALL,
 )
+from app.modules.dev_runner.services.event_payload import (
+    build_status_payload, build_all_runners_status,
+)
 
 
 @pytest.fixture
@@ -46,7 +49,7 @@ class TestPhantomAllPlansRegression:
         # plan_file 없음 → 이전에는 PLAN_FILE_ALL sentinel → 프론트에서 "전체 실행" 탭 생성
         sync_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
 
         assert runner_id not in ids, (
@@ -63,7 +66,7 @@ class TestPhantomAllPlansRegression:
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         # plan_file 키 의도적으로 미설정
 
-        payload = event_service._build_status_payload(runner_id)
+        payload = build_status_payload(event_service._sync, runner_id)
 
         assert payload is not None
         assert payload["plan_file"] is None, (
@@ -79,7 +82,7 @@ class TestPhantomAllPlansRegression:
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", PLAN_FILE_ALL)
         sync_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
-        result = event_service._build_all_runners_status()
+        result = build_all_runners_status(event_service._sync)
         matching = [r for r in result if r["runner_id"] == runner_id]
 
         assert len(matching) == 1, "명시적 sentinel runner가 결과에 미포함"

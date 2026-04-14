@@ -225,7 +225,7 @@
 					{/if}
 				</div>
 				<div class="mt-3 flex gap-2">
-					<Button variant="secondary" size="sm" on:click={() => openRunsModal(schedule)}
+					<Button variant="secondary" size="sm" onclick={() => openRunsModal(schedule)}
 					>
 						실행 이력
 					</Button>
@@ -233,7 +233,7 @@
 						<Button
 							variant={schedule.enabled ? 'destructive' : 'primary'}
 							size="sm"
-							on:click={() => handleToggle(schedule.id, !schedule.enabled)}
+							onclick={() => handleToggle(schedule.id, !schedule.enabled)}
 						>
 							{schedule.enabled ? '비활성화' : '활성화'}
 						</Button>
@@ -370,7 +370,7 @@
 			{/if}
 
 			<div class="mt-6 flex justify-end">
-				<Button variant="secondary" size="sm" on:click={() => (showRunsModal = false)}>닫기</Button>
+				<Button variant="secondary" size="sm" onclick={() => (showRunsModal = false)}>닫기</Button>
 			</div>
 		</div>
 	</div>

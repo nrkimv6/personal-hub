@@ -248,154 +248,53 @@ class TestProcessPlanArchiveSchedule:
 
 
 # ============================================================
-# Phase T1: _maybe_queue_requirements_sync() TC
-# (plan_analyze_handler._maybe_queue_requirements_sync)
+# Phase T1: devguide_staleness 스케줄 TC
 # ============================================================
 
-class TestMaybeQueueRequirementsSync:
-    """_maybe_queue_requirements_sync() 동작 검증 (in-memory SQLite)."""
+class TestDevguideStalenessSchedule:
+    """devguide_staleness 스케줄 워커 동작 검증."""
 
-    def _setup_sqlalchemy_db(self):
-        """SQLAlchemy in-memory DB + 필요 테이블 생성."""
-        from sqlalchemy import create_engine, text
-        from sqlalchemy.orm import sessionmaker
+    def test_dispatch_includes_devguide_staleness_type(self):
+        """R: _dispatch_scheduled_runs()에 TARGET_TYPE_DEVGUIDE_STALENESS 참조 존재."""
+        source = SCHEDULED_WORKER_PATH.read_text(encoding="utf-8")
+        assert "TARGET_TYPE_DEVGUIDE_STALENESS" in source, (
+            "_dispatch_scheduled_runs에 TARGET_TYPE_DEVGUIDE_STALENESS 참조 필요"
+        )
 
-        engine = create_engine("sqlite:///:memory:", echo=False)
-        # 테이블 생성 (SQLAlchemy model 없이 raw SQL)
-        with engine.connect() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS plan_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    filename_hash TEXT,
-                    filename TEXT,
-                    file_path TEXT,
-                    archived_at DATETIME,
-                    llm_processed_at DATETIME,
-                    category TEXT,
-                    summary TEXT,
-                    tags TEXT,
-                    superseded_by TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS llm_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    caller_type TEXT,
-                    caller_id TEXT,
-                    prompt TEXT,
-                    queue_name TEXT,
-                    requested_by TEXT,
-                    status TEXT DEFAULT 'pending',
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            conn.commit()
+    def test_no_requirements_sync_in_dispatch(self):
+        """R: _dispatch_scheduled_runs()에 _process_plan_requirements_sync_schedule 없음."""
+        source = SCHEDULED_WORKER_PATH.read_text(encoding="utf-8")
+        assert "_process_plan_requirements_sync_schedule" not in source, (
+            "구 requirements_sync 메서드가 dispatch에서 제거되어야 함"
+        )
 
-        Session = sessionmaker(bind=engine)
-        return Session()
+    def test_devguide_staleness_method_exists(self):
+        """R: _process_devguide_staleness_schedule 메서드 존재."""
+        source = SCHEDULED_WORKER_PATH.read_text(encoding="utf-8")
+        assert "_process_devguide_staleness_schedule" in source, (
+            "_process_devguide_staleness_schedule 메서드 필요"
+        )
 
-    def _insert_plan_records(self, db, category: str, count: int, with_summary: bool = True):
-        """plan_records 테스트 데이터 삽입."""
-        from sqlalchemy import text
-        now = datetime.now()
-        for i in range(count):
-            db.execute(text("""
-                INSERT INTO plan_records (filename_hash, filename, file_path, archived_at, llm_processed_at, category, summary)
-                VALUES (:hash, :filename, :filepath, :archived, :processed, :category, :summary)
-            """), {
-                "hash": f"hash_{category}_{i}",
-                "filename": f"{category}_plan_{i}.md",
-                "filepath": f"docs/archive/{category}_plan_{i}.md",
-                "archived": now.isoformat(),
-                "processed": now.isoformat(),
-                "category": category,
-                "summary": f"Summary {i}" if with_summary else None,
-            })
-        db.commit()
+    def test_execute_devguide_staleness_run_method_exists(self):
+        """R: _execute_devguide_staleness_run 메서드 존재."""
+        source = SCHEDULED_WORKER_PATH.read_text(encoding="utf-8")
+        assert "_execute_devguide_staleness_run" in source, (
+            "_execute_devguide_staleness_run 메서드 필요"
+        )
 
-    def test_maybe_queue_right_queues_when_enough(self):
-        """R: category='instagram', processed 5개 → LLMRequest 1개 생성."""
-        db = self._setup_sqlalchemy_db()
-        self._insert_plan_records(db, "instagram", 5)
+    def test_no_check_requirements_sync_schedule(self):
+        """R: _check_requirements_sync_schedule 안전망 메서드 제거됨."""
+        source = SCHEDULED_WORKER_PATH.read_text(encoding="utf-8")
+        assert "_check_requirements_sync_schedule" not in source, (
+            "구 _check_requirements_sync_schedule이 제거되어야 함"
+        )
 
-        from app.modules.claude_worker.services.plan_analyze_handler import _maybe_queue_requirements_sync
-        result = _maybe_queue_requirements_sync(db, "instagram")
-
-        assert result is True
-        from sqlalchemy import text
-        rows = db.execute(text("SELECT * FROM llm_requests WHERE caller_type='plan_requirements_sync' AND caller_id='instagram'")).fetchall()
-        assert len(rows) == 1
-
-    def test_maybe_queue_boundary_4_records_skipped(self):
-        """B: processed 4개 → LLMRequest 미생성."""
-        db = self._setup_sqlalchemy_db()
-        self._insert_plan_records(db, "naver-booking", 4)
-
-        from app.modules.claude_worker.services.plan_analyze_handler import _maybe_queue_requirements_sync
-        result = _maybe_queue_requirements_sync(db, "naver-booking")
-
-        assert result is False
-        from sqlalchemy import text
-        rows = db.execute(text("SELECT * FROM llm_requests WHERE caller_type='plan_requirements_sync'")).fetchall()
-        assert len(rows) == 0
-
-    def test_maybe_queue_boundary_exactly_5_queued(self):
-        """B: processed 정확히 5개 → LLMRequest 1개 생성 (경계값)."""
-        db = self._setup_sqlalchemy_db()
-        self._insert_plan_records(db, "infra", 5)
-
-        from app.modules.claude_worker.services.plan_analyze_handler import _maybe_queue_requirements_sync
-        result = _maybe_queue_requirements_sync(db, "infra")
-
-        assert result is True
-
-    def test_maybe_queue_boundary_24h_duplicate_skipped(self):
-        """B: 24시간 내 동일 category LLMRequest 존재 → 중복 미생성."""
-        db = self._setup_sqlalchemy_db()
-        self._insert_plan_records(db, "writing", 6)
-
-        # 1시간 전 LLMRequest 삽입
-        from sqlalchemy import text
-        recent = (datetime.now() - timedelta(hours=1)).isoformat()
-        db.execute(text("""
-            INSERT INTO llm_requests (caller_type, caller_id, prompt, queue_name, requested_by, created_at)
-            VALUES ('plan_requirements_sync', 'writing', 'test', 'utility', 'scheduler', :created_at)
-        """), {"created_at": recent})
-        db.commit()
-
-        from app.modules.claude_worker.services.plan_analyze_handler import _maybe_queue_requirements_sync
-        result = _maybe_queue_requirements_sync(db, "writing")
-
-        assert result is False
-        from sqlalchemy import text as t
-        rows = db.execute(t("SELECT * FROM llm_requests WHERE caller_type='plan_requirements_sync' AND caller_id='writing'")).fetchall()
-        assert len(rows) == 1  # 기존 1개만, 새 것 없음
-
-    def test_maybe_queue_right_limits_50_summaries(self):
-        """R: processed 80개 → build_requirements_sync_prompt에 ≤50개 summary 전달."""
-        db = self._setup_sqlalchemy_db()
-        self._insert_plan_records(db, "common", 80)
-
-        captured_summaries = []
-        original = None
-
-        import app.modules.claude_worker.services.plan_analyze_handler as handler_mod
-        original_build = handler_mod.build_requirements_sync_prompt
-
-        def mock_build(category, plan_summaries):
-            captured_summaries.extend(plan_summaries)
-            return original_build(category, plan_summaries)
-
-        handler_mod.build_requirements_sync_prompt = mock_build
-        try:
-            from app.modules.claude_worker.services.plan_analyze_handler import _maybe_queue_requirements_sync
-            _maybe_queue_requirements_sync(db, "common")
-        finally:
-            handler_mod.build_requirements_sync_prompt = original_build
-
-        assert len(captured_summaries) <= 50
+    def test_no_process_unqueued_requirements_sync(self):
+        """R: _process_unqueued_requirements_sync 메서드 제거됨."""
+        source = SCHEDULED_WORKER_PATH.read_text(encoding="utf-8")
+        assert "_process_unqueued_requirements_sync" not in source, (
+            "구 _process_unqueued_requirements_sync이 제거되어야 함"
+        )
 
 
 # ============================================================
@@ -428,8 +327,8 @@ class TestDispatchAndHardcodingRemoval:
         assert "TARGET_TYPE_PLAN_ARCHIVE_ANALYZE" in (func_source or ""), \
             "_dispatch_scheduled_runs에 TARGET_TYPE_PLAN_ARCHIVE_ANALYZE 참조 없음"
 
-    def test_dispatch_includes_plan_requirements_sync_type(self):
-        """R: _dispatch_scheduled_runs()에 TARGET_TYPE_PLAN_REQUIREMENTS_SYNC 참조 존재."""
+    def test_dispatch_includes_devguide_staleness_type(self):
+        """R: _dispatch_scheduled_runs()에 TARGET_TYPE_DEVGUIDE_STALENESS 참조 존재."""
         source = self._get_source()
         tree = self._get_tree()
 
@@ -441,8 +340,8 @@ class TestDispatchAndHardcodingRemoval:
 
         assert dispatch_func is not None
         func_source = ast.get_source_segment(source, dispatch_func)
-        assert "TARGET_TYPE_PLAN_REQUIREMENTS_SYNC" in (func_source or ""), \
-            "_dispatch_scheduled_runs에 TARGET_TYPE_PLAN_REQUIREMENTS_SYNC 참조 없음"
+        assert "TARGET_TYPE_DEVGUIDE_STALENESS" in (func_source or ""), \
+            "_dispatch_scheduled_runs에 TARGET_TYPE_DEVGUIDE_STALENESS 참조 없음"
 
     def test_hardcoded_schedule_method_removed(self):
         """R: _check_plan_archive_schedule 메서드 정의 없음."""

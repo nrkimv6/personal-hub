@@ -19,7 +19,7 @@ sys.modules.setdefault("plan_runner.core.stages", _mock_stages_mod)
 sys.modules.setdefault("plan_runner", types.ModuleType("plan_runner"))
 sys.modules.setdefault("plan_runner.core", types.ModuleType("plan_runner.core"))
 
-_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 _mock_noise = types.ModuleType("listener_noise_filter")
 _mock_noise.NOISE_BLOCK_MARKERS = []
@@ -137,6 +137,7 @@ class TestRetryMergeFullFlow:
         redis = make_redis_mock(worktree_path=str(worktree))
 
         merge_status_sequence = []
+        publish_calls = []
 
         def track_set(key, value, *args, **kwargs):
             if "merge_status" in key:
@@ -144,6 +145,7 @@ class TestRetryMergeFullFlow:
             return True
 
         redis.set.side_effect = track_set
+        redis.publish.side_effect = lambda channel, payload: publish_calls.append((channel, payload))
 
         import merge_queue as mq
 
@@ -161,6 +163,13 @@ class TestRetryMergeFullFlow:
         assert "merging" in merge_status_sequence
         assert "merged" in merge_status_sequence
         mock_cleanup.assert_called_once()
+        merge_publish_calls = [
+            c for c in publish_calls
+            if c[0] == f"plan-runner:merge-log:{runner_id}"
+        ]
+        assert merge_publish_calls == [
+            (f"plan-runner:merge-log:{runner_id}", "__MERGE_COMPLETED__")
+        ]
 
 
 class TestDirectMergeFullFlow:

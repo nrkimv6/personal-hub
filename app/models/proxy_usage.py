@@ -48,6 +48,7 @@ class ProxyUsageLog(Base):
     # 컨텍스트
     target_url = Column(Text)
     fetch_method = Column(Text)  # graphql_api, anonymous_api, html_scrape
+    http_method = Column(Text)  # get, post
 
     # 타임스탬프
     timestamp = Column(DateTime, default=datetime.now)

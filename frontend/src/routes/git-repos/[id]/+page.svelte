@@ -3,15 +3,16 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { gitReposApi } from '$lib/api/gitRepos';
+  import { llmApi, type ProviderInfo } from '$lib/api';
   import type { GitRepo, GitStatus, GitLogEntry, OperationLog, AutoCleanupResult } from '$lib/types/gitRepos';
-  import { 
-    ArrowLeft, 
-    GitBranch, 
-    Eraser, 
-    CheckCircle, 
-    Loader2, 
-    Package, 
-    GitCommit, 
+  import {
+    ArrowLeft,
+    GitBranch,
+    Eraser,
+    CheckCircle,
+    Loader2,
+    Package,
+    GitCommit,
     Sparkles,
     RefreshCw,
     Download,
@@ -21,6 +22,7 @@
     Search,
     FileEdit
   } from 'lucide-svelte';
+  import TabNav from '$lib/components/layout/TabNav.svelte';
 
   // URL params
   const repoId = $derived(Number($page.params.id));
@@ -34,6 +36,12 @@
   let stagedDiff = $state('');
 
   let activeTab: 'changes' | 'log' | 'history' = $state('changes');
+
+  const repoTabs = [
+    { id: 'changes', label: '변경사항' },
+    { id: 'log', label: '커밋 로그' },
+    { id: 'history', label: '작업 이력' },
+  ];
   let loading = $state(true);
   let working = $state(false);
   let error = $state('');
@@ -42,7 +50,8 @@
   // 커밋
   let commitMsg = $state('');
   let generatingMsg = $state(false);
-  let llmProvider = $state<'claude' | 'gemini'>('claude');
+  let llmProvider = $state('claude');
+  let providers = $state<ProviderInfo[]>([]);
 
   // 자동 정리
   let cleanupRequestId = $state<number | null>(null);
@@ -60,7 +69,12 @@
 
   onMount(async () => {
     await loadAll();
+    llmApi.getProviders().then(data => { providers = data; }).catch(() => {});
   });
+
+  async function loadRepo() {
+    repo = await gitReposApi.getRepo(repoId);
+  }
 
   async function loadAll() {
     loading = true;
@@ -72,8 +86,10 @@
         { interval: 500, maxRetries: 30 }
       );
 
+      await loadRepo();
       await Promise.all([loadStatus(), loadLog(), loadOperations()]);
     } catch (e) {
+      repo = null;
       error = e instanceof Error ? e.message : '로드 실패';
     } finally {
       loading = false;
@@ -320,7 +336,7 @@
       <ArrowLeft size={16} /> 목록
     </button>
     {#if repo}
-      {@const r = repo as GitRepo}
+      {@const r = repo}
       <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100">
         {r.alias || r.path.split(/[/\\]/).pop()}
       </h1>
@@ -340,8 +356,9 @@
     </div>
   {:else if error}
     <div class="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400">{error}</div>
-  {:else}
-    <!-- 상단 액션 버튼 -->
+    {:else if repo}
+      {@const r = repo}
+      <!-- 상단 액션 버튼 -->
     <div class="flex gap-2 mb-5">
       <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1" onclick={handleFetch} disabled={working}>
         <RefreshCw size={14} /> 페치
@@ -355,11 +372,11 @@
       <button class="px-3 py-1.5 text-sm rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1" onclick={handleAutoCleanup} disabled={working}>
         <Eraser size={14} /> 자동 정리
       </button>
-      {#if repo?.last_ahead != null && repo.last_ahead > 0}
-        <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{repo.last_ahead} ahead</span>
+      {#if r.last_ahead != null && r.last_ahead > 0}
+        <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{r.last_ahead} ahead</span>
       {/if}
-      {#if repo?.last_behind != null && repo.last_behind > 0}
-        <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{repo.last_behind} behind</span>
+      {#if r.last_behind != null && r.last_behind > 0}
+        <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{r.last_behind} behind</span>
       {/if}
     </div>
 
@@ -410,14 +427,7 @@
     {/if}
 
     <!-- 탭 -->
-    <div class="flex gap-1 mb-5 border-b border-gray-200 dark:border-gray-700">
-      {#each [['changes', '변경사항'], ['log', '커밋 로그'], ['history', '작업 이력']] as [tab, label]}
-        <button
-          class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {activeTab === tab ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}"
-          onclick={() => (activeTab = tab as typeof activeTab)}
-        >{label}</button>
-      {/each}
-    </div>
+    <TabNav tabs={repoTabs} bind:activeTab variant="primary" />
 
     <!-- 탭 내용 -->
     {#if activeTab === 'changes'}
@@ -485,8 +495,14 @@
                 bind:value={llmProvider}
                 title="LLM 엔진 선택"
               >
-                <option value="claude">Claude Haiku</option>
-                <option value="gemini">Gemini Flash</option>
+                {#if providers.length > 0}
+                  {#each providers as p}
+                    <option value={p.key}>{p.display_name}</option>
+                  {/each}
+                {:else}
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                {/if}
               </select>
               <button
                 class="px-3 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50 flex items-center justify-center"

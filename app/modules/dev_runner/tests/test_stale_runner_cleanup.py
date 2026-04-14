@@ -19,6 +19,7 @@ import pytest
 # its heavy optional dependencies (worktree_manager, merge_workflow, etc.)
 # ---------------------------------------------------------------------------
 _SCRIPTS_DIR = Path(__file__).parents[4] / "scripts"
+_PLAN_RUNNER_DIR = _SCRIPTS_DIR / "plan_runner"
 
 
 def _make_fake_module(name: str) -> types.ModuleType:
@@ -46,16 +47,16 @@ def _prepare_listener_imports():
                 mod.WorktreeManager = _WM
                 mod.WorktreeError = Exception
                 mod.ensure_main_branch = lambda *a, **kw: None
-    # Ensure scripts dir is on path
-    if str(_SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(_SCRIPTS_DIR))
+    # Ensure plan_runner dir is on path
+    if str(_PLAN_RUNNER_DIR) not in sys.path:
+        sys.path.insert(0, str(_PLAN_RUNNER_DIR))
 
 
 _prepare_listener_imports()
 
 # Import the listener module by file path (module name has dashes)
 import importlib.util
-_LISTENER_PATH = _SCRIPTS_DIR / "dev-runner-command-listener.py"
+_LISTENER_PATH = _PLAN_RUNNER_DIR / "dev-runner-command-listener.py"
 _spec = importlib.util.spec_from_file_location("dev_runner_listener", str(_LISTENER_PATH))
 _listener = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_listener)
@@ -345,7 +346,7 @@ class TestPrepareListenerImports:
         import types
 
         _SCRIPTS_DIR = Path(__file__).parents[4] / "scripts"
-        _LISTENER_FILE = _SCRIPTS_DIR / "dev-runner-command-listener.py"
+        _LISTENER_FILE = _SCRIPTS_DIR / "plan_runner" / "dev-runner-command-listener.py"
 
         def _inject_incomplete_stub():
             """ensure_main_branch 없는 minimal fake worktree_manager 주입"""

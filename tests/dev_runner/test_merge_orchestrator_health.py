@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 # 하이픈 파일명이라 importlib 사용
 _spec = importlib.util.spec_from_file_location(
     "dev_runner_command_listener",
-    Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py",
+    Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py",
 )
 mod = importlib.util.module_from_spec(_spec)
 sys.modules["dev_runner_command_listener"] = mod

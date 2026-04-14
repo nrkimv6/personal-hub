@@ -30,7 +30,7 @@ from app.modules.dev_runner.services.executor_service import RUNNER_KEY_SUFFIXES
 from tests.dev_runner.conftest_e2e import (
     e2e_redis_cleanup,
     listener_process,
-    isolated_redis,
+    isolated_redis_db15,
     RUNNER_KEY_PREFIX,
     _cleanup_test_worktrees,
 )
@@ -130,7 +130,7 @@ def require_full_env():
         r.ping()
         r.close()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
 
     if not _config.PLAN_RUNNER_PYTHON.exists():
         pytest.skip(f"plan-runner venv not found: {_config.PLAN_RUNNER_PYTHON}")
@@ -143,7 +143,7 @@ def real_redis_db0():
         r = redis_lib.Redis(host="localhost", port=6379, db=0, decode_responses=True)
         r.ping()
     except Exception:
-        pytest.skip("Redis not available")
+        pytest.fail("Redis not available")
     yield r
     r.close()
 
@@ -175,11 +175,11 @@ def _post_run(http_client, plan_file: str, max_cycles: int = 1, tracker=None) ->
     return runner_id
 
 
-def _wait_until_not_running(isolated_redis, runner_id: str, timeout: int = 600) -> bool:
+def _wait_until_not_running(isolated_redis_db15, runner_id: str, timeout: int = 600) -> bool:
     """status != 'running' 될 때까지 최대 timeout초 대기. 성공 여부 반환."""
     key = f"{RUNNER_KEY_PREFIX}:{runner_id}:status"
     for _ in range(timeout * 2):
-        status = isolated_redis.get(key)
+        status = isolated_redis_db15.get(key)
         if status != "running":
             return True
         time.sleep(0.5)
@@ -192,7 +192,7 @@ class TestFullE2E:
     """Level 3: 실제 LLM 1 cycle 실행 → merge까지 전체 파이프라인"""
 
     @pytest.fixture(autouse=True)
-    def force_kill_runners(self, isolated_redis, real_redis_db0):
+    def force_kill_runners(self, isolated_redis_db15, real_redis_db0):
         """테스트 후 시작된 모든 runner 프로세스를 강제 정리하는 안전망 fixture.
 
         self-termination에 의존하지 않고, teardown에서 명시적으로 PID kill을 수행한다.
@@ -211,7 +211,7 @@ class TestFullE2E:
             real_redis_db0.zrem("plan-runner:recent_runners", rid)
         _cleanup_test_worktrees()  # ← 추가: worktree/branch 잔류 보장 제거
 
-    def test_single_plan_1cycle(self, http_client, listener_process, isolated_redis, e2e_redis_cleanup):
+    def test_single_plan_1cycle(self, http_client, listener_process, isolated_redis_db15, e2e_redis_cleanup):
         """단일 plan 파일로 1 cycle 실행 → 완료까지 대기
 
         검증:
@@ -221,15 +221,15 @@ class TestFullE2E:
         plan_file = str(FIXTURES_DIR / "test_minimal_plan.md")
         runner_id = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
 
-        assert _wait_until_not_running(isolated_redis, runner_id, timeout=600), (
+        assert _wait_until_not_running(isolated_redis_db15, runner_id, timeout=600), (
             f"runner {runner_id}가 10분 내 완료되지 않음"
         )
 
-        log_path = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+        log_path = isolated_redis_db15.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
         if log_path and Path(log_path).exists():
             assert Path(log_path).stat().st_size > 0, "로그 파일이 비어 있음"
 
-    def test_single_plan_with_merge(self, http_client, listener_process, isolated_redis, e2e_redis_cleanup):
+    def test_single_plan_with_merge(self, http_client, listener_process, isolated_redis_db15, e2e_redis_cleanup):
         """1 cycle 실행 후 merge queue 진입 → 상태 확인
 
         검증:
@@ -239,21 +239,21 @@ class TestFullE2E:
         plan_file = str(FIXTURES_DIR / "test_minimal_plan.md")
         runner_id = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
 
-        assert _wait_until_not_running(isolated_redis, runner_id, timeout=600), (
+        assert _wait_until_not_running(isolated_redis_db15, runner_id, timeout=600), (
             f"runner {runner_id}가 10분 내 완료되지 않음"
         )
 
         # worktree 생성 여부 확인 (생성된 경우)
-        worktree_path = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+        worktree_path = isolated_redis_db15.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         if worktree_path:
             # worktree가 생성됐다면 merge 처리 후 정리됐거나 merge 중
-            merge_status = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            merge_status = isolated_redis_db15.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
             # merge_status는 pending_merge, conflict, merged, 또는 None
             assert merge_status in (None, "pending_merge", "conflict", "merged"), (
                 f"예상치 못한 merge_status: {merge_status}"
             )
 
-    def test_batch_run_2plans(self, http_client, listener_process, isolated_redis, e2e_redis_cleanup, tmp_path):
+    def test_batch_run_2plans(self, http_client, listener_process, isolated_redis_db15, e2e_redis_cleanup, tmp_path):
         """2개 plan 순차 실행 → 각각 독립 runner_id 반환
 
         검증:
@@ -261,7 +261,7 @@ class TestFullE2E:
         - 각 runner_id 독립 로그 파일 생성 (동일 파일 공유 금지)
 
         NOTE: 테스트 리스너는 db=15, API는 db=0 사용 → 양측이 연결되지 않으므로
-        isolated_redis(db=15)에서 조회한 log_paths는 None이 될 수 있음.
+        isolated_redis_db15(db=15)에서 조회한 log_paths는 None이 될 수 있음.
         log_paths_set이 비어있으면 "공유 없음"으로 간주하여 통과.
         (핵심 검증: runner_id 차별성. 로그 파일 고유성은 실서버 E2E에서 확인)
         """
@@ -279,10 +279,10 @@ class TestFullE2E:
 
         assert runner_id_1 != runner_id_2, "2개 실행 시 runner_id가 동일하면 안 됨"
 
-        # 각각 독립 로그 파일 확인 (isolated_redis=db=15에서 조회, 테스트 리스너와 동일 DB)
+        # 각각 독립 로그 파일 확인 (isolated_redis_db15=db=15에서 조회, 테스트 리스너와 동일 DB)
         # 빠르게 종료되는 plan은 log file을 생성하지 않을 수 있으므로, 생성된 경우에만 검증
         log_paths = [
-            isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:stream_log_path")
+            isolated_redis_db15.get(f"{RUNNER_KEY_PREFIX}:{rid}:stream_log_path")
             for rid in (runner_id_1, runner_id_2)
         ]
         log_paths_set = set(p for p in log_paths if p)

@@ -241,7 +241,7 @@
 							<Button
 								variant="secondary"
 								size="sm"
-								on:click={openLoginBrowser}
+								onclick={openLoginBrowser}
 								disabled={!editAccountId || openingBrowser}
 								class="whitespace-nowrap"
 							>
@@ -250,7 +250,7 @@
 							<Button
 								variant="outline"
 								size="sm"
-								on:click={checkLoginStatus}
+								onclick={checkLoginStatus}
 								disabled={!editAccountId || checkingLogin}
 								class="whitespace-nowrap"
 								title="로그인 후 이 버튼을 눌러 상태를 확인하세요"
@@ -436,7 +436,7 @@
 					</div>
 
 					<!-- 저장 버튼 -->
-					<Button variant="primary" on:click={saveConfig} disabled={saving} class="w-full">
+					<Button variant="primary" onclick={saveConfig} disabled={saving} class="w-full">
 						{saving ? '저장 중...' : '설정 저장'}
 					</Button>
 				</div>
@@ -449,7 +449,7 @@
 					<Button
 						variant="primary"
 						size="sm"
-						on:click={requestManualCrawl}
+						onclick={requestManualCrawl}
 						disabled={!editAccountId || requesting || pendingRequests.length > 0}
 						title={!editAccountId ? '계정을 먼저 선택하세요' : ''}
 					>

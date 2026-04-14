@@ -72,7 +72,7 @@ def _create_merge_commit(repo: Path, branch: str) -> str:
 def redis_client():
     r = _get_redis()
     if r is None:
-        pytest.skip("Redis 연결 불가 (localhost:6379 db=15)")
+        pytest.fail("Redis 연결 불가 (localhost:6379 db=15)")
     yield r
     # 사용한 키 정리
     for key in r.scan_iter("plan-runner:runners:integration-*:*"):

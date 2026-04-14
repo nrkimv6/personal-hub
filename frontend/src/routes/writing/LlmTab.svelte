@@ -2,11 +2,12 @@
 	import { Button } from '$lib/components/ui';
 
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse } from '$lib/api';
+	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse, type ProviderInfo } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
 	import { createSelection } from '$lib/utils/selection.svelte';
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	// 상태
 	let requests: LLMRequest[] = [];
@@ -50,12 +51,19 @@
 	type Tab = 'queue' | 'history' | 'create' | 'performance';
 	let activeTab: Tab = 'queue';
 
+	const llmSubTabs = [
+		{ id: 'queue', label: '대기열 (pending/processing)' },
+		{ id: 'history', label: '이력 (completed/failed)' },
+		{ id: 'create', label: '수동 요청 생성' },
+		{ id: 'performance', label: '성능 분석' },
+	];
+
 	// 모달
 	let selectedRequest: LLMRequest | null = null;
 	let showModal = false;
 
 	// 수동 요청 생성 폼
-	let createForm = {
+	let createForm = $state({
 		caller_type: 'test',
 		caller_id: '',
 		prompt: '',
@@ -63,21 +71,31 @@
 		request_source: 'manual_test',
 		provider: 'claude',
 		model: ''
-	};
+	});
 	let createLoading = false;
 	let createError: string | null = null;
 	let createSuccess = false;
 
 	// Provider별 모델 목록
-	const providerModels: Record<string, string[]> = {
-		claude: ['(기본)', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514'],
-		gemini: ['(기본)', 'gemini-2.5-pro', 'gemini-2.5-flash']
+	// Provider 목록 (API에서 동적 로드)
+	let providers = $state<ProviderInfo[]>([]);
+	let providersLoading = $state(true);
+	let providersError = $state<string | null>(null);
+
+	function getProviderModels(providerKey: string): string[] {
+		const p = providers.find(x => x.key === providerKey);
+		if (p && p.models.length > 0) return ['(기본)', ...p.models];
+		return ['(기본)'];
 	};
 
 	// Provider 변경 시 model 초기화
-	$: if (createForm.provider) {
-		createForm.model = '';
-	}
+	let prevProvider = createForm.provider;
+	$effect(() => {
+		if (createForm.provider !== prevProvider) {
+			prevProvider = createForm.provider;
+			createForm.model = '';
+		}
+	});
 
 	// 탭별 status 필터
 	function getStatusFilter(): string | undefined {
@@ -454,6 +472,9 @@
 	onMount(() => {
 		fetchData();
 		fetchQuotaStatus();
+		llmApi.getProviders()
+			.then(data => { providers = data; providersLoading = false; })
+			.catch(() => { providersError = 'Provider 목록 로드 실패'; providersLoading = false; });
 	});
 </script>
 
@@ -462,10 +483,10 @@
 	<div class="mb-6 flex justify-between items-center">
 		<h2 class="text-lg font-bold text-foreground">LLM 요청 관리</h2>
 		<div class="flex gap-2">
-			<Button variant="secondary" size="sm" on:click={runCleanup} title="Stale 정리 및 오래된 이력 삭제">
+			<Button variant="secondary" size="sm" onclick={runCleanup} title="Stale 정리 및 오래된 이력 삭제">
 				정리
 			</Button>
-			<Button variant="secondary" size="sm" on:click={() => fetchData()}>
+			<Button variant="secondary" size="sm" onclick={() => fetchData()}>
 				새로고침
 			</Button>
 		</div>
@@ -515,34 +536,7 @@
 	{/if}
 
 	<!-- 탭 -->
-	<div class="mb-4 border-b border-border">
-		<nav class="flex gap-4">
-			<button
-				onclick={() => switchTab('queue')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				대기열 (pending/processing)
-			</button>
-			<button
-				onclick={() => switchTab('history')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				이력 (completed/failed)
-			</button>
-			<button
-				onclick={() => switchTab('create')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				수동 요청 생성
-			</button>
-			<button
-				onclick={() => switchTab('performance')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				성능 분석
-			</button>
-		</nav>
-	</div>
+	<TabNav tabs={llmSubTabs} bind:activeTab variant="secondary" />
 
 	{#if activeTab === 'queue' || activeTab === 'history'}
 		<!-- 필터 -->
@@ -582,15 +576,15 @@
 					성공 없는 것만
 				</label>
 			{/if}
-			<Button variant="primary" size="sm" on:click={viewMode === 'grouped' ? handleGroupFilter : handleFilter}>필터</Button>
-			<Button variant="secondary" size="sm" on:click={clearFilters}>초기화</Button>
+			<Button variant="primary" size="sm" onclick={viewMode === 'grouped' ? handleGroupFilter : handleFilter}>필터</Button>
+			<Button variant="secondary" size="sm" onclick={clearFilters}>초기화</Button>
 
 			{#if activeTab === 'history'}
 				<div class="ml-auto flex items-center gap-2">
 					<Button
 						variant={viewMode === 'grouped' ? 'primary' : 'secondary'}
 						size="sm"
-						on:click={toggleViewMode}
+						onclick={toggleViewMode}
 					>
 						{viewMode === 'individual' ? '그룹 뷰' : '개별 뷰'}
 					</Button>
@@ -616,12 +610,12 @@
 				<div class="ml-auto flex gap-2">
 					{#if selectedGroupKeys.length > 0}
 						<span class="text-sm text-muted-foreground self-center">{selectedGroupKeys.length}개 선택</span>
-						<Button variant="secondary" size="sm" on:click={multiRetrySelectedGroups}>
+						<Button variant="secondary" size="sm" onclick={multiRetrySelectedGroups}>
 							선택 그룹 재시도
 						</Button>
 					{/if}
 					{#if groupedResponse.summary.callers_without_success > 0}
-						<Button variant="primary" size="sm" on:click={retryAllFailedWithoutSuccess}>
+						<Button variant="primary" size="sm" onclick={retryAllFailedWithoutSuccess}>
 							성공 없는 것 일괄 재시도
 						</Button>
 					{/if}
@@ -634,7 +628,7 @@
 			<div class="mb-4 flex gap-2 items-center">
 				<span class="text-sm text-muted-foreground">{selection.count}개 선택</span>
 				{#if activeTab === 'history'}
-					<Button variant="secondary" size="sm" on:click={batchRetry}>일괄 재시도</Button>
+					<Button variant="secondary" size="sm" onclick={batchRetry}>일괄 재시도</Button>
 				{/if}
 				<button onclick={batchDelete} class="btn btn-danger btn-sm">일괄 삭제</button>
 			</div>
@@ -921,15 +915,22 @@
 					<div class="grid grid-cols-2 gap-4">
 						<div>
 							<label class="block text-sm font-medium text-foreground mb-1">Provider</label>
-							<select bind:value={createForm.provider} class="w-full px-3 py-2 border border-border rounded-lg">
-								<option value="claude">Claude</option>
-								<option value="gemini">Gemini</option>
-							</select>
+							{#if providersError}
+								<p class="text-sm text-red-500">{providersError}</p>
+							{:else if providersLoading}
+								<p class="text-sm text-muted-foreground">로딩 중...</p>
+							{:else}
+								<select bind:value={createForm.provider} class="w-full px-3 py-2 border border-border rounded-lg">
+									{#each providers as p}
+										<option value={p.key}>{p.display_name}</option>
+									{/each}
+								</select>
+							{/if}
 						</div>
 						<div>
 							<label class="block text-sm font-medium text-foreground mb-1">Model</label>
 							<select bind:value={createForm.model} class="w-full px-3 py-2 border border-border rounded-lg">
-								{#each providerModels[createForm.provider] as modelOption}
+								{#each getProviderModels(createForm.provider) as modelOption}
 									<option value={modelOption === '(기본)' ? '' : modelOption}>
 										{modelOption}
 									</option>
@@ -1086,7 +1087,7 @@
 					>
 						삭제
 					</button>
-					<Button variant="secondary" size="sm" on:click={closeModal}>닫기</Button>
+					<Button variant="secondary" size="sm" onclick={closeModal}>닫기</Button>
 				</div>
 			</div>
 		</div>

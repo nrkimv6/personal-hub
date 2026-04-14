@@ -2,15 +2,26 @@
   import { onMount, onDestroy } from 'svelte';
   import TabNav from '$lib/components/layout/TabNav.svelte';
   import CoupangMonitoringHistory from '$lib/components/CoupangMonitoringHistory.svelte';
+  import MegabeautyHistoryTab from '$lib/components/coupang/MegabeautyHistoryTab.svelte';
   import {
     coupangTravelApi,
     type CoupangTarget,
     type CoupangSchedule,
     type CoupangStatusSummary
   } from '$lib/api/coupangTravel';
-  import { serviceAccountApi, type ServiceAccountWithProfile } from '$lib/api/common';
+  import { workerApi } from '$lib/api';
+  import { serviceAccountApi } from '$lib/api/common';
+  import type { ServiceAccountWithProfile } from '$lib/types';
   import { createSelection } from '$lib/utils/selection.svelte';
   import { toast } from '$lib/stores/toast';
+
+  type WorkerRecoveryAction = 'start' | 'restart';
+  type WorkerBanner = {
+    tone: 'danger' | 'warning' | 'info';
+    title: string;
+    message: string;
+    action: WorkerRecoveryAction | null;
+  };
 
   let targets = $state<CoupangTarget[]>([]);
   let schedules = $state<CoupangSchedule[]>([]);
@@ -18,12 +29,21 @@
   let statusSummary = $state<CoupangStatusSummary>({
     total_schedules: 0,
     enabled_schedules: 0,
-    active_schedules: 0
+    active_schedules: 0,
+    proxy_enabled: false,
+    proxy_active_count: 0,
+    worker_health: {
+      status: 'not_started',
+      message: '',
+      updated_at: null,
+      last_event_at: null
+    }
   });
 
   let loading = $state(false);
   let error = $state('');
-  let activeTab = $state<'schedules' | 'history'>('schedules');
+  let workerActionLoading = $state<WorkerRecoveryAction | null>(null);
+  let activeTab = $state<'schedules' | 'history' | 'cancellation-history'>('schedules');
 
   let newUrl = $state('');
   let newVendorItemPackageId = $state('');
@@ -33,6 +53,7 @@
   let selectedTargetId = $state('');
   let newDate = $state('');
   let selectedAccountId = $state('');
+  let newTimes = $state('');
   let submittingSchedule = $state(false);
 
   let scheduleFilters = $state({
@@ -43,13 +64,15 @@
   });
 
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
-  let abortController: AbortController | null = null;
+  let loadAllController: AbortController | null = null;
+  let pollingController: AbortController | null = null;
 
   const selection = createSelection();
 
   const coupangTabs = $derived([
     { id: 'schedules', label: '일정', count: schedules.length || undefined },
-    { id: 'history', label: '이력' }
+    { id: 'history', label: '이력' },
+    { id: 'cancellation-history', label: '메가뷰티쇼 취소이력' }
   ]);
 
   const filteredSchedules = $derived(
@@ -67,18 +90,144 @@
     })
   );
 
+  function getLatestEnabledEventAt(): string | null {
+    const enabledEvents = schedules
+      .filter((schedule) => schedule.is_enabled && schedule.last_event_at)
+      .map((schedule) => schedule.last_event_at as string);
+    if (enabledEvents.length === 0) return null;
+    return enabledEvents.reduce((latest, current) => {
+      const latestMs = Date.parse(latest);
+      const currentMs = Date.parse(current);
+      if (Number.isNaN(latestMs)) return current;
+      if (Number.isNaN(currentMs)) return latest;
+      return currentMs > latestMs ? current : latest;
+    });
+  }
+
+  const latestEnabledEventAt = $derived(getLatestEnabledEventAt());
+
+  function getLatestActivityAt(): string | null {
+    const candidates = [latestEnabledEventAt, statusSummary.worker_health.last_event_at].filter(
+      (value): value is string => Boolean(value)
+    );
+    if (candidates.length === 0) return null;
+    return candidates.reduce((latest, current) => {
+      const latestMs = Date.parse(latest);
+      const currentMs = Date.parse(current);
+      if (Number.isNaN(latestMs)) return current;
+      if (Number.isNaN(currentMs)) return latest;
+      return currentMs > latestMs ? current : latest;
+    });
+  }
+
+  const latestActivityAt = $derived(getLatestActivityAt());
+
+  function wasRecentlyChecked(value: string | null, thresholdMinutes = 5): boolean {
+    if (!value) return false;
+    const checkedAt = Date.parse(value);
+    if (Number.isNaN(checkedAt)) return false;
+    return Date.now() - checkedAt < thresholdMinutes * 60 * 1000;
+  }
+
+  function formatRecentActivity(value: string | null): string {
+    if (!value) return '-';
+    const checkedAt = Date.parse(value);
+    if (Number.isNaN(checkedAt)) return value;
+
+    const diffMs = Date.now() - checkedAt;
+    if (diffMs < 60 * 1000) return '방금 전';
+
+    const diffMinutes = Math.floor(diffMs / (60 * 1000));
+    if (diffMinutes < 60) return `${diffMinutes}분 전`;
+
+    return new Date(checkedAt).toLocaleString('ko-KR', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function getWorkerBanner(): WorkerBanner | null {
+    if (loading) {
+      return null;
+    }
+
+    const workerHealth = statusSummary.worker_health;
+    if (workerHealth.status === 'not_started') {
+      return {
+        tone: 'danger',
+        title: '워커 미기동',
+        message: workerHealth.message || '쿠팡 워커가 아직 실행되지 않았습니다.',
+        action: 'start'
+      };
+    }
+
+    if (workerHealth.status === 'stale') {
+      return {
+        tone: 'warning',
+        title: '워커 정체',
+        message: workerHealth.message || '쿠팡 워커 heartbeat가 지연되고 있습니다.',
+        action: 'restart'
+      };
+    }
+
+    if (statusSummary.enabled_schedules > 0 && statusSummary.active_schedules === 0) {
+      if (wasRecentlyChecked(latestActivityAt)) {
+        return null;
+      }
+
+      return {
+        tone: 'info',
+        title: '현재 실행 중인 일정이 없습니다',
+        message: '활성 일정은 있지만 지금 이 순간 실행 중인 작업은 없습니다.',
+        action: null
+      };
+    }
+
+    return null;
+  }
+
+  const workerBanner = $derived(getWorkerBanner());
+
+  async function runWorkerRecovery(action: WorkerRecoveryAction): Promise<void> {
+    workerActionLoading = action;
+    try {
+      if (action === 'start') {
+        const result = await workerApi.start();
+        if (result.success) {
+          toast.success(result.message);
+        } else {
+          toast.warning(result.message);
+        }
+      } else if (action === 'restart') {
+        const result = await workerApi.restart();
+        if (result.success) {
+          toast.success(result.message);
+        } else {
+          toast.warning(result.message);
+        }
+      }
+      await loadAll(false);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '복구 작업 실패');
+    } finally {
+      workerActionLoading = null;
+    }
+  }
+
   async function loadAll(showLoading = true): Promise<void> {
     if (showLoading) loading = true;
-    abortController?.abort();
-    abortController = new AbortController();
+    loadAllController?.abort();
+    loadAllController = new AbortController();
     error = '';
 
     try {
       const [targetData, scheduleData, accountData, statusData] = await Promise.all([
-        coupangTravelApi.listTargets({ signal: abortController.signal }),
-        coupangTravelApi.listSchedules({ signal: abortController.signal }),
-        serviceAccountApi.listActive('coupang', { signal: abortController.signal }),
-        coupangTravelApi.getStatus({ signal: abortController.signal })
+        coupangTravelApi.listTargets({ signal: loadAllController.signal }),
+        coupangTravelApi.listSchedules({ signal: loadAllController.signal }),
+        serviceAccountApi.listActive('coupang', { signal: loadAllController.signal }),
+        coupangTravelApi.getStatus({ signal: loadAllController.signal })
       ]);
       targets = targetData;
       schedules = scheduleData;
@@ -95,13 +244,13 @@
 
   async function fetchSchedulesAndStatus(showLoading = false): Promise<void> {
     if (showLoading) loading = true;
-    abortController?.abort();
-    abortController = new AbortController();
+    pollingController?.abort();
+    pollingController = new AbortController();
 
     try {
       const [scheduleData, statusData] = await Promise.all([
-        coupangTravelApi.listSchedules({ signal: abortController.signal }),
-        coupangTravelApi.getStatus({ signal: abortController.signal })
+        coupangTravelApi.listSchedules({ signal: pollingController.signal }),
+        coupangTravelApi.getStatus({ signal: pollingController.signal })
       ]);
       schedules = scheduleData;
       statusSummary = statusData;
@@ -123,13 +272,31 @@
     error = '';
   }
 
+  function getLastEventBadgeClass(status: string): string {
+    if (status === 'error') return 'badge-danger';
+    if (status === 'no_slots') return 'badge-gray';
+    return 'badge-success';
+  }
+
+  function getLastEventLabel(status: string): string {
+    const labels: Record<string, string> = {
+      success: '예약가능',
+      available: '예약가능',
+      no_slots: '매진',
+      error: '오류'
+    };
+    return labels[status] || status;
+  }
+
   function cleanupPolling(): void {
     if (refreshInterval) {
       clearInterval(refreshInterval);
       refreshInterval = null;
     }
-    abortController?.abort();
-    abortController = null;
+    loadAllController?.abort();
+    loadAllController = null;
+    pollingController?.abort();
+    pollingController = null;
   }
 
   async function submitTarget(): Promise<void> {
@@ -171,19 +338,29 @@
     const targetId = Number(selectedTargetId);
     const accountId = Number(selectedAccountId);
 
-    if (!targetId || !newDate || !accountId) {
-      toast.error('상품, 날짜, 계정을 모두 선택해주세요.');
+    if (!targetId || !newDate) {
+      toast.error('상품과 날짜를 선택해주세요.');
       return;
     }
 
     submittingSchedule = true;
     try {
-      const result = await coupangTravelApi.createSchedules({
+      const scheduleBody: { biz_item_id: number; dates: string[]; service_account_id?: number; times?: string[] } = {
         biz_item_id: targetId,
-        dates: [newDate],
-        service_account_id: accountId
-      });
+        dates: [newDate]
+      };
+      if (accountId) {
+        scheduleBody.service_account_id = accountId;
+      }
+      const parsedTimes = newTimes.trim()
+        ? newTimes.split(',').map((t) => t.trim()).filter(Boolean)
+        : undefined;
+      if (parsedTimes) {
+        scheduleBody.times = parsedTimes;
+      }
+      const result = await coupangTravelApi.createSchedules(scheduleBody);
       newDate = '';
+      newTimes = '';
       toast.success(`일정 ${result.created}건이 추가되었습니다.`);
       await fetchSchedulesAndStatus(false);
     } catch (e: unknown) {
@@ -246,8 +423,19 @@
     toast.success(`일괄 ${actionLabel} 완료 (${successCount}건)`);
   }
 
-  onMount(() => {
-    void loadAll(true);
+  async function cleanupLegacySchedules(): Promise<void> {
+    if (!confirm('과거 날짜 및 계정 미연결 일정을 삭제합니다.')) return;
+    try {
+      const result = await coupangTravelApi.cleanupSchedules();
+      toast.success(`${result.deleted}건 정리되었습니다.`);
+      await fetchSchedulesAndStatus(false);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '정리 실패');
+    }
+  }
+
+  onMount(async () => {
+    await loadAll(true);
     refreshInterval = setInterval(() => {
       if (activeTab !== 'schedules') return;
       void fetchSchedulesAndStatus(false);
@@ -258,11 +446,7 @@
     cleanupPolling();
   });
 
-  $effect(() => {
-    if (activeTab === 'schedules') {
-      void fetchSchedulesAndStatus(false);
-    }
-  });
+
 </script>
 
 <div class="space-y-6">
@@ -284,6 +468,51 @@
     </div>
   {/if}
 
+  {#if workerBanner}
+    <div
+      class={`rounded border px-4 py-3 text-sm ${
+        workerBanner.tone === 'danger'
+          ? 'border-red-200 bg-red-50 text-red-800'
+          : workerBanner.tone === 'warning'
+            ? 'border-amber-200 bg-amber-50 text-amber-800'
+            : 'border-sky-200 bg-sky-50 text-sky-800'
+      }`}
+      role="alert"
+    >
+      <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div class="space-y-1">
+          <div class="font-semibold">{workerBanner.title}</div>
+          <div>{workerBanner.message}</div>
+          {#if latestActivityAt}
+            <div class="text-xs opacity-80">최근 활성 일정 점검: {formatRecentActivity(latestActivityAt)}</div>
+          {/if}
+        </div>
+        {#if workerBanner.action}
+          <div class="flex flex-wrap gap-2">
+            {#if workerBanner.action === 'start'}
+              <button
+                class="btn btn-primary btn-sm"
+                disabled={workerActionLoading !== null}
+                onclick={() => runWorkerRecovery('start')}
+              >
+                {workerActionLoading === 'start' ? '처리 중...' : '워커 시작'}
+              </button>
+            {/if}
+            {#if workerBanner.action === 'restart'}
+              <button
+                class="btn btn-primary btn-sm"
+                disabled={workerActionLoading !== null}
+                onclick={() => runWorkerRecovery('restart')}
+              >
+                {workerActionLoading === 'restart' ? '처리 중...' : '워커 재시작'}
+              </button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
   <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
     <div class="card text-center">
       <div class="text-3xl font-bold text-foreground">{statusSummary.total_schedules}</div>
@@ -291,12 +520,24 @@
     </div>
     <div class="card text-center">
       <div class="text-3xl font-bold text-primary">{statusSummary.enabled_schedules}</div>
-      <div class="text-sm text-muted-foreground">활성 일정</div>
+      <div class="text-sm text-muted-foreground">활성화됨</div>
     </div>
     <div class="card text-center">
       <div class="text-3xl font-bold text-success">{statusSummary.active_schedules}</div>
-      <div class="text-sm text-muted-foreground">동작 중</div>
+      <div class="text-sm text-muted-foreground">현재 실행 중</div>
     </div>
+  </div>
+
+  <div class="flex items-center gap-2">
+    {#if statusSummary.proxy_enabled}
+      <span class="inline-flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
+        프록시 활성 ({statusSummary.proxy_active_count}개)
+      </span>
+    {:else}
+      <span class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
+        프록시 비활성 (직접 연결)
+      </span>
+    {/if}
   </div>
 
   <TabNav tabs={coupangTabs} bind:activeTab variant="primary" queryParam="tab" />
@@ -347,6 +588,15 @@
 
     <section class="card">
       <h2 class="text-lg font-semibold mb-4">일정 추가</h2>
+      {#if accounts.length === 0}
+        <div class="mb-4 flex items-center justify-between rounded bg-amber-50 border border-amber-200 px-4 py-3">
+          <span class="text-sm text-amber-800">쿠팡 계정이 등록되어 있지 않습니다. 계정 없이도 일정을 추가할 수 있지만, 로그인이 필요할 경우 모니터링이 동작하지 않을 수 있습니다.</span>
+          <button
+            class="ml-4 shrink-0 rounded bg-amber-500 px-3 py-1 text-sm font-medium text-white hover:bg-amber-600"
+            onclick={() => { window.location.href = '/system?tab=browsers'; }}
+          >계정 등록</button>
+        </div>
+      {/if}
       <div class="grid gap-3 sm:grid-cols-3">
         <div>
           <label class="mb-1 block text-sm font-medium text-gray-700" for="target-select">상품 선택</label>
@@ -382,6 +632,16 @@
               <option value={account.id}>{account.profile_name ?? account.identifier ?? `계정 #${account.id}`}</option>
             {/each}
           </select>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700" for="times-input">알림 시간대 (선택)</label>
+          <input
+            id="times-input"
+            type="text"
+            bind:value={newTimes}
+            placeholder="10:00,11:00,14:00-19:00"
+            class="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+          />
         </div>
       </div>
       <button
@@ -456,13 +716,14 @@
             <span class="ml-2 text-primary">({selection.count}건 선택)</span>
           {/if}
         </div>
-        {#if selection.count > 0}
-          <div class="flex gap-2">
+        <div class="flex gap-2">
+          {#if selection.count > 0}
             <button class="btn btn-secondary btn-sm" onclick={() => runBulkAction('enable')}>일괄 활성화</button>
             <button class="btn btn-secondary btn-sm" onclick={() => runBulkAction('disable')}>일괄 비활성화</button>
             <button class="btn btn-danger btn-sm" onclick={() => runBulkAction('delete')}>일괄 삭제</button>
-          </div>
-        {/if}
+          {/if}
+          <button class="btn btn-secondary btn-sm" onclick={cleanupLegacySchedules}>과거 일정 정리</button>
+        </div>
       </div>
 
       {#if loading}
@@ -491,6 +752,8 @@
                 <th>날짜</th>
                 <th>상태</th>
                 <th>동작</th>
+                <th>최근 점검</th>
+                <th>최근 상태</th>
                 <th>관리</th>
               </tr>
             </thead>
@@ -524,6 +787,22 @@
                       <span class="badge badge-gray">대기</span>
                     {/if}
                   </td>
+                  <td class="text-xs text-muted-foreground">
+                    {#if schedule.last_event_at}
+                      {new Date(schedule.last_event_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    {:else}
+                      -
+                    {/if}
+                  </td>
+                  <td>
+                    {#if schedule.last_event_status}
+                      <span class={`badge ${getLastEventBadgeClass(schedule.last_event_status)}`}>
+                        {getLastEventLabel(schedule.last_event_status)}
+                      </span>
+                    {:else}
+                      <span class="badge badge-gray">-</span>
+                    {/if}
+                  </td>
                   <td>
                     <div class="flex gap-2">
                       <button class="btn btn-danger btn-xs" onclick={() => deleteSchedule(schedule.id)}>삭제</button>
@@ -540,5 +819,9 @@
 
   {#if activeTab === 'history'}
     <CoupangMonitoringHistory />
+  {/if}
+
+  {#if activeTab === 'cancellation-history'}
+    <MegabeautyHistoryTab />
   {/if}
 </div>

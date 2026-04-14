@@ -21,8 +21,11 @@ from plan_worktree_helpers import (
     is_fix_plan,
     has_phase_r,
     has_undefended_paths,
-    validate_done_preconditions,
 )
+
+# app/ 경로가 이미 추가된 이후 직접 utils에서 import (plan_worktree_helpers 위임과 동일 구현)
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions
 
 # app/ 경로 추가 (plan_service 테스트용)
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -179,23 +182,18 @@ class TestValidateDonePreconditions:
 # ---------------------------------------------------------------------------
 
 class TestRunDoneRejectsFixWithoutPhaseR:
-    """run_done API에서 fix plan + Phase R 없음 → ValueError"""
+    """run_done API에서 fix plan + Phase R 없음 → ValueError
 
-    def test_plan_service_validate(self):
-        """plan_service._validate_done_preconditions이 fix plan Phase R 없음을 거부"""
-        from app.modules.dev_runner.services.plan_service import PlanService
-        content = "# fix: 뭔가\n\n> 상태: 구현중\n\n## TODO\n- [x] 뭔가\n"
-        errors = PlanService._validate_done_preconditions(
-            "docs/plan/2026-03-31_fix-something.md", content
-        )
-        assert len(errors) >= 1
-        assert any("Phase R" in e for e in errors)
+    NOTE: PlanService._validate_done_preconditions / PlanDoneService._validate_done_preconditions
+    는 _plan_header_utils.validate_done_preconditions로 통합됨.
+    동작 검증은 tests/dev_runner/test_plan_header_utils.py의 utils 직접 TC로 커버.
+    """
 
-    def test_plan_done_service_validate(self):
-        """plan_done_service._validate_done_preconditions이 fix plan Phase R 없음을 거부"""
-        from app.modules.dev_runner.services.plan_done_service import PlanDoneService
+    def test_utils_validate_fix_without_phase_r(self):
+        """_plan_header_utils.validate_done_preconditions이 fix plan Phase R 없음을 거부"""
+        from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions as service_validate_done
         content = "# fix: 뭔가\n\n> 상태: 구현중\n\n## TODO\n- [x] 뭔가\n"
-        errors = PlanDoneService._validate_done_preconditions(
+        errors = service_validate_done(
             "docs/plan/2026-03-31_fix-something.md", content
         )
         assert len(errors) >= 1

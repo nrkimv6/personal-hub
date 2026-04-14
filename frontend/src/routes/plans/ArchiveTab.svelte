@@ -396,7 +396,7 @@
                   {:else}
                     <button
                       class="px-2 py-0.5 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-                      onclick={(e) => { e.stopPropagation(); (() => selectRecord(record))(e); }}
+                      onclick={(e) => { e.stopPropagation(); selectRecord(record); }}
                     >메모 추가</button>
                   {/if}
                 </td>

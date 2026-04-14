@@ -26,7 +26,7 @@ from worktree_manager import WorktreeManager, MergeResult
 
 # ── dev-runner-command-listener 모듈 로드 ─────────────────────────────────────
 
-_LISTENER_PATH = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+_LISTENER_PATH = Path(__file__).parent.parent.parent / "scripts" / "plan_runner" / "dev-runner-command-listener.py"
 
 def _load_listener():
     """listener_noise_filter 의존성을 mock해서 모듈 로드"""

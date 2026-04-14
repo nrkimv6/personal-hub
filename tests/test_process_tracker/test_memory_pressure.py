@@ -1,4 +1,7 @@
-"""MemoryPressureResponder TC"""
+"""MemoryPressureResponder TC
+
+browser_workers.py는 CLI facade이므로 parent_name 테스트 데이터는 그대로 유지한다.
+"""
 import time
 import pytest
 import psutil

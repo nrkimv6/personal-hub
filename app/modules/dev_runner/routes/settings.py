@@ -1,6 +1,8 @@
 """Dev Runner Settings API — GET/PUT 엔드포인트"""
 
-from fastapi import APIRouter, HTTPException
+from typing import Literal
+
+from fastapi import APIRouter, HTTPException, Query
 
 from app.config import logger
 from app.modules.dev_runner.schemas import DevRunnerSettingsResponse, DevRunnerSettingsUpdateRequest
@@ -35,5 +37,14 @@ async def update_settings(body: DevRunnerSettingsUpdateRequest):
             default_fix_engine=settings.default_fix_engine,
             updated_at=settings.updated_at,
         )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/engine-suggestion")
+async def get_engine_suggestion(kind: Literal["feat", "fix"] = Query(...)):
+    """registry picker 기반 engine 제안 (dev-runner run modal 기본값용)."""
+    try:
+        return settings_service.suggest_engine(kind)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

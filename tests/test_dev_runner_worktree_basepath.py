@@ -34,7 +34,7 @@ def _load_listener_module():
     """dev-runner-command-listener.py를 side-effect 없이 로드하여 get_plan_git_root 추출."""
     spec = importlib.util.spec_from_file_location(
         "dev_runner_command_listener",
-        str(_SCRIPTS_DIR / "dev-runner-command-listener.py"),
+        str(_SCRIPTS_DIR / "plan_runner" / "dev-runner-command-listener.py"),
     )
     # 실제 실행 없이 모듈 생성만 (redis 연결 등 side-effect 방지)
     mod = types.ModuleType("dev_runner_command_listener")

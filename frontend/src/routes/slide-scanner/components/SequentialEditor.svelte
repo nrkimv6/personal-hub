@@ -1,24 +1,10 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
-
   import type { SlideDetailResponse, SlideFilterOptions, SlidePoint } from '$lib/api/slide-scanner';
 
   import CornerEditor from './CornerEditor.svelte';
   import FilterPanel from './FilterPanel.svelte';
   import KeyboardShortcuts from './KeyboardShortcuts.svelte';
   import TagInput from './TagInput.svelte';
-
-  const dispatch = createEventDispatcher<{
-    changePoints: { points: SlidePoint[] };
-    changeFilters: { filters: SlideFilterOptions };
-    changeTag: { tag: string | null };
-    prev: void;
-    next: void;
-    review: void;
-    ocr: void;
-    transform: void;
-    saveAll: void;
-  }>();
 
   export let slide: SlideDetailResponse | null = null;
   export let points: SlidePoint[] = [];
@@ -39,17 +25,26 @@
   export let tag: string | null = null;
   export let tagSuggestions: string[] = [];
   export let tagSaving = false;
+  export let onchangepoints: ((detail: { points: SlidePoint[] }) => void) | undefined = undefined;
+  export let onchangefilters: ((detail: { filters: SlideFilterOptions }) => void) | undefined = undefined;
+  export let onchangetag: ((detail: { tag: string | null }) => void) | undefined = undefined;
+  export let onprev: (() => void) | undefined = undefined;
+  export let onnext: (() => void) | undefined = undefined;
+  export let onreview: (() => void) | undefined = undefined;
+  export let onocr: (() => void) | undefined = undefined;
+  export let ontransform: (() => void) | undefined = undefined;
+  export let onsaveall: (() => void) | undefined = undefined;
 
-  function handlePointsChange(event: CustomEvent<{ points: SlidePoint[] }>) {
-    dispatch('changePoints', { points: event.detail.points });
+  function handlePointsChange(detail: { points: SlidePoint[] }) {
+    onchangepoints?.({ points: detail.points });
   }
 
-  function handleFiltersChange(event: CustomEvent<{ value: SlideFilterOptions }>) {
-    dispatch('changeFilters', { filters: event.detail.value });
+  function handleFiltersChange(detail: { value: SlideFilterOptions }) {
+    onchangefilters?.({ filters: detail.value });
   }
 
-  function handleTagChange(event: CustomEvent<{ value: string | null }>) {
-    dispatch('changeTag', { tag: event.detail.value });
+  function handleTagChange(detail: { value: string | null }) {
+    onchangetag?.({ tag: detail.value });
   }
 </script>
 
@@ -60,10 +55,10 @@
       disabled={reviewing || transforming}
       {canPrev}
       {canNext}
-      on:prev={() => dispatch('prev')}
-      on:next={() => dispatch('next')}
-      on:confirm={() => dispatch('transform')}
-      on:saveAll={() => dispatch('saveAll')}
+      onprev={() => onprev?.()}
+      onnext={() => onnext?.()}
+      onconfirm={() => ontransform?.()}
+      onsaveall={() => onsaveall?.()}
     />
 
     <div class="flex flex-wrap items-center justify-between gap-2">
@@ -75,10 +70,10 @@
         <p class="text-[11px] text-muted-foreground">선택 비율: {aspectRatioLabel}</p>
       </div>
       <div class="flex items-center gap-2">
-        <button type="button" class="btn btn-outline btn-sm" onclick={() => dispatch('prev')} disabled={!canPrev}>
+        <button type="button" class="btn btn-outline btn-sm" onclick={() => onprev?.()} disabled={!canPrev}>
           이전
         </button>
-        <button type="button" class="btn btn-outline btn-sm" onclick={() => dispatch('next')} disabled={!canNext}>
+        <button type="button" class="btn btn-outline btn-sm" onclick={() => onnext?.()} disabled={!canNext}>
           다음
         </button>
       </div>
@@ -89,21 +84,21 @@
       suggestions={tagSuggestions}
       disabled={reviewing || transforming}
       saving={tagSaving}
-      on:change={handleTagChange}
+      onchange={handleTagChange}
     />
 
-    <CornerEditor {imageUrl} {points} on:change={handlePointsChange} />
+    <CornerEditor {imageUrl} {points} onchange={handlePointsChange} />
     <FilterPanel
       value={filters}
       disabled={reviewing || transforming}
-      on:change={handleFiltersChange}
+      onchange={handleFiltersChange}
     />
 
     <div class="flex flex-wrap items-center justify-end gap-2">
       <button
         type="button"
         class="btn btn-outline"
-        onclick={() => dispatch('ocr')}
+        onclick={() => onocr?.()}
         disabled={ocring || transforming || points.length !== 4}
       >
         {ocring ? 'OCR 추출 중...' : 'OCR 추출'}
@@ -111,7 +106,7 @@
       <button
         type="button"
         class="btn btn-outline"
-        onclick={() => dispatch('review')}
+        onclick={() => onreview?.()}
         disabled={reviewing || points.length !== 4}
       >
         {reviewing ? '확정 중...' : '확정 (REVIEWED)'}
@@ -119,7 +114,7 @@
       <button
         type="button"
         class="btn btn-primary"
-        onclick={() => dispatch('transform')}
+        onclick={() => ontransform?.()}
         disabled={transforming || points.length !== 4}
       >
         {transforming ? '변환 중...' : '보정 실행'}
