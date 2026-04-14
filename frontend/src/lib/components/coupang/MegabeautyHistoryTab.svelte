@@ -7,6 +7,7 @@
     type CancellationStatsResponse
   } from '$lib/api/coupangTravel';
   import type { MonitoringEvent } from '$lib/types';
+  import { normalizeHistoryText } from '$lib/utils/coupangHistoryDisplay';
   import { isAbortError } from '$lib/utils/isAbortError.js';
   import { createPagePagination } from '$lib/utils/pagination.svelte';
 
@@ -26,14 +27,6 @@
   let dateFrom = $state(getDefaultDateFrom());
   let dateTo = $state('');
 
-  function sanitizeLabel(value: string | null | undefined): string {
-    const cleaned = (value ?? '')
-      .replace(/2026\s*쿠팡\s*메가뷰티쇼/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return cleaned || '메가뷰티쇼';
-  }
-
   function formatDateTime(dateStr: string | null): string {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleString('ko-KR', {
@@ -50,7 +43,7 @@
   }
 
   const recentDetectedAt = $derived(events[0]?.timestamp ?? null);
-  const pageLabel = sanitizeLabel('2026 쿠팡 메가뷰티쇼');
+  const pageLabel = normalizeHistoryText('2026 쿠팡 메가뷰티쇼') || '메가뷰티쇼';
 
   async function loadEvents(): Promise<void> {
     try {
