@@ -35,6 +35,7 @@ from scripts.services.service_utils import (
 )
 from scripts.services.frontend_mode import (
     build_frontend_env,
+    ensure_frontend_runtime_tsconfigs,
     describe_frontend_runtime,
 )
 
@@ -202,6 +203,7 @@ class ServiceRunner:
         frontend_env = self._frontend_runtime_env(public=not self.dev)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.log.info(f"Frontend runtime contract: {describe_frontend_runtime(public=not self.dev)}")
+        ensure_frontend_runtime_tsconfigs(frontend_dir)
 
         # frontend 의존성 확인 (node_modules 디렉토리만 믿지 말고 vite 실행 파일도 확인)
         node_modules_dir = frontend_dir / "node_modules"
@@ -302,7 +304,7 @@ class ServiceRunner:
                 self.log.error(f"Frontend build failed (rc={build_result.returncode}): {err_msg}")
                 # graceful degradation: 이전 빌드가 있으면 그것으로 preview, 없으면 API-only
                 if not (frontend_dir / "build").exists():
-                    self.log.warning("No previous build found — Frontend unavailable, API-only mode")
+                    self.log.warning("No previous build found - Frontend unavailable, API-only mode")
                     return None
                 self.log.warning("Using previous build for preview")
             else:

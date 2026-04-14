@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from scripts.services import service_run
+from scripts.services import frontend_mode
 
 
 def _info_lines(log: MagicMock) -> list[str]:
@@ -47,3 +48,18 @@ def test_service_runner_frontend_runtime_env_separates_admin_and_public_modes():
     assert public_env["MONITOR_FRONTEND_MODE"] == "public"
     assert public_env["MONITOR_SVELTEKIT_OUTDIR"] == ".svelte-kit-public"
     assert "VITE_API_PORT" not in public_env
+
+
+def test_ensure_frontend_runtime_tsconfigs_copies_base_config_for_both_modes(tmp_path):
+    frontend_dir = tmp_path / "frontend"
+    base_dir = frontend_dir / ".svelte-kit"
+    base_dir.mkdir(parents=True)
+    base_tsconfig = base_dir / "tsconfig.json"
+    base_tsconfig.write_text("{\"compilerOptions\":{}}", encoding="utf-8")
+
+    frontend_mode.ensure_frontend_runtime_tsconfigs(frontend_dir)
+
+    admin_tsconfig = frontend_dir / ".svelte-kit-admin" / "tsconfig.json"
+    public_tsconfig = frontend_dir / ".svelte-kit-public" / "tsconfig.json"
+    assert admin_tsconfig.read_text(encoding="utf-8") == base_tsconfig.read_text(encoding="utf-8")
+    assert public_tsconfig.read_text(encoding="utf-8") == base_tsconfig.read_text(encoding="utf-8")

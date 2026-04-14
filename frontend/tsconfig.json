@@ -1,5 +1,9 @@
 {
-	"extends": "./.svelte-kit/tsconfig.json",
+	"extends": [
+		"./.svelte-kit/tsconfig.json",
+		"./.svelte-kit-admin/tsconfig.json",
+		"./.svelte-kit-public/tsconfig.json"
+	],
 	"compilerOptions": {
 		"rewriteRelativeImportExtensions": true,
 		"allowJs": true,

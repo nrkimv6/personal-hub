@@ -11,7 +11,11 @@ from pathlib import Path
 
 import psutil
 
-from scripts.services.frontend_mode import build_frontend_env, describe_frontend_runtime
+from scripts.services.frontend_mode import (
+    build_frontend_env,
+    ensure_frontend_runtime_tsconfigs,
+    describe_frontend_runtime,
+)
 from scripts.services.browser_worker_runtime.runtime import GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
 
 
@@ -119,6 +123,7 @@ def _run_frontend_build_if_needed(manager, public: bool, frontend_env: dict[str,
     if frontend_env is None:
         frontend_env = _frontend_runtime_env(manager, public)
 
+    ensure_frontend_runtime_tsconfigs(manager.frontend_dir)
     cprint("Building frontend for PUBLIC PREVIEW...", YELLOW)
     build_result = subprocess.run(
         ["npm.cmd", "run", "build"],
@@ -137,7 +142,7 @@ def _run_frontend_build_if_needed(manager, public: bool, frontend_env: dict[str,
     cprint(f"Frontend build failed (rc={build_result.returncode}): {short_err}", RED)
 
     if not (manager.frontend_dir / "build").exists():
-        cprint("No previous build artifact found — cannot run PUBLIC PREVIEW", RED)
+        cprint("No previous build artifact found - cannot run PUBLIC PREVIEW", RED)
         return False
 
     cprint("Using previous build artifact for fallback preview", YELLOW)
@@ -168,6 +173,7 @@ def restart_frontend(manager, public: bool = False) -> bool:
     print(f"  (port {frontend_port}){RESET}")
     print(f"{YELLOW}{'=' * 40}{RESET}\n")
     cprint(f"Frontend runtime contract: {describe_frontend_runtime(public)}", YELLOW)
+    ensure_frontend_runtime_tsconfigs(manager.frontend_dir)
 
     lock_fd = manager._acquire_frontend_restart_lock(wait_seconds=10)
     if lock_fd is None:

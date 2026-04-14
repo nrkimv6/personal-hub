@@ -9,6 +9,8 @@ app_bin
 /browser_data/
 node_modules/
 .svelte-kit
+.svelte-kit-admin/
+.svelte-kit-public/
 build
 /nul
 /app/static/

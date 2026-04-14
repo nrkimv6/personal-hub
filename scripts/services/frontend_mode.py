@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from collections.abc import Mapping
+from pathlib import Path
 
 MONITOR_FRONTEND_MODE_ENV = "MONITOR_FRONTEND_MODE"
 MONITOR_SVELTEKIT_OUTDIR_ENV = "MONITOR_SVELTEKIT_OUTDIR"
@@ -42,3 +45,30 @@ def build_frontend_env(
 
 def describe_frontend_runtime(public: bool) -> str:
     return f"mode={get_frontend_mode(public)} outDir={get_frontend_outdir(public)}"
+
+
+def ensure_frontend_runtime_tsconfigs(frontend_dir: Path) -> None:
+    """Ensure mode-specific tsconfig copies exist for SvelteKit parsing.
+
+    SvelteKit validates the root tsconfig before generating the mode-specific
+    outDir config, so both runtime locations need a materialized tsconfig file.
+    """
+
+    base_tsconfig = frontend_dir / DEFAULT_FRONTEND_OUTDIR / "tsconfig.json"
+    if not base_tsconfig.exists():
+        subprocess.run(
+            ["npm.cmd", "run", "prepare"],
+            cwd=str(frontend_dir),
+            check=False,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    if not base_tsconfig.exists():
+        return
+
+    for outdir in (ADMIN_FRONTEND_OUTDIR, PUBLIC_FRONTEND_OUTDIR):
+        target_dir = frontend_dir / outdir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(base_tsconfig, target_dir / "tsconfig.json")
