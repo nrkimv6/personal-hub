@@ -5,7 +5,7 @@ import pytest
 
 pytestmark = pytest.mark.http_live
 
-BASE_URL = "http://localhost:8001"
+BASE_URL = "http://localhost:8000"
 PUBLIC_HISTORY_URL = f"{BASE_URL}/api/v1/monitoring/events/coupang-public-history"
 
 
@@ -34,10 +34,25 @@ def test_live_public_history_200_and_shape():
     summary = data["summary"]
     assert "total" in summary
     assert "cancellation_count" in summary
-    assert "sold_out_count" in summary
+    assert "total_sold" in summary
+    assert "remaining_open_count" in summary
+    assert "avg_sale_duration_seconds" in summary
+    assert "sold_out_count" not in summary
+    assert "sale_observed_count" not in summary
+    assert "open_count" not in summary
     assert isinstance(summary["total"], int)
     assert isinstance(summary["cancellation_count"], int)
-    assert isinstance(summary["sold_out_count"], int)
+    assert isinstance(summary["total_sold"], int)
+    assert isinstance(summary["remaining_open_count"], int)
+    if data["items"]:
+        item = data["items"][0]
+        assert isinstance(item["sale_durations"], list)
+        assert item["last_transition_label"] in {
+            "취소표발생",
+            "다시 매진",
+            "판매 관측",
+            "잔여석발생",
+        }
 
 
 def test_live_public_history_accepts_date_and_time_filters():
@@ -61,3 +76,4 @@ def test_live_public_history_accepts_date_and_time_filters():
     assert isinstance(data["items"], list)
     assert isinstance(data["slot_time_options"], list)
     assert data["summary"]["total"] >= 0
+    assert isinstance(data["items"], list)

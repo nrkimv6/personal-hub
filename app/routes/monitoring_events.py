@@ -4,6 +4,7 @@
 """
 import json
 import re
+from collections import deque
 from typing import Optional, List, Any
 from datetime import datetime, timedelta, date
 from fastapi import APIRouter, Depends, Query
@@ -99,7 +100,11 @@ def _is_coupang_slot_available(slot: dict) -> bool:
     return sale_status in {"AVAILABLE", "ON_SALE", "SALE"}
 
 
-def _normalize_coupang_slot(slot: dict, schedule_date: Optional[str] = None) -> dict:
+def _normalize_coupang_slot(
+    slot: dict,
+    schedule_id: Optional[int] = None,
+    schedule_date: Optional[str] = None,
+) -> dict:
     raw_label = slot.get("vendorItemName") or slot.get("vendor_item_name") or ""
     normalized_label = _normalize_coupang_slot_label(raw_label)
     slot_time_label = _extract_coupang_slot_time_label(normalized_label)
@@ -111,7 +116,7 @@ def _normalize_coupang_slot(slot: dict, schedule_date: Optional[str] = None) -> 
         stock_count = None
 
     is_available = _is_coupang_slot_available(slot)
-    slot_key = _build_coupang_slot_key(schedule_date, normalized_label)
+    slot_key = _build_coupang_slot_key(schedule_id, schedule_date, normalized_label)
 
     return {
         "raw_label": raw_label,
@@ -124,8 +129,12 @@ def _normalize_coupang_slot(slot: dict, schedule_date: Optional[str] = None) -> 
     }
 
 
-def _build_coupang_slot_key(schedule_date: Optional[str], normalized_label: str) -> str:
-    return f"{schedule_date or ''}|{normalized_label or ''}"
+def _build_coupang_slot_key(
+    schedule_id: Optional[int],
+    schedule_date: Optional[str],
+    normalized_label: str,
+) -> str:
+    return f"{schedule_id or ''}|{schedule_date or ''}|{normalized_label or ''}"
 
 
 def _should_include_public_coupang_schedule(schedule_date: Optional[str], now: datetime) -> bool:
@@ -150,42 +159,28 @@ def _get_open_observation_end(schedule_date: Optional[str], now: datetime) -> da
     return min(now, cutoff)
 
 
-def _make_public_history_item(
-    event: MonitoringEvent,
-    schedule_date: Optional[str],
-    biz_item_name: Optional[str],
-    business_name: Optional[str],
-    slot: dict,
-    transition_type: str,
-    transition_label: str,
-    delta_count: int = 1,
-    previous_stock_count: Optional[int] = None,
-    observed_sale_seconds: Optional[float] = None,
-    observed_open_seconds: Optional[float] = None,
-) -> CoupangPublicHistoryItem:
+def _build_coupang_public_history_item(state: dict[str, Any]) -> CoupangPublicHistoryItem:
     return CoupangPublicHistoryItem(
-        id=event.id,
-        schedule_id=event.schedule_id,
-        timestamp=event.timestamp,
-        schedule_date=schedule_date,
-        biz_item_name=biz_item_name,
-        business_name=business_name,
-        slot_key=slot.get("slot_key") or _build_coupang_slot_key(schedule_date, slot.get("normalized_label", "")),
-        option_label=slot.get("normalized_label") or "",
-        slot_time_label=slot.get("slot_time_label"),
-        transition_type=transition_type,
-        transition_label=transition_label,
-        delta_count=delta_count,
-        stock_count=slot.get("stock_count"),
-        previous_stock_count=previous_stock_count,
-        observed_sale_seconds=observed_sale_seconds,
-        observed_open_seconds=observed_open_seconds,
+        id=state["last_event_id"],
+        schedule_id=state["schedule_id"],
+        timestamp=state["last_timestamp"],
+        schedule_date=state["schedule_date"],
+        biz_item_name=state["biz_item_name"],
+        business_name=state["business_name"],
+        slot_key=state["slot"]["slot_key"],
+        option_label=state["slot"]["normalized_label"] or "",
+        slot_time_label=state["slot"]["slot_time_label"],
+        cancellation_count=state["cancellation_count"],
+        sold_count=state["sold_count"],
+        remaining_open_count=state["remaining_open_count"],
+        sale_durations=state["sale_durations"],
+        open_durations=state["open_durations"],
+        last_transition_label=state["last_transition_label"] or "잔여석발생",
     )
 
 
-def _compute_coupang_slot_transitions(events: List[MonitoringEvent], now: datetime) -> List[CoupangPublicHistoryItem]:
-    items: List[CoupangPublicHistoryItem] = []
-    latest_state: dict[str, dict[str, Any]] = {}
+def _compute_coupang_slot_histories(events: List[MonitoringEvent], now: datetime) -> List[CoupangPublicHistoryItem]:
+    slot_state: dict[str, dict[str, Any]] = {}
 
     for event in events:
         schedule = event.schedule
@@ -202,100 +197,97 @@ def _compute_coupang_slot_transitions(events: List[MonitoringEvent], now: dateti
         cutoff = _get_open_observation_end(schedule_date, now)
 
         for raw_slot in slots:
-            slot = _normalize_coupang_slot(raw_slot, schedule_date)
+            slot = _normalize_coupang_slot(raw_slot, event.schedule_id, schedule_date)
             if not slot["normalized_label"]:
                 continue
 
             key = slot["slot_key"]
-            prev = latest_state.get(key)
+            state = slot_state.get(key)
             current_available = slot["is_available"]
             current_stock = slot["stock_count"]
 
-            if prev is not None:
-                prev_available = prev["is_available"]
-                prev_stock = prev["stock_count"]
-                prev_timestamp = prev["timestamp"]
+            if state is None:
+                state = {
+                    "slot": slot,
+                    "schedule_id": event.schedule_id,
+                    "schedule_date": schedule_date,
+                    "biz_item_name": biz_item.name if biz_item else None,
+                    "business_name": business.name if business else None,
+                    "opened_seats": deque(),
+                    "cancellation_count": 0,
+                    "sold_count": 0,
+                    "remaining_open_count": 0,
+                    "sale_durations": [],
+                    "open_durations": [],
+                    "last_event_id": event.id,
+                    "last_timestamp": event.timestamp,
+                    "last_transition_label": "",
+                    "is_available": current_available,
+                    "stock_count": current_stock,
+                    "cutoff": cutoff,
+                }
+                slot_state[key] = state
+                continue
 
+            prev_available = state["is_available"]
+            prev_stock = state["stock_count"]
+            opened_seats = state["opened_seats"]
+
+            if prev_available is not None:
                 if not prev_available and current_available:
-                    items.append(
-                        _make_public_history_item(
-                            event,
-                            schedule_date,
-                            biz_item.name if biz_item else None,
-                            business.name if business else None,
-                            slot,
-                            transition_type="cancellation",
-                            transition_label="취소표발생",
-                            delta_count=1,
-                            previous_stock_count=prev_stock,
-                        )
-                    )
-                elif prev_available and not current_available:
-                    items.append(
-                        _make_public_history_item(
-                            event,
-                            schedule_date,
-                            biz_item.name if biz_item else None,
-                            business.name if business else None,
-                            slot,
-                            transition_type="sold_out",
-                            transition_label="다시 매진",
-                            delta_count=1,
-                            previous_stock_count=prev_stock,
-                        )
-                    )
-                elif prev_available and current_available and prev_stock is not None and current_stock is not None:
-                    delta = prev_stock - current_stock
-                    if delta > 0:
-                        observed_sale_seconds = (event.timestamp - prev_timestamp).total_seconds() if delta == 1 else None
-                        items.append(
-                            _make_public_history_item(
-                                event,
-                                schedule_date,
-                                biz_item.name if biz_item else None,
-                                business.name if business else None,
-                                slot,
-                                transition_type="sale_observed" if delta == 1 else "bulk_sale",
-                                transition_label="판매 관측" if delta == 1 else "재고감소",
-                                delta_count=delta,
-                                previous_stock_count=prev_stock,
-                                observed_sale_seconds=observed_sale_seconds,
-                            )
-                        )
+                    if current_stock is not None and current_stock > 0:
+                        for _ in range(current_stock):
+                            opened_seats.append(event.timestamp)
+                        state["cancellation_count"] += current_stock
+                        state["last_transition_label"] = "취소표발생"
+                elif prev_available and current_stock is not None and prev_stock is not None:
+                    delta = current_stock - prev_stock
+                    if delta > 0 and current_available:
+                        for _ in range(delta):
+                            opened_seats.append(event.timestamp)
+                        state["cancellation_count"] += delta
+                        state["last_transition_label"] = "취소표발생"
+                    elif delta < 0:
+                        sold_count = 0
+                        for _ in range(abs(delta)):
+                            if not opened_seats:
+                                break
+                            open_ts = opened_seats.popleft()
+                            state["sale_durations"].append((event.timestamp - open_ts).total_seconds())
+                            sold_count += 1
+                        if sold_count > 0:
+                            state["sold_count"] += sold_count
+                        state["last_transition_label"] = "판매 관측" if current_available else "다시 매진"
+                    elif not current_available:
+                        state["last_transition_label"] = "다시 매진"
+                elif not current_available and prev_available:
+                    state["last_transition_label"] = "다시 매진"
 
-            latest_state[key] = {
-                "event": event,
-                "timestamp": event.timestamp,
-                "is_available": current_available,
-                "stock_count": current_stock,
-                "slot": slot,
-                "schedule_date": schedule_date,
-                "cutoff": cutoff,
-                "biz_item_name": biz_item.name if biz_item else None,
-                "business_name": business.name if business else None,
-            }
+            state["slot"] = slot
+            state["schedule_id"] = event.schedule_id
+            state["schedule_date"] = schedule_date
+            state["biz_item_name"] = biz_item.name if biz_item else None
+            state["business_name"] = business.name if business else None
+            state["last_event_id"] = event.id
+            state["last_timestamp"] = event.timestamp
+            state["is_available"] = current_available
+            state["stock_count"] = current_stock
+            state["cutoff"] = cutoff
 
-    for key, state in latest_state.items():
-        if not state["is_available"]:
+    items: List[CoupangPublicHistoryItem] = []
+    for state in slot_state.values():
+        if state["opened_seats"]:
+            cutoff = state["cutoff"]
+            for open_ts in state["opened_seats"]:
+                state["open_durations"].append(max(0.0, (cutoff - open_ts).total_seconds()))
+            state["remaining_open_count"] = len(state["open_durations"])
+            if not state["last_transition_label"]:
+                state["last_transition_label"] = "잔여석발생"
+
+        if not (state["cancellation_count"] or state["sold_count"] or state["remaining_open_count"]):
             continue
-        slot = state["slot"]
-        schedule_date = state["schedule_date"]
-        cutoff = state["cutoff"]
-        observed_open_seconds = max(0.0, (cutoff - state["timestamp"]).total_seconds())
-        items.append(
-            _make_public_history_item(
-                event=state["event"],
-                schedule_date=schedule_date,
-                biz_item_name=state["biz_item_name"],
-                business_name=state["business_name"],
-                slot=slot,
-                transition_type="open",
-                transition_label="잔여석발생",
-                delta_count=0,
-                previous_stock_count=slot.get("stock_count"),
-                observed_open_seconds=observed_open_seconds,
-            )
-        )
+
+        items.append(_build_coupang_public_history_item(state))
 
     return items
 
@@ -893,7 +885,7 @@ def get_coupang_public_history(
         query = query.filter(MonitorSchedule.date <= schedule_date_to)
 
     events = query.order_by(MonitoringEvent.timestamp.asc(), MonitoringEvent.id.asc()).all()
-    items = _compute_coupang_slot_transitions(events, datetime.now())
+    items = _compute_coupang_slot_histories(events, datetime.now())
 
     slot_time_filters = set(_parse_comma_separated_text(slot_times))
     if slot_time_filters:
@@ -906,22 +898,20 @@ def get_coupang_public_history(
     page_items = items[offset:offset + page_size]
     total_pages = (total + page_size - 1) // page_size if total else 0
 
-    cancellation_count = sum(1 for item in items if item.transition_type == "cancellation")
-    sold_out_count = sum(1 for item in items if item.transition_type == "sold_out")
-    sale_observed_count = sum(1 for item in items if item.transition_type == "sale_observed")
-    open_count = sum(1 for item in items if item.transition_type == "open")
-    sale_seconds = [item.observed_sale_seconds for item in items if item.observed_sale_seconds is not None]
-    avg_observed_sale_seconds = round(sum(sale_seconds) / len(sale_seconds), 2) if sale_seconds else None
+    cancellation_count = sum(item.cancellation_count for item in items)
+    total_sold = sum(item.sold_count for item in items)
+    remaining_open_count = sum(item.remaining_open_count for item in items)
+    sale_seconds = [duration for item in items for duration in item.sale_durations]
+    avg_sale_duration_seconds = round(sum(sale_seconds) / len(sale_seconds), 2) if sale_seconds else None
     last_transition_at = max((item.timestamp for item in items), default=None)
     slot_time_options = sorted({item.slot_time_label for item in items if item.slot_time_label})
 
     summary = CoupangPublicHistorySummary(
         total=total,
         cancellation_count=cancellation_count,
-        sold_out_count=sold_out_count,
-        sale_observed_count=sale_observed_count,
-        open_count=open_count,
-        avg_observed_sale_seconds=avg_observed_sale_seconds,
+        total_sold=total_sold,
+        remaining_open_count=remaining_open_count,
+        avg_sale_duration_seconds=avg_sale_duration_seconds,
         last_transition_at=last_transition_at,
     )
 

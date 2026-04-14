@@ -3,6 +3,7 @@
   import { coupangTravelApi } from '$lib/api/coupangTravel';
   import type { CoupangPublicHistoryResponse } from '$lib/types';
   import { isAbortError } from '$lib/utils/isAbortError.js';
+  import { formatDuration } from '$lib/utils/coupangHistoryDisplay';
   import { createPagePagination } from '$lib/utils/pagination.svelte';
   import PublicCoupangHistoryCard from '$lib/components/coupang/PublicCoupangHistoryCard.svelte';
   import PublicCoupangHistoryTable from '$lib/components/coupang/PublicCoupangHistoryTable.svelte';
@@ -14,10 +15,9 @@
     summary: {
       total: 0,
       cancellation_count: 0,
-      sold_out_count: 0,
-      sale_observed_count: 0,
-      open_count: 0,
-      avg_observed_sale_seconds: null,
+      total_sold: 0,
+      remaining_open_count: 0,
+      avg_sale_duration_seconds: null,
       last_transition_at: null
     },
     slot_time_options: [],
@@ -70,15 +70,6 @@
       hour: '2-digit',
       minute: '2-digit'
     });
-  }
-
-  function formatDuration(seconds: number | null | undefined): string {
-    if (seconds == null || Number.isNaN(seconds)) return '-';
-    const rounded = Math.max(0, Math.round(seconds));
-    if (rounded < 60) return `약 ${rounded}초`;
-    const minutes = Math.floor(rounded / 60);
-    const rest = rounded % 60;
-    return rest > 0 ? `약 ${minutes}분 ${rest}초` : `약 ${minutes}분`;
   }
 
   function formatPageLabel(): string {
@@ -173,7 +164,7 @@
       <div class="space-y-1">
         <h2 class="text-lg font-semibold text-foreground">쿠팡 취소표 이력</h2>
         <p class="text-sm text-muted-foreground">
-          공개 페이지는 옵션 날짜+시간 기준 전환 이력만 보여준다. 판매 소요시간은 폴링 기반 관측치다.
+          공개 페이지는 옵션 날짜+시간 단위 병합 이력을 보여준다. 판매 소요시간은 폴링 기반 관측치다.
         </p>
         {#if summary.last_transition_at}
           <p class="text-xs text-muted-foreground">최근 전환 {formatShortDateTime(summary.last_transition_at)}</p>
@@ -187,20 +178,20 @@
     <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-foreground">{summary.total.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">총 전환</div>
+        <div class="mt-1 text-xs text-muted-foreground">관측 슬롯</div>
       </div>
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-emerald-600">{summary.cancellation_count.toLocaleString()}</div>
         <div class="mt-1 text-xs text-muted-foreground">취소표발생</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-rose-600">{summary.sold_out_count.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">다시 매진</div>
+        <div class="text-3xl font-bold text-rose-600">{summary.total_sold.toLocaleString()}</div>
+        <div class="mt-1 text-xs text-muted-foreground">판매</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-sky-600">{formatDuration(summary.avg_observed_sale_seconds)}</div>
-        <div class="mt-1 text-xs text-muted-foreground">평균 판매 관측</div>
-        <div class="mt-1 text-[11px] text-muted-foreground">잔여석 {summary.open_count.toLocaleString()}건</div>
+        <div class="text-3xl font-bold text-sky-600">{formatDuration(summary.avg_sale_duration_seconds)}</div>
+        <div class="mt-1 text-xs text-muted-foreground">평균 판매 소요</div>
+        <div class="mt-1 text-[11px] text-muted-foreground">잔여석 {summary.remaining_open_count.toLocaleString()}건</div>
       </div>
     </div>
 
@@ -274,11 +265,11 @@
     <section class="space-y-3">
       <div class="flex items-center justify-between">
         <h3 class="text-sm font-semibold text-foreground">
-          전환 이력
+          병합 이력
           <span class="ml-1 font-normal text-muted-foreground">({formatPageLabel()})</span>
         </h3>
         <p class="text-xs text-muted-foreground">
-          목록은 날짜+시간 기준이며, 판매 시간은 관측치다.
+          목록은 날짜+시간 기준으로 병합되며, 판매 시간은 관측치다.
         </p>
       </div>
 
