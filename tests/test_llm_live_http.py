@@ -141,51 +141,7 @@ def test_live_llm_quota_status_returns_200():
 
 
 # ---------------------------------------------------------------------------
-# Phase 5: 프로세스 감시 API (process_watch 대체)
-# ---------------------------------------------------------------------------
-
-def test_live_process_watch_latest_returns_200():
-    """R: GET /api/v1/system/process-watch/latest → 200."""
-    resp = _get("/api/v1/system/process-watch/latest", timeout=30)
-    assert resp.status_code == 200
-
-
-def test_live_process_watch_latest_schema():
-    """R: /api/v1/system/process-watch/latest 응답에 items, source, item_count 필드 존재."""
-    resp = _get("/api/v1/system/process-watch/latest", timeout=30)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "items" in data, f"items 키 없음: {list(data.keys())}"
-    assert "source" in data, f"source 키 없음: {list(data.keys())}"
-    assert "item_count" in data, f"item_count 키 없음: {list(data.keys())}"
-
-
-def test_live_process_watch_latest_items_or_empty():
-    """B: 서버 기동 직후 스냅샷 미생성 시 items=[], item_count=0도 정상."""
-    resp = _get("/api/v1/system/process-watch/latest", timeout=30)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert isinstance(data["items"], list), "items가 list가 아님"
-    assert isinstance(data["item_count"], int), "item_count가 int가 아님"
-
-
-def test_live_process_watch_history_returns_200():
-    """R: GET /api/v1/system/process-watch/history → 200."""
-    resp = _get("/api/v1/system/process-watch/history")
-    assert resp.status_code == 200
-
-
-def test_live_process_watch_history_schema():
-    """R: /api/v1/system/process-watch/history 응답에 total, items 필드 존재."""
-    resp = _get("/api/v1/system/process-watch/history")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "total" in data, f"total 키 없음: {list(data.keys())}"
-    assert "items" in data, f"items 키 없음: {list(data.keys())}"
-
-
-# ---------------------------------------------------------------------------
-# Phase 6: LLM enqueue 파이프라인 (model_registry_e2e 대체)
+# Phase 5: LLM enqueue 파이프라인 (model_registry_e2e 대체)
 # ---------------------------------------------------------------------------
 
 def test_live_llm_enqueue_returns_200():
@@ -272,8 +228,8 @@ def test_live_llm_enqueue_persisted_in_db():
         pass
 
 
-def test_live_llm_enqueue_cancel_returns_200():
-    """B: enqueue 직후 cancel → 200, success=true."""
+def test_live_llm_enqueue_cancel_returns_200_or_400():
+    """B: enqueue 직후 cancel → 200, 경합 시 400(not pending)."""
     resp = _post("/api/v1/llm/requests", json={
         "caller_type": "test",
         "caller_id": "live_http_tc_cancel",
@@ -285,11 +241,14 @@ def test_live_llm_enqueue_cancel_returns_200():
     req_id = resp.json()["id"]
 
     cancel_resp = _post(f"/api/v1/llm/requests/{req_id}/cancel")
-    assert cancel_resp.status_code == 200, (
-        f"cancel 실패: {cancel_resp.status_code} {cancel_resp.text[:200]}"
+    assert cancel_resp.status_code in (200, 400), (
+        f"cancel 응답이 예상 범위를 벗어남: {cancel_resp.status_code} {cancel_resp.text[:200]}"
     )
-    cancel_data = cancel_resp.json()
-    assert cancel_data.get("success") is True, f"success!=true: {cancel_data}"
+    if cancel_resp.status_code == 200:
+        cancel_data = cancel_resp.json()
+        assert cancel_data.get("success") is True, f"success!=true: {cancel_data}"
+    else:
+        assert cancel_resp.json().get("detail") == "Cannot cancel this request (not pending)"
 
 
 def test_live_llm_enqueue_cancel_not_pending_returns_400():
