@@ -5,9 +5,11 @@
   import {
     coupangTravelApi,
     type CancellationStatsResponse,
-    type CancellationByProductResponse
+    type CancellationByProductResponse,
+    type CoupangStatusSummary
   } from '$lib/api/coupangTravel';
   import type { MonitoringEvent } from '$lib/types';
+  import { formatKoreanDateTime } from '$lib/utils/coupangHistoryDisplay';
   import { createPagePagination } from '$lib/utils/pagination.svelte';
 
   // ── 상태 ─────────────────────────────────────────────────────────────────────
@@ -19,6 +21,7 @@
   let hourlyStats = $state<CancellationStatsResponse>({ items: [], summary: { total: 0, avg_per_day: 0, peak_hour: null } });
   let products = $state<CancellationByProductResponse>({ items: [] });
   let events = $state<MonitoringEvent[]>([]);
+  let status = $state<CoupangStatusSummary | null>(null);
 
   const pager = createPagePagination(20);
 
@@ -35,6 +38,11 @@
   let bizItemId = $state<number | null>(null);
 
   const hoursParam = $derived(selectedHours.length > 0 ? selectedHours.join(',') : undefined);
+  const recentDetectedAt = $derived(events[0]?.timestamp ?? null);
+  const lastCheckedAt = $derived(
+    status?.worker_health.updated_at ?? status?.worker_health.last_event_at ?? null
+  );
+  const lastCheckedTone = $derived(status?.worker_health.updated_at ? 'text-sky-600' : 'text-amber-600');
 
   // ── 데이터 로드 ───────────────────────────────────────────────────────────────
   async function loadStats(): Promise<void> {
@@ -88,11 +96,20 @@
     }
   }
 
+  async function loadStatus(): Promise<void> {
+    try {
+      status = await coupangTravelApi.getStatus();
+    } catch (e) {
+      status = null;
+    }
+  }
+
   async function loadAll(): Promise<void> {
     loading = true;
     error = '';
+    status = null;
     pager.reset();
-    await Promise.all([loadStats(), loadEvents()]);
+    await Promise.all([loadStats(), loadEvents(), loadStatus()]);
     loading = false;
   }
 
@@ -244,16 +261,20 @@
         <div class="text-xs text-muted-foreground mt-1">총 감지 횟수</div>
       </div>
       <div class="card text-center py-4">
-        <div class="text-3xl font-bold text-primary">{stats.summary.avg_per_day.toFixed(1)}</div>
-        <div class="text-xs text-muted-foreground mt-1">일 평균</div>
+        <div class="text-3xl font-bold text-primary">
+          {formatKoreanDateTime(recentDetectedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+        </div>
+        <div class="text-xs text-muted-foreground mt-1">최근 감지</div>
+      </div>
+      <div class="card text-center py-4">
+        <div class="text-3xl font-bold {lastCheckedTone}">
+          {formatKoreanDateTime(lastCheckedAt, { hour: '2-digit', minute: '2-digit' })}
+        </div>
+        <div class="text-xs text-muted-foreground mt-1">마지막 확인</div>
       </div>
       <div class="card text-center py-4">
         <div class="text-3xl font-bold text-warning">{formatHour(stats.summary.peak_hour)}</div>
         <div class="text-xs text-muted-foreground mt-1">피크 시간</div>
-      </div>
-      <div class="card text-center py-4">
-        <div class="text-3xl font-bold text-success">{products.items.length}</div>
-        <div class="text-xs text-muted-foreground mt-1">감지 상품 수</div>
       </div>
     </div>
 
@@ -337,7 +358,10 @@
     <!-- 상품별 통계 -->
     {#if products.items.length > 0}
       <section class="card">
-        <h2 class="text-sm font-semibold mb-3 text-foreground">상품별 취소표 감지 현황</h2>
+        <h2 class="text-sm font-semibold mb-3 text-foreground">
+          상품별 취소표 감지 현황
+          <span class="text-muted-foreground font-normal ml-1">({products.items.length}개)</span>
+        </h2>
         <div class="space-y-2">
           {#each products.items as p, i (p.biz_item_id)}
             {@const maxCount = products.items[0]?.total_count ?? 1}
@@ -356,7 +380,7 @@
                 </div>
                 {#if p.last_detected}
                   <p class="text-xs text-muted-foreground mt-0.5">
-                    마지막 감지: {new Date(p.last_detected).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    마지막 감지: {formatKoreanDateTime(p.last_detected, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     {#if p.avg_interval_hours != null}
                       &middot; 평균 {p.avg_interval_hours.toFixed(1)}h 간격
                     {/if}

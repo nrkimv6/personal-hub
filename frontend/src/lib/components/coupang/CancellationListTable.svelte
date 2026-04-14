@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { MonitoringEvent } from '$lib/types';
+  import { formatKoreanDateTime } from '$lib/utils/coupangHistoryDisplay';
 
   interface Props {
     events: MonitoringEvent[];
@@ -7,13 +8,6 @@
 
   let { events }: Props = $props();
 
-  function formatDatetime(ts: string): string {
-    const d = new Date(ts);
-    return d.toLocaleString('ko-KR', {
-      year: '2-digit', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit'
-    });
-  }
 </script>
 
 <div class="hidden md:block overflow-x-auto">
@@ -30,7 +24,7 @@
     <tbody>
       {#each events as ev (ev.id)}
         <tr>
-          <td class="text-sm text-muted-foreground whitespace-nowrap">{formatDatetime(ev.timestamp)}</td>
+          <td class="text-sm text-muted-foreground whitespace-nowrap">{formatKoreanDateTime(ev.timestamp, { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
           <td class="font-medium text-sm">{ev.biz_item_name ?? '-'}</td>
           <td class="text-sm text-muted-foreground">{ev.business_name ?? '-'}</td>
           <td class="text-sm">{ev.schedule_date ?? '-'}</td>

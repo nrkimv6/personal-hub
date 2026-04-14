@@ -1,22 +1,12 @@
 <script lang="ts">
   import type { CoupangPublicHistoryItem } from '$lib/types';
-  import { formatDuration } from '$lib/utils/coupangHistoryDisplay';
+  import { formatDuration, formatKoreanDateTime } from '$lib/utils/coupangHistoryDisplay';
 
   interface Props {
     items: CoupangPublicHistoryItem[];
   }
 
   let { items }: Props = $props();
-
-  function formatDatetime(ts: string): string {
-    const date = new Date(ts);
-    return date.toLocaleString('ko-KR', {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  }
 
   function statusTone(statusLabel: string): string {
     switch (statusLabel) {
@@ -43,12 +33,7 @@
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-semibold text-foreground">{item.option_label}</p>
-          <p class="mt-1 text-xs text-muted-foreground">
-            발견 {formatDatetime(item.timestamp)}
-            {#if item.slot_time_label}
-              · {item.slot_time_label}
-            {/if}
-          </p>
+          <p class="mt-1 text-xs text-muted-foreground">발견 {formatKoreanDateTime(item.timestamp, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
         </div>
 
         <span class={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${statusTone(item.status_label)}`}>

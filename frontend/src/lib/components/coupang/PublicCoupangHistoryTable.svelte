@@ -1,24 +1,12 @@
 <script lang="ts">
   import type { CoupangPublicHistoryItem } from '$lib/types';
-  import { formatDuration } from '$lib/utils/coupangHistoryDisplay';
+  import { formatDuration, formatKoreanDateTime } from '$lib/utils/coupangHistoryDisplay';
 
   interface Props {
     items: CoupangPublicHistoryItem[];
   }
 
   let { items }: Props = $props();
-
-  function formatDatetime(ts: string): string {
-    const d = new Date(ts);
-    return d.toLocaleString('ko-KR', {
-      year: '2-digit',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  }
 
   function statusTone(statusLabel: string): string {
     switch (statusLabel) {
@@ -53,23 +41,14 @@
     <tbody>
       {#each items as item (item.id)}
         <tr>
-          <td class="whitespace-nowrap text-sm text-muted-foreground">{formatDatetime(item.timestamp)}</td>
+          <td class="whitespace-nowrap text-sm text-muted-foreground">{formatKoreanDateTime(item.timestamp, { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
           <td>
             <span class={`badge badge-sm shrink-0 ${statusTone(item.status_label)}`}>
               {item.status_label}
             </span>
           </td>
           <td>
-            <div class="space-y-1">
-              <div class="text-sm font-medium text-foreground">{item.option_label}</div>
-              <div class="text-xs text-muted-foreground">
-                {#if item.slot_time_label}
-                  {item.slot_time_label}
-                {:else}
-                  -
-                {/if}
-              </div>
-            </div>
+            <div class="text-sm font-medium text-foreground">{item.option_label}</div>
           </td>
           <td class="text-sm">{item.schedule_date ?? '-'}</td>
           <td class="text-center text-sm text-muted-foreground">

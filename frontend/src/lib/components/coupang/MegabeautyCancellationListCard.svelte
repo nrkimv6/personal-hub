@@ -1,21 +1,12 @@
 <script lang="ts">
   import type { MonitoringEvent } from '$lib/types';
-  import { normalizeHistoryText } from '$lib/utils/coupangHistoryDisplay';
+  import { formatKoreanDateTime, normalizeHistoryText } from '$lib/utils/coupangHistoryDisplay';
 
   interface Props {
     events: MonitoringEvent[];
   }
 
   let { events }: Props = $props();
-
-  function formatDatetime(ts: string): string {
-    const d = new Date(ts);
-    return (
-      d.toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) +
-      ' ' +
-      d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-    );
-  }
 
   function getDisplayItemName(name: string | null | undefined): string {
     return normalizeHistoryText(name) || '메가뷰티쇼';
@@ -35,7 +26,7 @@
         </span>
       </div>
       <div class="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-        <span>{formatDatetime(ev.timestamp)}</span>
+        <span>{formatKoreanDateTime(ev.timestamp, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
         {#if ev.schedule_date}
           <span class="text-foreground font-medium">여행일 {ev.schedule_date}</span>
         {/if}

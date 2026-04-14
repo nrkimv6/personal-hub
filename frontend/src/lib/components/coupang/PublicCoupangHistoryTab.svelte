@@ -159,22 +159,22 @@
       </button>
     </div>
 
-    <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-foreground">{summary.total.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">전체 이력</div>
+        <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">전체 이력</div>
       </div>
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-rose-600">{summary.closed_pair_count.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">다시 매진</div>
+        <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">다시 매진</div>
       </div>
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-sky-600">{summary.open_pair_count.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">현재 열림</div>
+        <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">현재 열림</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-foreground">{formatDuration(summary.avg_closed_duration_seconds)}</div>
-        <div class="mt-1 text-xs text-muted-foreground">평균 다시 매진 소요</div>
+        <div class="text-2xl font-semibold text-foreground">{formatDuration(summary.avg_closed_duration_seconds)}</div>
+        <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">평균 다시 매진 소요</div>
       </div>
     </div>
 
@@ -248,12 +248,10 @@
     <section class="space-y-3">
       <div class="flex items-center justify-between">
         <h3 class="text-sm font-semibold text-foreground">
-          공개 이력 요약
+          빈자리 요약
           <span class="ml-1 font-normal text-muted-foreground">({formatPageLabel()})</span>
         </h3>
-        <p class="text-xs text-muted-foreground">
-          목록은 발견 시각 기준으로 정렬되며, 같은 슬롯의 열림과 다시 매진을 분리해서 보여준다.
-        </p>
+        <p class="text-xs text-muted-foreground">빈자리와 다시 매진을 발견 시각 기준으로 나눠 보여준다.</p>
       </div>
 
       <PublicCoupangHistoryCard {items} />
