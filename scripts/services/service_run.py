@@ -32,6 +32,7 @@ from scripts.services.service_utils import (
     pick_listener_pid,
     read_pid_file,
     remove_pid_file,
+    sync_frontend_pid_file,
     setup_service_logger,
     write_pid_file,
 )
@@ -207,11 +208,14 @@ class ServiceRunner:
         pid_file = self._frontend_pid_file()
         listener_pid = self._wait_for_frontend_listener(proc)
         pid_to_record = listener_pid or (proc.pid if proc.poll() is None else None)
-        if pid_to_record is not None:
-            write_pid_file(pid_file, pid_to_record)
-        else:
-            remove_pid_file(pid_file)
-        return pid_to_record
+        return sync_frontend_pid_file(
+            pid_file,
+            self.frontend_port,
+            pid_to_record,
+            listener_pid_resolver=lambda _port: listener_pid,
+            writer=write_pid_file,
+            remover=remove_pid_file,
+        )
 
     def _frontend_is_healthy(self) -> tuple[bool, str | None]:
         pid_file = self._frontend_pid_file()
