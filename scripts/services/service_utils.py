@@ -174,28 +174,6 @@ def remove_pid_file(path: Path | str) -> None:
         path.unlink(missing_ok=True)
 
 
-def sync_frontend_pid_file(
-    pid_file: Path | str,
-    frontend_port: int,
-    process_pid: int | None,
-    listener_pid_resolver=pick_listener_pid,
-    writer=write_pid_file,
-    remover=remove_pid_file,
-) -> int | None:
-    """프론트엔드 PID 파일을 실제 listener PID 기준으로 동기화한다.
-
-    listener PID가 있으면 그 값을 우선 기록하고, 없으면 launcher PID를 기록한다.
-    둘 다 없으면 PID 파일을 제거한다.
-    """
-    listener_pid = listener_pid_resolver(frontend_port)
-    pid_to_record = listener_pid or process_pid
-    if pid_to_record is not None:
-        writer(pid_file, pid_to_record)
-    else:
-        remover(pid_file)
-    return pid_to_record
-
-
 # ── 로깅 유틸 ───────────────────────────────────────────────────
 def setup_service_logger(
     name: str,
