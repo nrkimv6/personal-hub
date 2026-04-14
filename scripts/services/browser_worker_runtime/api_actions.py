@@ -8,7 +8,7 @@ import time
 import urllib.request
 
 from app.core.runtime_fingerprint import build_runtime_fingerprint_snapshot
-from scripts.services.browser_worker_runtime.runtime import GREEN, RED, RESET, YELLOW, cprint
+from scripts.services.browser_worker_runtime.runtime import GRAY, GREEN, RED, RESET, YELLOW, cprint
 
 
 def _manager():
@@ -98,6 +98,11 @@ def restart_api(manager):
     app_mode = _manager_app_mode(manager)
     expected_snapshot = build_runtime_fingerprint_snapshot(app_mode=app_mode)
     expected_fingerprint = str(expected_snapshot["runtime_fingerprint"])
+    cprint(
+        f"API restart target: port={manager.api_port} app_mode={app_mode} "
+        f"expected_fp={expected_fingerprint[:12]}...",
+        GRAY,
+    )
 
     url = f"http://localhost:{manager.api_port}/api/v1/system/self-restart?delay=2&reason=browser_workers_py"
     killed = False
@@ -112,6 +117,7 @@ def restart_api(manager):
 
         pids = mgr.find_pids_on_port(manager.api_port)
         if pids:
+            cprint(f"API port {manager.api_port} live pids: {pids}", GRAY)
             for pid in pids:
                 cprint(f"Killing API process (PID: {pid})...")
                 mgr.kill_pid(pid)
@@ -123,10 +129,17 @@ def restart_api(manager):
             api_pid_file = manager.pid_dir / f"api{manager.pid_suffix}.pid"
             stale_pid = mgr.read_pid_file(api_pid_file)
             if stale_pid and mgr.is_process_alive(stale_pid):
-                cprint(f"Service runner alive (PID: {stale_pid}) but API port dead", YELLOW)
+                cprint(
+                    f"Service runner alive (PID: {stale_pid}) but API port dead; "
+                    f"restarting {service_name}",
+                    YELLOW,
+                )
                 killed = manager._nssm_restart_elevated(service_name)
             elif stale_pid:
-                cprint(f"Stale PID file (PID: {stale_pid}, already dead)", YELLOW)
+                cprint(
+                    f"Stale PID file for {service_name} (PID: {stale_pid}, already dead)",
+                    YELLOW,
+                )
                 mgr.remove_pid_file(api_pid_file)
                 killed = manager._nssm_restart_elevated(service_name)
 
