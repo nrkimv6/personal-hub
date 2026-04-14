@@ -56,6 +56,7 @@ class TestInlineMergeConflictAutoRetry:
     def test_inline_merge_conflict_auto_retry_R(self, tmp_path):
         """R(Right): conflict 시 _launch_conflict_resolver_process 자동 호출"""
         cl = _load_listener()
+        dr_merge_mod = sys.modules["_dr_merge"]
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
@@ -70,7 +71,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
-             patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": False, "message": "fail"}) as mock_resolve, \
+             patch.object(dr_merge_mod, "_launch_conflict_resolver_process", return_value={"success": False, "message": "fail"}) as mock_resolve, \
              patch.object(cl, "_cleanup_process_state"), \
              patch.object(cl.WorktreeManager, "remove", return_value=True):
             mock_wf = MagicMock()
@@ -83,6 +84,7 @@ class TestInlineMergeConflictAutoRetry:
     def test_inline_merge_conflict_auto_retry_success_R(self, tmp_path):
         """R(Right): resolve 성공 → merge_status='merged' 전이"""
         cl = _load_listener()
+        dr_merge_mod = sys.modules["_dr_merge"]
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
@@ -110,7 +112,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
-             patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(dr_merge_mod, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
              patch("subprocess.run", side_effect=mock_run_fn), \
@@ -126,6 +128,7 @@ class TestInlineMergeConflictAutoRetry:
     def test_inline_merge_conflict_auto_retry_failure_E(self, tmp_path):
         """E(Error): resolve 실패 → merge_status='conflict' 최종"""
         cl = _load_listener()
+        dr_merge_mod = sys.modules["_dr_merge"]
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
@@ -146,7 +149,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
-             patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": False, "message": "markers remain"}), \
+             patch.object(dr_merge_mod, "_launch_conflict_resolver_process", return_value={"success": False, "message": "markers remain"}), \
              patch.object(cl, "_cleanup_process_state"), \
              patch("subprocess.run", return_value=MagicMock(returncode=0)), \
              patch.object(cl.WorktreeManager, "remove", return_value=True):
@@ -160,6 +163,7 @@ class TestInlineMergeConflictAutoRetry:
     def test_inline_merge_conflict_resolve_success_removes_worktree_R(self, tmp_path):
         """R(Right): auto-resolve 성공 시 WorktreeManager.remove() 호출됨"""
         cl = _load_listener()
+        dr_merge_mod = sys.modules["_dr_merge"]
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
@@ -181,7 +185,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
-             patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(dr_merge_mod, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
              patch("subprocess.run", side_effect=mock_run_fn), \
@@ -196,6 +200,7 @@ class TestInlineMergeConflictAutoRetry:
     def test_inline_merge_conflict_resolve_success_remove_failure_ignored_E(self, tmp_path):
         """E(Error): WorktreeManager.remove() 예외 시 merge_status 여전히 'merged'"""
         cl = _load_listener()
+        dr_merge_mod = sys.modules["_dr_merge"]
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
@@ -223,7 +228,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
-             patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(dr_merge_mod, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
              patch("subprocess.run", side_effect=mock_run_fn), \
@@ -238,6 +243,7 @@ class TestInlineMergeConflictAutoRetry:
     def test_inline_merge_conflict_verify_exception_removes_worktree_B(self, tmp_path):
         """B(Boundary): verify 예외 경로에서도 WorktreeManager.remove() 호출됨"""
         cl = _load_listener()
+        dr_merge_mod = sys.modules["_dr_merge"]
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
@@ -257,7 +263,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_queue.release_merge_turn"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
-             patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(dr_merge_mod, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
              patch("subprocess.run", side_effect=mock_run_fail), \
