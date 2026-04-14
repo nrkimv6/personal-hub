@@ -8,11 +8,14 @@ T5: T4/T5 백틱 없는 체크박스 — monitor-page admin API 통합 테스트
 이 테스트는 TestClient 기반 (실서버 불필요).
 executor_service.run_async를 mock하여 run_e2e_with_fix 경로 진입 여부만 검증.
 """
+import base64
 import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
+from app.modules.dev_runner.schemas import RunStatusResponse
+from app.modules.dev_runner.services.executor_service import executor_service
 
 pytestmark = pytest.mark.http
 
@@ -84,3 +87,50 @@ def test_post_api_run_no_plan_returns_ok(api_client):
     # plan_file=None + test_source=None → test_source 필수 규칙으로 서버 측 오류 (500)
     # 중요: 이 경로는 run_plan_tests가 아닌 에러 게이트에서 걸림 (기존 동작)
     assert response.status_code in (200, 500)
+
+
+def test_post_run_then_get_plan_items_reflects_completed_checkboxes(api_client, tmp_path):
+    """T5: /run 후 /plans/{path}/items 가 완료된 체크박스를 반영하는지 검증"""
+    plan_file = tmp_path / "t4t5-regression.md"
+    plan_file.write_text(
+        "# Regression Plan\n\n"
+        "## Phase T4: E2E\n\n"
+        "- [ ] T4 E2E: regression target\n",
+        encoding="utf-8",
+    )
+
+    async def _fake_start_dev_runner(request):
+        plan_file.write_text(
+            "# Regression Plan\n\n"
+            "## Phase T4: E2E\n\n"
+            "- [x] T4 E2E: regression target\n",
+            encoding="utf-8",
+        )
+        return RunStatusResponse(
+            running=True,
+            listener_alive=True,
+            redis_connected=True,
+            runner_id="t4t5reg1",
+        )
+
+    encoded = base64.urlsafe_b64encode(str(plan_file).encode()).decode().rstrip("=")
+
+    with patch.object(executor_service, "start_dev_runner", new=AsyncMock(side_effect=_fake_start_dev_runner)), \
+         patch("app.modules.dev_runner.services.plan_service.plan_service.validate_path", return_value=True):
+        run_resp = api_client.post(
+            f"{BASE_URL}/run",
+            json={
+                "plan_file": str(plan_file),
+                "engine": "gemini",
+                "dry_run": True,
+                "test_source": "t5_regression",
+            },
+        )
+        assert run_resp.status_code == 200, f"/run 실패: {run_resp.status_code} {run_resp.text}"
+
+        items_resp = api_client.get(f"{BASE_URL}/plans/{encoded}/items")
+
+    assert items_resp.status_code == 200, f"/plans/{{path}}/items 실패: {items_resp.status_code} {items_resp.text}"
+    payload = items_resp.json()
+    assert payload["progress"]["percent"] == 100
+    assert payload["phases"][0]["items"][0]["checked"] is True
