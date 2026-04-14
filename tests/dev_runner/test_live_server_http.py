@@ -10,6 +10,8 @@
 import pytest
 import httpx
 
+from app.core.runtime_fingerprint import build_runtime_fingerprint_snapshot
+
 pytestmark = pytest.mark.http_live
 
 BASE_URL = "http://localhost:8001"
@@ -42,6 +44,8 @@ def test_live_runtime_fingerprint_endpoint():
         pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
     assert resp.status_code == 200
     data = resp.json()
+    expected = build_runtime_fingerprint_snapshot()
     assert "runtime_fingerprint" in data
     assert "source_fingerprint" in data
     assert isinstance(data.get("source_files"), list)
+    assert data["source_fingerprint"] == expected["source_fingerprint"]
