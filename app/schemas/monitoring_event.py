@@ -95,7 +95,7 @@ class MonitoringEventList(BaseModel):
 
 
 class CoupangPublicHistoryItem(BaseModel):
-    """쿠팡 공개 전환 이력 개별 항목"""
+    """쿠팡 공개 병합 이력 개별 항목"""
     id: int
     schedule_id: int
     timestamp: datetime
@@ -105,28 +105,26 @@ class CoupangPublicHistoryItem(BaseModel):
     slot_key: str
     option_label: str
     slot_time_label: Optional[str] = None
-    transition_type: str
-    transition_label: str
-    delta_count: int = 1
-    stock_count: Optional[int] = None
-    previous_stock_count: Optional[int] = None
-    observed_sale_seconds: Optional[float] = None
-    observed_open_seconds: Optional[float] = None
+    cancellation_count: int = 0
+    sold_count: int = 0
+    remaining_open_count: int = 0
+    sale_durations: List[float] = Field(default_factory=list)
+    open_durations: List[float] = Field(default_factory=list)
+    last_transition_label: str = "잔여석발생"
 
 
 class CoupangPublicHistorySummary(BaseModel):
-    """쿠팡 공개 전환 이력 요약"""
-    total: int = 0
+    """쿠팡 공개 병합 이력 요약"""
+    total: int = 0  # 병합 슬롯 수
     cancellation_count: int = 0
-    sold_out_count: int = 0
-    sale_observed_count: int = 0
-    open_count: int = 0
-    avg_observed_sale_seconds: Optional[float] = None
+    total_sold: int = 0
+    remaining_open_count: int = 0
+    avg_sale_duration_seconds: Optional[float] = None
     last_transition_at: Optional[datetime] = None
 
 
 class CoupangPublicHistoryResponse(BaseModel):
-    """쿠팡 공개 전환 이력 응답"""
+    """쿠팡 공개 병합 이력 응답"""
     items: List[CoupangPublicHistoryItem]
     summary: CoupangPublicHistorySummary
     slot_time_options: List[str] = Field(default_factory=list)

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { CoupangPublicHistoryItem } from '$lib/types';
+  import { formatDurationList } from '$lib/utils/coupangHistoryDisplay';
 
   interface Props {
     items: CoupangPublicHistoryItem[];
@@ -17,47 +18,23 @@
     });
   }
 
-  function formatDuration(seconds: number | null | undefined): string {
-    if (seconds == null || Number.isNaN(seconds)) return '-';
-    const rounded = Math.max(0, Math.round(seconds));
-    if (rounded < 60) return `약 ${rounded}초`;
-    const minutes = Math.floor(rounded / 60);
-    const rest = rounded % 60;
-    return rest > 0 ? `약 ${minutes}분 ${rest}초` : `약 ${minutes}분`;
-  }
-
-  function transitionTone(transitionType: string): string {
-    switch (transitionType) {
-      case 'cancellation':
+  function transitionTone(lastTransitionLabel: string): string {
+    switch (lastTransitionLabel) {
+      case '취소표발생':
         return 'bg-emerald-100 text-emerald-700';
-      case 'sold_out':
+      case '다시 매진':
         return 'bg-rose-100 text-rose-700';
-      case 'sale_observed':
+      case '판매 관측':
         return 'bg-sky-100 text-sky-700';
-      case 'bulk_sale':
-        return 'bg-amber-100 text-amber-700';
-      case 'open':
+      case '잔여석발생':
         return 'bg-violet-100 text-violet-700';
       default:
         return 'bg-muted text-muted-foreground';
     }
   }
 
-  function transitionTitle(transitionType: string): string {
-    switch (transitionType) {
-      case 'cancellation':
-        return '취소표발생';
-      case 'sold_out':
-        return '다시 매진';
-      case 'sale_observed':
-        return '판매 관측';
-      case 'bulk_sale':
-        return '재고 감소';
-      case 'open':
-        return '잔여석발생';
-      default:
-        return transitionType;
-    }
+  function transitionTitle(lastTransitionLabel: string): string {
+    return lastTransitionLabel || '-';
   }
 </script>
 
@@ -75,8 +52,8 @@
           </p>
         </div>
 
-        <span class={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${transitionTone(item.transition_type)}`}>
-          {transitionTitle(item.transition_type)}
+        <span class={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${transitionTone(item.last_transition_label)}`}>
+          {transitionTitle(item.last_transition_label)}
         </span>
       </div>
 
@@ -86,23 +63,20 @@
           <div class="mt-0.5 text-sm font-medium text-foreground">{item.schedule_date ?? '-'}</div>
         </div>
         <div class="rounded-md bg-muted/40 px-2 py-1.5">
-          <div class="text-[11px] text-muted-foreground">전환</div>
-          <div class="mt-0.5 text-sm font-medium text-foreground">{transitionTitle(item.transition_type)}</div>
+          <div class="text-[11px] text-muted-foreground">상태</div>
+          <div class="mt-0.5 text-sm font-medium text-foreground">{transitionTitle(item.last_transition_label)}</div>
         </div>
         <div class="rounded-md bg-muted/40 px-2 py-1.5">
           <div class="text-[11px] text-muted-foreground">수량</div>
           <div class="mt-0.5 text-sm font-medium text-foreground">
-            {item.delta_count > 0 ? `x${item.delta_count}` : '-'}
+            취소 {item.cancellation_count} · 판매 {item.sold_count} · 잔여 {item.remaining_open_count}
           </div>
         </div>
         <div class="rounded-md bg-muted/40 px-2 py-1.5">
           <div class="text-[11px] text-muted-foreground">소요시간</div>
-          <div class="mt-0.5 text-sm font-medium text-foreground">
-            {item.observed_sale_seconds != null
-              ? formatDuration(item.observed_sale_seconds)
-              : item.observed_open_seconds != null
-                ? formatDuration(item.observed_open_seconds)
-                : '-'}
+          <div class="mt-0.5 space-y-1 text-[11px] font-medium text-foreground">
+            <div>판매 {formatDurationList(item.sale_durations)}</div>
+            <div>잔여 {formatDurationList(item.open_durations)}</div>
           </div>
         </div>
       </div>
