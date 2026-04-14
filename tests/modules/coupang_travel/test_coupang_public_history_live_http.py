@@ -33,26 +33,27 @@ def test_live_public_history_200_and_shape():
 
     summary = data["summary"]
     assert "total" in summary
-    assert "cancellation_count" in summary
-    assert "total_sold" in summary
-    assert "remaining_open_count" in summary
-    assert "avg_sale_duration_seconds" in summary
-    assert "sold_out_count" not in summary
-    assert "sale_observed_count" not in summary
-    assert "open_count" not in summary
+    assert "closed_pair_count" in summary
+    assert "open_pair_count" in summary
+    assert "avg_closed_duration_seconds" in summary
+    assert "cancellation_count" not in summary
+    assert "total_sold" not in summary
+    assert "remaining_open_count" not in summary
     assert isinstance(summary["total"], int)
-    assert isinstance(summary["cancellation_count"], int)
-    assert isinstance(summary["total_sold"], int)
-    assert isinstance(summary["remaining_open_count"], int)
+    assert isinstance(summary["closed_pair_count"], int)
+    assert isinstance(summary["open_pair_count"], int)
     if data["items"]:
         item = data["items"][0]
-        assert isinstance(item["sale_durations"], list)
-        assert item["last_transition_label"] in {
-            "취소표발생",
-            "다시 매진",
-            "판매 관측",
-            "잔여석발생",
-        }
+        assert isinstance(item["id"], str)
+        assert "opened_at" in item
+        assert "closed_at" in item
+        assert item["status_label"] in {"다시 매진", "현재 열림"}
+        if item["status_label"] == "다시 매진":
+            assert item["closed_duration_seconds"] is not None
+            assert item["open_duration_seconds"] is None
+        else:
+            assert item["closed_duration_seconds"] is None
+            assert item["open_duration_seconds"] is not None
 
 
 def test_live_public_history_accepts_date_and_time_filters():

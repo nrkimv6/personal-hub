@@ -14,11 +14,9 @@
     items: [],
     summary: {
       total: 0,
-      cancellation_count: 0,
-      total_sold: 0,
-      remaining_open_count: 0,
-      avg_sale_duration_seconds: null,
-      last_transition_at: null
+      closed_pair_count: 0,
+      open_pair_count: 0,
+      avg_closed_duration_seconds: null
     },
     slot_time_options: [],
     total: 0,
@@ -61,24 +59,13 @@
     return selectedSlotTimes.length > 0 ? selectedSlotTimes.join(',') : undefined;
   }
 
-  function formatShortDateTime(value: string | null): string {
-    if (!value) return '-';
-    const date = new Date(value);
-    return date.toLocaleString('ko-KR', {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  }
-
   function formatPageLabel(): string {
     if (pager.total === 0) return '0건';
     return `${pager.total.toLocaleString()}건`;
   }
 
   async function loadHistory(): Promise<void> {
-    const result = await coupangTravelApi.getPublicHistoryTransitions(
+    const result = await coupangTravelApi.getPublicHistoryPairs(
       {
         schedule_date_from: dateFrom || undefined,
         schedule_date_to: dateTo || undefined,
@@ -164,11 +151,8 @@
       <div class="space-y-1">
         <h2 class="text-lg font-semibold text-foreground">쿠팡 취소표 이력</h2>
         <p class="text-sm text-muted-foreground">
-          공개 페이지는 옵션별 발견 이력을 묶어 보여준다. 시각은 마지막 발견 기준이며, 닫힘 시간은 폴링 기반 관측치다.
+          공개 페이지는 발견 시각 기준의 공개 이력을 보여준다. 같은 슬롯의 열림과 다시 매진은 각각 별도 row로 노출된다.
         </p>
-        {#if summary.last_transition_at}
-          <p class="text-xs text-muted-foreground">최근 발견 {formatShortDateTime(summary.last_transition_at)}</p>
-        {/if}
       </div>
       <button class="btn btn-secondary btn-sm self-start" onclick={() => void loadAll()} disabled={loading}>
         새로고침
@@ -178,20 +162,19 @@
     <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-foreground">{summary.total.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">요약 슬롯</div>
+        <div class="mt-1 text-xs text-muted-foreground">전체 이력</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-emerald-600">{summary.cancellation_count.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">열림 감지</div>
-      </div>
-      <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-rose-600">{summary.total_sold.toLocaleString()}</div>
+        <div class="text-3xl font-bold text-rose-600">{summary.closed_pair_count.toLocaleString()}</div>
         <div class="mt-1 text-xs text-muted-foreground">다시 매진</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-sky-600">{formatDuration(summary.avg_sale_duration_seconds)}</div>
-        <div class="mt-1 text-xs text-muted-foreground">평균 닫힘까지</div>
-        <div class="mt-1 text-[11px] text-muted-foreground">현재 열림 {summary.remaining_open_count.toLocaleString()}건</div>
+        <div class="text-3xl font-bold text-sky-600">{summary.open_pair_count.toLocaleString()}</div>
+        <div class="mt-1 text-xs text-muted-foreground">현재 열림</div>
+      </div>
+      <div class="card py-4 text-center">
+        <div class="text-3xl font-bold text-foreground">{formatDuration(summary.avg_closed_duration_seconds)}</div>
+        <div class="mt-1 text-xs text-muted-foreground">평균 다시 매진 소요</div>
       </div>
     </div>
 
@@ -259,17 +242,17 @@
     </div>
   {:else if items.length === 0}
     <div class="card py-10 text-center text-sm text-muted-foreground">
-      조건에 맞는 공개 전환 이력이 없습니다.
+      조건에 맞는 공개 이력이 없습니다.
     </div>
   {:else}
     <section class="space-y-3">
       <div class="flex items-center justify-between">
         <h3 class="text-sm font-semibold text-foreground">
-          슬롯 요약
+          공개 이력 요약
           <span class="ml-1 font-normal text-muted-foreground">({formatPageLabel()})</span>
         </h3>
         <p class="text-xs text-muted-foreground">
-          목록은 옵션별 발견 이력을 묶어 보여주며, 시각은 마지막 발견 기준이다.
+          목록은 발견 시각 기준으로 정렬되며, 같은 슬롯의 열림과 다시 매진을 분리해서 보여준다.
         </p>
       </div>
 
