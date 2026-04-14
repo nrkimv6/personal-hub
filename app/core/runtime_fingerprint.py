@@ -36,6 +36,28 @@ def _resolve_project_root(project_root: str | Path | None) -> Path:
     return PROJECT_ROOT if project_root is None else Path(project_root).resolve()
 
 
+def _resolve_app_mode(app_mode: str | None) -> str:
+    if app_mode is not None:
+        normalized = str(app_mode).strip()
+        if normalized:
+            return normalized
+
+    env_app_mode = os.environ.get("APP_MODE", "").strip()
+    if env_app_mode:
+        return env_app_mode
+
+    try:
+        from app.config import settings
+
+        settings_app_mode = str(getattr(settings, "APP_MODE", "")).strip()
+        if settings_app_mode:
+            return settings_app_mode
+    except Exception:
+        pass
+
+    return "unknown"
+
+
 def _collect_source_files(project_root: Path, source_files: Sequence[str | Path]) -> list[dict[str, object]]:
     items: list[dict[str, object]] = []
     for source_file in source_files:
@@ -52,6 +74,16 @@ def _collect_source_files(project_root: Path, source_files: Sequence[str | Path]
             record["present"] = False
         items.append(record)
     return items
+
+
+def _build_runtime_fingerprint(source_fingerprint: str, app_mode: str) -> str:
+    runtime_seed = "\n".join(
+        [
+            f"app_mode={app_mode}",
+            f"source_fingerprint={source_fingerprint}",
+        ]
+    )
+    return _sha256_bytes(runtime_seed.encode("utf-8"))
 
 
 def build_runtime_fingerprint_snapshot(
@@ -71,14 +103,8 @@ def build_runtime_fingerprint_snapshot(
     source_seed = "\n".join(f"{item['path']}={item['sha256']}" for item in source_records)
     source_fingerprint = _sha256_bytes(source_seed.encode("utf-8"))
 
-    normalized_app_mode = (app_mode or os.environ.get("APP_MODE") or "unknown").strip() or "unknown"
-    runtime_seed = "\n".join(
-        [
-            f"app_mode={normalized_app_mode}",
-            f"source_fingerprint={source_fingerprint}",
-        ]
-    )
-    runtime_fingerprint = _sha256_bytes(runtime_seed.encode("utf-8"))
+    normalized_app_mode = _resolve_app_mode(app_mode)
+    runtime_fingerprint = _build_runtime_fingerprint(source_fingerprint, normalized_app_mode)
 
     return {
         "runtime_fingerprint": runtime_fingerprint,
@@ -98,8 +124,15 @@ RUNTIME_FINGERPRINT_SNAPSHOT = build_runtime_fingerprint_snapshot()
 
 def get_runtime_fingerprint_snapshot() -> dict[str, object]:
     """Return a copy of the cached import-time snapshot."""
-    return copy.deepcopy(RUNTIME_FINGERPRINT_SNAPSHOT)
+    snapshot = copy.deepcopy(RUNTIME_FINGERPRINT_SNAPSHOT)
+    app_mode = _resolve_app_mode(snapshot.get("app_mode") if snapshot.get("app_mode") != "unknown" else None)
+    snapshot["app_mode"] = app_mode
+    snapshot["runtime_fingerprint"] = _build_runtime_fingerprint(
+        str(snapshot["source_fingerprint"]),
+        app_mode,
+    )
+    return snapshot
 
 
 def get_runtime_fingerprint() -> str:
-    return str(RUNTIME_FINGERPRINT_SNAPSHOT["runtime_fingerprint"])
+    return str(get_runtime_fingerprint_snapshot()["runtime_fingerprint"])

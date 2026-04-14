@@ -97,10 +97,10 @@ def restart_api(manager):
 
     app_mode = _manager_app_mode(manager)
     expected_snapshot = build_runtime_fingerprint_snapshot(app_mode=app_mode)
-    expected_fingerprint = str(expected_snapshot["runtime_fingerprint"])
+    expected_source_fingerprint = str(expected_snapshot["source_fingerprint"])
     cprint(
         f"API restart target: port={manager.api_port} app_mode={app_mode} "
-        f"expected_fp={expected_fingerprint[:12]}...",
+        f"expected_source_fp={expected_source_fingerprint[:12]}...",
         GRAY,
     )
 
@@ -117,7 +117,7 @@ def restart_api(manager):
 
         pids = mgr.find_pids_on_port(manager.api_port)
         if pids:
-            cprint(f"API port {manager.api_port} live pids: {pids}", GRAY)
+            cprint(f"Active API port PIDs detected: {pids}", YELLOW)
             for pid in pids:
                 cprint(f"Killing API process (PID: {pid})...")
                 mgr.kill_pid(pid)
@@ -146,31 +146,37 @@ def restart_api(manager):
     if killed:
         cprint("Waiting for NSSM to restart API (up to 60s)...")
         healthy = False
+        fingerprint_seen = False
         fingerprint_url = f"http://localhost:{manager.api_port}/api/v1/system/runtime-fingerprint"
         status_url = f"http://localhost:{manager.api_port}/api/v1/system/status"
         for i in range(12):
             time.sleep(5)
             fingerprint_data = _fetch_json(fingerprint_url, timeout=3)
             if fingerprint_data is not None:
-                actual_fingerprint = str(fingerprint_data.get("runtime_fingerprint", ""))
-                if actual_fingerprint == expected_fingerprint:
-                    cprint(f"API runtime fingerprint matched (took ~{(i + 1) * 5}s)", GREEN)
+                fingerprint_seen = True
+                actual_source_fingerprint = str(fingerprint_data.get("source_fingerprint", ""))
+                if actual_source_fingerprint == expected_source_fingerprint:
+                    cprint(f"API source fingerprint matched (took ~{(i + 1) * 5}s)", GREEN)
                     healthy = True
                     break
                 cprint(
-                    "Runtime fingerprint mismatch: "
-                    f"expected={expected_fingerprint[:12]}... actual={actual_fingerprint[:12]}...",
+                    "Source fingerprint mismatch: "
+                    f"expected={expected_source_fingerprint[:12]}... actual={actual_source_fingerprint[:12]}...",
                     YELLOW,
                 )
                 continue
-            try:
-                with urllib.request.urlopen(status_url, timeout=3) as resp:
-                    if resp.status == 200:
-                        cprint(f"API server is healthy (legacy /system/status fallback, took ~{(i + 1) * 5}s)", GREEN)
-                        healthy = True
-                        break
-            except Exception:
-                pass
+            if not fingerprint_seen:
+                try:
+                    with urllib.request.urlopen(status_url, timeout=3) as resp:
+                        if resp.status == 200:
+                            cprint(
+                                f"API server is healthy (legacy /system/status fallback, took ~{(i + 1) * 5}s)",
+                                GREEN,
+                            )
+                            healthy = True
+                            break
+                except Exception:
+                    pass
         if not healthy:
             cprint("API not responding after 60s - check NSSM service status", RED)
     else:
