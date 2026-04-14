@@ -1,4 +1,4 @@
-﻿"""plan_service._extract_worktree_meta / _update_plan_headers / _validate_done_preconditions ?⑥쐞 ?뚯뒪??""
+"""plan_service._extract_worktree_meta / _update_plan_headers / _validate_done_preconditions ?⑥쐞 ?뚯뒪??"""
 import pytest
 from app.modules.dev_runner.services.plan_service import PlanService
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
@@ -7,7 +7,7 @@ from app.modules.dev_runner.services._plan_header_utils import validate_done_pre
 # ??? _extract_worktree_meta ???????????????????????????????????????????????????
 
 def test__extract_worktree_meta_right():
-    """R(Right): 3媛??꾨뱶 紐⑤몢 ?ы븿 ???뺥솗??異붿텧 + ?뺢퇋??""
+    """R(Right): 3媛??꾨뱶 紐⑤몢 ?ы븿 ???뺥솗??異붿텧 + ?뺢퇋??"""
     content = (
         "# plan title\n"
         "> ?묒꽦?쇱떆: 2026-04-06\n"
@@ -83,7 +83,7 @@ def test__extract_worktree_meta_normalize():
 # ??? _update_plan_headers ?????????????????????????????????????????????????????
 
 def test__update_plan_headers_removes_worktree_owner():
-    """R(Right): branch/worktree/worktree-owner 3以?紐⑤몢 ?쒓굅??""
+    """R(Right): branch/worktree/worktree-owner 3以?紐⑤몢 ?쒓굅??"""
     content = (
         "# plan\n"
         "> ?곹깭: 援ы쁽以?n"
@@ -151,4 +151,5 @@ def test_project_root_is_monitor_page_dir():
     assert PROJECT_ROOT.name == "monitor-page" or is_worktree, (
         f"?덉긽移??딆? PROJECT_ROOT.name: '{PROJECT_ROOT.name}'"
     )
+
 

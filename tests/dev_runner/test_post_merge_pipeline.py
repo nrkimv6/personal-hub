@@ -1,4 +1,4 @@
-﻿"""
+"""
 TC: _do_inline_merge / _do_retry_merge subprocess 援먯껜 ?⑥쐞 ?뚯뒪??
 
 Phase T1: plan-runner post-merge subprocess ?몄텧 ?⑦꽩 寃利?
@@ -104,7 +104,7 @@ def _merge_lock_patch():
 class TestDoInlineMergeSubprocess:
     def test_do_inline_merge_calls_plan_runner_subprocess_R(self, cl, tmp_path):
         """R(Right): _do_inline_merge ?몄텧 ??subprocess.run??
-        [..PLAN_RUNNER_PYTHON, '-m', 'plan_runner', 'post-merge', '--runner-id', ...] 紐낅졊?쇰줈 ?몄텧??""
+        [..PLAN_RUNNER_PYTHON, '-m', 'plan_runner', 'post-merge', '--runner-id', ...] 紐낅졊?쇰줈 ?몄텧??"""
         redis = _make_redis_mock()
         proc_result = MagicMock()
         proc_result.returncode = 0
@@ -182,7 +182,7 @@ class TestDoInlineMergeSubprocess:
         assert "conflict" in status_values
 
     def test_do_inline_merge_cleanup_always_runs_R(self, cl, tmp_path):
-        """R(Right): subprocess ?깃났/?ㅽ뙣 紐⑤몢 _cleanup_process_state ?몄텧??""
+        """R(Right): subprocess ?깃났/?ㅽ뙣 紐⑤몢 _cleanup_process_state ?몄텧??"""
         # ?깃났 耳?댁뒪
         redis_ok = _make_redis_mock()
         proc_ok = MagicMock()
@@ -245,7 +245,7 @@ class TestDoInlineMergeSubprocess:
 
 class TestDoRetryMergeSubprocess:
     def test_do_retry_merge_calls_plan_runner_subprocess_R(self, cl, tmp_path):
-        """R(Right): _do_retry_merge ?몄텧 ??subprocess.run??post-merge 紐낅졊?쇰줈 ?몄텧??""
+        """R(Right): _do_retry_merge ?몄텧 ??subprocess.run??post-merge 紐낅졊?쇰줈 ?몄텧??"""
         redis = _make_redis_mock(worktree_path=tmp_path)
         proc_result = MagicMock()
         proc_result.returncode = 0
@@ -456,7 +456,7 @@ class TestInlineMergeE2ESubprocessFlow:
 
 class TestExitCode2AutoImplPostMerge:
     def test_exit_code_2_triggers_auto_impl_post_merge_R(self, cl, dr_merge_mod, tmp_path):
-        """R(Right): exit_code=2 ??_launch_auto_impl_post_merge_process ?몄텧??""
+        """R(Right): exit_code=2 ??_launch_auto_impl_post_merge_process ?몄텧??"""
         redis = _make_redis_mock(worktree_path=tmp_path, plan_file="docs/plan/test.md")
         proc_result = MagicMock()
         proc_result.returncode = 2
@@ -599,4 +599,5 @@ class TestExitCode2IntegrationFakeRedis:
         result_data = json.loads(results[0])
         assert result_data["runner_id"] == runner_id
         assert result_data["success"] is False
+
 
