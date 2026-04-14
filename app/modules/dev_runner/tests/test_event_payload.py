@@ -154,6 +154,20 @@ class TestBuildStatusPayload:
         assert payload["exit_reason"] == "commit_failed"
         assert payload["error"] == detail
 
+    def test_build_status_payload_includes_merge_recovery_fields(self, event_service, sync_redis):
+        """R: merge 복구용 필드가 status payload에 포함된다."""
+        runner_id = "merge01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", "/tmp/wt/merge01")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage", "post_review")
+
+        payload = build_status_payload(event_service._sync, runner_id)
+        assert payload is not None
+        assert payload["worktree_path"] == "/tmp/wt/merge01"
+        assert payload["merge_status"] == "merged"
+        assert payload["stop_stage"] == "post_review"
+
     def test_build_status_payload_plan_file_none_when_key_missing(self, event_service, sync_redis):
         """R: trigger="user" + plan_file 키 미설정 → payload["plan_file"] is None, != PLAN_FILE_ALL"""
         runner_id = "user-pf-none-01"

@@ -126,6 +126,9 @@
 		running: boolean;
 		start_time: string | null;
 		branch?: string | null;
+		worktree_path?: string | null;
+		merge_status?: string | null;
+		stop_stage?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
 		exit_reason?: string | null;
@@ -144,6 +147,9 @@
 		current_cycle?: number | string | null;
 		start_time?: string | null;
 		branch?: string | null;
+		worktree_path?: string | null;
+		merge_status?: string | null;
+		stop_stage?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
 		exit_reason?: string | null;
@@ -161,6 +167,9 @@
 			running: runner.running ?? runner.status === 'running',
 			start_time: runner.start_time ? new Date(runner.start_time).toISOString() : null,
 			branch: runner.branch ?? null,
+			worktree_path: runner.worktree_path ?? null,
+			merge_status: runner.merge_status ?? null,
+			stop_stage: runner.stop_stage ?? null,
 			trigger: runner.trigger ?? null,
 			orphan: runner.orphan ?? false,
 			exit_reason: runner.exit_reason ?? undefined,
@@ -270,6 +279,10 @@
 			plan_file: (!runner.plan_file || isAllPlansSentinel(runner.plan_file)) ? tab.plan_file : runner.plan_file,
 			engine: (runner.engine ?? tab.engine) ?? null,
 			start_time: (runner.start_time ?? tab.start_time) ?? null,
+			branch: runner.branch ?? tab.branch ?? null,
+			worktree_path: runner.worktree_path ?? tab.worktree_path ?? null,
+			merge_status: runner.merge_status ?? tab.merge_status ?? null,
+			stop_stage: runner.stop_stage ?? tab.stop_stage ?? null,
 			orphan: runner.orphan ?? tab.orphan ?? false,
 			exit_reason: runner.exit_reason ?? tab.exit_reason ?? undefined,
 			error: runner.error ?? tab.error ?? undefined,
@@ -431,6 +444,10 @@
 						start_time: string | null;
 						plan_file: string | null;
 						engine: string | null;
+						branch?: string | null;
+						worktree_path?: string | null;
+						merge_status?: string | null;
+						stop_stage?: string | null;
 						trigger?: string | null;
 						exit_reason?: string | null;
 						error?: string | null;
@@ -1023,6 +1040,9 @@
 										running={tab.running}
 										engine={tab.engine}
 										startTime={tab.start_time}
+										worktreePath={tab.worktree_path}
+										branch={tab.branch}
+										mergeStatus={tab.merge_status}
 										trigger={tab.trigger}
 										orphan={tab.orphan}
 										exitReason={tab.exit_reason}

@@ -121,6 +121,40 @@ class TestStreamEventsIntegration:
         await gen.aclose()
 
     @pytest.mark.asyncio
+    async def test_initial_status_event_includes_merge_recovery_fields(self, event_service, sync_redis, async_redis):
+        """R: 초기 status snapshot이 merge 복구용 필드를 포함한다."""
+        runner_id = "runner-merge-status"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", "/tmp/wt/runner-merge-status")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage", "post_review")
+        sync_redis.sadd("plan-runner:active_runners", runner_id)
+
+        mock_pubsub = AsyncMock()
+        mock_pubsub.psubscribe = AsyncMock()
+        mock_pubsub.get_message = AsyncMock(return_value=None)
+        mock_pubsub.punsubscribe = AsyncMock()
+        mock_pubsub.aclose = AsyncMock()
+
+        async_redis.pubsub = MagicMock(return_value=mock_pubsub)
+        event_service._async = async_redis
+
+        gen = event_service.stream_events()
+        first = await gen.__anext__()
+        second = await gen.__anext__()
+        await gen.aclose()
+
+        assert first == "event: connected\ndata: ok\n\n"
+        assert second.startswith("event: status\n")
+        payload = json.loads(second.split("data: ", 1)[1].split("\n", 1)[0])
+        runners = payload["runners"]
+        matched = next(r for r in runners if r["runner_id"] == runner_id)
+        assert matched["worktree_path"] == "/tmp/wt/runner-merge-status"
+        assert matched["merge_status"] == "merged"
+        assert matched["stop_stage"] == "post_review"
+
+    @pytest.mark.asyncio
     async def test_unknown_key_filtered_out(self, event_service, sync_redis, async_redis):
         """알 수 없는 키 변경 이벤트는 yield 없이 무시 확인"""
         message = {"type": "message", "data": "unrelated:key:value"}
