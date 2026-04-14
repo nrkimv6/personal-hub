@@ -170,7 +170,9 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
         ) as mock_popen, patch(
-            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", side_effect=[1111, 2222]
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", return_value=1111
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_listener", return_value=2222
         ), patch(
             "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
@@ -205,7 +207,9 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
         ) as mock_popen, patch(
-            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", side_effect=[None, 3333]
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", return_value=None
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_listener", return_value=3333
         ), patch(
             "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
@@ -293,7 +297,9 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
         ), patch(
-            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", side_effect=[1234, 5678]
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", return_value=1234
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_listener", return_value=5678
         ), patch(
             "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
@@ -303,6 +309,42 @@ class TestRestartFrontendBehavior:
 
         assert ok is False
         mock_urlopen.assert_not_called()
+
+    def test_restart_frontend_boundary_does_not_write_launcher_pid_when_listener_missing(self, tmp_path):
+        """B: listener 미감지 상태에서는 launcher PID를 frontend.pid에 기록하지 않는다."""
+        mgr = _make_manager(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.pid = 5555
+
+        with patch.object(mgr, "_acquire_frontend_restart_lock", return_value=104), patch.object(
+            mgr, "_release_frontend_restart_lock"
+        ), patch.object(mgr, "_cleanup_frontend_runtime"), patch.object(mgr, "_prepare_frontend_env"), patch.object(
+            mgr, "_run_frontend_build_if_needed", return_value=True
+        ), patch.object(
+            mgr, "_has_port_collision_error", return_value=False
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", return_value=1234
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_listener", return_value=None
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.is_process_alive", return_value=True
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.urllib.request.urlopen",
+            side_effect=OSError("connection refused"),
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.write_pid_file"
+        ) as mock_write, patch(
+            "scripts.services.browser_worker_runtime.manager.remove_pid_file"
+        ) as mock_remove:
+            ok = mgr.restart_frontend(public=False)
+
+        assert ok is False
+        mock_write.assert_not_called()
+        mock_remove.assert_called()
 
 
 class TestListenerPidAndStatus:

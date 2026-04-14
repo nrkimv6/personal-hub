@@ -164,6 +164,23 @@ def _has_port_collision_error(manager, stderr_log_path: Path, frontend_port: int
     return f"Port {frontend_port} is already in use" in tail
 
 
+def _wait_for_frontend_listener(frontend_port: int, launcher_pid: int, timeout_seconds: float = 15.0) -> int | None:
+    mgr = _manager()
+    deadline = time.time() + max(timeout_seconds, 1.0)
+
+    while time.time() <= deadline:
+        listener_pid = mgr.pick_listener_pid(frontend_port)
+        if listener_pid is not None:
+            return listener_pid
+
+        if launcher_pid and not mgr.is_process_alive(launcher_pid):
+            return None
+
+        time.sleep(0.5)
+
+    return None
+
+
 def restart_frontend(manager, public: bool = False) -> bool:
     mgr = _manager()
     mode_label, api_port, frontend_port, pid_file, log_dir = _frontend_mode(manager, public)
@@ -216,16 +233,17 @@ def restart_frontend(manager, public: bool = False) -> bool:
             )
         cprint(f"Frontend launcher started (PID: {proc.pid})", GREEN)
 
-        cprint("Waiting 5s for frontend to initialize...")
-        time.sleep(5)
-
-        new_listener_pid = mgr.pick_listener_pid(frontend_port)
+        cprint(f"Waiting for frontend listener on :{frontend_port}...", YELLOW)
+        new_listener_pid = _wait_for_frontend_listener(frontend_port, proc.pid)
         if new_listener_pid is not None:
             mgr.write_pid_file(pid_file, new_listener_pid)
-        elif mgr.is_process_alive(proc.pid):
-            mgr.write_pid_file(pid_file, proc.pid)
         else:
             mgr.remove_pid_file(pid_file)
+            if mgr.is_process_alive(proc.pid):
+                cprint(
+                    "Launcher is alive but frontend listener was not detected; launcher PID will not be written",
+                    YELLOW,
+                )
 
         if manager._has_port_collision_error(stderr_log_path, frontend_port):
             cprint(

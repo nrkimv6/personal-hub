@@ -26,6 +26,20 @@
     }
     return formatDuration(item.open_duration_seconds);
   }
+
+  function detailParts(item: CoupangPublicHistoryItem): string[] {
+    const parts: string[] = [];
+    if (item.schedule_date) {
+      parts.push(item.schedule_date);
+    }
+
+    const duration = durationLabel(item);
+    if (duration !== '-') {
+      parts.push(`유지 ${duration}`);
+    }
+
+    return parts;
+  }
 </script>
 
 <div class="md:hidden space-y-2">
@@ -47,16 +61,9 @@
         {/if}
       </div>
 
-      <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div class="rounded-md bg-muted/40 px-2 py-1.5">
-          <div class="text-[11px] text-muted-foreground">날짜</div>
-          <div class="mt-0.5 text-sm font-medium text-foreground">{item.schedule_date ?? '-'}</div>
-        </div>
-        <div class="rounded-md bg-muted/40 px-2 py-1.5">
-          <div class="text-[11px] text-muted-foreground">소요시간</div>
-          <div class="mt-0.5 text-sm font-medium text-foreground">{durationLabel(item)}</div>
-        </div>
-      </div>
+      {#if detailParts(item).length > 0}
+        <p class="mt-3 text-xs text-muted-foreground">{detailParts(item).join(' · ')}</p>
+      {/if}
     </article>
   {/each}
 </div>
