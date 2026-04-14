@@ -258,3 +258,40 @@ class TestEventStreamLogIntegration:
         payload = json.loads(collected["merge_log"][0])
         assert payload["runner_id"] == TEST_RUNNER_ID
         assert payload["line"] == test_line
+
+    def test_sse_events_stream_merge_log_completed(self, r):
+        """T4/T5: merge-log sentinel publish → SSE에서 event: merge_log_completed 수신"""
+        url = f"{ADMIN_API}/api/v1/dev-runner/events"
+        channel = f"{MERGE_LOG_CHANNEL}:{TEST_RUNNER_ID}"
+
+        collected: dict[str, list[str]] = {"merge_log_completed": []}
+
+        def collect():
+            try:
+                with requests.get(url, stream=True, timeout=6) as resp:
+                    current_event = "message"
+                    for raw_line in resp.iter_lines(decode_unicode=True):
+                        if not raw_line:
+                            current_event = "message"
+                            continue
+                        if raw_line.startswith("event:"):
+                            current_event = raw_line[6:].strip()
+                        elif raw_line.startswith("data:"):
+                            data = raw_line[5:].strip()
+                            if current_event == "merge_log_completed":
+                                collected["merge_log_completed"].append(data)
+                                return
+            except Exception:
+                pass
+
+        t = threading.Thread(target=collect, daemon=True)
+        t.start()
+        time.sleep(3.0)
+        r.publish(channel, "__MERGE_COMPLETED__")
+        t.join(timeout=5)
+
+        assert collected["merge_log_completed"], "event: merge_log_completed 미수신"
+        payload = json.loads(collected["merge_log_completed"][0])
+        assert payload["runner_id"] == TEST_RUNNER_ID
+        assert payload["status"] == "success"
+        assert payload["reason"] == "completed"

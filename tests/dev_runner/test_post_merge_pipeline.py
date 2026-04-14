@@ -242,6 +242,161 @@ class TestDoInlineMergeSubprocess:
         pushed_keys = [k for k, v in lpush_calls]
         assert "plan-runner:merge-results" in pushed_keys
 
+    def test_do_inline_merge_subprocess_exit0_emits_merge_completed_sentinel_R(self, cl, tmp_path):
+        """R(Right): _do_inline_merge 성공 시 merge-log completed sentinel이 1회 publish된다."""
+        redis = _make_redis_mock()
+        publish_calls = []
+        redis.publish.side_effect = lambda channel, payload: publish_calls.append((channel, payload))
+
+        proc_result = MagicMock()
+        proc_result.returncode = 0
+
+        with _merge_lock_patch(), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
+             patch("subprocess.run", return_value=proc_result):
+            result = cl._do_inline_merge("r_inline_ok", redis)
+
+        assert result is None
+        merge_publish_calls = [
+            c for c in publish_calls
+            if c[0] == "plan-runner:merge-log:r_inline_ok"
+        ]
+        assert merge_publish_calls == [
+            ("plan-runner:merge-log:r_inline_ok", "__MERGE_COMPLETED__")
+        ]
+
+    def test_do_inline_merge_subprocess_exit3_emits_merge_failed_sentinel_B(self, cl, tmp_path):
+        """B(Boundary): _do_inline_merge conflict 시 merge-log merge_failed sentinel이 1회 publish된다."""
+        redis = _make_redis_mock()
+        publish_calls = []
+        redis.publish.side_effect = lambda channel, payload: publish_calls.append((channel, payload))
+
+        proc_result = MagicMock()
+        proc_result.returncode = 3
+
+        with _merge_lock_patch(), \
+             patch("_dr_stream_cleanup._cleanup_process_state"), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch("_dr_merge._launch_conflict_resolver_process",
+                   return_value={"success": False, "message": "mocked"}):
+            cl._do_inline_merge("r_inline_fail", redis)
+
+        merge_publish_calls = [
+            c for c in publish_calls
+            if c[0] == "plan-runner:merge-log:r_inline_fail"
+        ]
+        assert merge_publish_calls == [
+            ("plan-runner:merge-log:r_inline_fail", "__MERGE_COMPLETED::merge_failed__")
+        ]
+
+
+class TestMergeCompletedSentinelEmission:
+    def test_build_merge_completed_sentinel_success_R(self, dr_merge_mod):
+        """R: 성공 결과는 __MERGE_COMPLETED__로 정규화된다."""
+        sentinel = dr_merge_mod._build_merge_completed_sentinel({"success": True, "merge_status": "merged"})
+        assert sentinel == "__MERGE_COMPLETED__"
+
+    def test_build_merge_completed_sentinel_failure_B(self, dr_merge_mod):
+        """B: 실패 결과는 __MERGE_COMPLETED::merge_failed__로 정규화된다."""
+        sentinel = dr_merge_mod._build_merge_completed_sentinel({"success": False, "merge_status": "conflict"})
+        assert sentinel == "__MERGE_COMPLETED::merge_failed__"
+
+    def test_publish_merge_completed_sentinel_success_to_merge_log_only_R(self, dr_merge_mod):
+        """R: terminal success sentinel은 merge-log 채널에만 publish된다."""
+        redis = _make_redis_mock()
+
+        dr_merge_mod._publish_merge_completed_sentinel(
+            "r_merge_ok",
+            redis,
+            {"success": True, "merge_status": "merged"},
+        )
+
+        redis.publish.assert_called_once_with(
+            "plan-runner:merge-log:r_merge_ok",
+            "__MERGE_COMPLETED__",
+        )
+
+    def test_publish_merge_completed_sentinel_failure_to_merge_log_only_B(self, dr_merge_mod):
+        """B: terminal failure sentinel은 merge-log 채널에만 publish된다."""
+        redis = _make_redis_mock()
+
+        dr_merge_mod._publish_merge_completed_sentinel(
+            "r_merge_fail",
+            redis,
+            {"success": False, "merge_status": "conflict"},
+        )
+
+        redis.publish.assert_called_once_with(
+            "plan-runner:merge-log:r_merge_fail",
+            "__MERGE_COMPLETED::merge_failed__",
+        )
+
+    def test_execute_merge_with_lock_publishes_success_merge_completed_sentinel_R(self, cl, tmp_path):
+        """R: _execute_merge_with_lock 성공 경로에서 merge-log completed sentinel이 1회 publish된다."""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file=None, branch=None)
+        publish_calls = []
+        redis.publish.side_effect = lambda channel, payload: publish_calls.append((channel, payload))
+        proc_result = MagicMock()
+        proc_result.returncode = 0
+
+        with _merge_lock_patch(), \
+             patch("subprocess.run", return_value=proc_result):
+            result = cl._execute_merge_with_lock("r_merge_ok", redis)
+
+        assert result["success"] is True
+        merge_publish_calls = [
+            c for c in publish_calls
+            if c[0] == "plan-runner:merge-log:r_merge_ok"
+        ]
+        assert merge_publish_calls == [
+            ("plan-runner:merge-log:r_merge_ok", "__MERGE_COMPLETED__")
+        ]
+
+    def test_execute_merge_with_lock_publishes_failure_merge_completed_sentinel_B(self, cl, tmp_path):
+        """B: _execute_merge_with_lock 실패 경로에서 merge-log merge_failed sentinel이 1회 publish된다."""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file=None, branch=None)
+        publish_calls = []
+        redis.publish.side_effect = lambda channel, payload: publish_calls.append((channel, payload))
+        proc_result = MagicMock()
+        proc_result.returncode = 3
+
+        with _merge_lock_patch(), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch("_dr_merge._launch_conflict_resolver_process", return_value={"success": False, "message": "mocked"}):
+            result = cl._execute_merge_with_lock("r_merge_fail", redis)
+
+        assert result["success"] is False
+        assert result["merge_status"] == "conflict"
+        merge_publish_calls = [
+            c for c in publish_calls
+            if c[0] == "plan-runner:merge-log:r_merge_fail"
+        ]
+        assert merge_publish_calls == [
+            ("plan-runner:merge-log:r_merge_fail", "__MERGE_COMPLETED::merge_failed__")
+        ]
+
+    def test_execute_merge_with_lock_retry_action_emits_merge_completed_sentinel_R(self, cl, tmp_path):
+        """R(Right): retry-merge action도 동일한 merge-log completed sentinel 계약을 공유한다."""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file=None, branch=None)
+        publish_calls = []
+        redis.publish.side_effect = lambda channel, payload: publish_calls.append((channel, payload))
+        proc_result = MagicMock()
+        proc_result.returncode = 0
+
+        with _merge_lock_patch(), \
+             patch("subprocess.run", return_value=proc_result):
+            result = cl._execute_merge_with_lock("r_retry_ok", redis, action_name="retry-merge")
+
+        assert result["success"] is True
+        assert result["action"] == "retry-merge"
+        merge_publish_calls = [
+            c for c in publish_calls
+            if c[0] == "plan-runner:merge-log:r_retry_ok"
+        ]
+        assert merge_publish_calls == [
+            ("plan-runner:merge-log:r_retry_ok", "__MERGE_COMPLETED__")
+        ]
+
 
 class TestDoRetryMergeSubprocess:
     def test_do_retry_merge_calls_plan_runner_subprocess_R(self, cl, tmp_path):

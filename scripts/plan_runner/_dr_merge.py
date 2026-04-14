@@ -221,6 +221,25 @@ def _pub_and_log(runner_id: str, msg: str, redis_client: redis.Redis, tag: str =
         logger.debug(f"[_pub_and_log] 파일 기록 실패 (무시): {_e}")
 
 
+def _build_merge_completed_sentinel(result: dict) -> str:
+    """merge 결과를 merge-log 종료 sentinel payload로 정규화한다."""
+    success = bool(result.get("success", False))
+    merge_status = str(result.get("merge_status") or "").strip().lower()
+    if success or merge_status == "merged":
+        return "__MERGE_COMPLETED__"
+    return "__MERGE_COMPLETED::merge_failed__"
+
+
+def _publish_merge_completed_sentinel(runner_id: str, redis_client: redis.Redis, result: dict) -> None:
+    """terminal merge sentinel만 merge-log 채널에 1회 publish한다."""
+    channel = f"plan-runner:merge-log:{runner_id}"
+    payload = _build_merge_completed_sentinel(result)
+    try:
+        redis_client.publish(channel, payload)
+    except Exception as _e:
+        logger.debug(f"[_publish_merge_completed_sentinel] publish 실패 (무시): {_e}")
+
+
 def _extract_post_merge_done_failure(done_result) -> tuple[bool, str]:
     """post-merge done 결과에서 실패 여부/사유를 추출한다."""
     if not isinstance(done_result, dict):
@@ -529,6 +548,8 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             redis_client.expire("plan-runner:merge-results", 86400 * 7)
         except Exception as _mr_err:
             logger.debug(f"[_execute_merge_with_lock] merge-results push 실패 (무시): {_mr_err}")
+        # terminal merge sentinel은 normal log와 분리해 merge-log 채널에만 1회 publish한다.
+        _publish_merge_completed_sentinel(runner_id, redis_client, result)
 
     return result
 
