@@ -12,6 +12,7 @@ if sys.platform == 'win32':
     os.environ['PYTHONIOENCODING'] = 'utf-8'
     os.environ['PYTHONUTF8'] = '1'
 
+import json
 import pytest
 from pathlib import Path
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
@@ -23,8 +24,9 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 # 테스트 설정
 E2E_CONFIG = {
-    "api_url": "http://localhost:8001",
-    "frontend_url": "http://localhost:6101",
+    "api_url": os.environ.get("E2E_API_URL", "http://localhost:8001"),
+    "frontend_url": os.environ.get("E2E_FRONTEND_URL", "http://localhost:6101"),
+    "public_frontend_url": os.environ.get("E2E_PUBLIC_FRONTEND_URL", "http://localhost:6100"),
     "headless": True,  # CI에서는 True, 디버깅 시 False
     "slow_mo": 0,  # 디버깅 시 100~500 설정
     "timeout": 30000,  # 30초
@@ -86,15 +88,30 @@ def api_url():
 def frontend_url():
     """프론트엔드 URL"""
     url = E2E_CONFIG["frontend_url"]
-    try:
-        # HTTPError(4xx/5xx)는 서버 기동 상태로 간주하고 테스트 진행
-        with urlopen(url, timeout=2):
-            pass
-    except HTTPError:
-        pass
-    except (URLError, OSError):
-        pytest.fail(f"Frontend not available: {url}")
+    _assert_frontend_available(url)
     return url
+
+
+@pytest.fixture
+def public_frontend_url():
+    """공개 프론트엔드 URL"""
+    url = E2E_CONFIG["public_frontend_url"]
+    _assert_frontend_available(url)
+    return url
+
+
+@pytest.fixture
+def system_mode(api_url: str) -> str:
+    """현재 API 모드(public/admin)."""
+    mode_url = f"{api_url}/api/v1/system/mode"
+    try:
+        with urlopen(mode_url, timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        pytest.fail(f"system/mode endpoint returned HTTP {exc.code}: {mode_url}")
+    except (URLError, OSError, json.JSONDecodeError) as exc:
+        pytest.fail(f"system/mode endpoint unavailable: {mode_url} ({exc})")
+    return str(payload.get("mode") or "public")
 
 
 # =============================================================================
@@ -111,6 +128,17 @@ def wait_for_app_ready(page: Page, url: str, timeout: int = 30000):
     page.wait_for_load_state("networkidle")
     # SvelteKit hydration 완료 대기
     page.wait_for_selector("[data-sveltekit-hydrated]", timeout=timeout, state="attached")
+
+
+def _assert_frontend_available(url: str) -> None:
+    try:
+        # HTTPError(4xx/5xx)는 서버 기동 상태로 간주하고 테스트 진행
+        with urlopen(url, timeout=2):
+            pass
+    except HTTPError:
+        pass
+    except (URLError, OSError):
+        pytest.fail(f"Frontend not available: {url}")
 
 
 def take_screenshot_on_failure(page: Page, request: pytest.FixtureRequest):

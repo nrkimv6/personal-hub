@@ -34,6 +34,11 @@ def _skip_if_frontend_error_title(page: Page) -> None:
         pytest.skip(f"frontend 에러 페이지 감지: {title}")
 
 
+def _skip_admin_mode_if_public(system_mode: str) -> None:
+    if system_mode != "admin":
+        pytest.skip(f"현재 system mode={system_mode} — admin E2E 스킵")
+
+
 class TestPageLoad:
     """페이지 로드 테스트"""
 
@@ -83,8 +88,9 @@ class TestPageLoad:
         expect(page).to_have_title(self._TITLE_PATTERN)
         expect(page.locator("main").first).to_be_visible()
 
-    def test_monitoring_loads(self, page: Page, frontend_url: str):
+    def test_monitoring_loads(self, page: Page, frontend_url: str, system_mode: str):
         """통합 모니터링 페이지 로드"""
+        _skip_admin_mode_if_public(system_mode)
         page.goto(f"{frontend_url}/monitoring")
         page.wait_for_load_state("networkidle")
         _skip_if_frontend_error_title(page)
@@ -92,8 +98,9 @@ class TestPageLoad:
         expect(page).to_have_title(self._TITLE_PATTERN)
         expect(page.locator("main").first).to_be_visible()
 
-    def test_root_redirects_to_monitoring(self, page: Page, frontend_url: str):
+    def test_root_redirects_to_monitoring(self, page: Page, frontend_url: str, system_mode: str):
         """루트(/) 접근 시 /monitoring으로 리다이렉트"""
+        _skip_admin_mode_if_public(system_mode)
         page.goto(f"{frontend_url}/")
         page.wait_for_load_state("networkidle")
         _skip_if_frontend_error_title(page)
@@ -118,8 +125,9 @@ class TestSidebar:
             pytest.skip("현재 프런트 빌드에 desktop sidebar가 없음")
         expect(sidebar).to_be_visible()
 
-    def test_sidebar_navigation(self, page: Page, frontend_url: str):
+    def test_sidebar_navigation(self, page: Page, frontend_url: str, system_mode: str):
         """사이드바를 통한 페이지 이동"""
+        _skip_admin_mode_if_public(system_mode)
         page.set_viewport_size({"width": 1280, "height": 720})
         page.goto(f"{frontend_url}/dashboard")
         page.wait_for_load_state("networkidle")
@@ -133,8 +141,9 @@ class TestSidebar:
         page.wait_for_load_state("networkidle")
         expect(page).to_have_url(f"{frontend_url}/monitoring")
 
-    def test_dashboard_loads_after_restart_frontend_admin_e2e(self, page: Page, frontend_url: str):
+    def test_dashboard_loads_after_restart_frontend_admin_e2e(self, page: Page, frontend_url: str, system_mode: str):
         """CLI restart-frontend 직후 /dashboard가 정상 로드되어야 한다."""
+        _skip_admin_mode_if_public(system_mode)
         result = _run_restart_frontend_admin()
         assert result.returncode in (0, 1)
 
@@ -144,8 +153,9 @@ class TestSidebar:
         expect(page).to_have_title(re.compile(r"(모니터링 시스템|통합 대시보드)"))
         expect(page.locator("main").first).to_be_visible()
 
-    def test_sidebar_navigation_after_restart_frontend_admin_e2e(self, page: Page, frontend_url: str):
+    def test_sidebar_navigation_after_restart_frontend_admin_e2e(self, page: Page, frontend_url: str, system_mode: str):
         """CLI restart-frontend 직후 사이드바 내비게이션이 동작해야 한다."""
+        _skip_admin_mode_if_public(system_mode)
         result = _run_restart_frontend_admin()
         assert result.returncode in (0, 1)
 
