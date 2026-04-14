@@ -32,3 +32,18 @@ def test_service_runner_log_environment_reports_boot_paths():
     assert any("sys.path[0]:" in line and str(service_run.PROJECT_ROOT) in line for line in lines)
     assert any("Runtime fingerprint:" in line and "source=" in line and "files=1" in line for line in lines)
     assert any("CWD:" in line for line in lines)
+
+
+def test_service_runner_frontend_runtime_env_separates_admin_and_public_modes():
+    runner = object.__new__(service_run.ServiceRunner)
+    runner.api_port = 8001
+
+    admin_env = runner._frontend_runtime_env(public=False)
+    assert admin_env["MONITOR_FRONTEND_MODE"] == "admin"
+    assert admin_env["MONITOR_SVELTEKIT_OUTDIR"] == ".svelte-kit-admin"
+    assert admin_env["VITE_API_PORT"] == "8001"
+
+    public_env = runner._frontend_runtime_env(public=True)
+    assert public_env["MONITOR_FRONTEND_MODE"] == "public"
+    assert public_env["MONITOR_SVELTEKIT_OUTDIR"] == ".svelte-kit-public"
+    assert "VITE_API_PORT" not in public_env

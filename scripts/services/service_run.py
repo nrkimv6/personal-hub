@@ -33,6 +33,10 @@ from scripts.services.service_utils import (
     setup_service_logger,
     write_pid_file,
 )
+from scripts.services.frontend_mode import (
+    build_frontend_env,
+    describe_frontend_runtime,
+)
 
 import psutil
 from app.core.runtime_fingerprint import get_runtime_fingerprint_snapshot
@@ -58,6 +62,10 @@ class ServiceRunner:
 
         self._frontend_proc: subprocess.Popen | None = None
         self._cleaned_up = False
+
+    def _frontend_runtime_env(self, public: bool) -> dict[str, str]:
+        api_port = None if public else self.api_port
+        return build_frontend_env(os.environ, public=public, api_port=api_port)
 
     # ── 메인 실행 흐름 ──────────────────────────────────────────
     def run(self):
@@ -191,7 +199,9 @@ class ServiceRunner:
         """
         self.log.info("Starting Frontend...")
         frontend_dir = PROJECT_ROOT / "frontend"
+        frontend_env = self._frontend_runtime_env(public=not self.dev)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
+        self.log.info(f"Frontend runtime contract: {describe_frontend_runtime(public=not self.dev)}")
 
         # frontend 의존성 확인 (node_modules 디렉토리만 믿지 말고 vite 실행 파일도 확인)
         node_modules_dir = frontend_dir / "node_modules"
@@ -204,8 +214,14 @@ class ServiceRunner:
 
         if deps_reason:
             self.log.warning(f"Frontend dependency check: {deps_reason}; running npm install...")
-            subprocess.run(["npm.cmd", "install"], cwd=str(frontend_dir), check=False,
-                           encoding="utf-8", errors="replace")
+            subprocess.run(
+                ["npm.cmd", "install"],
+                cwd=str(frontend_dir),
+                check=False,
+                encoding="utf-8",
+                errors="replace",
+                env=frontend_env,
+            )
             if not vite_bin.exists():
                 self.log.error("Vite binary is still missing after npm install; frontend start may fail")
 
@@ -219,7 +235,6 @@ class ServiceRunner:
             # .env.development.local
             env_file = frontend_dir / ".env.development.local"
             env_file.write_text(f"VITE_API_PORT={self.api_port}\n", encoding="utf-8")
-            os.environ["VITE_API_PORT"] = str(self.api_port)
 
             stdout_log = open(self.log_dir / f"frontend_{timestamp}.log", "w", encoding="utf-8")
             stderr_log = open(self.log_dir / f"frontend_err_{timestamp}.log", "w", encoding="utf-8")
@@ -237,6 +252,7 @@ class ServiceRunner:
                 cwd=str(frontend_dir),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=frontend_env,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
 
@@ -267,6 +283,7 @@ class ServiceRunner:
                 cwd=str(frontend_dir),
                 stdout=stdout_log,
                 stderr=stderr_log,
+                env=frontend_env,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
@@ -278,6 +295,7 @@ class ServiceRunner:
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",
+                env=frontend_env,
             )
             if build_result.returncode != 0:
                 err_msg = (build_result.stderr or "")[-500:] or "(no stderr output)"
@@ -303,6 +321,7 @@ class ServiceRunner:
                 cwd=str(frontend_dir),
                 stdout=stdout_log,
                 stderr=stderr_log,
+                env=frontend_env,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
 

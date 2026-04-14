@@ -38,6 +38,7 @@ from scripts.services.browser_worker_runtime.frontend_actions import (
     _acquire_frontend_restart_lock as _acquire_frontend_restart_lock_impl,
     _cleanup_frontend_runtime as _cleanup_frontend_runtime_impl,
     _frontend_mode as _frontend_mode_impl,
+    _frontend_runtime_env as _frontend_runtime_env_impl,
     _has_port_collision_error as _has_port_collision_error_impl,
     _prepare_frontend_env as _prepare_frontend_env_impl,
     _print_frontend_status as _print_frontend_status_impl,
@@ -210,8 +211,11 @@ class BrowserWorkerManager:
     def _prepare_frontend_env(self, api_port: int, public: bool) -> None:
         return _prepare_frontend_env_impl(self, api_port, public)
 
-    def _run_frontend_build_if_needed(self, public: bool) -> bool:
-        return _run_frontend_build_if_needed_impl(self, public)
+    def _frontend_runtime_env(self, public: bool) -> dict[str, str]:
+        return _frontend_runtime_env_impl(self, public)
+
+    def _run_frontend_build_if_needed(self, public: bool, frontend_env: dict[str, str] | None = None) -> bool:
+        return _run_frontend_build_if_needed_impl(self, public, frontend_env=frontend_env)
 
     def _has_port_collision_error(self, stderr_log_path: Path, frontend_port: int) -> bool:
         return _has_port_collision_error_impl(self, stderr_log_path, frontend_port)

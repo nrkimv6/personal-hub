@@ -11,6 +11,7 @@ from pathlib import Path
 
 import psutil
 
+from scripts.services.frontend_mode import build_frontend_env, describe_frontend_runtime
 from scripts.services.browser_worker_runtime.runtime import GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
 
 
@@ -91,6 +92,11 @@ def _cleanup_frontend_runtime(manager, frontend_port: int, pid_file: Path) -> No
             pass
 
 
+def _frontend_runtime_env(manager, public: bool) -> dict[str, str]:
+    api_port = None if public else manager.api_port
+    return build_frontend_env(os.environ, public=public, api_port=api_port)
+
+
 def _prepare_frontend_env(manager, api_port: int, public: bool) -> None:
     if public:
         env_local = manager.frontend_dir / ".env.local"
@@ -106,9 +112,12 @@ def _prepare_frontend_env(manager, api_port: int, public: bool) -> None:
         cprint("Cleaned up stale build directory")
 
 
-def _run_frontend_build_if_needed(manager, public: bool) -> bool:
+def _run_frontend_build_if_needed(manager, public: bool, frontend_env: dict[str, str] | None = None) -> bool:
     if not public:
         return True
+
+    if frontend_env is None:
+        frontend_env = _frontend_runtime_env(manager, public)
 
     cprint("Building frontend for PUBLIC PREVIEW...", YELLOW)
     build_result = subprocess.run(
@@ -117,6 +126,7 @@ def _run_frontend_build_if_needed(manager, public: bool) -> bool:
         capture_output=True,
         encoding="utf-8",
         errors="replace",
+        env=frontend_env,
     )
     if build_result.returncode == 0:
         cprint("Frontend build completed", GREEN)
@@ -152,10 +162,12 @@ def _has_port_collision_error(manager, stderr_log_path: Path, frontend_port: int
 def restart_frontend(manager, public: bool = False) -> bool:
     mgr = _manager()
     mode_label, api_port, frontend_port, pid_file, log_dir = _frontend_mode(manager, public)
+    frontend_env = _frontend_runtime_env(manager, public)
     print(f"\n{YELLOW}{'=' * 40}")
     print(f"  Restarting {mode_label} Frontend")
     print(f"  (port {frontend_port}){RESET}")
     print(f"{YELLOW}{'=' * 40}{RESET}\n")
+    cprint(f"Frontend runtime contract: {describe_frontend_runtime(public)}", YELLOW)
 
     lock_fd = manager._acquire_frontend_restart_lock(wait_seconds=10)
     if lock_fd is None:
@@ -174,7 +186,7 @@ def restart_frontend(manager, public: bool = False) -> bool:
         time.sleep(2)
         manager._prepare_frontend_env(api_port=api_port, public=public)
 
-        if not manager._run_frontend_build_if_needed(public=public):
+        if not manager._run_frontend_build_if_needed(public=public, frontend_env=frontend_env):
             return False
 
         start_cmd = (
@@ -193,6 +205,7 @@ def restart_frontend(manager, public: bool = False) -> bool:
                 cwd=str(manager.frontend_dir),
                 stdout=stdout_log,
                 stderr=stderr_log,
+                env=frontend_env,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         cprint(f"Frontend launcher started (PID: {proc.pid})", GREEN)
@@ -241,10 +254,11 @@ def restart_frontend(manager, public: bool = False) -> bool:
 def _print_frontend_status(manager, public: bool = False):
     mgr = _manager()
     mode_label, _api_port, frontend_port, frontend_pid_file, _log_dir = _frontend_mode(manager, public)
+    contract = describe_frontend_runtime(public)
     pid = mgr.read_pid_file(frontend_pid_file)
     port_up = mgr.is_port_listening(frontend_port)
     if pid and mgr.is_process_alive(pid) and port_up:
-        print(f"  {GREEN}[+] Frontend {mode_label} :{frontend_port} (PID: {pid}){RESET}")
+        print(f"  {GREEN}[+] Frontend {mode_label} :{frontend_port} ({contract}, PID: {pid}){RESET}")
         return
 
     if port_up:
@@ -252,11 +266,11 @@ def _print_frontend_status(manager, public: bool = False):
         if listener_pid is not None:
             mgr.write_pid_file(frontend_pid_file, listener_pid)
             print(
-                f"  {YELLOW}[~] Frontend {mode_label} :{frontend_port} "
+                f"  {YELLOW}[~] Frontend {mode_label} :{frontend_port} ({contract}) "
                 f"(PID file stale -> auto-healed to PID {listener_pid}){RESET}"
             )
         else:
-            print(f"  {YELLOW}[~] Frontend {mode_label} :{frontend_port} (port listening, PID file stale){RESET}")
+            print(f"  {YELLOW}[~] Frontend {mode_label} :{frontend_port} ({contract}) (port listening, PID file stale){RESET}")
         return
 
-    print(f"  {YELLOW}[-] Frontend {mode_label} :{frontend_port}: Not running{RESET}")
+    print(f"  {YELLOW}[-] Frontend {mode_label} :{frontend_port} ({contract}): Not running{RESET}")

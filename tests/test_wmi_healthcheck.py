@@ -185,6 +185,10 @@ class TestRestartFrontendBehavior:
         assert cmd[:3] == ["npm.cmd", "run", "dev"]
         assert "--port" in cmd
         assert "6101" in cmd
+        env = mock_popen.call_args.kwargs["env"]
+        assert env["MONITOR_FRONTEND_MODE"] == "admin"
+        assert env["MONITOR_SVELTEKIT_OUTDIR"] == ".svelte-kit-admin"
+        assert env["VITE_API_PORT"] == "8001"
 
     def test_restart_frontend_public_right_runs_build_preview(self, tmp_path):
         """R: public 모드에서 preview 실행."""
@@ -217,6 +221,31 @@ class TestRestartFrontendBehavior:
         assert cmd[:3] == ["npm.cmd", "run", "preview"]
         assert "--port" in cmd
         assert "6100" in cmd
+        env = mock_popen.call_args.kwargs["env"]
+        assert env["MONITOR_FRONTEND_MODE"] == "public"
+        assert env["MONITOR_SVELTEKIT_OUTDIR"] == ".svelte-kit-public"
+        assert "VITE_API_PORT" not in env
+
+    def test_run_frontend_build_if_needed_public_right_passes_runtime_env(self, tmp_path):
+        """R: public build 단계도 runtime contract env를 사용한다."""
+        mgr = _make_manager(tmp_path)
+        frontend_env = mgr._frontend_runtime_env(public=True)
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+        mock_result.stdout = ""
+
+        with patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.subprocess.run",
+            return_value=mock_result,
+        ) as mock_run:
+            ok = mgr._run_frontend_build_if_needed(public=True, frontend_env=frontend_env)
+
+        assert ok is True
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs["env"]["MONITOR_FRONTEND_MODE"] == "public"
+        assert call_kwargs["env"]["MONITOR_SVELTEKIT_OUTDIR"] == ".svelte-kit-public"
+        assert "VITE_API_PORT" not in call_kwargs["env"]
 
     def test_restart_frontend_public_error_build_fail_without_artifact(self, tmp_path):
         """E: build 실패 + 아티팩트 없음이면 재시작 실패."""

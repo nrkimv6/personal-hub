@@ -1,6 +1,16 @@
 import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
+const frontendMode = process.env.MONITOR_FRONTEND_MODE || '';
+const explicitOutDir = process.env.MONITOR_SVELTEKIT_OUTDIR || '';
+const frontendOutDir =
+	explicitOutDir ||
+	(frontendMode === 'public'
+		? '.svelte-kit-public'
+		: frontendMode === 'admin'
+			? '.svelte-kit-admin'
+			: '.svelte-kit');
+
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	// Consult https://svelte.dev/docs/kit/integrations
@@ -18,6 +28,7 @@ const config = {
 			precompress: false,
 			strict: true
 		}),
+		outDir: frontendOutDir,
 		serviceWorker: {
 			register: false
 		}

@@ -69,6 +69,24 @@ function Test-WmiHealth {
     }
 }
 
+function Set-FrontendRuntimeEnv {
+    param(
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$OutDir,
+        [Nullable[int]]$ApiPort = $null
+    )
+
+    $env:MONITOR_FRONTEND_MODE = $Mode
+    $env:MONITOR_SVELTEKIT_OUTDIR = $OutDir
+    if ($null -ne $ApiPort) {
+        $env:VITE_API_PORT = "$ApiPort"
+        Write-ServiceLog "Frontend runtime contract: mode=$Mode outDir=$OutDir apiPort=$ApiPort"
+    } else {
+        Remove-Item Env:VITE_API_PORT -ErrorAction SilentlyContinue
+        Write-ServiceLog "Frontend runtime contract: mode=$Mode outDir=$OutDir"
+    }
+}
+
 Write-ServiceLog "=========================================="
 Write-ServiceLog "Monitor Page Service Starting"
 Write-ServiceLog "Mode: $AppMode"
@@ -333,6 +351,8 @@ if ($installReason) {
 # Start frontend - different modes for admin/public
 if ($Admin) {
     # ---- Admin: npm run dev (HMR, hot reload) ----
+    Set-FrontendRuntimeEnv -Mode "admin" -OutDir ".svelte-kit-admin" -ApiPort $ApiPort
+
     # Stale build 디렉토리 제거 (lstat 에러 방지)
     $buildDir = Join-Path $FrontendDir "build"
     if (Test-Path $buildDir) {
@@ -356,6 +376,8 @@ if ($Admin) {
         -PassThru
 } else {
     # ---- Public: npm run build + npm run preview ----
+    Set-FrontendRuntimeEnv -Mode "public" -OutDir ".svelte-kit-public"
+
     # Remove .env.local if exists (prevents dev settings from affecting production)
     $envLocalFile = Join-Path $FrontendDir ".env.local"
     if (Test-Path $envLocalFile) {
