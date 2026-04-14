@@ -60,6 +60,26 @@ def isolate_llm_defaults_file(monkeypatch, tmp_path):
     yield
 
 
+def _seed_llm_request(
+    test_db_session,
+    *,
+    caller_id: str,
+    status: str = "failed",
+    caller_type: str = "test",
+    prompt: str = "seeded prompt",
+):
+    request = LLMRequest(
+        caller_type=caller_type,
+        caller_id=caller_id,
+        prompt=prompt,
+        status=status,
+    )
+    test_db_session.add(request)
+    test_db_session.commit()
+    test_db_session.refresh(request)
+    return request
+
+
 class TestCreateRequestQueueName:
     """POST /api/v1/llm/requests — queue_name 파라미터 테스트."""
 
@@ -494,3 +514,77 @@ class TestProvidersApiHttp:
             f"codex ({by_key['codex']['executor_key']}) 와 cc-codex ({by_key['cc-codex']['executor_key']}) "
             "executor_key 동일 — registry 설정 오류"
         )
+
+
+class TestBatchRetryRoutes:
+    """LLM batch retry route shadow regression tests."""
+
+    def test_batch_retry_route_R_failed_requests_return_200(self, client, test_db_session):
+        """R: /requests/batch/retry → failed 요청을 pending으로 전환."""
+        req1 = _seed_llm_request(test_db_session, caller_id="batch-retry-r-1", status="failed")
+        req2 = _seed_llm_request(test_db_session, caller_id="batch-retry-r-2", status="failed")
+
+        resp = client.post(
+            "/api/v1/llm/requests/batch/retry",
+            json={"request_ids": [req1.id, req2.id]},
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["success"] == 2
+        assert body["skipped"] == 0
+        assert body["failed"] == 0
+
+        test_db_session.refresh(req1)
+        test_db_session.refresh(req2)
+        assert req1.status == "pending"
+        assert req2.status == "pending"
+
+    def test_batch_retry_route_B_mixed_status_returns_success_and_skipped(self, client, test_db_session):
+        """B: failed + pending 혼합 → success/skipped 합계가 입력 개수와 일치."""
+        failed_request = _seed_llm_request(test_db_session, caller_id="batch-retry-b-1", status="failed")
+        pending_request = _seed_llm_request(test_db_session, caller_id="batch-retry-b-2", status="pending")
+
+        resp = client.post(
+            "/api/v1/llm/requests/batch/retry",
+            json={"request_ids": [failed_request.id, pending_request.id]},
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["success"] == 1
+        assert body["skipped"] == 1
+        assert body["success"] + body["skipped"] == 2
+
+    def test_batch_retry_route_E_batch_literal_is_not_parsed_as_request_id(self, client, test_db_session):
+        """E: literal batch 경로가 request_id path int 파싱 실패로 빠지지 않음."""
+        request = _seed_llm_request(test_db_session, caller_id="batch-retry-e-1", status="failed")
+
+        resp = client.post(
+            "/api/v1/llm/requests/batch/retry",
+            json={"request_ids": [request.id]},
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["success"] == 1
+        assert body["skipped"] == 0
+
+    def test_retry_route_R_single_failed_request_returns_200(self, client, test_db_session):
+        """R: /requests/{id}/retry → failed 요청을 pending으로 전환."""
+        request = _seed_llm_request(test_db_session, caller_id="single-retry-r-1", status="failed")
+
+        resp = client.post(f"/api/v1/llm/requests/{request.id}/retry")
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["success"] is True
+        test_db_session.refresh(request)
+        assert request.status == "pending"
+
+    def test_retry_route_E_unknown_numeric_id_returns_400(self, client):
+        """E: 존재하지 않는 numeric id retry → 400 business error."""
+        resp = client.post("/api/v1/llm/requests/999999/retry")
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"] == "Cannot retry this request"

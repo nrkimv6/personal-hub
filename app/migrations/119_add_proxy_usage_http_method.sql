@@ -3,4 +3,4 @@
 -- Description: 프록시 사용 이력에 실제 HTTP 메서드(get/post) 저장 컬럼 추가
 
 ALTER TABLE proxy_usage_logs
-ADD COLUMN IF NOT EXISTS http_method TEXT;
+ADD COLUMN http_method TEXT;

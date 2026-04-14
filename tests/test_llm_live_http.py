@@ -9,6 +9,10 @@ TestClient 기반 오분류 e2e 테스트가 검증하던 API 레벨 동작을
 """
 import pytest
 import httpx
+from uuid import uuid4
+
+from app.database import SessionLocal
+from app.modules.claude_worker.models.llm_request import LLMRequest
 
 pytestmark = pytest.mark.http_live
 
@@ -41,6 +45,37 @@ def _put(path: str, timeout: int = 5, **kwargs) -> httpx.Response:
         return httpx.put(BASE_URL + path, timeout=timeout, **kwargs)
     except httpx.ConnectError:
         pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+
+
+def _seed_failed_live_request(caller_id: str) -> int:
+    """실서버가 보는 DB에 failed 요청 1건을 직접 삽입한다."""
+    db = SessionLocal()
+    try:
+        request = LLMRequest(
+            caller_type="test",
+            caller_id=caller_id,
+            prompt="live batch retry test",
+            status="failed",
+            error_message="seeded failure",
+        )
+        db.add(request)
+        db.commit()
+        db.refresh(request)
+        return request.id
+    finally:
+        db.close()
+
+
+def _delete_live_request(request_id: int) -> None:
+    """실서버가 보는 DB에서 테스트 요청을 정리한다."""
+    db = SessionLocal()
+    try:
+        request = db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        if request is not None:
+            db.delete(request)
+            db.commit()
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -295,3 +330,33 @@ def test_live_llm_enqueue_invalid_provider_returns_4xx():
     assert resp.status_code >= 400, (
         f"비유효 provider인데 4xx가 아님: {resp.status_code} {resp.text[:200]}"
     )
+
+
+def test_live_llm_batch_retry_returns_200_for_failed_requests():
+    """R: POST /api/v1/llm/requests/batch/retry → failed 요청을 pending으로 전환."""
+    caller_id = f"live_http_batch_retry_{uuid4().hex}"
+    request_id = _seed_failed_live_request(caller_id)
+
+    try:
+        resp = _post("/api/v1/llm/requests/batch/retry", json={"request_ids": [request_id]})
+        assert resp.status_code == 200, f"batch retry 실패: {resp.status_code} {resp.text[:200]}"
+        body = resp.json()
+        assert body["success"] == 1, body
+        assert body["skipped"] == 0, body
+
+        db = SessionLocal()
+        try:
+            request = db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+            assert request is not None
+            assert request.status == "pending"
+        finally:
+            db.close()
+    finally:
+        _delete_live_request(request_id)
+
+
+def test_live_llm_retry_unknown_numeric_id_returns_400_not_422():
+    """E: GET/POST numeric retry path는 422 path parsing error가 아니라 400 business error."""
+    resp = _post("/api/v1/llm/requests/99999999/retry")
+    assert resp.status_code == 400, f"unknown retry가 400이 아님: {resp.status_code} {resp.text[:200]}"
+    assert resp.json()["detail"] == "Cannot retry this request"

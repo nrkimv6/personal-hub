@@ -382,6 +382,28 @@ def list_requests_grouped_by_caller(
     )
 
 
+@router.post("/requests/batch/retry")
+def batch_retry_requests(
+    data: BatchRetryRequest,
+    db: Session = Depends(get_db),
+):
+    """일괄 재시도."""
+    service = LLMService(db)
+    result = service.batch_retry(data.request_ids)
+    return result
+
+
+@router.post("/requests/batch/delete")
+def batch_delete_requests(
+    data: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+):
+    """일괄 삭제."""
+    service = LLMService(db)
+    result = service.batch_delete(data.request_ids, hard_delete=data.hard_delete)
+    return result
+
+
 @router.get("/requests/{request_id}", response_model=LLMRequestDetailResponse)
 def get_request_by_id(
     request_id: int,
@@ -428,19 +450,6 @@ def get_request_by_caller(
     return _to_response(request)
 
 
-@router.post("/requests/{request_id}/retry")
-def retry_request(
-    request_id: int,
-    db: Session = Depends(get_db),
-):
-    """실패한 요청 재시도."""
-    service = LLMService(db)
-    success = service.reset_to_pending(request_id)
-    if not success:
-        raise HTTPException(status_code=400, detail="Cannot retry this request")
-    return {"success": True, "message": "Request queued for retry"}
-
-
 @router.post("/requests/{request_id}/cancel")
 def cancel_request(
     request_id: int,
@@ -479,26 +488,17 @@ def delete_request(
     return {"success": True, "message": "Request deleted"}
 
 
-@router.post("/requests/batch/retry")
-def batch_retry_requests(
-    data: BatchRetryRequest,
+@router.post("/requests/{request_id}/retry")
+def retry_request(
+    request_id: int,
     db: Session = Depends(get_db),
 ):
-    """일괄 재시도."""
+    """실패한 요청 재시도."""
     service = LLMService(db)
-    result = service.batch_retry(data.request_ids)
-    return result
-
-
-@router.post("/requests/batch/delete")
-def batch_delete_requests(
-    data: BatchDeleteRequest,
-    db: Session = Depends(get_db),
-):
-    """일괄 삭제."""
-    service = LLMService(db)
-    result = service.batch_delete(data.request_ids, hard_delete=data.hard_delete)
-    return result
+    success = service.reset_to_pending(request_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot retry this request")
+    return {"success": True, "message": "Request queued for retry"}
 
 
 @router.get("/worker/status", response_model=LLMWorkerStatusResponse)
