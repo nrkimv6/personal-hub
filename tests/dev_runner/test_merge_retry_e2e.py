@@ -137,6 +137,7 @@ class TestRetryMergeFullFlow:
         redis = make_redis_mock(worktree_path=str(worktree))
 
         merge_status_sequence = []
+        publish_calls = []
 
         def track_set(key, value, *args, **kwargs):
             if "merge_status" in key:
@@ -144,6 +145,7 @@ class TestRetryMergeFullFlow:
             return True
 
         redis.set.side_effect = track_set
+        redis.publish.side_effect = lambda channel, payload: publish_calls.append((channel, payload))
 
         import merge_queue as mq
 
@@ -161,6 +163,13 @@ class TestRetryMergeFullFlow:
         assert "merging" in merge_status_sequence
         assert "merged" in merge_status_sequence
         mock_cleanup.assert_called_once()
+        merge_publish_calls = [
+            c for c in publish_calls
+            if c[0] == f"plan-runner:merge-log:{runner_id}"
+        ]
+        assert merge_publish_calls == [
+            (f"plan-runner:merge-log:{runner_id}", "__MERGE_COMPLETED__")
+        ]
 
 
 class TestDirectMergeFullFlow:
