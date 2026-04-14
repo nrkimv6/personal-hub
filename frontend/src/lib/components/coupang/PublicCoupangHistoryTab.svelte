@@ -263,7 +263,7 @@
             {/each}
           </div>
           <p class="text-[11px] text-muted-foreground">
-            당일 도래한 옵션은 공개 이력에서 제외된다.
+            오늘 일정은 공개 목록에서 자동 제외된다.
           </p>
         </div>
       </div>
