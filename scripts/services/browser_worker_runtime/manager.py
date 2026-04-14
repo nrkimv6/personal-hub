@@ -91,6 +91,7 @@ class BrowserWorkerManager:
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         self.pid_suffix = "_admin"
+        self.app_mode = "admin"
         self.api_port = 8001
         self.frontend_port = 6101
         self.frontend_restart_lock = self.pid_dir / "frontend_restart.lock"

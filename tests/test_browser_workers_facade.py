@@ -80,6 +80,13 @@ def test_browser_workers_main_dispatches_restart_frontend_public_R(monkeypatch):
     assert calls == [True]
 
 
+def test_browser_workers_manager_exposes_admin_app_mode_R():
+    """R: BrowserWorkerManager exposes explicit app_mode for restart readiness."""
+    manager = browser_workers.BrowserWorkerManager()
+    assert manager.app_mode == "admin"
+    assert manager.pid_suffix == "_admin"
+
+
 def test_browser_workers_ps1_wrapper_still_targets_python_entrypoint_R():
     """R: PowerShell wrapper still calls the Python facade entrypoint."""
     wrapper_path = SCRIPTS_DIR / "services" / "browser-workers.ps1"
