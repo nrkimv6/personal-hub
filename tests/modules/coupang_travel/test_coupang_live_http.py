@@ -291,3 +291,34 @@ def test_live_coupang_account_not_in_naver_filter():
 
     assert coupang_ids.isdisjoint(naver_ids), \
         f"coupang/naver 계정 ID 중복: {coupang_ids & naver_ids}"
+
+
+def test_live_monitoring_events_hours_filter_200():
+    """R: GET /monitoring/events?hours=2,14 → 200 + 목록 구조."""
+    _skip_if_down()
+    resp = httpx.get(
+        f"{BASE_URL}/api/v1/monitoring/events",
+        params={"service_type": "coupang", "status": "available", "hours": "2,14", "page_size": 20},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "items" in body
+    assert "total" in body
+    assert "page" in body
+    assert "page_size" in body
+    assert "total_pages" in body
+
+
+def test_live_monitoring_events_hours_filter_values():
+    """B: 응답 item이 존재하면 timestamp hour가 요청한 집합 안에 있어야 함."""
+    _skip_if_down()
+    resp = httpx.get(
+        f"{BASE_URL}/api/v1/monitoring/events",
+        params={"service_type": "coupang", "status": "available", "hours": "2,14", "page_size": 20},
+        timeout=10,
+    )
+    assert resp.status_code == 200
+    for item in resp.json()["items"]:
+        hour = int(item["timestamp"][11:13])
+        assert hour in {2, 14}

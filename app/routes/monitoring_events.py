@@ -28,6 +28,21 @@ from app.schemas.monitoring_event import (
 router = APIRouter(prefix="/api/v1/monitoring", tags=["monitoring"])
 
 
+def _parse_hours_filter(hours: Optional[str]) -> List[int]:
+    hour_list: List[int] = []
+    if not hours:
+        return hour_list
+
+    for hour_text in hours.split(","):
+        hour_text = hour_text.strip()
+        if hour_text.isdigit():
+            hour = int(hour_text)
+            if 0 <= hour <= 23:
+                hour_list.append(hour)
+
+    return hour_list
+
+
 @router.get("/events", response_model=MonitoringEventList)
 def get_monitoring_events(
     schedule_id: Optional[int] = Query(None, description="스케줄 ID로 필터링"),
@@ -38,6 +53,7 @@ def get_monitoring_events(
     event_type: Optional[str] = Query(None, description="이벤트 타입으로 필터링"),
     date_from: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
+    hours: Optional[str] = Query(None, description="시간 필터 — 쉼표 구분 정수 (예: 13,15,18), 시간끼리 OR"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     page_size: int = Query(50, ge=1, le=200, description="페이지 크기"),
     db: Session = Depends(get_db)
@@ -94,6 +110,10 @@ def get_monitoring_events(
             query = query.filter(MonitoringEvent.timestamp < to_dt)
         except ValueError:
             pass
+
+    hour_list = _parse_hours_filter(hours)
+    if hour_list:
+        query = query.filter(extract("hour", MonitoringEvent.timestamp).in_(hour_list))
 
     # 총 개수
     total = query.count()

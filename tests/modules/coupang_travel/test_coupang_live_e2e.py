@@ -180,3 +180,20 @@ def test_live_delete_target_cascades_schedules():
     post_schedules = _get_schedules()
     assert not any(s["id"] == schedule_id for s in post_schedules), \
         "상품 삭제 후 스케줄이 남아 있음"
+
+
+def test_live_monitoring_events_hours_filter_smoke():
+    """R: 운영 데이터 기준 monitoring/events hours 조회가 200과 필수 필드를 반환한다."""
+    _skip_if_down()
+    resp = httpx.get(
+        f"{BASE_URL}/api/v1/monitoring/events",
+        params={"service_type": "coupang", "status": "available", "hours": "13,18", "page_size": 20},
+        timeout=30,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "items" in body
+    assert "total" in body
+    assert "page" in body
+    assert "page_size" in body
+    assert "total_pages" in body

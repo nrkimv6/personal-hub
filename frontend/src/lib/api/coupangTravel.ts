@@ -166,6 +166,7 @@ export const coupangTravelApi = {
     if (params?.event_type) searchParams.append('event_type', params.event_type);
     if (params?.date_from) searchParams.append('date_from', params.date_from);
     if (params?.date_to) searchParams.append('date_to', params.date_to);
+    if (params?.hours) searchParams.append('hours', params.hours);
     if (params?.page) searchParams.append('page', String(params.page));
     if (params?.page_size) searchParams.append('page_size', String(params.page_size));
     searchParams.append('service_type', 'coupang');
