@@ -100,10 +100,10 @@ class RunnerState:
         """
         try:
             if runner_id:
-                _module_logger.info(f"[dev-runner] force_cleanup_state ?쒖옉: {runner_id}")
+                _module_logger.info(f"[dev-runner] force_cleanup_state 시작: {runner_id}")
                 existing_status = await self.async_redis.get(self._runner_key(runner_id, "status"))
                 if existing_status is None:
-                    _module_logger.debug(f"[dev-runner] status ???놁쓬: {runner_id} ??RECENT ?깅줉 ?ㅽ궢")
+                    _module_logger.debug(f"[dev-runner] status 키 없음: {runner_id} — RECENT 등록 스킵")
                     await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
                     return
                 await self.async_redis.set(self._runner_key(runner_id, "status"), "stopped")
@@ -131,7 +131,7 @@ class RunnerState:
                 pipe.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
                 await pipe.execute()
                 plan_service.invalidate_plans_cache()
-                _module_logger.info(f"[dev-runner] force_cleanup_state ?꾨즺: {runner_id} RECENT ?대룞")
+                _module_logger.info(f"[dev-runner] force_cleanup_state 완료: {runner_id} RECENT 이동")
             else:
                 runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
                 stop_ts = time.time()
@@ -240,6 +240,14 @@ class RunnerState:
                             reason = "archived"
                     except PathRuleError:
                         pass
+
+                if reason == "archived":
+                    preserved_recent += 1
+                    continue
+
+                if reason == "file_lost" and recent_score >= cutoff_ts:
+                    preserved_recent += 1
+                    continue
 
                 if is_visible_runner(trigger, rid):
                     # user/user:all trigger: dismiss ?꾧퉴吏 cleanup-stale濡???젣?섏? ?딅뒗??

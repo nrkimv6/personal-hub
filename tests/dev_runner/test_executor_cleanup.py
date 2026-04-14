@@ -72,7 +72,7 @@ async def _seed_active(r, rid, *, pid):
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_archived_plan(svc, fake_async_redis, tmp_path):
-    """plan 없음 + archive 있음 + stopped + TTL 내 recent → 정리 (R)"""
+    """plan 없음 + archive 있음 + stopped + TTL 내 recent → 보존 (R)."""
     archive_file = tmp_path / "archive" / "2026-01-01_foo.md"
     archive_file.parent.mkdir(parents=True)
     archive_file.write_text("archived plan")
@@ -91,13 +91,13 @@ async def test_cleanup_stale_archived_plan(svc, fake_async_redis, tmp_path):
 
     result = await svc.cleanup_stale_runners()
 
-    assert result["cleaned_recent"] == 1
-    assert result["preserved_recent"] == 0
+    assert result["cleaned_recent"] == 0
+    assert result["preserved_recent"] == 1
     assert result["bugs"] == 0
-    assert result["total"] == 1
+    assert result["total"] == 0
 
     remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
-    assert rid not in remaining
+    assert rid in remaining
 
 
 @pytest.mark.asyncio
@@ -127,7 +127,7 @@ async def test_cleanup_stale_auto_history_plan_R(svc, fake_async_redis, tmp_path
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_file_lost(svc, fake_async_redis, tmp_path):
-    """plan 없음 + archive도 없음 + stopped + TTL 내 recent → 정리 (R)"""
+    """plan 없음 + archive도 없음 + stopped + TTL 내 recent → 보존 (R)."""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     plan_file_path = str(plan_dir / "2026-02-01_lost.md")
@@ -137,13 +137,13 @@ async def test_cleanup_stale_file_lost(svc, fake_async_redis, tmp_path):
 
     result = await svc.cleanup_stale_runners()
 
-    assert result["cleaned_recent"] == 1
-    assert result["preserved_recent"] == 0
-    assert result["bugs"] == 1
-    assert result["total"] == 1
+    assert result["cleaned_recent"] == 0
+    assert result["preserved_recent"] == 1
+    assert result["bugs"] == 0
+    assert result["total"] == 0
 
     remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
-    assert rid not in remaining
+    assert rid in remaining
 
 
 @pytest.mark.asyncio

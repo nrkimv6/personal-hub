@@ -491,7 +491,9 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
         # 3. subprocess로 plan-runner post-merge 호출
         proc = subprocess.run(
             [str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "post-merge",
-             "--runner-id", runner_id, "--redis-db", str(get_redis_db())],
+             "--runner-id", runner_id,
+             "--redis-db", str(get_redis_db()),
+             "--project-dir", str(PROJECT_ROOT)],
             cwd=str(PLAN_RUNNER_MODULE_PATH),
         )
         exit_code = proc.returncode

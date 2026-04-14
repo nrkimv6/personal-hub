@@ -145,6 +145,107 @@ class TestStreamSSELoop:
         assert any(": heartbeat" in e for e in collected), f"heartbeat not found: {collected}"
 
     @pytest.mark.asyncio
+    async def test_stream_sse_loop_heartbeat_boundary_single_emit(self):
+        """B: interval 경과 시 heartbeat는 1회만 방출된다."""
+        svc = _make_log_service()
+
+        call_count = [0]
+        max_calls = 4
+
+        async def get_message_no_msg(ignore_subscribe_messages=True, timeout=0.5):
+            call_count[0] += 1
+            if call_count[0] > max_calls:
+                raise StopAsyncIteration("test stop")
+            return None
+
+        pubsub_mock = AsyncMock()
+        pubsub_mock.subscribe = AsyncMock()
+        pubsub_mock.unsubscribe = AsyncMock()
+        pubsub_mock.punsubscribe = AsyncMock()
+        pubsub_mock.aclose = AsyncMock()
+        pubsub_mock.get_message = get_message_no_msg
+
+        async_redis_mock = MagicMock()
+        async_redis_mock.pubsub.return_value = pubsub_mock
+        svc.async_redis = async_redis_mock
+
+        base_time = time.monotonic()
+        call_idx = [0]
+
+        def mock_monotonic():
+            call_idx[0] += 1
+            if call_idx[0] <= 2:
+                return base_time
+            return base_time + HEARTBEAT_INTERVAL + 1
+
+        collected = []
+        with patch("app.modules.dev_runner.services.log_service.time.monotonic", mock_monotonic):
+            with patch("app.modules.dev_runner.services.log_service.asyncio.sleep", AsyncMock()):
+                try:
+                    async for event in svc._stream_sse_loop(
+                        "test:channel",
+                        lambda d: False,
+                        lambda d: (d, d),
+                        multiline_frame=False,
+                    ):
+                        collected.append(event)
+                        if len(collected) >= 2:
+                            break
+                except StopAsyncIteration:
+                    pass
+
+        heartbeat_events = [e for e in collected if ": heartbeat" in e]
+        assert len(heartbeat_events) == 1, f"heartbeat events: {collected}"
+
+    @pytest.mark.asyncio
+    async def test_stream_sse_loop_no_heartbeat_before_interval(self):
+        """B: interval 경과 전에는 heartbeat를 방출하지 않는다."""
+        svc = _make_log_service()
+
+        call_count = [0]
+        max_calls = 3
+
+        async def get_message_no_msg(ignore_subscribe_messages=True, timeout=0.5):
+            call_count[0] += 1
+            if call_count[0] > max_calls:
+                raise StopAsyncIteration("test stop")
+            return None
+
+        pubsub_mock = AsyncMock()
+        pubsub_mock.subscribe = AsyncMock()
+        pubsub_mock.unsubscribe = AsyncMock()
+        pubsub_mock.punsubscribe = AsyncMock()
+        pubsub_mock.aclose = AsyncMock()
+        pubsub_mock.get_message = get_message_no_msg
+
+        async_redis_mock = MagicMock()
+        async_redis_mock.pubsub.return_value = pubsub_mock
+        svc.async_redis = async_redis_mock
+
+        base_time = time.monotonic()
+        call_idx = [0]
+
+        def mock_monotonic():
+            call_idx[0] += 1
+            return base_time
+
+        collected = []
+        with patch("app.modules.dev_runner.services.log_service.time.monotonic", mock_monotonic):
+            with patch("app.modules.dev_runner.services.log_service.asyncio.sleep", AsyncMock()):
+                try:
+                    async for event in svc._stream_sse_loop(
+                        "test:channel",
+                        lambda d: False,
+                        lambda d: (d, d),
+                        multiline_frame=False,
+                    ):
+                        collected.append(event)
+                except StopAsyncIteration:
+                    pass
+
+        assert not any(": heartbeat" in e for e in collected), f"heartbeat should not appear: {collected}"
+
+    @pytest.mark.asyncio
     async def test_stream_sse_loop_redis_reconnect(self):
         """E: Redis ConnectionError 발생 시 event: redis_disconnected yield"""
         svc = _make_log_service()

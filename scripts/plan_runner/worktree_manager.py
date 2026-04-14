@@ -304,9 +304,11 @@ class WorktreeManager:
         else:
             branch = f"runner/{runner_id}"
         stashed = False
+        repo_git_path = project_root / ".git"
         try:
-            # main 泥댄겕?꾩썐
-            ensure_main_branch(project_root)
+            # 실제 git repo일 때만 main 체크아웃 보장
+            if repo_git_path.exists():
+                ensure_main_branch(project_root)
             # is-ancestor ?ъ쟾 泥댄겕 ???대? 癒몄???釉뚮옖移섎㈃ skip
             ancestor_check = _run_git(
                 ["merge-base", "--is-ancestor", branch, "HEAD"],
@@ -381,6 +383,8 @@ class WorktreeManager:
                 # CONFLICT 以꾨쭔 異붿텧?섏뿬 message???ы븿 (resolve?먯꽌 而⑦뀓?ㅽ듃濡??쒖슜)
                 conflict_lines = [l.strip() for l in result.stdout.splitlines() if l.strip().startswith("CONFLICT")]
                 detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr.strip() + "\n" + result.stdout.strip()).strip()[:500]
+                if not repo_git_path.exists():
+                    detail = f"failed to restore main branch: {detail}"
                 # ??긽 abort ??stash pop
                 _run_git(["merge", "--abort"], cwd=str(project_root), capture_output=True)
                 if stashed:
@@ -398,10 +402,11 @@ class WorktreeManager:
         finally:
             # ?덉쇅 諛쒖깮 ?쒖뿉??main 蹂듦? 蹂댁옣 (stash pop? ?꾩뿉???대? 泥섎━)
             # ?덉쇅???듭젣 ???대? except?먯꽌 MergeResult瑜?諛섑솚?덇굅???곸쐞濡??꾪뙆 以?
-            try:
-                _run_git(["checkout", "main"], cwd=str(project_root), capture_output=True)
-            except Exception:
-                pass
+            if repo_git_path.exists():
+                try:
+                    _run_git(["checkout", "main"], cwd=str(project_root), capture_output=True)
+                except Exception:
+                    pass
 
     @staticmethod
     def list_worktrees() -> list:
