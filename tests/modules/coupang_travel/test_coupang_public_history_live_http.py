@@ -13,7 +13,7 @@ def _skip_if_down() -> None:
     try:
         httpx.get(BASE_URL, timeout=5)
     except httpx.ConnectError:
-        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+        pytest.skip("실서버 미기동 — localhost:8001 연결 불가")
 
 
 def test_live_public_history_200_and_shape():
