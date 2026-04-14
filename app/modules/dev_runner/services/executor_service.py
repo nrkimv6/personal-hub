@@ -235,7 +235,7 @@ class ExecutorService:
         # 동시 실행 개수 제한 확인
         count = await self.async_redis.scard(ACTIVE_RUNNERS_KEY)
         settings = settings_service.get()
-        max_concurrent_runners = config.MAX_CONCURRENT_RUNNERS
+        max_concurrent_runners = getattr(settings, "max_concurrent_runners", config.MAX_CONCURRENT_RUNNERS)
         if count >= max_concurrent_runners:
             raise HTTPException(
                 status_code=429,

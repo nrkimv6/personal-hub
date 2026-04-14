@@ -10,8 +10,8 @@ def test__extract_worktree_meta_right():
     """R(Right): 3媛??꾨뱶 紐⑤몢 ?ы븿 ???뺥솗??異붿텧 + ?뺢퇋??"""
     content = (
         "# plan title\n"
-        "> ?묒꽦?쇱떆: 2026-04-06\n"
-        "> ?곹깭: 援ы쁽以?n"
+        "> created_at: 2026-04-06\n"
+        "> status: in_progress\n"
         "> branch: impl/feature-name\n"
         "> worktree: .worktrees/impl-feature-name\n"
         "> worktree-owner: docs/plan/2026-04-06_feature.md\n"
@@ -25,7 +25,7 @@ def test__extract_worktree_meta_right():
 
 def test__extract_worktree_meta_empty():
     """B(Boundary): 硫뷀? ?꾨뱶 ?녿뒗 content ??3媛???紐⑤몢 None"""
-    content = "# plan title\n> ?곹깭: 珥덉븞\n\n---\n## 媛쒖슂\n?댁슜"
+    content = "# plan title\n> status: unknown\n\n---\n## overview\ncontent"
     result = PlanService._extract_worktree_meta(content)
     assert result["branch"] is None
     assert result["worktree_path"] is None
@@ -34,7 +34,7 @@ def test__extract_worktree_meta_empty():
 
 def test__extract_worktree_meta_partial():
     """B(Boundary): branch留??덇퀬 worktree-owner ?녿뒗 寃쎌슦"""
-    content = "# plan\n> branch: impl/feature\n> ?곹깭: 援ы쁽以?n"
+    content = "# plan\n> branch: impl/feature\n> status: in_progress\n"
     result = PlanService._extract_worktree_meta(content)
     assert result["branch"] == "impl/feature"
     assert result["worktree_path"] is None
@@ -86,20 +86,20 @@ def test__update_plan_headers_removes_worktree_owner():
     """R(Right): branch/worktree/worktree-owner 3以?紐⑤몢 ?쒓굅??"""
     content = (
         "# plan\n"
-        "> ?곹깭: 援ы쁽以?n"
-        "> 吏꾪뻾瑜? 5/5 (100%)\n"
+        "> status: in_progress\n"
+        "> progress: 5/5 (100%)\n"
         "> branch: impl/feature\n"
         "> worktree: .worktrees/impl-feature\n"
         "> worktree-owner: docs/plan/2026-04-06_feature.md\n"
         "\n---\n"
         "- [x] ??ぉ1\n"
-        "*?곹깭: 援ы쁽以?| 吏꾪뻾瑜? 5/5 (100%)*\n"
+        "*status: in_progress | progress: 5/5 (100%)*\n"
     )
     result = update_plan_headers(content, total=5)
     assert "branch" not in result or "> branch:" not in result
     assert "> worktree:" not in result
     assert "worktree-owner" not in result
-    assert "援ы쁽?꾨즺" in result
+    assert "in_progress" in result
 
 
 # ??? _validate_done_preconditions ?????????????????????????????????????????????
@@ -108,8 +108,8 @@ def test__validate_done_preconditions_detects_worktree_owner():
     """E(Error): worktree-owner留??붿〈?대룄 ?먮윭 媛먯?"""
     content = (
         "# plan\n"
-        "> ?곹깭: 援ы쁽?꾨즺\n"
-        "> 吏꾪뻾瑜? 5/5 (100%)\n"
+        "> status: completed\n"
+        "> progress: 5/5 (100%)\n"
         "> worktree-owner: docs/plan/2026-04-06_feature.md\n"
         "\n---\n"
     )

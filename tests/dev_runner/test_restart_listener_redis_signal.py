@@ -187,13 +187,10 @@ class TestGracefulExitHandler:
 
     def test_graceful_exit_with_active_runners_warns_not_refuses(self, listener, mock_redis, caplog):
         """B: 활성 runner 존재 시 거부하지 않고 warning 로그 + success: True"""
-        from _dr_state import get_running_processes
-
         # 활성 runner mock (poll() = None → 실행 중)
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
-        procs = get_running_processes()
-        procs["test-runner-123"] = mock_proc
+        listener._running_processes["test-runner-123"] = mock_proc
 
         try:
             import logging
@@ -201,10 +198,12 @@ class TestGracefulExitHandler:
                 result = listener._handle_graceful_exit(mock_redis)
 
             assert result["success"] is True, "활성 runner 있어도 graceful-exit 허용해야 함"
-            assert any("graceful-exit" in r.message and "runner" in r.message
-                       for r in caplog.records), "활성 runner 경고 로그 없음"
+            assert any(
+                r.levelno >= logging.WARNING and "graceful-exit" in r.getMessage()
+                for r in caplog.records
+            ), "활성 runner 경고 로그 없음"
         finally:
-            procs.pop("test-runner-123", None)
+            listener._running_processes.pop("test-runner-123", None)
 
     def test_graceful_exit_returns_result_dict(self, listener, mock_redis):
         """R: 반환값이 {"success": True, "message": "graceful-exit scheduled"} 형태"""

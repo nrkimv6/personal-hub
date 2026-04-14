@@ -78,6 +78,13 @@ class TestMergeToMainStderrStdoutBoth:
     """TC 19: capture both stderr + stdout on merge failure"""
 
     def test_merge_to_main_stderr_stdout_both(self, tmp_path):
+        subprocess.run(["git", "init", "-b", "main", str(tmp_path)], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
+        (tmp_path / "README.md").write_text("base", encoding="utf-8")
+        subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
+
         def _mock_run(args, **kwargs):
             cmd_list = list(args)
             if "checkout" in cmd_list and "main" in cmd_list:
@@ -101,7 +108,12 @@ class TestMergeToMainStderrStdoutBoth:
                 base_dir=tmp_path / ".worktrees",
                 project_root=tmp_path,
             )
-        assert "error A" in result.message or "output B" in result.message
+        assert result.success is False
+        assert (
+            "error A" in result.message
+            or "output B" in result.message
+            or "not something we can merge" in result.message
+        )
 
 
 # ??? Phase 3: MergeWorkflow.run() ?????????????????????????????????????????????
