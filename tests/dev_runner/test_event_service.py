@@ -83,7 +83,11 @@ class TestBuildStatusPayloadVisible:
             SENTINEL,
             "claude",
             None,
+            None,
+            None,
+            None,
             "user",
+            None,
             None,
             None,
         ]
@@ -103,7 +107,11 @@ class TestBuildStatusPayloadVisible:
             "ALL",
             "claude",
             None,
+            None,
+            None,
+            None,
             "api",
+            None,
             None,
             None,
         ]
@@ -143,8 +151,8 @@ class TestBuildStatusPayloadExecutionCount:
         # 11 fields: status, pid, current_cycle, start_time, plan_file, engine, branch, trigger, exit_reason, error, execution_count
         svc._sync.mget.return_value = [
             "running", "1234", "1", "2026-03-04T00:00:00",
-            "docs/plan/test.md", "claude", None, "user",
-            None, None, "2",
+            "docs/plan/test.md", "claude", None, None,
+            None, None, "user", None, None, "2", None, None, None,
         ]
         payload = svc._build_status_payload("runner-ec")
         assert payload is not None
@@ -155,8 +163,8 @@ class TestBuildStatusPayloadExecutionCount:
         svc = _make_service()
         svc._sync.mget.return_value = [
             "running", "1234", "1", "2026-03-04T00:00:00",
-            "docs/plan/test.md", "claude", None, "user",
-            None, None, None,
+            "docs/plan/test.md", "claude", None, None,
+            None, None, "user", None, None, None, None, None, None,
         ]
         payload = svc._build_status_payload("runner-no-ec")
         assert payload is not None

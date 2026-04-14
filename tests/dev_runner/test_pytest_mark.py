@@ -125,7 +125,7 @@ class TestPytestMarkInfra:
         combined = result.stdout + result.stderr
         assert result.returncode == 0, combined
         assert "--run-destructive-live required" in combined, combined
-        assert "4 skipped" in combined, combined
+        assert "5 skipped" in combined, combined
 
     def test_log_stream_live_file_collects_under_http_live(self):
         """TC-Right: test_log_stream_http.py 전체는 http_live에서만 수집된다."""

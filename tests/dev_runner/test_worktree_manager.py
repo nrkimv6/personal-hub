@@ -94,15 +94,9 @@ class TestWorktreeManagerCreate:
         assert path2.is_dir()
         assert branch2 == branch1
 
-    def test_error_not_a_git_repo(self, tmp_path):
-        import worktree_manager
-        with patch("worktree_manager._run_git") as mock_run:
-            mock_run.returncode = 128
-            mock_run.side_effect = lambda *args, **kwargs: MagicMock(returncode=128, stderr="fatal: not a git repository")
-    def test_error_not_a_git_repo(self, tmp_path):
+    def test_error_not_a_git_repo(self, tmp_path_factory):
         """TC-Error: non-git directory raises WorktreeError"""
-        non_repo = tmp_path / "not_a_repo"
-        non_repo.mkdir()
+        non_repo = tmp_path_factory.mktemp("not_a_repo")
         base_dir = non_repo / ".worktrees"
         with pytest.raises(WorktreeError):
             WorktreeManager.create("err001", base_dir)

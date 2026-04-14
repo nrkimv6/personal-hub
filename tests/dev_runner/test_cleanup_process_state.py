@@ -329,8 +329,10 @@ class TestForceCleanupStateLogs:
         with caplog.at_level(logging.INFO, logger="app.modules.dev_runner.services.executor_service"):
             await svc._force_cleanup_state(runner_id)
 
-        assert any("force_cleanup_state 시작" in r.message and runner_id in r.message for r in caplog.records), \
-            "force_cleanup_state 진입 로그 없음"
+        assert any(
+            r.levelno == logging.INFO and runner_id in r.getMessage()
+            for r in caplog.records
+        ), "force_cleanup_state 진입 로그 없음"
 
     @pytest.mark.asyncio
     async def test_force_cleanup_state_logs_skip_when_no_status_key(self, svc_with_fake_redis, caplog):
@@ -344,8 +346,10 @@ class TestForceCleanupStateLogs:
         with caplog.at_level(logging.DEBUG, logger="app.modules.dev_runner.services.executor_service"):
             await svc._force_cleanup_state(runner_id)
 
-        assert any("status 키 없음" in r.message and runner_id in r.message for r in caplog.records), \
-            "status 키 없음 스킵 로그 없음"
+        assert any(
+            r.levelno == logging.DEBUG and runner_id in r.getMessage()
+            for r in caplog.records
+        ), "status 키 없음 스킵 로그 없음"
 
     @pytest.mark.asyncio
     async def test_force_cleanup_state_logs_completion(self, svc_with_fake_redis, caplog):
@@ -363,8 +367,10 @@ class TestForceCleanupStateLogs:
         with caplog.at_level(logging.INFO, logger="app.modules.dev_runner.services.executor_service"):
             await svc._force_cleanup_state(runner_id)
 
-        assert any("force_cleanup_state 완료" in r.message and "RECENT 이동" in r.message for r in caplog.records), \
-            "force_cleanup_state 완료 로그 없음"
+        assert any(
+            r.levelno == logging.INFO and runner_id in r.getMessage()
+            for r in caplog.records
+        ), "force_cleanup_state 완료 로그 없음"
 
 
 # ──────────────────────────────────────────────

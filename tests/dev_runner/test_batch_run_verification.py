@@ -56,6 +56,14 @@ def _make_capture_lpush(fake_async_redis, captured, result_data=None):
     return capture_lpush
 
 
+def _get_launch_command(mock_popen):
+    for call in mock_popen.call_args_list:
+        cmd = call.args[0]
+        if isinstance(cmd, list) and cmd and cmd[0] != "git":
+            return cmd
+    raise AssertionError(f"launch command not found in calls: {mock_popen.call_args_list}")
+
+
 # ========== Fixtures (executor_service) ==========
 
 @pytest.fixture
@@ -253,7 +261,7 @@ class TestLaunchCliArgs:
                 command, fr, RUNNER_ID, mock_worktree, None, None
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--extra-plan-dirs" in cmd
         idx = cmd.index("--extra-plan-dirs")
         assert cmd[idx + 1] == "D:\\a,D:\\b"
@@ -277,7 +285,7 @@ class TestLaunchCliArgs:
                 command, fr, RUNNER_ID, mock_worktree, None, None
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--ignored-plans" in cmd
         idx = cmd.index("--ignored-plans")
         assert cmd[idx + 1] == "D:\\a\\skip.md"
@@ -301,7 +309,7 @@ class TestLaunchCliArgs:
                 command, fr, RUNNER_ID, mock_worktree, "test.md", None
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--session-id" in cmd
         idx = cmd.index("--session-id")
         assert cmd[idx + 1] == "abc-def-123"
@@ -325,7 +333,7 @@ class TestLaunchCliArgs:
                 command, fr, RUNNER_ID, mock_worktree, "test.md", None
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--skip-plan" not in cmd
 
     def test_launch_cli_includes_fused_session(
@@ -348,7 +356,7 @@ class TestLaunchCliArgs:
                 command, fr, RUNNER_ID, mock_worktree, "test.md", None
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--fused-session" in cmd
 
 

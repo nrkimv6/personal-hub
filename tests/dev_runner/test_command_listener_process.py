@@ -65,6 +65,14 @@ def mock_popen():
 RUNNER_ID = "test1234"
 
 
+def _get_launch_command(mock_popen):
+    for call in mock_popen.call_args_list:
+        cmd = call.args[0]
+        if isinstance(cmd, list) and cmd and cmd[0] != "git":
+            return cmd
+    raise AssertionError(f"launch command not found in calls: {mock_popen.call_args_list}")
+
+
 class _RedisHeartbeatSetFailProxy:
     """subprocess_heartbeat SET만 실패시키는 Redis 프록시."""
 
@@ -146,7 +154,7 @@ class TestLaunchPlanRunnerProcess:
             result = listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", None)
 
         assert mp.call_count >= 1  # plan runner + optional merge orchestrator
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "run" in cmd
         assert "--plan-file" in cmd
         assert "common/docs/plan/test.md" in cmd
@@ -163,7 +171,7 @@ class TestLaunchPlanRunnerProcess:
             mock_thread.return_value = MagicMock()
             result = listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, None, None)
 
-        cmd = mp.call_args[0][0]
+        cmd = _get_launch_command(mp)
         assert "--plan-file" not in cmd
         assert "--parallel" in cmd
 
@@ -184,7 +192,7 @@ class TestLaunchPlanRunnerProcess:
                 command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "cc-codex"
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--engine" in cmd
         assert cmd[cmd.index("--engine") + 1] == "cc-codex"
 
@@ -205,7 +213,7 @@ class TestLaunchPlanRunnerProcess:
                 command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "claude"
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--fix-engine" in cmd
         assert cmd[cmd.index("--fix-engine") + 1] == "cc-codex"
 
@@ -226,7 +234,7 @@ class TestLaunchPlanRunnerProcess:
                 command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "codex"
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--engine" in cmd
         assert cmd[cmd.index("--engine") + 1] == "codex"
 
@@ -247,7 +255,7 @@ class TestLaunchPlanRunnerProcess:
                 command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "claude"
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--fix-engine" in cmd
         assert cmd[cmd.index("--fix-engine") + 1] == "codex"
 
@@ -269,7 +277,7 @@ class TestLaunchPlanRunnerProcess:
                 command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", "codex", fix_engine="codex"
             )
 
-        cmd = mp.call_args_list[0][0][0]
+        cmd = _get_launch_command(mp)
         assert "--engine" in cmd
         assert cmd[cmd.index("--engine") + 1] == "codex"
         assert "--fix-engine" in cmd

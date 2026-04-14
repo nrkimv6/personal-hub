@@ -11,6 +11,7 @@ Phase T3 integration tests:
 from __future__ import annotations
 
 import json
+import importlib
 import sys
 import time
 import threading
@@ -28,47 +29,47 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 # dependency module stubs (without full listener loading)
 import types
-for _mod_name in [
-    "listener_noise_filter",
-    "merge_queue",
-    "worktree_manager",
-    "plan_worktree_helpers",
-]:
-    if _mod_name not in sys.modules:
-        _stub = types.ModuleType(_mod_name)
-        sys.modules[_mod_name] = _stub
+
+
+def _install_stub_module(module_name: str, **attrs):
+    stub = types.ModuleType(module_name)
+    for key, value in attrs.items():
+        setattr(stub, key, value)
+    return stub
+
 
 # noise_filter default settings
-_nf = sys.modules["listener_noise_filter"]
-if not hasattr(_nf, "NOISE_BLOCK_MARKERS"):
-    _nf.NOISE_BLOCK_MARKERS = []
-if not hasattr(_nf, "is_noise_line"):
-    _nf.is_noise_line = lambda line: False
+_nf = _install_stub_module(
+    "listener_noise_filter",
+    NOISE_BLOCK_MARKERS=[],
+    is_noise_line=lambda line: False,
+)
 
 # merge_queue stubs
-_mq = sys.modules["merge_queue"]
-if not hasattr(_mq, "release_merge_turn"):
-    _mq.release_merge_turn = lambda *a, **kw: None
-if not hasattr(_mq, "_get_repo_id"):
-    _mq._get_repo_id = lambda *a, **kw: "test-repo"
-if not hasattr(_mq, "get_queue_key"):
-    _mq.get_queue_key = lambda *a, **kw: "test:queue"
+_mq = _install_stub_module(
+    "merge_queue",
+    release_merge_turn=lambda *a, **kw: None,
+    _get_repo_id=lambda *a, **kw: "test-repo",
+    get_queue_key=lambda *a, **kw: "test:queue",
+)
 
 # worktree_manager stubs
-_wm = sys.modules["worktree_manager"]
-if not hasattr(_wm, "WorktreeManager"):
-    class _WM:
-        @staticmethod
-        def remove(*a, **kw):
-            pass
-    _wm.WorktreeManager = _WM
+class _WM:
+    @staticmethod
+    def remove(*a, **kw):
+        pass
+
+
+_wm = _install_stub_module("worktree_manager", WorktreeManager=_WM)
 
 # plan_worktree_helpers stubs
-_pwh = sys.modules["plan_worktree_helpers"]
-if not hasattr(_pwh, "is_plan_in_progress"):
-    _pwh.is_plan_in_progress = lambda *a, **kw: False
+_pwh = _install_stub_module(
+    "plan_worktree_helpers",
+    is_plan_in_progress=lambda *a, **kw: False,
+)
 
 from _dr_constants import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, PLAN_FILE_ALL, _LEGACY_ALL, RESULTS_KEY, LOG_CHANNEL_PREFIX
+import _dr_state as _dr_state_module
 from _dr_state import get_running_processes
 from _dr_process_utils import _tail_log_and_publish, _cleanup_process_state, _DummyProcess
 from _dr_plan_runner import start_plan_runner
@@ -77,6 +78,48 @@ from _dr_plan_runner import start_plan_runner
 # ?????????????????????????????????????????????????????????????
 # Helpers
 # ?????????????????????????????????????????????????????????????
+
+@pytest.fixture(autouse=True)
+def _install_dev_runner_stubs(monkeypatch):
+    monkeypatch.setitem(sys.modules, "listener_noise_filter", _nf)
+    monkeypatch.setitem(sys.modules, "merge_queue", _mq)
+    monkeypatch.setitem(sys.modules, "worktree_manager", _wm)
+    monkeypatch.setitem(sys.modules, "plan_worktree_helpers", _pwh)
+
+    # 이전 테스트 파일에서 이미 로드된 dev-runner 모듈을 강제로 비우고,
+    # 여기서 설치한 stub를 반영한 fresh import로 다시 연결한다.
+    for module_name in (
+        "_dr_state",
+        "_dr_process_utils",
+        "_dr_plan_runner",
+        "scripts.plan_runner._dr_state",
+        "scripts.plan_runner._dr_process_utils",
+        "scripts.plan_runner._dr_plan_runner",
+    ):
+        sys.modules.pop(module_name, None)
+
+    global _dr_state_module, get_running_processes
+    global _tail_log_and_publish, _cleanup_process_state, _DummyProcess, start_plan_runner
+
+    _dr_state_module = importlib.import_module("_dr_state")
+    get_running_processes = _dr_state_module.get_running_processes
+
+    _process_utils_module = importlib.import_module("_dr_process_utils")
+    _tail_log_and_publish = _process_utils_module._tail_log_and_publish
+    _cleanup_process_state = _process_utils_module._cleanup_process_state
+    _DummyProcess = _process_utils_module._DummyProcess
+
+    _plan_runner_module = importlib.import_module("_dr_plan_runner")
+    start_plan_runner = _plan_runner_module.start_plan_runner
+
+
+@pytest.fixture(autouse=True)
+def _reset_running_processes(monkeypatch):
+    for name in ("_running_processes", "_running_log_files", "_stream_threads", "_cleanup_done", "_dead_process_first_seen", "_zombie_first_seen"):
+        getattr(_dr_state_module, name).clear()
+    monkeypatch.setattr("_dr_plan_runner.get_running_processes", _dr_state_module.get_running_processes)
+    monkeypatch.setattr("_dr_process_utils.get_running_processes", _dr_state_module.get_running_processes)
+
 
 def _make_fr():
     return fakeredis.FakeRedis(decode_responses=True)
