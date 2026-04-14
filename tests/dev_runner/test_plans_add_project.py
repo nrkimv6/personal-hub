@@ -120,3 +120,25 @@ class TestAddProjectCrossCheck:
         resp2 = client.post(f"{BASE}/plans/paths/project", json={"path": str(project_root)})
         data = resp2.json()
         assert len(data["added"]) + len(data["skipped"]) == 2
+
+
+class TestAddProjectPlansWorktree:
+    """plans worktree가 있으면 .worktrees/plans 경로를 우선 등록"""
+
+    def test_prefers_plans_worktree_paths(self, client, tmp_path):
+        project_root = tmp_path / "monitor-page"
+        plan_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+        archive_dir = project_root / ".worktrees" / "plans" / "docs" / "archive"
+        plan_dir.mkdir(parents=True)
+        archive_dir.mkdir(parents=True)
+        (project_root / "docs" / "plan").mkdir(parents=True)
+        (project_root / "docs" / "archive").mkdir(parents=True)
+
+        resp = client.post(f"{BASE}/plans/paths/project", json={"path": str(project_root)})
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert any(".worktrees" in item for item in data["added"])
+        assert all(".worktrees" in item for item in data["added"])
+        assert len(data["added"]) == 2
+        assert len(data["skipped"]) == 0

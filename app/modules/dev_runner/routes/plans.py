@@ -152,9 +152,24 @@ class AddProjectRequest(BaseModel):
     path: str
 
 
+def _project_registration_candidates(root: Path, subdir: str) -> list[Path]:
+    """프로젝트 등록 시 plans worktree 우선 후보를 반환한다."""
+    candidates: list[Path] = []
+
+    plans_root = root / ".worktrees" / "plans"
+    if plans_root.exists():
+        candidates.append(plans_root / "docs" / subdir)
+
+    legacy_path = root / "docs" / subdir
+    if legacy_path not in candidates:
+        candidates.append(legacy_path)
+
+    return candidates
+
+
 @router.post("/plans/paths/project")
 async def add_project(request: AddProjectRequest):
-    """프로젝트 루트 경로 등록 — docs/plan(plan) + docs/archive(archive) 동시 등록"""
+    """프로젝트 루트 경로 등록 — plans worktree 우선, legacy는 fallback"""
     if not plan_service.validate_path(request.path):
         raise HTTPException(status_code=403, detail="Path not allowed")
 
@@ -165,15 +180,16 @@ async def add_project(request: AddProjectRequest):
     added = []
     skipped = []
 
-    for sub, path_type in [("docs/plan", "plan"), ("docs/archive", "archive")]:
-        sub_path = root / sub
-        if not sub_path.exists():
-            skipped.append(f"{sub_path} ({path_type}, not found)")
+    for subdir, path_type in [("plan", "plan"), ("archive", "archive")]:
+        candidates = _project_registration_candidates(root, subdir)
+        selected = next((candidate for candidate in candidates if candidate.exists()), None)
+        if selected is None:
+            skipped.append(f"{candidates[0]} ({path_type}, not found)")
             continue
-        if plan_service.add_path(str(sub_path), path_type=path_type):
-            added.append(f"{sub_path} ({path_type})")
+        if plan_service.add_path(str(selected), path_type=path_type):
+            added.append(f"{selected} ({path_type})")
         else:
-            skipped.append(f"{sub_path} ({path_type}, already registered)")
+            skipped.append(f"{selected} ({path_type}, already registered)")
 
     return {"added": added, "skipped": skipped}
 
