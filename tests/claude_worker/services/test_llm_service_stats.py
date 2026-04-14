@@ -88,8 +88,8 @@ class TestGetStats:
         # "cancelled" 는 known 키 없음 → 0 기본값
         assert result.get("cancelled") is None
 
-    def test_get_stats_Re_includes_soft_deleted(self, test_session, llm_service):
-        """deleted_at IS NOT NULL row도 카운트에 포함 (기존 동작 보존)."""
+    def test_get_stats_Re_excludes_soft_deleted(self, test_session, llm_service):
+        """deleted_at IS NOT NULL row는 카운트에서 제외되어야 한다."""
         now = datetime.now()
         _make_req(test_session, "completed")
         _make_req(test_session, "completed", deleted_at=now)  # soft-deleted
@@ -97,5 +97,5 @@ class TestGetStats:
 
         result = llm_service.get_stats()
 
-        assert result["completed"] == 2  # soft-deleted 포함
-        assert result["total"] == 2
+        assert result["completed"] == 1
+        assert result["total"] == 1

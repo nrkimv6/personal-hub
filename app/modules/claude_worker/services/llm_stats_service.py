@@ -327,7 +327,7 @@ class LLMStatsService:
     # ── 기본 통계 / 성능 분석 ─────────────────────────────────────────────────
 
     def get_stats(self) -> dict:
-        """통계 조회. deleted_at 필터 없음 (soft-deleted 포함, 기존 동작 보존)."""
+        """통계 조회. 목록/큐 화면과 동일하게 soft-deleted 요청은 제외한다."""
         rows = self._repo.get_status_counts()
         counts = {s: n for s, n in rows}
         return {

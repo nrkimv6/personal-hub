@@ -271,9 +271,10 @@ class LLMRequestRepository:
         )
 
     def get_status_counts(self):
-        """status별 카운트 집계 rows 반환 (get_stats용, deleted 포함)."""
+        """status별 카운트 집계 rows 반환 (get_stats용, soft-deleted 제외)."""
         return (
             self.db.query(LLMRequest.status, func.count())
+            .filter(LLMRequest.deleted_at.is_(None))
             .group_by(LLMRequest.status)
             .all()
         )

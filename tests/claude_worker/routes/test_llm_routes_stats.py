@@ -89,3 +89,30 @@ class TestStatsEndpoint:
         assert body["pending"] == 0
         assert body["completed"] == 0
         assert body["failed"] == 0
+
+    def test_stats_Re_excludes_soft_deleted(self, client, db):
+        """soft-deleted 요청은 stats 집계에서 제외한다."""
+        active = LLMRequest(
+            caller_type="t",
+            caller_id="active",
+            prompt="p",
+            status="pending",
+            requested_at=datetime.now(),
+        )
+        deleted = LLMRequest(
+            caller_type="t",
+            caller_id="deleted",
+            prompt="p",
+            status="pending",
+            requested_at=datetime.now(),
+            deleted_at=datetime.now(),
+        )
+        db.add_all([active, deleted])
+        db.commit()
+
+        resp = client.get("/api/v1/llm/stats")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["pending"] == 1
+        assert body["total"] == 1
