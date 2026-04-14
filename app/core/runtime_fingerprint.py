@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import os
 import platform
@@ -96,10 +95,25 @@ def build_runtime_fingerprint_snapshot(
 RUNTIME_FINGERPRINT_SNAPSHOT = build_runtime_fingerprint_snapshot()
 
 
-def get_runtime_fingerprint_snapshot() -> dict[str, object]:
-    """Return a copy of the cached import-time snapshot."""
-    return copy.deepcopy(RUNTIME_FINGERPRINT_SNAPSHOT)
+def get_runtime_fingerprint_snapshot(
+    *,
+    project_root: str | Path | None = None,
+    app_mode: str | None = None,
+    source_files: Sequence[str | Path] | None = None,
+    pid: int | None = None,
+    cwd: str | Path | None = None,
+    python_executable: str | Path | None = None,
+) -> dict[str, object]:
+    """Return a fresh snapshot for the current process/runtime state."""
+    return build_runtime_fingerprint_snapshot(
+        project_root=project_root,
+        app_mode=app_mode,
+        source_files=source_files,
+        pid=pid,
+        cwd=cwd,
+        python_executable=python_executable,
+    )
 
 
 def get_runtime_fingerprint() -> str:
-    return str(RUNTIME_FINGERPRINT_SNAPSHOT["runtime_fingerprint"])
+    return str(get_runtime_fingerprint_snapshot()["runtime_fingerprint"])

@@ -5,7 +5,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from app.core.runtime_fingerprint import build_runtime_fingerprint_snapshot
+from app.core.runtime_fingerprint import build_runtime_fingerprint_snapshot, get_runtime_fingerprint_snapshot
 from scripts.services.browser_worker_runtime import api_actions
 
 
@@ -59,6 +59,17 @@ def test_runtime_fingerprint_changes_when_source_or_mode_changes(tmp_path: Path)
     assert admin_snapshot["source_fingerprint"] == public_snapshot["source_fingerprint"]
     assert admin_snapshot["runtime_fingerprint"] != public_snapshot["runtime_fingerprint"]
     assert admin_snapshot["source_fingerprint"] != changed_source_snapshot["source_fingerprint"]
+
+
+def test_runtime_fingerprint_snapshot_reflects_current_app_mode(monkeypatch):
+    monkeypatch.setenv("APP_MODE", "admin")
+    admin_snapshot = get_runtime_fingerprint_snapshot()
+    monkeypatch.setenv("APP_MODE", "public")
+    public_snapshot = get_runtime_fingerprint_snapshot()
+
+    assert admin_snapshot["app_mode"] == "admin"
+    assert public_snapshot["app_mode"] == "public"
+    assert admin_snapshot["runtime_fingerprint"] != public_snapshot["runtime_fingerprint"]
 
 
 def test_restart_api_waits_for_runtime_fingerprint_match(tmp_path: Path):
