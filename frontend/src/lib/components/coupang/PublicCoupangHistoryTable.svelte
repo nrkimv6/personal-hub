@@ -38,23 +38,23 @@
   function transitionTitle(lastTransitionLabel: string): string {
     return lastTransitionLabel || '-';
   }
+
 </script>
 
 <div class="hidden md:block overflow-x-auto">
   <table class="table w-full">
     <thead>
       <tr>
-        <th>감지 시각</th>
+        <th>발견시간</th>
         <th>상태</th>
         <th>옵션</th>
         <th>날짜</th>
-        <th class="text-center">수량</th>
-        <th class="text-center">판매 소요시간</th>
-        <th class="text-center">잔여 유지시간</th>
+        <th class="text-center">다시 매진까지</th>
+        <th class="text-center">현재 열림 유지</th>
       </tr>
     </thead>
     <tbody>
-      {#each items as item (item.id)}
+      {#each items as item (item.slot_key)}
         <tr>
           <td class="whitespace-nowrap text-sm text-muted-foreground">{formatDatetime(item.timestamp)}</td>
           <td>
@@ -75,13 +75,6 @@
             </div>
           </td>
           <td class="text-sm">{item.schedule_date ?? '-'}</td>
-          <td class="text-center">
-            <div class="space-y-1 text-xs text-muted-foreground">
-              <div>취소 {item.cancellation_count}</div>
-              <div>판매 {item.sold_count}</div>
-              <div>잔여 {item.remaining_open_count}</div>
-            </div>
-          </td>
           <td class="text-center text-sm text-muted-foreground">
             {formatDurationList(item.sale_durations)}
           </td>
@@ -91,7 +84,7 @@
         </tr>
       {:else}
         <tr>
-          <td colspan="7" class="py-8 text-center text-sm text-muted-foreground">
+          <td colspan="6" class="py-8 text-center text-sm text-muted-foreground">
             조건에 맞는 공개 전환 이력이 없습니다.
           </td>
         </tr>

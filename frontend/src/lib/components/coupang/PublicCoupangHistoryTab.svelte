@@ -164,10 +164,10 @@
       <div class="space-y-1">
         <h2 class="text-lg font-semibold text-foreground">쿠팡 취소표 이력</h2>
         <p class="text-sm text-muted-foreground">
-          공개 페이지는 옵션 날짜+시간 단위 병합 이력을 보여준다. 판매 소요시간은 폴링 기반 관측치다.
+          공개 페이지는 옵션별 발견 이력을 묶어 보여준다. 시각은 마지막 발견 기준이며, 닫힘 시간은 폴링 기반 관측치다.
         </p>
         {#if summary.last_transition_at}
-          <p class="text-xs text-muted-foreground">최근 전환 {formatShortDateTime(summary.last_transition_at)}</p>
+          <p class="text-xs text-muted-foreground">최근 발견 {formatShortDateTime(summary.last_transition_at)}</p>
         {/if}
       </div>
       <button class="btn btn-secondary btn-sm self-start" onclick={() => void loadAll()} disabled={loading}>
@@ -178,20 +178,20 @@
     <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-foreground">{summary.total.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">관측 슬롯</div>
+        <div class="mt-1 text-xs text-muted-foreground">요약 슬롯</div>
       </div>
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-emerald-600">{summary.cancellation_count.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">취소표발생</div>
+        <div class="mt-1 text-xs text-muted-foreground">열림 감지</div>
       </div>
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-rose-600">{summary.total_sold.toLocaleString()}</div>
-        <div class="mt-1 text-xs text-muted-foreground">판매</div>
+        <div class="mt-1 text-xs text-muted-foreground">다시 매진</div>
       </div>
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-sky-600">{formatDuration(summary.avg_sale_duration_seconds)}</div>
-        <div class="mt-1 text-xs text-muted-foreground">평균 판매 소요</div>
-        <div class="mt-1 text-[11px] text-muted-foreground">잔여석 {summary.remaining_open_count.toLocaleString()}건</div>
+        <div class="mt-1 text-xs text-muted-foreground">평균 닫힘까지</div>
+        <div class="mt-1 text-[11px] text-muted-foreground">현재 열림 {summary.remaining_open_count.toLocaleString()}건</div>
       </div>
     </div>
 
@@ -265,11 +265,11 @@
     <section class="space-y-3">
       <div class="flex items-center justify-between">
         <h3 class="text-sm font-semibold text-foreground">
-          병합 이력
+          슬롯 요약
           <span class="ml-1 font-normal text-muted-foreground">({formatPageLabel()})</span>
         </h3>
         <p class="text-xs text-muted-foreground">
-          목록은 날짜+시간 기준으로 병합되며, 판매 시간은 관측치다.
+          목록은 옵션별 발견 이력을 묶어 보여주며, 시각은 마지막 발견 기준이다.
         </p>
       </div>
 

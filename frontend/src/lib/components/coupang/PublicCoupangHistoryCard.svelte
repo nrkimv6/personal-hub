@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CoupangPublicHistoryItem } from '$lib/types';
-  import { formatDurationList } from '$lib/utils/coupangHistoryDisplay';
+  import { formatDuration } from '$lib/utils/coupangHistoryDisplay';
 
   interface Props {
     items: CoupangPublicHistoryItem[];
@@ -36,16 +36,24 @@
   function transitionTitle(lastTransitionLabel: string): string {
     return lastTransitionLabel || '-';
   }
+
+  function formatCompactDurations(durations: number[]): string {
+    if (durations.length === 0) return '-';
+    if (durations.length === 1) return formatDuration(durations[0]);
+
+    const avg = durations.reduce((sum, value) => sum + value, 0) / durations.length;
+    return `${durations.length}회 · 평균 ${formatDuration(avg)}`;
+  }
 </script>
 
 <div class="md:hidden space-y-2">
-  {#each items as item (item.id)}
+  {#each items as item (item.slot_key)}
     <article class="rounded-lg border border-border bg-card p-3 shadow-sm">
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-semibold text-foreground">{item.option_label}</p>
           <p class="mt-1 text-xs text-muted-foreground">
-            감지시각 {formatDatetime(item.timestamp)}
+            발견 {formatDatetime(item.timestamp)}
             {#if item.slot_time_label}
               · {item.slot_time_label}
             {/if}
@@ -67,16 +75,10 @@
           <div class="mt-0.5 text-sm font-medium text-foreground">{transitionTitle(item.last_transition_label)}</div>
         </div>
         <div class="rounded-md bg-muted/40 px-2 py-1.5">
-          <div class="text-[11px] text-muted-foreground">수량</div>
-          <div class="mt-0.5 text-sm font-medium text-foreground">
-            취소 {item.cancellation_count} · 판매 {item.sold_count} · 잔여 {item.remaining_open_count}
-          </div>
-        </div>
-        <div class="rounded-md bg-muted/40 px-2 py-1.5">
-          <div class="text-[11px] text-muted-foreground">소요시간</div>
+          <div class="text-[11px] text-muted-foreground">관측 시간</div>
           <div class="mt-0.5 space-y-1 text-[11px] font-medium text-foreground">
-            <div>판매 {formatDurationList(item.sale_durations)}</div>
-            <div>잔여 {formatDurationList(item.open_durations)}</div>
+            <div>다시 매진까지 {formatCompactDurations(item.sale_durations)}</div>
+            <div>현재 열림 유지 {formatCompactDurations(item.open_durations)}</div>
           </div>
         </div>
       </div>
