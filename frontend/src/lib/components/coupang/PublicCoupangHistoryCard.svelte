@@ -8,6 +8,10 @@
 
   let { items }: Props = $props();
 
+  function availableStatusTone(): string {
+    return 'bg-emerald-100 text-emerald-700';
+  }
+
   function closedStatusTone(): string {
     return 'bg-rose-100 text-rose-700';
   }
@@ -35,7 +39,7 @@
 
         {#if item.status_label === '다시 매진'}
           <div class="flex shrink-0 items-center gap-1">
-            <span class={`rounded-full px-2 py-0.5 text-xs font-medium ${closedStatusTone()}`}>빈자리</span>
+            <span class={`rounded-full px-2 py-0.5 text-xs font-medium ${availableStatusTone()}`}>빈자리</span>
             <span class={`rounded-full px-2 py-0.5 text-xs font-medium ${closedStatusTone()}`}>매진</span>
           </div>
         {:else}

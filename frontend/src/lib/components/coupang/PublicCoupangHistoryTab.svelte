@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { coupangTravelApi } from '$lib/api/coupangTravel';
+  import { coupangTravelApi, type CoupangStatusSummary } from '$lib/api/coupangTravel';
   import type { CoupangPublicHistoryResponse } from '$lib/types';
   import { isAbortError } from '$lib/utils/isAbortError.js';
-  import { formatDuration } from '$lib/utils/coupangHistoryDisplay';
+  import { formatKoreanDateTime } from '$lib/utils/coupangHistoryDisplay';
   import { createPagePagination } from '$lib/utils/pagination.svelte';
   import PublicCoupangHistoryCard from '$lib/components/coupang/PublicCoupangHistoryCard.svelte';
   import PublicCoupangHistoryTable from '$lib/components/coupang/PublicCoupangHistoryTable.svelte';
@@ -27,6 +27,7 @@
 
   const pager = createPagePagination(20);
   let abortController: AbortController | null = null;
+  let status = $state<CoupangStatusSummary | null>(null);
 
   function getDefaultDateFrom(): string {
     const d = new Date();
@@ -41,6 +42,11 @@
   const items = $derived(response.items);
   const summary = $derived(response.summary);
   const slotTimeOptions = $derived(response.slot_time_options);
+  const recentDetectedAt = $derived(items[0]?.timestamp ?? null);
+  const lastCheckedAt = $derived(
+    status?.worker_health.updated_at ?? status?.worker_health.last_event_at ?? null
+  );
+  const lastCheckedTone = $derived(status?.worker_health.updated_at ? 'text-sky-600' : 'text-amber-600');
   const visibleSlotTimes = $derived.by(() => {
     const seen = new Set<string>();
     return [...slotTimeOptions, ...selectedSlotTimes].filter((slotTime) => {
@@ -79,15 +85,25 @@
     pager.total = result.total;
   }
 
+  async function loadStatus(): Promise<void> {
+    try {
+      status = await coupangTravelApi.getStatus();
+    } catch (e: unknown) {
+      if (isAbortError(e)) return;
+      status = null;
+    }
+  }
+
   async function loadAll(): Promise<void> {
     loading = true;
     error = '';
+    status = null;
     pager.reset();
     abortInFlightRequest();
     abortController = new AbortController();
 
     try {
-      await loadHistory();
+      await Promise.all([loadHistory(), loadStatus()]);
     } catch (e: unknown) {
       if (!isAbortError(e)) {
         error = e instanceof Error ? e.message : '공개 전환 이력 로드 실패';
@@ -147,19 +163,13 @@
 
 <div class="space-y-6">
   <section class="card space-y-4">
-    <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-      <div class="space-y-1">
-        <h2 class="text-lg font-semibold text-foreground">쿠팡 취소표 이력</h2>
-        <p class="text-sm text-muted-foreground">
-          공개 페이지는 발견 시각 기준의 공개 이력을 보여준다. 같은 슬롯의 열림과 다시 매진은 각각 별도 row로 노출된다.
-        </p>
-      </div>
+    <div class="flex justify-end">
       <button class="btn btn-secondary btn-sm self-start" onclick={() => void loadAll()} disabled={loading}>
         새로고침
       </button>
     </div>
 
-      <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
       <div class="card py-4 text-center">
         <div class="text-3xl font-bold text-foreground">{summary.total.toLocaleString()}</div>
         <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">전체 이력</div>
@@ -169,12 +179,16 @@
         <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">다시 매진</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-sky-600">{summary.open_pair_count.toLocaleString()}</div>
-        <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">현재 열림</div>
+        <div class="text-3xl font-bold text-primary">
+          {formatKoreanDateTime(recentDetectedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+        </div>
+        <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">최근 감지</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-2xl font-semibold text-foreground">{formatDuration(summary.avg_closed_duration_seconds)}</div>
-        <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">평균 다시 매진 소요</div>
+        <div class="text-3xl font-bold {lastCheckedTone}">
+          {formatKoreanDateTime(lastCheckedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+        </div>
+        <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">마지막 확인</div>
       </div>
     </div>
 
@@ -251,7 +265,6 @@
           빈자리 요약
           <span class="ml-1 font-normal text-muted-foreground">({formatPageLabel()})</span>
         </h3>
-        <p class="text-xs text-muted-foreground">빈자리와 다시 매진을 발견 시각 기준으로 나눠 보여준다.</p>
       </div>
 
       <PublicCoupangHistoryCard {items} />
