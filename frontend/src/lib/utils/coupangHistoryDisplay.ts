@@ -17,6 +17,21 @@ export function normalizeHistoryText(value: string | null | undefined): string {
     .trim();
 }
 
+export function formatKoreanDateTime(
+  value: string | number | Date | null | undefined,
+  options: Intl.DateTimeFormatOptions = {}
+): string {
+  if (value == null || value === '') return '-';
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+
+  return date.toLocaleString('ko-KR', {
+    ...options,
+    hour12: false
+  });
+}
+
 function getSlotLabels(event: MonitoringEvent): string[] {
   if (!Array.isArray(event.slots_info)) {
     return [];

@@ -4,10 +4,11 @@
   import MegabeautyCancellationListTable from '$lib/components/coupang/MegabeautyCancellationListTable.svelte';
   import {
     coupangTravelApi,
-    type CancellationStatsResponse
+    type CancellationStatsResponse,
+    type CoupangStatusSummary
   } from '$lib/api/coupangTravel';
   import type { MonitoringEvent } from '$lib/types';
-  import { normalizeHistoryText } from '$lib/utils/coupangHistoryDisplay';
+  import { formatKoreanDateTime, normalizeHistoryText } from '$lib/utils/coupangHistoryDisplay';
   import { isAbortError } from '$lib/utils/isAbortError.js';
   import { createPagePagination } from '$lib/utils/pagination.svelte';
 
@@ -15,6 +16,7 @@
   let error = $state('');
   let stats = $state<CancellationStatsResponse>({ items: [], summary: { total: 0, avg_per_day: 0, peak_hour: null } });
   let events = $state<MonitoringEvent[]>([]);
+  let status = $state<CoupangStatusSummary | null>(null);
 
   const pager = createPagePagination(20);
 
@@ -27,22 +29,16 @@
   let dateFrom = $state(getDefaultDateFrom());
   let dateTo = $state('');
 
-  function formatDateTime(dateStr: string | null): string {
-    if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleString('ko-KR', {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  }
-
   function formatHour(h: number | null | undefined): string {
     if (h == null) return '-';
     return `${h}시`;
   }
 
   const recentDetectedAt = $derived(events[0]?.timestamp ?? null);
+  const lastCheckedAt = $derived(
+    status?.worker_health.updated_at ?? status?.worker_health.last_event_at ?? null
+  );
+  const lastCheckedTone = $derived(status?.worker_health.updated_at ? 'text-sky-600' : 'text-amber-600');
   const pageLabel = normalizeHistoryText('2026 쿠팡 메가뷰티쇼') || '메가뷰티쇼';
 
   async function loadEvents(): Promise<void> {
@@ -75,11 +71,21 @@
     }
   }
 
+  async function loadStatus(): Promise<void> {
+    try {
+      status = await coupangTravelApi.getStatus();
+    } catch (e: unknown) {
+      if (isAbortError(e)) return;
+      status = null;
+    }
+  }
+
   async function loadAll(): Promise<void> {
     loading = true;
     error = '';
+    status = null;
     pager.reset();
-    await Promise.all([loadStats(), loadEvents()]);
+    await Promise.all([loadStats(), loadEvents(), loadStatus()]);
     loading = false;
   }
 
@@ -120,14 +126,22 @@
       </button>
     </div>
 
-    <div class="grid grid-cols-2 gap-3 md:grid-cols-3">
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
       <div class="card text-center py-4">
         <div class="text-3xl font-bold text-foreground">{stats.summary.total.toLocaleString()}</div>
         <div class="text-xs text-muted-foreground mt-1">총 감지 횟수</div>
       </div>
       <div class="card text-center py-4">
-        <div class="text-3xl font-bold text-primary">{formatDateTime(recentDetectedAt)}</div>
+        <div class="text-3xl font-bold text-primary">
+          {formatKoreanDateTime(recentDetectedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+        </div>
         <div class="text-xs text-muted-foreground mt-1">최근 감지</div>
+      </div>
+      <div class="card text-center py-4">
+        <div class="text-3xl font-bold {lastCheckedTone}">
+          {formatKoreanDateTime(lastCheckedAt, { hour: '2-digit', minute: '2-digit' })}
+        </div>
+        <div class="text-xs text-muted-foreground mt-1">마지막 확인</div>
       </div>
       <div class="card text-center py-4">
         <div class="text-3xl font-bold text-warning">{formatHour(stats.summary.peak_hour)}</div>
