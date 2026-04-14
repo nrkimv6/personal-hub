@@ -5,8 +5,15 @@ import asyncio
 import json
 from pathlib import Path
 
+from app.core.config import settings
+
 from ..config import MANAGED_PROJECTS
 from .system_utils import run_admin_command
+from scripts.services.service_utils import (
+    is_process_alive,
+    pick_listener_pid,
+    read_pid_file,
+)
 
 
 class NssmService:
@@ -56,6 +63,8 @@ class NssmService:
                 "display_name": svc.get("DisplayName", "")
             } for svc in data]
 
+            result = [self._decorate_runtime_state(entry) for entry in result]
+
             if not result:
                 return [self._unregistered_sentinel(prefix, project_name)]
             return result
@@ -78,13 +87,14 @@ class NssmService:
 
         try:
             svc = json.loads(stdout.decode('utf-8'))
-            return {
+            service = {
                 "name": svc.get("Name", ""),
                 "project": project_name,
                 "status": self._normalize_status(svc.get("Status")),
                 "start_type": str(svc.get("StartType", "Unknown")),
                 "display_name": svc.get("DisplayName", "")
             }
+            return self._decorate_runtime_state(service)
         except json.JSONDecodeError:
             return self._unregistered_sentinel(name, project_name)
 
@@ -104,6 +114,50 @@ class NssmService:
             "start_type": "N/A",
             "display_name": f"{name} (미등록)",
         }
+
+    def _decorate_runtime_state(self, service: dict) -> dict:
+        """monitor-page frontend health를 NSSM 서비스 항목에 결합한다."""
+        name = service.get("name", "")
+        if name not in {"MonitorPage-Public", "MonitorPage-Admin"}:
+            return service
+
+        public = name.endswith("Public")
+        frontend_port = 6100 if public else 6101
+        pid_file = Path(settings.PID_DIR) / ("frontend.pid" if public else "frontend_admin.pid")
+        pid = read_pid_file(pid_file)
+        listener_pid = pick_listener_pid(frontend_port)
+        service_running = service.get("status") == "Running"
+
+        frontend_health = "healthy"
+        degraded_reason: str | None = None
+
+        if not service_running:
+            frontend_health = "down"
+            degraded_reason = "service_stopped"
+        elif pid is None and listener_pid is None:
+            frontend_health = "down"
+            degraded_reason = "pid_file_missing"
+        elif listener_pid is None:
+            frontend_health = "degraded"
+            degraded_reason = "port_not_listening"
+        elif pid is None:
+            frontend_health = "degraded"
+            degraded_reason = "pid_file_missing"
+        elif not is_process_alive(pid):
+            frontend_health = "degraded"
+            degraded_reason = "pid_stale"
+        elif listener_pid != pid:
+            frontend_health = "degraded"
+            degraded_reason = "listener_pid_drift"
+
+        service.update({
+            "frontend_port": frontend_port,
+            "frontend_pid": pid,
+            "frontend_listener_pid": listener_pid,
+            "frontend_health": frontend_health,
+            "degraded_reason": degraded_reason,
+        })
+        return service
 
     async def get_startup_programs(self) -> list:
         """Query startup programs by prefix"""

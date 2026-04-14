@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import time
+import threading
 from pathlib import Path
 
 # 프로젝트 루트를 sys.path에 추가 (app 패키지 import용)
@@ -28,6 +29,7 @@ from scripts.services.service_utils import (
     is_port_listening,
     is_process_alive,
     kill_pid,
+    pick_listener_pid,
     read_pid_file,
     remove_pid_file,
     setup_service_logger,
@@ -57,6 +59,15 @@ class ServiceRunner:
         )
 
         self._frontend_proc: subprocess.Popen | None = None
+        self._frontend_monitor_thread: threading.Thread | None = None
+        self._frontend_monitor_stop = threading.Event()
+        self._frontend_restart_lock = threading.Lock()
+        self._frontend_state_lock = threading.Lock()
+        self._frontend_health = "unknown"
+        self._frontend_degraded_reason: str | None = None
+        self._frontend_last_build_error_at: float | None = None
+        self._frontend_listener_pid: int | None = None
+        self._frontend_retry_count = 0
         self._cleaned_up = False
 
     # ── 메인 실행 흐름 ──────────────────────────────────────────
@@ -79,6 +90,8 @@ class ServiceRunner:
         try:
             self.cleanup_before_start()
             self._frontend_proc = self.start_frontend()
+            if not self.dev:
+                self._start_frontend_monitor()
             self.log.info("Redis will be started via startup program (requires user session)")
             self.run_api()
         except KeyboardInterrupt:
@@ -118,6 +131,171 @@ class ServiceRunner:
         self._cleanup_stale_pids()
         self._cleanup_orphan_vite()
         self._cleanup_ports()
+
+    def _frontend_pid_file(self) -> Path:
+        return self.pid_dir / f"frontend{self.pid_suffix}.pid"
+
+    def _set_frontend_state(
+        self,
+        health: str,
+        reason: str | None = None,
+        pid: int | None = None,
+        listener_pid: int | None = None,
+    ) -> None:
+        with self._frontend_state_lock:
+            self._frontend_health = health
+            self._frontend_degraded_reason = reason
+            self._frontend_listener_pid = listener_pid
+            if health == "healthy":
+                self._frontend_retry_count = 0
+
+    def _mark_frontend_healthy(self, pid: int | None = None, listener_pid: int | None = None) -> None:
+        self._set_frontend_state("healthy", None, pid=pid, listener_pid=listener_pid)
+
+    def _mark_frontend_degraded(
+        self,
+        reason: str,
+        pid: int | None = None,
+        listener_pid: int | None = None,
+    ) -> None:
+        with self._frontend_state_lock:
+            self._frontend_health = "degraded"
+            self._frontend_degraded_reason = reason
+            self._frontend_listener_pid = listener_pid
+            if pid is not None:
+                self._frontend_listener_pid = listener_pid
+
+    def _mark_frontend_down(self, reason: str) -> None:
+        with self._frontend_state_lock:
+            self._frontend_health = "down"
+            self._frontend_degraded_reason = reason
+            self._frontend_listener_pid = None
+
+    def _cleanup_frontend_runtime(self):
+        pid_file = self._frontend_pid_file()
+        if self._frontend_proc and self._frontend_proc.poll() is None:
+            self.log.info(f"Stopping existing Frontend process (PID: {self._frontend_proc.pid})...")
+            kill_pid(self._frontend_proc.pid, logger=self.log)
+        self._frontend_proc = None
+
+        pid = read_pid_file(pid_file)
+        if pid is not None and is_process_alive(pid):
+            self.log.info(f"Stopping stored Frontend PID (PID: {pid})...")
+            kill_pid(pid, logger=self.log)
+
+        remove_pid_file(pid_file)
+
+        for pid_on_port in find_pids_on_port(self.frontend_port):
+            if self._frontend_proc and pid_on_port == self._frontend_proc.pid:
+                continue
+            self.log.info(f"  Frontend port {self.frontend_port}: killing PID {pid_on_port}")
+            kill_pid(pid_on_port, logger=self.log)
+
+    def _wait_for_frontend_listener(self, proc: subprocess.Popen, timeout_seconds: int = 30) -> int | None:
+        deadline = time.time() + timeout_seconds
+        listener_pid: int | None = None
+        while time.time() < deadline:
+            listener_pid = pick_listener_pid(self.frontend_port)
+            if listener_pid is not None:
+                return listener_pid
+            if proc.poll() is not None:
+                break
+            time.sleep(1)
+        return listener_pid
+
+    def _sync_frontend_pid_file(self, proc: subprocess.Popen) -> int | None:
+        pid_file = self._frontend_pid_file()
+        listener_pid = self._wait_for_frontend_listener(proc)
+        pid_to_record = listener_pid or (proc.pid if proc.poll() is None else None)
+        if pid_to_record is not None:
+            write_pid_file(pid_file, pid_to_record)
+        else:
+            remove_pid_file(pid_file)
+        return pid_to_record
+
+    def _frontend_is_healthy(self) -> tuple[bool, str | None]:
+        pid_file = self._frontend_pid_file()
+        pid = read_pid_file(pid_file)
+        listener_pid = pick_listener_pid(self.frontend_port)
+
+        if pid is None:
+            if listener_pid is not None:
+                return False, "pid_file_missing"
+            return False, "port_not_listening"
+
+        if not is_process_alive(pid):
+            if listener_pid is not None:
+                return False, "pid_stale"
+            return False, "process_not_running"
+
+        if listener_pid is None:
+            return False, "port_not_listening"
+
+        if listener_pid != pid:
+            return False, "listener_pid_drift"
+
+        return True, None
+
+    def _start_frontend_monitor(self) -> None:
+        if self.dev or self._frontend_monitor_thread is not None:
+            return
+
+        def _monitor_loop():
+            initial_delay = 20
+            retry_backoff = 30
+            max_backoff = 300
+            time.sleep(initial_delay)
+
+            while not self._frontend_monitor_stop.is_set():
+                healthy, reason = self._frontend_is_healthy()
+                if healthy:
+                    listener_pid = pick_listener_pid(self.frontend_port)
+                    stored_pid = read_pid_file(self._frontend_pid_file())
+                    self._mark_frontend_healthy(pid=stored_pid, listener_pid=listener_pid)
+                    retry_backoff = 30
+                    self._frontend_retry_count = 0
+                    time.sleep(30)
+                    continue
+
+                if reason:
+                    self._mark_frontend_degraded(reason, pid=read_pid_file(self._frontend_pid_file()))
+
+                if not self._frontend_restart_lock.acquire(blocking=False):
+                    time.sleep(10)
+                    continue
+
+                try:
+                    self._frontend_retry_count += 1
+                    self.log.warning(
+                        f"Frontend unhealthy ({reason or 'unknown'}) — retry #{self._frontend_retry_count}"
+                    )
+                    self._cleanup_frontend_runtime()
+                    proc = self.start_frontend()
+                    self._frontend_proc = proc
+                    if proc is not None:
+                        healthy, next_reason = self._frontend_is_healthy()
+                        if healthy:
+                            listener_pid = pick_listener_pid(self.frontend_port)
+                            stored_pid = read_pid_file(self._frontend_pid_file())
+                            self._mark_frontend_healthy(pid=stored_pid, listener_pid=listener_pid)
+                            retry_backoff = 30
+                            self._frontend_retry_count = 0
+                        else:
+                            self._mark_frontend_degraded(next_reason or "frontend_restart_failed")
+                            retry_backoff = min(max_backoff, retry_backoff * 2)
+                    else:
+                        retry_backoff = min(max_backoff, retry_backoff * 2)
+                finally:
+                    self._frontend_restart_lock.release()
+
+                time.sleep(retry_backoff)
+
+        self._frontend_monitor_thread = threading.Thread(
+            target=_monitor_loop,
+            name="frontend-health-monitor",
+            daemon=True,
+        )
+        self._frontend_monitor_thread.start()
 
     def _cleanup_stale_pids(self):
         # 자기 suffix에 해당하는 PID 파일만 처리 (prod: api.pid, dev: api_dev.pid)
@@ -186,6 +364,7 @@ class ServiceRunner:
           (build 실패 시 기존 `build/`가 있으면 fallback preview)
         """
         self.log.info("Starting Frontend...")
+        self._cleanup_frontend_runtime()
         frontend_dir = PROJECT_ROOT / "frontend"
         timestamp = time.strftime("%Y%m%d_%H%M%S")
 
@@ -258,15 +437,26 @@ class ServiceRunner:
             kill_pid(warmup_proc.pid, logger=self.log)
             # ----------------------------------
 
-            proc = subprocess.Popen(
-                ["npm.cmd", "run", "dev", "--", "--host", "--port", str(self.frontend_port)],
-                cwd=str(frontend_dir),
-                stdout=stdout_log,
-                stderr=stderr_log,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
+            try:
+                proc = subprocess.Popen(
+                    ["npm.cmd", "run", "dev", "--", "--host", "--port", str(self.frontend_port)],
+                    cwd=str(frontend_dir),
+                    stdout=stdout_log,
+                    stderr=stderr_log,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception as e:
+                self._mark_frontend_down(f"dev_preview_launch_failed:{e.__class__.__name__}")
+                self.log.error(f"Frontend dev launch failed: {e}", exc_info=True)
+                return None
+            listener_pid = self._sync_frontend_pid_file(proc)
+            if listener_pid is None:
+                self._mark_frontend_degraded("dev_preview_not_listening", pid=proc.pid)
+            else:
+                self._mark_frontend_healthy(pid=proc.pid, listener_pid=listener_pid)
         else:
             # Production: build → preview
+            build_dir = frontend_dir / "build"
             self.log.info("Building frontend for production...")
             build_result = subprocess.run(
                 ["npm.cmd", "run", "build"],
@@ -275,13 +465,17 @@ class ServiceRunner:
                 encoding="utf-8",
                 errors="replace",
             )
-            if build_result.returncode != 0:
-                err_msg = (build_result.stderr or "")[-500:] or "(no stderr output)"
+            build_failed = build_result.returncode != 0
+            if build_failed:
+                err_msg = (build_result.stderr or build_result.stdout or "")[-500:] or "(no output)"
+                self._frontend_last_build_error_at = time.time()
                 self.log.error(f"Frontend build failed (rc={build_result.returncode}): {err_msg}")
-                # graceful degradation: 이전 빌드가 있으면 그것으로 preview, 없으면 API-only
-                if not (frontend_dir / "build").exists():
+                # graceful degradation: 이전 빌드가 없으면 API-only, 있으면 fallback preview
+                if not build_dir.exists():
+                    self._mark_frontend_down("build_failed")
                     self.log.warning("No previous build found — Frontend unavailable, API-only mode")
                     return None
+                self._mark_frontend_degraded("build_failed_with_fallback")
                 self.log.warning("Using previous build for preview")
             else:
                 self.log.info("Frontend build completed")
@@ -294,16 +488,29 @@ class ServiceRunner:
             stdout_log = open(self.log_dir / f"frontend_{timestamp}.log", "w", encoding="utf-8")
             stderr_log = open(self.log_dir / f"frontend_err_{timestamp}.log", "w", encoding="utf-8")
 
-            proc = subprocess.Popen(
-                ["npm.cmd", "run", "preview", "--", "--host", "--port", str(self.frontend_port)],
-                cwd=str(frontend_dir),
-                stdout=stdout_log,
-                stderr=stderr_log,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
+            try:
+                proc = subprocess.Popen(
+                    ["npm.cmd", "run", "preview", "--", "--host", "--port", str(self.frontend_port)],
+                    cwd=str(frontend_dir),
+                    stdout=stdout_log,
+                    stderr=stderr_log,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception as e:
+                self._mark_frontend_down(f"preview_launch_failed:{e.__class__.__name__}")
+                self.log.error(f"Frontend preview launch failed: {e}", exc_info=True)
+                return None
+            listener_pid = self._sync_frontend_pid_file(proc)
+            if listener_pid is None:
+                self._mark_frontend_degraded(
+                    "build_failed_with_fallback" if build_failed else "preview_not_listening",
+                    pid=proc.pid,
+                )
+            elif build_failed:
+                self._mark_frontend_degraded("build_failed_with_fallback", pid=proc.pid, listener_pid=listener_pid)
+            else:
+                self._mark_frontend_healthy(pid=proc.pid, listener_pid=listener_pid)
 
-        pid_file = self.pid_dir / f"frontend{self.pid_suffix}.pid"
-        write_pid_file(pid_file, proc.pid)
         self.log.info(f"Frontend started (PID: {proc.pid})")
         return proc
 
@@ -467,6 +674,9 @@ class ServiceRunner:
             return
         self._cleaned_up = True
         self.log.info("Service stopping, running cleanup...")
+        self._frontend_monitor_stop.set()
+        if self._frontend_monitor_thread and self._frontend_monitor_thread.is_alive():
+            self._frontend_monitor_thread.join(timeout=2)
 
         # Frontend 종료
         if self._frontend_proc and self._frontend_proc.poll() is None:
