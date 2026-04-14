@@ -79,6 +79,61 @@ def _register_canonical_alias() -> None:
 
 _register_canonical_alias()
 
+def _ownership_snapshot_dir(project_root: Path = PROJECT_ROOT) -> Path:
+    return project_root / "logs" / "dev_runner" / "ownership"
+
+
+def _normalize_dirty_path(line: str) -> str:
+    raw = line[3:].strip() if len(line) >= 3 else line.strip()
+    if " -> " in raw:
+        raw = raw.split(" -> ", 1)[1].strip()
+    return raw.replace("\\", "/").casefold()
+
+
+def _capture_runner_ownership_snapshot(runner_id: str, project_root: Path) -> dict:
+    snapshot_path = _ownership_snapshot_dir(project_root) / f"{runner_id}.json"
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "runner_id": runner_id,
+        "captured_at": datetime.now().isoformat(),
+        "project_root": str(project_root),
+        "dirty_files": [],
+        "owned_files": [],
+        "clean_at_start_files": [],
+    }
+
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain=v1"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        if result.returncode == 0:
+            dirty_files = []
+            for line in result.stdout.splitlines():
+                if not line.strip():
+                    continue
+                normalized = _normalize_dirty_path(line)
+                if normalized:
+                    dirty_files.append(normalized)
+            payload["dirty_files"] = sorted(dict.fromkeys(dirty_files))
+        else:
+            payload["capture_error"] = f"git status failed ({result.returncode})"
+    except Exception as exc:
+        payload["capture_error"] = str(exc)
+
+    try:
+        snapshot_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning(f"ownership snapshot write failed (runner_id={runner_id}): {exc}")
+    return payload
+
+
 try:
     from listener_noise_filter import NOISE_BLOCK_MARKERS as _NOISE_BLOCK_MARKERS, is_noise_line as _is_noise_line
 except ImportError:
@@ -838,6 +893,8 @@ def _launch_plan_runner_process(
         except Exception as _mem_chk_err:
             logger.warning(f"[_launch_plan_runner_process] 메모리 확인 실패 (무시): {_mem_chk_err}")
         # ────────────────────────────────────────────────────────────────
+
+        _capture_runner_ownership_snapshot(runner_id, project_root)
 
         process = subprocess.Popen(
             cmd,

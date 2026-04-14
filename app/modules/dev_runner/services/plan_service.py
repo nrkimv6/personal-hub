@@ -14,7 +14,7 @@ from typing import List, Optional
 
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
-from app.modules.dev_runner.services.archive_service import archive_plan_bundle
+from app.modules.dev_runner.services.archive_service import archive_plan_bundle, resolve_archive_target_or_raise
 from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL, REDIS_HOST, REDIS_PORT
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
@@ -883,17 +883,17 @@ class PlanService:
             done_path.write_text(f"# DONE (최근 20개)\n\n{new_entry}", encoding="utf-8")
 
     @staticmethod
-    def _archive_done_if_needed(done_path: Path) -> None:
+    def _archive_done_if_needed(done_path: Path) -> Optional[Path]:
         """DONE.md 항목 5개 초과 시 월별 아카이브"""
         if not done_path.exists():
-            return
+            return None
 
         content = done_path.read_text(encoding="utf-8")
         lines = content.splitlines(keepends=True)
         item_lines = [l for l in lines if re.match(r'^-\s*\[', l)]
 
         if len(item_lines) <= 5:
-            return
+            return None
 
         keep = item_lines[:5]
         overflow = item_lines[5:]
@@ -919,13 +919,93 @@ class PlanService:
         header_match = re.match(r'(#[^\n]+\n\n?)', content)
         header = header_match.group(1) if header_match else "# DONE (최근 20개)\n\n"
         done_path.write_text(header + "".join(keep), encoding="utf-8")
+        return archive_path
+
+    @staticmethod
+    def _ownership_snapshot_dir() -> Path:
+        """runner dirty ownership snapshot 저장 디렉토리."""
+        return PROJECT_ROOT / "logs" / "dev_runner" / "ownership"
+
+    @classmethod
+    def _ownership_snapshot_path(cls, runner_id: str) -> Path:
+        return cls._ownership_snapshot_dir() / f"{runner_id}.json"
+
+    @staticmethod
+    def _normalize_ownership_key(path: Path, project_dir: Path) -> Optional[str]:
+        try:
+            rel = path.resolve(strict=False).relative_to(project_dir.resolve(strict=False))
+        except Exception:
+            return None
+        return str(rel).replace("\\", "/").casefold()
+
+    @classmethod
+    def _load_runner_dirty_snapshot(cls, runner_id: Optional[str]) -> set[str]:
+        if not runner_id:
+            return set()
+
+        snapshot_path = cls._ownership_snapshot_path(runner_id)
+        try:
+            payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise ValueError(f"runner ownership snapshot not found: {runner_id}") from exc
+        except Exception as exc:
+            raise ValueError(f"runner ownership snapshot unreadable: {snapshot_path}: {exc}") from exc
+
+        dirty_files = payload.get("dirty_files", []) if isinstance(payload, dict) else []
+        if not isinstance(dirty_files, list):
+            raise ValueError(f"runner ownership snapshot invalid: {snapshot_path}")
+        capture_error = payload.get("capture_error") if isinstance(payload, dict) else None
+        if capture_error:
+            raise ValueError(f"runner ownership snapshot capture failed: {capture_error}")
+        return {
+            str(item).replace("\\", "/").casefold()
+            for item in dirty_files
+            if isinstance(item, str) and item.strip()
+        }
+
+    @classmethod
+    def _validate_runner_ownership(
+        cls,
+        project_dir: Optional[Path],
+        files_to_check: List[Path],
+        runner_id: Optional[str],
+    ) -> Optional[str]:
+        if not runner_id or not project_dir:
+            return None
+
+        dirty_files = cls._load_runner_dirty_snapshot(runner_id)
+        if not dirty_files:
+            return None
+
+        normalized_project_dir = project_dir.resolve(strict=False)
+        conflicts: list[str] = []
+        for target in files_to_check:
+            key = cls._normalize_ownership_key(target, normalized_project_dir)
+            if key and key in dirty_files:
+                conflicts.append(str(target))
+
+        if conflicts:
+            joined = ", ".join(conflicts)
+            return (
+                f"runner ownership guard blocked auto-done: pre-dirty file(s) detected for runner "
+                f"{runner_id}: {joined}"
+            )
+        return None
 
     async def _git_commit(
-        self, project_dir: Optional[Path], files_to_add: List[Path], commit_msg: str
+        self,
+        project_dir: Optional[Path],
+        files_to_add: List[Path],
+        commit_msg: str,
+        runner_id: Optional[str] = None,
     ) -> str:
         """git add + commit.sh 호출"""
         if not self.COMMIT_SH.exists():
             return f"commit.sh not found: {self.COMMIT_SH}"
+
+        ownership_error = self._validate_runner_ownership(project_dir, files_to_add, runner_id)
+        if ownership_error:
+            return ownership_error
 
         # 존재하는 파일(신규/수정) + 삭제된 파일(git mv로 이미 staged된 경우도 포함)을 모두 add
         # git add는 삭제된 파일 경로도 처리 가능 (staging에 반영)
@@ -956,7 +1036,7 @@ class PlanService:
         stdout, _ = await asyncio.wait_for(commit_proc.communicate(), timeout=60)
         return stdout.decode("utf-8", errors="replace") if stdout else ""
 
-    async def run_done(self, plan_path: str) -> dict:
+    async def run_done(self, plan_path: str, runner_id: Optional[str] = None) -> dict:
         """Python 네이티브 plan 완료 처리 (아카이브, TODO→DONE, git commit)"""
         path = Path(plan_path)
         if not path.exists():
@@ -987,6 +1067,38 @@ class PlanService:
                 self._update_manual_tasks(project_dir, pending_items, path.name)
                 has_manual = True
 
+            archive_path = resolve_archive_target_or_raise(plan_path)
+            todo_file = self._find_todo_file(path)
+            todo_archive_path = archive_path.parent / todo_file.name if todo_file and todo_file.exists() else None
+            ownership_targets: list[Path] = [path, archive_path]
+            if todo_file and todo_file.exists():
+                ownership_targets.append(todo_file)
+                if todo_archive_path:
+                    ownership_targets.append(todo_archive_path)
+            if project_dir:
+                done_path = project_dir / "docs" / "DONE.md"
+                today = date.today()
+                done_history_path = done_path.parent / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md"
+                ownership_targets.extend([
+                    project_dir / "TODO.md",
+                    done_path,
+                    done_history_path,
+                ])
+                if has_manual:
+                    ownership_targets.append(project_dir / "MANUAL_TASKS.md")
+
+            ownership_error = self._validate_runner_ownership(project_dir, ownership_targets, runner_id)
+            if ownership_error:
+                return {
+                    "success": False,
+                    "message": ownership_error,
+                    "reason": "ownership_guard",
+                    "output": None,
+                    "remaining_tasks": pre_progress.total - pre_progress.done,
+                    "total_tasks": pre_progress.total,
+                    "plan_status": pre_status,
+                }
+
             # 3. 아카이브 이동
             archive_path, todo_archive_path = await self._archive_plan(plan_path, updated_content)
 
@@ -994,7 +1106,7 @@ class PlanService:
             if project_dir:
                 self._update_todo_done(project_dir, title)
                 done_path = project_dir / "docs" / "DONE.md"
-                self._archive_done_if_needed(done_path)
+                done_history_path = self._archive_done_if_needed(done_path)
 
             # 5. git commit
             files_to_commit: List[Path] = [archive_path]
@@ -1003,12 +1115,14 @@ class PlanService:
             if project_dir:
                 files_to_commit += [
                     project_dir / "TODO.md",
-                    project_dir / "docs" / "DONE.md",
+                    done_path,
                 ]
+                if done_history_path:
+                    files_to_commit.append(done_history_path)
                 if has_manual:
                     files_to_commit.append(project_dir / "MANUAL_TASKS.md")
             commit_output = await self._git_commit(
-                project_dir, files_to_commit, f"docs: {title} 완료 처리"
+                project_dir, files_to_commit, f"docs: {title} 완료 처리", runner_id=runner_id
             )
 
             self.sync_plans()

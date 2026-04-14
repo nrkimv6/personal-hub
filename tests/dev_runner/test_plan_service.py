@@ -6,6 +6,7 @@
 import asyncio
 import json
 import pytest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -671,6 +672,120 @@ class TestRunDone:
         assert "archive failed" in result["message"]
         assert result["remaining_tasks"] == 0
         assert result["total_tasks"] == 0
+
+    @pytest.mark.asyncio
+    async def test_runner_ownership_guard_blocks_pre_dirty_source(self, svc, tmp_path):
+        """R: run 시작 시 dirty였던 plan source path는 auto-done에서 차단된다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        (tmp_path / "docs").mkdir(exist_ok=True)
+        ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+        ownership_dir.mkdir(parents=True, exist_ok=True)
+
+        plan = plan_dir / "2026-04-14_ownership-block.md"
+        plan.write_text("> 상태: 구현완료\n> 진행률: 2/2 (100%)\n\n- [x] a\n- [x] b\n", encoding="utf-8")
+        (ownership_dir / "runner-1.json").write_text(
+            json.dumps(
+                {
+                    "runner_id": "runner-1",
+                    "captured_at": "2026-04-14T16:54:00",
+                    "project_root": str(tmp_path),
+                    "dirty_files": ["docs/plan/2026-04-14_ownership-block.md"],
+                    "owned_files": [],
+                    "clean_at_start_files": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(tmp_path / "docs" / "archive" / "ownership_block.md", None))) as mock_archive:
+            result = await svc.run_done(str(plan), runner_id="runner-1")
+
+        assert result["success"] is False
+        assert result["reason"] == "ownership_guard"
+        assert "pre-dirty file" in result["message"]
+        mock_archive.assert_not_called()
+        assert plan.exists(), "ownership guard 차단 시 원본 plan은 유지되어야 함"
+
+    @pytest.mark.asyncio
+    async def test_runner_ownership_guard_blocks_pre_dirty_history_archive(self, svc, tmp_path):
+        """R: run 시작 시 dirty였던 DONE history archive도 auto-done에서 차단된다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        (tmp_path / "docs").mkdir(exist_ok=True)
+        ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+        ownership_dir.mkdir(parents=True, exist_ok=True)
+        today = date.today()
+        history_name = f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md"
+
+        plan = plan_dir / "2026-04-14_history-block.md"
+        plan.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] a\n", encoding="utf-8")
+        (ownership_dir / "runner-2.json").write_text(
+            json.dumps(
+                {
+                    "runner_id": "runner-2",
+                    "captured_at": "2026-04-14T16:54:00",
+                    "project_root": str(tmp_path),
+                    "dirty_files": [f"docs/history/{history_name}"],
+                    "owned_files": [],
+                    "clean_at_start_files": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(tmp_path / "docs" / "archive" / "history_block.md", None))) as mock_archive:
+            result = await svc.run_done(str(plan), runner_id="runner-2")
+
+        assert result["success"] is False
+        assert result["reason"] == "ownership_guard"
+        assert history_name in result["message"]
+        mock_archive.assert_not_called()
+        assert plan.exists(), "ownership guard 차단 시 원본 plan은 유지되어야 함"
+
+    @pytest.mark.asyncio
+    async def test_run_done_commits_done_history_archive_when_done_overflows(self, svc, tmp_path):
+        """R: DONE.md가 5개를 넘으면 history archive도 commit 대상에 포함된다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        docs_dir = tmp_path / "docs"
+        docs_dir.mkdir(exist_ok=True)
+        done_path = docs_dir / "DONE.md"
+        done_path.write_text(
+            "# DONE\n\n"
+            "- [x] 2026-04-01: a\n"
+            "- [x] 2026-04-02: b\n"
+            "- [x] 2026-04-03: c\n"
+            "- [x] 2026-04-04: d\n"
+            "- [x] 2026-04-05: e\n",
+            encoding="utf-8",
+        )
+
+        plan = plan_dir / "2026-04-14_history-archive.md"
+        plan.write_text(
+            "# feat: history archive\n\n"
+            "> 상태: 구현완료\n"
+            "> 진행률: 1/1 (100%)\n\n"
+            "- [x] only\n",
+            encoding="utf-8",
+        )
+
+        with patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(tmp_path / "docs" / "archive" / "history_archive.md", None))), \
+             patch.object(svc, "_resolve_project_dir", return_value=tmp_path), \
+             patch.object(svc, "sync_plans"), \
+             patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")) as mock_commit:
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is True
+        today = date.today()
+        expected_history = tmp_path / "docs" / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md"
+        assert expected_history.exists()
+        commit_files = mock_commit.await_args.args[1]
+        assert expected_history in commit_files
 
     @pytest.mark.asyncio
     async def test_resolver_error_failure_message(self, svc, tmp_plan_dir):

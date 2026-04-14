@@ -685,7 +685,8 @@ def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
     try:
         encoded = base64.urlsafe_b64encode(plan_file.encode("utf-8")).decode("ascii").rstrip("=")
         url = f"{get_admin_api_base()}/plans/{encoded}/done"
-        resp = requests.post(url, timeout=60)
+        headers = {"X-Plan-Runner-Id": runner_id} if runner_id else None
+        resp = requests.post(url, timeout=60, headers=headers)
         if resp.status_code != 200:
             pub_fn(f"done API 실패 (status={resp.status_code}) — 수동 처리 필요")
             logger.warning(f"[_call_done_api] done API 실패: runner={runner_id}, status={resp.status_code}, url={url}")

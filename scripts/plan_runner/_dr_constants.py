@@ -74,6 +74,7 @@ MERGE_ACTIVE_STATUSES = ("pre_merge", "queued", "merging", "pending_merge", "res
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/plan_runner/ → scripts/ → project root
 WORKTREE_BASE_DIR = PROJECT_ROOT / ".worktrees"
+OWNERSHIP_SNAPSHOT_DIR = PROJECT_ROOT / "logs" / "dev_runner" / "ownership"
 WTOOLS_BASE_DIR = Path("D:/work/project/service/wtools")
 PLAN_RUNNER_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/plan-runner"
 PLAN_RUNNER_PYTHON = PLAN_RUNNER_MODULE_PATH / ".venv/Scripts/python.exe"

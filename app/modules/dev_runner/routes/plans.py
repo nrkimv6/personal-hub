@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -232,7 +232,11 @@ async def unignore_plan(encoded_path: str):
 
 
 @router.post("/plans/{encoded_path}/done", response_model=DoneResponse)
-async def run_plan_done(encoded_path: str):
+async def run_plan_done(
+    encoded_path: str,
+    runner_id: Optional[str] = None,
+    x_plan_runner_id: Optional[str] = Header(default=None, alias="X-Plan-Runner-Id"),
+):
     """plan 완료 처리 (아카이브, TODO→DONE, 커밋)"""
     try:
         decoded_path = _decode_path(encoded_path)
@@ -246,7 +250,8 @@ async def run_plan_done(encoded_path: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Plan file not found")
 
-    result = await plan_service.run_done(decoded_path)
+    effective_runner_id = x_plan_runner_id or runner_id
+    result = await plan_service.run_done(decoded_path, runner_id=effective_runner_id)
     plans = plan_service.list_plans()
     return {**result, "plans": [p.model_dump() for p in plans]}
 

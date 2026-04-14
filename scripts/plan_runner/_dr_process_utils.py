@@ -18,6 +18,7 @@ from _dr_constants import (
     RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, PLAN_FILE_ALL, _LEGACY_ALL,
     LOG_CHANNEL_PREFIX, MERGE_ACTIVE_STATUSES, WORKTREE_BASE_DIR,
     RECENT_RUNNERS_TTL, RUNNER_KEY_SUFFIXES, PROJECT_ROOT, RECENT_META_TTL,
+    OWNERSHIP_SNAPSHOT_DIR,
 )
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_state import (
@@ -292,6 +293,13 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                 logger.info(f"[cleanup] workflow {wf['id']} -> failed (reason: {reason})")
     except Exception as e:
         logger.warning(f"[cleanup] workflow DB update failed (ignoring): {e}")
+
+    try:
+        ownership_snapshot = OWNERSHIP_SNAPSHOT_DIR / f"{runner_id}.json"
+        if ownership_snapshot.exists():
+            ownership_snapshot.unlink()
+    except Exception as e:
+        logger.debug(f"[cleanup] ownership snapshot cleanup failed (ignoring): {e}")
 
     logger.info(f"[cleanup] _cleanup_process_state completed: {runner_id} (reason={reason})")
 

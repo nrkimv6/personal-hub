@@ -158,6 +158,7 @@ class DoneResponse(BaseModel):
     success: bool
     message: str
     output: Optional[str] = None
+    reason: Optional[str] = None
     remaining_tasks: int = 0
     total_tasks: int = 0
     plan_status: str = ""

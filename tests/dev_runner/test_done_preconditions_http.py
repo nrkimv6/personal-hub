@@ -6,13 +6,14 @@ main 머지 후 실행. TestClient 기반 (실서버 불필요).
 - Phase R 있는 fix plan은 정상 처리
 """
 import textwrap
+import base64
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import quote
 
 import pytest
 
-from app.modules.dev_runner.routes.plans import router
+from app.modules.dev_runner.routes.plans import router, run_plan_done
 from app.modules.dev_runner.services.plan_service import PlanService
 
 
@@ -90,6 +91,51 @@ class TestDonePreconditionsHttp:
             result = asyncio.run(svc.run_done(str(plan_path)))
 
         assert result["success"] is True
+
+    def test_plan_done_api_prefers_runner_id_header(self, tmp_path, dev_runner_config_isolation):
+        """X-Plan-Runner-Id 헤더가 query runner_id보다 우선한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plan_dir / "2026-03-31_fix-test-http-header.md"
+        plan_path.write_text(textwrap.dedent("""\
+            # fix: HTTP 헤더 테스트
+
+            > 상태: 구현완료
+            > 진행률: 1/1 (100%)
+
+            - [x] A
+
+            ### Phase R: 재발 경로 분석
+
+            | 경로 | 방어여부 |
+            | path1 | 방어됨 |
+
+            *상태: 구현완료 | 진행률: 1/1 (100%)*
+        """), encoding="utf-8")
+
+        with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), \
+             patch("app.modules.dev_runner.routes.plans.plan_service.run_done", new=AsyncMock(return_value={
+                 "success": True,
+                 "message": "ok",
+                 "output": None,
+                 "remaining_tasks": 0,
+                 "total_tasks": 1,
+                 "plan_status": "구현완료",
+             })) as mock_run_done, \
+             patch("app.modules.dev_runner.routes.plans.plan_service.list_plans", return_value=[]):
+            import asyncio
+            result = asyncio.run(
+                run_plan_done(
+                    base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("="),
+                    runner_id="query-runner",
+                    x_plan_runner_id="header-runner",
+                )
+            )
+
+        assert result["success"] is True
+        mock_run_done.assert_awaited_once()
+        called_args = mock_run_done.await_args.kwargs
+        assert called_args["runner_id"] == "header-runner"
 
     def test_plan_done_api_resolver_error_returns_failure_E(self, svc, tmp_path, dev_runner_config_isolation):
         """docs/plan 외 경로 plan은 resolver hard-fail 응답(success=false)을 반환한다."""

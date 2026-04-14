@@ -164,6 +164,7 @@ def test_call_done_api_uses_base64_encoded_path_Co(cl):
 
     assert result is True
     called_url = mock_post.call_args[0][0]
+    assert mock_post.call_args.kwargs.get("headers") == {"X-Plan-Runner-Id": "runner1"}
     encoded = called_url.split("/plans/")[1].split("/done")[0]
     padded = encoded + "=" * ((4 - len(encoded) % 4) % 4)
     decoded = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
