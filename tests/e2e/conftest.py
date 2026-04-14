@@ -26,7 +26,8 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 E2E_CONFIG = {
     "api_url": os.environ.get("E2E_API_URL", "http://localhost:8001"),
     "frontend_url": os.environ.get("E2E_FRONTEND_URL", "http://localhost:6101"),
-    "public_frontend_url": os.environ.get("E2E_PUBLIC_FRONTEND_URL", "http://localhost:6100"),
+    # public PREVIEW는 localhost auth fallback을 피하기 위해 127.0.0.2를 기본 호스트로 사용한다.
+    "public_frontend_url": os.environ.get("E2E_PUBLIC_FRONTEND_URL", "http://127.0.0.2:6100"),
     "headless": True,  # CI에서는 True, 디버깅 시 False
     "slow_mo": 0,  # 디버깅 시 100~500 설정
     "timeout": 30000,  # 30초
@@ -60,6 +61,11 @@ def context(browser: Browser):
     context = browser.new_context(
         viewport={"width": 1280, "height": 720},
         locale="ko-KR",
+        service_workers="block",
+        extra_http_headers={
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
     )
     context.set_default_timeout(E2E_CONFIG["timeout"])
     yield context

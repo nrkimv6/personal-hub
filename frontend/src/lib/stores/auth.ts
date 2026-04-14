@@ -48,6 +48,8 @@ function createAuthStore() {
 			const isLocalhost = window.location.hostname === 'localhost' ||
 				window.location.hostname === '127.0.0.1' ||
 				window.location.hostname === '::1';
+			const isPublicPreview = isLocalhost && window.location.port === '6100';
+			const shouldAutoAdmin = isLocalhost && !isPublicPreview;
 
 			const token = localStorage.getItem(TOKEN_KEY);
 
@@ -79,7 +81,10 @@ function createAuthStore() {
 
 				const data = await response.json();
 
-				if (data.user) {
+				if (isPublicPreview) {
+					// public PREVIEW(6100)는 관리자 오토 판정을 사용하지 않는다.
+					set({ ...initialState, isLoading: false });
+				} else if (data.user) {
 					set({
 						isLoggedIn: true,
 						isAdmin: data.user.isAdmin,
@@ -87,7 +92,7 @@ function createAuthStore() {
 						isLoading: false,
 						isExpired: false
 					});
-				} else if (isLocalhost) {
+				} else if (shouldAutoAdmin) {
 					// 백엔드가 user를 반환하지 않아도 localhost면 관리자 처리
 					set({
 						isLoggedIn: true,
@@ -106,7 +111,7 @@ function createAuthStore() {
 				console.warn('[auth] Network error, keeping token:', error);
 
 				// 에러 시에도 localhost면 관리자 처리
-				if (isLocalhost) {
+				if (shouldAutoAdmin) {
 					set({
 						isLoggedIn: true,
 						isAdmin: true,

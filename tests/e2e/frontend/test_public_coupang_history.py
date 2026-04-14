@@ -31,11 +31,11 @@ class TestPublicCoupangHistory:
         expect(page.locator("#date-from")).to_have_value("2026-04-17")
         expect(page.locator("#date-to")).to_have_value("2026-04-19")
 
-        recent_card = page.locator("div.card").filter(has_text="최근 감지").first()
-        last_checked_card = page.locator("div.card").filter(has_text="마지막 확인").first()
+        recent_card = page.locator("div.card").filter(has_text="최근 감지").first
+        last_checked_card = page.locator("div.card").filter(has_text="마지막 확인").first
 
-        expect(recent_card.locator(":scope > div").first()).to_have_class(re.compile(r"\btext-lg\b"))
-        expect(last_checked_card.locator(":scope > div").first()).to_have_class(re.compile(r"\btext-lg\b"))
+        expect(recent_card.locator(":scope > div").first).to_have_class(re.compile(r"\btext-lg\b"))
+        expect(last_checked_card.locator(":scope > div").first).to_have_class(re.compile(r"\btext-lg\b"))
 
         articles = page.locator("article.rounded-lg")
         assert articles.count() > 0, "공개 이력 카드가 렌더링되지 않음"
