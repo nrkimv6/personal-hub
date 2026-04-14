@@ -141,6 +141,26 @@ def test_live_llm_quota_status_returns_200():
 
 
 # ---------------------------------------------------------------------------
+# LLM Bootstrap API
+# ---------------------------------------------------------------------------
+
+def test_live_llm_bootstrap_returns_200_and_serialized_items():
+    """R: GET /api/v1/llm/bootstrap → 200 + 직렬화된 list shape."""
+    resp = _get("/api/v1/llm/bootstrap?status=completed&page=1&page_size=5")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "list" in data
+    assert "items" in data["list"]
+    assert "stats" in data
+    assert "worker_status" in data
+    for item in data["list"]["items"]:
+        if item.get("result") is not None:
+            assert not isinstance(item["result"], str), f"result가 문자열로 남음: {item}"
+        if item.get("cli_options") is not None:
+            assert not isinstance(item["cli_options"], str), f"cli_options가 문자열로 남음: {item}"
+
+
+# ---------------------------------------------------------------------------
 # Phase 5: LLM enqueue 파이프라인 (model_registry_e2e 대체)
 # ---------------------------------------------------------------------------
 

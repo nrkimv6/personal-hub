@@ -158,6 +158,19 @@ class LLMDefaultsUpdateRequest(BaseModel):
 
 # ========== Endpoints ==========
 
+def _parse_json_field(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value
+
+
 def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
     """LLMRequest를 LLMRequestResponse로 변환.
 
@@ -165,35 +178,52 @@ def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
         request: LLMRequest 모델 인스턴스
         include_raw: True면 raw_response 포함 (상세 조회용)
     """
-    result = None
-    if request.result:
-        try:
-            result = json.loads(request.result)
-        except json.JSONDecodeError:
-            pass
-
-    fields = dict(
-        id=request.id,
-        caller_type=request.caller_type,
-        caller_id=request.caller_id,
-        status=request.status,
-        requested_by=request.requested_by,
-        request_source=request.request_source,
-        provider=getattr(request, "provider", "claude"),
-        model=getattr(request, "model", ""),
-        mode=getattr(request, "mode", "single"),
-        queue_name=getattr(request, "queue_name", "utility"),
-        requested_at=request.requested_at,
-        processed_at=request.processed_at,
-        result=result,
-        error_message=request.error_message,
-        retry_count=request.retry_count,
-        prompt=request.prompt,
-        cli_options=json.loads(request.cli_options) if request.cli_options else None,
-    )
+    if isinstance(request, dict):
+        result = _parse_json_field(request.get("result"))
+        cli_options = _parse_json_field(request.get("cli_options"))
+        fields = dict(
+            id=request["id"],
+            caller_type=request["caller_type"],
+            caller_id=request["caller_id"],
+            status=request["status"],
+            requested_by=request.get("requested_by"),
+            request_source=request.get("request_source"),
+            provider=request.get("provider", "claude"),
+            model=request.get("model", ""),
+            mode=request.get("mode", "single"),
+            queue_name=request.get("queue_name", "utility"),
+            requested_at=request.get("requested_at"),
+            processed_at=request.get("processed_at"),
+            result=result,
+            error_message=request.get("error_message"),
+            retry_count=request.get("retry_count", 0),
+            prompt=request.get("prompt"),
+            cli_options=cli_options,
+        )
+    else:
+        result = _parse_json_field(request.result)
+        fields = dict(
+            id=request.id,
+            caller_type=request.caller_type,
+            caller_id=request.caller_id,
+            status=request.status,
+            requested_by=request.requested_by,
+            request_source=request.request_source,
+            provider=getattr(request, "provider", "claude"),
+            model=getattr(request, "model", ""),
+            mode=getattr(request, "mode", "single"),
+            queue_name=getattr(request, "queue_name", "utility"),
+            requested_at=request.requested_at,
+            processed_at=request.processed_at,
+            result=result,
+            error_message=request.error_message,
+            retry_count=request.retry_count,
+            prompt=request.prompt,
+            cli_options=_parse_json_field(request.cli_options),
+        )
 
     if include_raw:
-        fields["raw_response"] = getattr(request, "raw_response", None)
+        fields["raw_response"] = request.get("raw_response") if isinstance(request, dict) else getattr(request, "raw_response", None)
         return LLMRequestDetailResponse(**fields)
 
     return LLMRequestResponse(**fields)
@@ -266,8 +296,15 @@ def get_llm_bootstrap(
         page_size=page_size,
         queue_name=queue_name,
     )
+    request_list = result["list"]
     return LLMBootstrapResponse(
-        list=LLMRequestListResponse(**result["list"]),
+        list=LLMRequestListResponse(
+            items=[_to_response(item) for item in request_list["items"]],
+            total=request_list["total"],
+            page=request_list["page"],
+            page_size=request_list["page_size"],
+            pages=request_list["pages"],
+        ),
         stats=LLMStatsResponse(**result["stats"]),
         queue_stats=result["queue_stats"],
         worker_status=LLMWorkerStatusResponse(**result["worker_status"]),
