@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import TabNav from '$lib/components/layout/TabNav.svelte';
   import CoupangMonitoringHistory from '$lib/components/CoupangMonitoringHistory.svelte';
-  import CancellationHistoryTab from '$lib/components/coupang/CancellationHistoryTab.svelte';
+  import MegabeautyHistoryTab from '$lib/components/coupang/MegabeautyHistoryTab.svelte';
   import {
     coupangTravelApi,
     type CoupangTarget,
@@ -72,7 +72,7 @@
   const coupangTabs = $derived([
     { id: 'schedules', label: '일정', count: schedules.length || undefined },
     { id: 'history', label: '이력' },
-    { id: 'cancellation-history', label: '취소표 이력' }
+    { id: 'cancellation-history', label: '메가뷰티쇼 취소이력' }
   ]);
 
   const filteredSchedules = $derived(
@@ -770,6 +770,6 @@
   {/if}
 
   {#if activeTab === 'cancellation-history'}
-    <CancellationHistoryTab />
+    <MegabeautyHistoryTab />
   {/if}
 </div>
