@@ -7,8 +7,10 @@ SSE /events 스트림에서 log/log_completed/merge_log 이벤트 수신을 확�
 import json
 import threading
 import time
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import fakeredis
+import fakeredis.aioredis
 import pytest
 import redis
 import requests
@@ -131,6 +133,64 @@ def test_http_events_log_completed_commit_failed_preserves_error_detail(local_cl
     payload = json.loads(completed["data"])
     assert payload["reason"] == "commit_failed"
     assert payload["error"] == detail
+
+
+@pytest.mark.http
+def test_http_events_initial_status_includes_merge_recovery_fields(local_client):
+    """T5: /events 초기 status가 merge 복구 필드를 포함한다."""
+    from app.modules.dev_runner.services.event_service import event_service
+
+    fake_server = fakeredis.FakeServer()
+    fake_sync = fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+    fake_async = fakeredis.aioredis.FakeRedis(server=fake_server, decode_responses=True)
+    runner_id = "http-merge-recovery-01"
+    expected_worktree = f"D:/tmp/.worktrees/{runner_id}"
+
+    fake_sync.sadd("plan-runner:active_runners", runner_id)
+    fake_sync.set(f"plan-runner:runners:{runner_id}:status", "running")
+    fake_sync.set(f"plan-runner:runners:{runner_id}:trigger", "user")
+    fake_sync.set(f"plan-runner:runners:{runner_id}:plan_file", "docs/plan/test.md")
+    fake_sync.set(f"plan-runner:runners:{runner_id}:worktree_path", expected_worktree)
+    fake_sync.set(f"plan-runner:runners:{runner_id}:merge_status", "conflict")
+    fake_sync.set(f"plan-runner:runners:{runner_id}:stop_stage", "post_review")
+
+    original_sync = event_service._sync
+    original_async = event_service._async
+    real_stream_events = event_service.stream_events
+
+    async def _finite_stream_events():
+        gen = real_stream_events()
+        try:
+            yield await gen.__anext__()
+            yield await gen.__anext__()
+        finally:
+            await gen.aclose()
+
+    event_service._sync = fake_sync
+    event_service._async = fake_async
+    try:
+        with patch.object(event_service, "_enable_keyspace_notifications", new=AsyncMock(return_value=None)), \
+             patch.object(event_service, "_list_visible_active_runner_ids", return_value=[]), \
+             patch.object(event_service, "_cleanup_invisible_recent_runners", return_value=None), \
+             patch.object(event_service._log_tailer, "init_offsets_for_active_runners", new=AsyncMock(return_value=None)), \
+             patch("app.modules.dev_runner.routes.events.event_service.stream_events", new=_finite_stream_events):
+            response = local_client.get(
+                f"{BASE_URL}/events",
+                headers={"Accept": "text/event-stream"},
+            )
+    finally:
+        event_service._sync = original_sync
+        event_service._async = original_async
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    events = _parse_sse_events(response.text)
+    status_event = next(event for event in events if event.get("event") == "status")
+    payload = json.loads(status_event["data"])
+    matched = next(item for item in payload["runners"] if item.get("runner_id") == runner_id)
+    assert matched["worktree_path"] == expected_worktree
+    assert matched["merge_status"] == "conflict"
+    assert matched["stop_stage"] == "post_review"
 
 
 @pytest.mark.integration
