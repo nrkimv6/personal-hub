@@ -14,4 +14,4 @@ CREATE TABLE IF NOT EXISTS notification_settings (
 
 -- 초기 데이터 삽입 (없으면)
 INSERT OR IGNORE INTO notification_settings (id, enable_telegram, enable_desktop, notify_states)
-VALUES (1, 1, 1, '["available", "booking_success", "booking_failed", "error", "startup"]');
+VALUES (1, 1, 1, '["available", "booking_success", "booking_failed", "error", "popup_new"]');

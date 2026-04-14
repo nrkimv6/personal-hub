@@ -17,6 +17,21 @@ router = APIRouter(
     tags=["notification"]
 )
 
+_DEFAULT_NOTIFY_STATES = [
+    "available",
+    "booking_success",
+    "booking_failed",
+    "error",
+    "popup_new",
+]
+
+
+def _normalize_notify_states(states: list[str] | None) -> list[str]:
+    """알림 상태 목록에서 지원하지 않는 항목을 제거합니다."""
+    if not states:
+        return []
+    return [state for state in states if state in _DEFAULT_NOTIFY_STATES]
+
 
 def get_notification_settings_from_db() -> NotificationSettings:
     """DB에서 알림 설정을 조회합니다."""
@@ -33,15 +48,8 @@ def get_notification_settings_from_db() -> NotificationSettings:
                 try:
                     notify_states = json.loads(notify_states)
                 except json.JSONDecodeError:
-                    notify_states = [
-                        "available",
-                        "booking_success",
-                        "booking_failed",
-                        "error",
-                        "startup",
-                        "shutdown",
-                        "popup_new",
-                    ]
+                    notify_states = _DEFAULT_NOTIFY_STATES.copy()
+            notify_states = _normalize_notify_states(notify_states)
 
             return NotificationSettings(
                 enable_telegram=bool(result[0]),
@@ -53,30 +61,14 @@ def get_notification_settings_from_db() -> NotificationSettings:
         return NotificationSettings(
             enable_telegram=True,
             enable_desktop=True,
-            notify_states=[
-                "available",
-                "booking_success",
-                "booking_failed",
-                "error",
-                "startup",
-                "shutdown",
-                "popup_new",
-            ]
+            notify_states=_DEFAULT_NOTIFY_STATES.copy()
         )
     except Exception as e:
         logger.error(f"알림 설정 조회 중 오류: {str(e)}")
         return NotificationSettings(
             enable_telegram=True,
             enable_desktop=True,
-            notify_states=[
-                "available",
-                "booking_success",
-                "booking_failed",
-                "error",
-                "startup",
-                "shutdown",
-                "popup_new",
-            ]
+            notify_states=_DEFAULT_NOTIFY_STATES.copy()
         )
     finally:
         db.close()
@@ -86,7 +78,8 @@ def update_notification_settings_in_db(settings: NotificationSettingsUpdate) -> 
     """DB에서 알림 설정을 업데이트합니다."""
     db = SessionLocal()
     try:
-        notify_states_json = json.dumps(settings.notify_states, ensure_ascii=False)
+        notify_states = _normalize_notify_states(settings.notify_states)
+        notify_states_json = json.dumps(notify_states, ensure_ascii=False)
 
         # 기존 설정 확인 또는 생성
         result = db.execute(text("SELECT id FROM notification_settings WHERE id = 1")).fetchone()
@@ -119,7 +112,7 @@ def update_notification_settings_in_db(settings: NotificationSettingsUpdate) -> 
         return NotificationSettings(
             enable_telegram=settings.enable_telegram,
             enable_desktop=settings.enable_desktop,
-            notify_states=settings.notify_states
+            notify_states=notify_states
         )
     except Exception as e:
         db.rollback()
@@ -148,8 +141,6 @@ async def update_notification_settings(settings: NotificationSettingsUpdate):
         - booking_success: 예약 성공
         - booking_failed: 예약 실패
         - error: 오류 발생
-        - startup: 서버 시작
-        - shutdown: 서버 종료
         - popup_new: 팝업 URL 모니터 신규 항목 감지
     """
     try:

@@ -89,6 +89,33 @@ export const systemApi = {
   }
 };
 
+export interface BootHistoryItem {
+  pid: number;
+  started_at: string;
+  ended_at: string | null;
+  end_cause: string | null;
+  end_details: string | null;
+  exit_code: number | null;
+  uptime_seconds: number;
+  restart_gap_seconds: number | null;
+  last_request: string | null;
+  restarted: boolean;
+  needs_attention: boolean;
+  current: boolean;
+  status: 'running' | 'restarted' | 'stopped';
+  inferred_end: boolean;
+}
+
+export interface BootHistoryResponse {
+  total: number;
+  system_boot_at: string | null;
+  items: BootHistoryItem[];
+}
+
+export const bootHistoryApi = {
+  list: (limit: number = 50) => request<BootHistoryResponse>(`/system/boot-history?limit=${limit}`)
+};
+
 // ============================================================
 // 워커 API
 // ============================================================
