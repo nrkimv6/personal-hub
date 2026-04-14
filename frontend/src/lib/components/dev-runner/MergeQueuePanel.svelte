@@ -10,13 +10,15 @@
 		timestamp?: string;
 	}
 
+	let { onCountChange }: { onCountChange?: (count: number) => void } = $props();
+
 	let waitItems: MergeItem[] = $state([]);
 	let loading = $state(false);
 	let error = $state('');
 	let selectedRunnerId = $state<string | null>(null);
 	let mergeLogLines = $state<string[]>([]);
 	let mergeEventSource: EventSource | null = null;
-	let pollInterval: ReturnType<typeof setInterval>;
+	let pollTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	const STATUS_COLORS: Record<string, string> = {
 		queued:      'bg-yellow-100 text-yellow-800',
@@ -44,10 +46,38 @@
 		try {
 			const raw = await devRunnerMergeApi.queue();
 			waitItems = raw as unknown as MergeItem[];
+			const queuedCount = waitItems.filter(i => i.status === 'queued').length;
+			onCountChange?.(queuedCount);
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : '불러오기 실패';
 		} finally {
 			loading = false;
+		}
+	}
+
+	function schedulePoll() {
+		if (pollTimeout) {
+			clearTimeout(pollTimeout);
+			pollTimeout = null;
+		}
+		if (document.hidden) return;
+		// 활성 항목이 있으면 5초, 없으면 30초
+		const interval = activeItems.length > 0 ? 5000 : 30000;
+		pollTimeout = setTimeout(async () => {
+			await load();
+			schedulePoll();
+		}, interval);
+	}
+
+	function handleVisibilityChange() {
+		if (document.hidden) {
+			if (pollTimeout) {
+				clearTimeout(pollTimeout);
+				pollTimeout = null;
+			}
+		} else {
+			// 탭 복귀 시 즉시 fetch 후 폴링 재개
+			load().then(() => schedulePoll());
 		}
 	}
 
@@ -72,12 +102,13 @@
 	}
 
 	onMount(() => {
-		load();
-		pollInterval = setInterval(load, 5000);
+		load().then(() => schedulePoll());
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 	});
 
 	onDestroy(() => {
-		clearInterval(pollInterval);
+		if (pollTimeout) clearTimeout(pollTimeout);
+		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		closeMergeStream();
 	});
 </script>

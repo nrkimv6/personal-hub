@@ -12,14 +12,13 @@
 	import LogHistoryPanel from '$lib/components/dev-runner/LogHistoryPanel.svelte';
 	import DevRunnerSettingsPanel from '$lib/components/dev-runner/DevRunnerSettingsPanel.svelte';
 	import WorkflowList from '$lib/components/dev-runner/WorkflowList.svelte';
-	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import RunStatusBar from '$lib/components/dev-runner/RunStatusBar.svelte';
 	import {
 		devRunnerTaskApi,
 		devRunnerRunnerApi,
 		devRunnerEventApi
 	} from '$lib/api';
-	import { devRunnerMergeApi, devRunnerPlanApi } from '$lib/api/dev-runner';
+	import { devRunnerPlanApi } from '$lib/api/dev-runner';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import { normalizeExitReason } from '$lib/utils/dev-runner-exit-reason';
 	import { shouldSkipInjectedLine } from '$lib/dev-runner/log-dedup.js';
@@ -102,17 +101,11 @@
 		}
 	}
 
-	// Merge 탭 대기 건수 뱃지
+	// Merge 탭 대기 건수 뱃지 (MergeQueuePanel onCountChange 콜백으로 갱신)
 	let mergeQueuedCount = $state(0);
-	let mergeQueuePollInterval: ReturnType<typeof setInterval> | null = null;
 
-	async function pollMergeQueueCount() {
-		try {
-			const items = await devRunnerMergeApi.queue();
-			mergeQueuedCount = items.filter(i => i.status === 'queued').length;
-		} catch {
-			// 폴링 실패 시 무시
-		}
+	function handleMergeQueueCount(count: number) {
+		mergeQueuedCount = count;
 	}
 
 	// Batch plan 상태 (LogViewer SSE에서 수신)
@@ -723,10 +716,6 @@
 
 		// SSE 연결 (폴링 대체)
 		connectSSE();
-
-		// Merge 큐 건수 폴링 시작
-		pollMergeQueueCount();
-		mergeQueuePollInterval = setInterval(pollMergeQueueCount, 10000);
 	});
 
 	onDestroy(() => {
@@ -748,10 +737,6 @@
 		if (elapsedInterval) {
 			clearInterval(elapsedInterval);
 			elapsedInterval = null;
-		}
-		if (mergeQueuePollInterval) {
-			clearInterval(mergeQueuePollInterval);
-			mergeQueuePollInterval = null;
 		}
 		injectedLineFingerprints.clear();
 		});
@@ -1005,7 +990,7 @@
 						{:else if taskHistoryTab === 'merge'}
 							<div class="h-full min-h-0 flex flex-col overflow-hidden">
 								<div class="min-h-0 flex-[3] overflow-hidden">
-									<MergeQueuePanel />
+									<MergeQueuePanel onCountChange={handleMergeQueueCount} />
 								</div>
 								<div class="min-h-0 flex-[2] overflow-hidden border-t border-gray-200">
 									<WorkflowList />

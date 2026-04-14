@@ -56,13 +56,32 @@
     }
   }
 
-  onMount(() => {
-    fetchDiagnostics();
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(fetchDiagnostics, 30000);
+  }
+
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = undefined;
+      }
+    } else {
+      // 탭 복귀 시 즉시 fetch 후 폴링 재개
+      void fetchDiagnostics().then(() => startPolling());
+    }
+  }
+
+  onMount(() => {
+    void fetchDiagnostics();
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
   });
 
   onDestroy(() => {
     if (pollTimer) clearInterval(pollTimer);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   });
 </script>
 
