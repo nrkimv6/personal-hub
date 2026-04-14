@@ -95,6 +95,9 @@ class ServiceRunner:
     def log_environment(self):
         session_id = get_session_id()
         self.log.info(f"PID: {os.getpid()} | Session: {session_id} | Python: {sys.version.split()[0]}")
+        self.log.info(f"Script: {Path(__file__).resolve()}")
+        self.log.info(f"PROJECT_ROOT: {PROJECT_ROOT}")
+        self.log.info(f"sys.path[0]: {sys.path[0] if sys.path else ''}")
         self.log.info(f"CWD: {os.getcwd()}")
         fingerprint = get_runtime_fingerprint_snapshot()
         self.log.info(
