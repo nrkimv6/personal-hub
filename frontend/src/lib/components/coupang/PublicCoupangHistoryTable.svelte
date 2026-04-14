@@ -8,22 +8,19 @@
 
   let { items }: Props = $props();
 
-  function statusTone(statusLabel: string): string {
-    switch (statusLabel) {
-      case '다시 매진':
-        return 'bg-rose-100 text-rose-700';
-      case '현재 열림':
-        return 'bg-sky-100 text-sky-700';
-      default:
-        return 'bg-muted text-muted-foreground';
-    }
+  function closedStatusTone(): string {
+    return 'bg-rose-100 text-rose-700';
+  }
+
+  function openStatusTone(): string {
+    return 'bg-sky-100 text-sky-700';
   }
 
   function durationLabel(item: CoupangPublicHistoryItem): string {
     if (item.status_label === '다시 매진') {
-      return `다시 매진까지 ${formatDuration(item.closed_duration_seconds)}`;
+      return formatDuration(item.closed_duration_seconds);
     }
-    return `현재 열림 ${formatDuration(item.open_duration_seconds)}`;
+    return formatDuration(item.open_duration_seconds);
   }
 </script>
 
@@ -43,9 +40,14 @@
         <tr>
           <td class="whitespace-nowrap text-sm text-muted-foreground">{formatKoreanDateTime(item.timestamp, { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
           <td>
-            <span class={`badge badge-sm shrink-0 ${statusTone(item.status_label)}`}>
-              {item.status_label}
-            </span>
+            {#if item.status_label === '다시 매진'}
+              <div class="flex flex-wrap gap-1">
+                <span class={`badge badge-sm shrink-0 ${closedStatusTone()}`}>빈자리</span>
+                <span class={`badge badge-sm shrink-0 ${closedStatusTone()}`}>매진</span>
+              </div>
+            {:else}
+              <span class={`badge badge-sm shrink-0 ${openStatusTone()}`}>열림</span>
+            {/if}
           </td>
           <td>
             <div class="text-sm font-medium text-foreground">{item.option_label}</div>
