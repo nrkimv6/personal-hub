@@ -9,9 +9,10 @@
   import DiagnosticTab from './DiagnosticTab.svelte';
   import MemoryTab from './MemoryTab.svelte';
   import SleepNowTab from './SleepNowTab.svelte';
+  import BootHistoryTab from './BootHistoryTab.svelte';
 
   // 탭 정의
-  type TabId = 'status' | 'errors' | 'integrity' | 'browsers' | 'settings' | 'memory' | 'diagnostic' | 'sleep-now';
+  type TabId = 'status' | 'boot-history' | 'errors' | 'integrity' | 'browsers' | 'settings' | 'memory' | 'diagnostic' | 'sleep-now';
 
   // 탭 상태
   let activeTab: TabId = $state('status');
@@ -29,6 +30,7 @@
       label: '서비스 상태',
       count: serviceStatus ? serviceStatus.running : undefined,
     },
+    { id: 'boot-history', label: '부팅 이력' },
     {
       id: 'errors',
       label: '에러 로그',
@@ -76,7 +78,7 @@
 
 <div class="p-4 lg:p-6 space-y-6">
   <!-- 헤더 -->
-  <PageHeader title="시스템 / 설정" subtitle="서비스 상태, 오류 로그, 시스템 설정을 관리합니다" />
+  <PageHeader title="시스템 / 설정" subtitle="서비스 상태, 부팅 이력, 오류 로그, 시스템 설정을 관리합니다" />
 
   <!-- 탭 네비게이션 -->
   <TabNav tabs={systemTabs} bind:activeTab variant="primary" queryParam="tab" replaceState={false} />
@@ -85,6 +87,8 @@
   <div class="mt-4">
     {#if activeTab === 'status'}
       <ServiceStatusTab onStatusChange={handleServiceStatusChange} />
+    {:else if activeTab === 'boot-history'}
+      <BootHistoryTab />
     {:else if activeTab === 'errors'}
       <ErrorLogTab onUnresolvedChange={handleUnresolvedChange} />
     {:else if activeTab === 'integrity'}

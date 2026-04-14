@@ -33,6 +33,14 @@ def _is_session_0() -> bool:
 
 _IN_SESSION_0 = _is_session_0()
 
+_ALLOWED_NOTIFY_STATES = {
+    "available",
+    "booking_success",
+    "booking_failed",
+    "error",
+    "popup_new",
+}
+
 class NotificationService:
     def __init__(self):
         self.db = next(get_db())
@@ -72,7 +80,8 @@ class NotificationService:
             else:
                 self.enable_telegram = bool(result[0])
                 self.enable_desktop = bool(result[1])
-                self.notify_states = json.loads(result[2]) if result[2] else []
+                loaded_states = json.loads(result[2]) if result[2] else []
+                self.notify_states = [state for state in loaded_states if state in _ALLOWED_NOTIFY_STATES]
         except Exception as e:
             logger.warning(f"알림 설정 로드 실패: {e}, 기본값 사용")
             self.enable_telegram = True
@@ -83,7 +92,7 @@ class NotificationService:
         """특정 상태에 대해 알림을 보내야 하는지 확인합니다.
 
         Args:
-            state: 알림 상태 (예: "startup", "shutdown", "available", "booking_success", "booking_failed", "error")
+            state: 알림 상태 (예: "available", "booking_success", "booking_failed", "error", "popup_new")
 
         Returns:
             bool: 알림을 보내야 하면 True
@@ -529,4 +538,4 @@ class NotificationService:
         except asyncio.TimeoutError:
             logger.warning("텔레그램 알림 전송 타임아웃 (10초)")
         except Exception as e:
-            logger.error(f"텔레그램 알림 전송 중 오류 발생: {str(e)}") 
+            logger.error(f"텔레그램 알림 전송 중 오류 발생: {str(e)}")

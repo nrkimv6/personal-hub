@@ -40,6 +40,7 @@ $healthEndpoint = "http://localhost:$port/api/v1/system/status"
 $failureCount = 0
 $lastSuccessTime = Get-Date
 $totalRestarts = 0
+$script:outageAlertSent = $false
 $diagScriptPath = Join-Path $ProjectRoot "scripts\diagnostics\diagnose-api.ps1"
 $diagJsonPath = Join-Path $ProjectRoot "frontend\static\diagnostics.json"
 $processStatusPath = Join-Path $ProjectRoot "frontend\static\process-status.json"
@@ -217,12 +218,6 @@ function Request-SystemReboot {
 
     Write-WatchdogLog "CRITICAL: Requesting system reboot - $Reason" "ERROR"
 
-    # Send alert before reboot
-    Send-TelegramAlert "🔴 <b>시스템 재부팅</b>`n`n이유: $Reason`n환경: $mode`n시간: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-
-    # Give time for alert to send
-    Start-Sleep -Seconds 3
-
     # Initiate reboot
     shutdown /r /t 10 /c "Monitor Page API 서버 복구 불가로 인한 자동 재부팅"
 }
@@ -269,9 +264,9 @@ while ($true) {
     if ($isHealthy) {
         if ($failureCount -gt 0) {
             Write-WatchdogLog "API recovered after $failureCount failures" "OK"
-            Send-TelegramAlert "✅ <b>API 복구됨</b>`n`n환경: $mode`n실패 횟수: $failureCount`n다운타임: $([int]((Get-Date) - $lastSuccessTime).TotalSeconds)초"
         }
         $failureCount = 0
+        $script:outageAlertSent = $false
         $lastSuccessTime = Get-Date
         Write-WatchdogLog "Health check passed" "DEBUG"
 
@@ -303,31 +298,27 @@ while ($true) {
 
         $diagLabel = if ($diagStatus) { " — 원인: $diagStatus" } else { "" }
 
+        if ($failureCount -ge 3 -and -not $script:outageAlertSent) {
+            $outageMsg = "⚠️ <b>API 종료 후 미재기동 확인 전</b>`n`n환경: $mode`n포트: $port`n연속 실패: $failureCount회$diagLabel`n상태: watchdog 복구 시도 중"
+            Send-TelegramAlert $outageMsg
+            $script:outageAlertSent = $true
+        }
+
         # Staged recovery
         switch ($failureCount) {
             3 {
                 # Stage 1: Diagnosis-aware restart
-                $alertMsg = "⚠️ <b>API Hang 감지</b>`n`n환경: $mode`n포트: $port`n실패: $failureCount회 연속$diagLabel"
-
                 # Diagnosis-based recovery strategy
                 if ($diagStatus -eq "sqlalchemy_hang") {
-                    $alertMsg += "`n조치: 재부팅 필요 (자동 재시작 무의미)"
-                    Send-TelegramAlert $alertMsg
                     # Skip restart — sqlalchemy hang needs reboot
                 } elseif ($diagStatus -eq "db_migration_error") {
-                    $alertMsg += "`n조치: 마이그레이션 SQL 실행 필요"
-                    Send-TelegramAlert $alertMsg
                 } else {
-                    $alertMsg += "`n조치: 프로세스 재시작 시도"
-                    Send-TelegramAlert $alertMsg
                     if (Restart-ApiService "Stage 1: 3 consecutive failures$diagLabel") { $totalRestarts++ }
                 }
                 Start-Sleep -Seconds 10
             }
             6 {
                 # Stage 2: Force kill + NSSM restart
-                Send-TelegramAlert "🟠 <b>API 복구 실패</b>`n`n환경: $mode`n포트: $port`n실패: $failureCount회 연속$diagLabel`n조치: 포트 강제 해제 시도"
-
                 Force-KillPortOwner
                 Start-Sleep -Seconds 5
 

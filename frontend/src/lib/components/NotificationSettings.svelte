@@ -14,13 +14,19 @@
 		{ value: 'booking_success', label: '예약 성공' },
 		{ value: 'booking_failed', label: '예약 실패' },
 		{ value: 'error', label: '오류 발생' },
-		{ value: 'startup', label: '서버 시작' }
+		{ value: 'popup_new', label: '팝업 신규 감지' }
 	];
+
+	const allowedNotifyStates = new Set(notifyStateOptions.map((option) => option.value));
 
 	export async function fetchData() {
 		loading = true;
 		try {
-			notificationSettings = await notificationApi.getSettings();
+			const settings = await notificationApi.getSettings();
+			notificationSettings = {
+				...settings,
+				notify_states: settings.notify_states.filter((state) => allowedNotifyStates.has(state))
+			};
 			error = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
