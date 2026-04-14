@@ -144,3 +144,111 @@ def test_get_llm_bootstrap_serializes_nested_request_list_shape(client, monkeypa
     assert data["list"]["items"][0]["queue_name"] == "system"
     assert data["queue_stats"]["system"]["pending"] == 1
     assert data["worker_status"]["state"] == "idle"
+
+
+def test_get_llm_bootstrap_treats_blank_result_and_cli_options_as_null(client, monkeypatch):
+    def fake_get_bootstrap_data(
+        self,
+        status=None,
+        caller_type=None,
+        requested_by=None,
+        include_deleted=False,
+        page=1,
+        page_size=20,
+        queue_name=None,
+    ):
+        return {
+            "list": {
+                "items": [
+                    {
+                        "id": 203,
+                        "caller_type": "test",
+                        "caller_id": "bootstrap-empty",
+                        "status": "failed",
+                        "requested_by": "manual",
+                        "request_source": "manual_test",
+                        "provider": "claude",
+                        "model": "",
+                        "mode": "single",
+                        "queue_name": "utility",
+                        "requested_at": None,
+                        "processed_at": None,
+                        "result": "",
+                        "error_message": "boom",
+                        "retry_count": 0,
+                        "prompt": "empty",
+                        "cli_options": "",
+                    }
+                ],
+                "total": 1,
+                "page": page,
+                "page_size": page_size,
+                "pages": 1,
+            },
+            "stats": {"total": 1, "pending": 0, "processing": 0, "completed": 0, "failed": 1},
+            "queue_stats": {"system": {"pending": 0, "processing": 0}, "utility": {"pending": 0, "processing": 0}},
+            "worker_status": {"status": "healthy", "worker_id": "worker-1", "state": "idle"},
+        }
+
+    monkeypatch.setattr(LLMService, "get_bootstrap_data", fake_get_bootstrap_data)
+
+    resp = client.get("/api/v1/llm/bootstrap?status=failed")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["list"]["items"][0]["result"] is None
+    assert data["list"]["items"][0]["cli_options"] is None
+
+
+def test_get_llm_bootstrap_silently_nulls_invalid_json_fields(client, monkeypatch):
+    def fake_get_bootstrap_data(
+        self,
+        status=None,
+        caller_type=None,
+        requested_by=None,
+        include_deleted=False,
+        page=1,
+        page_size=20,
+        queue_name=None,
+    ):
+        return {
+            "list": {
+                "items": [
+                    {
+                        "id": 204,
+                        "caller_type": "test",
+                        "caller_id": "bootstrap-invalid",
+                        "status": "completed",
+                        "requested_by": "manual",
+                        "request_source": "manual_test",
+                        "provider": "claude",
+                        "model": "",
+                        "mode": "single",
+                        "queue_name": "utility",
+                        "requested_at": None,
+                        "processed_at": None,
+                        "result": "{invalid-json}",
+                        "error_message": None,
+                        "retry_count": 0,
+                        "prompt": "invalid",
+                        "cli_options": "{invalid-json}",
+                    }
+                ],
+                "total": 1,
+                "page": page,
+                "page_size": page_size,
+                "pages": 1,
+            },
+            "stats": {"total": 1, "pending": 0, "processing": 0, "completed": 1, "failed": 0},
+            "queue_stats": {"system": {"pending": 0, "processing": 0}, "utility": {"pending": 0, "processing": 0}},
+            "worker_status": {"status": "healthy", "worker_id": "worker-1", "state": "idle"},
+        }
+
+    monkeypatch.setattr(LLMService, "get_bootstrap_data", fake_get_bootstrap_data)
+
+    resp = client.get("/api/v1/llm/bootstrap?status=completed")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["list"]["items"][0]["result"] is None
+    assert data["list"]["items"][0]["cli_options"] is None

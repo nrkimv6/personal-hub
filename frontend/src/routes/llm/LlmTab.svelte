@@ -7,62 +7,63 @@
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 
 	// 상태
-	let requests: LLMRequest[] = [];
-	let stats: LLMStats | null = null;
-	let workerStatus: LLMWorkerStatus | null = null;
-	let historyStats: LLMHistoryStats | null = null;
-	let queueStats: LLMQueueStats | null = null;
+	let requests = $state<LLMRequest[]>([]);
+	let stats = $state<LLMStats | null>(null);
+	let workerStatus = $state<LLMWorkerStatus | null>(null);
+	let historyStats = $state<LLMHistoryStats | null>(null);
+	let queueStats = $state<LLMQueueStats | null>(null);
 
 	// 그룹 뷰 상태
-	let callerGroups: LLMCallerGroup[] = [];
-	let groupedResponse: LLMGroupedListResponse | null = null;
-	let viewMode: 'individual' | 'grouped' = 'individual';
-	let onlyWithoutSuccess = false;
+	let callerGroups = $state<LLMCallerGroup[]>([]);
+	let groupedResponse = $state<LLMGroupedListResponse | null>(null);
+	let viewMode = $state<'individual' | 'grouped'>('individual');
+	let onlyWithoutSuccess = $state(false);
 
-	let loading = true;
+	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let initialAutoSwitchHandled = false;
 
 	// 페이지네이션
-	let currentPage = 1;
-	let pageSize = 20;
-	let total = 0;
-	let pages = 0;
+	let currentPage = $state(1);
+	const pageSize = 20;
+	let total = $state(0);
+	let pages = $state(0);
 
 	// 그룹 뷰 페이지네이션
-	let groupCurrentPage = 1;
-	let groupPageSize = 50;
-	let groupTotal = 0;
-	let groupPages = 0;
+	let groupCurrentPage = $state(1);
+	const groupPageSize = 50;
+	let groupTotal = $state(0);
+	let groupPages = $state(0);
 
 	// 그룹 선택 (multi-재요청용)
-	let selectedGroupKeys: string[] = [];  // "caller_type:caller_id" 형식
-	let groupSelectAll = false;
+	let selectedGroupKeys = $state<string[]>([]);  // "caller_type:caller_id" 형식
+	let groupSelectAll = $state(false);
 
 	// 필터 (탭에 따라 다르게 설정)
-	let filterCallerType = '';
-	let filterRequestedBy = '';
-	let filterQueueName = '';  // '' = 전체, 'utility', 'system'
+	let filterCallerType = $state('');
+	let filterRequestedBy = $state('');
+	let filterQueueName = $state('');  // '' = 전체, 'utility', 'system'
 
 	// 선택
-	let selectedIds: number[] = [];
-	let selectAll = false;
+	let selectedIds = $state<number[]>([]);
+	let selectAll = $state(false);
 
 	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능), claude-sessions(세션 뷰어)
 	type Tab = 'queue' | 'history' | 'create' | 'performance' | 'claude-sessions';
-	let activeTab: Tab = 'queue';
+	let activeTab = $state<Tab>('queue');
 
 	// 모달
-	let selectedRequest: LLMRequest | null = null;
-	let showModal = false;
+	let selectedRequest = $state<LLMRequest | null>(null);
+	let showModal = $state(false);
 	let editCwd = $state('');
 	let editCwdSaving = $state(false);
-	let quotaStatus: QuotaStatusMap = {};
-	let countdownSeconds: number = 0;
+	let quotaStatus = $state<QuotaStatusMap>({});
+	let countdownSeconds = $state(0);
 	let countdownTimer: ReturnType<typeof setInterval> | null = null;
 	let createMetaLoaded = false;
 	let createMetaLoading = false;
-	let performanceTabComponent: any = null;
-	let claudeSessionsTabComponent: any = null;
+	let performanceTabComponent = $state<any | null>(null);
+	let claudeSessionsTabComponent = $state<any | null>(null);
 
 	// 수동 요청 생성 폼
 	let createForm = $state({
@@ -77,9 +78,9 @@
 		cli_options: undefined as Record<string, unknown> | undefined,
 		userInput: ''
 	});
-	let createLoading = false;
+	let createLoading = $state(false);
 	let createError = $state<string | null>(null);
-	let createSuccess = false;
+	let createSuccess = $state(false);
 
 	// Provider 목록 (API에서 동적 로드)
 	let providers = $state<ProviderInfo[]>([]);
@@ -121,8 +122,8 @@
 		}
 	];
 
-	let selectedPreset: Preset = presets[0];
-	let userInput = '';
+	let selectedPreset = $state<Preset>(presets[0]);
+	let userInput = $state('');
 
 	function applyPreset(preset: Preset) {
 		selectedPreset = preset;
@@ -161,6 +162,15 @@
 			return 'completed,failed,cancelled';
 		}
 		return undefined;
+	}
+
+	function shouldAutoSwitchToHistory(bootstrapRes: LLMBootstrapResponse): boolean {
+		if (initialAutoSwitchHandled) return false;
+		if (activeTab !== 'queue') return false;
+		if (currentPage !== 1) return false;
+		if (filterCallerType || filterRequestedBy || filterQueueName) return false;
+		if (bootstrapRes.list.total > 0) return false;
+		return (bootstrapRes.stats.completed + bootstrapRes.stats.failed) > 0;
 	}
 
 	async function loadCreateMeta() {
@@ -211,6 +221,14 @@
 				page_size: pageSize
 			});
 
+			if (shouldAutoSwitchToHistory(bootstrapRes)) {
+				initialAutoSwitchHandled = true;
+				activeTab = 'history';
+				await fetchHistoryStats();
+				await fetchData();
+				return;
+			}
+
 			// 서버에서 이미 status 필터링된 결과 사용
 			requests = bootstrapRes.list.items;
 			total = bootstrapRes.list.total;
@@ -218,6 +236,7 @@
 			stats = bootstrapRes.stats;
 			workerStatus = bootstrapRes.worker_status;
 			queueStats = bootstrapRes.queue_stats;
+			initialAutoSwitchHandled = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
 		} finally {
@@ -1003,6 +1022,13 @@
 		{:else if requests.length === 0}
 			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">{activeTab === 'queue' ? '대기열이 비어있습니다' : '이력이 없습니다'}</p>
+				{#if activeTab === 'queue' && stats && (stats.completed + stats.failed) > 0}
+					<div class="mt-3">
+						<Button variant="secondary" size="sm" onclick={() => switchTab('history')}>
+							이력 보기
+						</Button>
+					</div>
+				{/if}
 			</div>
 		{:else}
 			<!-- 개별 요청 목록 테이블 -->

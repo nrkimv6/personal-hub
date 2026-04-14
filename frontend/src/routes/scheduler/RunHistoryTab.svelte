@@ -4,11 +4,11 @@
 	import type { TaskLog } from '$lib/types';
 	import { RefreshCw, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-svelte';
 
-	let logs: TaskLog[] = [];
-	let loading = true;
-	let error: string | null = null;
-	let selectedTask = '';
-	let taskNames: string[] = [];
+	let logs = $state<TaskLog[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+	let selectedTask = $state('');
+	let taskNames = $state<string[]>([]);
 
 	async function fetchLogs(silent = false) {
 		try {

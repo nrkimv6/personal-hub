@@ -5,11 +5,11 @@
 	import { schedulerApi } from '$lib/api';
 	import type { ScheduledTask, TaskLog } from '$lib/types';
 
-	let tasks: ScheduledTask[] = [];
-	let logs: TaskLog[] = [];
-	let loading = true;
-	let error: string | null = null;
-	let actionLoading: Record<string, boolean> = {};
+	let tasks = $state<ScheduledTask[]>([]);
+	let logs = $state<TaskLog[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+	let actionLoading = $state<Record<string, boolean>>({});
 
 	// 작업명 한글 매핑
 	const taskLabels: Record<string, { name: string; description: string }> = {
