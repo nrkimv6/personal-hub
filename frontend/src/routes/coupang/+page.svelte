@@ -95,10 +95,58 @@
       .filter((schedule) => schedule.is_enabled && schedule.last_event_at)
       .map((schedule) => schedule.last_event_at as string);
     if (enabledEvents.length === 0) return null;
-    return enabledEvents.reduce((latest, current) => (current > latest ? current : latest));
+    return enabledEvents.reduce((latest, current) => {
+      const latestMs = Date.parse(latest);
+      const currentMs = Date.parse(current);
+      if (Number.isNaN(latestMs)) return current;
+      if (Number.isNaN(currentMs)) return latest;
+      return currentMs > latestMs ? current : latest;
+    });
   }
 
   const latestEnabledEventAt = $derived(getLatestEnabledEventAt());
+
+  function getLatestActivityAt(): string | null {
+    const candidates = [latestEnabledEventAt, statusSummary.worker_health.last_event_at].filter(
+      (value): value is string => Boolean(value)
+    );
+    if (candidates.length === 0) return null;
+    return candidates.reduce((latest, current) => {
+      const latestMs = Date.parse(latest);
+      const currentMs = Date.parse(current);
+      if (Number.isNaN(latestMs)) return current;
+      if (Number.isNaN(currentMs)) return latest;
+      return currentMs > latestMs ? current : latest;
+    });
+  }
+
+  const latestActivityAt = $derived(getLatestActivityAt());
+
+  function wasRecentlyChecked(value: string | null, thresholdMinutes = 5): boolean {
+    if (!value) return false;
+    const checkedAt = Date.parse(value);
+    if (Number.isNaN(checkedAt)) return false;
+    return Date.now() - checkedAt < thresholdMinutes * 60 * 1000;
+  }
+
+  function formatRecentActivity(value: string | null): string {
+    if (!value) return '-';
+    const checkedAt = Date.parse(value);
+    if (Number.isNaN(checkedAt)) return value;
+
+    const diffMs = Date.now() - checkedAt;
+    if (diffMs < 60 * 1000) return '방금 전';
+
+    const diffMinutes = Math.floor(diffMs / (60 * 1000));
+    if (diffMinutes < 60) return `${diffMinutes}분 전`;
+
+    return new Date(checkedAt).toLocaleString('ko-KR', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
 
   function getWorkerBanner(): WorkerBanner | null {
     if (loading) {
@@ -125,10 +173,14 @@
     }
 
     if (statusSummary.enabled_schedules > 0 && statusSummary.active_schedules === 0) {
+      if (wasRecentlyChecked(latestActivityAt)) {
+        return null;
+      }
+
       return {
         tone: 'info',
         title: '현재 실행 중인 일정이 없습니다',
-        message: '워커는 살아 있지만 활성화된 일정이 아직 실행 대기 상태입니다.',
+        message: '활성 일정은 있지만 지금 이 순간 실행 중인 작업은 없습니다.',
         action: null
       };
     }
@@ -431,8 +483,8 @@
         <div class="space-y-1">
           <div class="font-semibold">{workerBanner.title}</div>
           <div>{workerBanner.message}</div>
-          {#if latestEnabledEventAt}
-            <div class="text-xs opacity-80">최근 활성 일정 점검: {latestEnabledEventAt}</div>
+          {#if latestActivityAt}
+            <div class="text-xs opacity-80">최근 활성 일정 점검: {formatRecentActivity(latestActivityAt)}</div>
           {/if}
         </div>
         {#if workerBanner.action}
