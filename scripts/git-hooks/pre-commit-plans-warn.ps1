@@ -1,29 +1,77 @@
 # pre-commit-plans-warn.ps1
-# 경고 모드 (차단 없음) — plan-isolation-4-cutover 완료 후 pre-commit-plans-block.ps1로 교체
 #
-# 목적: main/impl 브랜치에서 docs/plan/, docs/archive/ 커밋 시도를 감지해 경고 출력
-# 차단 모드로 전환 시: exit 0 → exit 1 + 파일명 warn → block 변경
+# 목적: active runner가 있는 동안만 mixed-scope staged commit을 차단한다.
+# - runner가 없으면 manual commit은 pass-through
+# - runner가 있으면 scripts/diagnostics/audit_mixed_scope_commits.py --staged 결과를 재사용해
+#   plan/archive + code 혼합 스테이징만 block
 #
-# 우회 절차: docs/plan 수정은 'cd .worktrees/plans' 후 작업
 # --no-verify 사용 절대 금지
 
 $staged = git diff --cached --name-only 2>$null
 $branch = git rev-parse --abbrev-ref HEAD 2>$null
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$ownershipDir = Join-Path $projectRoot "logs\dev_runner\ownership"
 
 # plans 브랜치이면 정상 — 경고 없음
 if ($branch -eq "plans") {
     exit 0
 }
 
-# main/impl/* 등 코드 브랜치에서 docs/plan/ 또는 docs/archive/ 포함 시 경고
-$planFiles = $staged | Where-Object { $_ -match "^docs/(plan|archive)/" }
-
-if ($planFiles) {
-    Write-Warning "⚠️  [pre-commit hook] 코드 브랜치($branch)에서 계획서/아카이브 커밋 감지"
-    Write-Warning "    감지된 파일:"
-    $planFiles | ForEach-Object { Write-Warning "      - $_" }
-    Write-Warning "    계획서 수정은 '.worktrees/plans' 워크트리에서 수행하세요."
-    Write-Warning "    (현재는 경고 모드 — 커밋이 차단되지 않습니다)"
+# active runner snapshot이 없으면 manual commit은 그대로 허용
+$activeSnapshots = @()
+if (Test-Path $ownershipDir) {
+    $activeSnapshots = @(Get-ChildItem -LiteralPath $ownershipDir -Filter "*.json" -File -ErrorAction SilentlyContinue)
+}
+if ($activeSnapshots.Count -eq 0) {
+    exit 0
 }
 
-exit 0
+$planFiles = @($staged | Where-Object { $_ -match "^docs/(plan|archive)/" })
+$codeFiles = @($staged | Where-Object { $_ -match "\.(py|ps1|svelte|ts|tsx|js|jsx|json|toml|yml|yaml)$" -and $_ -notmatch "^docs/" })
+if ($planFiles.Count -eq 0 -or $codeFiles.Count -eq 0) {
+    exit 0
+}
+
+$python = Join-Path $projectRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path $python)) {
+    $python = "python"
+}
+$auditScript = Join-Path $projectRoot "scripts\diagnostics\audit_mixed_scope_commits.py"
+
+$report = & $python $auditScript --repo $projectRoot --staged --format json 2>&1
+$auditExit = $LASTEXITCODE
+if ($auditExit -eq 0) {
+    exit 0
+}
+
+$findings = $null
+try {
+    if ($report) {
+        $findings = $report | ConvertFrom-Json
+    }
+} catch {
+    $findings = $null
+}
+
+Write-Warning "⚠️  [pre-commit hook] active runner ownership guard blocked a mixed-scope staged commit"
+Write-Warning "    active snapshot:"
+$activeSnapshots | ForEach-Object { Write-Warning "      - $($_.Name)" }
+if ($findings) {
+    @($findings) | ForEach-Object {
+        Write-Warning "    [$($_.severity)] $($_.subject)"
+        if ($_.linked_docs) {
+            Write-Warning "      docs: $(@($_.linked_docs) -join ', ')"
+        }
+        if ($_.changed_files) {
+            Write-Warning "      files: $(@($_.changed_files) -join ', ')"
+        }
+        if ($_.reason) {
+            Write-Warning "      reason: $($_.reason)"
+        }
+    }
+} elseif ($report) {
+    Write-Warning "    audit output:"
+    $report | ForEach-Object { Write-Warning "      $_" }
+}
+
+exit 1
