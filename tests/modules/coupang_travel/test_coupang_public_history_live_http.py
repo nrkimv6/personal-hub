@@ -45,6 +45,9 @@ def test_live_public_history_200_and_shape():
     if data["items"]:
         item = data["items"][0]
         assert isinstance(item["id"], str)
+        assert "timestamp" in item
+        assert "option_label" in item
+        assert "schedule_date" in item
         assert "opened_at" in item
         assert "closed_at" in item
         assert item["status_label"] in {"다시 매진", "현재 열림"}

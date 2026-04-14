@@ -28,6 +28,7 @@
 
   let dateFrom = $state(getDefaultDateFrom());
   let dateTo = $state('');
+  const summaryValueClass = 'text-lg font-bold leading-tight md:text-xl';
 
   function formatHour(h: number | null | undefined): string {
     if (h == null) return '-';
@@ -35,10 +36,10 @@
   }
 
   const recentDetectedAt = $derived(events[0]?.timestamp ?? null);
-  const lastCheckedAt = $derived(
-    status?.worker_health.updated_at ?? status?.worker_health.last_event_at ?? null
+  const lastCheckedAt = $derived(status?.worker_health.last_event_at ?? null);
+  const lastCheckedTone = $derived(
+    status?.worker_health.last_event_at ? 'text-sky-600' : 'text-muted-foreground'
   );
-  const lastCheckedTone = $derived(status?.worker_health.updated_at ? 'text-sky-600' : 'text-amber-600');
   const pageLabel = normalizeHistoryText('2026 쿠팡 메가뷰티쇼') || '메가뷰티쇼';
 
   async function loadEvents(): Promise<void> {
@@ -131,14 +132,14 @@
         <div class="text-3xl font-bold text-foreground">{stats.summary.total.toLocaleString()}</div>
         <div class="text-xs text-muted-foreground mt-1">총 감지 횟수</div>
       </div>
-      <div class="card text-center py-4">
-        <div class="text-3xl font-bold text-primary">
+    <div class="card text-center py-4">
+        <div class={`${summaryValueClass} font-bold text-primary`}>
           {formatKoreanDateTime(recentDetectedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
         </div>
         <div class="text-xs text-muted-foreground mt-1">최근 감지</div>
       </div>
       <div class="card text-center py-4">
-        <div class="text-3xl font-bold {lastCheckedTone}">
+        <div class={`${summaryValueClass} font-bold ${lastCheckedTone}`}>
           {formatKoreanDateTime(lastCheckedAt, { hour: '2-digit', minute: '2-digit' })}
         </div>
         <div class="text-xs text-muted-foreground mt-1">마지막 확인</div>

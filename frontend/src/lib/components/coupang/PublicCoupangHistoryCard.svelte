@@ -29,9 +29,6 @@
 
   function detailParts(item: CoupangPublicHistoryItem): string[] {
     const parts: string[] = [];
-    if (item.schedule_date) {
-      parts.push(item.schedule_date);
-    }
 
     const duration = durationLabel(item);
     if (duration !== '-') {

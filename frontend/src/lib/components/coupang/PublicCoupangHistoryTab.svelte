@@ -30,34 +30,28 @@
   let status = $state<CoupangStatusSummary | null>(null);
   let filtersExpanded = $state(false);
 
-  function getDefaultDateFrom(): string {
-    const d = new Date();
-    d.setDate(d.getDate() - 365);
-    return d.toISOString().split('T')[0];
-  }
-
-  const defaultDateFrom = getDefaultDateFrom();
+  // 사용자가 지정한 공개 확인 구간을 초기 조회 범위로 보여준다.
+  const defaultDateFrom = '2026-04-17';
+  const defaultDateTo = '2026-04-19';
+  const summaryValueClass = 'text-lg font-bold leading-tight md:text-xl';
   let dateFrom = $state(defaultDateFrom);
-  let dateTo = $state('');
+  let dateTo = $state(defaultDateTo);
   let selectedSlotTimes = $state<string[]>([]);
 
   const items = $derived(response.items);
   const summary = $derived(response.summary);
   const slotTimeOptions = $derived(response.slot_time_options);
   const recentDetectedAt = $derived(items[0]?.timestamp ?? null);
-  const lastCheckedAt = $derived(
-    status?.worker_health.updated_at ?? status?.worker_health.last_event_at ?? null
+  const lastCheckedAt = $derived(status?.worker_health.last_event_at ?? null);
+  const lastCheckedTone = $derived(
+    status?.worker_health.last_event_at ? 'text-sky-600' : 'text-muted-foreground'
   );
-  const lastCheckedTone = $derived(status?.worker_health.updated_at ? 'text-sky-600' : 'text-amber-600');
   const filterSummaryText = $derived.by(() => {
-    const parts: string[] = [];
-    if (dateFrom !== defaultDateFrom || dateTo) {
-      parts.push(dateTo ? `${dateFrom || '-'} ~ ${dateTo}` : `${dateFrom}부터`);
-    }
+    const parts: string[] = [`${dateFrom || defaultDateFrom} ~ ${dateTo || defaultDateTo}`];
     if (selectedSlotTimes.length > 0) {
       parts.push(`옵션 ${selectedSlotTimes.length}개`);
     }
-    return parts.join(' · ') || '기본 범위';
+    return parts.join(' · ');
   });
   const visibleSlotTimes = $derived.by(() => {
     const seen = new Set<string>();
@@ -150,7 +144,7 @@
   function reset(): void {
     selectedSlotTimes = [];
     dateFrom = defaultDateFrom;
-    dateTo = '';
+    dateTo = defaultDateTo;
     void loadAll();
   }
 
@@ -191,13 +185,13 @@
         <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">다시 매진</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold text-primary">
+        <div class={`${summaryValueClass} font-bold text-primary`}>
           {formatKoreanDateTime(recentDetectedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
         </div>
         <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">최근 감지</div>
       </div>
       <div class="card py-4 text-center">
-        <div class="text-3xl font-bold {lastCheckedTone}">
+        <div class={`${summaryValueClass} font-bold ${lastCheckedTone}`}>
           {formatKoreanDateTime(lastCheckedAt, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
         </div>
         <div class="mt-1 text-[10px] leading-tight text-muted-foreground md:text-xs">마지막 확인</div>
