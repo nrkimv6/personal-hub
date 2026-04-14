@@ -209,7 +209,7 @@ export const coupangTravelApi = {
     );
   },
 
-  async getPublicHistoryTransitions(
+  async getPublicHistoryPairs(
     params?: {
       schedule_date_from?: string;
       schedule_date_to?: string;

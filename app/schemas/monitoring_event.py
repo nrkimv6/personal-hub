@@ -4,7 +4,7 @@ MonitoringEvent 스키마 (Pydantic)
 import json
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 
 
 class MonitoringEventBase(BaseModel):
@@ -95,32 +95,29 @@ class MonitoringEventList(BaseModel):
 
 
 class CoupangPublicHistoryItem(BaseModel):
-    """쿠팡 공개 병합 이력 개별 항목"""
-    id: int
+    """쿠팡 공개 페어 레코드 개별 항목"""
+    id: str
     schedule_id: int
     timestamp: datetime
+    opened_at: datetime
+    closed_at: Optional[datetime] = None
+    status_label: Literal["다시 매진", "현재 열림"]
+    closed_duration_seconds: Optional[float] = None
+    open_duration_seconds: Optional[float] = None
     schedule_date: Optional[str] = None
     biz_item_name: Optional[str] = None
     business_name: Optional[str] = None
     slot_key: str
     option_label: str
     slot_time_label: Optional[str] = None
-    cancellation_count: int = 0
-    sold_count: int = 0
-    remaining_open_count: int = 0
-    sale_durations: List[float] = Field(default_factory=list)
-    open_durations: List[float] = Field(default_factory=list)
-    last_transition_label: str = "잔여석발생"
 
 
 class CoupangPublicHistorySummary(BaseModel):
-    """쿠팡 공개 병합 이력 요약"""
-    total: int = 0  # 병합 슬롯 수
-    cancellation_count: int = 0
-    total_sold: int = 0
-    remaining_open_count: int = 0
-    avg_sale_duration_seconds: Optional[float] = None
-    last_transition_at: Optional[datetime] = None
+    """쿠팡 공개 페어 이력 요약"""
+    total: int = 0  # 공개 이력 레코드 수
+    closed_pair_count: int = 0
+    open_pair_count: int = 0
+    avg_closed_duration_seconds: Optional[float] = None
 
 
 class CoupangPublicHistoryResponse(BaseModel):

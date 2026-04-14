@@ -60,10 +60,3 @@ export function formatDuration(seconds: number | null | undefined): string {
   const rest = rounded % 60;
   return rest > 0 ? `약 ${minutes}분 ${rest}초` : `약 ${minutes}분`;
 }
-
-export function formatDurationList(secondsList: Array<number | null | undefined>): string {
-  const durations = secondsList
-    .map((seconds) => formatDuration(seconds))
-    .filter((value) => value !== '-');
-  return durations.length > 0 ? durations.join(' · ') : '-';
-}
