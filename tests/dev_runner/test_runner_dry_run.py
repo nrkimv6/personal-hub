@@ -8,7 +8,6 @@
 실행 명령:
   pytest -m integration tests/dev_runner/test_runner_dry_run.py -v
 """
-import subprocess
 import time
 from pathlib import Path
 
@@ -32,41 +31,16 @@ pytestmark = pytest.mark.integration
 BASE_URL = "http://test/api/v1/dev-runner"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 _config = DevRunnerConfig()
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-_TEST_BRANCH_SUFFIXES = ["test_minimal_plan_a", "test_minimal_plan_b", "test_minimal_plan"]
-
-
-def _delete_test_branches():
-    """테스트 중 생성된 plan 브랜치 + worktree 정리 (이전 실행 잔여 제거)
-
-    worktree에 체크아웃된 브랜치는 git branch -D가 실패하므로
-    worktree를 먼저 제거한 후 브랜치를 삭제.
-    """
-    for suffix in _TEST_BRANCH_SUFFIXES:
-        # worktree 제거 시도
-        worktree_path = _PROJECT_ROOT / ".worktrees" / suffix
-        if worktree_path.exists():
-            subprocess.run(
-                ["git", "worktree", "remove", "--force", str(worktree_path)],
-                capture_output=True,
-                cwd=str(_PROJECT_ROOT),
-                timeout=10,
-            )
-        # 브랜치 삭제 (plan/ 접두어)
-        subprocess.run(
-            ["git", "branch", "-D", f"plan/{suffix}"],
-            capture_output=True,
-            cwd=str(_PROJECT_ROOT),
-            timeout=10,
-        )
 
 
 @pytest.fixture
 def cleanup_test_branches():
     """concurrent 테스트 전후 plan 브랜치 정리"""
-    _delete_test_branches()
+    from tests.dev_runner.conftest_e2e import _cleanup_test_worktrees
+
+    _cleanup_test_worktrees()
     yield
-    _delete_test_branches()
+    _cleanup_test_worktrees()
 
 
 @pytest.fixture(autouse=True)

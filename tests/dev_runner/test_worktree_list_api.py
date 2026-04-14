@@ -1,7 +1,7 @@
 """worktree_service 단위 TC + GET /worktrees HTTP TC"""
-import re
+import shutil
+import subprocess
 import pytest
-from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
 
@@ -72,6 +72,32 @@ class TestListWorktrees:
             result = await list_worktrees()
 
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_right_excludes_prunable(self):
+        """prunable 블록이 있는 워크트리 제외"""
+        from app.modules.dev_runner.services.worktree_service import list_worktrees
+
+        porcelain = (
+            "worktree /repo/.worktrees/prunable-wt\n"
+            "HEAD aaa111\n"
+            "prunable\n"
+            "\n"
+            "worktree /repo/.worktrees/impl-bar\n"
+            "HEAD bbb222\n"
+            "branch refs/heads/impl/bar\n"
+            "locked reason\n"
+            "\n"
+        )
+        with patch(
+            "app.modules.dev_runner.services.worktree_service._run_git",
+            new=AsyncMock(return_value=porcelain.strip()),
+        ):
+            result = await list_worktrees()
+
+        assert len(result) == 1
+        assert result[0]["branch"] == "impl/bar"
+        assert result[0]["locked"] is True
 
 
 class TestGetAheadBehind:
@@ -227,3 +253,37 @@ class TestRealRepo:
         ahead, behind = await get_ahead_behind("main")
         assert ahead == 0
         assert behind == 0
+
+
+class TestRealGitPrunable:
+    @pytest.mark.asyncio
+    async def test_list_worktrees_filters_prunable_real_git(self, tmp_path):
+        """실제 git worktree list에서 prunable registration이 결과에 노출되지 않음"""
+        from app.modules.dev_runner.services.worktree_service import list_worktrees
+
+        repo = tmp_path / "repo"
+        subprocess.run(["git", "init", "-b", "main", str(repo)], capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(repo), check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(repo), check=True)
+        subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(repo), check=True)
+        (repo / "README.md").write_text("seed", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], capture_output=True, cwd=str(repo), check=True)
+        subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(repo), check=True)
+
+        active_path = repo / ".worktrees" / "runner-active"
+        prunable_path = repo / ".worktrees" / "runner-prunable"
+        subprocess.run(
+            ["git", "worktree", "add", "-b", "runner/active", str(active_path)],
+            capture_output=True, cwd=str(repo), check=True,
+        )
+        subprocess.run(
+            ["git", "worktree", "add", "-b", "runner/prunable", str(prunable_path)],
+            capture_output=True, cwd=str(repo), check=True,
+        )
+        shutil.rmtree(prunable_path)
+
+        result = await list_worktrees(repo_root=repo)
+        branches = [wt["branch"] for wt in result]
+
+        assert "runner/active" in branches
+        assert "runner/prunable" not in branches

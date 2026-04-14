@@ -77,7 +77,7 @@ async def list_worktrees(repo_root: Path = _REPO_ROOT) -> list[dict]:
         if line.startswith("worktree "):
             if block:
                 _maybe_append(block, result)
-            block = {"worktree_path": line[len("worktree "):].strip(), "locked": False}
+            block = {"worktree_path": line[len("worktree "):].strip(), "locked": False, "prunable": False}
         elif line.startswith("HEAD "):
             block["head"] = line[len("HEAD "):].strip()
         elif line.startswith("branch "):
@@ -87,6 +87,8 @@ async def list_worktrees(repo_root: Path = _REPO_ROOT) -> list[dict]:
             block["detached"] = True
         elif line.startswith("locked"):
             block["locked"] = True
+        elif line.startswith("prunable"):
+            block["prunable"] = True
 
     if block:
         _maybe_append(block, result)
@@ -95,8 +97,10 @@ async def list_worktrees(repo_root: Path = _REPO_ROOT) -> list[dict]:
 
 
 def _maybe_append(block: dict, result: list) -> None:
-    """detached HEAD 및 branch == main 제외"""
+    """detached HEAD, prunable, branch == main 제외"""
     if block.get("detached"):
+        return
+    if block.get("prunable"):
         return
     branch = block.get("branch", "")
     if branch == "main":
