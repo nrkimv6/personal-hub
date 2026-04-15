@@ -14,7 +14,7 @@
 	import { goto } from '$app/navigation';
 	import { eventApi, popupApi, uncategorizedApi, collectApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate, ExpoDraftBooth, ExpoMapDocument, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
-	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
+	import { isAdmin, isAuthLoading, isLoggedIn } from '$lib/stores/auth';
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 	import { localParticipation } from '$lib/stores/localParticipation';
@@ -148,9 +148,21 @@
 	// 탭/필터 관련 함수
 	// =========================================================
 
+	function isLocalAdminOrigin() {
+		if (!browser) {
+			return false;
+		}
+
+		const isLocalhost = window.location.hostname === 'localhost' ||
+			window.location.hostname === '127.0.0.1' ||
+			window.location.hostname === '::1';
+
+		return isLocalhost && window.location.port === '6101';
+	}
+
 	// 탭 전환 탭 목록 (TabNav용)
 	const eventTabs = $derived.by(() => {
-		if (!$isAdmin) {
+		if (!$isAdmin && !isLocalAdminOrigin()) {
 			return [...baseEventTabs];
 		}
 
@@ -163,7 +175,7 @@
 	const isExpoTab = $derived(activeTab === ADMIN_EXPO_TAB);
 
 	function getAvailableTabs(): TabMode[] {
-		return ($isAdmin
+		return (($isAdmin || isLocalAdminOrigin())
 			? [...baseEventTabs.map((tab) => tab.id), ADMIN_EXPO_TAB]
 			: [...baseEventTabs.map((tab) => tab.id)]) as TabMode[];
 	}

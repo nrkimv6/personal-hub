@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { browser } from '$app/environment';
+  import { onMount } from 'svelte';
   import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import { toast } from '$lib/stores/toast';
   import type { ExpoDraftBooth, ExpoMapDocument } from '$lib/types';
@@ -8,6 +10,18 @@
   import expoData from '../expo-data.json';
 
   const expo = expoData as ExpoMapDocument;
+
+  onMount(() => {
+    const isLocalhost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname === '127.0.0.2' ||
+      window.location.hostname === '::1';
+
+    if (isLocalhost && window.location.port === '6100') {
+      goto('/expo/coffee-expo-2026', { replaceState: true, keepFocus: true, noScroll: true });
+    }
+  });
 
   async function handleSaveDrafts(drafts: ExpoDraftBooth[]) {
     if (!browser || drafts.length === 0) {

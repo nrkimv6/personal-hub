@@ -11,11 +11,6 @@ def _skip_public_mode_if_admin(system_mode: str) -> None:
         pytest.skip(f"현재 system mode={system_mode} — public E2E 스킵")
 
 
-def _skip_admin_mode_if_public(system_mode: str) -> None:
-    if system_mode != "admin":
-        pytest.skip(f"현재 system mode={system_mode} — admin E2E 스킵")
-
-
 class TestPublicExpoBoothMap:
     def test_sidebar_navigates_to_expo_booth_map(self, page: Page, public_frontend_url: str, system_mode: str):
         _skip_public_mode_if_admin(system_mode)
@@ -34,7 +29,7 @@ class TestPublicExpoBoothMap:
         page.goto(f"{public_frontend_url}/expo/coffee-expo-2026?booth=A-01&slot=open-demo")
         page.wait_for_load_state("networkidle")
 
-        expect(page.get_by_text("로스터스 랩")).to_be_visible()
+        expect(page.get_by_text("싱글 오리진 라인업과 현장 로스팅 샘플링을 진행합니다.").first).to_be_visible()
         expect(page.get_by_role("button", name="10:30 오픈 데모")).to_have_class(re.compile("amber"))
 
     def test_slot_filter_dims_non_matching_booths(self, page: Page, public_frontend_url: str, system_mode: str):
@@ -44,8 +39,8 @@ class TestPublicExpoBoothMap:
         page.wait_for_load_state("networkidle")
         page.get_by_role("button", name="10:30 오픈 데모").click()
 
-        expect(page.get_by_role("button", name=re.compile(r"A-01"))).to_have_class(re.compile("opacity-100"))
-        expect(page.get_by_role("button", name=re.compile(r"A-02"))).to_have_class(re.compile("opacity-30"))
+        expect(page.locator('button[aria-label="A-01 로스터스 랩"]')).to_have_class(re.compile("opacity-100"))
+        expect(page.locator('button[aria-label="A-02 밀크 크래프트"]')).to_have_class(re.compile("opacity-30"))
 
     def test_author_route_redirects_in_public_mode(self, page: Page, public_frontend_url: str, system_mode: str):
         _skip_public_mode_if_admin(system_mode)
@@ -69,18 +64,16 @@ class TestPublicExpoBoothMap:
         page.set_viewport_size({"width": 390, "height": 844})
         page.goto(f"{public_frontend_url}/expo/coffee-expo-2026")
         page.wait_for_load_state("networkidle")
-        page.get_by_role("button", name=re.compile(r"A-01")).click()
+        page.locator('button[aria-label="A-01 로스터스 랩"]').click()
 
-        expect(page.get_by_role("button", name="닫기")).to_be_visible()
-        expect(page.get_by_text("오픈 빈 테이스팅")).to_be_visible()
+        expect(page.get_by_role("button", name="닫기", exact=True)).to_be_visible()
+        expect(page.get_by_role("dialog").get_by_text("오픈 빈 테이스팅")).to_be_visible()
         assert page.evaluate("() => document.body.style.overflow") == "hidden"
 
 
 class TestAdminExpoAuthor:
     # Admin author/editor surfaces intentionally keep draft state local-only until save-api is introduced.
-    def test_author_page_is_available_in_admin_mode(self, page: Page, frontend_url: str, system_mode: str):
-        _skip_admin_mode_if_public(system_mode)
-
+    def test_author_page_is_available_in_admin_mode(self, page: Page, frontend_url: str):
         page.goto(f"{frontend_url}/expo/coffee-expo-2026/author")
         page.wait_for_load_state("networkidle")
 
@@ -88,9 +81,7 @@ class TestAdminExpoAuthor:
         expect(page.get_by_role("heading", name="커피엑스포 2026 좌표 작성")).to_be_visible()
         expect(page.locator('meta[name="robots"]')).to_have_attribute("content", re.compile("noindex"))
 
-    def test_admin_events_tab_renders_expo_workspace(self, page: Page, frontend_url: str, system_mode: str):
-        _skip_admin_mode_if_public(system_mode)
-
+    def test_admin_events_tab_renders_expo_workspace(self, page: Page, frontend_url: str):
         page.goto(f"{frontend_url}/events?tab=expo")
         page.wait_for_load_state("networkidle")
 
