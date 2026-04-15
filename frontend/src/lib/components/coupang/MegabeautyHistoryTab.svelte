@@ -36,9 +36,11 @@
   }
 
   const recentDetectedAt = $derived(events[0]?.timestamp ?? null);
-  const lastCheckedAt = $derived(status?.worker_health.last_checked_at ?? null);
+  const lastCheckedAt = $derived(
+    status?.worker_health.status === 'healthy' ? (status?.worker_health.last_checked_at ?? null) : null
+  );
   const lastCheckedTone = $derived(
-    status?.worker_health.last_checked_at ? 'text-sky-600' : 'text-muted-foreground'
+    lastCheckedAt ? 'text-sky-600' : 'text-muted-foreground'
   );
   const pageLabel = normalizeHistoryText('2026 쿠팡 메가뷰티쇼') || '메가뷰티쇼';
 
