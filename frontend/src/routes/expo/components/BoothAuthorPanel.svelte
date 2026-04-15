@@ -3,11 +3,14 @@
   import { onMount } from 'svelte';
   import { toast } from '$lib/stores/toast';
   import type { ExpoBooth, ExpoDraftBooth, ExpoMapDocument } from '$lib/types';
+  import { buildExpoDraftStorageKey, serializeExpoDraftsForExport } from '../utils/authorDraft';
   import { toNormalizedPoint } from '../utils/mapTransform';
 
   interface Props {
     existingBooths: ExpoBooth[];
     map: ExpoMapDocument['map'];
+    onSaveDrafts?: (drafts: ExpoDraftBooth[]) => Promise<void> | void;
+    saveButtonLabel?: string;
     slug: string;
   }
 
@@ -20,7 +23,13 @@
     step: number;
   }
 
-  let { existingBooths, map, slug }: Props = $props();
+  let {
+    existingBooths,
+    map,
+    onSaveDrafts,
+    saveButtonLabel = 'JSON 복사',
+    slug
+  }: Props = $props();
 
   let stageEl: HTMLDivElement | null = null;
   let prefix = $state('A-');
@@ -32,7 +41,7 @@
   let history = $state<ExpoDraftBooth[][]>([]);
   let stateLoaded = $state(false);
 
-  const storageKey = `expo:${slug}:draft`;
+  const storageKey = buildExpoDraftStorageKey(slug);
 
   function buildName() {
     return `${prefix}${String(currentNumber).padStart(Math.max(1, padLength), '0')}`;
@@ -144,18 +153,26 @@
       return;
     }
 
-    const payload = drafts.map((draft) => ({
-      id: draft.name,
-      name: draft.name,
-      pin: draft.pin
-    }));
-
     try {
-      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      await navigator.clipboard.writeText(serializeExpoDraftsForExport(drafts));
       toast.success(`${drafts.length}개 draft를 복사했습니다.`);
     } catch {
       toast.error('클립보드 복사에 실패했습니다.');
     }
+  }
+
+  async function handleSaveDrafts() {
+    if (drafts.length === 0) {
+      toast.warning('저장할 좌표 draft가 없습니다.');
+      return;
+    }
+
+    if (onSaveDrafts) {
+      await onSaveDrafts(drafts);
+      return;
+    }
+
+    await copyJson();
   }
 
   onMount(() => {
@@ -244,8 +261,8 @@
     </div>
 
     <div class="flex flex-wrap gap-2">
-      <button type="button" class="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white" onclick={copyJson}>
-        JSON 복사
+      <button type="button" class="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white" onclick={handleSaveDrafts}>
+        {saveButtonLabel}
       </button>
       <button type="button" class="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700" onclick={handleUndo}>
         Undo

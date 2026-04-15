@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { Button } from '$lib/components/ui';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
@@ -12,7 +13,7 @@
 	import { page as pageStore } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { eventApi, popupApi, uncategorizedApi, collectApi } from '$lib/api';
-	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
+	import type { Event, EventCreate, EventUpdate, ExpoDraftBooth, ExpoMapDocument, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
 	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
@@ -28,9 +29,21 @@
 	import EventFormModal from '$lib/components/events/EventFormModal.svelte';
 	import EventFeedViewerModal from '$lib/components/events/EventFeedViewerModal.svelte';
 	import EventUrlImportModal from '$lib/components/events/EventUrlImportModal.svelte';
+	import ExpoAdminWorkspace from '../expo/components/ExpoAdminWorkspace.svelte';
+	import expoData from '../expo/coffee-expo-2026/expo-data.json';
+	import { serializeExpoDraftsForExport } from '../expo/utils/authorDraft';
 
 	// 로컬 참여 상태 스토어 반응형 구독
 	const participatedMap = $derived($localParticipation);
+	const expo = expoData as ExpoMapDocument;
+	const DEFAULT_TAB = 'online';
+	const ADMIN_EXPO_TAB = 'expo';
+	const baseEventTabs = [
+		{ id: 'online', label: '온라인 이벤트', color: 'purple' },
+		{ id: 'offline', label: '오프라인 이벤트', color: 'green' },
+		{ id: 'popup', label: '팝업', color: 'pink' },
+		{ id: 'uncategorized', label: '미분류', color: 'gray' }
+	] as const;
 
 	// 상태 변수
 	let events: Event[] = $state([]);
@@ -42,8 +55,10 @@
 	let error: string | null = $state(null);
 
 	// 탭 모드: online(온라인 이벤트), offline(오프라인 이벤트), popup, uncategorized
-	type TabMode = 'online' | 'offline' | 'popup' | 'uncategorized';
+	type TabMode = 'online' | 'offline' | 'popup' | 'uncategorized' | 'expo';
 	let activeTab: TabMode = $state('online');
+	let mounted = $state(false);
+	let lastHandledTab = $state<TabMode | null>(null);
 
 	// 미분류 목록
 	let uncategorizedPosts: UncategorizedPost[] = $state([]);
@@ -134,31 +149,86 @@
 	// =========================================================
 
 	// 탭 전환 탭 목록 (TabNav용)
-	const eventTabs = [
-		{ id: 'online', label: '온라인 이벤트', color: 'purple' },
-		{ id: 'offline', label: '오프라인 이벤트', color: 'green' },
-		{ id: 'popup', label: '팝업', color: 'pink' },
-		{ id: 'uncategorized', label: '미분류', color: 'gray' },
-	];
+	const eventTabs = $derived.by(() => {
+		if (!$isAdmin) {
+			return [...baseEventTabs];
+		}
+
+		return [
+			...baseEventTabs,
+			{ id: ADMIN_EXPO_TAB, label: '커피엑스포 2026', color: 'amber' }
+		];
+	});
+
+	const isExpoTab = $derived(activeTab === ADMIN_EXPO_TAB);
+
+	function getAvailableTabs(): TabMode[] {
+		return ($isAdmin
+			? [...baseEventTabs.map((tab) => tab.id), ADMIN_EXPO_TAB]
+			: [...baseEventTabs.map((tab) => tab.id)]) as TabMode[];
+	}
+
+	function normalizeTab(rawTab: string | null): TabMode {
+		const availableTabs = getAvailableTabs();
+		if (rawTab && availableTabs.includes(rawTab as TabMode)) {
+			return rawTab as TabMode;
+		}
+
+		return DEFAULT_TAB;
+	}
+
+	function applyDefaultStatusFilter(tab: TabMode) {
+		if (tab === ADMIN_EXPO_TAB) {
+			filterEventStatus = null;
+			return;
+		}
+
+		if (isAnonymous) {
+			if (tab === 'online') filterEventStatus = 'ending_tomorrow';
+			else if (tab === 'offline') filterEventStatus = 'ongoing';
+			else filterEventStatus = null;
+			return;
+		}
+
+		if (tab === 'online' || tab === 'offline') {
+			filterEventStatus = 'ongoing';
+		} else if (tab === 'popup') {
+			filterEventStatus = 'ongoing_or_upcoming';
+		} else {
+			filterEventStatus = null;
+		}
+	}
+
+	function redirectToDefaultTab() {
+		const nextUrl = new URL($pageStore.url);
+		nextUrl.searchParams.set('tab', DEFAULT_TAB);
+		goto(nextUrl.toString(), { replaceState: true, keepFocus: true, noScroll: true });
+	}
 
 	// URL 변경 감지 → 탭 전환 사이드이펙트 적용 (탭 변경 시에만 currentPage/필터 초기화)
 	$effect(() => {
-		const urlTab = $pageStore.url.searchParams.get('tab') as TabMode | null;
-		const validTabs: TabMode[] = ['online', 'offline', 'popup', 'uncategorized'];
-		const targetTab: TabMode = urlTab && validTabs.includes(urlTab) ? urlTab : 'online';
-		if (activeTab !== targetTab) {
+		const requestedTab = $pageStore.url.searchParams.get('tab');
+		const targetTab = normalizeTab(requestedTab);
+
+		if (requestedTab === ADMIN_EXPO_TAB && targetTab !== ADMIN_EXPO_TAB) {
+			redirectToDefaultTab();
+			return;
+		}
+
+		if (lastHandledTab !== targetTab) {
+			lastHandledTab = targetTab;
 			activeTab = targetTab;
 			currentPage = 1;
-			if (isAnonymous) {
-				if (targetTab === 'online') filterEventStatus = 'ending_tomorrow';
-				else if (targetTab === 'offline') filterEventStatus = 'ongoing';
-				else filterEventStatus = null;
-			} else if (targetTab === 'online' || targetTab === 'offline') {
-				filterEventStatus = 'ongoing';
-			} else if (targetTab === 'popup') {
-				filterEventStatus = 'ongoing_or_upcoming';
-			} else if (targetTab === 'uncategorized') {
-				filterEventStatus = null;
+			applyDefaultStatusFilter(targetTab);
+
+			if (mounted) {
+				if (targetTab === ADMIN_EXPO_TAB) {
+					loading = false;
+					error = null;
+					total = 0;
+				} else {
+					fetchEvents();
+				}
 			}
 		}
 	});
@@ -172,7 +242,9 @@
 			goto(`?tab=${tab}`, { replaceState: false, keepFocus: true, noScroll: true });
 		}
 
-		if (isAnonymous) {
+		if (tab === ADMIN_EXPO_TAB) {
+			filterEventStatus = null;
+		} else if (isAnonymous) {
 			// 운영모드: 온라인은 내일까지, 오프라인은 진행중
 			if (tab === 'online') {
 				filterEventStatus = 'ending_tomorrow';
@@ -266,6 +338,20 @@
 		currentPage = 1;
 		fetchEvents();
 		syncUrlParams();
+	}
+
+	async function handleExpoDraftSave(drafts: ExpoDraftBooth[]) {
+		if (!browser || drafts.length === 0) {
+			toast.warning('복사할 좌표 draft가 없습니다.');
+			return;
+		}
+
+		try {
+			await navigator.clipboard.writeText(serializeExpoDraftsForExport(drafts));
+			toast.success(`${drafts.length}개 draft를 복사했습니다.`);
+		} catch {
+			toast.error('클립보드 복사에 실패했습니다.');
+		}
 	}
 
 	// =========================================================
@@ -685,26 +771,19 @@
 		fetchDeadlineCounts();
 
 		const searchParams = $pageStore.url.searchParams;
-		const validTabs: TabMode[] = ['online', 'offline', 'popup', 'uncategorized'];
+		const requestedTab = searchParams.get('tab');
+		const normalizedTab = normalizeTab(requestedTab);
+
+		if (requestedTab === ADMIN_EXPO_TAB && normalizedTab !== ADMIN_EXPO_TAB) {
+			redirectToDefaultTab();
+		}
 
 		// 1. 탭 설정 (URL → activeTab)
-		const urlTab = searchParams.get('tab');
-		if (urlTab && validTabs.includes(urlTab as TabMode)) {
-			activeTab = urlTab as TabMode;
-		}
+		activeTab = normalizedTab;
+		lastHandledTab = normalizedTab;
 
 		// 2. 탭별 기본 필터 설정
-		if (isAnonymous) {
-			if (activeTab === 'online') filterEventStatus = 'ending_tomorrow';
-			else if (activeTab === 'offline') filterEventStatus = 'ongoing';
-			else filterEventStatus = null;
-		} else if (activeTab === 'online' || activeTab === 'offline') {
-			filterEventStatus = 'ongoing';
-		} else if (activeTab === 'popup') {
-			filterEventStatus = 'ongoing_or_upcoming';
-		} else {
-			filterEventStatus = null;
-		}
+		applyDefaultStatusFilter(normalizedTab);
 
 		// 3. URL 파라미터로 page/sort/order 복원 (탭 기본값보다 우선)
 		const { page, sort, order, eventId } = getUrlParams(searchParams);
@@ -720,10 +799,16 @@
 		}
 
 		// 5. 데이터 로드
-		await fetchEvents();
+		if (normalizedTab === ADMIN_EXPO_TAB) {
+			loading = false;
+			error = null;
+			total = 0;
+		} else {
+			await fetchEvents();
+		}
 
 		// 6. event 파라미터로 모달 자동 열기 (데이터 로드 완료 후)
-		if (eventId) {
+		if (eventId && normalizedTab !== ADMIN_EXPO_TAB) {
 			try {
 				const event = await eventApi.get(eventId);
 				openEditModal(event);
@@ -732,6 +817,8 @@
 				syncUrlParams({ eventId: null });
 			}
 		}
+
+		mounted = true;
 	});
 </script>
 
@@ -742,7 +829,7 @@
 <div class="p-4 md:p-6">
 	<!-- 헤더 -->
 	<PageHeader title="이벤트 관리" subtitle="이벤트와 팝업을 관리합니다">
-		{#if $isAdmin}
+		{#if $isAdmin && !isExpoTab}
 			<div class="flex gap-2">
 				<Button variant="primary" size="sm" onclick={openCreateModal}> + 새 이벤트 </Button>
 				<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
@@ -752,6 +839,7 @@
 		{/if}
 	</PageHeader>
 	<!-- 필터 요약 + 모바일 필터 토글 -->
+	{#if !isExpoTab}
 	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-end sm:items-center gap-3">
 		<div class="flex items-center gap-2">
 			{#if isAnonymous}
@@ -800,12 +888,13 @@
 			{/if}
 		</div>
 	</div>
+	{/if}
 
 	<!-- 탭 -->
 	<TabNav tabs={eventTabs} bind:activeTab variant="primary" queryParam="tab" replaceState={false} />
 
 	<!-- 필터 패널 (로그인 사용자만) -->
-	{#if !isAnonymous}
+	{#if !isAnonymous && !isExpoTab}
 		<EventFilterPanel
 			{filterEventStatus}
 			{unknownPeriodFilter}
@@ -831,7 +920,17 @@
 	{/if}
 
 	<!-- 목록 -->
-	{#if loading}
+	{#if isExpoTab}
+		<ExpoAdminWorkspace
+			existingBooths={expo.booths}
+			map={expo.map}
+			onSaveDrafts={handleExpoDraftSave}
+			previewHref="/expo/coffee-expo-2026"
+			saveButtonLabel="JSON 복사"
+			slug={expo.slug}
+			title={expo.title}
+		/>
+	{:else if loading}
 			<div class="flex justify-center items-center h-64">
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 			</div>
@@ -935,7 +1034,7 @@
 		{/if}
 
 		<!-- 페이지네이션 -->
-		{#if !loading && !error && (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) > 0}
+		{#if !isExpoTab && !loading && !error && (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) > 0}
 		<div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-6">
 			<span class="text-sm text-muted-foreground">
 				전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(
