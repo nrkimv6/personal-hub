@@ -39,7 +39,7 @@ test('memory pressure process summary prefers the first entries', () => {
   assert.equal(summary, 'python.exe (512 MB), chrome.exe (128 MB), node.exe (64 MB)');
 });
 
-test('memory pressure tree excerpt trims to the requested lines', () => {
+test('memory pressure tree excerpt trims raw process trees to the requested lines', () => {
   const tree = Array.from({ length: 100 }, (_, idx) => `line-${idx + 1}`).join('\n');
   const excerpt = excerptMemoryPressureTree(tree, 80);
 
@@ -59,6 +59,15 @@ test('memory pressure server excerpt passthrough normalizes empty values', () =>
   assert.equal(renderMemoryPressureExcerpt(null), '');
   assert.equal(renderMemoryPressureExcerpt(undefined), '');
   assert.equal(renderMemoryPressureExcerpt(''), '');
+});
+
+test('memory pressure raw helper rewrites server excerpts incorrectly', () => {
+  const serverExcerpt = Array.from({ length: 80 }, (_, idx) => `line-${idx + 1}`).join('\n') + '\n... (+20 lines)';
+  const rewrapped = excerptMemoryPressureTree(serverExcerpt, 80);
+
+  assert.notEqual(rewrapped, serverExcerpt);
+  assert.ok(rewrapped.endsWith('... (+1 lines)'));
+  assert.ok(rewrapped.includes('line-80'));
 });
 
 test('toggle string selection adds and removes values', () => {
