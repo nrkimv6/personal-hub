@@ -209,9 +209,9 @@ class Settings(BaseSettings):
     GOOGLE_SEARCH_API_KEY: str = ""  # Google Cloud Console에서 발급 (선택)
     GOOGLE_SEARCH_CSE_ID: str = ""  # Programmable Search Engine ID (선택)
 
-    # 메가뷰티쇼 2026-04-17 Kakao 알림 설정
+    # 메가뷰티쇼 Kakao 알림 설정
     MEGABEAUTY_KAKAO_ALERT_ENABLED: bool = True
-    MEGABEAUTY_KAKAO_ALERT_DATE: str = "2026-04-17"
+    MEGABEAUTY_KAKAO_ALERT_DATES: str = "2026-04-17"
     MEGABEAUTY_KAKAO_ALERT_ITEM_NAME_KEYWORD: str = "메가뷰티쇼"
     MEGABEAUTY_KAKAO_ALERT_ROOM_NAME: str = "소나무봇"
     MEGABEAUTY_KAKAO_ALERT_CLI_PATH: str = r"D:\work\project\tools\kakaocli-win\.venv\Scripts\kakaocli-win.exe"

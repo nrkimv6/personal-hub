@@ -243,8 +243,17 @@ class CoupangMonitorService:
         """메가뷰티쇼 카카오 알림 대상인지 판정."""
         if not bool(getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", False)):
             return False
-        if date != getattr(settings, "MEGABEAUTY_KAKAO_ALERT_DATE", "2026-04-17"):
-            return False
+        configured_dates = str(
+            getattr(settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "2026-04-17") or ""
+        ).strip()
+        if configured_dates != "*":
+            allowed_dates = {
+                part.strip()
+                for part in configured_dates.replace("\n", ",").split(",")
+                if part.strip()
+            }
+            if not allowed_dates or date not in allowed_dates:
+                return False
 
         keyword = (getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ITEM_NAME_KEYWORD", "") or "").strip()
         if keyword:

@@ -5,6 +5,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from app.modules.coupang_travel.services.api_client import VendorItem
+from app.modules.coupang_travel.services import monitor_service as service_module
 from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
 
 
@@ -83,6 +84,73 @@ async def test_check_and_notify_kakao_bypasses_notify_times():
     kwargs = notification.send_notification_message.call_args.kwargs
     assert kwargs["send_telegram"] is False
     assert kwargs["send_desktop"] is False
+    assert kwargs["send_kakao"] is True
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_kakao_blocks_non_target_single_date():
+    """단일 날짜 설정이면 다른 날짜는 Kakao 알림이 가지 않는다."""
+    service, api_client, notification = make_service()
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)
+    ])
+    await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
+    ])
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "2026-04-17"):
+        with patch.object(service, "_is_within_notify_times", return_value=False):
+            changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    assert len(changes) == 1
+    notification.send_notification_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_kakao_allows_multiple_dates():
+    """복수 날짜 설정이면 포함된 날짜는 Kakao 알림이 간다."""
+    service, api_client, notification = make_service()
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)
+    ])
+    await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
+    ])
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "2026-04-17, 2026-04-18"):
+        with patch.object(service, "_is_within_notify_times", return_value=False):
+            changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    assert len(changes) == 1
+    notification.send_notification_message.assert_called_once()
+    kwargs = notification.send_notification_message.call_args.kwargs
+    assert kwargs["send_kakao"] is True
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_kakao_allows_wildcard_dates():
+    """날짜 필터를 `*`로 풀면 4/17이 아니어도 Kakao 알림이 간다."""
+    service, api_client, notification = make_service()
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)
+    ])
+    await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
+    ])
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "*"):
+        with patch.object(service, "_is_within_notify_times", return_value=False):
+            changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    assert len(changes) == 1
+    notification.send_notification_message.assert_called_once()
+    kwargs = notification.send_notification_message.call_args.kwargs
     assert kwargs["send_kakao"] is True
 
 
