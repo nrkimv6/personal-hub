@@ -9,6 +9,7 @@
   import expoData from './expo-data.json';
 
   const expo = expoData as ExpoMapDocument;
+  // [slug] 승격 시 이동 대상: expo-data import, route 경로, author/preview 링크 참조부.
 
   let imageFailed = $state(false);
   let liveMessage = $state('');
