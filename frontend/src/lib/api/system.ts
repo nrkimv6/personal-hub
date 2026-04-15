@@ -628,6 +628,41 @@ export interface LLMDefaultsUpdateRequest {
   caller_defaults?: Record<string, LLMDefaultConfig>;
 }
 
+export interface SchedulerRuntimeProviderSummary {
+  provider: string;
+  model: string;
+  count: number;
+  latest_requested_at?: string | null;
+  caller_types: string[];
+}
+
+export interface SchedulerRuntimeCallerSummary {
+  caller_type: string;
+  provider: string;
+  model: string;
+  count: number;
+  latest_requested_at?: string | null;
+}
+
+export interface SchedulerRuntimeLatestRequest {
+  id: number;
+  caller_type: string;
+  caller_id: string;
+  provider: string;
+  model: string;
+  requested_at?: string | null;
+  requested_by?: string | null;
+  request_source?: string | null;
+}
+
+export interface SchedulerRuntimeSummaryResponse {
+  recent_limit: number;
+  total_requests: number;
+  provider_summary: SchedulerRuntimeProviderSummary[];
+  caller_summary: SchedulerRuntimeCallerSummary[];
+  latest_request?: SchedulerRuntimeLatestRequest | null;
+}
+
 export interface LLMProfileConfig {
   engine: string;
   name: string;
@@ -814,6 +849,9 @@ export const llmApi = {
   getQuotaStatus: () => request<QuotaStatusMap>('/llm/quota-status'),
 
   getDefaults: () => request<LLMDefaultsResponse>('/llm/defaults'),
+
+  getSchedulerRuntimeSummary: (recentLimit: number = 50) =>
+    request<SchedulerRuntimeSummaryResponse>(`/llm/scheduler-runtime-summary?recent_limit=${recentLimit}`),
 
   updateDefaults: (payload: LLMDefaultsUpdateRequest) =>
     request<LLMDefaultsResponse>('/llm/defaults', {

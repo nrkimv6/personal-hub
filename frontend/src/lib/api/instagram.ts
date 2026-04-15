@@ -31,6 +31,7 @@ import type {
   CrawlSchedule,
   CrawlScheduleCreate,
   CrawlScheduleUpdate,
+  CrawlScheduleRepairResponse,
   CrawlScheduleRunPaginated,
   CrawlRunStats,
   UrlParseResponse,
@@ -321,6 +322,18 @@ export const crawlApi = {
     requestTasks<CrawlSchedule>(`/schedules/${scheduleId}`, {
       method: 'PUT',
       body: JSON.stringify(data)
+    }),
+
+  // legacy placeholder repair preview
+  previewLegacyPlaceholderRepair: () =>
+    requestTasks<CrawlScheduleRepairResponse>('/schedules/repair-legacy-placeholder', {
+      method: 'POST'
+    }),
+
+  // legacy placeholder repair apply
+  applyLegacyPlaceholderRepair: () =>
+    requestTasks<CrawlScheduleRepairResponse>('/schedules/repair-legacy-placeholder/apply', {
+      method: 'POST'
     }),
 
   // 스케줄 활성화/비활성화

@@ -156,6 +156,41 @@ class LLMDefaultsUpdateRequest(BaseModel):
     caller_defaults: dict[str, LLMDefaultConfig] = Field(default_factory=dict)
 
 
+class SchedulerRuntimeProviderSummary(BaseModel):
+    provider: str
+    model: str
+    count: int
+    latest_requested_at: Optional[datetime] = None
+    caller_types: List[str] = Field(default_factory=list)
+
+
+class SchedulerRuntimeCallerSummary(BaseModel):
+    caller_type: str
+    provider: str
+    model: str
+    count: int
+    latest_requested_at: Optional[datetime] = None
+
+
+class SchedulerRuntimeLatestRequest(BaseModel):
+    id: int
+    caller_type: str
+    caller_id: str
+    provider: str
+    model: str
+    requested_at: Optional[datetime] = None
+    requested_by: Optional[str] = None
+    request_source: Optional[str] = None
+
+
+class SchedulerRuntimeSummaryResponse(BaseModel):
+    recent_limit: int
+    total_requests: int
+    provider_summary: List[SchedulerRuntimeProviderSummary]
+    caller_summary: List[SchedulerRuntimeCallerSummary]
+    latest_request: Optional[SchedulerRuntimeLatestRequest] = None
+
+
 # ========== Endpoints ==========
 
 def _parse_json_field(value):
@@ -321,6 +356,27 @@ def get_llm_defaults(db: Session = Depends(get_db)):
         caller_defaults={k: LLMDefaultConfig(**v) for k, v in defaults.get("caller_defaults", {}).items()},
         supported_providers=service.get_supported_providers(),
         known_caller_types=service.get_known_caller_types(),
+    )
+
+
+@router.get("/scheduler-runtime-summary", response_model=SchedulerRuntimeSummaryResponse)
+def get_scheduler_runtime_summary(
+    recent_limit: int = Query(50, ge=1, le=200, description="집계할 최근 scheduler 요청 수"),
+    db: Session = Depends(get_db),
+):
+    """최근 scheduler 요청의 실제 provider/model 집계 조회."""
+    service = LLMService(db)
+    summary = service.get_scheduler_runtime_summary(recent_limit=recent_limit)
+    return SchedulerRuntimeSummaryResponse(
+        recent_limit=summary["recent_limit"],
+        total_requests=summary["total_requests"],
+        provider_summary=[SchedulerRuntimeProviderSummary(**item) for item in summary["provider_summary"]],
+        caller_summary=[SchedulerRuntimeCallerSummary(**item) for item in summary["caller_summary"]],
+        latest_request=(
+            SchedulerRuntimeLatestRequest(**summary["latest_request"])
+            if summary.get("latest_request")
+            else None
+        ),
     )
 
 
