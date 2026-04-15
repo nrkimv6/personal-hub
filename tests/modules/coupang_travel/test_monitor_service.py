@@ -59,9 +59,33 @@ async def test_check_and_notify_status_change():
     notification.send_notification_message.assert_called_once()
 
     msg_arg = notification.send_notification_message.call_args[0][0]
-    assert "[쿠팡]" in msg_arg
-    assert "SOLD_OUT" in msg_arg
-    assert "ON_SALE" in msg_arg
+    assert "[쿠팡][재고알림]" in msg_arg
+    assert "옵션=옵션A" in msg_arg
+    assert "재고=2개" in msg_arg
+    assert "판매상태" not in msg_arg
+    assert "날짜=" not in msg_arg
+    assert "SOLD_OUT" not in msg_arg
+    assert "ON_SALE" not in msg_arg
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_message_removes_megabeauty_prefix():
+    service, api_client, notification = make_service()
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="메가뷰티쇼 버추얼스토어 4/18토 오후 7시", sale_status="SOLD_OUT", stock_count=0)
+    ])
+    await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="메가뷰티쇼 버추얼스토어 4/18토 오후 7시", sale_status="ON_SALE", stock_count=1)
+    ])
+    await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    notification.send_notification_message.assert_called_once()
+    msg_arg = notification.send_notification_message.call_args[0][0]
+    assert "메가뷰티쇼 버추얼스토어" not in msg_arg
+    assert "옵션=4/18토 오후 7시" in msg_arg
 
 
 @pytest.mark.asyncio
