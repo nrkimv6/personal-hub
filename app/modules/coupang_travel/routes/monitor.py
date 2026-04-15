@@ -174,8 +174,9 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
         .filter(Business.service_type == "coupang")
         .scalar()
     )
-    # 최신 이벤트/heartbeat/스케줄 체크 중 존재하는 값을 기준으로 마지막 확인 시각을 계산해 '-'를 줄인다.
-    last_checked_at = latest_event_at or heartbeat_updated_at or latest_schedule_check_at
+    # 마지막 확인은 실제 모니터링 체크(이벤트/스케줄 체크) 시각만 사용한다.
+    # heartbeat는 워커 생존 판정용이며, 체크 시각으로는 사용하지 않는다.
+    last_checked_at = latest_event_at or latest_schedule_check_at
     last_event_at_str = latest_event_at.isoformat() if latest_event_at else None
     last_checked_at_str = last_checked_at.isoformat() if last_checked_at else None
     freshness_window = timedelta(seconds=_WORKER_HEALTH_FRESHNESS_SECONDS)
