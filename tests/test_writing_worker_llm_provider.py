@@ -3,7 +3,7 @@ Writing Worker / TopicExtract Worker LLM Provider 테스트
 
 RIGHT-BICEP 원칙:
 - Right: llm_provider/model이 LLMRequest에 올바르게 전달되는가?
-- Default: target_config 없을 때 "claude" 기본값 사용
+- Default: target_config 없을 때 resolver 결과 사용
 - Boundary: llm_model="" 빈 문자열 그대로 저장
 
 대상:
@@ -152,7 +152,7 @@ class TestWritingWorkerLlmProvider:
         assert req.model == "gemini-2.0-flash"
 
     def test_queue_mix_writing_default_provider(self, test_db):
-        """TC-Default: llm_provider 미전달 → 기본값 'claude'"""
+        """TC-Default: llm_provider 미전달 → resolver 결과 사용"""
         from app.modules.writing.worker.writing_worker import SlotContext
 
         for i in range(3):
@@ -166,6 +166,11 @@ class TestWritingWorkerLlmProvider:
 
         worker = self._get_worker(test_db)
         slot_context = SlotContext()
+        expected_provider, expected_model = worker.llm_service.resolve_provider_model(
+            caller_type="writing_generate",
+            provider=None,
+            model=None,
+        )
         result = worker._queue_mix_writing(
             run_id=998,
             slot_context=slot_context,
@@ -175,7 +180,8 @@ class TestWritingWorkerLlmProvider:
         assert result is True
         req = test_db.query(LLMRequest).filter_by(caller_id="mix_998_0").first()
         assert req is not None
-        assert req.provider == "claude"
+        assert req.provider == expected_provider
+        assert req.model == expected_model
 
     def test_queue_mix_writing_empty_model(self, test_db):
         """TC-Boundary: llm_model='' 빈 문자열 그대로 저장"""
@@ -192,6 +198,11 @@ class TestWritingWorkerLlmProvider:
 
         worker = self._get_worker(test_db)
         slot_context = SlotContext()
+        expected_provider, expected_model = worker.llm_service.resolve_provider_model(
+            caller_type="writing_generate",
+            provider="gemini",
+            model="",
+        )
         result = worker._queue_mix_writing(
             run_id=997,
             slot_context=slot_context,
@@ -203,7 +214,8 @@ class TestWritingWorkerLlmProvider:
         assert result is True
         req = test_db.query(LLMRequest).filter_by(caller_id="mix_997_0").first()
         assert req is not None
-        assert req.model == ""
+        assert req.provider == expected_provider
+        assert req.model == expected_model
 
 
 # ============================================================
@@ -243,7 +255,7 @@ class TestTopicExtractWorkerLlmProvider:
         assert req.model == "gemini-2.0-flash"
 
     def test_create_extract_requests_default(self, test_db):
-        """TC-Default: llm_provider 미전달 → 기본값 'claude'"""
+        """TC-Default: llm_provider 미전달 → resolver 결과 사용"""
 
         src = WritingSource(
             content="기본값 소재 추출 " * 50,
@@ -254,9 +266,15 @@ class TestTopicExtractWorkerLlmProvider:
         test_db.commit()
 
         worker = self._get_worker(test_db)
+        expected_provider, expected_model = worker.llm_service.resolve_provider_model(
+            caller_type="topic_extract",
+            provider=None,
+            model=None,
+        )
         count = worker.create_extract_requests(limit=10)
 
         assert count > 0
         req = test_db.query(LLMRequest).filter_by(caller_type="topic_extract").order_by(LLMRequest.id.desc()).first()
         assert req is not None
-        assert req.provider == "claude"
+        assert req.provider == expected_provider
+        assert req.model == expected_model

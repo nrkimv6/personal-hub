@@ -212,8 +212,8 @@ class LLMClassifierService:
         post_id: int,
         trigger_tag: str,
         requested_by: str = "auto",
-        provider: str = "claude",
-        model: str = "",
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
         _suppress_quota_warn: bool = False,
     ) -> Optional[object]:
         """LLM 분류 요청 생성 (claude_worker에 위임).
@@ -255,7 +255,7 @@ class LLMClassifierService:
         )
 
         # quota pause 경고 로그 (batch 호출 시 중복 방지를 위해 suppress 가능)
-        if not _suppress_quota_warn:
+        if not _suppress_quota_warn and provider is not None:
             paused_until = self._llm_service.get_provider_quota_pause(provider)
             if paused_until:
                 logger.warning(
@@ -287,12 +287,12 @@ class LLMClassifierService:
         post_ids: list[int],
         trigger_tag: str = "manual",
         requested_by: str = "manual",
-        provider: str = "claude",
-        model: str = "",
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> list:
         """여러 게시물에 대해 LLM 분류 요청 생성."""
         # quota pause 경고 로그 — 루프 밖에서 1회만 출력 (중복 방지)
-        paused_until = self._llm_service.get_provider_quota_pause(provider)
+        paused_until = self._llm_service.get_provider_quota_pause(provider) if provider is not None else None
         if paused_until:
             logger.warning(
                 "[QUOTA_WARN] instagram 일괄 분류 %d건 — %s 쿼터 정지 중 (재개: %s)",

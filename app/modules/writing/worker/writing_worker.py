@@ -253,8 +253,8 @@ class WritingWorker:
         run_id: int,
         slot_context: SlotContext,
         index: int = 0,
-        llm_provider: str = "claude",
-        llm_model: str = "",
+        llm_provider: Optional[str] = None,
+        llm_model: Optional[str] = None,
     ) -> bool:
         """믹스 글쓰기 LLM 요청 생성 (비동기 큐 패턴).
 
@@ -328,8 +328,8 @@ class WritingWorker:
         slot_context: SlotContext,
         season: Optional[str],
         index: int = 0,
-        llm_provider: str = "claude",
-        llm_model: str = "",
+        llm_provider: Optional[str] = None,
+        llm_model: Optional[str] = None,
     ) -> bool:
         """랜덤 프롬프트 글쓰기 LLM 요청 생성 (비동기 큐 패턴).
 
@@ -420,8 +420,8 @@ class WritingWorker:
         slot_context: SlotContext,
         season: Optional[str],
         index: int = 0,
-        llm_provider: str = "claude",
-        llm_model: str = "",
+        llm_provider: Optional[str] = None,
+        llm_model: Optional[str] = None,
     ) -> bool:
         """키워드 전용 글쓰기 LLM 요청 생성 (비동기 큐 패턴).
 
