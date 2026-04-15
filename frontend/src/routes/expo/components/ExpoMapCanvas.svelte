@@ -32,7 +32,11 @@
 
   const minZoom = 1;
   const maxZoom = 4;
+  const tapMoveThreshold = 8;
+  const tapSelectionRadius = 28;
+  const doubleTapResetDelayMs = 280;
   const activePointers = new Map<number, PointerPoint>();
+  const pointerStartPoints = new Map<number, PointerPoint>();
 
   let containerEl: HTMLDivElement | null = null;
   let zoom = $state(1);
@@ -43,6 +47,8 @@
   let pinchDistance = $state<number | null>(null);
   let pinchMidpoint = $state<{ x: number; y: number } | null>(null);
   let focusedBoothId = $state<string | null>(null);
+  let lastTouchTapAt = $state(0);
+  let lastTouchTapPoint = $state<PointerPoint | null>(null);
 
   function getViewport() {
     const rect = containerEl?.getBoundingClientRect();
@@ -107,6 +113,30 @@
     applyTransform(1, 0, 0);
   }
 
+  function findNearestBoothAtViewportPoint(viewX: number, viewY: number) {
+    const viewport = getViewport();
+    let nearestBooth: ExpoBooth | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const booth of booths) {
+      const point = toViewPoint(booth.pin.xNorm, booth.pin.yNorm, viewport.width, viewport.height);
+      const mappedX = point.x * zoom + panX;
+      const mappedY = point.y * zoom + panY;
+      const distance = Math.hypot(mappedX - viewX, mappedY - viewY);
+
+      if (distance < nearestDistance) {
+        nearestBooth = booth;
+        nearestDistance = distance;
+      }
+    }
+
+    if (!nearestBooth || nearestDistance > tapSelectionRadius) {
+      return null;
+    }
+
+    return nearestBooth;
+  }
+
   function focusBooth(boothId: string | null) {
     if (!boothId || !containerEl) {
       return;
@@ -139,7 +169,9 @@
       return;
     }
 
+    event.preventDefault();
     activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+    pointerStartPoints.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
     (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
 
     if (activePointers.size === 1) {
@@ -159,6 +191,7 @@
       return;
     }
 
+    event.preventDefault();
     activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
 
     if (activePointers.size === 2 && pinchDistance && pinchMidpoint) {
@@ -202,7 +235,61 @@
   }
 
   function handlePointerUp(event: PointerEvent) {
+    if (!activePointers.has(event.pointerId)) {
+      return;
+    }
+
+    const wasSinglePointer = activePointers.size === 1;
+    const startPoint = pointerStartPoints.get(event.pointerId);
     activePointers.delete(event.pointerId);
+    pointerStartPoints.delete(event.pointerId);
+
+    if (wasSinglePointer && startPoint) {
+      const travelDistance = Math.hypot(
+        event.clientX - startPoint.clientX,
+        event.clientY - startPoint.clientY
+      );
+
+      if (travelDistance <= tapMoveThreshold) {
+        const rect = containerEl?.getBoundingClientRect();
+        if (rect) {
+          const tapPoint = {
+            clientX: event.clientX,
+            clientY: event.clientY
+          };
+
+          if (event.pointerType === 'touch' && lastTouchTapPoint) {
+            const tapInterval = event.timeStamp - lastTouchTapAt;
+            const tapDistance = Math.hypot(
+              tapPoint.clientX - lastTouchTapPoint.clientX,
+              tapPoint.clientY - lastTouchTapPoint.clientY
+            );
+
+            if (tapInterval <= doubleTapResetDelayMs && tapDistance <= tapSelectionRadius) {
+              lastTouchTapAt = 0;
+              lastTouchTapPoint = null;
+              resetView();
+              resetGestureState();
+              return;
+            }
+          }
+
+          const nearestBooth = findNearestBoothAtViewportPoint(
+            event.clientX - rect.left,
+            event.clientY - rect.top
+          );
+
+          if (nearestBooth) {
+            onSelectBooth(nearestBooth.id);
+          }
+
+          if (event.pointerType === 'touch') {
+            lastTouchTapAt = event.timeStamp;
+            lastTouchTapPoint = tapPoint;
+          }
+        }
+      }
+    }
 
     if (activePointers.size === 1) {
       const [pointerId, point] = [...activePointers.entries()][0];
@@ -231,7 +318,7 @@
   class="relative overflow-hidden rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.18),_transparent_32%),linear-gradient(180deg,_#fffdf7_0%,_#f6f1e7_100%)] shadow-[0_24px_60px_rgba(148,163,184,0.18)]"
   role="application"
   aria-label="커피엑스포 2026 부스맵"
-  style={`aspect-ratio: ${map.width} / ${map.height}; touch-action: none;`}
+  style={`aspect-ratio: ${map.width} / ${map.height}; touch-action: none; overscroll-behavior: contain;`}
   onwheel={handleWheel}
   onpointerdown={handlePointerDown}
   onpointermove={handlePointerMove}

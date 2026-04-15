@@ -7,6 +7,7 @@
   }
 
   let { booth, onClose }: Props = $props();
+  let mobileTitleId = $derived(booth ? `expo-booth-sheet-title-${booth.id}` : 'expo-booth-sheet-title');
 
   $effect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -25,6 +26,14 @@
     };
   });
 </script>
+
+<svelte:window
+  onkeydown={(event) => {
+    if (event.key === 'Escape' && booth) {
+      onClose();
+    }
+  }}
+/>
 
 <aside class="hidden h-full min-h-[480px] flex-col rounded-[28px] border border-slate-200 bg-white/96 p-5 shadow-sm lg:flex">
   {#if booth}
@@ -91,15 +100,18 @@
 {#if booth}
   <div class="fixed inset-0 z-40 bg-slate-950/35 lg:hidden" onclick={onClose}></div>
   <section
-    class="fixed inset-x-0 bottom-0 z-50 rounded-t-[32px] border border-slate-200 bg-white px-5 pb-5 pt-3 shadow-[0_-18px_50px_rgba(15,23,42,0.22)] lg:hidden"
-    style="padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));"
+    class="fixed inset-x-0 bottom-0 z-50 overflow-y-auto rounded-t-[32px] border border-slate-200 bg-white px-5 pb-5 pt-3 shadow-[0_-18px_50px_rgba(15,23,42,0.22)] overscroll-contain lg:hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby={mobileTitleId}
+    style="padding-left: calc(1.25rem + env(safe-area-inset-left)); padding-right: calc(1.25rem + env(safe-area-inset-right)); padding-bottom: calc(1.25rem + env(safe-area-inset-bottom)); max-height: min(82vh, calc(100vh - env(safe-area-inset-top) - 0.75rem));"
   >
-    <div class="mx-auto h-1.5 w-14 rounded-full bg-slate-200"></div>
+    <div class="mx-auto h-1.5 w-14 rounded-full bg-slate-200" aria-hidden="true"></div>
 
     <div class="mt-4 flex items-start justify-between gap-3">
       <div>
         <p class="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">{booth.id}</p>
-        <h2 class="mt-2 text-xl font-semibold text-slate-900">{booth.name}</h2>
+        <h2 class="mt-2 text-xl font-semibold text-slate-900" id={mobileTitleId}>{booth.name}</h2>
         {#if booth.brand}
           <p class="mt-1 text-sm text-slate-500">{booth.brand}</p>
         {/if}
@@ -123,6 +135,17 @@
           <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">{tag}</span>
         {/each}
       </div>
+    {/if}
+
+    {#if booth.link}
+      <a
+        href={booth.link}
+        target="_blank"
+        rel="noreferrer"
+        class="mt-4 inline-flex rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-900 hover:text-slate-900"
+      >
+        브랜드 링크 열기
+      </a>
     {/if}
 
     <section class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
