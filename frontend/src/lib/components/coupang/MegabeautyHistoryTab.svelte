@@ -37,7 +37,9 @@
 
   const recentDetectedAt = $derived(events[0]?.timestamp ?? null);
   const lastCheckedAt = $derived(
-    status?.worker_health.status === 'healthy' ? (status?.worker_health.last_checked_at ?? null) : null
+    !loading && status?.worker_health.status === 'healthy'
+      ? (status?.worker_health.last_checked_at ?? null)
+      : null
   );
   const lastCheckedTone = $derived(
     lastCheckedAt ? 'text-sky-600' : 'text-muted-foreground'
