@@ -211,7 +211,7 @@ class Settings(BaseSettings):
 
     # 메가뷰티쇼 Kakao 알림 설정
     MEGABEAUTY_KAKAO_ALERT_ENABLED: bool = True
-    MEGABEAUTY_KAKAO_ALERT_DATES: str = "*"
+    MEGABEAUTY_KAKAO_ALERT_DATES: str = "2026-04-17"
     MEGABEAUTY_KAKAO_ALERT_ITEM_NAME_KEYWORD: str = "메가뷰티쇼"
     MEGABEAUTY_KAKAO_ALERT_ROOM_NAME: str = "소나무봇"
     MEGABEAUTY_KAKAO_ALERT_CLI_PATH: str = r"D:\work\project\tools\kakaocli-win\.venv\Scripts\kakaocli-win.exe"
