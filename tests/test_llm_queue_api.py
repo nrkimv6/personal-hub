@@ -440,6 +440,41 @@ class TestLlmDefaultsApi:
         assert created["provider"] == "claude"
         assert created["model"] == "opus"
 
+    def test_get_scheduler_runtime_summary_returns_recent_provider_counts(self, client, test_db_session):
+        _seed_llm_request(
+            test_db_session,
+            caller_id="scheduler-runtime-1",
+            caller_type="writing_generate",
+            status="completed",
+            prompt="one",
+        ).requested_by = "scheduler"
+        _seed_llm_request(
+            test_db_session,
+            caller_id="scheduler-runtime-2",
+            caller_type="plan_archive_analyze",
+            status="completed",
+            prompt="two",
+        ).requested_by = "scheduler"
+        _seed_llm_request(
+            test_db_session,
+            caller_id="scheduler-runtime-3",
+            caller_type="plan_archive_analyze",
+            status="completed",
+            prompt="three",
+        ).requested_by = "scheduler"
+        test_db_session.commit()
+
+        resp = client.get("/api/v1/llm/scheduler-runtime-summary?recent_limit=20")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total_requests"] == 3
+        assert body["provider_summary"]
+        assert body["caller_summary"]
+        top_provider = body["provider_summary"][0]
+        assert top_provider["count"] == 3
+        assert top_provider["provider"] == "claude"
+        assert body["latest_request"]["caller_id"] == "scheduler-runtime-3"
+
     def test_put_defaults_rejects_unsupported_provider(self, client):
         response = client.put(
             "/api/v1/llm/defaults",

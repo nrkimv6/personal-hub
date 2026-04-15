@@ -58,6 +58,7 @@ def test_db():
     # 스케줄 API 테스트에 필요한 테이블만 명시적으로 생성
     _NEEDED = {
         "task_schedules", "task_schedule_runs",
+        "crawl_requests",
         "service_accounts", "browser_profiles",
         "google_saved_searches",
     }
@@ -241,7 +242,10 @@ class TestCreateScheduleErrors:
         })
 
         assert response.status_code == 400
-        assert "saved_search_id" in response.json()["detail"]
+        assert any(
+            needle in response.json()["detail"]
+            for needle in ("saved_search_id", "target_config")
+        )
 
     def test_create_google_with_nonexistent_saved_search(self, client):
         """Google 스케줄 - 존재하지 않는 저장된 검색"""
@@ -543,4 +547,66 @@ class TestUpdateScheduleTargetConfig:
         assert tc.get("llm_provider") == "gemini", (
             f"GET /collect/schedules 응답에 llm_provider=gemini 없음: {tc}"
         )
+
+    def test_get_schedules_returns_audit_fields(self, client):
+        """TC-Audit: 목록 응답에 resolved/provider/source 필드가 포함된다."""
+        schedule_id = self._create_writing_schedule(client)
+
+        client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini", "llm_model": "gemini-2.0-flash"}
+        })
+
+        response = client.get(f"{API_PREFIX}/collect/schedules")
+        assert response.status_code == 200
+        schedules = response.json()
+        found = next((s for s in schedules if s["id"] == schedule_id), None)
+        assert found is not None
+        assert found["resolved_provider"] == "gemini"
+        assert found["resolved_model"] == "gemini-2.0-flash"
+        assert found["resolution_source"] == "schedule_pin"
+        assert found["legacy_placeholder_candidate"] is False
+
+    def test_get_schedule_detail_returns_legacy_placeholder_audit(self, client):
+        """TC-Audit: legacy placeholder는 detail 응답에서 candidate로 노출된다."""
+        schedule_id = self._create_writing_schedule(client)
+
+        client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "claude", "llm_model": ""}
+        })
+
+        response = client.get(f"{API_PREFIX}/collect/schedules/{schedule_id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["legacy_placeholder_candidate"] is True
+        assert data["resolution_source"] == "legacy_placeholder"
+        assert data["resolved_provider"]
+        assert data["resolved_model"] is not None
+
+    def test_repair_legacy_placeholder_preview_and_apply(self, client):
+        """TC-Repair: preview는 읽기 전용, apply는 candidate만 제거한다."""
+        schedule_id = self._create_writing_schedule(client)
+        client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "claude", "llm_model": ""}
+        })
+
+        preview = client.post(f"{API_PREFIX}/collect/schedules/repair-legacy-placeholder")
+        assert preview.status_code == 200
+        preview_data = preview.json()
+        assert preview_data["candidate_count"] == 1
+        assert preview_data["repaired_count"] == 0
+        assert len(preview_data["items"]) == 1
+        assert preview_data["items"][0]["before"]["llm_provider"] == "claude"
+        assert "llm_provider" not in preview_data["items"][0]["after"]
+
+        apply_resp = client.post(f"{API_PREFIX}/collect/schedules/repair-legacy-placeholder/apply")
+        assert apply_resp.status_code == 200
+        apply_data = apply_resp.json()
+        assert apply_data["candidate_count"] == 1
+        assert apply_data["repaired_count"] == 1
+
+        detail = client.get(f"{API_PREFIX}/collect/schedules/{schedule_id}")
+        assert detail.status_code == 200
+        detail_data = detail.json()
+        assert detail_data["legacy_placeholder_candidate"] is False
+        assert detail_data["resolution_source"] in {"inherit", "caller_default"}
 

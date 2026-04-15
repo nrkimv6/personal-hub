@@ -116,6 +116,10 @@ class ScheduleResponse(BaseModel):
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
     target_config: Optional[Dict[str, Any]] = None
+    resolved_provider: Optional[str] = None
+    resolved_model: Optional[str] = None
+    resolution_source: Optional[str] = None
+    legacy_placeholder_candidate: bool = False
 
     class Config:
         from_attributes = True
@@ -126,6 +130,22 @@ class ScheduleDetailResponse(ScheduleResponse):
     target_config: Optional[Dict[str, Any]] = None
     schedule_value: Optional[Dict[str, Any]] = None
     saved_search: Optional[Dict[str, Any]] = None  # Google 검색: { query, date_filter, max_pages, search_params }
+
+
+class ScheduleRepairItemResponse(BaseModel):
+    id: int
+    name: str
+    display_name: Optional[str] = None
+    target_type: str
+    before: Dict[str, Any]
+    after: Dict[str, Any]
+
+
+class ScheduleRepairResponse(BaseModel):
+    dry_run: bool
+    candidate_count: int
+    repaired_count: int
+    items: List[ScheduleRepairItemResponse]
 
 
 class CollectScheduleCreate(BaseModel):
@@ -159,24 +179,36 @@ def _generate_schedule_name(data: CollectScheduleCreate) -> str:
         return f"{data.target_type}_{uuid.uuid4().hex[:8]}"
 
 
+def _schedule_response_kwargs(schedule: TaskSchedule, audit_item: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    audit_item = audit_item or {}
+    return {
+        "id": schedule.id,
+        "name": schedule.name,
+        "display_name": schedule.display_name,
+        "target_type": schedule.target_type,
+        "schedule_type": schedule.schedule_type,
+        "enabled": schedule.enabled,
+        "last_run_at": schedule.last_run_at,
+        "next_run_at": schedule.next_run_at,
+        "target_config": audit_item.get("target_config") if audit_item else (schedule.get_target_config() if schedule.target_config else None),
+        "resolved_provider": audit_item.get("resolved_provider"),
+        "resolved_model": audit_item.get("resolved_model"),
+        "resolution_source": audit_item.get("resolution_source"),
+        "legacy_placeholder_candidate": bool(audit_item.get("legacy_placeholder_candidate", False)),
+    }
+
+
 @router.get("/schedules")
 async def get_schedules(
     db: Session = Depends(get_db),
 ):
     """전체 스케줄 목록 조회."""
+    schedule_service = TaskScheduleService(db)
+    audit = schedule_service.get_schedule_audit(include_disabled=True)
+    audit_by_id = {item["id"]: item for item in audit["items"]}
     schedules = db.query(TaskSchedule).order_by(TaskSchedule.target_type, TaskSchedule.name).all()
     return [
-        ScheduleResponse(
-            id=s.id,
-            name=s.name,
-            display_name=s.display_name,
-            target_type=s.target_type,
-            schedule_type=s.schedule_type,
-            enabled=s.enabled,
-            last_run_at=s.last_run_at,
-            next_run_at=s.next_run_at,
-            target_config=s.get_target_config() if s.target_config else None,
-        )
+        ScheduleResponse(**_schedule_response_kwargs(s, audit_by_id.get(s.id)))
         for s in schedules
     ]
 
@@ -304,16 +336,29 @@ async def create_schedule(
         enabled=True
     )
 
-    return ScheduleResponse(
-        id=schedule.id,
-        name=schedule.name,
-        display_name=schedule.display_name,
-        target_type=schedule.target_type,
-        schedule_type=schedule.schedule_type,
-        enabled=schedule.enabled,
-        last_run_at=schedule.last_run_at,
-        next_run_at=schedule.next_run_at,
-    )
+    audit = schedule_service.get_schedule_audit(include_disabled=True)
+    audit_item = next((item for item in audit["items"] if item["id"] == schedule.id), None)
+    return ScheduleResponse(**_schedule_response_kwargs(schedule, audit_item))
+
+
+@router.post("/schedules/repair-legacy-placeholder", response_model=ScheduleRepairResponse)
+async def preview_legacy_placeholder_repair(
+    db: Session = Depends(get_db),
+):
+    """legacy placeholder 후보의 dry-run 미리보기."""
+    service = TaskScheduleService(db)
+    result = service.preview_legacy_placeholder_repair(apply=False)
+    return ScheduleRepairResponse(**result)
+
+
+@router.post("/schedules/repair-legacy-placeholder/apply", response_model=ScheduleRepairResponse)
+async def apply_legacy_placeholder_repair(
+    db: Session = Depends(get_db),
+):
+    """legacy placeholder 후보를 실제로 복구한다."""
+    service = TaskScheduleService(db)
+    result = service.preview_legacy_placeholder_repair(apply=True)
+    return ScheduleRepairResponse(**result)
 
 
 @router.get("/schedules/{schedule_id}", response_model=ScheduleDetailResponse)
@@ -326,6 +371,9 @@ async def get_schedule_detail(
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
+    schedule_service = TaskScheduleService(db)
+    audit = schedule_service.get_schedule_audit(include_disabled=True)
+    audit_item = next((item for item in audit["items"] if item["id"] == schedule.id), None)
     target_config = schedule.get_target_config() if schedule.target_config else None
     if schedule.schedule_value:
         try:
@@ -355,15 +403,7 @@ async def get_schedule_detail(
                 }
 
     return ScheduleDetailResponse(
-        id=schedule.id,
-        name=schedule.name,
-        display_name=schedule.display_name,
-        target_type=schedule.target_type,
-        schedule_type=schedule.schedule_type,
-        enabled=schedule.enabled,
-        last_run_at=schedule.last_run_at,
-        next_run_at=schedule.next_run_at,
-        target_config=target_config,
+        **_schedule_response_kwargs(schedule, audit_item),
         schedule_value=schedule_value,
         saved_search=saved_search_info,
     )
@@ -454,16 +494,11 @@ async def update_schedule(
                     "search_params": sp,
                 }
 
+    audit = schedule_service.get_schedule_audit(include_disabled=True)
+    audit_item = next((item for item in audit["items"] if item["id"] == schedule.id), None)
+
     return ScheduleDetailResponse(
-        id=schedule.id,
-        name=schedule.name,
-        display_name=schedule.display_name,
-        target_type=schedule.target_type,
-        schedule_type=schedule.schedule_type,
-        enabled=schedule.enabled,
-        last_run_at=schedule.last_run_at,
-        next_run_at=schedule.next_run_at,
-        target_config=target_config,
+        **_schedule_response_kwargs(schedule, audit_item),
         schedule_value=schedule_value,
         saved_search=saved_search_info,
     )

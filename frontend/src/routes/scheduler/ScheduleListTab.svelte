@@ -4,7 +4,7 @@
 
 	import { onMount } from 'svelte';
 	import { collectApi, llmApi, type ProviderInfo } from '$lib/api';
-	import type { CrawlSchedule, ServiceAccountWithProfile } from '$lib/types';
+	import type { CrawlSchedule, ServiceAccountWithProfile, CrawlScheduleRepairResponse } from '$lib/types';
 	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
 	import { 
 		Instagram, 
@@ -100,6 +100,10 @@
 	// LLM 설정 (instagram_feed, writing_task, topic_extract 전용)
 	let editLlmProvider = $state('claude');
 	let editLlmModel = $state('');
+	let showLegacyRepairModal = $state(false);
+	let legacyRepairPreview = $state<CrawlScheduleRepairResponse | null>(null);
+	let loadingLegacyRepair = $state(false);
+	let applyingLegacyRepair = $state(false);
 
 	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract'];
 
@@ -582,6 +586,52 @@
 		}
 	}
 
+	function getResolutionBadge(schedule: CrawlSchedule): { class: string; text: string } {
+		switch (schedule.resolution_source) {
+			case 'schedule_pin':
+				return { class: 'bg-emerald-100 text-emerald-800', text: 'pin' };
+			case 'caller_default':
+				return { class: 'bg-blue-100 text-blue-800', text: 'caller default' };
+			case 'legacy_placeholder':
+				return { class: 'bg-amber-100 text-amber-800', text: 'legacy placeholder' };
+			default:
+				return { class: 'bg-slate-100 text-slate-700', text: 'inherit' };
+		}
+	}
+
+	async function previewLegacyRepair() {
+		loadingLegacyRepair = true;
+		error = null;
+		try {
+			legacyRepairPreview = await collectApi.previewLegacyPlaceholderRepair();
+			showLegacyRepairModal = true;
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'legacy 복구 미리보기 실패';
+		} finally {
+			loadingLegacyRepair = false;
+		}
+	}
+
+	function closeLegacyRepairModal() {
+		showLegacyRepairModal = false;
+	}
+
+	async function applyLegacyRepair() {
+		if (!legacyRepairPreview || legacyRepairPreview.candidate_count === 0) return;
+		applyingLegacyRepair = true;
+		error = null;
+		try {
+			await collectApi.applyLegacyPlaceholderRepair();
+			successMessage = 'legacy placeholder 복구가 적용되었습니다';
+			showLegacyRepairModal = false;
+			await fetchSchedules();
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'legacy 복구 적용 실패';
+		} finally {
+			applyingLegacyRepair = false;
+		}
+	}
+
 	onMount(() => {
 		fetchSchedules();
 		llmApi.getProviders().then(data => { providers = data; }).catch(() => {});
@@ -591,6 +641,9 @@
 <div>
 	<!-- 헤더 -->
 	<PageHeader title="스케줄 설정" subtitle="수집 스케줄을 관리합니다">
+		<Button variant="secondary" onclick={previewLegacyRepair} disabled={loadingLegacyRepair}>
+			{loadingLegacyRepair ? '복구 조회 중...' : 'legacy 복구'}
+		</Button>
 		<Button variant="primary" onclick={openAddModal}>
 			<Plus size={18} class="mr-1" /> 스케줄 추가
 		</Button>
@@ -621,6 +674,7 @@
 			{#each schedules as schedule}
 				{@const targetBadge = getTargetTypeBadge(schedule.target_type)}
 				{@const scheduleBadge = getScheduleTypeBadge(schedule.schedule_type)}
+				{@const resolutionBadge = getResolutionBadge(schedule)}
 				<div class="card">
 					<div class="flex items-center justify-between">
 						<!-- 스케줄 정보 -->
@@ -651,6 +705,9 @@
 									<span class="px-2 py-0.5 text-xs rounded-full {scheduleBadge.class}">
 										{scheduleBadge.text}
 									</span>
+									<span class="px-2 py-0.5 text-xs rounded-full {resolutionBadge.class}">
+										{resolutionBadge.text}
+									</span>
 								</div>
 								<div class="text-sm text-muted-foreground mt-1 flex gap-4">
 									<span>마지막 실행: {formatDateTime(schedule.last_run_at)}</span>
@@ -658,6 +715,14 @@
 										<span>다음 실행: {formatDateTime(schedule.next_run_at)}</span>
 									{/if}
 								</div>
+								{#if schedule.resolved_provider}
+									<div class="text-xs text-muted-foreground mt-1">
+										해석: {schedule.resolved_provider}{#if schedule.resolved_model} / {schedule.resolved_model}{/if}
+										{#if schedule.legacy_placeholder_candidate}
+											<span class="ml-2 text-amber-700">legacy 후보</span>
+										{/if}
+									</div>
+								{/if}
 							</div>
 						</div>
 
@@ -729,6 +794,58 @@
 		</div>
 	{/if}
 </div>
+
+{#if showLegacyRepairModal}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+		<div class="max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl">
+			<div class="flex items-center justify-between border-b border-border px-6 py-4">
+				<h2 class="text-lg font-bold text-foreground">legacy placeholder 복구 미리보기</h2>
+				<button onclick={closeLegacyRepairModal} class="text-2xl leading-none text-muted-foreground">&times;</button>
+			</div>
+			<div class="max-h-[calc(90vh-80px)] space-y-4 overflow-y-auto p-6">
+				<p class="text-sm text-muted-foreground">
+					`llm_provider=claude` + 빈 model 조합만 후보로 잡습니다. apply는 이 키를 제거해 inherit 상태로 되돌립니다.
+				</p>
+				<div class="grid gap-3 sm:grid-cols-3">
+					<div class="rounded border border-border bg-muted/30 p-3">
+						<div class="text-xs text-muted-foreground">후보 수</div>
+						<div class="mt-1 text-lg font-semibold">{legacyRepairPreview?.candidate_count ?? 0}</div>
+					</div>
+					<div class="rounded border border-border bg-muted/30 p-3">
+						<div class="text-xs text-muted-foreground">적용 대상</div>
+						<div class="mt-1 text-lg font-semibold">{legacyRepairPreview?.items.length ?? 0}</div>
+					</div>
+					<div class="rounded border border-border bg-muted/30 p-3">
+						<div class="text-xs text-muted-foreground">적용 모드</div>
+						<div class="mt-1 text-lg font-semibold">{legacyRepairPreview?.dry_run ? 'dry-run' : 'apply'}</div>
+					</div>
+				</div>
+				{#if legacyRepairPreview?.items.length}
+					<div class="space-y-2">
+						{#each legacyRepairPreview.items as item}
+							<div class="rounded border border-border p-3">
+								<div class="text-sm font-semibold text-foreground">{item.display_name || item.name}</div>
+								<div class="mt-1 text-xs text-muted-foreground">{item.target_type} / #{item.id}</div>
+								<div class="mt-2 grid gap-2 sm:grid-cols-2">
+									<pre class="overflow-auto rounded bg-muted p-2 text-[11px]">{JSON.stringify(item.before, null, 2)}</pre>
+									<pre class="overflow-auto rounded bg-muted p-2 text-[11px]">{JSON.stringify(item.after, null, 2)}</pre>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{:else}
+					<p class="text-sm text-muted-foreground">적용할 후보가 없습니다.</p>
+				{/if}
+			</div>
+			<div class="flex items-center justify-end gap-2 border-t border-border px-6 py-4">
+				<Button variant="secondary" onclick={closeLegacyRepairModal}>닫기</Button>
+				<Button variant="primary" onclick={applyLegacyRepair} disabled={applyingLegacyRepair || !legacyRepairPreview?.candidate_count}>
+					{applyingLegacyRepair ? '적용 중...' : '복구 적용'}
+				</Button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <!-- Instagram 설정 모달 -->
 {#if showInstagramSettingsModal && instagramSettingsSchedule?.target_type === 'instagram_feed'}

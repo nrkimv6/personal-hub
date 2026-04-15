@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { collectApi } from '$lib/api';
 	import { llmApi, type LLMDefaultsResponse } from '$lib/api/system';
 	import {
 		devRunnerSettingsApi,
@@ -7,6 +8,7 @@
 		type DevRunnerSettings,
 		type AllEnginesConfig
 	} from '$lib/api/dev-runner';
+	import type { CrawlSchedule } from '$lib/types';
 
 	type CallerDraft = { provider: string; model: string };
 
@@ -22,6 +24,8 @@
 	let llmDefaults: LLMDefaultsResponse | null = null;
 	let devRunnerSettings: DevRunnerSettings | null = null;
 	let engineConfigs: AllEnginesConfig = {};
+	let schedulerSchedules: CrawlSchedule[] = [];
+	let schedulerRuntimeSummary: Awaited<ReturnType<typeof llmApi.getSchedulerRuntimeSummary>> | null = null;
 
 	let globalProvider = 'claude';
 	let globalModel = '';
@@ -72,14 +76,18 @@
 		loading = true;
 		errorMessage = '';
 		try {
-			const [llm, devRunner, engines] = await Promise.all([
+			const [llm, devRunner, engines, schedules, runtime] = await Promise.all([
 				llmApi.getDefaults(),
 				devRunnerSettingsApi.get(),
-				devRunnerEngineApi.list()
+				devRunnerEngineApi.list(),
+				collectApi.getSchedules(),
+				llmApi.getSchedulerRuntimeSummary()
 			]);
 			setLlmDrafts(llm);
 			setDevRunnerDrafts(devRunner);
 			engineConfigs = engines;
+			schedulerSchedules = schedules;
+			schedulerRuntimeSummary = runtime;
 			bulkEngine = Object.keys(engines)[0] ?? 'claude';
 			resetBulkModel(bulkEngine);
 		} catch (e) {
@@ -174,6 +182,21 @@
 		}
 	}
 
+	function getActiveSchedulePinCount() {
+		return schedulerSchedules.filter((schedule) => schedule.enabled && schedule.resolution_source === 'schedule_pin').length;
+	}
+
+	function getLegacyCandidateCount() {
+		return schedulerSchedules.filter((schedule) => schedule.enabled && schedule.legacy_placeholder_candidate).length;
+	}
+
+	function getRecentProviderSummary() {
+		const top = schedulerRuntimeSummary?.provider_summary?.[0];
+		if (!top) return '최근 scheduler 실행 없음';
+		const model = top.model ? ` / ${top.model}` : '';
+		return `${top.provider}${model} (${top.count}건)`;
+	}
+
 	onMount(loadData);
 </script>
 
@@ -189,6 +212,21 @@
 		{/if}
 
 		<section class="rounded-lg border border-border p-4 space-y-4">
+			<div class="grid gap-3 sm:grid-cols-3">
+				<div class="rounded border border-border bg-muted/30 p-3">
+					<div class="text-xs text-muted-foreground">활성 schedule pin</div>
+					<div class="mt-1 text-lg font-semibold">{getActiveSchedulePinCount()}건</div>
+				</div>
+				<div class="rounded border border-border bg-muted/30 p-3">
+					<div class="text-xs text-muted-foreground">legacy 후보</div>
+					<div class="mt-1 text-lg font-semibold">{getLegacyCandidateCount()}건</div>
+				</div>
+				<div class="rounded border border-border bg-muted/30 p-3">
+					<div class="text-xs text-muted-foreground">최근 scheduler provider</div>
+					<div class="mt-1 text-sm font-semibold">{getRecentProviderSummary()}</div>
+				</div>
+			</div>
+
 			<div class="flex items-center justify-between gap-3">
 				<div>
 					<h3 class="text-sm font-semibold">LLMWorker 기본값</h3>

@@ -247,6 +247,97 @@ class LLMService:
             "worker_status": self.check_worker_health(),
         }
 
+    def get_scheduler_runtime_summary(self, recent_limit: int = 50) -> Dict[str, Any]:
+        """최근 scheduler 요청의 실제 provider/model 집계."""
+        rows = (
+            self.db.query(LLMRequest)
+            .filter(LLMRequest.requested_by == "scheduler")
+            .order_by(LLMRequest.requested_at.desc(), LLMRequest.id.desc())
+            .limit(max(1, recent_limit))
+            .all()
+        )
+
+        provider_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        caller_map: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+        latest_request = None
+
+        for req in rows:
+            provider = (req.provider or "claude").strip() or "claude"
+            model = (req.model or "").strip()
+            provider_key = (provider, model)
+            provider_entry = provider_map.setdefault(
+                provider_key,
+                {
+                    "provider": provider,
+                    "model": model,
+                    "count": 0,
+                    "latest_requested_at": None,
+                    "caller_types": set(),
+                },
+            )
+            provider_entry["count"] += 1
+            provider_entry["caller_types"].add(req.caller_type)
+            if provider_entry["latest_requested_at"] is None or (
+                req.requested_at and provider_entry["latest_requested_at"] < req.requested_at
+            ):
+                provider_entry["latest_requested_at"] = req.requested_at
+
+            caller_key = (req.caller_type, provider, model)
+            caller_entry = caller_map.setdefault(
+                caller_key,
+                {
+                    "caller_type": req.caller_type,
+                    "provider": provider,
+                    "model": model,
+                    "count": 0,
+                    "latest_requested_at": None,
+                },
+            )
+            caller_entry["count"] += 1
+            if caller_entry["latest_requested_at"] is None or (
+                req.requested_at and caller_entry["latest_requested_at"] < req.requested_at
+            ):
+                caller_entry["latest_requested_at"] = req.requested_at
+
+            if latest_request is None:
+                latest_request = req
+
+        provider_summary = [
+            {
+                **entry,
+                "caller_types": sorted(entry["caller_types"]),
+            }
+            for entry in sorted(
+                provider_map.values(),
+                key=lambda item: (-item["count"], item["provider"], item["model"]),
+            )
+        ]
+        caller_summary = sorted(
+            caller_map.values(),
+            key=lambda item: (-item["count"], item["caller_type"], item["provider"], item["model"]),
+        )
+
+        return {
+            "recent_limit": recent_limit,
+            "total_requests": len(rows),
+            "provider_summary": provider_summary,
+            "caller_summary": caller_summary,
+            "latest_request": (
+                {
+                    "id": latest_request.id,
+                    "caller_type": latest_request.caller_type,
+                    "caller_id": latest_request.caller_id,
+                    "provider": latest_request.provider or "claude",
+                    "model": latest_request.model or "",
+                    "requested_at": latest_request.requested_at,
+                    "requested_by": latest_request.requested_by,
+                    "request_source": latest_request.request_source,
+                }
+                if latest_request
+                else None
+            ),
+        }
+
     # ========== 요청 관리 (→ LLMRequestCrudService 위임) ==========
 
     def list_requests(self, status=None, caller_type=None, requested_by=None, include_deleted=False, page=1, page_size=20, queue_name=None) -> dict:

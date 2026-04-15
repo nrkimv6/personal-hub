@@ -1,14 +1,29 @@
 """태스크 스케줄 서비스."""
 
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Any, Optional, List
 from sqlalchemy.orm import Session
 
 from app.models import TaskSchedule, TaskScheduleRun
+from app.modules.claude_worker.models.llm_request import LLMRequest
+from app.modules.claude_worker.services.llm_service import LLMService
 
 
 class TaskScheduleService:
     """태스크 스케줄 관리 서비스."""
+
+    AUDIT_SOURCE_INHERIT = "inherit"
+    AUDIT_SOURCE_CALLER_DEFAULT = "caller_default"
+    AUDIT_SOURCE_SCHEDULE_PIN = "schedule_pin"
+    AUDIT_SOURCE_LEGACY_PLACEHOLDER = "legacy_placeholder"
+
+    AUDIT_TARGET_CALLER_MAP = {
+        TaskSchedule.TARGET_TYPE_WRITING_TASK: "writing_generate",
+        TaskSchedule.TARGET_TYPE_TOPIC_EXTRACT: "topic_extract",
+        TaskSchedule.TARGET_TYPE_REPORT: "report",
+        TaskSchedule.TARGET_TYPE_PYTEST_RUN: "pytest_fix",
+        TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE: "plan_archive_analyze",
+    }
 
     def __init__(self, db: Session):
         self.db = db
@@ -51,6 +66,269 @@ class TaskScheduleService:
         return self.db.query(TaskSchedule).filter(
             TaskSchedule.id == schedule_id
         ).first()
+
+    @staticmethod
+    def _normalize_llm_value(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value)
+        value = value.strip()
+        return value or None
+
+    @classmethod
+    def _audit_caller_type(cls, target_type: str) -> Optional[str]:
+        return cls.AUDIT_TARGET_CALLER_MAP.get(target_type)
+
+    def _resolve_runtime_llm(self, caller_type: str) -> tuple[str, str]:
+        service = LLMService(self.db)
+        try:
+            return service.resolve_provider_model(caller_type, None, None)
+        except Exception:
+            defaults = service.load_llm_defaults()
+            global_default = defaults.get("global_default", {})
+            provider = self._normalize_llm_value(global_default.get("provider")) or "claude"
+            model = self._normalize_llm_value(global_default.get("model")) or ""
+            return provider, model
+
+    def _build_schedule_audit(self, schedule: TaskSchedule, defaults: dict[str, Any]) -> dict[str, Any]:
+        config = schedule.get_target_config() if schedule.target_config else {}
+        provider = self._normalize_llm_value(config.get("llm_provider"))
+        model = self._normalize_llm_value(config.get("llm_model"))
+        caller_type = self._audit_caller_type(schedule.target_type)
+
+        caller_defaults = defaults.get("caller_defaults", {}) if isinstance(defaults, dict) else {}
+        caller_default = caller_defaults.get(caller_type, {}) if caller_type and isinstance(caller_defaults, dict) else {}
+        caller_default_provider = self._normalize_llm_value(caller_default.get("provider"))
+        caller_default_model = self._normalize_llm_value(caller_default.get("model"))
+
+        legacy_placeholder = provider == "claude" and model is None and (
+            "llm_provider" in config or "llm_model" in config
+        )
+
+        if provider and model and not legacy_placeholder:
+            resolved_provider = provider
+            resolved_model = model
+            resolution_source = self.AUDIT_SOURCE_SCHEDULE_PIN
+        elif legacy_placeholder:
+            resolved_provider, resolved_model = self._resolve_runtime_llm(caller_type or schedule.target_type)
+            resolution_source = self.AUDIT_SOURCE_LEGACY_PLACEHOLDER
+        elif caller_default_provider and caller_default_model:
+            resolved_provider = caller_default_provider
+            resolved_model = caller_default_model
+            resolution_source = self.AUDIT_SOURCE_CALLER_DEFAULT
+        else:
+            resolved_provider, resolved_model = self._resolve_runtime_llm(caller_type or schedule.target_type)
+            resolution_source = self.AUDIT_SOURCE_INHERIT
+
+        return {
+            "resolved_provider": resolved_provider,
+            "resolved_model": resolved_model,
+            "resolution_source": resolution_source,
+            "legacy_placeholder_candidate": legacy_placeholder,
+            "caller_type": caller_type,
+            "target_config": config,
+        }
+
+    def get_schedule_audit(self, include_disabled: bool = True) -> dict[str, Any]:
+        """스케줄 LLM 감사 데이터 조회."""
+        defaults_service = LLMService(self.db)
+        defaults = defaults_service.load_llm_defaults()
+
+        query = self.db.query(TaskSchedule)
+        if not include_disabled:
+            query = query.filter(TaskSchedule.enabled == True)
+
+        schedules = query.order_by(TaskSchedule.target_type, TaskSchedule.name).all()
+        items: list[dict[str, Any]] = []
+        summary = {
+            "total": 0,
+            "enabled": 0,
+            "schedule_pin": 0,
+            "caller_default": 0,
+            "inherit": 0,
+            "legacy_placeholder": 0,
+        }
+
+        for schedule in schedules:
+            audit = self._build_schedule_audit(schedule, defaults)
+            summary["total"] += 1
+            if schedule.enabled:
+                summary["enabled"] += 1
+            summary[audit["resolution_source"]] += 1
+
+            items.append(
+                {
+                    "id": schedule.id,
+                    "name": schedule.name,
+                    "display_name": schedule.display_name,
+                    "target_type": schedule.target_type,
+                    "enabled": schedule.enabled,
+                    "target_config": audit["target_config"],
+                    "resolved_provider": audit["resolved_provider"],
+                    "resolved_model": audit["resolved_model"],
+                    "resolution_source": audit["resolution_source"],
+                    "legacy_placeholder_candidate": audit["legacy_placeholder_candidate"],
+                }
+            )
+
+        active_pin_count = sum(
+            1
+            for item in items
+            if item["enabled"] and item["resolution_source"] == self.AUDIT_SOURCE_SCHEDULE_PIN
+        )
+        legacy_candidate_count = sum(
+            1
+            for item in items
+            if item["enabled"] and item["legacy_placeholder_candidate"]
+        )
+
+        return {
+            "items": items,
+            "summary": {
+                **summary,
+                "active_pin_count": active_pin_count,
+                "legacy_candidate_count": legacy_candidate_count,
+            },
+        }
+
+    def get_scheduler_runtime_summary(self, recent_limit: int = 50) -> dict[str, Any]:
+        """최근 scheduler 요청의 실제 provider/model 집계."""
+        rows = (
+            self.db.query(LLMRequest)
+            .filter(LLMRequest.requested_by == "scheduler")
+            .order_by(LLMRequest.requested_at.desc(), LLMRequest.id.desc())
+            .limit(max(1, recent_limit))
+            .all()
+        )
+
+        provider_map: dict[tuple[str, str], dict[str, Any]] = {}
+        caller_map: dict[tuple[str, str, str], dict[str, Any]] = {}
+        latest_request = None
+
+        for req in rows:
+            provider = self._normalize_llm_value(getattr(req, "provider", None)) or "claude"
+            model = self._normalize_llm_value(getattr(req, "model", None)) or ""
+            provider_key = (provider, model)
+            provider_entry = provider_map.setdefault(
+                provider_key,
+                {
+                    "provider": provider,
+                    "model": model,
+                    "count": 0,
+                    "latest_requested_at": None,
+                    "caller_types": set(),
+                },
+            )
+            provider_entry["count"] += 1
+            provider_entry["caller_types"].add(req.caller_type)
+            if provider_entry["latest_requested_at"] is None or (
+                req.requested_at and provider_entry["latest_requested_at"] < req.requested_at
+            ):
+                provider_entry["latest_requested_at"] = req.requested_at
+
+            caller_key = (req.caller_type, provider, model)
+            caller_entry = caller_map.setdefault(
+                caller_key,
+                {
+                    "caller_type": req.caller_type,
+                    "provider": provider,
+                    "model": model,
+                    "count": 0,
+                    "latest_requested_at": None,
+                },
+            )
+            caller_entry["count"] += 1
+            if caller_entry["latest_requested_at"] is None or (
+                req.requested_at and caller_entry["latest_requested_at"] < req.requested_at
+            ):
+                caller_entry["latest_requested_at"] = req.requested_at
+
+            if latest_request is None:
+                latest_request = req
+
+        provider_summary = [
+            {
+                **entry,
+                "caller_types": sorted(entry["caller_types"]),
+            }
+            for entry in sorted(
+                provider_map.values(),
+                key=lambda item: (-item["count"], item["provider"], item["model"]),
+            )
+        ]
+        caller_summary = sorted(
+            caller_map.values(),
+            key=lambda item: (-item["count"], item["caller_type"], item["provider"], item["model"]),
+        )
+
+        return {
+            "recent_limit": recent_limit,
+            "total_requests": len(rows),
+            "provider_summary": provider_summary,
+            "caller_summary": caller_summary,
+            "latest_request": (
+                {
+                    "id": latest_request.id,
+                    "caller_type": latest_request.caller_type,
+                    "caller_id": latest_request.caller_id,
+                    "provider": latest_request.provider or "claude",
+                    "model": latest_request.model or "",
+                    "requested_at": latest_request.requested_at,
+                    "requested_by": latest_request.requested_by,
+                    "request_source": latest_request.request_source,
+                }
+                if latest_request
+                else None
+            ),
+        }
+
+    def preview_legacy_placeholder_repair(self, apply: bool = False) -> dict[str, Any]:
+        """legacy placeholder 후보를 미리보기 또는 적용."""
+        audit = self.get_schedule_audit(include_disabled=True)
+        candidates = [
+            item
+            for item in audit["items"]
+            if item["legacy_placeholder_candidate"]
+        ]
+
+        repaired_items: list[dict[str, Any]] = []
+        for item in candidates:
+            schedule = self.get_schedule_by_id(item["id"])
+            if not schedule:
+                continue
+            config = schedule.get_target_config() if schedule.target_config else {}
+            before = dict(config)
+            after = dict(config)
+            after.pop("llm_provider", None)
+            after.pop("llm_model", None)
+            repaired_items.append(
+                {
+                    "id": schedule.id,
+                    "name": schedule.name,
+                    "display_name": schedule.display_name,
+                    "target_type": schedule.target_type,
+                    "before": before,
+                    "after": after,
+                }
+            )
+            if apply:
+                schedule.set_target_config(after)
+                schedule.updated_at = datetime.now()
+
+        if apply and repaired_items:
+            self.db.commit()
+            for item in repaired_items:
+                schedule = self.get_schedule_by_id(item["id"])
+                if schedule:
+                    self.db.refresh(schedule)
+
+        return {
+            "dry_run": not apply,
+            "candidate_count": len(candidates),
+            "repaired_count": len(repaired_items) if apply else 0,
+            "items": repaired_items,
+        }
 
     def get_schedules_by_type(
         self,
