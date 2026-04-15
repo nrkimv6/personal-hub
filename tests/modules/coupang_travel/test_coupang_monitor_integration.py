@@ -3,6 +3,7 @@
 DB: 실제 SQLite(테스트용 in-memory 또는 테스트 DB)
 """
 import json
+from datetime import datetime
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -297,6 +298,40 @@ async def test_coupang_monitor_logs_events(db_session, coupang_schedule):
 
     row = db_session.execute(text("SELECT COUNT(*) FROM monitoring_events")).scalar()
     assert row == 1
+
+
+@pytest.mark.asyncio
+async def test_coupang_monitor_service_records_fetched_checked_at():
+    from app.modules.coupang_travel.services.api_client import CoupangApiClient
+    from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
+    from app.shared.notification import NotificationService
+
+    mock_api = AsyncMock(spec=CoupangApiClient)
+    mock_api.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="특실A", sale_status="ON_SALE", stock_count=1),
+    ])
+    notification_service = NotificationService()
+    fixed = datetime(2026, 4, 15, 10, 0, 0)
+
+    with patch.object(notification_service, "send_notification_message", AsyncMock()):
+        with patch(
+            "app.modules.coupang_travel.services.monitor_service.datetime"
+        ) as datetime_module:
+            datetime_module.now.return_value = fixed
+            with patch(
+                "app.modules.coupang_travel.services.monitor_service.EventLogger.log_monitoring_event"
+            ) as log_event:
+                service = CoupangMonitorService(mock_api, notification_service)
+                await service.check_and_notify(
+                    "99999",
+                    "pkg_test",
+                    ["2026-04-15"],
+                    AsyncMock(),
+                    schedule_id=1,
+                )
+
+    kwargs = log_event.call_args.kwargs
+    assert kwargs["timestamp"] == fixed
 
 
 @pytest.mark.asyncio

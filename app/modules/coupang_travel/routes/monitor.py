@@ -84,6 +84,7 @@ class WorkerHealthInfo(BaseModel):
     message: str
     updated_at: Optional[str] = None
     last_event_at: Optional[str] = None
+    last_checked_at: Optional[str] = None
 
 
 class CoupangStatusSummary(BaseModel):
@@ -166,7 +167,17 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
         .filter(Business.service_type == "coupang")
         .scalar()
     )
+    last_checked_at = (
+        db.query(func.max(MonitoringEvent.timestamp))
+        .join(MonitorSchedule, MonitoringEvent.schedule_id == MonitorSchedule.id)
+        .join(BizItem, MonitorSchedule.biz_item_id == BizItem.id)
+        .join(Business, BizItem.business_id == Business.id)
+        .filter(Business.service_type == "coupang")
+        .filter(MonitoringEvent.status != "error")
+        .scalar()
+    )
     latest_event_at_str = latest_event_at.isoformat() if latest_event_at else None
+    last_checked_at_str = last_checked_at.isoformat() if last_checked_at else None
     freshness_window = timedelta(seconds=_WORKER_HEALTH_FRESHNESS_SECONDS)
 
     if heartbeat_alive and heartbeat_updated_at is None:
@@ -175,6 +186,7 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
             message="쿠팡 워커 프로세스가 실행 중입니다.",
             updated_at=None,
             last_event_at=latest_event_at_str,
+            last_checked_at=last_checked_at_str,
         )
 
     if heartbeat_updated_at and now - heartbeat_updated_at <= freshness_window:
@@ -183,6 +195,7 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
             message="쿠팡 워커 heartbeat가 정상입니다.",
             updated_at=heartbeat_updated_at.isoformat(),
             last_event_at=latest_event_at_str,
+            last_checked_at=last_checked_at_str,
         )
 
     if latest_event_at and now - latest_event_at <= freshness_window:
@@ -191,6 +204,7 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
             message="최근 쿠팡 감지 이력이 있어 워커를 정상으로 판단했습니다.",
             updated_at=heartbeat_updated_at.isoformat() if heartbeat_updated_at else None,
             last_event_at=latest_event_at_str,
+            last_checked_at=last_checked_at_str,
         )
 
     if heartbeat_updated_at or latest_event_at:
@@ -200,6 +214,7 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
             message=f"쿠팡 워커 {stale_source}가 {_WORKER_HEALTH_FRESHNESS_SECONDS}초 이상 끊겼습니다.",
             updated_at=heartbeat_updated_at.isoformat() if heartbeat_updated_at else None,
             last_event_at=latest_event_at_str,
+            last_checked_at=last_checked_at_str,
         )
 
     return WorkerHealthInfo(
@@ -207,6 +222,7 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
         message="쿠팡 워커 heartbeat와 최근 감지 이력이 없습니다.",
         updated_at=None,
         last_event_at=None,
+        last_checked_at=None,
     )
 
 

@@ -42,9 +42,9 @@
   const summary = $derived(response.summary);
   const slotTimeOptions = $derived(response.slot_time_options);
   const recentDetectedAt = $derived(items[0]?.timestamp ?? null);
-  const lastCheckedAt = $derived(status?.worker_health.last_event_at ?? null);
+  const lastCheckedAt = $derived(status?.worker_health.last_checked_at ?? null);
   const lastCheckedTone = $derived(
-    status?.worker_health.last_event_at ? 'text-sky-600' : 'text-muted-foreground'
+    status?.worker_health.last_checked_at ? 'text-sky-600' : 'text-muted-foreground'
   );
   const filterSummaryText = $derived.by(() => {
     const parts: string[] = [`${dateFrom || defaultDateFrom} ~ ${dateTo || defaultDateTo}`];

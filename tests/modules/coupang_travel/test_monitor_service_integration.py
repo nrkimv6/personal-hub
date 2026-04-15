@@ -3,6 +3,7 @@
 - CoupangMonitorService + EventLogger DB 기록 검증
 """
 import json
+from datetime import datetime
 import pytest
 from unittest.mock import AsyncMock, patch
 from sqlalchemy import create_engine
@@ -150,5 +151,35 @@ async def test_slots_info_roundtrip_as_list(integration_session_factory):
         assert isinstance(parsed, list)
         assert parsed[0]["vendorItemName"] == "옵션A"
         assert parsed[0]["saleStatus"] == "ON_SALE"
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_event_logging_respects_prefetched_checked_at(integration_session_factory):
+    from app.models.monitoring_event import MonitoringEvent
+
+    schedule_id = _create_coupang_schedule(integration_session_factory)
+    checked_at = datetime(2026, 4, 15, 10, 0, 0)
+    mock_api = AsyncMock(spec=CoupangApiClient)
+    notification_service = NotificationService()
+
+    with patch.object(notification_service, "send_notification_message", AsyncMock()):
+        with patch("app.services.event_logger.SessionLocal", integration_session_factory):
+            service = CoupangMonitorService(mock_api, notification_service)
+            await service.check_and_notify(
+                "1000001",
+                "pkg",
+                ["2026-05-01"],
+                prefetched_items=[VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)],
+                prefetched_checked_at=checked_at,
+                schedule_id=schedule_id,
+            )
+
+    db = integration_session_factory()
+    try:
+        event = db.query(MonitoringEvent).first()
+        assert event is not None
+        assert event.timestamp == checked_at
     finally:
         db.close()
