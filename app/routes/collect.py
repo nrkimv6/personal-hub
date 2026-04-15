@@ -192,6 +192,9 @@ async def create_schedule(
     - instagram_feed: Instagram 피드 수집 (target_config.service_account_id 필요)
     - google_search: Google 검색 수집 (target_config.saved_search_id 필요)
     - writing_task: 글쓰기 태스크
+    - pytest_run: pytest 자동 실행
+    - plan_archive_analyze: plan archive 분석
+    - devguide_staleness: dev-guide 갱신 점검
     """
     schedule_service = TaskScheduleService(db)
 
@@ -286,6 +289,39 @@ async def create_schedule(
             )
         if not data.display_name:
             data.display_name = "글쓰기 태스크"
+
+    elif data.target_type == "pytest_run":
+        schedule_name = "pytest_run_default"
+        existing = schedule_service.get_schedule_by_name(schedule_name)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="이미 pytest 스케줄이 존재합니다"
+            )
+        if not data.display_name:
+            data.display_name = "pytest 자동 실행"
+
+    elif data.target_type == "plan_archive_analyze":
+        schedule_name = "plan_archive_analyze_daily"
+        existing = schedule_service.get_schedule_by_name(schedule_name)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="이미 plan archive 분석 스케줄이 존재합니다"
+            )
+        if not data.display_name:
+            data.display_name = "Plan Archive LLM 분석"
+
+    elif data.target_type == "devguide_staleness":
+        schedule_name = "devguide_staleness_daily"
+        existing = schedule_service.get_schedule_by_name(schedule_name)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="이미 devguide staleness 스케줄이 존재합니다"
+            )
+        if not data.display_name:
+            data.display_name = "Dev-Guide 갱신 점검"
 
     else:
         raise HTTPException(
@@ -398,10 +434,7 @@ async def update_schedule(
 
     # target_config 수정 (LLM provider/model 등)
     if data.target_config is not None:
-        existing_config = schedule.get_target_config() if schedule.target_config else {}
-        merged = {**existing_config, **data.target_config}
-        schedule.set_target_config(merged)
-        db.commit()
+        schedule_service.update_schedule(schedule_id, target_config=data.target_config)
 
     # Google 검색 파라미터 수정
     if data.google_search_params and schedule.target_type == "google_search":

@@ -1802,8 +1802,12 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             )
 
             if config.get("auto_fix_plan", True) and (test_run.failed + test_run.errors) > 0:
-                provider = config.get("provider", "claude")
-                model = config.get("model", "")
+                provider = config.get("llm_provider")
+                model = config.get("llm_model")
+                if provider is None:
+                    provider = config.get("provider")
+                if model is None:
+                    model = config.get("model")
                 await loop.run_in_executor(
                     None,
                     lambda: runner.create_fix_plan_requests(
