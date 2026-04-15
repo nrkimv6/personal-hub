@@ -98,11 +98,15 @@
   function handleReset() {
     searchQuery = '';
     selectedSlotId = null;
+    liveMessage = '필터가 초기화되었습니다';
     syncUrl();
   }
 
   function handleSelectSlot(slotId: string | null) {
     selectedSlotId = slotId;
+    liveMessage = slotId
+      ? `${expo.timeSlots.find((slot) => slot.id === slotId)?.label ?? slotId} 필터 적용`
+      : '전체 시간 필터 적용';
     if (selectedBooth && !boothMatches(selectedBooth, slotId, searchQuery)) {
       selectedBoothId = null;
     }
@@ -125,6 +129,7 @@
 
   function closeDetail() {
     selectedBoothId = null;
+    liveMessage = '부스 선택이 해제되었습니다';
     syncUrl();
   }
 
