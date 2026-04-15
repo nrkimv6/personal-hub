@@ -6,6 +6,7 @@ import {
   formatMemoryPressureTimestamp,
   summarizeMemoryPressureProcesses,
   excerptMemoryPressureTree,
+  renderMemoryPressureExcerpt,
   toggleStringSelection,
 } from '../src/lib/memory-pressure-history.js';
 
@@ -45,6 +46,19 @@ test('memory pressure tree excerpt trims to the requested lines', () => {
   assert.ok(excerpt.includes('line-80'));
   assert.ok(excerpt.endsWith('... (+20 lines)'));
   assert.ok(!excerpt.includes('line-100'));
+});
+
+test('memory pressure server excerpt passthrough preserves suffix text', () => {
+  const excerpt = Array.from({ length: 80 }, (_, idx) => `line-${idx + 1}`).join('\n') + '\n... (+20 lines)';
+
+  assert.equal(renderMemoryPressureExcerpt(excerpt), excerpt);
+  assert.equal(renderMemoryPressureExcerpt(renderMemoryPressureExcerpt(excerpt)), excerpt);
+});
+
+test('memory pressure server excerpt passthrough normalizes empty values', () => {
+  assert.equal(renderMemoryPressureExcerpt(null), '');
+  assert.equal(renderMemoryPressureExcerpt(undefined), '');
+  assert.equal(renderMemoryPressureExcerpt(''), '');
 });
 
 test('toggle string selection adds and removes values', () => {

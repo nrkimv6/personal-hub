@@ -136,6 +136,7 @@ export interface MemoryPressureHistoryItem {
   level: MemoryPressureLevel;
   available_mb: number;
   top_processes: MemoryPressureTopProcess[];
+  // Server already truncates `process_tree` into this display-ready excerpt string.
   process_tree_excerpt: string;
 }
 

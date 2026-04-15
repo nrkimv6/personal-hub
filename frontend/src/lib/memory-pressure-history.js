@@ -53,6 +53,10 @@ export function summarizeMemoryPressureProcesses(topProcesses, limit = 3) {
     .join(', ');
 }
 
+/**
+ * Raw `process_tree` 전문을 목록 UI용 excerpt로 자른다.
+ * 이미 excerpt된 `process_tree_excerpt`에는 재적용하지 않는다.
+ */
 export function excerptMemoryPressureTree(treeText, maxLines = 80) {
   const raw = String(treeText ?? '');
   if (!raw) return '';
@@ -60,6 +64,13 @@ export function excerptMemoryPressureTree(treeText, maxLines = 80) {
   if (lines.length <= maxLines) return raw;
   const omitted = lines.length - maxLines;
   return `${lines.slice(0, maxLines).join('\n')}\n... (+${omitted} lines)`;
+}
+
+/**
+ * Server가 이미 잘라서 내려준 `process_tree_excerpt`를 그대로 표시한다.
+ */
+export function renderMemoryPressureExcerpt(processTreeExcerpt) {
+  return String(processTreeExcerpt ?? '');
 }
 
 export function toggleStringSelection(values, value) {

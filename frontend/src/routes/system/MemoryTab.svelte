@@ -23,7 +23,7 @@
     formatMemoryPressureMb,
     formatMemoryPressureTimestamp,
     summarizeMemoryPressureProcesses,
-    excerptMemoryPressureTree,
+    renderMemoryPressureExcerpt,
     toggleStringSelection
   } from '$lib/memory-pressure-history.js';
 
@@ -508,7 +508,7 @@
                         </div>
                         <div>
                           <p class="text-[11px] uppercase tracking-wide text-gray-500">process_tree_excerpt</p>
-                          <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded border border-gray-200 bg-white p-2 text-[11px] leading-4 text-gray-700">{excerptMemoryPressureTree(item.process_tree_excerpt, 80)}</pre>
+                          <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded border border-gray-200 bg-white p-2 text-[11px] leading-4 text-gray-700">{renderMemoryPressureExcerpt(item.process_tree_excerpt)}</pre>
                         </div>
                       </div>
                     </details>
