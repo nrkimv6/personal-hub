@@ -156,6 +156,52 @@ async def test_check_and_notify_kakao_allows_wildcard_dates():
 
 
 @pytest.mark.asyncio
+async def test_check_and_notify_kakao_allows_any_token_dates():
+    """날짜 필터를 any로 두면 모든 날짜에서 Kakao 알림이 간다."""
+    service, api_client, notification = make_service()
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)
+    ])
+    await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
+    ])
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "any"):
+        with patch.object(service, "_is_within_notify_times", return_value=False):
+            changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    assert len(changes) == 1
+    notification.send_notification_message.assert_called_once()
+    kwargs = notification.send_notification_message.call_args.kwargs
+    assert kwargs["send_kakao"] is True
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_kakao_fail_open_on_blank_dates():
+    """날짜 설정이 공백/파싱 실패면 알림 누락 방지를 위해 Kakao 알림을 허용한다."""
+    service, api_client, notification = make_service()
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)
+    ])
+    await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
+    ])
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", " , ; \n "):
+        with patch.object(service, "_is_within_notify_times", return_value=False):
+            changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+
+    assert len(changes) == 1
+    notification.send_notification_message.assert_called_once()
+    kwargs = notification.send_notification_message.call_args.kwargs
+    assert kwargs["send_kakao"] is True
+
+
+@pytest.mark.asyncio
 async def test_check_and_notify_stock_change():
     """I: saleStatus 동일 + stockCount 변경 → StatusChange 1개"""
     service, api_client, notification = make_service()

@@ -9,6 +9,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+import re
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from app.core.config import settings
@@ -165,8 +166,22 @@ class CoupangMonitorService:
                     kakao_notify = self._should_send_kakao_alert(date, change)
 
                     if not core_notify and not kakao_notify:
+                        logger.warning(
+                            "[CoupangMonitorService] 알림 제외: date=%s item=%s core_notify=%s kakao_notify=%s",
+                            change.date,
+                            change.item_name,
+                            core_notify,
+                            kakao_notify,
+                        )
                         continue
 
+                    logger.warning(
+                        "[CoupangMonitorService] 알림 전송 결정: date=%s item=%s core_notify=%s kakao_notify=%s",
+                        change.date,
+                        change.item_name,
+                        core_notify,
+                        kakao_notify,
+                    )
                     await self._send_notification(
                         change,
                         send_telegram=core_notify,
@@ -249,18 +264,40 @@ class CoupangMonitorService:
     def _should_send_kakao_alert(date: str, change: StatusChange) -> bool:
         """메가뷰티쇼 카카오 알림 대상인지 판정."""
         if not bool(getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", False)):
+            logger.warning(
+                "[CoupangMonitorService] Kakao 알림 비활성화로 제외: date=%s item=%s",
+                date,
+                change.item_name,
+            )
             return False
         configured_dates = str(
-            getattr(settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "2026-04-17") or ""
+            getattr(settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "*") or ""
         ).strip()
-        if configured_dates != "*":
-            allowed_dates = {
-                part.strip()
-                for part in configured_dates.replace("\n", ",").split(",")
-                if part.strip()
-            }
-            if not allowed_dates or date not in allowed_dates:
-                return False
+        wildcard_tokens = {"*", "any", "all", "true", "on"}
+        if configured_dates:
+            normalized = configured_dates.strip().strip("[]")
+            raw_tokens = re.split(r"[,\n;]", normalized)
+            tokens = []
+            for token in raw_tokens:
+                cleaned = token.strip().strip("'\"")
+                if cleaned:
+                    tokens.append(cleaned)
+            lowered_tokens = {token.casefold() for token in tokens}
+            if lowered_tokens and not (lowered_tokens & wildcard_tokens):
+                allowed_dates = set(tokens)
+                if date not in allowed_dates:
+                    logger.info(
+                        "[CoupangMonitorService] Kakao 알림 날짜 필터로 제외: date=%s allowed=%s",
+                        date,
+                        sorted(allowed_dates),
+                    )
+                    return False
+            elif not lowered_tokens:
+                logger.warning(
+                    "[CoupangMonitorService] Kakao 날짜 설정 파싱 실패/공백으로 감지됨. "
+                    "알림 누락 방지를 위해 날짜 필터를 비활성화합니다. raw=%r",
+                    configured_dates,
+                )
 
         keyword = (getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ITEM_NAME_KEYWORD", "") or "").strip()
         if keyword:
