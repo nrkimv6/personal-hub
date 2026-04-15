@@ -40,6 +40,7 @@ export interface CoupangWorkerHealth {
   message: string;
   updated_at: string | null;
   last_event_at: string | null;
+  last_checked_at: string | null;
 }
 
 export interface CoupangStatusSummary {

@@ -40,9 +40,9 @@
   const hoursParam = $derived(selectedHours.length > 0 ? selectedHours.join(',') : undefined);
   const recentDetectedAt = $derived(events[0]?.timestamp ?? null);
   const summaryValueClass = 'text-lg font-bold leading-tight md:text-xl';
-  const lastCheckedAt = $derived(status?.worker_health.last_event_at ?? null);
+  const lastCheckedAt = $derived(status?.worker_health.last_checked_at ?? null);
   const lastCheckedTone = $derived(
-    status?.worker_health.last_event_at ? 'text-sky-600' : 'text-muted-foreground'
+    status?.worker_health.last_checked_at ? 'text-sky-600' : 'text-muted-foreground'
   );
 
   // ── 데이터 로드 ───────────────────────────────────────────────────────────────

@@ -73,6 +73,7 @@ class CoupangMonitorService:
         notify_times: Optional[List[str]] = None,
         prefetched_items: Optional[List[VendorItem]] = None,
         prefetched_response_time_ms: float = 0.0,
+        prefetched_checked_at: Optional[datetime] = None,
     ) -> List[StatusChange]:
         """각 date별 상태를 체크하고 변경 시 알림 발송.
 
@@ -82,6 +83,9 @@ class CoupangMonitorService:
             prefetched_items: HTTP 클라이언트로 미리 가져온 아이템 목록.
                               제공 시 page 경로 skip. dates는 단일 date여야 함.
             prefetched_response_time_ms: prefetched_items 획득에 걸린 시간.
+            prefetched_checked_at: HTTP 응답 수신 시각.
+            event_timestamp: 응답 기반 성공/무재고 이벤트만 전달되는
+                            시각(에러/no-response는 None).
 
         Returns:
             변경된 StatusChange 목록
@@ -93,6 +97,7 @@ class CoupangMonitorService:
                 # HTTP 클라이언트로 미리 가져온 아이템 사용
                 items = prefetched_items
                 response_time_ms = prefetched_response_time_ms
+                event_timestamp = prefetched_checked_at
             else:
                 if page is None:
                     logger.error(
@@ -108,6 +113,7 @@ class CoupangMonitorService:
                     page=page,
                 )
                 response_time_ms = (time.perf_counter() - started_at) * 1000
+                event_timestamp = datetime.now()
 
             if items is None:
                 logger.warning(
@@ -185,6 +191,7 @@ class CoupangMonitorService:
                 available_count=available_count,
                 slots_info=slots_info,
                 response_time_ms=response_time_ms,
+                event_timestamp=event_timestamp,
             )
 
         return changes
@@ -294,6 +301,7 @@ class CoupangMonitorService:
         available_count: int,
         slots_info: Optional[List[dict]],
         response_time_ms: Optional[float] = None,
+        event_timestamp: Optional[datetime] = None,
         error_message: Optional[str] = None,
     ) -> None:
         if not self._db_logging:
@@ -316,6 +324,8 @@ class CoupangMonitorService:
                 event_type=event_type,
                 status=status,
                 available_count=available_count,
+                # error/no-response는 응답 수신 시각을 덮어쓰지 않도록 None으로 둔다.
+                timestamp=event_timestamp,
                 slots_info=slots_info,
                 error_message=error_message,
                 response_time_ms=response_time_ms,

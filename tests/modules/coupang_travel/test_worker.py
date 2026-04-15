@@ -2,6 +2,7 @@
 워커 테스트 (RIGHT-BICEP: R, E)
 """
 import json
+from datetime import datetime
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -215,3 +216,31 @@ async def test_worker_sets_active_true_false_around_check():
     assert first_call.args[1] == 8 and first_call.args[2] is True
     assert second_call.args[1] == 8 and second_call.args[2] is False
     mock_browser.tab_pool_manager.release_tab.assert_called_once_with(mock_page)
+
+
+@pytest.mark.asyncio
+async def test_http_path_passes_checked_at_to_check_and_notify():
+    from app.worker.coupang_monitor_worker import CoupangMonitorWorker
+
+    worker = CoupangMonitorWorker(browser_manager=None)
+    worker._http_client = AsyncMock()
+    worker._http_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0),
+    ])
+    worker._monitor_service = AsyncMock()
+    worker._monitor_service.check_and_notify = AsyncMock(return_value=[])
+    fixed = datetime(2026, 4, 15, 10, 0, 0)
+
+    with patch("app.worker.coupang_monitor_worker.datetime") as datetime_module:
+        datetime_module.now.return_value = fixed
+
+        await worker._check_via_http(
+            product_id="123",
+            vendor_item_package_id="pkg",
+            date="2026-04-10",
+            schedule_id=1,
+            notify_times=None,
+        )
+
+    called_kwargs = worker._monitor_service.check_and_notify.call_args.kwargs
+    assert called_kwargs["prefetched_checked_at"] == fixed

@@ -7,8 +7,9 @@
     pytest tests/modules/coupang_travel/test_coupang_live_http.py -m http_live -v
     pytest tests/modules/coupang_travel/test_coupang_live_http.py -m "http_live and destructive_live" --run-destructive-live -v
 """
-import pytest
+from datetime import datetime, timezone
 import httpx
+import pytest
 
 pytestmark = pytest.mark.http_live
 
@@ -322,3 +323,52 @@ def test_live_monitoring_events_hours_filter_values():
     for item in resp.json()["items"]:
         hour = int(item["timestamp"][11:13])
         assert hour in {2, 14}
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    dt = datetime.fromisoformat(normalized)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def test_live_status_last_checked_matches_latest_checked_event():
+    """R: /status의 last_checked_at가 latest 응답 성공 이벤트 시각과 동기화된다."""
+    _skip_if_down()
+
+    status_resp = httpx.get(f"{COUPANG}/status", timeout=10)
+    assert status_resp.status_code == 200
+    status_payload = status_resp.json()
+    worker_health = status_payload["worker_health"]
+
+    last_checked_at = worker_health.get("last_checked_at")
+    last_event_at = worker_health.get("last_event_at")
+    assert isinstance(last_checked_at, str) and last_checked_at, "worker_health.last_checked_at가 비어 있음"
+
+    events_resp = httpx.get(
+        f"{BASE_URL}/api/v1/monitoring/events",
+        params={"service_type": "coupang", "page_size": 100},
+        timeout=10,
+    )
+    assert events_resp.status_code == 200
+    items = events_resp.json().get("items", [])
+
+    checked_events = [
+        item["timestamp"]
+        for item in items
+        if item.get("status") in {"available", "no_slots", "success"}
+    ]
+
+    if not checked_events:
+        pytest.skip("checked 응답 이벤트가 없어 last_checked 기준을 검증할 수 없음")
+
+    latest_checked = max(_parse_iso_datetime(v) for v in checked_events if _parse_iso_datetime(v))
+    status_checked = _parse_iso_datetime(last_checked_at)
+    status_event = _parse_iso_datetime(last_event_at)
+
+    assert status_checked == latest_checked
+    if status_event is not None:
+        assert status_event >= status_checked

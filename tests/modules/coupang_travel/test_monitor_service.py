@@ -1,6 +1,7 @@
 """
 모니터링 서비스 테스트 (RIGHT-BICEP: R, B, I, C)
 """
+from datetime import datetime
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -268,6 +269,25 @@ async def test_check_and_notify_logs_error_on_api_failure_with_schedule_id():
 
 
 @pytest.mark.asyncio
+async def test_check_and_notify_http_path_passes_checked_timestamp_to_logger():
+    service, api_client, _ = make_service()
+    checked_at = datetime(2026, 4, 15, 10, 0, 0)
+
+    with patch("app.modules.coupang_travel.services.monitor_service.EventLogger.log_monitoring_event") as log_event:
+        await service.check_and_notify(
+            "123",
+            "pkg",
+            ["2026-04-10"],
+            prefetched_items=[VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)],
+            prefetched_checked_at=checked_at,
+            schedule_id=10,
+        )
+
+    kwargs = log_event.call_args.kwargs
+    assert kwargs["timestamp"] == checked_at
+
+
+@pytest.mark.asyncio
 async def test_check_and_notify_slots_info_not_double_serialized():
     service, api_client, _ = make_service()
     api_client.fetch_vendor_items = AsyncMock(return_value=[
@@ -280,3 +300,15 @@ async def test_check_and_notify_slots_info_not_double_serialized():
     kwargs = log_event.call_args.kwargs
     assert isinstance(kwargs["slots_info"], list)
     assert kwargs["slots_info"][0]["vendorItemName"] == "옵션A"
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_api_failure_does_not_pass_timestamp():
+    service, api_client, _ = make_service()
+    api_client.fetch_vendor_items = AsyncMock(return_value=None)
+
+    with patch("app.modules.coupang_travel.services.monitor_service.EventLogger.log_monitoring_event") as log_event:
+        await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page(), schedule_id=11)
+
+    kwargs = log_event.call_args.kwargs
+    assert "timestamp" not in kwargs or kwargs["timestamp"] is None

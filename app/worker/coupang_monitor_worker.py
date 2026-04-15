@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from sqlalchemy import text
@@ -261,6 +262,7 @@ class CoupangMonitorWorker(BaseWorker):
             schedule_id=schedule_id,
         )
         response_time_ms = (time.perf_counter() - started_at) * 1000
+        checked_at = datetime.now()
 
         if items is None:
             return None  # HTTP 실패 → caller가 fallback 처리
@@ -271,6 +273,7 @@ class CoupangMonitorWorker(BaseWorker):
             dates=[date],
             prefetched_items=items,
             prefetched_response_time_ms=response_time_ms,
+            prefetched_checked_at=checked_at,
             schedule_id=schedule_id,
             notify_times=notify_times,
         )
