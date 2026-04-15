@@ -178,7 +178,8 @@ def _excerpt_process_tree(tree_text: str, max_lines: int = 80) -> str:
     lines = tree_text.splitlines()
     if len(lines) <= max_lines:
         return tree_text
-    return "\n".join(lines[:max_lines])
+    omitted = len(lines) - max_lines
+    return "\n".join(lines[:max_lines]) + f"\n... (+{omitted} lines)"
 
 
 def _normalize_history_levels(levels: list[str] | None) -> set[str] | None:
