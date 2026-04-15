@@ -185,6 +185,7 @@ class CoupangMonitorWorker(BaseWorker):
             return
 
         active_marked = False
+        checked_at: Optional[datetime] = None
         try:
             self._set_schedule_active(schedule_id, True)
             active_marked = True
@@ -192,13 +193,15 @@ class CoupangMonitorWorker(BaseWorker):
             notify_times = ctx.get("times")
 
             # 1차 시도: HTTP 클라이언트 (aiohttp + 프록시 로테이션)
-            changes = await self._check_via_http(
+            changes, checked_at = await self._check_via_http(
                 product_id=product_id,
                 vendor_item_package_id=vendor_item_package_id,
                 date=date,
                 schedule_id=schedule_id,
                 notify_times=notify_times,
             )
+            if checked_at is None:
+                checked_at = datetime.now()
 
             # HTTP 실패 시 2차: Playwright fallback
             if changes is None:
@@ -206,7 +209,7 @@ class CoupangMonitorWorker(BaseWorker):
                     "[%s] HTTP 클라이언트 실패 — Playwright fallback 시도 (schedule_id=%s)",
                     self.name, schedule_id,
                 )
-                changes = await self._check_via_playwright(
+                changes, checked_at = await self._check_via_playwright(
                     product_id=product_id,
                     vendor_item_package_id=vendor_item_package_id,
                     date=date,
@@ -214,6 +217,8 @@ class CoupangMonitorWorker(BaseWorker):
                     service_account_id=service_account_id,
                     notify_times=notify_times,
                 )
+                if checked_at is None:
+                    checked_at = datetime.now()
 
             if changes:
                 logger.info(
@@ -236,6 +241,11 @@ class CoupangMonitorWorker(BaseWorker):
         finally:
             if active_marked:
                 self._set_schedule_active(schedule_id, False)
+            if schedule_id is not None:
+                self._set_schedule_last_check_time(
+                    schedule_id,
+                    checked_at or datetime.now(),
+                )
 
     async def _check_via_http(
         self,
@@ -244,15 +254,15 @@ class CoupangMonitorWorker(BaseWorker):
         date: str,
         schedule_id: Optional[int],
         notify_times: Optional[List] = None,
-    ) -> Optional[List]:
+    ) -> tuple[Optional[List], Optional[datetime]]:
         """
         HTTP 클라이언트(aiohttp + 프록시)로 상태 체크.
 
         Returns:
-            StatusChange 목록 (성공), None (전체 실패 → Playwright fallback 필요)
+            (StatusChange 목록 (성공), None), 체크 시각
         """
         if self._http_client is None:
-            return None
+            return None, None
 
         started_at = time.perf_counter()
         items = await self._http_client.fetch_vendor_items(
@@ -265,9 +275,9 @@ class CoupangMonitorWorker(BaseWorker):
         checked_at = datetime.now()
 
         if items is None:
-            return None  # HTTP 실패 → caller가 fallback 처리
+            return None, checked_at  # HTTP 실패 → caller가 fallback 처리
 
-        return await self._monitor_service.check_and_notify(
+        changes = await self._monitor_service.check_and_notify(
             product_id=product_id,
             vendor_item_package_id=vendor_item_package_id,
             dates=[date],
@@ -277,6 +287,7 @@ class CoupangMonitorWorker(BaseWorker):
             schedule_id=schedule_id,
             notify_times=notify_times,
         )
+        return changes, checked_at
 
     async def _check_via_playwright(
         self,
@@ -286,20 +297,20 @@ class CoupangMonitorWorker(BaseWorker):
         schedule_id: Optional[int],
         service_account_id: Optional[int],
         notify_times: Optional[List] = None,
-    ) -> Optional[List]:
+    ) -> tuple[Optional[List], Optional[datetime]]:
         """
         Playwright 브라우저로 상태 체크 (HTTP 실패 시 fallback).
 
         Returns:
-            StatusChange 목록 (성공), None (BrowserManager 없거나 실패)
+            (StatusChange 목록 (성공), None (BrowserManager 없거나 실패), 체크 시각)
         """
         if not self.browser:
             logger.warning("[%s] BrowserManager 없음 — Playwright fallback 불가", self.name)
-            return None
+            return None, None
 
         if not self.browser.tab_pool_manager:
             logger.warning("[%s] TabPoolManager 없음 — Playwright fallback 불가", self.name)
-            return None
+            return None, None
 
         page = None
         try:
@@ -317,7 +328,7 @@ class CoupangMonitorWorker(BaseWorker):
             if not page.url.startswith(expected_url):
                 await page.goto(expected_url)
 
-            return await self._monitor_service.check_and_notify(
+            changes = await self._monitor_service.check_and_notify(
                 product_id=product_id,
                 vendor_item_package_id=vendor_item_package_id,
                 dates=[date],
@@ -325,9 +336,27 @@ class CoupangMonitorWorker(BaseWorker):
                 schedule_id=schedule_id,
                 notify_times=notify_times,
             )
+            return changes, datetime.now()
         finally:
             if page is not None:
                 await self.browser.tab_pool_manager.release_tab(page)
+
+    def _set_schedule_last_check_time(self, schedule_id: int, checked_at: datetime) -> None:
+        """스케줄 마지막 확인 시각 저장."""
+        if schedule_id is None:
+            return
+        db = SessionLocal()
+        try:
+            schedule_service.set_last_check_time(db, schedule_id, checked_at)
+        except Exception as e:
+            logger.warning(
+                "[%s] schedule last_check_time 갱신 실패 (schedule_id=%s): %s",
+                self.name,
+                schedule_id,
+                e,
+            )
+        finally:
+            db.close()
 
     def _set_schedule_active(self, schedule_id: Optional[int], is_active: bool) -> None:
         """스케줄 active 상태를 DB에 반영."""

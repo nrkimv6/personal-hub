@@ -364,6 +364,23 @@ class ScheduleService:
             run_status="running" if is_active else "idle"
         ))
 
+    def set_last_check_time(
+        self,
+        db: Session,
+        schedule_id: int,
+        check_time: Optional[datetime] = None,
+    ) -> Optional[MonitorSchedule]:
+        """스케줄 마지막 확인 시각 갱신 (워커 체크 완료/시도 시점)."""
+        schedule = self.get_by_id(db, schedule_id)
+        if not schedule:
+            return None
+
+        schedule.last_check_time = check_time or datetime.now()
+        schedule.updated_at = datetime.now()
+        db.commit()
+        db.refresh(schedule)
+        return schedule
+
     def increment_booking_count(self, db: Session, schedule_id: int) -> Optional[MonitorSchedule]:
         """예약 횟수 증가"""
         schedule = self.get_by_id(db, schedule_id)

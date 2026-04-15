@@ -167,16 +167,16 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
         .filter(Business.service_type == "coupang")
         .scalar()
     )
-    last_checked_at = (
-        db.query(func.max(MonitoringEvent.timestamp))
-        .join(MonitorSchedule, MonitoringEvent.schedule_id == MonitorSchedule.id)
+    latest_schedule_check_at = (
+        db.query(func.max(MonitorSchedule.last_check_time))
         .join(BizItem, MonitorSchedule.biz_item_id == BizItem.id)
         .join(Business, BizItem.business_id == Business.id)
         .filter(Business.service_type == "coupang")
-        .filter(MonitoringEvent.status != "error")
         .scalar()
     )
-    latest_event_at_str = latest_event_at.isoformat() if latest_event_at else None
+    # 최신 이벤트/heartbeat/스케줄 체크 중 존재하는 값을 기준으로 마지막 확인 시각을 계산해 '-'를 줄인다.
+    last_checked_at = latest_event_at or heartbeat_updated_at or latest_schedule_check_at
+    last_event_at_str = latest_event_at.isoformat() if latest_event_at else None
     last_checked_at_str = last_checked_at.isoformat() if last_checked_at else None
     freshness_window = timedelta(seconds=_WORKER_HEALTH_FRESHNESS_SECONDS)
 
@@ -185,7 +185,7 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
             status="healthy",
             message="쿠팡 워커 프로세스가 실행 중입니다.",
             updated_at=None,
-            last_event_at=latest_event_at_str,
+            last_event_at=last_event_at_str,
             last_checked_at=last_checked_at_str,
         )
 
@@ -194,7 +194,7 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
             status="healthy",
             message="쿠팡 워커 heartbeat가 정상입니다.",
             updated_at=heartbeat_updated_at.isoformat(),
-            last_event_at=latest_event_at_str,
+            last_event_at=last_event_at_str,
             last_checked_at=last_checked_at_str,
         )
 
@@ -203,23 +203,32 @@ def _build_worker_health(db: Session) -> WorkerHealthInfo:
             status="healthy",
             message="최근 쿠팡 감지 이력이 있어 워커를 정상으로 판단했습니다.",
             updated_at=heartbeat_updated_at.isoformat() if heartbeat_updated_at else None,
-            last_event_at=latest_event_at_str,
+            last_event_at=last_event_at_str,
             last_checked_at=last_checked_at_str,
         )
 
-    if heartbeat_updated_at or latest_event_at:
-        stale_source = "heartbeat" if heartbeat_updated_at else "event"
+    if latest_schedule_check_at and now - latest_schedule_check_at <= freshness_window:
+        return WorkerHealthInfo(
+            status="healthy",
+            message="쿠팡 스케줄 최근 확인 이력이 있어 워커를 정상으로 판단했습니다.",
+            updated_at=heartbeat_updated_at.isoformat() if heartbeat_updated_at else None,
+            last_event_at=last_event_at_str,
+            last_checked_at=last_checked_at_str,
+        )
+
+    if heartbeat_updated_at or latest_event_at or latest_schedule_check_at:
+        stale_source = "heartbeat" if heartbeat_updated_at else ("event" if latest_event_at else "schedule_check")
         return WorkerHealthInfo(
             status="stale",
             message=f"쿠팡 워커 {stale_source}가 {_WORKER_HEALTH_FRESHNESS_SECONDS}초 이상 끊겼습니다.",
             updated_at=heartbeat_updated_at.isoformat() if heartbeat_updated_at else None,
-            last_event_at=latest_event_at_str,
+            last_event_at=last_event_at_str,
             last_checked_at=last_checked_at_str,
         )
 
     return WorkerHealthInfo(
         status="not_started",
-        message="쿠팡 워커 heartbeat와 최근 감지 이력이 없습니다.",
+        message="쿠팡 워커 heartbeat/감지/확인 이력이 없습니다.",
         updated_at=None,
         last_event_at=None,
         last_checked_at=None,

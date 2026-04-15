@@ -261,6 +261,16 @@ class CoupangMonitorService:
         ]
 
     @staticmethod
+    def _normalize_alert_item_name(item_name: Optional[str]) -> str:
+        """알림 메시지용 옵션 라벨 정규화."""
+        raw = (item_name or "").strip()
+        if not raw:
+            return "옵션 미확인"
+        normalized = raw.replace("메가뷰티쇼 버추얼스토어", "", 1).strip()
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized or "옵션 미확인"
+
+    @staticmethod
     def _should_send_kakao_alert(date: str, change: StatusChange) -> bool:
         """메가뷰티쇼 카카오 알림 대상인지 판정."""
         if not bool(getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", False)):
@@ -385,11 +395,13 @@ class CoupangMonitorService:
     ) -> None:
         """변경 알림 발송."""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item_name = self._normalize_alert_item_name(change.item_name)
+        # 일부 채널에서 개행이 소실되어도 가독성을 유지하도록 단일 라인 포맷을 사용한다.
         message = (
-            f"[쿠팡] 상태 변경: [{change.date}] {change.item_name}\n"
-            f"판매상태: {change.old_status} -> {change.new_status}\n"
-            f"재고: {change.new_stock}개\n"
-            f"감지 시각: {now_str}"
+            "[쿠팡][재고알림] "
+            f"옵션={item_name} | "
+            f"재고={change.new_stock}개 | "
+            f"감지시각={now_str}"
         )
         try:
             await self._notification_service.send_notification_message(
