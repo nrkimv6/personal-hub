@@ -137,6 +137,14 @@ class BrowserWorkerManager:
                 "role": "listener",
             },
             {
+                "name": "Kakao Notification Watchdog",
+                "pid_file": f"kakao_notification_watchdog{self.pid_suffix}.pid",
+                "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
+                        str(self.watchdogs_dir / "kakao-notification-watchdog.ps1")],
+                "env": {"APP_MODE": "admin"},
+                "role": "listener",
+            },
+            {
                 "name": "Dev Runner Listener Watchdog",
                 "pid_file": f"dev_runner_watchdog{self.pid_suffix}.pid",
                 "cmd": [_ps_alias("monitorpage-wdog-devrunner.exe"), "-ExecutionPolicy", "Bypass", "-File",
@@ -161,6 +169,7 @@ class BrowserWorkerManager:
             f"command_listener{self.pid_suffix}.pid",
             f"dev_runner_command_listener{self.pid_suffix}.pid",  # watchdog가 관리하는 worker PID
             f"chat_executor_admin.pid",
+            "kakao_notification_listener.pid",
         ]
 
         # Legacy PID 파일

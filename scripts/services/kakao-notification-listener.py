@@ -6,10 +6,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import redis.asyncio as aioredis
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.config import settings
 from app.shared.notification.kakao_queue import (
@@ -17,8 +23,6 @@ from app.shared.notification.kakao_queue import (
     is_payload_expired,
 )
 
-SCRIPT_DIR = Path(__file__).parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
 LOG_DIR = PROJECT_ROOT / "logs" / "admin"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 _LOG_TS = datetime.now().strftime("%Y%m%d_%H%M%S")

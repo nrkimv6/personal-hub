@@ -56,6 +56,7 @@ def status(manager):
     worker_names = {
         f"unified_worker{manager.pid_suffix}.pid": "Unified Worker (via Orchestrator, incl. video-dl)",
         f"claude_worker{manager.pid_suffix}.pid": "Claude Worker",
+        "kakao_notification_listener.pid": "Kakao Notification Listener",
     }
     for pf, name in worker_names.items():
         pid_path = manager.pid_dir / pf
