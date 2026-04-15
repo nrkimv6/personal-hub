@@ -116,6 +116,56 @@ export const bootHistoryApi = {
   list: (limit: number = 50) => request<BootHistoryResponse>(`/system/boot-history?limit=${limit}`)
 };
 
+export type MemoryPressureLevel = 'critical' | 'emergency' | 'fatal' | 'fatal_recovered';
+
+export interface MemoryPressureTopProcess {
+  pid: number;
+  name: string;
+  memory_mb: number;
+  script_path?: string | null;
+  ppid?: number | null;
+  parent_name?: string | null;
+  ppid_alive?: boolean | null;
+  grandparent_pid?: number | null;
+  grandparent_name?: string | null;
+  is_orphan?: boolean | null;
+}
+
+export interface MemoryPressureHistoryItem {
+  timestamp: string;
+  level: MemoryPressureLevel;
+  available_mb: number;
+  top_processes: MemoryPressureTopProcess[];
+  process_tree_excerpt: string;
+}
+
+export interface MemoryPressureHistorySummary {
+  total: number;
+  critical: number;
+  emergency: number;
+  fatal: number;
+  fatal_recovered: number;
+}
+
+export interface MemoryPressureHistoryResponse {
+  total: number;
+  summary: MemoryPressureHistorySummary;
+  items: MemoryPressureHistoryItem[];
+}
+
+export const memoryPressureHistoryApi = {
+  list: (params?: { limit?: number; levels?: MemoryPressureLevel[]; since_hours?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit !== undefined) searchParams.append('limit', String(params.limit));
+    if (params?.levels?.length) {
+      params.levels.forEach((level) => searchParams.append('levels', level));
+    }
+    if (params?.since_hours !== undefined) searchParams.append('since_hours', String(params.since_hours));
+    const query = searchParams.toString();
+    return request<MemoryPressureHistoryResponse>(`/system/memory-pressure/history${query ? `?${query}` : ''}`);
+  }
+};
+
 // ============================================================
 // 워커 API
 // ============================================================

@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     MEMORY_CRITICAL_MB: int = 1024  # 위험 임계값 (MB)
     MEMORY_EMERGENCY_MB: int = 512  # 긴급 임계값 (MB)
     MEMORY_FATAL_MB: int = 256      # 강제 재부팅 임계값 (MB)
+    MEMORY_PRESSURE_OUTBOUND_ALERT_MAX_MB: int = 500  # 500MB 이상은 history-only, 미만만 outbound 허용
 
     # bizItems API 캐싱 설정 (REQ-MON-006)
     BIZ_ITEMS_CACHE_TTL_NORMAL: int = 300  # 정상 운영 시 캐시 TTL (초) - 5분

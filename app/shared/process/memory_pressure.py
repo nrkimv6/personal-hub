@@ -6,15 +6,18 @@
     normal    : >= MEMORY_CAUTION_MB (4096 MB)
     caution   : >= MEMORY_WARNING_MB (2048 MB)
     warning   : >= MEMORY_CRITICAL_MB (1024 MB)
-    critical  : >= MEMORY_EMERGENCY_MB (512 MB)
+    critical  : >= MEMORY_EMERGENCY_MB (512 MB) -> history-only
     emergency : >= MEMORY_FATAL_MB (256 MB)
-    fatal     : < MEMORY_FATAL_MB
+                >= 500 MB -> history-only
+                < 500 MB  -> outbound alert
+    fatal     : < MEMORY_FATAL_MB -> outbound alert 유지
 """
 import json
 import logging
 import subprocess
 import time
-from datetime import datetime
+from collections import Counter, deque
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +33,12 @@ logger = logging.getLogger(__name__)
 _ALERT_COOLDOWN_SEC = 600  # 10분 쿨다운
 _SCRIPT_EXTENSIONS = {".py", ".ps1", ".bat", ".cmd"}
 _HEAVY_TEST_PROCESS_MB_DEFAULT = 1500.0
+_MEMORY_PRESSURE_HISTORY_LEVELS = {
+    "critical",
+    "emergency",
+    "fatal",
+    "fatal_recovered",
+}
 
 
 def _shorten_path(path: str, max_len: int = 80) -> str:
@@ -157,6 +166,121 @@ def _format_process_tree(tree: dict[int, dict], min_memory_mb: float = 50.0) -> 
     return "\n".join(lines) if lines else "(50MB 이상 프로세스 없음)"
 
 
+def _resolve_events_log_path() -> Path:
+    """메모리 압박 이벤트 JSONL 경로를 반환한다."""
+    return Path(__file__).resolve().parents[3] / "logs" / "memory_pressure_events.jsonl"
+
+
+def _excerpt_process_tree(tree_text: str, max_lines: int = 80) -> str:
+    """프로세스 트리 전문을 목록 화면용 excerpt로 잘라낸다."""
+    if not tree_text:
+        return ""
+    lines = tree_text.splitlines()
+    if len(lines) <= max_lines:
+        return tree_text
+    return "\n".join(lines[:max_lines])
+
+
+def _normalize_history_levels(levels: list[str] | None) -> set[str] | None:
+    """history 필터 값을 소문자 set으로 정규화한다."""
+    if not levels:
+        return None
+    normalized: set[str] = set()
+    for raw in levels:
+        for part in str(raw).split(","):
+            value = part.strip().lower()
+            if value:
+                normalized.add(value)
+    return normalized or None
+
+
+def read_persisted_history(
+    limit: int,
+    levels: list[str] | None = None,
+    since_hours: int | None = None,
+) -> dict:
+    """메모리 압박 JSONL 히스토리를 newest-first 형태로 읽는다."""
+    log_path = _resolve_events_log_path()
+    normalized_levels = _normalize_history_levels(levels)
+    cutoff = datetime.now() - timedelta(hours=since_hours) if since_hours is not None else None
+    items: deque[dict] = deque(maxlen=max(1, limit))
+    summary = Counter()
+    total = 0
+
+    if not log_path.exists():
+        return {
+            "total": 0,
+            "summary": {
+                "total": 0,
+                "critical": 0,
+                "emergency": 0,
+                "fatal": 0,
+                "fatal_recovered": 0,
+            },
+            "items": [],
+        }
+
+    with log_path.open("r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            level = str(record.get("level") or "").strip().lower()
+            if level not in _MEMORY_PRESSURE_HISTORY_LEVELS:
+                continue
+            if normalized_levels is not None and level not in normalized_levels:
+                continue
+
+            timestamp = record.get("timestamp")
+            if cutoff is not None:
+                try:
+                    record_time = datetime.fromisoformat(str(timestamp))
+                except (TypeError, ValueError):
+                    continue
+                if record_time < cutoff:
+                    continue
+
+            try:
+                available_mb = float(record.get("available_mb") or 0.0)
+            except (TypeError, ValueError):
+                continue
+
+            top_processes = record.get("top_processes")
+            if not isinstance(top_processes, list):
+                top_processes = []
+
+            process_tree = record.get("process_tree")
+            items.append(
+                {
+                    "timestamp": str(timestamp or ""),
+                    "level": level,
+                    "available_mb": round(available_mb, 1),
+                    "top_processes": top_processes,
+                    "process_tree_excerpt": _excerpt_process_tree(str(process_tree or "")),
+                }
+            )
+            total += 1
+            summary[level] += 1
+
+    ordered_items = list(reversed(items))
+    return {
+        "total": total,
+        "summary": {
+            "total": total,
+            "critical": summary.get("critical", 0),
+            "emergency": summary.get("emergency", 0),
+            "fatal": summary.get("fatal", 0),
+            "fatal_recovered": summary.get("fatal_recovered", 0),
+        },
+        "items": ordered_items,
+    }
+
+
 class MemoryPressureResponder:
     """시스템 메모리 압박을 감지하고 단계별 대응을 수행한다."""
 
@@ -203,6 +327,10 @@ class MemoryPressureResponder:
         if time.time() - last < _ALERT_COOLDOWN_SEC:
             return False
         return True
+
+    def _should_notify_outbound(self, available_mb: float) -> bool:
+        """500MB 미만에서만 outbound 알림을 허용한다."""
+        return available_mb < float(getattr(settings, "MEMORY_PRESSURE_OUTBOUND_ALERT_MAX_MB", 500))
 
     def _record_alert(self, level: str) -> None:
         """알림 시각을 기록한다."""
@@ -394,9 +522,9 @@ class MemoryPressureResponder:
         예외 발생 시 경고 로그만 출력하고 절대 전파하지 않는다.
         """
         try:
-            log_dir = Path(__file__).resolve().parents[3] / "logs"
+            log_path = _resolve_events_log_path()
+            log_dir = log_path.parent
             log_dir.mkdir(parents=True, exist_ok=True)
-            log_path = log_dir / "memory_pressure_events.jsonl"
 
             record = {
                 "timestamp": datetime.now().isoformat(),
@@ -450,45 +578,55 @@ class MemoryPressureResponder:
 
     async def _on_critical(self, available_mb: float) -> None:
         """위험 단계 대응 — 강제 고아 정리 + 상세 프로세스 로그."""
-        if not self._should_alert("critical"):
-            return
         detail = self._format_top_processes(5)
         msg = (
             f"🔴 시스템 메모리 위험: {available_mb:.0f}MB 남음\n"
-            f"강제 고아 정리 실행\n"
+            f"강제 고아 정리 실행 (history-only)\n"
             f"상위 프로세스:\n{detail}"
         )
         logger.error(msg)
-        await self._send_telegram(msg)
-        self._record_alert("critical")
-
         top5 = self._get_top_processes(5)
         tree_text = _format_process_tree(_collect_process_tree())
         self._persist_snapshot("critical", available_mb, top5, tree_text)
 
         orphans = await self.orphan_detector.scan()
         await self.orphan_detector.cleanup(orphans, force=True)
+        logger.warning(
+            "[memory-pressure] outbound_suppressed level=critical available_mb=%.1f",
+            available_mb,
+        )
         logger.error("메모리 위험 — 워커 재시작이 필요할 수 있습니다.")
 
     async def _on_emergency(self, available_mb: float) -> None:
         """긴급 단계 대응 — 강제 정리 + 데스크톱 알림 + 상세 프로세스 로그."""
-        if not self._should_alert("emergency"):
-            return
         detail = self._format_top_processes(5)
         msg = (
             f"🚨 메모리 긴급: {available_mb:.0f}MB 남음! 즉각 조치 필요\n"
             f"상위 프로세스:\n{detail}"
         )
         logger.critical(msg)
-        await self._send_telegram(msg)
-        self._record_alert("emergency")
-
         top5 = self._get_top_processes(5)
         tree_text = _format_process_tree(_collect_process_tree())
         self._persist_snapshot("emergency", available_mb, top5, tree_text)
 
         orphans = await self.orphan_detector.scan()
         await self.orphan_detector.cleanup(orphans, force=True)
+
+        if not self._should_notify_outbound(available_mb):
+            logger.warning(
+                "[memory-pressure] outbound_suppressed level=emergency available_mb=%.1f",
+                available_mb,
+            )
+            return
+        if not self._should_alert("emergency"):
+            logger.warning(
+                "[memory-pressure] outbound_suppressed level=emergency available_mb=%.1f reason=cooldown",
+                available_mb,
+            )
+            return
+
+        await self._send_telegram(msg)
+        self._record_alert("emergency")
 
         # 데스크톱 팝업
         try:

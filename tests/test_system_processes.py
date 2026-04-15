@@ -4,13 +4,14 @@ Python 프로세스 모니터 API 테스트
 RIGHT-BICEP + CORRECT 기반 테스트 케이스
 """
 
+import json
 import sys
 import os
 import time
 import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 import requests
@@ -356,6 +357,67 @@ class TestProcessWatchApi:
         assert resp.status_code == 403
         detail = resp.json()["detail"]
         assert detail["code"] == "protected_pid"
+
+
+class TestMemoryPressureHistoryApi:
+    def test_history_endpoint_reads_latest_records(self, tmp_path):
+        log_file = tmp_path / "memory_pressure_events.jsonl"
+        now = datetime.now()
+
+        critical_record = {
+            "timestamp": (now - timedelta(minutes=50)).isoformat(),
+            "level": "critical",
+            "available_mb": 700.0,
+            "top_processes": [
+                {"pid": 1, "name": "python.exe", "memory_mb": 700.0},
+            ],
+            "process_tree": "\n".join([f"critical-line-{idx}" for idx in range(1, 101)]),
+        }
+        emergency_record = {
+            "timestamp": (now - timedelta(minutes=10)).isoformat(),
+            "level": "emergency",
+            "available_mb": 499.0,
+            "top_processes": [
+                {"pid": 2, "name": "python.exe", "memory_mb": 499.0},
+            ],
+            "process_tree": "emergency-root\nemergency-child",
+        }
+        fatal_recovered_record = {
+            "timestamp": (now - timedelta(minutes=5)).isoformat(),
+            "level": "fatal_recovered",
+            "available_mb": 650.0,
+            "top_processes": [],
+            "process_tree": "fatal-recovered-root",
+        }
+
+        log_file.write_text(
+            "\n".join(
+                json.dumps(record, ensure_ascii=False)
+                for record in [critical_record, emergency_record, fatal_recovered_record]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with patch("app.shared.process.memory_pressure._resolve_events_log_path", return_value=log_file):
+            resp = client.get(
+                "/api/v1/system/memory-pressure/history?limit=2&since_hours=1&levels=critical&levels=emergency"
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert data["summary"]["total"] == 2
+        assert data["summary"]["critical"] == 1
+        assert data["summary"]["emergency"] == 1
+        assert data["summary"]["fatal"] == 0
+        assert data["summary"]["fatal_recovered"] == 0
+
+        levels = [item["level"] for item in data["items"]]
+        assert levels == ["emergency", "critical"]
+        assert data["items"][0]["available_mb"] == 499.0
+        assert data["items"][1]["available_mb"] == 700.0
+        assert data["items"][1]["process_tree_excerpt"].endswith("... (+20 lines)")
 
 
 def test_http_system_mode_survives_restart_frontend_admin():

@@ -80,8 +80,8 @@ async def test_check_fatal_below_256mb():
 
 
 @pytest.mark.asyncio
-async def test_alert_cooldown_suppresses_duplicate():
-    """B: critical 2회 연속 (10분 미경과) → 2번째 send_telegram 미호출"""
+async def test_critical_history_only_persists_every_time():
+    """R: critical 2회 연속 → 둘 다 history/cleanup 되고 outbound는 없음"""
     from app.shared.process.memory_pressure import MemoryPressureResponder
 
     detector = make_orphan_detector()
@@ -89,15 +89,96 @@ async def test_alert_cooldown_suppresses_duplicate():
     responder = MemoryPressureResponder(detector)
 
     mock_telegram = AsyncMock()
+    mock_persist = MagicMock()
+    mock_orphans = AsyncMock(return_value=[])
 
     with patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(700)), \
          patch.object(responder, "_send_telegram", mock_telegram), \
-         patch.object(responder, "_get_top_processes", return_value=[]):
+         patch.object(responder, "_get_top_processes", return_value=[]), \
+         patch.object(responder, "_persist_snapshot", mock_persist), \
+         patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
+         patch("app.shared.process.memory_pressure._format_process_tree", return_value=""), \
+         patch.object(detector, "scan", mock_orphans), \
+         patch.object(detector, "cleanup", AsyncMock(return_value=[])):
         await responder.check()  # 1회 → critical, Telegram 발송
-        await responder.check()  # 2회 → 쿨다운, 미발송
+        await responder.check()  # 2회 → history-only 반복
 
-    # 1회만 호출됨
-    assert mock_telegram.call_count == 1
+    mock_telegram.assert_not_called()
+    assert mock_persist.call_count == 2
+    assert responder._last_alert_time == {}
+
+
+@pytest.mark.asyncio
+async def test_should_notify_outbound_boundaries():
+    """R: 499/500/512 경계에서 outbound 허용 여부가 고정된다."""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    assert responder._should_notify_outbound(499.0) is True
+    assert responder._should_notify_outbound(500.0) is False
+    assert responder._should_notify_outbound(512.0) is False
+
+
+@pytest.mark.asyncio
+async def test_emergency_at_500mb_suppresses_outbound():
+    """R: available=500MB → emergency지만 history-only"""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    mock_telegram = AsyncMock()
+    mock_persist = MagicMock()
+    mock_run = MagicMock()
+
+    with patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(500)), \
+         patch.object(responder, "_send_telegram", mock_telegram), \
+         patch.object(responder, "_get_top_processes", return_value=[]), \
+         patch.object(responder, "_persist_snapshot", mock_persist), \
+         patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
+         patch("app.shared.process.memory_pressure._format_process_tree", return_value=""), \
+         patch.object(detector, "scan", AsyncMock(return_value=[])), \
+         patch.object(detector, "cleanup", AsyncMock(return_value=[])), \
+         patch("app.shared.process.memory_pressure.subprocess.Popen", mock_run):
+        level = await responder.check()
+
+    assert level == "emergency"
+    mock_telegram.assert_not_called()
+    mock_run.assert_not_called()
+    assert mock_persist.call_count == 1
+    assert responder._last_alert_time == {}
+
+
+@pytest.mark.asyncio
+async def test_emergency_below_500mb_sends_telegram():
+    """R: available=499MB → emergency outbound 유지"""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    mock_telegram = AsyncMock()
+    mock_persist = MagicMock()
+    mock_run = MagicMock()
+
+    with patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(499)), \
+         patch.object(responder, "_send_telegram", mock_telegram), \
+         patch.object(responder, "_get_top_processes", return_value=[]), \
+         patch.object(responder, "_persist_snapshot", mock_persist), \
+         patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
+         patch("app.shared.process.memory_pressure._format_process_tree", return_value=""), \
+         patch.object(detector, "scan", AsyncMock(return_value=[])), \
+         patch.object(detector, "cleanup", AsyncMock(return_value=[])), \
+         patch("app.shared.process.memory_pressure.subprocess.Popen", mock_run):
+        level = await responder.check()
+
+    assert level == "emergency"
+    assert mock_telegram.await_count == 1
+    mock_run.assert_called_once()
+    assert mock_persist.call_count == 1
+    assert responder._last_alert_time.get("emergency")
 
 
 @pytest.mark.asyncio
