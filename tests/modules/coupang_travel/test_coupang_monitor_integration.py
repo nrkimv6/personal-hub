@@ -226,7 +226,7 @@ async def test_coupang_monitor_full_pipeline():
     notification_service = NotificationService()
     sent_messages = []
 
-    async def fake_send(msg, send_desktop=False):
+    async def fake_send(msg, send_desktop=False, send_telegram: bool = True, **_kwargs):
         sent_messages.append(msg)
 
     with patch.object(notification_service, "send_notification_message", side_effect=fake_send):
@@ -540,6 +540,7 @@ async def test_coupang_e2e_notify_time_filter_pipeline():
     from datetime import datetime
     from unittest.mock import patch
     from app.modules.coupang_travel.services.api_client import CoupangApiClient
+    from app.modules.coupang_travel.services import monitor_service as service_module
     from app.modules.coupang_travel.services.monitor_service import CoupangMonitorService
     from app.shared.notification import NotificationService
 
@@ -555,18 +556,19 @@ async def test_coupang_e2e_notify_time_filter_pipeline():
     notif_1 = NotificationService()
     sent_1 = []
 
-    async def fake_send_1(msg, send_desktop=False):
+    async def fake_send_1(msg, send_desktop=False, send_telegram: bool = True, **_kwargs):
         sent_1.append(msg)
 
     service_1 = CoupangMonitorService(mock_api_1, notif_1, db_logging=False)
 
-    with patch.object(notif_1, "send_notification_message", side_effect=fake_send_1):
-        page = AsyncMock()
-        fixed_outside = datetime(2026, 4, 17, 10, 0, 0)
-        with patch("app.modules.coupang_travel.services.monitor_service.datetime") as mock_dt:
-            mock_dt.now.return_value = fixed_outside
-            await service_1.check_and_notify("99999", "pkg_test", ["2026-04-17"], page, notify_times=["14:00-19:00"])
-            changes_1 = await service_1.check_and_notify("99999", "pkg_test", ["2026-04-17"], page, notify_times=["14:00-19:00"])
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", False):
+        with patch.object(notif_1, "send_notification_message", side_effect=fake_send_1):
+            page = AsyncMock()
+            fixed_outside = datetime(2026, 4, 17, 10, 0, 0)
+            with patch("app.modules.coupang_travel.services.monitor_service.datetime") as mock_dt:
+                mock_dt.now.return_value = fixed_outside
+                await service_1.check_and_notify("99999", "pkg_test", ["2026-04-17"], page, notify_times=["14:00-19:00"])
+                changes_1 = await service_1.check_and_notify("99999", "pkg_test", ["2026-04-17"], page, notify_times=["14:00-19:00"])
 
     assert len(changes_1) == 1, "변경은 감지되어야 함"
     assert len(sent_1) == 0, f"10:00은 알림 시간 밖 → 알림 없어야 함, 실제: {len(sent_1)}"
@@ -577,18 +579,19 @@ async def test_coupang_e2e_notify_time_filter_pipeline():
     notif_2 = NotificationService()
     sent_2 = []
 
-    async def fake_send_2(msg, send_desktop=False):
+    async def fake_send_2(msg, send_desktop=False, send_telegram: bool = True, **_kwargs):
         sent_2.append(msg)
 
     service_2 = CoupangMonitorService(mock_api_2, notif_2, db_logging=False)
 
-    with patch.object(notif_2, "send_notification_message", side_effect=fake_send_2):
-        page2 = AsyncMock()
-        fixed_inside = datetime(2026, 4, 17, 16, 0, 0)
-        with patch("app.modules.coupang_travel.services.monitor_service.datetime") as mock_dt2:
-            mock_dt2.now.return_value = fixed_inside
-            await service_2.check_and_notify("99999", "pkg_test", ["2026-04-17"], page2, notify_times=["14:00-19:00"])
-            changes_2 = await service_2.check_and_notify("99999", "pkg_test", ["2026-04-17"], page2, notify_times=["14:00-19:00"])
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", False):
+        with patch.object(notif_2, "send_notification_message", side_effect=fake_send_2):
+            page2 = AsyncMock()
+            fixed_inside = datetime(2026, 4, 17, 16, 0, 0)
+            with patch("app.modules.coupang_travel.services.monitor_service.datetime") as mock_dt2:
+                mock_dt2.now.return_value = fixed_inside
+                await service_2.check_and_notify("99999", "pkg_test", ["2026-04-17"], page2, notify_times=["14:00-19:00"])
+                changes_2 = await service_2.check_and_notify("99999", "pkg_test", ["2026-04-17"], page2, notify_times=["14:00-19:00"])
 
     assert len(changes_2) == 1, "변경은 감지되어야 함"
     assert len(sent_2) == 1, f"16:00은 알림 시간 안 → 알림 1회여야 함, 실제: {len(sent_2)}"
@@ -879,7 +882,7 @@ async def test_coupang_proxy_e2e():
     notif_svc = NotificationService()
     notifications_sent = []
 
-    async def fake_send(msg, send_desktop=False):
+    async def fake_send(msg, send_desktop=False, send_telegram: bool = True, **_kwargs):
         notifications_sent.append(msg)
 
     service = CoupangMonitorService(mock_api, notif_svc, db_logging=False)
