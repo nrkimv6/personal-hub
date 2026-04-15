@@ -1,0 +1,163 @@
+{
+  "slug": "coffee-expo-2026",
+  "title": "커피엑스포 2026",
+  "venue": "COEX Hall C",
+  "dateRange": "2026.04.15 - 2026.04.18",
+  "themeColor": "#9a3412",
+  "map": {
+    "imageSrc": "/expo/coffee-expo-2026/map.svg",
+    "fallbackSrc": "/expo/coffee-expo-2026/map.svg",
+    "width": 1200,
+    "height": 800,
+    "alt": "커피엑스포 2026 부스 배치도"
+  },
+  "timeSlots": [
+    {
+      "id": "open-demo",
+      "label": "10:30 오픈 데모",
+      "start": "2026-04-15T10:30:00+09:00",
+      "end": "2026-04-15T11:00:00+09:00"
+    },
+    {
+      "id": "brew-talk",
+      "label": "13:00 브루 토크",
+      "start": "2026-04-15T13:00:00+09:00",
+      "end": "2026-04-15T13:40:00+09:00"
+    },
+    {
+      "id": "latte-show",
+      "label": "15:00 라떼 쇼케이스",
+      "start": "2026-04-15T15:00:00+09:00",
+      "end": "2026-04-15T15:30:00+09:00"
+    }
+  ],
+  "booths": [
+    {
+      "id": "A-01",
+      "name": "로스터스 랩",
+      "brand": "Roasters Lab",
+      "description": "싱글 오리진 라인업과 현장 로스팅 샘플링을 진행합니다.",
+      "tags": ["로스팅", "싱글오리진", "샘플링"],
+      "link": "https://example.com/roasters-lab",
+      "pin": { "xNorm": 0.18, "yNorm": 0.29 },
+      "events": [
+        {
+          "id": "a01-open-demo",
+          "title": "오픈 빈 테이스팅",
+          "start": "10:30",
+          "end": "11:00",
+          "slotIds": ["open-demo"],
+          "description": "에티오피아, 과테말라 신규 라인업 컵핑."
+        }
+      ]
+    },
+    {
+      "id": "A-02",
+      "name": "밀크 크래프트",
+      "brand": "Milk Craft",
+      "description": "우유 스티밍 장비와 식물성 베이스 비교 시음을 제공합니다.",
+      "tags": ["스티밍", "오트", "장비"],
+      "pin": { "xNorm": 0.31, "yNorm": 0.29 },
+      "events": [
+        {
+          "id": "a02-latte-show",
+          "title": "밀크 텍스처 쇼케이스",
+          "start": "15:00",
+          "end": "15:30",
+          "slotIds": ["latte-show"],
+          "description": "오트 / 저지방 우유 스티밍 비교."
+        }
+      ]
+    },
+    {
+      "id": "B-01",
+      "name": "그라인더 웍스",
+      "brand": "Grinder Works",
+      "description": "플랫버와 코니컬버 그라인더를 같은 레시피로 비교 체험합니다.",
+      "tags": ["그라인더", "장비"],
+      "pin": { "xNorm": 0.22, "yNorm": 0.5 },
+      "events": [
+        {
+          "id": "b01-brew-talk",
+          "title": "버 타입 비교 세션",
+          "start": "13:00",
+          "end": "13:40",
+          "slotIds": ["brew-talk"],
+          "description": "플랫버와 코니컬버 추출 편차 비교."
+        }
+      ]
+    },
+    {
+      "id": "B-02",
+      "name": "필터 하우스",
+      "brand": "Filter House",
+      "description": "종이, 메탈, 패브릭 필터의 추출 차이를 바로 비교합니다.",
+      "tags": ["드립", "필터"],
+      "pin": { "xNorm": 0.37, "yNorm": 0.5 },
+      "events": [
+        {
+          "id": "b02-open-demo",
+          "title": "필터 재질 비교 추출",
+          "start": "10:30",
+          "end": "11:00",
+          "slotIds": ["open-demo"],
+          "description": "같은 원두로 필터 재질별 추출 변화 시연."
+        }
+      ]
+    },
+    {
+      "id": "C-01",
+      "name": "그린빈 랩",
+      "brand": "Green Bean Lab",
+      "description": "수입 원두 샘플과 산지 정보를 큐레이션해 소개합니다.",
+      "tags": ["생두", "산지"],
+      "pin": { "xNorm": 0.63, "yNorm": 0.37 },
+      "events": [
+        {
+          "id": "c01-brew-talk",
+          "title": "산지 브리핑",
+          "start": "13:00",
+          "end": "13:40",
+          "slotIds": ["brew-talk"],
+          "description": "동아프리카 수확 시즌 이슈와 테이스팅 노트."
+        }
+      ]
+    },
+    {
+      "id": "C-02",
+      "name": "에스프레소 바",
+      "brand": "Espresso Bar",
+      "description": "대회용 머신 셋업과 샷 프로파일 튜닝 데모를 상시 진행합니다.",
+      "tags": ["에스프레소", "머신", "튜닝"],
+      "pin": { "xNorm": 0.77, "yNorm": 0.37 },
+      "events": [
+        {
+          "id": "c02-latte-show",
+          "title": "라떼 쇼케이스",
+          "start": "15:00",
+          "end": "15:30",
+          "slotIds": ["latte-show"],
+          "description": "에스프레소 베이스 메뉴와 라떼아트 퍼포먼스."
+        }
+      ]
+    },
+    {
+      "id": "D-01",
+      "name": "콜드브루 스튜디오",
+      "brand": "Cold Brew Studio",
+      "description": "콜드브루 배치 시스템과 RTD 라인업을 전시합니다.",
+      "tags": ["콜드브루", "RTD"],
+      "pin": { "xNorm": 0.66, "yNorm": 0.61 },
+      "events": []
+    },
+    {
+      "id": "D-02",
+      "name": "컵 앤 케그",
+      "brand": "Cup & Keg",
+      "description": "테이크아웃 패키징과 콜드 드래프트 솔루션을 소개합니다.",
+      "tags": ["패키징", "드래프트"],
+      "pin": { "xNorm": 0.8, "yNorm": 0.61 },
+      "events": []
+    }
+  ]
+}
