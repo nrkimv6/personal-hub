@@ -12,6 +12,10 @@ from sqlalchemy import text
 import logging
 
 from app.core.config import settings, logger
+from app.shared.notification.kakao_queue import (
+    KakaoNotificationQueue,
+    get_kakao_backlog_alert_key,
+)
 from app.modules.naver_booking.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
 from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_naver_page_info
 from app.utils.parsers import extract_date_from_url
@@ -251,7 +255,15 @@ class NotificationService:
             logger.error(f"Error sending notification: {str(e)}")
             raise
 
-    async def send_notification_message(self, message: str, send_desktop: bool = False, force_send: bool = False) -> None:
+    async def send_notification_message(
+        self,
+        message: str,
+        send_desktop: bool = False,
+        force_send: bool = False,
+        send_telegram: bool = True,
+        send_kakao: bool = False,
+        kakao_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
         단순 문자열 메시지를 알림으로 발송합니다.
         
@@ -259,10 +271,18 @@ class NotificationService:
             message: 발송할 메시지
             send_desktop: 데스크톱 알림 발송 여부
             force_send: 중복 메시지 검사를 건너뛰고 강제로 발송할지 여부
+            send_telegram: 텔레그램 발송 여부
+            send_kakao: 카카오 Redis 큐 적재 여부
+            kakao_metadata: 카카오 payload metadata
         """
         try:
             # 텔레그램 알림 발송
-            await self._send_telegram(message)
+            if send_telegram:
+                await self.send_telegram(message, force_send=force_send)
+
+            # 카카오 알림은 Redis 큐에만 적재하고 별도 consumer가 처리
+            if send_kakao:
+                await self._enqueue_kakao_notification(message, metadata=kakao_metadata)
             
             # 데스크톱 알림 발송 (요청된 경우)
             if send_desktop:
@@ -313,6 +333,104 @@ class NotificationService:
         except Exception as e:
             logger.error(f"텔레그램 알림 전송 실패: {str(e)}")
             return False
+
+    async def _enqueue_kakao_notification(
+        self,
+        message: str,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """카카오 알림을 Redis 큐에 적재합니다.
+
+        큐 적재 실패는 메인 모니터링 경로를 막지 않도록 warning 수준으로만 처리합니다.
+        """
+        if not bool(getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", False)):
+            return False
+
+        try:
+            import redis.asyncio as aioredis
+            from app.core.config import settings as _settings
+
+            client = aioredis.Redis(
+                host=_settings.REDIS_HOST,
+                port=_settings.REDIS_PORT,
+                decode_responses=True,
+            )
+            try:
+                queue = KakaoNotificationQueue(
+                    client,
+                room_name=getattr(_settings, "MEGABEAUTY_KAKAO_ALERT_ROOM_NAME", "소나무봇"),
+                )
+                result = await queue.enqueue(
+                    message,
+                    source="coupang-megabeautyshow",
+                    metadata=metadata,
+                    expires_seconds=getattr(_settings, "MEGABEAUTY_KAKAO_ALERT_EXPIRES_SECONDS", 900),
+                    dedup_ttl_seconds=getattr(_settings, "MEGABEAUTY_KAKAO_ALERT_DEDUP_TTL_SECONDS", 300),
+                )
+
+                if result.get("disabled"):
+                    logger.info("카카오 알림이 설정으로 비활성화되어 있습니다.")
+                    return False
+
+                if result.get("duplicate"):
+                    logger.info("카카오 알림 중복 감지로 큐 적재를 건너뜀")
+                    return False
+
+                if result.get("enqueued"):
+                    queue_length = int(result.get("queue_length", 0) or 0)
+                    await self._maybe_send_kakao_backlog_alert(queue_length)
+                    logger.info(
+                        "카카오 알림 Redis 큐 적재 성공: %s (len=%s)",
+                        queue.queue_name,
+                        queue_length,
+                    )
+                    return True
+
+                logger.warning("카카오 알림 큐 적재 결과가 비정상입니다: %s", result)
+                return False
+            finally:
+                await client.aclose()
+        except Exception as e:
+            logger.warning(f"카카오 알림 Redis 릴레이 실패 (알림 무시): {str(e)}")
+            return False
+
+    async def _maybe_send_kakao_backlog_alert(self, queue_length: int) -> None:
+        """Kakao 큐 적체가 임계치 이상이면 관리자에게 텔레그램 경고를 보냅니다."""
+        threshold = getattr(settings, "MEGABEAUTY_KAKAO_ALERT_BACKLOG_THRESHOLD", 10)
+        if queue_length < threshold:
+            return
+
+        try:
+            import redis.asyncio as aioredis
+            from app.core.config import settings as _settings
+
+            client = aioredis.Redis(
+                host=_settings.REDIS_HOST,
+                port=_settings.REDIS_PORT,
+                decode_responses=True,
+            )
+            try:
+                cooldown_key = get_kakao_backlog_alert_key()
+                accepted = await client.set(
+                    cooldown_key,
+                    str(queue_length),
+                    ex=getattr(_settings, "MEGABEAUTY_KAKAO_ALERT_BACKLOG_COOLDOWN_SECONDS", 600),
+                    nx=True,
+                )
+                if not accepted:
+                    return
+
+                alert_message = (
+                    "[Kakao backlog] "
+                    f"queue={queue_length} >= threshold={threshold}, "
+                    f"room={getattr(_settings, 'MEGABEAUTY_KAKAO_ALERT_ROOM_NAME', '소나무봇')}"
+                )
+                await self.send_telegram(alert_message, force_send=True)
+            finally:
+                await client.aclose()
+        except Exception as e:
+            logger.warning(f"카카오 backlog 경고 전송 실패: {str(e)}")
 
     async def _relay_desktop_via_redis(self, message: str) -> bool:
         """Session 0에서 Desktop 알림을 Redis를 통해 Session 1로 릴레이합니다.

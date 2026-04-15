@@ -34,6 +34,7 @@ $Aliases = [ordered]@{
     "monitorpage-worker"      = "통합 브라우저 워커"
     "monitorpage-claude"      = "Claude Worker"
     "monitorpage-cmdlistener"     = "Redis Command Listener"
+    "monitorpage-kakao"           = "Kakao Notification Listener"
     "monitorpage-chat-executor"   = "Chat Executor"
     "monitorpage-classifier"      = "Image Classifier"
     "monitorpage-proxy"           = "Proxy Manager"
@@ -225,6 +226,7 @@ Write-Host "Usage in start scripts:" -ForegroundColor White
 Write-Host "  & `"$VenvScripts\monitorpage-api.exe`" app/main.py --port 8000" -ForegroundColor Gray
 Write-Host "  & `"$VenvScripts\monitorpage-worker.exe`" scripts/services/browser_workers.py" -ForegroundColor Gray
 Write-Host "  & `"$VenvScripts\monitorpage-claude.exe`" app/workers/claude_worker.py" -ForegroundColor Gray
+Write-Host "  & `"$VenvScripts\monitorpage-kakao.exe`" scripts/services/kakao-notification-listener.py" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Run again after venv recreation or Python upgrade." -ForegroundColor Yellow
 Write-Host ""

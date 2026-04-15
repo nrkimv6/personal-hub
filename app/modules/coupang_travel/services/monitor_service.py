@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, TYPE_CHECKING
 
+from app.core.config import settings
 from app.modules.coupang_travel.services.api_client import CoupangApiClient, VendorItem
 from app.services.event_logger import EventLogger
 
@@ -154,9 +155,26 @@ class CoupangMonitorService:
                     changes.append(change)
                     date_changes.append(change)
                     self._previous_statuses[state_key] = current
-                    if not self._is_within_notify_times(notify_times):
+                    core_notify = self._is_within_notify_times(notify_times)
+                    kakao_notify = self._should_send_kakao_alert(date, change)
+
+                    if not core_notify and not kakao_notify:
                         continue
-                    await self._send_notification(change)
+
+                    await self._send_notification(
+                        change,
+                        send_telegram=core_notify,
+                        send_desktop=core_notify,
+                        send_kakao=kakao_notify,
+                        kakao_metadata={
+                            "date": change.date,
+                            "item_name": change.item_name,
+                            "old_status": change.old_status,
+                            "new_status": change.new_status,
+                            "old_stock": change.old_stock,
+                            "new_stock": change.new_stock,
+                        },
+                    )
 
             slots_info = self._build_slots_info(items)
             available_count = sum(1 for item in items if self._is_item_available(item))
@@ -220,6 +238,33 @@ class CoupangMonitorService:
             for item in items
         ]
 
+    @staticmethod
+    def _should_send_kakao_alert(date: str, change: StatusChange) -> bool:
+        """메가뷰티쇼 카카오 알림 대상인지 판정."""
+        if not bool(getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", False)):
+            return False
+        if date != getattr(settings, "MEGABEAUTY_KAKAO_ALERT_DATE", "2026-04-17"):
+            return False
+
+        keyword = (getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ITEM_NAME_KEYWORD", "") or "").strip()
+        if keyword:
+            candidate = " ".join(
+                part for part in [
+                    change.item_name,
+                    change.old_status,
+                    change.new_status,
+                ]
+                if part
+            )
+            if keyword.casefold() not in candidate.casefold():
+                logger.debug(
+                    "[CoupangMonitorService] Kakao 키워드 미일치지만 날짜 조건으로 알림 허용: date=%s keyword=%s item=%s",
+                    date,
+                    keyword,
+                    change.item_name,
+                )
+        return True
+
     def _map_monitor_status(
         self,
         items: List[VendorItem],
@@ -273,7 +318,15 @@ class CoupangMonitorService:
                 e,
             )
 
-    async def _send_notification(self, change: StatusChange) -> None:
+    async def _send_notification(
+        self,
+        change: StatusChange,
+        *,
+        send_telegram: bool = True,
+        send_desktop: bool = True,
+        send_kakao: bool = False,
+        kakao_metadata: Optional[dict] = None,
+    ) -> None:
         """변경 알림 발송."""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         message = (
@@ -284,7 +337,11 @@ class CoupangMonitorService:
         )
         try:
             await self._notification_service.send_notification_message(
-                message, send_desktop=True
+                message,
+                send_telegram=send_telegram,
+                send_desktop=send_desktop,
+                send_kakao=send_kakao,
+                kakao_metadata=kakao_metadata,
             )
         except Exception as e:
             logger.error("[CoupangMonitorService] 알림 발송 실패: %s", e)

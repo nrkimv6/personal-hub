@@ -63,6 +63,30 @@ async def test_check_and_notify_status_change():
 
 
 @pytest.mark.asyncio
+async def test_check_and_notify_kakao_bypasses_notify_times():
+    """메가뷰티쇼 날짜는 notify_times 밖이어도 Kakao 알림이 간다."""
+    service, api_client, notification = make_service()
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="SOLD_OUT", stock_count=0)
+    ])
+    await service.check_and_notify("123", "pkg", ["2026-04-17"], make_page())
+
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
+    ])
+    with patch.object(service, "_is_within_notify_times", return_value=False):
+        changes = await service.check_and_notify("123", "pkg", ["2026-04-17"], make_page())
+
+    assert len(changes) == 1
+    notification.send_notification_message.assert_called_once()
+    kwargs = notification.send_notification_message.call_args.kwargs
+    assert kwargs["send_telegram"] is False
+    assert kwargs["send_desktop"] is False
+    assert kwargs["send_kakao"] is True
+
+
+@pytest.mark.asyncio
 async def test_check_and_notify_stock_change():
     """I: saleStatus 동일 + stockCount 변경 → StatusChange 1개"""
     service, api_client, notification = make_service()

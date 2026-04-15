@@ -209,6 +209,17 @@ class Settings(BaseSettings):
     GOOGLE_SEARCH_API_KEY: str = ""  # Google Cloud Console에서 발급 (선택)
     GOOGLE_SEARCH_CSE_ID: str = ""  # Programmable Search Engine ID (선택)
 
+    # 메가뷰티쇼 2026-04-17 Kakao 알림 설정
+    MEGABEAUTY_KAKAO_ALERT_ENABLED: bool = True
+    MEGABEAUTY_KAKAO_ALERT_DATE: str = "2026-04-17"
+    MEGABEAUTY_KAKAO_ALERT_ITEM_NAME_KEYWORD: str = "메가뷰티쇼"
+    MEGABEAUTY_KAKAO_ALERT_ROOM_NAME: str = "소나무봇"
+    MEGABEAUTY_KAKAO_ALERT_CLI_PATH: str = r"D:\work\project\tools\kakaocli-win\.venv\Scripts\kakaocli-win.exe"
+    MEGABEAUTY_KAKAO_ALERT_EXPIRES_SECONDS: int = 900
+    MEGABEAUTY_KAKAO_ALERT_DEDUP_TTL_SECONDS: int = 300
+    MEGABEAUTY_KAKAO_ALERT_BACKLOG_THRESHOLD: int = 10
+    MEGABEAUTY_KAKAO_ALERT_BACKLOG_COOLDOWN_SECONDS: int = 600
+
     # Activity Hub 동기화 설정
     ACTIVITY_HUB_PUSH_URL: str = "https://activity.woory.day/api/push"  # Activity Hub PUSH API URL
     ACTIVITY_HUB_SYNC_API_KEY: str = ""  # Activity Hub 동기화 API 키

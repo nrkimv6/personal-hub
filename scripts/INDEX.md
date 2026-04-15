@@ -61,6 +61,7 @@
 | ✅ | `service_run.py` | `service-run.ps1`의 Python 구현 엔트리 |
 | ✅ | `service_utils.py` | `service_run.py`와 `browser_workers.py`가 공유하는 유틸 |
 | ✅ | `worker-command-listener.py` | API→워커 명령 리스너 (Redis pub/sub 또는 stream 기반) |
+| ✅ | `kakao-notification-listener.py` | Session 1 카카오 알림 소비자 (Redis Queue → `kakaocli-win`) |
 | ⏳ | `port-utils.ps1` | 포트 점유 확인 유틸 (서비스 기동 시 포트 검증) |
 
 ---
@@ -76,6 +77,7 @@
 | ✅ | `api-watchdog.ps1` | FastAPI 서버(:8000/:8001) 헬스체크 및 재기동 |
 | ✅ | `claude-watchdog.ps1` | Claude worker 프로세스 감시 |
 | ✅ | `command-listener-watchdog.ps1` | `worker-command-listener.py` 감시 |
+| ✅ | `kakao-notification-watchdog.ps1` | `kakao-notification-listener.py` 감시 |
 | ✅ | `crawl-watchdog.ps1` | 크롤러 프로세스 감시 |
 | ✅ | `dev-runner-listener-watchdog.ps1` | `dev-runner-command-listener.py` 감시 — 내부에서 `_dr_*` 경로 spawn |
 | ✅ | `llm-chat-executor-watchdog.ps1` | LLM 채팅 executor 감시 |
@@ -173,6 +175,7 @@
 | ✅ | `diagnose-api.ps1` | API 진단 스크립트 — api-watchdog.ps1에서 참조, _todo-6에서 이관 완료 |
 | ✅ | `ps-python-processes.ps1` | 파이썬 프로세스 트리 출력 |
 | ✅ | `show-processes.ps1` | 프로세스 요약 출력 |
+| ✅ | `kakao_queue_status.py` | Kakao 알림 Redis 큐 상태/적체 진단 |
 | ✅ | `test_pg_connection.py` | PG 연결 확인 (진단용 — migrations 아님) |
 | ✅ | `register_process.py` | 프로세스 등록/추적 유틸 |
 

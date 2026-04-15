@@ -153,3 +153,23 @@ try {
 } catch {
     Write-Log "ERROR: Failed to start browser workers: $_"
 }
+
+# Kakao notification listener watchdog (separate Session 1 consumer)
+$kakaoWatchdogScript = Join-Path (Split-Path -Parent $ScriptDir) "watchdogs\kakao-notification-watchdog.ps1"
+if (Test-Path $kakaoWatchdogScript) {
+    try {
+        Write-Log "Starting Kakao notification watchdog..."
+        Start-Process -FilePath "powershell.exe" `
+            -ArgumentList @(
+                "-ExecutionPolicy", "Bypass",
+                "-File", $kakaoWatchdogScript
+            ) `
+            -WorkingDirectory $ProjectRoot `
+            -WindowStyle Hidden
+        Write-Log "Kakao notification watchdog started"
+    } catch {
+        Write-Log "ERROR: Failed to start Kakao notification watchdog: $_"
+    }
+} else {
+    Write-Log "WARNING: Kakao notification watchdog script not found: $kakaoWatchdogScript"
+}
