@@ -19,7 +19,7 @@ from app.models.base import Base
 from app.models.workflow import (
     Workflow,
     STATUS_PLANNED, STATUS_RUNNING, STATUS_MERGE_PENDING,
-    STATUS_MERGING, STATUS_MERGED, STATUS_FAILED, STATUS_CANCELLED,
+    STATUS_MERGING, STATUS_COMPLETED, STATUS_MERGED, STATUS_FAILED, STATUS_CANCELLED,
 )
 
 
@@ -42,6 +42,7 @@ def test_workflow_model_create(session):
     assert STATUS_RUNNING == "running"
     assert STATUS_MERGE_PENDING == "merge_pending"
     assert STATUS_MERGING == "merging"
+    assert STATUS_COMPLETED == "completed"
     assert STATUS_MERGED == "merged"
     assert STATUS_FAILED == "failed"
     assert STATUS_CANCELLED == "cancelled"
@@ -93,6 +94,21 @@ def test_workflow_model_mark_merged(session):
     assert wf.merged_at is not None
     assert wf.finished_at is not None
     assert wf.merged_at >= before
+
+
+def test_workflow_model_mark_completed(session):
+    """R(Right): mark_completed() → status/finished_at 설정"""
+    wf = Workflow(slug="test-completed", status=STATUS_RUNNING, created_at=datetime.now())
+    session.add(wf)
+    session.commit()
+
+    before = datetime.now()
+    wf.mark_completed()
+    session.commit()
+
+    assert wf.status == STATUS_COMPLETED
+    assert wf.finished_at is not None
+    assert wf.finished_at >= before
 
 
 def test_workflow_model_mark_failed(session):

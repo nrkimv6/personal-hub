@@ -11,7 +11,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.workflow import Workflow
+from app.models.workflow import (
+    Workflow,
+    STATUS_CANCELLED,
+    STATUS_MERGE_PENDING,
+    STATUS_MERGING,
+    STATUS_PLANNED,
+    STATUS_RUNNING,
+)
 from app.modules.dev_runner.schemas import WorkflowResponse, WorkflowCreateRequest
 
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
@@ -55,11 +62,11 @@ async def list_workflows(
 
 @router.get("/orphans", response_model=List[WorkflowResponse])
 async def list_orphan_workflows(db: Session = Depends(get_db)):
-    """고아 워크플로우 조회 — DB에 running/merge_pending이지만 Redis active_runners에 없는 항목"""
+    """고아 워크플로우 조회 — DB에 running/merge_pending/merging 이지만 Redis active_runners에 없는 항목"""
     r = sync_redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
     try:
         workflows = db.query(Workflow).filter(
-            Workflow.status.in_(["running", "merge_pending"])
+            Workflow.status.in_([STATUS_RUNNING, STATUS_MERGE_PENDING, STATUS_MERGING])
         ).all()
         orphans = []
         for wf in workflows:
@@ -101,7 +108,7 @@ async def create_workflow(req: WorkflowCreateRequest, db: Session = Depends(get_
     wf = Workflow(
         slug=slug,
         plan_file=req.plan_file,
-        status="planned",
+        status=STATUS_PLANNED,
         created_at=datetime.now(),
     )
     db.add(wf)
@@ -117,13 +124,13 @@ async def cancel_workflow(workflow_id: int, db: Session = Depends(get_db)):
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-    if wf.status not in ("planned", "running"):
+    if wf.status not in (STATUS_PLANNED, STATUS_RUNNING):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot cancel workflow in status '{wf.status}' (only planned/running allowed)"
         )
 
-    wf.status = "cancelled"
+    wf.status = STATUS_CANCELLED
     wf.finished_at = datetime.now()
     db.commit()
     db.refresh(wf)
@@ -137,7 +144,7 @@ async def reset_workflow(workflow_id: int, cleanup_worktree: bool = False, db: S
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-    if wf.status not in ("running", "merge_pending", "merging", "planned"):
+    if wf.status not in (STATUS_RUNNING, STATUS_MERGE_PENDING, STATUS_MERGING, STATUS_PLANNED):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot reset workflow in status '{wf.status}'"
@@ -168,7 +175,7 @@ async def reset_all_orphans(db: Session = Depends(get_db)):
     r = sync_redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
     try:
         workflows = db.query(Workflow).filter(
-            Workflow.status.in_(["running", "merge_pending"])
+            Workflow.status.in_([STATUS_RUNNING, STATUS_MERGE_PENDING, STATUS_MERGING])
         ).all()
         count = 0
         for wf in workflows:

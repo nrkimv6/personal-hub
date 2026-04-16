@@ -133,7 +133,7 @@ def test_cleanup_process_state_merge_pending_R(listener, fr, mock_wf_manager):
 # ─── _cleanup_orphan_plans ─────────────────────────────────
 
 def test_detect_orphan_plans_no_match_R(listener, fr, mock_wf_manager, tmp_path):
-    """plan 파일이 구현중인데 DB에 running 레코드 없으면 경고 (worktree 없으면 cleaned_count=0)"""
+    """active signal이 없으면 plan orphan cleanup 대상이 아니다."""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     (plan_dir / "2026-01-01_test.md").write_text("> 상태: 구현중\n# Test\n", encoding="utf-8")
@@ -142,17 +142,19 @@ def test_detect_orphan_plans_no_match_R(listener, fr, mock_wf_manager, tmp_path)
 
     with patch("_dr_state._wf_manager", mock_wf_manager), \
          patch("_dr_process_utils.PROJECT_ROOT", tmp_path):
-        # worktree 헤더 없으므로 cleaned_count=0이지만 경고는 찍힘
         result = listener._cleanup_orphan_plans(fr)
 
-    assert result == 0  # worktree 없어 정리 불필요, 경고만
+    assert result == 0
 
 
 def test_detect_orphan_plans_healthy_B(listener, fr, mock_wf_manager, tmp_path):
-    """정상: plan 구현중 + DB running + active_runners에 있음 → 정리 없음"""
+    """정상: active worktree + DB running + active_runners에 있음 → 정리 없음"""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
-    (plan_dir / "2026-01-01_test.md").write_text("> 상태: 구현중\n# Test\n", encoding="utf-8")
+    (plan_dir / "2026-01-01_test.md").write_text(
+        "> 상태: 구현중\n> branch: plan/test-plan\n> worktree: .worktrees/plans\n# Test\n",
+        encoding="utf-8",
+    )
 
     fr.sadd("plan-runner:active_runners", "r1")
     mock_wf_manager.list_workflows = Mock(return_value=[
@@ -160,10 +162,14 @@ def test_detect_orphan_plans_healthy_B(listener, fr, mock_wf_manager, tmp_path):
     ])
 
     with patch("_dr_state._wf_manager", mock_wf_manager), \
-         patch("_dr_process_utils.PROJECT_ROOT", tmp_path):
+         patch("_dr_process_utils.PROJECT_ROOT", tmp_path), \
+         patch("plan_worktree_helpers.is_worktree_active", return_value=(True, "plan/test-plan", tmp_path / ".worktrees" / "plans")), \
+         patch("plan_worktree_helpers.has_unmerged_commits", return_value=False), \
+         patch("worktree_manager.WorktreeManager.remove") as mock_remove:
         result = listener._cleanup_orphan_plans(fr)
 
     assert result == 0
+    mock_remove.assert_not_called()
 
 
 def test_detect_orphan_plans_scans_plans_worktree_R(listener, fr, mock_wf_manager, tmp_path):
@@ -218,7 +224,7 @@ def test_executor_service_raises_for_archived_plan():
 # ─── T3: 재현/통합 TC ─────────────────────────────────
 
 def test_archived_plan_worktree_cleanup_integration(tmp_path):
-    """T3 통합: 실제 git repo + worktree 생성 → _cleanup_orphan_plans → worktree/branch 삭제 검증"""
+    """T3 통합: archive plan은 orphan cleanup 대상이 아니어야 한다."""
     import subprocess
 
     # git repo 초기화
@@ -254,16 +260,10 @@ def test_archived_plan_worktree_cleanup_integration(tmp_path):
 
     with patch("_dr_state._wf_manager", mock_wf_manager), \
          patch("_dr_process_utils.PROJECT_ROOT", tmp_path), \
-         patch.object(listener, "WORKTREE_BASE_DIR", tmp_path / ".worktrees"):
+         patch.object(listener, "WORKTREE_BASE_DIR", tmp_path / ".worktrees"), \
+         patch("worktree_manager.WorktreeManager.remove") as mock_remove:
         result = listener._cleanup_orphan_plans(mock_redis)
 
-    # 독자 커밋 없음 → worktree/branch 정리됨
-    assert result >= 1, f"expected cleaned_count >= 1, got {result}"
-    assert not wt_dir.exists(), f"worktree dir should be removed: {wt_dir}"
-
-    # branch 삭제 확인
-    branch_check = subprocess.run(
-        ["git", "branch", "--list", "plan/test-plan"],
-        cwd=tmp_path, capture_output=True, text=True
-    )
-    assert "plan/test-plan" not in branch_check.stdout, "branch should be deleted"
+    assert result == 0
+    mock_remove.assert_not_called()
+    assert wt_dir.exists()
