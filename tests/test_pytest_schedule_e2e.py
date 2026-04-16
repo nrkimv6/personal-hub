@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.database import get_db
+from app.models.task_schedule import TaskSchedule
 from app.models.test_run import TestRun, TestResult
 from app.services.pytest_runner_service import PytestRunnerService
 from app.modules.claude_worker.models.llm_request import LLMRequest
@@ -251,7 +252,16 @@ class TestCreateFixPlanRequestsE2E:
         test_db_session.commit()
 
         mock_llm = MagicMock()
-        mock_llm.enqueue.return_value = MagicMock(id=999)
+        mock_llm.enqueue.return_value = LLMRequest(
+            caller_type="pytest_fix",
+            caller_id=f"{run.id}__tests_test_foo_py__test_fail",
+            prompt="fix prompt",
+            requested_by="scheduler",
+            request_source="pytest_auto_run",
+            provider="claude",
+            model="claude-sonnet-4-6",
+            queue_name="utility",
+        )
 
         with patch("app.modules.claude_worker.services.llm_service.LLMService", return_value=mock_llm):
             request_ids = service.create_fix_plan_requests(run.id)
@@ -261,6 +271,71 @@ class TestCreateFixPlanRequestsE2E:
         assert mock_llm.enqueue.call_count == 1
         call_kwargs = mock_llm.enqueue.call_args
         assert call_kwargs is not None
+
+    def test_schedule_provider_model_roundtrip_into_fix_requests(self, service, test_db_session):
+        """pytest_run 스케줄의 llm_provider/model이 fix request enqueue까지 이어진다."""
+        schedule = TaskSchedule(
+            name="pytest_run_daily",
+            display_name="pytest run daily",
+            target_type="pytest_run",
+            schedule_type="cron",
+            enabled=True,
+        )
+        schedule.set_target_config({
+            "test_path": "tests/",
+            "llm_provider": "claude",
+            "llm_model": "claude-sonnet-4-6",
+        })
+        test_db_session.add(schedule)
+        test_db_session.commit()
+        test_db_session.refresh(schedule)
+
+        run = TestRun(
+            status=TestRun.STATUS_COMPLETED,
+            triggered_by=TestRun.TRIGGERED_BY_MANUAL,
+            test_path="tests/",
+            total_tests=1, passed=0, failed=1, errors=0, skipped=0,
+        )
+        test_db_session.add(run)
+        test_db_session.commit()
+        test_db_session.refresh(run)
+
+        fail_r = TestResult(
+            test_run_id=run.id,
+            test_name="tests/test_foo.py::test_fail",
+            status=TestResult.STATUS_FAILED,
+            duration_seconds=0.2,
+            error_message="AssertionError",
+        )
+        test_db_session.add(fail_r)
+        test_db_session.commit()
+
+        mock_llm = MagicMock()
+        fake_llm_req = LLMRequest(
+            caller_type="pytest_fix",
+            caller_id=f"{run.id}__tests_test_foo_py__test_fail",
+            prompt="fix prompt",
+            requested_by="scheduler",
+            request_source="pytest_auto_run",
+            provider="claude",
+            model="claude-sonnet-4-6",
+            queue_name="utility",
+        )
+        mock_llm.enqueue.return_value = fake_llm_req
+
+        target_config = schedule.get_target_config()
+        with patch("app.modules.claude_worker.services.llm_service.LLMService", return_value=mock_llm):
+            request_ids = service.create_fix_plan_requests(
+                run.id,
+                provider=target_config.get("llm_provider"),
+                model=target_config.get("llm_model"),
+            )
+
+        assert len(request_ids) == 1
+        assert request_ids[0] == fake_llm_req.id
+        call_kwargs = mock_llm.enqueue.call_args.kwargs
+        assert call_kwargs["provider"] == "claude"
+        assert call_kwargs["model"] == "claude-sonnet-4-6"
 
     def test_no_failed_no_llm_request(self, service, test_db_session):
         """passed만 있는 경우 LLMRequest 0건."""
@@ -314,8 +389,16 @@ class TestCreateFixPlanRequestsE2E:
         test_db_session.commit()
         test_db_session.refresh(fail_r)
 
-        fake_llm_req = MagicMock()
-        fake_llm_req.id = 42
+        fake_llm_req = LLMRequest(
+            caller_type="pytest_fix",
+            caller_id=f"{run.id}__tests_test_foo_py__test_fail",
+            prompt="fix prompt",
+            requested_by="scheduler",
+            request_source="pytest_auto_run",
+            provider="claude",
+            model="claude-sonnet-4-6",
+            queue_name="utility",
+        )
         mock_llm = MagicMock()
         mock_llm.enqueue.return_value = fake_llm_req
 
@@ -323,7 +406,7 @@ class TestCreateFixPlanRequestsE2E:
             service.create_fix_plan_requests(run.id)
 
         test_db_session.refresh(fail_r)
-        assert fail_r.llm_request_id == 42
+        assert fail_r.llm_request_id == fake_llm_req.id
 
 
 # ============================================================
@@ -348,6 +431,20 @@ class TestSavePytestFixResultE2E:
         test_db_session.refresh(run)
 
         FIX_PLAN_LLM_ID = 77  # 가상 LLM request id
+        test_db_session.add(
+            LLMRequest(
+                id=FIX_PLAN_LLM_ID,
+                caller_type="pytest_fix",
+                caller_id=f"{run.id}__tests_test_foo_py__test_fail",
+                prompt="fix prompt",
+                requested_by="scheduler",
+                request_source="pytest_auto_run",
+                provider="claude",
+                model="claude-sonnet-4-6",
+                queue_name="utility",
+            )
+        )
+        test_db_session.commit()
 
         test_result = TestResult(
             test_run_id=run.id,
