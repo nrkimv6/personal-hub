@@ -349,24 +349,23 @@ class NotificationService:
 
         try:
             import redis.asyncio as aioredis
-            from app.core.config import settings as _settings
 
             client = aioredis.Redis(
-                host=_settings.REDIS_HOST,
-                port=_settings.REDIS_PORT,
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
                 decode_responses=True,
             )
             try:
                 queue = KakaoNotificationQueue(
                     client,
-                room_name=getattr(_settings, "MEGABEAUTY_KAKAO_ALERT_ROOM_NAME", "소나무봇"),
+                    room_name=getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ROOM_NAME", "소나무봇"),
                 )
                 result = await queue.enqueue(
                     message,
                     source="coupang-megabeautyshow",
                     metadata=metadata,
-                    expires_seconds=getattr(_settings, "MEGABEAUTY_KAKAO_ALERT_EXPIRES_SECONDS", 900),
-                    dedup_ttl_seconds=getattr(_settings, "MEGABEAUTY_KAKAO_ALERT_DEDUP_TTL_SECONDS", 300),
+                    expires_seconds=getattr(settings, "MEGABEAUTY_KAKAO_ALERT_EXPIRES_SECONDS", 900),
+                    dedup_ttl_seconds=getattr(settings, "MEGABEAUTY_KAKAO_ALERT_DEDUP_TTL_SECONDS", 300),
                 )
 
                 if result.get("disabled"):
@@ -403,11 +402,10 @@ class NotificationService:
 
         try:
             import redis.asyncio as aioredis
-            from app.core.config import settings as _settings
 
             client = aioredis.Redis(
-                host=_settings.REDIS_HOST,
-                port=_settings.REDIS_PORT,
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
                 decode_responses=True,
             )
             try:
@@ -415,7 +413,7 @@ class NotificationService:
                 accepted = await client.set(
                     cooldown_key,
                     str(queue_length),
-                    ex=getattr(_settings, "MEGABEAUTY_KAKAO_ALERT_BACKLOG_COOLDOWN_SECONDS", 600),
+                    ex=getattr(settings, "MEGABEAUTY_KAKAO_ALERT_BACKLOG_COOLDOWN_SECONDS", 600),
                     nx=True,
                 )
                 if not accepted:
@@ -424,7 +422,7 @@ class NotificationService:
                 alert_message = (
                     "[Kakao backlog] "
                     f"queue={queue_length} >= threshold={threshold}, "
-                    f"room={getattr(_settings, 'MEGABEAUTY_KAKAO_ALERT_ROOM_NAME', '소나무봇')}"
+                    f"room={getattr(settings, 'MEGABEAUTY_KAKAO_ALERT_ROOM_NAME', '소나무봇')}"
                 )
                 await self.send_telegram(alert_message, force_send=True)
             finally:

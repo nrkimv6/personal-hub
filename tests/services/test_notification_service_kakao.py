@@ -25,7 +25,7 @@ def notification_service():
         mock_settings.REDIS_PORT = 6379
 
         from app.shared.notification.notification_service import NotificationService
-        return NotificationService()
+        yield NotificationService()
 
 
 @pytest.mark.asyncio
