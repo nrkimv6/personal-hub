@@ -437,6 +437,18 @@ class TestCreateFixPlanRequestsRight:
         call_kwargs = mock_enqueue.call_args[1]
         assert call_kwargs["caller_type"] == "pytest_fix"
 
+    def test_defaults_provider_and_model_are_none(self, runner, test_db_session, sample_test_run, failed_test_result):
+        """기본 인자 생략 시 provider/model=None 전달."""
+        with patch("app.modules.claude_worker.services.llm_service.LLMService.enqueue") as mock_enqueue:
+            from app.modules.claude_worker.models.llm_request import LLMRequest
+            fake_req = LLMRequest(id=112, caller_type="pytest_fix", caller_id="x", prompt="p", status="pending")
+            mock_enqueue.return_value = fake_req
+            runner.create_fix_plan_requests(sample_test_run.id)
+
+        call_kwargs = mock_enqueue.call_args[1]
+        assert call_kwargs["provider"] is None
+        assert call_kwargs["model"] is None
+
 
 class TestCreateFixPlanRequestsBoundary:
     """Boundary: 경계값 (CORRECT)."""

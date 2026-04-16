@@ -190,6 +190,26 @@ class TestCreateScheduleRight:
         assert data["target_type"] == "writing_task"
         assert data["display_name"] == "글쓰기 태스크"
 
+    def test_create_pytest_schedule_success(self, client):
+        """pytest_run 스케줄 생성 성공"""
+        response = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "pytest_run",
+            "target_config": {
+                "test_path": "tests/",
+                "extra_args": ["-q"],
+                "auto_fix_plan": True,
+                "llm_provider": "claude",
+                "llm_model": "",
+            },
+            "schedule_type": "cron",
+            "schedule_value": {"time": "02:00"},
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["target_type"] == "pytest_run"
+        assert data["display_name"] == "pytest 자동 실행"
+
 
 class TestGetSchedules:
     """스케줄 목록 조회 테스트"""
@@ -609,4 +629,56 @@ class TestUpdateScheduleTargetConfig:
         detail_data = detail.json()
         assert detail_data["legacy_placeholder_candidate"] is False
         assert detail_data["resolution_source"] in {"inherit", "caller_default"}
+
+    def test_update_schedule_target_config_remove_llm_keys(self, client):
+        """TC-Remove: llm_provider/model null PATCH → 키 제거 확인."""
+        schedule_id = self._create_writing_schedule(client)
+
+        response = client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini", "llm_model": "gemini-3-flash"}
+        })
+        assert response.status_code == 200
+
+        response = client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": None, "llm_model": None}
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        tc = data.get("target_config") or {}
+        assert "llm_provider" not in tc
+        assert "llm_model" not in tc
+
+    def test_pytest_schedule_target_config_roundtrip(self, client):
+        """TC-RoundTrip: pytest_run create/update에서 llm_provider/model 왕복."""
+        create_resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "pytest_run",
+            "target_config": {
+                "test_path": "tests/test_sample.py",
+                "extra_args": ["-q"],
+                "auto_fix_plan": True,
+                "llm_provider": "claude",
+                "llm_model": "claude-sonnet-4-6",
+            },
+            "schedule_type": "cron",
+            "schedule_value": {"time": "02:00"},
+        })
+        assert create_resp.status_code == 200
+        schedule_id = create_resp.json()["id"]
+
+        detail_resp = client.get(f"{API_PREFIX}/collect/schedules/{schedule_id}")
+        assert detail_resp.status_code == 200
+        detail = detail_resp.json()
+        tc = detail.get("target_config") or {}
+        assert tc.get("llm_provider") == "claude"
+        assert tc.get("llm_model") == "claude-sonnet-4-6"
+
+        update_resp = client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": None, "llm_model": None}
+        })
+        assert update_resp.status_code == 200
+        updated = update_resp.json()
+        updated_tc = updated.get("target_config") or {}
+        assert "llm_provider" not in updated_tc
+        assert "llm_model" not in updated_tc
 

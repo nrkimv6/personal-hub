@@ -50,6 +50,7 @@
 	let pytestTestPath = 'tests/';
 	let pytestExtraArgs = '';
 	let pytestAutoFixPlan = true;
+	let pytestLlmUseSystemDefaults = true;
 	let providers = $state<ProviderInfo[]>([]);
 	let pytestLlmProvider = 'claude';
 	let pytestLlmModel = '';
@@ -98,6 +99,7 @@
 	let editGoogleSitesearch = '';
 	let editShowAdvanced = false;
 	// LLM 설정 (instagram_feed, writing_task, topic_extract 전용)
+	let editLlmUseSystemDefaults = true;
 	let editLlmProvider = 'claude';
 	let editLlmModel = '';
 	let showLegacyRepairModal = false;
@@ -105,7 +107,7 @@
 	let loadingLegacyRepair = false;
 	let applyingLegacyRepair = false;
 
-	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract'];
+	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract', 'pytest_run'];
 
 	const scheduleTypes = [
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: Instagram, color: 'pink' },
@@ -160,6 +162,7 @@
 		selectedType = '';
 		selectedTarget = null;
 		scheduleTimes = ['09:00', '12:00', '18:00'];
+		pytestLlmUseSystemDefaults = true;
 		resetNewSearchForm();
 	}
 
@@ -277,13 +280,16 @@
 					.split(/\s+/)
 					.map((s) => s.trim())
 					.filter(Boolean);
-				data.target_config = {
+				const pytestTargetConfig: Record<string, unknown> = {
 					test_path: pytestTestPath.trim() || 'tests/',
 					extra_args: extraArgsList,
-					auto_fix_plan: pytestAutoFixPlan,
-					llm_provider: pytestLlmProvider,
-					llm_model: pytestLlmModel.trim()
+					auto_fix_plan: pytestAutoFixPlan
 				};
+				if (!pytestLlmUseSystemDefaults) {
+					pytestTargetConfig.llm_provider = pytestLlmProvider;
+					pytestTargetConfig.llm_model = pytestLlmModel.trim();
+				}
+				data.target_config = pytestTargetConfig;
 			} else if (selectedType === 'instagram_feed' && selectedTarget) {
 				data.target_config = { service_account_id: selectedTarget.id };
 			} else if (selectedType === 'google_search') {
@@ -364,12 +370,16 @@
 				editGoogleSitesearch = '';
 			}
 
-			// LLM 설정 복원 (instagram_feed, writing_task, topic_extract)
+			// LLM 설정 복원 (instagram_feed, writing_task, topic_extract, pytest_run)
 			if (LLM_TARGET_TYPES.includes(schedule.target_type) && detail.target_config) {
 				const tc = detail.target_config as Record<string, string>;
+				const hasLlmProvider = Object.prototype.hasOwnProperty.call(tc, 'llm_provider');
+				const hasLlmModel = Object.prototype.hasOwnProperty.call(tc, 'llm_model');
+				editLlmUseSystemDefaults = !(hasLlmProvider || hasLlmModel);
 				editLlmProvider = tc.llm_provider || 'claude';
 				editLlmModel = tc.llm_model || '';
 			} else {
+				editLlmUseSystemDefaults = true;
 				editLlmProvider = 'claude';
 				editLlmModel = '';
 			}
@@ -397,7 +407,7 @@
 				display_name?: string;
 				schedule_value?: Record<string, unknown>;
 				google_search_params?: Record<string, unknown>;
-				target_config?: Record<string, unknown>;
+				target_config?: Record<string, unknown> | null;
 			} = {};
 
 			// 표시 이름
@@ -430,12 +440,14 @@
 				};
 			}
 
-			// LLM 설정 (instagram_feed, writing_task, topic_extract)
+			// LLM 설정 (instagram_feed, writing_task, topic_extract, pytest_run)
 			if (LLM_TARGET_TYPES.includes(editSchedule.target_type)) {
-				updateData.target_config = {
-					llm_provider: editLlmProvider,
-					llm_model: editLlmModel
-				};
+				updateData.target_config = editLlmUseSystemDefaults
+					? { llm_provider: null, llm_model: null }
+					: {
+							llm_provider: editLlmProvider,
+							llm_model: editLlmModel
+						};
 			}
 
 			await collectApi.updateSchedule(editSchedule.id, updateData);
@@ -991,11 +1003,20 @@
 
 								{#if pytestAutoFixPlan}
 									<div class="space-y-3 pl-1">
+										<label class="flex items-center gap-3 text-sm text-foreground">
+											<input
+												type="checkbox"
+												bind:checked={pytestLlmUseSystemDefaults}
+												class="rounded border-border text-primary focus:ring-ring"
+											/>
+											<span>시스템 기본값 사용</span>
+										</label>
 										<div>
 											<label for="pytest-provider" class="block text-sm font-medium text-foreground mb-1">LLM Provider</label>
 											<select
 												id="pytest-provider"
 												bind:value={pytestLlmProvider}
+												disabled={pytestLlmUseSystemDefaults}
 												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring text-sm"
 											>
 												{#if providers.length > 0}
@@ -1014,10 +1035,16 @@
 												id="pytest-model"
 												type="text"
 												bind:value={pytestLlmModel}
+												disabled={pytestLlmUseSystemDefaults}
 												placeholder="비워두면 기본 모델 사용"
 												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring text-sm"
 											/>
 										</div>
+										{#if pytestLlmUseSystemDefaults}
+											<p class="text-xs text-muted-foreground">
+												LLM 수정계획은 시스템 기본값과 caller defaults를 따릅니다.
+											</p>
+										{/if}
 									</div>
 								{/if}
 							</div>
@@ -1406,16 +1433,25 @@
 							</div>
 						{/if}
 
-						<!-- LLM 설정 (instagram_feed, writing_task, topic_extract) -->
+						<!-- LLM 설정 (instagram_feed, writing_task, topic_extract, pytest_run) -->
 						{#if LLM_TARGET_TYPES.includes(editSchedule.target_type)}
 							<div class="border-t border-border pt-4">
 								<h3 class="font-medium text-foreground mb-3">LLM 설정</h3>
 								<div class="space-y-3">
+									<label class="flex items-center gap-3 text-sm text-foreground">
+										<input
+											type="checkbox"
+											bind:checked={editLlmUseSystemDefaults}
+											class="rounded border-border text-primary focus:ring-ring"
+										/>
+										<span>시스템 기본값 사용</span>
+									</label>
 									<div>
 										<label for="edit-llm-provider" class="block text-sm font-medium text-foreground mb-1">LLM Provider</label>
 										<select
 											id="edit-llm-provider"
 											bind:value={editLlmProvider}
+											disabled={editLlmUseSystemDefaults}
 											class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 										>
 											{#if providers.length > 0}
@@ -1434,10 +1470,16 @@
 											id="edit-llm-model"
 											type="text"
 											bind:value={editLlmModel}
+											disabled={editLlmUseSystemDefaults}
 											placeholder="비워두면 기본 모델 사용"
 											class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 										/>
 									</div>
+									{#if editLlmUseSystemDefaults}
+										<p class="text-xs text-muted-foreground">
+											저장 시 llm_provider / llm_model 키를 제거합니다.
+										</p>
+									{/if}
 								</div>
 							</div>
 						{/if}

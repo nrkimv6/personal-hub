@@ -98,6 +98,19 @@ def test_enqueue_with_auto_resolve_uses_picker(llm_svc, db_session):
 
 
 @pytest.mark.integration
+def test_resolve_plan_requirements_sync_uses_step_picker(llm_svc, db_session):
+    """plan_requirements_sync가 step picker 경로를 타는지 확인."""
+    provider, model = llm_svc.resolve_provider_model(
+        caller_type="plan_requirements_sync",
+        provider=None,
+        model=None,
+    )
+
+    assert provider == "claude"
+    assert model == "claude-opus-4-6"
+
+
+@pytest.mark.integration
 def test_enqueue_respects_explicit_override(llm_svc, db_session):
     """명시 provider/model 전달 시 picker 우회: DB에 명시값 그대로 저장."""
     req = llm_svc.enqueue(

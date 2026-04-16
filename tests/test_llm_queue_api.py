@@ -364,6 +364,7 @@ class TestLlmDefaultsApi:
         data = response.json()
         assert data["global_default"]["provider"] == "claude"
         assert "dev_runner" in data["known_caller_types"]
+        assert "plan_requirements_sync" in data["known_caller_types"]
 
     def test_put_defaults_and_create_request_uses_caller_fallback(self, client):
         put_resp = client.put(

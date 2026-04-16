@@ -1,7 +1,7 @@
 """Instagram Classifier LLM Provider 테스트.
 
 테스트 범위:
-1. LLMClassifierService.create_request() 에 provider 파라미터가 enqueue()로 전달되는지
+1. LLMClassifierService.create_request() 에 provider/model 파라미터가 enqueue()로 전달되는지
 2. ClassifierService._trigger_llm_classification_if_needed() 가
    instagram_feed 스케줄의 target_config에서 provider를 읽어 전달하는지
 """
@@ -72,8 +72,8 @@ class TestLLMClassifierServiceProvider(unittest.TestCase):
             f"enqueue()에 model='gemini-2.0-flash' 전달 안 됨: {call_kwargs.kwargs}"
         )
 
-    def test_create_request_default_claude_provider(self):
-        """TC-Default: provider 미지정(기본값) 시 enqueue()에 provider='claude' 전달됨."""
+    def test_create_request_default_none_provider(self):
+        """TC-Default: provider 미지정 시 enqueue()에 provider/model=None 전달됨."""
         post = self._make_mock_post()
         service = self._make_service_with_mock_db(post)
 
@@ -81,8 +81,11 @@ class TestLLMClassifierServiceProvider(unittest.TestCase):
 
         service._llm_service.enqueue.assert_called_once()
         call_kwargs = service._llm_service.enqueue.call_args
-        assert call_kwargs.kwargs.get("provider") == "claude", (
-            f"기본값 provider='claude' 아님: {call_kwargs.kwargs}"
+        assert call_kwargs.kwargs.get("provider") is None, (
+            f"기본값 provider=None 아님: {call_kwargs.kwargs}"
+        )
+        assert call_kwargs.kwargs.get("model") is None, (
+            f"기본값 model=None 아님: {call_kwargs.kwargs}"
         )
 
     def test_create_requests_batch_passes_provider(self):
@@ -167,8 +170,8 @@ class TestClassifierServiceProviderFromSchedule(unittest.TestCase):
             f"create_request()에 provider='gemini' 전달 안 됨: {call_kwargs}"
         )
 
-    def test_trigger_defaults_to_claude_when_no_schedule(self):
-        """TC-Default: instagram_feed 스케줄 없을 때 기본값 provider='claude' 사용."""
+    def test_trigger_defaults_to_none_when_no_schedule(self):
+        """TC-Default: instagram_feed 스케줄 없을 때 기본값 provider/model=None 사용."""
         service = self._make_classifier_service()
 
         # 스케줄 없음
@@ -189,8 +192,11 @@ class TestClassifierServiceProviderFromSchedule(unittest.TestCase):
 
         mock_llm_service.create_request.assert_called_once()
         call_kwargs = mock_llm_service.create_request.call_args
-        assert call_kwargs.kwargs.get("provider") == "claude", (
-            f"기본값 provider='claude' 아님: {call_kwargs}"
+        assert call_kwargs.kwargs.get("provider") is None, (
+            f"기본값 provider=None 아님: {call_kwargs}"
+        )
+        assert call_kwargs.kwargs.get("model") is None, (
+            f"기본값 model=None 아님: {call_kwargs}"
         )
 
     def test_trigger_no_llm_when_tag_not_trigger(self):

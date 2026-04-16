@@ -9,6 +9,27 @@ from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.llm_service import LLMService
 
 
+def _merge_target_config(existing: Optional[dict], patch: dict) -> dict:
+    """target_config patch를 병합한다.
+
+    None / 빈 문자열 값은 해당 key 삭제로 해석한다.
+    """
+    merged = dict(existing or {})
+    for key, value in patch.items():
+        if value is None:
+            merged.pop(key, None)
+            continue
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized == "":
+                merged.pop(key, None)
+                continue
+            merged[key] = normalized
+            continue
+        merged[key] = value
+    return merged
+
+
 class TaskScheduleService:
     """태스크 스케줄 관리 서비스."""
 
@@ -363,7 +384,12 @@ class TaskScheduleService:
 
         for key, value in updates.items():
             if key == "target_config" and isinstance(value, dict):
-                schedule.set_target_config(value)
+                existing = schedule.get_target_config() if schedule.target_config else {}
+                merged = _merge_target_config(existing, value)
+                if merged:
+                    schedule.set_target_config(merged)
+                else:
+                    schedule.target_config = None
             elif hasattr(schedule, key):
                 setattr(schedule, key, value)
 

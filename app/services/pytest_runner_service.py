@@ -251,16 +251,16 @@ class PytestRunnerService:
     def create_fix_plan_requests(
         self,
         test_run_id: int,
-        provider: str = "claude",
-        model: str = "",
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
         queue_name: str = "utility",
     ) -> List[int]:
         """실패 테스트에 대해 LLM 수정계획서 요청을 생성한다.
 
         Args:
             test_run_id: TestRun ID
-            provider: LLM provider ('claude', 'gemini')
-            model: 모델명 (빈 문자열 = provider 기본 모델)
+            provider: LLM provider (None이면 resolver에 위임)
+            model: 모델명 (None이면 resolver에 위임)
             queue_name: LLM 큐 이름
 
         Returns:
@@ -300,6 +300,9 @@ class PytestRunnerService:
                 queue_name=queue_name,
             )
 
+            # enqueue()가 mock으로 대체된 경우에도 FK 연결이 가능하도록 세션에 붙인다.
+            self.db.add(req)
+            self.db.flush()
             # TestResult에 llm_request_id 연결
             result.llm_request_id = req.id
             request_ids.append(req.id)

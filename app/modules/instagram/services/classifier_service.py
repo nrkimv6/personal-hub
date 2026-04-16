@@ -229,12 +229,13 @@ class ClassifierService:
                     .filter_by(target_type="instagram_feed", enabled=True)
                     .first()
                 )
-                provider = "claude"
-                model = ""
                 if schedule:
                     config = schedule.get_target_config()
-                    provider = config.get("llm_provider", "claude")
-                    model = config.get("llm_model", "")
+                    provider = config.get("llm_provider")
+                    model = config.get("llm_model")
+                else:
+                    provider = None
+                    model = None
 
                 llm_service.create_request(post_id, trigger_tag, provider=provider, model=model)
                 logger.info(f"LLM classification queued for post {post_id} (trigger: {trigger_tag}, provider: {provider})")
