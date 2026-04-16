@@ -126,7 +126,7 @@
 				<div
 					class={`h-full rounded transition-all ${isComplete ? 'bg-success' : 'bg-primary'}`}
 					style={`width: ${progressPercent}%`}
-				/>
+				></div>
 			</div>
 		{:else}
 			<div class="rounded-md border border-dashed border-border px-3 py-2">

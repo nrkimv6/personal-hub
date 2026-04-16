@@ -435,7 +435,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 
 	{#if open}
 		<ExecuteModalShell open={open} onClose={onClose} titleId={plan ? 'plan-modal-title' : 'execute-modal-title'}>
-			<svelte:fragment slot="header">
+			{#snippet header()}
 				{#if plan}
 					<PlanIdentityHeader
 						filename={plan.filename}
@@ -457,9 +457,9 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 						</button>
 					</div>
 				{/if}
-			</svelte:fragment>
+			{/snippet}
 
-			<svelte:fragment slot="banner">
+			{#snippet banner()}
 				{#if actionError}
 					<div class="flex items-center justify-between gap-2 bg-destructive px-5 py-2 text-xs text-destructive-foreground">
 						<span>{actionError}</span>
@@ -495,7 +495,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 						onRegenerate={onGenerateSummary ?? (() => {})}
 					/>
 				{/if}
-			</svelte:fragment>
+			{/snippet}
 
 			<div class="min-h-full p-5">
 				<ExecutionSettingsForm
@@ -529,20 +529,20 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				/>
 			</div>
 
-			<svelte:fragment slot="actions">
-					<ActionBar
-						status={status}
-						anyRunning={anyRunning}
-						actionLoading={actionLoading}
-						mode={mode}
-						selectedPlan={selectedPlan}
-						selectedPlanArchived={selectedPlanArchived}
-						onStop={handleStop}
+			{#snippet actions()}
+				<ActionBar
+					status={status}
+					anyRunning={anyRunning}
+					actionLoading={actionLoading}
+					mode={mode}
+					selectedPlan={selectedPlan}
+					selectedPlanArchived={selectedPlanArchived}
+					onStop={handleStop}
 					onSync={handleSync}
 					onReset={() => handleResetState(false)}
 					onFullReset={() => handleResetState(true)}
 					onStart={handleStart}
 				/>
-			</svelte:fragment>
+			{/snippet}
 		</ExecuteModalShell>
 	{/if}

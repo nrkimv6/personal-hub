@@ -1,11 +1,17 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
+
 	interface Props {
 		open: boolean;
 		onClose: () => void;
 		titleId?: string;
+		header: Snippet;
+		banner?: Snippet;
+		children: Snippet;
+		actions?: Snippet;
 	}
 
-	let { open, onClose, titleId = 'execute-modal-title' }: Props = $props();
+	let { open, onClose, titleId = 'execute-modal-title', header, banner, children, actions }: Props = $props();
 	let previousOverflow = '';
 
 	$effect(() => {
@@ -41,17 +47,18 @@
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby={titleId}
+			tabindex="-1"
 			onclick={(event) => event.stopPropagation()}
 		>
-			<slot name="header" />
+			{@render header()}
 
-			<slot name="banner" />
+			{@render banner?.()}
 
 			<div class="flex-1 min-h-0 overflow-y-auto">
-				<slot />
+				{@render children()}
 			</div>
 
-			<slot name="actions" />
+			{@render actions?.()}
 		</div>
 	</div>
 {/if}
