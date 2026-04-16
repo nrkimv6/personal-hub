@@ -107,3 +107,21 @@ class ErrorLogStatsResponse(BaseModel):
     by_type: List[ErrorLogTypeStats]
     by_hour: List[ErrorLogHourlyStats]
     period_hours: int  # 통계 기간 (시간)
+
+
+class OperationalIssueResponse(BaseModel):
+    """파일 기반 운영 장애 응답"""
+    id: str
+    created_at: datetime
+    source: str
+    severity: str
+    error_type: str
+    message: str
+    traceback: Optional[str] = None
+    context: Optional[dict[str, Any]] = None
+
+
+class OperationalIssueList(BaseModel):
+    """운영 장애 목록 응답"""
+    items: List[OperationalIssueResponse]
+    total: int

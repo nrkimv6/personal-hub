@@ -953,6 +953,22 @@ export interface ErrorLogStatsResponse {
   period_hours: number;
 }
 
+export interface OperationalIssue {
+  id: string;
+  created_at: string;
+  source: string;
+  severity: string;
+  error_type: string;
+  message: string;
+  traceback?: string;
+  context?: Record<string, unknown>;
+}
+
+export interface OperationalIssueList {
+  items: OperationalIssue[];
+  total: number;
+}
+
 export interface ErrorListParams {
   source?: string;
   severity?: string;
@@ -987,6 +1003,16 @@ export const errorApi = {
 
   // 소스 목록 조회
   sources: () => request<string[]>('/errors/sources'),
+
+  // 파일 기반 운영 장애 이력 조회
+  operational: (params: { source?: string; search?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.source) query.append('source', params.source);
+    if (params.search) query.append('search', params.search);
+    if (params.limit) query.append('limit', String(params.limit));
+    const queryStr = query.toString();
+    return request<OperationalIssueList>(`/errors/operational${queryStr ? `?${queryStr}` : ''}`);
+  },
 
   // 에러 타입 목록 조회
   types: (source?: string) => {

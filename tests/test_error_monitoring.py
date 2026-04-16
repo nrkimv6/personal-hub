@@ -202,6 +202,8 @@ class TestErrorSourceConstants:
         """에러 소스 값 테스트"""
         assert ErrorSource.API == "api"
         assert ErrorSource.WORKER == "worker"
+        assert ErrorSource.DATABASE == "database"
+        assert ErrorSource.MIGRATION == "migration"
         assert ErrorSource.NAVER == "naver"
         assert ErrorSource.INSTAGRAM == "instagram"
         assert ErrorSource.WRITING == "writing"

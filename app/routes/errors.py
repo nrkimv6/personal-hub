@@ -19,9 +19,31 @@ from app.schemas.error_log import (
     ErrorLogTypeStats,
     ErrorLogHourlyStats,
     ErrorLogStatsResponse,
+    OperationalIssueResponse,
+    OperationalIssueList,
 )
 
 router = APIRouter(prefix="/api/v1/errors", tags=["errors"])
+
+
+@router.get("/operational", response_model=OperationalIssueList)
+def get_operational_issues(
+    source: Optional[str] = Query(None, description="소스로 필터링 (database/migration)"),
+    search: Optional[str] = Query(None, description="메시지/컨텍스트 검색"),
+    limit: int = Query(100, ge=1, le=500, description="조회 개수"),
+):
+    """파일 기반 운영 장애 이력을 조회합니다."""
+    from app.services.operational_issue_store import OperationalIssueStore
+
+    items = OperationalIssueStore.list(
+        source=source,
+        search=search,
+        limit=limit,
+    )
+    return OperationalIssueList(
+        items=[OperationalIssueResponse.model_validate(item) for item in items],
+        total=len(items),
+    )
 
 
 @router.get("", response_model=ErrorLogList)

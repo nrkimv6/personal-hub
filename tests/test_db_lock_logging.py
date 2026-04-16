@@ -130,6 +130,23 @@ def test_locked_error_logging(caplog):
     assert any("[DB-LOCKED]" in r.message for r in caplog.records)
 
 
+def test_locked_error_reports_operational_issue():
+    """R: database locked 예외는 운영 장애 저장소로도 전달된다."""
+    from sqlalchemy.exc import OperationalError
+
+    exc_ctx = MagicMock()
+    exc_ctx.original_exception = OperationalError("database is locked", None, None)
+    exc_ctx.sqlalchemy_exception = OperationalError("stmt", {}, exc_ctx.original_exception)
+    exc_ctx.statement = "INSERT INTO t VALUES (3, 'z')"
+    exc_ctx.parameters = {"id": 3}
+    exc_ctx.is_disconnect = False
+
+    with patch("app.services.operational_issue_store.OperationalIssueReporter.report") as mock_report:
+        _on_handle_error(exc_ctx)
+
+    mock_report.assert_called_once()
+
+
 # ── 세션 이벤트 훅 ────────────────────────────────────────────────────────
 
 def test_slow_txn_commit_warning(caplog):

@@ -110,6 +110,25 @@ async def lifespan(app: FastAPI):
         logger.info("추가 테이블 초기화 완료")
     except Exception as e:
         logger.error(f"추가 테이블 초기화 실패: {str(e)}")
+        try:
+            from app.services.operational_issue_store import (
+                OperationalIssueReporter,
+                OperationalIssueSource,
+            )
+
+            OperationalIssueReporter.report(
+                error=e,
+                source=OperationalIssueSource.MIGRATION,
+                severity="critical",
+                context={
+                    "phase": "api_startup",
+                    "step": "db_init",
+                },
+                notify=True,
+                persist_error_log=True,
+            )
+        except Exception:
+            pass
 
     # image_classifier: stale task_progress 정리 (서버 재시작 시 running → failed)
     try:

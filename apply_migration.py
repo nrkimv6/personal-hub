@@ -2,6 +2,11 @@
 import sqlite3
 from pathlib import Path
 
+from app.services.operational_issue_store import (
+    OperationalIssueReporter,
+    OperationalIssueSource,
+)
+
 DB_PATH = Path(__file__).parent / "data" / "monitor.db"
 MIGRATIONS_DIR = Path(__file__).parent / "app" / "migrations"
 
@@ -21,6 +26,18 @@ def apply_migration(migration_file: Path):
         print(f"[+] Successfully applied: {migration_file.name}")
     except Exception as e:
         print(f"[!] Error applying {migration_file.name}: {e}")
+        OperationalIssueReporter.report(
+            error=e,
+            source=OperationalIssueSource.MIGRATION,
+            severity="critical",
+            context={
+                "script": "apply_migration.py",
+                "migration_file": migration_file.name,
+                "db_path": str(DB_PATH),
+            },
+            notify=True,
+            persist_error_log=True,
+        )
         conn.rollback()
         raise
     finally:

@@ -21,6 +21,8 @@ from app.core.config import settings
 class ErrorSource:
     API = "api"
     WORKER = "worker"
+    DATABASE = "database"
+    MIGRATION = "migration"
     NAVER = "naver"
     INSTAGRAM = "instagram"
     WRITING = "writing"

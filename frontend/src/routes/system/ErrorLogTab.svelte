@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { errorApi, type ErrorLog, type ErrorLogStatsResponse, type ErrorListParams } from '$lib/api';
+  import {
+    errorApi,
+    type ErrorLog,
+    type ErrorLogStatsResponse,
+    type ErrorListParams,
+    type OperationalIssue,
+  } from '$lib/api';
   import { createSelection } from '$lib/utils/selection.svelte';
 
   // Props
@@ -15,6 +21,7 @@
   let total = $state(0);
   let loading = $state(true);
   let statsLoading = $state(true);
+  let operationalLoading = $state(true);
 
   // 필터
   let source = $state('');
@@ -30,6 +37,8 @@
   // 모달
   let detailModal = $state<ErrorLog | null>(null);
   let sources = $state<string[]>([]);
+  let operationalIssues = $state<OperationalIssue[]>([]);
+  let operationalSource = $state('');
 
   const REFRESH_INTERVAL = 30000; // 30초
 
@@ -74,10 +83,30 @@
     }
   }
 
+  async function fetchOperationalIssues() {
+    operationalLoading = true;
+    try {
+      const result = await errorApi.operational({
+        source: operationalSource || undefined,
+        limit: 20,
+      });
+      operationalIssues = result.items;
+    } catch (e) {
+      console.error('Failed to fetch operational issues:', e);
+    } finally {
+      operationalLoading = false;
+    }
+  }
+
   function handleFilterChange() {
     page = 1;
     selection.clear();
     fetchErrors();
+  }
+
+  function selectOperationalSource(next: string) {
+    operationalSource = next;
+    fetchOperationalIssues();
   }
 
   async function resolveError(id: number) {
@@ -124,6 +153,8 @@
   function getSourceColor(src: string): string {
     const colors: Record<string, string> = {
       api: 'bg-primary-light text-primary dark:bg-blue-900/30 dark:text-blue-400',
+      database: 'bg-error-light text-error dark:bg-red-900/30 dark:text-red-300',
+      migration: 'bg-warning-light text-warning dark:bg-orange-900/30 dark:text-orange-300',
       worker: 'bg-purple-light text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
       naver: 'bg-success-light text-success dark:bg-green-900/30 dark:text-green-400',
       instagram: 'bg-pink-light text-pink dark:bg-pink-900/30 dark:text-pink-400',
@@ -136,9 +167,11 @@
     fetchStats();
     fetchErrors();
     fetchSources();
+    fetchOperationalIssues();
     const interval = setInterval(() => {
       fetchStats();
       fetchErrors();
+      fetchOperationalIssues();
     }, REFRESH_INTERVAL);
     return () => clearInterval(interval);
   });
@@ -189,6 +222,64 @@
       </div>
     {/if}
   {/if}
+
+  <!-- DB / 마이그레이션 운영 장애 -->
+  <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h3 class="text-sm font-medium text-foreground dark:text-white">DB / 마이그레이션 장애 이력</h3>
+        <p class="text-xs text-muted-foreground dark:text-muted-foreground mt-1">
+          DB 연결 실패나 스키마/마이그레이션 오류는 파일에도 기록되어 DB 장애 중에도 보존됩니다.
+        </p>
+      </div>
+      <div class="flex gap-2">
+        <button
+          onclick={() => selectOperationalSource('')}
+          class={`px-3 py-1.5 rounded-lg text-xs border ${operationalSource === '' ? 'bg-primary text-white border-primary' : 'border-border text-muted-foreground dark:border-gray-600 dark:text-muted-foreground'}`}
+        >
+          전체
+        </button>
+        <button
+          onclick={() => selectOperationalSource('database')}
+          class={`px-3 py-1.5 rounded-lg text-xs border ${operationalSource === 'database' ? 'bg-error text-white border-error' : 'border-border text-muted-foreground dark:border-gray-600 dark:text-muted-foreground'}`}
+        >
+          DB
+        </button>
+        <button
+          onclick={() => selectOperationalSource('migration')}
+          class={`px-3 py-1.5 rounded-lg text-xs border ${operationalSource === 'migration' ? 'bg-warning text-white border-warning' : 'border-border text-muted-foreground dark:border-gray-600 dark:text-muted-foreground'}`}
+        >
+          마이그레이션
+        </button>
+      </div>
+    </div>
+
+    {#if operationalLoading}
+      <div class="text-sm text-muted-foreground dark:text-muted-foreground">운영 장애 이력 로딩 중...</div>
+    {:else if operationalIssues.length === 0}
+      <div class="text-sm text-muted-foreground dark:text-muted-foreground">기록된 운영 장애가 없습니다.</div>
+    {:else}
+      <div class="space-y-3">
+        {#each operationalIssues as issue}
+          <div class="border border-border dark:border-gray-700 rounded-lg p-3 space-y-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs text-muted-foreground dark:text-muted-foreground">{formatDate(issue.created_at)}</span>
+              <span class="px-2 py-1 text-xs rounded-full {getSourceColor(issue.source)}">{issue.source}</span>
+              <span class="px-2 py-1 text-xs rounded-full {getSeverityColor(issue.severity)}">{issue.severity}</span>
+              <span class="text-xs font-mono text-foreground dark:text-gray-300">{issue.error_type}</span>
+            </div>
+            <div class="text-sm text-foreground dark:text-white break-words">{issue.message}</div>
+            {#if issue.context && Object.keys(issue.context).length > 0}
+              <details class="text-xs">
+                <summary class="cursor-pointer text-muted-foreground dark:text-muted-foreground">컨텍스트</summary>
+                <pre class="mt-2 p-3 bg-muted dark:bg-gray-900 rounded overflow-auto">{JSON.stringify(issue.context, null, 2)}</pre>
+              </details>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
 
   <!-- 필터 -->
   <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
