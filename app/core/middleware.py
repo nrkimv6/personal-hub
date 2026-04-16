@@ -17,7 +17,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 import re
-from app.core.config import settings, logger
+from app.core.config import get_runtime_app_mode, settings, logger
 from app.core.auth import verify_token, is_localhost_request
 
 # 운영 모드에서 비관리자에게 허용할 API 패턴 (화이트리스트)
@@ -65,7 +65,7 @@ class ProductionModeMiddleware(BaseHTTPMiddleware):
             status_code=403,
             content={
                 "detail": "관리자 로그인이 필요합니다.",
-                "mode": settings.APP_MODE,
+                "mode": get_runtime_app_mode(settings_app_mode=settings.APP_MODE),
                 "blocked_action": f"{request.method} {request.url.path}",
                 "hint": "관리자로 로그인하세요."
             }

@@ -5,6 +5,38 @@ from unittest.mock import MagicMock, patch
 from scripts.services import service_run
 
 
+def test_bootstrap_service_environment_sets_mode_and_encoding():
+    env: dict[str, str] = {}
+
+    resolved_admin = service_run.bootstrap_service_environment(["--admin"], env)
+    assert resolved_admin == "admin"
+    assert env["APP_MODE"] == "admin"
+    assert env["PYTHONIOENCODING"] == "utf-8"
+
+    resolved_public = service_run.bootstrap_service_environment([], env)
+    assert resolved_public == "public"
+    assert env["APP_MODE"] == "public"
+
+
+def test_log_mode_alignment_detects_stale_settings():
+    logger = MagicMock()
+    with patch.dict(service_run.os.environ, {"APP_MODE": "admin"}, clear=False), patch.object(
+        service_run,
+        "get_runtime_fingerprint_snapshot",
+        return_value={"app_mode": "admin"},
+    ):
+        aligned = service_run._log_mode_alignment(logger, "public")
+
+    assert aligned is False
+    logger.info.assert_called_once_with("Mode alignment: env=%s | settings=%s | runtime=%s", "admin", "public", "admin")
+    logger.warning.assert_called_once_with(
+        "Mode alignment drift detected: env=%s | settings=%s | runtime=%s",
+        "admin",
+        "public",
+        "admin",
+    )
+
+
 def test_service_runner_run_sets_expected_environment_and_logs_boot():
     logger = MagicMock()
     with patch.object(service_run, "setup_service_logger", return_value=logger), patch.object(

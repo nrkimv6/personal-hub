@@ -17,7 +17,7 @@ from typing import Optional
 import aiohttp
 import psutil
 
-from app.core.config import settings
+from app.core.config import get_runtime_app_mode, settings
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,9 @@ class HealthMonitorService:
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
+
+    def _runtime_app_mode(self) -> str:
+        return get_runtime_app_mode(settings_app_mode=settings.APP_MODE)
 
     def read_pid_file(self, service_name: str) -> Optional[int]:
         """PID 파일에서 PID 읽기"""
@@ -331,7 +334,7 @@ class HealthMonitorService:
         results = []
         for service_name in SERVICE_CONFIG:
             # 현재 모드에 따라 체크 대상 필터링
-            if settings.APP_MODE == "admin":
+            if self._runtime_app_mode() == "admin":
                 if not service_name.endswith("_admin") and service_name not in ["cloudflared"]:
                     continue
             else:
@@ -403,7 +406,7 @@ class HealthMonitorService:
 
     async def check_worker_health(self) -> ServiceHealth:
         """워커 헬스 체크 (API 경유)"""
-        port = 8001 if settings.APP_MODE == "admin" else 8000
+        port = 8001 if self._runtime_app_mode() == "admin" else 8000
         try:
             session = await self._get_session()
             async with session.get(
@@ -440,8 +443,9 @@ class HealthMonitorService:
 
     async def check_all_http_endpoints(self) -> list[ServiceHealth]:
         """모든 서비스 HTTP 헬스 체크"""
-        port = 8001 if settings.APP_MODE == "admin" else 8000
-        frontend_port = 6101 if settings.APP_MODE == "admin" else 6100
+        runtime_mode = self._runtime_app_mode()
+        port = 8001 if runtime_mode == "admin" else 8000
+        frontend_port = 6101 if runtime_mode == "admin" else 6100
 
         checks = [
             self.check_http_endpoint("api_internal", f"http://localhost:{port}/api/v1/system/status"),

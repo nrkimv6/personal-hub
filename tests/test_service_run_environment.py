@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
 from scripts.services import service_run
@@ -33,6 +35,63 @@ def test_service_runner_log_environment_reports_boot_paths():
     assert any("sys.path[0]:" in line and str(service_run.PROJECT_ROOT) in line for line in lines)
     assert any("Runtime fingerprint:" in line and "source=" in line and "files=1" in line for line in lines)
     assert any("CWD:" in line for line in lines)
+
+
+def test_service_run_project_root_resolves_to_repo_root():
+    expected_root = Path(__file__).resolve().parents[1]
+    assert service_run.PROJECT_ROOT == expected_root
+
+
+def test_service_run_import_does_not_pull_app_core_config_subprocess():
+    script = """
+import sys
+before = set(sys.modules)
+from scripts.services import service_run
+after = set(sys.modules) - before
+print("app.core.config" in after)
+print(service_run.PROJECT_ROOT)
+"""
+    env = dict(service_run.os.environ)
+    env.pop("APP_MODE", None)
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        check=True,
+    )
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    assert lines[0] == "False"
+    assert Path(lines[1]) == Path(__file__).resolve().parents[1]
+
+
+def test_runtime_mode_prefers_env_over_stale_settings_subprocess():
+    script = """
+import os
+from app.core.config import settings, get_runtime_app_mode
+print(settings.APP_MODE)
+os.environ["APP_MODE"] = "admin"
+print(get_runtime_app_mode(settings_app_mode=settings.APP_MODE))
+"""
+    env = dict(service_run.os.environ)
+    env.pop("APP_MODE", None)
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        check=True,
+    )
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip() in {"public", "admin"}]
+    assert lines[-2:] == ["public", "admin"]
 
 
 def test_service_runner_frontend_runtime_env_separates_admin_and_public_modes():
