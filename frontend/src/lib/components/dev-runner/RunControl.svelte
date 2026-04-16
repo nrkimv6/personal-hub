@@ -1,17 +1,28 @@
 <script lang="ts">
-	import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi, devRunnerSettingsApi } from '$lib/api';
-	import type {
-		DevRunnerRunStatusResponse,
-		DevRunnerPlanFileResponse,
-		AllEnginesConfig,
-		EngineConfig,
-		DevRunnerRunnerListItem
-	} from '$lib/api';
-	import { llmApi } from '$lib/api/system';
-	import type { LLMProfilesResponse } from '$lib/api/system';
-	import { onMount } from 'svelte';
+import { X } from 'lucide-svelte';
+import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi, devRunnerSettingsApi } from '$lib/api';
+import type {
+	DevRunnerRunStatusResponse,
+	DevRunnerPlanFileResponse,
+	AllEnginesConfig,
+	EngineConfig
+} from '$lib/api';
+import { llmApi } from '$lib/api/system';
+import type { LLMProfilesResponse } from '$lib/api/system';
+import { onMount, onDestroy } from 'svelte';
+import ExecuteModalShell from '$lib/components/dev-runner/execute-modal/ExecuteModalShell.svelte';
+import PlanIdentityHeader from '$lib/components/dev-runner/execute-modal/PlanIdentityHeader.svelte';
+import ActionBar from '$lib/components/dev-runner/execute-modal/ActionBar.svelte';
+import ExecutionSettingsForm from '$lib/components/dev-runner/execute-modal/ExecutionSettingsForm.svelte';
+import SummaryProgress from '$lib/components/dev-runner/execute-modal/SummaryProgress.svelte';
 
 	interface Props {
+		open?: boolean;
+		onClose?: () => void;
+		plan?: DevRunnerPlanFileResponse | null;
+		summaryGenerating?: boolean;
+		summaryGenerated?: boolean;
+		onGenerateSummary?: () => void | Promise<void>;
 		status: DevRunnerRunStatusResponse | null;
 		plans: DevRunnerPlanFileResponse[];
 		onStatusChange: () => void;
@@ -22,7 +33,22 @@
 		hidePlanSelector?: boolean;
 	}
 
-	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), mode = $bindable('single'), runnerTabs = [], hidePlanSelector = false }: Props = $props();
+	let {
+		open = true,
+		onClose = () => {},
+		plan = null,
+		summaryGenerating = false,
+		summaryGenerated = false,
+		onGenerateSummary,
+		status,
+		plans,
+		onStatusChange,
+		onStart,
+		selectedPlan = $bindable(''),
+		mode = $bindable('single'),
+		runnerTabs = [],
+		hidePlanSelector = false
+	}: Props = $props();
 	let selectedEngine = $state('claude');
 	let selectedFixEngine = $state('claude');
 	let profilesData = $state<LLMProfilesResponse | null>(null);
@@ -35,32 +61,20 @@
 	let selectedEnginePhases = $derived(getPhaseKeys(selectedEngineConfig));
 	let maxCycles = $state(0);
 
-	const ALL_PLANS_SENTINEL = '__ALL_PLANS__';
-
-	// 실행 중인 plan 표시 정보
-	let runningPlanName = $derived(
-		!status?.running ? '' :
-		!status.plan_file ? '(알 수 없음)' :
-		(status.plan_file === ALL_PLANS_SENTINEL || status.plan_file === 'ALL') ? '전체 실행' :
-		status.plan_file.split(/[\\/]/).pop() ?? ''
-	);
 	let runningEngine = $derived(status?.engine ?? 'claude');
-	let runningPlanProgress = $derived(
-		status?.running && status.plan_file && status.plan_file !== ALL_PLANS_SENTINEL && status.plan_file !== 'ALL'
-			? (plans.find(p => p.path === status!.plan_file)?.progress ?? null)
-			: null
-	);
 	let until = $state('');
 	let dryRun = $state(false);
 	let worktree = $state(true);
 	let parallel = $state(false);
 	let projects = $state('');
-	let planSummary = $derived((plans.find(p => p.path === selectedPlan) as any)?.summary as string | undefined ?? '');
+	let planSummary = $derived(plans.find(p => p.path === selectedPlan)?.summary ?? '');
+	let selectedPlanArchived = $derived(mode === 'single' && selectedPlan ? isArchivedPlanPath(selectedPlan) : false);
 	let anyRunning = $derived(runnerTabs.some(t => t.running));
 	let actionLoading = $state(false);
 	let actionError = $state<string | null>(null);
 	let syncMessage = $state<string | null>(null);
 	let forceStopNeeded = $state(false);
+	let syncMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// 엔진별 fallback 모델 리스트 (engines API 실패/누락 시에만 사용)
 	const PREDEFINED_MODELS: Record<string, string[]> = {
@@ -108,6 +122,16 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 
 	function isArchivedPlanPath(path: string): boolean {
 		return path.includes('/archive/') || path.includes('\\archive\\');
+	}
+
+	function resetTransientActionState() {
+		actionError = null;
+		syncMessage = null;
+		forceStopNeeded = false;
+		if (syncMessageTimer) {
+			clearTimeout(syncMessageTimer);
+			syncMessageTimer = null;
+		}
 	}
 
 	function getConfiguredEngines(): string[] {
@@ -352,6 +376,10 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		actionLoading = true;
 		actionError = null;
 		syncMessage = null;
+		if (syncMessageTimer) {
+			clearTimeout(syncMessageTimer);
+			syncMessageTimer = null;
+		}
 		try {
 			const result = await devRunnerPlanApi.sync();
 			onStatusChange();
@@ -362,7 +390,10 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 			syncMessage = parts.length > 0
 				? `동기화 완료: ${parts.join(', ')} (총 ${result.synced}개)`
 				: `동기화 완료: 변경 없음 (총 ${result.synced}개)`;
-			setTimeout(() => { syncMessage = null; }, 5000);
+			syncMessageTimer = setTimeout(() => {
+				syncMessage = null;
+				syncMessageTimer = null;
+			}, 5000);
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '동기화 실패';
 		} finally {
@@ -387,261 +418,131 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 			actionLoading = false;
 		}
 	}
+
+	onDestroy(() => {
+		if (syncMessageTimer) {
+			clearTimeout(syncMessageTimer);
+			syncMessageTimer = null;
+		}
+	});
+
+	$effect(() => {
+		if (!open) {
+			resetTransientActionState();
+		}
+	});
 </script>
 
-<div class="flex flex-col gap-4">
-	{#if actionError}
-		<div class="text-xs text-red-600 bg-red-50 rounded p-2 flex items-center justify-between gap-2">
-			<span>{actionError}</span>
-			{#if forceStopNeeded}
-				<button
-					class="shrink-0 px-2 py-0.5 rounded border border-red-400 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors"
-					onclick={handleForceStop}
-					disabled={actionLoading}
-				>
-					강제 중지
-				</button>
-			{/if}
-		</div>
-	{/if}
-	{#if syncMessage}
-		<div class="text-xs text-green-700 bg-green-50 rounded p-2">{syncMessage}</div>
-	{/if}
-
-	<!-- Infra Status Row -->
-	<div class="flex items-center gap-3 text-xs text-gray-500">
-		<div class="flex items-center gap-1.5">
-			<span class="w-2 h-2 rounded-full {status?.redis_connected ? 'bg-green-500' : 'bg-gray-300'}"></span>
-			<span>Redis</span>
-		</div>
-		<div class="flex items-center gap-1.5">
-			<span class="w-2 h-2 rounded-full {status?.listener_alive ? 'bg-green-500' : 'bg-gray-300'}"></span>
-			<span>Listener</span>
-		</div>
-		{#if status && (!status.redis_connected || !status.listener_alive)}
-			<span class="text-red-500">
-				{#if !status.redis_connected}Redis 미연결{:else}Listener 미실행{/if}
-			</span>
-		{/if}
-	</div>
-
-	<!-- Controls Row -->
-	<div class="flex items-center gap-2 flex-wrap">
-		<!-- 중지 버튼: running 탭이 하나라도 있을 때 표시 -->
-		{#if anyRunning}
-			<button
-				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 disabled:opacity-50 transition-colors"
-				onclick={handleStop}
-				disabled={actionLoading}
-			>
-				<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-				{actionLoading ? '중지 중...' : '중지'}
-			</button>
-		{/if}
-		<!-- 시작 버튼: 항상 표시 -->
-		<button
-			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-mono font-semibold bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
-			onclick={handleStart}
-			disabled={actionLoading || (mode === 'single' && !selectedPlan) || !status?.redis_connected || !status?.listener_alive}
-		>
-			<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-			{actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행' : '시작'}
-		</button>
-
-		<button
-			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-			onclick={handleSync}
-			disabled={actionLoading}
-			title="Plan 파일과 TODO.md를 SQLite 큐에 동기화합니다"
-		>
-			<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
-			{actionLoading ? '동기화 중...' : '동기화'}
-		</button>
-
-		{#if !anyRunning}
-			<button
-				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-				onclick={() => handleResetState(false)}
-				disabled={actionLoading}
-				title="RUNNING 상태를 강제로 초기화하고 미완료 작업을 PENDING으로 복구합니다."
-			>
-				<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/></svg>
-				{actionLoading ? '초기화 중...' : '초기화'}
-			</button>
-
-			<button
-				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-				onclick={() => handleResetState(true)}
-				disabled={actionLoading}
-				title="모든 작업 기록을 삭제하고 완전히 초기화합니다."
-			>
-				{actionLoading ? '삭제 중...' : '전체 리셋'}
-			</button>
-		{/if}
-
-		<div class="h-4 w-px bg-gray-200 mx-1"></div>
-
-		<!-- Mode & Engine Select -->
-		<div class="flex items-center gap-2">
-			<select
-				class="border rounded px-2 py-1 text-xs h-7 w-[120px] font-mono"
-				bind:value={mode}
-			>
-				<option value="single">단일 Plan</option>
-				<option value="all">전체 실행</option>
-			</select>
-
-			<select
-				class={`border rounded px-2 py-1 text-xs h-7 w-[112px] font-mono font-medium ${getEngineThemeClasses(selectedEngine)}`}
-				bind:value={selectedEngine}
-			>
-				{#each getEngineOptions() as engine}
-					<option value={engine}>{formatEngineLabel(engine)}</option>
-				{/each}
-			</select>
-			<div class="flex items-center gap-1">
-				<span class="text-[10px] text-gray-400 font-medium">Fix</span>
-				<select
-					class={`border rounded px-2 py-1 text-xs h-7 w-[112px] font-mono font-medium ${getEngineThemeClasses(selectedFixEngine)}`}
-					bind:value={selectedFixEngine}
-				>
-					{#each getEngineOptions() as engine}
-						<option value={engine}>{formatEngineLabel(engine)}</option>
-					{/each}
-				</select>
-			</div>
-			{#if showProfileSelect}
-				<div class="flex items-center gap-1">
-					<span class="text-[10px] text-gray-400 font-medium">Profile</span>
-					<select
-						class={`border rounded px-2 py-1 text-xs h-7 w-[100px] font-mono font-medium ${getEngineThemeClasses(selectedEngine)}`}
-						bind:value={selectedProfile}
-					>
-						{#each profilesForEngine as p}
-							<option value={p.name}>{p.name}</option>
-						{/each}
-					</select>
-				</div>
-			{/if}
-			{#if status?.running}
-				<span class={`inline-flex h-7 items-center rounded border px-2 text-[10px] font-mono ${getEngineThemeClasses(runningEngine)}`}>
-					Run {formatEngineLabel(runningEngine)}
-				</span>
-			{/if}
-
-		</div>
-	</div>
-
-	{#if selectedEngineConfig}
-		<div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
-			<span class="text-[10px] font-bold text-gray-400 uppercase shrink-0 w-full sm:w-auto">Phase Models:</span>
-			{#each selectedEnginePhases as phase, index}
-				<div class="flex items-center gap-1.5 flex-1 sm:flex-none">
-					<label
-						for={getPhaseSelectId(phase, index)}
-						class="text-[10px] font-mono uppercase text-muted-foreground w-28 shrink-0"
-					>{phase}</label>
-					<select
-						id={getPhaseSelectId(phase, index)}
-						class="border rounded px-1.5 py-0.5 flex-1 sm:w-40 h-6 text-[10px] font-mono bg-white"
-						value={getPhaseModel(phase)}
-						onchange={(e) => updateModel(phase, e.currentTarget.value)}
-					>
-						{#each selectedEngineModelOptions as model}
-							<option value={model}>{model}</option>
-						{/each}
-						{#if !selectedEngineModelOptions.includes(getPhaseModel(phase))}
-							<option value={getPhaseModel(phase)}>
-								{getPhaseModel(phase)} (Custom)
-							</option>
-						{/if}
-					</select>
-				</div>
-			{/each}
-		</div>
-	{/if}
-
-	<!-- Options Row -->
-	<div class="flex items-center gap-4 flex-wrap text-xs">
-		{#if !hidePlanSelector}
-			{#if mode === 'single'}
-				<div class="flex items-center gap-2">
-					<label for="plan-select" class="text-gray-500 text-xs">Plan</label>
-					<select
-						id="plan-select"
-						class="border rounded px-2 py-1 text-xs w-[200px] h-7 font-mono"
-						bind:value={selectedPlan}
-					>
-						<option value="">Plan 선택...</option>
-						{#each plans.filter((p) => !isArchivedPlanPath(p.path)) as plan}
-							<option value={plan.path}>{plan.filename}{plan.progress != null ? ` (${plan.progress.percent}%)` : ''}</option>
-						{/each}
-					</select>
-				</div>
-				{#if planSummary}
-					<p class="text-[10px] text-gray-500 font-mono leading-relaxed col-span-full mt-0.5 line-clamp-2">{planSummary}</p>
+	{#if open}
+		<ExecuteModalShell open={open} onClose={onClose} titleId={plan ? 'plan-modal-title' : 'execute-modal-title'}>
+			<svelte:fragment slot="header">
+				{#if plan}
+					<PlanIdentityHeader
+						filename={plan.filename}
+						status={plan.status}
+						runningEngine={status?.running ? status.engine ?? null : null}
+						titleId="plan-modal-title"
+						onClose={onClose}
+					/>
+				{:else}
+					<div class="flex items-center justify-between border-b border-border px-5 py-3.5 shrink-0">
+						<h2 id="execute-modal-title" class="font-mono text-sm font-medium text-foreground">실행 설정</h2>
+						<button
+							type="button"
+							onclick={onClose}
+							class="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+							aria-label="닫기"
+						>
+							<X class="h-3.5 w-3.5" />
+						</button>
+					</div>
 				{/if}
-			{:else}
-				<span class="text-gray-400 text-xs">모든 미완료 Plan 자동 실행</span>
-			{/if}
-		{/if}
+			</svelte:fragment>
 
-		<div class="flex items-center gap-2">
-			<label for="max-cycles" class="text-gray-500 text-xs">Max Cycles</label>
-			<input
-				id="max-cycles"
-				type="number"
-				class="border rounded px-1.5 py-0.5 w-16 h-7 text-xs font-mono"
-				bind:value={maxCycles}
-				min="0"
-				placeholder="∞"
-			/>
-			<label for="end-time" class="text-gray-500 text-xs">End Time</label>
-			<input
-				id="end-time"
-				type="time"
-				class="border rounded px-1.5 py-0.5 w-24 h-7 text-xs font-mono"
-				bind:value={until}
-			/>
-		</div>
+			<svelte:fragment slot="banner">
+				{#if actionError}
+					<div class="flex items-center justify-between gap-2 bg-destructive px-5 py-2 text-xs text-destructive-foreground">
+						<span>{actionError}</span>
+						{#if forceStopNeeded}
+							<button
+								type="button"
+								class="shrink-0 rounded-md border border-destructive-foreground/40 px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-destructive-foreground/10 disabled:opacity-50"
+								onclick={handleForceStop}
+								disabled={actionLoading}
+							>
+								강제 중지
+							</button>
+						{/if}
+					</div>
+				{/if}
 
-		<div class="flex items-center gap-2">
-			<label class="relative inline-flex items-center cursor-pointer scale-90">
-				<input type="checkbox" bind:checked={dryRun} class="sr-only peer" />
-				<div class="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
-			</label>
-			<span class="text-gray-500 text-xs flex items-center gap-1">
-				<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
-				Dry Run
-			</span>
-		</div>
+				{#if syncMessage}
+					<div class="bg-success-light px-5 py-2 text-xs text-success">{syncMessage}</div>
+				{/if}
 
-		<div class="flex items-center gap-2">
-			<label class="relative inline-flex items-center cursor-pointer scale-90">
-				<input type="checkbox" bind:checked={worktree} class="sr-only peer" />
-				<div class="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-green-500"></div>
-			</label>
-			<span class="text-gray-500 text-xs">Worktree 모드</span>
-		</div>
+				{#if plan && mode !== 'all'}
+					<SummaryProgress
+						summaryKey={plan.path}
+						summary={plan.summary ?? null}
+						summaryGenerating={summaryGenerating}
+						summaryGenerated={summaryGenerated}
+						progress={plan.progress ?? null}
+						worktreeBranch={plan.branch ?? null}
+						worktreePath={plan.worktree_path ?? null}
+						worktreeOwner={plan.worktree_owner ?? null}
+						redisRunning={status?.redis_connected ?? false}
+						listenerRunning={status?.listener_alive ?? false}
+						onRegenerate={onGenerateSummary ?? (() => {})}
+					/>
+				{/if}
+			</svelte:fragment>
 
-		{#if mode === 'single'}
-			<label class="flex items-center gap-1.5 text-gray-500 cursor-pointer text-xs">
-				<input type="checkbox" bind:checked={parallel} class="rounded" />
-				<span>병렬</span>
-			</label>
-		{/if}
-	</div>
+			<div class="min-h-full p-5">
+				<ExecutionSettingsForm
+					plans={plans}
+					bind:selectedPlan={selectedPlan}
+					bind:mode={mode}
+					bind:selectedEngine={selectedEngine}
+					bind:selectedFixEngine={selectedFixEngine}
+					bind:selectedProfile={selectedProfile}
+					bind:maxCycles={maxCycles}
+					bind:until={until}
+					bind:dryRun={dryRun}
+					bind:worktree={worktree}
+					bind:parallel={parallel}
+					bind:projects={projects}
+					selectedEngineConfig={selectedEngineConfig}
+					selectedEnginePhases={selectedEnginePhases}
+					selectedEngineModelOptions={selectedEngineModelOptions}
+					profilesForEngine={profilesForEngine}
+					showProfileSelect={showProfileSelect}
+					hidePlanSelector={hidePlanSelector}
+					selectedPlanArchived={selectedPlanArchived}
+					planSummary={planSummary}
+					runningEngine={status?.running ? runningEngine : null}
+					getEngineOptions={getEngineOptions}
+					getEngineThemeClasses={getEngineThemeClasses}
+					formatEngineLabel={formatEngineLabel}
+					getPhaseSelectId={getPhaseSelectId}
+					getPhaseModel={getPhaseModel}
+					onUpdateModel={updateModel}
+				/>
+			</div>
 
-	{#if (mode === 'single' && parallel) || mode === 'all'}
-		<div class="flex items-center gap-2 text-xs">
-			<label class="text-gray-500 shrink-0" for="projects-input">프로젝트:</label>
-			<input
-				id="projects-input"
-				type="text"
-				class="flex-1 border rounded px-2 py-1 text-xs"
-				bind:value={projects}
-				placeholder="쉼표 구분 (비우면 전체)"
-			/>
-		</div>
+			<svelte:fragment slot="actions">
+					<ActionBar
+						status={status}
+						anyRunning={anyRunning}
+						actionLoading={actionLoading}
+						mode={mode}
+						selectedPlan={selectedPlan}
+						selectedPlanArchived={selectedPlanArchived}
+						onStop={handleStop}
+					onSync={handleSync}
+					onReset={() => handleResetState(false)}
+					onFullReset={() => handleResetState(true)}
+					onStart={handleStart}
+				/>
+			</svelte:fragment>
+		</ExecuteModalShell>
 	{/if}
-</div>
