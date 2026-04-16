@@ -85,9 +85,9 @@ LOG_SOURCES: list[LogSource] = [
     ),
     LogSource(
         name="WORKER",
-        # stdout_worker_*: 레거시(구형 worker-watchdog.ps1)
-        # stdout_unified_worker_*: 현재 활성(unified-worker-watchdog.ps1)
-        patterns=["stdout_unified_worker_", "stdout_worker_", "worker_", "unified_worker_"],
+        # WORKER 뷰는 구조화 본로그(worker_*)를 기준으로 본다.
+        # stdout_unified_worker_*는 stdout 캡처용 보조 로그라 일부 워커 이벤트가 누락될 수 있다.
+        patterns=["worker_", "unified_worker_"],
         color="magenta",
         tail_lines=5,
         admin_only=True,

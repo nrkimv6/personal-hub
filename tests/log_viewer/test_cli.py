@@ -158,6 +158,42 @@ class TestMainCleanupArgv:
         assert "normal line" not in output
 
 
+class TestWorkerSourceSelection:
+    def test_show_source_worker_prefers_structured_worker_log_over_stdout_capture(self, tmp_path: Path, monkeypatch):
+        """
+        WORKER 소스는 최신 stdout 캡처 파일보다 구조화 본로그(worker_*.log)를 우선해야 한다.
+        """
+        log_dir = tmp_path / "logs"
+        admin_dir = log_dir / "admin"
+        admin_dir.mkdir(parents=True)
+
+        worker_log = admin_dir / "worker_20260416_164035.log"
+        worker_log.write_text(
+            "2026-04-16 23:17:15,234 - [WORKER] INFO - [coupang_monitor] 상태 변경 1건 감지\n",
+            encoding="utf-8",
+        )
+
+        stdout_log = admin_dir / "stdout_unified_worker_20260416_164033.log"
+        stdout_log.write_text(
+            "2026-04-16 23:17:15,227 - [API] INFO - Notification message sent\n",
+            encoding="utf-8",
+        )
+
+        worker_log.touch()
+        stdout_log.touch()
+
+        monkeypatch.setattr("app.log_viewer.cli._LOGS_DIR", log_dir)
+        monkeypatch.setattr("app.log_viewer.cli._LOGS_ADMIN_DIR", admin_dir)
+
+        captured = StringIO()
+        with patch("app.log_viewer.cli._print_line", side_effect=lambda t: captured.write(t + "\n")):
+            show_source("WORKER", admin=True, lines_override=50)
+
+        output = captured.getvalue()
+        assert "상태 변경 1건 감지" in output
+        assert "Notification message sent" not in output
+
+
 class TestRunnerTcFormatEndToEnd:
     def test_runner_tc_format_end_to_end(self):
         """

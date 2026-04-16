@@ -313,9 +313,9 @@ if ($Admin) {
 # LastWriteTime이 가장 최신인 파일 선택
 $apiLogFile = $apiCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($apiLogFile) { $apiLogFile = $apiLogFile.FullName }
-# stdout_worker_: 레거시 (구형 worker-watchdog.ps1, dev/에만 존재)
-# stdout_unified_worker_: 현재 활성 (unified-worker-watchdog.ps1이 stdout 캡처)
-$workerLogFile = Get-LatestLogFileMultiPattern @("stdout_unified_worker_", "stdout_worker_", "worker_", "unified_worker_")
+# WORKER 뷰는 구조화 본로그(worker_*)를 우선 사용한다.
+# stdout_unified_worker_* / stdout_worker_*는 stdout 캡처용 보조 로그라 이벤트 누락이 있을 수 있다.
+$workerLogFile = Get-LatestLogFileMultiPattern @("worker_", "unified_worker_")
 $frontendLogFile = Get-LatestLogFileMultiPattern @("frontend_2")
 $claudeWorkerLogFile = Get-LatestLogFileMultiPattern @("llm_worker_")
 # stdout_video_download_worker_: 레거시 (Python 앱 자체 로깅으로 전환됨)
@@ -846,7 +846,7 @@ function Start-CombinedLogTail {
     # 활성 패턴: stdout_unified_worker_*(unified-worker-watchdog.ps1이 stdout 캡처)
     $timestampedLogPatterns = @{
         "API"         = @("stdout_api_*.log", "api_*.log")  # stdout_api_*: 레거시
-        "WORKER"      = @("stdout_unified_worker_*.log", "stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")  # stdout_worker_*: 레거시
+        "WORKER"      = @("worker_*.log", "unified_worker_*.log")
         "LLM"         = @("llm_worker_*.log")
         "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")  # stdout_video_download_worker_*: 레거시
         "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")  # stdout_crawl_*: 레거시
