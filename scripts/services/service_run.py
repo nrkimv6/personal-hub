@@ -17,8 +17,64 @@ import sys
 import time
 from pathlib import Path
 
-# 프로젝트 루트를 sys.path에 추가 (app 패키지 import용)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+def _resolve_project_root() -> Path:
+    current = Path(__file__).resolve()
+    # 스텁 경유 실행(scripts/service_run.py)과 실제 파일 import 모두에서 repo root를 찾는다.
+    for candidate in (current.parent, *current.parents):
+        if all((candidate / marker).exists() for marker in ("app", "frontend", "scripts")):
+            return candidate
+    return current.parent.parent
+
+
+def _resolve_bootstrap_app_mode(argv: list[str] | None = None) -> str:
+    return "admin" if "--admin" in (argv or sys.argv[1:]) else "public"
+
+
+def bootstrap_service_environment(argv: list[str] | None = None, env: dict[str, str] | None = None) -> str:
+    target_env = os.environ if env is None else env
+    app_mode = _resolve_bootstrap_app_mode(argv)
+    target_env["APP_MODE"] = app_mode
+    target_env["PYTHONIOENCODING"] = "utf-8"
+    return app_mode
+
+
+def get_runtime_fingerprint_snapshot(*args, **kwargs):
+    from app.core.runtime_fingerprint import get_runtime_fingerprint_snapshot as _inner
+
+    return _inner(*args, **kwargs)
+
+
+def _normalize_app_mode(value: object) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"admin", "public"}:
+            return normalized
+    return "public"
+
+
+def _log_mode_alignment(log, settings_mode: object) -> bool:
+    env_mode = _normalize_app_mode(os.environ.get("APP_MODE"))
+    runtime_mode = _normalize_app_mode(get_runtime_fingerprint_snapshot().get("app_mode"))
+    normalized_settings_mode = _normalize_app_mode(settings_mode)
+    aligned = env_mode == normalized_settings_mode == runtime_mode
+
+    log.info(
+        "Mode alignment: env=%s | settings=%s | runtime=%s",
+        env_mode,
+        normalized_settings_mode,
+        runtime_mode,
+    )
+    if not aligned:
+        log.warning(
+            "Mode alignment drift detected: env=%s | settings=%s | runtime=%s",
+            env_mode,
+            normalized_settings_mode,
+            runtime_mode,
+        )
+    return aligned
+
+
+PROJECT_ROOT = _resolve_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 os.chdir(PROJECT_ROOT)
 
@@ -40,7 +96,6 @@ from scripts.services.frontend_mode import (
 )
 
 import psutil
-from app.core.runtime_fingerprint import get_runtime_fingerprint_snapshot
 
 
 class ServiceRunner:
@@ -70,8 +125,7 @@ class ServiceRunner:
 
     # ── 메인 실행 흐름 ──────────────────────────────────────────
     def run(self):
-        os.environ["PYTHONIOENCODING"] = "utf-8"
-        os.environ["APP_MODE"] = self.app_mode
+        bootstrap_service_environment(["--admin"] if self.dev else [])
 
         self.log.info("=" * 50)
         self.log.info("Monitor Page Service Starting")
@@ -390,13 +444,15 @@ class ServiceRunner:
         # 환경변수
         os.environ["API_PORT"] = str(self.api_port)
         os.environ["WORKER_AUTO_START"] = "false"
-        os.environ["APP_MODE"] = self.app_mode
+        bootstrap_service_environment(["--admin"] if self.dev else [])
 
         # 단계별 import (hang 진단용)
         t = time.time()
         self.log.info("Importing app.config...")
-        from app.config import settings  # noqa: F401
+        from app.config import settings
         self.log.info(f"  app.config imported ({time.time() - t:.1f}s)")
+        if not _log_mode_alignment(self.log, settings.APP_MODE):
+            raise RuntimeError("APP_MODE bootstrap drift detected before API startup")
 
         t = time.time()
         self.log.info("Importing app.main...")
@@ -515,6 +571,8 @@ def main():
     parser.add_argument("--admin", action="store_true", help="Admin mode (port 8001/6101)")
     args = parser.parse_args()
 
+    # main() 진입 즉시 APP_MODE를 고정해 이후 app import가 stale settings를 만들지 않게 한다.
+    bootstrap_service_environment(["--admin"] if args.admin else [])
     runner = ServiceRunner(dev=args.admin)
     runner.run()
 

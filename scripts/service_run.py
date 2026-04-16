@@ -16,6 +16,9 @@ _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
+# Stub 단계에서 모드를 먼저 고정해 실제 서비스 러너 import 전에 APP_MODE가 결정되게 한다.
+os.environ["APP_MODE"] = "admin" if "--admin" in sys.argv[1:] else "public"
+
 _real = os.path.join(_root, "scripts", "services", "service_run.py")
 with open(_real, encoding="utf-8") as _f:
     exec(compile(_f.read(), _real, "exec"))  # noqa: S102

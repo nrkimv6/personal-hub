@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 import sys
 import os
-from typing import Optional, Dict, Any, List, Set
+from typing import Mapping, Optional, Dict, Any, List, Set
 from pydantic import Field, validator, AnyHttpUrl
 
 # 로거 구성 - 나중에 setup_logging()에서 초기화됨
@@ -13,6 +13,32 @@ logger.setLevel(logging.INFO)
 
 # 프로젝트 루트 디렉토리 (.env 파일 경로 계산용)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
+DEFAULT_APP_MODE = "public"
+
+
+def normalize_app_mode(value: object, default: str = DEFAULT_APP_MODE) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"admin", "public"}:
+            return normalized
+    return default
+
+
+def get_runtime_app_mode(
+    *,
+    env: Mapping[str, str] | None = None,
+    settings_app_mode: object | None = None,
+) -> str:
+    runtime_env = os.environ if env is None else env
+    env_mode = normalize_app_mode(runtime_env.get("APP_MODE"), default="")
+    if env_mode:
+        return env_mode
+
+    if settings_app_mode is None:
+        current_settings = globals().get("settings")
+        settings_app_mode = getattr(current_settings, "APP_MODE", None)
+
+    return normalize_app_mode(settings_app_mode)
 
 class Settings(BaseSettings):
     # 기본 설정
@@ -23,9 +49,7 @@ class Settings(BaseSettings):
     @validator("APP_MODE", pre=True)
     def strip_app_mode(cls, v):
         """환경변수에서 공백 제거"""
-        if isinstance(v, str):
-            return v.strip()
-        return v
+        return normalize_app_mode(v)
     
     # 데이터베이스 설정 (2026-04-10: SQLite → PostgreSQL 전환)
     DATABASE_URL: str = "postgresql://monitor_user:monitor_pass_2026@localhost:5432/monitor"

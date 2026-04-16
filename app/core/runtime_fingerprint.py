@@ -1,4 +1,7 @@
-"""Runtime fingerprint helpers for API/service drift detection."""
+"""Runtime fingerprint helpers for API/service drift detection.
+
+`app_mode`는 settings snapshot이 아니라 현재 프로세스 env(APP_MODE)를 기준으로 기록한다.
+"""
 
 from __future__ import annotations
 

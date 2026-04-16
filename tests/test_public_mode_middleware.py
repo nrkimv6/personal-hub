@@ -9,6 +9,7 @@ API Access Control Middleware Tests
 - 관리자 로그인: 모든 API 허용
 - 비관리자: 이벤트 관리, 인증만 허용 (모드 무관)
 """
+import os
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
@@ -58,6 +59,18 @@ class TestAppModeEndpoint:
         assert "admin_api_enabled" in features
         assert "crawling_enabled" in features
         assert "sniping_enabled" in features
+
+    def test_get_app_mode_prefers_runtime_env_over_stale_settings(self, client):
+        """env APP_MODE가 stale settings보다 우선한다."""
+        with patch.dict(os.environ, {"APP_MODE": "admin"}, clear=False), patch("app.routes.system.settings") as mock_settings:
+            mock_settings.APP_MODE = "public"
+            response = client.get("/api/v1/system/mode")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "admin"
+        assert data["is_dev"] is True
+        assert data["features"]["workers_enabled"] is True
 
 
 class TestProductionModeMiddleware:

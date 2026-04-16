@@ -7,6 +7,7 @@
 import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
 import { fetchWithTimeout } from '$lib/api/client';
+import { getLocalhostRouteModeFallback } from '$lib/utils/publicRouteMode';
 
 const API_BASE = '/api/v1';
 const TOKEN_KEY = 'auth_token';
@@ -45,11 +46,12 @@ function createAuthStore() {
 			if (!browser) return;
 
 			// localhost 체크 - 프론트엔드에서도 직접 확인
-			const isLocalhost = window.location.hostname === 'localhost' ||
-				window.location.hostname === '127.0.0.1' ||
-				window.location.hostname === '::1';
-			const isPublicPreview = isLocalhost && window.location.port === '6100';
-			const shouldAutoAdmin = isLocalhost && !isPublicPreview;
+			const localhostRouteMode = getLocalhostRouteModeFallback(
+				window.location.hostname,
+				window.location.port
+			);
+			const isPublicPreview = localhostRouteMode === 'public';
+			const shouldAutoAdmin = localhostRouteMode === 'admin';
 
 			const token = localStorage.getItem(TOKEN_KEY);
 
