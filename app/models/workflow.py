@@ -12,6 +12,7 @@ STATUS_PLANNED = "planned"
 STATUS_RUNNING = "running"
 STATUS_MERGE_PENDING = "merge_pending"
 STATUS_MERGING = "merging"
+STATUS_COMPLETED = "completed"
 STATUS_MERGED = "merged"
 STATUS_FAILED = "failed"
 STATUS_CANCELLED = "cancelled"
@@ -56,6 +57,11 @@ class Workflow(Base):
     def mark_merge_pending(self) -> None:
         """merge_pending 상태로 전이"""
         self.status = STATUS_MERGE_PENDING
+
+    def mark_completed(self) -> None:
+        """completed 상태로 전이"""
+        self.status = STATUS_COMPLETED
+        self.finished_at = datetime.now()
 
     def mark_merged(self, commit_hash: str) -> None:
         """merged 상태로 전이"""

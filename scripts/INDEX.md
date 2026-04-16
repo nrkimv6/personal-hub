@@ -62,6 +62,7 @@
 | ✅ | `service_utils.py` | `service_run.py`와 `browser_workers.py`가 공유하는 유틸 |
 | ✅ | `worker-command-listener.py` | API→워커 명령 리스너 (Redis pub/sub 또는 stream 기반) |
 | ✅ | `kakao-notification-listener.py` | Session 1 카카오 알림 소비자 (Redis Queue → `kakaocli-win`) |
+| ✅ | `megabeauty-kakao-alert.ps1` | 메가뷰티쇼 카카오 알림 feature flag(`MEGABEAUTY_KAKAO_ALERT_ENABLED`) 조회/enable/disable + 선택적 API 재시작 |
 | ⏳ | `port-utils.ps1` | 포트 점유 확인 유틸 (서비스 기동 시 포트 검증) |
 
 ---

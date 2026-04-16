@@ -14,6 +14,7 @@ import sqlite3
 from pathlib import Path
 import tempfile
 import os
+from sqlalchemy.exc import IntegrityError
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
@@ -77,13 +78,13 @@ def test_workflow_manager_update_status(wf_manager):
 
 
 def test_workflow_manager_list_filter(wf_manager):
-    """R(Right): 3개 레코드(planned, running, merged) 생성 → list_workflows(status="running") → 1개만 반환"""
+    """R(Right): 3개 레코드(planned, running, completed) 생성 → list_workflows 필터 확인"""
     id1 = wf_manager.create("slug-planned", None)
     id2 = wf_manager.create("slug-running", None)
-    id3 = wf_manager.create("slug-merged", None)
+    id3 = wf_manager.create("slug-completed", None)
 
     wf_manager.update_status(id2, "running")
-    wf_manager.update_status(id3, "merged", commit_hash="abc123")
+    wf_manager.update_status(id3, "completed")
 
     all_wf = wf_manager.list_workflows()
     assert len(all_wf) == 3
@@ -92,8 +93,10 @@ def test_workflow_manager_list_filter(wf_manager):
     assert len(running_wf) == 1
     assert running_wf[0]["slug"] == "slug-running"
 
-    merged_wf = wf_manager.list_workflows(status="merged")
-    assert len(merged_wf) == 1
+    completed_wf = wf_manager.list_workflows(status="completed")
+    assert len(completed_wf) == 1
+    assert completed_wf[0]["slug"] == "slug-completed"
+    assert completed_wf[0]["finished_at"] is not None
 
 
 def test_workflow_manager_boundary_empty_db(wf_manager):
@@ -115,7 +118,7 @@ def test_workflow_manager_error_duplicate_create(wf_manager):
     """E(Error): 동일 slug로 create() 2회 → sqlite3.IntegrityError 발생"""
     wf_manager.create("duplicate", None)
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(IntegrityError):
         wf_manager.create("duplicate", None)
 
 

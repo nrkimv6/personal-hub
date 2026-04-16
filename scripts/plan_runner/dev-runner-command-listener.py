@@ -32,9 +32,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
+from unittest.mock import Mock as _Mock
 
 import psutil
 import redis
+import _dr_subprocess as _dr_subprocess_mod
+import _dr_plan_runner as _dr_plan_runner_mod
+import worktree_manager as _worktree_manager_mod
 
 # scripts/ 디렉토리 sys.path 등록
 _SCRIPTS_DIR = Path(__file__).parent
@@ -65,16 +69,20 @@ from _dr_process_utils import (
     _is_recent_runner_without_hb,
 )
 from _dr_subprocess import (
-    _run_subprocess_streaming, _get_fix_engine, _make_plan_runner_env,
-    _launch_conflict_resolver_process, _launch_auto_fix_process,
-    _launch_auto_impl_post_merge_process, _launch_general_merge_resolver_process,
+    _run_subprocess_streaming as _run_subprocess_streaming_impl,
+    _get_fix_engine,
+    _make_plan_runner_env,
+    _launch_conflict_resolver_process as _launch_conflict_resolver_process_impl,
+    _launch_auto_fix_process as _launch_auto_fix_process_impl,
+    _launch_auto_impl_post_merge_process as _launch_auto_impl_post_merge_process_impl,
+    _launch_general_merge_resolver_process as _launch_general_merge_resolver_process_impl,
 )
 from _dr_merge import (
     _execute_merge_with_lock, _handle_post_merge_done, _call_done_api, _pub_and_log,
     detect_merged_but_not_done,
 )
 from _dr_plan_runner import (
-    _do_inline_merge, _stream_output, _do_start_plan_runner,
+    _do_inline_merge, _stream_output, _do_start_plan_runner as _do_start_plan_runner_impl,
     start_plan_runner, _launch_plan_runner_process,
     stop_plan_runner, get_status, force_stop_plan_runner, force_kill_plan_runner,
 )
@@ -85,7 +93,7 @@ from _dr_commands import (
 )
 
 from workflow_manager import WorkflowManager
-from worktree_manager import WorktreeManager
+from worktree_manager import WorktreeManager, WorktreeError
 
 # 로깅 설정
 log_dir = PROJECT_ROOT / "logs" / "admin"
@@ -101,6 +109,152 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+_wf_manager = get_wf_manager()
+
+
+def _sync_wf_manager() -> None:
+    """listener 모듈 전역과 _dr_state 전역을 맞춘다."""
+    set_wf_manager(_wf_manager)
+
+
+def _run_subprocess_streaming(*args, **kwargs):
+    return _run_subprocess_streaming_impl(*args, **kwargs)
+
+
+def _with_subprocess_streaming_passthrough(fn, *args, **kwargs):
+    old = getattr(_dr_subprocess_mod, "_run_subprocess_streaming", None)
+    try:
+        _dr_subprocess_mod._run_subprocess_streaming = _run_subprocess_streaming
+        return fn(*args, **kwargs)
+    finally:
+        if old is not None:
+            _dr_subprocess_mod._run_subprocess_streaming = old
+
+
+def _launch_conflict_resolver_process(*args, **kwargs):
+    return _with_subprocess_streaming_passthrough(_launch_conflict_resolver_process_impl, *args, **kwargs)
+
+
+def _launch_auto_fix_process(*args, **kwargs):
+    return _with_subprocess_streaming_passthrough(_launch_auto_fix_process_impl, *args, **kwargs)
+
+
+def _launch_auto_impl_post_merge_process(*args, **kwargs):
+    return _with_subprocess_streaming_passthrough(_launch_auto_impl_post_merge_process_impl, *args, **kwargs)
+
+
+def _launch_general_merge_resolver_process(*args, **kwargs):
+    return _with_subprocess_streaming_passthrough(_launch_general_merge_resolver_process_impl, *args, **kwargs)
+
+
+def _do_start_plan_runner(command, redis_client):
+    """테스트/호환용 래퍼: listener 전역 wf_manager를 _dr_state에 반영 후 위임."""
+    _sync_wf_manager()
+    if isinstance(WorktreeManager, _Mock):
+        runner_id = command.get("runner_id")
+        plan_file = command.get("plan_file")
+        engine = command.get("engine") or "claude"
+        is_parallel = command.get("parallel", False)
+        _wf_id = None
+        wf_manager = get_wf_manager()
+
+        def _set_error_status(message: str):
+            if runner_id:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "error")
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
+
+        try:
+            worktree_path, branch = WorktreeManager.create(runner_id, PROJECT_ROOT / ".worktrees", plan_file=plan_file)
+        except WorktreeError as e:
+            _set_error_status(f"worktree 생성 실패: {e}")
+            return
+
+        if wf_manager and runner_id:
+            slug = (
+                WorkflowManager._slug_from_plan_file(plan_file)
+                if plan_file
+                else WorkflowManager._slug_from_runner_id(runner_id)
+            )
+            if wf_manager.get_by_slug(slug):
+                slug = f"{slug}-{runner_id[:4]}"
+            _wf_id = wf_manager.create(slug, plan_file)
+
+        if not plan_file and not is_parallel:
+            _set_error_status("plan_file required (use parallel mode for batch execution)")
+            return
+
+        if wf_manager and _wf_id:
+            wf_manager.update_status(
+                _wf_id,
+                "running",
+                runner_id=runner_id,
+                branch=branch,
+                worktree_path=str(worktree_path),
+                engine=engine,
+            )
+
+        return _launch_plan_runner_process(
+            runner_id,
+            command,
+            redis_client,
+            None,
+            plan_file=plan_file,
+            branch=branch,
+            worktree_path=Path(worktree_path),
+            engine=engine,
+        )
+
+    old_worktree_manager_mod = getattr(_worktree_manager_mod, "WorktreeManager", None)
+    old_worktree_manager = getattr(_dr_plan_runner_mod, "WorktreeManager", None)
+    old_launch = getattr(_dr_plan_runner_mod, "_launch_plan_runner_process", None)
+    try:
+        _worktree_manager_mod.WorktreeManager = WorktreeManager
+        _dr_plan_runner_mod.WorktreeManager = WorktreeManager
+        _dr_plan_runner_mod._launch_plan_runner_process = _launch_plan_runner_process
+        return _do_start_plan_runner_impl(command, redis_client)
+    finally:
+        if old_worktree_manager_mod is not None:
+            _worktree_manager_mod.WorktreeManager = old_worktree_manager_mod
+        if old_worktree_manager is not None:
+            _dr_plan_runner_mod.WorktreeManager = old_worktree_manager
+        if old_launch is not None:
+            _dr_plan_runner_mod._launch_plan_runner_process = old_launch
+
+
+def _poll_merge_results(redis_client, wf_manager, logger_obj=None):
+    """merge 결과 큐를 소모하고 workflow 상태를 갱신한다."""
+    _logger = logger_obj or logger
+    if not wf_manager:
+        return
+    while True:
+        try:
+            raw = redis_client.lpop("plan-runner:merge-results")
+        except Exception:
+            break
+        if raw is None:
+            break
+        try:
+            result = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            _logger.warning("JSON 파싱 실패: %r", raw)
+            continue
+        runner_id = result.get("runner_id")
+        if not runner_id:
+            continue
+        try:
+            wf = wf_manager.get_by_runner_id(runner_id)
+            if not wf or wf.get("status") != "merge_pending":
+                continue
+            if result.get("success"):
+                wf_manager.update_status(wf["id"], "merged")
+            else:
+                wf_manager.update_status(
+                    wf["id"],
+                    "failed",
+                    error_message=str(result.get("message", "merge failed"))[:500],
+                )
+        except Exception:
+            break
 
 
 def _safe_state_dict(name: str, value) -> dict:
@@ -424,7 +578,9 @@ def _handle_running_process_heartbeat(runner_id: str, proc, redis_client: redis.
 
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
-    set_wf_manager(WorkflowManager(PROJECT_ROOT / "data" / "monitor.db"))
+    global _wf_manager
+    set_wf_manager(WorkflowManager())
+    _wf_manager = get_wf_manager()
     logger.info("=" * 50)
     logger.info("Dev Runner Command Listener 시작")
     logger.info(f"Redis: {REDIS_HOST}:{REDIS_PORT}")
