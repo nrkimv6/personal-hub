@@ -138,4 +138,5 @@ async def test_validate_instagram_caller_right(db, worker):
     
     # 3. 검증
     service.execute_llm.assert_called_once()
-    service.mark_completed.assert_called_once()
+    service.prepare_completed.assert_called_once()
+    service.mark_completed.assert_not_called()

@@ -85,6 +85,35 @@ class TestEventListAPI:
         response = client.get("/api/v1/events?event_status=ongoing")
         assert response.status_code == 200
 
+    def test_get_events_filter_ongoing_or_upcoming(self, client, admin_headers):
+        """진행 중 + 예정 상태 필터"""
+        response_a = client.post("/api/v1/events", json={
+            "title": "진행 중 이벤트",
+            "event_start": str(date.today() - timedelta(days=1)),
+            "event_end": str(date.today() + timedelta(days=2)),
+        }, headers=admin_headers)
+        response_b = client.post("/api/v1/events", json={
+            "title": "예정 이벤트",
+            "event_start": str(date.today() + timedelta(days=3)),
+            "event_end": str(date.today() + timedelta(days=5)),
+        }, headers=admin_headers)
+        response_c = client.post("/api/v1/events", json={
+            "title": "종료 이벤트",
+            "event_start": str(date.today() - timedelta(days=5)),
+            "event_end": str(date.today() - timedelta(days=1)),
+        }, headers=admin_headers)
+        assert response_a.status_code == 201
+        assert response_b.status_code == 201
+        assert response_c.status_code == 201
+
+        response = client.get("/api/v1/events?event_status=ongoing_or_upcoming")
+        assert response.status_code == 200
+        data = response.json()
+        titles = {item["title"] for item in data["items"]}
+        assert "진행 중 이벤트" in titles
+        assert "예정 이벤트" in titles
+        assert "종료 이벤트" not in titles
+
     def test_get_events_pagination(self, client, sample_event):
         """페이지네이션"""
         response = client.get("/api/v1/events?page=1&page_size=10")

@@ -178,6 +178,7 @@
 | ✅ | `kakao_queue_status.py` | Kakao 알림 Redis 큐 상태/적체 진단 |
 | ✅ | `test_pg_connection.py` | PG 연결 확인 (진단용 — migrations 아님) |
 | ✅ | `register_process.py` | 프로세스 등록/추적 유틸 |
+| ✅ | `recover_instagram_llm_missing_events.py` | completed Instagram LLM 요청 중 Event 누락 건 조회/복구 (dry-run 기본, `--apply` 실제 반영) |
 
 ---
 

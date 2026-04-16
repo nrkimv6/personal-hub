@@ -179,6 +179,23 @@ class LLMQueueService:
         claude_session_id: Optional[str] = None,
     ) -> None:
         """요청을 completed 상태로 변경."""
+        request = self.prepare_completed(
+            request_id,
+            result,
+            raw_response,
+            claude_session_id,
+        )
+        if request:
+            self.db.commit()
+
+    def prepare_completed(
+        self,
+        request_id: int,
+        result: dict,
+        raw_response: str = "",
+        claude_session_id: Optional[str] = None,
+    ) -> Optional[LLMRequest]:
+        """요청의 completed 필드를 채우되 commit은 호출자가 결정한다."""
         request = self._repo.get_by_id(request_id)
         if request:
             request.status = "completed"
@@ -188,7 +205,8 @@ class LLMQueueService:
             request.error_message = None
             if claude_session_id:
                 request.claude_session_id = claude_session_id
-            self.db.commit()
+            return request
+        return None
 
     def mark_failed(self, request_id: int, error_message: str, raw_response: str = "") -> None:
         """요청을 failed 상태로 변경."""

@@ -283,6 +283,35 @@ class TestLLMServiceParseJsonResponse:
         with pytest.raises(ValueError):
             parser._parse_json_response("This is not JSON")
 
+    def test_right_unwraps_outer_result_envelope(self, parser):
+        """outer envelope의 result 문자열도 inner payload로 벗긴다."""
+        from app.modules.claude_worker.services.executors.base import normalize_json_payload
+
+        payload = normalize_json_payload(
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": '```json\n{"tag": "이벤트", "summary": "테스트"}\n```',
+            }
+        )
+
+        assert payload["tag"] == "이벤트"
+        assert payload["summary"] == "테스트"
+
+    def test_right_prefers_structured_output_over_result(self, parser):
+        """structured_output이 있으면 result보다 우선한다."""
+        from app.modules.claude_worker.services.executors.base import normalize_json_payload
+
+        payload = normalize_json_payload(
+            {
+                "structured_output": {"tag": "팝업", "summary": "structured"},
+                "result": '```json\n{"tag": "이벤트", "summary": "fallback"}\n```',
+            }
+        )
+
+        assert payload["tag"] == "팝업"
+        assert payload["summary"] == "structured"
+
 
 class TestLLMServiceWorkerStatus:
     """워커 상태 관련 메서드 테스트."""

@@ -68,6 +68,19 @@ class TestMarkStateTransitions:
         assert req.status == "completed"
         assert req.processed_at is not None
 
+    def test_prepare_completed_R_sets_fields_without_commit(self, db, svc):
+        """R: prepare_completed는 상태 필드만 채우고 commit은 호출자가 결정."""
+        req = svc.enqueue("ct", "ci2b", "prompt")
+        original_commit = db.commit
+        db.commit = MagicMock(side_effect=original_commit)
+        svc.prepare_completed(req.id, {"key": "val"}, raw_response="raw")
+
+        assert db.commit.call_count == 0
+        original_commit()
+        db.refresh(req)
+        assert req.status == "completed"
+        assert req.raw_response == "raw"
+
     def test_mark_failed_R_increments_retry(self, db, svc):
         """R: mark_failed → retry_count 증가."""
         req = svc.enqueue("ct", "ci3", "prompt")

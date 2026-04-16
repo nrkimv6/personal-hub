@@ -123,6 +123,9 @@ class LLMService:
     def mark_completed(self, request_id: int, result: dict, raw_response: str = "", claude_session_id: Optional[str] = None) -> None:
         return self._queue_svc.mark_completed(request_id, result, raw_response, claude_session_id)
 
+    def prepare_completed(self, request_id: int, result: dict, raw_response: str = "", claude_session_id: Optional[str] = None):
+        return self._queue_svc.prepare_completed(request_id, result, raw_response, claude_session_id)
+
     def mark_failed(self, request_id: int, error_message: str, raw_response: str = "") -> None:
         return self._queue_svc.mark_failed(request_id, error_message, raw_response)
 

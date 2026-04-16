@@ -64,7 +64,7 @@
 	let uncategorizedPosts: UncategorizedPost[] = $state([]);
 
 	// 필터
-	let filterEventStatus: string | null = $state('ongoing');
+	let filterEventStatus: string | null = $state('ongoing_or_upcoming');
 	let filterUrlType: string | null = $state(null);
 	let filterSourceType: string | null = $state(null);
 	let filterSearch = $state('');  // 검색어
@@ -202,7 +202,9 @@
 			return;
 		}
 
-		if (tab === 'online' || tab === 'offline') {
+		if (tab === 'online') {
+			filterEventStatus = 'ongoing_or_upcoming';
+		} else if (tab === 'offline') {
 			filterEventStatus = 'ongoing';
 		} else if (tab === 'popup') {
 			filterEventStatus = 'ongoing_or_upcoming';
@@ -265,7 +267,9 @@
 			} else {
 				filterEventStatus = null;
 			}
-		} else if (tab === 'online' || tab === 'offline') {
+		} else if (tab === 'online') {
+			filterEventStatus = 'ongoing_or_upcoming';
+		} else if (tab === 'offline') {
 			filterEventStatus = 'ongoing';
 		} else if (tab === 'popup') {
 			filterEventStatus = 'ongoing_or_upcoming';
