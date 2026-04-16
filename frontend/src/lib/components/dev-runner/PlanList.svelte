@@ -110,12 +110,10 @@
 		runningPlanFile?: string | null;
 		lastPlanFile?: string | null;
 		batchPlans?: BatchPlanItem[];
-		onPlanSelect?: (path: string) => void;
-		onExecute?: (path: string) => void;
 		onPlanModalOpen?: (plan: DevRunnerPlanFileResponse) => void;
 	}
 
-	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanSelect, onExecute, onPlanModalOpen }: Props = $props();
+	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanModalOpen }: Props = $props();
 
 	function parsePlanFilename(filename: string) {
 		const match = filename.match(/^(\d{4}-\d{2}-\d{2})_(.+)$/);
@@ -182,7 +180,6 @@
 
 	function handlePlanSelect(plan: DevRunnerPlanFileResponse) {
 		onPlanModalOpen?.(plan);
-		onPlanSelect?.(plan.path);
 	}
 
 	async function handleGenerateSummary(e: Event, plan: DevRunnerPlanFileResponse) {
