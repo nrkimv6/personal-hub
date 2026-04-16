@@ -48,8 +48,8 @@ class SnapshotWriter:
         return str(cmdline_parts).strip()
 
     @staticmethod
-    def _safe_bool(value: Any) -> int:
-        return 1 if bool(value) else 0
+    def _safe_bool(value: Any) -> bool:
+        return bool(value)
 
     @staticmethod
     def _normalize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -108,6 +108,7 @@ class SnapshotWriter:
 
     def _ensure_watch_tables(self, db: Any) -> None:
         auto_pk = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        bool_default = "BOOLEAN DEFAULT FALSE" if is_pg else "INTEGER DEFAULT 0"
         db.execute(
             text(
                 f"""
@@ -124,7 +125,7 @@ class SnapshotWriter:
                     cmdline_hash TEXT,
                     create_time REAL,
                     memory_mb REAL,
-                    is_orphan INTEGER DEFAULT 0,
+                    is_orphan {bool_default},
                     scope TEXT DEFAULT 'external',
                     captured_by TEXT DEFAULT 'periodic'
                 )
@@ -234,7 +235,7 @@ class SnapshotWriter:
                     INSERT INTO process_snapshots
                         (captured_at, pid, ppid, name, exe, role, memory_mb, is_orphan, action_taken)
                     VALUES
-                        (:captured_at, :pid, :ppid, :name, :exe, :role, :memory_mb, 0, NULL)
+                        (:captured_at, :pid, :ppid, :name, :exe, :role, :memory_mb, :is_orphan, NULL)
                     """,
                     {
                         "captured_at": captured_at,
@@ -244,6 +245,7 @@ class SnapshotWriter:
                         "exe": entry.get("exe", ""),
                         "role": entry.get("role", ""),
                         "memory_mb": memory_mb,
+                        "is_orphan": self._safe_bool(False),
                     },
                 )
             db.commit()
@@ -422,7 +424,8 @@ class SnapshotWriter:
             "limit": int(max(1, min(limit, 1000))),
         }
         if only_orphan:
-            where_parts.append("is_orphan = 1")
+            where_parts.append("is_orphan = :only_orphan")
+            params["only_orphan"] = self._safe_bool(True)
         if scope:
             where_parts.append("scope = :scope")
             params["scope"] = scope
@@ -509,12 +512,13 @@ class SnapshotWriter:
                     INSERT INTO process_snapshots
                         (captured_at, pid, name, is_orphan, action_taken)
                     VALUES
-                        (:captured_at, :pid, :name, 1, :action_taken)
+                        (:captured_at, :pid, :name, :is_orphan, :action_taken)
                     """,
                     {
                         "captured_at": captured_at,
                         "pid": pid,
                         "name": name,
+                        "is_orphan": self._safe_bool(True),
                         "action_taken": action,
                     },
                 )
