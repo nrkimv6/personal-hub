@@ -58,6 +58,29 @@ def _make_engine_ctx(mock_conn):
 class TestSyncSerialSequences:
     """sync_serial_sequences() 단위 테스트 (RIGHT-BICEP)"""
 
+    def test_pg_serial_tables_regression_uses_real_singular_table_names(self):
+        """R(Regression): 단수형 실제 테이블명이 PG_SERIAL_TABLES에 유지되어야 한다."""
+        from app.core.database import PG_SERIAL_TABLES
+
+        required = {
+            "file_search_status",
+            "file_search_ignore_pattern",
+            "google_search_queue",
+            "llm_worker_status",
+        }
+        forbidden = {
+            "file_search_statuses",
+            "file_search_ignore_patterns",
+            "google_search_queues",
+            "llm_worker_statuses",
+        }
+
+        for table in required:
+            assert table in PG_SERIAL_TABLES
+
+        for table in forbidden:
+            assert table not in PG_SERIAL_TABLES
+
     def test_sync_serial_sequences_right(self):
         """R(Right): PG 환경에서 존재하는 테이블 1개 — 시퀀스 동기화 1건 반환"""
         mock_conn = _make_mock_conn(seq_exists=True)
