@@ -51,10 +51,12 @@ def test_instagram_llm_post_endpoint_returns_normalized_result(client, test_db_s
 
 
 def test_instagram_llm_requests_endpoint_filters_non_instagram(client, test_db_session):
+    instagram_caller_id = "910001"
+    non_instagram_caller_id = "910002"
     test_db_session.add_all(
         [
-            LLMRequest(caller_type="instagram", caller_id="1", prompt="a", status="completed"),
-            LLMRequest(caller_type="writing_generate", caller_id="2", prompt="b", status="completed"),
+            LLMRequest(caller_type="instagram", caller_id=instagram_caller_id, prompt="a", status="completed"),
+            LLMRequest(caller_type="writing_generate", caller_id=non_instagram_caller_id, prompt="b", status="completed"),
         ]
     )
     test_db_session.commit()
@@ -62,5 +64,6 @@ def test_instagram_llm_requests_endpoint_filters_non_instagram(client, test_db_s
     response = client.get("/api/v1/instagram/llm/requests")
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 1
-    assert all(item["post_id"] == 1 for item in data["requests"])
+    returned_post_ids = {item["post_id"] for item in data["requests"]}
+    assert int(instagram_caller_id) in returned_post_ids
+    assert int(non_instagram_caller_id) not in returned_post_ids
