@@ -100,6 +100,22 @@ class TestPgBooleanCompatSourceCheck:
                 violations.extend(matches)
         assert not violations, f"integrity_check_service.py boolean=integer 패턴: {violations}"
 
+    def test_integrity_check_service_no_sqlite_master_runtime_lookup(self):
+        """재현 TC: integrity_check_service.py에서 sqlite_master 런타임 의존 제거 확인"""
+        from app.services import integrity_check_service
+        source = inspect.getsource(integrity_check_service)
+        assert "sqlite_master" not in source, (
+            "integrity_check_service.py에 sqlite_master 런타임 메타조회가 남아있음"
+        )
+
+    def test_integrity_check_service_no_pragma_table_info_runtime_lookup(self):
+        """재현 TC: integrity_check_service.py에서 PRAGMA table_info 런타임 의존 제거 확인"""
+        from app.services import integrity_check_service
+        source = inspect.getsource(integrity_check_service)
+        assert "PRAGMA table_info" not in source, (
+            "integrity_check_service.py에 PRAGMA table_info 런타임 메타조회가 남아있음"
+        )
+
     def test_schedule_service_no_integer_boolean(self):
         """재현 TC: schedule_service.py에서 boolean=integer 제거 확인"""
         from app.modules.naver_booking.services import schedule_service

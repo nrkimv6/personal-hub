@@ -1,61 +1,114 @@
 #!/usr/bin/env python3
-"""스케줄 상태 확인 스크립트."""
-import sqlite3
+"""현재 운영 DB 기준 스케줄 상태 확인 스크립트."""
 import json
-from datetime import datetime
+import sys
+from pathlib import Path
 
-conn = sqlite3.connect('D:/work/project/tools/monitor-page/data/monitor.db')
-cursor = conn.cursor()
+from sqlalchemy import inspect, text
 
-# 테이블 스키마 확인
-print("=" * 80)
-print("task_schedules schema")
-print("=" * 80)
-cursor.execute("PRAGMA table_info(task_schedules)")
-for row in cursor.fetchall():
-    print(row)
-print()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# 모든 활성 스케줄 확인 (task_schedules 테이블)
-cursor.execute('SELECT * FROM task_schedules WHERE enabled = 1')
-rows = cursor.fetchall()
-columns = [d[0] for d in cursor.description]
+from app.database import SessionLocal
 
-print("=" * 80)
-print("Active Schedules")
-print("=" * 80)
 
-for row in rows:
-    d = dict(zip(columns, row))
-    print(f"ID: {d.get('id')}, Name: {d.get('name')}, Type: {d.get('target_type')}")
-    config = json.loads(d.get('target_config', '{}')) if d.get('target_config') else {}
-    print(f"  time_windows: {config.get('time_windows', [])}")
-    print(f"  daily_runs: {config.get('daily_runs', 'N/A')}")
-    print(f"  min_interval_hours: {config.get('min_interval_hours', 'N/A')}")
-    print(f"  Last: {d.get('last_run_at')}")
-    print(f"  Next: {d.get('next_run_at')}")
-    print()
+def _print_header(title: str) -> None:
+    print("=" * 80)
+    print(title)
+    print("=" * 80)
 
-# 최근 스케줄 실행 이력 확인
-print("=" * 80)
-print("Recent Schedule Runs (last 20)")
-print("=" * 80)
 
-cursor.execute('''
-    SELECT r.id, s.name, s.target_type, r.status, r.started_at, r.completed_at, r.stop_reason
-    FROM task_schedule_runs r
-    JOIN task_schedules s ON r.schedule_id = s.id
-    ORDER BY r.id DESC
-    LIMIT 20
-''')
-rows = cursor.fetchall()
-columns = [d[0] for d in cursor.description]
+def _load_config(raw_value):
+    if raw_value is None:
+        return {}
+    if isinstance(raw_value, dict):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            return json.loads(raw_value)
+        except json.JSONDecodeError:
+            return {}
+    return {}
 
-for row in rows:
-    d = dict(zip(columns, row))
-    print(f"Run #{d['id']}: {d['name']} ({d['target_type']})")
-    print(f"  Status: {d['status']}, Started: {d['started_at']}, Completed: {d['completed_at']}")
-    print(f"  Reason: {d['stop_reason']}")
-    print()
 
-conn.close()
+def main() -> int:
+    db = SessionLocal()
+
+    try:
+        inspector = inspect(db.get_bind())
+        tables = set(inspector.get_table_names())
+
+        if "task_schedules" not in tables:
+            print("task_schedules 테이블이 없습니다.")
+            return 1
+
+        _print_header("task_schedules schema")
+        for column in inspector.get_columns("task_schedules"):
+            print(
+                f"{column['name']}: {column['type']} "
+                f"(nullable={column.get('nullable')}, default={column.get('default')})"
+            )
+        print()
+
+        active_rows = db.execute(
+            text(
+                """
+                SELECT id, name, target_type, enabled, last_run_at, next_run_at, target_config
+                FROM task_schedules
+                WHERE enabled = true
+                ORDER BY CASE WHEN next_run_at IS NULL THEN 1 ELSE 0 END, next_run_at, id
+                LIMIT 50
+                """
+            )
+        ).mappings().all()
+
+        _print_header("Active Schedules")
+        if not active_rows:
+            print("(활성 스케줄 없음)")
+        for row in active_rows:
+            config = _load_config(row["target_config"])
+            print(f"ID: {row['id']}, Name: {row['name']}, Type: {row['target_type']}")
+            print(f"  enabled: {row['enabled']}")
+            print(f"  Last: {row['last_run_at']}")
+            print(f"  Next: {row['next_run_at']}")
+            print(f"  target_config keys: {sorted(config.keys()) if config else []}")
+            print()
+
+        _print_header("Recent Schedule Runs (last 20)")
+        if "task_schedule_runs" not in tables:
+            print("task_schedule_runs 테이블이 없습니다.")
+            return 0
+
+        run_rows = db.execute(
+            text(
+                """
+                SELECT r.id, s.name, s.target_type, r.status, r.started_at, r.finished_at, r.stop_reason
+                FROM task_schedule_runs r
+                JOIN task_schedules s ON r.schedule_id = s.id
+                ORDER BY r.id DESC
+                LIMIT 20
+                """
+            )
+        ).mappings().all()
+
+        if not run_rows:
+            print("(최근 실행 이력 없음)")
+            return 0
+
+        for row in run_rows:
+            print(f"Run #{row['id']}: {row['name']} ({row['target_type']})")
+            print(
+                f"  Status: {row['status']}, "
+                f"Started: {row['started_at']}, Finished: {row['finished_at']}"
+            )
+            print(f"  Reason: {row['stop_reason']}")
+            print()
+
+        return 0
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
