@@ -6,19 +6,12 @@ from playwright.sync_api import Page, expect
 pytestmark = pytest.mark.e2e
 
 
-def _skip_admin_mode_if_public(system_mode: str) -> None:
-    if system_mode != "admin":
-        pytest.skip(f"현재 system mode={system_mode} — admin E2E 스킵")
-
-
 def _assert_no_loading_spinner(page: Page) -> None:
     expect(page.locator(".animate-spin")).to_have_count(0, timeout=15000)
 
 
 class TestLlmRuntime:
-    def test_llm_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str, system_mode: str):
-        _skip_admin_mode_if_public(system_mode)
-
+    def test_llm_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str):
         page.goto(f"{frontend_url}/llm")
         page.wait_for_load_state("networkidle")
 
@@ -33,15 +26,24 @@ class TestLlmRuntime:
 
 
 class TestSchedulerRuntime:
-    def test_scheduler_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str, system_mode: str):
-        _skip_admin_mode_if_public(system_mode)
-
+    def test_scheduler_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str):
         page.goto(f"{frontend_url}/scheduler")
         page.wait_for_load_state("networkidle")
 
         _assert_no_loading_spinner(page)
         expect(page.locator("main").first).to_be_visible()
-        assert (
-            page.get_by_text("등록된 스케줄이 없습니다").count() > 0
-            or page.locator("table tbody tr").count() > 0
-        ), "Scheduler 화면이 빈 상태로 남아있거나 목록이 렌더되지 않았습니다"
+        assert page.get_by_text("해석:").count() > 0, "Scheduler 화면에서 해석 요약이 렌더되지 않았습니다"
+
+
+class TestSystemSettingsRuntime:
+    def test_system_settings_exposes_scheduler_contract(self, page: Page, frontend_url: str):
+        page.goto(f"{frontend_url}/system?tab=settings")
+        page.wait_for_load_state("networkidle")
+        page.get_by_text("AI 기본값").click()
+
+        _assert_no_loading_spinner(page)
+        expect(page.locator("main").first).to_be_visible()
+        expect(page.get_by_text("최근 scheduler provider")).to_be_visible()
+        expect(page.get_by_text("LLMWorker 기본값")).to_be_visible()
+        expect(page.get_by_text("요청값 미지정 시 caller별 기본 provider/model을 적용합니다.")).to_be_visible()
+        expect(page.get_by_text("plan_requirements_sync")).to_be_visible()
