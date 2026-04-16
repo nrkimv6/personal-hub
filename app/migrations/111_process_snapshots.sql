@@ -8,9 +8,9 @@ CREATE TABLE IF NOT EXISTS process_snapshots (
     exe TEXT,
     role TEXT,
     memory_mb REAL,
-    is_orphan INTEGER DEFAULT 0,
+    is_orphan BOOLEAN DEFAULT FALSE,
     action_taken TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_ps_captured ON process_snapshots(captured_at);
-CREATE INDEX IF NOT EXISTS idx_ps_orphan ON process_snapshots(is_orphan) WHERE is_orphan = 1;
+CREATE INDEX IF NOT EXISTS idx_ps_orphan ON process_snapshots(is_orphan) WHERE is_orphan;

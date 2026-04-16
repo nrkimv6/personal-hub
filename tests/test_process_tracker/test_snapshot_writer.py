@@ -2,6 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import sqlite3
+import inspect
 import psutil
 
 
@@ -82,7 +83,8 @@ class MockSession:
 
     def execute(self, sql, params=None):
         sql_str = str(sql)
-        self._conn.execute(sql_str, params or {})
+        cursor = self._conn.execute(sql_str, params or {})
+        return _ResultProxy(cursor)
 
     def commit(self):
         self._conn.commit()
@@ -92,6 +94,33 @@ class MockSession:
 
     def __exit__(self, *args):
         pass
+
+
+class _ResultRow:
+    def __init__(self, row, keys):
+        self._row = row
+        self._mapping = dict(zip(keys, row))
+
+    def __getitem__(self, item):
+        return self._row[item]
+
+
+class _ResultProxy:
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self._keys = [col[0] for col in (cursor.description or [])]
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None or not self._keys:
+            return row
+        return _ResultRow(row, self._keys)
+
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        if not self._keys:
+            return rows
+        return [_ResultRow(row, self._keys) for row in rows]
 
 
 class FakeProc:
@@ -125,6 +154,7 @@ async def test_capture_inserts_rows():
         return p
 
     with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)), \
+         patch("app.shared.process.snapshot_writer.is_pg", False), \
          patch("app.shared.process.snapshot_writer.psutil.Process", side_effect=mock_process):
         writer = SnapshotWriter(registry)
         await writer.capture()
@@ -140,15 +170,16 @@ def test_record_orphan_action():
     conn = make_in_memory_db()
     registry = MagicMock()
 
-    with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)):
+    with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)), \
+         patch("app.shared.process.snapshot_writer.is_pg", False):
         writer = SnapshotWriter(registry)
         writer.record_orphan_action(123, "node", "terminated")
 
     rows = conn.execute("SELECT * FROM process_snapshots WHERE pid=123").fetchall()
     assert len(rows) == 1
     row = rows[0]
-    # is_orphan=1, action_taken='terminated'
-    assert row[8] == 1  # is_orphan
+    # SQLite는 bool을 0/1로 저장하므로 truthy 여부로 검증한다.
+    assert bool(row[8]) is True
     assert row[9] == "terminated"  # action_taken
 
 
@@ -168,7 +199,8 @@ def test_purge_old_deletes_expired():
     conn.commit()
 
     registry = MagicMock()
-    with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)):
+    with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)), \
+         patch("app.shared.process.snapshot_writer.is_pg", False):
         writer = SnapshotWriter(registry)
         writer.purge_old(7)
 
@@ -188,6 +220,16 @@ def test_cmdline_hash_stable_for_same_cmdline():
 
     assert h1 == h2
     assert len(h1) == 32
+
+
+def test_safe_bool_returns_real_bool():
+    """_safe_bool()는 PG boolean 컬럼에 바로 바인딩 가능한 bool을 반환한다."""
+    from app.shared.process.snapshot_writer import SnapshotWriter
+
+    assert type(SnapshotWriter._safe_bool(True)) is bool
+    assert type(SnapshotWriter._safe_bool(False)) is bool
+    assert SnapshotWriter._safe_bool(1) is True
+    assert SnapshotWriter._safe_bool(0) is False
 
 
 @pytest.mark.asyncio
@@ -222,6 +264,7 @@ async def test_capture_python_processes_collects_parent_chain():
     parent_proc.ppid.return_value = 1000
 
     with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)), \
+         patch("app.shared.process.snapshot_writer.is_pg", False), \
          patch("app.shared.process.snapshot_writer.psutil.process_iter", return_value=[proc]), \
          patch("app.shared.process.snapshot_writer.psutil.Process", return_value=parent_proc), \
          patch("app.shared.process.snapshot_writer.psutil.pid_exists", return_value=True):
@@ -269,6 +312,7 @@ async def test_capture_python_processes_access_denied_skips():
     )
 
     with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)), \
+         patch("app.shared.process.snapshot_writer.is_pg", False), \
          patch("app.shared.process.snapshot_writer.psutil.process_iter", return_value=[AccessDeniedInfoProc(), valid_proc]), \
          patch("app.shared.process.snapshot_writer.psutil.Process", side_effect=psutil.AccessDenied(pid=1)), \
          patch("app.shared.process.snapshot_writer.psutil.pid_exists", return_value=True):
@@ -280,6 +324,41 @@ async def test_capture_python_processes_access_denied_skips():
     assert rows == [(7001,)]
 
 
+def test_get_python_snapshot_history_only_orphan_filters():
+    """only_orphan=True면 orphan row만 반환하고 응답 타입은 bool을 유지한다."""
+    from app.shared.process.snapshot_writer import SnapshotWriter
+
+    conn = make_in_memory_db()
+    conn.execute(
+        """
+        INSERT INTO process_watch_snapshots (
+            captured_at, pid, ppid, parent_pid, parent_name, name, exe, cmdline,
+            cmdline_hash, create_time, memory_mb, is_orphan, scope, captured_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("2026-04-16T15:50:00", 9001, 1, None, "", "python.exe", "", "", "a" * 32, 1.0, 100.0, 1, "external", "test"),
+    )
+    conn.execute(
+        """
+        INSERT INTO process_watch_snapshots (
+            captured_at, pid, ppid, parent_pid, parent_name, name, exe, cmdline,
+            cmdline_hash, create_time, memory_mb, is_orphan, scope, captured_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("2026-04-16T15:49:00", 9002, 1, None, "", "python.exe", "", "", "b" * 32, 2.0, 80.0, 0, "external", "test"),
+    )
+    conn.commit()
+
+    with patch("app.shared.process.snapshot_writer.SessionLocal", return_value=MockSession(conn)), \
+         patch("app.shared.process.snapshot_writer.is_pg", False):
+        writer = SnapshotWriter(MagicMock())
+        rows = writer.get_python_snapshot_history(only_orphan=True, limit=10)
+
+    assert len(rows) == 1
+    assert rows[0]["pid"] == 9001
+    assert rows[0]["is_orphan"] is True
+
+
 # ============================================================
 # PG AUTOINCREMENT → SERIAL 분기 TC
 # ============================================================
@@ -287,7 +366,6 @@ async def test_capture_python_processes_access_denied_skips():
 def test_ensure_watch_tables_sqlite_uses_autoincrement():
     """R: is_pg=False일 때 CREATE TABLE에 AUTOINCREMENT 사용"""
     from app.shared.process.snapshot_writer import SnapshotWriter
-    import inspect
 
     source = inspect.getsource(SnapshotWriter._ensure_watch_tables)
     assert "auto_pk" in source, "is_pg 분기 auto_pk 변수가 없음"
@@ -295,12 +373,18 @@ def test_ensure_watch_tables_sqlite_uses_autoincrement():
     assert "AUTOINCREMENT" in source, "SQLite 분기(AUTOINCREMENT) 없음"
 
 
+def test_ensure_watch_tables_has_pg_boolean_default():
+    """R: is_pg=True일 때 is_orphan 컬럼은 BOOLEAN DEFAULT FALSE 계약을 가진다."""
+    from app.shared.process.snapshot_writer import SnapshotWriter
+
+    source = inspect.getsource(SnapshotWriter._ensure_watch_tables)
+    assert "BOOLEAN DEFAULT FALSE" in source
+
+
 def test_ensure_watch_tables_pg_generates_serial_ddl():
     """R: is_pg=True일 때 DDL에 SERIAL PRIMARY KEY 삽입"""
     with patch("app.shared.process.snapshot_writer.is_pg", True):
         from app.shared.process.snapshot_writer import SnapshotWriter
-        import importlib
-        import app.shared.process.snapshot_writer as sw_module
         # auto_pk 값 직접 검증
         auto_pk = "SERIAL PRIMARY KEY" if True else "INTEGER PRIMARY KEY AUTOINCREMENT"
         assert auto_pk == "SERIAL PRIMARY KEY"

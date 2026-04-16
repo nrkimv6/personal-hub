@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS process_watch_snapshots (
     cmdline_hash TEXT,
     create_time REAL,
     memory_mb REAL,
-    is_orphan INTEGER DEFAULT 0,
+    is_orphan BOOLEAN DEFAULT FALSE,
     scope TEXT DEFAULT 'external',
     captured_by TEXT DEFAULT 'periodic'
 );

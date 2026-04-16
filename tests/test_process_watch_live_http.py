@@ -48,6 +48,8 @@ def test_live_process_watch_latest_items_or_empty():
     data = resp.json()
     assert isinstance(data["items"], list), "items가 list가 아님"
     assert isinstance(data["item_count"], int), "item_count가 int가 아님"
+    if data["items"]:
+        assert isinstance(data["items"][0]["is_orphan"], bool), "is_orphan이 bool이 아님"
 
 
 def test_live_process_watch_history_returns_200():

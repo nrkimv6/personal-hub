@@ -71,3 +71,5 @@ def test_process_watch_latest_has_source_and_age():
     data = resp.json()
     assert data["source"] in ("periodic", "on_demand", "stale_cache")
     assert "snapshot_age_seconds" in data
+    if data.get("items"):
+        assert isinstance(data["items"][0]["is_orphan"], bool)

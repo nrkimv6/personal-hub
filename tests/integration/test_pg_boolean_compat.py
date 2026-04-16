@@ -7,10 +7,15 @@ SQLite→PostgreSQL 마이그레이션 후 boolean 컬럼에 integer 리터럴(0
 import re
 import inspect
 import sys
+import uuid
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import psycopg2
 import pytest
+from sqlalchemy import create_engine, text as sa_text
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -107,6 +112,14 @@ class TestPgBooleanCompatSourceCheck:
                 violations.extend(matches)
         assert not violations, f"schedule_service.py boolean=integer 패턴: {violations}"
 
+    def test_snapshot_writer_no_integer_boolean_literals(self):
+        """재현 TC: snapshot_writer.py에 integer boolean 리터럴이 남아 있지 않은지 확인"""
+        from app.shared.process import snapshot_writer
+
+        source = inspect.getsource(snapshot_writer)
+        assert "1 if bool(value) else 0" not in source
+        assert "is_orphan = 1" not in source
+
 
 class TestLastInsertRowidRemoved:
     """last_insert_rowid() → RETURNING id 교체 확인"""
@@ -153,6 +166,8 @@ class TestPgBooleanDbTypeCheck:
         ("instagram_tag_keywords", "is_active"),
         ("instagram_tag_keywords", "is_case_sensitive"),
         ("instagram_tag_keywords", "is_regex"),
+        ("process_snapshots", "is_orphan"),
+        ("process_watch_snapshots", "is_orphan"),
         ("process_watch_snapshots_archive", "is_orphan"),
     ]
 
@@ -182,5 +197,89 @@ class TestSnapshotWriterPgDdl:
         source = inspect.getsource(snapshot_writer.SnapshotWriter._ensure_watch_tables)
         assert "is_pg" in source, "_ensure_watch_tables에 is_pg 분기 없음"
         assert "SERIAL PRIMARY KEY" in source, "PG용 SERIAL 없음"
+        assert "BOOLEAN DEFAULT FALSE" in source, "PG용 boolean default 없음"
         # AUTOINCREMENT는 f-string 내 SQLite 분기로 여전히 존재해야 함
         assert "AUTOINCREMENT" in source, "SQLite 분기 AUTOINCREMENT 없음"
+
+
+class _FakeProc:
+    def __init__(self, info):
+        self.info = info
+
+
+@pytest.fixture
+def pg_session_factory():
+    from app.core.config import settings
+
+    schema = f"test_pws_bool_{uuid.uuid4().hex[:10]}"
+    admin_conn = psycopg2.connect(settings.DATABASE_URL)
+    admin_conn.autocommit = True
+    admin_cur = admin_conn.cursor()
+    admin_cur.execute(f'CREATE SCHEMA "{schema}"')
+
+    engine = create_engine(
+        settings.DATABASE_URL,
+        poolclass=NullPool,
+        connect_args={"options": f"-c search_path={schema}"},
+    )
+    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    try:
+        yield session_factory, engine
+    finally:
+        engine.dispose()
+        admin_cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        admin_cur.close()
+        admin_conn.close()
+
+
+class TestSnapshotWriterPgRuntimeCompat:
+    """실제 PostgreSQL 연결에서 SnapshotWriter boolean 바인딩 호환성을 검증한다."""
+
+    @pytest.mark.asyncio
+    async def test_capture_python_processes_inserts_pg_boolean(self, pg_session_factory):
+        from app.shared.process.snapshot_writer import SnapshotWriter
+
+        session_factory, engine = pg_session_factory
+        registry = MagicMock()
+
+        mem = MagicMock()
+        mem.rss = 256 * 1024 * 1024
+        proc = _FakeProc(
+            {
+                "pid": 81234,
+                "name": "python.exe",
+                "exe": r"D:\Python39\python.exe",
+                "ppid": 5000,
+                "cmdline": ["python", "-m", "pytest"],
+                "memory_info": mem,
+                "create_time": 1712100000.0,
+            }
+        )
+        parent_proc = MagicMock()
+        parent_proc.name.return_value = "cmd.exe"
+        parent_proc.ppid.return_value = 1000
+
+        with patch("app.shared.process.snapshot_writer.SessionLocal", session_factory), \
+             patch("app.shared.process.snapshot_writer.is_pg", True), \
+             patch("app.shared.process.snapshot_writer.psutil.process_iter", return_value=[proc]), \
+             patch("app.shared.process.snapshot_writer.psutil.Process", return_value=parent_proc), \
+             patch("app.shared.process.snapshot_writer.psutil.pid_exists", return_value=False), \
+             patch.object(SnapshotWriter, "_purge_watch_rows", return_value=None):
+            writer = SnapshotWriter(registry)
+            count = await writer.capture_python_processes(limit=10, captured_by="test")
+
+        assert count == 1
+        with engine.begin() as conn:
+            row = conn.execute(
+                sa_text(
+                    """
+                    SELECT pid, is_orphan, scope, captured_by
+                    FROM process_watch_snapshots
+                    """
+                )
+            ).mappings().one()
+        assert row["pid"] == 81234
+        assert row["is_orphan"] is True
+        assert row["scope"] == "external"
+        assert row["captured_by"] == "test"
