@@ -214,8 +214,17 @@ class TestSnapshotWriterPgDdl:
         assert "is_pg" in source, "_ensure_watch_tables에 is_pg 분기 없음"
         assert "SERIAL PRIMARY KEY" in source, "PG용 SERIAL 없음"
         assert "BOOLEAN DEFAULT FALSE" in source, "PG용 boolean default 없음"
+        assert "pg_advisory_xact_lock" in source, "PG용 DDL advisory lock 없음"
         # AUTOINCREMENT는 f-string 내 SQLite 분기로 여전히 존재해야 함
         assert "AUTOINCREMENT" in source, "SQLite 분기 AUTOINCREMENT 없음"
+
+    def test_purge_watch_rows_uses_backend_safe_cutoff(self):
+        """재현 TC: PG에서 :window::interval 같은 문법 오류를 다시 만들지 않는다."""
+        from app.shared.process import snapshot_writer
+        source = inspect.getsource(snapshot_writer.SnapshotWriter._purge_watch_rows)
+        assert ":window::interval" not in source
+        assert "captured_at < :cutoff" in source
+        assert "acted_at < :cutoff" in source
 
 
 class _FakeProc:
