@@ -298,6 +298,12 @@ class TestEventServiceFilter:
         for item in result.items:
             assert item.event_status == "upcoming"
 
+    def test_filter_by_event_status_ongoing_or_upcoming(self, test_db_session, event_service, sample_events):
+        """Right: 진행 중 + 예정 필터는 종료된 이벤트를 제외한다."""
+        result = event_service.get_events(test_db_session, event_status="ongoing_or_upcoming")
+        assert result.total >= 2
+        assert all(item.event_status in ("ongoing", "upcoming") for item in result.items)
+
     def test_filter_by_event_status_ended(self, test_db_session, event_service, sample_events):
         """Right: 종료 상태 필터"""
         result = event_service.get_events(test_db_session, event_status="ended")

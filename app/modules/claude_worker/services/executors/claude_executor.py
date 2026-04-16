@@ -6,7 +6,10 @@ import subprocess
 import sys
 import tempfile
 
-from app.modules.claude_worker.services.executors.base import LLMExecutorBase
+from app.modules.claude_worker.services.executors.base import (
+    LLMExecutorBase,
+    normalize_json_payload,
+)
 from app.modules.claude_worker.services.profile_env import build_cli_env
 
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
@@ -295,7 +298,13 @@ class ClaudeExecutor(LLMExecutorBase):
             # JSON 파싱 (선택적)
             if parse_json:
                 try:
-                    parsed = self._parse_json_response(raw_response)
+                    if output_format == "json":
+                        try:
+                            parsed = normalize_json_payload(json.loads(raw_response))
+                        except (json.JSONDecodeError, ValueError, TypeError):
+                            parsed = self._parse_json_response(raw_response)
+                    else:
+                        parsed = self._parse_json_response(raw_response)
                     return {
                         "success": True,
                         "result": parsed,

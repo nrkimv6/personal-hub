@@ -32,6 +32,7 @@ sys.path.insert(0, str(project_root))
 from app.utils.async_logger import AsyncLoggerManager
 from app.shared.llm_registry import report_quota as _registry_report_quota
 from app.modules.claude_worker.services import provider_registry
+from app.modules.claude_worker.services.executors.base import normalize_json_payload
 
 # 워커 전용 비동기 로거 설정
 logger = AsyncLoggerManager.setup_worker_logger(
@@ -84,6 +85,31 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
         return None
 
 
+INSTAGRAM_ENTITY_TAGS = {"이벤트", "팝업", "홍보대사", "기타"}
+INSTAGRAM_NON_ENTITY_TAGS = {"리그램", "후기"}
+
+
+def _truncate_for_log(value, limit: int = 240) -> str:
+    text = "" if value is None else str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
+def extract_instagram_payload(result_value, raw_response: Optional[str] = None) -> Optional[dict]:
+    """저장된 result/raw_response에서 Instagram inner payload를 복구한다."""
+    for candidate in (result_value, raw_response):
+        if candidate in (None, ""):
+            continue
+        try:
+            payload = normalize_json_payload(candidate)
+        except ValueError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
 def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
     """Instagram 게시물에 LLM 분류 결과 저장 및 분류 테이블에 레코드 생성.
 
@@ -106,11 +132,24 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
             logger.error(f"Instagram post not found: {post_id}")
             return False
 
+        if not isinstance(llm_result, dict):
+            logger.error(
+                f"Instagram result payload must be dict: post_id={post_id}, "
+                f"type={type(llm_result).__name__}, payload={_truncate_for_log(llm_result)}"
+            )
+            return False
+
         # 이벤트 기간 파싱
         event_period = llm_result.get("event_period")
         event_start = None
         event_end = None
-        if event_period and isinstance(event_period, dict):
+        if event_period is not None:
+            if not isinstance(event_period, dict):
+                logger.error(
+                    f"Instagram result event_period shape invalid: post_id={post_id}, "
+                    f"type={type(event_period).__name__}, payload={_truncate_for_log(event_period)}"
+                )
+                return False
             event_start = parse_date(event_period.get("start"))
             event_end = parse_date(event_period.get("end"))
 
@@ -119,8 +158,32 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
 
         # 분류 태그에 따라 적절한 테이블에 레코드 생성
         tag = llm_result.get("tag")
-        llm_urls = llm_result.get("urls") or []
-        location = llm_result.get("location") or {}
+        if tag not in INSTAGRAM_ENTITY_TAGS and tag not in INSTAGRAM_NON_ENTITY_TAGS:
+            logger.error(
+                f"Instagram result tag invalid: post_id={post_id}, tag={tag!r}, "
+                f"keys={sorted(llm_result.keys())}"
+            )
+            return False
+
+        llm_urls = llm_result.get("urls")
+        if llm_urls is None:
+            llm_urls = []
+        elif not isinstance(llm_urls, list):
+            logger.error(
+                f"Instagram result urls shape invalid: post_id={post_id}, "
+                f"type={type(llm_urls).__name__}, payload={_truncate_for_log(llm_urls)}"
+            )
+            return False
+
+        location = llm_result.get("location")
+        if location is None:
+            location = {}
+        elif not isinstance(location, dict):
+            logger.error(
+                f"Instagram result location shape invalid: post_id={post_id}, "
+                f"type={type(location).__name__}, payload={_truncate_for_log(location)}"
+            )
+            return False
 
         # 썸네일 URL 추출
         thumbnail_url = None
@@ -207,9 +270,12 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
             post.classified_at = datetime.now()
             logger.info(f"Created UncategorizedPost {uncategorized.id} from Instagram post {post_id}")
 
-        # 리그램/후기 등 분류 테이블 생성이 필요없는 태그는 classified_type/id가 NULL로 유지됨
+        elif tag in INSTAGRAM_NON_ENTITY_TAGS:
+            post.classified_type = None
+            post.classified_id = None
+            post.classified_at = datetime.now()
+            logger.info(f"Instagram post {post_id} classified without entity: tag={tag}")
 
-        db.commit()
         logger.info(f"Instagram post {post_id} LLM result saved: tag={tag}")
         return True
 
@@ -314,7 +380,6 @@ def save_universal_crawl_result(db, page_id: int, llm_result: dict) -> bool:
                 page.popup_id = popup.id
                 logger.info(f"CrawledPage {page_id}: created Popup {popup.id}")
 
-        db.commit()
         logger.info(f"CrawledPage {page_id} LLM result saved: is_event={is_event}, is_popup={is_popup}")
         return True
 
@@ -875,8 +940,7 @@ def save_event_import_result(db, request, result: dict) -> bool:
             input_source="ai",
         )
         db.add(event)
-        db.commit()
-        db.refresh(event)
+        db.flush()
 
         logger.info(f"Event 생성 완료: id={event.id}, title={event.title}")
         return True
@@ -1572,45 +1636,148 @@ class LLMWorker:
             )
 
             if result["success"]:
-                service.mark_completed(
-                    request.id,
-                    result["result"],
-                    result.get("raw_response", ""),
-                    result.get("claude_session_id"),
-                )
-                self._increment_processed()
-                logger.info(f"LLM 실행 완료: id={request.id}")
+                normalized_result = result.get("result")
+                raw_response = result.get("raw_response", "")
+                claude_session_id = result.get("claude_session_id")
 
                 # caller_type별 결과 저장
                 save_success = True
                 if request.caller_type == "instagram":
-                    save_success = save_instagram_result(db, int(request.caller_id), result["result"])
+                    save_success = save_instagram_result(db, int(request.caller_id), normalized_result)
                 elif request.caller_type == "universal_crawl":
-                    save_success = save_universal_crawl_result(db, int(request.caller_id), result["result"])
+                    save_success = save_universal_crawl_result(db, int(request.caller_id), normalized_result)
                 elif request.caller_type == "topic_extract":
-                    save_success = save_topic_extract_result(db, request.caller_id, result["result"])
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    save_success = save_topic_extract_result(db, request.caller_id, normalized_result)
                 elif request.caller_type == "writing":
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
                     save_success = save_writing_result(db, request, result)
                 elif request.caller_type == "writing_generate":
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
                     save_success = save_writing_generate_result(db, request, result)
                 elif request.caller_type == "writing_refine":
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
                     save_success = save_writing_refine_result(db, request, result)
                 elif request.caller_type == "event_import":
                     save_success = save_event_import_result(db, request, result)
                 elif request.caller_type == "report":
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
                     save_success = save_report_result(db, request, result)
                 elif request.caller_type == "pytest_fix":
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
                     save_success = save_pytest_fix_result(db, request, result)
                 elif request.caller_type == "plan_archive_analyze":
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
                     save_success = save_plan_archive_result(db, request, result)
                 elif request.caller_type == "plan_recurrence_check":
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
                     save_success = save_recurrence_check_result(db, request, result)
                 elif request.caller_type == "plan_recurrence_suggest":
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
                     save_success = save_recurrence_suggest_result(db, request, result)
+                else:
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
+
+                if request.caller_type in {"instagram", "universal_crawl", "event_import"}:
+                    if save_success:
+                        service.prepare_completed(
+                            request.id,
+                            normalized_result,
+                            raw_response,
+                            claude_session_id,
+                        )
+                        db.commit()
+                        self._increment_processed()
+                        logger.info(f"LLM 실행 완료: id={request.id}")
+                    else:
+                        db.rollback()
 
                 if not save_success:
-                    logger.error(f"결과 저장 실패 (상태 전환: completed -> failed): id={request.id}, caller_type={request.caller_type}")
-                    service.mark_failed(request.id, f"Save result failed for {request.caller_type}")
+                    payload_summary = _truncate_for_log(normalized_result)
+                    response_summary = _truncate_for_log(raw_response)
+                    logger.error(
+                        "결과 저장 실패: id=%s, caller_type=%s, session_id=%s, payload=%s, raw=%s",
+                        request.id,
+                        request.caller_type,
+                        claude_session_id,
+                        payload_summary,
+                        response_summary,
+                    )
+                    service.mark_failed(
+                        request.id,
+                        f"Save result failed for {request.caller_type}",
+                        raw_response,
+                    )
             else:
                 # JSON 파싱 실패지만 raw_response가 있는 경우
                 if "raw_response" in result and result.get("raw_response"):

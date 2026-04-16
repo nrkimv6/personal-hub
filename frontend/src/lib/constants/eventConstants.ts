@@ -7,6 +7,7 @@ export const EVENT_STATUS_OPTIONS = [
 	{ value: '', label: '전체', color: 'bg-secondary text-foreground' },
 	{ value: 'ending_today', label: '오늘 마감', color: 'bg-warning-light text-warning' },
 	{ value: 'ongoing', label: '진행 중', color: 'bg-success-light text-success' },
+	{ value: 'ongoing_or_upcoming', label: '진행+예정', color: 'bg-sky-100 text-sky-700' },
 	{ value: 'upcoming', label: '예정', color: 'bg-primary-light text-primary' },
 	{ value: 'ended', label: '종료', color: 'bg-muted text-muted-foreground' },
 	{ value: 'cancelled', label: '취소됨', color: 'bg-error-light text-error' }

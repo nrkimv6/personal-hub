@@ -4,18 +4,11 @@ Use cases:
 1. Dry-run: list completed Instagram LLM requests whose normalized payload says
    ``tag=이벤트`` but no linked ``events`` row exists for the source post.
 2. Apply: create the missing Event row and relink ``instagram_posts.classified_*``.
-
-Examples:
-    python scripts/diagnostics/recover_instagram_llm_missing_events.py
-    python scripts/diagnostics/recover_instagram_llm_missing_events.py --request-id 14074 --apply
-    python scripts/diagnostics/recover_instagram_llm_missing_events.py --apply --limit 20
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import re
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -30,6 +23,7 @@ from app.database import SessionLocal
 from app.models.event import Event
 from app.models.instagram_post import InstagramPost
 from app.modules.claude_worker.models.llm_request import LLMRequest
+from app.modules.claude_worker.worker.worker import extract_instagram_payload, save_instagram_result
 
 
 TAG_EVENT = "이벤트"
@@ -69,15 +63,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--request-id", type=int, help="Recover one specific llm_requests.id only.")
     parser.add_argument("--limit", type=int, default=50, help="Max candidate rows to inspect. Default: 50")
-    parser.add_argument(
-        "--request-source",
-        help="Filter by exact request_source, e.g. instagram_event",
-    )
-    parser.add_argument(
-        "--apply",
-        action="store_true",
-        help="Actually create/relink rows. Default is dry-run.",
-    )
+    parser.add_argument("--request-source", help="Filter by exact request_source, e.g. instagram_event")
+    parser.add_argument("--apply", action="store_true", help="Actually create/relink rows. Default is dry-run.")
     parser.add_argument(
         "--allow-duplicate-url",
         action="store_true",
@@ -95,93 +82,9 @@ def parse_date(value: Optional[str]) -> Optional[date]:
         return None
 
 
-def _looks_like_event_payload(data: Any) -> bool:
-    if not isinstance(data, dict):
-        return False
-    return any(
-        key in data
-        for key in ("tag", "summary", "event_period", "urls", "organizer", "announcement_date")
-    )
-
-
-def _extract_json_like(text: str) -> Optional[Any]:
-    stripped = text.strip()
-    if not stripped:
-        return None
-
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        pass
-
-    block_match = re.search(r"```json\s*([\s\S]*?)\s*```", stripped, re.IGNORECASE)
-    if block_match:
-        try:
-            return json.loads(block_match.group(1))
-        except json.JSONDecodeError:
-            pass
-
-    start = stripped.find("{")
-    if start == -1:
-        return None
-
-    depth = 0
-    in_string = False
-    escape = False
-    for idx in range(start, len(stripped)):
-        ch = stripped[idx]
-        if escape:
-            escape = False
-            continue
-        if ch == "\\":
-            escape = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(stripped[start : idx + 1])
-                except json.JSONDecodeError:
-                    return None
-    return None
-
-
 def normalize_payload(result_text: Optional[str], raw_response: Optional[str]) -> Optional[dict[str, Any]]:
     """Normalize stored request.result/raw_response into the inner Instagram payload."""
-
-    def unwrap(value: Any) -> Optional[dict[str, Any]]:
-        if _looks_like_event_payload(value):
-            return value
-
-        if isinstance(value, str):
-            parsed = _extract_json_like(value)
-            if parsed is None:
-                return None
-            return unwrap(parsed)
-
-        if not isinstance(value, dict):
-            return None
-
-        for key in ("structured_output", "result"):
-            payload = unwrap(value.get(key))
-            if payload is not None:
-                return payload
-
-        if _looks_like_event_payload(value):
-            return value
-        return None
-
-    payload = unwrap(result_text)
-    if payload is not None:
-        return payload
-    return unwrap(raw_response)
+    return extract_instagram_payload(result_text, raw_response)
 
 
 def build_candidate(session, request: LLMRequest) -> Optional[Candidate]:
@@ -283,39 +186,15 @@ def recover_candidate(session, candidate: Candidate, allow_duplicate_url: bool =
         if duplicate:
             return RecoveryOutcome(False, "skip", f"duplicate_url_event:{duplicate.id}", duplicate.id)
 
-    thumbnail_url = None
-    images = post.images or []
-    if images:
-        first_image = images[0]
-        thumbnail_url = first_image.get("src") if isinstance(first_image, dict) else first_image
+    if not save_instagram_result(session, candidate.post_id, candidate.payload):
+        session.rollback()
+        return RecoveryOutcome(False, "skip", "save_instagram_result_failed")
 
-    event = Event(
-        title=candidate.payload.get("summary") or f"{post.account}의 이벤트",
-        thumbnail_url=thumbnail_url,
-        event_type="event",
-        event_url=candidate.event_url,
-        additional_urls=urls[1:] if len(urls) > 1 else [],
-        event_start=candidate.event_start,
-        event_end=candidate.event_end,
-        announcement_date=parse_date(candidate.payload.get("announcement_date")),
-        organizer=candidate.payload.get("organizer"),
-        summary=candidate.payload.get("summary"),
-        prizes=candidate.payload.get("prizes") or [],
-        winner_count=candidate.payload.get("winner_count"),
-        purchase_required=candidate.payload.get("purchase_required"),
-        source_type="instagram",
-        source_instagram_post_id=post.id,
-        source_instagram_url=post.url,
-        source_instagram_account=post.account,
-    )
-    session.add(event)
-    session.flush()
-
-    post.classified_type = "event"
-    post.classified_id = event.id
-    post.classified_at = candidate.processed_at or datetime.now()
+    if candidate.processed_at:
+        post.classified_at = candidate.processed_at
     session.commit()
-    return RecoveryOutcome(True, "create", "event_created", event.id)
+    session.refresh(post)
+    return RecoveryOutcome(True, "create", "event_created", post.classified_id)
 
 
 def load_candidates(session, args: argparse.Namespace) -> list[Candidate]:

@@ -137,6 +137,21 @@ class TestParseJsonResponse(unittest.TestCase):
         with self.assertRaises((ValueError, json.JSONDecodeError)):
             self.parser._parse_json_response(text)
 
+    def test_tc_outer_envelope_result_string(self):
+        """TC-Envelope: outer result envelope 안쪽 markdown JSON을 inner payload로 벗긴다."""
+        from app.modules.claude_worker.services.executors.base import normalize_json_payload
+
+        payload = normalize_json_payload(
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": '```json\n{"tag":"이벤트","summary":"봄 할인"}\n```',
+            }
+        )
+
+        self.assertEqual(payload["tag"], "이벤트")
+        self.assertEqual(payload["summary"], "봄 할인")
+
 
 # ===========================================================================
 # 3. Instagram 분류 응답 저장 흐름 테스트 (mock 방식)
@@ -258,6 +273,36 @@ class TestInstagramClassificationFlow(unittest.TestCase):
 
         result = save_instagram_result(mock_db, 999999, {"tag": "기타", "summary": "없는 포스트"})
         self.assertFalse(result)
+
+    def test_instagram_result_invalid_location_shape_returns_false(self):
+        """location이 dict/None이 아니면 저장 실패."""
+        llm_result = {
+            "tag": "팝업",
+            "summary": "shape invalid",
+            "urls": [],
+            "location": ["not", "dict"],
+        }
+
+        result, mock_db = self._run_save_instagram_result(llm_result)
+
+        self.assertFalse(result)
+        self.assertEqual(mock_db.add.call_count, 0)
+
+    def test_instagram_event_allows_null_location_and_empty_urls(self):
+        """단일일 이벤트 + location=None + urls=[]도 Event 생성으로 이어져야 한다."""
+        llm_result = {
+            "tag": "이벤트",
+            "summary": "단일일 이벤트",
+            "urls": [],
+            "event_period": {"start": "2026-04-17", "end": "2026-04-17"},
+            "location": None,
+        }
+
+        result, mock_db = self._run_save_instagram_result(llm_result)
+
+        self.assertTrue(result)
+        added_types = [type(call.args[0]).__name__ for call in mock_db.add.call_args_list]
+        self.assertIn("Event", added_types)
 
 
 # ===========================================================================

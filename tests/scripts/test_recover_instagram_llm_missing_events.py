@@ -165,3 +165,50 @@ def test_recover_candidate_skips_duplicate_url_by_default():
     finally:
         session.close()
         engine.dispose()
+
+
+def test_recover_candidate_relinks_existing_event():
+    session, engine = make_session()
+    try:
+        post = InstagramPost(id=300, post_id="p300", account="acc", caption="caption")
+        session.add(post)
+        session.flush()
+        event = Event(
+            title="existing",
+            event_type="event",
+            source_type="instagram",
+            source_instagram_post_id=300,
+            source_instagram_account="acc",
+        )
+        session.add(event)
+        session.commit()
+
+        candidate = m.Candidate(
+            request_id=3,
+            post_id=300,
+            request_source="instagram_event",
+            processed_at=datetime(2026, 4, 14, 17, 7, 35),
+            account="acc",
+            summary="existing",
+            organizer=None,
+            event_start=None,
+            event_end=None,
+            event_url=None,
+            existing_event_id=event.id,
+            classified_type=None,
+            classified_id=None,
+            action="relink",
+            reason="event_exists_but_post_link_missing",
+            payload={"tag": "이벤트", "summary": "existing", "urls": []},
+        )
+
+        outcome = m.recover_candidate(session, candidate)
+
+        session.refresh(post)
+        assert outcome.changed is True
+        assert outcome.action == "relink"
+        assert post.classified_type == "event"
+        assert post.classified_id == event.id
+    finally:
+        session.close()
+        engine.dispose()

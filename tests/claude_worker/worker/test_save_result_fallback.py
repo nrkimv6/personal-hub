@@ -44,9 +44,8 @@ async def test_save_instagram_failure_marks_failed(db, worker):
         await worker._execute_request(request, db, service)
     
     # 3. 검증
-    # mark_completed는 성공했으니 호출됨
-    service.mark_completed.assert_called_once()
-    # 하지만 save 실패했으므로 mark_failed도 호출되어야 함 (상태 전환)
+    service.mark_completed.assert_not_called()
+    service.prepare_completed.assert_not_called()
     service.mark_failed.assert_called_once()
     args, _ = service.mark_failed.call_args
     assert "Save result failed" in args[1]
@@ -79,3 +78,52 @@ async def test_save_writing_fallback_failure_marks_failed(db, worker):
     args, _ = service.mark_failed.call_args
     assert "Save result failed" in args[1]
     assert "(fallback)" in args[1]
+
+
+@pytest.mark.asyncio
+async def test_save_instagram_missing_tag_marks_failed(db, worker):
+    """B: tag 없는 payload는 save 실패 후 mark_failed."""
+    from app.modules.claude_worker.services.llm_service import LLMService
+
+    service = MagicMock(spec=LLMService)
+    service.resolve_provider_model.return_value = ("claude", "opus")
+    service.execute_llm.return_value = {"success": True, "result": {"summary": "missing tag"}}
+
+    post = InstagramPost(id=301, post_id="p301", account="acc", caption="caption")
+    request = LLMRequest(id=12, caller_type="instagram", caller_id="301", prompt="test", status="pending")
+    db.add_all([post, request])
+    db.commit()
+
+    await worker._execute_request(request, db, service)
+
+    service.prepare_completed.assert_not_called()
+    service.mark_completed.assert_not_called()
+    service.mark_failed.assert_called_once()
+    args, _ = service.mark_failed.call_args
+    assert "Save result failed" in args[1]
+
+
+@pytest.mark.asyncio
+async def test_save_instagram_unknown_tag_marks_failed(db, worker):
+    """E: allowlist 밖 tag는 성공 처리하지 않는다."""
+    from app.modules.claude_worker.services.llm_service import LLMService
+
+    service = MagicMock(spec=LLMService)
+    service.resolve_provider_model.return_value = ("claude", "opus")
+    service.execute_llm.return_value = {
+        "success": True,
+        "result": {"tag": "미상태그", "summary": "unknown tag"},
+    }
+
+    post = InstagramPost(id=302, post_id="p302", account="acc", caption="caption")
+    request = LLMRequest(id=13, caller_type="instagram", caller_id="302", prompt="test", status="pending")
+    db.add_all([post, request])
+    db.commit()
+
+    await worker._execute_request(request, db, service)
+
+    service.prepare_completed.assert_not_called()
+    service.mark_completed.assert_not_called()
+    service.mark_failed.assert_called_once()
+    args, _ = service.mark_failed.call_args
+    assert "Save result failed" in args[1]
