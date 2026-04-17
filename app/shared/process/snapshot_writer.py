@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -25,6 +26,9 @@ _KILL_AUDIT_LOG = _PROJECT_ROOT / "logs" / "process_watch_kill_audit.jsonl"
 
 class SnapshotWriter:
     """프로세스 스냅샷과 조치 로그를 DB/JSONL에 기록한다."""
+
+    _watch_tables_ready: dict[str, bool] = {"pg": False, "sqlite": False}
+    _watch_tables_lock = threading.Lock()
 
     def __init__(self, registry: "ProcessRegistry") -> None:
         self.registry = registry
@@ -107,77 +111,81 @@ class SnapshotWriter:
             return None, ""
 
     def _ensure_watch_tables(self, db: Any) -> None:
-        auto_pk = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
-        bool_default = "BOOLEAN DEFAULT FALSE" if is_pg else "INTEGER DEFAULT 0"
-        db.execute(
-            text(
-                f"""
-                CREATE TABLE IF NOT EXISTS process_watch_snapshots (
-                    id {auto_pk},
-                    captured_at TEXT NOT NULL,
-                    pid INTEGER NOT NULL,
-                    ppid INTEGER,
-                    parent_pid INTEGER,
-                    parent_name TEXT,
-                    name TEXT,
-                    exe TEXT,
-                    cmdline TEXT,
-                    cmdline_hash TEXT,
-                    create_time REAL,
-                    memory_mb REAL,
-                    is_orphan {bool_default},
-                    scope TEXT DEFAULT 'external',
-                    captured_by TEXT DEFAULT 'periodic'
+        backend_key = "pg" if is_pg else "sqlite"
+        if self._watch_tables_ready.get(backend_key):
+            return
+
+        with self._watch_tables_lock:
+            if self._watch_tables_ready.get(backend_key):
+                return
+
+            if is_pg:
+                # process-watch DDL은 여러 watchdog 프로세스가 동시에 부를 수 있어
+                # PG에서는 advisory lock으로 초기 테이블/인덱스 생성만 직렬화한다.
+                db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": 24041601})
+
+            auto_pk = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            bool_default = "BOOLEAN DEFAULT FALSE" if is_pg else "INTEGER DEFAULT 0"
+            db.execute(
+                text(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS process_watch_snapshots (
+                        id {auto_pk},
+                        captured_at TEXT NOT NULL,
+                        pid INTEGER NOT NULL,
+                        ppid INTEGER,
+                        parent_pid INTEGER,
+                        parent_name TEXT,
+                        name TEXT,
+                        exe TEXT,
+                        cmdline TEXT,
+                        cmdline_hash TEXT,
+                        create_time REAL,
+                        memory_mb REAL,
+                        is_orphan {bool_default},
+                        scope TEXT DEFAULT 'external',
+                        captured_by TEXT DEFAULT 'periodic'
+                    )
+                    """
                 )
-                """
             )
-        )
-        db.execute(
-            text(
-                f"""
-                CREATE TABLE IF NOT EXISTS process_watch_actions (
-                    id {auto_pk},
-                    acted_at TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    pid INTEGER NOT NULL,
-                    cmdline_hash TEXT,
-                    reason TEXT,
-                    actor TEXT,
-                    result TEXT,
-                    detail TEXT
+            db.execute(
+                text(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS process_watch_actions (
+                        id {auto_pk},
+                        acted_at TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        pid INTEGER NOT NULL,
+                        cmdline_hash TEXT,
+                        reason TEXT,
+                        actor TEXT,
+                        result TEXT,
+                        detail TEXT
+                    )
+                    """
                 )
-                """
             )
-        )
-        db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_captured_at ON process_watch_snapshots(captured_at)"))
-        db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_pid ON process_watch_snapshots(pid)"))
-        db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_orphan ON process_watch_snapshots(is_orphan)"))
-        db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_memory ON process_watch_snapshots(memory_mb)"))
-        db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_hash ON process_watch_snapshots(cmdline_hash)"))
-        db.execute(text("CREATE INDEX IF NOT EXISTS idx_pwa_acted_at ON process_watch_actions(acted_at)"))
-        db.execute(text("CREATE INDEX IF NOT EXISTS idx_pwa_pid ON process_watch_actions(pid)"))
-        db.execute(text("CREATE INDEX IF NOT EXISTS idx_pwa_hash ON process_watch_actions(cmdline_hash)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_captured_at ON process_watch_snapshots(captured_at)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_pid ON process_watch_snapshots(pid)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_orphan ON process_watch_snapshots(is_orphan)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_memory ON process_watch_snapshots(memory_mb)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_pws_hash ON process_watch_snapshots(cmdline_hash)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_pwa_acted_at ON process_watch_actions(acted_at)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_pwa_pid ON process_watch_actions(pid)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_pwa_hash ON process_watch_actions(cmdline_hash)"))
+            self._watch_tables_ready[backend_key] = True
 
     def _purge_watch_rows(self, db: Any) -> None:
-        window = f"-{self._retention_days} days"
-        if is_pg:
-            db.execute(
-                text("DELETE FROM process_watch_snapshots WHERE captured_at < NOW() + :window::interval"),
-                {"window": window},
-            )
-            db.execute(
-                text("DELETE FROM process_watch_actions WHERE acted_at < NOW() + :window::interval"),
-                {"window": window},
-            )
-        else:
-            db.execute(
-                text("DELETE FROM process_watch_snapshots WHERE captured_at < datetime('now', :window)"),
-                {"window": window},
-            )
-            db.execute(
-                text("DELETE FROM process_watch_actions WHERE acted_at < datetime('now', :window)"),
-                {"window": window},
-            )
+        cutoff = (datetime.now() - timedelta(days=self._retention_days)).isoformat()
+        db.execute(
+            text("DELETE FROM process_watch_snapshots WHERE captured_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
+        db.execute(
+            text("DELETE FROM process_watch_actions WHERE acted_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
 
     def _rotate_jsonl_if_needed(self, path: Path) -> None:
         if not path.exists():
