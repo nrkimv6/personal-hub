@@ -11,6 +11,7 @@ from app.utils.parsers import (
     extract_date_from_url,
     calculate_interval
 )
+from app.modules.naver_booking.utils.parsers import parse_naver_booking_url
 
 
 class TestExtractDateOnly:
@@ -147,6 +148,51 @@ class TestCalculateInterval:
         result = calculate_interval("2026-01-02T00:00:00+09:00")
         assert result is not None
         assert 20 <= result <= 50
+
+
+class TestParseNaverBookingUrl:
+    """parse_naver_booking_url URL 인코딩 포맷 처리 테스트 (사용자 실패 URL 기반)"""
+
+    USER_URL = (
+        "https://booking.naver.com/booking/12/bizes/1630978/items/7575050"
+        "?startDateTime=2026-04-25T00%3A00%3A00%2B09%3A00"
+    )
+
+    def test_right_url_encoded_startdatetime_decoded(self):
+        """%2B %3A URL 인코딩된 +09:00 타임존을 parse_qs가 자동 디코딩 — R: 사용자 실패 URL"""
+        result = parse_naver_booking_url(self.USER_URL)
+        assert result.is_valid is True
+        assert result.business_id == "1630978"
+        assert result.item_id == "7575050"
+        assert result.start_date == "2026-04-25T00:00:00+09:00"
+
+    def test_right_extract_date_from_decoded_startdatetime(self):
+        """parse → extract_date_only 체인: 타임존 포함 datetime → YYYY-MM-DD — R: 체인 검증"""
+        result = parse_naver_booking_url(self.USER_URL)
+        assert result.is_valid is True
+        date_str = extract_date_only(result.start_date)
+        assert date_str == "2026-04-25"
+
+    def test_boundary_no_startdatetime_param(self):
+        """쿼리 파라미터 없는 URL — B: start_date는 None, is_valid는 True"""
+        url = "https://booking.naver.com/booking/12/bizes/1630978/items/7575050"
+        result = parse_naver_booking_url(url)
+        assert result.is_valid is True
+        assert result.start_date is None
+
+    def test_error_invalid_path_format(self):
+        """경로 패턴 불일치 URL — E: is_valid False + error 포함"""
+        result = parse_naver_booking_url("https://naver.com/unknown/path")
+        assert result.is_valid is False
+        assert result.error is not None
+
+
+class TestExtractDateOnlyTimezone:
+    """extract_date_only 타임존 포함 포맷 추가 검증"""
+
+    def test_right_iso_with_plus09_tz(self):
+        """2026-04-25T00:00:00+09:00 → 2026-04-25 — R: 사용자 URL 최종 단계"""
+        assert extract_date_only("2026-04-25T00:00:00+09:00") == "2026-04-25"
 
     # Boundary - 경계값
     def test_boundary_none_input(self):

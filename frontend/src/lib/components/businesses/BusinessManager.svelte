@@ -39,7 +39,15 @@
     time_range: '',
     max_bookings_per_schedule: 1
   };
-  let urlImportResult: { success: boolean; message: string; parsed_info?: Record<string, unknown> } | null = null;
+  let urlImportResult: {
+    success: boolean;
+    message: string;
+    parsed_info?: Record<string, unknown>;
+    business?: { id: number; name: string; [key: string]: unknown };
+    biz_item?: { id: number; name: string; [key: string]: unknown };
+    business_details?: Record<string, unknown>;
+    item_details?: Record<string, unknown>;
+  } | null = null;
   let urlImportLoading = false;
 
   // 폼 데이터
@@ -308,8 +316,8 @@
 
 
   async function handleUrlImport() {
-    if (!urlImport.url || !urlImport.item_name) {
-      alert('URL과 아이템명은 필수입니다.');
+    if (!urlImport.url) {
+      alert('URL을 입력해주세요.');
       return;
     }
 
@@ -318,7 +326,7 @@
     try {
       const result = await businessApi.importFromUrl({
         url: urlImport.url,
-        item_name: urlImport.item_name,
+        item_name: urlImport.item_name || undefined,
         business_name: urlImport.business_name || undefined,
         auto_booking_enabled: urlImport.auto_booking_enabled,
         time_range: urlImport.time_range || undefined,
@@ -864,15 +872,14 @@
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="import-item-name" class="block text-sm font-medium text-foreground mb-1">
-              아이템명 <span class="text-error">*</span>
+              아이템명 <span class="text-muted-foreground font-normal text-xs">(자동 채움 가능)</span>
             </label>
             <input
               id="import-item-name"
               type="text"
               class="input"
               bind:value={urlImport.item_name}
-              required
-              placeholder="표시할 이름"
+              placeholder="비워두면 URL에서 자동으로 가져옵니다"
             />
           </div>
           <div>
@@ -928,6 +935,12 @@
             <p class="text-sm mt-1 {urlImportResult.success ? 'text-success' : 'text-error'}">
               {urlImportResult.message}
             </p>
+            {#if urlImportResult.success && (urlImportResult.business?.name || urlImportResult.biz_item?.name)}
+              <div class="text-sm mt-2 text-foreground font-medium">
+                {#if urlImportResult.business?.name}<p>업체: {urlImportResult.business.name}</p>{/if}
+                {#if urlImportResult.biz_item?.name}<p>아이템: {urlImportResult.biz_item.name}</p>{/if}
+              </div>
+            {/if}
             {#if urlImportResult.parsed_info}
               <div class="text-xs text-muted-foreground mt-2">
                 <p>카테고리: {urlImportResult.parsed_info.category}</p>

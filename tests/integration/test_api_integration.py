@@ -86,6 +86,77 @@ class TestSlotCheckAPI:
         assert response.status_code == 400
 
 
+class TestBusinessUrlImportAPI:
+    """Business URL Import API 통합 테스트 (T5 HTTP 통합)"""
+
+    ENCODED_URL = (
+        "https://booking.naver.com/booking/12/bizes/1630978/items/7575050"
+        "?startDateTime=2026-04-25T00%3A00%3A00%2B09%3A00"
+    )
+
+    def test_import_url_right_url_only_autofills_names(self, integration_server):
+        """R: item_name 없이 URL만으로 200 + business_id/item_id 반환"""
+        response = requests.post(
+            f"{integration_server}/api/businesses/import-url",
+            json={"url": self.ENCODED_URL, "fetch_details": False}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["business_id"] is not None
+        assert data["item_id"] is not None
+
+    def test_import_url_right_response_includes_business_and_item_fields(self, integration_server):
+        """R: 응답에 business/biz_item 필드가 포함되고 name이 비어있지 않음"""
+        response = requests.post(
+            f"{integration_server}/api/businesses/import-url",
+            json={"url": self.ENCODED_URL, "fetch_details": False}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("business") is not None
+        assert data["business"].get("name"), "business.name이 비어있어서는 안 됨"
+        assert data.get("biz_item") is not None
+        assert data["biz_item"].get("name"), "biz_item.name이 비어있어서는 안 됨"
+
+    def test_import_url_boundary_existing_business_reuse(self, integration_server):
+        """B: 동일 URL 두 번 요청 시 재사용 분기에서도 business.name 반환"""
+        payload = {"url": self.ENCODED_URL, "fetch_details": False}
+        requests.post(f"{integration_server}/api/businesses/import-url", json=payload)
+        response = requests.post(f"{integration_server}/api/businesses/import-url", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data.get("business") is not None
+        assert data["business"].get("name")
+
+    def test_import_url_right_with_manual_item_name_preserved(self, integration_server):
+        """R 회귀: item_name 직접 지정 시 해당 값 그대로 저장"""
+        import time
+        unique_name = f"TC_아이템_{int(time.time())}"
+        response = requests.post(
+            f"{integration_server}/api/businesses/import-url",
+            json={
+                "url": "https://booking.naver.com/booking/12/bizes/9990001/items/9990001",
+                "item_name": unique_name,
+                "fetch_details": False
+            }
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["biz_item"]["name"] == unique_name
+
+    def test_import_url_error_invalid_url_format(self, integration_server):
+        """E: 잘못된 URL 입력 시 success=False 또는 에러 응답"""
+        response = requests.post(
+            f"{integration_server}/api/businesses/import-url",
+            json={"url": "https://naver.com/invalid/path"}
+        )
+        data = response.json()
+        assert data.get("success") is False or response.status_code >= 400
+
+
 class TestAccountAPI:
     """Account API 통합 테스트"""
 

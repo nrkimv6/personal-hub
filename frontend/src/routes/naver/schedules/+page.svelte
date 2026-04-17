@@ -709,22 +709,25 @@
 
   // URL로 일정 생성
   async function handleCreateFromUrl() {
-    if (!createForm.url || !createForm.item_name) {
-      alert('URL과 아이템 이름을 입력해주세요.');
+    if (!createForm.url) {
+      alert('URL을 입력해주세요.');
       return;
     }
     createLoading = true;
     try {
       const result = await businessApi.importFromUrl({
         url: createForm.url,
-        item_name: createForm.item_name,
+        item_name: createForm.item_name || undefined,
         business_name: createForm.business_name || undefined,
         auto_booking_enabled: false
       });
       if (result.success) {
+        const bizName = result.business?.name || result.business_details?.['name'] as string | undefined;
+        const itemName = result.biz_item?.name || result.item_details?.['name'] as string | undefined;
+        const nameInfo = bizName || itemName ? ` (${[bizName, itemName].filter(Boolean).join(' / ')})` : '';
         showCreateModal = false;
         await fetchSchedules();
-        alert('일정이 등록되었습니다.');
+        alert(`일정이 등록되었습니다.${nameInfo}`);
       } else {
         alert(result.message || '등록 실패');
       }
@@ -1517,13 +1520,13 @@
             />
           </div>
           <div>
-            <label for="create-item-name" class="block text-sm font-medium text-foreground mb-1">아이템 이름</label>
+            <label for="create-item-name" class="block text-sm font-medium text-foreground mb-1">아이템 이름 <span class="text-muted-foreground font-normal">(자동 채움 가능)</span></label>
             <input
               id="create-item-name"
               type="text"
               class="input"
               bind:value={createForm.item_name}
-              placeholder="예: 프라이빗 사우나 A"
+              placeholder="비워두면 URL에서 자동으로 가져옵니다"
             />
           </div>
           <div>

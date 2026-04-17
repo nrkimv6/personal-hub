@@ -219,11 +219,12 @@ export const businessApi = {
   // URL에서 업체/아이템/일정 자동 생성
   importFromUrl: (data: {
     url: string;
-    item_name: string;
+    item_name?: string;
     business_name?: string;
     auto_booking_enabled?: boolean;
     time_range?: string;
     max_bookings_per_schedule?: number;
+    fetch_details?: boolean;
   }) =>
     request<{
       success: boolean;
@@ -232,6 +233,10 @@ export const businessApi = {
       item_id?: number;
       schedule_id?: number;
       parsed_info?: Record<string, unknown>;
+      business?: { id: number; name: string; [key: string]: unknown };
+      biz_item?: { id: number; name: string; [key: string]: unknown };
+      business_details?: Record<string, unknown>;
+      item_details?: Record<string, unknown>;
     }>('/businesses/import-url', {
       method: 'POST',
       body: JSON.stringify(data)
