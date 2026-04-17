@@ -21,10 +21,25 @@ export const MEMORY_PRESSURE_LEVEL_META = {
   },
 };
 
+/**
+ * @typedef {keyof typeof MEMORY_PRESSURE_LEVEL_META} MemoryPressureLevelKey
+ * @typedef {{ name?: string | null, memory_mb?: number | null }} MemoryPressureTopProcessLike
+ */
+
+/**
+ * @param {MemoryPressureLevelKey | string | null | undefined} level
+ */
 export function getMemoryPressureLevelMeta(level) {
-  return MEMORY_PRESSURE_LEVEL_META[level] ?? MEMORY_PRESSURE_LEVEL_META.emergency;
+  if (!level || !(level in MEMORY_PRESSURE_LEVEL_META)) {
+    return MEMORY_PRESSURE_LEVEL_META.emergency;
+  }
+  const metaKey = /** @type {MemoryPressureLevelKey} */ (level);
+  return MEMORY_PRESSURE_LEVEL_META[metaKey] ?? MEMORY_PRESSURE_LEVEL_META.emergency;
 }
 
+/**
+ * @param {number | string | null | undefined} value
+ */
 export function formatMemoryPressureMb(value) {
   const mb = Number(value);
   if (!Number.isFinite(mb)) return '-';
@@ -32,6 +47,9 @@ export function formatMemoryPressureMb(value) {
   return `${Math.round(mb)} MB`;
 }
 
+/**
+ * @param {string | number | Date | null | undefined} value
+ */
 export function formatMemoryPressureTimestamp(value) {
   if (!value) return '-';
   const date = new Date(value);
@@ -39,6 +57,10 @@ export function formatMemoryPressureTimestamp(value) {
   return date.toLocaleString();
 }
 
+/**
+ * @param {MemoryPressureTopProcessLike[] | null | undefined} topProcesses
+ * @param {number} [limit=3]
+ */
 export function summarizeMemoryPressureProcesses(topProcesses, limit = 3) {
   if (!Array.isArray(topProcesses) || topProcesses.length === 0) {
     return '(프로세스 없음)';
@@ -56,6 +78,8 @@ export function summarizeMemoryPressureProcesses(topProcesses, limit = 3) {
 /**
  * Raw `process_tree` 전문을 목록 UI용 excerpt로 자른다.
  * 이미 excerpt된 `process_tree_excerpt`에는 재적용하지 않는다.
+ * @param {string | null | undefined} treeText
+ * @param {number} [maxLines=80]
  */
 export function excerptMemoryPressureTree(treeText, maxLines = 80) {
   const raw = String(treeText ?? '');
@@ -68,11 +92,16 @@ export function excerptMemoryPressureTree(treeText, maxLines = 80) {
 
 /**
  * Server가 이미 잘라서 내려준 `process_tree_excerpt`를 그대로 표시한다.
+ * @param {string | null | undefined} processTreeExcerpt
  */
 export function renderMemoryPressureExcerpt(processTreeExcerpt) {
   return String(processTreeExcerpt ?? '');
 }
 
+/**
+ * @param {string[] | null | undefined} values
+ * @param {string} value
+ */
 export function toggleStringSelection(values, value) {
   if (!Array.isArray(values)) return [value];
   return values.includes(value)

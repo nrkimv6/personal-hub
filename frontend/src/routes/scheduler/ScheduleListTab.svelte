@@ -446,7 +446,7 @@
 					? { llm_provider: null, llm_model: null }
 					: {
 							llm_provider: editLlmProvider,
-							llm_model: editLlmModel
+							llm_model: editLlmModel || null
 						};
 			}
 

@@ -108,7 +108,7 @@
 		await loadCourses();
 	}
 
-	function formatDate(dateStr: string | null): string {
+	function formatDate(dateStr: string | null | undefined): string {
 		if (!dateStr) return '-';
 		return new Date(dateStr).toLocaleString('ko-KR', {
 			month: 'short',
@@ -118,7 +118,7 @@
 		});
 	}
 
-	function formatSimpleDate(dateStr: string | null): string {
+	function formatSimpleDate(dateStr: string | null | undefined): string {
 		if (!dateStr) return '-';
 		return new Date(dateStr).toLocaleDateString('ko-KR', {
 			month: 'short',
@@ -142,7 +142,7 @@
 		}
 	}
 
-	function getCategoryName(cat: string | null): string {
+	function getCategoryName(cat: string | null | undefined): string {
 		if (!cat) return '-';
 		const categories: Record<string, string> = {
 			exercise: '운동/건강',
@@ -157,7 +157,7 @@
 		return categories[cat] || cat;
 	}
 
-	function formatFee(fee: number | null): string {
+	function formatFee(fee: number | null | undefined): string {
 		if (fee === null || fee === undefined) return '-';
 		return `${fee.toLocaleString()}원`;
 	}

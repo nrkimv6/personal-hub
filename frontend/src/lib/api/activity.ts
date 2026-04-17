@@ -7,6 +7,7 @@
 import { request } from './client';
 
 const BASE = '/activity';
+type QueryParamValue = string | number | boolean | null | undefined;
 
 function appendParam(
   searchParams: URLSearchParams,
@@ -17,12 +18,10 @@ function appendParam(
   searchParams.append(key, String(value));
 }
 
-function buildQuery(
-  params: Record<string, string | number | boolean | null | undefined> | undefined
-): string {
+function buildQuery(params: object | undefined): string {
   if (!params) return '';
   const searchParams = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
+  for (const [key, value] of Object.entries(params as Record<string, QueryParamValue>)) {
     appendParam(searchParams, key, value);
   }
   const query = searchParams.toString();

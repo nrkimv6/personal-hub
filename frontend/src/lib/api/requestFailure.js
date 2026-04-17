@@ -1,5 +1,17 @@
 import { isAbortError } from '../utils/isAbortError.js';
 
+/**
+ * @typedef {{ kind: 'abort'; error: Error }} AbortRequestFailure
+ * @typedef {{ kind: 'timeout'; error: Error }} TimeoutRequestFailure
+ * @typedef {{ kind: 'connection'; error: Error; message: string; url: string }} ConnectionRequestFailure
+ * @typedef {AbortRequestFailure | TimeoutRequestFailure | ConnectionRequestFailure} RequestFailure
+ */
+
+/**
+ * @param {unknown} error
+ * @param {string} url
+ * @returns {RequestFailure}
+ */
 export function classifyRequestFailure(error, url) {
 	const normalizedError = error instanceof Error ? error : new Error(String(error));
 

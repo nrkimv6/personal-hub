@@ -4,6 +4,7 @@
 
 import { apiHealth } from '../stores/apiHealth.svelte';
 import { classifyRequestFailure } from './requestFailure.js';
+import { isAbortError } from '../utils/isAbortError.js';
 
 // 브라우저 환경 체크
 const isBrowser = typeof window !== 'undefined';
@@ -191,6 +192,9 @@ export async function request<T>(
     if (failure.kind === 'timeout') {
       globalErrorHandler?.(failure.error.message, 'timeout');
       throw failure.error;
+    }
+    if (failure.kind !== 'connection') {
+      throw new Error('알 수 없는 요청 실패');
     }
     // 네트워크 에러 (API 서버 연결 불가 - 좀비 포트 가능성)
     const connError = new ApiConnectionError(failure.message, failure.error);

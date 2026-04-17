@@ -36,8 +36,9 @@
 	// 로컬 참여 상태 스토어 반응형 구독
 	const participatedMap = $derived($localParticipation);
 	const expo = expoData as ExpoMapDocument;
-	const DEFAULT_TAB = 'online';
-	const ADMIN_EXPO_TAB = 'expo';
+	type TabMode = 'online' | 'offline' | 'popup' | 'uncategorized' | 'expo';
+	const DEFAULT_TAB: TabMode = 'online';
+	const ADMIN_EXPO_TAB: TabMode = 'expo';
 	const baseEventTabs = [
 		{ id: 'online', label: '온라인 이벤트', color: 'purple' },
 		{ id: 'offline', label: '오프라인 이벤트', color: 'green' },
@@ -55,8 +56,7 @@
 	let error: string | null = $state(null);
 
 	// 탭 모드: online(온라인 이벤트), offline(오프라인 이벤트), popup, uncategorized
-	type TabMode = 'online' | 'offline' | 'popup' | 'uncategorized' | 'expo';
-	let activeTab: TabMode = $state('online');
+	let activeTab = $state<TabMode>(DEFAULT_TAB);
 	let mounted = $state(false);
 	let lastHandledTab = $state<TabMode | null>(null);
 

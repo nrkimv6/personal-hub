@@ -36,7 +36,8 @@
       status: 'not_started',
       message: '',
       updated_at: null,
-      last_event_at: null
+      last_event_at: null,
+      last_checked_at: null
     }
   });
 

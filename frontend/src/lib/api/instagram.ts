@@ -564,10 +564,21 @@ export const collectApi = {
     display_name?: string;
     schedule_value?: Record<string, unknown>;
     google_search_params?: Record<string, unknown>;
+    target_config?: Record<string, unknown> | null;
   }) =>
     request<CrawlSchedule>(`/collect/schedules/${scheduleId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    }),
+
+  previewLegacyPlaceholderRepair: () =>
+    request<CrawlScheduleRepairResponse>('/collect/schedules/repair-legacy-placeholder', {
+      method: 'POST'
+    }),
+
+  applyLegacyPlaceholderRepair: () =>
+    request<CrawlScheduleRepairResponse>('/collect/schedules/repair-legacy-placeholder/apply', {
+      method: 'POST'
     }),
 
   // Google 저장된 검색 목록 조회
