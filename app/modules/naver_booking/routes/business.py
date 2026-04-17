@@ -294,7 +294,7 @@ async def import_from_url(data: UrlImportRequest, db: Session = Depends(get_db))
 
     return UrlImportResponse(
         success=True,
-        message=" / ".join(messages) if messages else "이미 등록된 항목입니다.",
+        message=" / ".join(messages) if messages else f"이미 등록: 업체 '{business.name}' / 아이템 '{item.name}'",
         business_id=business.id,
         item_id=item.id,
         schedule_id=schedule_id,
