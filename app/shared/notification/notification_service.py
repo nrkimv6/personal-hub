@@ -7,6 +7,7 @@ import re
 from typing import Optional, Dict, Any, List
 import json
 import asyncio
+from contextlib import contextmanager
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import logging
@@ -47,7 +48,6 @@ _ALLOWED_NOTIFY_STATES = {
 
 class NotificationService:
     def __init__(self):
-        self.db = next(get_db())
         self._load_settings()
         self.telegram_bot_token = settings.TELEGRAM_BOT_TOKEN
         self.telegram_chat_id = settings.TELEGRAM_CHAT_ID
@@ -62,30 +62,45 @@ class NotificationService:
         
         # 시간별 알림 로그
         self.time_alert_log = {}  # url: {time_key: last_alert_time}
+
+    @contextmanager
+    def _db_session(self):
+        """get_db 제너레이터를 즉시 정리해 세션 누수를 막는다."""
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            yield db
+        finally:
+            close_gen = getattr(db_gen, "close", None)
+            if callable(close_gen):
+                close_gen()
+            else:
+                db.close()
         
     def _load_settings(self):
         """알림 설정을 로드합니다."""
         try:
-            result = self.db.execute(text("""
-                SELECT enable_telegram, enable_desktop, notify_states
-                FROM notification_settings WHERE id = 1
-            """)).fetchone()
+            with self._db_session() as db:
+                result = db.execute(text("""
+                    SELECT enable_telegram, enable_desktop, notify_states
+                    FROM notification_settings WHERE id = 1
+                """)).fetchone()
 
-            if not result:
-                # 기본 설정 생성
-                self.db.execute(text("""
-                    INSERT INTO notification_settings (id, enable_telegram, enable_desktop, notify_states)
-                    VALUES (1, 1, 1, '[]')
-                """))
-                self.db.commit()
-                self.enable_telegram = True
-                self.enable_desktop = True
-                self.notify_states = []
-            else:
-                self.enable_telegram = bool(result[0])
-                self.enable_desktop = bool(result[1])
-                loaded_states = json.loads(result[2]) if result[2] else []
-                self.notify_states = [state for state in loaded_states if state in _ALLOWED_NOTIFY_STATES]
+                if not result:
+                    # 기본 설정 생성
+                    db.execute(text("""
+                        INSERT INTO notification_settings (id, enable_telegram, enable_desktop, notify_states)
+                        VALUES (1, 1, 1, '[]')
+                    """))
+                    db.commit()
+                    self.enable_telegram = True
+                    self.enable_desktop = True
+                    self.notify_states = []
+                else:
+                    self.enable_telegram = bool(result[0])
+                    self.enable_desktop = bool(result[1])
+                    loaded_states = json.loads(result[2]) if result[2] else []
+                    self.notify_states = [state for state in loaded_states if state in _ALLOWED_NOTIFY_STATES]
         except Exception as e:
             logger.warning(f"알림 설정 로드 실패: {e}, 기본값 사용")
             self.enable_telegram = True

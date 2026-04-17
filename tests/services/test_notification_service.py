@@ -80,6 +80,30 @@ class TestNotificationServiceInit:
 
             assert service.notify_states == ["available", "popup_new"]
 
+    def test_right_init_closes_db_generator_after_loading_settings(self):
+        """초기 설정 로드 후 DB 제너레이터를 즉시 닫아 세션 누수를 막는다."""
+        with patch('app.shared.notification.notification_service.settings') as mock_settings:
+            mock_db = MagicMock()
+            mock_db.execute.return_value.fetchone.return_value = (1, 1, '["available"]')
+            closed = {"value": False}
+
+            def fake_get_db():
+                try:
+                    yield mock_db
+                finally:
+                    closed["value"] = True
+
+            mock_settings.TELEGRAM_BOT_TOKEN = "test_token"
+            mock_settings.TELEGRAM_CHAT_ID = "test_chat_id"
+            mock_settings.ENABLE_DESKTOP_NOTIFICATION = True
+            mock_settings.RECENT_MESSAGES_MAX = 100
+
+            with patch('app.shared.notification.notification_service.get_db', side_effect=fake_get_db):
+                from app.shared.notification.notification_service import NotificationService
+                NotificationService()
+
+            assert closed["value"] is True
+
 
 class TestShouldNotify:
     """should_notify 메서드 테스트"""
