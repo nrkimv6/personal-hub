@@ -783,10 +783,6 @@
 			clearInterval(elapsedInterval);
 			elapsedInterval = null;
 		}
-		if (mergeQueuePollInterval) {
-			clearInterval(mergeQueuePollInterval);
-			mergeQueuePollInterval = null;
-		}
 		clearSummaryGeneratedTimer();
 		injectedLineFingerprints.clear();
 		});
@@ -949,6 +945,7 @@
 				<div
 					class="fixed inset-0 z-40 bg-black/30 sm:hidden"
 					onclick={() => { taskHistoryOpen = false; }}
+					role="presentation"
 				></div>
 			{/if}
 
