@@ -177,7 +177,7 @@ class ElementSelector:
         # 제외하고 조회
         query = self.db.query(WritingElement).filter(
             WritingElement.category == category,
-            WritingElement.is_active == 1,
+            WritingElement.is_active.is_(True),
         )
         if recent_ids:
             query = query.filter(WritingElement.id.notin_(recent_ids))
@@ -251,7 +251,7 @@ class ElementSelector:
             self.db.query(WritingElement)
             .filter(
                 WritingElement.category == category,
-                WritingElement.is_active == 1,
+                WritingElement.is_active.is_(True),
             )
             .all()
         )

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -20,7 +20,7 @@ class WritingElement(Base):
     category = Column(String(20), nullable=False)  # 카테고리
     name = Column(String(100), nullable=False)  # 요소 이름
     season_hint = Column(String(50), nullable=True)  # 시즌 힌트 (쉼표 구분)
-    is_active = Column(Integer, default=1)  # 활성화 여부
+    is_active = Column(Boolean, default=True)  # 활성화 여부
 
     # 빈도 기반 키워드용 (keyword_stats에서 승격된 경우)
     frequency = Column(Integer, nullable=True)  # 빈도수

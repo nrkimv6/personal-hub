@@ -450,7 +450,7 @@ def list_elements(
     """
     from app.models.writing_element import WritingElement
 
-    query = db.query(WritingElement).filter(WritingElement.is_active == 1)
+    query = db.query(WritingElement).filter(WritingElement.is_active.is_(True))
 
     if category:
         query = query.filter(WritingElement.category == category)
@@ -482,7 +482,7 @@ def get_elements_stats(db: Session = Depends(get_db)):
     # 카테고리별 개수
     category_stats = (
         db.query(WritingElement.category, func.count(WritingElement.id))
-        .filter(WritingElement.is_active == 1)
+        .filter(WritingElement.is_active.is_(True))
         .group_by(WritingElement.category)
         .all()
     )
@@ -490,7 +490,7 @@ def get_elements_stats(db: Session = Depends(get_db)):
     # source_type별 개수
     source_type_stats = (
         db.query(WritingElement.source_type, func.count(WritingElement.id))
-        .filter(WritingElement.is_active == 1)
+        .filter(WritingElement.is_active.is_(True))
         .group_by(WritingElement.source_type)
         .all()
     )
@@ -499,7 +499,7 @@ def get_elements_stats(db: Session = Depends(get_db)):
     topic_by_source = (
         db.query(WritingElement.source_type, func.count(WritingElement.id))
         .filter(
-            WritingElement.is_active == 1,
+            WritingElement.is_active.is_(True),
             WritingElement.category == WritingElement.CATEGORY_TOPIC,
         )
         .group_by(WritingElement.source_type)
@@ -523,7 +523,7 @@ def delete_element(element_id: int, db: Session = Depends(get_db)):
     if not element:
         raise HTTPException(404, "Element not found")
 
-    element.is_active = 0
+    element.is_active = False
     db.commit()
     return {"success": True}
 
