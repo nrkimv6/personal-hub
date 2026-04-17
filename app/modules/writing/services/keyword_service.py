@@ -114,7 +114,7 @@ class KeywordService:
                 frequency=kw.frequency,
                 source_keyword_id=kw.id,
                 season_hint=season_hint,
-                is_active=1,
+                is_active=True,
             )
             self.db.add(element)
             self.db.flush()

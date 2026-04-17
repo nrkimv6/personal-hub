@@ -5,6 +5,7 @@ Writing Service 테스트
 """
 
 import pytest
+import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -24,7 +25,7 @@ def cleanup_writing_data(test_db_session):
     test_db_session.query(WritingSource).delete()
     test_db_session.query(WritingElement).delete()
     test_db_session.query(LLMRequest).filter(
-        LLMRequest.caller_type == "writing"
+        LLMRequest.caller_type.in_(["writing", "writing_generate"])
     ).delete()
     test_db_session.commit()
     yield
@@ -34,7 +35,7 @@ def cleanup_writing_data(test_db_session):
     test_db_session.query(WritingSource).delete()
     test_db_session.query(WritingElement).delete()
     test_db_session.query(LLMRequest).filter(
-        LLMRequest.caller_type == "writing"
+        LLMRequest.caller_type.in_(["writing", "writing_generate"])
     ).delete()
     test_db_session.commit()
 
@@ -49,7 +50,7 @@ def sample_elements(test_db_session):
             category=WritingElement.CATEGORY_TOPIC,
             name=name,
             season_hint="winter" if i == 0 else None,
-            is_active=1
+            is_active=True
         )
         test_db_session.add(elem)
         elements.append(elem)
@@ -59,7 +60,7 @@ def sample_elements(test_db_session):
         elem = WritingElement(
             category=WritingElement.CATEGORY_KEYWORD,
             name=name,
-            is_active=1
+            is_active=True
         )
         test_db_session.add(elem)
         elements.append(elem)
@@ -69,7 +70,7 @@ def sample_elements(test_db_session):
         elem = WritingElement(
             category=WritingElement.CATEGORY_TONE,
             name=name,
-            is_active=1
+            is_active=True
         )
         test_db_session.add(elem)
         elements.append(elem)
@@ -79,7 +80,7 @@ def sample_elements(test_db_session):
         elem = WritingElement(
             category=WritingElement.CATEGORY_STYLE,
             name=name,
-            is_active=1
+            is_active=True
         )
         test_db_session.add(elem)
         elements.append(elem)
@@ -89,7 +90,7 @@ def sample_elements(test_db_session):
         elem = WritingElement(
             category=WritingElement.CATEGORY_FORMAT,
             name=name,
-            is_active=1
+            is_active=True
         )
         test_db_session.add(elem)
         elements.append(elem)
@@ -99,7 +100,7 @@ def sample_elements(test_db_session):
         elem = WritingElement(
             category=WritingElement.CATEGORY_EMOTION,
             name=name,
-            is_active=1
+            is_active=True
         )
         test_db_session.add(elem)
         elements.append(elem)
@@ -425,8 +426,8 @@ class TestWritingWorker:
         assert worker.mix_prompt_template is not None
         assert worker.random_prompt_template is not None
 
-    def test_mix_writing_creates_llm_request_on_success(self, test_db_session):
-        """믹스 글쓰기 성공 시 LLMRequest 이력 저장 테스트"""
+    def test_mix_writing_queues_llm_request_on_success(self, test_db_session):
+        """믹스 글쓰기 요청이 pending LLMRequest로 적재되는지 테스트"""
         from app.modules.writing.worker.writing_worker import WritingWorker, SlotContext
 
         # 테스트 소스 데이터 추가
@@ -442,33 +443,35 @@ class TestWritingWorker:
             worker = WritingWorker(test_db_session)
             worker.mix_prompt_template = "테스트 프롬프트 (여기에 첫 번째 글 붙여넣기) (여기에 두 번째 글 붙여넣기) (여기에 세 번째 글 붙여넣기)"
             worker.random_prompt_template = "랜덤 프롬프트"
-
-            # execute_claude mock (성공)
-            worker.llm_service.execute_claude = MagicMock(return_value={
-                "success": True,
-                "raw_response": "---\n생성된 글 내용입니다. " * 20
-            })
+            worker.llm_service.resolve_provider_model = MagicMock(
+                return_value=("test-provider", "test-model")
+            )
 
             # 믹스 글쓰기 실행
             ctx = SlotContext()
-            result = worker._generate_mix_writing(run_id=1, slot_context=ctx, index=0)
+            result = worker._queue_mix_writing(run_id=1, slot_context=ctx, index=0)
 
             assert result is True
 
             # LLMRequest 이력 확인
             llm_request = test_db_session.query(LLMRequest).filter(
-                LLMRequest.caller_type == "writing",
+                LLMRequest.caller_type == "writing_generate",
                 LLMRequest.caller_id == "mix_1_0"
             ).first()
 
             assert llm_request is not None
-            assert llm_request.status == "completed"
-            assert llm_request.raw_response is not None
-            assert llm_request.processed_at is not None
-            assert llm_request.error_message is None
+            assert llm_request.status == "pending"
+            assert llm_request.requested_by == "scheduler"
+            assert llm_request.request_source == "writing_worker"
+            assert llm_request.provider == "test-provider"
+            assert llm_request.model == "test-model"
+            metadata = json.loads(llm_request.writing_metadata)
+            assert metadata["task_type"] == "mix"
+            assert metadata["run_id"] == 1
+            assert sorted(metadata["source_ids"]) == sorted(ctx.used_source_ids)
 
-    def test_mix_writing_creates_llm_request_on_failure(self, test_db_session):
-        """믹스 글쓰기 실패 시 LLMRequest 이력 저장 테스트"""
+    def test_mix_writing_returns_false_on_queue_failure(self, test_db_session):
+        """믹스 글쓰기 요청 생성 중 예외가 나면 False 반환 테스트"""
         from app.modules.writing.worker.writing_worker import WritingWorker, SlotContext
 
         # 테스트 소스 데이터 추가
@@ -482,89 +485,77 @@ class TestWritingWorker:
         with patch.object(WritingWorker, '_load_prompts'):
             worker = WritingWorker(test_db_session)
             worker.mix_prompt_template = "테스트 프롬프트 (여기에 첫 번째 글 붙여넣기) (여기에 두 번째 글 붙여넣기) (여기에 세 번째 글 붙여넣기)"
-
-            # execute_claude mock (실패)
-            worker.llm_service.execute_claude = MagicMock(return_value={
-                "success": False,
-                "error": "LLM 호출 타임아웃"
-            })
+            worker.llm_service.resolve_provider_model = MagicMock(
+                side_effect=RuntimeError("LLM 호출 타임아웃")
+            )
 
             ctx = SlotContext()
-            result = worker._generate_mix_writing(run_id=1, slot_context=ctx, index=0)
+            result = worker._queue_mix_writing(run_id=1, slot_context=ctx, index=0)
 
             assert result is False
 
-            # LLMRequest 이력 확인 (실패로 기록)
             llm_request = test_db_session.query(LLMRequest).filter(
-                LLMRequest.caller_type == "writing",
+                LLMRequest.caller_type == "writing_generate",
                 LLMRequest.caller_id == "mix_1_0"
             ).first()
 
-            assert llm_request is not None
-            assert llm_request.status == "failed"
-            assert llm_request.error_message == "LLM 호출 타임아웃"
-            assert llm_request.processed_at is not None
+            assert llm_request is None
 
-    def test_random_writing_creates_llm_request_on_success(self, test_db_session, sample_elements):
-        """랜덤 글쓰기 성공 시 LLMRequest 이력 저장 테스트"""
+    def test_random_writing_queues_llm_request_on_success(self, test_db_session, sample_elements):
+        """랜덤 글쓰기 요청이 pending LLMRequest로 적재되는지 테스트"""
         from app.modules.writing.worker.writing_worker import WritingWorker, SlotContext
 
         with patch.object(WritingWorker, '_load_prompts'):
             worker = WritingWorker(test_db_session)
             worker.mix_prompt_template = ""
             worker.random_prompt_template = "소재: {topic}\n키워드: {keywords}\n톤: {tone}\n문체: {style}\n형식: {format}\n감정선: {emotion}"
-
-            # execute_claude mock (성공)
-            worker.llm_service.execute_claude = MagicMock(return_value={
-                "success": True,
-                "raw_response": "---\n랜덤으로 생성된 글 내용입니다. " * 20
-            })
+            worker.llm_service.resolve_provider_model = MagicMock(
+                return_value=("test-provider", "test-model")
+            )
 
             ctx = SlotContext()
-            result = worker._generate_random_writing(run_id=2, slot_context=ctx, season="winter", index=1)
+            result = worker._queue_random_writing(run_id=2, slot_context=ctx, season="winter", index=1)
 
             assert result is True
 
-            # LLMRequest 이력 확인
             llm_request = test_db_session.query(LLMRequest).filter(
-                LLMRequest.caller_type == "writing",
+                LLMRequest.caller_type == "writing_generate",
                 LLMRequest.caller_id == "random_2_1"
             ).first()
 
             assert llm_request is not None
-            assert llm_request.status == "completed"
+            assert llm_request.status == "pending"
             assert llm_request.requested_by == "scheduler"
             assert llm_request.request_source == "writing_worker"
+            metadata = json.loads(llm_request.writing_metadata)
+            assert metadata["task_type"] == "random"
+            assert metadata["run_id"] == 2
+            assert metadata["selected_elements"]["season"] == "winter"
+            assert metadata["selected_elements"]["topic"]
 
-    def test_random_writing_creates_llm_request_on_failure(self, test_db_session, sample_elements):
-        """랜덤 글쓰기 실패 시 LLMRequest 이력 저장 테스트"""
+    def test_random_writing_returns_false_on_queue_failure(self, test_db_session, sample_elements):
+        """랜덤 글쓰기 요청 생성 중 예외가 나면 False 반환 테스트"""
         from app.modules.writing.worker.writing_worker import WritingWorker, SlotContext
 
         with patch.object(WritingWorker, '_load_prompts'):
             worker = WritingWorker(test_db_session)
             worker.mix_prompt_template = ""
             worker.random_prompt_template = "소재: {topic}\n키워드: {keywords}\n톤: {tone}\n문체: {style}\n형식: {format}\n감정선: {emotion}"
-
-            # execute_claude mock (실패)
-            worker.llm_service.execute_claude = MagicMock(return_value={
-                "success": False,
-                "error": "API 오류"
-            })
+            worker.llm_service.resolve_provider_model = MagicMock(
+                side_effect=RuntimeError("API 오류")
+            )
 
             ctx = SlotContext()
-            result = worker._generate_random_writing(run_id=2, slot_context=ctx, season="winter", index=1)
+            result = worker._queue_random_writing(run_id=2, slot_context=ctx, season="winter", index=1)
 
             assert result is False
 
-            # LLMRequest 이력 확인
             llm_request = test_db_session.query(LLMRequest).filter(
-                LLMRequest.caller_type == "writing",
+                LLMRequest.caller_type == "writing_generate",
                 LLMRequest.caller_id == "random_2_1"
             ).first()
 
-            assert llm_request is not None
-            assert llm_request.status == "failed"
-            assert llm_request.error_message == "API 오류"
+            assert llm_request is None
 
 
 class TestWritingElement:
@@ -576,7 +567,7 @@ class TestWritingElement:
             category=WritingElement.CATEGORY_TOPIC,
             name="테스트 소재",
             season_hint="spring,fall",
-            is_active=1
+            is_active=True
         )
         test_db_session.add(elem)
         test_db_session.commit()
@@ -878,7 +869,7 @@ class TestWritingWorkerRotation:
 
     @patch('app.modules.writing.worker.writing_worker.LLMService')
     def test_mix_writing_uses_selector(self, mock_llm, test_db_session, sample_elements):
-        """믹스 글쓰기가 ElementSelector를 사용하는지 테스트"""
+        """믹스 글쓰기가 selector 결과를 요청 메타데이터에 반영하는지 테스트"""
         from app.modules.writing.worker.writing_worker import WritingWorker, SlotContext
 
         # 소스 추가
@@ -892,32 +883,31 @@ class TestWritingWorkerRotation:
         with patch.object(WritingWorker, '_load_prompts'):
             worker = WritingWorker(test_db_session)
             worker.mix_prompt_template = "프롬프트 (여기에 첫 번째 글 붙여넣기) (여기에 두 번째 글 붙여넣기) (여기에 세 번째 글 붙여넣기)"
-
-            worker.llm_service.execute_claude = MagicMock(return_value={
-                "success": True,
-                "raw_response": "---\n생성된 글. " * 30
-            })
+            worker.llm_service.resolve_provider_model = MagicMock(
+                return_value=("test-provider", "test-model")
+            )
 
             ctx = SlotContext()
 
             # 첫 번째 실행
-            result1 = worker._generate_mix_writing(run_id=1, slot_context=ctx, index=0)
+            result1 = worker._queue_mix_writing(run_id=1, slot_context=ctx, index=0)
             assert result1 is True
 
             # 사용된 소스가 컨텍스트에 기록되었는지 확인
             assert len(ctx.used_source_ids) == 3
 
-            # 사용 이력이 DB에 기록되었는지 확인
-            usages = test_db_session.query(WritingElementUsage).filter(
-                WritingElementUsage.source_id.isnot(None)
-            ).all()
-            assert len(usages) == 3
+            llm_request = test_db_session.query(LLMRequest).filter(
+                LLMRequest.caller_type == "writing_generate",
+                LLMRequest.caller_id == "mix_1_0"
+            ).first()
+            assert llm_request is not None
+            metadata = json.loads(llm_request.writing_metadata)
+            assert sorted(metadata["source_ids"]) == sorted(ctx.used_source_ids)
 
     @patch('app.modules.writing.worker.writing_worker.LLMService')
     def test_random_writing_stores_selected_elements(self, mock_llm, test_db_session, sample_elements):
-        """랜덤 글쓰기가 선택된 요소를 저장하는지 테스트"""
+        """랜덤 글쓰기 요청 메타데이터에 선택 요소가 저장되는지 테스트"""
         from app.modules.writing.worker.writing_worker import WritingWorker, SlotContext
-        import json
 
         with patch.object(WritingWorker, '_load_prompts'):
             worker = WritingWorker(test_db_session)
@@ -929,15 +919,13 @@ class TestWritingWorkerRotation:
 형식: {format}
 감정선: {emotion}
 """
-
-            worker.llm_service.execute_claude = MagicMock(return_value={
-                "success": True,
-                "raw_response": "---\n랜덤 생성 글. " * 30
-            })
+            worker.llm_service.resolve_provider_model = MagicMock(
+                return_value=("test-provider", "test-model")
+            )
 
             ctx = SlotContext()
 
-            result = worker._generate_random_writing(
+            result = worker._queue_random_writing(
                 run_id=1,
                 slot_context=ctx,
                 season="winter",
@@ -946,16 +934,15 @@ class TestWritingWorkerRotation:
 
             assert result is True
 
-            # 생성된 글 확인
-            writing = test_db_session.query(GeneratedWriting).filter(
-                GeneratedWriting.task_type == GeneratedWriting.TASK_TYPE_RANDOM
+            llm_request = test_db_session.query(LLMRequest).filter(
+                LLMRequest.caller_type == "writing_generate",
+                LLMRequest.caller_id == "random_1_0"
             ).first()
 
-            assert writing is not None
-            assert writing.selected_elements is not None
+            assert llm_request is not None
+            assert llm_request.status == "pending"
 
-            # JSON 파싱 확인
-            selected = json.loads(writing.selected_elements)
+            selected = json.loads(llm_request.writing_metadata)["selected_elements"]
             assert "topic" in selected
             assert "keywords" in selected
             assert "season" in selected

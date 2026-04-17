@@ -740,7 +740,7 @@ def _save_extracted_topics(db, analysis: list) -> list[str]:
                     name=topic,
                     source_type=WritingElement.SOURCE_TYPE_AUTO,
                     frequency=1,
-                    is_active=1,
+                    is_active=True,
                 )
                 db.add(new_element)
                 logger.info(f"새 소재 추가: {topic}")
@@ -1002,7 +1002,7 @@ def save_topic_extract_result(db, caller_id: str, llm_result: dict) -> bool:
                         name=topic,
                         source_type=WritingElement.SOURCE_TYPE_AUTO,
                         frequency=1,
-                        is_active=1,
+                        is_active=True,
                     )
                     db.add(new_element)
 

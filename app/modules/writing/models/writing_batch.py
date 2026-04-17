@@ -47,7 +47,9 @@ class WritingBatch(Base):
     schedule_run = relationship("TaskScheduleRun", backref="writing_batches")
 
     def __repr__(self) -> str:
-        return f"<WritingBatch(id={self.id}, status={self.status}, {self.completed_count}/{self.total_count})>"
+        completed = self.completed_count or 0
+        total = self.total_count or 0
+        return f"<WritingBatch(id={self.id}, status={self.status}, {completed}/{total})>"
 
     def mark_started(self):
         """배치 시작 표시."""
@@ -66,17 +68,20 @@ class WritingBatch(Base):
 
     def increment_completed(self):
         """완료 카운트 증가."""
-        self.completed_count += 1
+        self.completed_count = (self.completed_count or 0) + 1
         self._check_completion()
 
     def increment_failed(self):
         """실패 카운트 증가."""
-        self.failed_count += 1
+        self.failed_count = (self.failed_count or 0) + 1
         self._check_completion()
 
     def _check_completion(self):
         """완료 여부 체크."""
-        if self.completed_count + self.failed_count >= self.total_count:
+        completed = self.completed_count or 0
+        failed = self.failed_count or 0
+        total = self.total_count or 0
+        if total and completed + failed >= total:
             self.mark_completed()
 
     @property
@@ -87,6 +92,9 @@ class WritingBatch(Base):
     @property
     def progress_percent(self) -> int:
         """진행률 (%)."""
-        if self.total_count == 0:
+        total = self.total_count or 0
+        if total == 0:
             return 100
-        return int((self.completed_count + self.failed_count) / self.total_count * 100)
+        completed = self.completed_count or 0
+        failed = self.failed_count or 0
+        return int((completed + failed) / total * 100)

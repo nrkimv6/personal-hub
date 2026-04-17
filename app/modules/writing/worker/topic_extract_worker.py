@@ -231,7 +231,7 @@ class TopicExtractWorker:
                         name=topic,
                         source_type=WritingElement.SOURCE_TYPE_AUTO,
                         frequency=1,
-                        is_active=1,
+                        is_active=True,
                     )
                     self.db.add(new_element)
 
