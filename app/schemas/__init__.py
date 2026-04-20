@@ -85,6 +85,17 @@ from app.schemas.error_log import (
     ErrorLogHourlyStats,
     ErrorLogStatsResponse,
 )
+from app.schemas.expo import (
+    ExpoExportPin,
+    ExpoExportBooth,
+    ExpoExportPayload,
+    ExpoExportRecordResponse,
+    ExpoWorkerStatusSummary,
+    ExpoPublishedStatusResponse,
+    ExpoPipelineStatusResponse,
+    ExpoCollectionPreviewItem,
+    ExpoCollectionStatusResponse,
+)
 
 __all__ = [
     # browser_profile
@@ -163,4 +174,14 @@ __all__ = [
     "ErrorLogTypeStats",
     "ErrorLogHourlyStats",
     "ErrorLogStatsResponse",
+    # expo
+    "ExpoExportPin",
+    "ExpoExportBooth",
+    "ExpoExportPayload",
+    "ExpoExportRecordResponse",
+    "ExpoWorkerStatusSummary",
+    "ExpoPublishedStatusResponse",
+    "ExpoPipelineStatusResponse",
+    "ExpoCollectionPreviewItem",
+    "ExpoCollectionStatusResponse",
 ]

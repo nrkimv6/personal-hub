@@ -87,3 +87,21 @@ class TestAdminExpoAuthor:
 
         expect(page.get_by_role("heading", name="커피엑스포 2026 좌표 작업")).to_be_visible()
         expect(page.get_by_role("link", name="공개 부스맵 열기")).to_be_visible()
+
+    def test_admin_events_tab_renders_pipeline_and_collection_sections(self, page: Page, frontend_url: str):
+        page.goto(f"{frontend_url}/events?tab=expo")
+        page.wait_for_load_state("networkidle")
+
+        expect(page.get_by_role("heading", name="소스 파이프라인 상태")).to_be_visible()
+        expect(page.get_by_role("heading", name="수집 현황과 export 흐름")).to_be_visible()
+
+    def test_public_expo_page_does_not_render_admin_operations_sections(
+        self, page: Page, public_frontend_url: str, system_mode: str
+    ):
+        _skip_public_mode_if_admin(system_mode)
+
+        page.goto(f"{public_frontend_url}/expo/coffee-expo-2026")
+        page.wait_for_load_state("networkidle")
+
+        expect(page.get_by_role("heading", name="소스 파이프라인 상태")).to_have_count(0)
+        expect(page.get_by_role("heading", name="수집 현황과 export 흐름")).to_have_count(0)

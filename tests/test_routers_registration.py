@@ -48,6 +48,10 @@ class TestRegisterRoutersAddsRoutes:
             "/api/activity/worker/status",
             "/api/v1/activity/crawl/sync-hub",
             "/api/activity/crawl/sync-hub",
+            "/api/v1/expo/{slug}/pipeline-status",
+            "/api/v1/expo/{slug}/collection-status",
+            "/api/v1/expo/{slug}/published-status",
+            "/api/v1/expo/{slug}/exports/record",
         }
 
         missing = expected - paths

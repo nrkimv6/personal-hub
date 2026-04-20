@@ -13,7 +13,7 @@
 	import { page as pageStore } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { eventApi, popupApi, uncategorizedApi, collectApi } from '$lib/api';
-	import type { Event, EventCreate, EventUpdate, ExpoDraftBooth, ExpoMapDocument, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
+	import type { Event, EventCreate, EventUpdate, ExpoMapDocument, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
 	import { isAdmin, isAuthLoading, isLoggedIn } from '$lib/stores/auth';
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
@@ -31,7 +31,6 @@
 	import EventUrlImportModal from '$lib/components/events/EventUrlImportModal.svelte';
 	import ExpoAdminWorkspace from '../expo/components/ExpoAdminWorkspace.svelte';
 	import expoData from '../expo/coffee-expo-2026/expo-data.json';
-	import { serializeExpoDraftsForExport } from '../expo/utils/authorDraft';
 
 	// 로컬 참여 상태 스토어 반응형 구독
 	const participatedMap = $derived($localParticipation);
@@ -354,20 +353,6 @@
 		currentPage = 1;
 		fetchEvents();
 		syncUrlParams();
-	}
-
-	async function handleExpoDraftSave(drafts: ExpoDraftBooth[]) {
-		if (!browser || drafts.length === 0) {
-			toast.warning('복사할 좌표 draft가 없습니다.');
-			return;
-		}
-
-		try {
-			await navigator.clipboard.writeText(serializeExpoDraftsForExport(drafts));
-			toast.success(`${drafts.length}개 draft를 복사했습니다.`);
-		} catch {
-			toast.error('클립보드 복사에 실패했습니다.');
-		}
 	}
 
 	// =========================================================
@@ -844,7 +829,7 @@
 
 <div class="p-4 md:p-6">
 	<!-- 헤더 -->
-	<PageHeader title="이벤트 관리" subtitle="이벤트와 팝업을 관리합니다">
+	<PageHeader title="이벤트 관리" subtitle={isExpoTab ? 'System Control Tower · source data 운영 콘솔' : '이벤트와 팝업을 관리합니다'}>
 		{#if $isAdmin && !isExpoTab}
 			<div class="flex gap-2">
 				<Button variant="primary" size="sm" onclick={openCreateModal}> + 새 이벤트 </Button>
@@ -937,12 +922,14 @@
 
 	<!-- 목록 -->
 	{#if isExpoTab}
+		<section class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+			monitor-page는 source data 수집/보정과 export까지만 담당합니다. publish 판단과 게시 반영은 admin-tools에서 수행합니다.
+		</section>
 		<ExpoAdminWorkspace
 			existingBooths={expo.booths}
 			map={expo.map}
-			onSaveDrafts={handleExpoDraftSave}
 			previewHref="/expo/coffee-expo-2026"
-			saveButtonLabel="JSON 복사"
+			saveButtonLabel="Export JSON"
 			slug={expo.slug}
 			title={expo.title}
 		/>
