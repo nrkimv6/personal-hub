@@ -129,8 +129,8 @@ def import_from_url(
 
     - Playwright로 페이지 로드
     - 페이지 유형별 최적화된 추출기 사용 (Google Forms, Naver Form, Naver Blog 등)
-    - LLM으로 이벤트 정보 분석
-    - auto_save=True면 Event 자동 생성
+    - LLM 요청을 큐에 등록하고 즉시 acceptance 응답 반환
+    - 실제 Event 생성은 Claude Worker가 후처리
 
     지원 페이지 유형:
     - google_forms: Google Forms 설문
