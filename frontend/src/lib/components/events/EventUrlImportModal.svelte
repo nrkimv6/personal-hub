@@ -71,6 +71,14 @@
 		failed: '추출 실패'
 	};
 
+	const pendingAcceptance = $derived(
+		mode === 'instant' &&
+		!!result?.success &&
+		!!result?.is_event &&
+		!result?.extracted_event &&
+		!!result?.message
+	);
+
 	// 계정 목록 로드 (Instagram URL 크롤링용)
 	async function loadAccounts() {
 		try {
@@ -476,6 +484,49 @@
 						{#if error}
 							<div class="p-3 bg-error-light border border-red-200 rounded-lg">
 								<p class="text-sm text-error">{error}</p>
+							</div>
+						{/if}
+
+						<!-- 추출 결과: 요청 접수 완료 (즉시 추출 모드에서만) -->
+						{#if pendingAcceptance}
+							<div class="p-4 bg-primary-light border border-blue-200 rounded-lg space-y-3">
+								<div class="flex items-center gap-2 text-sm">
+									<span class="px-2 py-0.5 bg-primary-light text-primary rounded-full text-xs">
+										요청 접수
+									</span>
+									<span class="px-2 py-0.5 bg-muted text-foreground rounded-full text-xs">
+										{pageTypeLabels[result?.page_type || 'generic'] || result?.page_type}
+									</span>
+								</div>
+
+								<div class="space-y-2 text-sm">
+									<p class="text-primary">
+										{result?.message}
+									</p>
+									{#if result?.request_id}
+										<p class="text-xs text-muted-foreground">
+											요청 ID: {result.request_id}
+										</p>
+									{/if}
+									<p class="text-xs text-muted-foreground">
+										분석이 끝나면 LLM 요청 목록에서 진행상황을 확인할 수 있습니다.
+									</p>
+								</div>
+
+								<div class="flex justify-end gap-2 pt-2 border-t border-blue-200">
+									<button
+										onclick={handleClose}
+										class="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+									>
+										닫기
+									</button>
+									<a
+										href="/llm"
+										class="px-4 py-1.5 text-sm bg-primary text-white rounded-lg hover:bg-primary-hover"
+									>
+										LLM 요청 보기
+									</a>
+								</div>
 							</div>
 						{/if}
 

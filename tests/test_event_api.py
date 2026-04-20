@@ -5,12 +5,15 @@ Event API 통합 테스트
 import pytest
 from datetime import date, timedelta
 from fastapi.testclient import TestClient
+from unittest.mock import MagicMock, patch
 
 from app.main import app
 from app.database import get_db
 from app.models.event import Event
 from app.models.instagram_post import InstagramPost
 from app.core.auth import create_access_token
+from app.modules.claude_worker.models.llm_request import LLMRequest
+from app.services.page_extractor.base import ExtractedContent
 
 
 pytestmark = pytest.mark.http
@@ -414,6 +417,110 @@ class TestEventImportFromInstagramAPI:
             "instagram_post_id": 1,
         })
         assert response.status_code == 401
+
+
+class TestEventImportFromUrlAPI:
+    """POST /api/v1/events/import-from-url 테스트"""
+
+    @patch("app.modules.claude_worker.services.llm_service.LLMService.resolve_provider_model")
+    @patch("app.services.event_service.asyncio.get_event_loop")
+    def test_import_from_url_right_returns_acceptance_response(
+        self, mock_get_event_loop, mock_resolve_provider_model, client, admin_headers, test_db_session
+    ):
+        mock_extracted = ExtractedContent(
+            url="https://example.com/api-success",
+            page_type="generic",
+            extraction_method="fallback",
+            title="API 이벤트",
+            content="API 이벤트 본문",
+            success=True,
+        )
+        mock_resolve_provider_model.return_value = ("claude", "sonnet-test")
+        mock_get_event_loop.return_value.run_until_complete.return_value = mock_extracted
+
+        with patch(
+            "app.services.event_service.EventService._extract_page_content",
+            new=MagicMock(return_value=mock_extracted),
+        ):
+            response = client.post(
+                "/api/v1/events/import-from-url",
+                json={"url": "https://example.com/api-success", "auto_save": False},
+                headers=admin_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        saved_request = (
+            test_db_session.query(LLMRequest)
+            .filter(LLMRequest.caller_type == "event_import")
+            .filter(LLMRequest.caller_id == "https://example.com/api-success")
+            .one()
+        )
+
+        assert data["success"] is True
+        assert data["is_event"] is True
+        assert data["page_type"] == "generic"
+        assert data["extraction_method"] == "fallback"
+        assert data["request_id"] == saved_request.id
+        assert data["message"] == f"이벤트 등록 요청을 받았습니다 (요청 ID: {saved_request.id})"
+        assert data["extracted_event"] is None
+        assert data["created_event"] is None
+        assert data["error"] is None
+
+    def test_import_from_url_error_duplicate_url_returns_contract_error(
+        self, client, admin_headers, sample_event, test_db_session
+    ):
+        response = client.post(
+            "/api/v1/events/import-from-url",
+            json={"url": sample_event.event_url, "auto_save": False},
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["success"] is False
+        assert data["is_event"] is True
+        assert data["page_type"] == "unknown"
+        assert data["extraction_method"] == "skipped"
+        assert "동일 URL" in data["error"]
+        assert test_db_session.query(LLMRequest).count() == 0
+
+    @patch("app.modules.claude_worker.services.llm_service.LLMService.resolve_provider_model")
+    @patch("app.services.event_service.asyncio.get_event_loop")
+    def test_import_from_url_error_request_persist_failure_returns_contract_error(
+        self, mock_get_event_loop, mock_resolve_provider_model, client, admin_headers, test_db_session
+    ):
+        mock_extracted = ExtractedContent(
+            url="https://example.com/api-failure",
+            page_type="generic",
+            extraction_method="fallback",
+            title="API 실패 이벤트",
+            content="API 실패 이벤트 본문",
+            success=True,
+        )
+        mock_get_event_loop.return_value.run_until_complete.return_value = mock_extracted
+        mock_resolve_provider_model.side_effect = RuntimeError("provider unavailable")
+
+        with patch(
+            "app.services.event_service.EventService._extract_page_content",
+            new=MagicMock(return_value=mock_extracted),
+        ):
+            response = client.post(
+                "/api/v1/events/import-from-url",
+                json={"url": "https://example.com/api-failure", "auto_save": False},
+                headers=admin_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["success"] is False
+        assert data["is_event"] is True
+        assert data["page_type"] == "generic"
+        assert data["extraction_method"] == "fallback"
+        assert "LLM 요청 생성 실패" in data["error"]
+        assert test_db_session.query(LLMRequest).count() == 0
 
 
 class TestEventComputedFields:

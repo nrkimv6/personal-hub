@@ -23,6 +23,7 @@ from app.schemas.event import (
 )
 from app.models.event import Event
 from app.models.instagram_post import InstagramPost
+from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.services.page_extractor.base import ExtractedContent
 
 
@@ -646,32 +647,36 @@ class TestEventServiceImportFromUrl:
     def event_service(self):
         return EventService()
 
-    def test_import_from_url_duplicate_check(self, test_db_session, event_service):
-        """Right: 중복 URL 확인"""
-        # 먼저 이벤트 생성
-        data = EventCreate(
-            title="기존 이벤트",
-            event_url="https://docs.google.com/forms/d/e/test123/viewform",
+    def test_import_from_url_error_duplicate_url_short_circuits(
+        self, test_db_session, event_service
+    ):
+        """Error: 중복 URL은 추출/queue 생성 전에 종료된다."""
+        event_service.create_event(
+            test_db_session,
+            EventCreate(
+                title="기존 이벤트",
+                event_url="https://docs.google.com/forms/d/e/test123/viewform",
+            ),
         )
-        event_service.create_event(test_db_session, data)
 
-        # 같은 URL로 import 시도
-        import_data = EventImportFromUrl(
-            url="https://docs.google.com/forms/d/e/test123/viewform",
-            auto_save=False,
+        result = event_service.import_from_url(
+            test_db_session,
+            EventImportFromUrl(
+                url="https://docs.google.com/forms/d/e/test123/viewform",
+                auto_save=False,
+            ),
         )
-        result = event_service.import_from_url(test_db_session, import_data)
 
         assert result.success is False
         assert "동일 URL" in result.error
+        assert test_db_session.query(LLMRequest).count() == 0
 
-    @patch("app.services.event_service.EventService._extract_page_content")
-    @patch("app.modules.claude_worker.services.llm_service.LLMService.execute_claude")
-    def test_import_from_url_success(
-        self, mock_execute_claude, mock_extract, test_db_session, event_service
+    @patch("app.modules.claude_worker.services.llm_service.LLMService.resolve_provider_model")
+    @patch("app.services.event_service.asyncio.get_event_loop")
+    def test_import_from_url_right_returns_acceptance_response(
+        self, mock_get_event_loop, mock_resolve_provider_model, test_db_session, event_service
     ):
-        """Right: URL에서 이벤트 추출 성공"""
-        # Mock 페이지 추출 결과
+        """Right: acceptance 응답과 pending LLMRequest를 반환한다."""
         mock_extracted = ExtractedContent(
             url="https://docs.google.com/forms/d/e/new123/viewform",
             page_type="google_forms",
@@ -680,53 +685,87 @@ class TestEventServiceImportFromUrl:
             content="12월 이벤트 참여하기...",
             success=True,
         )
+        mock_resolve_provider_model.return_value = ("claude", "sonnet-test")
+        mock_get_event_loop.return_value.run_until_complete.return_value = mock_extracted
 
-        # asyncio.run을 우회하여 직접 결과 반환
-        async def mock_extract_coro(url):
-            return mock_extracted
+        with patch.object(
+            event_service,
+            "_extract_page_content",
+            new=MagicMock(return_value=mock_extracted),
+        ):
+            result = event_service.import_from_url(
+                test_db_session,
+                EventImportFromUrl(
+                    url="https://docs.google.com/forms/d/e/new123/viewform",
+                    auto_save=False,
+                ),
+            )
 
-        mock_extract.return_value = mock_extract_coro("test")
-
-        # Mock LLM 응답
-        mock_execute_claude.return_value = {
-            "success": True,
-            "result": {
-                "title": "크리스마스 이벤트",
-                "event_type": "event",
-                "event_start": "2024-12-01",
-                "event_end": "2024-12-25",
-                "organizer": "테스트 브랜드",
-                "prizes": ["상품권"],
-                "winner_count": 10,
-            },
-            "raw_response": '{"title": "크리스마스 이벤트"}',
-        }
-
-        import_data = EventImportFromUrl(
-            url="https://docs.google.com/forms/d/e/new123/viewform",
-            auto_save=False,
+        saved_request = (
+            test_db_session.query(LLMRequest)
+            .filter(LLMRequest.caller_type == "event_import")
+            .filter(LLMRequest.caller_id == "https://docs.google.com/forms/d/e/new123/viewform")
+            .one()
         )
 
-        # _extract_page_content를 직접 패치
+        assert result.success is True
+        assert result.is_event is True
+        assert result.page_type == "google_forms"
+        assert result.extraction_method == "structured"
+        assert result.request_id == saved_request.id
+        assert result.message == f"이벤트 등록 요청을 받았습니다 (요청 ID: {saved_request.id})"
+        assert result.raw_content == "12월 이벤트 참여하기..."
+        assert result.extracted_event is None
+        assert result.created_event is None
+        assert saved_request.status == "pending"
+        assert saved_request.requested_by == "api"
+        assert saved_request.request_source == "event_import"
+        assert saved_request.provider == "claude"
+        assert saved_request.model == "sonnet-test"
+
+    @patch("app.modules.claude_worker.services.llm_service.LLMService.resolve_provider_model")
+    @patch("app.services.event_service.asyncio.get_event_loop")
+    def test_import_from_url_boundary_auto_save_still_returns_acceptance_only(
+        self, mock_get_event_loop, mock_resolve_provider_model, test_db_session, event_service
+    ):
+        """Boundary: auto_save=True여도 즉시 Event는 생성하지 않는다."""
+        mock_extracted = ExtractedContent(
+            url="https://example.com/auto-save",
+            page_type="generic",
+            extraction_method="fallback",
+            title="자동 저장 테스트",
+            content="자동 저장과 무관하게 worker 후처리",
+            success=True,
+        )
+        mock_resolve_provider_model.return_value = ("claude", "sonnet-test")
+        mock_get_event_loop.return_value.run_until_complete.return_value = mock_extracted
+
         with patch.object(
-            event_service, "_extract_page_content", return_value=mock_extracted
+            event_service,
+            "_extract_page_content",
+            new=MagicMock(return_value=mock_extracted),
         ):
-            # asyncio.run을 우회
-            with patch("asyncio.run", return_value=mock_extracted):
-                with patch("asyncio.get_event_loop") as mock_loop:
-                    mock_loop.return_value.run_until_complete.return_value = mock_extracted
-                    result = event_service.import_from_url(test_db_session, import_data)
+            result = event_service.import_from_url(
+                test_db_session,
+                EventImportFromUrl(url="https://example.com/auto-save", auto_save=True),
+            )
 
         assert result.success is True
-        assert result.page_type == "google_forms"
-        assert result.extracted_event is not None
-        assert result.extracted_event["title"] == "크리스마스 이벤트"
+        assert result.request_id is not None
+        assert result.extracted_event is None
+        assert result.created_event is None
+        assert (
+            test_db_session.query(Event)
+            .filter(Event.source_url == "https://example.com/auto-save")
+            .count()
+            == 0
+        )
 
-    @patch("app.services.event_service.EventService._extract_page_content")
-    def test_import_from_url_extraction_failure(
-        self, mock_extract, test_db_session, event_service
+    @patch("app.services.event_service.asyncio.get_event_loop")
+    def test_import_from_url_error_extraction_failure_short_circuits(
+        self, mock_get_event_loop, test_db_session, event_service
     ):
-        """Error: 페이지 추출 실패"""
+        """Error: 페이지 추출 실패는 enqueue 전에 종료된다."""
         mock_extracted = ExtractedContent(
             url="https://example.com/broken",
             page_type="generic",
@@ -734,26 +773,33 @@ class TestEventServiceImportFromUrl:
             success=False,
             error="페이지 로드 타임아웃",
         )
+        mock_get_event_loop.return_value.run_until_complete.return_value = mock_extracted
 
-        import_data = EventImportFromUrl(
-            url="https://example.com/broken",
-            auto_save=False,
-        )
-
-        with patch("asyncio.run", return_value=mock_extracted):
-            with patch("asyncio.get_event_loop") as mock_loop:
-                mock_loop.return_value.run_until_complete.return_value = mock_extracted
-                result = event_service.import_from_url(test_db_session, import_data)
+        with patch.object(
+            event_service,
+            "_extract_page_content",
+            new=MagicMock(return_value=mock_extracted),
+        ):
+            result = event_service.import_from_url(
+                test_db_session,
+                EventImportFromUrl(url="https://example.com/broken", auto_save=False),
+            )
 
         assert result.success is False
         assert "페이지 로드 타임아웃" in result.error
+        assert (
+            test_db_session.query(LLMRequest)
+            .filter(LLMRequest.caller_id == "https://example.com/broken")
+            .count()
+            == 0
+        )
 
-    @patch("app.services.event_service.EventService._extract_page_content")
-    @patch("app.modules.claude_worker.services.llm_service.LLMService.execute_claude")
-    def test_import_from_url_llm_failure(
-        self, mock_execute_claude, mock_extract, test_db_session, event_service
+    @patch("app.modules.claude_worker.services.llm_service.LLMService.resolve_provider_model")
+    @patch("app.services.event_service.asyncio.get_event_loop")
+    def test_import_from_url_error_request_persist_failure_returns_error(
+        self, mock_get_event_loop, mock_resolve_provider_model, test_db_session, event_service
     ):
-        """Error: LLM 분석 실패"""
+        """Error: 요청 생성 실패는 즉시 에러 응답으로 변환된다."""
         mock_extracted = ExtractedContent(
             url="https://example.com/test",
             page_type="generic",
@@ -762,24 +808,29 @@ class TestEventServiceImportFromUrl:
             content="내용...",
             success=True,
         )
+        mock_get_event_loop.return_value.run_until_complete.return_value = mock_extracted
+        mock_resolve_provider_model.side_effect = RuntimeError("provider unavailable")
 
-        mock_execute_claude.return_value = {
-            "success": False,
-            "error": "Claude CLI timeout",
-        }
-
-        import_data = EventImportFromUrl(
-            url="https://example.com/test",
-            auto_save=False,
-        )
-
-        with patch("asyncio.run", return_value=mock_extracted):
-            with patch("asyncio.get_event_loop") as mock_loop:
-                mock_loop.return_value.run_until_complete.return_value = mock_extracted
-                result = event_service.import_from_url(test_db_session, import_data)
+        with patch.object(
+            event_service,
+            "_extract_page_content",
+            new=MagicMock(return_value=mock_extracted),
+        ):
+            result = event_service.import_from_url(
+                test_db_session,
+                EventImportFromUrl(url="https://example.com/test", auto_save=False),
+            )
 
         assert result.success is False
-        assert "LLM 분석 실패" in result.error
+        assert result.page_type == "generic"
+        assert result.extraction_method == "fallback"
+        assert "LLM 요청 생성 실패" in result.error
+        assert (
+            test_db_session.query(LLMRequest)
+            .filter(LLMRequest.caller_id == "https://example.com/test")
+            .count()
+            == 0
+        )
 
     def test_parse_event_dates(self, event_service):
         """Right: 날짜 문자열 파싱"""

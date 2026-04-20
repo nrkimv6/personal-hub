@@ -452,8 +452,8 @@ class EventService:
         1. Playwright로 페이지 로드
         2. ExtractorFactory로 적절한 추출기 선택
         3. 페이지 내용 추출
-        4. LLM으로 이벤트 정보 분석
-        5. auto_save=True면 Event 생성
+        4. LLM 요청을 큐에 등록
+        5. Worker가 후처리하며 API는 acceptance 응답만 반환
 
         Args:
             db: DB 세션
@@ -462,12 +462,11 @@ class EventService:
         Returns:
             EventImportFromUrlResponse
         """
-        from app.services.page_extractor import get_extractor_factory
         from app.modules.claude_worker.prompts.event_extract import (
             build_event_extract_prompt,
-            parse_event_from_llm_response,
         )
         from app.modules.claude_worker.services.llm_service import LLMService
+        from app.modules.claude_worker.models.llm_request import LLMRequest
 
         url = data.url
 
@@ -503,30 +502,37 @@ class EventService:
         # LLM 프롬프트 생성
         prompt = build_event_extract_prompt(extracted)
 
-        # LLM 요청 생성 (비동기 큐 패턴)
-        from app.modules.claude_worker.models.llm_request import LLMRequest
-        from app.modules.claude_worker.services.llm_service import LLMService
+        try:
+            llm_service = LLMService(db)
+            provider, model = llm_service.resolve_provider_model(
+                caller_type="event_import",
+                provider=None,
+                model=None,
+            )
 
-        llm_service = LLMService(db)
-        provider, model = llm_service.resolve_provider_model(
-            caller_type="event_import",
-            provider=None,
-            model=None,
-        )
-
-        llm_request = LLMRequest(
-            caller_type="event_import",
-            caller_id=url,
-            prompt=prompt,
-            status="pending",
-            requested_by="api",
-            request_source="event_import",
-            provider=provider,
-            model=model,
-        )
-        db.add(llm_request)
-        db.commit()
-        db.refresh(llm_request)
+            llm_request = LLMRequest(
+                caller_type="event_import",
+                caller_id=url,
+                prompt=prompt,
+                status="pending",
+                requested_by="api",
+                request_source="event_import",
+                provider=provider,
+                model=model,
+            )
+            db.add(llm_request)
+            db.commit()
+            db.refresh(llm_request)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Event import 요청 생성 실패: url=%s", url)
+            return EventImportFromUrlResponse(
+                success=False,
+                is_event=True,
+                page_type=extracted.page_type,
+                extraction_method=extracted.extraction_method,
+                error=f"LLM 요청 생성 실패: {exc}",
+            )
 
         logger.info(f"Event import 요청 생성: request_id={llm_request.id}, url={url}")
 
@@ -537,6 +543,7 @@ class EventService:
             page_type=extracted.page_type,
             extraction_method=extracted.extraction_method,
             raw_content=extracted.content[:1000] if extracted.content else None,
+            request_id=llm_request.id,
             message=f"이벤트 등록 요청을 받았습니다 (요청 ID: {llm_request.id})",
         )
 

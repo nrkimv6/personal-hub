@@ -154,7 +154,7 @@ class EventImportFromInstagram(BaseModel):
 class EventImportFromUrl(BaseModel):
     """URL에서 이벤트 가져오기 요청"""
     url: str  # 이벤트 정보가 있는 URL
-    auto_save: bool = False  # True면 Event 자동 생성, False면 추출 결과만 반환
+    auto_save: bool = False  # Deprecated: async queue 전환 후 즉시 저장 분기에는 사용되지 않음
 
 
 class EventImportFromUrlResponse(BaseModel):
@@ -163,9 +163,10 @@ class EventImportFromUrlResponse(BaseModel):
     is_event: bool = True  # 이벤트/행사/프로모션인지 여부
     page_type: str  # google_forms, naver_form, naver_blog_pc, naver_blog_mobile, generic
     extraction_method: str  # structured, generic, fallback, failed
-    extracted_event: Optional[dict] = None  # LLM 분석 결과 (이벤트 정보)
+    extracted_event: Optional[dict] = None  # Deprecated: acceptance 응답에서는 비워두고 worker 완료 후 별도 경로에서 확인
     raw_content: Optional[str] = None  # 추출된 원본 텍스트 (디버깅용)
-    created_event: Optional[EventResponse] = None  # auto_save=True일 때 생성된 Event
+    created_event: Optional[EventResponse] = None  # Deprecated: acceptance 응답에서는 채우지 않음
     not_event_reason: Optional[str] = None  # is_event=False일 때 이유
-    message: Optional[str] = None  # 비동기 처리 메시지 (요청 ID 포함)
+    request_id: Optional[int] = None  # acceptance 시 생성된 LLMRequest ID
+    message: Optional[str] = None  # 비동기 처리 메시지
     error: Optional[str] = None
