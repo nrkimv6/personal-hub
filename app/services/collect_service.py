@@ -556,6 +556,7 @@ class CollectService:
             finished_at=run.finished_at,
             duration_seconds=run.duration_seconds,
             error_message=run.error_message,
+            stop_reason=run.stop_reason,
             schedule_id=run.schedule_id,
             schedule_name=schedule.display_name or schedule.name if schedule else None,
             collected_count=run.collected_count or 0,

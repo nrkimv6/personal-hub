@@ -73,6 +73,7 @@ class CrawlHistoryItem(BaseModel):
     finished_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
     error_message: Optional[str] = None
+    stop_reason: Optional[str] = None
 
     # Request / Google Search 전용
     url: Optional[str] = None

@@ -195,9 +195,15 @@ class WritingWorker:
             # 소스 글 개수 확인
             source_count = self.db.query(WritingSource).count()
             if source_count < 3:
-                error_msg = f"소스 글이 부족합니다: {source_count}개 (최소 3개 필요)"
+                if source_count == 0:
+                    error_msg = (
+                        "소스 글이 부족합니다: 0개 (최소 3개 필요) "
+                        "- writing_sources 데이터 이관/동기화 누락을 확인하세요."
+                    )
+                else:
+                    error_msg = f"소스 글이 부족합니다: {source_count}개 (최소 3개 필요)"
                 logger.error(error_msg)
-                run.mark_failed(error_msg)
+                run.mark_failed(error_msg, stop_reason="source_shortage")
                 self.db.commit()
                 return {"total": 0, "success": 0, "failed": 0, "error": error_msg}
 
