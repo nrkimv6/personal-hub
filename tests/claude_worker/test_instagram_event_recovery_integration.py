@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,6 +12,7 @@ from app.models.instagram_post import InstagramPost
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.llm_service import LLMService
 from app.modules.claude_worker.worker.worker import LLMWorker
+from scripts.diagnostics.instagram_event_incident_report import build_window, collect_funnel_metrics
 from scripts.diagnostics.recover_instagram_llm_missing_events import build_candidate, recover_candidate
 
 
@@ -189,3 +191,49 @@ def test_legacy_completed_request_can_be_recovered_from_raw_envelope(db):
     repaired_event = db.query(Event).filter(Event.id == post.classified_id).first()
     assert repaired_event is not None
     assert repaired_event.summary == "legacy repaired"
+
+
+def test_completed_no_event_bucket_matches_recovery_candidate_state(db):
+    post = InstagramPost(
+        id=9001,
+        post_id="p9001",
+        account="bucket",
+        url="https://instagram.com/p/bucket",
+        caption="caption",
+        created_at=datetime(2026, 4, 17, 9, 0, 0),
+    )
+    request = LLMRequest(
+        id=9002,
+        caller_type="instagram",
+        caller_id="9001",
+        prompt="test",
+        status="completed",
+        request_source="instagram_event",
+        requested_at=datetime(2026, 4, 17, 10, 0, 0),
+        processed_at=datetime(2026, 4, 17, 10, 1, 0),
+        result=json.dumps(
+            {
+                "tag": "이벤트",
+                "summary": "still missing",
+                "urls": [],
+                "event_period": {"start": "2026-04-17", "end": "2026-04-17"},
+            },
+            ensure_ascii=False,
+        ),
+    )
+    db.add_all([post, request])
+    db.commit()
+
+    candidate = build_candidate(db, request)
+    metrics = {
+        row.metric: row
+        for row in collect_funnel_metrics(
+            db,
+            build_window("incident", "2026-04-17", "2026-04-17"),
+        )
+    }
+
+    assert candidate is not None
+    assert candidate.action == "create"
+    assert metrics["completed_event_missing"].count == 1
+    assert metrics["completed_event_missing"].sample_ids == [9001]
