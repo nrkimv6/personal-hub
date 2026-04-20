@@ -78,7 +78,7 @@
 		}
 	}
 
-	let mobileViewerTab: MobileViewerTab = $state('info');
+	let mobileViewerTab = $state<MobileViewerTab>('info');
 
 	// show가 변경될 때 탭 초기화
 	$effect(() => {
