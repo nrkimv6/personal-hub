@@ -106,13 +106,8 @@ class TestGetAheadBehind:
         """git rev-list mock → (ahead, behind) 정수 튜플 반환"""
         from app.modules.dev_runner.services.worktree_service import get_ahead_behind
 
-        call_count = 0
-
         async def mock_run(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            # 첫 번째 호출: ahead, 두 번째 호출: behind
-            return "3" if call_count == 1 else "1"
+            return "1\t3"
 
         with patch(
             "app.modules.dev_runner.services.worktree_service._run_git",
@@ -130,21 +125,15 @@ class TestGetWorktreeCommits:
         """git log mock → WorktreeCommit 리스트, 필드 확인"""
         from app.modules.dev_runner.services.worktree_service import get_worktree_commits
 
-        log_line = "abc1234567890|2026-04-07 10:00:00 +0900|feat: test commit"
-        numstat_line = "5\t2\tapp/foo.py\n3\t1\tapp/bar.py"
-
-        call_count = 0
-
-        async def mock_run(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return log_line
-            return numstat_line
+        log_output = (
+            "__WT_COMMIT__abc1234567890|2026-04-07 10:00:00 +0900|feat: test commit\n"
+            "5\t2\tapp/foo.py\n"
+            "3\t1\tapp/bar.py\n"
+        )
 
         with patch(
             "app.modules.dev_runner.services.worktree_service._run_git",
-            side_effect=mock_run,
+            new=AsyncMock(return_value=log_output),
         ):
             commits = await get_worktree_commits("impl/foo")
 
