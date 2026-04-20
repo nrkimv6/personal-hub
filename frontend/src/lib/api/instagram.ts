@@ -444,6 +444,7 @@ export interface CrawlHistoryItem {
   finished_at: string | null;
   duration_seconds: number | null;
   error_message: string | null;
+  stop_reason?: string | null;
   // Request / Google Search 전용
   url?: string;
   url_type?: string;

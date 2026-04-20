@@ -36,7 +36,7 @@ from sqlalchemy.pool import StaticPool
 from app.main import app
 from app.database import get_db
 from app.models.base import Base
-from app.models import TaskSchedule, ServiceAccount, BrowserProfile
+from app.models import TaskSchedule, TaskScheduleRun, ServiceAccount, BrowserProfile
 from app.models.google_search import GoogleSavedSearch
 
 
@@ -392,6 +392,79 @@ class TestRunSchedule:
         response = client.post(f"{API_PREFIX}/collect/schedules/99999/run")
 
         assert response.status_code == 404
+
+
+class TestCollectHistoryWritingFailure:
+    """GET /collect/history - writing 실패 진단 메타 검증"""
+
+    def _seed_failed_writing_run(self, test_db) -> tuple[TaskSchedule, TaskScheduleRun]:
+        schedule = TaskSchedule(
+            name="writing_task_history_test",
+            display_name="글쓰기 이력 테스트",
+            target_type="writing_task",
+            schedule_type="time_window",
+            enabled=True,
+        )
+        test_db.add(schedule)
+        test_db.commit()
+        test_db.refresh(schedule)
+
+        run = TaskScheduleRun(
+            schedule_id=schedule.id,
+            status=TaskScheduleRun.STATUS_FAILED,
+            started_at=datetime(2026, 4, 20, 9, 19, 0),
+            finished_at=datetime(2026, 4, 20, 9, 19, 0),
+            error_message="소스 글이 부족합니다: 0개 (최소 3개 필요) - writing_sources 데이터 이관/동기화 누락을 확인하세요.",
+            stop_reason="source_shortage",
+        )
+        test_db.add(run)
+        test_db.commit()
+        test_db.refresh(run)
+        return schedule, run
+
+    def test_collect_history_writing_failure_right(self, client, test_db):
+        """TC-Right: writing 실패 run은 source_type=writing row로 반환된다."""
+        schedule, run = self._seed_failed_writing_run(test_db)
+
+        response = client.get(
+            f"{API_PREFIX}/collect/history?source_type=writing&status=failed&period=month"
+        )
+
+        assert response.status_code == 200
+        items = response.json()["items"]
+        found = next((item for item in items if item["id"] == run.id), None)
+        assert found is not None
+        assert found["history_type"] == "schedule_run"
+        assert found["source_type"] == "writing"
+        assert found["schedule_id"] == schedule.id
+
+    def test_collect_history_writing_failure_returns_error_message(self, client, test_db):
+        """TC-Right: writing 실패 row는 error_message를 그대로 유지한다."""
+        _, run = self._seed_failed_writing_run(test_db)
+
+        response = client.get(
+            f"{API_PREFIX}/collect/history?source_type=writing&status=failed&period=month"
+        )
+
+        assert response.status_code == 200
+        items = response.json()["items"]
+        found = next((item for item in items if item["id"] == run.id), None)
+        assert found is not None
+        assert found["error_message"] == run.error_message
+
+    def test_collect_history_writing_failure_returns_stop_reason(self, client, test_db):
+        """TC-Right: writing 실패 row는 stop_reason을 그대로 유지한다."""
+        _, run = self._seed_failed_writing_run(test_db)
+
+        response = client.get(
+            f"{API_PREFIX}/collect/history?source_type=writing&status=failed&period=month"
+        )
+
+        assert response.status_code == 200
+        items = response.json()["items"]
+        found = next((item for item in items if item["id"] == run.id), None)
+        assert found is not None
+        assert found["stop_reason"] == "source_shortage"
 
 
 # ============================================================
