@@ -183,7 +183,7 @@ class EventService:
                 )
 
             elif event_status == "ongoing_or_upcoming":
-                # 진행 중 + 예정: 종료일 >= 오늘 OR 종료일 NULL
+                # 진행 중 + 예정: 취소/종료 상태 제외 후 종료일 >= 오늘 OR 종료일 NULL
                 conditions = [Event.event_end >= today]
                 if include_unknown:
                     conditions.append(Event.event_end.is_(None))

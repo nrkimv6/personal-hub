@@ -13,6 +13,9 @@ from app.models.instagram_post import InstagramPost
 from app.core.auth import create_access_token
 
 
+pytestmark = pytest.mark.http
+
+
 @pytest.fixture
 def admin_headers():
     """관리자 인증 헤더"""
@@ -106,12 +109,18 @@ class TestEventListAPI:
             "title": "취소 이벤트",
             "event_start": str(date.today()),
             "event_end": str(date.today() + timedelta(days=1)),
-            "status": "cancelled",
         }, headers=admin_headers)
         assert response_a.status_code == 201
         assert response_b.status_code == 201
         assert response_c.status_code == 201
         assert response_d.status_code == 201
+        cancelled_id = response_d.json()["id"]
+        cancel_response = client.put(
+            f"/api/v1/events/{cancelled_id}",
+            json={"status": "cancelled"},
+            headers=admin_headers,
+        )
+        assert cancel_response.status_code == 200
 
         response = client.get("/api/v1/events?event_status=ongoing_or_upcoming")
         assert response.status_code == 200

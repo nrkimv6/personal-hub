@@ -75,6 +75,12 @@ class PopupService:
 
         # popup_status 필터 (기간 기반) - only가 아닐 때만 적용
         if popup_status and unknown_period_filter != "only":
+            if popup_status != "cancelled":
+                query = query.filter(Popup.status != "cancelled")
+
+            if popup_status != "ended":
+                query = query.filter(Popup.status != "ended")
+
             if popup_status == "ongoing":
                 conditions = [
                     and_(
@@ -92,9 +98,10 @@ class PopupService:
                 query = query.filter(Popup.start_date > today)
 
             elif popup_status == "ended":
-                query = query.filter(Popup.end_date < today)
+                query = query.filter(or_(Popup.end_date < today, Popup.status == "ended"))
 
             elif popup_status == "ongoing_or_upcoming":
+                # 진행 중 + 예정: 취소/종료 상태 제외 후 종료일 >= 오늘 OR 종료일 NULL
                 conditions = [Popup.end_date >= today]
                 if include_unknown:
                     conditions.append(Popup.end_date.is_(None))
