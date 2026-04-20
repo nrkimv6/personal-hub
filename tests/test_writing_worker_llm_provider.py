@@ -217,6 +217,80 @@ class TestWritingWorkerLlmProvider:
         assert req.provider == expected_provider
         assert req.model == expected_model
 
+    def test_run_marks_failed_when_source_count_zero(self, test_db, writing_schedule_with_gemini):
+        """TC-Error: source_count == 0이면 source shortage로 실패 저장."""
+        worker = self._get_worker(test_db)
+        run = TaskScheduleRun(
+            schedule_id=writing_schedule_with_gemini.id,
+            status="running",
+        )
+        test_db.add(run)
+        test_db.commit()
+        test_db.refresh(run)
+
+        result = worker.run(writing_schedule_with_gemini, run)
+        test_db.refresh(run)
+
+        assert result["error"].startswith("소스 글이 부족합니다: 0개")
+        assert run.status == TaskScheduleRun.STATUS_FAILED
+        assert run.stop_reason == "source_shortage"
+        assert "이관/동기화 누락" in (run.error_message or "")
+
+    def test_run_sets_source_shortage_stop_reason(self, test_db, writing_schedule_with_gemini):
+        """TC-Right: source shortage 실패는 stop_reason=source_shortage를 남긴다."""
+        test_db.add(
+            WritingSource(
+                content="소스 1 " * 50,
+                source_type="rss",
+                source_url="http://example.com/1",
+            )
+        )
+        test_db.commit()
+
+        worker = self._get_worker(test_db)
+        run = TaskScheduleRun(
+            schedule_id=writing_schedule_with_gemini.id,
+            status="running",
+        )
+        test_db.add(run)
+        test_db.commit()
+        test_db.refresh(run)
+
+        worker.run(writing_schedule_with_gemini, run)
+        test_db.refresh(run)
+
+        assert run.status == TaskScheduleRun.STATUS_FAILED
+        assert run.stop_reason == "source_shortage"
+
+    def test_run_boundary_source_count_two_keeps_shortage_message(self, test_db, writing_schedule_with_gemini):
+        """TC-Boundary: source_count == 2이면 0건 전용 migration 의심 문구를 쓰지 않는다."""
+        for index in range(2):
+            test_db.add(
+                WritingSource(
+                    content=f"소스 {index} " * 50,
+                    source_type="rss",
+                    source_url=f"http://example.com/{index}",
+                )
+            )
+        test_db.commit()
+
+        worker = self._get_worker(test_db)
+        run = TaskScheduleRun(
+            schedule_id=writing_schedule_with_gemini.id,
+            status="running",
+        )
+        test_db.add(run)
+        test_db.commit()
+        test_db.refresh(run)
+
+        result = worker.run(writing_schedule_with_gemini, run)
+        test_db.refresh(run)
+
+        assert run.status == TaskScheduleRun.STATUS_FAILED
+        assert run.stop_reason == "source_shortage"
+        assert result["error"] == "소스 글이 부족합니다: 2개 (최소 3개 필요)"
+        assert "이관/동기화 누락" not in result["error"]
+
 
 # ============================================================
 # TopicExtract Worker LLM provider 테스트

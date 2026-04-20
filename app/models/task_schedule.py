@@ -163,11 +163,13 @@ class TaskScheduleRun(Base):
         self.saved_count = saved_count
         self.stop_reason = stop_reason
 
-    def mark_failed(self, error_message: str):
+    def mark_failed(self, error_message: str, stop_reason: str | None = None):
         """실패로 표시."""
         self.status = self.STATUS_FAILED
         self.finished_at = datetime.now()
         self.error_message = error_message
+        if stop_reason is not None:
+            self.stop_reason = stop_reason
 
     @property
     def duration_seconds(self) -> int | None:

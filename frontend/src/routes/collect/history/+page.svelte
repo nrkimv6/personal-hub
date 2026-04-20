@@ -154,7 +154,12 @@
 	function getResultSummary(item: CrawlHistoryItem): string {
 		if (item.status === 'pending') return '대기 중...';
 		if (item.status === 'processing') return '처리 중...';
-		if (item.status === 'failed') return item.error_message || '실패';
+		if (item.status === 'failed') {
+			if (item.source_type === 'writing' && item.stop_reason === 'source_shortage') {
+				return item.error_message || '글쓰기 소스 부족';
+			}
+			return item.error_message || '실패';
+		}
 
 		// URL 수동 크롤링인 경우
 		if (item.history_type === 'request') {
