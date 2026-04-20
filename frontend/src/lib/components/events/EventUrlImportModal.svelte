@@ -26,7 +26,7 @@
 	let loading = $state(false);
 	let error: string | null = $state(null);
 	let result: EventImportFromUrlResponse | null = $state(null);
-	let mode: ImportMode = $state('batch');  // 기본값: 배치 크롤링
+	let mode = $state<ImportMode>('batch');  // 기본값: 배치 크롤링
 
 	// Instagram 계정 (Instagram URL에만 필요)
 	let accounts: ServiceAccountWithProfile[] = $state([]);
