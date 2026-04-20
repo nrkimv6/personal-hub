@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+import re
 import sys
 from uuid import uuid4
 
@@ -110,6 +111,4 @@ def test_collect_history_writing_filters_preserve_row(page: Page, frontend_url: 
         page.locator("#period").select_option("all")
         page.wait_for_load_state("networkidle")
         expect(row).to_be_visible()
-        expect(page).to_have_url(
-            lambda url: "sourceType=writing" in url and "status=failed" in url and "period=all" in url
-        )
+        expect(page).to_have_url(re.compile(r".*sourceType=writing.*status=failed.*period=all.*"))

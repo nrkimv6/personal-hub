@@ -23,6 +23,7 @@ from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.writing import WritingSource
 
 API_PREFIX = "/api/v1"
+pytestmark = pytest.mark.http
 
 
 @pytest.fixture(scope="function")
@@ -96,8 +97,8 @@ def _seed_writing_sources(test_db, count: int = 3) -> None:
         test_db.add(
             WritingSource(
                 source_type="manual",
-                source_name=f"legacy-source-{idx}",
-                title=f"소스 글 {idx}",
+                source_info=f"legacy-source-{idx}",
+                source_url=f"https://example.com/writing/{idx}",
                 content=f"본문 {idx}",
             )
         )
@@ -169,6 +170,6 @@ def test_post_run_writing_schedule_after_backfill_not_zero_source_failure(client
     items = history.json()["items"]
     found = next((item for item in items if item["id"] == run.id), None)
     assert found is not None
-    assert found["status"] == "processing"
+    assert found["status"] == "running"
     assert found["error_message"] is None
     assert found["stop_reason"] is None
