@@ -85,3 +85,73 @@ class TestExecuteReturnsSessionId:
 
         assert result["success"] is False
         assert "claude_session_id" not in result
+
+    @patch("subprocess.run")
+    def test_execute_exec_mode_uses_stdin_utf8_R(self, mock_run):
+        """R: exec mode도 shell pipe 없이 UTF-8 stdin 파일로 전달한다."""
+        from app.modules.claude_worker.services.executors.claude_executor import ClaudeExecutor
+
+        raw = json.dumps({"type": "result", "session_id": "stdin-id", "result": "ok"})
+        mock_run.return_value = MagicMock(returncode=0, stdout=raw, stderr="")
+
+        executor = ClaudeExecutor()
+        result = executor.execute(
+            "한글 프롬프트",
+            parse_json=False,
+            cli_options={"exec_mode": True},
+        )
+
+        assert result["success"] is True
+        args, kwargs = mock_run.call_args
+        assert isinstance(args[0], list)
+        assert args[0][0] == "claude"
+        assert kwargs["stdin"].encoding.lower() == "utf-8"
+        assert kwargs["shell"] is False
+
+    @patch("subprocess.run")
+    def test_execute_single_mode_uses_schema_file_arg_R(self, mock_run):
+        """R: single mode json_schema는 @schema_file argv로 전달한다."""
+        from app.modules.claude_worker.services.executors.claude_executor import ClaudeExecutor
+
+        raw = json.dumps({"type": "result", "session_id": "schema-id", "result": "ok"})
+        mock_run.return_value = MagicMock(returncode=0, stdout=raw, stderr="")
+
+        executor = ClaudeExecutor()
+        executor.execute(
+            "prompt",
+            parse_json=False,
+            cli_options={"json_schema": {"type": "object"}},
+        )
+
+        command = mock_run.call_args.args[0]
+        schema_index = command.index("--json-schema")
+        assert command[schema_index + 1].startswith("@")
+
+    @patch("subprocess.run")
+    def test_execute_never_builds_type_pipe_E(self, mock_run):
+        """E: Windows shell type/cat pipe 문자열을 더 이상 만들지 않는다."""
+        from app.modules.claude_worker.services.executors.claude_executor import ClaudeExecutor
+
+        raw = json.dumps({"type": "result", "session_id": "pipe-id", "result": "ok"})
+        mock_run.return_value = MagicMock(returncode=0, stdout=raw, stderr="")
+
+        executor = ClaudeExecutor()
+        executor.execute("prompt", parse_json=False)
+
+        command = mock_run.call_args.args[0]
+        assert isinstance(command, list)
+        assert 'type "' not in " ".join(command)
+        assert "cat " not in " ".join(command)
+
+    @patch("subprocess.run")
+    def test_execute_sets_errors_replace_B(self, mock_run):
+        """B: stdout decode 에러는 errors=replace로 완충한다."""
+        from app.modules.claude_worker.services.executors.claude_executor import ClaudeExecutor
+
+        raw = json.dumps({"type": "result", "session_id": "replace-id", "result": "ok"})
+        mock_run.return_value = MagicMock(returncode=0, stdout=raw, stderr="")
+
+        executor = ClaudeExecutor()
+        executor.execute("prompt", parse_json=False)
+
+        assert mock_run.call_args.kwargs["errors"] == "replace"

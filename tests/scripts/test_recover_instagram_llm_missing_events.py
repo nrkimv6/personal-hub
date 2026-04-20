@@ -62,6 +62,28 @@ def test_normalize_payload_falls_back_to_raw_response():
     assert payload["summary"] == "raw fallback"
 
 
+def test_normalize_payload_repairs_cp949_roundtrip_R():
+    repaired_tag = "\uc774\ubca4\ud2b8"
+    repaired_summary = "\ud14c\uc2a4\ud2b8 \uc774\ubca4\ud2b8"
+    mojibake_tag = repaired_tag.encode("utf-8").decode("latin1")
+    mojibake_summary = repaired_summary.encode("utf-8").decode("latin1")
+    raw = json.dumps(
+        {
+            "tag": mojibake_tag,
+            "summary": mojibake_summary,
+            "urls": [],
+            "event_period": {"start": "2026-04-17", "end": "2026-04-17"},
+        },
+        ensure_ascii=False,
+    )
+
+    payload = m.normalize_payload(raw, None)
+
+    assert payload is not None
+    assert payload["tag"] == repaired_tag
+    assert payload["summary"] == repaired_summary
+
+
 def test_recover_candidate_creates_event_and_updates_post():
     session, engine = make_session()
     try:
@@ -219,6 +241,106 @@ def test_recover_candidate_relinks_existing_event():
         engine.dispose()
 
 
+def test_build_candidate_marks_requeue_needed_E():
+    session, engine = _make_full_session()
+    try:
+        post = InstagramPost(
+            id=400,
+            post_id="p400",
+            account="broken",
+            url="https://instagram.com/p/400",
+            caption="caption",
+            images=[],
+        )
+        request = LLMRequest(
+            id=4001,
+            caller_type="instagram",
+            caller_id="400",
+            prompt="test",
+            status="completed",
+            request_source="instagram_event",
+            result=json.dumps(
+                {
+                    "tag": "\ufffd\u013a\u00ba\uFFFD\u01AE",
+                    "summary": "깨진 응답",
+                    "urls": [],
+                    "event_period": {"start": "2026-04-17", "end": "2026-04-17"},
+                },
+                ensure_ascii=False,
+            ),
+            raw_response='{"tag":"\ufffd\u013a\u00ba\uFFFD\u01AE"}',
+        )
+        session.add_all([post, request])
+        session.commit()
+
+        candidate = m.build_candidate(session, request)
+
+        assert candidate is not None
+        assert candidate.action == "requeue"
+        assert candidate.reason == "requeue_required"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_recover_candidate_uses_repaired_payload_Co():
+    session, engine = make_session()
+    try:
+        post = InstagramPost(
+            id=601,
+            post_id="p601",
+            account="acc",
+            url="https://instagram.com/p/601",
+            caption="caption",
+            images=[{"src": "https://example.com/thumb.jpg"}],
+        )
+        session.add(post)
+        session.commit()
+
+        repaired_tag = "\uc774\ubca4\ud2b8"
+        repaired_summary = "\uc218\ubcf5 \uc774\ubca4\ud2b8"
+        candidate = m.Candidate(
+            request_id=6011,
+            post_id=601,
+            request_source="instagram_event",
+            processed_at=datetime(2026, 4, 14, 17, 7, 35),
+            account="acc",
+            summary=repaired_summary,
+            organizer=None,
+            event_start=datetime(2026, 4, 17).date(),
+            event_end=datetime(2026, 4, 17).date(),
+            event_url=None,
+            existing_event_id=None,
+            classified_type=None,
+            classified_id=None,
+            action="repair",
+            reason="repairable_mojibake",
+            payload={
+                "tag": repaired_tag,
+                "summary": repaired_summary,
+                "urls": [],
+                "event_period": {"start": "2026-04-17", "end": "2026-04-17"},
+                "announcement_date": None,
+                "prizes": [],
+                "winner_count": None,
+                "purchase_required": "아니오",
+            },
+        )
+
+        outcome = m.recover_candidate(session, candidate)
+
+        repaired_post = session.query(InstagramPost).filter(InstagramPost.id == 601).first()
+        event = session.query(Event).filter(Event.id == repaired_post.classified_id).first()
+        assert outcome.changed is True
+        assert outcome.action == "repair"
+        assert outcome.reason == "repairable_mojibake"
+        assert event is not None
+        assert event.summary == repaired_summary
+    finally:
+        session.close()
+        engine.dispose()
+
+
 # ---------------------------------------------------------------------------
 # 날짜 범위 필터 TC (Phase 2 Task 4)
 # ---------------------------------------------------------------------------
@@ -353,11 +475,11 @@ def test_dry_run_summary_output_format(capsys):
             classified_type=None, classified_id=None, action=action, reason="r",
             payload={"tag": "이벤트"},
         )
-        for i, action in enumerate(["create", "create", "relink", "skip"])
+        for i, action in enumerate(["create", "create", "relink", "repair", "requeue", "skip"])
     ]
     m.print_candidates(candidates)
     captured = capsys.readouterr()
-    assert "summary create=2 relink=1 skip=1" in captured.out
+    assert "summary create=2 relink=1 repair=1 requeue=1 skip=1" in captured.out
 
 
 def test_existing_regression_create_still_passes():

@@ -20,7 +20,10 @@ from app.models.event import Event
 from app.models.instagram_post import InstagramPost
 from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.modules.claude_worker.models.llm_request import LLMRequest
-from app.modules.claude_worker.worker.worker import extract_instagram_payload
+from app.modules.claude_worker.worker.worker import (
+    extract_instagram_payload,
+    instagram_payload_has_mojibake,
+)
 
 
 TAG_EVENT = "이벤트"
@@ -111,6 +114,7 @@ class TransitionRow:
     new_saved: int
     new_posts: int
     completed_requests: int
+    completed_mojibake_requests: int
     event_saved: int
     visible_event_saved: int
 
@@ -426,8 +430,11 @@ def collect_funnel_metrics(session, window: PeriodWindow, sample_limit: int = 5)
 
     completed_event_saved_ids: list[int] = []
     completed_event_missing_ids: list[int] = []
+    completed_mojibake_request_ids: list[int] = []
     for request in processed_requests:
         payload = extract_instagram_payload(request.result, request.raw_response)
+        if instagram_payload_has_mojibake(payload, request.raw_response):
+            completed_mojibake_request_ids.append(request.id)
         if not payload or payload.get("tag") != TAG_EVENT:
             continue
 
@@ -510,6 +517,13 @@ def collect_funnel_metrics(session, window: PeriodWindow, sample_limit: int = 5)
             "llm_requests.processed_at",
             len(completed_event_missing_ids),
             completed_event_missing_ids[:sample_limit],
+        ),
+        _build_metric(
+            window.name,
+            "completed_mojibake_requests",
+            "llm_requests.processed_at",
+            len(completed_mojibake_request_ids),
+            completed_mojibake_request_ids[:sample_limit],
         ),
         _build_metric(
             window.name,
@@ -679,7 +693,7 @@ def collect_daily_transition_metrics(
         rows.extend(
             row
             for row in collect_funnel_metrics(session, day_window, sample_limit)
-            if row.metric in {"new_posts", "completed_requests", "event_saved"}
+            if row.metric in {"new_posts", "completed_requests", "completed_mojibake_requests", "event_saved"}
         )
         current_day += timedelta(days=1)
     return rows
@@ -716,6 +730,7 @@ def build_transition_rows(
                     new_saved=run_metrics["new_saved"].count,
                     new_posts=funnel_metrics["new_posts"].count,
                     completed_requests=funnel_metrics["completed_requests"].count,
+                    completed_mojibake_requests=funnel_metrics["completed_mojibake_requests"].count,
                     event_saved=event_saved.count,
                     visible_event_saved=event_saved.visible_count or 0,
                 )

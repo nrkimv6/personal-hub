@@ -23,7 +23,13 @@ from app.database import SessionLocal
 from app.models.event import Event
 from app.models.instagram_post import InstagramPost
 from app.modules.claude_worker.models.llm_request import LLMRequest
-from app.modules.claude_worker.worker.worker import extract_instagram_payload, save_instagram_result
+from app.modules.claude_worker.worker.worker import (
+    extract_instagram_payload,
+    instagram_payload_has_mojibake,
+    repair_instagram_payload_mojibake,
+    save_instagram_result,
+    try_reverse_decode_text as _worker_try_reverse_decode_text,
+)
 
 
 TAG_EVENT = "이벤트"
@@ -92,7 +98,13 @@ def parse_date(value: Optional[str]) -> Optional[date]:
 
 def normalize_payload(result_text: Optional[str], raw_response: Optional[str]) -> Optional[dict[str, Any]]:
     """Normalize stored request.result/raw_response into the inner Instagram payload."""
-    return extract_instagram_payload(result_text, raw_response)
+    payload = extract_instagram_payload(result_text, raw_response)
+    repaired_payload, _ = repair_instagram_payload_mojibake(payload)
+    return repaired_payload
+
+
+def try_reverse_decode_text(text: Optional[str]) -> Optional[str]:
+    return _worker_try_reverse_decode_text(text)
 
 
 def build_candidate(session, request: LLMRequest) -> Optional[Candidate]:
@@ -105,8 +117,33 @@ def build_candidate(session, request: LLMRequest) -> Optional[Candidate]:
     if not post:
         return None
 
+    original_payload = extract_instagram_payload(request.result, request.raw_response)
     payload = normalize_payload(request.result, request.raw_response)
-    if not payload or payload.get("tag") != TAG_EVENT:
+    payload_repaired = payload is not None and payload != original_payload
+    payload_mojibake = instagram_payload_has_mojibake(original_payload, request.raw_response)
+
+    if not payload:
+        return None
+    if payload.get("tag") != TAG_EVENT:
+        if payload_mojibake:
+            return Candidate(
+                request_id=request.id,
+                post_id=post_id,
+                request_source=request.request_source,
+                processed_at=request.processed_at,
+                account=post.account,
+                summary=payload.get("summary"),
+                organizer=payload.get("organizer"),
+                event_start=None,
+                event_end=None,
+                event_url=None,
+                existing_event_id=None,
+                classified_type=post.classified_type,
+                classified_id=post.classified_id,
+                action="requeue",
+                reason="requeue_required",
+                payload=payload,
+            )
         return None
 
     existing_event = (
@@ -135,6 +172,9 @@ def build_candidate(session, request: LLMRequest) -> Optional[Candidate]:
     elif existing_event is not None:
         action = "relink"
         reason = "event_exists_but_post_link_missing"
+    elif payload_repaired:
+        action = "repair"
+        reason = "repairable_mojibake"
     else:
         action = "create"
         reason = "missing_event_row"
@@ -166,6 +206,9 @@ def recover_candidate(session, candidate: Candidate, allow_duplicate_url: bool =
 
     if candidate.action == "skip":
         return RecoveryOutcome(False, "skip", candidate.reason, candidate.existing_event_id)
+
+    if candidate.action == "requeue":
+        return RecoveryOutcome(False, "requeue", candidate.reason, candidate.existing_event_id)
 
     if candidate.action == "relink":
         existing_event = session.query(Event).filter(Event.id == candidate.existing_event_id).first()
@@ -202,7 +245,12 @@ def recover_candidate(session, candidate: Candidate, allow_duplicate_url: bool =
         post.classified_at = candidate.processed_at
     session.commit()
     session.refresh(post)
-    return RecoveryOutcome(True, "create", "event_created", post.classified_id)
+    return RecoveryOutcome(
+        True,
+        "repair" if candidate.action == "repair" else "create",
+        candidate.reason if candidate.action == "repair" else "event_created",
+        post.classified_id,
+    )
 
 
 def load_candidates(session, args: argparse.Namespace) -> list[Candidate]:
@@ -262,6 +310,8 @@ def print_candidates(candidates: list[Candidate]) -> None:
     print(
         f"summary create={counts.get('create', 0)} "
         f"relink={counts.get('relink', 0)} "
+        f"repair={counts.get('repair', 0)} "
+        f"requeue={counts.get('requeue', 0)} "
         f"skip={counts.get('skip', 0)}"
     )
 

@@ -146,6 +146,52 @@ async def test_instagram_invalid_payload_marks_failed_without_completed(db, work
     worker._increment_processed.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_instagram_mojibake_payload_marks_failed_without_completed(db, worker):
+    post = InstagramPost(
+        id=7101,
+        post_id="p7101",
+        account="broken",
+        url="https://instagram.com/p/7101",
+        caption="caption",
+    )
+    request = LLMRequest(
+        id=7102,
+        caller_type="instagram",
+        caller_id="7101",
+        prompt="test",
+        status="pending",
+    )
+    db.add_all([post, request])
+    db.commit()
+
+    service = LLMService(db)
+    service.resolve_provider_model = MagicMock(return_value=("claude", "claude-haiku-4-5"))
+    service.execute_llm = MagicMock(
+        return_value={
+            "success": True,
+            "result": {
+                "tag": "\ufffd\u013a\u00ba\uFFFD\u01AE",
+                "summary": "깨진 응답",
+                "urls": [],
+                "event_period": {"start": "2026-04-17", "end": "2026-04-17"},
+                "prizes": [],
+                "winner_count": None,
+                "purchase_required": "아니오",
+            },
+            "raw_response": '{"tag":"\ufffd\u013a\u00ba\uFFFD\u01AE"}',
+            "claude_session_id": "session-broken",
+        }
+    )
+
+    await worker._execute_request(request, db, service)
+
+    db.refresh(request)
+    assert request.status == "failed"
+    assert request.error_message == "encoding_mojibake"
+    assert db.query(Event).filter(Event.source_instagram_post_id == 7101).count() == 0
+
+
 def test_legacy_completed_request_can_be_recovered_from_raw_envelope(db):
     post = InstagramPost(
         id=8001,
@@ -193,6 +239,51 @@ def test_legacy_completed_request_can_be_recovered_from_raw_envelope(db):
     assert repaired_event.summary == "legacy repaired"
 
 
+def test_repairable_mojibake_candidate_creates_event(db):
+    repaired_tag = "\uc774\ubca4\ud2b8"
+    repaired_summary = "\uc218\ubcf5 \uc774\ubca4\ud2b8"
+    mojibake_tag = repaired_tag.encode("utf-8").decode("latin1")
+    mojibake_summary = repaired_summary.encode("utf-8").decode("latin1")
+
+    post = InstagramPost(
+        id=8101,
+        post_id="p8101",
+        account="legacy",
+        url="https://instagram.com/p/8101",
+        caption="legacy caption",
+    )
+    request = LLMRequest(
+        id=8102,
+        caller_type="instagram",
+        caller_id="8101",
+        prompt="test",
+        status="completed",
+        request_source="instagram_event",
+        result=json.dumps(
+            {
+                "tag": mojibake_tag,
+                "summary": mojibake_summary,
+                "urls": [],
+                "event_period": {"start": "2026-04-17", "end": "2026-04-17"},
+            },
+            ensure_ascii=False,
+        ),
+    )
+    db.add_all([post, request])
+    db.commit()
+
+    candidate = build_candidate(db, request)
+    outcome = recover_candidate(db, candidate)
+    repaired_event = db.query(Event).filter(Event.source_instagram_post_id == 8101).first()
+
+    assert candidate is not None
+    assert candidate.action == "repair"
+    assert outcome.changed is True
+    assert outcome.action == "repair"
+    assert repaired_event is not None
+    assert repaired_event.summary == repaired_summary
+
+
 def test_completed_no_event_bucket_matches_recovery_candidate_state(db):
     post = InstagramPost(
         id=9001,
@@ -237,3 +328,4 @@ def test_completed_no_event_bucket_matches_recovery_candidate_state(db):
     assert candidate.action == "create"
     assert metrics["completed_event_missing"].count == 1
     assert metrics["completed_event_missing"].sample_ids == [9001]
+    assert metrics["completed_mojibake_requests"].count == 0

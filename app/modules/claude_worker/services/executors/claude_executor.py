@@ -3,8 +3,8 @@
 import json
 import os
 import subprocess
-import sys
 import tempfile
+from typing import Iterable
 
 from app.modules.claude_worker.services.executors.base import (
     LLMExecutorBase,
@@ -13,6 +13,43 @@ from app.modules.claude_worker.services.executors.base import (
 from app.modules.claude_worker.services.profile_env import build_cli_env
 
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
+
+
+def _normalize_allowed_tools(allowed_tools) -> list[str]:
+    if not allowed_tools:
+        return []
+    if isinstance(allowed_tools, str):
+        return [allowed_tools]
+    if isinstance(allowed_tools, Iterable):
+        return [str(tool) for tool in allowed_tools if tool]
+    return [str(allowed_tools)]
+
+
+def _build_claude_command(
+    *,
+    model: str,
+    output_format: str | None,
+    schema_file: str | None,
+    allowed_tools,
+    enable_tools: bool,
+) -> list[str]:
+    command = ["claude"]
+
+    tools = _normalize_allowed_tools(allowed_tools)
+    if tools:
+        for tool in tools:
+            command.extend(["--allowedTools", tool])
+    elif enable_tools:
+        command.extend(["--allowedTools", "Read"])
+
+    if model:
+        command.extend(["--model", model])
+    if output_format:
+        command.extend(["--output-format", output_format])
+    if schema_file:
+        command.extend(["--json-schema", f"@{schema_file}"])
+
+    return command
 
 
 def _extract_session_id(raw: str) -> "str | None":
@@ -87,7 +124,7 @@ class ClaudeExecutor(LLMExecutorBase):
             cli_options = {**cli_options, "output_format": "json"}
 
         try:
-            # 프롬프트를 임시 파일에 저장하여 전달 (긴 프롬프트 및 특수문자 처리)
+            # 프롬프트를 임시 파일에 저장하고 UTF-8 stdin으로 직접 전달한다.
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".txt", delete=False, encoding="utf-8"
             ) as f:
@@ -97,13 +134,12 @@ class ClaudeExecutor(LLMExecutorBase):
             # Claude CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
             env = build_cli_env("claude")
 
+            schema_file = None
+
             try:
-                # cli_options 기반 명령어 빌드
-                exec_mode = cli_options.get("exec_mode", False)
                 output_format = cli_options.get("output_format")
                 json_schema = cli_options.get("json_schema")
                 allowed_tools = cli_options.get("allowed_tools")
-                schema_file = None
 
                 # cwd 처리 — 허용 경로 검증 후 subprocess cwd로 전달
                 cwd_opt = cli_options.get("cwd")
@@ -124,102 +160,32 @@ class ClaudeExecutor(LLMExecutorBase):
                 else:
                     cwd_value = None
 
-                if exec_mode:
-                    # ========== B 방식: exec 모드 ==========
-                    # 이미지 분류 등 복잡한 CLI 옵션용.
-                    schema_file_exec = None
-                    try:
-                        # json_schema → 임시파일
-                        if json_schema:
-                            schema_str = json.dumps(json_schema, ensure_ascii=False)
-                            with tempfile.NamedTemporaryFile(
-                                mode="w", suffix=".json", delete=False, encoding="utf-8"
-                            ) as sf:
-                                sf.write(schema_str)
-                                schema_file_exec = sf.name
-                            schema_opt = f'--json-schema "@{schema_file_exec}"'
-                        else:
-                            schema_opt = ""
+                if json_schema:
+                    schema_str = json.dumps(json_schema, ensure_ascii=False)
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".json", delete=False, encoding="utf-8"
+                    ) as sf:
+                        sf.write(schema_str)
+                        schema_file = sf.name
 
-                        # CLI 옵션 문자열 조립
-                        tools_parts = []
-                        if allowed_tools:
-                            for tool in allowed_tools:
-                                tools_parts.append(f"--allowedTools {tool}")
-                        elif enable_tools:
-                            tools_parts.append("--allowedTools Read")
+                command = _build_claude_command(
+                    model=model,
+                    output_format=output_format,
+                    schema_file=schema_file,
+                    allowed_tools=allowed_tools,
+                    enable_tools=enable_tools,
+                )
 
-                        model_opt = f"--model {model}" if model else ""
-                        format_opt = f"--output-format {output_format}" if output_format else ""
-                        opts = " ".join(
-                            p for p in [*tools_parts, model_opt, format_opt, schema_opt] if p
-                        )
-
-                        # 프롬프트를 stdin으로 전달
-                        if sys.platform == "win32":
-                            cmd = f'type "{prompt_file}" | claude {opts}'
-                        else:
-                            cmd = f'cat "{prompt_file}" | claude {opts}'
-
-                        result = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            timeout=timeout,
-                            encoding="utf-8",
-                            shell=True,
-                            env=env,
-                            cwd=cwd_value,
-                        )
-                    finally:
-                        if schema_file_exec:
-                            try:
-                                os.unlink(schema_file_exec)
-                            except Exception:
-                                pass
-                else:
-                    # ========== A 방식: shell 모드 (stdin pipe, 2단계) ==========
-                    if allowed_tools:
-                        tools_opt = " ".join(f"--allowedTools {t}" for t in allowed_tools)
-                    elif enable_tools:
-                        tools_opt = '--tools "Read"'
-                    else:
-                        tools_opt = ""
-
-                    model_opt = f"--model {model}" if model else ""
-                    format_opt = f"--output-format {output_format}" if output_format else ""
-
-                    # json schema: 임시파일로 전달
-                    if json_schema:
-                        schema_str = json.dumps(json_schema, ensure_ascii=False)
-                        with tempfile.NamedTemporaryFile(
-                            mode="w", suffix=".json", delete=False, encoding="utf-8"
-                        ) as sf:
-                            sf.write(schema_str)
-                            schema_file = sf.name
-                        if sys.platform == "win32":
-                            schema_opt = f'--json-schema "$(type \\"{schema_file}\\")"'
-                        else:
-                            schema_opt = f"--json-schema '$(cat \"{schema_file}\")'"
-                    else:
-                        schema_opt = ""
-
-                    opts = " ".join(
-                        part for part in [tools_opt, model_opt, format_opt, schema_opt] if part
-                    )
-
-                    if sys.platform == "win32":
-                        cmd = f'type "{prompt_file}" | claude {opts}'
-                    else:
-                        cmd = f'cat "{prompt_file}" | claude {opts}'
-
+                with open(prompt_file, "r", encoding="utf-8") as prompt_stream:
                     result = subprocess.run(
-                        cmd,
+                        command,
+                        stdin=prompt_stream,
                         capture_output=True,
                         text=True,
                         timeout=timeout,
                         encoding="utf-8",
-                        shell=True,
+                        errors="replace",
+                        shell=False,
                         env=env,
                         cwd=cwd_value,
                     )

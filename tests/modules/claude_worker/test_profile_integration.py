@@ -122,3 +122,63 @@ def test_chat_executor_env_preserves_filtered_base(isolate_profiles):
     removed_by_design = {"CLAUDE_CODE_SESSION", "CLAUDE_CODE_ENTRYPOINT"}
     for k in original_keys - removed_by_design:
         assert k in env, f"base_env key {k!r} 가 env 에서 사라짐"
+
+
+def test_claude_executor_uses_direct_stdin_with_profile_env(isolate_profiles):
+    """ClaudeExecutor도 profile env 주입 상태에서 argv + stdin 경로를 유지한다."""
+    ps.save_profiles({
+        "selected": {"claude": "work", "gemini": "default"},
+        "profiles": [
+            {"engine": "claude", "name": "default", "config_dir": None, "extra_env": {}},
+            {"engine": "claude", "name": "work", "config_dir": str(isolate_profiles / ".claude-work"), "extra_env": {}},
+            {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}},
+        ],
+    })
+
+    captured = {}
+
+    def capture_run(*args, **kwargs):
+        captured["args"] = args[0]
+        captured["kwargs"] = kwargs
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = json.dumps({"type": "result", "session_id": "profile-id", "result": "ok"})
+        m.stderr = ""
+        return m
+
+    with patch("subprocess.run", side_effect=capture_run):
+        from app.modules.claude_worker.services.executors.claude_executor import ClaudeExecutor
+
+        executor = ClaudeExecutor()
+        executor.execute("한글 prompt", parse_json=False)
+
+    assert captured["args"][0] == "claude"
+    assert captured["kwargs"]["stdin"].encoding.lower() == "utf-8"
+    assert captured["kwargs"]["shell"] is False
+    assert captured["kwargs"]["env"]["CLAUDE_CONFIG_DIR"] == str(isolate_profiles / ".claude-work")
+
+
+def test_claude_executor_keeps_schema_file_arg_with_profile_env(isolate_profiles):
+    """profile env 경유 single mode json_schema도 @schema_file argv를 유지한다."""
+    captured = {}
+
+    def capture_run(*args, **kwargs):
+        captured["args"] = args[0]
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = json.dumps({"type": "result", "session_id": "schema-id", "result": "ok"})
+        m.stderr = ""
+        return m
+
+    with patch("subprocess.run", side_effect=capture_run):
+        from app.modules.claude_worker.services.executors.claude_executor import ClaudeExecutor
+
+        executor = ClaudeExecutor()
+        executor.execute(
+            "prompt",
+            parse_json=False,
+            cli_options={"json_schema": {"type": "object"}},
+        )
+
+    schema_index = captured["args"].index("--json-schema")
+    assert captured["args"][schema_index + 1].startswith("@")

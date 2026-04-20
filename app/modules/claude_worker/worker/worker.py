@@ -87,6 +87,8 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
 
 INSTAGRAM_ENTITY_TAGS = {"이벤트", "팝업", "홍보대사", "기타"}
 INSTAGRAM_NON_ENTITY_TAGS = {"리그램", "후기"}
+INSTAGRAM_MOJIBAKE_TEXT_KEYS = ("tag", "summary", "purchase_required", "organizer")
+INSTAGRAM_MOJIBAKE_LOCATION_KEYS = ("venue_name", "address")
 
 
 def _truncate_for_log(value, limit: int = 240) -> str:
@@ -94,6 +96,103 @@ def _truncate_for_log(value, limit: int = 240) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + "..."
+
+
+def _contains_hangul(text: str) -> bool:
+    return any("\uac00" <= ch <= "\ud7a3" for ch in text)
+
+
+def try_reverse_decode_text(text: Optional[str]) -> Optional[str]:
+    """UTF-8/locale mojibake 후보를 역변환한다."""
+    if not isinstance(text, str) or not text or "\ufffd" in text:
+        return None
+
+    for source_encoding in ("cp949", "latin1", "cp1252"):
+        try:
+            repaired = text.encode(source_encoding).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        if repaired == text or "\ufffd" in repaired or not _contains_hangul(repaired):
+            continue
+        return repaired
+    return None
+
+
+def repair_instagram_payload_mojibake(payload: Optional[dict]) -> tuple[Optional[dict], bool]:
+    """Instagram payload의 주요 한글 필드를 역변환 가능한 경우 복구한다."""
+    if not isinstance(payload, dict):
+        return payload, False
+
+    repaired = dict(payload)
+    changed = False
+
+    for key in INSTAGRAM_MOJIBAKE_TEXT_KEYS:
+        value = repaired.get(key)
+        fixed = try_reverse_decode_text(value)
+        if fixed is not None:
+            repaired[key] = fixed
+            changed = True
+
+    prizes = repaired.get("prizes")
+    if isinstance(prizes, list):
+        new_prizes = []
+        for item in prizes:
+            fixed = try_reverse_decode_text(item) if isinstance(item, str) else None
+            new_prizes.append(fixed if fixed is not None else item)
+            changed = changed or fixed is not None
+        repaired["prizes"] = new_prizes
+
+    location = repaired.get("location")
+    if isinstance(location, dict):
+        new_location = dict(location)
+        for key in INSTAGRAM_MOJIBAKE_LOCATION_KEYS:
+            fixed = try_reverse_decode_text(new_location.get(key))
+            if fixed is not None:
+                new_location[key] = fixed
+                changed = True
+        repaired["location"] = new_location
+
+    return repaired, changed
+
+
+def _iter_instagram_payload_texts(payload: Optional[dict]):
+    if not isinstance(payload, dict):
+        return
+
+    for key in INSTAGRAM_MOJIBAKE_TEXT_KEYS:
+        value = payload.get(key)
+        if isinstance(value, str):
+            yield value
+
+    prizes = payload.get("prizes")
+    if isinstance(prizes, list):
+        for item in prizes:
+            if isinstance(item, str):
+                yield item
+
+    location = payload.get("location")
+    if isinstance(location, dict):
+        for key in INSTAGRAM_MOJIBAKE_LOCATION_KEYS:
+            value = location.get(key)
+            if isinstance(value, str):
+                yield value
+
+
+def instagram_payload_has_mojibake(
+    payload: Optional[dict],
+    raw_response: Optional[str] = None,
+) -> bool:
+    """Instagram payload/raw_response가 mojibake 징후를 가지는지 판별한다."""
+    if isinstance(raw_response, str) and "\ufffd" in raw_response:
+        return True
+
+    for text in _iter_instagram_payload_texts(payload):
+        if "\ufffd" in text:
+            return True
+        if try_reverse_decode_text(text) is not None:
+            return True
+
+    return False
 
 
 def extract_instagram_payload(result_value, raw_response: Optional[str] = None) -> Optional[dict]:
@@ -1642,8 +1741,21 @@ class LLMWorker:
 
                 # caller_type별 결과 저장
                 save_success = True
+                failure_reason = None
                 if request.caller_type == "instagram":
-                    save_success = save_instagram_result(db, int(request.caller_id), normalized_result)
+                    if instagram_payload_has_mojibake(normalized_result, raw_response):
+                        failure_reason = "encoding_mojibake"
+                        save_success = False
+                        logger.error(
+                            "Instagram mojibake 감지: request_id=%s caller_id=%s session_id=%s payload=%s raw=%s",
+                            request.id,
+                            request.caller_id,
+                            claude_session_id,
+                            _truncate_for_log(normalized_result),
+                            _truncate_for_log(raw_response),
+                        )
+                    else:
+                        save_success = save_instagram_result(db, int(request.caller_id), normalized_result)
                 elif request.caller_type == "universal_crawl":
                     save_success = save_universal_crawl_result(db, int(request.caller_id), normalized_result)
                 elif request.caller_type == "topic_extract":
@@ -1775,7 +1887,7 @@ class LLMWorker:
                     )
                     service.mark_failed(
                         request.id,
-                        f"Save result failed for {request.caller_type}",
+                        failure_reason or f"Save result failed for {request.caller_type}",
                         raw_response,
                     )
             else:
