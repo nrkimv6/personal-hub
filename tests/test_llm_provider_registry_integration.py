@@ -121,19 +121,14 @@ def test_integration_git_repos_schema_rejects_unknown():
 # ─── execute_llm dispatch 경로 회귀 ────────────────────────────────────────────
 
 def test_integration_execute_llm_unknown_no_fallback(test_db_session):
-    """execute_llm(provider='unknown') → {"success": False}, execute_claude/gemini 미호출 (통합)."""
+    """execute_llm(provider='unknown') → dispatcher/provider_registry 에러 계약으로 {"success": False} (통합)."""
     from app.modules.claude_worker.services.llm_service import LLMService
-    from unittest.mock import patch
 
     service = LLMService(test_db_session)
-
-    with patch.object(service, "execute_claude") as mock_claude, \
-         patch.object(service, "execute_gemini") as mock_gemini:
-        result = service.execute_llm("prompt", provider="unknown_xyz")
+    result = service.execute_llm("prompt", provider="unknown_xyz")
 
     assert result["success"] is False
-    mock_claude.assert_not_called()
-    mock_gemini.assert_not_called()
+    assert "지원되지 않는 provider" in result.get("error", "")
 
 
 # ─── worker quota loop DB 상태 통합 ───────────────────────────────────────────

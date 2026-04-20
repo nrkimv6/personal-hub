@@ -2,6 +2,8 @@
 LLMService execute_llm() dispatch 단위 테스트 (RIGHT-BICEP)
 
 테스트 대상: app/modules/claude_worker/services/llm_service.py :: LLMService.execute_llm()
+현행 계약: positive path는 execute_claude()/execute_gemini() wrapper가 아니라
+ExecutionDispatcher.dispatch(provider, prompt, ...)로 직접 위임된다.
 """
 
 from __future__ import annotations
@@ -21,44 +23,86 @@ def service(test_db_session):
 # ─── RIGHT ─────────────────────────────────────────────────────────────────────
 
 def test_execute_llm_R_claude_dispatches_to_execute_claude(service):
-    """provider='claude' → execute_claude() 호출 (RIGHT)."""
+    """provider='claude' → dispatcher에 claude provider 전달 (RIGHT)."""
     expected = {"success": True, "result": {}, "raw_response": "ok"}
-    with patch.object(service, "execute_claude", return_value=expected) as mock_fn:
+    with patch(
+        "app.modules.claude_worker.services.executors.ExecutionDispatcher.dispatch",
+        return_value=expected,
+    ) as mock_fn:
         result = service.execute_llm("test prompt", provider="claude", model="claude-opus-4-6")
 
-    mock_fn.assert_called_once()
+    mock_fn.assert_called_once_with(
+        "claude",
+        "test prompt",
+        model="claude-opus-4-6",
+        timeout=120,
+        parse_json=True,
+        enable_tools=False,
+        cli_options=None,
+    )
     assert result == expected
 
 
 def test_execute_llm_R_gemini_dispatches_to_execute_gemini(service):
-    """provider='gemini' → execute_gemini() 호출 (RIGHT)."""
+    """provider='gemini' → dispatcher에 gemini provider 전달 (RIGHT)."""
     expected = {"success": True, "result": {}, "raw_response": "gemini-ok"}
-    with patch.object(service, "execute_gemini", return_value=expected) as mock_fn:
+    with patch(
+        "app.modules.claude_worker.services.executors.ExecutionDispatcher.dispatch",
+        return_value=expected,
+    ) as mock_fn:
         result = service.execute_llm("test prompt", provider="gemini")
 
-    mock_fn.assert_called_once()
+    mock_fn.assert_called_once_with(
+        "gemini",
+        "test prompt",
+        model="",
+        timeout=120,
+        parse_json=True,
+        enable_tools=False,
+        cli_options=None,
+    )
     assert result == expected
 
 
 def test_execute_llm_R_codex_dispatches_to_execute_codex(service):
-    """provider='codex' → execute_codex() 호출 (RIGHT)."""
+    """provider='codex' → dispatcher에 codex provider 전달 (RIGHT)."""
     expected = {"success": False, "error": "codex provider 실행 경로 미구현 (B4)"}
-    with patch.object(service, "execute_codex", return_value=expected) as mock_fn:
+    with patch(
+        "app.modules.claude_worker.services.executors.ExecutionDispatcher.dispatch",
+        return_value=expected,
+    ) as mock_fn:
         result = service.execute_llm("test prompt", provider="codex")
 
-    mock_fn.assert_called_once()
+    mock_fn.assert_called_once_with(
+        "codex",
+        "test prompt",
+        model="",
+        timeout=120,
+        parse_json=True,
+        enable_tools=False,
+        cli_options=None,
+    )
     assert result == expected
 
 
 def test_execute_llm_R_cc_codex_dispatches_to_execute_cc_codex_not_codex(service):
-    """provider='cc-codex' → execute_cc_codex() 호출, execute_codex()와 다른 경로 (RIGHT)."""
+    """provider='cc-codex' → dispatcher에 cc-codex provider 전달 (RIGHT)."""
     cc_codex_result = {"success": False, "error": "cc-codex provider 실행 경로 미구현 (B4)"}
-    with patch.object(service, "execute_codex") as mock_codex, \
-         patch.object(service, "execute_cc_codex", return_value=cc_codex_result) as mock_cc_codex:
+    with patch(
+        "app.modules.claude_worker.services.executors.ExecutionDispatcher.dispatch",
+        return_value=cc_codex_result,
+    ) as mock_dispatch:
         result = service.execute_llm("test prompt", provider="cc-codex")
 
-    mock_cc_codex.assert_called_once()
-    mock_codex.assert_not_called()
+    mock_dispatch.assert_called_once_with(
+        "cc-codex",
+        "test prompt",
+        model="",
+        timeout=120,
+        parse_json=True,
+        enable_tools=False,
+        cli_options=None,
+    )
     assert result == cc_codex_result
 
 

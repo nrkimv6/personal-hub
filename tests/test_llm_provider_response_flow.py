@@ -37,48 +37,75 @@ def _make_service():
 # ===========================================================================
 
 class TestExecuteLlmProviderRouting(unittest.TestCase):
-    """execute_llm()이 provider 파라미터에 따라 올바른 실행 메서드를 호출하는지 확인."""
+    """execute_llm()이 provider 파라미터에 따라 dispatcher에 올바른 provider를 넘기는지 확인."""
 
     def setUp(self):
         self.service = _make_service()
 
     def test_gemini_provider_calls_execute_gemini(self):
-        """provider='gemini' 전달 시 execute_gemini() 가 호출돼야 한다."""
+        """provider='gemini' 전달 시 dispatcher가 gemini provider로 호출돼야 한다."""
         expected = {"success": True, "result": {"key": "value"}, "raw_response": "{}"}
 
-        with patch.object(self.service, "execute_gemini", return_value=expected) as mock_gemini, \
-             patch.object(self.service, "execute_claude") as mock_claude:
+        with patch(
+            "app.modules.claude_worker.services.executors.ExecutionDispatcher.dispatch",
+            return_value=expected,
+        ) as mock_dispatch:
 
             result = self.service.execute_llm(prompt="test prompt", provider="gemini")
 
-        mock_gemini.assert_called_once()
-        mock_claude.assert_not_called()
+        mock_dispatch.assert_called_once_with(
+            "gemini",
+            "test prompt",
+            model="",
+            timeout=120,
+            parse_json=True,
+            enable_tools=False,
+            cli_options=None,
+        )
         self.assertEqual(result, expected)
 
     def test_claude_provider_calls_execute_claude(self):
-        """provider='claude' 전달 시 execute_claude() 가 호출돼야 한다."""
+        """provider='claude' 전달 시 dispatcher가 claude provider로 호출돼야 한다."""
         expected = {"success": True, "result": {"key": "value"}, "raw_response": "{}"}
 
-        with patch.object(self.service, "execute_claude", return_value=expected) as mock_claude, \
-             patch.object(self.service, "execute_gemini") as mock_gemini:
+        with patch(
+            "app.modules.claude_worker.services.executors.ExecutionDispatcher.dispatch",
+            return_value=expected,
+        ) as mock_dispatch:
 
             result = self.service.execute_llm(prompt="test prompt", provider="claude")
 
-        mock_claude.assert_called_once()
-        mock_gemini.assert_not_called()
+        mock_dispatch.assert_called_once_with(
+            "claude",
+            "test prompt",
+            model="",
+            timeout=120,
+            parse_json=True,
+            enable_tools=False,
+            cli_options=None,
+        )
         self.assertEqual(result, expected)
 
     def test_default_provider_is_claude(self):
-        """provider 미지정 시 기본값 claude가 사용돼야 한다."""
+        """provider 미지정 시 dispatcher 기본값으로 claude가 사용돼야 한다."""
         expected = {"success": True, "result": {}, "raw_response": "{}"}
 
-        with patch.object(self.service, "execute_claude", return_value=expected) as mock_claude, \
-             patch.object(self.service, "execute_gemini") as mock_gemini:
+        with patch(
+            "app.modules.claude_worker.services.executors.ExecutionDispatcher.dispatch",
+            return_value=expected,
+        ) as mock_dispatch:
 
             self.service.execute_llm(prompt="test")
 
-        mock_claude.assert_called_once()
-        mock_gemini.assert_not_called()
+        mock_dispatch.assert_called_once_with(
+            "claude",
+            "test",
+            model="",
+            timeout=120,
+            parse_json=True,
+            enable_tools=False,
+            cli_options=None,
+        )
 
 
 # ===========================================================================
@@ -352,10 +379,10 @@ class TestGeminiCliOptions(unittest.TestCase):
         )
 
     def test_execute_llm_with_gemini_passes_cli_options_to_execute_gemini(self):
-        """provider='gemini' + cli_options 전달 시 cli_options가 execute_gemini()로 전달돼야 한다.
+        """provider='gemini' + cli_options 전달 시 cli_options가 dispatcher 호출에 포함돼야 한다.
 
         설계 의도:
-            execute_llm()이 gemini 분기에서 execute_gemini()를 호출할 때
+            execute_llm()이 gemini 분기에서 dispatcher를 호출할 때
             cli_options를 그대로 전달한다. (image_path 등 gemini 전용 옵션 활용)
             이 테스트는 그 동작을 문서화한다.
         """
@@ -365,33 +392,25 @@ class TestGeminiCliOptions(unittest.TestCase):
             "raw_response": '{"tag": "이벤트"}',
         }
 
-        with patch.object(self.service, "execute_gemini", return_value=mock_gemini_result) as mock_gemini:
+        with patch(
+            "app.modules.claude_worker.services.executors.ExecutionDispatcher.dispatch",
+            return_value=mock_gemini_result,
+        ) as mock_dispatch:
             result = self.service.execute_llm(
                 prompt="분류해주세요",
                 provider="gemini",
                 cli_options={"image_path": "/test/57.jpg"},
             )
 
-        # execute_gemini가 호출됐는지 확인
-        mock_gemini.assert_called_once()
-
-        # execute_gemini 호출 시 cli_options가 전달됐는지 확인
-        # positional(args) 또는 keyword(kwargs) 모두 허용
-        call_args = mock_gemini.call_args[0]    # positional arguments
-        call_kwargs = mock_gemini.call_args[1]  # keyword arguments
-
-        # execute_gemini(prompt, model, timeout, parse_json, enable_tools, cli_options)
-        # positional 6번째(index 5) 또는 keyword "cli_options"로 전달됨
-        cli_options_passed = (
-            "cli_options" in call_kwargs
-            or len(call_args) >= 6  # positional 6개 이상이면 cli_options 포함
+        mock_dispatch.assert_called_once_with(
+            "gemini",
+            "분류해주세요",
+            model="",
+            timeout=120,
+            parse_json=True,
+            enable_tools=False,
+            cli_options={"image_path": "/test/57.jpg"},
         )
-        self.assertTrue(
-            cli_options_passed,
-            "execute_gemini() 호출에 cli_options가 전달돼야 한다 (image_path 포함).",
-        )
-
-        # 결과는 정상 반환
         self.assertTrue(result["success"])
         self.assertEqual(result["result"]["tag"], "이벤트")
 
@@ -492,11 +511,14 @@ class TestParsJsonFalseAndCallerTypeFallback(unittest.TestCase):
         service = _make_service()
         raw_text = "# 계획서\n아이디어 구체화\n"
 
-        with patch.object(service, "execute_claude", return_value={
-            "success": True,
-            "result": None,
-            "raw_response": raw_text,
-        }) as mock_claude:
+        with patch(
+            "app.modules.claude_worker.services.executors.ExecutionDispatcher.dispatch",
+            return_value={
+                "success": True,
+                "result": None,
+                "raw_response": raw_text,
+            },
+        ) as mock_dispatch:
             result = service.execute_llm(
                 prompt="/plan 테스트",
                 provider="claude",
@@ -504,6 +526,15 @@ class TestParsJsonFalseAndCallerTypeFallback(unittest.TestCase):
                 cli_options={"cwd": "/tmp", "parse_json": False},
             )
 
+        mock_dispatch.assert_called_once_with(
+            "claude",
+            "/plan 테스트",
+            model="",
+            timeout=120,
+            parse_json=False,
+            enable_tools=False,
+            cli_options={"cwd": "/tmp", "parse_json": False},
+        )
         self.assertTrue(result["success"], f"성공이어야 함: {result}")
         self.assertEqual(result.get("raw_response"), raw_text)
 
