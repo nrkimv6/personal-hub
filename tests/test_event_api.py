@@ -102,9 +102,16 @@ class TestEventListAPI:
             "event_start": str(date.today() - timedelta(days=5)),
             "event_end": str(date.today() - timedelta(days=1)),
         }, headers=admin_headers)
+        response_d = client.post("/api/v1/events", json={
+            "title": "취소 이벤트",
+            "event_start": str(date.today()),
+            "event_end": str(date.today() + timedelta(days=1)),
+            "status": "cancelled",
+        }, headers=admin_headers)
         assert response_a.status_code == 201
         assert response_b.status_code == 201
         assert response_c.status_code == 201
+        assert response_d.status_code == 201
 
         response = client.get("/api/v1/events?event_status=ongoing_or_upcoming")
         assert response.status_code == 200
@@ -113,6 +120,7 @@ class TestEventListAPI:
         assert "진행 중 이벤트" in titles
         assert "예정 이벤트" in titles
         assert "종료 이벤트" not in titles
+        assert "취소 이벤트" not in titles
 
     def test_get_events_pagination(self, client, sample_event):
         """페이지네이션"""

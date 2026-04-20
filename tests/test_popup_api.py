@@ -76,6 +76,43 @@ class TestPopupListAPI:
         response = client.get("/api/v1/popups?popup_status=ongoing")
         assert response.status_code == 200
 
+    def test_get_popups_filter_ongoing_or_upcoming(self, client, admin_headers):
+        """진행 중 + 예정 상태 필터는 종료된 팝업을 제외한다."""
+        response_a = client.post("/api/v1/popups", json={
+            "title": "진행 중 팝업",
+            "start_date": str(date.today() - timedelta(days=1)),
+            "end_date": str(date.today() + timedelta(days=2)),
+        }, headers=admin_headers)
+        response_b = client.post("/api/v1/popups", json={
+            "title": "예정 팝업",
+            "start_date": str(date.today() + timedelta(days=3)),
+            "end_date": str(date.today() + timedelta(days=5)),
+        }, headers=admin_headers)
+        response_c = client.post("/api/v1/popups", json={
+            "title": "종료 팝업",
+            "start_date": str(date.today() - timedelta(days=5)),
+            "end_date": str(date.today() - timedelta(days=1)),
+        }, headers=admin_headers)
+        response_d = client.post("/api/v1/popups", json={
+            "title": "취소 팝업",
+            "start_date": str(date.today()),
+            "end_date": str(date.today() + timedelta(days=1)),
+            "status": "cancelled",
+        }, headers=admin_headers)
+        assert response_a.status_code == 201
+        assert response_b.status_code == 201
+        assert response_c.status_code == 201
+        assert response_d.status_code == 201
+
+        response = client.get("/api/v1/popups?popup_status=ongoing_or_upcoming")
+        assert response.status_code == 200
+        data = response.json()
+        titles = {item["title"] for item in data["items"]}
+        assert "진행 중 팝업" in titles
+        assert "예정 팝업" in titles
+        assert "종료 팝업" not in titles
+        assert "취소 팝업" not in titles
+
     def test_get_popups_pagination(self, client, sample_popup):
         """페이지네이션"""
         response = client.get("/api/v1/popups?page=1&page_size=10")
