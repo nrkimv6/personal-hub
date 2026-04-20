@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from datetime import datetime
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -14,8 +17,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "diagnostics"))
 
 import recover_instagram_llm_missing_events as m  # noqa: E402
+from app.models.base import Base  # noqa: E402
 from app.models.event import Event  # noqa: E402
 from app.models.instagram_post import InstagramPost  # noqa: E402
+from app.modules.claude_worker.models.llm_request import LLMRequest  # noqa: E402
 
 
 def make_session():
@@ -209,6 +214,174 @@ def test_recover_candidate_relinks_existing_event():
         assert outcome.action == "relink"
         assert post.classified_type == "event"
         assert post.classified_id == event.id
+    finally:
+        session.close()
+        engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# 날짜 범위 필터 TC (Phase 2 Task 4)
+# ---------------------------------------------------------------------------
+
+def _make_full_session():
+    """LLMRequest 포함 전체 테이블 SQLite in-memory 세션."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+    return session, engine
+
+
+def _make_request_with_processed_at(session, req_id: int, post_id: int, processed_at: datetime):
+    """post + completed LLM request(태그=이벤트) 쌍 생성 헬퍼."""
+    payload_json = json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "result": json.dumps({
+            "tag": "이벤트",
+            "summary": f"event {req_id}",
+            "urls": [],
+            "event_period": {"start": "2026-04-17", "end": "2026-04-17"},
+        }, ensure_ascii=False),
+    }, ensure_ascii=False)
+
+    post = InstagramPost(
+        id=post_id,
+        post_id=f"p{post_id}",
+        account="test_account",
+        url=f"https://instagram.com/p/{post_id}",
+        caption="caption",
+        images=[],
+    )
+    request = LLMRequest(
+        id=req_id,
+        caller_type="instagram",
+        caller_id=str(post_id),
+        prompt="test",
+        status="completed",
+        request_source="instagram_event",
+        result=payload_json,
+        processed_at=processed_at,
+    )
+    session.add_all([post, request])
+    session.commit()
+    return post, request
+
+
+def test_date_range_since_filters_out_earlier_requests():
+    """--since 2026-04-15 시 이전 날짜(4/14) request는 후보에서 제외된다."""
+    session, engine = _make_full_session()
+    try:
+        _make_request_with_processed_at(session, 10001, 50001, datetime(2026, 4, 14, 10, 0, 0))
+        _make_request_with_processed_at(session, 10002, 50002, datetime(2026, 4, 15, 10, 0, 0))
+
+        args = argparse.Namespace(
+            request_id=None,
+            limit=100,
+            request_source=None,
+            since="2026-04-15",
+            until=None,
+        )
+        candidates = m.load_candidates(session, args)
+        candidate_req_ids = [c.request_id for c in candidates]
+
+        assert 10001 not in candidate_req_ids, "4/14 request는 --since 2026-04-15 이후에서 제외돼야 한다"
+        assert 10002 in candidate_req_ids, "4/15 request는 --since 2026-04-15 범위에 포함돼야 한다"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_date_range_until_filters_out_later_requests():
+    """--until 2026-04-15 시 이후 날짜(4/16) request는 후보에서 제외된다."""
+    session, engine = _make_full_session()
+    try:
+        _make_request_with_processed_at(session, 10003, 50003, datetime(2026, 4, 15, 10, 0, 0))
+        _make_request_with_processed_at(session, 10004, 50004, datetime(2026, 4, 16, 10, 0, 0))
+
+        args = argparse.Namespace(
+            request_id=None,
+            limit=100,
+            request_source=None,
+            since=None,
+            until="2026-04-15",
+        )
+        candidates = m.load_candidates(session, args)
+        candidate_req_ids = [c.request_id for c in candidates]
+
+        assert 10003 in candidate_req_ids, "4/15 request는 --until 2026-04-15 범위에 포함돼야 한다"
+        assert 10004 not in candidate_req_ids, "4/16 request는 --until 2026-04-15 이후에서 제외돼야 한다"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_date_range_since_until_combined():
+    """--since 2026-04-14 --until 2026-04-16 시 해당 범위만 포함된다."""
+    session, engine = _make_full_session()
+    try:
+        _make_request_with_processed_at(session, 10005, 50005, datetime(2026, 4, 13, 23, 59, 0))
+        _make_request_with_processed_at(session, 10006, 50006, datetime(2026, 4, 14, 0, 1, 0))
+        _make_request_with_processed_at(session, 10007, 50007, datetime(2026, 4, 16, 22, 0, 0))
+        _make_request_with_processed_at(session, 10008, 50008, datetime(2026, 4, 17, 0, 1, 0))
+
+        args = argparse.Namespace(
+            request_id=None,
+            limit=100,
+            request_source=None,
+            since="2026-04-14",
+            until="2026-04-16",
+        )
+        candidates = m.load_candidates(session, args)
+        candidate_req_ids = [c.request_id for c in candidates]
+
+        assert 10005 not in candidate_req_ids, "4/13 request는 범위 밖이므로 제외"
+        assert 10006 in candidate_req_ids, "4/14 request는 범위 내"
+        assert 10007 in candidate_req_ids, "4/16 request는 범위 내"
+        assert 10008 not in candidate_req_ids, "4/17 request는 범위 밖이므로 제외"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_dry_run_summary_output_format(capsys):
+    """print_candidates가 summary 행(create/relink/skip 집계)을 출력한다."""
+    candidates = [
+        m.Candidate(
+            request_id=i, post_id=i, request_source=None, processed_at=None,
+            account="a", summary="s", organizer=None, event_start=None,
+            event_end=None, event_url=None, existing_event_id=None,
+            classified_type=None, classified_id=None, action=action, reason="r",
+            payload={"tag": "이벤트"},
+        )
+        for i, action in enumerate(["create", "create", "relink", "skip"])
+    ]
+    m.print_candidates(candidates)
+    captured = capsys.readouterr()
+    assert "summary create=2 relink=1 skip=1" in captured.out
+
+
+def test_existing_regression_create_still_passes():
+    """기존 create/relink/duplicate_url 회귀 TC가 날짜 범위 옵션 추가 후에도 동작한다."""
+    session, engine = _make_full_session()
+    try:
+        post = InstagramPost(id=600, post_id="p600", account="acc", caption="c")
+        session.add(post)
+        session.commit()
+
+        candidate = m.Candidate(
+            request_id=999, post_id=600, request_source="instagram_event",
+            processed_at=datetime(2026, 4, 14), account="acc",
+            summary="테스트", organizer=None, event_start=None, event_end=None,
+            event_url=None, existing_event_id=None, classified_type=None, classified_id=None,
+            action="create", reason="missing_event_row",
+            payload={
+                "tag": "이벤트", "summary": "테스트", "urls": [],
+                "event_period": {"start": "2026-04-17", "end": "2026-04-17"},
+            },
+        )
+        outcome = m.recover_candidate(session, candidate)
+        assert outcome.changed is True
+        assert outcome.action == "create"
     finally:
         session.close()
         engine.dispose()

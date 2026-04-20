@@ -1,0 +1,16 @@
+{
+  "_comment": "GPT-5.4-mini synthesized envelope fixture. PROVIDER DISABLED: openai.enabled=False in provider_registry.py. Live T4/T5 excluded until gate is lifted. This fixture is for fixture/unit/integration coverage only.",
+  "_provider_status": "disabled",
+  "id": "chatcmpl-sample",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```json\n{\n    \"tag\": \"이벤트\",\n    \"summary\": \"GPT 테스트 이벤트 (fixture only)\",\n    \"organizer\": \"주최 기관\",\n    \"urls\": [],\n    \"event_period\": {\n        \"start\": \"2026-04-20\",\n        \"end\": \"2026-04-20\"\n    },\n    \"announcement_date\": null,\n    \"prizes\": [],\n    \"winner_count\": null,\n    \"purchase_required\": \"아니오\"\n}\n```"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}

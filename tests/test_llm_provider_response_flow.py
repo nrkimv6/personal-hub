@@ -574,5 +574,213 @@ class TestParsJsonFalseAndCallerTypeFallback(unittest.TestCase):
         service_mock.mark_completed.assert_not_called()
 
 
+# ===========================================================================
+# 7. cross-provider fixture matrix TC (Phase T1 — Task 11)
+# ===========================================================================
+
+class TestNormalizeJsonPayloadFixtureMatrix(unittest.TestCase):
+    """normalize_json_payload()가 각 provider fixture에서 tag를 올바르게 추출하는지 검증.
+
+    TC 대상:
+    - claude_haiku_4_5: outer envelope {"type":"result","result":"```json...```"}
+    - claude_sonnet_4_6: 동일 envelope 형태
+    - gemini_3_flash: raw text (```json...```)
+    - gpt_5_4_mini: OpenAI-shaped fixture (fixture only — provider disabled)
+      → parser-only coverage. live T4/T5 제외 사유: openai.enabled=False.
+    """
+
+    def setUp(self):
+        from app.modules.claude_worker.services.executors.base import normalize_json_payload
+        self.normalize = normalize_json_payload
+
+    def test_claude_haiku_outer_envelope_extracts_tag(self):
+        """claude-haiku-4-5 outer envelope → tag 추출."""
+        import json
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "llm_executor_outputs" / "claude_haiku_4_5.json"
+        )
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        # outer envelope 그대로 전달 (result 키에 markdown JSON 내포)
+        payload = self.normalize(fixture)
+        self.assertEqual(payload["tag"], "이벤트")
+
+    def test_claude_sonnet_outer_envelope_extracts_tag(self):
+        """claude-sonnet-4-6 outer envelope → tag 추출."""
+        import json
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "llm_executor_outputs" / "claude_sonnet_4_6.json"
+        )
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        payload = self.normalize(fixture)
+        self.assertEqual(payload["tag"], "이벤트")
+
+    def test_gemini_raw_text_extracts_tag(self):
+        """gemini-3-flash raw text (```json...```) → tag 추출.
+
+        Gemini executor가 parse_json_response_text를 직접 호출하므로
+        normalize_json_payload에 raw text를 넣는 경우와 동일하게 검증한다.
+        """
+        import json
+        from app.modules.claude_worker.services.executors.base import parse_json_response_text
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "llm_executor_outputs" / "gemini_3_flash.json"
+        )
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        raw_text = fixture["raw_text"]
+        payload = parse_json_response_text(raw_text)
+        self.assertEqual(payload["tag"], "이벤트")
+
+    def test_gpt_fixture_parser_only_coverage(self):
+        """gpt-5.4-mini fixture에서 content string 추출 후 tag 파싱.
+
+        NOTE: provider disabled (openai.enabled=False). This test is
+        parser-only coverage. Live T4/T5 is excluded until the gate is lifted.
+        """
+        import json
+        from app.modules.claude_worker.services.executors.base import parse_json_response_text
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "llm_executor_outputs" / "gpt_5_4_mini.json"
+        )
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        # OpenAI-shaped: choices[0].message.content
+        content = fixture["choices"][0]["message"]["content"]
+        payload = parse_json_response_text(content)
+        self.assertEqual(payload["tag"], "이벤트")
+
+    def test_empty_string_raises_value_error(self):
+        """빈 문자열 → ValueError."""
+        with self.assertRaises(ValueError):
+            self.normalize("")
+
+    def test_none_raises_value_error(self):
+        """None → ValueError."""
+        with self.assertRaises(ValueError):
+            self.normalize(None)
+
+    def test_double_envelope_unwrap(self):
+        """result 안에 result가 또 있는 이중 envelope → 최종 inner payload 반환."""
+        inner = {"tag": "이벤트", "summary": "이중 envelope 테스트"}
+        middle = {"result": json.dumps(inner, ensure_ascii=False)}
+        outer = {"result": json.dumps(middle, ensure_ascii=False)}
+        payload = self.normalize(outer)
+        self.assertEqual(payload["tag"], "이벤트")
+
+
+# ===========================================================================
+# 8. save_instagram_result fallback 단위 TC (Phase T1 — Task 12)
+# ===========================================================================
+
+class TestSaveResultFallback(unittest.TestCase):
+    """save_instagram_result()에서 invalid tag/shape가 silent success가 아닌지 확인."""
+
+    def _run_save(self, llm_result: dict, post_id: int = 1):
+        from app.modules.claude_worker.worker.worker import save_instagram_result
+        post = MagicMock()
+        post.id = post_id
+        post.account = "test_account"
+        post.images = [{"src": "https://example.com/img.jpg"}]
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = post
+        result = save_instagram_result(mock_db, post_id, llm_result)
+        return result, mock_db
+
+    def test_invalid_tag_returns_false_not_silent_success(self):
+        """invalid tag가 False를 반환하고 db.add()를 호출하지 않는다."""
+        result, mock_db = self._run_save({"tag": "INVALID_TAG", "summary": "test"})
+        self.assertFalse(result, "invalid tag는 False를 반환해야 한다")
+        self.assertEqual(mock_db.add.call_count, 0, "invalid tag 시 DB add 호출 금지")
+
+    def test_missing_tag_returns_false(self):
+        """tag 키 없음 → False."""
+        result, mock_db = self._run_save({"summary": "no tag field"})
+        self.assertFalse(result)
+
+    def test_none_tag_returns_false(self):
+        """tag=None → False."""
+        result, mock_db = self._run_save({"tag": None, "summary": "null tag"})
+        self.assertFalse(result)
+
+
+# ===========================================================================
+# 9. defaults 우선순위 단위 TC (Phase T1 — Task 13)
+# ===========================================================================
+
+class TestResolveProviderModelPriority(unittest.TestCase):
+    """LLMConfigService.resolve_provider_model() 우선순위 계약 검증.
+
+    1순위: explicit > 2순위: caller_pin > 3순위: registry > 4순위: global_default
+    """
+
+    def _make_service(self, tmp_path=None):
+        from app.modules.claude_worker.services.llm_config_service import LLMConfigService
+        import app.modules.claude_worker.services.llm_config_service as svc_mod
+        service = LLMConfigService()
+        if tmp_path:
+            import unittest.mock
+            self._patcher = unittest.mock.patch.object(
+                svc_mod, "LLM_DEFAULTS_FILE", tmp_path
+            )
+            self._patcher.start()
+        return service
+
+    def tearDown(self):
+        patcher = getattr(self, "_patcher", None)
+        if patcher:
+            patcher.stop()
+
+    def test_explicit_provider_model_takes_first_priority(self):
+        """1순위: 명시 provider/model이 있으면 즉시 반환."""
+        service = self._make_service()
+        with patch.object(service, "load_llm_defaults", return_value={
+            "global_default": {"provider": "gemini", "model": "gemini-3-flash"},
+            "caller_defaults": {"instagram": {"provider": "gemini", "model": "gemini-3-flash"}},
+        }):
+            provider, model = service.resolve_provider_model(
+                "instagram", provider="claude", model="claude-haiku-4-5"
+            )
+        self.assertEqual(provider, "claude")
+        self.assertEqual(model, "claude-haiku-4-5")
+
+    def test_caller_pin_takes_second_priority(self):
+        """2순위: caller_defaults pin이 registry picker보다 우선."""
+        service = self._make_service()
+        with patch.object(service, "load_llm_defaults", return_value={
+            "global_default": {"provider": "claude", "model": ""},
+            "caller_defaults": {"instagram": {"provider": "gemini", "model": "gemini-3-flash"}},
+        }):
+            provider, model = service.resolve_provider_model("instagram")
+        self.assertEqual(provider, "gemini")
+        self.assertEqual(model, "gemini-3-flash")
+
+    def test_registry_picker_takes_third_priority_when_no_pin(self):
+        """3순위: caller_defaults 없을 때 registry picker(status_tracking)가 동작한다."""
+        service = self._make_service()
+        with patch.object(service, "load_llm_defaults", return_value={
+            "global_default": {"provider": "claude", "model": ""},
+            "caller_defaults": {},
+        }):
+            with patch(
+                "app.modules.claude_worker.services.llm_config_service.pick_model",
+                return_value=("claude", "claude-haiku-4-5"),
+            ):
+                provider, model = service.resolve_provider_model("instagram")
+        self.assertEqual(provider, "claude")
+        self.assertEqual(model, "claude-haiku-4-5")
+
+    def test_empty_llm_defaults_falls_through_to_registry(self):
+        """data/llm_defaults.json가 비어있을 때 instagram은 status_tracking 후보를 탄다."""
+        service = self._make_service()
+        with patch.object(service, "load_llm_defaults", return_value={
+            "global_default": {"provider": "claude", "model": ""},
+            "caller_defaults": {},
+        }):
+            with patch(
+                "app.modules.claude_worker.services.llm_config_service.pick_model",
+                return_value=("claude", "claude-haiku-4-5"),
+            ) as mock_pick:
+                service.resolve_provider_model("instagram")
+        mock_pick.assert_called_once_with("status_tracking", oneshot=False)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

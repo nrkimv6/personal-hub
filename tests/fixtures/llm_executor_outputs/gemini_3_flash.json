@@ -1,0 +1,4 @@
+{
+  "_comment": "Gemini 3 Flash raw stdout sample. Gemini returns raw text — either pure JSON or markdown code fence. No outer envelope wrapper.",
+  "raw_text": "```json\n{\n    \"tag\": \"이벤트\",\n    \"summary\": \"제미나이 테스트 이벤트\",\n    \"organizer\": \"주최 기관\",\n    \"urls\": [],\n    \"event_period\": {\n        \"start\": \"2026-04-20\",\n        \"end\": \"2026-04-20\"\n    },\n    \"announcement_date\": null,\n    \"prizes\": [],\n    \"winner_count\": null,\n    \"purchase_required\": \"아니오\"\n}\n```"
+}

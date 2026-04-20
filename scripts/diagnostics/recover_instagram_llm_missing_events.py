@@ -64,6 +64,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--request-id", type=int, help="Recover one specific llm_requests.id only.")
     parser.add_argument("--limit", type=int, default=50, help="Max candidate rows to inspect. Default: 50")
     parser.add_argument("--request-source", help="Filter by exact request_source, e.g. instagram_event")
+    parser.add_argument(
+        "--since",
+        help="Filter by processed_at >= YYYY-MM-DD (inclusive). Example: --since 2026-04-14",
+    )
+    parser.add_argument(
+        "--until",
+        help="Filter by processed_at <= YYYY-MM-DD (inclusive, end-of-day). Example: --until 2026-04-16",
+    )
     parser.add_argument("--apply", action="store_true", help="Actually create/relink rows. Default is dry-run.")
     parser.add_argument(
         "--allow-duplicate-url",
@@ -213,6 +221,16 @@ def load_candidates(session, args: argparse.Namespace) -> list[Candidate]:
     if args.request_source:
         query = query.filter(LLMRequest.request_source == args.request_source)
 
+    since_date = parse_date(getattr(args, "since", None))
+    until_date = parse_date(getattr(args, "until", None))
+    if since_date is not None:
+        since_dt = datetime.combine(since_date, datetime.min.time())
+        query = query.filter(LLMRequest.processed_at >= since_dt)
+    if until_date is not None:
+        from datetime import time as dt_time
+        until_dt = datetime.combine(until_date, dt_time(23, 59, 59, 999999))
+        query = query.filter(LLMRequest.processed_at <= until_dt)
+
     requests = query.limit(args.limit).all()
     candidates: list[Candidate] = []
     for request in requests:
@@ -238,6 +256,14 @@ def print_candidates(candidates: list[Candidate]) -> None:
                 ]
             )
         )
+    # dry-run summary by action
+    from collections import Counter
+    counts = Counter(c.action for c in candidates)
+    print(
+        f"summary create={counts.get('create', 0)} "
+        f"relink={counts.get('relink', 0)} "
+        f"skip={counts.get('skip', 0)}"
+    )
 
 
 def main() -> int:

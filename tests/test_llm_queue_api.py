@@ -624,3 +624,66 @@ class TestBatchRetryRoutes:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["detail"] == "Cannot retry this request"
+
+
+# ─── Phase 4: LLM defaults API + Instagram caller 우선순위 계약 ─────────────
+
+class TestLLMDefaultsInstagramCallerContract:
+    """GET/PUT /api/v1/llm/defaults — Instagram caller_defaults pin, global fallback, explicit override.
+
+    Phase 4 Task 10: caller 우선순위 계약을 API 레벨에서 고정한다.
+    """
+
+    def test_put_caller_defaults_instagram_pin_returns_saved_value(self, client):
+        """R: caller_defaults["instagram"] pin 저장 → GET에서 그대로 반환된다."""
+        payload = {
+            "global_default": {"provider": "claude", "model": ""},
+            "caller_defaults": {
+                "instagram": {"provider": "gemini", "model": "gemini-3-flash"},
+            },
+        }
+        put_resp = client.put("/api/v1/llm/defaults", json=payload)
+        assert put_resp.status_code == 200, put_resp.text
+
+        get_resp = client.get("/api/v1/llm/defaults")
+        assert get_resp.status_code == 200
+        data = get_resp.json()
+        assert data["caller_defaults"]["instagram"]["provider"] == "gemini"
+        assert data["caller_defaults"]["instagram"]["model"] == "gemini-3-flash"
+
+    def test_put_empty_caller_defaults_does_not_pin_instagram(self, client):
+        """B: caller_defaults={} (비어있음) → GET에서 instagram 키가 없다."""
+        payload = {
+            "global_default": {"provider": "claude", "model": ""},
+            "caller_defaults": {},
+        }
+        client.put("/api/v1/llm/defaults", json=payload)
+
+        get_resp = client.get("/api/v1/llm/defaults")
+        data = get_resp.json()
+        assert "instagram" not in data.get("caller_defaults", {}), (
+            "caller_defaults 비어있을 때 instagram 키가 없어야 한다"
+        )
+
+    def test_get_llm_defaults_returns_known_caller_types(self, client):
+        """R: GET /api/v1/llm/defaults → known_caller_types에 instagram이 포함된다."""
+        resp = client.get("/api/v1/llm/defaults")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "known_caller_types" in data
+        assert "instagram" in data["known_caller_types"], (
+            f"instagram이 known_caller_types에 없음: {data['known_caller_types']}"
+        )
+
+    def test_put_unsupported_provider_for_caller_defaults_rejected(self, client):
+        """E: caller_defaults에 지원하지 않는 provider → 400/422."""
+        payload = {
+            "global_default": {"provider": "claude", "model": ""},
+            "caller_defaults": {
+                "instagram": {"provider": "nonexistent_provider", "model": "x"},
+            },
+        }
+        resp = client.put("/api/v1/llm/defaults", json=payload)
+        assert resp.status_code in (400, 422), (
+            f"지원되지 않는 provider가 허용됨: {resp.status_code} {resp.text}"
+        )

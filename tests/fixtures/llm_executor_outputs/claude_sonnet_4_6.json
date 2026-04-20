@@ -1,0 +1,9 @@
+{
+  "_comment": "Claude Sonnet 4.6 CLI raw stdout sample. Older sonnet/opus returned top-level JSON without outer envelope in many cases, but may also use the same result envelope as haiku.",
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "result": "```json\n{\n    \"tag\": \"이벤트\",\n    \"summary\": \"소네트 테스트 이벤트\",\n    \"organizer\": \"주최 기관\",\n    \"urls\": [\"https://event.example.com/form\"],\n    \"event_period\": {\n        \"start\": \"2026-04-20\",\n        \"end\": \"2026-04-20\"\n    },\n    \"announcement_date\": null,\n    \"prizes\": [],\n    \"winner_count\": null,\n    \"purchase_required\": \"아니오\"\n}\n```",
+  "session_id": "session-sample-sonnet",
+  "cost_usd": 0.001
+}
