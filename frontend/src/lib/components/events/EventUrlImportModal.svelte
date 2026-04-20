@@ -24,14 +24,14 @@
 	let url = $state('');
 	let urlsInput = $state('');  // 다건 URL 입력
 	let loading = $state(false);
-	let error: string | null = $state(null);
-	let result: EventImportFromUrlResponse | null = $state(null);
+	let error = $state<string | null>(null);
+	let result = $state<EventImportFromUrlResponse | null>(null);
 	let mode = $state<ImportMode>('batch');  // 기본값: 배치 크롤링
 
 	// Instagram 계정 (Instagram URL에만 필요)
-	let accounts: ServiceAccountWithProfile[] = $state([]);
-	let selectedAccountId: number | null = $state(null);
-	let crawlResult: { created: number; skipped: number; errors: string[]; request_ids?: number[] } | null = $state(null);
+	let accounts = $state<ServiceAccountWithProfile[]>([]);
+	let selectedAccountId = $state<number | null>(null);
+	let crawlResult = $state<{ created: number; skipped: number; errors: string[]; request_ids?: number[] } | null>(null);
 
 	// URL 파싱 (모든 URL 지원)
 	const parsedUrls = $derived(
