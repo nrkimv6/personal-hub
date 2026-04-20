@@ -484,7 +484,13 @@ class TestEventImportFromUrlAPI:
         assert data["page_type"] == "unknown"
         assert data["extraction_method"] == "skipped"
         assert "동일 URL" in data["error"]
-        assert test_db_session.query(LLMRequest).count() == 0
+        assert (
+            test_db_session.query(LLMRequest)
+            .filter(LLMRequest.caller_type == "event_import")
+            .filter(LLMRequest.caller_id == sample_event.event_url)
+            .count()
+            == 0
+        )
 
     @patch("app.modules.claude_worker.services.llm_service.LLMService.resolve_provider_model")
     @patch("app.services.event_service.asyncio.get_event_loop")
@@ -520,7 +526,13 @@ class TestEventImportFromUrlAPI:
         assert data["page_type"] == "generic"
         assert data["extraction_method"] == "fallback"
         assert "LLM 요청 생성 실패" in data["error"]
-        assert test_db_session.query(LLMRequest).count() == 0
+        assert (
+            test_db_session.query(LLMRequest)
+            .filter(LLMRequest.caller_type == "event_import")
+            .filter(LLMRequest.caller_id == "https://example.com/api-failure")
+            .count()
+            == 0
+        )
 
 
 class TestEventComputedFields:

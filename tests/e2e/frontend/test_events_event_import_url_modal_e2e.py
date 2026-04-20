@@ -53,12 +53,13 @@ def test_event_import_url_modal_shows_pending_acceptance_message(
     page.wait_for_load_state("networkidle")
 
     page.get_by_role("button", name="URL 가져오기").click()
+    page.get_by_role("button", name="이벤트 추출").click()
     page.get_by_label("이벤트 URL").fill("https://forms.gle/pending321")
-    page.get_by_role("button", name="추출").click()
+    page.get_by_role("button", name="추출", exact=True).click()
 
     expect(page.get_by_text("요청 접수")).to_be_visible()
     expect(page.get_by_text("이벤트 등록 요청을 받았습니다 (요청 ID: 321)")).to_be_visible()
-    expect(page.get_by_text("요청 ID: 321")).to_be_visible()
+    expect(page.get_by_text("요청 ID: 321", exact=True)).to_be_visible()
     expect(page.get_by_role("link", name="LLM 요청 보기")).to_be_visible()
     expect(page.get_by_role("button", name="추출된 정보 사용")).to_have_count(0)
     expect(page.get_by_role("button", name="그래도 이벤트로 등록")).to_have_count(0)
@@ -95,8 +96,9 @@ def test_event_import_url_modal_shows_error_without_pending_panel(
     page.wait_for_load_state("networkidle")
 
     page.get_by_role("button", name="URL 가져오기").click()
+    page.get_by_role("button", name="이벤트 추출").click()
     page.get_by_label("이벤트 URL").fill("https://forms.gle/duplicate7")
-    page.get_by_role("button", name="추출").click()
+    page.get_by_role("button", name="추출", exact=True).click()
 
     expect(page.get_by_text("동일 URL로 등록된 이벤트가 있습니다 (ID: 7)")).to_be_visible()
     expect(page.get_by_text("요청 접수")).to_have_count(0)
