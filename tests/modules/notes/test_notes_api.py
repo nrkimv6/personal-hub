@@ -11,30 +11,45 @@ from app.main import app
 from app.database import get_db, Base
 
 
-# ──────────────── 인메모리 DB 픽스처 ────────────────
-
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test_notes_temp.db"
-
-engine_test = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine_test)
+# ──────────────── 테스트 DB 픽스처 ────────────────
 
 
 @pytest.fixture(scope="function")
-def db():
+def db_bundle(tmp_path):
+    db_path = tmp_path / "test_notes_temp.db"
+    engine_test = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    testing_session_local = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=engine_test,
+    )
+
     Base.metadata.create_all(bind=engine_test)
-    session = TestingSessionLocal()
+    session = testing_session_local()
     try:
-        yield session
+        yield {
+            "session": session,
+            "SessionLocal": testing_session_local,
+            "engine": engine_test,
+        }
     finally:
         session.close()
         Base.metadata.drop_all(bind=engine_test)
+        engine_test.dispose()
 
 
 @pytest.fixture(scope="function")
-def client(db):
+def db(db_bundle):
+    yield db_bundle["session"]
+
+
+@pytest.fixture(scope="function")
+def client(db_bundle):
+    TestingSessionLocal = db_bundle["SessionLocal"]
+
     def override_get_db():
         s = TestingSessionLocal()
         try:
