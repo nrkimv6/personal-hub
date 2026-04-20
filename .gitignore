@@ -30,8 +30,7 @@ data/image_classifier/settings.json
 frontend/static/diagnostics.json
 
 *cwd
-.worktrees/*
-!.worktrees/plans/
+.worktrees/
 data/image_classifier
 .claude/worktrees/
 /check-full.txt
