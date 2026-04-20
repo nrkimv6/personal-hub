@@ -26,52 +26,52 @@
     MoreHorizontal
   } from 'lucide-svelte';
 
-  let posts: CollectedPost[] = [];
-  let loading = true;
-  let error: string | null = null;
+  let posts = $state<CollectedPost[]>([]);
+  let loading = $state(true);
+  let error = $state<string | null>(null);
 
   // 페이지네이션
   const pager = createPagePagination(20);
 
   // 필터
-  let sourceType: string = '';
-  let urlType: string = '';
-  let classification: string = '';
-  let search: string = '';
+  let sourceType = $state('');
+  let urlType = $state('');
+  let classification = $state('');
+  let search = $state('');
 
   // URL 타입 목록
-  let urlTypes: string[] = [];
+  let urlTypes = $state<string[]>([]);
 
   // 상세보기 모달
-  let selectedPost: CollectedPost | null = null;
-  let selectedPostLlmResult: LLMRequest | null = null;
-  let loadingLlm = false;
+  let selectedPost = $state<CollectedPost | null>(null);
+  let selectedPostLlmResult = $state<LLMRequest | null>(null);
+  let loadingLlm = $state(false);
   let currentImageIndex = $state(0);
 
   // 뷰 모드
   type ViewMode = 'grid' | 'list';
-  let viewMode: ViewMode = 'grid';
+  let viewMode = $state<ViewMode>('grid');
   const STORAGE_KEY_VIEW_MODE = 'collect_view_mode';
 
   // 선택 모드
   const selection = createSelection();
-  let isSelectMode = false;
-  let isBatchProcessing = false;
-  let showBatchActionMenu = false;
-  let showDeleteConfirmModal = false;
+  let isSelectMode = $state(false);
+  let isBatchProcessing = $state(false);
+  let showBatchActionMenu = $state(false);
+  let showDeleteConfirmModal = $state(false);
 
   // URL 수집 모달
-  let showUrlCrawlModal = false;
-  let urlCrawlInput = '';
-  let urlCrawlAccountId: number | null = null;
-  let isUrlCrawling = false;
-  let isUrlParsing = false;
-  let parsedUrl: UrlParseResponse | null = null;
-  let accounts: ServiceAccountWithProfile[] = [];
+  let showUrlCrawlModal = $state(false);
+  let urlCrawlInput = $state('');
+  let urlCrawlAccountId = $state<number | null>(null);
+  let isUrlCrawling = $state(false);
+  let isUrlParsing = $state(false);
+  let parsedUrl = $state<UrlParseResponse | null>(null);
+  let accounts = $state<ServiceAccountWithProfile[]>([]);
 
   // 피드 수집 옵션
-  let urlCrawlMaxPosts = 20;
-  let urlCrawlScrollCount = 3;
+  let urlCrawlMaxPosts = $state(20);
+  let urlCrawlScrollCount = $state(3);
 
   // URL 타입별 스타일
   const urlTypeStyles: Record<string, { icon: any; color: string; bgColor: string }> = {
