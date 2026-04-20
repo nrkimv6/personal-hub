@@ -3,15 +3,21 @@
   import { onMount } from 'svelte';
   import { toast } from '$lib/stores/toast';
   import type { ExpoBooth, ExpoDraftBooth, ExpoMapDocument } from '$lib/types';
-  import { buildExpoDraftStorageKey, serializeExpoDraftsForExport } from '../utils/authorDraft';
+  import {
+    buildExpoDraftStorageKey,
+    buildExpoExportPayload,
+    copyExpoExportPayloadToClipboard
+  } from '../utils/authorDraft';
   import { toNormalizedPoint } from '../utils/mapTransform';
 
   interface Props {
     existingBooths: ExpoBooth[];
     map: ExpoMapDocument['map'];
     onSaveDrafts?: (drafts: ExpoDraftBooth[]) => Promise<void> | void;
+    onDraftsChange?: (drafts: ExpoDraftBooth[]) => void;
     saveButtonLabel?: string;
     slug: string;
+    title: string;
   }
 
   interface AuthorDraftState {
@@ -27,8 +33,10 @@
     existingBooths,
     map,
     onSaveDrafts,
+    onDraftsChange,
     saveButtonLabel = 'JSON 복사',
-    slug
+    slug,
+    title
   }: Props = $props();
 
   let stageEl: HTMLDivElement | null = null;
@@ -154,7 +162,7 @@
     }
 
     try {
-      await navigator.clipboard.writeText(serializeExpoDraftsForExport(drafts));
+      await copyExpoExportPayloadToClipboard(buildExpoExportPayload(slug, drafts, title));
       toast.success(`${drafts.length}개 draft를 복사했습니다.`);
     } catch {
       toast.error('클립보드 복사에 실패했습니다.');
@@ -186,6 +194,7 @@
     }
 
     saveState();
+    onDraftsChange?.(drafts);
   });
 </script>
 

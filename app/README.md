@@ -29,3 +29,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```bash
 pip install XXX
 ```
+
+## Expo Backend Boundary
+
+monitor-page backend는 expo에서 source data와 운영 상태를 담당합니다. `app/routes/expo.py`, `app/services/expo_service.py`는 booth seed / collect summary / worker heartbeat / export record를 집계하고, publish 결정 자체는 `admin-tools`가 맡습니다.

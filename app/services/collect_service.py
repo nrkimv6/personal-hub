@@ -1,7 +1,7 @@
 """수집 관리 서비스."""
 
 from datetime import datetime, timedelta
-from typing import Optional, List, Tuple
+from typing import Any, Optional, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc, func
 
@@ -669,3 +669,74 @@ class CollectService:
             failed_requests=failed,
             processing_requests=processing,
         )
+
+    def get_recent_source_previews(self, limit: int = 5) -> list[dict[str, Any]]:
+        """운영 콘솔용 최근 수집 source 미리보기."""
+        pages = (
+            self.db.query(CrawledPage)
+            .order_by(desc(CrawledPage.crawled_at))
+            .limit(limit)
+            .all()
+        )
+
+        previews: list[dict[str, Any]] = []
+        for page in pages:
+            if page.event_id:
+                match_status = "event"
+            elif page.popup_id:
+                match_status = "popup"
+            elif page.is_event is None:
+                match_status = "analysis_pending"
+            else:
+                match_status = "matching_pending"
+
+            previews.append(
+                {
+                    "title": page.title or page.og_title or page.url,
+                    "url": page.url,
+                    "url_type": page.url_type,
+                    "collected_at": page.crawled_at or datetime.now(),
+                    "match_status": match_status,
+                }
+            )
+
+        return previews
+
+    def get_recent_crawl_summary(self, hours: int = 24) -> dict[str, Any]:
+        """운영 콘솔용 최근 crawl 요약."""
+        date_from = datetime.now() - timedelta(hours=hours)
+        pending_statuses = [
+            CrawlRequest.STATUS_PENDING,
+            CrawlRequest.STATUS_QUEUED,
+            CrawlRequest.STATUS_PICKED,
+            CrawlRequest.STATUS_PROCESSING,
+        ]
+
+        base_query = self.db.query(CrawlRequest).filter(CrawlRequest.requested_at >= date_from)
+        recent_completed_requests = base_query.filter(CrawlRequest.status == CrawlRequest.STATUS_COMPLETED).count()
+        failed_request_count = base_query.filter(CrawlRequest.status == CrawlRequest.STATUS_FAILED).count()
+        pending_request_count = base_query.filter(CrawlRequest.status.in_(pending_statuses)).count()
+        last_collected_at = (
+            self.db.query(CrawledPage.crawled_at)
+            .order_by(desc(CrawledPage.crawled_at))
+            .limit(1)
+            .scalar()
+        )
+        matching_pending_count = (
+            self.db.query(func.count(CrawledPage.id))
+            .filter(
+                CrawledPage.is_event.isnot(None),
+                CrawledPage.event_id.is_(None),
+                CrawledPage.popup_id.is_(None),
+            )
+            .scalar()
+            or 0
+        )
+
+        return {
+            "recent_completed_requests": recent_completed_requests,
+            "failed_request_count": failed_request_count,
+            "pending_request_count": pending_request_count,
+            "matching_pending_count": matching_pending_count,
+            "last_collected_at": last_collected_at,
+        }
