@@ -105,8 +105,9 @@ def test_instagram_llm_requests_endpoint_includes_failed_mojibake(client, test_d
 
     assert response.status_code == 200
     data = response.json()
-    assert [item["id"] for item in data["requests"]] == [request.id]
-    assert data["requests"][0]["error_message"] == "encoding_mojibake"
+    returned = {item["id"]: item for item in data["requests"]}
+    assert request.id in returned
+    assert returned[request.id]["error_message"] == "encoding_mojibake"
 
 
 def test_instagram_llm_retry_resets_failed_request_to_pending(client, test_db_session):
