@@ -11,12 +11,14 @@ from app.models.event import Event
 from app.models.instagram_post import InstagramPost
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services.executors import claude_executor as claude_executor_module
 from app.modules.claude_worker.services.executors.claude_executor import ClaudeExecutor
 from app.modules.claude_worker.worker.worker import LLMWorker
 
 
 @pytest.fixture
 def fake_claude_env(tmp_path, monkeypatch):
+    npm_path = os.path.expanduser("~/AppData/Roaming/npm")
     fake_py = tmp_path / "fake_claude.py"
     fake_py.write_text(
         dedent(
@@ -62,8 +64,24 @@ def fake_claude_env(tmp_path, monkeypatch):
     fake_cmd = tmp_path / "claude.cmd"
     fake_cmd.write_text(f'@echo off\r\npython "{fake_py}"\r\n', encoding="utf-8")
 
-    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
-    return tmp_path
+    existing_path = os.environ.get("PATH", "")
+    if npm_path and npm_path not in existing_path:
+        existing_path = f"{npm_path}{os.pathsep}{existing_path}"
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{existing_path}")
+    return fake_cmd
+
+
+@pytest.fixture
+def fake_claude_command(fake_claude_env, monkeypatch):
+    original = claude_executor_module._build_claude_command
+
+    def _build_fake_command(**kwargs):
+        command = original(**kwargs)
+        command[0] = str(fake_claude_env)
+        return command
+
+    monkeypatch.setattr(claude_executor_module, "_build_claude_command", _build_fake_command)
+    return fake_claude_env
 
 
 @pytest.fixture
@@ -76,7 +94,7 @@ def db():
     session.close()
 
 
-def test_utf8_korean_payload_preserved(fake_claude_env):
+def test_utf8_korean_payload_preserved(fake_claude_command):
     executor = ClaudeExecutor()
 
     result = executor.execute("한글 prompt", timeout=10)
@@ -88,7 +106,7 @@ def test_utf8_korean_payload_preserved(fake_claude_env):
 
 
 @pytest.mark.asyncio
-async def test_mojibake_payload_marks_failed_e2e(fake_claude_env, db, monkeypatch):
+async def test_mojibake_payload_marks_failed_e2e(fake_claude_command, db, monkeypatch):
     monkeypatch.setenv("CLAUDE_FAKE_MODE", "mojibake")
 
     post = InstagramPost(
