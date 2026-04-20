@@ -1,7 +1,8 @@
 import re
+from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import BrowserContext, Page, expect
 
 pytestmark = pytest.mark.e2e
 
@@ -9,6 +10,37 @@ pytestmark = pytest.mark.e2e
 def _skip_public_mode_if_admin(system_mode: str) -> None:
     if system_mode != "public":
         pytest.skip(f"현재 system mode={system_mode} — public E2E 스킵")
+
+
+def _seed_admin_expo_draft(page: Page) -> None:
+    export_record = Path(__file__).resolve().parents[3] / "data" / "expo" / "coffee-expo-2026" / "export-record.json"
+    export_record.unlink(missing_ok=True)
+
+
+def _hydrate_admin_expo_draft(page: Page) -> None:
+    page.evaluate(
+        """
+        () => {
+          const payload = {
+            prefix: 'Z-',
+            startNumber: 1,
+            currentNumber: 2,
+            padLength: 2,
+            step: 1,
+            drafts: [
+              {
+                name: 'Z-01',
+                pin: { xNorm: 0.12, yNorm: 0.34 },
+                createdAt: '2026-04-20T15:00:00+09:00'
+              }
+            ]
+          };
+          localStorage.setItem('expo:coffee-expo-2026:draft', JSON.stringify(payload));
+        }
+        """
+    )
+    page.reload()
+    page.wait_for_load_state("networkidle")
 
 
 class TestPublicExpoBoothMap:
@@ -94,6 +126,49 @@ class TestAdminExpoAuthor:
 
         expect(page.get_by_role("heading", name="소스 파이프라인 상태")).to_be_visible()
         expect(page.get_by_role("heading", name="수집 현황과 export 흐름")).to_be_visible()
+
+    def test_admin_export_cta_shows_success_feedback(self, page: Page, context: BrowserContext, frontend_url: str):
+        _seed_admin_expo_draft(page)
+        context.grant_permissions(["clipboard-read", "clipboard-write"], origin=frontend_url)
+        page.goto(f"{frontend_url}/events?tab=expo")
+        page.wait_for_load_state("networkidle")
+        _hydrate_admin_expo_draft(page)
+
+        export_button = page.get_by_role("button", name="Export JSON (1)")
+        expect(export_button).to_be_enabled()
+        export_button.click()
+
+        expect(page.get_by_text("1개 draft를 복사하고 export 기록을 저장했습니다.")).to_be_visible()
+        assert "coffee-expo-2026" in page.evaluate("() => navigator.clipboard.readText()")
+
+    def test_admin_export_cta_updates_last_exported_timestamp(self, page: Page, context: BrowserContext, frontend_url: str):
+        _seed_admin_expo_draft(page)
+        context.grant_permissions(["clipboard-read", "clipboard-write"], origin=frontend_url)
+        page.goto(f"{frontend_url}/events?tab=expo")
+        page.wait_for_load_state("networkidle")
+        _hydrate_admin_expo_draft(page)
+
+        before = page.get_by_text("최근 export:", exact=False)
+        expect(before).to_contain_text("기록 없음")
+
+        page.get_by_role("button", name="Export JSON (1)").click()
+
+        after = page.get_by_text("최근 export:", exact=False)
+        expect(after).not_to_contain_text("기록 없음")
+
+    def test_admin_export_keeps_unknown_publish_badge_placeholder(self, page: Page, context: BrowserContext, frontend_url: str):
+        _seed_admin_expo_draft(page)
+        context.grant_permissions(["clipboard-read", "clipboard-write"], origin=frontend_url)
+        page.goto(f"{frontend_url}/events?tab=expo")
+        page.wait_for_load_state("networkidle")
+        _hydrate_admin_expo_draft(page)
+
+        status = page.get_by_text("publish 상태: unknown")
+        expect(status).to_be_visible()
+
+        page.get_by_role("button", name="Export JSON (1)").click()
+
+        expect(status).to_be_visible()
 
     def test_public_expo_page_does_not_render_admin_operations_sections(
         self, page: Page, public_frontend_url: str, system_mode: str

@@ -23,6 +23,12 @@ def admin_headers():
 
 
 @pytest.fixture
+def user_headers():
+    token = create_access_token(email="user@test.com", is_admin=False)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
 def client(test_db_session):
     def override_get_db():
         try:
@@ -213,6 +219,18 @@ class TestExpoApi:
         )
 
         assert response.status_code == 401
+
+    def test_post_expo_export_record_error_returns_403_for_non_admin(
+        self, client, expo_test_env, user_headers, monkeypatch
+    ):
+        with patch("app.core.auth.is_localhost_request", return_value=False):
+            response = client.post(
+                "/api/v1/expo/coffee-expo-2026/exports/record",
+                json=_make_payload(),
+                headers=user_headers,
+            )
+
+        assert response.status_code == 403
 
     def test_post_expo_export_record_right_creates_record(self, client, expo_test_env, admin_headers):
         response = client.post(
