@@ -6,8 +6,9 @@ _sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
 del _sys_inject, _Path_inject
 
 import logging
-import time
+import subprocess
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, IO
@@ -37,6 +38,82 @@ from _dr_runner_predicates import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _force_cleanup_test_runner_worktree(runner_id: str, redis_client: redis.Redis) -> bool:
+    """test_source가 있는 runner의 worktree/branch를 강제 정리한다."""
+    test_source = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source")
+    if not test_source:
+        return False
+
+    worktree_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+    branch = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch") or f"runner/{runner_id}"
+    repo_root = PROJECT_ROOT
+
+    if not worktree_path:
+        worktree_path = str(WORKTREE_BASE_DIR / runner_id)
+
+    logger.info(
+        "[cleanup][test_source=%s] forcing worktree cleanup for runner=%s branch=%s path=%s",
+        test_source,
+        runner_id,
+        branch,
+        worktree_path,
+    )
+
+    try:
+        remove_result = subprocess.run(
+            ["git", "worktree", "remove", "--force", worktree_path],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=str(repo_root),
+            timeout=15,
+        )
+        remove_err = (remove_result.stderr or "").strip()
+        if remove_result.returncode != 0 and "not a working tree" not in remove_err and "is not a working tree" not in remove_err:
+            logger.warning(
+                "[cleanup][test_source=%s] worktree remove failed: runner=%s err=%s",
+                test_source,
+                runner_id,
+                remove_err or remove_result.stdout.strip(),
+            )
+    except Exception as exc:
+        logger.warning(
+            "[cleanup][test_source=%s] worktree remove exception: runner=%s error=%s",
+            test_source,
+            runner_id,
+            exc,
+        )
+
+    try:
+        branch_result = subprocess.run(
+            ["git", "branch", "-D", branch],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=str(repo_root),
+            timeout=15,
+        )
+        branch_err = (branch_result.stderr or "").strip()
+        if branch_result.returncode != 0 and "not found" not in branch_err:
+            logger.warning(
+                "[cleanup][test_source=%s] branch delete failed: runner=%s branch=%s err=%s",
+                test_source,
+                runner_id,
+                branch,
+                branch_err or branch_result.stdout.strip(),
+            )
+    except Exception as exc:
+        logger.warning(
+            "[cleanup][test_source=%s] branch delete exception: runner=%s branch=%s error=%s",
+            test_source,
+            runner_id,
+            branch,
+            exc,
+        )
+
+    return True
 
 
 def _try_v2_merge_fallback(runner_id: str, redis_client: redis.Redis, reason_tag: str) -> bool:
@@ -170,12 +247,24 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             plan_file_val = None
         _trigger_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
         merge_requested = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+        test_source_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source")
+        branch_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+        worktree_path_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+        force_test_cleanup = bool(test_source_val) and (
+            (isinstance(branch_val, str) and branch_val.startswith("runner/t-"))
+            or (
+                runner_id.startswith("t-")
+                and isinstance(worktree_path_val, str)
+                and Path(worktree_path_val).name == runner_id
+            )
+        )
     except Exception as e:
         logger.warning(f"[cleanup] state capture failed (runner_id={runner_id}): {e}")
         merge_status = None
         plan_file_val = None
         _trigger_val = None
         merge_requested = None
+        force_test_cleanup = False
 
     # 1) register stopped runner in RECENT_RUNNERS
     try:
@@ -236,42 +325,46 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
         _cleanup_worktree_base = (get_plan_git_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
 
-        _preserve_worktree = False
-        if plan_file_val and _is_plan_in_progress(plan_file_val):
-            _preserve_worktree = True
-            logger.info(f"preserving worktree (plan in progress): {runner_id}")
-            redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
-
-        # unmerged commits protection
-        if not _preserve_worktree:
-            _branch = (
-                f"plan/{Path(plan_file_val).stem}" if plan_file_val
-                else f"runner/{runner_id}"
-            )
-            if _has_unmerged_commits(_branch, get_plan_git_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
+        if force_test_cleanup:
+            _force_cleanup_test_runner_worktree(runner_id, redis_client)
+            logger.info("[cleanup] test_source runner force-cleaned: %s", runner_id)
+        else:
+            _preserve_worktree = False
+            if plan_file_val and _is_plan_in_progress(plan_file_val):
                 _preserve_worktree = True
-                logger.warning(
-                    f"[cleanup] preserving worktree (unmerged commits exist): runner={runner_id}, branch={_branch}"
-                )
+                logger.info(f"preserving worktree (plan in progress): {runner_id}")
                 redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
 
-        # ?뵶 [fix] merge_requested protection
-        if merge_requested == "1":
-            _preserve_worktree = True
-            logger.warning(f"[_cleanup_process_state] merge_requested=1 -> preserving worktree (runner={runner_id})")
-            redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+            # unmerged commits protection
+            if not _preserve_worktree:
+                _branch = (
+                    f"plan/{Path(plan_file_val).stem}" if plan_file_val
+                    else f"runner/{runner_id}"
+                )
+                if _has_unmerged_commits(_branch, get_plan_git_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
+                    _preserve_worktree = True
+                    logger.warning(
+                        f"[cleanup] preserving worktree (unmerged commits exist): runner={runner_id}, branch={_branch}"
+                    )
+                    redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
 
-        if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
-            try:
-                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
-            except Exception as wt_e:
-                logger.warning(f"worktree removal failed (runner_id: {runner_id}): {wt_e}")
-        elif not _preserve_worktree and merge_status in ("merging", "testing"):
-            try:
-                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
-                logger.info(f"cleaning up stale intermediate worktree: {runner_id} (merge_status={merge_status})")
-            except Exception as wt_e:
-                logger.warning(f"stale worktree cleanup failed (runner_id: {runner_id}): {wt_e}")
+            # ?뵶 [fix] merge_requested protection
+            if merge_requested == "1":
+                _preserve_worktree = True
+                logger.warning(f"[_cleanup_process_state] merge_requested=1 -> preserving worktree (runner={runner_id})")
+                redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+
+            if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
+                try:
+                    WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+                except Exception as wt_e:
+                    logger.warning(f"worktree removal failed (runner_id: {runner_id}): {wt_e}")
+            elif not _preserve_worktree and merge_status in ("merging", "testing"):
+                try:
+                    WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+                    logger.info(f"cleaning up stale intermediate worktree: {runner_id} (merge_status={merge_status})")
+                except Exception as wt_e:
+                    logger.warning(f"stale worktree cleanup failed (runner_id: {runner_id}): {wt_e}")
     except Exception as e:
         logger.warning(f"[cleanup] error during worktree cleanup (ignoring, runner_id={runner_id}): {e}")
 

@@ -7,8 +7,9 @@ import asyncio
 import logging
 import sys
 import time
+import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 import psutil
 
@@ -41,7 +42,16 @@ logger = logging.getLogger(__name__)
 class OrphanDetector:
     """고아 프로세스 감지 및 정리 클래스."""
 
-    def __init__(self, registry: ProcessRegistry, grace_period: int = 30) -> None:
+    def __init__(
+        self,
+        registry: ProcessRegistry,
+        grace_period: int = 30,
+        *,
+        repo_root: Path | None = None,
+        runner_key_exists: Optional[Callable[[str], bool]] = None,
+        cleanup_callback: Optional[Callable[[list[str]], Awaitable[object]]] = None,
+        test_worktree_grace_period_seconds: int = 900,
+    ) -> None:
         """초기화.
 
         Args:
@@ -51,6 +61,10 @@ class OrphanDetector:
         self.registry = registry
         self.grace_period = grace_period
         self._orphan_first_seen: dict[int, float] = {}  # pid → 최초 감지 시각
+        self.repo_root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[3]
+        self.runner_key_exists = runner_key_exists
+        self.cleanup_callback = cleanup_callback
+        self.test_worktree_grace_period_seconds = test_worktree_grace_period_seconds
 
     async def scan(self) -> list[dict]:
         """고아 프로세스를 스캔한다.
@@ -97,6 +111,90 @@ class OrphanDetector:
             return psutil.Process(pid).name().startswith("monitorpage-")
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return False
+
+    def _iter_git_worktrees(self) -> list[dict]:
+        """git worktree list --porcelain 결과를 파싱한다."""
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=str(self.repo_root),
+            timeout=15,
+        )
+        if result.returncode != 0:
+            logger.warning("[orphan-worktree] git worktree list 실패: %s", result.stderr.strip())
+            return []
+
+        parsed: list[dict] = []
+        current: dict[str, str | bool] | None = None
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                if current:
+                    parsed.append(current)
+                current = {"worktree_path": line[9:], "branch": "", "locked": False}
+            elif current is not None and line.startswith("branch "):
+                current["branch"] = line[7:].replace("refs/heads/", "")
+            elif current is not None and line.startswith("locked"):
+                current["locked"] = True
+
+        if current:
+            parsed.append(current)
+        return parsed
+
+    def _runner_keys_exist(self, runner_id: str) -> bool:
+        if self.runner_key_exists is not None:
+            return bool(self.runner_key_exists(runner_id))
+
+        try:
+            from app.modules.dev_runner.services.redis_connection import RedisConnection, RUNNER_KEY_PREFIX
+
+            client = RedisConnection().redis_client
+            for _ in client.scan_iter(f"{RUNNER_KEY_PREFIX}:{runner_id}:*"):
+                return True
+            return False
+        except Exception as exc:
+            logger.warning("[orphan-worktree] runner key 조회 실패 (%s): %s", runner_id, exc)
+            return False
+
+    async def detect_orphan_test_worktrees(self) -> list[str]:
+        """잔류 test worktree 후보 branch 목록을 반환한다."""
+        from app.modules.dev_runner.services.worktree_service import is_test_branch
+
+        now = time.time()
+        branches: list[str] = []
+        for item in self._iter_git_worktrees():
+            branch = str(item.get("branch") or "")
+            if not branch or not is_test_branch(branch):
+                continue
+
+            worktree_path = Path(str(item.get("worktree_path") or ""))
+            if not worktree_path.exists():
+                continue
+
+            age_seconds = now - worktree_path.stat().st_mtime
+            if age_seconds < self.test_worktree_grace_period_seconds:
+                continue
+
+            if branch.startswith("runner/"):
+                runner_id = branch.split("/", 1)[1]
+                if self._runner_keys_exist(runner_id):
+                    continue
+
+            branches.append(branch)
+
+        return branches
+
+    async def cleanup_orphan_test_worktrees(self, branches: list[str]) -> object | None:
+        if not branches:
+            return None
+
+        if self.cleanup_callback is not None:
+            return await self.cleanup_callback(branches)
+
+        from app.modules.dev_runner.services.worktree_service import cleanup_worktrees
+
+        return await cleanup_worktrees(branches, dry_run=False, repo_root=self.repo_root)
 
     async def cleanup(self, orphans: list[dict], force: bool = False) -> list[dict]:
         """고아 프로세스를 정리한다.
@@ -222,6 +320,14 @@ class OrphanDetector:
 
                     orphans = await self.scan()
                     await self.cleanup(orphans)
+                    stale_test_branches = await self.detect_orphan_test_worktrees()
+                    if stale_test_branches:
+                        await self.cleanup_orphan_test_worktrees(stale_test_branches)
+                        logger.info(
+                            "[orphan-worktree] cleaned %d stale test worktrees: %s",
+                            len(stale_test_branches),
+                            ", ".join(stale_test_branches),
+                        )
                     next_scan_at = time.monotonic() + scan_interval
 
                 now = time.monotonic()

@@ -1,6 +1,9 @@
 """dev_runner 테스트 공통 conftest - config 격리로 hang 방지"""
 
+import fnmatch
 import json
+import os
+import subprocess
 import sys
 import pytest
 from datetime import datetime
@@ -16,6 +19,9 @@ try:
     import plan_runner.core.stages  # noqa: F401
 except ImportError:
     pass
+
+
+_SESSION_TEST_BRANCH_PATTERNS = ("runner/t-*", "runner/t5*", "plan/test_*", "plan/t-test*")
 
 
 def _collect_python_memory_snapshot(cmdline_filter: str | None = None, limit: int = 30) -> dict:
@@ -142,6 +148,69 @@ def _should_skip_pid_kill(pid: int) -> bool:
         return int(pid) == _os.getpid()
     except Exception:
         return False
+
+
+def _cleanup_session_test_worktrees() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    worktree_result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        timeout=15,
+    )
+
+    current_path: str | None = None
+    current_branch: str | None = None
+    branches_to_delete: set[str] = set()
+    for line in worktree_result.stdout.splitlines() + [""]:
+        if line.startswith("worktree "):
+            current_path = line[9:]
+            current_branch = None
+            continue
+        if line.startswith("branch "):
+            current_branch = line[7:].replace("refs/heads/", "")
+            continue
+        if line == "" and current_path:
+            if current_branch and any(fnmatch.fnmatch(current_branch, pattern) for pattern in _SESSION_TEST_BRANCH_PATTERNS):
+                branches_to_delete.add(current_branch)
+                subprocess.run(
+                    ["git", "worktree", "remove", "--force", current_path],
+                    capture_output=True,
+                    cwd=str(repo_root),
+                    timeout=15,
+                )
+            current_path = None
+            current_branch = None
+
+    refs_result = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/runner", "refs/heads/plan"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        timeout=15,
+    )
+    for branch in {line.strip() for line in refs_result.stdout.splitlines() if line.strip()} | branches_to_delete:
+        if not any(fnmatch.fnmatch(branch, pattern) for pattern in _SESSION_TEST_BRANCH_PATTERNS):
+            continue
+        subprocess.run(
+            ["git", "branch", "-D", branch],
+            capture_output=True,
+            cwd=str(repo_root),
+            timeout=15,
+        )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """pytest 세션 종료 시 test worktree/branch 잔여물을 정리한다."""
+    if os.environ.get("PLAN_RUNNER_DISABLE_SESSION_CLEANUP") == "1":
+        return
+
+    try:
+        _cleanup_session_test_worktrees()
+    except Exception as exc:
+        sys.stderr.write(f"[session_cleanup] warning: {exc}\n")
+        sys.stderr.flush()
 
 
 

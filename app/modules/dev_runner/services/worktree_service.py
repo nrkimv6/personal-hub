@@ -7,38 +7,90 @@ from pathlib import Path
 from typing import Optional
 
 from app.modules.dev_runner.schemas import (
+    BranchUnresolvedPlan,
     CommitDiffStat,
+    MainDirtyStatus,
+    PlanOnlyBranch,
+    WorktreeCleanupResponse,
+    WorktreeCleanupResult,
     WorktreeCommit,
     WorktreeInfo,
-    PlanOnlyBranch,
-    BranchUnresolvedPlan,
-    MainDirtyStatus,
     WorktreeListResponse,
 )
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent.parent  # monitor-page 루트
+TEST_BRANCH_PATTERNS = (
+    re.compile(r"^runner/t-"),
+    re.compile(r"^runner/t5"),
+    re.compile(r"^plan/test_"),
+    re.compile(r"^plan/t-test"),
+)
+_cleanup_lock = asyncio.Lock()
 
 
-def _iter_plan_dirs(repo_root: Path) -> list[Path]:
-    """활성 plan 디렉토리 후보를 우선순위 순서대로 반환.
+def _iter_plan_dirs(repo_root: Path) -> list[tuple[Path, bool]]:
+    """plan 디렉토리 후보를 우선순위 순서대로 반환.
 
     우선순위:
-    1) .worktrees/plans/docs/plan (plan SSOT)
-    2) docs/plan (legacy fallback)
+    1) .worktrees/plans/docs/plan (활성 plan SSOT)
+    2) docs/plan (legacy 활성 plan fallback)
+    3) .worktrees/plans/docs/archive (archive SSOT)
+    4) docs/archive (legacy archive fallback)
     """
     candidates = [
-        repo_root / ".worktrees" / "plans" / "docs" / "plan",
-        repo_root / "docs" / "plan",
+        (repo_root / ".worktrees" / "plans" / "docs" / "plan", False),
+        (repo_root / "docs" / "plan", False),
+        (repo_root / ".worktrees" / "plans" / "docs" / "archive", True),
+        (repo_root / "docs" / "archive", True),
     ]
-    deduped: list[Path] = []
+    deduped: list[tuple[Path, bool]] = []
     seen: set[str] = set()
-    for candidate in candidates:
+    for candidate, archived in candidates:
         key = str(candidate)
         if key in seen:
             continue
         seen.add(key)
-        deduped.append(candidate)
+        deduped.append((candidate, archived))
     return deduped
+
+
+def is_test_branch(branch: str) -> bool:
+    return any(pattern.match(branch) for pattern in TEST_BRANCH_PATTERNS)
+
+
+def compute_cleanable(
+    *,
+    locked: bool,
+    ahead: int,
+    plan_file: Optional[str],
+    archived: bool,
+) -> bool:
+    if locked:
+        return False
+    if ahead != 0:
+        return False
+    if plan_file is None:
+        return True
+    return archived
+
+
+async def _run_git_exec(*args: str, repo_root: Path = _REPO_ROOT) -> tuple[int, str, str]:
+    """git 명령 실행 헬퍼 — returncode/stdout/stderr를 반환한다."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-c", "safe.directory=*", *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(repo_root),
+        )
+        stdout, stderr = await proc.communicate()
+        return (
+            proc.returncode,
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+        )
+    except Exception as exc:
+        return 1, "", str(exc)
 
 
 async def _run_git(*args: str, repo_root: Path = _REPO_ROOT) -> str:
@@ -50,19 +102,10 @@ async def _run_git(*args: str, repo_root: Path = _REPO_ROOT) -> str:
     ⚠️ 중복 주의: scripts/worktree_manager.py:_run_git에도 동일한 safe.directory
     주입 로직이 있다. 하나를 수정할 때 반드시 다른 쪽도 함께 확인할 것.
     """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "git", "-c", "safe.directory=*", *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(repo_root),
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            return ""
-        return stdout.decode("utf-8", errors="replace").strip()
-    except Exception:
+    returncode, stdout, _stderr = await _run_git_exec(*args, repo_root=repo_root)
+    if returncode != 0:
         return ""
+    return stdout.strip()
 
 
 async def list_worktrees(repo_root: Path = _REPO_ROOT) -> list[dict]:
@@ -185,14 +228,16 @@ def _parse_numstat(output: str) -> list[CommitDiffStat]:
     return stats
 
 
-def find_plan_file(branch: str, repo_root: Path = _REPO_ROOT) -> tuple[Optional[str], Optional[str]]:
-    """활성 plan 루트에서 > branch: {branch} 헤더를 찾아 (경로, mtime_iso) 반환 (sync)
+def find_plan_file(
+    branch: str,
+    repo_root: Path = _REPO_ROOT,
+) -> tuple[Optional[str], Optional[str], bool]:
+    """plan/archive 루트에서 > branch: {branch} 헤더를 찾아 (경로, mtime_iso, archived) 반환.
 
-    기존 plan_scanner/plan_path_resolver에 유사 로직 없으므로 자체 구현.
-    매칭 실패 시 (None, None) 반환.
+    매칭 실패 시 (None, None, False) 반환.
     """
     pattern = re.compile(rf"^>\s*branch:\s*{re.escape(branch)}\s*$")
-    for plan_dir in _iter_plan_dirs(repo_root):
+    for plan_dir, archived in _iter_plan_dirs(repo_root):
         if not plan_dir.exists():
             continue
         for md_file in sorted(plan_dir.glob("*.md")):
@@ -203,10 +248,10 @@ def find_plan_file(branch: str, repo_root: Path = _REPO_ROOT) -> tuple[Optional[
                             break
                         if pattern.match(line.rstrip()):
                             mtime_iso = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
-                            return str(md_file.relative_to(repo_root)), mtime_iso
+                            return str(md_file.relative_to(repo_root)), mtime_iso, archived
             except (OSError, UnicodeDecodeError):
                 continue
-    return None, None
+    return None, None, False
 
 
 def list_plan_only_branches(
@@ -222,8 +267,9 @@ def list_plan_only_branches(
     plan_only: list[PlanOnlyBranch] = []
     branch_unresolved: list[BranchUnresolvedPlan] = []
     seen_paths: set[str] = set()
+    seen_plan_only_branches: set[str] = set()
 
-    for plan_dir in _iter_plan_dirs(repo_root):
+    for plan_dir, archived in _iter_plan_dirs(repo_root):
         if not plan_dir.exists():
             continue
         for md_file in sorted(plan_dir.glob("*.md")):
@@ -245,16 +291,22 @@ def list_plan_only_branches(
                             break
 
                 if found_branch is None:
+                    if archived:
+                        continue
                     branch_unresolved.append(BranchUnresolvedPlan(
                         plan_file=relative_path,
                         reason="missing > branch header",
                         plan_mtime=mtime_iso,
                     ))
-                elif found_branch not in existing_branches:
+                elif archived:
+                    continue
+                elif found_branch not in existing_branches and found_branch not in seen_plan_only_branches:
+                    seen_plan_only_branches.add(found_branch)
                     plan_only.append(PlanOnlyBranch(
                         plan_file=relative_path,
                         branch=found_branch,
                         plan_mtime=mtime_iso,
+                        is_test=is_test_branch(found_branch),
                     ))
 
             except (OSError, UnicodeDecodeError):
@@ -265,8 +317,8 @@ def list_plan_only_branches(
 
 async def get_main_dirty(repo_root: Path = _REPO_ROOT) -> MainDirtyStatus:
     """main 브랜치 dirty 파일 목록 반환 — git status --porcelain=v1 -z 파싱"""
-    output = await _run_git("status", "--porcelain=v1", "-z", repo_root=repo_root)
-    if not output:
+    returncode, output, _stderr = await _run_git_exec("status", "--porcelain=v1", "-z", repo_root=repo_root)
+    if returncode != 0 or not output:
         return MainDirtyStatus()
 
     files: list[str] = []
@@ -302,7 +354,7 @@ async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListRespons
 
     async def _build(wt: dict) -> WorktreeInfo:
         branch = wt["branch"]
-        (ahead, behind), commits, (plan_file, plan_mtime) = await asyncio.gather(
+        (ahead, behind), commits, (plan_file, plan_mtime, plan_file_archived) = await asyncio.gather(
             get_ahead_behind(branch, repo_root=repo_root),
             get_worktree_commits(branch, repo_root=repo_root),
             asyncio.to_thread(find_plan_file, branch, repo_root),
@@ -318,6 +370,14 @@ async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListRespons
             commits=commits,
             plan_file=plan_file,
             plan_mtime=plan_mtime,
+            is_test=is_test_branch(branch),
+            plan_file_archived=plan_file_archived,
+            cleanable=compute_cleanable(
+                locked=wt.get("locked", False),
+                ahead=ahead,
+                plan_file=plan_file,
+                archived=plan_file_archived,
+            ),
         )
 
     worktrees: list[WorktreeInfo] = []
@@ -338,3 +398,110 @@ async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListRespons
         branch_unresolved=branch_unresolved_list,
         main_dirty=main_dirty,
     )
+
+
+async def cleanup_worktrees(
+    branches: list[str],
+    dry_run: bool,
+    repo_root: Path = _REPO_ROOT,
+) -> WorktreeCleanupResponse:
+    requested = [branch for branch in dict.fromkeys(branches) if branch]
+    if not requested:
+        return WorktreeCleanupResponse(
+            results=[],
+            summary={"requested": 0, "removed": 0, "skipped": 0, "failed": 0},
+        )
+
+    async with _cleanup_lock:
+        raw_worktrees = await list_worktrees(repo_root=repo_root)
+        worktree_by_branch = {wt["branch"]: wt for wt in raw_worktrees}
+        results: list[WorktreeCleanupResult] = []
+
+        for branch in requested:
+            wt = worktree_by_branch.get(branch)
+            if wt is None:
+                results.append(WorktreeCleanupResult(
+                    branch=branch,
+                    status="skipped",
+                    reason="worktree not found",
+                ))
+                continue
+
+            ahead, _behind = await get_ahead_behind(branch, repo_root=repo_root)
+            plan_file, _plan_mtime, archived = await asyncio.to_thread(find_plan_file, branch, repo_root)
+            cleanable = compute_cleanable(
+                locked=wt.get("locked", False),
+                ahead=ahead,
+                plan_file=plan_file,
+                archived=archived,
+            )
+            if not cleanable:
+                reasons: list[str] = []
+                if wt.get("locked", False):
+                    reasons.append("locked")
+                if ahead != 0:
+                    reasons.append(f"ahead={ahead}")
+                if plan_file and not archived:
+                    reasons.append("active plan linked")
+                results.append(WorktreeCleanupResult(
+                    branch=branch,
+                    status="skipped",
+                    reason=", ".join(reasons) or "not cleanable",
+                ))
+                continue
+
+            if dry_run:
+                results.append(WorktreeCleanupResult(
+                    branch=branch,
+                    status="skipped",
+                    reason="dry_run",
+                ))
+                continue
+
+            worktree_removed = False
+            branch_removed = False
+            remove_rc, _remove_out, remove_err = await _run_git_exec(
+                "worktree", "remove", "--force", wt["worktree_path"],
+                repo_root=repo_root,
+            )
+            if remove_rc == 0 or "is not a working tree" in remove_err:
+                worktree_removed = True
+            else:
+                results.append(WorktreeCleanupResult(
+                    branch=branch,
+                    status="failed",
+                    reason=remove_err.strip() or "git worktree remove failed",
+                    worktree_removed=False,
+                    branch_removed=False,
+                ))
+                continue
+
+            branch_rc, _branch_out, branch_err = await _run_git_exec(
+                "branch", "-D", branch,
+                repo_root=repo_root,
+            )
+            if branch_rc == 0 or "not found" in branch_err or "branch '" in branch_err:
+                branch_removed = branch_rc == 0 or "not found" in branch_err
+                results.append(WorktreeCleanupResult(
+                    branch=branch,
+                    status="removed",
+                    worktree_removed=worktree_removed,
+                    branch_removed=branch_removed,
+                ))
+                continue
+
+            results.append(WorktreeCleanupResult(
+                branch=branch,
+                status="failed",
+                reason=branch_err.strip() or "git branch -D failed",
+                worktree_removed=worktree_removed,
+                branch_removed=False,
+            ))
+
+        summary = {
+            "requested": len(requested),
+            "removed": sum(1 for result in results if result.status == "removed"),
+            "skipped": sum(1 for result in results if result.status == "skipped"),
+            "failed": sum(1 for result in results if result.status == "failed"),
+        }
+        return WorktreeCleanupResponse(results=results, summary=summary)
