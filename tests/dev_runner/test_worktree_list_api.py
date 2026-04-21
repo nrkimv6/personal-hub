@@ -1,7 +1,12 @@
 """worktree_service 단위 TC + GET /worktrees HTTP TC"""
+import os
 import shutil
 import subprocess
+import time
+from pathlib import Path
+
 import pytest
+from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, patch, MagicMock
 
 
@@ -276,3 +281,127 @@ class TestRealGitPrunable:
 
         assert "runner/active" in branches
         assert "runner/prunable" not in branches
+
+
+def _run_repo_git(repo: Path, *args: str, env: dict[str, str] | None = None) -> None:
+    subprocess.run(["git", *args], cwd=str(repo), capture_output=True, check=True, env=env)
+
+
+def _init_http_repo(tmp_path: Path, worktree_count: int = 1, commits_per_worktree: int = 1) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run_repo_git(repo, "init", "-b", "main")
+    _run_repo_git(repo, "config", "user.email", "test@test.com")
+    _run_repo_git(repo, "config", "user.name", "Test")
+    _run_repo_git(repo, "config", "commit.gpgsign", "false")
+
+    (repo / "README.md").write_text("seed", encoding="utf-8")
+    _run_repo_git(repo, "add", "README.md")
+    _run_repo_git(repo, "commit", "-m", "init")
+
+    plan_dir = repo / "docs" / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+
+    for index in range(worktree_count):
+        branch = f"impl/http-{index}"
+        worktree_path = repo / ".worktrees" / f"impl-http-{index}"
+        _run_repo_git(repo, "worktree", "add", "-b", branch, str(worktree_path))
+
+        for commit_index in range(commits_per_worktree):
+            target = worktree_path / "app" / f"file_{index}_{commit_index}.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f"print('{index}-{commit_index}')\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["GIT_AUTHOR_DATE"] = f"2026-04-07 0{commit_index}:00:00 +0900"
+            env["GIT_COMMITTER_DATE"] = env["GIT_AUTHOR_DATE"]
+            _run_repo_git(worktree_path, "add", str(target.relative_to(worktree_path)), env=env)
+            _run_repo_git(
+                worktree_path,
+                "commit",
+                "-m",
+                f"feat: commit {index}-{commit_index}",
+                env=env,
+            )
+
+        (plan_dir / f"2026-04-07_http-{index}.md").write_text(
+            f"> branch: {branch}\n",
+            encoding="utf-8",
+        )
+
+    return repo
+
+
+@pytest.fixture
+async def http_client():
+    from app.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+class TestWorktreeListHttp:
+    @pytest.mark.http
+    @pytest.mark.asyncio
+    async def test_list_worktrees_v2_http_right_shape_preserved(self, tmp_path: Path, http_client):
+        repo = _init_http_repo(tmp_path, worktree_count=1, commits_per_worktree=1)
+
+        with patch(
+            "app.modules.dev_runner.routes.worktrees._resolve_repo_root",
+            return_value=repo,
+        ):
+            v1_resp = await http_client.get("/api/v1/dev-runner/worktrees")
+            v2_resp = await http_client.get("/api/v1/dev-runner/worktrees/v2")
+
+        assert v1_resp.status_code == 200
+        assert v2_resp.status_code == 200
+
+        v1_data = v1_resp.json()
+        v2_data = v2_resp.json()
+
+        assert isinstance(v1_data, list)
+        assert isinstance(v2_data, dict)
+        assert set(v2_data.keys()) == {
+            "worktrees",
+            "plan_only",
+            "branch_unresolved",
+            "main_dirty",
+        }
+        assert len(v2_data["worktrees"]) == len(v1_data) == 1
+        assert v2_data["worktrees"][0]["branch"] == v1_data[0]["branch"]
+
+    @pytest.mark.http
+    @pytest.mark.asyncio
+    async def test_list_worktrees_v2_http_plan_mtime_present(self, tmp_path: Path, http_client):
+        repo = _init_http_repo(tmp_path, worktree_count=1, commits_per_worktree=1)
+
+        with patch(
+            "app.modules.dev_runner.routes.worktrees._resolve_repo_root",
+            return_value=repo,
+        ):
+            resp = await http_client.get("/api/v1/dev-runner/worktrees/v2")
+
+        assert resp.status_code == 200
+        item = resp.json()["worktrees"][0]
+        assert item["plan_mtime"] is not None
+        assert item["plan_mtime"][4] == "-"
+        assert item["plan_file"].replace("\\", "/").startswith("docs/plan/")
+
+    @pytest.mark.http
+    @pytest.mark.asyncio
+    async def test_list_worktrees_v2_http_performance_10worktrees(self, tmp_path: Path, http_client):
+        repo = _init_http_repo(tmp_path, worktree_count=10, commits_per_worktree=3)
+
+        with patch(
+            "app.modules.dev_runner.routes.worktrees._resolve_repo_root",
+            return_value=repo,
+        ):
+            started = time.perf_counter()
+            resp = await http_client.get("/api/v1/dev-runner/worktrees/v2")
+            elapsed = time.perf_counter() - started
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["worktrees"]) == 10
+        assert all(len(item["commits"]) == 3 for item in data["worktrees"])
+        assert elapsed < 3.0
