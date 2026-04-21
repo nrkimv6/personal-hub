@@ -9,6 +9,7 @@ test_plan_done_e2e.py — monitor-page batch_done API e2e 테스트
 """
 
 import asyncio
+import json
 import textwrap
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -178,3 +179,87 @@ async def test_run_done_resolver_error_keeps_plan_unmoved_E(svc, tmp_path, dev_r
     assert plan_path.exists()
     assert plan_path.read_text(encoding="utf-8") == original
     assert not archive_path.exists()
+
+
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_batch_done_ignores_unrelated_snapshot_json_B(svc, tmp_path, dev_runner_config_isolation):
+    """B: unrelated ownership snapshot이 남아 있어도 batch_done(manual path)은 정상 완료된다."""
+    plan_dir = tmp_path / "docs" / "plan"
+    archive_dir = tmp_path / "docs" / "archive"
+    ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+    ownership_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = make_completed_plan(plan_dir, "2026-04-21-batch-done-snapshot.md")
+
+    (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+    done_md = tmp_path / "docs" / "DONE.md"
+    done_md.parent.mkdir(parents=True, exist_ok=True)
+    done_md.write_text("# DONE\n", encoding="utf-8")
+    (ownership_dir / "other-runner.json").write_text(
+        json.dumps(
+            {
+                "runner_id": "other-runner",
+                "captured_at": "2026-04-21T10:00:00",
+                "project_root": str(tmp_path),
+                "dirty_files": ["TODO.md"],
+                "owned_files": [],
+                "clean_at_start_files": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    svc.add_path(str(plan_dir))
+
+    with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+         patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")), \
+         patch("app.modules.dev_runner.services.plan_service._publish_log"), \
+         patch("app.modules.dev_runner.services.plan_service._get_redis", return_value=MagicMock()):
+        result = await svc.batch_done()
+
+    assert result["total"] == 1
+    assert result["success"] == 1
+    assert result["failed"] == 0
+    assert not plan_path.exists()
+    assert (archive_dir / plan_path.name).exists()
+
+
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_run_done_strict_snapshot_failure_keeps_plan_unmoved_E(svc, tmp_path, dev_runner_config_isolation):
+    """E: auto-done + snapshot JSON 충돌이면 archive 이동 없이 ownership_guard로 실패한다."""
+    plan_dir = tmp_path / "docs" / "plan"
+    archive_dir = tmp_path / "docs" / "archive"
+    ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+    ownership_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = make_completed_plan(plan_dir, "2026-04-21-strict-fail.md")
+    original = plan_path.read_text(encoding="utf-8")
+
+    (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+    done_md = tmp_path / "docs" / "DONE.md"
+    done_md.parent.mkdir(parents=True, exist_ok=True)
+    done_md.write_text("# DONE\n", encoding="utf-8")
+    (ownership_dir / "strict-runner.json").write_text(
+        json.dumps(
+                {
+                    "runner_id": "strict-runner",
+                    "captured_at": "2026-04-21T11:00:00",
+                    "project_root": str(tmp_path),
+                    "dirty_files": [],
+                    "owned_files": ["docs/plan/owned-other.md"],
+                    "clean_at_start_files": [],
+                },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir):
+        result = await svc.run_done(str(plan_path), runner_id="strict-runner")
+
+    assert result["success"] is False
+    assert result["reason"] == "ownership_guard"
+    assert plan_path.exists()
+    assert plan_path.read_text(encoding="utf-8") == original
+    assert not (archive_dir / plan_path.name).exists()

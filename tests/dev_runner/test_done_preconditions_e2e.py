@@ -6,6 +6,7 @@ T4 검증:
 - fix plan(Phase R 방어 완료)에 대해 done API 전체 흐름 정상 완료
 """
 import asyncio
+import json
 import textwrap
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -113,3 +114,44 @@ async def test_done_e2e_fix_plan_with_phase_r_completes(svc, tmp_path, dev_runne
     assert result["success"] is True
     # plan이 archive로 이동됨
     assert (archive_dir / "2026-03-31_fix-test-ok.md").exists() or not plan_path.exists()
+
+
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_manual_done_ignores_stale_snapshot_without_runner_id_B(svc, tmp_path, dev_runner_config_isolation):
+    """B: stale ownership snapshot이 남아 있어도 manual /done(None)은 정상 완료된다."""
+    plan_dir = tmp_path / "docs" / "plan"
+    archive_dir = tmp_path / "docs" / "archive"
+    ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+    ownership_dir.mkdir(parents=True, exist_ok=True)
+
+    todo_md = tmp_path / "TODO.md"
+    todo_md.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+    done_md = tmp_path / "docs" / "DONE.md"
+    done_md.parent.mkdir(parents=True, exist_ok=True)
+    done_md.write_text("# DONE\n", encoding="utf-8")
+
+    plan_path = make_fix_plan_with_phase_r(plan_dir, "2026-04-21_fix-stale-snapshot.md")
+    (ownership_dir / "stale-runner.json").write_text(
+        json.dumps(
+            {
+                "runner_id": "stale-runner",
+                "captured_at": "2026-04-21T09:00:00",
+                "project_root": str(tmp_path),
+                "dirty_files": ["TODO.md"],
+                "owned_files": [],
+                "clean_at_start_files": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+         patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")), \
+         patch("app.modules.dev_runner.services.plan_service._publish_log"), \
+         patch("app.modules.dev_runner.services.plan_service._get_redis", return_value=MagicMock()):
+        result = await svc.run_done(str(plan_path))
+
+    assert result["success"] is True
+    assert (archive_dir / plan_path.name).exists() or not plan_path.exists()

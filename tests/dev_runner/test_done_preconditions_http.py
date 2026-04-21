@@ -170,6 +170,7 @@ class TestDonePreconditionsHttp:
             result = asyncio.run(
                 run_plan_done(
                     base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("="),
+                    x_plan_runner_id=None,
                 )
             )
 
