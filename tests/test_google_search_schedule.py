@@ -596,21 +596,28 @@ class TestExecuteGoogleSearch:
         mock_db = self._make_mock_db(saved_search=mock_saved_search)
         added_items = []
         mock_db.add.side_effect = lambda x: added_items.append(x)
+        mock_db.refresh = Mock()
+        enqueue_mock = AsyncMock(return_value=GoogleSearchQueue.STATUS_QUEUED)
 
         with patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db):
             with patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service):
-                with patch.object(worker, "_update_worker_state"):
-                    await worker._execute_google_search(
-                        schedule_id=99,
-                        run_id=1,
-                        saved_search_id=1,
-                    )
+                with patch("app.worker.scheduled_worker.enqueue_google_search", enqueue_mock):
+                    with patch.object(worker, "_update_worker_state"):
+                        await worker._execute_google_search(
+                            schedule_id=99,
+                            run_id=1,
+                            saved_search_id=1,
+                        )
 
         # 추가된 GoogleSearchQueue의 schedule_id가 99인지 확인
         assert len(added_items) == 1
         queue_item = added_items[0]
         assert isinstance(queue_item, GoogleSearchQueue)
         assert queue_item.schedule_id == 99
+        assert queue_item.status == GoogleSearchQueue.STATUS_QUEUED
+        enqueue_mock.assert_awaited_once_with(queue_item, mock_db)
+        mock_service.complete_run.assert_called_once()
+        mock_service.update_schedule_after_run.assert_called_once_with(99)
 
     @pytest.mark.asyncio
     async def test_execute_google_search_boundary_missing_saved_search(self):
@@ -650,19 +657,22 @@ class TestExecuteGoogleSearch:
 
         mock_db = self._make_mock_db(saved_search=mock_saved_search)
         mock_db.commit.side_effect = Exception("DB 연결 오류")
+        enqueue_mock = AsyncMock()
 
         with patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db):
             with patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service):
-                with patch.object(worker, "_update_worker_state"):
-                    await worker._execute_google_search(
-                        schedule_id=1,
-                        run_id=5,
-                        saved_search_id=1,
-                    )
+                with patch("app.worker.scheduled_worker.enqueue_google_search", enqueue_mock):
+                    with patch.object(worker, "_update_worker_state"):
+                        await worker._execute_google_search(
+                            schedule_id=1,
+                            run_id=5,
+                            saved_search_id=1,
+                        )
 
         mock_service.fail_run.assert_called_once()
         run_id_called = mock_service.fail_run.call_args[0][0]
         assert run_id_called == 5
+        enqueue_mock.assert_not_awaited()
 
 
 if __name__ == "__main__":

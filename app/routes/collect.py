@@ -11,11 +11,10 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.services.collect_service import CollectService
 from app.services.task_schedule_service import TaskScheduleService
+from app.modules.google_search.services.queue_service import enqueue_google_search
 from app.schemas.collect import CollectedPostList, CollectedPostBase, CrawlHistoryList
 from app.models import TaskSchedule, CrawlRequest
 from app.models.google_search import GoogleSearchQueue, GoogleSavedSearch
-from app.shared.redis import RedisClient, RedisQueue
-from app.shared.redis.queue import GOOGLE_SEARCH_QUEUE
 
 router = APIRouter(prefix="/collect", tags=["collect"])
 
@@ -678,28 +677,7 @@ async def trigger_schedule_run(
         db.commit()
         db.refresh(queue_item)
 
-        # Redis 큐에 추가 시도
-        redis_client = await RedisClient.get_client()
-        if redis_client:
-            redis_queue = RedisQueue(redis_client, GOOGLE_SEARCH_QUEUE)
-            success = await redis_queue.push({
-                "id": queue_item.id,
-                "search_id": queue_item.search_id,
-                "query": queue_item.query,
-                "date_filter": queue_item.date_filter,
-                "max_pages": queue_item.max_pages,
-                "search_params": queue_item.search_params,
-                "created_at": queue_item.created_at.isoformat() if queue_item.created_at else None,
-            })
-
-            if not success:
-                # Redis push 실패 → SQLite fallback
-                queue_item.status = "pending"
-                db.commit()
-        else:
-            # Redis 미연결 → SQLite fallback
-            queue_item.status = "pending"
-            db.commit()
+        await enqueue_google_search(queue_item, db)
 
         return {
             "success": True,

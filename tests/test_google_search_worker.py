@@ -215,6 +215,47 @@ class TestGoogleSearchWorkerResults:
         worker = GoogleSearchWorker(browser_manager=None)
         assert worker.name == "google_search_worker"
 
+    @pytest.mark.asyncio
+    async def test_setup_redis_recovers_pending_requests_once(self):
+        """Redis 연결 시 startup recovery 1회 실행."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+
+        worker = GoogleSearchWorker(browser_manager=None)
+
+        with patch(
+            "app.worker.google_search_worker.RedisClient.get_client",
+            AsyncMock(return_value=object()),
+        ):
+            with patch("app.worker.google_search_worker.RedisQueue", return_value=Mock()):
+                with patch.object(
+                    worker,
+                    "_recover_pending_requests",
+                    AsyncMock(),
+                ) as recover_mock:
+                    await worker._setup_redis()
+                    await worker._setup_redis()
+
+        assert worker.use_redis is True
+        recover_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_setup_redis_falls_back_to_sqlite_when_unavailable(self):
+        """Redis 미연결 시 startup recovery 없이 SQLite 모드 유지."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+
+        worker = GoogleSearchWorker(browser_manager=None)
+
+        with patch(
+            "app.worker.google_search_worker.RedisClient.get_client",
+            AsyncMock(return_value=None),
+        ):
+            with patch.object(worker, "_recover_pending_requests", AsyncMock()) as recover_mock:
+                await worker._setup_redis()
+
+        assert worker.use_redis is False
+        assert worker.redis_queue is None
+        recover_mock.assert_not_awaited()
+
 
 # ============================================================
 # BOUNDARY: Are the boundary conditions correct?
@@ -511,6 +552,59 @@ class TestGoogleSearchWorkerProcessing:
 
         assert saved.last_search_id == search_id
         assert saved.last_result_count == 10
+
+    @pytest.mark.asyncio
+    async def test_recover_pending_requests_skips_without_redis_queue(self):
+        """Redis 큐가 없으면 복구를 바로 스킵."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+
+        worker = GoogleSearchWorker(browser_manager=None)
+        worker.redis_queue = None
+
+        with patch(
+            "app.worker.google_search_worker.recover_pending_google_searches",
+            AsyncMock(),
+        ) as recover_mock:
+            await worker._recover_pending_requests()
+
+        recover_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_recover_pending_requests_skips_when_db_unavailable(self):
+        """DB circuit open 상태면 복구를 수행하지 않는다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+
+        worker = GoogleSearchWorker(browser_manager=None)
+        worker.redis_queue = Mock()
+
+        with patch("app.worker.google_search_worker.db_circuit.is_available", return_value=False):
+            with patch(
+                "app.worker.google_search_worker.recover_pending_google_searches",
+                AsyncMock(),
+            ) as recover_mock:
+                await worker._recover_pending_requests()
+
+        recover_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_recover_pending_requests_runs_service_and_closes_session(self):
+        """DB 사용 가능 시 pending 복구 서비스를 호출한다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+
+        worker = GoogleSearchWorker(browser_manager=None)
+        worker.redis_queue = Mock()
+        mock_db = Mock()
+
+        with patch("app.worker.google_search_worker.db_circuit.is_available", return_value=True):
+            with patch("app.worker.google_search_worker.SessionLocal", return_value=mock_db):
+                with patch(
+                    "app.worker.google_search_worker.recover_pending_google_searches",
+                    AsyncMock(return_value={"pending_found": 2, "recovered": 1, "failed_push": 1}),
+                ) as recover_mock:
+                    await worker._recover_pending_requests()
+
+        recover_mock.assert_awaited_once_with(mock_db)
+        mock_db.close.assert_called_once()
 
 
 class TestBuildUrlSiteRestriction:

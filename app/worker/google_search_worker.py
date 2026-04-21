@@ -24,6 +24,7 @@ import logging
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
+from app.core.database import db_circuit
 from app.shared.worker.base_worker import BaseWorker
 from app.database import SessionLocal
 from app.models.google_search import (
@@ -37,6 +38,7 @@ from app.modules.google_search.services.crawler import (
     CrawlOptions,
     CaptchaDetectedError,
 )
+from app.modules.google_search.services.queue_service import recover_pending_google_searches
 from app.shared.redis import RedisClient, RedisQueue
 from app.shared.redis.queue import GOOGLE_SEARCH_QUEUE
 
@@ -89,11 +91,37 @@ class GoogleSearchWorker(BaseWorker):
             self.redis_queue = RedisQueue(redis_client, GOOGLE_SEARCH_QUEUE)
             self.use_redis = True
             logger.info(f"[{self.name}] Redis 큐 모드 활성화")
+            await self._recover_pending_requests()
         else:
             self.use_redis = False
             logger.info(f"[{self.name}] SQLite 폴링 모드 (Redis 미연결)")
 
         self._redis_initialized = True
+
+    async def _recover_pending_requests(self):
+        """워커 시작 시 pending 요청을 Redis 큐에 복구."""
+        if not self.redis_queue:
+            logger.debug(f"[{self.name}] Redis 큐가 없어 pending 복구 스킵")
+            return
+
+        if not db_circuit.is_available():
+            logger.info("[%s] DB 불가 — pending 복구 스킵", self.name)
+            return
+
+        db = SessionLocal()
+        try:
+            result = await recover_pending_google_searches(db)
+            logger.info(
+                "[%s] Google pending 복구: pending_found=%s, recovered=%s, failed_push=%s",
+                self.name,
+                result["pending_found"],
+                result["recovered"],
+                result["failed_push"],
+            )
+        except Exception as e:
+            self._log_worker_error("pending 복구", e)
+        finally:
+            db.close()
 
     def _get_loop_interval(self) -> float:
         """메인 루프 간격 반환.

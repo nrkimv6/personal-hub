@@ -23,6 +23,7 @@ from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
 from app.models import ServiceAccount, TaskSchedule, TaskScheduleRun
 from app.models.google_search import GoogleSearchQueue, GoogleSearchHistory, GoogleSavedSearch
+from app.modules.google_search.services.queue_service import enqueue_google_search
 
 from app.services.task_schedule_service import TaskScheduleService
 from app.modules.instagram.services.crawl_service import CrawlService
@@ -878,14 +879,23 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 search_params=saved_search.search_params,
                 saved_search_id=saved_search_id,
                 schedule_id=schedule_id,
-                status="pending"
+                status=GoogleSearchQueue.STATUS_QUEUED,
             )
             db.add(queue_item)
             db.commit()
+            db.refresh(queue_item)
+
+            status = await enqueue_google_search(queue_item, db)
 
             logger.info(
-                f"[{self.name}] Google 검색 큐에 추가: "
-                f"search_id={search_id}, query={saved_search.query}"
+                "[%s] Google 검색 큐에 추가: search_id=%s, query=%s, schedule_id=%s, "
+                "mode=%s, status=%s",
+                self.name,
+                search_id,
+                saved_search.query,
+                schedule_id,
+                "redis" if status == GoogleSearchQueue.STATUS_QUEUED else "sqlite",
+                status,
             )
 
             # 즉시 완료 처리 (비동기 - 실제 결과는 GoogleSearchWorker가 처리)
