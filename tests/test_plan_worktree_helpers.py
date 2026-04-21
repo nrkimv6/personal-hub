@@ -129,8 +129,8 @@ def test_resolve_active_plan_file_prefers_plans_worktree_R(tmp_path):
     assert resolved == plans.resolve()
 
 
-def test_resolve_active_plan_file_fallback_to_legacy_B(tmp_path):
-    """B: plans/worktree가 없으면 legacy docs/plan 경로를 반환"""
+def test_resolve_active_plan_file_returns_existing_input_path_B(tmp_path):
+    """B: plans/worktree가 없어도 입력 경로가 실제 파일이면 그대로 반환"""
     legacy = tmp_path / "docs" / "plan" / "2026-01-02_test.md"
     legacy.parent.mkdir(parents=True, exist_ok=True)
     legacy.write_text("# legacy only\n", encoding="utf-8")

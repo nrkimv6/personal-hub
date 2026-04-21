@@ -125,7 +125,7 @@ def resolve_plan_target(plan_file: str | Path, purpose: str = "archive") -> Path
 
     docs_idx = _find_docs_segment(source)
     if docs_idx < 0 or docs_idx + 1 >= len(parts) or parts[docs_idx + 1] != "plan":
-        raise PathRuleError(f"docs/plan 경로가 아닌 파일입니다: {source}")
+        raise PathRuleError(f"plan source 경로가 아닌 파일입니다: {source}")
 
     docs_dir = Path(*source.parts[: docs_idx + 1])  # .../docs
     parent_before_docs = source.parts[docs_idx - 1] if docs_idx > 0 else ""

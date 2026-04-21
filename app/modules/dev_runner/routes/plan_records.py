@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.config import PROJECT_ROOT
 from app.database import get_db
 from app.modules.dev_runner.services.plan_record_service import PlanRecordService
 from app.modules.dev_runner.services.plan_service import plan_service as _plan_service
@@ -39,6 +40,7 @@ class IngestSingleRequest(BaseModel):
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/plans", tags=["plan-records"])
+_DEFAULT_PLANS_ARCHIVE_DIR = PROJECT_ROOT / ".worktrees" / "plans" / "docs" / "archive"
 
 
 @router.get("/records/by-path", response_model=PlanRecordResponse)
@@ -153,7 +155,7 @@ def import_archived(archive_dir: Optional[str] = None, db: Session = Depends(get
         registered = _plan_service.list_registered_paths()
         archive_dirs = [r.path for r in registered if getattr(r, "path_type", "") == "archive"]
         if not archive_dirs:
-            archive_dirs = ["docs/archive"]
+            archive_dirs = [str(_DEFAULT_PLANS_ARCHIVE_DIR)]
     else:
         archive_dirs = [archive_dir]
 

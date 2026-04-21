@@ -48,15 +48,11 @@ def _iter_plan_dirs(repo_root: Path) -> list[tuple[Path, bool]]:
 
     우선순위:
     1) .worktrees/plans/docs/plan (활성 plan SSOT)
-    2) docs/plan (legacy 활성 plan fallback)
-    3) .worktrees/plans/docs/archive (archive SSOT)
-    4) docs/archive (legacy archive fallback)
+    2) .worktrees/plans/docs/archive (archive SSOT)
     """
     candidates = [
         (repo_root / ".worktrees" / "plans" / "docs" / "plan", False),
-        (repo_root / "docs" / "plan", False),
         (repo_root / ".worktrees" / "plans" / "docs" / "archive", True),
-        (repo_root / "docs" / "archive", True),
     ]
     deduped: list[tuple[Path, bool]] = []
     seen: set[str] = set()

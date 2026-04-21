@@ -615,6 +615,44 @@ class TestMigration:
         assert "/existing/path" in reg_paths
         assert "/should/not/appear" not in reg_paths
 
+    def test_normalizes_monitor_page_legacy_paths_to_plans_ssot(self, dev_runner_config_isolation, tmp_path):
+        """monitor-page legacy docs/plan, docs/archive 등록 경로는 plans SSOT로 치환"""
+        from app.modules.dev_runner.services.plan_service import PlanService
+
+        cfg = dev_runner_config_isolation
+        project_root = tmp_path / "monitor-page"
+        reg_file = project_root / "registered_paths.json"
+        legacy_plan = project_root / "docs" / "plan"
+        legacy_archive = project_root / "docs" / "archive"
+        ssot_plan = project_root / ".worktrees" / "plans" / "docs" / "plan"
+        ssot_archive = project_root / ".worktrees" / "plans" / "docs" / "archive"
+
+        ssot_plan.mkdir(parents=True)
+        ssot_archive.mkdir(parents=True)
+        reg_file.write_text(
+            json.dumps(
+                [
+                    {"path": str(legacy_plan), "type": "plan"},
+                    {"path": str(legacy_archive), "type": "archive"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        cfg.REGISTERED_PATHS_FILE = reg_file
+        cfg.EXTERNAL_PLANS_FILE = project_root / "external_plans.json"
+        cfg.IGNORED_PLANS_FILE = project_root / "ignored_plans.json"
+        cfg.WTOOLS_BASE_DIR = tmp_path / "nonexistent_wtools"
+        cfg.IGNORED_PLANS_FILE.write_text("[]", encoding="utf-8")
+
+        with patch("app.modules.dev_runner.services.plan_service.PROJECT_ROOT", project_root):
+            svc = PlanService()
+
+        reg_paths = {(entry["path"], entry["type"]) for entry in svc._registered_paths}
+        assert (str(ssot_plan.resolve()), "plan") in reg_paths
+        assert (str(ssot_archive.resolve()), "archive") in reg_paths
+        assert (str(legacy_plan.resolve()), "plan") not in reg_paths
+        assert (str(legacy_archive.resolve()), "archive") not in reg_paths
+
 
 # ========== run_done() ==========
 

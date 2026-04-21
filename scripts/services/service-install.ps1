@@ -32,7 +32,7 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)  # scripts/ser
 
 # Service configuration
 # Python service runner: service_run.py (service-run.ps1에서 마이그레이션됨)
-# See: docs/plan/2026-02-18_service-runner-python-migration.md
+# See: .worktrees/plans/docs/plan/2026-02-18_service-runner-python-migration.md
 $PostgresServiceName = "postgresql-scoop"
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {

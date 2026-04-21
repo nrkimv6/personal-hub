@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.modules.dev_runner.services.worktree_service import (
+    _iter_plan_dirs,
     compute_cleanable,
     find_plan_file,
     is_test_branch,
@@ -106,3 +107,24 @@ def test_find_plan_file_prefers_active_over_archive(tmp_path: Path):
 
 def test_find_plan_file_returns_none_when_missing(tmp_path: Path):
     assert find_plan_file("impl/missing", tmp_path) == (None, None, False)
+
+
+def test_iter_plan_dirs_uses_plans_worktree_only(tmp_path: Path):
+    repo_root = tmp_path
+    legacy_plan = repo_root / "docs" / "plan"
+    legacy_archive = repo_root / "docs" / "archive"
+    legacy_plan.mkdir(parents=True)
+    legacy_archive.mkdir(parents=True)
+
+    plan_dirs = _iter_plan_dirs(repo_root)
+
+    assert (legacy_plan, False) not in plan_dirs
+    assert (legacy_archive, True) not in plan_dirs
+
+
+def test_find_plan_file_ignores_legacy_docs_dirs(tmp_path: Path):
+    repo_root = tmp_path
+    legacy = repo_root / "docs" / "plan" / "legacy.md"
+    _write_plan(legacy, "impl/legacy-branch")
+
+    assert find_plan_file("impl/legacy-branch", repo_root) == (None, None, False)

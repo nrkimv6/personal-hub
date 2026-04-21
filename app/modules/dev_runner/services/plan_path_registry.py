@@ -6,10 +6,24 @@ import re
 from pathlib import Path
 from typing import Callable, List, Optional
 
+from app.core.config import PROJECT_ROOT
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.schemas import RegisteredPathResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _get_monitor_page_plan_paths() -> dict[str, tuple[Path, Path]]:
+    return {
+        "plan": (
+            PROJECT_ROOT / "docs" / "plan",
+            PROJECT_ROOT / ".worktrees" / "plans" / "docs" / "plan",
+        ),
+        "archive": (
+            PROJECT_ROOT / "docs" / "archive",
+            PROJECT_ROOT / ".worktrees" / "plans" / "docs" / "archive",
+        ),
+    }
 
 
 class PlanPathRegistry:
@@ -69,13 +83,17 @@ class PlanPathRegistry:
         reg_path = config.REGISTERED_PATHS_FILE
 
         if reg_path.exists():
-            # 기존 파일이 문자열 배열이면 객체 배열로 마이그레이션
+            changed = False
             try:
                 data = json.loads(reg_path.read_text(encoding="utf-8"))
                 if data and isinstance(data[0], str):
                     migrated = [{"path": p, "type": "plan"} for p in data]
-                    reg_path.write_text(json.dumps(migrated, ensure_ascii=False, indent=2), encoding="utf-8")
+                    data = migrated
+                    changed = True
                     logger.info(f"[마이그레이션] 문자열→객체 배열 변환 완료 ({len(migrated)}개)")
+                normalized, normalized_changed = self._normalize_registered_paths(data)
+                if normalized_changed or changed:
+                    reg_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
             return
@@ -117,6 +135,7 @@ class PlanPathRegistry:
         # 객체 배열로 저장
         if paths:
             entries = [{"path": p, "type": "plan"} for p in paths]
+            entries, _ = self._normalize_registered_paths(entries)
             reg_path.parent.mkdir(parents=True, exist_ok=True)
             reg_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
             logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(entries)}개)")
@@ -126,7 +145,11 @@ class PlanPathRegistry:
         path = config.REGISTERED_PATHS_FILE
         if path.exists():
             try:
-                self._registered_paths = json.loads(path.read_text(encoding="utf-8"))
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                normalized, changed = self._normalize_registered_paths(loaded)
+                self._registered_paths = normalized
+                if changed:
+                    path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 self._registered_paths = []
 
@@ -134,11 +157,60 @@ class PlanPathRegistry:
         """등록된 경로 목록 저장 — 객체 배열 {"path", "type"}"""
         path = config.REGISTERED_PATHS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self._registered_paths, ensure_ascii=False, indent=2), encoding="utf-8")
+        normalized, _ = self._normalize_registered_paths(self._registered_paths)
+        self._registered_paths = normalized
+        path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _get_registered_path_strs(self) -> List[str]:
         """등록 경로를 문자열 목록으로 반환 (내부 탐색용)"""
         return [entry["path"] for entry in self._registered_paths]
+
+    @staticmethod
+    def _resolve_path_str(path_str: str) -> str:
+        try:
+            return str(Path(path_str).resolve())
+        except Exception:
+            return path_str
+
+    def _normalize_registered_paths(self, entries: List[dict] | List[str]) -> tuple[List[dict], bool]:
+        """monitor-page 레거시 docs 경로를 plans worktree SSOT로 정규화한다."""
+        normalized: List[dict] = []
+        seen: set[tuple[str, str]] = set()
+        changed = False
+
+        legacy_map: dict[str, tuple[str, str]] = {}
+        for path_type, (legacy_path, ssot_path) in _get_monitor_page_plan_paths().items():
+            legacy_map[self._resolve_path_str(str(legacy_path))] = (str(ssot_path.resolve()), path_type)
+
+        for entry in entries:
+            if isinstance(entry, str):
+                item = {"path": entry, "type": "plan"}
+                changed = True
+            else:
+                item = {"path": entry.get("path"), "type": entry.get("type", "plan")}
+
+            path_value = item.get("path")
+            if not path_value:
+                changed = True
+                continue
+
+            resolved = self._resolve_path_str(path_value)
+            replacement = legacy_map.get(resolved)
+            if replacement is not None:
+                path_value, expected_type = replacement
+                if item["type"] != expected_type or item["path"] != path_value:
+                    changed = True
+                item["path"] = path_value
+                item["type"] = expected_type
+
+            dedupe_key = (item["path"], item["type"])
+            if dedupe_key in seen:
+                changed = True
+                continue
+            seen.add(dedupe_key)
+            normalized.append(item)
+
+        return normalized, changed
 
     def _load_ignored_plans(self):
         """수동 무시 plan 목록 로드"""

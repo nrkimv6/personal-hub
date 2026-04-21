@@ -54,7 +54,6 @@ def resolve_active_plan_file(plan_file: str, project_root: "Path | None" = None)
     우선순위:
     1) project_root/.worktrees/plans/docs/plan/{filename_tail} (존재 시 SSOT)
     2) 입력 plan_file의 실제 경로
-    3) project_root/docs/plan/{filename_tail} (legacy fallback)
     """
     if not plan_file:
         return None
@@ -65,8 +64,7 @@ def resolve_active_plan_file(plan_file: str, project_root: "Path | None" = None)
 
     if root and tail:
         plans_ssot = root / ".worktrees" / "plans" / "docs" / "plan" / tail
-        legacy_docs = root / "docs" / "plan" / tail
-        candidates.extend([plans_ssot, legacy_docs])
+        candidates.append(plans_ssot)
 
     path_obj = Path(plan_file)
     if path_obj.is_absolute():

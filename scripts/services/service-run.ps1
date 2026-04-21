@@ -596,7 +596,7 @@ try {
         # 포트 감지에서 확인된 실제 PID를 사용하여 프로세스 종료를 대기.
         # 하트비트 루프는 Session 0에서 TcpClient/netstat가 간헐적으로 실패하여
         # 건강한 API를 오살(false-kill)하는 문제가 있어 제거됨.
-        # See: docs/plan/2026-02-18_api-crash-loop-investigation.md
+        # See: .worktrees/plans/docs/plan/2026-02-18_api-crash-loop-investigation.md
         $uvicornPids = Get-ListeningPids -Port $ApiPort
         if ($uvicornPids.Count -gt 0) {
             $uvicornPid = $uvicornPids[0]

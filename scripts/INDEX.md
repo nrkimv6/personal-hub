@@ -2,7 +2,7 @@
 
 > 이 문서는 `scripts/` 하위 모든 파일의 카테고리 분류와 한 줄 설명을 제공합니다.
 > 작성: 2026-04-11 (Phase 1 — 이동 없음, 문서화만)
-> 관련 plan: [2026-04-11_scripts-reorganization.md](../docs/plan/2026-04-11_scripts-reorganization.md)
+> 관련 plan: [2026-04-11_scripts-reorganization.md](../.worktrees/plans/docs/plan/2026-04-11_scripts-reorganization.md)
 >
 > 현재 `scripts/` 루트에는 148개 파일이 플랫하게 쌓여 있고, 하위 디렉토리 4개(`archive/`, `_deprecated/`, `dumptruck_templates/`, `__pycache__/`)가 존재합니다. 본 plan의 Phase 2~5에 걸쳐 아래 13개 카테고리 폴더로 단계적으로 이동합니다.
 
@@ -128,7 +128,7 @@
 
 > 현재 위치: `scripts/migrations/` ✅
 > 위험도: **🟡 중** — `docs/dev-guide/db-migration.md`, `app/migrations/`와 연관
-> 주요 외부 참조자: `CLAUDE.md` (migrations/migrate_sqlite_to_pg.py), `docs/wiki-schema.md`, `docs/plan/2026-04-10_fix-pg-instagram-posts-remigrate.md`, `docs/plan/2026-04-11_archive-db-first-rotation-and-wtools-ingest-cleanup.md`
+> 주요 외부 참조자: `CLAUDE.md` (migrations/migrate_sqlite_to_pg.py), `docs/wiki-schema.md`, `.worktrees/plans/docs/plan/2026-04-10_fix-pg-instagram-posts-remigrate.md`, `.worktrees/plans/docs/plan/2026-04-11_archive-db-first-rotation-and-wtools-ingest-cleanup.md`
 > 제외: `queue_archived_plans.py` → `plan_runner/` (_todo-3 범위)
 > 제외: `migrate-colors-phase*.py` → `fixes/` (일회성 마이그레이션, _todo-2에서 이관 완료)
 
