@@ -449,12 +449,10 @@ class TestGeminiImagePath(unittest.TestCase):
         return mock
 
     def test_image_path_appended_to_cmd(self):
-        """cli_options={"image_path": "C:/test/57.jpg"} 시 cmd에 @"C:/test/57.jpg" 포함."""
-        import sys
+        """cli_options={"image_path": "C:/test/57.jpg"} 시 argv에 @경로가 추가된다."""
         mock_result = self._make_mock_run()
 
-        with patch("subprocess.run", return_value=mock_result) as mock_run, \
-             patch("os.unlink"):
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
             self.service.execute_gemini(
                 prompt="이미지를 분류하세요",
                 cli_options={"image_path": "C:/test/57.jpg"},
@@ -462,15 +460,16 @@ class TestGeminiImagePath(unittest.TestCase):
             )
 
         mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]  # positional 첫 번째 인수 (cmd 문자열)
-        self.assertIn('@"C:/test/57.jpg"', cmd)
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("@C:/test/57.jpg", cmd)
+        self.assertEqual(mock_run.call_args.kwargs.get("input"), "이미지를 분류하세요")
+        self.assertFalse(mock_run.call_args.kwargs.get("shell"))
 
     def test_no_image_path_no_append(self):
-        """cli_options=None 또는 image_path 없을 때 cmd에 @ 문자 없음."""
+        """cli_options=None 또는 image_path 없을 때 argv에 @인수 없음."""
         mock_result = self._make_mock_run()
 
-        with patch("subprocess.run", return_value=mock_result) as mock_run, \
-             patch("os.unlink"):
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
             self.service.execute_gemini(
                 prompt="분류",
                 cli_options=None,
@@ -479,7 +478,7 @@ class TestGeminiImagePath(unittest.TestCase):
 
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
-        self.assertNotIn(" @", cmd)
+        self.assertEqual(cmd, ["gemini"])
 
     def test_claude_unaffected(self):
         """execute_claude() 시그니처에 cli_options 파라미터가 여전히 존재 (회귀 방지)."""
