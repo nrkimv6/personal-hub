@@ -7,25 +7,39 @@ from app.main import app
 from app.modules.dev_runner.schemas import (
     MainDirtyStatus,
     WorktreeInfo,
+    WorktreeInfoLite,
     WorktreeListResponse,
 )
 
 pytestmark = [pytest.mark.http, pytest.mark.asyncio]
 
-_MOCK_WORKTREE_INFO = WorktreeInfo(
+_MOCK_WORKTREE_INFO_FULL = WorktreeInfo(
     branch="impl/test-branch",
     worktree_path="/repo/.worktrees/impl-test",
     created_at="2026-04-07 10:00:00 +0900",
     ahead=2,
     behind=0,
     locked=False,
+    commit_count=2,
     commits=[],
     plan_file="docs/plan/2026-04-07_test.md",
     plan_mtime="2026-04-07T10:00:00",
 )
 
+_MOCK_WORKTREE_INFO_LITE = WorktreeInfoLite(
+    branch="impl/test-branch",
+    worktree_path="/repo/.worktrees/impl-test",
+    created_at="2026-04-07 10:00:00 +0900",
+    ahead=2,
+    behind=0,
+    locked=False,
+    commit_count=2,
+    plan_file="docs/plan/2026-04-07_test.md",
+    plan_mtime="2026-04-07T10:00:00",
+)
+
 _MOCK_RESPONSE = WorktreeListResponse(
-    worktrees=[_MOCK_WORKTREE_INFO],
+    worktrees=[_MOCK_WORKTREE_INFO_LITE],
     plan_only=[],
     branch_unresolved=[],
     main_dirty=MainDirtyStatus(),
@@ -42,8 +56,8 @@ async def client():
 async def test_get_worktrees_returns_list(client):
     """GET /api/v1/dev-runner/worktrees → 200, 리스트, 필수 필드 존재"""
     with patch(
-        "app.modules.dev_runner.routes.worktrees.get_all_worktrees",
-        new=AsyncMock(return_value=_MOCK_RESPONSE),
+        "app.modules.dev_runner.routes.worktrees.get_all_worktrees_full",
+        new=AsyncMock(return_value=[_MOCK_WORKTREE_INFO_FULL]),
     ):
         resp = await client.get("/api/v1/dev-runner/worktrees")
 
@@ -61,8 +75,8 @@ async def test_get_worktrees_returns_list(client):
 async def test_worktree_list_v1_still_list(client):
     """v1 엔드포인트는 항상 list 타입 응답 유지"""
     with patch(
-        "app.modules.dev_runner.routes.worktrees.get_all_worktrees",
-        new=AsyncMock(return_value=_MOCK_RESPONSE),
+        "app.modules.dev_runner.routes.worktrees.get_all_worktrees_full",
+        new=AsyncMock(return_value=[_MOCK_WORKTREE_INFO_FULL]),
     ):
         resp = await client.get("/api/v1/dev-runner/worktrees")
 
@@ -105,3 +119,5 @@ async def test_worktree_v2_plan_mtime_present(client):
     assert "plan_mtime" in item
     assert item["plan_mtime"] is not None
     assert item["plan_mtime"][4] == "-"  # ISO 8601 형식 간이 확인
+    assert "commit_count" in item
+    assert "commits" not in item

@@ -12,7 +12,7 @@
   } from 'lucide-svelte';
   import {
     devRunnerWorktreeApi,
-    type WorktreeInfo,
+    type WorktreeCommit,
     type WorktreeCleanupResponse,
     type WorktreeListResponse,
     type RepoOption,
@@ -39,6 +39,12 @@
   let cleanupResult: WorktreeCleanupResponse | null = $state(null);
 
   let expanded: Record<string, boolean> = $state({});
+  let commitsByBranch: Record<string, WorktreeCommit[]> = $state({});
+  let loadingCommits: Record<string, boolean> = $state({});
+  let commitsError: Record<string, string> = $state({});
+  let loadRequestSeq = 0;
+  let commitRequestSeq = 0;
+  let branchRequestSeq: Record<string, number> = $state({});
   const selection = createSelection<string>();
 
   const visibleWorktrees = $derived(
@@ -63,16 +69,37 @@
       : 0
   );
 
+  function resetWorktreeUiState() {
+    expanded = {};
+    commitsByBranch = {};
+    loadingCommits = {};
+    commitsError = {};
+    branchRequestSeq = {};
+    cleanupResult = null;
+    selection.clear();
+  }
+
+  function hasVisibleBranch(branch: string): boolean {
+    return response.worktrees.some((wt) => wt.branch === branch);
+  }
+
   async function loadWorktrees() {
+    const requestId = ++loadRequestSeq;
+    resetWorktreeUiState();
     loading = true;
     error = '';
     try {
-      response = await devRunnerWorktreeApi.listV2(selectedRepoId);
+      const nextResponse = await devRunnerWorktreeApi.listV2(selectedRepoId);
+      if (requestId !== loadRequestSeq) return;
+      response = nextResponse;
     } catch (e: unknown) {
+      if (requestId !== loadRequestSeq) return;
       error = e instanceof Error ? e.message : '워크트리 목록을 불러오지 못했습니다';
       response = EMPTY_RESPONSE;
     } finally {
-      loading = false;
+      if (requestId === loadRequestSeq) {
+        loading = false;
+      }
     }
   }
 
@@ -86,8 +113,42 @@
     }
   });
 
+  async function loadBranchCommits(branch: string) {
+    if (loadingCommits[branch] || commitsByBranch[branch]) {
+      return;
+    }
+
+    const requestId = ++commitRequestSeq;
+    const requestRepoId = selectedRepoId ?? null;
+    branchRequestSeq[branch] = requestId;
+    loadingCommits[branch] = true;
+    commitsError[branch] = '';
+
+    const isCurrentRequest = () =>
+      branchRequestSeq[branch] === requestId
+      && (selectedRepoId ?? null) === requestRepoId
+      && hasVisibleBranch(branch);
+
+    try {
+      const commits = await devRunnerWorktreeApi.listCommits(branch, selectedRepoId);
+      if (!isCurrentRequest()) return;
+      commitsByBranch[branch] = commits;
+    } catch (e: unknown) {
+      if (!isCurrentRequest()) return;
+      commitsError[branch] = e instanceof Error ? e.message : '커밋을 불러오지 못했습니다';
+    } finally {
+      if (isCurrentRequest()) {
+        loadingCommits[branch] = false;
+      }
+    }
+  }
+
   function toggleExpanded(branch: string) {
-    expanded[branch] = !expanded[branch];
+    const nextExpanded = !expanded[branch];
+    expanded[branch] = nextExpanded;
+    if (nextExpanded) {
+      void loadBranchCommits(branch);
+    }
   }
 
   function formatDate(dateStr: string | null): string {
@@ -361,7 +422,7 @@
                 onclick={() => toggleExpanded(wt.branch)}
                 type="button"
               >
-                커밋 {wt.commits.length}개
+                커밋 {wt.commit_count}개
                 {#if expanded[wt.branch]}
                   <ChevronUp size={14} />
                 {:else}
@@ -372,28 +433,36 @@
 
             {#if expanded[wt.branch]}
               <div class="commit-list">
-                {#each wt.commits as commit (commit.hash)}
-                  <div class="commit-row">
-                    <div class="commit-header">
-                      <code class="short-hash">{commit.short_hash}</code>
-                      <span class="commit-message">{commit.message}</span>
-                      <span class="commit-date">{formatDate(commit.date)}</span>
-                    </div>
-                    {#if commit.diff_stat.length > 0}
-                      <div class="diff-stat-list">
-                        {#each commit.diff_stat.slice(0, 5) as stat (stat.file)}
-                          <div class="diff-stat-row">
-                            <span class="diff-file">{stat.file}</span>
-                            <span class="diff-changes">{stat.changes}</span>
-                          </div>
-                        {/each}
-                        {#if commit.diff_stat.length > 5}
-                          <div class="diff-more">외 {commit.diff_stat.length - 5}개 파일</div>
-                        {/if}
+                {#if loadingCommits[wt.branch]}
+                  <div class="commit-state">커밋을 불러오는 중...</div>
+                {:else if commitsError[wt.branch]}
+                  <div class="commit-state commit-state-error">{commitsError[wt.branch]}</div>
+                {:else if (commitsByBranch[wt.branch]?.length ?? 0) === 0}
+                  <div class="commit-state">표시할 커밋이 없습니다.</div>
+                {:else}
+                  {#each commitsByBranch[wt.branch] ?? [] as commit (commit.hash)}
+                    <div class="commit-row">
+                      <div class="commit-header">
+                        <code class="short-hash">{commit.short_hash}</code>
+                        <span class="commit-message">{commit.message}</span>
+                        <span class="commit-date">{formatDate(commit.date)}</span>
                       </div>
-                    {/if}
-                  </div>
-                {/each}
+                      {#if commit.diff_stat.length > 0}
+                        <div class="diff-stat-list">
+                          {#each commit.diff_stat.slice(0, 5) as stat (stat.file)}
+                            <div class="diff-stat-row">
+                              <span class="diff-file">{stat.file}</span>
+                              <span class="diff-changes">{stat.changes}</span>
+                            </div>
+                          {/each}
+                          {#if commit.diff_stat.length > 5}
+                            <div class="diff-more">외 {commit.diff_stat.length - 5}개 파일</div>
+                          {/if}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                {/if}
               </div>
             {/if}
           </div>
@@ -823,6 +892,16 @@
   .commit-list {
     border-top: 1px solid var(--border-color, #e5e7eb);
     padding: 0.5rem 0;
+  }
+
+  .commit-state {
+    padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
+    color: var(--text-muted, #6b7280);
+  }
+
+  .commit-state-error {
+    color: var(--color-error, #dc2626);
   }
 
   .commit-row {

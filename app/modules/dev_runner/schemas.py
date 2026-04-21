@@ -424,20 +424,25 @@ class WorktreeCommit(BaseModel):
     diff_stat: List[CommitDiffStat]
 
 
-class WorktreeInfo(BaseModel):
-    """워크트리 상태 정보"""
+class WorktreeInfoLite(BaseModel):
+    """v2 워크트리 상태 정보 (커밋 상세 lazy-load 전용 lite 스키마)"""
     branch: str
     worktree_path: str
     created_at: Optional[str]
     ahead: int
     behind: int
     locked: bool
-    commits: List[WorktreeCommit]
+    commit_count: int
     plan_file: Optional[str]
     plan_mtime: Optional[str] = None
     is_test: bool = False
     plan_file_archived: bool = False
     cleanable: bool = False
+
+
+class WorktreeInfo(WorktreeInfoLite):
+    """v1 워크트리 상태 정보 (full 커밋 포함)"""
+    commits: List[WorktreeCommit]
 
 
 class MainDirtyStatus(BaseModel):
@@ -478,7 +483,7 @@ class WorktreeCleanupResponse(BaseModel):
 
 
 class WorktreeListResponse(BaseModel):
-    worktrees: List[WorktreeInfo] = Field(default_factory=list)
+    worktrees: List[WorktreeInfoLite] = Field(default_factory=list)
     plan_only: List[PlanOnlyBranch] = Field(default_factory=list)
     branch_unresolved: List[BranchUnresolvedPlan] = Field(default_factory=list)
     main_dirty: MainDirtyStatus = Field(default_factory=MainDirtyStatus)
@@ -519,6 +524,7 @@ __all__ = [
     'RetryMergeRequest',
     'CommitDiffStat',
     'WorktreeCommit',
+    'WorktreeInfoLite',
     'WorktreeInfo',
     'MainDirtyStatus',
     'PlanOnlyBranch',
