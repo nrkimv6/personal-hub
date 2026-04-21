@@ -39,6 +39,16 @@ from _dr_runner_predicates import (
 logger = logging.getLogger(__name__)
 
 
+def _cleanup_runner_ownership_snapshot(runner_id: str) -> None:
+    """runner ownership snapshot 단일 truth 파일을 정리한다."""
+    try:
+        ownership_snapshot = OWNERSHIP_SNAPSHOT_DIR / f"{runner_id}.json"
+        if ownership_snapshot.exists():
+            ownership_snapshot.unlink()
+    except Exception as e:
+        logger.debug(f"[cleanup] ownership snapshot cleanup failed (ignoring): {e}")
+
+
 def _try_v2_merge_fallback(runner_id: str, redis_client: redis.Redis, reason_tag: str) -> bool:
     """v2 merge fallback helper ??detect -> handle pattern."""
     try:
@@ -294,12 +304,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     except Exception as e:
         logger.warning(f"[cleanup] workflow DB update failed (ignoring): {e}")
 
-    try:
-        ownership_snapshot = OWNERSHIP_SNAPSHOT_DIR / f"{runner_id}.json"
-        if ownership_snapshot.exists():
-            ownership_snapshot.unlink()
-    except Exception as e:
-        logger.debug(f"[cleanup] ownership snapshot cleanup failed (ignoring): {e}")
+    _cleanup_runner_ownership_snapshot(runner_id)
 
     logger.info(f"[cleanup] _cleanup_process_state completed: {runner_id} (reason={reason})")
 

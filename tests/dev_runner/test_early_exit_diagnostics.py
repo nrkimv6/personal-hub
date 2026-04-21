@@ -314,6 +314,42 @@ class TestMemoryPrecheck:
         # 실행은 계속 — Popen 호출됨
         assert _popen_called, "400MB인데 Popen이 호출되지 않음 (실행 차단됨)"
 
+    def test_ownership_snapshot_capture_warning_but_continue(self, fr, tmp_path):
+        """ownership snapshot capture_error는 warning만 남기고 runner 실행은 계속한다."""
+        import _dr_plan_runner as mod
+
+        _vmem_mock = MagicMock()
+        _vmem_mock.available = 4 * 1024 * 1024 * 1024
+        _vmem_mock.total = 16 * 1024 * 1024 * 1024
+
+        _mock_proc = _make_process(returncode=0)
+        _mock_log = _CapturingLog()
+
+        with (
+            patch.object(mod.psutil, "virtual_memory", return_value=_vmem_mock),
+            patch.object(mod, "get_running_processes", return_value={}),
+            patch.object(mod, "get_running_log_files", return_value={}),
+            patch.object(mod, "get_stream_threads", return_value={}),
+            patch("builtins.open", return_value=_mock_log),
+            patch.object(mod, "_capture_runner_ownership_snapshot", return_value={"capture_error": "git status failed (128)"}),
+            patch.object(mod.subprocess, "Popen", return_value=_mock_proc) as mock_popen,
+            patch.object(mod.threading, "Thread") as _mock_thread,
+        ):
+            _mock_thread.return_value.start = MagicMock()
+            result = mod._launch_plan_runner_process(
+                command=self._make_command("t-own-warn"),
+                redis_client=fr,
+                runner_id="t-own-warn",
+                worktree_path=tmp_path,
+                plan_file="test.md",
+                engine="claude",
+            )
+
+        assert result["success"] is True
+        assert mock_popen.called, "capture_error 경고 후에도 실행은 계속돼야 함"
+        all_written = _mock_log.getvalue()
+        assert "ownership snapshot capture failed" in all_written
+
 
 class TestEnvHeaderInLog:
     """T1-6: [ENV] 헤더가 TRIGGER/RUN_META 직후 로그에 기록되는지 검증"""

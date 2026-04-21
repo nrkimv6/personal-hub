@@ -861,10 +861,10 @@ def _launch_plan_runner_process(
             env["PLAN_RUNNER_BRANCH"] = branch
 
         # ── Phase 2: 메모리 사전 검증 ────────────────────────────────────
+        _log_ch_pre = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
         try:
             _pre_vmem = psutil.virtual_memory()
             _avail_mb = _pre_vmem.available // (1024 * 1024)
-            _log_ch_pre = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
             if _avail_mb < 300:
                 _reject_msg = f"메모리 부족으로 plan-runner 실행 거부 (가용: {_avail_mb}MB < 300MB)"
                 logger.error(f"[_launch_plan_runner_process] {_reject_msg}")
@@ -894,7 +894,20 @@ def _launch_plan_runner_process(
             logger.warning(f"[_launch_plan_runner_process] 메모리 확인 실패 (무시): {_mem_chk_err}")
         # ────────────────────────────────────────────────────────────────
 
-        _capture_runner_ownership_snapshot(runner_id, project_root)
+        ownership_snapshot = _capture_runner_ownership_snapshot(runner_id, project_root)
+        capture_error = ownership_snapshot.get("capture_error") if isinstance(ownership_snapshot, dict) else None
+        if capture_error:
+            _warn_msg = f"[WARN] ownership snapshot capture failed — 실행은 계속 ({capture_error})"
+            logger.warning(f"[_launch_plan_runner_process] {_warn_msg}")
+            try:
+                log_handle.write(_warn_msg + "\n")
+                log_handle.flush()
+            except Exception:
+                pass
+            try:
+                redis_client.publish(_log_ch_pre, _warn_msg)
+            except Exception:
+                pass
 
         process = subprocess.Popen(
             cmd,

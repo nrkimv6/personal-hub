@@ -48,8 +48,10 @@ class TestRestartAfterMergeTriggerIntegration:
         shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
 
         # _execute_merge_with_lock mock (merge 성공 시뮬레이션, 실제 git 실행 방지)
+        cleanup_order = []
         with patch("_dr_stream_cleanup._execute_merge_with_lock") as mock_merge, \
-             patch("_dr_stream_cleanup._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state", side_effect=lambda *a, **k: cleanup_order.append("cleanup")), \
+             patch("_dr_stream_cleanup._cleanup_runner_ownership_snapshot", side_effect=lambda rid: cleanup_order.append(f"snapshot:{rid}")), \
              patch("_dr_plan_runner._pub_and_log"):
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, shared_redis)
@@ -77,6 +79,7 @@ class TestRestartAfterMergeTriggerIntegration:
         # restart_after_merge 플래그가 삭제됐는지 확인 (중복 실행 방지)
         flag = shared_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
         assert flag is None, f"restart_after_merge 플래그가 삭제되지 않음: {flag!r}"
+        assert cleanup_order == [f"snapshot:{runner_id}", "cleanup"], cleanup_order
 
     def test_restart_after_merge_trigger_none_skips_integration(self, shared_redis):
         """T3: trigger 소실(None) 상황에서 restart_after_merge 발동 시 새 command 미생성
@@ -90,7 +93,8 @@ class TestRestartAfterMergeTriggerIntegration:
         # trigger 키 미설정 (소실 시나리오)
 
         with patch("_dr_stream_cleanup._execute_merge_with_lock"), \
-             patch("_dr_stream_cleanup._cleanup_process_state"), \
+             patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup, \
+             patch("_dr_stream_cleanup._cleanup_runner_ownership_snapshot") as mock_snapshot_cleanup, \
              patch("_dr_plan_runner._pub_and_log"):
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, shared_redis)
@@ -99,3 +103,5 @@ class TestRestartAfterMergeTriggerIntegration:
         assert len(raw_commands) == 0, (
             f"trigger 소실 시 새 command를 생성하면 안 됨. 생성된 command: {raw_commands}"
         )
+        mock_snapshot_cleanup.assert_not_called()
+        mock_cleanup.assert_called_once()
