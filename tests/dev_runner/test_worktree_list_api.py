@@ -395,6 +395,23 @@ class TestWorktreeListHttp:
 
     @pytest.mark.http
     @pytest.mark.asyncio
+    async def test_list_worktrees_v2_http_commits_lazy_endpoint(self, tmp_path: Path, http_client):
+        repo = _init_http_repo(tmp_path, worktree_count=1, commits_per_worktree=2)
+
+        with patch(
+            "app.modules.dev_runner.routes.worktrees._resolve_repo_root",
+            return_value=repo,
+        ):
+            resp = await http_client.get("/api/v1/dev-runner/worktrees/v2/commits", params={"branch": "impl/http-0"})
+
+        assert resp.status_code == 200
+        commits = resp.json()
+        assert len(commits) == 2
+        assert commits[0]["message"].startswith("feat: commit 0-")
+        assert "diff_stat" in commits[0]
+
+    @pytest.mark.http
+    @pytest.mark.asyncio
     async def test_list_worktrees_v2_http_performance_10worktrees(self, tmp_path: Path, http_client):
         repo = _init_http_repo(tmp_path, worktree_count=10, commits_per_worktree=3)
 

@@ -1,8 +1,7 @@
 """멀티 레포 워크트리 서비스 TC (Phase 4 — T1/T2)"""
 import pytest
-import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import app.modules.dev_runner.services.worktree_service as svc
 from app.modules.dev_runner.schemas import MainDirtyStatus, WorktreeListResponse
@@ -73,6 +72,113 @@ class TestGetAllWorktreesRepoRoot:
             result = await svc.get_all_worktrees()
 
         assert isinstance(result, WorktreeListResponse)
+
+    @pytest.mark.asyncio
+    async def test_get_all_worktrees_skips_commit_log_when_ahead_zero_RIGHT(self, tmp_path):
+        """ahead=0 브랜치는 git log를 호출하지 않고 commit_count=0 유지"""
+        with (
+            patch.object(
+                svc,
+                "list_worktrees",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "branch": "impl/behind-only",
+                            "worktree_path": str(tmp_path / ".worktrees" / "impl-behind-only"),
+                            "locked": False,
+                        }
+                    ]
+                ),
+            ),
+            patch.object(
+                svc,
+                "_scan_plan_file_index",
+                return_value=({}, {}, []),
+            ),
+            patch.object(
+                svc,
+                "get_ahead_behind",
+                new=AsyncMock(return_value=(0, 7)),
+            ),
+            patch.object(
+                svc,
+                "get_worktree_commits",
+                new=AsyncMock(side_effect=AssertionError("ahead=0 브랜치에서 호출되면 안 됨")),
+            ),
+            patch.object(
+                svc,
+                "get_created_at",
+                new=AsyncMock(side_effect=AssertionError("ahead=0 브랜치에서 호출되면 안 됨")),
+            ),
+            patch.object(
+                svc,
+                "get_main_dirty",
+                new=AsyncMock(return_value=MainDirtyStatus()),
+            ),
+        ):
+            result = await svc.get_all_worktrees(repo_root=tmp_path)
+
+        assert len(result.worktrees) == 1
+        assert result.worktrees[0].ahead == 0
+        assert result.worktrees[0].behind == 7
+        assert result.worktrees[0].commit_count == 0
+        assert result.worktrees[0].created_at is None
+
+    @pytest.mark.asyncio
+    async def test_get_all_worktrees_prefers_batched_ahead_behind_RIGHT(self, tmp_path):
+        """배치 ahead/behind 결과가 있으면 개별 rev-list 호출 없이 사용"""
+        with (
+            patch.object(
+                svc,
+                "list_worktrees",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "branch": "impl/batched",
+                            "worktree_path": str(tmp_path / ".worktrees" / "impl-batched"),
+                            "locked": False,
+                        }
+                    ]
+                ),
+            ),
+            patch.object(
+                svc,
+                "_scan_plan_file_index",
+                return_value=({}, {}, []),
+            ),
+            patch.object(
+                svc,
+                "get_ahead_behind_map",
+                new=AsyncMock(return_value={"impl/batched": (2, 5)}),
+            ),
+            patch.object(
+                svc,
+                "get_ahead_behind",
+                new=AsyncMock(side_effect=AssertionError("배치 결과가 있으면 개별 rev-list 호출 금지")),
+            ),
+            patch.object(
+                svc,
+                "get_worktree_commits",
+                new=AsyncMock(side_effect=AssertionError("v2 lite 응답에서 커밋 상세 호출 금지")),
+            ),
+            patch.object(
+                svc,
+                "get_created_at",
+                new=AsyncMock(return_value="2026-04-21 10:00:00 +0900"),
+            ),
+            patch.object(
+                svc,
+                "get_main_dirty",
+                new=AsyncMock(return_value=MainDirtyStatus()),
+            ),
+        ):
+            result = await svc.get_all_worktrees(repo_root=tmp_path)
+
+        assert len(result.worktrees) == 1
+        assert result.worktrees[0].ahead == 2
+        assert result.worktrees[0].behind == 5
+        assert result.worktrees[0].commit_count == 2
+        assert result.worktrees[0].created_at == "2026-04-21 10:00:00 +0900"
 
 
 class TestGetAllWorktreesWtools:

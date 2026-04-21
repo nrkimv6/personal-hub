@@ -182,6 +182,41 @@ async def get_ahead_behind(branch: str, repo_root: Path = _REPO_ROOT) -> tuple[i
     return ahead, behind
 
 
+async def get_ahead_behind_map(
+    branches: list[str],
+    repo_root: Path = _REPO_ROOT,
+) -> dict[str, tuple[int, int]]:
+    """여러 브랜치의 main 대비 ahead/behind를 한 번에 조회한다."""
+    requested = [branch for branch in dict.fromkeys(branches) if branch]
+    if not requested:
+        return {}
+
+    output = await _run_git(
+        "for-each-ref",
+        "--format=%(refname:short)|%(ahead-behind:refs/heads/main)",
+        *[f"refs/heads/{branch}" for branch in requested],
+        repo_root=repo_root,
+    )
+    if not output:
+        return {}
+
+    ahead_behind_map: dict[str, tuple[int, int]] = {}
+    for line in output.splitlines():
+        if "|" not in line:
+            continue
+        branch, counts = line.split("|", 1)
+        parts = counts.split()
+        if len(parts) != 2:
+            continue
+        try:
+            ahead = int(parts[0])
+            behind = int(parts[1])
+        except ValueError:
+            continue
+        ahead_behind_map[branch] = (ahead, behind)
+    return ahead_behind_map
+
+
 async def get_worktree_commits(branch: str, repo_root: Path = _REPO_ROOT) -> list[WorktreeCommit]:
     """main 이후 커밋 목록 + 각 커밋의 diff stat 반환 (빈 브랜치 방어)"""
     log_output = await _run_git(
@@ -426,15 +461,56 @@ async def get_main_dirty(repo_root: Path = _REPO_ROOT) -> MainDirtyStatus:
     return MainDirtyStatus(dirty_count=len(files), files=files)
 
 
+async def get_created_at(branch: str, ahead: int, repo_root: Path = _REPO_ROOT) -> Optional[str]:
+    """main 이후 가장 오래된 first-parent 커밋 날짜를 반환한다."""
+    if ahead <= 0:
+        return None
+
+    revision = branch if ahead == 1 else f"{branch}~{ahead - 1}"
+    output = await _run_git("show", "-s", "--format=%ai", revision, repo_root=repo_root)
+    if not output:
+        return None
+
+    for line in output.splitlines():
+        candidate = line.strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def _resolve_plan_metadata(
+    branch: str,
+    active_branch_map: PlanScanMap,
+    archived_branch_map: PlanScanMap,
+) -> tuple[Optional[str], Optional[str], bool]:
+    plan_file, plan_mtime = active_branch_map.get(branch, (None, None))
+    if plan_file is not None:
+        return plan_file, plan_mtime, False
+
+    plan_file, plan_mtime = archived_branch_map.get(branch, (None, None))
+    return plan_file, plan_mtime, plan_file is not None
+
+
+async def _resolve_ahead_behind(
+    branch: str,
+    ahead_behind_map: dict[str, tuple[int, int]],
+    repo_root: Path,
+) -> tuple[int, int]:
+    ahead_behind = ahead_behind_map.get(branch)
+    if ahead_behind is None:
+        ahead_behind = await get_ahead_behind(branch, repo_root=repo_root)
+    return ahead_behind
 async def _collect_worktree_state(
     *,
     repo_root: Path,
     worktree_builder,
 ) -> tuple[list[WorktreeInfoLite], list[PlanOnlyBranch], list[BranchUnresolvedPlan], MainDirtyStatus]:
     raw_worktrees = await list_worktrees(repo_root=repo_root)
-    active_branch_map, archived_branch_map, unresolved = await asyncio.to_thread(
-        _scan_plan_file_index, repo_root
+    ahead_behind_map, plan_index = await asyncio.gather(
+        get_ahead_behind_map([wt["branch"] for wt in raw_worktrees], repo_root=repo_root),
+        asyncio.to_thread(_scan_plan_file_index, repo_root),
     )
+    active_branch_map, archived_branch_map, unresolved = plan_index
 
     worktrees: list[WorktreeInfoLite] = []
     if raw_worktrees:
@@ -442,6 +518,7 @@ async def _collect_worktree_state(
             worktree_builder(
                 wt,
                 repo_root=repo_root,
+                ahead_behind_map=ahead_behind_map,
                 active_branch_map=active_branch_map,
                 archived_branch_map=archived_branch_map,
             )
@@ -457,20 +534,20 @@ async def _collect_worktree_state(
         get_main_dirty(repo_root=repo_root),
     )
     plan_only_list, branch_unresolved_list = plan_only_result
-
     return worktrees, plan_only_list, branch_unresolved_list, main_dirty
-
 
 async def _build_worktree_info_lite(
     wt: dict,
     *,
     repo_root: Path,
+    ahead_behind_map: dict[str, tuple[int, int]],
     active_branch_map: PlanScanMap,
     archived_branch_map: PlanScanMap,
 ) -> WorktreeInfoLite:
+    """v2용 lite 카드 모델을 구성한다."""
     branch = wt["branch"]
-    ahead, behind = await get_ahead_behind(branch, repo_root=repo_root)
-    created_at = await get_created_at(branch, repo_root=repo_root) if ahead > 0 else None
+    ahead, behind = await _resolve_ahead_behind(branch, ahead_behind_map, repo_root)
+    created_at = await get_created_at(branch, ahead, repo_root=repo_root) if ahead > 0 else None
     plan_file, plan_mtime, plan_file_archived = _resolve_plan_metadata(
         branch,
         active_branch_map,
@@ -501,14 +578,15 @@ async def _build_worktree_info_full(
     wt: dict,
     *,
     repo_root: Path,
+    ahead_behind_map: dict[str, tuple[int, int]],
     active_branch_map: PlanScanMap,
     archived_branch_map: PlanScanMap,
 ) -> WorktreeInfo:
     branch = wt["branch"]
-    (ahead, behind), commits = await asyncio.gather(
-        get_ahead_behind(branch, repo_root=repo_root),
-        get_worktree_commits(branch, repo_root=repo_root),
-    )
+    ahead, behind = await _resolve_ahead_behind(branch, ahead_behind_map, repo_root)
+    commits = []
+    if ahead > 0:
+        commits = await get_worktree_commits(branch, repo_root=repo_root)
     plan_file, plan_mtime, plan_file_archived = _resolve_plan_metadata(
         branch,
         active_branch_map,
