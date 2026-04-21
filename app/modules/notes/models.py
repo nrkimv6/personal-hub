@@ -1,7 +1,7 @@
 """Notes 모듈 SQLAlchemy 모델."""
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -30,8 +30,8 @@ class Note(Base):
     title = Column(String(200), nullable=False)
     content = Column(Text, nullable=False, default="")
     remark = Column(Text, nullable=True)
-    is_pinned = Column(Integer, nullable=False, default=0)
-    is_starred = Column(Integer, nullable=False, default=0)
+    is_pinned = Column(Boolean, nullable=False, default=False)
+    is_starred = Column(Boolean, nullable=False, default=False)
     linked_menu_id = Column(String(50), nullable=True)
     linked_tab = Column(String(100), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

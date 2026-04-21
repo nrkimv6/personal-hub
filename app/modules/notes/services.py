@@ -122,7 +122,7 @@ def list_notes(
         query = query.filter(Note.created_at <= datetime.fromisoformat(date_to))
 
     if starred is not None:
-        query = query.filter(Note.is_starred == (1 if starred else 0))
+        query = query.filter(Note.is_starred.is_(starred))
 
     if linked_menu_id is not None:
         query = query.filter(Note.linked_menu_id == linked_menu_id)
@@ -246,7 +246,7 @@ def toggle_star(db: Session, note_id: int) -> Note:
     if not note:
         raise HTTPException(status_code=404, detail="메모를 찾을 수 없습니다.")
 
-    note.is_starred = 0 if note.is_starred else 1
+    note.is_starred = not bool(note.is_starred)
     note.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(note)
@@ -258,7 +258,7 @@ def toggle_pin(db: Session, note_id: int) -> Note:
     if not note:
         raise HTTPException(status_code=404, detail="메모를 찾을 수 없습니다.")
 
-    note.is_pinned = 0 if note.is_pinned else 1
+    note.is_pinned = not bool(note.is_pinned)
     note.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(note)
@@ -544,7 +544,7 @@ def bulk_star(db: Session, note_ids: List[int], starred: bool) -> int:
     count = (
         db.query(Note)
         .filter(Note.id.in_(note_ids), Note.deleted_at.is_(None))
-        .update({"is_starred": 1 if starred else 0}, synchronize_session=False)
+        .update({"is_starred": starred}, synchronize_session=False)
     )
     db.commit()
     return count
