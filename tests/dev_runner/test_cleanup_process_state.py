@@ -57,17 +57,7 @@ class TestCleanupProcessState:
     """_cleanup_process_state() 내부 Redis 동작 검증 (listener 상수 기준)"""
 
     def _import_listener_constants(self):
-        """listener 모듈에서 상수 가져오기 (import 실패 시 직접 정의)"""
-        try:
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(
-                "listener", Path(_SCRIPTS_DIR) / "plan_runner" / "dev-runner-command-listener.py"
-            )
-            # 스크립트 전체 실행은 부수 효과가 크므로, 상수만 정규식으로 파싱
-        except Exception:
-            pass
-
-        # 직접 상수 참조
+        """executor_service에서 listener 상수를 직접 가져온다."""
         from app.modules.dev_runner.services.executor_service import (
             RUNNER_KEY_SUFFIXES,
             RUNNER_KEY_PREFIX,
@@ -421,7 +411,6 @@ class TestCleanupProcessStatePersistSuffixes:
 
     def _import_process_utils(self):
         import importlib
-        import importlib.util
         import types
 
         # listener noise filter mock (부수 효과 방지)
@@ -432,18 +421,8 @@ class TestCleanupProcessStatePersistSuffixes:
             sys.modules["listener_noise_filter"] = mock_noise
 
         # _dr_constants, _dr_state 먼저 로드 (_dr_process_utils 의존)
-        bootstrap_plan_runner_modules()
-
-        if "_dr_process_utils" not in sys.modules:
-            spec = importlib.util.spec_from_file_location(
-                "_dr_process_utils",
-                get_plan_runner_impl_script_path().with_name("_dr_process_utils.py"),
-            )
-            mod = importlib.util.module_from_spec(spec)
-            sys.modules["_dr_process_utils"] = mod
-            spec.loader.exec_module(mod)
-
-        return sys.modules["_dr_process_utils"]
+        _, process_utils_mod = bootstrap_plan_runner_modules()
+        return process_utils_mod
 
     def test_cleanup_process_state_persist_trigger_plan_branch(self):
         """R: _cleanup_process_state() 후 plan_file/branch/trigger TTL == -1 (영구 보존)"""

@@ -25,6 +25,7 @@ from app.modules.dev_runner.services.executor_service import (
     RUNNER_KEY_PREFIX,
     RUNNER_KEY_SUFFIXES,
 )
+from app.modules.dev_runner.services.runner_state import RunnerState
 from tests.dev_runner.merge_test_helpers import resolve_archive_or_history_path
 
 
@@ -46,6 +47,12 @@ def svc(fake_redis, fake_async_redis):
     service = ExecutorService()
     service.redis_client = fake_redis
     service.async_redis = fake_async_redis
+    service.state = RunnerState(
+        fake_async_redis,
+        service._runner_key,
+        service._is_pid_alive,
+        service._force_cleanup_state,
+    )
     return service
 
 

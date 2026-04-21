@@ -232,12 +232,13 @@ class RunnerState:
                 reason = "file_lost"  # 湲곕낯媛? ?뚯씪 ?놁쓬
                 if plan_file:
                     try:
-                        if Path(plan_file).exists():
+                        source_path = Path(plan_file)
+                        if source_path.exists():
                             preserved_recent += 1
                             continue
                         target = resolve_plan_target(plan_file, purpose="archive")
                         if Path(target.target).exists():
-                            reason = "archived"
+                            reason = "history_archived" if target.target_kind == "history" else "archived"
                     except PathRuleError:
                         pass
 

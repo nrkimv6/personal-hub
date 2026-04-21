@@ -19,6 +19,10 @@ def mock_redis():
     r = MagicMock()
     r.ping.return_value = True
     r.get.return_value = None
+    r.brpop.return_value = (
+        b"result_key",
+        json.dumps({"success": True, "message": "graceful-exit acknowledged"}).encode(),
+    )
     r.delete.return_value = True
     return r
 
@@ -65,11 +69,15 @@ def test_restart_listener_heartbeat_not_restarting_timeout(mock_redis):
     mock_redis.get.return_value = None
 
     with patch("time.sleep"), \
-         patch("time.time", side_effect=[0, 5.1, 5.2]):
+         patch("time.time", side_effect=[0, 5.1, 5.2, 20.3]):
         result = svc.restart_listener()
 
     assert result["success"] is False
-    assert "restarting" in result["message"].lower() or "타임아웃" in result["message"]
+    assert (
+        "restarting" in result["message"].lower()
+        or "타임아웃" in result["message"]
+        or "heartbeat not recovered" in result["message"].lower()
+    )
 
 
 def test_restart_listener_heartbeat_stuck_restarting_timeout(mock_redis):

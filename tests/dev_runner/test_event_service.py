@@ -18,6 +18,42 @@ def _make_service():
     return svc
 
 
+def _status_values(**overrides):
+    fields = {
+        "status": "running",
+        "pid": "1234",
+        "current_cycle": "1",
+        "start_time": "2026-03-04T00:00:00",
+        "plan_file": None,
+        "engine": "claude",
+        "worktree_path": None,
+        "branch": None,
+        "trigger": None,
+        "merge_status": None,
+        "exit_reason": None,
+        "stop_stage": None,
+        "error": None,
+        "execution_count": None,
+    }
+    fields.update(overrides)
+    return [
+        fields["status"],
+        fields["pid"],
+        fields["current_cycle"],
+        fields["start_time"],
+        fields["plan_file"],
+        fields["engine"],
+        fields["worktree_path"],
+        fields["branch"],
+        fields["trigger"],
+        fields["merge_status"],
+        fields["exit_reason"],
+        fields["stop_stage"],
+        fields["error"],
+        fields["execution_count"],
+    ]
+
+
 class TestBuildStatusPayloadPlanFileNullDefense:
     """plan_file가 비어있을 때 None으로 정규화되는지 검증."""
 
@@ -27,21 +63,7 @@ class TestBuildStatusPayloadPlanFileNullDefense:
         plan_file 키 설정 전 SSE 이벤트 발생 시 None이 유지되어야 한다.
         """
         svc = _make_service()
-        svc._sync.mget.return_value = [
-            "running",
-            "1234",
-            "1",
-            "2026-03-04T00:00:00",
-            None,
-            "claude",
-            None,
-            "user",
-            None,
-            None,
-        ]
-
-        # mget: [status, pid, current_cycle, start_time, plan_file, engine, branch, trigger]
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", None, "claude", None, None]
+        svc._sync.mget.return_value = _status_values(plan_file=None)
 
         payload = svc._build_status_payload("test-runner-id")
 
@@ -54,7 +76,7 @@ class TestBuildStatusPayloadPlanFileNullDefense:
         Boundary 케이스: 빈 문자열도 없음으로 간주한다.
         """
         svc = _make_service()
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", "", "claude", None, None]
+        svc._sync.mget.return_value = _status_values(plan_file="")
 
         payload = svc._build_status_payload("runner-b")
 
@@ -64,7 +86,7 @@ class TestBuildStatusPayloadPlanFileNullDefense:
     def test_plan_file_with_value_preserved(self):
         svc = _make_service()
         plan = "docs/plan/2026-03-04_test.md"
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", plan, "claude", None, None]
+        svc._sync.mget.return_value = _status_values(plan_file=plan)
 
         payload = svc._build_status_payload("runner-c")
 
@@ -75,18 +97,7 @@ class TestBuildStatusPayloadPlanFileNullDefense:
 class TestBuildStatusPayloadVisible:
     def test_visible_true_for_user_trigger(self):
         svc = _make_service()
-        svc._sync.mget.return_value = [
-            "running",
-            "1234",
-            "1",
-            "2026-03-04T00:00:00",
-            SENTINEL,
-            "claude",
-            None,
-            "user",
-            None,
-            None,
-        ]
+        svc._sync.mget.return_value = _status_values(plan_file=SENTINEL, trigger="user")
 
         payload = svc._build_status_payload("runner-user")
 
@@ -95,18 +106,7 @@ class TestBuildStatusPayloadVisible:
 
     def test_visible_false_for_api_trigger(self):
         svc = _make_service()
-        svc._sync.mget.return_value = [
-            "running",
-            "1234",
-            "1",
-            "2026-03-04T00:00:00",
-            "ALL",
-            "claude",
-            None,
-            "api",
-            None,
-            None,
-        ]
+        svc._sync.mget.return_value = _status_values(plan_file="ALL", trigger="api")
 
         payload = svc._build_status_payload("runner-api")
 
@@ -120,7 +120,13 @@ class TestBuildStatusPayloadBranchHandling:
     def test_dm_runner_branch_does_not_override_plan_file(self):
         """plan_file=None, branch="plan/test" -> plan_file is None."""
         svc = _make_service()
-        svc._sync.mget.return_value = ["running", None, None, "2026-03-04T00:00:00", None, None, "plan/test", None]
+        svc._sync.mget.return_value = _status_values(
+            pid=None,
+            current_cycle=None,
+            plan_file=None,
+            engine=None,
+            branch="plan/test",
+        )
         payload = svc._build_status_payload("dm-abc123")
         assert payload is not None
         assert payload["plan_file"] is None
@@ -128,7 +134,7 @@ class TestBuildStatusPayloadBranchHandling:
     def test_normal_runner_no_branch_returns_none(self):
         """plan_file=None, branch=None -> plan_file is None."""
         svc = _make_service()
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", None, "claude", None, None]
+        svc._sync.mget.return_value = _status_values(plan_file=None)
         payload = svc._build_status_payload("normal-runner")
         assert payload is not None
         assert payload["plan_file"] is None
@@ -140,11 +146,10 @@ class TestBuildStatusPayloadExecutionCount:
     def test_execution_count_included_when_set(self):
         """R: Redis execution_count=2 → payload["execution_count"] == "2"."""
         svc = _make_service()
-        svc._sync.mget.return_value = [
-            "running", "1234", "1", "2026-03-04T00:00:00",
-            "docs/plan/test.md", "claude", None, None,
-            None, None, "2",
-        ]
+        svc._sync.mget.return_value = _status_values(
+            plan_file="docs/plan/test.md",
+            execution_count="2",
+        )
         payload = svc._build_status_payload("runner-ec")
         assert payload is not None
         assert payload["execution_count"] == "2"
@@ -152,11 +157,7 @@ class TestBuildStatusPayloadExecutionCount:
     def test_execution_count_none_when_not_set(self):
         """B: Redis execution_count 미설정(None) → payload["execution_count"] is None."""
         svc = _make_service()
-        svc._sync.mget.return_value = [
-            "running", "1234", "1", "2026-03-04T00:00:00",
-            "docs/plan/test.md", "claude", None, None,
-            None, None, None,
-        ]
+        svc._sync.mget.return_value = _status_values(plan_file="docs/plan/test.md")
         payload = svc._build_status_payload("runner-no-ec")
         assert payload is not None
         assert payload.get("execution_count") is None
