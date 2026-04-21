@@ -207,3 +207,27 @@ def test_T5_post_restart_chat_executor_returns_200():
     assert resp.status_code == 200
     data = resp.json()
     assert "success" in data
+
+
+@pytest.mark.skip(reason="T5: HTTP 통합테스트 — /merge-test에서 main 머지 후 실행")
+def test_system_workers_naver_unified_worker_running():
+    """
+    T5[http_live]: GET /api/v1/system/services/workers → unified_worker (NaverMonitorWorker 포함) 실행 확인.
+
+    NaverMonitorWorker는 unified_worker 프로세스 내부에서 실행됨.
+    unified_worker가 응답 목록에 있으면 NaverMonitorWorker 실행 루프도 동작 중.
+    워커 미등록 시 실행 루프가 동작하지 않는 근본 증상 재발 방지.
+    """
+    import httpx
+    resp = httpx.get(
+        "http://localhost:8001/api/v1/system/services/workers",
+        timeout=5,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list), f"응답이 리스트여야 함: {data}"
+    names = [w.get("name", "") for w in data]
+    assert "unified_worker" in names, (
+        f"unified_worker가 /api/v1/system/services/workers 응답에 없음 — "
+        f"NaverMonitorWorker 실행 루프 미동작 가능성. 워커 목록: {names}"
+    )
