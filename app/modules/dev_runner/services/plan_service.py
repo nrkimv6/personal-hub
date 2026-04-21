@@ -1126,6 +1126,8 @@ class PlanService:
     ) -> Optional[str]:
         if not runner_id or not project_dir:
             return None
+        if not (project_dir / ".git").exists():
+            return None
 
         try:
             snapshot = cls._load_runner_dirty_snapshot(runner_id)
