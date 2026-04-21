@@ -121,3 +121,39 @@ async def test_worktree_v2_plan_mtime_present(client):
     assert item["plan_mtime"][4] == "-"  # ISO 8601 형식 간이 확인
     assert "commit_count" in item
     assert "commits" not in item
+
+
+async def test_worktree_list_v1_repeat_calls_stay_uncached(client):
+    mock_full = AsyncMock(return_value=[_MOCK_WORKTREE_INFO_FULL])
+    with patch(
+        "app.modules.dev_runner.routes.worktrees.get_all_worktrees_full",
+        new=mock_full,
+    ):
+        first = await client.get("/api/v1/dev-runner/worktrees")
+        second = await client.get("/api/v1/dev-runner/worktrees")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert mock_full.await_count == 2
+
+
+async def test_worktree_list_v2_forwards_force_and_no_cache(client):
+    mock_v2 = AsyncMock(return_value=_MOCK_RESPONSE)
+    with patch(
+        "app.modules.dev_runner.routes.worktrees.get_all_worktrees",
+        new=mock_v2,
+    ):
+        default_resp = await client.get("/api/v1/dev-runner/worktrees/v2")
+        force_resp = await client.get("/api/v1/dev-runner/worktrees/v2?force=1")
+        header_resp = await client.get(
+            "/api/v1/dev-runner/worktrees/v2",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    assert default_resp.status_code == 200
+    assert force_resp.status_code == 200
+    assert header_resp.status_code == 200
+    assert mock_v2.await_args_list[0].kwargs["use_cache"] is True
+    assert mock_v2.await_args_list[0].kwargs["force"] is False
+    assert mock_v2.await_args_list[1].kwargs["force"] is True
+    assert mock_v2.await_args_list[2].kwargs["force"] is True

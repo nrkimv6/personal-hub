@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -72,14 +72,23 @@ async def list_worktrees_v1(
 
 @router.get("/v2", response_model=WorktreeListResponse)
 async def list_worktrees_v2(
+    request: Request,
     repo_id: Optional[int] = Query(None),
+    force: bool = Query(False, description="캐시 무시"),
     db: Session = Depends(get_db),
 ):
     """전체 워크트리 상태 반환 (v2: plan_only·branch_unresolved·main_dirty 포함)"""
     try:
         repo_root = _resolve_repo_root(repo_id, db)
         kwargs = {"repo_root": repo_root} if repo_root else {}
-        return await get_all_worktrees(**kwargs)
+        cache_control = request.headers.get("Cache-Control", "")
+        force_refresh = force or "no-cache" in cache_control.lower()
+        return await get_all_worktrees(
+            **kwargs,
+            use_cache=True,
+            cache_repo_id=repo_id,
+            force=force_refresh,
+        )
     except HTTPException:
         raise
     except Exception as e:

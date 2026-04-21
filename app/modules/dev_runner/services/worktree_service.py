@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -32,6 +33,10 @@ PlanScanMap = dict[str, tuple[str, str]]
 PlanScanUnresolved = list[dict[str, str]]
 PlanScanResult = tuple[PlanScanMap, PlanScanUnresolved]
 PlanIndexResult = tuple[PlanScanMap, PlanScanMap, PlanScanUnresolved]
+_WorktreeCacheKey = tuple[str, Optional[int]]
+_CACHE: dict[_WorktreeCacheKey, tuple[WorktreeListResponse, float]] = {}
+_CACHE_TTL_SEC = 3.0
+_CACHE_LOCKS: dict[_WorktreeCacheKey, asyncio.Lock] = {}
 
 
 def _iter_plan_dirs(repo_root: Path) -> list[tuple[Path, bool]]:
@@ -58,6 +63,51 @@ def _iter_plan_dirs(repo_root: Path) -> list[tuple[Path, bool]]:
         seen.add(key)
         deduped.append((candidate, archived))
     return deduped
+
+
+def _make_worktree_cache_key(
+    repo_root: Path,
+    cache_repo_id: Optional[int],
+) -> _WorktreeCacheKey:
+    """repo_id 단독이 아닌 resolved repo_root + repo_id 조합으로 key를 만든다."""
+    resolved_root = str(repo_root.resolve()) if repo_root.exists() else str(repo_root)
+    return resolved_root, cache_repo_id
+
+
+def _get_cache_lock(key: _WorktreeCacheKey) -> asyncio.Lock:
+    lock = _CACHE_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _CACHE_LOCKS[key] = lock
+    return lock
+
+
+def _cache_get(key: _WorktreeCacheKey) -> Optional[WorktreeListResponse]:
+    entry = _CACHE.get(key)
+    if entry is None:
+        return None
+
+    cached_response, expires_at = entry
+    if expires_at <= time.monotonic():
+        _CACHE.pop(key, None)
+        return None
+
+    return cached_response.model_copy(deep=True)
+
+
+def _cache_put(key: _WorktreeCacheKey, value: WorktreeListResponse) -> None:
+    """캐시 저장 시 deep copy를 남기고, 조회 시에도 deep copy를 반환한다."""
+    _CACHE[key] = (value.model_copy(deep=True), time.monotonic() + _CACHE_TTL_SEC)
+
+
+def invalidate_worktree_cache(key: Optional[_WorktreeCacheKey] = None) -> None:
+    if key is None:
+        _CACHE.clear()
+        _CACHE_LOCKS.clear()
+        return
+
+    _CACHE.pop(key, None)
+    _CACHE_LOCKS.pop(key, None)
 
 
 def _iter_active_plan_dirs(repo_root: Path) -> list[Path]:
@@ -615,8 +665,8 @@ async def _build_worktree_info_full(
     )
 
 
-async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListResponse:
-    """v2 lite 워크트리 목록 — commit_count만 포함하고 상세 커밋은 lazy-load한다."""
+async def _compute_worktree_list_response(repo_root: Path = _REPO_ROOT) -> WorktreeListResponse:
+    """실제 v2 응답 계산 로직."""
     worktrees, plan_only, branch_unresolved, main_dirty = await _collect_worktree_state(
         repo_root=repo_root,
         worktree_builder=_build_worktree_info_lite,
@@ -627,6 +677,34 @@ async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListRespons
         branch_unresolved=branch_unresolved,
         main_dirty=main_dirty,
     )
+
+
+async def get_all_worktrees(
+    repo_root: Path = _REPO_ROOT,
+    *,
+    use_cache: bool = False,
+    cache_repo_id: Optional[int] = None,
+    force: bool = False,
+) -> WorktreeListResponse:
+    """v2 lite 워크트리 목록 — 선택적으로 repo_root + repo_id 기반 TTL 캐시를 사용한다."""
+    if not use_cache:
+        return await _compute_worktree_list_response(repo_root=repo_root)
+
+    cache_key = _make_worktree_cache_key(repo_root, cache_repo_id)
+    if not force:
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return cached
+
+    async with _get_cache_lock(cache_key):
+        if not force:
+            cached = _cache_get(cache_key)
+            if cached is not None:
+                return cached
+
+        response = await _compute_worktree_list_response(repo_root=repo_root)
+        _cache_put(cache_key, response)
+        return response.model_copy(deep=True)
 
 
 async def get_all_worktrees_full(repo_root: Path = _REPO_ROOT) -> list[WorktreeInfo]:

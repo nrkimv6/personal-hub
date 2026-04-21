@@ -180,6 +180,24 @@ class TestGetAllWorktreesRepoRoot:
         assert result.worktrees[0].commit_count == 2
         assert result.worktrees[0].created_at == "2026-04-21 10:00:00 +0900"
 
+    @pytest.mark.asyncio
+    async def test_get_all_worktrees_direct_call_stays_uncached_by_default_RIGHT(self, tmp_path):
+        """direct service call은 기본적으로 cache를 사용하지 않아 매번 재계산한다."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        compute = AsyncMock(
+            side_effect=[
+                WorktreeListResponse(worktrees=[], plan_only=[], branch_unresolved=[], main_dirty=MainDirtyStatus()),
+                WorktreeListResponse(worktrees=[], plan_only=[], branch_unresolved=[], main_dirty=MainDirtyStatus()),
+            ]
+        )
+
+        with patch.object(svc, "_compute_worktree_list_response", new=compute):
+            await svc.get_all_worktrees(repo_root=repo_root)
+            await svc.get_all_worktrees(repo_root=repo_root)
+
+        assert compute.await_count == 2
+
 
 class TestGetAllWorktreesWtools:
     @pytest.mark.asyncio

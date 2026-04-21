@@ -429,3 +429,114 @@ class TestWorktreeListHttp:
         assert all(item["commit_count"] == 3 for item in data["worktrees"])
         assert all("commits" not in item for item in data["worktrees"])
         assert elapsed < 3.0
+
+    @pytest.mark.http
+    @pytest.mark.asyncio
+    async def test_list_v2_http_cache_hit_consistent_response(self, tmp_path: Path, http_client):
+        from app.modules.dev_runner.schemas import MainDirtyStatus, WorktreeInfoLite, WorktreeListResponse
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        expected = WorktreeListResponse(
+            worktrees=[
+                WorktreeInfoLite(
+                    branch="impl/cache-hit",
+                    worktree_path="/repo/.worktrees/impl-cache-hit",
+                    created_at="2026-04-21 09:00:00 +0900",
+                    ahead=1,
+                    behind=0,
+                    locked=False,
+                    commit_count=1,
+                    plan_file="docs/plan/cache.md",
+                    plan_mtime="2026-04-21T09:00:00",
+                    is_test=False,
+                    plan_file_archived=False,
+                    cleanable=False,
+                )
+            ],
+            plan_only=[],
+            branch_unresolved=[],
+            main_dirty=MainDirtyStatus(),
+        )
+        compute = AsyncMock(return_value=expected)
+
+        with (
+            patch("app.modules.dev_runner.routes.worktrees._resolve_repo_root", return_value=repo),
+            patch("app.modules.dev_runner.services.worktree_service._compute_worktree_list_response", new=compute),
+        ):
+            first = await http_client.get("/api/v1/dev-runner/worktrees/v2")
+            second = await http_client.get("/api/v1/dev-runner/worktrees/v2")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json() == second.json()
+        assert compute.await_count == 1
+
+    @pytest.mark.http
+    @pytest.mark.asyncio
+    async def test_list_v2_http_force_bypasses_cache(self, tmp_path: Path, http_client):
+        from app.modules.dev_runner.schemas import MainDirtyStatus, WorktreeInfoLite, WorktreeListResponse
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        compute = AsyncMock(
+            side_effect=[
+                WorktreeListResponse(
+                    worktrees=[
+                        WorktreeInfoLite(
+                            branch="impl/first",
+                            worktree_path="/repo/.worktrees/impl-first",
+                            created_at="2026-04-21 09:00:00 +0900",
+                            ahead=1,
+                            behind=0,
+                            locked=False,
+                            commit_count=1,
+                            plan_file="docs/plan/first.md",
+                            plan_mtime="2026-04-21T09:00:00",
+                            is_test=False,
+                            plan_file_archived=False,
+                            cleanable=False,
+                        )
+                    ],
+                    plan_only=[],
+                    branch_unresolved=[],
+                    main_dirty=MainDirtyStatus(),
+                ),
+                WorktreeListResponse(
+                    worktrees=[
+                        WorktreeInfoLite(
+                            branch="impl/forced",
+                            worktree_path="/repo/.worktrees/impl-forced",
+                            created_at="2026-04-21 10:00:00 +0900",
+                            ahead=2,
+                            behind=0,
+                            locked=False,
+                            commit_count=2,
+                            plan_file="docs/plan/forced.md",
+                            plan_mtime="2026-04-21T10:00:00",
+                            is_test=False,
+                            plan_file_archived=False,
+                            cleanable=False,
+                        )
+                    ],
+                    plan_only=[],
+                    branch_unresolved=[],
+                    main_dirty=MainDirtyStatus(),
+                ),
+            ]
+        )
+
+        with (
+            patch("app.modules.dev_runner.routes.worktrees._resolve_repo_root", return_value=repo),
+            patch("app.modules.dev_runner.services.worktree_service._compute_worktree_list_response", new=compute),
+        ):
+            first = await http_client.get("/api/v1/dev-runner/worktrees/v2")
+            second = await http_client.get("/api/v1/dev-runner/worktrees/v2")
+            forced = await http_client.get("/api/v1/dev-runner/worktrees/v2?force=1")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert forced.status_code == 200
+        assert first.json() == second.json()
+        assert forced.json()["worktrees"][0]["branch"] == "impl/forced"
+        assert compute.await_count == 2

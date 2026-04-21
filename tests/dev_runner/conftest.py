@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import app.modules.dev_runner.services.worktree_service as worktree_service
+
 # plan_runner.core.stages를 테스트 파일 수집 전에 미리 로드한다.
 # test_merge_lock_ownership.py / test_merge_retry_e2e.py 등이 모듈 수준에서
 # sys.modules.setdefault("plan_runner.core.stages", <빈 mock>) 를 호출한다.
@@ -211,6 +213,13 @@ def pytest_sessionfinish(session, exitstatus):
     except Exception as exc:
         sys.stderr.write(f"[session_cleanup] warning: {exc}\n")
         sys.stderr.flush()
+
+
+@pytest.fixture(autouse=True)
+def clear_worktree_cache():
+    worktree_service.invalidate_worktree_cache()
+    yield
+    worktree_service.invalidate_worktree_cache()
 
 
 
