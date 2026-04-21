@@ -23,7 +23,7 @@ from _dr_constants import (
 )
 from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 from _dr_plan_paths import classify_plan_stage, read_plan_status
-from _dr_process_utils import _cleanup_process_state
+from _dr_process_utils import _cleanup_process_state, _cleanup_runner_ownership_snapshot
 from _dr_subprocess import _ANSI_ESCAPE
 from _dr_log_framing import MultilineFrameBuffer
 from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
@@ -275,8 +275,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 logger.warning(
                     f"[_do_inline_merge] trigger 소실 — restart_after_merge 스킵: {runner_id}"
                 )
-                return
-            if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
+            elif plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
                 import uuid as _uuid
 
                 new_runner_id = _uuid.uuid4().hex[:8]
@@ -297,6 +296,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                     redis_client,
                     "MERGE",
                 )
+                _cleanup_runner_ownership_snapshot(runner_id)
     except redis.ConnectionError:
         logger.warning(
             f"[_do_inline_merge] restart_after_merge 감지 중 Redis 연결 실패 (무시)"

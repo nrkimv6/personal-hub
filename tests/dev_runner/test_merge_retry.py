@@ -67,27 +67,19 @@ def make_merge_result(merged=True, tests_passed=True, conflict=False, message="o
 
 class TestDoRetryMerge:
     def test_do_retry_merge_acquires_and_releases_lock(self, tmp_path):
-        """R(Right): merge 성공 시 acquire_merge_lock + release_merge_lock 모두 호출"""
+        """R: retry-merge는 현재 _execute_merge_with_lock 경로로 위임된다."""
         cl = _load_listener()
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
         redis = make_redis_mock(worktree_path=str(worktree))
-        merge_result = make_merge_result(merged=True, tests_passed=True)
-
-        # 로컬 임포트(`from merge_lock import ...`)는 merge_lock 모듈 자체를 패치
-        import merge_queue as mq
-        with patch.object(mq, "acquire_merge_turn", return_value=True) as mock_acquire, \
-             patch.object(mq, "release_merge_turn") as mock_release, \
-             patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("_dr_commands._cleanup_process_state"):
-            mock_wf = MagicMock()
-            mock_wf.run.return_value = merge_result
-            mock_wf_cls.return_value = mock_wf
+        with patch("_dr_commands._execute_merge_with_lock", return_value={"success": True, "message": "merged", "merge_status": "merged"}) as mock_merge, \
+             patch("_dr_commands._cleanup_process_state"), \
+             patch("plan_runner.core.stages.pre_merge_gate", return_value=(True, "ok")), \
+             patch("plan_runner.core.stages.auto_commit_stage", return_value=False):
             cl._do_retry_merge("runner01", redis, "cmd001")
 
-        mock_acquire.assert_called_once()
-        mock_release.assert_called()
+        mock_merge.assert_called_once_with("runner01", redis, action_name="retry-merge")
 
     def test_do_retry_merge_publishes_logs(self, tmp_path):
         """R(Right): 진행 중 plan-runner:logs:{runner_id} 채널에 [MERGE] 로그 발행"""
@@ -97,22 +89,34 @@ class TestDoRetryMerge:
         worktree.mkdir()
         runner_id = "t-mretry-02"
         redis = make_redis_mock(worktree_path=str(worktree))
-        merge_result = make_merge_result(merged=True, tests_passed=True)
-
-        import merge_queue as mq
-        with patch.object(mq, "acquire_merge_turn", return_value=True), \
-             patch.object(mq, "release_merge_turn"), \
-             patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("_dr_commands._cleanup_process_state"):
-            mock_wf = MagicMock()
-            mock_wf.run.return_value = merge_result
-            mock_wf_cls.return_value = mock_wf
+        with patch("_dr_commands._execute_merge_with_lock", return_value={"success": True, "message": "merged", "merge_status": "merged"}), \
+             patch("_dr_commands._cleanup_process_state"), \
+             patch("plan_runner.core.stages.pre_merge_gate", return_value=(True, "ok")), \
+             patch("plan_runner.core.stages.auto_commit_stage", return_value=False):
             cl._do_retry_merge(runner_id, redis, "cmd002")
 
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
         publish_calls = redis.publish.call_args_list
         assert any(log_channel in str(c) for c in publish_calls), "로그 채널에 publish 없음"
         assert any("[MERGE]" in str(c) for c in publish_calls if log_channel in str(c)), "[MERGE] 로그 없음"
+
+    def test_do_retry_merge_refreshes_ownership_snapshot(self, tmp_path):
+        """R: retry-merge는 merge 직전 ownership snapshot을 다시 캡처한다."""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        with patch("_dr_commands._refresh_runner_ownership_snapshot") as mock_refresh, \
+             patch("_dr_commands._execute_merge_with_lock", return_value={"success": True, "message": "merged", "merge_status": "merged"}), \
+             patch("_dr_commands._cleanup_process_state"), \
+             patch("plan_runner.core.stages.pre_merge_gate", return_value=(True, "ok")), \
+             patch("plan_runner.core.stages.auto_commit_stage", return_value=False):
+            cl._do_retry_merge("runner-snapshot", redis, "cmd-snapshot")
+
+        mock_refresh.assert_called_once()
+        assert mock_refresh.call_args.kwargs["action"] == "retry-merge"
 
     def test_do_retry_merge_cleanup_on_merged(self, tmp_path):
         """R(Right): merge 성공 시 _cleanup_process_state 호출됨"""
@@ -121,16 +125,10 @@ class TestDoRetryMerge:
         worktree = tmp_path / "worktree"
         worktree.mkdir()
         redis = make_redis_mock(worktree_path=str(worktree))
-        merge_result = make_merge_result(merged=True, tests_passed=True)
-
-        import merge_queue as mq
-        with patch.object(mq, "acquire_merge_turn", return_value=True), \
-             patch.object(mq, "release_merge_turn"), \
-             patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("_dr_commands._cleanup_process_state") as mock_cleanup:
-            mock_wf = MagicMock()
-            mock_wf.run.return_value = merge_result
-            mock_wf_cls.return_value = mock_wf
+        with patch("_dr_commands._execute_merge_with_lock", return_value={"success": True, "message": "merged", "merge_status": "merged"}), \
+             patch("_dr_commands._cleanup_process_state") as mock_cleanup, \
+             patch("plan_runner.core.stages.pre_merge_gate", return_value=(True, "ok")), \
+             patch("plan_runner.core.stages.auto_commit_stage", return_value=False):
             cl._do_retry_merge("runner03", redis, "cmd003")
 
         mock_cleanup.assert_called_once_with("runner03", redis)

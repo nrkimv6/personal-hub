@@ -98,7 +98,7 @@ def test_get_plan_completion_missing_file_E(tmp_path):
 
 
 def test_call_done_api_success_R(cl):
-    """R: requests.post 200 응답 → True 반환"""
+    """R: requests.post 200 응답 → success=True 반환"""
     pub_calls = []
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -107,12 +107,12 @@ def test_call_done_api_success_R(cl):
     with patch("requests.post", return_value=mock_resp):
         result = cl._call_done_api("/some/plan.md", "runner1", pub_calls.append)
 
-    assert result is True
+    assert result["success"] is True
     assert len(pub_calls) == 0  # 성공 시 pub 없음
 
 
 def test_call_done_api_http_error_E(cl):
-    """E: 500 응답 → False 반환, pub_fn 호출됨"""
+    """E: 500 응답 → success=False 반환, pub_fn 호출됨"""
     pub_calls = []
     mock_resp = MagicMock()
     mock_resp.status_code = 500
@@ -120,12 +120,13 @@ def test_call_done_api_http_error_E(cl):
     with patch("requests.post", return_value=mock_resp):
         result = cl._call_done_api("/some/plan.md", "runner1", pub_calls.append)
 
-    assert result is False
+    assert result["success"] is False
+    assert result["reason"] == "http_error"
     assert any("done API 실패" in m for m in pub_calls)
 
 
 def test_call_done_api_connection_error_E(cl):
-    """E: ConnectionError → False 반환, pub_fn 호출됨"""
+    """E: ConnectionError → success=False 반환, pub_fn 호출됨"""
     import requests as _requests
 
     pub_calls = []
@@ -133,12 +134,13 @@ def test_call_done_api_connection_error_E(cl):
     with patch("requests.post", side_effect=_requests.exceptions.ConnectionError("refused")):
         result = cl._call_done_api("/some/plan.md", "runner1", pub_calls.append)
 
-    assert result is False
+    assert result["success"] is False
+    assert result["reason"] == "request_exception"
     assert any("연결 실패" in m for m in pub_calls)
 
 
 def test_call_done_api_success_false_body_E(cl):
-    """E: 200 + success=false 응답 → False 반환, pub_fn 호출됨"""
+    """E: 200 + success=false 응답 → success=False 반환, pub_fn 호출됨"""
     pub_calls = []
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -147,8 +149,28 @@ def test_call_done_api_success_false_body_E(cl):
     with patch("requests.post", return_value=mock_resp):
         result = cl._call_done_api("/some/plan.md", "runner1", pub_calls.append)
 
-    assert result is False
+    assert result["success"] is False
+    assert result["reason"] == "done_api_failed"
     assert any("success=false" in m for m in pub_calls)
+
+
+def test_call_done_api_preserves_ownership_guard_reason_E(cl):
+    """E: ownership_guard 응답이면 machine-readable reason을 그대로 보존한다."""
+    pub_calls = []
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "success": False,
+        "reason": "ownership_guard",
+        "message": "runner ownership guard blocked auto-done",
+    }
+
+    with patch("requests.post", return_value=mock_resp):
+        result = cl._call_done_api("/some/plan.md", "runner1", pub_calls.append)
+
+    assert result["success"] is False
+    assert result["reason"] == "ownership_guard"
+    assert "ownership guard" in result["message"]
 
 
 def test_call_done_api_uses_base64_encoded_path_Co(cl):
@@ -162,7 +184,7 @@ def test_call_done_api_uses_base64_encoded_path_Co(cl):
     with patch("requests.post", return_value=mock_resp) as mock_post:
         result = cl._call_done_api(plan_path, "runner1", pub_calls.append)
 
-    assert result is True
+    assert result["success"] is True
     called_url = mock_post.call_args[0][0]
     assert mock_post.call_args.kwargs.get("headers") == {"X-Plan-Runner-Id": "runner1"}
     encoded = called_url.split("/plans/")[1].split("/done")[0]

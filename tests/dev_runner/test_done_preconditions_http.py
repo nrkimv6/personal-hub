@@ -137,6 +137,48 @@ class TestDonePreconditionsHttp:
         called_args = mock_run_done.await_args.kwargs
         assert called_args["runner_id"] == "header-runner"
 
+    def test_plan_done_api_without_runner_header_stays_manual(self, tmp_path, dev_runner_config_isolation):
+        """header/query runner_id가 모두 없으면 manual /done 경로(None)로 호출한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plan_dir / "2026-03-31_fix-test-http-manual.md"
+        plan_path.write_text(textwrap.dedent("""\
+            # fix: HTTP manual 테스트
+
+            > 상태: 구현완료
+            > 진행률: 1/1 (100%)
+
+            - [x] A
+
+            ### Phase R: 재발 경로 분석
+
+            | 경로 | 방어여부 |
+            | path1 | 방어됨 |
+        """), encoding="utf-8")
+
+        with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), \
+             patch("app.modules.dev_runner.routes.plans.plan_service.run_done", new=AsyncMock(return_value={
+                 "success": True,
+                 "message": "ok",
+                 "output": None,
+                 "remaining_tasks": 0,
+                 "total_tasks": 1,
+                 "plan_status": "구현완료",
+             })) as mock_run_done, \
+             patch("app.modules.dev_runner.routes.plans.plan_service.list_plans", return_value=[]):
+            import asyncio
+            result = asyncio.run(
+                run_plan_done(
+                    base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("="),
+                    x_plan_runner_id=None,
+                )
+            )
+
+        assert result["success"] is True
+        mock_run_done.assert_awaited_once()
+        called_args = mock_run_done.await_args.kwargs
+        assert called_args["runner_id"] is None
+
     def test_plan_done_api_resolver_error_returns_failure_E(self, svc, tmp_path, dev_runner_config_isolation):
         """docs/plan 외 경로 plan은 resolver hard-fail 응답(success=false)을 반환한다."""
         plan_dir = tmp_path / "docs" / "tmp"

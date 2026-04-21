@@ -36,7 +36,7 @@ class TestT5DoneApiFromLoop:
         pub_fn = MagicMock()
         mock_rc = MagicMock()
 
-        with patch("_dr_merge._call_done_api", return_value=True) as mock_api:
+        with patch("_dr_merge._call_done_api", return_value={"success": True, "reason": None, "message": ""}) as mock_api:
             _handle_post_merge_done(str(plan_file), "t5-runner", pub_fn, mock_rc)
             mock_api.assert_called_once()
 
@@ -106,9 +106,10 @@ class TestT5DoneApiContract:
         plan_path = "/tmp/v2 done plan.md"
 
         with patch("requests.post", return_value=mock_resp) as mock_post:
-            ok = _call_done_api(plan_path, "t5-contract", lambda _m: None)
+            result = _call_done_api(plan_path, "t5-contract", lambda _m: None)
 
-        assert ok is True
+        assert result["success"] is True
+        assert result["reason"] is None
         called_url = mock_post.call_args[0][0]
         encoded = called_url.split("/plans/")[1].split("/done")[0]
         padded = encoded + "=" * ((4 - len(encoded) % 4) % 4)
@@ -124,7 +125,9 @@ class TestT5DoneApiContract:
         mock_resp.json.return_value = {"success": False, "message": "archive target resolve failed"}
 
         with patch("requests.post", return_value=mock_resp):
-            ok = _call_done_api("/tmp/plan.md", "t5-contract", messages.append)
+            result = _call_done_api("/tmp/plan.md", "t5-contract", messages.append)
 
-        assert ok is False
+        assert result["success"] is False
+        assert result["reason"] == "done_api_failed"
+        assert "archive target resolve failed" in result["message"]
         assert any("success=false" in m for m in messages)

@@ -748,6 +748,90 @@ class TestRunDone:
         assert plan.exists(), "ownership guard 차단 시 원본 plan은 유지되어야 함"
 
     @pytest.mark.asyncio
+    async def test_runner_ownership_guard_blocks_unowned_targets(self, svc, tmp_path):
+        """R: snapshot owned_files 바깥의 auto-done 대상은 차단된다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        docs_dir = tmp_path / "docs"
+        docs_dir.mkdir(exist_ok=True)
+        ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+        ownership_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
+
+        plan = plan_dir / "2026-04-14_owned-only.md"
+        plan.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] a\n", encoding="utf-8")
+        (ownership_dir / "runner-3.json").write_text(
+            json.dumps(
+                {
+                    "runner_id": "runner-3",
+                    "captured_at": "2026-04-14T16:54:00",
+                    "project_root": str(tmp_path),
+                    "dirty_files": [],
+                    "owned_files": [
+                        "docs/plan/2026-04-14_owned-only.md",
+                        "docs/archive/2026-04-14_owned-only.md",
+                    ],
+                    "clean_at_start_files": [
+                        "docs/plan/2026-04-14_owned-only.md",
+                        "docs/archive/2026-04-14_owned-only.md",
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(tmp_path / "docs" / "archive" / "owned_only.md", None))) as mock_archive:
+            result = await svc.run_done(str(plan), runner_id="runner-3")
+
+        assert result["success"] is False
+        assert result["reason"] == "ownership_guard"
+        assert "unowned file" in result["message"]
+        mock_archive.assert_not_called()
+        assert plan.exists(), "ownership guard 차단 시 원본 plan은 유지되어야 함"
+
+    @pytest.mark.asyncio
+    async def test_run_done_manual_path_ignores_runner_snapshot(self, svc, tmp_path):
+        """B: runner_id=None 수동 done 경로는 snapshot 존재와 무관하게 ownership guard를 타지 않는다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        docs_dir = tmp_path / "docs"
+        docs_dir.mkdir(exist_ok=True)
+        ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+        ownership_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
+
+        plan = plan_dir / "2026-04-14_manual-done.md"
+        plan.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] a\n", encoding="utf-8")
+        (ownership_dir / "runner-manual.json").write_text(
+            json.dumps(
+                {
+                    "runner_id": "runner-manual",
+                    "captured_at": "2026-04-14T16:54:00",
+                    "project_root": str(tmp_path),
+                    "dirty_files": ["TODO.md", "docs/DONE.md"],
+                    "owned_files": [],
+                    "clean_at_start_files": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        archive_path = tmp_path / "docs" / "archive" / "manual-done.md"
+        with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(archive_path, None))), \
+             patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")), \
+             patch.object(svc, "sync_plans"):
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is True
+        assert result.get("reason") != "ownership_guard"
+
+    @pytest.mark.asyncio
     async def test_run_done_commits_done_history_archive_when_done_overflows(self, svc, tmp_path):
         """R: DONE.md가 5개를 넘으면 history archive도 commit 대상에 포함된다."""
         plan_dir = tmp_path / "docs" / "plan"
@@ -1134,6 +1218,23 @@ class TestBatchDoneRedisPublish:
         assert len(error_tags) >= 1
         error_messages = [m for t, m in published if t == "ERROR"]
         assert any("스크립트 오류" in m for m in error_messages)
+
+    @pytest.mark.asyncio
+    async def test_batch_done_calls_run_done_without_runner_id(self, svc, tmp_plan_dir):
+        """B: ownership snapshot 존재와 무관하게 batch_done은 manual run_done(None) 경로를 사용한다."""
+        p1 = tmp_plan_dir / "plan-batch.md"
+        p1.write_text("> 상태: 검토완료\n\n- [x] task\n", encoding="utf-8")
+
+        import app.modules.dev_runner.services.plan_service as ps_module
+
+        with patch.object(ps_module, "_publish_log"), \
+             patch.object(svc, "run_done", new=AsyncMock(return_value={"success": True, "message": "ok", "remaining_tasks": 0, "total_tasks": 1, "plan_status": "완료"})) as mock_run_done:
+            result = await svc.batch_done()
+
+        assert result["success"] == 1
+        mock_run_done.assert_awaited_once()
+        assert mock_run_done.await_args.args == (str(p1),)
+        assert mock_run_done.await_args.kwargs == {}
 
 
 class TestUpdatePlanStatus:

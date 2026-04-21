@@ -14,15 +14,27 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import requests
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.modules.dev_runner.routes.plans import router as plans_router
 
 BASE_URL = os.environ.get("ADMIN_API_BASE", "http://localhost:8001/api/v1/dev-runner")
 PLANS_DIR = Path(__file__).parent.parent.parent / "docs" / "plan"
 ARCHIVE_DIR = Path(__file__).parent.parent.parent / "docs" / "archive"
 STRICT_CONTRACT = os.environ.get("DONE_API_CONTRACT_STRICT", "").strip() == "1"
 REQUEST_TIMEOUT = 5
+
+
+@pytest.fixture
+def client():
+    app = FastAPI()
+    app.include_router(plans_router, prefix="/api/v1/dev-runner")
+    return TestClient(app, raise_server_exceptions=True)
 
 
 @pytest.fixture(scope="module")
@@ -82,6 +94,80 @@ def test_done_nonexistent_plan_returns_error_E():
     except requests.RequestException as exc:
         pytest.skip(f"admin api unavailable: {exc}")
     assert 400 <= resp.status_code < 500, f"expected 4xx, got {resp.status_code}"
+
+
+@pytest.mark.http
+def test_done_http_returns_ownership_guard_reason_with_runner_header(client, tmp_path):
+    """T5: runner header가 있으면 ownership_guard 실패 contract를 HTTP 응답으로 그대로 반환한다."""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = plan_dir / "2026-04-21-http-ownership.md"
+    plan_path.write_text(
+        "# HTTP ownership guard test\n"
+        "> 상태: 구현완료\n"
+        "> 진행률: 1/1 (100%)\n"
+        "\n"
+        "- [x] task\n",
+        encoding="utf-8",
+    )
+    encoded = base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("=")
+
+    with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), \
+         patch("app.modules.dev_runner.routes.plans.plan_service.run_done", new=AsyncMock(return_value={
+             "success": False,
+             "message": "runner ownership guard blocked auto-done",
+             "reason": "ownership_guard",
+             "output": None,
+             "remaining_tasks": 0,
+             "total_tasks": 1,
+             "plan_status": "구현완료",
+         })) as mock_run_done, \
+         patch("app.modules.dev_runner.routes.plans.plan_service.list_plans", return_value=[]):
+        resp = client.post(
+            f"/api/v1/dev-runner/plans/{encoded}/done",
+            headers={"X-Plan-Runner-Id": "runner-http"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert body["reason"] == "ownership_guard"
+    assert "ownership guard" in body["message"]
+    assert mock_run_done.await_args.kwargs["runner_id"] == "runner-http"
+
+
+@pytest.mark.http
+def test_done_http_without_runner_header_stays_manual_contract(client, tmp_path):
+    """T5: header 없이 같은 endpoint를 호출하면 manual contract(None runner_id)를 유지한다."""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = plan_dir / "2026-04-21-http-manual.md"
+    plan_path.write_text(
+        "# HTTP manual done test\n"
+        "> 상태: 구현완료\n"
+        "> 진행률: 1/1 (100%)\n"
+        "\n"
+        "- [x] task\n",
+        encoding="utf-8",
+    )
+    encoded = base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("=")
+
+    with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), \
+         patch("app.modules.dev_runner.routes.plans.plan_service.run_done", new=AsyncMock(return_value={
+             "success": True,
+             "message": "완료 처리 성공",
+             "output": None,
+             "remaining_tasks": 0,
+             "total_tasks": 1,
+             "plan_status": "구현완료",
+         })) as mock_run_done, \
+         patch("app.modules.dev_runner.routes.plans.plan_service.list_plans", return_value=[]):
+        resp = client.post(f"/api/v1/dev-runner/plans/{encoded}/done")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert mock_run_done.await_args.kwargs["runner_id"] is None
 
 
 @pytest.mark.skipif(STRICT_CONTRACT, reason="strict 모드에서는 strict 전용 케이스만 실행")

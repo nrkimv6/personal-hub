@@ -24,9 +24,34 @@ from _dr_constants import (
 from _dr_merge import _execute_merge_with_lock, _pub_and_log
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process
 from _dr_process_utils import _cleanup_process_state, get_plan_git_root
-from _dr_plan_runner import _do_inline_merge
+from _dr_plan_runner import _do_inline_merge, _capture_runner_ownership_snapshot
 
 logger = logging.getLogger(__name__)
+
+
+def _refresh_runner_ownership_snapshot(runner_id: str, redis_client: redis.Redis | None = None, action: str = "") -> None:
+    """retry/direct merge 진입 직전에 ownership snapshot을 다시 캡처한다."""
+    try:
+        payload = _capture_runner_ownership_snapshot(runner_id, PROJECT_ROOT)
+    except Exception as exc:
+        logger.warning("[ownership] snapshot refresh failed: runner=%s action=%s error=%s", runner_id, action, exc)
+        if redis_client and runner_id:
+            try:
+                _pub_and_log(runner_id, f"[ownership] snapshot refresh failed ({action}): {exc}", redis_client, "MERGE")
+            except Exception:
+                pass
+        return
+
+    if payload.get("capture_error") and redis_client and runner_id:
+        try:
+            _pub_and_log(
+                runner_id,
+                f"[ownership] snapshot refresh warning ({action}): {payload['capture_error']}",
+                redis_client,
+                "MERGE",
+            )
+        except Exception:
+            pass
 
 
 def _log_memory_stage(
@@ -129,6 +154,7 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
             _pub(f"[RETRY-MERGE] pre_merge_gate 통과 — merge 진행")
 
         # lock + subprocess + 결과 처리는 공통 헬퍼에 위임
+        _refresh_runner_ownership_snapshot(runner_id, redis_client, action="retry-merge")
         _log_memory_stage("retry-merge", "mid", runner_id, redis_client)
         merge_result = _execute_merge_with_lock(runner_id, redis_client, action_name="retry-merge")
         result = merge_result
@@ -240,6 +266,7 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         logger.info(f"[direct_merge] 임시 runner {runner_id} 생성, branch={branch}, worktree={worktree_path}")
 
         # _do_inline_merge 호출 (lock+cleanup+로그 발행 포함)
+        _refresh_runner_ownership_snapshot(runner_id, redis_client, action="direct-merge")
         _log_memory_stage("direct-merge", "mid", runner_id, redis_client)
         _do_inline_merge(runner_id, redis_client)
 

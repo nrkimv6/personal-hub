@@ -234,3 +234,60 @@ def test_all_done_success_false_body_sets_restart_E(cl, tmp_path):
     assert r.get(f"{prefix}:{runner_id}:done_post_merge_status") == "failed"
     assert r.get(f"{prefix}:{runner_id}:done_post_merge_error") == "done_api_failed"
     assert r.get(f"{prefix}:{runner_id}:restart_after_merge") == "1"
+
+
+def test_all_done_ownership_guard_sets_specific_error_E(cl, tmp_path):
+    """E: ownership_guard 응답이면 done_post_merge_error에 같은 reason을 남긴다."""
+    r = _make_redis()
+    runner_id = "intg08-own"
+    prefix = cl.RUNNER_KEY_PREFIX
+    plan_path = str(tmp_path / "plan_all_done_ownership.md")
+    _make_all_done_plan(plan_path)
+    _seed_runner_keys(r, prefix, runner_id, plan_path)
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "success": False,
+        "reason": "ownership_guard",
+        "message": "runner ownership guard blocked auto-done",
+    }
+
+    with patch("requests.post", return_value=mock_resp):
+        result = _run_merge(cl, runner_id, r)
+
+    assert result["success"] is False
+    assert result["merge_status"] == "error"
+    assert "ownership_guard" in result["message"]
+    assert r.get(f"{prefix}:{runner_id}:done_post_merge_error") == "ownership_guard"
+    assert r.get(f"{prefix}:{runner_id}:restart_after_merge") == "1"
+
+
+def test_all_done_pre_dirty_todo_ownership_guard_restarts_E(cl, tmp_path):
+    """E: pre-dirty TODO.md로 인한 ownership_guard 실패도 restart_after_merge를 예약한다."""
+    r = _make_redis()
+    runner_id = "intg09-pre-dirty-todo"
+    prefix = cl.RUNNER_KEY_PREFIX
+    plan_path = str(tmp_path / "plan_all_done_pre_dirty_todo.md")
+    _make_all_done_plan(plan_path)
+    _seed_runner_keys(r, prefix, runner_id, plan_path)
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "success": False,
+        "reason": "ownership_guard",
+        "message": (
+            "runner ownership guard blocked auto-done: pre-dirty file(s) detected "
+            f"for runner {runner_id}: {tmp_path / 'TODO.md'}"
+        ),
+    }
+
+    with patch("requests.post", return_value=mock_resp):
+        result = _run_merge(cl, runner_id, r)
+
+    assert result["success"] is False
+    assert result["merge_status"] == "error"
+    assert "ownership_guard" in result["message"]
+    assert r.get(f"{prefix}:{runner_id}:done_post_merge_error") == "ownership_guard"
+    assert r.get(f"{prefix}:{runner_id}:restart_after_merge") == "1"

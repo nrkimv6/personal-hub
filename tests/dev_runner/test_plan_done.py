@@ -12,6 +12,7 @@
 """
 
 import asyncio
+import json
 import pytest
 from datetime import date
 from pathlib import Path
@@ -473,6 +474,48 @@ class TestRunDone:
         assert "archive target resolve failed" in result["message"]
         assert plan_file.exists()
         assert plan_file.read_text(encoding="utf-8") == original
+
+    @pytest.mark.asyncio
+    async def test_run_done_ownership_guard_returns_failure_E(self, tmp_path, svc):
+        """E: auto-done ownership_guard 실패 시 원본 plan 유지 + reason 반환."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        (tmp_path / "docs").mkdir(exist_ok=True)
+        ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+        ownership_dir.mkdir(parents=True, exist_ok=True)
+
+        plan_file = plan_dir / "2026-04-14-ownership-guard.md"
+        original = (
+            "# ownership guard test\n\n"
+            "> 상태: 구현완료\n"
+            "> 진행률: 1/1 (100%)\n\n"
+            "- [x] done\n"
+        )
+        plan_file.write_text(original, encoding="utf-8")
+        (ownership_dir / "runner-own.json").write_text(
+            json.dumps(
+                {
+                    "runner_id": "runner-own",
+                    "captured_at": "2026-04-14T16:54:00",
+                    "project_root": str(tmp_path),
+                    "dirty_files": ["docs/plan/2026-04-14-ownership-guard.md"],
+                    "owned_files": [],
+                    "clean_at_start_files": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(tmp_path / "docs" / "archive" / "owned.md", None))) as mock_archive:
+            result = await svc.run_done(str(plan_file), runner_id="runner-own")
+
+        assert result["success"] is False
+        assert result["reason"] == "ownership_guard"
+        assert plan_file.exists()
+        assert plan_file.read_text(encoding="utf-8") == original
+        mock_archive.assert_not_called()
 
 
 # ========== run_done DB 연동 Cross-check ==========

@@ -154,13 +154,35 @@ def test_handle_post_merge_done_propagates_done_failure_E(cl, tmp_path):
     mock_redis = MagicMock()
 
     with patch("plan_worktree_helpers.remove_plan_header_fields"), \
-         patch("_dr_merge._call_done_api", return_value=False) as mock_done:
+         patch("_dr_merge._call_done_api", return_value={"success": False, "reason": "done_api_failed", "message": "done API failed"}) as mock_done:
         result = cl._handle_post_merge_done(str(plan), "runner-fail", pub_msgs.append, mock_redis)
 
     assert mock_done.call_count == 1
     assert result["success"] is False
     assert result["reason"] == "done_api_failed"
     assert any("자동 done 실패" in m for m in pub_msgs)
+
+
+def test_handle_post_merge_done_preserves_ownership_guard_reason_E(cl, tmp_path):
+    """E: ownership_guard 실패는 redis/result에 별도 reason으로 남는다."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("- [x] 항목1\n", encoding="utf-8")
+
+    pub_msgs = []
+    mock_redis = MagicMock()
+
+    with patch("plan_worktree_helpers.remove_plan_header_fields"), \
+         patch("_dr_merge._register_post_merge_owned_files"), \
+         patch(
+             "_dr_merge._call_done_api",
+             return_value={"success": False, "reason": "ownership_guard", "message": "runner ownership guard blocked auto-done"},
+         ):
+        result = cl._handle_post_merge_done(str(plan), "runner-own", pub_msgs.append, mock_redis)
+
+    assert result["success"] is False
+    assert result["reason"] == "ownership_guard"
+    assert any("ownership_guard" in str(call.args[1]) for call in mock_redis.set.call_args_list if "done_post_merge_error" in call.args[0])
+    assert any("ownership_guard" in m for m in pub_msgs)
 
 
 # ── T3: conflict resolver 성공 후 done flow 재현 TC ─────────────
