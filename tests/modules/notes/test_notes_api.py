@@ -5,8 +5,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-# 메타데이터에 notes 모델 등록을 보장하기 위해 명시적 임포트 (app 변수 오염 방지)
-from app.modules.notes import models as _notes_models  # noqa: F401
 from app.main import app
 from app.database import get_db, Base
 
@@ -78,6 +76,46 @@ def create_tag(client: TestClient, name: str) -> int:
 
 
 # ──────────────── 테스트 ────────────────
+
+class TestBootstrapSmoke:
+    """bootstrap smoke 테스트."""
+
+    def test_bootstrap_smoke_create_list_archive(self, client):
+        """첫 요청부터 notes/archive bootstrap이 연속으로 살아 있어야 한다."""
+        first_list = client.get("/api/notes")
+        assert first_list.status_code == 200, first_list.text
+        assert first_list.json()["items"] == []
+
+        note_id = create_note(client, "bootstrap smoke")
+
+        created = client.get(f"/api/notes/{note_id}")
+        assert created.status_code == 200, created.text
+        assert created.json()["title"] == "bootstrap smoke"
+
+        archived = client.post(f"/api/notes/{note_id}/archive")
+        assert archived.status_code == 200, archived.text
+        archive_payload = archived.json()
+        assert archive_payload["original_id"] == note_id
+
+        archive_list = client.get("/api/notes/archive")
+        assert archive_list.status_code == 200, archive_list.text
+        archive_ids = [item["original_id"] for item in archive_list.json()["items"]]
+        assert note_id in archive_ids
+
+    def test_bootstrap_smoke_repeated_requests_same_client(self, client):
+        """동일 프로세스 재요청에서도 bootstrap/setup 오류가 없어야 한다."""
+        note_id = create_note(client, "repeat bootstrap")
+
+        first = client.get("/api/notes")
+        second = client.get("/api/notes")
+
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+
+        first_ids = [item["id"] for item in first.json()["items"]]
+        second_ids = [item["id"] for item in second.json()["items"]]
+        assert note_id in first_ids
+        assert note_id in second_ids
 
 class TestBulkDelete:
     """벌크 삭제 테스트."""

@@ -92,9 +92,9 @@ def temp_discover_base(temp_git_repo_base):
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_git_repos_tables(test_db_engine):
     """git_repos 관련 테이블이 test DB에 생성되도록 보장."""
-    # 모델 import로 Base.metadata에 등록
-    import app.modules.git_repos.models  # noqa: F401
+    from app.models.bootstrap import load_all_models
     from app.core.database import Base
+    load_all_models()
     Base.metadata.create_all(bind=test_db_engine)
 
 
@@ -730,6 +730,19 @@ class TestAPIRouteStatus:
         assert isinstance(data["staged"], list)
         assert isinstance(data["unstaged"], list)
         assert isinstance(data["untracked"], list)
+
+    def test_get_status_repeated_same_process(self, api_client, temp_git_repo):
+        """첫 상태 조회와 동일 프로세스 재조회 모두 bootstrap 오류 없이 통과해야 한다."""
+        create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
+        repo_id = create.json()["id"]
+
+        first = api_client.get(f"/api/v1/git-repos/{repo_id}/status")
+        second = api_client.get(f"/api/v1/git-repos/{repo_id}/status")
+
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        assert first.json()["status"] == "clean"
+        assert second.json()["status"] == "clean"
 
     def test_get_diff(self, api_client, temp_git_repo):
         """diff 조회 (Right)."""
