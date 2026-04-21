@@ -511,36 +511,6 @@ async def get_main_dirty(repo_root: Path = _REPO_ROOT) -> MainDirtyStatus:
     return MainDirtyStatus(dirty_count=len(files), files=files)
 
 
-async def get_created_at(branch: str, ahead: int, repo_root: Path = _REPO_ROOT) -> Optional[str]:
-    """main 이후 가장 오래된 first-parent 커밋 날짜를 반환한다."""
-    if ahead <= 0:
-        return None
-
-    revision = branch if ahead == 1 else f"{branch}~{ahead - 1}"
-    output = await _run_git("show", "-s", "--format=%ai", revision, repo_root=repo_root)
-    if not output:
-        return None
-
-    for line in output.splitlines():
-        candidate = line.strip()
-        if candidate:
-            return candidate
-    return None
-
-
-def _resolve_plan_metadata(
-    branch: str,
-    active_branch_map: PlanScanMap,
-    archived_branch_map: PlanScanMap,
-) -> tuple[Optional[str], Optional[str], bool]:
-    plan_file, plan_mtime = active_branch_map.get(branch, (None, None))
-    if plan_file is not None:
-        return plan_file, plan_mtime, False
-
-    plan_file, plan_mtime = archived_branch_map.get(branch, (None, None))
-    return plan_file, plan_mtime, plan_file is not None
-
-
 async def _resolve_ahead_behind(
     branch: str,
     ahead_behind_map: dict[str, tuple[int, int]],
@@ -550,6 +520,8 @@ async def _resolve_ahead_behind(
     if ahead_behind is None:
         ahead_behind = await get_ahead_behind(branch, repo_root=repo_root)
     return ahead_behind
+
+
 async def _collect_worktree_state(
     *,
     repo_root: Path,
@@ -597,7 +569,7 @@ async def _build_worktree_info_lite(
     """v2용 lite 카드 모델을 구성한다."""
     branch = wt["branch"]
     ahead, behind = await _resolve_ahead_behind(branch, ahead_behind_map, repo_root)
-    created_at = await get_created_at(branch, ahead, repo_root=repo_root) if ahead > 0 else None
+    created_at = await get_created_at(branch, repo_root=repo_root) if ahead > 0 else None
     plan_file, plan_mtime, plan_file_archived = _resolve_plan_metadata(
         branch,
         active_branch_map,
