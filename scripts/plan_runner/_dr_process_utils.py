@@ -40,6 +40,31 @@ from _dr_runner_predicates import (
 logger = logging.getLogger(__name__)
 
 
+def _record_worktree_cleanup_monitor_event(
+    *,
+    event_type: str,
+    branches: list[str],
+    runner_id: str | None = None,
+    test_source: str | None = None,
+    worktree_path: str | None = None,
+) -> None:
+    try:
+        if str(PROJECT_ROOT) not in sys.path:
+            sys.path.insert(0, str(PROJECT_ROOT))
+        from app.shared.process.worktree_residue_monitor import WorktreeResidueMonitor
+
+        WorktreeResidueMonitor.record_cleanup(
+            event_type=event_type,
+            branches=branches,
+            source="_dr_process_utils",
+            runner_id=runner_id,
+            test_source=test_source,
+            worktree_path=worktree_path,
+        )
+    except Exception as exc:
+        logger.debug("[cleanup] worktree residue monitor record skipped: %s", exc)
+
+
 def _force_cleanup_test_runner_worktree(runner_id: str, redis_client: redis.Redis) -> bool:
     """test_source가 있는 runner의 worktree/branch를 강제 정리한다."""
     test_source = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source")
@@ -112,6 +137,14 @@ def _force_cleanup_test_runner_worktree(runner_id: str, redis_client: redis.Redi
             branch,
             exc,
         )
+
+    _record_worktree_cleanup_monitor_event(
+        event_type="force_cleanup",
+        branches=[branch],
+        runner_id=runner_id,
+        test_source=str(test_source),
+        worktree_path=str(worktree_path),
+    )
 
     return True
 

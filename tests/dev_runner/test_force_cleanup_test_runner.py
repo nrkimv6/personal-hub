@@ -39,12 +39,20 @@ def test_force_cleanup_test_runner_worktree_when_test_source_present():
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    with patch.object(mod.subprocess, "run", side_effect=_fake_run):
+    with patch.object(mod.subprocess, "run", side_effect=_fake_run), \
+         patch.object(mod, "_record_worktree_cleanup_monitor_event") as mock_record:
         result = mod._force_cleanup_test_runner_worktree("t-clean-1234", redis_client)
 
     assert result is True
     assert calls[0][:4] == ["git", "worktree", "remove", "--force"]
     assert calls[1] == ["git", "branch", "-D", "runner/t-clean-1234"]
+    mock_record.assert_called_once_with(
+        event_type="force_cleanup",
+        branches=["runner/t-clean-1234"],
+        runner_id="t-clean-1234",
+        test_source="cleanup",
+        worktree_path="D:/repo/.worktrees/t-clean-1234",
+    )
 
 
 def test_force_cleanup_test_runner_worktree_skips_without_test_source():

@@ -10,8 +10,11 @@ T5-2  GET /api/v1/dev-runner/runners 에서 실패 runner 진단 메시지 확�
 """
 from __future__ import annotations
 
+import os
+import subprocess
 import time
 import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -20,8 +23,11 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-BASE_URL = "http://localhost:8001"
+BASE_URL = os.environ.get("ADMIN_SERVER_URL", "http://localhost:8001")
 API_PREFIX = "/api/v1/dev-runner"
+STATUS_PATH = "/api/v1/system/status"
+HTTP_TIMEOUT = float(os.environ.get("ADMIN_SERVER_TIMEOUT", "30"))
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.http
 
@@ -32,18 +38,36 @@ pytestmark = pytest.mark.http
 
 def _live_server_available() -> bool:
     try:
-        httpx.get(f"{BASE_URL}/", timeout=3)
+        httpx.get(f"{BASE_URL}{STATUS_PATH}", timeout=3)
         return True
-    except httpx.ConnectError:
+    except httpx.RequestError:
         return False
 
 
 def _live_get(path: str, **kwargs) -> httpx.Response:
-    return httpx.get(f"{BASE_URL}{path}", timeout=10, **kwargs)
+    return httpx.get(f"{BASE_URL}{path}", timeout=HTTP_TIMEOUT, **kwargs)
 
 
 def _live_post(path: str, json=None, **kwargs) -> httpx.Response:
-    return httpx.post(f"{BASE_URL}{path}", json=json or {}, timeout=10, **kwargs)
+    return httpx.post(f"{BASE_URL}{path}", json=json or {}, timeout=HTTP_TIMEOUT, **kwargs)
+
+
+def _git_worktree_branches() -> set[str]:
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    branches: set[str] = set()
+    for line in result.stdout.splitlines():
+        if not line.startswith("branch "):
+            continue
+        ref = line.removeprefix("branch ").strip()
+        if ref.startswith("refs/heads/"):
+            branches.add(ref.removeprefix("refs/heads/"))
+    return branches
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -246,7 +270,7 @@ class TestRunApiEnvHeaderHttp:
         )
 
     def test_post_run_test_source_worktree_auto_cleanup(self):
-        """T5-3: test_source runner 종료 후 worktrees/v2에 test runner worktree가 남지 않아야 한다."""
+        """T5-3: test_source runner 종료 후 git worktree 목록에 test runner worktree가 남지 않아야 한다."""
         if not _live_server_available():
             pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
 
@@ -266,7 +290,6 @@ class TestRunApiEnvHeaderHttp:
 
         runner_finished = False
         worktree_branch_seen = False
-        worktree_payload = None
 
         for _ in range(40):
             time.sleep(1)
@@ -276,32 +299,18 @@ class TestRunApiEnvHeaderHttp:
                 status_body = status_resp.json()
                 runner_finished = not bool(status_body.get("running"))
 
-            worktree_resp = _live_get(f"{API_PREFIX}/worktrees/v2")
-            if worktree_resp.status_code != 200:
-                continue
-
-            worktree_payload = worktree_resp.json()
-            branches = {
-                item.get("branch")
-                for item in worktree_payload.get("worktrees", [])
-                if item.get("branch")
-            }
+            branches = _git_worktree_branches()
             if expected_branch in branches:
                 worktree_branch_seen = True
             if runner_finished and expected_branch not in branches:
                 break
 
         assert runner_finished, f"runner_id={runner_id}: 종료 대기 타임아웃"
-        assert worktree_payload is not None, "worktrees/v2 응답을 한 번도 받지 못함"
         assert worktree_branch_seen, (
             f"runner_id={runner_id}: 테스트 러너 worktree가 한 번도 관측되지 않음. "
             "실제 생성 없이 종료됐다면 환경 상태를 확인해야 한다."
         )
-        remaining = {
-            item.get("branch")
-            for item in worktree_payload.get("worktrees", [])
-            if item.get("branch")
-        }
+        remaining = _git_worktree_branches()
         assert expected_branch not in remaining, (
             f"runner_id={runner_id}: test_source runner worktree가 cleanup 후에도 남아 있음"
         )

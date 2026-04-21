@@ -4,7 +4,6 @@
 감지하고, grace period 경과 후 자동으로 정리한다.
 """
 import asyncio
-import logging
 import sys
 import time
 import subprocess
@@ -13,8 +12,9 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 import psutil
 
-from app.core.config import settings
+from app.core.config import settings, logger
 from app.shared.process.registry import ProcessRegistry
+from app.shared.process.worktree_residue_monitor import WorktreeResidueMonitor
 
 if TYPE_CHECKING:
     pass
@@ -35,9 +35,6 @@ def kill_pid(pid: int, timeout: int = 5) -> bool:
         import logging as _l
         _l.getLogger(__name__).warning("kill_pid 실패 (pid=%s): %s", pid, exc)
         return False
-
-logger = logging.getLogger(__name__)
-
 
 class OrphanDetector:
     """고아 프로세스 감지 및 정리 클래스."""
@@ -156,6 +153,16 @@ class OrphanDetector:
         except Exception as exc:
             logger.warning("[orphan-worktree] runner key 조회 실패 (%s): %s", runner_id, exc)
             return False
+
+    def _list_test_worktree_branches(self) -> list[str]:
+        from app.modules.dev_runner.services.worktree_service import is_test_branch
+
+        branches: list[str] = []
+        for item in self._iter_git_worktrees():
+            branch = str(item.get("branch") or "")
+            if branch and is_test_branch(branch):
+                branches.append(branch)
+        return sorted(set(branches))
 
     async def detect_orphan_test_worktrees(self) -> list[str]:
         """잔류 test worktree 후보 branch 목록을 반환한다."""
@@ -323,11 +330,20 @@ class OrphanDetector:
                     stale_test_branches = await self.detect_orphan_test_worktrees()
                     if stale_test_branches:
                         await self.cleanup_orphan_test_worktrees(stale_test_branches)
+                        WorktreeResidueMonitor.record_cleanup(
+                            event_type="orphan_cleanup",
+                            branches=stale_test_branches,
+                            source="orphan_detector",
+                        )
                         logger.info(
                             "[orphan-worktree] cleaned %d stale test worktrees: %s",
                             len(stale_test_branches),
                             ", ".join(stale_test_branches),
                         )
+                    WorktreeResidueMonitor.record_scan(
+                        self._list_test_worktree_branches(),
+                        source="orphan_detector",
+                    )
                     next_scan_at = time.monotonic() + scan_interval
 
                 now = time.monotonic()

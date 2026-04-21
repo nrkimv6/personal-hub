@@ -12,9 +12,12 @@ WorkerOrchestrator 및 관련 컴포넌트 테스트.
 - 재시작 로직
 """
 import asyncio
+from pathlib import Path
 import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 
+from app.core.config import settings as core_settings
+from app.worker import orchestrator as orchestrator_mod
 from app.worker.orchestrator import WorkerOrchestrator, WorkerState
 from app.shared.worker.base_worker import BaseWorker
 from app.shared.worker.exceptions import (
@@ -184,6 +187,70 @@ class TestOrchestratorCrossCheck:
         assert len(orchestrator.workers) == 5
         assert len(orchestrator.worker_states) == 5
         assert orchestrator.get_status()["worker_count"] == 5
+
+    @pytest.mark.asyncio
+    async def test_run_starts_orphan_detector_with_cleanup_callback(self):
+        """run()이 stale test worktree 정리용 OrphanDetector를 올바르게 wiring한다."""
+        orchestrator = WorkerOrchestrator()
+        orchestrator._initialized = True
+        orchestrator.register_worker("test", DummyWorker("test"))
+
+        class FakeDetector:
+            instances = []
+
+            def __init__(self, registry, repo_root=None, cleanup_callback=None):
+                self.registry = registry
+                self.repo_root = repo_root
+                self.cleanup_callback = cleanup_callback
+                self.run_args = None
+                FakeDetector.instances.append(self)
+
+            async def run_periodic(self, interval, memory_check_interval):
+                self.run_args = (interval, memory_check_interval)
+                return None
+
+        with patch.object(orchestrator_mod, "OrphanDetector", FakeDetector), \
+             patch.object(
+                 WorkerOrchestrator,
+                 "_run_worker_with_supervision",
+                 new=AsyncMock(return_value=None),
+             ), \
+             patch.object(core_settings, "PROCESS_SCAN_INTERVAL", 12.5), \
+             patch.object(core_settings, "MEMORY_PRESSURE_CHECK_INTERVAL", 3.5):
+            await orchestrator.run()
+            if orchestrator._orphan_task is not None:
+                await orchestrator._orphan_task
+
+        assert len(FakeDetector.instances) == 1
+        detector = FakeDetector.instances[0]
+        assert detector.repo_root == Path(orchestrator_mod.__file__).resolve().parents[2]
+        assert detector.run_args == (12.5, 3.5)
+        assert detector.cleanup_callback.__self__ is orchestrator
+        assert (
+            detector.cleanup_callback.__func__
+            is WorkerOrchestrator._cleanup_orphan_test_worktrees
+        )
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphan_test_worktrees_delegates_to_worktree_service(self):
+        """cleanup helper는 cleanup_worktrees(..., dry_run=False)만 호출해야 한다."""
+        orchestrator = WorkerOrchestrator()
+        expected = {"results": [{"branch": "runner/t-stale-001", "status": "removed"}]}
+
+        with patch(
+            "app.modules.dev_runner.services.worktree_service.cleanup_worktrees",
+            new=AsyncMock(return_value=expected),
+        ) as mock_cleanup:
+            result = await orchestrator._cleanup_orphan_test_worktrees(
+                ["runner/t-stale-001"]
+            )
+
+        assert result == expected
+        mock_cleanup.assert_awaited_once_with(
+            ["runner/t-stale-001"],
+            dry_run=False,
+            repo_root=Path(orchestrator_mod.__file__).resolve().parents[2],
+        )
 
 
 # ============================================================

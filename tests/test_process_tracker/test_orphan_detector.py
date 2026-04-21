@@ -156,7 +156,11 @@ async def test_run_periodic_checks_memory_more_frequently_than_scan():
         task = asyncio.create_task(
             detector.run_periodic(interval=0.20, memory_check_interval=0.05)
         )
-        await asyncio.sleep(0.27)
+        deadline = time.monotonic() + 0.8
+        while time.monotonic() < deadline:
+            if fake_pressure.check.await_count > detector.scan.await_count:
+                break
+            await asyncio.sleep(0.02)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -292,12 +296,15 @@ async def test_run_periodic_invokes_test_worktree_cleanup():
     detector.scan = AsyncMock(return_value=[])
     detector.cleanup = AsyncMock(return_value=[])
     detector.detect_orphan_test_worktrees = AsyncMock(return_value=["runner/t-stale-002"])
+    detector._list_test_worktree_branches = MagicMock(return_value=[])
 
     fake_pressure = MagicMock()
     fake_pressure.check = AsyncMock(return_value="normal")
 
     with patch("app.shared.process.memory_pressure.MemoryPressureResponder", return_value=fake_pressure), \
-         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 999):
+         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 999), \
+         patch("app.shared.process.orphan_detector.WorktreeResidueMonitor.record_cleanup") as mock_record_cleanup, \
+         patch("app.shared.process.orphan_detector.WorktreeResidueMonitor.record_scan") as mock_record_scan:
         task = asyncio.create_task(
             detector.run_periodic(interval=0.20, memory_check_interval=0.20)
         )
@@ -307,3 +314,9 @@ async def test_run_periodic_invokes_test_worktree_cleanup():
             await task
 
     cleanup_callback.assert_awaited_with(["runner/t-stale-002"])
+    mock_record_cleanup.assert_called_with(
+        event_type="orphan_cleanup",
+        branches=["runner/t-stale-002"],
+        source="orphan_detector",
+    )
+    mock_record_scan.assert_called_with([], source="orphan_detector")
