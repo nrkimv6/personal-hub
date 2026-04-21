@@ -84,3 +84,52 @@ def test_v2_merge_fallback_e2e_stream_output_no_merge_B(monkeypatch, tmp_path):
     assert mock_cleanup.called, "_cleanup_process_state should be called"
 
 
+def test_v2_merge_fallback_e2e_stream_output_residue_guard_E(monkeypatch, tmp_path):
+    """T3 E: detect success + residue_guard failure면 workflow에 같은 reason을 남기고 cleanup한다."""
+    from _dr_plan_runner import _stream_output
+    import _dr_plan_runner as plan_runner_mod
+
+    monkeypatch.setattr("plan_worktree_helpers.is_plan_in_progress", lambda *a, **kw: False, raising=False)
+    monkeypatch.setattr("plan_worktree_helpers.has_unmerged_commits", lambda *a, **kw: False, raising=False)
+
+    runner_id = "e2e-test-runner-t4-residue"
+    plan_file = str(tmp_path / "test_plan_residue.md")
+    Path(plan_file).write_text("> Status: merging\n- [x] task1\n", encoding="utf-8")
+
+    proc = _make_mock_process(exit_code=15)
+    log_file = tmp_path / "runner_residue.log"
+    log_file.write_text("", encoding="utf-8")
+
+    redis_mock = MagicMock()
+    redis_mock.get.return_value = None
+    wf_mgr = MagicMock()
+    wf_mgr.get_by_runner_id.return_value = {"id": 77, "runner_id": runner_id, "status": "running"}
+
+    done_result = {
+        "success": False,
+        "status": "skipped_residue",
+        "reason": "residue_guard",
+        "quarantine_diff_path": "logs/dev_runner/residue/e2e-test-runner-t4-residue.diff",
+    }
+
+    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+         patch("_dr_stream_cleanup.detect_merged_but_not_done",
+               return_value={"plan_file": plan_file, "branch": "plan/e2e-test-residue"}) as mock_detect, \
+         patch("_dr_stream_cleanup._handle_post_merge_done", return_value=done_result) as mock_done, \
+         patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup, \
+         patch("_dr_merge._pub_and_log"), \
+         open(str(log_file), "a", encoding="utf-8") as lh:
+        _stream_output(proc, lh, redis_mock, runner_id)
+
+    mock_detect.assert_called_once_with(runner_id, redis_mock)
+    mock_done.assert_called_once()
+    wf_mgr.update_status.assert_any_call(
+        77,
+        "failed",
+        error_message="Fallback done failed: residue_guard",
+    )
+    assert wf_mgr.update_status.call_args_list[-1].kwargs["error_message"] == "Fallback done failed: residue_guard"
+    mock_cleanup.assert_called_once_with(runner_id, redis_mock)
+
+

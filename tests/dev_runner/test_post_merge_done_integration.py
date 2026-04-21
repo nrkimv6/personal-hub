@@ -6,6 +6,8 @@ subprocess(plan-runner post-merge)는 mock으로 대체하여 exit_code=0 경로
 """
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 import types
 import uuid
@@ -18,6 +20,8 @@ import pytest
 _SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+
+import _dr_merge as merge_mod
 
 _SCRIPT_PATH = _SCRIPTS_DIR / "plan_runner" / "dev-runner-command-listener.py"
 _mock_noise = types.ModuleType("listener_noise_filter")
@@ -62,6 +66,78 @@ def _make_partial_plan(path):
     Path(path).write_text(
         "# test plan\n> 상태: 구현중\n\n## Phase 1\n- [x] task one\n- [ ] task two\n",
         encoding="utf-8",
+    )
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def _setup_git_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@test.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "README.md").write_text("init\n", encoding="utf-8")
+    (repo / "notes.txt").write_text("baseline\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "init")
+    return repo
+
+
+def _create_merged_repo_with_stash_residue(repo: Path) -> None:
+    (repo / "notes.txt").write_text("stashed residue\n", encoding="utf-8")
+    _git(repo, "stash", "push", "-m", "pre-merge-residue", "--", "notes.txt")
+
+    _git(repo, "checkout", "-b", "feature/residue-guard")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _git(repo, "add", "feature.txt")
+    _git(repo, "commit", "-m", "feat: feature branch")
+    _git(repo, "checkout", "main")
+    _git(repo, "merge", "--no-ff", "feature/residue-guard", "-m", "Merge branch 'feature/residue-guard' into main")
+    _git(repo, "stash", "pop")
+
+
+_GIT_ENV = {
+    **os.environ,
+    "GIT_AUTHOR_NAME": "test",
+    "GIT_AUTHOR_EMAIL": "t@t.com",
+    "GIT_COMMITTER_NAME": "test",
+    "GIT_COMMITTER_EMAIL": "t@t.com",
+}
+
+
+def _init_git_repo_with_stashable_residue(repo: Path, branch: str) -> None:
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, env=_GIT_ENV)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=repo, check=True, capture_output=True, env=_GIT_ENV)
+
+    (repo / "README.md").write_text("init\n", encoding="utf-8")
+    (repo / "residue.txt").write_text("clean\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True, env=_GIT_ENV)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, env=_GIT_ENV)
+
+    subprocess.run(["git", "checkout", "-b", branch], cwd=repo, check=True, capture_output=True, env=_GIT_ENV)
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    subprocess.run(["git", "add", "feature.txt"], cwd=repo, check=True, capture_output=True, env=_GIT_ENV)
+    subprocess.run(["git", "commit", "-m", "feat: residue branch"], cwd=repo, check=True, capture_output=True, env=_GIT_ENV)
+    subprocess.run(["git", "checkout", "main"], cwd=repo, check=True, capture_output=True, env=_GIT_ENV)
+
+    (repo / "residue.txt").write_text("resurrected stray\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "stash", "push", "--include-untracked", "-m", "old-residue"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env=_GIT_ENV,
     )
 
 
@@ -316,3 +392,140 @@ def test_post_merge_residue_blocked_skips_restart_E(cl, tmp_path):
     assert result["reason"] == "residue_guard"
     assert result["quarantine_diff_path"].endswith("intg10-residue.diff")
     assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None
+
+
+def test_post_merge_stash_residue_blocks_restart_with_real_git_T3(cl, tmp_path):
+    """T3: pre-merge stash pop으로 생긴 stray dirty는 real git repo에서도 residue_blocked로 차단된다."""
+    r = _make_redis()
+    runner_id = "intg11-stash-residue"
+    prefix = cl.RUNNER_KEY_PREFIX
+    repo = _setup_git_repo(tmp_path)
+    _create_merged_repo_with_stash_residue(repo)
+
+    plan_path = str(tmp_path / "plan_stash_residue.md")
+    _make_all_done_plan(plan_path)
+    _seed_runner_keys(r, prefix, runner_id, plan_path, branch="feature/residue-guard")
+
+    snapshot_dir = tmp_path / "ownership"
+    snapshot_dir.mkdir()
+    (snapshot_dir / f"{runner_id}.json").write_text(
+        json.dumps(
+            {
+                "runner_id": runner_id,
+                "project_root": str(repo),
+                "dirty_files": [],
+                "dirty_status_lines": [],
+                "owned_files": [],
+                "clean_at_start_files": [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    pub_calls: list[str] = []
+    with patch.object(merge_mod, "OWNERSHIP_SNAPSHOT_DIR", snapshot_dir):
+        result = merge_mod._handle_merge_success(runner_id, r, plan_path, pub_calls.append)
+
+    status_after = _git(repo, "status", "--porcelain=v1").stdout.strip()
+    quarantine_path = Path(result["quarantine_diff_path"])
+
+    assert result["success"] is False
+    assert result["merge_status"] == "residue_blocked"
+    assert result["reason"] == "residue_guard"
+    assert r.get(f"{prefix}:{runner_id}:merge_status") == "residue_blocked"
+    assert r.get(f"{prefix}:{runner_id}:done_post_merge_status") == "skipped_residue"
+    assert r.get(f"{prefix}:{runner_id}:done_post_merge_error") == "residue_guard"
+    assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None
+    assert r.get(f"{prefix}:{runner_id}:quarantine_diff_path") == str(quarantine_path)
+    assert status_after == ""
+    assert (repo / "notes.txt").read_text(encoding="utf-8") == "baseline\n"
+    assert quarantine_path.exists()
+    assert "notes.txt" in quarantine_path.read_text(encoding="utf-8")
+    assert any("post-merge residue 감지" in line for line in pub_calls)
+
+
+def test_real_git_stash_pop_residue_blocked_skips_restart_T3(cl, tmp_path):
+    """T3: 실제 stash pop 재오염이 생기면 residue guard가 quarantine 후 restart 없이 차단한다."""
+    import _dr_merge as dr_merge_mod
+
+    r = _make_redis()
+    runner_id = "intg11-real-stash-residue"
+    prefix = cl.RUNNER_KEY_PREFIX
+    branch = "plan/real-stash-residue"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo_with_stashable_residue(repo, branch)
+
+    plan_path = str(tmp_path / "plan_real_stash_residue.md")
+    _make_all_done_plan(plan_path)
+    _seed_runner_keys(r, prefix, runner_id, plan_path, branch=branch)
+
+    snapshot_dir = tmp_path / "ownership"
+    snapshot_dir.mkdir()
+    (snapshot_dir / f"{runner_id}.json").write_text(
+        json.dumps(
+            {
+                "project_root": str(repo),
+                "dirty_files": [],
+                "owned_files": [],
+                "clean_at_start_files": [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    real_run = subprocess.run
+
+    def _subprocess_router(cmd, *args, **kwargs):
+        if cmd and cmd[0] == "git":
+            return real_run(cmd, *args, **kwargs)
+
+        real_run(
+            ["git", "merge", "--no-ff", branch, "-m", f"Merge branch '{branch}'"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_GIT_ENV,
+        )
+        real_run(
+            ["git", "stash", "pop"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_GIT_ENV,
+        )
+        proc = MagicMock()
+        proc.returncode = 0
+        return proc
+
+    with patch.object(dr_merge_mod, "PROJECT_ROOT", repo), \
+         patch.object(dr_merge_mod, "OWNERSHIP_SNAPSHOT_DIR", snapshot_dir), \
+         patch("subprocess.run", side_effect=_subprocess_router), \
+         patch("requests.post") as mock_post:
+        result = cl._execute_merge_with_lock(runner_id, r)
+
+    mock_post.assert_not_called()
+    assert result["success"] is False
+    assert result["merge_status"] == "residue_blocked"
+    assert result["reason"] == "residue_guard"
+    assert Path(result["quarantine_diff_path"]).exists()
+    assert "residue.txt" in Path(result["quarantine_diff_path"]).read_text(encoding="utf-8")
+    assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_GIT_ENV,
+    )
+    status_lines = [line.strip() for line in status.stdout.splitlines() if line.strip()]
+    assert len(status_lines) == 1
+    assert status_lines[0] == "?? logs/"

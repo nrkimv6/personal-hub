@@ -606,6 +606,57 @@ class TestInlineMergeE2ESubprocessFlow:
         pushed_data = json.loads(pushed[0])
         assert pushed_data["success"] is True
 
+    def test_execute_merge_with_lock_residue_blocked_persists_quarantine_T3(self, cl, dr_merge_mod):
+        """T3: residue helper 실패 시 result/Redis/merge-results가 residue_blocked로 고정된다."""
+        import fakeredis as _fakeredis
+        import types as _types
+
+        fake_r = _fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "e2e-residue-01"
+        prefix = cl.RUNNER_KEY_PREFIX
+
+        fake_r.set(f"{prefix}:{runner_id}:worktree_path", "D:/tmp/wt_residue")
+        fake_r.set(f"{prefix}:{runner_id}:plan_file", "docs/plan/test.md")
+        fake_r.set(f"{prefix}:{runner_id}:branch", "impl/test")
+
+        mock_lock_mod = _types.ModuleType("merge_queue")
+        mock_lock_mod.acquire_merge_turn = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_turn = MagicMock()
+        mock_lock_mod._get_repo_id = MagicMock(return_value="repo-test")
+
+        proc_result = MagicMock()
+        proc_result.returncode = 0
+
+        residue_result = {
+            "success": False,
+            "status": "residue_blocked",
+            "reason": "residue_guard",
+            "message": "post-merge residue detected and restored",
+            "quarantine_diff_path": "logs/dev_runner/residue/e2e-residue-01.diff",
+        }
+
+        with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(dr_merge_mod, "_check_post_merge_residue", return_value=residue_result):
+            result = cl._execute_merge_with_lock(runner_id, fake_r)
+
+        assert result["success"] is False
+        assert result["merge_status"] == "residue_blocked"
+        assert result["reason"] == "residue_guard"
+        assert result["quarantine_diff_path"].endswith("e2e-residue-01.diff")
+        assert fake_r.get(f"{prefix}:{runner_id}:merge_status") == "residue_blocked"
+        assert fake_r.get(f"{prefix}:{runner_id}:done_post_merge_status") == "skipped_residue"
+        assert fake_r.get(f"{prefix}:{runner_id}:done_post_merge_error") == "residue_guard"
+        assert fake_r.get(f"{prefix}:{runner_id}:quarantine_diff_path").endswith("e2e-residue-01.diff")
+
+        results = fake_r.lrange("plan-runner:merge-results", 0, 0)
+        assert len(results) > 0
+        result_data = json.loads(results[0])
+        assert result_data["runner_id"] == runner_id
+        assert result_data["status"] == "failed"
+        assert result_data["success"] is False
+        assert result_data["reason"] == "residue_guard"
+
 
 # ?? Phase T1 (exit_code=2): auto-impl-post-merge ?먮룞 蹂듦뎄 TC ?????????????????
 
