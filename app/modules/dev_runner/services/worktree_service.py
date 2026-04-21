@@ -30,6 +30,7 @@ _COMMIT_SENTINEL = "__WT_COMMIT__"
 PlanScanMap = dict[str, tuple[str, str]]
 PlanScanUnresolved = list[dict[str, str]]
 PlanScanResult = tuple[PlanScanMap, PlanScanUnresolved]
+PlanIndexResult = tuple[PlanScanMap, PlanScanMap, PlanScanUnresolved]
 
 
 def _iter_plan_dirs(repo_root: Path) -> list[tuple[Path, bool]]:
@@ -254,14 +255,15 @@ def _parse_numstat_line(line: str) -> Optional[CommitDiffStat]:
     return CommitDiffStat(file=path, changes=changes)
 
 
-def scan_plan_files(repo_root: Path = _REPO_ROOT) -> PlanScanResult:
-    """활성 plan 디렉토리를 1회 스캔해 branch map과 unresolved 목록을 반환한다."""
+def _scan_plan_file_index(repo_root: Path = _REPO_ROOT) -> PlanIndexResult:
+    """활성/아카이브 plan 인덱스를 한 번에 스캔한다."""
     branch_pattern = re.compile(r"^>\s*branch:\s*(.+)$")
-    branch_map: PlanScanMap = {}
+    active_branch_map: PlanScanMap = {}
+    archived_branch_map: PlanScanMap = {}
     unresolved: PlanScanUnresolved = []
     seen_paths: set[str] = set()
 
-    for plan_dir in _iter_active_plan_dirs(repo_root):
+    for plan_dir, archived in _iter_plan_dirs(repo_root):
         if not plan_dir.exists():
             continue
         for md_file in sorted(plan_dir.glob("*.md")):
@@ -284,6 +286,8 @@ def scan_plan_files(repo_root: Path = _REPO_ROOT) -> PlanScanResult:
                             break
 
                 if found_branch is None:
+                    if archived:
+                        continue
                     unresolved.append({
                         "plan_file": relative_path,
                         "reason": "missing > branch header",
@@ -291,11 +295,18 @@ def scan_plan_files(repo_root: Path = _REPO_ROOT) -> PlanScanResult:
                     })
                     continue
 
-                branch_map.setdefault(found_branch, (relative_path, mtime_iso))
+                target_map = archived_branch_map if archived else active_branch_map
+                target_map.setdefault(found_branch, (relative_path, mtime_iso))
             except (OSError, UnicodeDecodeError):
                 continue
 
-    return branch_map, unresolved
+    return active_branch_map, archived_branch_map, unresolved
+
+
+def scan_plan_files(repo_root: Path = _REPO_ROOT) -> PlanScanResult:
+    """활성 plan 디렉토리를 1회 스캔해 branch map과 unresolved 목록을 반환한다."""
+    active_branch_map, _archived_branch_map, unresolved = _scan_plan_file_index(repo_root)
+    return active_branch_map, unresolved
 
 
 def find_plan_file(
@@ -306,29 +317,16 @@ def find_plan_file(
 
     매칭 실패 시 (None, None, False) 반환.
     """
-    branch_map, _ = scan_plan_files(repo_root=repo_root)
-    active_match = branch_map.get(branch)
+    active_branch_map, archived_branch_map, _ = _scan_plan_file_index(repo_root=repo_root)
+    active_match = active_branch_map.get(branch)
     if active_match is not None:
         path, mtime = active_match
         return path, mtime, False
 
-    pattern = re.compile(rf"^>\s*branch:\s*{re.escape(branch)}\s*$")
-    for plan_dir, archived in _iter_plan_dirs(repo_root):
-        if not archived:
-            continue
-        if not plan_dir.exists():
-            continue
-        for md_file in sorted(plan_dir.glob("*.md")):
-            try:
-                with open(md_file, encoding="utf-8") as f:
-                    for i, line in enumerate(f):
-                        if i >= 30:
-                            break
-                        if pattern.match(line.rstrip()):
-                            mtime_iso = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
-                            return str(md_file.relative_to(repo_root)), mtime_iso, archived
-            except (OSError, UnicodeDecodeError):
-                continue
+    archived_match = archived_branch_map.get(branch)
+    if archived_match is not None:
+        path, mtime = archived_match
+        return path, mtime, True
     return None, None, False
 
 
@@ -402,7 +400,9 @@ async def get_main_dirty(repo_root: Path = _REPO_ROOT) -> MainDirtyStatus:
 async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListResponse:
     """전체 워크트리 정보 조합 — ahead/behind + 커밋 목록은 병렬, find_plan_file은 asyncio.to_thread"""
     raw_worktrees = await list_worktrees(repo_root=repo_root)
-    branch_map, unresolved = await asyncio.to_thread(scan_plan_files, repo_root)
+    active_branch_map, archived_branch_map, unresolved = await asyncio.to_thread(
+        _scan_plan_file_index, repo_root
+    )
 
     async def _build(wt: dict) -> WorktreeInfo:
         branch = wt["branch"]
@@ -410,12 +410,11 @@ async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListRespons
             get_ahead_behind(branch, repo_root=repo_root),
             get_worktree_commits(branch, repo_root=repo_root),
         )
-        plan_file, plan_mtime = branch_map.get(branch, (None, None))
+        plan_file, plan_mtime = active_branch_map.get(branch, (None, None))
         plan_file_archived = False
         if plan_file is None:
-            plan_file, plan_mtime, plan_file_archived = await asyncio.to_thread(
-                find_plan_file, branch, repo_root
-            )
+            plan_file, plan_mtime = archived_branch_map.get(branch, (None, None))
+            plan_file_archived = plan_file is not None
         created_at = commits[-1].date if commits else None
         return WorktreeInfo(
             branch=branch,
@@ -445,7 +444,7 @@ async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListRespons
 
     plan_only_result, main_dirty = await asyncio.gather(
         asyncio.to_thread(
-            list_plan_only_branches, existing_branches, repo_root, (branch_map, unresolved)
+            list_plan_only_branches, existing_branches, repo_root, (active_branch_map, unresolved)
         ),
         get_main_dirty(repo_root=repo_root),
     )
