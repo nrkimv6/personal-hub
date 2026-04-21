@@ -428,7 +428,7 @@ def test_post_merge_stash_residue_blocks_restart_with_real_git_T3(cl, tmp_path):
     with patch.object(merge_mod, "OWNERSHIP_SNAPSHOT_DIR", snapshot_dir):
         result = merge_mod._handle_merge_success(runner_id, r, plan_path, pub_calls.append)
 
-    status_after = _git(repo, "status", "--porcelain=v1").stdout.strip()
+    status_lines = [line for line in _git(repo, "status", "--porcelain=v1").stdout.splitlines() if line.strip()]
     quarantine_path = Path(result["quarantine_diff_path"])
 
     assert result["success"] is False
@@ -439,7 +439,7 @@ def test_post_merge_stash_residue_blocks_restart_with_real_git_T3(cl, tmp_path):
     assert r.get(f"{prefix}:{runner_id}:done_post_merge_error") == "residue_guard"
     assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None
     assert r.get(f"{prefix}:{runner_id}:quarantine_diff_path") == str(quarantine_path)
-    assert status_after == ""
+    assert status_lines == ["?? logs/"]
     assert (repo / "notes.txt").read_text(encoding="utf-8") == "baseline\n"
     assert quarantine_path.exists()
     assert "notes.txt" in quarantine_path.read_text(encoding="utf-8")
