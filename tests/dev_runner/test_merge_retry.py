@@ -156,6 +156,33 @@ class TestDoRetryMerge:
         result = json.loads(push_calls[-1][0][1])
         assert result.get("success") is False
 
+    def test_retry_merge_residue_blocked_distinct_from_error_R(self, tmp_path):
+        """R: retry-merge 결과는 residue_blocked를 generic error와 구분해 유지한다."""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+        merge_result = {
+            "success": False,
+            "message": "post-merge residue detected and restored",
+            "merge_status": "residue_blocked",
+            "reason": "residue_guard",
+            "action": "retry-merge",
+        }
+
+        with patch("_dr_commands._execute_merge_with_lock", return_value=merge_result), \
+             patch("_dr_commands._cleanup_process_state"), \
+             patch("plan_runner.core.stages.pre_merge_gate", return_value=(True, "ok")), \
+             patch("plan_runner.core.stages.auto_commit_stage", return_value=False):
+            cl._do_retry_merge("runner-residue", redis, "cmd-residue")
+
+        push_calls = redis.lpush.call_args_list
+        result = json.loads(push_calls[-1][0][1])
+        assert result["merge_status"] == "residue_blocked"
+        assert result["reason"] == "residue_guard"
+        assert result["message"] == "post-merge residue detected and restored"
+
     def test_do_retry_merge_lock_timeout_sets_error(self, tmp_path):
         """E(Error): acquire_merge_lock False → merge_status='error' + cleanup"""
         cl = _load_listener()

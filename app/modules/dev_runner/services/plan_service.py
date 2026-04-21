@@ -1093,6 +1093,55 @@ class PlanService:
             )
         return None
 
+    @classmethod
+    def _collect_current_dirty_keys(cls, project_dir: Path) -> set[str]:
+        result = subprocess.run(
+            ["git", "status", "--porcelain=v1"],
+            cwd=str(project_dir),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        if result.returncode != 0:
+            raise ValueError(f"runner residue guard git status failed: {result.returncode}")
+
+        dirty_keys: set[str] = set()
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            raw = line[3:].strip() if len(line) >= 3 else line.strip()
+            if " -> " in raw:
+                raw = raw.split(" -> ", 1)[1].strip()
+            if raw:
+                dirty_keys.add(raw.replace("\\", "/").casefold())
+        return dirty_keys
+
+    @classmethod
+    def _validate_runner_residue(
+        cls,
+        project_dir: Optional[Path],
+        runner_id: Optional[str],
+    ) -> Optional[str]:
+        if not runner_id or not project_dir:
+            return None
+
+        try:
+            snapshot = cls._load_runner_dirty_snapshot(runner_id)
+        except ValueError as exc:
+            return f"runner residue guard blocked auto-done: {exc}"
+
+        current_dirty = cls._collect_current_dirty_keys(project_dir)
+        stray_dirty = sorted(current_dirty - snapshot["dirty_files"] - snapshot["owned_files"])
+        if not stray_dirty:
+            return None
+
+        return (
+            f"runner residue guard blocked auto-done: stray dirty file(s) detected for runner "
+            f"{runner_id}: {', '.join(stray_dirty)}"
+        )
+
     async def _git_commit(
         self,
         project_dir: Optional[Path],
@@ -1194,6 +1243,17 @@ class PlanService:
                     "success": False,
                     "message": ownership_error,
                     "reason": "ownership_guard",
+                    "output": None,
+                    "remaining_tasks": pre_progress.total - pre_progress.done,
+                    "total_tasks": pre_progress.total,
+                    "plan_status": pre_status,
+                }
+            residue_error = self._validate_runner_residue(project_dir, runner_id)
+            if residue_error:
+                return {
+                    "success": False,
+                    "message": residue_error,
+                    "reason": "residue_guard",
                     "output": None,
                     "remaining_tasks": pre_progress.total - pre_progress.done,
                     "total_tasks": pre_progress.total,

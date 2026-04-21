@@ -870,6 +870,45 @@ class TestRunDone:
         assert result.get("reason") != "ownership_guard"
 
     @pytest.mark.asyncio
+    async def test_run_done_residue_guard_returns_failure_R(self, svc, tmp_path):
+        """R: auto path는 snapshot 밖 stray dirty가 있으면 residue_guard로 차단된다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        docs_dir = tmp_path / "docs"
+        docs_dir.mkdir(exist_ok=True)
+        ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+        ownership_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
+
+        plan = plan_dir / "2026-04-21_residue-guard.md"
+        plan.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] a\n", encoding="utf-8")
+        (ownership_dir / "runner-residue.json").write_text(
+            json.dumps(
+                {
+                    "runner_id": "runner-residue",
+                    "captured_at": "2026-04-21T10:00:00",
+                    "project_root": str(tmp_path),
+                    "dirty_files": [],
+                    "owned_files": [],
+                    "clean_at_start_files": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+             patch.object(type(svc), "_collect_current_dirty_keys", return_value={"app/stray.py"}), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(tmp_path / "docs" / "archive" / "residue.md", None))) as mock_archive:
+            result = await svc.run_done(str(plan), runner_id="runner-residue")
+
+        assert result["success"] is False
+        assert result["reason"] == "residue_guard"
+        assert "app/stray.py" in result["message"]
+        mock_archive.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_run_done_commits_done_history_archive_when_done_overflows(self, svc, tmp_path):
         """R: DONE.md가 5개를 넘으면 history archive도 commit 대상에 포함된다."""
         plan_dir = tmp_path / "docs" / "plan"

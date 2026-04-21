@@ -112,7 +112,20 @@ class MergeService:
             status = await self.async_redis.get(self._runner_key(runner_id, "merge_status"))
             if status is None:
                 return None
-            return {"runner_id": runner_id, "status": status, "test_passed": None, "fix_attempts": 0, "message": ""}
+            reason = await self.async_redis.get(self._runner_key(runner_id, "merge_reason"))
+            quarantine_diff_path = await self.async_redis.get(self._runner_key(runner_id, "quarantine_diff_path"))
+            message = await self.async_redis.get(self._runner_key(runner_id, "merge_message")) or ""
+            if not reason:
+                reason = await self.async_redis.get(self._runner_key(runner_id, "done_post_merge_error"))
+            return {
+                "runner_id": runner_id,
+                "status": status,
+                "test_passed": None,
+                "fix_attempts": 0,
+                "message": message,
+                "reason": reason,
+                "quarantine_diff_path": quarantine_diff_path,
+            }
         except Exception:
             return None
 

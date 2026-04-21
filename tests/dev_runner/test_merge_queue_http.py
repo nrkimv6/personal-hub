@@ -159,6 +159,8 @@ class TestMergeQueueHTTP:
             "test_passed": None,
             "fix_attempts": 0,
             "message": "",
+            "reason": None,
+            "quarantine_diff_path": None,
         }
 
         with patch(
@@ -171,6 +173,30 @@ class TestMergeQueueHTTP:
         data = resp.json()
         assert data["runner_id"] == "t-mqhttp-abc1"
         assert data["status"] == "testing"
+
+    def test_http3b_get_merge_status_residue_blocked_fields(self, api_client):
+        """HTTP-3b: residue_blocked 응답은 reason/quarantine_diff_path를 함께 직렬화한다."""
+        status_dict = {
+            "runner_id": "t-mqhttp-residue",
+            "status": "residue_blocked",
+            "test_passed": None,
+            "fix_attempts": 0,
+            "message": "post-merge residue detected and restored",
+            "reason": "residue_guard",
+            "quarantine_diff_path": "logs/dev_runner/residue/t-mqhttp-residue.diff",
+        }
+
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_status",
+            new=AsyncMock(return_value=status_dict)
+        ):
+            resp = api_client.get(f"{BASE_URL}/merge/t-mqhttp-residue")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "residue_blocked"
+        assert data["reason"] == "residue_guard"
+        assert data["quarantine_diff_path"].endswith("t-mqhttp-residue.diff")
 
     def test_http4_get_merge_status_nonexistent_returns_404(self, api_client):
         """HTTP-4: GET /merge/nonexistent → 404"""

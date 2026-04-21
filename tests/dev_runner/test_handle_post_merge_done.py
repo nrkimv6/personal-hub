@@ -185,6 +185,34 @@ def test_handle_post_merge_done_preserves_ownership_guard_reason_E(cl, tmp_path)
     assert any("ownership_guard" in m for m in pub_msgs)
 
 
+def test_handle_post_merge_done_residue_blocked_skips_restart_E(cl, tmp_path):
+    """E: merge_status=residue_blocked면 done/restart를 모두 건너뛴다."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("- [x] 항목1\n", encoding="utf-8")
+
+    pub_msgs = []
+    mock_redis = MagicMock()
+
+    def redis_get(key):
+        if "merge_status" in key:
+            return "residue_blocked"
+        return None
+
+    mock_redis.get.side_effect = redis_get
+
+    with patch("plan_worktree_helpers.remove_plan_header_fields") as mock_remove, \
+         patch("_dr_merge._call_done_api") as mock_done:
+        result = cl._handle_post_merge_done(str(plan), "runner-residue", pub_msgs.append, mock_redis)
+
+    mock_remove.assert_not_called()
+    mock_done.assert_not_called()
+    assert result["success"] is False
+    assert result["reason"] == "residue_guard"
+    assert result["status"] == "skipped_residue"
+    assert not any("restart_after_merge" in str(c) for c in mock_redis.set.call_args_list)
+    assert any("residue_blocked" in m for m in pub_msgs)
+
+
 # ── T3: conflict resolver 성공 후 done flow 재현 TC ─────────────
 
 

@@ -324,6 +324,8 @@ class MergeStatusResponse(BaseModel):
     test_passed: Optional[bool] = None
     fix_attempts: int = 0
     message: str = ""
+    reason: Optional[str] = None
+    quarantine_diff_path: Optional[str] = None
 
 
 class MergeHistoryItem(BaseModel):

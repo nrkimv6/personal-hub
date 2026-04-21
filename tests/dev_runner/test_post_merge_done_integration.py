@@ -291,3 +291,28 @@ def test_all_done_pre_dirty_todo_ownership_guard_restarts_E(cl, tmp_path):
     assert "ownership_guard" in result["message"]
     assert r.get(f"{prefix}:{runner_id}:done_post_merge_error") == "ownership_guard"
     assert r.get(f"{prefix}:{runner_id}:restart_after_merge") == "1"
+
+
+def test_post_merge_residue_blocked_skips_restart_E(cl, tmp_path):
+    """E: merge success 직후 residue_guard가 걸리면 restart 없이 residue_blocked로 멈춘다."""
+    r = _make_redis()
+    runner_id = "intg10-residue"
+    prefix = cl.RUNNER_KEY_PREFIX
+    plan_path = str(tmp_path / "plan_residue.md")
+    _make_all_done_plan(plan_path)
+    _seed_runner_keys(r, prefix, runner_id, plan_path)
+
+    with patch("_dr_merge._check_post_merge_residue", return_value={
+        "success": False,
+        "status": "residue_blocked",
+        "reason": "residue_guard",
+        "message": "post-merge residue detected and restored",
+        "quarantine_diff_path": "logs/dev_runner/residue/intg10-residue.diff",
+    }):
+        result = _run_merge(cl, runner_id, r)
+
+    assert result["success"] is False
+    assert result["merge_status"] == "residue_blocked"
+    assert result["reason"] == "residue_guard"
+    assert result["quarantine_diff_path"].endswith("intg10-residue.diff")
+    assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None

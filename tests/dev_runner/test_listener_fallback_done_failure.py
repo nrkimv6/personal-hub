@@ -135,3 +135,22 @@ def test_execute_heartbeat_done_fallback_dead_failure_updates_workflow_R():
     assert mock_pub.call_args.args[0] == "runner-dead-1"
     assert "heartbeat-dead fallback done 실패 전파" in mock_pub.call_args.args[1]
     assert mock_pub.call_args.args[3] == "MERGE-FALLBACK"
+
+
+def test_propagate_fallback_done_failure_keeps_residue_blocked_reason_R():
+    """R: residue_guard fallback 실패는 residue_blocked 상태로 유지한다."""
+    mod = _load_listener_module()
+    redis_client = MagicMock()
+    wf_manager = MagicMock()
+    wf_manager.get_by_runner_id.return_value = {"id": 301, "status": "running"}
+
+    with patch.object(mod, "_pub_and_log"):
+        mod._propagate_fallback_done_failure(
+            runner_id="runner-fb-residue",
+            done_result={"success": False, "reason": "residue_guard", "status": "skipped_residue"},
+            redis_client=redis_client,
+            wf_manager=wf_manager,
+            context="heartbeat-hang",
+        )
+
+    redis_client.set.assert_any_call("plan-runner:runners:runner-fb-residue:merge_status", "residue_blocked")

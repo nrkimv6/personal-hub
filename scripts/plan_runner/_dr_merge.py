@@ -10,6 +10,7 @@ import functools
 import json
 import logging
 import re
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,13 @@ def _normalize_ownership_key(path: Path, project_root: Path) -> Optional[str]:
     except Exception:
         return None
     return str(rel).replace("\\", "/").casefold()
+
+
+def _status_line_relpath(line: str) -> str:
+    raw = line[3:].strip() if len(line) >= 3 else line.strip()
+    if " -> " in raw:
+        raw = raw.split(" -> ", 1)[1].strip()
+    return raw.replace("\\", "/")
 
 
 def _load_runner_ownership_payload(runner_id: str) -> Optional[tuple[Path, dict]]:
@@ -123,6 +131,188 @@ def _register_post_merge_owned_files(runner_id: str, plan_file: str) -> None:
     payload["owned_files"] = sorted(owned_files)
     payload["clean_at_start_files"] = sorted(clean_at_start_files)
     snapshot_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _collect_git_status_entries(project_root: Path) -> list[dict]:
+    result = subprocess.run(
+        ["git", "status", "--porcelain=v1"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"git status failed ({result.returncode})")
+
+    entries: list[dict] = []
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        relpath = _status_line_relpath(line)
+        key = relpath.casefold()
+        if not key:
+            continue
+        entries.append(
+            {
+                "line": line,
+                "relpath": relpath,
+                "key": key,
+                "untracked": line.startswith("??"),
+            }
+        )
+    return entries
+
+
+def _write_post_merge_residue_diff(
+    runner_id: str,
+    stray_entries: list[dict],
+    project_root: Path,
+) -> str:
+    residue_dir = project_root / "logs" / "dev_runner" / "residue"
+    residue_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    diff_path = residue_dir / f"{runner_id}-{timestamp}.diff"
+
+    tracked_paths = [entry["relpath"] for entry in stray_entries if not entry.get("untracked")]
+    lines: list[str] = [
+        f"# runner_id: {runner_id}",
+        f"# captured_at: {datetime.now().isoformat()}",
+        "# stray_status:",
+    ]
+    lines.extend(str(entry["line"]) for entry in stray_entries)
+    lines.append("")
+
+    if tracked_paths:
+        diff_proc = subprocess.run(
+            ["git", "diff", "--binary", "--", *tracked_paths],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        lines.append("# tracked_diff:")
+        lines.append(diff_proc.stdout if diff_proc.returncode == 0 else f"# git diff failed ({diff_proc.returncode})")
+    else:
+        lines.append("# tracked_diff:")
+        lines.append("# no tracked residue")
+
+    untracked_paths = [entry["relpath"] for entry in stray_entries if entry.get("untracked")]
+    if untracked_paths:
+        lines.append("")
+        lines.append("# untracked_paths:")
+        lines.extend(untracked_paths)
+
+    diff_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return str(diff_path)
+
+
+def _remove_untracked_residue_path(project_root: Path, relpath: str) -> None:
+    target = (project_root / relpath).resolve(strict=False)
+    root = project_root.resolve(strict=False)
+    try:
+        target.relative_to(root)
+    except Exception as exc:
+        raise RuntimeError(f"residue path escaped project root: {relpath}") from exc
+
+    if not target.exists():
+        return
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+
+
+def _restore_post_merge_residue(stray_entries: list[dict], project_root: Path) -> None:
+    tracked_paths = [entry["relpath"] for entry in stray_entries if not entry.get("untracked")]
+    if tracked_paths:
+        restore_proc = subprocess.run(
+            ["git", "restore", "--source=HEAD", "--worktree", "--", *tracked_paths],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        if restore_proc.returncode != 0:
+            raise RuntimeError(f"git restore failed ({restore_proc.returncode})")
+
+    for entry in stray_entries:
+        if entry.get("untracked"):
+            _remove_untracked_residue_path(project_root, str(entry["relpath"]))
+
+
+def _check_post_merge_residue(runner_id: str, pub_fn) -> dict:
+    loaded = _load_runner_ownership_payload(runner_id)
+    if not loaded:
+        pub_fn("ownership snapshot 없음 — residue guard skip")
+        return {"success": True, "status": "snapshot_missing"}
+
+    _, payload = loaded
+    capture_error = payload.get("capture_error")
+    if capture_error:
+        pub_fn(f"ownership snapshot 경고 — residue guard skip ({capture_error})")
+        return {"success": True, "status": "snapshot_capture_failed"}
+
+    project_root = _resolve_snapshot_project_root(payload)
+    dirty_files = {
+        str(item).replace("\\", "/").casefold()
+        for item in payload.get("dirty_files", [])
+        if isinstance(item, str) and item.strip()
+    }
+    owned_files = {
+        str(item).replace("\\", "/").casefold()
+        for item in payload.get("owned_files", [])
+        if isinstance(item, str) and item.strip()
+    }
+    allowed_files = dirty_files | owned_files
+
+    entries = _collect_git_status_entries(project_root)
+    stray_entries = [entry for entry in entries if entry["key"] not in allowed_files]
+    if not stray_entries:
+        return {"success": True, "status": "clean"}
+
+    quarantine_diff_path = _write_post_merge_residue_diff(runner_id, stray_entries, project_root)
+    _restore_post_merge_residue(stray_entries, project_root)
+
+    stray_paths = [str(entry["relpath"]) for entry in stray_entries]
+    pub_fn(
+        f"post-merge residue 감지: {len(stray_paths)}건 차단, quarantine={quarantine_diff_path}"
+    )
+    return {
+        "success": False,
+        "status": "residue_blocked",
+        "reason": "residue_guard",
+        "message": "post-merge residue detected and restored",
+        "quarantine_diff_path": quarantine_diff_path,
+        "stray_files": stray_paths,
+    }
+
+
+def _persist_merge_result_metadata(runner_id: str, redis_client: redis.Redis, result: dict) -> None:
+    reason = result.get("reason")
+    if not reason and isinstance(result.get("post_merge_done"), dict):
+        reason = result["post_merge_done"].get("reason")
+    quarantine_diff_path = result.get("quarantine_diff_path")
+    if not quarantine_diff_path and isinstance(result.get("post_merge_done"), dict):
+        quarantine_diff_path = result["post_merge_done"].get("quarantine_diff_path")
+
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message", str(result.get("message") or ""))
+        if reason:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", str(reason))
+        else:
+            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")
+        if quarantine_diff_path:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path", str(quarantine_diff_path))
+        else:
+            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path")
+    except Exception:
+        pass
 
 
 def is_done_completed(runner_id: str, redis_client: redis.Redis) -> bool:
@@ -358,16 +548,18 @@ def _compose_merge_result_with_done(
     """merge 성공 결과에 post-merge done 결과를 반영한다."""
     failed, reason = _extract_post_merge_done_failure(done_result)
     if failed:
+        merge_status = "residue_blocked" if reason == "residue_guard" else "error"
         pub_fn(f"post-merge done 실패 전파: {reason}")
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", merge_status)
         except Exception:
             pass
         result = {
             "success": False,
             "message": f"{base_message}; post-merge done failed: {reason}",
-            "merge_status": "error",
+            "merge_status": merge_status,
             "action": action_name,
+            "reason": reason,
         }
     else:
         result = {
@@ -379,10 +571,38 @@ def _compose_merge_result_with_done(
 
     if isinstance(done_result, dict):
         result["post_merge_done"] = done_result
+        if done_result.get("quarantine_diff_path"):
+            result["quarantine_diff_path"] = done_result["quarantine_diff_path"]
     return result
 
 
 def _handle_merge_success(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn, action_name: str = "inline-merge") -> dict:
+    residue_result = _check_post_merge_residue(runner_id, pub_fn)
+    if not residue_result.get("success", True):
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_status", "skipped_residue")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_error", "residue_guard")
+            if residue_result.get("quarantine_diff_path"):
+                redis_client.set(
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path",
+                    residue_result["quarantine_diff_path"],
+                )
+        except Exception:
+            pass
+        return _compose_merge_result_with_done(
+            runner_id=runner_id,
+            redis_client=redis_client,
+            action_name=action_name,
+            base_message="merge blocked by residue",
+            done_result={
+                "success": False,
+                "status": "skipped_residue",
+                "reason": "residue_guard",
+                "message": str(residue_result.get("message") or "post-merge residue detected"),
+                "quarantine_diff_path": residue_result.get("quarantine_diff_path"),
+            },
+            pub_fn=pub_fn,
+        )
     try:
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
     except Exception:
@@ -423,28 +643,44 @@ def _handle_test_failed(runner_id: str, redis_client: redis.Redis, plan_file, pu
             pub_fn=pub_fn,
             engine=engine,
         )
-        if _fix_result["success"]:
-            pub_fn("auto-impl-post-merge 성공 — merge 완료")
-            try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
-            except Exception:
-                pass
-            done_result = _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
+    if _fix_result["success"]:
+        pub_fn("auto-impl-post-merge 성공 — merge 완료")
+        residue_result = _check_post_merge_residue(runner_id, pub_fn)
+        if not residue_result.get("success", True):
             return _compose_merge_result_with_done(
                 runner_id=runner_id,
                 redis_client=redis_client,
                 action_name=action_name,
-                base_message="test fixed and merged",
-                done_result=done_result,
+                base_message="test fixed but residue blocked",
+                done_result={
+                    "success": False,
+                    "status": "skipped_residue",
+                    "reason": "residue_guard",
+                    "message": str(residue_result.get("message") or "post-merge residue detected"),
+                    "quarantine_diff_path": residue_result.get("quarantine_diff_path"),
+                },
                 pub_fn=pub_fn,
             )
-        else:
-            pub_fn(f"auto-impl-post-merge 실패: {_fix_result['message']}")
-            try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
-            except Exception:
-                pass
-            return {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+        except Exception:
+            pass
+        done_result = _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
+        return _compose_merge_result_with_done(
+            runner_id=runner_id,
+            redis_client=redis_client,
+            action_name=action_name,
+            base_message="test fixed and merged",
+            done_result=done_result,
+            pub_fn=pub_fn,
+        )
+    else:
+        pub_fn(f"auto-impl-post-merge 실패: {_fix_result['message']}")
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
+        except Exception:
+            pass
+        return {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
 
 
 def _handle_conflict(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn, action_name: str = "inline-merge", branch_str: str = "") -> dict:
@@ -470,6 +706,22 @@ def _handle_conflict(runner_id: str, redis_client: redis.Redis, plan_file, pub_f
     )
     if _resolve_result["success"]:
         pub_fn("conflict resolver 성공 — merge 완료")
+        residue_result = _check_post_merge_residue(runner_id, pub_fn)
+        if not residue_result.get("success", True):
+            return _compose_merge_result_with_done(
+                runner_id=runner_id,
+                redis_client=redis_client,
+                action_name=action_name,
+                base_message="conflict resolved but residue blocked",
+                done_result={
+                    "success": False,
+                    "status": "skipped_residue",
+                    "reason": "residue_guard",
+                    "message": str(residue_result.get("message") or "post-merge residue detected"),
+                    "quarantine_diff_path": residue_result.get("quarantine_diff_path"),
+                },
+                pub_fn=pub_fn,
+            )
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
         except Exception:
@@ -626,6 +878,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
         result = {"success": False, "message": str(e), "merge_status": "error", "action": action_name}
 
     finally:
+        _persist_merge_result_metadata(runner_id, redis_client, result)
         if lock_acquired:
             try:
                 release_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT))
@@ -643,6 +896,8 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
                 "status": "done" if _is_success else "failed",
                 "success": _is_success,
                 "message": result.get("message", f"merge_status={_merge_status_final}"),
+                "reason": result.get("reason"),
+                "quarantine_diff_path": result.get("quarantine_diff_path"),
             }, ensure_ascii=False))
             redis_client.expire("plan-runner:merge-results", 86400 * 7)
         except Exception as _mr_err:
@@ -676,6 +931,12 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
     if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
         pub_fn("plan_file 없음(--all 모드) — done 스킵")
         return {"success": True, "status": "skipped_no_plan", "reason": "no_plan_file"}
+    try:
+        if redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") == "residue_blocked":
+            pub_fn("merge_status=residue_blocked 감지 — done/restart 스킵")
+            return {"success": False, "status": "skipped_residue", "reason": "residue_guard"}
+    except Exception:
+        pass
 
     # plan 파일 존재 확인 — 이미 archive됨 (fix: v2-pipeline-transition-safety Phase 2)
     if not Path(plan_file).exists():
@@ -752,14 +1013,23 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
             return {"success": True, "status": "done_called", "done_count": done_count, "total_count": total_count}
 
         failure_reason = str(done_result.get("reason") or "done_api_failed")
-        error_key = "ownership_guard" if failure_reason == "ownership_guard" else "done_api_failed"
+        if failure_reason == "residue_guard":
+            error_key = "residue_guard"
+        elif failure_reason == "ownership_guard":
+            error_key = "ownership_guard"
+        else:
+            error_key = "done_api_failed"
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_status", "failed")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_error", error_key)
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
+            if error_key != "residue_guard":
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
         except Exception:
             pass
-        pub_fn(f"자동 done 실패 ({failure_reason}) — main 추가 사이클 예약")
+        if error_key == "residue_guard":
+            pub_fn(f"자동 done 실패 ({failure_reason}) — residue 차단으로 추가 사이클 미예약")
+        else:
+            pub_fn(f"자동 done 실패 ({failure_reason}) — main 추가 사이클 예약")
         return {
             "success": False,
             "status": "done_failed",
