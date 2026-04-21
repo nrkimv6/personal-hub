@@ -17,7 +17,7 @@
 - 스킬 원본 수정: monitor-page의 `.claude/skills`, `.claude/agents` 직접 수정 금지  
   `D:\work\project\service\wtools\.claude\`에서 수정 후 동기화
 
-## Plans Worktree (병행 운영 중)
+## Plans Worktree (활성)
 
 계획서·아카이브는 orphan `plans` 브랜치의 고정 워크트리로 관리됩니다.
 
@@ -27,7 +27,7 @@
 | archive 경로 | `.worktrees/plans/docs/archive/` |
 | 브랜치 | `plans` (orphan — main과 공통 조상 없음) |
 
-**병행 운영 안내**: main의 `docs/plan/`, `docs/archive/`는 병행 운영 중 그대로 유지 (plan-isolation-4-cutover 완료 후 제거 예정).
+**활성 안내**: 계획서와 아카이브는 `.worktrees/plans`가 단일 진실원입니다. main에서 `docs/plan/` 또는 `docs/archive/`를 커밋하려 하면 pre-commit hook이 차단합니다.
 
 ### 세션 시작 시 ensure 명령
 
