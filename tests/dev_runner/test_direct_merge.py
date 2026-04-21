@@ -161,6 +161,33 @@ class TestDoDirectMerge:
         assert any("worktree_path" in c for c in set_calls), "worktree_path 없음"
         assert any("merge_status" in c and "queued" in c for c in set_calls), "merge_status=queued 없음"
 
+    def test_direct_merge_residue_check_runs_after_subprocess_B(self, tmp_path):
+        """B: direct-merge는 residue 차단 메타를 최종 결과에 반영한다."""
+        cl = _load_listener()
+        commands_mod = _get_commands_module()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock()
+
+        def fake_inline(runner_id, redis_client):
+            redis_client.get.side_effect = lambda key: {
+                f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status": "residue_blocked",
+                f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message": "post-merge residue detected and restored",
+                f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason": "residue_guard",
+                f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path": "logs/dev_runner/residue/dm.diff",
+            }.get(key, "merged")
+
+        with patch.object(commands_mod, "_do_inline_merge", side_effect=fake_inline):
+            cl._do_direct_merge("runner/test-residue", str(worktree), None, redis, "cmd-residue")
+
+        push_calls = redis.lpush.call_args_list
+        result = json.loads(push_calls[-1][0][1])
+        assert result["success"] is False
+        assert result["merge_status"] == "residue_blocked"
+        assert result["reason"] == "residue_guard"
+        assert result["quarantine_diff_path"] == "logs/dev_runner/residue/dm.diff"
+
 
 # ---------------------------------------------------------------------------
 # _do_inline_merge Redis branch 읽기 TC

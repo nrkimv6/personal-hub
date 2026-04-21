@@ -248,10 +248,17 @@ def _poll_merge_results(redis_client, wf_manager, logger_obj=None):
             if result.get("success"):
                 wf_manager.update_status(wf["id"], "merged")
             else:
+                error_message = str(result.get("message", "merge failed"))[:500]
+                reason = result.get("reason")
+                quarantine_diff_path = result.get("quarantine_diff_path")
+                if reason and reason not in error_message:
+                    error_message = f"{error_message} ({reason})"[:500]
+                if quarantine_diff_path and quarantine_diff_path not in error_message:
+                    error_message = f"{error_message} [{quarantine_diff_path}]"[:500]
                 wf_manager.update_status(
                     wf["id"],
                     "failed",
-                    error_message=str(result.get("message", "merge failed"))[:500],
+                    error_message=error_message,
                 )
         except Exception:
             break
@@ -311,7 +318,8 @@ def _propagate_fallback_done_failure(
     reason = str(done_result.get("reason") or done_result.get("status") or "done_post_merge_failed")
     _pub_and_log(runner_id, f"{context} fallback done 실패 전파: {reason}", redis_client, "MERGE-FALLBACK")
     try:
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+        merge_status = "residue_blocked" if reason == "residue_guard" else "error"
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", merge_status)
     except Exception:
         pass
 

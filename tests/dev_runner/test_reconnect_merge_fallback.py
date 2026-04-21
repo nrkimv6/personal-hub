@@ -10,26 +10,13 @@ Phase 1에서 추출한 merge fallback 공통 헬퍼 함수의 동작을 검증�
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 _SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
-
-# _dr_merge mock — scripts 환경에서 import 에러 방지
-_mock_dr_merge = types.ModuleType("_dr_merge")
-_mock_dr_merge.detect_merged_but_not_done = MagicMock(return_value=None)
-_mock_dr_merge._handle_post_merge_done = MagicMock()
-_mock_dr_merge._pub_and_log = MagicMock()
-sys.modules.setdefault("_dr_merge", _mock_dr_merge)
-
-# listener_noise_filter mock
-_mock_noise = types.ModuleType("listener_noise_filter")
-_mock_noise.NOISE_BLOCK_MARKERS = []
-_mock_noise.is_noise_line = lambda line: False
-sys.modules.setdefault("listener_noise_filter", _mock_noise)
 
 
 def _load_try_v2_merge_fallback():
@@ -137,3 +124,46 @@ class TestTryV2MergeFallback:
         assert result is False
         mock_merge_mod.detect_merged_but_not_done.assert_called_once()
         mock_merge_mod._handle_post_merge_done.assert_called_once()
+
+    def test_try_merge_fallback_propagates_residue_guard_reason(self):
+        """R: fallback done 실패가 residue_guard면 merge_status와 quarantine 경로를 남긴다."""
+        detect_result = {"plan_file": "/path/to/plan.md", "runner_id": "abc12345"}
+        done_result = {
+            "success": False,
+            "reason": "residue_guard",
+            "quarantine_diff_path": "logs/dev_runner/residue/abc12345-1.diff",
+        }
+
+        mock_merge_mod = types.ModuleType("_dr_merge")
+        mock_merge_mod.detect_merged_but_not_done = MagicMock(return_value=detect_result)
+        mock_merge_mod._handle_post_merge_done = MagicMock(return_value=done_result)
+        mock_merge_mod._pub_and_log = MagicMock()
+
+        wf_manager = MagicMock()
+        wf_manager.get_by_runner_id.return_value = {"id": 7}
+
+        r = _make_redis_mock()
+        runner_id = "abc12345"
+
+        with patch.dict(sys.modules, {"_dr_merge": mock_merge_mod}):
+            fn = _load_try_v2_merge_fallback()
+            with patch("_dr_process_utils.get_wf_manager", return_value=wf_manager):
+                result = fn(runner_id, r, "reconnect_no_pid")
+
+        assert result is False
+        r.set.assert_any_call("plan-runner:runners:abc12345:merge_status", "residue_blocked")
+        r.set.assert_any_call(
+            "plan-runner:runners:abc12345:quarantine_diff_path",
+            "logs/dev_runner/residue/abc12345-1.diff",
+        )
+        wf_manager.update_status.assert_called_once_with(
+            7,
+            "failed",
+            error_message="reconnect_no_pid fallback done failed: residue_guard",
+        )
+        mock_merge_mod._pub_and_log.assert_any_call(
+            runner_id,
+            "reconnect_no_pid fallback done failed: residue_guard [logs/dev_runner/residue/abc12345-1.diff]",
+            r,
+            "MERGE-FALLBACK",
+        )

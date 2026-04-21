@@ -272,14 +272,21 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
 
         # 머지 결과 읽기
         final_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
+        merge_message = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message") or f"direct-merge 완료: {final_status}"
+        merge_reason = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason") or None
+        quarantine_diff_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path") or None
         success = final_status == "merged"
         result = {
             "success": success,
-            "message": f"direct-merge 완료: {final_status}",
+            "message": merge_message,
             "merge_status": final_status,
             "action": "direct-merge",
             "runner_id": runner_id,
         }
+        if merge_reason:
+            result["reason"] = merge_reason
+        if quarantine_diff_path:
+            result["quarantine_diff_path"] = quarantine_diff_path
 
     except Exception as e:
         import traceback

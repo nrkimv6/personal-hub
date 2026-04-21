@@ -99,6 +99,7 @@ def _capture_runner_ownership_snapshot(runner_id: str, project_root: Path) -> di
         "captured_at": datetime.now().isoformat(),
         "project_root": str(project_root),
         "dirty_files": [],
+        "dirty_status_lines": [],
         "owned_files": [],
         "clean_at_start_files": [],
     }
@@ -115,13 +116,16 @@ def _capture_runner_ownership_snapshot(runner_id: str, project_root: Path) -> di
         )
         if result.returncode == 0:
             dirty_files = []
+            dirty_status_lines = []
             for line in result.stdout.splitlines():
                 if not line.strip():
                     continue
+                dirty_status_lines.append(line)
                 normalized = _normalize_dirty_path(line)
                 if normalized:
                     dirty_files.append(normalized)
             payload["dirty_files"] = sorted(dict.fromkeys(dirty_files))
+            payload["dirty_status_lines"] = dirty_status_lines
         else:
             payload["capture_error"] = f"git status failed ({result.returncode})"
     except Exception as exc:

@@ -170,7 +170,38 @@ def _try_v2_merge_fallback(runner_id: str, redis_client: redis.Redis, reason_tag
             try:
                 def _pub(msg: str, _rid=runner_id) -> None:
                     _pal(_rid, msg, redis_client, "MERGE-FALLBACK")
-                _hpmd(detect_result["plan_file"], runner_id, _pub, redis_client)
+                done_result = _hpmd(detect_result["plan_file"], runner_id, _pub, redis_client)
+                if isinstance(done_result, dict) and not done_result.get("success", True):
+                    reason = str(done_result.get("reason") or done_result.get("status") or "done_post_merge_failed")
+                    merge_status = "residue_blocked" if reason == "residue_guard" else "error"
+                    quarantine_diff_path = done_result.get("quarantine_diff_path")
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", merge_status)
+                        if quarantine_diff_path:
+                            redis_client.set(
+                                f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path",
+                                str(quarantine_diff_path),
+                            )
+                    except Exception:
+                        pass
+
+                    try:
+                        wf_manager = get_wf_manager()
+                        if wf_manager:
+                            wf = wf_manager.get_by_runner_id(runner_id)
+                            if wf:
+                                wf_manager.update_status(
+                                    wf["id"],
+                                    "failed",
+                                    error_message=f"{reason_tag} fallback done failed: {reason}"[:500],
+                                )
+                    except Exception:
+                        pass
+
+                    error_message = f"{reason_tag} fallback done failed: {reason}"
+                    if quarantine_diff_path and str(quarantine_diff_path) not in error_message:
+                        error_message = f"{error_message} [{quarantine_diff_path}]"
+                    _pal(runner_id, error_message[:500], redis_client, "MERGE-FALLBACK")
             except Exception as _handle_err:
                 logger.warning(f"[{reason_tag}] v2 merge fallback failed (continuing cleanup): {_handle_err}")
             return False

@@ -3,7 +3,7 @@ Phase T5: HTTP 통합 테스트 — POST /api/plans/{path}/done
 
 main 머지 후 실행. 실제 Admin API 서버(port 8001) 기동 상태에서 테스트.
 - POST /api/plans/{path}/done 200 응답 및 plan 파일 archive 이동 확인
-- GET /api/plans/ 에서 해당 plan이 docs/archive/로 이동됐는지 응답 검증
+- GET /api/plans/ 에서 해당 plan이 plans worktree archive로 이동됐는지 응답 검증
 
 계약 모드:
 - 기본(호환): 운영 서버 버전 차이를 고려해 hard-fail/legacy fallback 모두 허용
@@ -24,8 +24,9 @@ from fastapi.testclient import TestClient
 from app.modules.dev_runner.routes.plans import router as plans_router
 
 BASE_URL = os.environ.get("ADMIN_API_BASE", "http://localhost:8001/api/v1/dev-runner")
-PLANS_DIR = Path(__file__).parent.parent.parent / "docs" / "plan"
-ARCHIVE_DIR = Path(__file__).parent.parent.parent / "docs" / "archive"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PLANS_DIR = REPO_ROOT / ".worktrees" / "plans" / "docs" / "plan"
+ARCHIVE_DIR = REPO_ROOT / ".worktrees" / "plans" / "docs" / "archive"
 STRICT_CONTRACT = os.environ.get("DONE_API_CONTRACT_STRICT", "").strip() == "1"
 REQUEST_TIMEOUT = 5
 
@@ -39,9 +40,10 @@ def client():
 
 @pytest.fixture(scope="module")
 def tmp_plan_file():
-    """테스트용 임시 plan 파일 생성 (docs/plan/ 아래에 배치)"""
+    """테스트용 임시 plan 파일 생성 (plans worktree plan 경로에 배치)"""
     fname = "2026-03-09_test-http-done-temp.md"
     path = PLANS_DIR / fname
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         "# HTTP 테스트용 임시 plan\n"
         "> 상태: 구현중\n"
@@ -71,7 +73,7 @@ def test_post_done_returns_200_R(tmp_plan_file):
 
 
 def test_done_moves_file_to_archive_R(tmp_plan_file):
-    """R: done 처리 후 plan 파일이 docs/archive/로 이동됨 (test_post_done_returns_200_R 이후 상태 검증)"""
+    """R: done 처리 후 plan 파일이 plans worktree archive로 이동됨 (선행 done 호출 이후 상태 검증)"""
     fname = Path(tmp_plan_file).name
     archive_path = ARCHIVE_DIR / fname
     # test_post_done_returns_200_R에서 done API가 성공했으면 파일이 archive에 있어야 함
@@ -172,7 +174,7 @@ def test_done_http_without_runner_header_stays_manual_contract(client, tmp_path)
 
 @pytest.mark.skipif(STRICT_CONTRACT, reason="strict 모드에서는 strict 전용 케이스만 실행")
 def test_done_resolver_error_contract_compat_E():
-    """E(compat): docs/plan 외 경로 done 호출 시 hard-fail/legacy fallback 둘 다 허용."""
+    """E(compat): active plan root 밖 경로 done 호출 시 hard-fail/legacy fallback 둘 다 허용."""
     fname = "2026-04-03_test-http-resolver-fail.md"
     src_dir = PLANS_DIR.parent / "tmp"
     src_dir.mkdir(parents=True, exist_ok=True)
@@ -212,7 +214,7 @@ def test_done_resolver_error_contract_compat_E():
 
 @pytest.mark.skipif(not STRICT_CONTRACT, reason="DONE_API_CONTRACT_STRICT=1 환경에서만 strict 계약 검증")
 def test_done_resolver_error_contract_strict_E():
-    """E(strict): docs/plan 외 경로 done 호출은 hard-fail(success=false, no move)이어야 한다."""
+    """E(strict): active plan root 밖 경로 done 호출은 hard-fail(success=false, no move)이어야 한다."""
     fname = "2026-04-03_test-http-resolver-fail-strict.md"
     src_dir = PLANS_DIR.parent / "tmp"
     src_dir.mkdir(parents=True, exist_ok=True)

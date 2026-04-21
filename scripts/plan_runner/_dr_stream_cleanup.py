@@ -232,12 +232,17 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     except Exception:
         pass
 
-    _execute_merge_with_lock(runner_id, redis_client, action_name="inline-merge")
+    merge_result = _execute_merge_with_lock(runner_id, redis_client, action_name="inline-merge")
 
     # restart_after_merge 플래그 감지 → main 추가 사이클 트리거
     try:
+        if merge_result.get("merge_status") == "residue_blocked":
+            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
+            return
+
         _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
-        if _flag:
+        post_merge_done = merge_result.get("post_merge_done") if isinstance(merge_result, dict) else {}
+        if _flag and isinstance(post_merge_done, dict) and post_merge_done.get("status") == "restart_scheduled":
             redis_client.delete(
                 f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge"
             )
