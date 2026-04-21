@@ -42,7 +42,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "plan_runner"))
 
 # 테스트 DB 경로 (TEST_DB_DIR 환경변수로 워크트리 격리 지원)
 TEST_DB_DIR = Path(os.environ.get("TEST_DB_DIR", str(PROJECT_ROOT / "data")))
-TEST_DB_PATH = TEST_DB_DIR / "test_monitor.db"
+_DEFAULT_TEST_DB_NAME = f"test_monitor_{os.getpid()}.db"
+TEST_DB_PATH = Path(os.environ.get("TEST_DB_PATH", str(TEST_DB_DIR / _DEFAULT_TEST_DB_NAME)))
 MIGRATIONS_DIR = PROJECT_ROOT / "app" / "migrations"
 
 
