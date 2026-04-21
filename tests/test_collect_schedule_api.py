@@ -22,7 +22,7 @@ import pytest
 import sys
 from pathlib import Path
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 # 프로젝트 루트 추가
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -37,7 +37,9 @@ from app.main import app
 from app.database import get_db
 from app.models.base import Base
 from app.models import TaskSchedule, TaskScheduleRun, ServiceAccount, BrowserProfile
-from app.models.google_search import GoogleSavedSearch
+from app.models.google_search import GoogleSavedSearch, GoogleSearchQueue
+
+pytestmark = pytest.mark.http
 
 
 # ============================================================
@@ -61,6 +63,7 @@ def test_db():
         "crawl_requests",
         "service_accounts", "browser_profiles",
         "google_saved_searches",
+        "google_search_queue",
     }
     tables = [t for name, t in Base.metadata.tables.items() if name in _NEEDED]
     Base.metadata.create_all(bind=engine, tables=tables)
@@ -386,6 +389,38 @@ class TestRunSchedule:
         data = response.json()
         assert data["success"] is True
         assert "run_id" in data
+
+    def test_run_google_schedule_uses_shared_enqueue_helper(self, client, test_db, sample_saved_search):
+        """Google 즉시 실행이 공통 enqueue helper를 거쳐 search_id를 반환한다."""
+        create_resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "google_search",
+            "target_config": {"saved_search_id": sample_saved_search.id},
+            "schedule_type": "time_window",
+            "schedule_value": {"daily_runs": 1, "time_windows": []},
+        })
+        assert create_resp.status_code == 200
+        schedule_id = create_resp.json()["id"]
+
+        with patch(
+            "app.routes.collect.enqueue_google_search",
+            AsyncMock(return_value=GoogleSearchQueue.STATUS_QUEUED),
+        ) as enqueue_mock:
+            response = client.post(f"{API_PREFIX}/collect/schedules/{schedule_id}/run")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["search_id"]
+
+        queue_item = (
+            test_db.query(GoogleSearchQueue)
+            .filter_by(search_id=data["search_id"])
+            .first()
+        )
+        assert queue_item is not None
+        assert queue_item.schedule_id == schedule_id
+        assert queue_item.saved_search_id == sample_saved_search.id
+        enqueue_mock.assert_awaited_once_with(queue_item, test_db)
 
     def test_run_nonexistent_schedule(self, client):
         """존재하지 않는 스케줄 실행"""

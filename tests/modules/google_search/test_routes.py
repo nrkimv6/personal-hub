@@ -13,6 +13,7 @@ RIGHT-BICEP 패턴:
 import pytest
 from datetime import datetime
 from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock, patch
 
 from app.main import app
 from app.database import get_db
@@ -20,6 +21,7 @@ from app.models.google_search import (
     GoogleSavedSearch,
     GoogleSearchHistory,
     GoogleSearchResult,
+    GoogleSearchQueue,
 )
 
 
@@ -326,3 +328,70 @@ class TestDeleteHistoryAPI:
         """Error: 존재하지 않는 히스토리 삭제"""
         response = client.delete("/api/v1/google/history/non-existent-uuid")
         assert response.status_code == 404
+
+
+@pytest.mark.http
+class TestSearchQueueHTTP:
+    """Google 검색 큐 HTTP 계약 테스트."""
+
+    def test_search_route_reflects_enqueue_status(self, client, test_db_session):
+        """POST /google/search가 helper 반환 status를 응답에 반영한다."""
+        with patch(
+            "app.modules.google_search.routes.search.enqueue_google_search",
+            AsyncMock(return_value=GoogleSearchQueue.STATUS_PENDING),
+        ) as enqueue_mock:
+            response = client.post(
+                "/api/v1/google/search",
+                json={
+                    "query": "queue fallback test",
+                    "date_filter": "1w",
+                    "max_pages": 3,
+                },
+            )
+
+        assert response.status_code == 202
+        data = response.json()
+        assert data["status"] == GoogleSearchQueue.STATUS_PENDING
+        assert data["search_id"]
+
+        queue_item = (
+            test_db_session.query(GoogleSearchQueue)
+            .filter_by(search_id=data["search_id"])
+            .first()
+        )
+        assert queue_item is not None
+        enqueue_mock.assert_awaited_once_with(queue_item, test_db_session)
+
+    def test_saved_search_run_calls_shared_enqueue_helper(self, client, sample_saved_search, test_db_session):
+        """POST /google/saved/{id}/run가 공통 helper를 호출하고 search_id를 반환한다."""
+        with patch(
+            "app.modules.google_search.routes.search.enqueue_google_search",
+            AsyncMock(return_value=GoogleSearchQueue.STATUS_QUEUED),
+        ) as enqueue_mock:
+            response = client.post(f"/api/v1/google/saved/{sample_saved_search.id}/run")
+
+        assert response.status_code == 202
+        data = response.json()
+        assert data["status"] == GoogleSearchQueue.STATUS_QUEUED
+        assert data["search_id"]
+
+        queue_item = (
+            test_db_session.query(GoogleSearchQueue)
+            .filter_by(search_id=data["search_id"])
+            .first()
+        )
+        assert queue_item is not None
+        assert queue_item.saved_search_id == sample_saved_search.id
+        enqueue_mock.assert_awaited_once_with(queue_item, test_db_session)
+
+    def test_admin_recover_pending_returns_recovery_counts(self, client):
+        """POST /google/admin/recover-pending가 복구 집계를 그대로 반환한다."""
+        with patch(
+            "app.modules.google_search.routes.search.recover_pending_google_searches",
+            AsyncMock(return_value={"pending_found": 3, "recovered": 2, "failed_push": 1}),
+        ) as recover_mock:
+            response = client.post("/api/v1/google/admin/recover-pending")
+
+        assert response.status_code == 200
+        assert response.json() == {"pending_found": 3, "recovered": 2, "failed_push": 1}
+        recover_mock.assert_awaited_once()
