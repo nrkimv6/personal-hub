@@ -154,6 +154,20 @@ def test_resolve_active_plan_file_keeps_current_physical_path_R(tmp_path):
     assert resolved == current.resolve()
 
 
+def test_resolve_active_plan_file_prefers_current_physical_path_for_logical_relative_input_R(tmp_path):
+    """R: logical 상대경로 입력이어도 current physical path(.worktrees/plans)를 우선한다"""
+    legacy = tmp_path / "docs" / "plan" / "2026-01-04_test.md"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("# legacy relative\n", encoding="utf-8")
+
+    current = tmp_path / ".worktrees" / "plans" / "docs" / "plan" / "2026-01-04_test.md"
+    current.parent.mkdir(parents=True, exist_ok=True)
+    current.write_text("# current physical\n", encoding="utf-8")
+
+    resolved = resolve_active_plan_file("docs/plan/2026-01-04_test.md", project_root=tmp_path)
+    assert resolved == current.resolve()
+
+
 # ---------------------------------------------------------------------------
 # has_unmerged_commits
 # ---------------------------------------------------------------------------

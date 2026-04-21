@@ -94,3 +94,21 @@ def test_executor_py_cwd_is_dynamic():
     ]
     for pattern in hardcoded_patterns:
         assert pattern not in source, f"executor.py에 하드코딩된 cwd 발견: {pattern}"
+
+
+def test_worktree_scan_prefers_plans_worktree_path_for_same_branch(tmp_path):
+    """current active plan 안내는 legacy docs/plan보다 plans worktree 경로를 우선 노출한다"""
+    from app.modules.dev_runner.services.worktree_service import scan_plan_files
+
+    plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+    legacy_dir = tmp_path / "docs" / "plan"
+    plans_dir.mkdir(parents=True)
+    legacy_dir.mkdir(parents=True)
+
+    (plans_dir / "preferred.md").write_text("> branch: impl/shared-branch\n", encoding="utf-8")
+    (legacy_dir / "legacy.md").write_text("> branch: impl/shared-branch\n", encoding="utf-8")
+
+    branch_map, unresolved = scan_plan_files(repo_root=tmp_path)
+
+    assert unresolved == []
+    assert branch_map["impl/shared-branch"][0].replace("\\", "/") == ".worktrees/plans/docs/plan/preferred.md"
