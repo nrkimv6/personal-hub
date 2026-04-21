@@ -244,3 +244,90 @@ def test_worker_run_group_rotation_selects_same_date_rows_in_round_robin(test_db
         for _ in range(4)
     ]
     assert selected_ids == [first.id, second.id, first.id, second.id]
+
+
+@pytest.mark.integration
+def test_pending_schedule_consumed_after_worker_restart(test_db_session, seeded_schedule_context):
+    """
+    [T3] worker restart 후 pending 스케줄이 _run_monitoring_checks()에서 실행 대상으로 선택됨.
+
+    근본 원인 재현: _main_loop_iteration()에 _run_monitoring_checks() 호출이 없어
+    _active_schedules에 pending 스케줄 284개가 있어도 실행 코드가 없어 정체됨.
+    수정 후: _run_monitoring_checks()가 next_run_time=None 스케줄을 즉시 실행 대상으로
+    선택해 _check_schedule()를 호출함을 실제 DB + 실 워커 인스턴스로 검증.
+    """
+    import asyncio
+    from unittest.mock import patch, MagicMock
+
+    item = seeded_schedule_context["item"]
+    business = seeded_schedule_context["business"]
+
+    # 1. pending 스케줄 직접 삽입 (실제 PostgreSQL, next_run_time=None → 즉시 실행 대상)
+    schedule = MonitorSchedule(
+        biz_item_id=item.id,
+        date="2026-04-20",
+        times='["10:00"]',
+        is_enabled=True,
+        run_status="pending",
+        next_run_time=None,
+    )
+    test_db_session.add(schedule)
+    test_db_session.commit()
+    test_db_session.refresh(schedule)
+    schedule_id = schedule.id
+
+    # 2. worker 생성 + startup 시 pending 스케줄 로드 시뮬레이션 (_store_active_schedule)
+    worker = NaverMonitorWorker()
+    worker._store_active_schedule({
+        "id": schedule_id,
+        "biz_item_id": item.id,
+        "service_account_id": None,
+        "date": "2026-04-20",
+        "time_range": None,
+        "times": '["10:00"]',
+        "last_check_time": None,
+        "next_run_time": None,
+        "interval": 30,
+        "is_enabled": True,
+        "run_status": "pending",
+        "business_pk": business.id,
+        "naver_biz_item_id": item.biz_item_id,
+        "business_name": business.name,
+        "naver_business_id": business.business_id,
+    })
+    assert schedule_id in worker._active_schedules, "사전조건: startup 로드 후 스케줄이 active에 있어야 함"
+
+    # 3. fresh context (schedule_service.get_all_with_context 반환값)
+    fresh_ctx = {
+        "id": schedule_id,
+        "biz_item_id": item.id,
+        "business_type_id": business.business_type_id,
+        "business_id": business.business_id,
+        "item_biz_item_id": item.biz_item_id,
+        "date": "2026-04-20",
+        "times": '["10:00"]',
+        "next_run_time": None,
+        "interval": 30,
+        "is_enabled": True,
+        "run_status": "pending",
+    }
+
+    # 4. _check_schedule 호출 캡처 (AnonymousMonitor 등 외부 의존성 차단)
+    check_called_ids: list = []
+
+    async def capture_check_schedule(ctx: dict) -> None:
+        check_called_ids.append(ctx["id"])
+
+    worker._check_schedule = capture_check_schedule  # type: ignore[method-assign]
+
+    mock_db = MagicMock()
+    with patch("app.worker.naver_monitor_worker.SessionLocal", return_value=mock_db), \
+         patch("app.worker.naver_monitor_worker.schedule_service") as mock_svc:
+        mock_svc.get_all_with_context.return_value = [fresh_ctx]
+        asyncio.run(worker._run_monitoring_checks())
+
+    # 5. 검증: pending 스케줄이 _check_schedule 호출 대상이 됨 — 실행 루프 수정 확인
+    assert schedule_id in check_called_ids, (
+        f"schedule_id={schedule_id} (pending, next_run_time=None)이 _run_monitoring_checks()에서 "
+        f"_check_schedule() 대상으로 선택되어야 함 — 실행 루프 누락 회귀 방지"
+    )
