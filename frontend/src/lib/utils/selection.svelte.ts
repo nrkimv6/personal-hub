@@ -13,8 +13,8 @@
  *   // Svelte 5: let selection = createSelection(); (rune 없이도 반응형)
  */
 
-export class Selection {
-	ids = $state(new Set<number>());
+export class Selection<T extends string | number = number> {
+	ids = $state(new Set<T>());
 
 	/** 선택된 항목 수 */
 	get count(): number {
@@ -22,12 +22,12 @@ export class Selection {
 	}
 
 	/** 주어진 id가 선택됐는지 확인 */
-	has(id: number): boolean {
+	has(id: T): boolean {
 		return this.ids.has(id);
 	}
 
 	/** 선택 토글 — 있으면 제거, 없으면 추가 */
-	toggle(id: number): void {
+	toggle(id: T): void {
 		const next = new Set(this.ids);
 		if (next.has(id)) {
 			next.delete(id);
@@ -41,7 +41,7 @@ export class Selection {
 	 * 전체 선택 / 전체 해제 토글.
 	 * allIds 목록이 모두 선택돼 있으면 전체 해제, 아니면 전체 선택.
 	 */
-	selectAll(allIds: number[]): void {
+	selectAll(allIds: T[]): void {
 		if (allIds.length === 0) return;
 
 		const allSelected = allIds.every((id) => this.ids.has(id));
@@ -61,7 +61,7 @@ export class Selection {
 	}
 
 	/** allIds 기준으로 모두 선택됐는지 여부 */
-	isAllSelected(allIds: number[]): boolean {
+	isAllSelected(allIds: T[]): boolean {
 		if (allIds.length === 0) return false;
 		return allIds.every((id) => this.ids.has(id));
 	}
@@ -77,7 +77,7 @@ export class Selection {
 	}
 
 	/** API 호출 등에 사용할 배열로 변환 */
-	toArray(): number[] {
+	toArray(): T[] {
 		return Array.from(this.ids);
 	}
 }
@@ -91,6 +91,6 @@ export class Selection {
  * const selection = createSelection();
  * // selection.toggle(id) → ids 재할당 → 반응형 업데이트 발생
  */
-export function createSelection(): Selection {
-	return new Selection();
+export function createSelection<T extends string | number = number>(): Selection<T> {
+	return new Selection<T>();
 }

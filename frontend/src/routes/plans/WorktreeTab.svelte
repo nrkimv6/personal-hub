@@ -1,14 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { AlertTriangle, ChevronDown, ChevronUp, FileText, Lock } from 'lucide-svelte';
+  import {
+    AlertTriangle,
+    Archive,
+    ChevronDown,
+    ChevronUp,
+    FileText,
+    FlaskConical,
+    Lock,
+    Trash2,
+  } from 'lucide-svelte';
   import {
     devRunnerWorktreeApi,
     type WorktreeInfo,
-    type WorktreeCommit,
+    type WorktreeCleanupResponse,
     type WorktreeListResponse,
-    type PlanOnlyBranch,
     type RepoOption,
   } from '$lib/api/dev-runner';
+  import { toast } from '$lib/stores/toast';
+  import { createSelection } from '$lib/utils/selection.svelte';
 
   const EMPTY_RESPONSE: WorktreeListResponse = {
     worktrees: [],
@@ -23,9 +33,35 @@
   let loading = $state(true);
   let error = $state('');
   let showDirtyFiles = $state(false);
+  let hideTestRunners = $state(true);
+  let cleanableOnly = $state(false);
+  let cleanupBusy = $state(false);
+  let cleanupResult: WorktreeCleanupResponse | null = $state(null);
 
-  // 커밋 목록 펼치기/접기 상태 (branch → boolean)
   let expanded: Record<string, boolean> = $state({});
+  const selection = createSelection<string>();
+
+  const visibleWorktrees = $derived(
+    response.worktrees.filter(
+      (wt) => (!hideTestRunners || !wt.is_test) && (!cleanableOnly || wt.cleanable)
+    )
+  );
+  const visiblePlanOnly = $derived(
+    response.plan_only.filter((po) => !hideTestRunners || !po.is_test)
+  );
+  const visibleBranchUnresolved = $derived(
+    response.branch_unresolved.filter((bu) => !hideTestRunners || !bu.is_test)
+  );
+  const visibleCleanableBranches = $derived(
+    visibleWorktrees.filter((wt) => wt.cleanable).map((wt) => wt.branch)
+  );
+  const hiddenTestCount = $derived(
+    hideTestRunners
+      ? response.worktrees.filter((wt) => wt.is_test).length
+        + response.plan_only.filter((po) => po.is_test).length
+        + response.branch_unresolved.filter((bu) => bu.is_test).length
+      : 0
+  );
 
   async function loadWorktrees() {
     loading = true;
@@ -69,29 +105,160 @@
     if (!planFile) return '';
     return planFile.split(/[\\/]/).pop() ?? planFile;
   }
+
+  function cleanupSummaryText(result: WorktreeCleanupResponse): string {
+    const removable = result.results.filter((item) => item.reason === 'dry_run').map((item) => item.branch);
+    const blocked = result.results.filter((item) => item.reason !== 'dry_run');
+    const lines = [
+      `정리 후보 ${removable.length}개를 제거합니다.`,
+      removable.slice(0, 12).map((branch) => `- ${branch}`).join('\n'),
+    ];
+    if (removable.length > 12) {
+      lines.push(`... 외 ${removable.length - 12}개`);
+    }
+    if (blocked.length > 0) {
+      lines.push('');
+      lines.push(`건너뜀 ${blocked.length}개`);
+      lines.push(
+        blocked
+          .slice(0, 8)
+          .map((item) => `- ${item.branch}: ${item.reason || item.status}`)
+          .join('\n')
+      );
+    }
+    return lines.filter(Boolean).join('\n');
+  }
+
+  async function handleBatchCleanup() {
+    const branches = selection.toArray();
+    if (branches.length === 0) return;
+
+    cleanupBusy = true;
+    cleanupResult = null;
+    try {
+      const preview = await devRunnerWorktreeApi.cleanup(
+        { branches, dry_run: true },
+        selectedRepoId,
+      );
+      cleanupResult = preview;
+
+      const removable = preview.results.filter((item) => item.reason === 'dry_run');
+      if (removable.length === 0) {
+        toast.warning('정리 가능한 워크트리가 없습니다.');
+        return;
+      }
+      if (!confirm(cleanupSummaryText(preview))) {
+        return;
+      }
+
+      const result = await devRunnerWorktreeApi.cleanup(
+        { branches, dry_run: false },
+        selectedRepoId,
+      );
+      cleanupResult = result;
+      selection.clear();
+      await loadWorktrees();
+
+      const removed = result.summary.removed ?? 0;
+      const failed = result.summary.failed ?? 0;
+      const skipped = result.summary.skipped ?? 0;
+      if (removed > 0) {
+        toast.success(`워크트리 ${removed}개를 정리했습니다.`);
+      }
+      if (failed > 0 || skipped > 0) {
+        toast.warning(`건너뜀 ${skipped}개, 실패 ${failed}개가 있습니다.`);
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : '워크트리 정리에 실패했습니다';
+      cleanupResult = null;
+      toast.error(message);
+    } finally {
+      cleanupBusy = false;
+    }
+  }
+
+  function cleanupStatusClass(status: string): string {
+    switch (status) {
+      case 'removed':
+        return 'result-removed';
+      case 'failed':
+        return 'result-failed';
+      default:
+        return 'result-skipped';
+    }
+  }
 </script>
 
 <div class="worktree-tab">
-  <!-- 레포 선택 드롭다운 -->
   <div class="toolbar">
-    <select
-      class="repo-select"
-      bind:value={selectedRepoId}
-      onchange={loadWorktrees}
-    >
-      <option value={undefined}>현재 레포 (monitor-page)</option>
-      {#each repos as repo (repo.id)}
-        <option value={repo.id}>{repo.alias}</option>
-      {/each}
-    </select>
+    <div class="toolbar-left">
+      <select
+        class="repo-select"
+        bind:value={selectedRepoId}
+        onchange={loadWorktrees}
+      >
+        <option value={undefined}>현재 레포 (monitor-page)</option>
+        {#each repos as repo (repo.id)}
+          <option value={repo.id}>{repo.alias}</option>
+        {/each}
+      </select>
+
+      <label class="filter-check">
+        <input type="checkbox" bind:checked={hideTestRunners} />
+        테스트 러너 숨김
+      </label>
+
+      <label class="filter-check">
+        <input type="checkbox" bind:checked={cleanableOnly} />
+        정리가능만 보기
+      </label>
+    </div>
+
+    <div class="toolbar-right">
+      <button
+        type="button"
+        class="toolbar-btn"
+        onclick={() => selection.selectAll(visibleCleanableBranches)}
+        disabled={cleanupBusy || visibleCleanableBranches.length === 0}
+      >
+        {selection.isAllSelected(visibleCleanableBranches) ? '전체 해제' : '전체 선택'}
+      </button>
+      <button
+        type="button"
+        class="toolbar-btn toolbar-btn-danger"
+        onclick={handleBatchCleanup}
+        disabled={cleanupBusy || selection.count === 0}
+      >
+        {cleanupBusy ? '정리 중...' : `일괄 정리 (${selection.count})`}
+      </button>
+    </div>
   </div>
+
+  {#if hiddenTestCount > 0}
+    <div class="filter-hint">테스트 항목 {hiddenTestCount}개가 숨겨져 있습니다.</div>
+  {/if}
+
+  {#if cleanupResult}
+    <div class="cleanup-result">
+      <div class="cleanup-summary">
+        요청 {cleanupResult.summary.requested ?? 0} · 제거 {cleanupResult.summary.removed ?? 0} · 건너뜀 {cleanupResult.summary.skipped ?? 0} · 실패 {cleanupResult.summary.failed ?? 0}
+      </div>
+      <div class="cleanup-result-list">
+        {#each cleanupResult.results as item (`${item.branch}-${item.status}-${item.reason}`)}
+          <div class={`cleanup-result-row ${cleanupStatusClass(item.status)}`}>
+            <code>{item.branch}</code>
+            <span>{item.reason || item.status}</span>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   {#if loading}
     <div class="empty-state">불러오는 중...</div>
   {:else if error}
     <div class="error-state">{error}</div>
   {:else}
-    <!-- main dirty 배너 -->
     {#if response.main_dirty.dirty_count > 0}
       <div class="dirty-banner">
         <button
@@ -117,46 +284,77 @@
       </div>
     {/if}
 
-    <!-- 워크트리 목록 -->
-    {#if response.worktrees.length === 0 && response.plan_only.length === 0 && response.branch_unresolved.length === 0}
-      <div class="empty-state">활성 워크트리가 없습니다</div>
+    {#if visibleWorktrees.length === 0 && visiblePlanOnly.length === 0 && visibleBranchUnresolved.length === 0}
+      <div class="empty-state">표시할 워크트리가 없습니다</div>
     {:else}
       <div class="worktree-list">
-        {#each response.worktrees as wt (wt.branch)}
-          <div class="worktree-card">
-            <!-- 카드 헤더 -->
+        {#each visibleWorktrees as wt (wt.branch)}
+          <div class={`worktree-card ${wt.cleanable ? 'worktree-card-cleanable' : ''}`}>
             <div class="card-header">
-              <div class="branch-row">
-                <span class="branch-name">{wt.branch}</span>
-                <div class="badges">
-                  <span class="badge badge-diff">+{wt.ahead} -{wt.behind}</span>
-                  {#if wt.locked}
-                    <span class="badge badge-locked" title="locked">
-                      <Lock size={11} />
-                      locked
-                    </span>
-                  {/if}
+              <div class="card-main">
+                <label class="select-cell">
+                  <input
+                    type="checkbox"
+                    checked={selection.has(wt.branch)}
+                    disabled={!wt.cleanable || cleanupBusy}
+                    onchange={() => selection.toggle(wt.branch)}
+                  />
+                </label>
+
+                <div class="card-body">
+                  <div class="branch-row">
+                    <span class="branch-name">{wt.branch}</span>
+                    <div class="badges">
+                      <span class="badge badge-diff">+{wt.ahead} -{wt.behind}</span>
+                      {#if wt.cleanable}
+                        <span class="badge badge-cleanable">
+                          <Trash2 size={11} />
+                          정리가능
+                        </span>
+                      {/if}
+                      {#if wt.is_test}
+                        <span class="badge badge-test">
+                          <FlaskConical size={11} />
+                          테스트
+                        </span>
+                      {/if}
+                      {#if wt.plan_file_archived}
+                        <span class="badge badge-archive">
+                          <Archive size={11} />
+                          archive
+                        </span>
+                      {/if}
+                      {#if wt.locked}
+                        <span class="badge badge-locked" title="locked">
+                          <Lock size={11} />
+                          locked
+                        </span>
+                      {/if}
+                    </div>
+                  </div>
+
+                  <div class="meta-row">
+                    <span class="created-at">생성: {formatDate(wt.created_at)}</span>
+                    {#if wt.plan_file}
+                      <a
+                        class="plan-link"
+                        href="?tab=plans&subtab=plans"
+                        title={wt.plan_file}
+                      >
+                        <FileText size={13} />
+                        {wt.plan_file_archived ? `archive: ${planFileName(wt.plan_file)}` : planFileName(wt.plan_file)}
+                      </a>
+                      {#if wt.plan_mtime}
+                        <span class="plan-mtime">수정: {formatDate(wt.plan_mtime)}</span>
+                      {/if}
+                    {:else}
+                      <span class="plan-mtime">연결된 계획서 없음</span>
+                    {/if}
+                  </div>
                 </div>
-              </div>
-              <div class="meta-row">
-                <span class="created-at">생성: {formatDate(wt.created_at)}</span>
-                {#if wt.plan_file}
-                  <a
-                    class="plan-link"
-                    href="?tab=plans&subtab=plans"
-                    title={wt.plan_file}
-                  >
-                    <FileText size={13} />
-                    {planFileName(wt.plan_file)}
-                  </a>
-                  {#if wt.plan_mtime}
-                    <span class="plan-mtime">수정: {formatDate(wt.plan_mtime)}</span>
-                  {/if}
-                {/if}
               </div>
             </div>
 
-            <!-- 커밋 토글 -->
             <div class="commit-toggle">
               <button
                 class="toggle-btn"
@@ -172,7 +370,6 @@
               </button>
             </div>
 
-            <!-- 커밋 목록 -->
             {#if expanded[wt.branch]}
               <div class="commit-list">
                 {#each wt.commits as commit (commit.hash)}
@@ -203,16 +400,23 @@
         {/each}
       </div>
 
-      <!-- plan-only 섹션 -->
-      {#if response.plan_only.length > 0}
+      {#if visiblePlanOnly.length > 0}
         <div class="section-header">워크트리 없는 계획서</div>
         <div class="worktree-list">
-          {#each response.plan_only as po (po.plan_file)}
+          {#each visiblePlanOnly as po (po.plan_file)}
             <div class="worktree-card plan-only-card">
-              <div class="card-header">
+              <div class="card-header card-header-static">
                 <div class="branch-row">
                   <span class="branch-name">{po.branch}</span>
-                  <span class="badge badge-plan-only">워크트리 없음</span>
+                  <div class="badges">
+                    <span class="badge badge-plan-only">워크트리 없음</span>
+                    {#if po.is_test}
+                      <span class="badge badge-test">
+                        <FlaskConical size={11} />
+                        테스트
+                      </span>
+                    {/if}
+                  </div>
                 </div>
                 <div class="meta-row">
                   <a
@@ -233,16 +437,23 @@
         </div>
       {/if}
 
-      <!-- branch_unresolved 섹션 -->
-      {#if response.branch_unresolved.length > 0}
+      {#if visibleBranchUnresolved.length > 0}
         <div class="section-header">브랜치 헤더 누락 계획서</div>
         <div class="worktree-list">
-          {#each response.branch_unresolved as bu (bu.plan_file)}
+          {#each visibleBranchUnresolved as bu (bu.plan_file)}
             <div class="worktree-card unresolved-card">
-              <div class="card-header">
+              <div class="card-header card-header-static">
                 <div class="branch-row">
                   <span class="branch-name unresolved-name">{planFileName(bu.plan_file)}</span>
-                  <span class="badge badge-unresolved">헤더 없음</span>
+                  <div class="badges">
+                    <span class="badge badge-unresolved">헤더 없음</span>
+                    {#if bu.is_test}
+                      <span class="badge badge-test">
+                        <FlaskConical size={11} />
+                        테스트
+                      </span>
+                    {/if}
+                  </div>
                 </div>
                 <div class="meta-row">
                   {#if bu.plan_mtime}
@@ -266,16 +477,104 @@
 
   .toolbar {
     margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
   }
 
-  .repo-select {
+  .toolbar-left,
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .repo-select,
+  .toolbar-btn {
     font-size: 0.875rem;
-    padding: 0.375rem 0.5rem;
+    padding: 0.375rem 0.625rem;
     border: 1px solid var(--border-color, #e5e7eb);
     border-radius: 0.375rem;
     background: var(--card-bg, #fff);
     color: var(--text-primary, #111827);
+  }
+
+  .toolbar-btn {
     cursor: pointer;
+  }
+
+  .toolbar-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .toolbar-btn-danger {
+    border-color: #f59e0b;
+    background: #fff7ed;
+    color: #9a3412;
+  }
+
+  .filter-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.8125rem;
+    color: var(--text-secondary, #374151);
+  }
+
+  .filter-hint {
+    margin-bottom: 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text-muted, #6b7280);
+  }
+
+  .cleanup-result {
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 0.5rem;
+    background: var(--card-bg, #fff);
+    padding: 0.75rem;
+  }
+
+  .cleanup-summary {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-secondary, #374151);
+    margin-bottom: 0.5rem;
+  }
+
+  .cleanup-result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  .cleanup-result-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: 0.75rem;
+    border-radius: 0.375rem;
+    padding: 0.375rem 0.5rem;
+  }
+
+  .result-removed {
+    background: #ecfdf5;
+    color: #166534;
+  }
+
+  .result-skipped {
+    background: #f3f4f6;
+    color: #4b5563;
+  }
+
+  .result-failed {
+    background: #fef2f2;
+    color: #b91c1c;
   }
 
   .dirty-banner {
@@ -353,6 +652,11 @@
     background: var(--card-bg, #fff);
   }
 
+  .worktree-card-cleanable {
+    border-color: #bbf7d0;
+    box-shadow: inset 0 0 0 1px #dcfce7;
+  }
+
   .plan-only-card {
     background: var(--bg-subtle, #f9fafb);
     border-color: var(--border-subtle, #d1d5db);
@@ -366,14 +670,28 @@
   .card-header {
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--border-color, #e5e7eb);
+  }
+
+  .card-header-static {
+    border-bottom: none;
+  }
+
+  .card-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .card-body {
+    min-width: 0;
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
   }
 
-  .plan-only-card .card-header,
-  .unresolved-card .card-header {
-    border-bottom: none;
+  .select-cell {
+    padding-top: 0.125rem;
   }
 
   .branch-row {
@@ -398,6 +716,7 @@
     display: flex;
     gap: 0.375rem;
     align-items: center;
+    flex-wrap: wrap;
   }
 
   .badge {
@@ -413,6 +732,21 @@
   .badge-diff {
     background: var(--badge-diff-bg, #dbeafe);
     color: var(--badge-diff-text, #1d4ed8);
+  }
+
+  .badge-cleanable {
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  .badge-test {
+    background: #f3f4f6;
+    color: #4b5563;
+  }
+
+  .badge-archive {
+    background: #dbeafe;
+    color: #1d4ed8;
   }
 
   .badge-locked {
@@ -437,7 +771,8 @@
     flex-wrap: wrap;
   }
 
-  .created-at {
+  .created-at,
+  .plan-mtime {
     font-size: 0.75rem;
     color: var(--text-muted, #6b7280);
   }
@@ -449,7 +784,7 @@
     font-size: 0.75rem;
     color: var(--color-link, #3b82f6);
     text-decoration: none;
-    max-width: 300px;
+    max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -457,11 +792,6 @@
 
   .plan-link:hover {
     text-decoration: underline;
-  }
-
-  .plan-mtime {
-    font-size: 0.75rem;
-    color: var(--text-muted, #6b7280);
   }
 
   .unresolved-reason {
@@ -557,14 +887,35 @@
     max-width: 300px;
   }
 
-  .diff-changes {
+  .diff-changes,
+  .diff-more {
     color: var(--text-muted, #6b7280);
     flex-shrink: 0;
   }
 
-  .diff-more {
-    font-size: 0.75rem;
-    color: var(--text-muted, #6b7280);
-    padding-left: 0;
+  @media (max-width: 768px) {
+    .toolbar {
+      align-items: stretch;
+    }
+
+    .toolbar-left,
+    .toolbar-right {
+      width: 100%;
+    }
+
+    .toolbar-right .toolbar-btn,
+    .repo-select {
+      flex: 1;
+    }
+
+    .cleanup-result-row,
+    .card-main {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .select-cell {
+      padding-top: 0;
+    }
   }
 </style>

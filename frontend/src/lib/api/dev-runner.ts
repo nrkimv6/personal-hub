@@ -615,6 +615,9 @@ export interface WorktreeInfo {
 	commits: WorktreeCommit[];
 	plan_file: string | null;
 	plan_mtime: string | null;
+	is_test: boolean;
+	plan_file_archived: boolean;
+	cleanable: boolean;
 }
 
 export interface MainDirtyStatus {
@@ -626,12 +629,32 @@ export interface PlanOnlyBranch {
 	plan_file: string;
 	branch: string;
 	plan_mtime: string | null;
+	is_test: boolean;
 }
 
 export interface BranchUnresolvedPlan {
 	plan_file: string;
 	reason: string;
 	plan_mtime: string | null;
+	is_test: boolean;
+}
+
+export interface WorktreeCleanupRequest {
+	branches: string[];
+	dry_run?: boolean;
+}
+
+export interface WorktreeCleanupResult {
+	branch: string;
+	status: 'removed' | 'skipped' | 'failed';
+	reason: string;
+	worktree_removed: boolean;
+	branch_removed: boolean;
+}
+
+export interface WorktreeCleanupResponse {
+	results: WorktreeCleanupResult[];
+	summary: Record<string, number>;
 }
 
 export interface WorktreeListResponse {
@@ -654,6 +677,13 @@ export const devRunnerWorktreeApi = {
 		return devRunnerRequest<WorktreeListResponse>(`/worktrees/v2${query}`);
 	},
 	listRepos: (): Promise<RepoOption[]> => devRunnerRequest<RepoOption[]>('/worktrees/repos'),
+	cleanup: (req: WorktreeCleanupRequest, repoId?: number): Promise<WorktreeCleanupResponse> => {
+		const query = repoId !== undefined ? `?repo_id=${repoId}` : '';
+		return devRunnerRequest<WorktreeCleanupResponse>(`/worktrees/cleanup${query}`, {
+			method: 'POST',
+			body: JSON.stringify(req),
+		});
+	},
 };
 
 export const devRunnerWorkflowApi = {

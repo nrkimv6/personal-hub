@@ -23,6 +23,7 @@ import sys
 import time
 from collections import defaultdict
 from enum import Enum
+from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from app.shared.browser.browser_manager import BrowserManager
@@ -163,7 +164,11 @@ class WorkerOrchestrator:
         # OrphanDetector 태스크 시작
         from app.core.config import settings
         self._orphan_task = asyncio.create_task(
-            OrphanDetector(ProcessRegistry()).run_periodic(
+            OrphanDetector(
+                ProcessRegistry(),
+                repo_root=Path(__file__).resolve().parents[2],
+                cleanup_callback=self._cleanup_orphan_test_worktrees,
+            ).run_periodic(
                 settings.PROCESS_SCAN_INTERVAL,
                 settings.MEMORY_PRESSURE_CHECK_INTERVAL,
             ),
@@ -334,6 +339,15 @@ class WorkerOrchestrator:
         # TODO: 텔레그램 또는 데스크톱 알림
         logger.warning(
             f"[Orchestrator] 워커 {name} 영구 실패 알림 (TODO: 구현 필요)"
+        )
+
+    async def _cleanup_orphan_test_worktrees(self, branches: list[str]) -> object:
+        from app.modules.dev_runner.services.worktree_service import cleanup_worktrees
+
+        return await cleanup_worktrees(
+            branches,
+            dry_run=False,
+            repo_root=Path(__file__).resolve().parents[2],
         )
 
     async def shutdown(self):
