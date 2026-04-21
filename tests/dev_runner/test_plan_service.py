@@ -878,6 +878,7 @@ class TestRunDone:
         docs_dir.mkdir(exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".git").write_text("gitdir: mock\n", encoding="utf-8")
         (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
@@ -917,6 +918,7 @@ class TestRunDone:
         docs_dir.mkdir(exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".git").write_text("gitdir: mock\n", encoding="utf-8")
         (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
@@ -957,6 +959,7 @@ class TestRunDone:
         docs_dir.mkdir(exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".git").write_text("gitdir: mock\n", encoding="utf-8")
         (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
