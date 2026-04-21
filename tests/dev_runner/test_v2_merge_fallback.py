@@ -602,7 +602,7 @@ def test_cleanup_normal_join_B():
 
 @pytest.mark.asyncio
 async def test_handle_merge_stage_sets_merge_status_on_success_R():
-    """R(Right): execute_merge mock 성공 → Redis merge_status가 merged를 거쳐 done으로 종료"""
+    """R(Right): execute_merge mock 성공 → Redis merge_status가 merged로 유지되고 done은 loop에 위임"""
     import sys
     _wtools_path = Path(__file__).parents[6] / "service" / "wtools" / "common" / "tools" / "plan-runner"
     if str(_wtools_path) not in sys.path:
@@ -650,11 +650,11 @@ async def test_handle_merge_stage_sets_merge_status_on_success_R():
         )
 
     assert result.status == "SUCCESS"
-    # merge_status는 merged를 거쳐 최종 done으로 마감된다.
+    # merge_stage는 merge_status=merged까지만 책임지고 done 전이는 loop/auto-done에 위임한다.
     merged_key = "plan-runner:runners:runner-ms-test:merge_status"
     assert any(k == merged_key and v == "merged" for k, v in status_history), \
         f"merge_status=merged 세팅 이력 없음. history={status_history}"
-    assert status_calls.get(merged_key) == "done", f"최종 merge_status가 done이 아님. calls={status_calls}"
+    assert status_calls.get(merged_key) == "merged", f"최종 merge_status가 merged가 아님. calls={status_calls}"
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,7 @@ from app.modules.dev_runner.schemas import (
 class TestFindPlanFileMtime:
     def test_find_plan_file_returns_mtime_RIGHT(self, tmp_path):
         """plan 파일 매칭 시 (path, mtime) 모두 non-None, mtime이 ISO 8601"""
-        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "2026-04-13_test-plan.md"
         plan_file.write_text(
@@ -34,7 +34,7 @@ class TestFindPlanFileMtime:
 
     def test_find_plan_file_no_match_returns_none_tuple_ERROR(self, tmp_path):
         """매칭 없을 때 (None, None) 반환"""
-        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         (plan_dir / "other.md").write_text("> branch: impl/other\n", encoding="utf-8")
 
@@ -65,7 +65,7 @@ class TestFindPlanFileMtime:
 class TestListPlanOnlyBranches:
     def test_list_plan_only_branches_filters_existing_RIGHT(self, tmp_path):
         """existing_branches에 없는 브랜치만 plan_only로 반환"""
-        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         (plan_dir / "plan-a.md").write_text("> branch: impl/a\n", encoding="utf-8")
         (plan_dir / "plan-b.md").write_text("> branch: impl/b\n", encoding="utf-8")
@@ -80,7 +80,7 @@ class TestListPlanOnlyBranches:
 
     def test_list_plan_only_branches_all_existing_BOUNDARY(self, tmp_path):
         """모든 브랜치가 existing_branches에 있으면 plan_only 빈 목록"""
-        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         (plan_dir / "plan-a.md").write_text("> branch: impl/a\n", encoding="utf-8")
 
@@ -92,7 +92,7 @@ class TestListPlanOnlyBranches:
 
     def test_list_plan_only_branches_no_branch_header_BOUNDARY(self, tmp_path):
         """> branch: 헤더 없는 plan 파일 → branch_unresolved에 포함"""
-        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         (plan_dir / "no-header.md").write_text(
             "# 헤더 없는 계획\n\n내용\n", encoding="utf-8"
@@ -156,7 +156,7 @@ class TestGetAllWorktrees:
     @pytest.mark.asyncio
     async def test_get_all_worktrees_empty_raw_returns_plan_only_RIGHT(self, tmp_path):
         """list_worktrees가 [] 반환해도 plan_only가 채워진 WorktreeListResponse 반환"""
-        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         (plan_dir / "plan-x.md").write_text("> branch: impl/x\n", encoding="utf-8")
 

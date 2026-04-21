@@ -11,20 +11,22 @@ _REAL_REPO = Path(__file__).parent.parent.parent  # monitor-page 루트
 class TestFindPlanFileRealPlanDir:
     def test_find_plan_file_real_plan_dir(self):
         """실제 docs/plan/ 디렉토리에서 find_plan_file 실행 — 타입 확인"""
-        result, mtime = svc.find_plan_file("impl/nonexistent-branch-xyz", repo_root=_REAL_REPO)
-        # 매칭 없을 때 (None, None) 반환 확인
+        result, mtime, archived = svc.find_plan_file("impl/nonexistent-branch-xyz", repo_root=_REAL_REPO)
+        # 매칭 없을 때 (None, None, False) 반환 확인
         assert result is None
         assert mtime is None
+        assert archived is False
 
     def test_find_plan_file_returns_correct_types(self):
-        """find_plan_file은 항상 (Optional[str], Optional[str]) 반환"""
+        """find_plan_file은 항상 (Optional[str], Optional[str], bool) 반환"""
         # 실제 plan 파일에 등록된 브랜치로 호출할 때도 타입 일치
         result = svc.find_plan_file("impl/feat-worktree-tab-enhancements", repo_root=_REAL_REPO)
         assert isinstance(result, tuple)
-        assert len(result) == 2
-        path, mtime = result
+        assert len(result) == 3
+        path, mtime, archived = result
         assert path is None or isinstance(path, str)
         assert mtime is None or isinstance(mtime, str)
+        assert isinstance(archived, bool)
 
 
 class TestGetMainDirtyRealGit:
