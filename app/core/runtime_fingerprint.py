@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROCESS_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
 DEFAULT_SOURCE_FILES: tuple[str, ...] = (
     "app/main.py",
@@ -74,10 +75,17 @@ def build_runtime_fingerprint_snapshot(
     source_fingerprint = _sha256_bytes(source_seed.encode("utf-8"))
 
     normalized_app_mode = (app_mode or os.environ.get("APP_MODE") or "unknown").strip() or "unknown"
+    normalized_pid = os.getpid() if pid is None else pid
+    normalized_cwd = str(Path.cwd() if cwd is None else Path(cwd))
+    normalized_python_executable = str(sys.executable if python_executable is None else python_executable)
     runtime_seed = "\n".join(
         [
             f"app_mode={normalized_app_mode}",
             f"source_fingerprint={source_fingerprint}",
+            f"pid={normalized_pid}",
+            f"cwd={normalized_cwd}",
+            f"python_executable={normalized_python_executable}",
+            f"process_started_at={PROCESS_STARTED_AT}",
         ]
     )
     runtime_fingerprint = _sha256_bytes(runtime_seed.encode("utf-8"))
@@ -86,9 +94,9 @@ def build_runtime_fingerprint_snapshot(
         "runtime_fingerprint": runtime_fingerprint,
         "source_fingerprint": source_fingerprint,
         "app_mode": normalized_app_mode,
-        "pid": os.getpid() if pid is None else pid,
-        "cwd": str(Path.cwd() if cwd is None else Path(cwd)),
-        "python_executable": str(sys.executable if python_executable is None else python_executable),
+        "pid": normalized_pid,
+        "cwd": normalized_cwd,
+        "python_executable": normalized_python_executable,
         "python_version": platform.python_version(),
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "source_files": source_records,

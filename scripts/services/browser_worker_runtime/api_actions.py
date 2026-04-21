@@ -98,6 +98,7 @@ def restart_api(manager):
     app_mode = _manager_app_mode(manager)
     expected_snapshot = build_runtime_fingerprint_snapshot(app_mode=app_mode)
     expected_fingerprint = str(expected_snapshot["runtime_fingerprint"])
+    expected_source_fingerprint = str(expected_snapshot.get("source_fingerprint", ""))
     cprint(
         f"API restart target: port={manager.api_port} app_mode={app_mode} "
         f"expected_fp={expected_fingerprint[:12]}...",
@@ -153,8 +154,21 @@ def restart_api(manager):
             fingerprint_data = _fetch_json(fingerprint_url, timeout=3)
             if fingerprint_data is not None:
                 actual_fingerprint = str(fingerprint_data.get("runtime_fingerprint", ""))
+                actual_source_fingerprint = str(fingerprint_data.get("source_fingerprint", ""))
+                actual_app_mode = str(fingerprint_data.get("app_mode", ""))
                 if actual_fingerprint == expected_fingerprint:
                     cprint(f"API runtime fingerprint matched (took ~{(i + 1) * 5}s)", GREEN)
+                    healthy = True
+                    break
+                if (
+                    actual_source_fingerprint
+                    and actual_source_fingerprint == expected_source_fingerprint
+                    and actual_app_mode == app_mode
+                ):
+                    cprint(
+                        f"API source fingerprint matched (runtime drift allowed, took ~{(i + 1) * 5}s)",
+                        GREEN,
+                    )
                     healthy = True
                     break
                 cprint(

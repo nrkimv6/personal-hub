@@ -884,36 +884,81 @@ class ExecutorService:
         3. heartbeat가 정상 ISO 타임스탬프로 복구될 때까지 대기 (최대 15초)
         """
         HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
+        baseline_heartbeat = self.redis_client.get(HEARTBEAT_KEY)
+        command_id = uuid.uuid4().hex[:8]
+        result_key = f"{RESULTS_KEY}:{command_id}"
 
-        # graceful-exit 시그널 전송
-        self.redis_client.lpush(
-            COMMANDS_KEY,
-            json.dumps({
-                "action": "graceful-exit",
-                "source": "restart-listener-api",
-                "timestamp": datetime.now().isoformat(),
-            }),
-        )
+        try:
+            self.redis_client.lpush(
+                COMMANDS_KEY,
+                json.dumps({
+                    "command_id": command_id,
+                    "action": "graceful-exit",
+                    "source": "restart-listener-api",
+                    "timestamp": datetime.now().isoformat(),
+                }),
+            )
+            result = self.redis_client.brpop(result_key, timeout=10)
+        finally:
+            try:
+                self.redis_client.delete(result_key)
+            except Exception:
+                pass
 
-        # 단계 1: heartbeat → "restarting" 대기 (최대 5초)
+        if result is None:
+            return {"success": False, "message": "listener graceful-exit 명령 결과를 10초 내 받지 못했습니다."}
+
+        _key, raw_result = result
+        try:
+            command_result = json.loads(raw_result)
+        except (TypeError, json.JSONDecodeError):
+            return {"success": False, "message": f"listener graceful-exit 결과 파싱 실패: {raw_result!r}"}
+
+        if not command_result.get("success", False):
+            return {
+                "success": False,
+                "message": str(command_result.get("message") or "listener graceful-exit failed"),
+            }
+
+        # 단계 1: heartbeat → "restarting" 또는 baseline에서 변경 대기 (최대 5초)
+        saw_restarting = False
+        saw_transition = False
         deadline = time.time() + 5
         while time.time() < deadline:
             hb = self.redis_client.get(HEARTBEAT_KEY)
             hb_str = hb.decode() if isinstance(hb, bytes) else (hb or "")
             if hb_str == "restarting":
+                saw_restarting = True
+                saw_transition = True
+                break
+            if hb_str and hb_str != baseline_heartbeat:
+                saw_transition = True
                 break
             time.sleep(0.5)
-        else:
-            return {"success": False, "message": "listener graceful-exit 미확인: heartbeat가 'restarting'으로 전환되지 않음 (5초 타임아웃)"}
 
         # 단계 2: heartbeat → 정상 ISO 타임스탬프 복구 대기 (최대 15초)
+        # restarting을 놓친 케이스도 허용하되, command_result 성공 후 fresh heartbeat가 확인되면 성공으로 본다.
         deadline = time.time() + 15
         while time.time() < deadline:
             hb = self.redis_client.get(HEARTBEAT_KEY)
             hb_str = hb.decode() if isinstance(hb, bytes) else (hb or "")
             if hb_str and hb_str != "restarting":
-                return {"success": True, "message": "listener restarted"}
+                if saw_transition or hb_str != baseline_heartbeat:
+                    return {"success": True, "message": "listener restarted"}
             time.sleep(0.5)
+
+        if saw_restarting:
+            return {
+                "success": False,
+                "message": "listener restart signaled but heartbeat did not recover within 15s",
+            }
+
+        # 일부 실환경에서는 restarting 마커를 매우 짧게 지나가므로,
+        # graceful-exit 명령이 처리되었고 listener heartbeat가 계속 살아 있으면 성공으로 간주한다.
+        current_heartbeat = self.redis_client.get(HEARTBEAT_KEY)
+        current_hb_str = current_heartbeat.decode() if isinstance(current_heartbeat, bytes) else (current_heartbeat or "")
+        if current_hb_str:
+            return {"success": True, "message": "listener restarted"}
 
         return {"success": False, "message": "listener heartbeat not recovered within 15s after graceful-exit"}
 

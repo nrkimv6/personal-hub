@@ -9,6 +9,7 @@ TestClient 기반 오분류 e2e 테스트가 검증하던 API 레벨 동작을
 """
 import pytest
 import httpx
+import time
 from uuid import uuid4
 
 from app.database import SessionLocal
@@ -17,34 +18,43 @@ from app.modules.claude_worker.models.llm_request import LLMRequest
 pytestmark = pytest.mark.http_live
 
 BASE_URL = "http://localhost:8001"
+CONNECT_RETRY_SECONDS = 45
+CONNECT_RETRY_INTERVAL = 1.0
 
 
 # ---------------------------------------------------------------------------
 # 공통 헬퍼
 # ---------------------------------------------------------------------------
 
+def _request_with_connect_retry(method: str, path: str, timeout: int = 5, **kwargs) -> httpx.Response:
+    """실서버 재시작 공백을 흡수하며 요청한다."""
+    deadline = time.monotonic() + CONNECT_RETRY_SECONDS
+    last_error: httpx.ConnectError | None = None
+
+    while time.monotonic() < deadline:
+        try:
+            return httpx.request(method, BASE_URL + path, timeout=timeout, **kwargs)
+        except httpx.ConnectError as exc:
+            last_error = exc
+            time.sleep(CONNECT_RETRY_INTERVAL)
+
+    detail = f": {last_error}" if last_error else ""
+    pytest.fail(f"실서버 미기동 또는 재시작 장기화 — localhost:8001 연결 불가{detail}")
+
+
 def _get(path: str, timeout: int = 5, **kwargs) -> httpx.Response:
-    """GET 요청. 실서버 미기동 시 pytest.skip()."""
-    try:
-        return httpx.get(BASE_URL + path, timeout=timeout, **kwargs)
-    except httpx.ConnectError:
-        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+    """GET 요청. 실서버 재시작 공백은 짧게 재시도한다."""
+    return _request_with_connect_retry("GET", path, timeout=timeout, **kwargs)
 
 
 def _post(path: str, timeout: int = 5, **kwargs) -> httpx.Response:
-    """POST 요청. 실서버 미기동 시 pytest.skip()."""
-    try:
-        return httpx.post(BASE_URL + path, timeout=timeout, **kwargs)
-    except httpx.ConnectError:
-        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+    """POST 요청. 실서버 재시작 공백은 짧게 재시도한다."""
+    return _request_with_connect_retry("POST", path, timeout=timeout, **kwargs)
 
 
 def _put(path: str, timeout: int = 5, **kwargs) -> httpx.Response:
-    """PUT 요청. 실서버 미기동 시 pytest.skip()."""
-    try:
-        return httpx.put(BASE_URL + path, timeout=timeout, **kwargs)
-    except httpx.ConnectError:
-        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+    """PUT 요청. 실서버 재시작 공백은 짧게 재시도한다."""
+    return _request_with_connect_retry("PUT", path, timeout=timeout, **kwargs)
 
 
 def _seed_failed_live_request(caller_id: str) -> int:

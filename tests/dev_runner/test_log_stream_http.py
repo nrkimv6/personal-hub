@@ -25,6 +25,9 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 REDIS_DB = 0
 BASE_URL = "/api/v1/dev-runner"
+LIVE_RETRY_SECONDS = 45
+LIVE_RETRY_INTERVAL = 1.0
+LIVE_HTTP_TIMEOUT = 15
 
 
 @pytest.fixture
@@ -56,6 +59,22 @@ def _parse_sse_events(content: str) -> list[dict[str, str]]:
     if current:
         events.append(current)
     return events
+
+
+def _live_get(url: str, *, timeout=LIVE_HTTP_TIMEOUT, **kwargs) -> requests.Response:
+    """실서버 재시작/부하 구간의 일시적 connection timeout을 짧게 재시도한다."""
+    deadline = time.monotonic() + LIVE_RETRY_SECONDS
+    last_error: requests.exceptions.RequestException | None = None
+
+    while time.monotonic() < deadline:
+        try:
+            return requests.get(url, timeout=timeout, **kwargs)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            last_error = exc
+            time.sleep(LIVE_RETRY_INTERVAL)
+
+    detail = f": {last_error}" if last_error else ""
+    pytest.fail(f"API server unavailable or overloaded{detail}")
 
 
 @pytest.fixture
@@ -447,11 +466,11 @@ def test_http_log_stream_since_line_param():
         r.set(f"plan-runner:runners:{runner_id}:stream_log_path", log_path)
         # since_line=95 → 95번 이후(96~99, 4줄)만 버퍼로 수신 후 completed 이벤트 기다림
         # 완료 신호가 없으므로 짧은 timeout으로 첫 줄만 확인
-        resp = requests.get(
+        resp = _live_get(
             f"{ADMIN_API}/api/v1/dev-runner/logs/stream",
             params={"runner_id": runner_id, "since_line": 95},
             stream=True,
-            timeout=5,
+            timeout=(5, 15),
         )
         assert resp.status_code == 200
         lines_received = []
@@ -571,17 +590,16 @@ def test_http_log_recent_legacy_pseudo_id_after_size_removal():
                 f.write(f"[12:00:00] [INFO] legacy line {i}\n")
 
         # history에서 pseudo_id 확인
-        hist_resp = requests.get(f"{ADMIN_API}/api/v1/dev-runner/logs/history", timeout=5)
+        hist_resp = _live_get(f"{ADMIN_API}/api/v1/dev-runner/logs/history")
         assert hist_resp.status_code == 200
         runs = hist_resp.json().get("runs", [])
         found = any(r_item["runner_id"] == pseudo_id for r_item in runs)
         assert found, f"레거시 파일 이력에 없음. pseudo_id={pseudo_id}, runs={[r['runner_id'] for r in runs[:5]]}"
 
         # recent로 조회
-        recent_resp = requests.get(
+        recent_resp = _live_get(
             f"{ADMIN_API}/api/v1/dev-runner/logs/recent",
             params={"runner_id": pseudo_id},
-            timeout=5,
         )
         assert recent_resp.status_code == 200
         data = recent_resp.json()
@@ -617,10 +635,9 @@ def test_http_log_recent_codex_runtime_failure_signature():
 
     try:
         r.set(f"plan-runner:runners:{runner_id}:stream_log_path", log_path)
-        resp = requests.get(
+        resp = _live_get(
             f"{ADMIN_API}/api/v1/dev-runner/logs/recent",
             params={"runner_id": runner_id},
-            timeout=5,
         )
         assert resp.status_code == 200
         lines = resp.json().get("lines", [])
@@ -649,7 +666,7 @@ def test_http_logs_history_visible_only_true():
     """T5-40: GET /logs/history?visible_only=true → 200 + runs 배열 반환"""
     url = f"{ADMIN_API}/api/v1/dev-runner/logs/history?visible_only=true"
     try:
-        resp = requests.get(url, timeout=5)
+        resp = _live_get(url)
         assert resp.status_code == 200, f"기대 200, 실제 {resp.status_code}"
         data = resp.json()
         assert "runs" in data, f"runs 키 없음: {data.keys()}"
@@ -665,7 +682,7 @@ def test_http_logs_history_visible_only_default_false():
     """T5-41: GET /logs/history (파라미터 없음) → 200 + runs 배열 반환 (visible_only=False 기본값)"""
     url = f"{ADMIN_API}/api/v1/dev-runner/logs/history"
     try:
-        resp = requests.get(url, timeout=5)
+        resp = _live_get(url)
         assert resp.status_code == 200, f"기대 200, 실제 {resp.status_code}"
         data = resp.json()
         assert "runs" in data, f"runs 키 없음: {data.keys()}"

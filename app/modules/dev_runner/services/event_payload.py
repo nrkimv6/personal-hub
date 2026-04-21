@@ -27,9 +27,12 @@ def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
             "start_time",
             "plan_file",
             "engine",
+            "worktree_path",
             "branch",
             "trigger",
+            "merge_status",
             "exit_reason",
+            "stop_stage",
             "error",
             "execution_count",
         ]
