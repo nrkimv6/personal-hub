@@ -28,16 +28,17 @@ from unittest.mock import patch, MagicMock, AsyncMock
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.main import app
 from app.database import get_db
 from app.models.base import Base
 from app.models import TaskSchedule, TaskScheduleRun, ServiceAccount, BrowserProfile
 from app.models.google_search import GoogleSavedSearch, GoogleSearchQueue
+from app.routes.collect import router as collect_router
 
 pytestmark = pytest.mark.http
 
@@ -79,6 +80,12 @@ def test_db():
 @pytest.fixture(scope="function")
 def client(test_db):
     """테스트용 FastAPI 클라이언트"""
+    app = FastAPI()
+    app.include_router(collect_router, prefix="/api/v1")
+
+    routes = {route.path for route in app.routes}
+    assert "/api/v1/collect/schedules/{schedule_id}/run" in routes
+
     def override_get_db():
         try:
             yield test_db

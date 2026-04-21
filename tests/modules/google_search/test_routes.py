@@ -12,10 +12,10 @@ RIGHT-BICEP 패턴:
 
 import pytest
 from datetime import datetime
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch
 
-from app.main import app
 from app.database import get_db
 from app.models.google_search import (
     GoogleSavedSearch,
@@ -23,11 +23,23 @@ from app.models.google_search import (
     GoogleSearchResult,
     GoogleSearchQueue,
 )
+from app.modules.google_search.routes.search import router as google_search_router
+
+
+def _build_google_test_app() -> FastAPI:
+    app = FastAPI()
+    app.include_router(google_search_router)
+
+    routes = {route.path for route in app.routes}
+    assert "/api/v1/google/saved/{saved_id}/run" in routes
+    return app
 
 
 @pytest.fixture
 def client(test_db_session):
     """테스트용 FastAPI 클라이언트"""
+    app = _build_google_test_app()
+
     def override_get_db():
         try:
             yield test_db_session
@@ -35,7 +47,8 @@ def client(test_db_session):
             pass
 
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
+    with TestClient(app) as client:
+        yield client
     app.dependency_overrides.clear()
 
 
