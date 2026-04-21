@@ -24,12 +24,13 @@ class TestFindPlanFileMtime:
             encoding="utf-8",
         )
 
-        result, mtime = svc.find_plan_file("impl/my-feat", repo_root=tmp_path)
+        result, mtime, archived = svc.find_plan_file("impl/my-feat", repo_root=tmp_path)
 
         assert result is not None
         assert "test-plan" in result
         assert mtime is not None
         assert re.match(r"^\d{4}-\d{2}-\d{2}T", mtime), f"ISO 8601 아님: {mtime}"
+        assert archived is False
 
     def test_find_plan_file_no_match_returns_none_tuple_ERROR(self, tmp_path):
         """매칭 없을 때 (None, None) 반환"""
@@ -37,10 +38,11 @@ class TestFindPlanFileMtime:
         plan_dir.mkdir(parents=True)
         (plan_dir / "other.md").write_text("> branch: impl/other\n", encoding="utf-8")
 
-        result, mtime = svc.find_plan_file("impl/nonexistent", repo_root=tmp_path)
+        result, mtime, archived = svc.find_plan_file("impl/nonexistent", repo_root=tmp_path)
 
         assert result is None
         assert mtime is None
+        assert archived is False
 
     def test_find_plan_file_prefers_plans_worktree_over_legacy_RIGHT(self, tmp_path):
         """같은 branch가 두 경로에 있으면 .worktrees/plans 경로를 우선 사용"""
@@ -52,11 +54,12 @@ class TestFindPlanFileMtime:
         plans_dir.mkdir(parents=True)
         (plans_dir / "plans.md").write_text("> branch: impl/same\n", encoding="utf-8")
 
-        result, mtime = svc.find_plan_file("impl/same", repo_root=tmp_path)
+        result, mtime, archived = svc.find_plan_file("impl/same", repo_root=tmp_path)
 
         assert result is not None
         assert result.replace("\\", "/").startswith(".worktrees/plans/docs/plan/")
         assert mtime is not None
+        assert archived is False
 
 
 class TestListPlanOnlyBranches:
