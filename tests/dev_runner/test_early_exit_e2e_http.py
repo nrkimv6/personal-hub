@@ -245,6 +245,67 @@ class TestRunApiEnvHeaderHttp:
             f"[ENV] 줄에 available_memory 정보 없음: {log_content[:600]!r}"
         )
 
+    def test_post_run_test_source_worktree_auto_cleanup(self):
+        """T5-3: test_source runner 종료 후 worktrees/v2에 test runner worktree가 남지 않아야 한다."""
+        if not _live_server_available():
+            pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+
+        test_source = f"cleanuptest{uuid.uuid4().hex[:6]}"
+        run_payload = {
+            "test_source": test_source,
+            "engine": "gemini",
+            "dry_run": True,
+        }
+        resp = _live_post(f"{API_PREFIX}/run", json=run_payload)
+        if resp.status_code != 200:
+            pytest.skip(f"runner 시작 불가 (status={resp.status_code}): {resp.text[:200]}")
+
+        runner_id = resp.json().get("runner_id")
+        assert runner_id, f"runner_id 없음: {resp.json()}"
+        expected_branch = f"runner/{runner_id}"
+
+        runner_finished = False
+        worktree_branch_seen = False
+        worktree_payload = None
+
+        for _ in range(40):
+            time.sleep(1)
+
+            status_resp = _live_get(f"{API_PREFIX}/runners/{runner_id}")
+            if status_resp.status_code == 200:
+                status_body = status_resp.json()
+                runner_finished = not bool(status_body.get("running"))
+
+            worktree_resp = _live_get(f"{API_PREFIX}/worktrees/v2")
+            if worktree_resp.status_code != 200:
+                continue
+
+            worktree_payload = worktree_resp.json()
+            branches = {
+                item.get("branch")
+                for item in worktree_payload.get("worktrees", [])
+                if item.get("branch")
+            }
+            if expected_branch in branches:
+                worktree_branch_seen = True
+            if runner_finished and expected_branch not in branches:
+                break
+
+        assert runner_finished, f"runner_id={runner_id}: 종료 대기 타임아웃"
+        assert worktree_payload is not None, "worktrees/v2 응답을 한 번도 받지 못함"
+        assert worktree_branch_seen, (
+            f"runner_id={runner_id}: 테스트 러너 worktree가 한 번도 관측되지 않음. "
+            "실제 생성 없이 종료됐다면 환경 상태를 확인해야 한다."
+        )
+        remaining = {
+            item.get("branch")
+            for item in worktree_payload.get("worktrees", [])
+            if item.get("branch")
+        }
+        assert expected_branch not in remaining, (
+            f"runner_id={runner_id}: test_source runner worktree가 cleanup 후에도 남아 있음"
+        )
+
 
 # ─────────────────────────────────────────────────────────────────
 #  T5-2: HTTP — GET /runners 에서 실패 runner error 필드 진단 메시지 확인

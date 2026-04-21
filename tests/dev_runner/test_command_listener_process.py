@@ -448,6 +448,16 @@ class TestStopPlanRunner:
         # runner가 active_runners에서 제거되어야 함
         assert not fr.sismember(AK, RUNNER_ID)
 
+    def test_stop_calls_cleanup_process_state(self, listener_mod, fr, mock_popen):
+        """stop 경로는 종료 후 cleanup helper를 반드시 호출해야 한다."""
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+
+        with patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+            result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
+
+        assert result["success"] is True
+        mock_cleanup.assert_called_once_with(RUNNER_ID, fr)
+
     def test_stop_not_running_returns_error(self, listener_mod, fr):
         """미실행 runner_id stop → 실패"""
         result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
@@ -477,6 +487,18 @@ class TestGetStatus:
         assert result["running"] is False
         assert RUNNER_ID not in listener_mod._running_processes
 
+    def test_status_dead_process_calls_cleanup_process_state(self, listener_mod, fr):
+        """상태 조회 중 죽은 프로세스를 발견하면 cleanup helper를 호출해야 한다."""
+        mock_process = MagicMock()
+        mock_process.poll.return_value = 0
+        listener_mod._running_processes[RUNNER_ID] = mock_process
+
+        with patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+            result = listener_mod.get_status(fr)
+
+        assert result["running"] is False
+        mock_cleanup.assert_called_once_with(RUNNER_ID, fr)
+
     def test_status_no_process(self, listener_mod, fr):
         """프로세스 없음 → not running"""
         result = listener_mod.get_status(fr)
@@ -498,3 +520,24 @@ class TestExecuteCommand:
         result = listener_mod.execute_command({"action": "status"}, fr)
         assert result["success"] is True
         assert result["running"] is False
+
+
+class TestForceCleanupCommands:
+
+    def test_force_stop_calls_cleanup_process_state(self, listener_mod, fr, mock_popen):
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+
+        with patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+            result = listener_mod.force_stop_plan_runner(RUNNER_ID, fr)
+
+        assert result["success"] is True
+        mock_cleanup.assert_called_once_with(RUNNER_ID, fr)
+
+    def test_force_kill_calls_cleanup_process_state(self, listener_mod, fr, mock_popen):
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+
+        with patch("_dr_plan_runner._cleanup_process_state") as mock_cleanup:
+            result = listener_mod.force_kill_plan_runner(RUNNER_ID, fr)
+
+        assert result["success"] is True
+        mock_cleanup.assert_called_once_with(RUNNER_ID, fr)

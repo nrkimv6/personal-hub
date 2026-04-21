@@ -3,7 +3,7 @@
 import json as _json
 from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 SUPPORTED_RUN_ENGINES = {"claude", "gemini", "codex", "cc-codex"}
 
@@ -435,6 +435,9 @@ class WorktreeInfo(BaseModel):
     commits: List[WorktreeCommit]
     plan_file: Optional[str]
     plan_mtime: Optional[str] = None
+    is_test: bool = False
+    plan_file_archived: bool = False
+    cleanable: bool = False
 
 
 class MainDirtyStatus(BaseModel):
@@ -446,12 +449,32 @@ class PlanOnlyBranch(BaseModel):
     plan_file: str
     branch: str
     plan_mtime: Optional[str] = None
+    is_test: bool = False
 
 
 class BranchUnresolvedPlan(BaseModel):
     plan_file: str
     reason: str
     plan_mtime: Optional[str] = None
+    is_test: bool = False
+
+
+class WorktreeCleanupRequest(BaseModel):
+    branches: List[str] = Field(default_factory=list)
+    dry_run: bool = True
+
+
+class WorktreeCleanupResult(BaseModel):
+    branch: str
+    status: Literal["removed", "skipped", "failed"]
+    reason: str = ""
+    worktree_removed: bool = False
+    branch_removed: bool = False
+
+
+class WorktreeCleanupResponse(BaseModel):
+    results: List[WorktreeCleanupResult] = Field(default_factory=list)
+    summary: dict[str, int] = Field(default_factory=dict)
 
 
 class WorktreeListResponse(BaseModel):
@@ -500,5 +523,8 @@ __all__ = [
     'MainDirtyStatus',
     'PlanOnlyBranch',
     'BranchUnresolvedPlan',
+    'WorktreeCleanupRequest',
+    'WorktreeCleanupResult',
+    'WorktreeCleanupResponse',
     'WorktreeListResponse',
 ]

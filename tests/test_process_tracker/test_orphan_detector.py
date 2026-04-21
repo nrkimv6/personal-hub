@@ -162,3 +162,148 @@ async def test_run_periodic_checks_memory_more_frequently_than_scan():
             await task
 
     assert fake_pressure.check.await_count > detector.scan.await_count
+
+
+@pytest.mark.asyncio
+async def test_detect_orphan_test_worktrees_finds_stale_runner(tmp_path):
+    """R: stale runner/t-* worktree + Redis 키 없음 → cleanup 후보 반환"""
+    from app.shared.process.orphan_detector import OrphanDetector
+
+    worktree = tmp_path / ".worktrees" / "t-stale-001"
+    worktree.mkdir(parents=True)
+    stale_time = time.time() - 1200
+    import os
+    os.utime(worktree, (stale_time, stale_time))
+
+    detector = OrphanDetector(
+        make_registry({}),
+        repo_root=tmp_path,
+        runner_key_exists=lambda _runner_id: False,
+    )
+
+    with patch.object(
+        detector,
+        "_iter_git_worktrees",
+        return_value=[{"branch": "runner/t-stale-001", "worktree_path": str(worktree)}],
+    ):
+        branches = await detector.detect_orphan_test_worktrees()
+
+    assert branches == ["runner/t-stale-001"]
+
+
+@pytest.mark.asyncio
+async def test_detect_orphan_test_worktrees_skips_non_test_prefix(tmp_path):
+    """I: impl/* 브랜치는 후보에서 제외"""
+    from app.shared.process.orphan_detector import OrphanDetector
+
+    worktree = tmp_path / ".worktrees" / "impl-fix"
+    worktree.mkdir(parents=True)
+    stale_time = time.time() - 1200
+    import os
+    os.utime(worktree, (stale_time, stale_time))
+
+    detector = OrphanDetector(make_registry({}), repo_root=tmp_path)
+
+    with patch.object(
+        detector,
+        "_iter_git_worktrees",
+        return_value=[{"branch": "impl/fix-foo", "worktree_path": str(worktree)}],
+    ):
+        branches = await detector.detect_orphan_test_worktrees()
+
+    assert branches == []
+
+
+@pytest.mark.asyncio
+async def test_detect_orphan_test_worktrees_skips_active_runner(tmp_path):
+    """I: runner 키가 남아 있으면 후보에서 제외"""
+    from app.shared.process.orphan_detector import OrphanDetector
+
+    worktree = tmp_path / ".worktrees" / "t-active-001"
+    worktree.mkdir(parents=True)
+    stale_time = time.time() - 1200
+    import os
+    os.utime(worktree, (stale_time, stale_time))
+
+    detector = OrphanDetector(
+        make_registry({}),
+        repo_root=tmp_path,
+        runner_key_exists=lambda _runner_id: True,
+    )
+
+    with patch.object(
+        detector,
+        "_iter_git_worktrees",
+        return_value=[{"branch": "runner/t-active-001", "worktree_path": str(worktree)}],
+    ):
+        branches = await detector.detect_orphan_test_worktrees()
+
+    assert branches == []
+
+
+@pytest.mark.asyncio
+async def test_detect_orphan_test_worktrees_respects_age_threshold(tmp_path):
+    """B: 15분 경계 전후만 후보 여부가 갈려야 한다"""
+    from app.shared.process.orphan_detector import OrphanDetector
+
+    early = tmp_path / ".worktrees" / "t-early-001"
+    exact = tmp_path / ".worktrees" / "t-exact-001"
+    stale = tmp_path / ".worktrees" / "t-stale-001"
+    for worktree in (early, exact, stale):
+        worktree.mkdir(parents=True)
+
+    now = time.time()
+    import os
+
+    os.utime(early, (now - 899, now - 899))
+    os.utime(exact, (now - 900, now - 900))
+    os.utime(stale, (now - 901, now - 901))
+
+    detector = OrphanDetector(
+        make_registry({}),
+        repo_root=tmp_path,
+        runner_key_exists=lambda _runner_id: False,
+    )
+
+    with patch.object(
+        detector,
+        "_iter_git_worktrees",
+        return_value=[
+            {"branch": "runner/t-early-001", "worktree_path": str(early)},
+            {"branch": "runner/t-exact-001", "worktree_path": str(exact)},
+            {"branch": "runner/t-stale-001", "worktree_path": str(stale)},
+        ],
+    ):
+        branches = await detector.detect_orphan_test_worktrees()
+
+    assert "runner/t-early-001" not in branches
+    assert "runner/t-exact-001" in branches
+    assert "runner/t-stale-001" in branches
+
+
+@pytest.mark.asyncio
+async def test_run_periodic_invokes_test_worktree_cleanup():
+    """R: stale test worktree가 감지되면 cleanup callback까지 연결된다"""
+    from app.shared.process.orphan_detector import OrphanDetector
+
+    registry = make_registry({})
+    cleanup_callback = AsyncMock(return_value=None)
+    detector = OrphanDetector(registry, cleanup_callback=cleanup_callback)
+    detector.scan = AsyncMock(return_value=[])
+    detector.cleanup = AsyncMock(return_value=[])
+    detector.detect_orphan_test_worktrees = AsyncMock(return_value=["runner/t-stale-002"])
+
+    fake_pressure = MagicMock()
+    fake_pressure.check = AsyncMock(return_value="normal")
+
+    with patch("app.shared.process.memory_pressure.MemoryPressureResponder", return_value=fake_pressure), \
+         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 999):
+        task = asyncio.create_task(
+            detector.run_periodic(interval=0.20, memory_check_interval=0.20)
+        )
+        await asyncio.sleep(0.22)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    cleanup_callback.assert_awaited_with(["runner/t-stale-002"])

@@ -4,12 +4,17 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.modules.dev_runner.schemas import WorktreeInfo, WorktreeListResponse
-from app.modules.dev_runner.services.worktree_service import get_all_worktrees
+from app.modules.dev_runner.schemas import (
+    WorktreeCleanupRequest,
+    WorktreeCleanupResponse,
+    WorktreeInfo,
+    WorktreeListResponse,
+)
+from app.modules.dev_runner.services.worktree_service import cleanup_worktrees, get_all_worktrees
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -73,4 +78,22 @@ async def list_worktrees_v2(
         raise
     except Exception as e:
         logger.exception("워크트리 목록 조회 실패 (v2)")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cleanup", response_model=WorktreeCleanupResponse)
+async def cleanup_worktrees_v1(
+    req: WorktreeCleanupRequest = Body(...),
+    repo_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """정리 가능한 워크트리 일괄 cleanup."""
+    try:
+        repo_root = _resolve_repo_root(repo_id, db)
+        kwargs = {"repo_root": repo_root} if repo_root else {}
+        return await cleanup_worktrees(req.branches, req.dry_run, **kwargs)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("워크트리 cleanup 실패")
         raise HTTPException(status_code=500, detail=str(e))

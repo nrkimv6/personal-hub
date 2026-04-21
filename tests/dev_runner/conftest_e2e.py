@@ -8,6 +8,7 @@ fakeredis 기반 단위 테스트와 분리하여 관리.
 """
 import json
 import os
+import fnmatch
 import re
 import subprocess
 import time
@@ -40,6 +41,7 @@ TEST_PLAN_FILE = "tests/dev_runner/fixtures/test_minimal_plan.md"
 TEST_PLAN_FILE_A = "tests/dev_runner/fixtures/test_minimal_plan_a.md"
 TEST_PLAN_FILE_B = "tests/dev_runner/fixtures/test_minimal_plan_b.md"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
+TEST_BRANCH_PATTERNS = ("runner/t-*", "runner/t5*", "plan/test_*", "plan/t-test*")
 
 
 @pytest.fixture
@@ -159,6 +161,47 @@ def test_plan_file(tmp_path):
 
 def _cleanup_test_worktrees() -> None:
     """테스트 고정 plan 파일의 worktree/branch 잔여물 제거 (멱등)"""
+    worktree_list = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=15,
+    )
+    current_path = None
+    current_branch = None
+    seen_branches: set[str] = set()
+    for line in worktree_list.stdout.splitlines() + [""]:
+        if line.startswith("worktree "):
+            current_path = line[9:]
+            current_branch = None
+            continue
+        if line.startswith("branch "):
+            current_branch = line[7:].replace("refs/heads/", "")
+            continue
+        if line == "" and current_path:
+            if current_branch and any(fnmatch.fnmatch(current_branch, pattern) for pattern in TEST_BRANCH_PATTERNS):
+                seen_branches.add(current_branch)
+                res = subprocess.run(
+                    ["git", "worktree", "remove", current_path, "--force"],
+                    capture_output=True, cwd=str(PROJECT_ROOT), timeout=15,
+                )
+                if res.returncode != 0 and b"not a working tree" not in res.stderr:
+                    print(f"[cleanup] git worktree remove failed for {current_branch}: {res.stderr.decode('utf-8', errors='ignore').strip()}")
+            current_path = None
+            current_branch = None
+
+    branch_list = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/runner", "refs/heads/plan"],
+        capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=15,
+    )
+    for branch in {line.strip() for line in branch_list.stdout.splitlines() if line.strip()} | seen_branches:
+        if not any(fnmatch.fnmatch(branch, pattern) for pattern in TEST_BRANCH_PATTERNS):
+            continue
+        res = subprocess.run(
+            ["git", "branch", "-D", branch],
+            capture_output=True, cwd=str(PROJECT_ROOT), timeout=15,
+        )
+        if res.returncode != 0 and b"not found" not in res.stderr:
+            print(f"[cleanup] git branch remove failed for {branch}: {res.stderr.decode('utf-8', errors='ignore').strip()}")
+
     for stem in TEST_PLAN_STEMS:
         res1 = subprocess.run(
             ["git", "worktree", "remove", str(WORKTREE_BASE / stem), "--force"],
@@ -179,7 +222,7 @@ def _cleanup_test_worktrees() -> None:
         if fixture_path.exists():
             try:
                 lines = fixture_path.read_text(encoding="utf-8").splitlines(keepends=True)
-                cleaned = [ln for ln in lines if not re.match(r"^>\s*(branch|worktree):", ln)]
+                cleaned = [ln for ln in lines if not re.match(r"^>\s*(branch|worktree|worktree-owner):", ln)]
                 if cleaned != lines:
                     fixture_path.write_text("".join(cleaned), encoding="utf-8")
             except Exception as e:
