@@ -28,6 +28,8 @@ from pathlib import Path
 
 import redis
 
+from app.shared.process.subprocess_text import with_text_subprocess_defaults
+
 # 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
@@ -90,10 +92,12 @@ def execute_worker_action(action: str) -> dict:
                 "-File", str(BROWSER_WORKERS_SCRIPT),
                 "-Action", action,
             ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            cwd=str(PROJECT_ROOT),
+            **with_text_subprocess_defaults(
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(PROJECT_ROOT),
+            ),
         )
 
         output = result.stdout.strip()

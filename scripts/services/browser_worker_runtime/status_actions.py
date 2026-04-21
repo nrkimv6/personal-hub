@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import time
 
+from app.shared.process.subprocess_text import with_text_subprocess_defaults
 from scripts.services.browser_worker_runtime.runtime import BOLD, CYAN, GRAY, GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
 
 
@@ -111,7 +112,11 @@ def redis_status(manager):
     try:
         result = subprocess.run(
             ["podman", "inspect", "--format", "{{.State.Running}}", "monitor-redis"],
-            capture_output=True, text=True, timeout=5,
+            **with_text_subprocess_defaults(
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ),
         )
         if result.returncode == 0:
             running = result.stdout.strip().lower() == "true"
@@ -155,7 +160,11 @@ def redis_restart(manager):
         result = subprocess.run(
             [compose_cmd, "up", "-d", "redis"],
             cwd=str(PROJECT_ROOT),
-            capture_output=True, text=True, timeout=30,
+            **with_text_subprocess_defaults(
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ),
         )
         if result.returncode != 0:
             cprint(f"podman-compose failed: {result.stderr.strip()}", RED)

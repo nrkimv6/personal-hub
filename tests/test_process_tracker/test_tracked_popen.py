@@ -59,3 +59,54 @@ async def test_tracked_kill_unregisters_and_kills():
     mock_unregister.assert_called_once_with(1234)
     mock_kill.assert_called_once_with(1234, 5)
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_tracked_popen_sync_defaults_utf8_for_text_mode():
+    """R: text mode subprocess는 UTF-8 + replace 기본값을 사용한다."""
+    from app.shared.process.tracked_popen import tracked_popen_sync
+
+    mock_proc = MagicMock(spec=subprocess.Popen)
+    mock_proc.pid = 24680
+
+    with patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
+         patch("app.shared.process.tracked_popen.ProcessRegistry") as MockRegistry:
+        MockRegistry.return_value.register = AsyncMock(return_value=True)
+        tracked_popen_sync(
+            ["python", "-c", "print('ok')"],
+            role="test",
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    kwargs = mock_popen.call_args.kwargs
+    assert kwargs["text"] is True
+    assert kwargs["encoding"] == "utf-8"
+    assert kwargs["errors"] == "replace"
+
+
+@pytest.mark.asyncio
+async def test_tracked_popen_sync_preserves_explicit_text_encoding():
+    """B: 명시한 encoding/errors는 helper가 덮어쓰지 않는다."""
+    from app.shared.process.tracked_popen import tracked_popen_sync
+
+    mock_proc = MagicMock(spec=subprocess.Popen)
+    mock_proc.pid = 13579
+
+    with patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
+         patch("app.shared.process.tracked_popen.ProcessRegistry") as MockRegistry:
+        MockRegistry.return_value.register = AsyncMock(return_value=True)
+        tracked_popen_sync(
+            ["python", "-c", "print('ok')"],
+            role="test",
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="cp949",
+            errors="ignore",
+        )
+
+    kwargs = mock_popen.call_args.kwargs
+    assert kwargs["encoding"] == "cp949"
+    assert kwargs["errors"] == "ignore"

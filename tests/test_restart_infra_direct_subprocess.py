@@ -49,7 +49,7 @@ class TestRestartInfraDirectSubprocess:
         mock_restart.assert_called_once()
 
     def test_restart_infra_api_watchdog_uses_subprocess_R(self):
-        """R(정상): restart_infra("api_watchdog") → subprocess.run에 browser_workers.py, restart-infra, api_watchdog 포함"""
+        """R(정상): restart_infra("api_watchdog") → browser_workers.py + UTF-8 text 계약 사용"""
         from app.modules.system.services.worker_service import WorkerService
 
         with patch("app.modules.system.services.worker_service.subprocess.run",
@@ -59,9 +59,13 @@ class TestRestartInfraDirectSubprocess:
 
         assert result["success"] is True
         args = mock_run.call_args[0][0]
+        kwargs = mock_run.call_args.kwargs
         assert "browser_workers.py" in args[1]
         assert "restart-infra" in args
         assert "api_watchdog" in args
+        assert kwargs["text"] is True
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
 
     def test_restart_infra_subprocess_failure_returns_error_E(self):
         """E(에러): subprocess returncode=1 시 success=False + stderr 포함"""

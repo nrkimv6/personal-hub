@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from app.core.config import PROJECT_ROOT
+from app.shared.process.subprocess_text import with_text_subprocess_defaults
 from ..config import MANAGED_PROJECTS
 from .system_utils import send_redis_command
 from app.modules.dev_runner.services.executor_service import executor_service
@@ -181,9 +182,11 @@ class WorkerService:
             result = await asyncio.to_thread(
                 subprocess.run,
                 [sys.executable, str(browser_workers), action, *extra_args],
-                capture_output=True,
-                text=True,
-                timeout=60,
+                **with_text_subprocess_defaults(
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                ),
             )
             if result.returncode == 0:
                 return {"success": True, "message": result.stdout.strip() or f"{action} 완료"}
