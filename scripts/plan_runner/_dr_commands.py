@@ -375,12 +375,31 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
             engine=_get_fix_engine(redis_client, runner_id)
         )
 
-        if resolve_result["success"]:
+        merge_status = str(resolve_result.get("merge_status") or "").strip().lower()
+        if resolve_result["success"] and merge_status in ("", "merged"):
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
-            result = {"success": True, "message": "충돌 자동 해결 완료", "action": "resolve-conflict"}
-        else:
+            result = {
+                "success": True,
+                "message": resolve_result["message"],
+                "merge_status": "merged",
+                "action": "resolve-conflict",
+            }
+        elif merge_status == "conflict" or resolve_result.get("conflict"):
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
-            result = {"success": False, "message": resolve_result["message"], "action": "resolve-conflict"}
+            result = {
+                "success": False,
+                "message": resolve_result["message"],
+                "merge_status": "conflict",
+                "action": "resolve-conflict",
+            }
+        else:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+            result = {
+                "success": False,
+                "message": resolve_result["message"],
+                "merge_status": "error",
+                "action": "resolve-conflict",
+            }
     except Exception as e:
         logger.error(f"[resolve_conflict] 실패: {e}")
         result = {"success": False, "message": str(e), "action": "resolve-conflict"}

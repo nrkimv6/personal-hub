@@ -225,7 +225,7 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
         needs_remerge: True → --needs-remerge 플래그 전달 (abort 후 재머지로 conflict 생성)
 
     Returns:
-        {"success": True/False, "message": str}
+        {"success": bool, "message": str, "merge_status": str, "conflict": bool}
     """
     cmd = [
         str(PLAN_RUNNER_PYTHON),
@@ -257,11 +257,51 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
         tag="RESOLVE",
         timeout=300,
     )
+    combined = "\n".join(
+        part for part in (str(result.get("message") or "").strip(), str(result.get("output") or "").strip())
+        if part
+    ).lower()
+
     if result["success"]:
-        logger.info(f"[conflict-resolver] auto-resolve 성공 (runner_id={runner_id})")
-    else:
-        logger.warning(f"[conflict-resolver] auto-resolve 실패 (runner_id={runner_id}): {result['message']}")
-    return {"success": result["success"], "message": result["message"]}
+        normalized = {
+            "success": True,
+            "message": "safe-doc auto-resolved",
+            "merge_status": "merged",
+            "conflict": False,
+        }
+        logger.info(
+            f"[conflict-resolver] safe-doc auto-resolve 성공 (runner_id={runner_id}): {normalized['message']}"
+        )
+        return normalized
+
+    if any(token in combined for token in (
+        "safe-doc auto-resolve 중단",
+        "safe-doc auto-resolve failed",
+        "unsafe conflict",
+        "mixed conflict",
+        "unsafe/mixed conflict",
+        "manual resolution",
+        "requires manual resolution",
+    )):
+        normalized = {
+            "success": False,
+            "message": "unsafe conflict requires manual resolution",
+            "merge_status": "conflict",
+            "conflict": True,
+        }
+        logger.warning(
+            f"[conflict-resolver] unsafe/mixed conflict 유지 (runner_id={runner_id}): {result['message']}"
+        )
+        return normalized
+
+    normalized = {
+        "success": False,
+        "message": result["message"],
+        "merge_status": "error",
+        "conflict": False,
+    }
+    logger.warning(f"[conflict-resolver] auto-resolve 실패 (runner_id={runner_id}): {result['message']}")
+    return normalized
 
 
 def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, redis_client, pub_fn=None, engine: str = "claude") -> dict:

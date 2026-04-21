@@ -244,7 +244,7 @@ def test_conflict_resolve_success_triggers_done_flow(cl, tmp_path):
     merge_result_conflict = MagicMock()
     merge_result_conflict.returncode = 3
 
-    resolver_success = {"success": True, "message": "resolved"}
+    resolver_success = {"success": True, "message": "safe-doc auto-resolved", "merge_status": "merged"}
 
     handled = []
 
@@ -269,3 +269,49 @@ def test_conflict_resolve_success_triggers_done_flow(cl, tmp_path):
     assert len(handled) == 1, \
         f"_handle_post_merge_done이 1번 호출돼야 함, 실제: {len(handled)}번"
     assert handled[0] == plan_path_str
+
+
+def test_conflict_resolve_unsafe_does_not_trigger_done_flow(cl, tmp_path):
+    """T3: unsafe conflict 유지 시 _handle_post_merge_done은 호출되면 안 된다."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("- [x] 항목1\n- [x] 항목2\n", encoding="utf-8")
+    plan_path_str = str(plan)
+
+    def redis_get_side_effect(key):
+        if key.endswith(":plan_file"):
+            return plan_path_str
+        if key.endswith(":branch"):
+            return "plan/test-branch"
+        if key.endswith(":worktree_path"):
+            return str(tmp_path / "worktree")
+        return None
+
+    mock_redis = MagicMock()
+    mock_redis.get.side_effect = redis_get_side_effect
+
+    merge_result_conflict = MagicMock()
+    merge_result_conflict.returncode = 3
+    handled = []
+
+    with patch(
+        "_dr_merge._launch_conflict_resolver_process",
+        return_value={
+            "success": False,
+            "message": "unsafe conflict requires manual resolution",
+            "merge_status": "conflict",
+            "conflict": True,
+        },
+    ), \
+         patch("_dr_merge._handle_post_merge_done", side_effect=lambda *args, **kwargs: handled.append(args[0])), \
+         patch("subprocess.run", return_value=merge_result_conflict), \
+         patch("merge_queue.acquire_merge_turn", return_value=True), \
+         patch("merge_queue.release_merge_turn"):
+        result = cl._execute_merge_with_lock(
+            runner_id="test_runner_conflict",
+            redis_client=mock_redis,
+            action_name="merge",
+        )
+
+    assert handled == []
+    assert result["success"] is False
+    assert result["merge_status"] == "conflict"

@@ -276,7 +276,7 @@ class TestDirectMergeConflictResolverCrashSafe:
         with patch.dict(sys.modules, {"merge_queue": mock_merge_lock}), \
              patch("subprocess.run", return_value=MagicMock(returncode=3)), \
              patch("_dr_merge._launch_conflict_resolver_process",
-                          return_value={"success": False, "message": "resolve 실패 시뮬레이션"}), \
+                         return_value={"success": False, "message": "resolve 실패 시뮬레이션", "merge_status": "conflict", "conflict": True}), \
              patch("_dr_plan_runner._cleanup_process_state", MagicMock()):
 
             # 크래시 없이 실행 완료되어야 함
@@ -286,6 +286,52 @@ class TestDirectMergeConflictResolverCrashSafe:
         assert "conflict" in merge_status_sequence, \
             f"merge_status에 'conflict' 없음: {merge_status_sequence}"
         # 크래시 없이 여기까지 도달 = success
+
+    def test_retry_merge_safe_doc_conflict_transitions_to_merged(self, tmp_path):
+        """E2E: retry-merge에서 safe-doc conflict는 merged로 전이된다."""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        branch = "plan/test"
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        merge_status_sequence = []
+
+        def track_set(key, value, *args, **kwargs):
+            if "merge_status" in key:
+                merge_status_sequence.append(value)
+            return True
+
+        redis.set.side_effect = track_set
+        original_get = redis.get.side_effect
+
+        def extended_get(key):
+            if "branch" in key:
+                return branch
+            if "worktree_path" in key:
+                return str(worktree)
+            return original_get(key) if original_get else None
+
+        redis.get.side_effect = extended_get
+
+        mock_merge_lock = types.ModuleType("merge_queue")
+        mock_merge_lock.acquire_merge_turn = MagicMock(return_value=True)
+        mock_merge_lock.release_merge_turn = MagicMock(return_value=True)
+        mock_merge_lock._get_repo_id = MagicMock(return_value="monitor-page")
+
+        with patch.dict(sys.modules, {"merge_queue": mock_merge_lock}), \
+             patch("subprocess.run", return_value=MagicMock(returncode=3)), \
+             patch(
+                 "_dr_merge._launch_conflict_resolver_process",
+                 return_value={"success": True, "message": "safe-doc auto-resolved", "merge_status": "merged"},
+             ), \
+             patch("_dr_merge._handle_post_merge_done", return_value={"success": True, "status": "done_called"}), \
+             patch("_dr_commands._cleanup_process_state", MagicMock()):
+            cl._do_retry_merge("retry-safe-doc", redis, "cmd-retry-safe-doc")
+
+        assert "resolving" in merge_status_sequence
+        assert "merged" in merge_status_sequence
 
 
 class TestRetryMergeExitCode2AutoFix:

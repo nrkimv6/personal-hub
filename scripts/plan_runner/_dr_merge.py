@@ -512,7 +512,7 @@ def _build_merge_completed_sentinel(result: dict) -> str:
     """merge 결과를 merge-log 종료 sentinel payload로 정규화한다."""
     success = bool(result.get("success", False))
     merge_status = str(result.get("merge_status") or "").strip().lower()
-    if success or merge_status == "merged":
+    if merge_status == "merged" or (success and not merge_status):
         return "__MERGE_COMPLETED__"
     return "__MERGE_COMPLETED::merge_failed__"
 
@@ -704,24 +704,9 @@ def _handle_conflict(runner_id: str, redis_client: redis.Redis, plan_file, pub_f
         engine=engine,
         needs_remerge=True,
     )
-    if _resolve_result["success"]:
-        pub_fn("conflict resolver 성공 — merge 완료")
-        residue_result = _check_post_merge_residue(runner_id, pub_fn)
-        if not residue_result.get("success", True):
-            return _compose_merge_result_with_done(
-                runner_id=runner_id,
-                redis_client=redis_client,
-                action_name=action_name,
-                base_message="conflict resolved but residue blocked",
-                done_result={
-                    "success": False,
-                    "status": "skipped_residue",
-                    "reason": "residue_guard",
-                    "message": str(residue_result.get("message") or "post-merge residue detected"),
-                    "quarantine_diff_path": residue_result.get("quarantine_diff_path"),
-                },
-                pub_fn=pub_fn,
-            )
+    _resolve_merge_status = str(_resolve_result.get("merge_status") or "").strip().lower()
+    if _resolve_result["success"] and _resolve_merge_status in ("", "merged"):
+        pub_fn(f"conflict resolver 성공 — {_resolve_result['message']}")
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
         except Exception:
@@ -731,17 +716,35 @@ def _handle_conflict(runner_id: str, redis_client: redis.Redis, plan_file, pub_f
             runner_id=runner_id,
             redis_client=redis_client,
             action_name=action_name,
-            base_message="conflict resolved",
+            base_message=_resolve_result["message"],
             done_result=done_result,
             pub_fn=pub_fn,
         )
-    else:
-        pub_fn(f"conflict resolver 실패: {_resolve_result['message']}")
+    if _resolve_merge_status == "conflict" or _resolve_result.get("conflict"):
+        pub_fn(f"conflict resolver 중단: {_resolve_result['message']}")
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
         except Exception:
             pass
-        return {"success": False, "message": "conflict", "conflict": True, "merge_status": "conflict", "action": action_name}
+        return {
+            "success": False,
+            "message": _resolve_result["message"],
+            "conflict": True,
+            "merge_status": "conflict",
+            "action": action_name,
+        }
+
+    pub_fn(f"conflict resolver 실패: {_resolve_result['message']}")
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+    except Exception:
+        pass
+    return {
+        "success": False,
+        "message": _resolve_result["message"],
+        "merge_status": "error",
+        "action": action_name,
+    }
 
 
 def _handle_general_error(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn, action_name: str = "inline-merge", exit_code: int = 1, error_msg: str = "", branch_str: str = "") -> dict:

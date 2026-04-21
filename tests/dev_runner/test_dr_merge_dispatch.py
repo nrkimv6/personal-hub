@@ -22,3 +22,10 @@ def test_exit_code_handlers_dispatch_else_R():
 def test_exit_code_handlers_dispatch_unknown_B():
     from _dr_merge import _EXIT_CODE_HANDLERS
     assert _EXIT_CODE_HANDLERS.get(99) is None  # 폴백은 runtime에서 partial로
+
+
+def test_build_merge_completed_sentinel_conflict_like_success_still_fails_B():
+    from _dr_merge import _build_merge_completed_sentinel
+
+    sentinel = _build_merge_completed_sentinel({"success": True, "merge_status": "conflict"})
+    assert sentinel == "__MERGE_COMPLETED::merge_failed__"

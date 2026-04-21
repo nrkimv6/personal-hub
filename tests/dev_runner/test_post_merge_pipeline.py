@@ -175,7 +175,7 @@ class TestDoInlineMergeSubprocess:
              patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_result), \
              patch("_dr_merge._launch_conflict_resolver_process",
-                   return_value={"success": False, "message": "mocked"}):
+                   return_value={"success": False, "message": "mocked", "merge_status": "conflict", "conflict": True}):
             cl._do_inline_merge("r_exit3", redis)
 
         status_values = [v for k, v in set_calls if "merge_status" in k]
@@ -278,7 +278,7 @@ class TestDoInlineMergeSubprocess:
              patch("_dr_stream_cleanup._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_result), \
              patch("_dr_merge._launch_conflict_resolver_process",
-                   return_value={"success": False, "message": "mocked"}):
+                   return_value={"success": False, "message": "mocked", "merge_status": "conflict", "conflict": True}):
             cl._do_inline_merge("r_inline_fail", redis)
 
         merge_publish_calls = [
@@ -299,6 +299,11 @@ class TestMergeCompletedSentinelEmission:
     def test_build_merge_completed_sentinel_failure_B(self, dr_merge_mod):
         """B: 실패 결과는 __MERGE_COMPLETED::merge_failed__로 정규화된다."""
         sentinel = dr_merge_mod._build_merge_completed_sentinel({"success": False, "merge_status": "conflict"})
+        assert sentinel == "__MERGE_COMPLETED::merge_failed__"
+
+    def test_build_merge_completed_sentinel_conflict_like_success_B(self, dr_merge_mod):
+        """B: success=True여도 merge_status=conflict면 merge_failed sentinel이어야 한다."""
+        sentinel = dr_merge_mod._build_merge_completed_sentinel({"success": True, "merge_status": "conflict"})
         assert sentinel == "__MERGE_COMPLETED::merge_failed__"
 
     def test_publish_merge_completed_sentinel_success_to_merge_log_only_R(self, dr_merge_mod):
@@ -362,7 +367,7 @@ class TestMergeCompletedSentinelEmission:
 
         with _merge_lock_patch(), \
              patch("subprocess.run", return_value=proc_result), \
-             patch("_dr_merge._launch_conflict_resolver_process", return_value={"success": False, "message": "mocked"}):
+             patch("_dr_merge._launch_conflict_resolver_process", return_value={"success": False, "message": "mocked", "merge_status": "conflict", "conflict": True}):
             result = cl._execute_merge_with_lock("r_merge_fail", redis)
 
         assert result["success"] is False
@@ -396,6 +401,56 @@ class TestMergeCompletedSentinelEmission:
         assert merge_publish_calls == [
             ("plan-runner:merge-log:r_retry_ok", "__MERGE_COMPLETED__")
         ]
+
+
+class TestConflictResolverWrapperNormalization:
+    def test_launch_conflict_resolver_process_normalizes_safe_doc_R(self, cl):
+        """R: resolve subprocess 성공은 safe-doc auto-resolved + merged로 정규화된다."""
+        dr_subprocess_mod = sys.modules["_dr_subprocess"]
+        redis = _make_redis_mock()
+
+        with patch.object(dr_subprocess_mod, "_run_subprocess_streaming", return_value={
+            "success": True,
+            "message": "RESOLVE 성공",
+            "output": "[RESOLVE] safe-doc auto-resolved",
+        }):
+            result = dr_subprocess_mod._launch_conflict_resolver_process(
+                runner_id="runner-safe-doc",
+                branch="impl/test",
+                worktree_path=Path("D:/tmp/worktree"),
+                redis_client=redis,
+            )
+
+        assert result == {
+            "success": True,
+            "message": "safe-doc auto-resolved",
+            "merge_status": "merged",
+            "conflict": False,
+        }
+
+    def test_launch_conflict_resolver_process_normalizes_unsafe_conflict_B(self, cl):
+        """B: unsafe/mixed 수동 해결 요구는 conflict 상태로 정규화된다."""
+        dr_subprocess_mod = sys.modules["_dr_subprocess"]
+        redis = _make_redis_mock()
+
+        with patch.object(dr_subprocess_mod, "_run_subprocess_streaming", return_value={
+            "success": False,
+            "message": "mixed conflict requires manual resolution",
+            "output": "[RESOLVE] unsafe/mixed conflict requires manual resolution",
+        }):
+            result = dr_subprocess_mod._launch_conflict_resolver_process(
+                runner_id="runner-unsafe-conflict",
+                branch="impl/test",
+                worktree_path=Path("D:/tmp/worktree"),
+                redis_client=redis,
+            )
+
+        assert result == {
+            "success": False,
+            "message": "unsafe conflict requires manual resolution",
+            "merge_status": "conflict",
+            "conflict": True,
+        }
 
 
 class TestDoRetryMergeSubprocess:
@@ -456,7 +511,7 @@ class TestDoRetryMergeSubprocess:
              patch("_dr_commands._cleanup_process_state"), \
              patch("subprocess.run", return_value=proc_result), \
              patch("_dr_merge._launch_conflict_resolver_process",
-                   return_value={"success": False, "message": "mocked"}):
+                   return_value={"success": False, "message": "mocked", "merge_status": "conflict", "conflict": True}):
             cl._do_retry_merge("r_retry_conflict", redis, "cmd_conflict")
 
         result_key = f"{cl.RESULTS_KEY}:cmd_conflict"

@@ -31,6 +31,28 @@ class TestDirectMergeHttp:
         data = resp.json()
         assert data.get("success") is True
 
+    def test_direct_merge_safe_doc_payload_preserved(self, client):
+        """R: direct-merge 응답은 safe-doc auto-resolved payload를 그대로 노출한다."""
+        mock_result = {
+            "success": True,
+            "message": "safe-doc auto-resolved",
+            "merge_status": "merged",
+            "action": "direct-merge",
+        }
+        with patch(
+            "app.modules.dev_runner.services.executor_service.ExecutorService.send_direct_merge_command",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            resp = client.post(
+                "/api/v1/dev-runner/merge/direct",
+                json={"branch": "runner/test-safe-doc", "worktree_path": "/some/path"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("merge_status") == "merged"
+        assert data.get("message") == "safe-doc auto-resolved"
+
     def test_direct_merge_missing_branch_422(self, client):
         """B(Boundary): branch 누락 → 422 Validation Error"""
         resp = client.post(
@@ -50,6 +72,25 @@ class TestDirectMergeHttp:
             resp = client.post("/api/v1/dev-runner/runners/runner-test/retry-merge")
         # 200 또는 404 (runner 없음) — 422/500이 아니면 엔드포인트 자체는 정상
         assert resp.status_code in (200, 404, 400)
+
+    def test_retry_merge_conflict_payload_preserved(self, client):
+        """B: retry-merge 응답은 unsafe conflict payload를 conflict로 유지한다."""
+        mock_result = {
+            "success": False,
+            "message": "unsafe conflict requires manual resolution",
+            "merge_status": "conflict",
+        }
+        with patch(
+            "app.modules.dev_runner.services.executor_service.ExecutorService.send_runner_command",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            resp = client.post("/api/v1/dev-runner/runners/runner-test/retry-merge")
+        assert resp.status_code in (200, 404, 400)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data.get("merge_status") == "conflict"
+            assert "manual resolution" in data.get("message", "")
 
 
 class TestDirectMergePlanFileInSSE:

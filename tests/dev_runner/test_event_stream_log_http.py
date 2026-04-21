@@ -136,6 +136,42 @@ def test_http_events_log_completed_commit_failed_preserves_error_detail(local_cl
 
 
 @pytest.mark.http
+def test_http_events_merge_log_completed_failed_reason_preserved(local_client):
+    """T5: /events route는 merge_log_completed의 merge_failed reason을 그대로 전달한다."""
+
+    async def _fake_stream_events():
+        yield "event: connected\ndata: ok\n\n"
+        yield (
+            "event: merge_log_completed\ndata: "
+            + json.dumps(
+                {
+                    "runner_id": "http-merge-failed-runner",
+                    "status": "failed",
+                    "reason": "merge_failed",
+                },
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        )
+
+    with patch(
+        "app.modules.dev_runner.routes.events.event_service.stream_events",
+        new=_fake_stream_events,
+    ):
+        response = local_client.get(
+            f"{BASE_URL}/events",
+            headers={"Accept": "text/event-stream"},
+        )
+
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+    completed = next(event for event in events if event.get("event") == "merge_log_completed")
+    payload = json.loads(completed["data"])
+    assert payload["status"] == "failed"
+    assert payload["reason"] == "merge_failed"
+
+
+@pytest.mark.http
 def test_http_events_initial_status_includes_merge_recovery_fields(local_client):
     """T5: /events 초기 status가 merge 복구 필드를 포함한다."""
     from app.modules.dev_runner.services.event_service import event_service
