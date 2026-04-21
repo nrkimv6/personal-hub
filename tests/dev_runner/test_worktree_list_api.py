@@ -179,12 +179,13 @@ class TestFindPlanFile:
             encoding="utf-8",
         )
 
-        result, mtime = svc.find_plan_file("impl/my-feature", repo_root=tmp_path)
+        result, mtime, archived = svc.find_plan_file("impl/my-feature", repo_root=tmp_path)
 
         assert result is not None
         assert "my-plan" in result
         assert mtime is not None
         assert mtime[4] == "-"  # ISO 8601 형식 간이 확인
+        assert archived is False
 
     def test_right_no_match(self, tmp_path, monkeypatch):
         """일치하는 파일 없음 → (None, None) 반환"""
@@ -196,10 +197,11 @@ class TestFindPlanFile:
             "> branch: impl/other\n", encoding="utf-8"
         )
 
-        result, mtime = svc.find_plan_file("impl/nonexistent", repo_root=tmp_path)
+        result, mtime, archived = svc.find_plan_file("impl/nonexistent", repo_root=tmp_path)
 
         assert result is None
         assert mtime is None
+        assert archived is False
 
 
 class TestRunGitError:
