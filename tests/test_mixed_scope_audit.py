@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import os
 import json
 import subprocess
+import shutil
 from pathlib import Path
 
 import pytest
 
 from scripts.diagnostics.audit_mixed_scope_commits import (
+    ROOT,
     _collect_plan_keywords,
     _render_json,
     _render_markdown,
@@ -214,3 +217,76 @@ def test_renderers_produce_json_and_markdown(tmp_path):
 
     assert json.loads(json_text) == []
     assert "Mixed-Scope Commit Audit" in md_text
+
+
+def _copy_hook_assets(src_root: Path, dst_repo: Path) -> None:
+    assets = [
+        ("scripts/git-hooks/pre-commit-plans-warn.ps1", "scripts/git-hooks/pre-commit-plans-warn.ps1"),
+        ("scripts/diagnostics/audit_mixed_scope_commits.py", "scripts/diagnostics/audit_mixed_scope_commits.py"),
+    ]
+    for rel_src, rel_dst in assets:
+        target = dst_repo / rel_dst
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_root / rel_src, target)
+
+
+def _run_pre_commit_hook(repo: Path) -> subprocess.CompletedProcess[str]:
+    script = repo / "scripts" / "git-hooks" / "pre-commit-plans-warn.ps1"
+    return subprocess.run(
+        ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def test_pre_commit_hook_passes_without_active_snapshot(tmp_path):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, capture_output=True, check=True)
+    _copy_hook_assets(ROOT, repo)
+
+    plan = repo / "docs" / "plan" / "2026-04-13_hook-pass.md"
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    plan.write_text("# fix: hook pass\n\n- `frontend/src/routes/demo/+page.svelte`\n", encoding="utf-8")
+    code_file = repo / "app" / "modules" / "dev_runner" / "services" / "event_service.py"
+    code_file.parent.mkdir(parents=True, exist_ok=True)
+    code_file.write_text("value = 1\n", encoding="utf-8")
+    _commit_all(repo, "chore: seed repo")
+
+    plan.write_text("# fix: hook pass\n\n- `frontend/src/routes/demo/+page.svelte`\n- update\n", encoding="utf-8")
+    code_file.write_text("value = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "docs/plan/2026-04-13_hook-pass.md", "app/modules/dev_runner/services/event_service.py"], cwd=repo, capture_output=True, check=True)
+
+    result = _run_pre_commit_hook(repo)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_pre_commit_hook_blocks_mixed_scope_when_snapshot_exists(tmp_path):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, capture_output=True, check=True)
+    _copy_hook_assets(ROOT, repo)
+
+    plan = repo / "docs" / "plan" / "2026-04-13_hook-block.md"
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    plan.write_text("# fix: hook block\n\n- `frontend/src/routes/demo/+page.svelte`\n", encoding="utf-8")
+    code_file = repo / "app" / "modules" / "dev_runner" / "services" / "event_service.py"
+    code_file.parent.mkdir(parents=True, exist_ok=True)
+    code_file.write_text("value = 1\n", encoding="utf-8")
+    _commit_all(repo, "chore: seed repo")
+
+    plan.write_text("# fix: hook block\n\n- `frontend/src/routes/demo/+page.svelte`\n- update\n", encoding="utf-8")
+    code_file.write_text("value = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "docs/plan/2026-04-13_hook-block.md", "app/modules/dev_runner/services/event_service.py"], cwd=repo, capture_output=True, check=True)
+
+    ownership_dir = repo / "logs" / "dev_runner" / "ownership"
+    ownership_dir.mkdir(parents=True, exist_ok=True)
+    (ownership_dir / "runner-1.json").write_text("{}", encoding="utf-8")
+
+    result = _run_pre_commit_hook(repo)
+
+    assert result.returncode == 1, result.stderr + result.stdout
+    assert "ownership guard blocked" in (result.stderr + result.stdout).lower()
