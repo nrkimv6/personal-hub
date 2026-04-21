@@ -1237,23 +1237,23 @@ class PlanService:
                 if has_manual:
                     ownership_targets.append(project_dir / "MANUAL_TASKS.md")
 
-            ownership_error = self._validate_runner_ownership(project_dir, ownership_targets, runner_id)
-            if ownership_error:
-                return {
-                    "success": False,
-                    "message": ownership_error,
-                    "reason": "ownership_guard",
-                    "output": None,
-                    "remaining_tasks": pre_progress.total - pre_progress.done,
-                    "total_tasks": pre_progress.total,
-                    "plan_status": pre_status,
-                }
             residue_error = self._validate_runner_residue(project_dir, runner_id)
             if residue_error:
                 return {
                     "success": False,
                     "message": residue_error,
                     "reason": "residue_guard",
+                    "output": None,
+                    "remaining_tasks": pre_progress.total - pre_progress.done,
+                    "total_tasks": pre_progress.total,
+                    "plan_status": pre_status,
+                }
+            ownership_error = self._validate_runner_ownership(project_dir, ownership_targets, runner_id)
+            if ownership_error:
+                return {
+                    "success": False,
+                    "message": ownership_error,
+                    "reason": "ownership_guard",
                     "output": None,
                     "remaining_tasks": pre_progress.total - pre_progress.done,
                     "total_tasks": pre_progress.total,

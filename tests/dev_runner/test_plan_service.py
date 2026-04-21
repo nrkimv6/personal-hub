@@ -909,6 +909,70 @@ class TestRunDone:
         mock_archive.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_run_done_residue_guard_empty_tree_passes_B(self, svc, tmp_path):
+        """B: current dirty가 비어 있으면 residue_guard 없이 기존 완료 경로를 유지한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        docs_dir = tmp_path / "docs"
+        docs_dir.mkdir(exist_ok=True)
+        ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+        ownership_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
+
+        plan = plan_dir / "2026-04-21_residue-clean.md"
+        plan.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] a\n", encoding="utf-8")
+        (ownership_dir / "runner-clean.json").write_text(
+            json.dumps(
+                {
+                    "runner_id": "runner-clean",
+                    "captured_at": "2026-04-21T10:00:00",
+                    "project_root": str(tmp_path),
+                    "dirty_files": [],
+                    "owned_files": [],
+                    "clean_at_start_files": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        archive_path = tmp_path / "docs" / "archive" / "residue-clean.md"
+        with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+             patch.object(type(svc), "_collect_current_dirty_keys", return_value=set()), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(archive_path, None))), \
+             patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")), \
+             patch.object(svc, "sync_plans"):
+            result = await svc.run_done(str(plan), runner_id="runner-clean")
+
+        assert result["success"] is True
+        assert result.get("reason") != "residue_guard"
+
+    @pytest.mark.asyncio
+    async def test_run_done_residue_guard_missing_snapshot_E(self, svc, tmp_path):
+        """E: snapshot 부재 시 residue_guard가 strict fail 한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        docs_dir = tmp_path / "docs"
+        docs_dir.mkdir(exist_ok=True)
+        ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
+        ownership_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
+
+        plan = plan_dir / "2026-04-21_residue-missing-snapshot.md"
+        plan.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] a\n", encoding="utf-8")
+
+        with patch.object(type(svc), "_ownership_snapshot_dir", return_value=ownership_dir), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(tmp_path / "docs" / "archive" / "residue-missing.md", None))) as mock_archive:
+            result = await svc.run_done(str(plan), runner_id="runner-missing")
+
+        assert result["success"] is False
+        assert result["reason"] == "residue_guard"
+        assert "snapshot not found" in result["message"]
+        mock_archive.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_run_done_commits_done_history_archive_when_done_overflows(self, svc, tmp_path):
         """R: DONE.md가 5개를 넘으면 history archive도 commit 대상에 포함된다."""
         plan_dir = tmp_path / "docs" / "plan"
