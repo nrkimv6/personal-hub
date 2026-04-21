@@ -6,6 +6,7 @@ Business 라우트 - 업체 API
 from datetime import datetime
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -268,9 +269,7 @@ async def import_from_url(data: UrlImportRequest, db: Session = Depends(get_db))
     schedule_id = None
     date_str = extract_date_only(parsed.start_date)
     if date_str:
-        # 이미 존재하는 일정인지 확인
-        existing = schedule_service.get_by_date(db, item.id, date_str)
-        if not existing:
+        try:
             schedule_data = MonitorScheduleCreate(
                 biz_item_id=item.id,
                 date=date_str,
@@ -278,8 +277,16 @@ async def import_from_url(data: UrlImportRequest, db: Session = Depends(get_db))
             )
             schedule = schedule_service.create(db, schedule_data)
             schedule_id = schedule.id
-        else:
-            schedule_id = existing.id
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Schedule import failed because the running database schema still blocks "
+                    "same-date schedules. Apply the monitor_schedules date-unique removal "
+                    "migration and retry."
+                ),
+            ) from exc
 
     # 결과 메시지 구성
     messages = []

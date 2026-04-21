@@ -49,6 +49,14 @@ def calculate_default_interval(target_date_str: str) -> int:
 class ScheduleService:
     """일정 관리 서비스"""
 
+    @staticmethod
+    def serialize_times(times: Optional[List[str]]) -> Optional[str]:
+        """times를 저장용 JSON 문자열로 직렬화한다."""
+        if not times:
+            return None
+        normalized = sorted(str(item) for item in times)
+        return json.dumps(normalized, ensure_ascii=False)
+
     def get_by_item(self, db: Session, biz_item_id: int) -> List[MonitorSchedule]:
         """아이템별 일정 목록 조회 (service_account 포함)"""
         return db.query(MonitorSchedule).options(
@@ -62,15 +70,6 @@ class ScheduleService:
         return db.query(MonitorSchedule).options(
             joinedload(MonitorSchedule.service_account)
         ).filter(MonitorSchedule.id == schedule_id).first()
-
-    def get_by_date(
-        self, db: Session, biz_item_id: int, date: str
-    ) -> Optional[MonitorSchedule]:
-        """아이템 ID + 날짜로 일정 조회"""
-        return db.query(MonitorSchedule).filter(
-            MonitorSchedule.biz_item_id == biz_item_id,
-            MonitorSchedule.date == date
-        ).first()
 
     def get_all_enabled(self, db: Session) -> List[MonitorSchedule]:
         """활성화된 모든 일정 조회"""
@@ -256,9 +255,7 @@ class ScheduleService:
 
     def create(self, db: Session, data: MonitorScheduleCreate) -> MonitorSchedule:
         """일정 생성"""
-        times_json = None
-        if data.times:
-            times_json = json.dumps(data.times, ensure_ascii=False)
+        times_json = self.serialize_times(data.times)
 
         schedule = MonitorSchedule(
             biz_item_id=data.biz_item_id,
@@ -279,18 +276,10 @@ class ScheduleService:
 
     def create_bulk(self, db: Session, data: BulkScheduleCreate) -> List[MonitorSchedule]:
         """일정 일괄 생성"""
-        times_json = None
-        if data.times:
-            times_json = json.dumps(data.times, ensure_ascii=False)
+        times_json = self.serialize_times(data.times)
 
         schedules = []
         for date in data.dates:
-            # 이미 존재하는 일정은 스킵
-            existing = self.get_by_date(db, data.biz_item_id, date)
-            if existing:
-                schedules.append(existing)
-                continue
-
             schedule = MonitorSchedule(
                 biz_item_id=data.biz_item_id,
                 date=date,
@@ -323,7 +312,7 @@ class ScheduleService:
 
         # times JSON 변환
         if "times" in update_data and update_data["times"] is not None:
-            update_data["times"] = json.dumps(update_data["times"], ensure_ascii=False)
+            update_data["times"] = self.serialize_times(update_data["times"])
 
         for key, value in update_data.items():
             setattr(schedule, key, value)

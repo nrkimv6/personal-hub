@@ -4,6 +4,7 @@ BizItem 라우트 - 아이템 API
 """
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -95,15 +96,19 @@ def create_schedule(item_id: int, data: MonitorScheduleCreate, db: Session = Dep
     # biz_item_id 강제 설정
     data.biz_item_id = item_id
 
-    # 중복 체크 (같은 날짜, 같은 계정의 일정만 중복으로 처리)
-    existing = schedule_service.get_by_date(db, item_id, data.date)
-    if existing and existing.service_account_id == data.service_account_id:
+    try:
+        schedule = schedule_service.create(db, data)
+    except IntegrityError as exc:
+        db.rollback()
         raise HTTPException(
-            status_code=400,
-            detail=f"Schedule for date '{data.date}' with this service account already exists"
-        )
+            status_code=409,
+            detail=(
+                "Schedule insert failed because the running database schema still blocks "
+                "same-date schedules. Apply the monitor_schedules date-unique removal "
+                "migration and retry."
+            ),
+        ) from exc
 
-    schedule = schedule_service.create(db, data)
     # service_account_name 채우기
     if schedule.service_account:
         schedule.service_account_name = schedule.service_account.identifier
@@ -120,7 +125,18 @@ def create_bulk_schedules(item_id: int, data: BulkScheduleCreate, db: Session = 
     # biz_item_id 강제 설정
     data.biz_item_id = item_id
 
-    schedules = schedule_service.create_bulk(db, data)
+    try:
+        schedules = schedule_service.create_bulk(db, data)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Bulk schedule insert failed because the running database schema still blocks "
+                "same-date schedules. Apply the monitor_schedules date-unique removal "
+                "migration and retry."
+            ),
+        ) from exc
     # service_account_name 채우기
     for schedule in schedules:
         if schedule.service_account:
