@@ -1,4 +1,4 @@
-"""T4 E2E: exit_code=0 + completed 시 워크트리 커밋 자동 merge 전체 흐름 검증
+"""T3/T4 E2E: exit_code=0 + completed 시 워크트리 커밋 자동 merge 전체 흐름 검증
 
 검증 범위:
 - _stream_output(exit_code=0, exit_reason=completed, merge_requested 없음, worktree 커밋 있음)
@@ -7,6 +7,7 @@
 
 T3과의 차이:
 - T3: _do_inline_merge 호출 여부만 확인 (mock)
+- T3 residue: _do_inline_merge 내부에서 residue_blocked여도 cleanup이 유지되는지 검증
 - T4: _do_inline_merge 내부까지 실행 — merge_status 전이 + cleanup 호출까지 검증
 """
 from __future__ import annotations
@@ -233,3 +234,38 @@ class TestAutoMergeE2E:
         assert queued_idx is not None, "queued 전이 누락"
         assert merging_idx is not None, "merging 전이 누락"
         assert queued_idx < merging_idx, f"queued({queued_idx}) > merging({merging_idx}): 순서 역전"
+
+    def test_residue_blocked_inline_merge_still_cleans_up_T3(
+        self, real_git_repo_with_feature_branch, fr
+    ):
+        """T3: residue_blocked여도 cleanup은 항상 호출되고 restart 플래그는 제거된다."""
+        repo_dir, branch = real_git_repo_with_feature_branch
+        runner_id = "t3-auto-merge-residue-001"
+
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch)
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
+
+        proc = _make_process(returncode=0)
+        log_handle = io.StringIO()
+        wf_mgr, _ = _make_wf_manager(runner_id)
+
+        import merge_queue as mq
+
+        with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
+             patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+             patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
+             patch.object(
+                 stream_cleanup_mod,
+                 "_execute_merge_with_lock",
+                 return_value={"success": False, "merge_status": "residue_blocked", "reason": "residue_guard"},
+             ), \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+             patch("_dr_constants.PROJECT_ROOT", Path(repo_dir)), \
+             patch.object(mq, "acquire_merge_turn", return_value=True), \
+             patch.object(mq, "release_merge_turn"), \
+             patch("subprocess.run", side_effect=_make_subprocess_router(repo_dir)):
+            plan_runner_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
+
+        mock_cleanup.assert_called_once_with(runner_id, fr)
+        assert fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge") is None

@@ -236,72 +236,75 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
 
     # restart_after_merge 플래그 감지 → main 추가 사이클 트리거
     try:
-        if merge_result.get("merge_status") == "residue_blocked":
+        residue_blocked = (
+            isinstance(merge_result, dict)
+            and merge_result.get("merge_status") == "residue_blocked"
+        )
+        if residue_blocked:
             redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
-            return
+        else:
+            _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
+            post_merge_done = merge_result.get("post_merge_done") if isinstance(merge_result, dict) else {}
+            if _flag and isinstance(post_merge_done, dict) and post_merge_done.get("status") == "restart_scheduled":
+                redis_client.delete(
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge"
+                )
+                plan_file = redis_client.get(
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file"
+                )
+                if isinstance(plan_file, bytes):
+                    plan_file = plan_file.decode("utf-8")
+                engine = (
+                    redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine")
+                    or "claude"
+                )
+                if isinstance(engine, bytes):
+                    engine = engine.decode("utf-8")
+                fix_engine = (
+                    redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine")
+                    or "claude"
+                )
+                if isinstance(fix_engine, bytes):
+                    fix_engine = fix_engine.decode("utf-8")
+                trigger = redis_client.get(
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger"
+                )
+                if isinstance(trigger, bytes):
+                    trigger = trigger.decode("utf-8")
+                log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+                try:
+                    redis_client.publish(
+                        log_channel,
+                        f"main 추가 사이클 시작 (plan={plan_file}, engine={engine}, fix_engine={fix_engine})",
+                    )
+                except Exception:
+                    pass
+                if not trigger:
+                    logger.warning(
+                        f"[_do_inline_merge] trigger 소실 — restart_after_merge 스킵: {runner_id}"
+                    )
+                elif plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
+                    import uuid as _uuid
 
-        _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
-        post_merge_done = merge_result.get("post_merge_done") if isinstance(merge_result, dict) else {}
-        if _flag and isinstance(post_merge_done, dict) and post_merge_done.get("status") == "restart_scheduled":
-            redis_client.delete(
-                f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge"
-            )
-            plan_file = redis_client.get(
-                f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file"
-            )
-            if isinstance(plan_file, bytes):
-                plan_file = plan_file.decode("utf-8")
-            engine = (
-                redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine")
-                or "claude"
-            )
-            if isinstance(engine, bytes):
-                engine = engine.decode("utf-8")
-            fix_engine = (
-                redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine")
-                or "claude"
-            )
-            if isinstance(fix_engine, bytes):
-                fix_engine = fix_engine.decode("utf-8")
-            trigger = redis_client.get(
-                f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger"
-            )
-            if isinstance(trigger, bytes):
-                trigger = trigger.decode("utf-8")
-            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
-            try:
-                redis_client.publish(
-                    log_channel,
-                    f"main 추가 사이클 시작 (plan={plan_file}, engine={engine}, fix_engine={fix_engine})",
-                )
-            except Exception:
-                pass
-            if not trigger:
-                logger.warning(
-                    f"[_do_inline_merge] trigger 소실 — restart_after_merge 스킵: {runner_id}"
-                )
-            elif plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
-                import uuid as _uuid
-
-                new_runner_id = _uuid.uuid4().hex[:8]
-                command = {
-                    "action": "run",
-                    "runner_id": new_runner_id,
-                    "plan_file": plan_file,
-                    "engine": engine,
-                    "fix_engine": fix_engine,
-                    "trigger": trigger,
-                }
-                redis_client.lpush(
-                    COMMANDS_KEY, json.dumps(command, ensure_ascii=False)
-                )
-                _pub_and_log(
-                    runner_id,
-                    f"[_do_inline_merge] main 추가 사이클 큐잉: runner={new_runner_id}, plan={plan_file}",
-                    redis_client,
-                    "MERGE",
-                )
-                _cleanup_runner_ownership_snapshot(runner_id)
+                    new_runner_id = _uuid.uuid4().hex[:8]
+                    command = {
+                        "action": "run",
+                        "runner_id": new_runner_id,
+                        "plan_file": plan_file,
+                        "engine": engine,
+                        "fix_engine": fix_engine,
+                        "trigger": trigger,
+                    }
+                    redis_client.lpush(
+                        COMMANDS_KEY, json.dumps(command, ensure_ascii=False)
+                    )
+                    _pub_and_log(
+                        runner_id,
+                        f"[_do_inline_merge] main 추가 사이클 큐잉: runner={new_runner_id}, plan={plan_file}",
+                        redis_client,
+                        "MERGE",
+                    )
+                    _cleanup_runner_ownership_snapshot(runner_id)
     except redis.ConnectionError:
         logger.warning(
             f"[_do_inline_merge] restart_after_merge 감지 중 Redis 연결 실패 (무시)"
