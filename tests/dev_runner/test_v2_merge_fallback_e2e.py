@@ -1,12 +1,15 @@
 ﻿"""T4: v2 merge fallback verification.
 
 Tests the fallback detection when a runner has merged its worktree but crashed before completing the 'done' stage.
+This file is expected to be collected by the explicit ``-m e2e`` pair command.
 """
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+pytestmark = pytest.mark.e2e
 
 # scripts path setup
 import sys

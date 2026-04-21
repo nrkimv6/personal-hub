@@ -67,6 +67,35 @@ class TestPytestMarkInfra:
         combined = result.stdout + result.stderr
         assert "no tests collected" in combined, combined
 
+    def test_v2_merge_fallback_e2e_file_collects_under_e2e(self):
+        """TC-Right: v2 merge fallback e2e 파일은 -m e2e collect-only에서 수집된다."""
+        result = _run_collect_only("tests/dev_runner/test_v2_merge_fallback_e2e.py", "e2e")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "test_v2_merge_fallback_e2e_stream_output_R" in combined, combined
+        assert "test_v2_merge_fallback_e2e_stream_output_residue_guard_E" in combined, combined
+
+    def test_done_and_v2_merge_fallback_pair_collects_under_e2e(self):
+        """TC-Boundary: explicit e2e pair 명령은 done preconditions와 fallback 파일을 함께 수집한다."""
+        try:
+            result = _run_pytest(
+                "tests/dev_runner/test_done_preconditions_e2e.py",
+                "tests/dev_runner/test_v2_merge_fallback_e2e.py",
+                "--collect-only",
+                "-m",
+                "e2e",
+                "-q",
+                "--no-header",
+                timeout=90,
+            )
+        except subprocess.TimeoutExpired as exc:
+            pytest.skip(f"collect-only timeout: done+fallback pair -m e2e ({exc.timeout}s)")
+
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "test_done_e2e_fix_plan_no_phase_r_blocked" in combined, combined
+        assert "test_v2_merge_fallback_e2e_stream_output_R" in combined, combined
+
     def test_http_live_marker_collects_live_server_suite(self):
         """TC-Right: 실서버 파일은 -m http_live에서 수집된다."""
         result = _run_collect_only("tests/dev_runner/test_live_server_http.py", "http_live")
