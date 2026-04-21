@@ -139,10 +139,10 @@ class TestRunRequestValidation:
 class TestBase64Decoding:
 
     def test_standard_base64_path(self):
-        """정상 base64 경로 디코딩"""
+        """정상 base64 경로 디코딩 — current active plans worktree path"""
         from app.modules.dev_runner.routes.plans import _decode_path
 
-        path = r"D:\work\project\tools\monitor-page\docs\plan\test.md"
+        path = r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\plan\test.md"
         encoded = base64.urlsafe_b64encode(path.encode("utf-8")).decode("ascii")
         assert _decode_path(encoded) == path
 

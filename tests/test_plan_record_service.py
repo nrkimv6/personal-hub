@@ -29,7 +29,7 @@ class TestListEventsExcludesPytestPaths:
         """R: AppData\\Temp\\pytest- 경로 plan_record 이벤트 → list_events 결과에서 제외"""
         db = test_db_session
         pytest_path = r"C:\Users\Narang\AppData\Local\Temp\pytest-of-Narang\pytest-42\test_foo\docs\plan\test.md"
-        real_path = r"D:\work\project\tools\monitor-page\docs\plan\real_plan.md"
+        real_path = r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\plan\real_plan.md"
 
         pytest_rec = _make_record(db, pytest_path)
         real_rec = _make_record(db, real_path)
@@ -47,7 +47,7 @@ class TestListEventsExcludesPytestPaths:
         """R: /tmp/pytest- 경로 plan_record 이벤트 → 제외"""
         db = test_db_session
         linux_path = "/tmp/pytest-of-user/pytest-0/test_bar/docs/plan/test.md"
-        real_path = r"D:\work\project\tools\monitor-page\docs\archive\2026-01-01_done.md"
+        real_path = r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\archive\2026-01-01_done.md"
 
         linux_rec = _make_record(db, linux_path)
         real_rec = _make_record(db, real_path)
@@ -62,11 +62,11 @@ class TestListEventsExcludesPytestPaths:
         assert linux_rec.id not in [e.plan_record_id for e in events]
 
     def test_list_events_includes_real_paths(self, test_db_session):
-        """R: docs/plan/, docs/archive/ 경로 이벤트 → 포함"""
+        """R: current plans worktree docs/plan, docs/archive 경로 이벤트 → 포함"""
         db = test_db_session
         paths = [
-            r"D:\work\project\tools\monitor-page\docs\plan\2026-03-01_plan.md",
-            r"D:\work\project\tools\monitor-page\docs\archive\2026-02-01_done.md",
+            r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\plan\2026-03-01_plan.md",
+            r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\archive\2026-02-01_done.md",
         ]
         evts = []
         for p in paths:
@@ -79,6 +79,19 @@ class TestListEventsExcludesPytestPaths:
 
         for evt in evts:
             assert evt.id in ids, f"실제 경로 이벤트 {evt.id}는 포함되어야 한다"
+
+    def test_list_events_includes_legacy_root_plan_path_as_historical_B(self, test_db_session):
+        """B: legacy root docs/plan 경로도 historical path로는 계속 조회된다"""
+        db = test_db_session
+        legacy_path = r"D:\work\project\tools\monitor-page\docs\plan\2026-03-01_plan.md"
+
+        rec = _make_record(db, legacy_path)
+        evt = _make_event(db, rec, "created")
+
+        svc = PlanRecordService(db)
+        events = svc.list_events()
+
+        assert evt.id in [event.id for event in events]
 
     def test_list_events_empty_when_all_pytest(self, test_db_session):
         """E: 전체가 pytest 레코드일 때 빈 리스트 반환"""

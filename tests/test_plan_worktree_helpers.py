@@ -105,6 +105,11 @@ def test_is_plan_archived_false_R():
     assert is_plan_archived("D:/work/docs/plan/2026-01-01_test.md") is False
 
 
+def test_is_plan_archived_false_plans_worktree_R():
+    """R: plans worktree active plan 경로 → False"""
+    assert is_plan_archived("D:/work/project/tools/monitor-page/.worktrees/plans/docs/plan/2026-01-01_test.md") is False
+
+
 def test_is_plan_archived_backslash_B():
     """B: 백슬래시 경로 → True"""
     assert is_plan_archived("D:\\work\\docs\\archive\\test.md") is True
@@ -137,6 +142,16 @@ def test_resolve_active_plan_file_returns_existing_input_path_B(tmp_path):
 
     resolved = resolve_active_plan_file(str(legacy), project_root=tmp_path)
     assert resolved == legacy.resolve()
+
+
+def test_resolve_active_plan_file_keeps_current_physical_path_R(tmp_path):
+    """R: 현재 active physical path(.worktrees/plans)를 입력하면 그대로 유지"""
+    current = tmp_path / ".worktrees" / "plans" / "docs" / "plan" / "2026-01-03_test.md"
+    current.parent.mkdir(parents=True, exist_ok=True)
+    current.write_text("# plans physical\n", encoding="utf-8")
+
+    resolved = resolve_active_plan_file(str(current), project_root=tmp_path)
+    assert resolved == current.resolve()
 
 
 # ---------------------------------------------------------------------------

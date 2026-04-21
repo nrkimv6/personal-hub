@@ -15,7 +15,7 @@ def test_external_plan_path_accepted(monkeypatch):
     monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
     svc = ExecutorService()
 
-    external_plan = "D:/work/project/tools/monitor-page/docs/plan/test_stub.md"
+    external_plan = "D:/work/project/tools/monitor-page/.worktrees/plans/docs/plan/test_stub.md"
     req = RunRequest(test_source="path_isolation", plan_file=external_plan, engine="claude")
 
     # listener heartbeat 있음 + status not running
