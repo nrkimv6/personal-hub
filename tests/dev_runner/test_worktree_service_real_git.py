@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.modules.dev_runner.services.worktree_service import get_all_worktrees
+from app.modules.dev_runner.services.worktree_service import get_all_worktrees, get_all_worktrees_full
 
 
 def _run_git(repo: Path, *args: str, env: dict[str, str] | None = None) -> None:
@@ -58,10 +58,10 @@ async def test_get_all_worktrees_real_repo_basic(tmp_path: Path):
     plan_dir.mkdir(parents=True)
     (plan_dir / "2026-04-07_impl-foo.md").write_text("> branch: impl/foo\n", encoding="utf-8")
 
-    result = await get_all_worktrees(repo_root=repo)
+    result = await get_all_worktrees_full(repo_root=repo)
 
-    assert len(result.worktrees) == 1
-    worktree = result.worktrees[0]
+    assert len(result) == 1
+    worktree = result[0]
     assert worktree.branch == "impl/foo"
     assert worktree.ahead == 1
     assert worktree.behind == 0
@@ -84,9 +84,9 @@ async def test_get_all_worktrees_real_repo_binary_commit(tmp_path: Path):
         binary=True,
     )
 
-    result = await get_all_worktrees(repo_root=repo)
+    result = await get_all_worktrees_full(repo_root=repo)
 
-    assert result.worktrees[0].commits[0].diff_stat[0].changes == "- -"
+    assert result[0].commits[0].diff_stat[0].changes == "- -"
 
 
 @pytest.mark.asyncio
@@ -113,3 +113,4 @@ async def test_get_all_worktrees_real_repo_oldest_commit_used_for_created_at(tmp
     result = await get_all_worktrees(repo_root=repo)
 
     assert result.worktrees[0].created_at == "2026-04-07 08:00:00 +0900"
+    assert result.worktrees[0].commit_count == 2

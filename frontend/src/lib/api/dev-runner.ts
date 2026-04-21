@@ -605,19 +605,23 @@ export interface WorktreeCommit {
 	diff_stat: CommitDiffStat[];
 }
 
-export interface WorktreeInfo {
+export interface WorktreeInfoLite {
 	branch: string;
 	worktree_path: string;
 	created_at: string | null;
 	ahead: number;
 	behind: number;
 	locked: boolean;
-	commits: WorktreeCommit[];
+	commit_count: number;
 	plan_file: string | null;
 	plan_mtime: string | null;
 	is_test: boolean;
 	plan_file_archived: boolean;
 	cleanable: boolean;
+}
+
+export interface WorktreeInfoFull extends WorktreeInfoLite {
+	commits: WorktreeCommit[];
 }
 
 export interface MainDirtyStatus {
@@ -658,7 +662,7 @@ export interface WorktreeCleanupResponse {
 }
 
 export interface WorktreeListResponse {
-	worktrees: WorktreeInfo[];
+	worktrees: WorktreeInfoLite[];
 	plan_only: PlanOnlyBranch[];
 	branch_unresolved: BranchUnresolvedPlan[];
 	main_dirty: MainDirtyStatus;
@@ -671,10 +675,20 @@ export interface RepoOption {
 }
 
 export const devRunnerWorktreeApi = {
-	list: (): Promise<WorktreeInfo[]> => devRunnerRequest<WorktreeInfo[]>('/worktrees'),
+	list: (repoId?: number): Promise<WorktreeInfoFull[]> => {
+		const query = repoId !== undefined ? `?repo_id=${repoId}` : '';
+		return devRunnerRequest<WorktreeInfoFull[]>(`/worktrees${query}`);
+	},
 	listV2: (repoId?: number): Promise<WorktreeListResponse> => {
 		const query = repoId !== undefined ? `?repo_id=${repoId}` : '';
 		return devRunnerRequest<WorktreeListResponse>(`/worktrees/v2${query}`);
+	},
+	listCommits: (branch: string, repoId?: number): Promise<WorktreeCommit[]> => {
+		const query = new URLSearchParams({ branch });
+		if (repoId !== undefined) {
+			query.set('repo_id', String(repoId));
+		}
+		return devRunnerRequest<WorktreeCommit[]>(`/worktrees/v2/commits?${query.toString()}`);
 	},
 	listRepos: (): Promise<RepoOption[]> => devRunnerRequest<RepoOption[]>('/worktrees/repos'),
 	cleanup: (req: WorktreeCleanupRequest, repoId?: number): Promise<WorktreeCleanupResponse> => {

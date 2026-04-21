@@ -15,6 +15,7 @@ from app.modules.dev_runner.schemas import (
     WorktreeCleanupResult,
     WorktreeCommit,
     WorktreeInfo,
+    WorktreeInfoLite,
     WorktreeListResponse,
 )
 
@@ -229,6 +230,21 @@ async def get_worktree_commits(branch: str, repo_root: Path = _REPO_ROOT) -> lis
     return commits
 
 
+async def get_created_at(branch: str, repo_root: Path = _REPO_ROOT) -> Optional[str]:
+    """main 이후 커밋 중 가장 오래된 커밋의 날짜를 반환한다."""
+    output = await _run_git(
+        "log", f"main..{branch}", "--format=%ai", "--reverse", repo_root=repo_root
+    )
+    if not output:
+        return None
+
+    for line in output.splitlines():
+        candidate = line.strip()
+        if candidate:
+            return candidate
+    return None
+
+
 def _parse_numstat(output: str) -> list[CommitDiffStat]:
     """git diff-tree --numstat 출력 파싱 (탭 구분: added\\tdeleted\\tpath)"""
     stats = []
@@ -330,6 +346,19 @@ def find_plan_file(
     return None, None, False
 
 
+def _resolve_plan_metadata(
+    branch: str,
+    active_branch_map: PlanScanMap,
+    archived_branch_map: PlanScanMap,
+) -> tuple[Optional[str], Optional[str], bool]:
+    plan_file, plan_mtime = active_branch_map.get(branch, (None, None))
+    if plan_file is not None:
+        return plan_file, plan_mtime, False
+
+    plan_file, plan_mtime = archived_branch_map.get(branch, (None, None))
+    return plan_file, plan_mtime, plan_file is not None
+
+
 def list_plan_only_branches(
     existing_branches: set[str],
     repo_root: Path = _REPO_ROOT,
@@ -397,48 +426,27 @@ async def get_main_dirty(repo_root: Path = _REPO_ROOT) -> MainDirtyStatus:
     return MainDirtyStatus(dirty_count=len(files), files=files)
 
 
-async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListResponse:
-    """전체 워크트리 정보 조합 — ahead/behind + 커밋 목록은 병렬, find_plan_file은 asyncio.to_thread"""
+async def _collect_worktree_state(
+    *,
+    repo_root: Path,
+    worktree_builder,
+) -> tuple[list[WorktreeInfoLite], list[PlanOnlyBranch], list[BranchUnresolvedPlan], MainDirtyStatus]:
     raw_worktrees = await list_worktrees(repo_root=repo_root)
     active_branch_map, archived_branch_map, unresolved = await asyncio.to_thread(
         _scan_plan_file_index, repo_root
     )
 
-    async def _build(wt: dict) -> WorktreeInfo:
-        branch = wt["branch"]
-        (ahead, behind), commits = await asyncio.gather(
-            get_ahead_behind(branch, repo_root=repo_root),
-            get_worktree_commits(branch, repo_root=repo_root),
-        )
-        plan_file, plan_mtime = active_branch_map.get(branch, (None, None))
-        plan_file_archived = False
-        if plan_file is None:
-            plan_file, plan_mtime = archived_branch_map.get(branch, (None, None))
-            plan_file_archived = plan_file is not None
-        created_at = commits[-1].date if commits else None
-        return WorktreeInfo(
-            branch=branch,
-            worktree_path=wt["worktree_path"],
-            created_at=created_at,
-            ahead=ahead,
-            behind=behind,
-            locked=wt.get("locked", False),
-            commits=commits,
-            plan_file=plan_file,
-            plan_mtime=plan_mtime,
-            is_test=is_test_branch(branch),
-            plan_file_archived=plan_file_archived,
-            cleanable=compute_cleanable(
-                locked=wt.get("locked", False),
-                ahead=ahead,
-                plan_file=plan_file,
-                archived=plan_file_archived,
-            ),
-        )
-
-    worktrees: list[WorktreeInfo] = []
+    worktrees: list[WorktreeInfoLite] = []
     if raw_worktrees:
-        worktrees = list(await asyncio.gather(*[_build(wt) for wt in raw_worktrees]))
+        worktrees = list(await asyncio.gather(*[
+            worktree_builder(
+                wt,
+                repo_root=repo_root,
+                active_branch_map=active_branch_map,
+                archived_branch_map=archived_branch_map,
+            )
+            for wt in raw_worktrees
+        ]))
 
     existing_branches = {wt.branch for wt in worktrees}
 
@@ -450,12 +458,106 @@ async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListRespons
     )
     plan_only_list, branch_unresolved_list = plan_only_result
 
+    return worktrees, plan_only_list, branch_unresolved_list, main_dirty
+
+
+async def _build_worktree_info_lite(
+    wt: dict,
+    *,
+    repo_root: Path,
+    active_branch_map: PlanScanMap,
+    archived_branch_map: PlanScanMap,
+) -> WorktreeInfoLite:
+    branch = wt["branch"]
+    ahead, behind = await get_ahead_behind(branch, repo_root=repo_root)
+    created_at = await get_created_at(branch, repo_root=repo_root) if ahead > 0 else None
+    plan_file, plan_mtime, plan_file_archived = _resolve_plan_metadata(
+        branch,
+        active_branch_map,
+        archived_branch_map,
+    )
+    return WorktreeInfoLite(
+        branch=branch,
+        worktree_path=wt["worktree_path"],
+        created_at=created_at,
+        ahead=ahead,
+        behind=behind,
+        locked=wt.get("locked", False),
+        commit_count=ahead,
+        plan_file=plan_file,
+        plan_mtime=plan_mtime,
+        is_test=is_test_branch(branch),
+        plan_file_archived=plan_file_archived,
+        cleanable=compute_cleanable(
+            locked=wt.get("locked", False),
+            ahead=ahead,
+            plan_file=plan_file,
+            archived=plan_file_archived,
+        ),
+    )
+
+
+async def _build_worktree_info_full(
+    wt: dict,
+    *,
+    repo_root: Path,
+    active_branch_map: PlanScanMap,
+    archived_branch_map: PlanScanMap,
+) -> WorktreeInfo:
+    branch = wt["branch"]
+    (ahead, behind), commits = await asyncio.gather(
+        get_ahead_behind(branch, repo_root=repo_root),
+        get_worktree_commits(branch, repo_root=repo_root),
+    )
+    plan_file, plan_mtime, plan_file_archived = _resolve_plan_metadata(
+        branch,
+        active_branch_map,
+        archived_branch_map,
+    )
+    created_at = commits[-1].date if commits else None
+    return WorktreeInfo(
+        branch=branch,
+        worktree_path=wt["worktree_path"],
+        created_at=created_at,
+        ahead=ahead,
+        behind=behind,
+        locked=wt.get("locked", False),
+        commit_count=ahead,
+        commits=commits,
+        plan_file=plan_file,
+        plan_mtime=plan_mtime,
+        is_test=is_test_branch(branch),
+        plan_file_archived=plan_file_archived,
+        cleanable=compute_cleanable(
+            locked=wt.get("locked", False),
+            ahead=ahead,
+            plan_file=plan_file,
+            archived=plan_file_archived,
+        ),
+    )
+
+
+async def get_all_worktrees(repo_root: Path = _REPO_ROOT) -> WorktreeListResponse:
+    """v2 lite 워크트리 목록 — commit_count만 포함하고 상세 커밋은 lazy-load한다."""
+    worktrees, plan_only, branch_unresolved, main_dirty = await _collect_worktree_state(
+        repo_root=repo_root,
+        worktree_builder=_build_worktree_info_lite,
+    )
     return WorktreeListResponse(
         worktrees=worktrees,
-        plan_only=plan_only_list,
-        branch_unresolved=branch_unresolved_list,
+        plan_only=plan_only,
+        branch_unresolved=branch_unresolved,
         main_dirty=main_dirty,
     )
+
+
+async def get_all_worktrees_full(repo_root: Path = _REPO_ROOT) -> list[WorktreeInfo]:
+    """v1 full 워크트리 목록 — 커밋 상세 포함."""
+    worktrees, _plan_only, _branch_unresolved, _main_dirty = await _collect_worktree_state(
+        repo_root=repo_root,
+        worktree_builder=_build_worktree_info_full,
+    )
+    return [WorktreeInfo.model_validate(worktree) for worktree in worktrees]
 
 
 async def cleanup_worktrees(

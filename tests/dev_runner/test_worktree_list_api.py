@@ -371,6 +371,9 @@ class TestWorktreeListHttp:
         }
         assert len(v2_data["worktrees"]) == len(v1_data) == 1
         assert v2_data["worktrees"][0]["branch"] == v1_data[0]["branch"]
+        assert "commits" in v1_data[0]
+        assert "commit_count" in v2_data["worktrees"][0]
+        assert "commits" not in v2_data["worktrees"][0]
 
     @pytest.mark.http
     @pytest.mark.asyncio
@@ -388,6 +391,7 @@ class TestWorktreeListHttp:
         assert item["plan_mtime"] is not None
         assert item["plan_mtime"][4] == "-"
         assert item["plan_file"].replace("\\", "/").startswith("docs/plan/")
+        assert item["created_at"] is not None
 
     @pytest.mark.http
     @pytest.mark.asyncio
@@ -405,5 +409,6 @@ class TestWorktreeListHttp:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["worktrees"]) == 10
-        assert all(len(item["commits"]) == 3 for item in data["worktrees"])
+        assert all(item["commit_count"] == 3 for item in data["worktrees"])
+        assert all("commits" not in item for item in data["worktrees"])
         assert elapsed < 3.0

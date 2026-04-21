@@ -11,10 +11,17 @@ from app.core.database import get_db
 from app.modules.dev_runner.schemas import (
     WorktreeCleanupRequest,
     WorktreeCleanupResponse,
+    WorktreeCommit,
     WorktreeInfo,
     WorktreeListResponse,
 )
-from app.modules.dev_runner.services.worktree_service import cleanup_worktrees, get_all_worktrees
+from app.modules.dev_runner.services.worktree_service import (
+    cleanup_worktrees,
+    get_all_worktrees,
+    get_all_worktrees_full,
+    get_worktree_commits,
+    list_worktrees,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -55,8 +62,7 @@ async def list_worktrees_v1(
     try:
         repo_root = _resolve_repo_root(repo_id, db)
         kwargs = {"repo_root": repo_root} if repo_root else {}
-        resp = await get_all_worktrees(**kwargs)
-        return resp.worktrees
+        return await get_all_worktrees_full(**kwargs)
     except HTTPException:
         raise
     except Exception as e:
@@ -78,6 +84,27 @@ async def list_worktrees_v2(
         raise
     except Exception as e:
         logger.exception("워크트리 목록 조회 실패 (v2)")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/v2/commits", response_model=List[WorktreeCommit])
+async def list_worktree_commits_v2(
+    branch: str = Query(..., min_length=1),
+    repo_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """특정 워크트리 브랜치의 커밋 상세를 lazy-load 한다."""
+    try:
+        repo_root = _resolve_repo_root(repo_id, db)
+        kwargs = {"repo_root": repo_root} if repo_root else {}
+        existing_branches = {wt["branch"] for wt in await list_worktrees(**kwargs)}
+        if branch not in existing_branches:
+            raise HTTPException(status_code=404, detail="워크트리 브랜치를 찾을 수 없습니다.")
+        return await get_worktree_commits(branch, **kwargs)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("워크트리 커밋 상세 조회 실패 (v2)")
         raise HTTPException(status_code=500, detail=str(e))
 
 
