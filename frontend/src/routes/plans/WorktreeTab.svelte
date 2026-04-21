@@ -14,6 +14,7 @@
     devRunnerWorktreeApi,
     type WorktreeCommit,
     type WorktreeCleanupResponse,
+    type WorktreeCleanupResult,
     type WorktreeListResponse,
     type RepoOption,
   } from '$lib/api/dev-runner';
@@ -26,6 +27,10 @@
     branch_unresolved: [],
     main_dirty: { dirty_count: 0, files: [] },
   };
+  const CLEANUP_PREVIEW_TIMEOUT_MS = 30000;
+  const CLEANUP_APPLY_TIMEOUT_MS = 120000;
+  const CLEANUP_STALE_MESSAGE = '이미 정리되었거나 목록이 오래되었습니다. 목록을 새로고침했습니다.';
+  const CLEANUP_TIMEOUT_MESSAGE = '워크트리 정리 응답이 지연되고 있습니다. 서버에서 계속 정리 중일 수 있으니 잠시 후 목록을 새로고침해 결과를 확인하세요.';
 
   let response: WorktreeListResponse = $state(EMPTY_RESPONSE);
   let repos: RepoOption[] = $state([]);
@@ -190,6 +195,81 @@
     return lines.filter(Boolean).join('\n');
   }
 
+  function isCleanupNotFoundResult(item: WorktreeCleanupResult): boolean {
+    return item.reason === 'worktree not found' || item.reason === 'already removed';
+  }
+
+  function isCleanupTimedOutResult(item: WorktreeCleanupResult): boolean {
+    return item.reason.startsWith('timeout after ');
+  }
+
+  function cleanupSummaryCount(
+    result: WorktreeCleanupResponse,
+    key: string,
+    predicate: (item: WorktreeCleanupResult) => boolean,
+  ): number {
+    const summaryValue = result.summary[key];
+    return typeof summaryValue === 'number'
+      ? summaryValue
+      : result.results.filter(predicate).length;
+  }
+
+  function cleanupNotFoundCount(result: WorktreeCleanupResponse): number {
+    return cleanupSummaryCount(result, 'not_found', isCleanupNotFoundResult);
+  }
+
+  function cleanupTimedOutCount(result: WorktreeCleanupResponse): number {
+    return cleanupSummaryCount(result, 'timed_out', isCleanupTimedOutResult);
+  }
+
+  function isCleanupStaleOnlyResult(result: WorktreeCleanupResponse): boolean {
+    if (result.results.length === 0) return false;
+    return (result.summary.removed ?? 0) === 0
+      && result.results.every((item) => item.status === 'skipped' && isCleanupNotFoundResult(item));
+  }
+
+  function cleanupSummaryExtrasText(result: WorktreeCleanupResponse): string {
+    const parts: string[] = [];
+    const notFound = cleanupNotFoundCount(result);
+    const timedOut = cleanupTimedOutCount(result);
+    if (notFound > 0) {
+      parts.push(`이미 정리됨 ${notFound}`);
+    }
+    if (timedOut > 0) {
+      parts.push(`timeout ${timedOut}`);
+    }
+    return parts.length > 0 ? ` · ${parts.join(' · ')}` : '';
+  }
+
+  function cleanupWarningText(result: WorktreeCleanupResponse): string | null {
+    const skipped = result.summary.skipped ?? 0;
+    const failed = result.summary.failed ?? 0;
+    const notFound = cleanupNotFoundCount(result);
+    const timedOut = cleanupTimedOutCount(result);
+    const skippedOther = Math.max(skipped - notFound, 0);
+    const failedOther = Math.max(failed - timedOut, 0);
+    const parts: string[] = [];
+    if (skippedOther > 0) {
+      parts.push(`건너뜀 ${skippedOther}개`);
+    }
+    if (failedOther > 0) {
+      parts.push(`실패 ${failedOther}개`);
+    }
+    if (notFound > 0) {
+      parts.push(`이미 정리됨 ${notFound}개`);
+    }
+    if (timedOut > 0) {
+      parts.push(`timeout ${timedOut}개`);
+    }
+    return parts.length > 0 ? `${parts.join(', ')}가 있습니다.` : null;
+  }
+
+  function normalizeCleanupErrorMessage(message: string): string {
+    return message.startsWith('요청 타임아웃 (')
+      ? CLEANUP_TIMEOUT_MESSAGE
+      : message;
+  }
+
   async function handleBatchCleanup() {
     const branches = selection.toArray();
     if (branches.length === 0) return;
@@ -200,8 +280,15 @@
       const preview = await devRunnerWorktreeApi.cleanup(
         { branches, dry_run: true },
         selectedRepoId,
+        CLEANUP_PREVIEW_TIMEOUT_MS,
       );
       cleanupResult = preview;
+
+      if (isCleanupStaleOnlyResult(preview)) {
+        await loadWorktrees();
+        toast.warning(CLEANUP_STALE_MESSAGE);
+        return;
+      }
 
       const removable = preview.results.filter((item) => item.reason === 'dry_run');
       if (removable.length === 0) {
@@ -215,22 +302,28 @@
       const result = await devRunnerWorktreeApi.cleanup(
         { branches, dry_run: false },
         selectedRepoId,
+        CLEANUP_APPLY_TIMEOUT_MS,
       );
-      cleanupResult = result;
       selection.clear();
       await loadWorktrees();
+      cleanupResult = result;
+
+      if (isCleanupStaleOnlyResult(result)) {
+        toast.warning(CLEANUP_STALE_MESSAGE);
+        return;
+      }
 
       const removed = result.summary.removed ?? 0;
-      const failed = result.summary.failed ?? 0;
-      const skipped = result.summary.skipped ?? 0;
       if (removed > 0) {
         toast.success(`워크트리 ${removed}개를 정리했습니다.`);
       }
-      if (failed > 0 || skipped > 0) {
-        toast.warning(`건너뜀 ${skipped}개, 실패 ${failed}개가 있습니다.`);
+      const warningText = cleanupWarningText(result);
+      if (warningText) {
+        toast.warning(warningText);
       }
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : '워크트리 정리에 실패했습니다';
+      const rawMessage = e instanceof Error ? e.message : '워크트리 정리에 실패했습니다';
+      const message = normalizeCleanupErrorMessage(rawMessage);
       cleanupResult = null;
       toast.error(message);
     } finally {
@@ -302,7 +395,7 @@
   {#if cleanupResult}
     <div class="cleanup-result">
       <div class="cleanup-summary">
-        요청 {cleanupResult.summary.requested ?? 0} · 제거 {cleanupResult.summary.removed ?? 0} · 건너뜀 {cleanupResult.summary.skipped ?? 0} · 실패 {cleanupResult.summary.failed ?? 0}
+        요청 {cleanupResult.summary.requested ?? 0} · 제거 {cleanupResult.summary.removed ?? 0} · 건너뜀 {cleanupResult.summary.skipped ?? 0} · 실패 {cleanupResult.summary.failed ?? 0}{cleanupSummaryExtrasText(cleanupResult)}
       </div>
       <div class="cleanup-result-list">
         {#each cleanupResult.results as item (`${item.branch}-${item.status}-${item.reason}`)}

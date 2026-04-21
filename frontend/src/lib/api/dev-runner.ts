@@ -691,12 +691,16 @@ export const devRunnerWorktreeApi = {
 		return devRunnerRequest<WorktreeCommit[]>(`/worktrees/v2/commits?${query.toString()}`);
 	},
 	listRepos: (): Promise<RepoOption[]> => devRunnerRequest<RepoOption[]>('/worktrees/repos'),
-	cleanup: (req: WorktreeCleanupRequest, repoId?: number): Promise<WorktreeCleanupResponse> => {
+	cleanup: (
+		req: WorktreeCleanupRequest,
+		repoId?: number,
+		timeoutMs?: number,
+	): Promise<WorktreeCleanupResponse> => {
 		const query = repoId !== undefined ? `?repo_id=${repoId}` : '';
 		return devRunnerRequest<WorktreeCleanupResponse>(`/worktrees/cleanup${query}`, {
 			method: 'POST',
 			body: JSON.stringify(req),
-		});
+		}, timeoutMs);
 	},
 };
 
