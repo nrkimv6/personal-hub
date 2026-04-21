@@ -28,6 +28,9 @@ def ensure_bootstrap_tables_loaded() -> None:
 def load_all_models():
     """Register app ORM models on the shared Base metadata."""
     import app.models as models  # noqa: F401
+    import app.modules.claude_worker.models.llm_request  # noqa: F401
+    import app.modules.notes.models  # noqa: F401
+    import app.modules.git_repos.models  # noqa: F401
 
     ensure_bootstrap_tables_loaded()
     return models
