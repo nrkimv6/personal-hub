@@ -52,7 +52,7 @@ from _dr_constants import (
     HEARTBEAT_KEY, HEARTBEAT_INTERVAL, HEARTBEAT_TTL, MERGE_ACTIVE_STATUSES,
     ZOMBIE_GRACE_SECONDS, SUBPROCESS_HEARTBEAT_TTL,
     SCRIPT_DIR, PROJECT_ROOT, WORKTREE_BASE_DIR, WTOOLS_BASE_DIR,
-    PLAN_RUNNER_MODULE_PATH, PLAN_RUNNER_PYTHON, LOG_DIR,
+    PLAN_RUNNER_MODULE_PATH, PLAN_RUNNER_PYTHON, LOG_DIR, OWNERSHIP_SNAPSHOT_DIR,
     LOG_CHANNEL_PREFIX,
     get_redis_db, set_redis_db, get_admin_api_base,
 )
@@ -576,6 +576,31 @@ def _handle_running_process_heartbeat(runner_id: str, proc, redis_client: redis.
     return "checked"
 
 
+def _cleanup_stale_ownership_snapshots(redis_client: redis.Redis) -> int:
+    """inactive runner snapshot만 정리해 snapshot 파일을 단일 truth로 유지한다."""
+    if not OWNERSHIP_SNAPSHOT_DIR.exists():
+        return 0
+
+    removed = 0
+    for snapshot_path in OWNERSHIP_SNAPSHOT_DIR.glob("*.json"):
+        runner_id = snapshot_path.stem
+        try:
+            is_active = bool(redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id))
+        except Exception as exc:
+            logger.warning("[ownership] stale snapshot active check 실패: runner=%s error=%s", runner_id, exc)
+            break
+        if is_active:
+            continue
+        try:
+            snapshot_path.unlink()
+            removed += 1
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.warning("[ownership] stale snapshot cleanup 실패: path=%s error=%s", snapshot_path, exc)
+    return removed
+
+
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
     global _wf_manager
@@ -615,6 +640,9 @@ def main():
             _reconnect_surviving_runners(r)
             # listener 시작/재시작 시 생존 MergeOrchestrator 재연결
             _reconnect_surviving_merge_orchestrator(r)
+            removed_snapshot_count = _cleanup_stale_ownership_snapshots(r)
+            if removed_snapshot_count:
+                logger.warning("[ownership] stale snapshot %s개 정리", removed_snapshot_count)
 
             # 고아 탐지/정리 작업은 백그라운드 스레드에서 실행 — BRPOP 루프 진입 지연 방지
             # (archive 포함 plan 파일이 수백~수천 개로 증가하면 수십 초 블로킹 가능)

@@ -114,6 +114,24 @@ class TestDoRetryMerge:
         assert any(log_channel in str(c) for c in publish_calls), "로그 채널에 publish 없음"
         assert any("[MERGE]" in str(c) for c in publish_calls if log_channel in str(c)), "[MERGE] 로그 없음"
 
+    def test_do_retry_merge_refreshes_ownership_snapshot(self, tmp_path):
+        """R: retry-merge는 merge 직전 ownership snapshot을 다시 캡처한다."""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        with patch("_dr_commands._refresh_runner_ownership_snapshot") as mock_refresh, \
+             patch("_dr_commands._execute_merge_with_lock", return_value={"success": True, "message": "merged", "merge_status": "merged"}), \
+             patch("_dr_commands._cleanup_process_state"), \
+             patch("plan_runner.core.stages.pre_merge_gate", return_value=(True, "ok")), \
+             patch("plan_runner.core.stages.auto_commit_stage", return_value=False):
+            cl._do_retry_merge("runner-snapshot", redis, "cmd-snapshot")
+
+        mock_refresh.assert_called_once()
+        assert mock_refresh.call_args.kwargs["action"] == "retry-merge"
+
     def test_do_retry_merge_cleanup_on_merged(self, tmp_path):
         """R(Right): merge 성공 시 _cleanup_process_state 호출됨"""
         cl = _load_listener()

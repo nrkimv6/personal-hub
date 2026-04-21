@@ -126,6 +126,22 @@ class TestDoDirectMerge:
         assert args[0].startswith("dm-"), f"첫 번째 인자가 임시 runner_id여야 함: {args[0]}"
         assert args[1] is redis, "두 번째 인자가 redis여야 함"
 
+    def test_direct_merge_refreshes_ownership_snapshot(self, tmp_path):
+        """R: direct-merge 임시 runner는 merge 직전에 ownership snapshot을 새로 캡처한다."""
+        cl = _load_listener()
+        commands_mod = _get_commands_module()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock()
+
+        with patch.object(commands_mod, "_refresh_runner_ownership_snapshot") as mock_refresh, \
+             patch.object(commands_mod, "_do_inline_merge"):
+            cl._do_direct_merge("runner/snapshot", str(worktree), None, redis, "cmd004b")
+
+        mock_refresh.assert_called_once()
+        assert mock_refresh.call_args.kwargs["action"] == "direct-merge"
+
     def test_direct_merge_sets_minimum_redis_keys(self, tmp_path):
         """R(Right): status/worktree_path/branch/merge_status 키 세팅"""
         cl = _load_listener()

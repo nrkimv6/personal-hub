@@ -939,9 +939,9 @@ class PlanService:
         return str(rel).replace("\\", "/").casefold()
 
     @classmethod
-    def _load_runner_dirty_snapshot(cls, runner_id: Optional[str]) -> set[str]:
+    def _load_runner_dirty_snapshot(cls, runner_id: Optional[str]) -> dict[str, set[str]]:
         if not runner_id:
-            return set()
+            return {"dirty_files": set(), "owned_files": set(), "clean_at_start_files": set()}
 
         snapshot_path = cls._ownership_snapshot_path(runner_id)
         try:
@@ -951,16 +951,32 @@ class PlanService:
         except Exception as exc:
             raise ValueError(f"runner ownership snapshot unreadable: {snapshot_path}: {exc}") from exc
 
-        dirty_files = payload.get("dirty_files", []) if isinstance(payload, dict) else []
-        if not isinstance(dirty_files, list):
+        if not isinstance(payload, dict):
+            raise ValueError(f"runner ownership snapshot invalid: {snapshot_path}")
+        dirty_files = payload.get("dirty_files", [])
+        owned_files = payload.get("owned_files", [])
+        clean_at_start_files = payload.get("clean_at_start_files", [])
+        if not isinstance(dirty_files, list) or not isinstance(owned_files, list) or not isinstance(clean_at_start_files, list):
             raise ValueError(f"runner ownership snapshot invalid: {snapshot_path}")
         capture_error = payload.get("capture_error") if isinstance(payload, dict) else None
         if capture_error:
             raise ValueError(f"runner ownership snapshot capture failed: {capture_error}")
         return {
-            str(item).replace("\\", "/").casefold()
-            for item in dirty_files
-            if isinstance(item, str) and item.strip()
+            "dirty_files": {
+                str(item).replace("\\", "/").casefold()
+                for item in dirty_files
+                if isinstance(item, str) and item.strip()
+            },
+            "owned_files": {
+                str(item).replace("\\", "/").casefold()
+                for item in owned_files
+                if isinstance(item, str) and item.strip()
+            },
+            "clean_at_start_files": {
+                str(item).replace("\\", "/").casefold()
+                for item in clean_at_start_files
+                if isinstance(item, str) and item.strip()
+            },
         }
 
     @classmethod
@@ -973,21 +989,35 @@ class PlanService:
         if not runner_id or not project_dir:
             return None
 
-        dirty_files = cls._load_runner_dirty_snapshot(runner_id)
-        if not dirty_files:
+        snapshot = cls._load_runner_dirty_snapshot(runner_id)
+        dirty_files = snapshot["dirty_files"]
+        owned_files = snapshot["owned_files"]
+        if not dirty_files and not owned_files:
             return None
 
         normalized_project_dir = project_dir.resolve(strict=False)
-        conflicts: list[str] = []
+        pre_dirty_conflicts: list[str] = []
+        unowned_conflicts: list[str] = []
         for target in files_to_check:
             key = cls._normalize_ownership_key(target, normalized_project_dir)
-            if key and key in dirty_files:
-                conflicts.append(str(target))
+            if not key:
+                continue
+            if key in dirty_files:
+                pre_dirty_conflicts.append(str(target))
+                continue
+            if owned_files and key not in owned_files:
+                unowned_conflicts.append(str(target))
 
-        if conflicts:
-            joined = ", ".join(conflicts)
+        if pre_dirty_conflicts:
+            joined = ", ".join(pre_dirty_conflicts)
             return (
                 f"runner ownership guard blocked auto-done: pre-dirty file(s) detected for runner "
+                f"{runner_id}: {joined}"
+            )
+        if unowned_conflicts:
+            joined = ", ".join(unowned_conflicts)
+            return (
+                f"runner ownership guard blocked auto-done: unowned file(s) detected for runner "
                 f"{runner_id}: {joined}"
             )
         return None

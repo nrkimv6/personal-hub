@@ -20,12 +20,109 @@ import redis
 
 from _dr_constants import (
     RUNNER_KEY_PREFIX, PLAN_FILE_ALL, _LEGACY_ALL, LOG_CHANNEL_PREFIX,
-    PLAN_RUNNER_PYTHON, PLAN_RUNNER_MODULE_PATH, get_redis_db, get_admin_api_base,
+    PLAN_RUNNER_PYTHON, PLAN_RUNNER_MODULE_PATH, OWNERSHIP_SNAPSHOT_DIR, get_redis_db, get_admin_api_base,
 )
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _launch_auto_impl_post_merge_process, _launch_general_merge_resolver_process, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_ownership_key(path: Path, project_root: Path) -> Optional[str]:
+    try:
+        rel = path.resolve(strict=False).relative_to(project_root.resolve(strict=False))
+    except Exception:
+        return None
+    return str(rel).replace("\\", "/").casefold()
+
+
+def _load_runner_ownership_payload(runner_id: str) -> Optional[tuple[Path, dict]]:
+    snapshot_path = OWNERSHIP_SNAPSHOT_DIR / f"{runner_id}.json"
+    try:
+        payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        logger.warning("[ownership] snapshot read failed: runner=%s error=%s", runner_id, exc)
+        return None
+    if not isinstance(payload, dict):
+        logger.warning("[ownership] snapshot payload invalid: runner=%s type=%s", runner_id, type(payload).__name__)
+        return None
+    return snapshot_path, payload
+
+
+def _resolve_snapshot_project_root(payload: dict) -> Path:
+    raw = payload.get("project_root")
+    if isinstance(raw, str) and raw.strip():
+        return Path(raw)
+    return PROJECT_ROOT
+
+
+def _collect_post_merge_owned_paths(plan_file: str, project_root: Path) -> list[Path]:
+    from app.modules.dev_runner.services.archive_service import resolve_archive_target_or_raise
+
+    plan_path = Path(plan_file)
+    today = datetime.now().date()
+    candidates: list[Path] = [plan_path]
+    archive_path: Optional[Path] = None
+
+    try:
+        archive_path = resolve_archive_target_or_raise(plan_file)
+        candidates.append(archive_path)
+    except Exception as exc:
+        logger.debug("[ownership] archive target resolve skipped: plan=%s error=%s", plan_file, exc)
+
+    todo_path = plan_path.parent / f"{plan_path.stem}_todo.md"
+    candidates.append(todo_path)
+    if archive_path is not None:
+        candidates.append(archive_path.parent / todo_path.name)
+
+    done_path = project_root / "docs" / "DONE.md"
+    candidates.extend(
+        [
+            project_root / "TODO.md",
+            done_path,
+            done_path.parent / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md",
+            project_root / "MANUAL_TASKS.md",
+        ]
+    )
+    return candidates
+
+
+def _register_post_merge_owned_files(runner_id: str, plan_file: str) -> None:
+    loaded = _load_runner_ownership_payload(runner_id)
+    if not loaded:
+        return
+
+    snapshot_path, payload = loaded
+    project_root = _resolve_snapshot_project_root(payload)
+    dirty_files = {
+        str(item).replace("\\", "/").casefold()
+        for item in payload.get("dirty_files", [])
+        if isinstance(item, str) and item.strip()
+    }
+    owned_files = {
+        str(item).replace("\\", "/").casefold()
+        for item in payload.get("owned_files", [])
+        if isinstance(item, str) and item.strip()
+    }
+    clean_at_start_files = {
+        str(item).replace("\\", "/").casefold()
+        for item in payload.get("clean_at_start_files", [])
+        if isinstance(item, str) and item.strip()
+    }
+
+    for candidate in _collect_post_merge_owned_paths(plan_file, project_root):
+        key = _normalize_ownership_key(candidate, project_root)
+        if not key:
+            continue
+        owned_files.add(key)
+        if key not in dirty_files:
+            clean_at_start_files.add(key)
+
+    payload["owned_files"] = sorted(owned_files)
+    payload["clean_at_start_files"] = sorted(clean_at_start_files)
+    snapshot_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def is_done_completed(runner_id: str, redis_client: redis.Redis) -> bool:
@@ -642,25 +739,32 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
     done_count, total_count = _get_plan_completion(plan_file)
     if total_count > 0 and done_count == total_count:
         pub_fn(f"완료율 100% ({done_count}/{total_count}) — 자동 done 처리 시작")
-        done_ok = _call_done_api(plan_file, runner_id, pub_fn)
-        if done_ok:
+        try:
+            _register_post_merge_owned_files(runner_id, plan_file)
+        except Exception as exc:
+            logger.warning("[_handle_post_merge_done] ownership owned-files register 실패: runner=%s error=%s", runner_id, exc)
+        done_result = _call_done_api(plan_file, runner_id, pub_fn)
+        if done_result.get("success"):
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_status", "success")
             except Exception:
                 pass
             return {"success": True, "status": "done_called", "done_count": done_count, "total_count": total_count}
 
+        failure_reason = str(done_result.get("reason") or "done_api_failed")
+        error_key = "ownership_guard" if failure_reason == "ownership_guard" else "done_api_failed"
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_status", "failed")
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_error", "done_api_failed")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_error", error_key)
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
         except Exception:
             pass
-        pub_fn("자동 done 실패 — main 추가 사이클 예약")
+        pub_fn(f"자동 done 실패 ({failure_reason}) — main 추가 사이클 예약")
         return {
             "success": False,
             "status": "done_failed",
-            "reason": "done_api_failed",
+            "reason": error_key,
+            "message": str(done_result.get("message") or failure_reason),
             "done_count": done_count,
             "total_count": total_count,
         }
@@ -673,7 +777,7 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
     return {"success": True, "status": "restart_scheduled", "done_count": done_count, "total_count": total_count}
 
 
-def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
+def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> dict:
     """plan_file 경로에 대해 Admin API /plans/{encoded_path}/done 를 호출한다.
 
     Args:
@@ -682,7 +786,7 @@ def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
         pub_fn: 로그 publish 함수 (msg: str) -> None
 
     Returns:
-        True if done API returned 200, False otherwise
+        {"success": bool, "reason": str|None, "message": str}
     """
     try:
         encoded = base64.urlsafe_b64encode(plan_file.encode("utf-8")).decode("ascii").rstrip("=")
@@ -692,7 +796,7 @@ def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
         if resp.status_code != 200:
             pub_fn(f"done API 실패 (status={resp.status_code}) — 수동 처리 필요")
             logger.warning(f"[_call_done_api] done API 실패: runner={runner_id}, status={resp.status_code}, url={url}")
-            return False
+            return {"success": False, "reason": "http_error", "message": f"done API failed with status={resp.status_code}"}
 
         try:
             payload = resp.json()
@@ -704,7 +808,7 @@ def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
                 url,
                 parse_err,
             )
-            return False
+            return {"success": False, "reason": "invalid_json", "message": "done API returned invalid JSON"}
 
         if not isinstance(payload, dict):
             pub_fn("done API 응답 형식 오류 — 수동 처리 필요")
@@ -714,21 +818,22 @@ def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
                 url,
                 type(payload).__name__,
             )
-            return False
+            return {"success": False, "reason": "invalid_payload", "message": "done API returned non-dict payload"}
 
         if payload.get("success") is False:
-            reason = payload.get("message") or "unknown"
-            pub_fn(f"done API 실패 (success=false): {reason} — 수동 처리 필요")
+            reason = str(payload.get("reason") or "done_api_failed")
+            message = str(payload.get("message") or reason)
+            pub_fn(f"done API 실패 (success=false): {message} — 수동 처리 필요")
             logger.warning(
                 "[_call_done_api] done API success=false: runner=%s, url=%s, reason=%s",
                 runner_id,
                 url,
-                reason,
+                message,
             )
-            return False
+            return {"success": False, "reason": reason, "message": message}
 
-        return True
+        return {"success": True, "reason": None, "message": str(payload.get("message") or "")}
     except requests.exceptions.RequestException as e:
         pub_fn(f"done API 연결 실패: {e} — 수동 처리 필요")
         logger.warning(f"[_call_done_api] done API 연결 실패: runner={runner_id}, error={e}")
-        return False
+        return {"success": False, "reason": "request_exception", "message": str(e)}
