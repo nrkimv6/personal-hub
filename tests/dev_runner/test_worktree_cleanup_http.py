@@ -172,7 +172,7 @@ async def test_http_post_cleanup_calls_service(client):
 async def test_http_post_cleanup_repo_id_scope(client):
     mock_response = WorktreeCleanupResponse(
         results=[],
-        summary={"requested": 0, "removed": 0, "skipped": 0, "failed": 0},
+        summary={"requested": 0, "removed": 0, "skipped": 0, "failed": 0, "not_found": 0, "timed_out": 0},
     )
 
     with patch(
@@ -255,3 +255,58 @@ async def test_http_post_cleanup_rejects_non_cleanable(client, tmp_path: Path):
     assert results[locked_branch]["status"] == "skipped"
     assert "locked" in results[locked_branch]["reason"]
     assert results[removable_branch]["status"] == "removed"
+
+
+async def test_http_post_cleanup_returns_timeout_summary(client):
+    mock_response = WorktreeCleanupResponse(
+        results=[
+            WorktreeCleanupResult(
+                branch="runner/t-timeout",
+                status="failed",
+                reason="timeout after 30.0s",
+                worktree_removed=False,
+                branch_removed=False,
+            )
+        ],
+        summary={"requested": 1, "removed": 0, "skipped": 0, "failed": 1, "not_found": 0, "timed_out": 1},
+    )
+
+    with patch(
+        "app.modules.dev_runner.routes.worktrees.cleanup_worktrees",
+        new=AsyncMock(return_value=mock_response),
+    ):
+        resp = await client.post(
+            "/api/v1/dev-runner/worktrees/cleanup",
+            json={"branches": ["runner/t-timeout"], "dry_run": False},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["summary"]["timed_out"] == 1
+    assert body["results"][0]["reason"] == "timeout after 30.0s"
+
+
+async def test_http_post_cleanup_second_apply_reports_not_found(client, tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    branch = "runner/t-http-stale"
+    _add_worktree(repo, branch, "t-http-stale")
+
+    with patch(
+        "app.modules.dev_runner.routes.worktrees._resolve_repo_root",
+        return_value=repo,
+    ):
+        first = await client.post(
+            "/api/v1/dev-runner/worktrees/cleanup?repo_id=1",
+            json={"branches": [branch], "dry_run": False},
+        )
+        second = await client.post(
+            "/api/v1/dev-runner/worktrees/cleanup?repo_id=1",
+            json={"branches": [branch], "dry_run": False},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    body = second.json()
+    assert body["summary"]["not_found"] == 1
+    assert body["summary"]["skipped"] == 1
+    assert body["results"][0]["reason"] == "worktree not found"

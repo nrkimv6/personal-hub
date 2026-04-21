@@ -91,6 +91,21 @@ async def test_integration_cleanup_removes_test_runner_worktree(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_integration_cleanup_second_apply_reports_stale_selection(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    branch = "runner/t-stale-repeat"
+    _add_worktree(repo, branch, "t-stale-repeat")
+
+    first = await cleanup_worktrees([branch], dry_run=False, repo_root=repo)
+    second = await cleanup_worktrees([branch], dry_run=False, repo_root=repo)
+
+    assert first.summary["removed"] == 1
+    assert second.summary["not_found"] == 1
+    assert second.summary["skipped"] == 1
+    assert second.results[0].reason == "worktree not found"
+
+
+@pytest.mark.asyncio
 async def test_integration_cleanup_preserves_locked_and_ahead(tmp_path: Path):
     repo = _init_repo(tmp_path)
 
@@ -114,6 +129,29 @@ async def test_integration_cleanup_preserves_locked_and_ahead(tmp_path: Path):
     listed = _git(repo, "worktree", "list", "--porcelain").stdout
     assert locked_branch in listed
     assert ahead_branch in listed
+
+
+@pytest.mark.asyncio
+async def test_integration_cleanup_timeout_is_reported(monkeypatch, tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    branch = "runner/t-timeout-integration"
+    worktree = _add_worktree(repo, branch, "t-timeout-integration")
+    original_run_git_exec = cleanup_worktrees.__globals__["_run_git_exec"]
+
+    async def _fake_git_exec(*args: str, repo_root: Path, timeout_sec: float | None = None):
+        if args[:3] == ("worktree", "remove", "--force"):
+            return 124, "", f"timeout after {timeout_sec:.1f}s"
+        return await original_run_git_exec(*args, repo_root=repo_root, timeout_sec=timeout_sec)
+
+    monkeypatch.setitem(cleanup_worktrees.__globals__, "_run_git_exec", _fake_git_exec)
+
+    result = await cleanup_worktrees([branch], dry_run=False, repo_root=repo)
+
+    assert result.summary["failed"] == 1
+    assert result.summary["timed_out"] == 1
+    assert result.results[0].reason == "timeout after 30.0s"
+    assert branch in _git(repo, "worktree", "list", "--porcelain").stdout
+    assert worktree.as_posix() in _git(repo, "worktree", "list", "--porcelain").stdout
 
 
 @pytest.mark.skipif(not HAS_FAKEREDIS, reason="fakeredis 미설치")

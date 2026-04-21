@@ -1,8 +1,10 @@
 """워크트리 목록 및 커밋 정보 조회 서비스"""
 
 import asyncio
+import logging
 import re
 import time
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -37,6 +39,8 @@ _WorktreeCacheKey = tuple[str, Optional[int]]
 _CACHE: dict[_WorktreeCacheKey, tuple[WorktreeListResponse, float]] = {}
 _CACHE_TTL_SEC = 3.0
 _CACHE_LOCKS: dict[_WorktreeCacheKey, asyncio.Lock] = {}
+_CLEANUP_GIT_TIMEOUT_SEC = 30.0
+logger = logging.getLogger(__name__)
 
 
 def _iter_plan_dirs(repo_root: Path) -> list[tuple[Path, bool]]:
@@ -135,7 +139,37 @@ def compute_cleanable(
     return archived
 
 
-async def _run_git_exec(*args: str, repo_root: Path = _REPO_ROOT) -> tuple[int, str, str]:
+def _decode_git_output(payload: bytes | None) -> str:
+    return (payload or b"").decode("utf-8", errors="replace")
+
+
+def _is_cleanup_not_found_reason(reason: str) -> bool:
+    return reason.strip() in {"worktree not found", "already removed"}
+
+
+def _is_cleanup_timeout_reason(reason: str) -> bool:
+    return reason.strip().startswith("timeout after ")
+
+
+def _build_cleanup_summary(
+    requested_count: int,
+    results: list[WorktreeCleanupResult],
+) -> dict[str, int]:
+    return {
+        "requested": requested_count,
+        "removed": sum(1 for result in results if result.status == "removed"),
+        "skipped": sum(1 for result in results if result.status == "skipped"),
+        "failed": sum(1 for result in results if result.status == "failed"),
+        "not_found": sum(1 for result in results if _is_cleanup_not_found_reason(result.reason)),
+        "timed_out": sum(1 for result in results if _is_cleanup_timeout_reason(result.reason)),
+    }
+
+
+async def _run_git_exec(
+    *args: str,
+    repo_root: Path = _REPO_ROOT,
+    timeout_sec: float | None = None,
+) -> tuple[int, str, str]:
     """git 명령 실행 헬퍼 — returncode/stdout/stderr를 반환한다."""
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -144,11 +178,20 @@ async def _run_git_exec(*args: str, repo_root: Path = _REPO_ROOT) -> tuple[int, 
             stderr=asyncio.subprocess.PIPE,
             cwd=str(repo_root),
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            if timeout_sec is None:
+                stdout, stderr = await proc.communicate()
+            else:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
+        except asyncio.TimeoutError:
+            with suppress(ProcessLookupError):
+                proc.kill()
+            stdout, stderr = await proc.communicate()
+            return 124, _decode_git_output(stdout), f"timeout after {timeout_sec:.1f}s"
         return (
             proc.returncode,
-            stdout.decode("utf-8", errors="replace"),
-            stderr.decode("utf-8", errors="replace"),
+            _decode_git_output(stdout),
+            _decode_git_output(stderr),
         )
     except Exception as exc:
         return 1, "", str(exc)
@@ -697,15 +740,23 @@ async def cleanup_worktrees(
     if not requested:
         return WorktreeCleanupResponse(
             results=[],
-            summary={"requested": 0, "removed": 0, "skipped": 0, "failed": 0},
+            summary=_build_cleanup_summary(0, []),
         )
 
     async with _cleanup_lock:
+        cleanup_started_at = time.perf_counter()
+        logger.info(
+            "worktree cleanup start requested=%d dry_run=%s repo_root=%s",
+            len(requested),
+            dry_run,
+            repo_root,
+        )
         raw_worktrees = await list_worktrees(repo_root=repo_root)
         worktree_by_branch = {wt["branch"]: wt for wt in raw_worktrees}
         results: list[WorktreeCleanupResult] = []
 
         for branch in requested:
+            branch_started_at = time.perf_counter()
             wt = worktree_by_branch.get(branch)
             if wt is None:
                 results.append(WorktreeCleanupResult(
@@ -713,6 +764,11 @@ async def cleanup_worktrees(
                     status="skipped",
                     reason="worktree not found",
                 ))
+                logger.debug(
+                    "worktree cleanup branch=%s status=skipped reason='worktree not found' duration_sec=%.3f",
+                    branch,
+                    time.perf_counter() - branch_started_at,
+                )
                 continue
 
             ahead, _behind = await get_ahead_behind(branch, repo_root=repo_root)
@@ -736,6 +792,12 @@ async def cleanup_worktrees(
                     status="skipped",
                     reason=", ".join(reasons) or "not cleanable",
                 ))
+                logger.debug(
+                    "worktree cleanup branch=%s status=skipped reason=%r duration_sec=%.3f",
+                    branch,
+                    results[-1].reason,
+                    time.perf_counter() - branch_started_at,
+                )
                 continue
 
             if dry_run:
@@ -744,14 +806,22 @@ async def cleanup_worktrees(
                     status="skipped",
                     reason="dry_run",
                 ))
+                logger.debug(
+                    "worktree cleanup branch=%s status=skipped reason='dry_run' duration_sec=%.3f",
+                    branch,
+                    time.perf_counter() - branch_started_at,
+                )
                 continue
 
             worktree_removed = False
             branch_removed = False
+            remove_started_at = time.perf_counter()
             remove_rc, _remove_out, remove_err = await _run_git_exec(
                 "worktree", "remove", "--force", wt["worktree_path"],
                 repo_root=repo_root,
+                timeout_sec=_CLEANUP_GIT_TIMEOUT_SEC,
             )
+            remove_duration = time.perf_counter() - remove_started_at
             if remove_rc == 0 or "is not a working tree" in remove_err:
                 worktree_removed = True
             else:
@@ -762,20 +832,45 @@ async def cleanup_worktrees(
                     worktree_removed=False,
                     branch_removed=False,
                 ))
+                logger.warning(
+                    "worktree cleanup branch=%s step=worktree-remove status=failed rc=%s duration_sec=%.3f reason=%r",
+                    branch,
+                    remove_rc,
+                    remove_duration,
+                    results[-1].reason,
+                )
                 continue
 
+            logger.debug(
+                "worktree cleanup branch=%s step=worktree-remove status=ok rc=%s duration_sec=%.3f",
+                branch,
+                remove_rc,
+                remove_duration,
+            )
+
+            branch_delete_started_at = time.perf_counter()
             branch_rc, _branch_out, branch_err = await _run_git_exec(
                 "branch", "-D", branch,
                 repo_root=repo_root,
+                timeout_sec=_CLEANUP_GIT_TIMEOUT_SEC,
             )
-            if branch_rc == 0 or "not found" in branch_err or "branch '" in branch_err:
-                branch_removed = branch_rc == 0 or "not found" in branch_err
+            branch_delete_duration = time.perf_counter() - branch_delete_started_at
+            branch_not_found = "not found" in branch_err.lower()
+            if branch_rc == 0 or branch_not_found:
+                branch_removed = branch_rc == 0 or branch_not_found
                 results.append(WorktreeCleanupResult(
                     branch=branch,
                     status="removed",
                     worktree_removed=worktree_removed,
                     branch_removed=branch_removed,
                 ))
+                logger.debug(
+                    "worktree cleanup branch=%s step=branch-delete status=ok rc=%s duration_sec=%.3f branch_removed=%s",
+                    branch,
+                    branch_rc,
+                    branch_delete_duration,
+                    branch_removed,
+                )
                 continue
 
             results.append(WorktreeCleanupResult(
@@ -785,11 +880,25 @@ async def cleanup_worktrees(
                 worktree_removed=worktree_removed,
                 branch_removed=False,
             ))
+            logger.warning(
+                "worktree cleanup branch=%s step=branch-delete status=failed rc=%s duration_sec=%.3f reason=%r",
+                branch,
+                branch_rc,
+                branch_delete_duration,
+                results[-1].reason,
+            )
 
-        summary = {
-            "requested": len(requested),
-            "removed": sum(1 for result in results if result.status == "removed"),
-            "skipped": sum(1 for result in results if result.status == "skipped"),
-            "failed": sum(1 for result in results if result.status == "failed"),
-        }
+        summary = _build_cleanup_summary(len(requested), results)
+        logger.info(
+            "worktree cleanup end requested=%d dry_run=%s repo_root=%s duration_sec=%.3f removed=%d skipped=%d failed=%d not_found=%d timed_out=%d",
+            len(requested),
+            dry_run,
+            repo_root,
+            time.perf_counter() - cleanup_started_at,
+            summary["removed"],
+            summary["skipped"],
+            summary["failed"],
+            summary["not_found"],
+            summary["timed_out"],
+        )
         return WorktreeCleanupResponse(results=results, summary=summary)
