@@ -188,3 +188,93 @@ async def test_coupang_worker_popup_blocked_R():
     mock_popup = AsyncMock()
     await popup_handler(mock_popup)
     mock_popup.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_coupang_release_tab_shielded_on_cancel():
+    """D2-coupang: outer task cancel 후에도 asyncio.shield가 release_tab을 완료시키는지 TC.
+
+    외부 task가 _check_via_playwright 실행 중 cancel되면 finally 내
+    asyncio.shield(release_tab()) 덕분에 release_tab이 정확히 1회 완료되어야 함.
+    tab_in_use가 True로 남지 않는 것을 ensure.
+    """
+    import asyncio
+    from app.worker.coupang_monitor_worker import CoupangMonitorWorker
+
+    release_called = []
+    cancel_started = asyncio.Event()
+
+    mock_page = AsyncMock()
+    mock_page.url = "https://trip.coupang.com/tp/products/123"
+    mock_page.context = MagicMock()
+    mock_page._tab_id = "coupang_tab_1"
+
+    async def blocking_check_and_notify(**kwargs):
+        cancel_started.set()
+        await asyncio.sleep(10)  # 외부 cancel 기다림
+
+    async def tracking_release(tab):
+        release_called.append(tab)
+
+    mock_tab_pool = MagicMock()
+    mock_tab_pool.get_tab = AsyncMock(return_value=mock_page)
+    mock_tab_pool.release_tab = AsyncMock(side_effect=tracking_release)
+
+    mock_browser = MagicMock()
+    mock_browser.tab_pool_manager = mock_tab_pool
+
+    worker = CoupangMonitorWorker(browser_manager=mock_browser)
+    worker._monitor_service = AsyncMock()
+    worker._monitor_service.check_and_notify = AsyncMock(side_effect=blocking_check_and_notify)
+
+    task = asyncio.create_task(
+        worker._check_via_playwright(
+            product_id="123",
+            vendor_item_package_id="pkg_abc",
+            date="2026-04-22",
+            schedule_id=1,
+            service_account_id=None,
+        )
+    )
+    await cancel_started.wait()  # check_and_notify 진입 후 cancel
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+
+    # shield가 release_tab을 완료시켜야 함 (1회 호출)
+    assert len(release_called) == 1, f"release_tab 호출 횟수: {len(release_called)} (기대: 1)"
+
+
+@pytest.mark.asyncio
+async def test_coupang_release_tab_R_normal_release():
+    """R-regression: 정상 경로에서 _check_via_playwright 완료 후 release_tab 1회 호출."""
+    from app.worker.coupang_monitor_worker import CoupangMonitorWorker
+
+    mock_page = AsyncMock()
+    mock_page.url = "https://trip.coupang.com/tp/products/123"
+    mock_page.context = MagicMock()
+    mock_page._tab_id = "coupang_tab_2"
+
+    mock_tab_pool = MagicMock()
+    mock_tab_pool.get_tab = AsyncMock(return_value=mock_page)
+    mock_tab_pool.release_tab = AsyncMock()
+
+    mock_browser = MagicMock()
+    mock_browser.tab_pool_manager = mock_tab_pool
+
+    worker = CoupangMonitorWorker(browser_manager=mock_browser)
+    worker._monitor_service = AsyncMock()
+    worker._monitor_service.check_and_notify = AsyncMock(return_value=[])
+
+    result = await worker._check_via_playwright(
+        product_id="123",
+        vendor_item_package_id="pkg_abc",
+        date="2026-04-22",
+        schedule_id=1,
+        service_account_id=None,
+    )
+
+    assert result is not None
+    mock_tab_pool.release_tab.assert_called_once_with(mock_page)

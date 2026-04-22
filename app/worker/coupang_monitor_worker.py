@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -339,7 +340,7 @@ class CoupangMonitorWorker(BaseWorker):
             return changes, datetime.now()
         finally:
             if page is not None:
-                await self.browser.tab_pool_manager.release_tab(page)
+                await asyncio.shield(self.browser.tab_pool_manager.release_tab(page))
 
     def _set_schedule_last_check_time(self, schedule_id: int, checked_at: datetime) -> None:
         """스케줄 마지막 확인 시각 저장."""
