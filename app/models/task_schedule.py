@@ -56,6 +56,7 @@ class TaskSchedule(Base):
     TARGET_TYPE_PLAN_REQUIREMENTS_SYNC = "plan_requirements_sync"  # 요구사항 문서 생성 — deprecated — Plan 2 전환 후 제거
     TARGET_TYPE_DEVGUIDE_STALENESS = "devguide_staleness"  # dev-guide staleness 감지
     TARGET_TYPE_ARCHIVE_ROTATION = "archive_rotation"      # archive 파일 로테이션 (30건 트리거)
+    TARGET_TYPE_SCHEDULE_DATE_EXPIRE = "schedule_date_expire"  # 과거 날짜 모니터링 스케줄 매일 disable
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"

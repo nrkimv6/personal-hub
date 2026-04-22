@@ -226,6 +226,14 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             for schedule in archive_rotation_schedules:
                 await self._process_archive_rotation_schedule(db, schedule, schedule_service)
 
+            # schedule_date_expire 타입의 활성 스케줄 조회
+            schedule_date_expire_schedules = schedule_service.get_schedules_by_type(
+                TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+                enabled_only=True
+            )
+            for schedule in schedule_date_expire_schedules:
+                await self._process_schedule_date_expire_schedule(db, schedule, schedule_service)
+
         except Exception as e:
             self._log_worker_error("스케줄 디스패치", e)
         finally:
@@ -431,6 +439,111 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             logger.info(f"[{self.name}] archive_rotation 완료: {rotated}건 로테이션, run_id={run.id}")
         except Exception as e:
             self._log_worker_error("_execute_archive_rotation_run", e)
+            try:
+                schedule_service = TaskScheduleService(db)
+                schedule_service.fail_run(run.id, error_message=str(e))
+            except Exception:
+                pass
+        finally:
+            db.close()
+
+    async def _process_schedule_date_expire_schedule(
+        self,
+        db,
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
+    ):
+        """schedule_date_expire 스케줄 처리."""
+        try:
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_at = last_run.started_at if last_run else None
+
+            if not self._should_run_cron(schedule, last_run_at):
+                return
+
+            logger.info(f"[{self.name}] schedule_date_expire 실행 시간 도래: schedule_id={schedule.id}")
+
+            if schedule_service.has_active_run(schedule.id):
+                logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                return
+
+            run = schedule_service.start_run(
+                schedule_id=schedule.id,
+                worker_id=self.name,
+                config_snapshot={}
+            )
+
+            task_name = f"schedule_date_expire_{schedule.id}_run_{run.id}"
+            if not self._is_task_running(task_name):
+                self._create_task(
+                    self._execute_schedule_date_expire_run(schedule, run),
+                    task_name
+                )
+                logger.info(f"[{self.name}] schedule_date_expire 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(
+                f"[{self.name}] schedule_date_expire 스케줄 처리 오류: schedule_id={schedule.id}, error={e}",
+                exc_info=True
+            )
+
+    async def _execute_schedule_date_expire_run(
+        self,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
+    ):
+        """과거 날짜 모니터링 스케줄 is_enabled=false 일괄 처리 후 완료 기록."""
+        from app.services.monitor_schedule_cutoff import get_today_kst_iso
+        from sqlalchemy import text as sa_text
+        db = SessionLocal()
+        try:
+            schedule_service = TaskScheduleService(db)
+            loop = asyncio.get_event_loop()
+
+            def _process():
+                today_kst = get_today_kst_iso()
+                result = db.execute(sa_text("""
+                    UPDATE monitor_schedules
+                    SET is_enabled = false,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE is_enabled = true
+                      AND date < :today_kst
+                    RETURNING id
+                """), {"today_kst": today_kst})
+                affected_ids = [row[0] for row in result.fetchall()]
+                db.commit()
+                return today_kst, affected_ids
+
+            today_kst, affected_ids = await loop.run_in_executor(None, _process)
+            count = len(affected_ids)
+
+            schedule_service.complete_run(
+                run.id,
+                collected_count=count,
+                saved_count=count,
+                stop_reason="completed"
+            )
+            run_obj = db.query(TaskScheduleRun).filter_by(id=run.id).first()
+            if run_obj:
+                run_obj.set_config_snapshot({
+                    "cutoff_date": today_kst,
+                    "affected_count": count,
+                    "affected_ids": affected_ids[:500],
+                })
+                db.commit()
+            schedule_service.update_schedule_after_run(schedule.id)
+            if count > 0:
+                logger.info(
+                    f"[{self.name}] schedule_date_expire 완료: {count}건 비활성화, "
+                    f"cutoff={today_kst}, run_id={run.id}"
+                )
+            else:
+                logger.info(
+                    f"[{self.name}] schedule_date_expire 완료: 비활성화 대상 없음, "
+                    f"cutoff={today_kst}, run_id={run.id}"
+                )
+        except Exception as e:
+            self._log_worker_error("_execute_schedule_date_expire_run", e)
             try:
                 schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, error_message=str(e))

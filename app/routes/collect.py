@@ -18,6 +18,12 @@ from app.models.google_search import GoogleSearchQueue, GoogleSavedSearch
 
 router = APIRouter(prefix="/collect", tags=["collect"])
 
+# 사용자 CRUD 표면에서 숨기는 내부 시스템 스케줄 타입
+_INTERNAL_SCHEDULE_TYPES = {
+    TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
+    TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+}
+
 
 @router.get("/posts", response_model=CollectedPostList)
 async def get_collected_posts(
@@ -209,6 +215,7 @@ async def get_schedules(
     return [
         ScheduleResponse(**_schedule_response_kwargs(s, audit_by_id.get(s.id)))
         for s in schedules
+        if s.target_type not in _INTERNAL_SCHEDULE_TYPES
     ]
 
 
@@ -405,6 +412,8 @@ async def get_schedule_detail(
     schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
+    if schedule.target_type in _INTERNAL_SCHEDULE_TYPES:
+        raise HTTPException(status_code=404, detail="Schedule not found")
 
     schedule_service = TaskScheduleService(db)
     audit = schedule_service.get_schedule_audit(include_disabled=True)
@@ -458,6 +467,8 @@ async def update_schedule(
     """
     schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    if schedule.target_type in _INTERNAL_SCHEDULE_TYPES:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     schedule_service = TaskScheduleService(db)
@@ -544,9 +555,12 @@ async def toggle_schedule(
 ):
     """스케줄 활성화/비활성화."""
     service = TaskScheduleService(db)
-    schedule = service.toggle_schedule(schedule_id, enabled)
-    if not schedule:
+    existing = service.get_schedule_by_id(schedule_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Schedule not found")
+    if existing.target_type in _INTERNAL_SCHEDULE_TYPES:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    schedule = service.toggle_schedule(schedule_id, enabled)
     return {"success": True, "enabled": schedule.enabled}
 
 
@@ -567,6 +581,8 @@ async def delete_schedule(
     # 스케줄 존재 확인
     schedule = service.get_schedule_by_id(schedule_id)
     if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    if schedule.target_type in _INTERNAL_SCHEDULE_TYPES:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     # 실행 이력 수 확인 (삭제 전 정보 제공)
