@@ -169,62 +169,79 @@ class TabPoolManager:
             # 새 탭 생성 가능 여부 확인 (전체 최대 탭 수 기준)
             total_tabs = sum(len(pool) for pool in self.tab_pools.values())
             if total_tabs < self.TOTAL_MAX_TABS:
-                # 해당 계정의 컨텍스트에서 새 탭 생성
+                # new_page()~풀 등록 사이에서 CancelledError가 와도 미등록 탭이 남지 않도록 보호
+                new_tab = None
                 try:
-                    tab = await context.new_page()
-                except Exception as e:
-                    logger.warning(f"탭 생성 실패, 브라우저 컨텍스트 재생성 시도 (service_account_id={service_account_id}): {e}")
-                    # 브라우저 컨텍스트 재생성
-                    await self.handle_browser_closed_error(service_account_id, recreate=True)
-                    context = await self.context_manager.get_or_create_context(service_account_id)
-                    # 탭 풀 재초기화
-                    if service_account_id not in self.tab_pools:
-                        self.tab_pools[service_account_id] = {}
-                        await self.register_initial_tabs(service_account_id, context)
-                    # 재시도
-                    tab = await context.new_page()
-                    logger.info(f"브라우저 복구 후 탭 생성 성공 (service_account_id={service_account_id})")
+                    try:
+                        new_tab = await context.new_page()
+                    except Exception as e:
+                        logger.warning(f"탭 생성 실패, 브라우저 컨텍스트 재생성 시도 (service_account_id={service_account_id}): {e}")
+                        await self.handle_browser_closed_error(service_account_id, recreate=True)
+                        context = await self.context_manager.get_or_create_context(service_account_id)
+                        if service_account_id not in self.tab_pools:
+                            self.tab_pools[service_account_id] = {}
+                            await self.register_initial_tabs(service_account_id, context)
+                        new_tab = await context.new_page()
+                        logger.info(f"브라우저 복구 후 탭 생성 성공 (service_account_id={service_account_id})")
 
-                # 자동화 감지 방지 설정
-                await tab.set_extra_http_headers({
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
-                })
+                    # 자동화 감지 방지 설정
+                    await new_tab.set_extra_http_headers({
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+                    })
 
-                # 고유 탭 ID 생성 (계정 ID 포함)
-                tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
-                while tab_id in account_tab_pool or tab_id in self.tab_pool:
+                    # 고유 탭 ID 생성 (계정 ID 포함)
                     tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
+                    while tab_id in account_tab_pool or tab_id in self.tab_pool:
+                        tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
 
-                account_tab_pool[tab_id] = tab
-                self.tab_pool[tab_id] = tab  # 하위 호환성
-                self.tab_last_used[tab_id] = time.time()
-                self.tab_in_use[tab_id] = True  # ★ 새 탭도 즉시 잠금
-                self.tab_use_count[tab_id] = 0
-                self.tab_account[tab_id] = service_account_id
-                self.total_active_tabs = total_tabs + 1
+                    account_tab_pool[tab_id] = new_tab
+                    self.tab_pool[tab_id] = new_tab  # 하위 호환성
+                    self.tab_last_used[tab_id] = time.time()
+                    self.tab_in_use[tab_id] = True  # ★ 새 탭도 즉시 잠금
+                    self.tab_use_count[tab_id] = 0
+                    self.tab_account[tab_id] = service_account_id
+                    self.total_active_tabs = total_tabs + 1
 
-                tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
-                logger.info(f"🔒 새 탭 생성: {tab_id} → 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS}, 전체 탭: {total_tabs + 1})")
-                break
+                    tab = new_tab
+                    new_tab = None  # 등록 성공 → finally의 close 방지
+
+                    tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
+                    logger.info(f"🔒 새 탭 생성: {tab_id} → 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS}, 전체 탭: {total_tabs + 1})")
+                    break
+
+                finally:
+                    # 등록 전 cancel/error로 new_tab이 아직 None이 아니면 미등록 탭 정리
+                    if new_tab is not None:
+                        try:
+                            await new_tab.close()
+                            logger.warning(f"[TAB-POOL] 미등록 탭 정리: cancel/error 발생 (service_account_id={service_account_id})")
+                        except Exception as close_err:
+                            logger.debug(f"[TAB-POOL] 미등록 탭 close 실패 (무시): {close_err}")
             else:
                 # 모든 탭이 사용 중, 대기
                 wait_count += 1
                 if wait_count == 1:
-                    logger.info(f"대상 {target_id}의 탭 요청 {request_id} 대기 중 (계정 {service_account_id}, 전체 탭: {total_tabs}/{self.TOTAL_MAX_TABS}, 모두 사용 중)")
+                    dead_count = sum(1 for e in self.tab_waiters.values() if e.is_set())
+                    logger.info(
+                        f"[TAB-POOL] 대기 시작: target={target_id}, account={service_account_id}, "
+                        f"waiter_count={len(self.tab_waiters)}, dead={dead_count}, "
+                        f"total_tabs={total_tabs}/{self.TOTAL_MAX_TABS}"
+                    )
 
-                # 대기 이벤트 생성
+                # 대기 이벤트 생성 — try/finally로 CancelledError 포함 모든 종료 경로에서 정리
                 wait_event = asyncio.Event()
                 self.tab_waiters[request_id] = wait_event
-
                 try:
                     await asyncio.wait_for(wait_event.wait(), timeout=self.TAB_WAIT_RETRY_INTERVAL)
                     logger.info(f"대상 {target_id}의 탭 요청 {request_id} 신호 수신")
                     continue
                 except asyncio.TimeoutError:
-                    self.tab_waiters.pop(request_id, None)
                     await asyncio.sleep(0.5)
                     continue
+                finally:
+                    # release_tab이 이미 pop했으면 no-op; CancelledError 시에도 dead waiter 방지
+                    self.tab_waiters.pop(request_id, None)
 
         # 탭 메타데이터 설정 (tab_in_use는 이미 루프 안에서 True로 설정됨)
         self.tab_current_target[tab_id] = target_id
@@ -258,13 +275,16 @@ class TabPoolManager:
                     tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
                     logger.info(f"🔓 탭 반환: {tab_id} ← 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS})")
 
-                    # 대기 중인 요청에 신호 전송
+                    # 대기 중인 요청에 신호 전송 (dead waiter 건너뜀)
                     if self.tab_waiters:
-                        for waiter_id, event in list(self.tab_waiters.items()):
-                            event.set()
-                            self.tab_waiters.pop(waiter_id, None)
-                            logger.debug(f"대기 중인 요청 {waiter_id}에 탭 사용 가능 신호 전송")
-                            break  # 한 번에 하나만 깨움
+                        woken, dead_cleaned = self._wake_waiters(strategy="one")
+                        if dead_cleaned > 0:
+                            logger.info(
+                                f"[TAB-POOL] dead waiter {dead_cleaned}건 정리, "
+                                f"live {woken}건 깨움, 잔여 {len(self.tab_waiters)}건"
+                            )
+                        elif woken > 0:
+                            logger.debug(f"[TAB-POOL] waiter 깨움, 잔여 {len(self.tab_waiters)}건")
         except Exception as e:
             logger.warning(f"탭 반환 중 오류 발생: {str(e)}")
 
@@ -590,13 +610,58 @@ class TabPoolManager:
         # 전체 활성 탭 수 업데이트
         self.total_active_tabs = 0
 
-        # 대기 중인 요청들에게 신호 전송 (탭이 해제됨)
-        for waiter_id, event in list(self.tab_waiters.items()):
-            event.set()
-            self.tab_waiters.pop(waiter_id, None)
+        # 대기 중인 요청들에게 신호 전송 (탭이 해제됨, dead waiter 함께 정리)
+        woken, dead_cleaned = self._wake_waiters(strategy="all")
+        if dead_cleaned > 0:
+            logger.info(f"[TAB-POOL] close_all_tabs: dead waiter {dead_cleaned}건 정리")
 
         logger.info(f"[TAB-POOL] 모든 탭 닫기 완료: {closed_count}개 탭 정리됨")
         return closed_count
+
+    def _wake_waiters(self, strategy: str = "one") -> tuple:
+        """dead waiter를 건너뛰고 live waiter에게 탭 가용 신호를 전송한다.
+
+        strategy="one": live waiter 1건만 깨움 (release_tab용)
+        strategy="all": 모든 live waiter 깨움 (close_all_tabs용)
+
+        Returns:
+            (woken_count, dead_cleaned_count)
+        """
+        woken = 0
+        dead_cleaned = 0
+        for waiter_id, event in list(self.tab_waiters.items()):
+            if event.is_set():
+                # 이미 set된 waiter는 dead (cancel된 코루틴의 잔재)
+                self.tab_waiters.pop(waiter_id, None)
+                dead_cleaned += 1
+                continue
+            event.set()
+            self.tab_waiters.pop(waiter_id, None)
+            woken += 1
+            if strategy == "one":
+                break
+        return woken, dead_cleaned
+
+    def get_status(self) -> dict:
+        """탭 풀 상태 진단 정보 반환.
+
+        Returns:
+            dict: total_active_tabs, in_use_count, waiter_count, dead_waiter_count, account_pool_sizes
+        """
+        total_active = sum(len(pool) for pool in self.tab_pools.values())
+        in_use_count = sum(1 for v in self.tab_in_use.values() if v)
+        dead_waiter_count = sum(1 for e in self.tab_waiters.values() if e.is_set())
+        account_pool_sizes = {
+            account_id: len(pool)
+            for account_id, pool in self.tab_pools.items()
+        }
+        return {
+            "total_active_tabs": total_active,
+            "in_use_count": in_use_count,
+            "waiter_count": len(self.tab_waiters),
+            "dead_waiter_count": dead_waiter_count,
+            "account_pool_sizes": account_pool_sizes,
+        }
 
     def get_pool_size(self, service_account_id: Optional[int] = None) -> int:
         """
