@@ -74,3 +74,28 @@ class TestSystemLivenessHTTP:
                 assert int(val) >= 10, (
                     f"{script.name}: -TimeoutSec {val} < 10 (regression: reverted to 3?)"
                 )
+
+    def test_auto_update_script_uses_liveness_url(self):
+        """Contract guard: auto-update.ps1 probe points to /system/liveness"""
+        script = PROJECT_ROOT / "scripts" / "setup" / "auto-update.ps1"
+        content = script.read_text(encoding="utf-8")
+        pattern = re.compile(r"/api/v1/system/liveness")
+        assert pattern.search(content), (
+            "auto-update.ps1 does not reference /system/liveness — "
+            "regression: still pointing at /system/status?"
+        )
+
+    def test_auto_update_probe_timeout_is_at_least_10s(self):
+        """Regression guard: auto-update.ps1 liveness probe line uses TimeoutSec >= 10"""
+        script = PROJECT_ROOT / "scripts" / "setup" / "auto-update.ps1"
+        content = script.read_text(encoding="utf-8")
+        liveness_lines = [line for line in content.splitlines() if "/system/liveness" in line]
+        assert liveness_lines, "auto-update.ps1 has no /system/liveness reference"
+        timeout_pattern = re.compile(r"-TimeoutSec\s+(\d+)")
+        for line in liveness_lines:
+            m = timeout_pattern.search(line)
+            if m:
+                assert int(m.group(1)) >= 10, (
+                    f"auto-update.ps1 liveness probe: -TimeoutSec {m.group(1)} < 10 "
+                    "(regression: reverted to 5?)"
+                )

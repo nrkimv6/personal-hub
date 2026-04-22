@@ -165,9 +165,13 @@ if ($restartApi) {
 
         for ($i = 1; $i -le $maxRetries; $i++) {
             try {
-                $status = Invoke-RestMethod -Uri "http://localhost:$ApiPort/api/v1/system/status" -Method GET -TimeoutSec 5
-                Write-Log "API 재시작 완료 (PID: $($status.worker_pid), 시도: $i/$maxRetries)"
+                Invoke-RestMethod -Uri "http://localhost:$ApiPort/api/v1/system/liveness" -Method GET -TimeoutSec 10 | Out-Null
+                Write-Log "API 재시작 완료 (시도: $i/$maxRetries)"
                 $apiReady = $true
+                try {
+                    $s = Invoke-RestMethod -Uri "http://localhost:$ApiPort/api/v1/system/status" -Method GET -TimeoutSec 10 -ErrorAction SilentlyContinue
+                    if ($s.worker_pid) { Write-Log "API worker PID: $($s.worker_pid)" }
+                } catch {}
                 break
             } catch {
                 Write-Log "API 아직 준비 안 됨 (시도: $i/$maxRetries, ${retryInterval}초 후 재시도)" "WARN"
