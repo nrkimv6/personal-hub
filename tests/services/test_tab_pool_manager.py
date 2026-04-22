@@ -15,6 +15,7 @@ RIGHT-BICEP 패턴:
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
+import time
 
 
 class TestTabPoolManagerInit:
@@ -676,4 +677,57 @@ class TestTabPoolManagerConcurrentRepro:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # 완료 후 waiter dict가 비어 있어야 함
+        assert pool.tab_waiters == {}, f"waiter 잔류: {pool.tab_waiters}"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_acquire_with_outer_cancels_no_starvation(self, make_pool):
+        """TOTAL_MAX_TABS=5, 요청 8개 중 2개 outer cancel → 나머지 6개 starvation 없이 완료"""
+        pool = make_pool(total_max_tabs=5, tab_wait_retry_interval=0.02, tab_request_timeout=5.0)
+
+        # 탭 풀: 5개 탭 미리 채움. tab_last_used=time.time()으로 cleanup_old_tabs 유발 방지
+        now = time.time()
+        for i in range(5):
+            tab_id = f"t{i}"
+            p = AsyncMock()
+            p._tab_id = tab_id
+            p.is_closed = MagicMock(return_value=False)
+            p.evaluate = AsyncMock(return_value=True)
+            pool.tab_pools[1] = pool.tab_pools.get(1, {})
+            pool.tab_pools[1][tab_id] = p
+            pool.tab_in_use[tab_id] = False
+            pool.tab_account[tab_id] = 1
+            pool.tab_use_count[tab_id] = 0
+            pool.tab_last_used[tab_id] = now  # stale 방지
+        pool.total_active_tabs = 5
+
+        mock_ctx = MagicMock()
+        mock_ctx.pages = list(pool.tab_pools[1].values())
+        mock_ctx.browser = MagicMock()
+        mock_ctx.browser.is_connected = MagicMock(return_value=True)
+        pool.context_manager.get_or_create_context = AsyncMock(return_value=mock_ctx)
+        pool.context_manager.browser_contexts = {}
+        pool.context_manager._get_context_lock = AsyncMock(return_value=asyncio.Lock())
+
+        completed = []
+
+        async def acquire_and_hold(req_id: int):
+            tab = await pool.get_tab(target_id=req_id, service_account_id=1)
+            await asyncio.sleep(0.04)
+            await pool.release_tab(tab)
+            completed.append(req_id)
+
+        # 8개 태스크: 0-4는 즉시 acquire, 5-7은 waiter 큐에서 대기
+        tasks = [asyncio.create_task(acquire_and_hold(i)) for i in range(8)]
+        await asyncio.sleep(0.01)  # waiter 등록 대기
+
+        # 태스크 5, 6 취소 (waiter 큐에 있는 것들)
+        tasks[5].cancel()
+        tasks[6].cancel()
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 6개(0-4, 7)가 CancelledError 없이 완료
+        cancelled_count = sum(1 for r in results if isinstance(r, asyncio.CancelledError))
+        assert cancelled_count == 2, f"취소 수 불일치: {cancelled_count}"
+        assert len(completed) == 6, f"starvation 의심: completed={completed}"
         assert pool.tab_waiters == {}, f"waiter 잔류: {pool.tab_waiters}"
