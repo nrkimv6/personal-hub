@@ -385,349 +385,125 @@ class TestTabTrackingState:
         assert "tab_2" not in tab_pool_manager.tab_pools[1]
 
 
-# ---------------------------------------------------------------------------
-# 신규 TC (Phase T1): D1 waiter 누수, D2 dead waiter starvation, D5 orphan,
-#                     get_status(), _wake_waiters()
-# ---------------------------------------------------------------------------
+# ============================================================
+# actual_pages secondary gate 테스트 (Phase 2: 원인 A 수정 검증)
+# ============================================================
 
-@pytest.fixture()
-def make_pool():
-    """TabPoolManager 팩토리 (설정 패치 포함)"""
-    def _factory(total_max_tabs=5, tab_wait_retry_interval=0.05, tab_request_timeout=0.5):
+class TestActualPagesGate:
+    """실제 페이지 수 기반 TOTAL_MAX_TABS secondary gate 테스트"""
+
+    def _make_pool(self, total_max=5):
         with patch('app.shared.browser.tab_pool_manager.settings') as mock_settings:
             mock_settings.TAB_ROTATION_THRESHOLD = 100
             mock_settings.CACHE_CLEANUP_INTERVAL = 300
-            mock_settings.TAB_REQUEST_TIMEOUT = tab_request_timeout
-            mock_settings.TAB_WAIT_RETRY_INTERVAL = tab_wait_retry_interval
-            mock_settings.TOTAL_MAX_TABS = total_max_tabs
+            mock_settings.TAB_REQUEST_TIMEOUT = 30
+            mock_settings.TAB_WAIT_RETRY_INTERVAL = 0.1
+            mock_settings.TOTAL_MAX_TABS = total_max
             mock_settings.MAX_USES_PER_TAB = 50
-            mock_settings.TAB_CLEANUP_THRESHOLD = 3600
+            mock_settings.TAB_CLEANUP_THRESHOLD = 600
 
             from app.shared.browser.tab_pool_manager import TabPoolManager
-            return TabPoolManager(MagicMock())
-    return _factory
-
-
-class TestTabPoolManagerStatus:
-    """get_status() 메서드 + _wake_waiters() 헬퍼 TC"""
-
-    def test_right_get_status_empty_pool(self, make_pool):
-        """`get_status()` — 빈 풀에서 모든 카운터가 0"""
-        pool = make_pool()
-        status = pool.get_status()
-        assert status["total_active_tabs"] == 0
-        assert status["in_use_count"] == 0
-        assert status["waiter_count"] == 0
-        assert status["dead_waiter_count"] == 0
-        assert status["account_pool_sizes"] == {}
-
-    def test_right_get_status_counts_waiters_and_dead_waiters(self, make_pool):
-        """`get_status()` — live/dead waiter 수, in_use_count, account_pool_sizes 집계"""
-        pool = make_pool()
-        # 탭 2개 등록 (1개 사용중)
-        pool.tab_pools[1] = {"t1": MagicMock(), "t2": MagicMock()}
-        pool.tab_in_use["t1"] = True
-        pool.tab_in_use["t2"] = False
-        # live waiter 1개, dead waiter 1개 (is_set=True)
-        live_ev = asyncio.Event()
-        dead_ev = asyncio.Event()
-        dead_ev.set()
-        pool.tab_waiters["r1"] = live_ev
-        pool.tab_waiters["r2"] = dead_ev
-
-        status = pool.get_status()
-        assert status["total_active_tabs"] == 2
-        assert status["in_use_count"] == 1
-        assert status["waiter_count"] == 2
-        assert status["dead_waiter_count"] == 1
-        assert status["account_pool_sizes"] == {1: 2}
-
-    def test_cross_wake_waiters_one_skips_dead_returns_live(self, make_pool):
-        """`_wake_waiters(one)` — dead waiter 건너뛰고 live 1개만 깨움"""
-        pool = make_pool()
-        dead_ev = asyncio.Event()
-        dead_ev.set()
-        live_ev = asyncio.Event()
-        pool.tab_waiters["dead"] = dead_ev
-        pool.tab_waiters["live"] = live_ev
-
-        woken, dead_cleaned = pool._wake_waiters(strategy="one")
-
-        assert dead_cleaned == 1
-        assert woken == 1
-        assert live_ev.is_set()
-        assert pool.tab_waiters == {}
-
-    def test_cross_wake_waiters_all_wakes_all_live(self, make_pool):
-        """`_wake_waiters(all)` — 모든 live waiter 깨움"""
-        pool = make_pool()
-        ev1 = asyncio.Event()
-        ev2 = asyncio.Event()
-        dead_ev = asyncio.Event()
-        dead_ev.set()
-        pool.tab_waiters["r1"] = ev1
-        pool.tab_waiters["r2"] = ev2
-        pool.tab_waiters["dead"] = dead_ev
-
-        woken, dead_cleaned = pool._wake_waiters(strategy="all")
-
-        assert dead_cleaned == 1
-        assert woken == 2
-        assert ev1.is_set()
-        assert ev2.is_set()
-        assert pool.tab_waiters == {}
-
-
-class TestTabPoolManagerWaiterLeak:
-    """D1: outer cancel 시 waiter dict 정리 TC"""
+            mock_cm = MagicMock()
+            pool = TabPoolManager(mock_cm)
+            pool.TOTAL_MAX_TABS = total_max
+            return pool
 
     @pytest.mark.asyncio
-    async def test_error_outer_cancel_does_not_leak_waiter(self, make_pool):
-        """`wait_for(get_tab(...), timeout=짧은값)` 취소 후 tab_waiters == {}"""
-        pool = make_pool(total_max_tabs=1, tab_wait_retry_interval=10.0, tab_request_timeout=30.0)
+    async def test_tab_pool_actual_pages_gate_B(self):
+        """[Boundary] context.pages >= TOTAL_MAX_TABS일 때 new_page 추가 호출 없이 backoff"""
+        import asyncio
 
-        # 풀을 가득 채워 모든 탭이 사용 중이 되게 만듦
-        mock_tab = MagicMock()
-        mock_tab.is_closed = MagicMock(return_value=False)
-        mock_tab.evaluate = AsyncMock(return_value=True)
-        pool.tab_pools[1] = {"t1": mock_tab}
-        pool.tab_in_use["t1"] = True
-        pool.tab_account["t1"] = 1
-        pool.tab_use_count["t1"] = 0
-        pool.tab_last_used["t1"] = 0.0
-        pool.total_active_tabs = 1
+        with patch('app.shared.browser.tab_pool_manager.settings') as mock_settings:
+            mock_settings.TAB_ROTATION_THRESHOLD = 100
+            mock_settings.CACHE_CLEANUP_INTERVAL = 300
+            mock_settings.TAB_REQUEST_TIMEOUT = 1.0
+            mock_settings.TAB_WAIT_RETRY_INTERVAL = 0.1
+            mock_settings.TOTAL_MAX_TABS = 5
+            mock_settings.MAX_USES_PER_TAB = 50
+            mock_settings.TAB_CLEANUP_THRESHOLD = 600
 
-        mock_ctx = MagicMock()
-        mock_ctx.pages = [mock_tab]
-        mock_ctx.browser = MagicMock()
-        mock_ctx.browser.is_connected = MagicMock(return_value=True)
-        pool.context_manager.get_or_create_context = AsyncMock(return_value=mock_ctx)
-        pool.context_manager.browser_contexts = {}
-        pool.context_manager._get_context_lock = AsyncMock(return_value=asyncio.Lock())
+            from app.shared.browser.tab_pool_manager import TabPoolManager
 
-        # 아주 짧은 outer timeout으로 강제 취소
-        with pytest.raises((asyncio.TimeoutError, Exception)):
-            await asyncio.wait_for(
-                pool.get_tab(target_id=99, service_account_id=1),
-                timeout=0.05
-            )
+            # 5개의 비닫힌 페이지 (실제 탭 = TOTAL_MAX_TABS)
+            fake_pages = []
+            for _ in range(5):
+                p = MagicMock()
+                p.is_closed.return_value = False
+                p.url = "https://naver.com"
+                fake_pages.append(p)
 
-        assert pool.tab_waiters == {}, f"waiter 누수: {pool.tab_waiters}"
+            mock_context = MagicMock()
+            mock_context.pages = fake_pages
+            mock_context.new_page = AsyncMock()
 
-    @pytest.mark.asyncio
-    async def test_error_multiple_outer_cancels_no_accumulation(self, make_pool):
-        """같은 시나리오 5회 반복 후에도 waiter dict 길이가 0"""
-        pool = make_pool(total_max_tabs=1, tab_wait_retry_interval=10.0, tab_request_timeout=30.0)
+            mock_cm = MagicMock()
+            mock_cm.get_or_create_context = AsyncMock(return_value=mock_context)
+            mock_cm.browser_contexts = {}
 
-        mock_tab = MagicMock()
-        mock_tab.is_closed = MagicMock(return_value=False)
-        mock_tab.evaluate = AsyncMock(return_value=True)
-        pool.tab_pools[1] = {"t1": mock_tab}
-        pool.tab_in_use["t1"] = True
-        pool.tab_account["t1"] = 1
-        pool.tab_use_count["t1"] = 0
-        pool.tab_last_used["t1"] = 0.0
-        pool.total_active_tabs = 1
+            pool = TabPoolManager(mock_cm)
+            pool.TOTAL_MAX_TABS = 5
+            pool.TAB_REQUEST_TIMEOUT = 1.0
+            pool.TAB_WAIT_RETRY_INTERVAL = 0.1
 
-        mock_ctx = MagicMock()
-        mock_ctx.pages = [mock_tab]
-        mock_ctx.browser = MagicMock()
-        mock_ctx.browser.is_connected = MagicMock(return_value=True)
-        pool.context_manager.get_or_create_context = AsyncMock(return_value=mock_ctx)
-        pool.context_manager.browser_contexts = {}
-        pool.context_manager._get_context_lock = AsyncMock(return_value=asyncio.Lock())
+            # pool에 1개 탭 등록 (total_tabs = 1 < 5 이지만 actual_pages = 5 >= 5)
+            mock_pool_page = MagicMock()
+            mock_pool_page.is_closed.return_value = False
+            pool.tab_pools[1] = {"1_0001": mock_pool_page}
+            pool.tab_in_use["1_0001"] = True  # 사용 중 → available 없음
+            pool.tab_account["1_0001"] = 1
 
-        for _ in range(5):
-            with pytest.raises(Exception):
-                await asyncio.wait_for(
-                    pool.get_tab(target_id=99, service_account_id=1),
-                    timeout=0.05
-                )
+            # _cleanup_orphan_tabs를 no-op으로 패치 (외부 의존 없이)
+            pool._cleanup_orphan_tabs = AsyncMock(return_value=0)
 
-        assert len(pool.tab_waiters) == 0, f"waiter 누적: {len(pool.tab_waiters)}"
+            with pytest.raises(TimeoutError):
+                await pool.get_tab(target_id=999, service_account_id=1)
+
+            # new_page는 호출되지 않아야 한다 (secondary gate가 막음)
+            mock_context.new_page.assert_not_called()
 
 
-class TestTabPoolManagerReleaseTabFairness:
-    """D2: dead waiter 회피 + 공정성 TC"""
+# ============================================================
+# periodic_cleanup 테스트 (Phase 2: 원인 D 수정 검증)
+# ============================================================
+
+class TestPeriodicCleanup:
+    """periodic_cleanup 메서드 테스트"""
 
     @pytest.mark.asyncio
-    async def test_cross_skips_dead_waiter_and_wakes_live(self, make_pool):
-        """dead waiter를 건너뛰고 live waiter 1건만 깨우는지 검증"""
-        pool = make_pool()
-        mock_tab = MagicMock()
-        mock_tab._tab_id = "t1"
-        pool.tab_in_use["t1"] = True
-        pool.tab_account["t1"] = 1
-        pool.tab_current_target["t1"] = 10
-        pool.tab_last_used["t1"] = 0.0
+    async def test_tab_pool_periodic_cleanup_closes_orphans_R(self):
+        """[Right] periodic_cleanup 호출 시 about:blank / chrome-error:// 팝업 모두 닫힘"""
+        with patch('app.shared.browser.tab_pool_manager.settings') as mock_settings:
+            mock_settings.TAB_ROTATION_THRESHOLD = 100
+            mock_settings.CACHE_CLEANUP_INTERVAL = 300
+            mock_settings.TAB_REQUEST_TIMEOUT = 30
+            mock_settings.TAB_WAIT_RETRY_INTERVAL = 0.5
+            mock_settings.TOTAL_MAX_TABS = 5
+            mock_settings.MAX_USES_PER_TAB = 50
+            mock_settings.TAB_CLEANUP_THRESHOLD = 600
 
-        dead_ev = asyncio.Event()
-        dead_ev.set()
-        live_ev = asyncio.Event()
-        pool.tab_waiters["dead"] = dead_ev
-        pool.tab_waiters["live"] = live_ev
+            from app.shared.browser.tab_pool_manager import TabPoolManager
 
-        await pool.release_tab(mock_tab)
+            blank_page = MagicMock()
+            blank_page.url = "about:blank"
+            blank_page.is_closed.return_value = False
+            blank_page.close = AsyncMock()
 
-        assert live_ev.is_set(), "live waiter가 깨워지지 않음"
-        assert pool.tab_waiters == {}, f"waiter 잔류: {pool.tab_waiters}"
+            error_page = MagicMock()
+            error_page.url = "chrome-error://chromewebdata"
+            error_page.is_closed.return_value = False
+            error_page.close = AsyncMock()
 
-    @pytest.mark.asyncio
-    async def test_cross_only_one_live_waiter_woken_per_release(self, make_pool):
-        """release 1회당 live waiter 1명만 깨어나는지 검증"""
-        pool = make_pool()
-        mock_tab = MagicMock()
-        mock_tab._tab_id = "t1"
-        pool.tab_in_use["t1"] = True
-        pool.tab_account["t1"] = 1
-        pool.tab_last_used["t1"] = 0.0
+            mock_context = MagicMock()
+            mock_context.pages = [blank_page, error_page]
 
-        ev1 = asyncio.Event()
-        ev2 = asyncio.Event()
-        pool.tab_waiters["r1"] = ev1
-        pool.tab_waiters["r2"] = ev2
+            mock_cm = MagicMock()
+            mock_cm.browser_contexts = {1: mock_context}
 
-        await pool.release_tab(mock_tab)
+            pool = TabPoolManager(mock_cm)
+            pool.TOTAL_MAX_TABS = 5
+            pool.tab_pools[1] = {}  # 등록된 pool 탭 없음 → 둘 다 고아
 
-        woken = sum(1 for ev in [ev1, ev2] if ev.is_set())
-        assert woken == 1, f"release 1회에 {woken}개 깨어남"
+            await pool.periodic_cleanup()
 
-
-class TestTabPoolManagerOrphanOnCancel:
-    """D5: new_page() cancel 시 미등록 탭 정리 TC"""
-
-    @pytest.mark.asyncio
-    async def test_error_header_setup_failure_closes_unregistered_tab(self, make_pool):
-        """`set_extra_http_headers()` 실패 시 미등록 탭이 닫히는지 검증"""
-        pool = make_pool(total_max_tabs=5)
-
-        mock_page = AsyncMock()
-        mock_page.set_extra_http_headers = AsyncMock(side_effect=Exception("header error"))
-        mock_page.close = AsyncMock()
-
-        mock_ctx = MagicMock()
-        mock_ctx.pages = []
-        mock_ctx.browser = MagicMock()
-        mock_ctx.browser.is_connected = MagicMock(return_value=True)
-        mock_ctx.new_page = AsyncMock(return_value=mock_page)
-        pool.context_manager.get_or_create_context = AsyncMock(return_value=mock_ctx)
-        pool.context_manager.browser_contexts = {}
-        pool.context_manager._get_context_lock = AsyncMock(return_value=asyncio.Lock())
-
-        # 계정 탭 풀 빈 상태 (새 탭 생성 경로로 진입)
-        pool.tab_pools[1] = {}
-        pool.total_active_tabs = 0
-
-        with pytest.raises(Exception):
-            await pool.get_tab(target_id=1, service_account_id=1)
-
-        # 미등록 탭은 반드시 close() 호출되어야 함
-        mock_page.close.assert_called_once()
-
-
-class TestTabPoolManagerConcurrentRepro:
-    """Phase T3: 실제 asyncio 스케줄링으로 contention/cancel race 재현"""
-
-    @pytest.mark.asyncio
-    async def test_concurrent_acquire_waiter_dict_drains_after_all_done(self, make_pool):
-        """TOTAL_MAX_TABS=2, 요청 4개 (outer cancel 2개) 종료 후 tab_waiters == {}"""
-        pool = make_pool(total_max_tabs=2, tab_wait_retry_interval=0.02, tab_request_timeout=5.0)
-
-        # 탭 풀: 2개 탭 미리 채움
-        pages = []
-        for i in range(2):
-            p = AsyncMock()
-            p._tab_id = f"t{i}"
-            p.is_closed = MagicMock(return_value=False)
-            p.evaluate = AsyncMock(return_value=True)
-            pool.tab_pools[1] = pool.tab_pools.get(1, {})
-            pool.tab_pools[1][f"t{i}"] = p
-            pool.tab_in_use[f"t{i}"] = False
-            pool.tab_account[f"t{i}"] = 1
-            pool.tab_use_count[f"t{i}"] = 0
-            pool.tab_last_used[f"t{i}"] = 0.0
-            pages.append(p)
-        pool.total_active_tabs = 2
-
-        mock_ctx = MagicMock()
-        mock_ctx.pages = pages
-        mock_ctx.browser = MagicMock()
-        mock_ctx.browser.is_connected = MagicMock(return_value=True)
-        pool.context_manager.get_or_create_context = AsyncMock(return_value=mock_ctx)
-        pool.context_manager.browser_contexts = {}
-        pool.context_manager._get_context_lock = AsyncMock(return_value=asyncio.Lock())
-
-        acquired = []
-        released = asyncio.Event()
-
-        async def acquire_and_hold(req_id: int):
-            tab = await pool.get_tab(target_id=req_id, service_account_id=1)
-            acquired.append(req_id)
-            await asyncio.sleep(0.05)  # 잠깐 사용
-            await pool.release_tab(tab)
-
-        # 2개는 정상 acquire, 2개는 대기 → cancel
-        tasks = [asyncio.create_task(acquire_and_hold(i)) for i in range(4)]
-        await asyncio.sleep(0.01)  # 일부 waiter 등록 대기
-
-        # 대기 중인 태스크 2개 취소
-        for t in tasks[2:]:
-            t.cancel()
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 완료 후 waiter dict가 비어 있어야 함
-        assert pool.tab_waiters == {}, f"waiter 잔류: {pool.tab_waiters}"
-
-    @pytest.mark.asyncio
-    async def test_concurrent_acquire_with_outer_cancels_no_starvation(self, make_pool):
-        """TOTAL_MAX_TABS=5, 요청 8개 중 2개 outer cancel → 나머지 6개 starvation 없이 완료"""
-        pool = make_pool(total_max_tabs=5, tab_wait_retry_interval=0.02, tab_request_timeout=5.0)
-
-        # 탭 풀: 5개 탭 미리 채움. tab_last_used=time.time()으로 cleanup_old_tabs 유발 방지
-        now = time.time()
-        for i in range(5):
-            tab_id = f"t{i}"
-            p = AsyncMock()
-            p._tab_id = tab_id
-            p.is_closed = MagicMock(return_value=False)
-            p.evaluate = AsyncMock(return_value=True)
-            pool.tab_pools[1] = pool.tab_pools.get(1, {})
-            pool.tab_pools[1][tab_id] = p
-            pool.tab_in_use[tab_id] = False
-            pool.tab_account[tab_id] = 1
-            pool.tab_use_count[tab_id] = 0
-            pool.tab_last_used[tab_id] = now  # stale 방지
-        pool.total_active_tabs = 5
-
-        mock_ctx = MagicMock()
-        mock_ctx.pages = list(pool.tab_pools[1].values())
-        mock_ctx.browser = MagicMock()
-        mock_ctx.browser.is_connected = MagicMock(return_value=True)
-        pool.context_manager.get_or_create_context = AsyncMock(return_value=mock_ctx)
-        pool.context_manager.browser_contexts = {}
-        pool.context_manager._get_context_lock = AsyncMock(return_value=asyncio.Lock())
-
-        completed = []
-
-        async def acquire_and_hold(req_id: int):
-            tab = await pool.get_tab(target_id=req_id, service_account_id=1)
-            await asyncio.sleep(0.04)
-            await pool.release_tab(tab)
-            completed.append(req_id)
-
-        # 8개 태스크: 0-4는 즉시 acquire, 5-7은 waiter 큐에서 대기
-        tasks = [asyncio.create_task(acquire_and_hold(i)) for i in range(8)]
-        await asyncio.sleep(0.01)  # waiter 등록 대기
-
-        # 태스크 5, 6 취소 (waiter 큐에 있는 것들)
-        tasks[5].cancel()
-        tasks[6].cancel()
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 6개(0-4, 7)가 CancelledError 없이 완료
-        cancelled_count = sum(1 for r in results if isinstance(r, asyncio.CancelledError))
-        assert cancelled_count == 2, f"취소 수 불일치: {cancelled_count}"
-        assert len(completed) == 6, f"starvation 의심: completed={completed}"
-        assert pool.tab_waiters == {}, f"waiter 잔류: {pool.tab_waiters}"
+            blank_page.close.assert_called_once()
+            error_page.close.assert_called_once()

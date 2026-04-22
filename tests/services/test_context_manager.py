@@ -741,6 +741,114 @@ class TestConcurrency:
 
 
 # ============================================================
+# 팝업 핸들러 테스트 (Phase 1: 원인 B 수정 검증)
+# ============================================================
+
+class TestPopupHandlerRegistration:
+    """팝업 차단 핸들러 등록 테스트"""
+
+    def _make_manager(self):
+        from app.shared.browser.context_manager import ContextManager
+        return ContextManager()
+
+    def test_tab_pool_popup_handler_registered_R(self):
+        """[Right] context.on('page') 첫 호출 시 1회만 등록, 재호출 시 중복 등록 없음"""
+        manager = self._make_manager()
+        mock_context = MagicMock()
+        mock_context.pages = []
+
+        manager._register_popup_handler(service_account_id=1, context=mock_context)
+        manager._register_popup_handler(service_account_id=1, context=mock_context)
+
+        assert mock_context.on.call_count == 1
+        assert 1 in manager._popup_handler_registered
+
+    def test_tab_pool_popup_handler_skips_registered_tab_Co(self):
+        """[Conformance] pool 등록 탭(_tab_id 속성 있음)은 close() 호출 안 함"""
+        manager = self._make_manager()
+        mock_context = MagicMock()
+        mock_context.pages = []
+
+        captured_handler = None
+
+        def _capture_on(event, handler):
+            nonlocal captured_handler
+            captured_handler = handler
+
+        mock_context.on.side_effect = _capture_on
+        manager._register_popup_handler(service_account_id=1, context=mock_context)
+
+        assert captured_handler is not None
+
+        mock_page = MagicMock()
+        mock_page._tab_id = "1_1234"
+
+        captured_handler(mock_page)
+
+        mock_page.close.assert_not_called()
+
+    def test_tab_pool_popup_handler_closes_orphan_R(self):
+        """[Right] _tab_id 없는 팝업 페이지에 대해 close task가 생성됨"""
+        import asyncio
+        manager = self._make_manager()
+        mock_context = MagicMock()
+        mock_context.pages = []
+
+        captured_handler = None
+
+        def _capture_on(event, handler):
+            nonlocal captured_handler
+            captured_handler = handler
+
+        mock_context.on.side_effect = _capture_on
+        manager._register_popup_handler(service_account_id=1, context=mock_context)
+
+        assert captured_handler is not None
+
+        close_called = []
+        mock_page = MagicMock(spec=[])
+        mock_page.close = AsyncMock(side_effect=lambda: close_called.append(True))
+
+        async def run():
+            captured_handler(mock_page)
+            await asyncio.sleep(0.05)
+
+        asyncio.get_event_loop().run_until_complete(run())
+        assert len(close_called) == 1
+
+    def test_tab_pool_popup_handler_cleans_preexisting_orphan_E(self):
+        """[Existence] 핸들러 등록 이전의 about:blank 고아 탭을 즉시 close task 생성"""
+        import asyncio
+        manager = self._make_manager()
+
+        close_called = []
+        mock_page = MagicMock(spec=[])
+        mock_page.url = "about:blank"
+        mock_page.close = AsyncMock(side_effect=lambda: close_called.append(True))
+
+        mock_context = MagicMock()
+        mock_context.pages = [mock_page]
+        mock_context.on = MagicMock()
+
+        async def run():
+            manager._register_popup_handler(service_account_id=2, context=mock_context)
+            await asyncio.sleep(0.05)
+
+        asyncio.get_event_loop().run_until_complete(run())
+        assert len(close_called) == 1
+
+    def test_popup_handler_discard_on_close_context(self):
+        """close_context 호출 시 _popup_handler_registered에서 제거됨"""
+        import asyncio
+        manager = self._make_manager()
+        manager._popup_handler_registered.add(5)
+        manager.browser_contexts[5] = AsyncMock()
+
+        asyncio.get_event_loop().run_until_complete(manager.close_context(5))
+        assert 5 not in manager._popup_handler_registered
+
+
+# ============================================================
 # 실행
 # ============================================================
 

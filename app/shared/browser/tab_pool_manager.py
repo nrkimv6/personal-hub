@@ -169,8 +169,20 @@ class TabPoolManager:
             # 새 탭 생성 가능 여부 확인 (전체 최대 탭 수 기준)
             total_tabs = sum(len(pool) for pool in self.tab_pools.values())
             if total_tabs < self.TOTAL_MAX_TABS:
-                # new_page()~풀 등록 사이에서 CancelledError가 와도 미등록 탭이 남지 않도록 보호
-                new_tab = None
+                # secondary gate: 풀 외부 탭(팝업 등)까지 포함한 실제 탭 수 체크
+                actual_pages = len([p for p in context.pages if not p.is_closed()])
+                if actual_pages >= self.TOTAL_MAX_TABS:
+                    await self._cleanup_orphan_tabs()
+                    actual_pages = len([p for p in context.pages if not p.is_closed()])
+                    if actual_pages >= self.TOTAL_MAX_TABS:
+                        logger.warning(
+                            f"[TAB-POOL] 실제 탭 초과({actual_pages}/{self.TOTAL_MAX_TABS}), 재시도 대기 "
+                            f"(service_account_id={service_account_id})"
+                        )
+                        await asyncio.sleep(self.TAB_WAIT_RETRY_INTERVAL)
+                        continue
+
+                # 해당 계정의 컨텍스트에서 새 탭 생성
                 try:
                     try:
                         new_tab = await context.new_page()
@@ -390,10 +402,10 @@ class TabPoolManager:
                     # 탭 풀에 등록되지 않은 페이지 (고아 탭)
                     try:
                         page_url = page.url
-                        # about:blank나 빈 페이지는 닫기
-                        # 또는 최대 탭 수를 초과한 경우에도 닫기
-                        total_tabs = sum(len(pool) for pool in self.tab_pools.values())
-                        if page_url == "about:blank" or total_tabs > self.TOTAL_MAX_TABS:
+                        actual_pages = len([p for p in context.pages if not p.is_closed()])
+                        if (page_url == "about:blank"
+                                or page_url.startswith("chrome-error://")
+                                or actual_pages > self.TOTAL_MAX_TABS):
                             await page.close()
                             orphan_count += 1
                             logger.info(f"고아 탭 정리: service_account_id={service_account_id}, url={page_url}")
@@ -407,6 +419,14 @@ class TabPoolManager:
             logger.warning(f"고아 탭 정리 중 오류: {e}")
 
         return orphan_count
+
+    async def periodic_cleanup(self) -> int:
+        """주기적 고아 탭 정리 — cleanup_old_tabs 단일 경유로 중복 없이 실행.
+
+        Returns:
+            int: 닫힌 탭 수
+        """
+        return await self.cleanup_old_tabs()
 
     async def _is_tab_closed(self, tab: Page) -> bool:
         """탭이 닫혔는지 확인합니다."""

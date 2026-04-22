@@ -10,7 +10,7 @@ Proxy Support (2025-12-11):
 import os
 import asyncio
 from pathlib import Path
-from typing import Dict, Optional, TYPE_CHECKING
+from typing import Dict, Optional, Set, TYPE_CHECKING
 
 from playwright.async_api import async_playwright, BrowserContext
 
@@ -42,10 +42,43 @@ class ContextManager:
         self._context_locks: Dict[int, asyncio.Lock] = {}
         self._locks_lock = asyncio.Lock()  # Lock 딕셔너리 접근용 Lock
 
+        # 팝업 핸들러 중복 등록 방지
+        self._popup_handler_registered: Set[int] = set()
+
     def set_proxy_manager(self, proxy_manager: Optional["ProxyManager"]):
         """프록시 매니저 설정 (런타임 변경용)"""
         self._proxy_manager = proxy_manager
         logger.info(f"[ContextManager] 프록시 매니저 {'설정됨' if proxy_manager else '해제됨'}")
+
+    def _register_popup_handler(self, service_account_id: int, context: "BrowserContext"):
+        """팝업 탭 자동 차단 핸들러를 context에 1회만 등록한다.
+
+        pool 등록 탭(_tab_id 속성 보유)은 닫지 않는다.
+        핸들러 등록 이전에 열린 about:blank 고아 탭도 즉시 정리한다.
+        """
+        if service_account_id in self._popup_handler_registered:
+            return
+
+        def _on_popup(page: "Page"):
+            if hasattr(page, '_tab_id'):
+                return
+            task = asyncio.create_task(page.close())
+            task.add_done_callback(
+                lambda t: logger.debug(f"[ContextManager] 팝업 close 실패 (무시): {t.exception()}") if t.exception() else None
+            )
+
+        context.on("page", _on_popup)
+
+        # 핸들러 등록 이전에 이미 열린 about:blank 고아 탭 즉시 정리
+        try:
+            for page in context.pages:
+                if not hasattr(page, '_tab_id') and page.url == "about:blank":
+                    asyncio.create_task(page.close())
+        except Exception as e:
+            logger.debug(f"[ContextManager] 기존 고아 탭 정리 중 오류 (무시): {e}")
+
+        self._popup_handler_registered.add(service_account_id)
+        logger.debug(f"[ContextManager] 팝업 차단 핸들러 등록: service_account_id={service_account_id}")
 
     def _get_proxy_config(self) -> Optional[Dict]:
         """Playwright용 프록시 설정 반환"""
@@ -240,6 +273,7 @@ class ContextManager:
 
                 if context_valid:
                     logger.debug(f"기존 브라우저 컨텍스트 재사용 (service_account_id={service_account_id})")
+                    self._register_popup_handler(service_account_id, context)
                     return context
                 else:
                     # 컨텍스트가 닫혔으면 딕셔너리에서 제거
@@ -259,6 +293,7 @@ class ContextManager:
                 self.browser_context = context
                 logger.info("기본 브라우저 컨텍스트 설정 완료")
 
+            self._register_popup_handler(service_account_id, context)
             return context
 
     async def _create_browser_context(self, service_account_id: int) -> BrowserContext:
@@ -482,6 +517,7 @@ class ContextManager:
                 context = self.browser_contexts[service_account_id]
                 await context.close()
                 del self.browser_contexts[service_account_id]
+                self._popup_handler_registered.discard(service_account_id)
                 logger.info(f"브라우저 컨텍스트 종료 완료 (service_account_id={service_account_id})")
             except Exception as e:
                 logger.error(f"브라우저 컨텍스트 종료 실패 (service_account_id={service_account_id}): {str(e)}")
