@@ -1,10 +1,11 @@
 """Phase T4 mock E2E for same-date schedule dedupe/rotation."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.worker.naver_monitor_worker import NaverMonitorWorker
+from app.shared.worker.exceptions import TabOperationTimeout
 
 
 def _pending_row(
@@ -158,3 +159,82 @@ async def test_e2e_disabled_row_shrinks_group_and_updates_next_selection():
 
     assert worker._run_groups["100:2026-05-02"]["schedule_ids"] == [2]
     assert worker._select_next_schedule_for_group("100:2026-05-02")["id"] == 2
+
+
+def _make_schedule_meta(schedule_id: int = 199) -> dict:
+    return {
+        "id": schedule_id,
+        "biz_item_id": 100,
+        "service_account_id": 1,
+        "date": "2026-04-22",
+        "time_range": None,
+        "times": '["10:00"]',
+        "last_check_time": None,
+        "next_run_time": None,
+        "interval": 60,
+        "is_enabled": True,
+        "run_status": "queued",
+        "business_pk": 10,
+        "naver_biz_item_id": "naver-item-100",
+        "business_name": "Biz",
+        "naver_business_id": "biz-1",
+        "error_count": 0,
+        "last_error": None,
+        "last_slots": None,
+        "last_data_hash": None,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+async def test_e2e_due_schedule_timeout_is_reported_with_stage_acquire():
+    """overdue schedule TabOperationTimeout(stage=acquire) 시 last_error에 stage=acquire가 기록되고 worker loop가 유지되는지 검증"""
+    worker = NaverMonitorWorker()
+    meta = _make_schedule_meta(199)
+    worker._store_active_schedule(meta)
+
+    timeout_err = TabOperationTimeout("탭 획득 타임아웃 (stage=acquire)", timeout=60.0)
+
+    with patch("app.worker.naver_monitor_worker.SessionLocal") as mock_sl, \
+         patch("app.worker.naver_monitor_worker.EventLogger"), \
+         patch.object(worker, "_execute_monitoring_cycle", side_effect=timeout_err):
+        mock_db = MagicMock()
+        mock_sl.return_value = mock_db
+        mock_db.execute.return_value = MagicMock()
+
+        with pytest.raises(TabOperationTimeout):
+            await worker._check_schedule(meta)
+
+    stored = worker._active_schedules.get(199)
+    assert stored is not None, "schedule이 active_schedules에서 사라짐 (loop 유지 실패)"
+    last_error = stored.get("last_error", "")
+    assert last_error is not None, "last_error가 None"
+    assert "stage=acquire" in last_error, f"last_error에 stage=acquire 없음: {last_error!r}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+async def test_e2e_due_schedule_retries_after_acquire_timeout_without_waiter_leak():
+    """동일 schedule 2회 연속 TabOperationTimeout 처리 후 active_schedule / run-group이 유지되고 error_count가 누적되는지 검증"""
+    worker = NaverMonitorWorker()
+    meta = _make_schedule_meta(199)
+    worker._store_active_schedule(meta)
+
+    timeout_err = TabOperationTimeout("탭 획득 타임아웃 (stage=acquire)", timeout=60.0)
+
+    with patch("app.worker.naver_monitor_worker.SessionLocal") as mock_sl, \
+         patch("app.worker.naver_monitor_worker.EventLogger"), \
+         patch.object(worker, "_execute_monitoring_cycle", side_effect=timeout_err):
+        mock_db = MagicMock()
+        mock_sl.return_value = mock_db
+        mock_db.execute.return_value = MagicMock()
+
+        for _ in range(2):
+            with pytest.raises(TabOperationTimeout):
+                await worker._check_schedule(meta)
+
+    assert 199 in worker._active_schedules, "schedule이 active_schedules에서 제거됨"
+    stored = worker._active_schedules[199]
+    group_key = f"{stored.get('biz_item_id')}:{stored.get('date')}"
+    assert group_key in worker._run_groups, f"run_group {group_key!r} 제거됨"
+    assert stored.get("error_count", 0) >= 2, f"error_count 누적 실패: {stored.get('error_count')}"
