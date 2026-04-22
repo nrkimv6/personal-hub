@@ -77,7 +77,7 @@ def queue_client():
     from app.routes.system import router
 
     app = FastAPI()
-    app.include_router(router, prefix="/api/v1/system")
+    app.include_router(router, prefix="/api/v1")
     return TestClient(app)
 
 
