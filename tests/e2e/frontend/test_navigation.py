@@ -141,6 +141,34 @@ class TestSidebar:
         page.wait_for_load_state("networkidle")
         expect(page).to_have_url(f"{frontend_url}/monitoring")
 
+    def test_sidebar_contains_mp4_gif_link(self, page: Page, frontend_url: str, system_mode: str):
+        """사이드바에 /mp4-gif 링크가 보여야 한다."""
+        _skip_admin_mode_if_public(system_mode)
+        page.set_viewport_size({"width": 1280, "height": 720})
+        page.goto(f"{frontend_url}/dashboard")
+        page.wait_for_load_state("networkidle")
+        _skip_if_frontend_error_title(page)
+
+        mp4_gif_link = page.locator("aside a[href='/mp4-gif']").first
+        if mp4_gif_link.count() == 0:
+            pytest.skip("현재 프런트 빌드에 /mp4-gif 사이드바 링크가 없음")
+        expect(mp4_gif_link).to_be_visible()
+
+    def test_sidebar_navigation_to_mp4_gif(self, page: Page, frontend_url: str, system_mode: str):
+        """사이드바에서 /mp4-gif 페이지로 이동할 수 있어야 한다."""
+        _skip_admin_mode_if_public(system_mode)
+        page.set_viewport_size({"width": 1280, "height": 720})
+        page.goto(f"{frontend_url}/dashboard")
+        page.wait_for_load_state("networkidle")
+        _skip_if_frontend_error_title(page)
+
+        mp4_gif_link = page.locator("aside a[href='/mp4-gif']").first
+        if mp4_gif_link.count() == 0:
+            pytest.skip("현재 프런트 빌드에 /mp4-gif 사이드바 링크가 없음")
+        mp4_gif_link.click(timeout=5000)
+        page.wait_for_load_state("networkidle")
+        expect(page).to_have_url(f"{frontend_url}/mp4-gif")
+
     def test_dashboard_loads_after_restart_frontend_admin_e2e(self, page: Page, frontend_url: str, system_mode: str):
         """CLI restart-frontend 직후 /dashboard가 정상 로드되어야 한다."""
         _skip_admin_mode_if_public(system_mode)

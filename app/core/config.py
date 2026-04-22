@@ -250,6 +250,10 @@ class Settings(BaseSettings):
     ACTIVITY_HUB_PUSH_URL: str = "https://activity.woory.day/api/push"  # Activity Hub PUSH API URL
     ACTIVITY_HUB_SYNC_API_KEY: str = ""  # Activity Hub 동기화 API 키
 
+    # MP4 -> GIF 도구 설정
+    MP4_GIF_WORK_ROOT: str = "data/mp4_gif"
+    MP4_GIF_MAX_UPLOAD_MB: int = 100
+
     # Health Monitor 설정
     HEALTH_MONITOR_ENABLED: bool = True  # 헬스 모니터링 활성화 여부
     HEALTH_PID_CHECK_INTERVAL: int = 10  # PID+포트 체크 간격 (초)
