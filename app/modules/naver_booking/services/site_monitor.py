@@ -12,8 +12,8 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 import asyncio
 from app.config import settings, logger
-from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_naver_page_info
-from app.utils.parsers import extract_date_from_url
+from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_naver_page_info, parse_naver_booking_url
+from app.utils.parsers import extract_date_from_url, extract_date_only
 from app.utils.slot_utils import is_slot_available, is_slot_displayable_from_dict
 
 
@@ -796,23 +796,24 @@ class NaverSiteMonitor(AbstractSiteMonitor):
         """
         try:
             # URL에서 비즈니스 파라미터 추출
-            url_pattern = r'booking/(\d+)/bizes/(\d+)/items/(\d+)'
-            url_match = re.search(url_pattern, url)
-            if not url_match:
+            parsed_url = parse_naver_booking_url(url)
+            if not parsed_url.is_valid:
                 logger.error(f"[{tag}] Could not extract business parameters from URL: {url}")
                 return FetchResult(hash=current_hash, slots=current_data, status="error", reason="URL 파싱 오류")
 
-            business_type_id = int(url_match.group(1))
-            business_id = url_match.group(2)
-            biz_item_id = url_match.group(3)
+            if not parsed_url.category.isdigit():
+                logger.error(f"[{tag}] URL 합성 결함: business_type_id가 비숫자 ({parsed_url.category!r}) — upstream URL synthesis broken — check schedule_service.get_schedule")
+                return FetchResult(hash=current_hash, slots=current_data, status="error", reason="URL 합성 결함: business_type_id가 비숫자")
 
-            # URL에서 날짜 추출 (startDateTime 또는 startDate)
-            date_match = re.search(r'start(?:Date|DateTime)=(\d{4}-\d{2}-\d{2})', url)
-            if not date_match:
+            business_type_id = int(parsed_url.category)
+            business_id = parsed_url.business_id
+            biz_item_id = parsed_url.item_id
+
+            # URL에서 날짜 추출
+            start_date = extract_date_only(parsed_url.start_date)
+            if not start_date:
                 logger.error(f"[{tag}] Could not extract date from URL: {url}")
                 return FetchResult(hash=current_hash, slots=current_data, status="error", reason="날짜 파싱 오류")
-
-            start_date = date_match.group(1)
 
             # 예약 가능 시간 정책
             booking_available_hours = None
