@@ -238,3 +238,127 @@ async def test_e2e_due_schedule_retries_after_acquire_timeout_without_waiter_lea
     group_key = f"{stored.get('biz_item_id')}:{stored.get('date')}"
     assert group_key in worker._run_groups, f"run_group {group_key!r} 제거됨"
     assert stored.get("error_count", 0) >= 2, f"error_count 누적 실패: {stored.get('error_count')}"
+
+
+# ============================================================
+# Phase T4: 과거 날짜 필터 E2E (merge-test 후 실행)
+# ============================================================
+
+def _startup_row_with_date(
+    schedule_id: int,
+    biz_item_id: int,
+    date: str,
+    run_status: str = "queued",
+):
+    return (
+        schedule_id,
+        biz_item_id,
+        60,
+        True,
+        1,
+        run_status,
+        date,
+        None,
+        '["10:00"]',
+        None,
+        None,
+        biz_item_id,
+        f"nitem-{schedule_id}",
+        "Biz",
+        f"biz-{biz_item_id}",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+async def test_e2e_startup_load_excludes_past_date_rows_right():
+    """startup load에서 과거 row가 group에 올라가지 않는다 — DB가 필터링한 결과만 active에 진입."""
+    worker = NaverMonitorWorker()
+    today = "2026-04-22"
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [
+        _startup_row_with_date(10, 200, today),
+        _startup_row_with_date(11, 201, "2099-12-31"),
+    ]
+
+    execute_params = []
+
+    def capture(query, params=None):
+        execute_params.append(params or {})
+        return mock_result
+
+    with patch("app.worker.naver_monitor_worker.SessionLocal") as mock_sl, \
+         patch.object(worker.__class__, "_get_today_kst", return_value=today):
+        mock_db = MagicMock()
+        mock_db.execute.side_effect = capture
+        mock_sl.return_value = mock_db
+
+        await worker._load_active_schedules()
+
+    # today_kst 파라미터가 SQL에 전달됨
+    assert any("today_kst" in p for p in execute_params), "today_kst 파라미터가 SQL에 전달되지 않음"
+    # DB 반환값(필터 통과분)만 active에 존재
+    assert 10 in worker._active_schedules
+    assert 11 in worker._active_schedules
+    # 과거 날짜 row는 DB 필터에서 제외되어 반환 자체가 없음 — active에 없어야 함
+    assert 9 not in worker._active_schedules, "과거 row(id=9)가 active에 올라갔음"
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+async def test_e2e_pending_poll_excludes_past_date_rows_right():
+    """pending poll에서 과거 row가 queued로 승격되지 않는다 — DB가 필터링한 결과만 active에 진입."""
+    worker = NaverMonitorWorker()
+    today = "2026-04-22"
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [
+        _pending_row(20, 200, 1, today, '["10:00"]'),
+    ]
+
+    execute_params = []
+
+    def capture(query, params=None):
+        execute_params.append(params or {})
+        return mock_result
+
+    with patch("app.worker.naver_monitor_worker.SessionLocal") as mock_sl, \
+         patch.object(worker.__class__, "_get_today_kst", return_value=today):
+        mock_db = MagicMock()
+        mock_db.execute.side_effect = capture
+        mock_sl.return_value = mock_db
+
+        await worker._check_for_new_schedules()
+
+    assert any("today_kst" in p for p in execute_params), "today_kst 파라미터가 SQL에 전달되지 않음"
+    assert 20 in worker._active_schedules
+    assert worker._active_schedules[20]["run_status"] == "queued"
+    # 과거 row(id=19)는 DB 단에서 제외됨 — mock이 반환하지 않으므로 active에 없음
+    assert 19 not in worker._active_schedules, "과거 row(id=19)가 active에 올라갔음"
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+async def test_e2e_stale_prune_removes_past_rows_before_dispatch_right():
+    """stale prune이 dispatch 전 과거 row를 active/run_group에서 제거한다."""
+    worker = NaverMonitorWorker()
+    today = "2026-04-22"
+    past = "2026-04-21"
+
+    worker._store_active_schedule({
+        "id": 30, "biz_item_id": 300, "service_account_id": 1,
+        "date": past, "time_range": None, "times": '["10:00"]',
+        "last_check_time": None, "next_run_time": None,
+        "interval": 60, "is_enabled": True, "run_status": "queued",
+        "business_pk": 10, "naver_biz_item_id": "item-30",
+        "business_name": "Biz", "naver_business_id": "biz-300",
+    })
+    assert 30 in worker._active_schedules
+
+    with patch.object(worker.__class__, "_get_today_kst", return_value=today):
+        pruned = worker._prune_past_active_schedules()
+
+    assert pruned == 1, f"prune 결과가 1이어야 함: {pruned}"
+    assert 30 not in worker._active_schedules, "과거 row(id=30)가 prune 후에도 active에 남아있음"
+    assert "300:2026-04-21" not in worker._run_groups

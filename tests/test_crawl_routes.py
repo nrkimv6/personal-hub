@@ -403,3 +403,34 @@ class TestUrlCrawlRoutes:
         assert data["created"] == 2
         assert len(data["errors"]) == 1
         assert "example.com/2" in data["errors"][0]
+
+
+# ============================================================
+# T5: feat-scheduler-daily-disable — generic tasks 표면 검증
+# ============================================================
+
+@pytest.mark.http
+class TestScheduleDateExpireInTasksRoute:
+    """schedule_date_expire internal schedule이 generic /api/tasks/schedules에는 보인다."""
+
+    def test_internal_schedule_visible_in_tasks_api_right(self, client, test_db_session):
+        """[Right] GET /api/tasks/schedules 응답에 schedule_date_expire 타입이 포함된다."""
+        # seed internal schedule
+        schedule = TaskSchedule(
+            name="schedule_date_expire_daily",
+            display_name="과거 날짜 모니터링 스케줄 자동 비활성화",
+            target_type=TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+            target_config="{}",
+            schedule_type="cron",
+            schedule_value='{"time": "01:00"}',
+            enabled=True,
+        )
+        test_db_session.add(schedule)
+        test_db_session.commit()
+
+        response = client.get("/api/tasks/schedules")
+        assert response.status_code == 200
+        data = response.json()
+        types = [s.get("target_type") for s in data]
+        assert TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE in types, \
+            f"schedule_date_expire가 /api/tasks/schedules 응답에 없음: {types}"

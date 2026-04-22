@@ -797,3 +797,87 @@ class TestUpdateScheduleTargetConfig:
         assert "llm_provider" not in updated_tc
         assert "llm_model" not in updated_tc
 
+
+# ============================================================
+# T5: feat-scheduler-daily-disable — collect CRUD 경계 검증
+# ============================================================
+
+def _seed_internal_schedule(test_db, target_type: str) -> int:
+    """internal schedule 1건을 DB에 직접 삽입하고 id 반환."""
+    ts = TaskSchedule(
+        name=f"internal_{target_type}_test",
+        display_name="internal test schedule",
+        target_type=target_type,
+        target_config="{}",
+        schedule_type="cron",
+        schedule_value='{"time": "01:00"}',
+        enabled=True,
+    )
+    test_db.add(ts)
+    test_db.commit()
+    test_db.refresh(ts)
+    return ts.id
+
+
+class TestCollectScheduleHidesInternalSchedules:
+    """collect /schedules 목록에서 internal schedule이 숨겨진다."""
+
+    def test_list_excludes_archive_rotation_right(self, client, test_db):
+        """[Right] GET /api/v1/collect/schedules 응답에 archive_rotation 타입이 없다."""
+        _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION)
+        response = client.get(f"{API_PREFIX}/collect/schedules")
+        assert response.status_code == 200
+        types = [s.get("target_type") for s in response.json()]
+        assert TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION not in types, \
+            f"archive_rotation이 collect 목록에 노출됨: {types}"
+
+    def test_list_excludes_schedule_date_expire_right(self, client, test_db):
+        """[Right] GET /api/v1/collect/schedules 응답에 schedule_date_expire 타입이 없다."""
+        _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE)
+        response = client.get(f"{API_PREFIX}/collect/schedules")
+        assert response.status_code == 200
+        types = [s.get("target_type") for s in response.json()]
+        assert TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE not in types, \
+            f"schedule_date_expire가 collect 목록에 노출됨: {types}"
+
+    def test_detail_internal_schedule_returns_404_right(self, client, test_db):
+        """[Right] GET /api/v1/collect/schedules/{internal_id} → 404."""
+        internal_id = _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE)
+        response = client.get(f"{API_PREFIX}/collect/schedules/{internal_id}")
+        assert response.status_code == 404, \
+            f"internal schedule 상세 조회가 404가 아님: {response.status_code}"
+
+    def test_update_internal_schedule_returns_404_right(self, client, test_db):
+        """[Right] PUT /api/v1/collect/schedules/{internal_id} → 404."""
+        internal_id = _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE)
+        response = client.put(f"{API_PREFIX}/collect/schedules/{internal_id}", json={
+            "target_config": {}
+        })
+        assert response.status_code == 404, \
+            f"internal schedule 수정이 404가 아님: {response.status_code}"
+
+    def test_toggle_internal_schedule_returns_404_right(self, client, test_db):
+        """[Right] POST /api/v1/collect/schedules/{internal_id}/toggle → 404."""
+        internal_id = _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE)
+        response = client.post(f"{API_PREFIX}/collect/schedules/{internal_id}/toggle?enabled=true")
+        assert response.status_code == 404, \
+            f"internal schedule toggle이 404가 아님: {response.status_code}"
+
+    def test_delete_internal_schedule_returns_404_right(self, client, test_db):
+        """[Right] DELETE /api/v1/collect/schedules/{internal_id} → 404."""
+        internal_id = _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE)
+        response = client.delete(f"{API_PREFIX}/collect/schedules/{internal_id}")
+        assert response.status_code == 404, \
+            f"internal schedule 삭제가 404가 아님: {response.status_code}"
+
+    def test_create_schedule_date_expire_is_unsupported_right(self, client, test_db):
+        """[Right] POST /api/v1/collect/schedules에 schedule_date_expire target_type → unsupported 오류."""
+        response = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "schedule_date_expire",
+            "target_config": {},
+            "schedule_type": "cron",
+            "schedule_value": {"time": "01:00"},
+        })
+        assert response.status_code in (400, 422), \
+            f"schedule_date_expire create가 거부되지 않음: {response.status_code}"
+
