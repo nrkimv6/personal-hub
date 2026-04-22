@@ -412,3 +412,128 @@ async def test_worker_check_schedule_persists_last_check_and_next_run_time_after
     assert schedule.next_run_time == next_run_time
     assert worker._active_schedules[schedule.id]["last_check_time"] == checked_at
     assert worker._active_schedules[schedule.id]["next_run_time"] == next_run_time
+
+
+# ============================================================
+# T3: 과거 날짜 필터 PG 통합 케이스
+# ============================================================
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_past_date_excluded_from_startup_load(test_db_session, seeded_schedule_context):
+    """[T3-28] _load_active_schedules가 PG에서 과거 날짜 row를 제외하고 오늘/미래만 로드한다."""
+    item = seeded_schedule_context["item"]
+    today = "2026-04-22"
+    past = "2026-04-21"
+    future = "2026-04-29"
+
+    past_sched = MonitorSchedule(
+        biz_item_id=item.id, service_account_id=None,
+        date=past, times='["10:00"]', is_enabled=True, run_status="queued",
+    )
+    today_sched = MonitorSchedule(
+        biz_item_id=item.id, service_account_id=None,
+        date=today, times='["11:00"]', is_enabled=True, run_status="queued",
+    )
+    future_sched = MonitorSchedule(
+        biz_item_id=item.id, service_account_id=None,
+        date=future, times='["12:00"]', is_enabled=True, run_status="queued",
+    )
+    test_db_session.add_all([past_sched, today_sched, future_sched])
+    test_db_session.commit()
+    for s in [past_sched, today_sched, future_sched]:
+        test_db_session.refresh(s)
+
+    worker = NaverMonitorWorker()
+    with patch.object(test_db_session, "close", return_value=None), \
+         patch("app.worker.naver_monitor_worker.SessionLocal", return_value=test_db_session), \
+         patch.object(NaverMonitorWorker, "_get_today_kst", return_value=today):
+        await worker._load_active_schedules()
+
+    assert past_sched.id not in worker._active_schedules
+    assert today_sched.id in worker._active_schedules
+    assert future_sched.id in worker._active_schedules
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_past_pending_not_queued_by_check_for_new_schedules(test_db_session, seeded_schedule_context):
+    """[T3-29] _check_for_new_schedules가 PG에서 과거 pending row를 queued로 승격하지 않는다."""
+    item = seeded_schedule_context["item"]
+    today = "2026-04-22"
+    past = "2026-04-21"
+
+    past_pending = MonitorSchedule(
+        biz_item_id=item.id, service_account_id=None,
+        date=past, times='["10:00"]', is_enabled=True, run_status="pending",
+    )
+    today_pending = MonitorSchedule(
+        biz_item_id=item.id, service_account_id=None,
+        date=today, times='["11:00"]', is_enabled=True, run_status="pending",
+    )
+    test_db_session.add_all([past_pending, today_pending])
+    test_db_session.commit()
+    for s in [past_pending, today_pending]:
+        test_db_session.refresh(s)
+
+    worker = NaverMonitorWorker()
+    with patch.object(test_db_session, "close", return_value=None), \
+         patch("app.worker.naver_monitor_worker.SessionLocal", return_value=test_db_session), \
+         patch.object(NaverMonitorWorker, "_get_today_kst", return_value=today):
+        await worker._check_for_new_schedules()
+
+    test_db_session.refresh(past_pending)
+    test_db_session.refresh(today_pending)
+
+    # 과거 row는 queued 미승격
+    assert past_pending.run_status == "pending"
+    assert past_pending.id not in worker._active_schedules
+    # 오늘 row는 queued 승격
+    assert today_pending.run_status == "queued"
+    assert today_pending.id in worker._active_schedules
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_stale_row_pruned_before_dispatch(test_db_session, seeded_schedule_context):
+    """[T3-30] startup 때 오늘이었던 row가 cutoff를 넘기면 dispatch 전 prune으로 제거된다."""
+    item = seeded_schedule_context["item"]
+    stale_date = "2026-04-21"  # prune 시점에는 '어제'
+
+    schedule = MonitorSchedule(
+        biz_item_id=item.id, service_account_id=None,
+        date=stale_date, times='["10:00"]', is_enabled=True, run_status="queued",
+    )
+    test_db_session.add(schedule)
+    test_db_session.commit()
+    test_db_session.refresh(schedule)
+
+    worker = NaverMonitorWorker()
+    # 먼저 stale_date가 오늘인 것처럼 startup load
+    with patch.object(test_db_session, "close", return_value=None), \
+         patch("app.worker.naver_monitor_worker.SessionLocal", return_value=test_db_session), \
+         patch.object(NaverMonitorWorker, "_get_today_kst", return_value=stale_date):
+        await worker._load_active_schedules()
+
+    assert schedule.id in worker._active_schedules
+
+    # 격리: 다른 테스트의 row 제거, 대상 schedule만 남김
+    worker._active_schedules = {schedule.id: worker._active_schedules[schedule.id]}
+    worker._run_groups = {k: v for k, v in worker._run_groups.items()
+                         if schedule.id in v.get("schedule_ids", [])}
+
+    # 이제 오늘이 다음 날로 넘어감 → prune이 실행되어야 함
+    check_calls = []
+
+    async def fake_check(meta):
+        check_calls.append(meta["id"])
+
+    worker._check_schedule = AsyncMock(side_effect=fake_check)
+
+    with patch.object(NaverMonitorWorker, "_get_today_kst", return_value="2026-04-22"):
+        await worker._dispatch_due_monitoring_schedules()
+
+    # prune이 stale row를 제거하여 check_schedule이 호출되지 않음
+    assert schedule.id not in worker._active_schedules
+    assert schedule.id not in check_calls
