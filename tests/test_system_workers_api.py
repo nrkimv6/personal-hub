@@ -9,6 +9,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.modules.system.services.worker_service import WorkerService as SystemService
 
@@ -66,6 +67,12 @@ FAKE_PROJECTS_WITH_CHAT = {
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+@pytest.fixture
+def client():
+    from app.main import app
+    return TestClient(app)
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +183,54 @@ def test_stop_watchdogs_Ca_excludes_infra_tier():
         assert not any(pid in path for path in kill_calls), (
             f"infra watchdog {pid}가 stop_watchdogs에 포함됨 (제외되어야 함). 실제: {kill_calls}"
         )
+
+
+def test_get_workers_http_exposes_unified_monitoring_summary(client):
+    """T5: GET /api/v1/system/services/workers → unified_worker에 pending/stuck summary 노출"""
+    summary = {
+        "queued": 2,
+        "running": 1,
+        "pending": 12,
+        "stuck_pending": 4,
+        "hint": "pending 12건 중 4건이 next_run_time/last_check_time 없이 대기 중",
+    }
+
+    with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", FAKE_PROJECTS_WITH_CHAT), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._read_pid_status",
+             new=AsyncMock(return_value={"pid": 101, "running": True}),
+         ), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._get_naver_monitoring_summary",
+             return_value=summary,
+         ):
+        resp = client.get("/api/v1/system/services/workers")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    unified = next((entry for entry in data if entry["name"] == "unified_worker"), None)
+    assert unified is not None, f"unified_worker 없음: {data}"
+    assert unified["monitoring_summary"] == summary
+
+
+def test_get_workers_http_keeps_other_workers_without_monitoring_summary(client):
+    """T5: monitoring summary는 unified_worker에만 붙고 다른 worker 계약은 유지"""
+    with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", FAKE_PROJECTS_WITH_CHAT), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._read_pid_status",
+             new=AsyncMock(return_value={"pid": 202, "running": False}),
+         ), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._get_naver_monitoring_summary",
+             return_value={"queued": 0, "running": 0, "pending": 0, "stuck_pending": 0, "hint": None},
+         ):
+        resp = client.get("/api/v1/system/services/workers")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    chat_executor = next((entry for entry in data if entry["name"] == "chat_executor"), None)
+    assert chat_executor is not None, f"chat_executor 없음: {data}"
+    assert "monitoring_summary" not in chat_executor
 
 
 # ---------------------------------------------------------------------------

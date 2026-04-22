@@ -9,7 +9,10 @@ import sys
 from pathlib import Path
 
 from app.core.config import PROJECT_ROOT
+from app.database import SessionLocal
+from app.config import logger
 from app.shared.process.subprocess_text import with_text_subprocess_defaults
+from sqlalchemy import text
 from ..config import MANAGED_PROJECTS
 from .system_utils import send_redis_command
 from app.modules.dev_runner.services.executor_service import executor_service
@@ -21,6 +24,7 @@ class WorkerService:
     async def get_worker_status(self) -> list:
         """Query worker process status by PID files (watchdog + worker pairs)"""
         result = []
+        monitoring_summary = self._get_naver_monitoring_summary()
 
         for project_name, config in MANAGED_PROJECTS.items():
             workers_config = config.get("workers")
@@ -48,9 +52,63 @@ class WorkerService:
                 if worker_pid_file:
                     entry["worker"] = await self._read_pid_status(pid_dir / worker_pid_file)
 
+                if worker["name"] == "unified_worker" and monitoring_summary is not None:
+                    entry["monitoring_summary"] = monitoring_summary
+
                 result.append(entry)
 
         return result
+
+    def _get_naver_monitoring_summary(self) -> dict | None:
+        """네이버 모니터링 정체 신호를 unified_worker 응답에 함께 노출한다."""
+        db = SessionLocal()
+        try:
+            counts = {
+                "queued": 0,
+                "running": 0,
+                "pending": 0,
+                "stuck_pending": 0,
+                "hint": None,
+            }
+
+            status_rows = db.execute(text("""
+                SELECT run_status, COUNT(*) AS cnt
+                FROM monitor_schedules
+                WHERE is_enabled = true
+                  AND run_status IN ('queued', 'running', 'pending')
+                GROUP BY run_status
+            """)).fetchall()
+            for row in status_rows:
+                counts[str(row[0])] = row[1]
+
+            stuck_row = db.execute(text("""
+                SELECT COUNT(*)
+                FROM monitor_schedules
+                WHERE is_enabled = true
+                  AND run_status = 'pending'
+                  AND last_check_time IS NULL
+                  AND next_run_time IS NULL
+            """)).fetchone()
+            counts["stuck_pending"] = stuck_row[0] if stuck_row else 0
+
+            pending = counts["pending"]
+            active = counts["queued"] + counts["running"]
+            if counts["stuck_pending"] > 0:
+                counts["hint"] = (
+                    f"pending {pending}건 중 {counts['stuck_pending']}건이 "
+                    "next_run_time/last_check_time 없이 대기 중"
+                )
+            elif pending > 0 and active == 0:
+                counts["hint"] = f"pending {pending}건만 남아 있어 실행 정체 여부 확인 필요"
+            elif pending >= 10 and pending >= active * 3:
+                counts["hint"] = f"pending {pending}건이 queued/running {active}건보다 많음"
+
+            return counts
+        except Exception as e:
+            logger.warning(f"워커 모니터링 요약 조회 실패: {e}")
+            return None
+        finally:
+            db.close()
 
     async def _read_pid_status(self, pid_path: Path) -> dict:
         """Read PID file and check process status"""
