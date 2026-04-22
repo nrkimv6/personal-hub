@@ -186,6 +186,9 @@ class TabPoolManager:
                 try:
                     try:
                         new_tab = await context.new_page()
+                        # 즉시 pending 마커 설정 (동기) — _on_popup 핸들러가 sleep(0) 후
+                        # 재확인 시 _tab_id가 있어 탭을 닫지 않도록 보호한다
+                        new_tab._tab_id = "__pending__"
                     except Exception as e:
                         logger.warning(f"탭 생성 실패, 브라우저 컨텍스트 재생성 시도 (service_account_id={service_account_id}): {e}")
                         await self.handle_browser_closed_error(service_account_id, recreate=True)
@@ -194,6 +197,7 @@ class TabPoolManager:
                             self.tab_pools[service_account_id] = {}
                             await self.register_initial_tabs(service_account_id, context)
                         new_tab = await context.new_page()
+                        new_tab._tab_id = "__pending__"  # 재생성 경로도 동일하게 보호
                         logger.info(f"브라우저 복구 후 탭 생성 성공 (service_account_id={service_account_id})")
 
                     # 자동화 감지 방지 설정
@@ -745,6 +749,8 @@ class TabPoolManager:
 
                     # 새 탭 생성
                     page = await context.new_page()
+                    # 즉시 pending 마커 설정 (동기) — _on_popup 핸들러 오탐 방지
+                    page._tab_id = "__pending__"
 
                     # 자동화 감지 방지 설정
                     await page.set_extra_http_headers({

@@ -59,13 +59,27 @@ class ContextManager:
         if service_account_id in self._popup_handler_registered:
             return
 
+        async def _close_if_still_orphan(page: "Page"):
+            # 한 이벤트 루프 사이클 양보 — new_page() 반환 직후 tab_pool_manager가
+            # _tab_id = "__pending__" 마커를 동기적으로 설정할 시간을 확보한다.
+            await asyncio.sleep(0)
+            if hasattr(page, '_tab_id'):
+                return
+            try:
+                if page.is_closed():
+                    return
+            except Exception:
+                pass
+            try:
+                await page.close()
+                logger.debug(f"[ContextManager] 팝업/고아 탭 닫힘 (service_account_id={service_account_id})")
+            except Exception as e:
+                logger.debug(f"[ContextManager] 팝업 close 실패 (무시): {e}")
+
         def _on_popup(page: "Page"):
             if hasattr(page, '_tab_id'):
                 return
-            task = asyncio.create_task(page.close())
-            task.add_done_callback(
-                lambda t: logger.debug(f"[ContextManager] 팝업 close 실패 (무시): {t.exception()}") if t.exception() else None
-            )
+            asyncio.create_task(_close_if_still_orphan(page))
 
         context.on("page", _on_popup)
 
