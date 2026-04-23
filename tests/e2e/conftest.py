@@ -111,7 +111,7 @@ def system_mode(api_url: str) -> str:
     """현재 API 모드(public/admin)."""
     mode_url = f"{api_url}/api/v1/system/mode"
     try:
-        with urlopen(mode_url, timeout=2) as response:
+        with urlopen(mode_url, timeout=5) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         pytest.fail(f"system/mode endpoint returned HTTP {exc.code}: {mode_url}")
@@ -139,7 +139,7 @@ def wait_for_app_ready(page: Page, url: str, timeout: int = 30000):
 def _assert_frontend_available(url: str) -> None:
     try:
         # HTTPError(4xx/5xx)는 서버 기동 상태로 간주하고 테스트 진행
-        with urlopen(url, timeout=2):
+        with urlopen(url, timeout=5):
             pass
     except HTTPError:
         pass
