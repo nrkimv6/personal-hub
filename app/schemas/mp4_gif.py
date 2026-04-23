@@ -19,6 +19,8 @@ class Mp4GifTaskStatusResponse(BaseModel):
     status: Mp4GifTaskStatus
     source_name: str
     fps: int
+    start_seconds: float | None = None
+    duration_seconds: float | None = None
     error_message: str | None = None
     created_at: datetime
     started_at: datetime | None = None

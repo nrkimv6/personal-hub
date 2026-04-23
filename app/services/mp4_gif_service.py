@@ -50,21 +50,32 @@ def validate_mp4_upload(file_name: str, size_bytes: int | None) -> None:
             )
 
 
-def build_ffmpeg_command(input_path: Path, output_path: Path, fps: int) -> list[str]:
+def build_ffmpeg_command(
+    input_path: Path,
+    output_path: Path,
+    fps: int,
+    *,
+    start_seconds: float | None = None,
+    duration_seconds: float | None = None,
+) -> list[str]:
+    if start_seconds is not None and start_seconds < 0:
+        raise ValueError(f"start_seconds must be >= 0, got {start_seconds}")
+    if duration_seconds is not None and duration_seconds <= 0:
+        raise ValueError(f"duration_seconds must be > 0, got {duration_seconds}")
+
     filter_graph = (
         f"fps={fps},split[s0][s1];"
         f"[s0]palettegen[p];"
         f"[s1][p]paletteuse"
     )
-    return [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(input_path),
-        "-vf",
-        filter_graph,
-        str(output_path),
-    ]
+    cmd: list[str] = ["ffmpeg", "-y"]
+    if start_seconds is not None:
+        cmd += ["-ss", str(start_seconds)]
+    cmd += ["-i", str(input_path)]
+    if duration_seconds is not None:
+        cmd += ["-t", str(duration_seconds)]
+    cmd += ["-vf", filter_graph, str(output_path)]
+    return cmd
 
 
 def decode_process_output(raw: bytes | None) -> str:
@@ -87,8 +98,19 @@ def summarize_ffmpeg_error(stderr_text: str) -> str:
     return candidates[-1] if candidates else "ffmpeg 변환에 실패했습니다."
 
 
-def run_ffmpeg_conversion(input_path: Path, output_path: Path, fps: int) -> str | None:
-    command = build_ffmpeg_command(input_path, output_path, fps)
+def run_ffmpeg_conversion(
+    input_path: Path,
+    output_path: Path,
+    fps: int,
+    *,
+    start_seconds: float | None = None,
+    duration_seconds: float | None = None,
+) -> str | None:
+    command = build_ffmpeg_command(
+        input_path, output_path, fps,
+        start_seconds=start_seconds,
+        duration_seconds=duration_seconds,
+    )
     try:
         completed = subprocess.run(
             command,

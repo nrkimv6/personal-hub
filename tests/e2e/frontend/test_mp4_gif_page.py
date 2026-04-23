@@ -115,3 +115,90 @@ class TestMp4GifPageInteraction:
         """
         _skip_admin_mode_if_public(system_mode)
         pytest.skip("T4: 실서버 변환 완료 시나리오 — /merge-test에서 실행")
+
+
+class TestMp4GifTrimPreview:
+    """트림 미리보기 UI 시나리오: 파일 선택 후 video 요소 및 마커 버튼 확인."""
+
+    def test_video_preview_visible_after_file_select(
+        self, page: Page, frontend_url: str, system_mode: str, tmp_path
+    ):
+        """시나리오: MP4 파일 선택 후 video 미리보기 요소가 DOM에 나타난다.
+        기대 요소: video 태그가 visible 상태가 된다.
+        """
+        _skip_admin_mode_if_public(system_mode)
+        page.goto(f"{frontend_url}/mp4-gif")
+        page.wait_for_load_state("networkidle")
+        _skip_if_frontend_error_title(page)
+
+        dummy_mp4 = tmp_path / "sample.mp4"
+        dummy_mp4.write_bytes(b"\x00" * 128)
+
+        file_input = page.locator("input[type='file']")
+        file_input.set_input_files(str(dummy_mp4))
+
+        video_el = page.locator("video")
+        expect(video_el).to_be_attached()
+
+    def test_mark_start_button_visible_when_video_loaded(
+        self, page: Page, frontend_url: str, system_mode: str, tmp_path
+    ):
+        """시나리오: 파일 선택 후 '시작점 지정' 버튼이 DOM에 나타난다.
+        기대 요소: '시작점 지정' 텍스트를 가진 버튼이 attached 상태다.
+        """
+        _skip_admin_mode_if_public(system_mode)
+        page.goto(f"{frontend_url}/mp4-gif")
+        page.wait_for_load_state("networkidle")
+        _skip_if_frontend_error_title(page)
+
+        dummy_mp4 = tmp_path / "sample.mp4"
+        dummy_mp4.write_bytes(b"\x00" * 128)
+
+        file_input = page.locator("input[type='file']")
+        file_input.set_input_files(str(dummy_mp4))
+
+        start_btn = page.locator("button:has-text('시작점 지정')")
+        expect(start_btn).to_be_attached()
+
+    def test_mark_end_button_disabled_until_start_selected(
+        self, page: Page, frontend_url: str, system_mode: str, tmp_path
+    ):
+        """시나리오: 시작점 미지정 상태에서 '종료점 지정' 버튼은 비활성화된다.
+        기대 요소: '종료점 지정' 버튼이 disabled 속성을 갖는다.
+        """
+        _skip_admin_mode_if_public(system_mode)
+        page.goto(f"{frontend_url}/mp4-gif")
+        page.wait_for_load_state("networkidle")
+        _skip_if_frontend_error_title(page)
+
+        dummy_mp4 = tmp_path / "sample.mp4"
+        dummy_mp4.write_bytes(b"\x00" * 128)
+
+        file_input = page.locator("input[type='file']")
+        file_input.set_input_files(str(dummy_mp4))
+
+        end_btn = page.locator("button:has-text('종료점 지정')")
+        expect(end_btn).to_be_disabled()
+
+    def test_mark_end_button_enabled_after_start_selected(
+        self, page: Page, frontend_url: str, system_mode: str, tmp_path
+    ):
+        """시나리오: '시작점 지정' 클릭 후 '종료점 지정' 버튼이 활성화된다.
+        기대 요소: 시작점 클릭 → 종료점 버튼 not_to_be_disabled.
+        """
+        _skip_admin_mode_if_public(system_mode)
+        page.goto(f"{frontend_url}/mp4-gif")
+        page.wait_for_load_state("networkidle")
+        _skip_if_frontend_error_title(page)
+
+        dummy_mp4 = tmp_path / "sample.mp4"
+        dummy_mp4.write_bytes(b"\x00" * 128)
+
+        file_input = page.locator("input[type='file']")
+        file_input.set_input_files(str(dummy_mp4))
+
+        start_btn = page.locator("button:has-text('시작점 지정')")
+        start_btn.click()
+
+        end_btn = page.locator("button:has-text('종료점 지정')")
+        expect(end_btn).not_to_be_disabled()

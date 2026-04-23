@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.mp4_gif_task import Mp4GifTask
 from app.services.mp4_gif_service import (
+    build_ffmpeg_command,
     cleanup_expired_workdirs,
     get_task_input_path,
     get_task_output_path,
@@ -221,3 +222,37 @@ def test_state_transition_queued_to_failed(tmp_path):
 
     session.close()
     engine.dispose()
+
+
+# ─── trim 통합 TC (Phase T3, item 20) ───────────────────────────────────────
+
+def test_run_ffmpeg_conversion_with_trim_creates_output(tmp_path):
+    """start_seconds=0, duration_seconds=3로 stub ffmpeg를 실행해도 output GIF가 생성된다."""
+    from unittest.mock import MagicMock
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"\x00" * 64)
+    output_file = tmp_path / "output.gif"
+
+    def _fake_run(cmd, **kwargs):
+        out_path = Path(cmd[-1])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"GIF89a" + b"\x00" * 16)
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = b""
+        return result
+
+    with patch("app.services.mp4_gif_service.subprocess.run", side_effect=_fake_run):
+        error_msg = run_ffmpeg_conversion(input_file, output_file, fps=10, start_seconds=0.0, duration_seconds=3.0)
+
+    assert error_msg is None, f"성공 stub인데 에러: {error_msg}"
+    assert output_file.exists(), "GIF 산출물이 생성되지 않았습니다."
+
+
+def test_build_ffmpeg_command_ss_before_input(tmp_path):
+    """-ss 인덱스가 -i보다 앞에 있는지 실제 반환 리스트로 검증한다."""
+    cmd = build_ffmpeg_command(tmp_path / "i.mp4", tmp_path / "o.gif", 10, start_seconds=5.0)
+    assert "-ss" in cmd
+    assert "-i" in cmd
+    assert cmd.index("-ss") < cmd.index("-i"), "-ss가 -i보다 앞에 있어야 합니다."

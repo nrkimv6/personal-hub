@@ -23,6 +23,17 @@
   let dragActive = false;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+  // trim preview state (기존 let 패턴 유지 — runes 미사용)
+  let videoSrc: string | null = null;
+  let videoEl: HTMLVideoElement | undefined = undefined;
+  let startSeconds: number | null = null;
+  let endSeconds: number | null = null;
+  let trimErrorMessage: string = '';
+
+  function formatTrimSeconds(seconds: number): string {
+    return `${seconds.toFixed(1)}s`;
+  }
+
   const STATUS_LABELS: Record<Mp4GifTaskStatus, string> = {
     queued: '대기 중',
     running: '변환 중',
@@ -91,8 +102,18 @@
   }
 
   function setSelectedFile(file: File | null) {
+    if (videoSrc) {
+      URL.revokeObjectURL(videoSrc);
+      videoSrc = null;
+    }
     selectedFile = file;
     errorMessage = '';
+    startSeconds = null;
+    endSeconds = null;
+    trimErrorMessage = '';
+    if (file) {
+      videoSrc = URL.createObjectURL(file);
+    }
   }
 
   function handleFileInput(event: Event) {
@@ -135,13 +156,19 @@
       const formData = new FormData();
       formData.append('file', selectedFile);
       formData.append('fps', String(fps));
+      if (startSeconds !== null) {
+        formData.append('start_seconds', startSeconds.toFixed(3));
+        if (endSeconds !== null && endSeconds > startSeconds && !trimErrorMessage) {
+          formData.append('duration_seconds', (endSeconds - startSeconds).toFixed(3));
+        }
+      }
 
       const accepted = await createTask(formData);
       const initialTask = await getTask(accepted.task_id);
       tasks = [initialTask, ...tasks.filter((task) => task.task_id !== initialTask.task_id)];
       startPolling();
       toast.success('변환 작업을 시작했습니다.');
-      selectedFile = null;
+      setSelectedFile(null);
     } catch (error) {
       errorMessage = parseError(error);
       toast.error(errorMessage);
@@ -156,6 +183,9 @@
 
   onDestroy(() => {
     clearPolling();
+    if (videoSrc) {
+      URL.revokeObjectURL(videoSrc);
+    }
   });
 </script>
 
@@ -225,6 +255,74 @@
         {/if}
       </div>
 
+      {#if videoSrc}
+        <div class="mt-4">
+          <video
+            bind:this={videoEl}
+            src={videoSrc}
+            controls
+            class="w-full rounded-xl border border-border bg-black"
+            style="max-height:220px"
+          ></video>
+
+          <div class="mt-3 space-y-2">
+            <!-- 시작점 -->
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40 disabled:opacity-40"
+                onclick={() => {
+                  if (!videoEl) return;
+                  startSeconds = Math.round(videoEl.currentTime * 1000) / 1000;
+                  endSeconds = null;
+                  trimErrorMessage = '';
+                }}
+                disabled={!videoEl}
+              >
+                시작점 지정
+              </button>
+              {#if startSeconds !== null}
+                <span class="text-xs text-muted-foreground">시작: {formatTrimSeconds(startSeconds)}</span>
+                <button
+                  type="button"
+                  class="text-xs text-muted-foreground hover:text-destructive"
+                  onclick={() => { startSeconds = null; endSeconds = null; trimErrorMessage = ''; }}
+                >✕</button>
+              {/if}
+            </div>
+
+            <!-- 종료점 -->
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40 disabled:opacity-40"
+                onclick={() => {
+                  if (!videoEl || startSeconds === null) return;
+                  const t = Math.round(videoEl.currentTime * 1000) / 1000;
+                  endSeconds = t;
+                  trimErrorMessage = t <= startSeconds ? '종료점은 시작점보다 뒤여야 합니다.' : '';
+                }}
+                disabled={startSeconds === null || !videoEl}
+              >
+                종료점 지정
+              </button>
+              {#if endSeconds !== null}
+                <span class="text-xs text-muted-foreground">종료: {formatTrimSeconds(endSeconds)}</span>
+                <button
+                  type="button"
+                  class="text-xs text-muted-foreground hover:text-destructive"
+                  onclick={() => { endSeconds = null; trimErrorMessage = ''; }}
+                >✕</button>
+              {/if}
+            </div>
+
+            {#if trimErrorMessage}
+              <div class="text-xs text-destructive">{trimErrorMessage}</div>
+            {/if}
+          </div>
+        </div>
+      {/if}
+
       <div class="mt-4">
         <label class="mb-2 block text-sm font-medium" for="fps">FPS</label>
         <input
@@ -270,7 +368,13 @@
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <div class="truncate text-sm font-semibold">{task.source_name}</div>
-                  <div class="mt-1 text-xs text-muted-foreground">fps {task.fps}</div>
+                  <div class="mt-1 text-xs text-muted-foreground">fps {task.fps}
+                    {#if task.start_seconds != null && task.duration_seconds != null}
+                      &nbsp;·&nbsp;구간: {formatTrimSeconds(task.start_seconds)} ~ {formatTrimSeconds(task.start_seconds + task.duration_seconds)}
+                    {:else if task.start_seconds != null}
+                      &nbsp;·&nbsp;시작: {formatTrimSeconds(task.start_seconds)} 이후
+                    {/if}
+                  </div>
                 </div>
                 <div class="flex items-center gap-2">
                   {#if task.status === 'running'}

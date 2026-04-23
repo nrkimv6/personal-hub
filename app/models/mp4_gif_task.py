@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text
 
 from .base import Base
 
@@ -20,6 +20,8 @@ class Mp4GifTask(Base):
     stored_input_path = Column(Text, nullable=False)
     stored_output_path = Column(Text, nullable=False)
     fps = Column(Integer, nullable=False, default=10)
+    start_seconds = Column(Float, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
     error_message = Column(Text, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.now)

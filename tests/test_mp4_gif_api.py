@@ -55,7 +55,7 @@ def test_create_task_right_returns_202(
 ):
     client, _session = mp4_gif_api_context
 
-    def fake_run_ffmpeg_conversion(_input_path: Path, output_path: Path, _fps: int):
+    def fake_run_ffmpeg_conversion(_input_path: Path, output_path: Path, _fps: int, *, start_seconds=None, duration_seconds=None):
         output_path.write_bytes(b"GIF89a")
         return None
 
@@ -118,7 +118,7 @@ def test_completed_task_result_downloads_gif(
 ):
     client, _session = mp4_gif_api_context
 
-    def fake_run_ffmpeg_conversion(_input_path: Path, output_path: Path, _fps: int):
+    def fake_run_ffmpeg_conversion(_input_path: Path, output_path: Path, _fps: int, *, start_seconds=None, duration_seconds=None):
         output_path.write_bytes(b"GIF89a")
         return None
 
@@ -153,3 +153,78 @@ def test_health_reports_missing_ffmpeg(
     payload = response.json()
     assert payload["ffmpeg_ok"] is False
     assert "ffmpeg" in payload["error_message"].lower()
+
+
+# ─── trim TC (Phase T1, item 16) ──────────────────────────────────────────────
+
+def test_create_task_with_trim_params_returns_202(
+    mp4_gif_api_context: tuple[TestClient, Session],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Right: start_seconds=3, duration_seconds=7 POST가 202를 반환한다."""
+    client, _session = mp4_gif_api_context
+
+    def fake_run(_ip, op, _fps, *, start_seconds=None, duration_seconds=None):
+        op.write_bytes(b"GIF89a")
+        return None
+
+    monkeypatch.setattr(mp4_gif_routes, "run_ffmpeg_conversion", fake_run)
+
+    response = client.post(
+        "/api/v1/mp4-gif/tasks",
+        files={"file": ("sample.mp4", b"mp4-data", "video/mp4")},
+        data={"fps": "10", "start_seconds": "3", "duration_seconds": "7"},
+    )
+    assert response.status_code == 202
+    assert response.json()["task_id"]
+
+
+def test_create_task_negative_start_returns_400(mp4_gif_api_context: tuple[TestClient, Session]):
+    """Error: start_seconds=-1이면 400을 반환한다."""
+    client, _session = mp4_gif_api_context
+    response = client.post(
+        "/api/v1/mp4-gif/tasks",
+        files={"file": ("sample.mp4", b"mp4-data", "video/mp4")},
+        data={"fps": "10", "start_seconds": "-1"},
+    )
+    assert response.status_code == 400
+
+
+def test_create_task_zero_duration_returns_400(mp4_gif_api_context: tuple[TestClient, Session]):
+    """Error: duration_seconds=0이면 400을 반환한다."""
+    client, _session = mp4_gif_api_context
+    response = client.post(
+        "/api/v1/mp4-gif/tasks",
+        files={"file": ("sample.mp4", b"mp4-data", "video/mp4")},
+        data={"fps": "10", "duration_seconds": "0"},
+    )
+    assert response.status_code == 400
+
+
+def test_get_task_status_includes_trim_fields(
+    mp4_gif_api_context: tuple[TestClient, Session],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Right: 상태 응답 JSON에 start_seconds, duration_seconds가 포함된다."""
+    client, _session = mp4_gif_api_context
+
+    def fake_run(_ip, op, _fps, *, start_seconds=None, duration_seconds=None):
+        op.write_bytes(b"GIF89a")
+        return None
+
+    monkeypatch.setattr(mp4_gif_routes, "run_ffmpeg_conversion", fake_run)
+
+    created = client.post(
+        "/api/v1/mp4-gif/tasks",
+        files={"file": ("sample.mp4", b"mp4-data", "video/mp4")},
+        data={"fps": "10", "start_seconds": "2.5", "duration_seconds": "5.0"},
+    )
+    task_id = created.json()["task_id"]
+
+    status = client.get(f"/api/v1/mp4-gif/tasks/{task_id}")
+    assert status.status_code == 200
+    body = status.json()
+    assert "start_seconds" in body
+    assert "duration_seconds" in body
+    assert abs(body["start_seconds"] - 2.5) < 0.01
+    assert abs(body["duration_seconds"] - 5.0) < 0.01

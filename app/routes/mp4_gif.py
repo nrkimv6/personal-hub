@@ -36,6 +36,8 @@ def _serialize_task(task: Mp4GifTask) -> Mp4GifTaskStatusResponse:
         status=task.status,
         source_name=task.source_name,
         fps=task.fps,
+        start_seconds=task.start_seconds,
+        duration_seconds=task.duration_seconds,
         error_message=task.error_message,
         created_at=task.created_at,
         started_at=task.started_at,
@@ -58,7 +60,11 @@ def _run_task(task_id: str) -> None:
         output_path = Path(task.stored_output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        error_message = run_ffmpeg_conversion(input_path, output_path, task.fps)
+        error_message = run_ffmpeg_conversion(
+            input_path, output_path, task.fps,
+            start_seconds=task.start_seconds,
+            duration_seconds=task.duration_seconds,
+        )
         if error_message:
             task.mark_failed(error_message)
         else:
@@ -74,10 +80,16 @@ async def create_task(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     fps: int = Form(10),
+    start_seconds: float | None = Form(None),
+    duration_seconds: float | None = Form(None),
     db: Session = Depends(get_db),
 ):
     if fps <= 0:
         raise HTTPException(status_code=400, detail="fps는 1 이상의 정수여야 합니다.")
+    if start_seconds is not None and start_seconds < 0:
+        raise HTTPException(status_code=400, detail="start_seconds는 0 이상이어야 합니다.")
+    if duration_seconds is not None and duration_seconds <= 0:
+        raise HTTPException(status_code=400, detail="duration_seconds는 0보다 커야 합니다.")
 
     source_name = file.filename or "video.mp4"
     file_bytes = await file.read()
@@ -103,6 +115,8 @@ async def create_task(
         stored_input_path=str(input_path),
         stored_output_path=str(output_path),
         fps=fps,
+        start_seconds=start_seconds,
+        duration_seconds=duration_seconds,
     )
     db.add(task)
     db.commit()

@@ -12,6 +12,8 @@ export interface Mp4GifTaskStatusResponse {
   status: Mp4GifTaskStatus;
   source_name: string;
   fps: number;
+  start_seconds?: number | null;
+  duration_seconds?: number | null;
   error_message?: string | null;
   created_at: string;
   started_at?: string | null;
