@@ -663,3 +663,24 @@ class TestRunRequestProfileField:
         assert "profile" not in command
         assert "profile_config_dir" not in command
         assert "profile_extra_env" not in command
+
+
+class TestListRunners:
+    """GET /runners — Redis 장애 계약 및 정상 응답 고정"""
+
+    async def test_list_runners_redis_down_503(self, client, mock_executor_redis):
+        """E: Redis ConnectionError → 503 + detail='Redis 연결 실패' (readiness 분리 고정)"""
+        with patch.object(
+            executor_service,
+            "get_all_runners",
+            new=AsyncMock(side_effect=redis.ConnectionError("test")),
+        ):
+            response = await client.get("/api/v1/dev-runner/runners")
+        assert response.status_code == 503
+        assert response.json().get("detail") == "Redis 연결 실패"
+
+    async def test_list_runners_empty_when_no_active(self, client, mock_executor_redis):
+        """B: fakeredis 정상 상태, active runner 없음 → 200 + 빈 리스트 []"""
+        response = await client.get("/api/v1/dev-runner/runners")
+        assert response.status_code == 200
+        assert response.json() == []

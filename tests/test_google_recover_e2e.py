@@ -24,7 +24,7 @@ from app.models.google_search import (
 pytestmark = pytest.mark.e2e
 
 BASE_URL = "http://localhost:8001"
-HEALTH_URL = f"{BASE_URL}/api/v1/dev-runner/runners"
+HEALTH_URL = f"{BASE_URL}/api/v1/system/liveness"
 RECOVER_URL = f"{BASE_URL}/api/v1/google/admin/recover-pending"
 ACTIVE_STATUSES = {
     GoogleSearchQueue.STATUS_QUEUED,

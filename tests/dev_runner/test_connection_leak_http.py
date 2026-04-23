@@ -16,7 +16,7 @@ BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "services" / "browser_worker
 
 def _is_http_env_available() -> bool:
     try:
-        requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=1)
+        requests.get(f"{ADMIN_BASE}/api/v1/system/liveness", timeout=1)
     except Exception:
         return False
     try:

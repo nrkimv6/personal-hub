@@ -36,6 +36,17 @@ def test_live_runners_endpoint():
     assert isinstance(resp.json(), list)
 
 
+def test_live_liveness_endpoint():
+    """R: /api/v1/system/liveness → 200 + status='ok' (merge-test readiness probe, Redis/DB 무관)"""
+    try:
+        resp = httpx.get(f"{BASE_URL}/api/v1/system/liveness", timeout=5)
+    except httpx.ConnectError:
+        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("status") == "ok"
+
+
 def test_live_runtime_fingerprint_endpoint():
     """R: /api/v1/system/runtime-fingerprint 엔드포인트 200 응답 + 진단 필드 확인"""
     try:
