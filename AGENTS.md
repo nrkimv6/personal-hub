@@ -16,6 +16,7 @@
 - `_build_worktree.ps1`는 setup 전용 helper 예외이며, implement 중 임의 probe 근거로 사용하면 안 된다.
 - 스킬 원본 수정: monitor-page의 `.claude/skills`, `.claude/agents` 직접 수정 금지  
   `D:\work\project\service\wtools\.claude\`에서 수정 후 동기화
+- `.claude/skills/` 또는 `.agents/skills/` 수정 시에는 다른 경로도 함께 갱신해 드리프트를 방지한다.
 
 ## Plans Worktree (활성)
 
