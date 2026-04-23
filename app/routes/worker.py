@@ -106,25 +106,25 @@ def get_worker_status_from_db() -> dict:
                    started_at, active_tabs, browser_contexts, global_pause, paused_at
             FROM worker_status
             WHERE id = 1
-        """)).fetchone()
+        """)).mappings().first()
 
         if result:
             redis_health = WorkerHealthRedis.check("naver")
             last_heartbeat = redis_health["updated_at"] if redis_health else None
-            started_at = _to_iso_timestamp(result[5])
-            paused_at = _to_iso_timestamp(result[9])
-            uptime_seconds = calculate_uptime(result[5])
+            started_at = _to_iso_timestamp(result["started_at"])
+            paused_at = _to_iso_timestamp(result["paused_at"])
+            uptime_seconds = calculate_uptime(result["started_at"])
             return {
-                "pid": result[0],
-                "status": result[1],
-                "active_tasks": result[2] or 0,
+                "pid": result["pid"],
+                "status": result["status"],
+                "active_tasks": result["active_tasks"] or 0,
                 "last_heartbeat": last_heartbeat,
-                "memory_usage_mb": result[4],
+                "memory_usage_mb": result["memory_usage_mb"],
                 "started_at": started_at,
                 "uptime_seconds": uptime_seconds,
-                "active_tabs": result[6] or 0,
-                "browser_contexts": result[7] or 0,
-                "global_pause": bool(result[8]) if result[8] is not None else False,
+                "active_tabs": result["active_tabs"] or 0,
+                "browser_contexts": result["browser_contexts"] or 0,
+                "global_pause": bool(result["global_pause"]) if result["global_pause"] is not None else False,
                 "paused_at": paused_at,
                 "error_message": None,
             }

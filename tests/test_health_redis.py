@@ -184,16 +184,22 @@ class TestHealthCheckApiConversion:
     """Naver 워커 건강 체크 API 전환 테스트 (worker.py 로직)"""
 
     def _make_db_row(self, pid=None, last_heartbeat=None, started_at=None, paused_at=None):
-        """worker_status DB 행 모의 객체 생성.
+        """worker_status DB RowMapping dict 모의 객체 생성.
 
-        컬럼 순서 (새 스키마, 10컬럼):
-        pid[0], status[1], active_tasks[2], last_heartbeat[3],
-        memory_usage_mb[4], started_at[5], active_tabs[6],
-        browser_contexts[7], global_pause[8], paused_at[9]
+        .mappings().first() 전환 후 이름 기반 접근용.
         """
-        return (
-            pid, "running", None, last_heartbeat, 0, started_at, 0, 0, False, paused_at
-        )
+        return {
+            "pid": pid,
+            "status": "running",
+            "active_tasks": None,
+            "last_heartbeat": last_heartbeat,
+            "memory_usage_mb": 0,
+            "started_at": started_at,
+            "active_tabs": 0,
+            "browser_contexts": 0,
+            "global_pause": False,
+            "paused_at": paused_at,
+        }
 
     def test_worker_health_redis_healthy_right(self, fake_redis):
         """R(Right): Redis에 naver 키 publish → is_healthy=True + seconds_since_heartbeat 존재."""
@@ -203,7 +209,7 @@ class TestHealthCheckApiConversion:
 
         # SessionLocal을 mock으로 교체하여 get_worker_status_from_db() 실행
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=os.getpid())
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(pid=os.getpid())
 
         with patch("app.routes.worker.SessionLocal", return_value=mock_session):
             result = get_worker_status_from_db()
@@ -219,7 +225,7 @@ class TestHealthCheckApiConversion:
 
         # Redis에 키 없음, DB 행에 old last_heartbeat
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=0, last_heartbeat="2000-01-01")
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(pid=0, last_heartbeat="2000-01-01")
 
         with patch("app.routes.worker.SessionLocal", return_value=mock_session):
             result = get_worker_status_from_db()
@@ -238,7 +244,7 @@ class TestHealthCheckApiConversion:
         expected_updated_at = redis_data["updated_at"]
 
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=5678, last_heartbeat="2000-01-01T00:00:00")
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(pid=5678, last_heartbeat="2000-01-01T00:00:00")
 
         with patch("app.routes.worker.SessionLocal", return_value=mock_session):
             result = get_worker_status_from_db()
@@ -251,7 +257,7 @@ class TestHealthCheckApiConversion:
         from app.routes.worker import get_worker_status_from_db
 
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=1234)
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(pid=1234)
 
         with patch("app.routes.worker.SessionLocal", return_value=mock_session):
             result = get_worker_status_from_db()
@@ -265,7 +271,7 @@ class TestHealthCheckApiConversion:
         from app.routes.worker import get_worker_status_from_db
 
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=9999)
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(pid=9999)
 
         with patch("app.routes.worker.SessionLocal", return_value=mock_session):
             result = get_worker_status_from_db()
@@ -285,7 +291,7 @@ class TestHealthCheckApiConversion:
 
         started_at = datetime(2026, 4, 13, 9, 14, 0)
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(
             pid=1234,
             started_at=started_at,
         )
@@ -301,7 +307,7 @@ class TestHealthCheckApiConversion:
 
         paused_at = datetime(2026, 4, 13, 10, 30, 0)
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(
             pid=1234,
             paused_at=paused_at,
         )
@@ -316,7 +322,7 @@ class TestHealthCheckApiConversion:
         from app.routes.worker import get_worker_status_from_db
 
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(pid=1234)
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(pid=1234)
 
         with patch("app.routes.worker.SessionLocal", return_value=mock_session):
             result = get_worker_status_from_db()
@@ -345,7 +351,7 @@ class TestHealthCheckApiConversion:
 
         paused_at = datetime(2026, 4, 13, 10, 45, 0)
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(
             pid=1234,
             paused_at=paused_at,
             started_at=datetime(2026, 4, 13, 9, 0, 0),
@@ -371,7 +377,7 @@ class TestHealthCheckApiConversion:
 
         # DB에는 stale PID가 남아있음
         mock_session = MagicMock()
-        mock_session.execute.return_value.fetchone.return_value = self._make_db_row(
+        mock_session.execute.return_value.mappings.return_value.first.return_value = self._make_db_row(
             pid=stale_pid, last_heartbeat="2000-01-01T00:00:00"
         )
 
