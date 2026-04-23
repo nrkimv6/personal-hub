@@ -170,3 +170,34 @@ class TestSystemQueueUrlField:
 
         assert resp.status_code == 200
         assert resp.json() == []
+
+    def test_GET_system_queue_shuffled_keys_url_and_interval_intact(self, queue_client):
+        """Re: dict key 순서가 섞여도 이름 기반 접근이라 url/interval 생성이 깨지지 않음"""
+        shuffled_row = {
+            "naver_biz_item_id": "6309731",
+            "business_type_id": 13,
+            "custom_interval": 30,
+            "interval": 60,
+            "naver_business_id": "1630978",
+            "biz_item_name": "올리브영 예약",
+            "business_name": "올리브영N성수",
+            "id": 1,
+            "date": "2026-04-24",
+            "run_status": "queued",
+            "error_count": 0,
+            "last_error": None,
+            "last_check_time": None,
+            "next_run_time": None,
+        }
+        mock_db = MagicMock()
+        mock_db.execute.return_value.mappings.return_value.all.return_value = [shuffled_row]
+
+        with patch("app.routes.system.SessionLocal", return_value=mock_db):
+            resp = queue_client.get("/api/v1/system/queue")
+
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        item = items[0]
+        assert URL_PATTERN.match(item["url"]), f"url 불일치: {item['url']!r}"
+        assert item["interval"] == 30, "custom_interval=30이 interval보다 우선되어야 함"

@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("TESTING", "1")
 
+pytestmark = pytest.mark.http
+
 
 @pytest.fixture
 def app_with_router():
