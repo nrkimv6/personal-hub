@@ -184,10 +184,12 @@ async def test_coupang_worker_popup_blocked_R():
     mock_context.on.assert_called_once_with("page", popup_handler)
 
     # 팝업 핸들러 호출 시 popup.close() 가 호출되어야 함
+    # MagicMock(spec=['close'])로 _tab_id 자동 속성 생성 차단, close는 AsyncMock으로 명시
     assert popup_handler is not None
-    mock_popup = AsyncMock()
+    mock_popup = MagicMock(spec=["close"])
+    mock_popup.close = AsyncMock()
     await popup_handler(mock_popup)
-    mock_popup.close.assert_called_once()
+    mock_popup.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
