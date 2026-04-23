@@ -599,13 +599,21 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 if record.filename_hash in existing_pending:
                     continue
 
-                file_content = ""
-                try:
-                    fp = Path(record.file_path)
-                    if fp.exists():
-                        file_content = fp.read_text(encoding="utf-8", errors="replace")
-                except Exception:
-                    pass
+                # DB-first: raw_content 우선, 없으면 파일 읽기 fallback
+                file_content = record.raw_content or ""
+                if not file_content:
+                    try:
+                        fp = Path(record.file_path)
+                        if fp.exists():
+                            file_content = fp.read_text(encoding="utf-8", errors="replace")
+                    except Exception:
+                        pass
+
+                if not file_content:
+                    logger.warning(
+                        f"[scheduler] plan 내용 없음 — LLMRequest 생성 스킵: {record.file_path}"
+                    )
+                    continue
 
                 prompt = build_plan_analyze_prompt(
                     file_content=file_content,
