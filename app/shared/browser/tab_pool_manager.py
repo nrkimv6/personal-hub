@@ -230,7 +230,7 @@ class TabPoolManager:
                     # 등록 전 cancel/error로 new_tab이 아직 None이 아니면 미등록 탭 정리
                     if new_tab is not None:
                         try:
-                            await new_tab.close()
+                            await asyncio.shield(new_tab.close())
                             logger.warning(f"[TAB-POOL] 미등록 탭 정리: cancel/error 발생 (service_account_id={service_account_id})")
                         except Exception as close_err:
                             logger.debug(f"[TAB-POOL] 미등록 탭 close 실패 (무시): {close_err}")

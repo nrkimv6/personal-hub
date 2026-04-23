@@ -221,7 +221,10 @@ class SessionManager:
                 }
 
             finally:
-                await page.close()
+                try:
+                    await asyncio.shield(page.close())
+                except Exception as close_err:
+                    logger.debug(f"[SessionManager] naver login check page close 실패 (무시): {close_err}")
 
         except Exception as e:
             logger.error(f"로그인 상태 확인 실패 (service_account_id={service_account_id}): {str(e)}")
@@ -282,7 +285,10 @@ class SessionManager:
                 }
 
             finally:
-                await page.close()
+                try:
+                    await asyncio.shield(page.close())
+                except Exception as close_err:
+                    logger.debug(f"[SessionManager] instagram login check page close 실패 (무시): {close_err}")
 
         except Exception as e:
             logger.error(f"Instagram 로그인 상태 확인 실패 (service_account_id={service_account_id}): {str(e)}")
