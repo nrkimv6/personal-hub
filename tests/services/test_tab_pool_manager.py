@@ -513,27 +513,16 @@ class TestPeriodicCleanup:
 # asyncio.shield — 미등록 탭 close cancel 내성 (D2 패턴)
 # ============================================================
 
-def _make_pool():
-    from app.shared.browser.tab_pool_manager import TabPoolManager
-    mock_cm = MagicMock()
-    with patch("app.shared.browser.tab_pool_manager.settings") as mock_s:
-        mock_s.TAB_ROTATION_THRESHOLD = 100
-        mock_s.CACHE_CLEANUP_INTERVAL = 300
-        mock_s.TAB_REQUEST_TIMEOUT = 30
-        mock_s.TAB_WAIT_RETRY_INTERVAL = 0.5
-        mock_s.TOTAL_MAX_TABS = 10
-        mock_s.MAX_USES_PER_TAB = 50
-        pool = TabPoolManager(mock_cm)
-    return pool
-
-
 class TestGetTabUnregisteredCloseShield:
     """get_tab() finally 미등록 탭 정리 asyncio.shield 보호 TC"""
 
+    @pytest.fixture
+    def pool(self, pool_factory):
+        return pool_factory()
+
     @pytest.mark.asyncio
-    async def test_right_registered_new_tab_skips_finally_close_R(self):
+    async def test_right_registered_new_tab_skips_finally_close_R(self, pool):
         """R: 등록 성공 후 new_tab = None → finally close 미호출."""
-        pool = _make_pool()
         pool.TOTAL_MAX_TABS = 10
         pool.tab_pools[1] = {}
 
