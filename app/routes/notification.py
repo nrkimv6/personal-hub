@@ -40,10 +40,10 @@ def get_notification_settings_from_db() -> NotificationSettings:
         result = db.execute(text("""
             SELECT enable_telegram, enable_desktop, notify_states
             FROM notification_settings WHERE id = 1
-        """)).fetchone()
+        """)).mappings().first()
 
         if result:
-            notify_states = result[2]
+            notify_states = result["notify_states"]
             if isinstance(notify_states, str):
                 try:
                     notify_states = json.loads(notify_states)
@@ -52,8 +52,8 @@ def get_notification_settings_from_db() -> NotificationSettings:
             notify_states = _normalize_notify_states(notify_states)
 
             return NotificationSettings(
-                enable_telegram=bool(result[0]),
-                enable_desktop=bool(result[1]),
+                enable_telegram=bool(result["enable_telegram"]),
+                enable_desktop=bool(result["enable_desktop"]),
                 notify_states=notify_states or []
             )
 

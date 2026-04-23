@@ -5,8 +5,7 @@ pytest.mark.http — /merge-test 단계에서 main 머지 후 실행.
 
 목표:
   - 응답 항목의 url 필드가 /booking/{숫자}/bizes/{숫자}/items/{숫자}?startDateTime= 형식임을 핀
-  - system.py:549-555 SELECT 컬럼 순서(row[10]=naver_biz_item_id, row[12]=naver_business_id, row[13]=business_type_id)
-    변경 시 이 TC가 깨지도록 역패턴 assertion 포함
+  - system.py가 .mappings().all() + 이름 기반 접근으로 전환된 이후 url 생성 계약을 유지하는지 핀
   - b.name에 한글이 포함된 경우에도 url 첫 path 세그먼트가 숫자인지 검증
 """
 import re
@@ -45,29 +44,25 @@ def _make_mock_queue_row(
     business_type_id=13,
 ):
     """
-    system.py:543 `for i, row in enumerate(result, 1):` 에서 소비되는 fetchall row 목(tuple).
-    SELECT 컬럼 순서:
-      [0]=ms.id, [1]=ms.date, [2]=ms.run_status, [3]=ms.error_count, [4]=ms.last_error,
-      [5]=ms.last_check_time, [6]=ms.next_run_time, [7]=ms.interval, [8]=ms.custom_interval,
-      [9]=bi.name(biz_item_name), [10]=bi.biz_item_id(naver_biz_item_id),
-      [11]=b.name(business_name), [12]=b.business_id(naver_business_id), [13]=b.business_type_id
+    system.py `for i, row in enumerate(result, 1):` 에서 소비되는 mappings() dict row.
+    이름 기반 접근(.mappings().all())으로 전환된 이후 포맷.
     """
-    return (
-        schedule_id,       # [0]
-        date,              # [1]
-        run_status,        # [2]
-        error_count,       # [3]
-        last_error,        # [4]
-        last_check_time,   # [5]
-        next_run_time,     # [6]
-        interval,          # [7]
-        custom_interval,   # [8]
-        biz_item_name,     # [9]
-        naver_biz_item_id, # [10] ← url 합성에 사용
-        business_name,     # [11]
-        naver_business_id, # [12] ← url 합성에 사용
-        business_type_id,  # [13] ← url 합성에 사용
-    )
+    return {
+        "id": schedule_id,
+        "date": date,
+        "run_status": run_status,
+        "error_count": error_count,
+        "last_error": last_error,
+        "last_check_time": last_check_time,
+        "next_run_time": next_run_time,
+        "interval": interval,
+        "custom_interval": custom_interval,
+        "biz_item_name": biz_item_name,
+        "naver_biz_item_id": naver_biz_item_id,
+        "business_name": business_name,
+        "naver_business_id": naver_business_id,
+        "business_type_id": business_type_id,
+    }
 
 
 @pytest.fixture
@@ -91,7 +86,7 @@ class TestSystemQueueUrlField:
             business_type_id=13,
         )
         mock_db = MagicMock()
-        mock_db.execute.return_value.fetchall.return_value = [fake_row]
+        mock_db.execute.return_value.mappings.return_value.all.return_value = [fake_row]
 
         with patch("app.routes.system.SessionLocal", return_value=mock_db):
             resp = queue_client.get("/api/v1/system/queue")
@@ -114,7 +109,7 @@ class TestSystemQueueUrlField:
             business_type_id=13,
         )
         mock_db = MagicMock()
-        mock_db.execute.return_value.fetchall.return_value = [fake_row]
+        mock_db.execute.return_value.mappings.return_value.all.return_value = [fake_row]
 
         with patch("app.routes.system.SessionLocal", return_value=mock_db):
             resp = queue_client.get("/api/v1/system/queue")
@@ -145,7 +140,7 @@ class TestSystemQueueUrlField:
             naver_biz_item_id=naver_biz_item_id,
         )
         mock_db = MagicMock()
-        mock_db.execute.return_value.fetchall.return_value = [fake_row]
+        mock_db.execute.return_value.mappings.return_value.all.return_value = [fake_row]
 
         with patch("app.routes.system.SessionLocal", return_value=mock_db):
             resp = queue_client.get("/api/v1/system/queue")
@@ -168,7 +163,7 @@ class TestSystemQueueUrlField:
     def test_GET_system_queue_empty_returns_200_empty_list(self, queue_client):
         """E: queued 스케줄 없으면 빈 배열 반환"""
         mock_db = MagicMock()
-        mock_db.execute.return_value.fetchall.return_value = []
+        mock_db.execute.return_value.mappings.return_value.all.return_value = []
 
         with patch("app.routes.system.SessionLocal", return_value=mock_db):
             resp = queue_client.get("/api/v1/system/queue")
