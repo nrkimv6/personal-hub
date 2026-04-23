@@ -2,6 +2,7 @@
 
 - POST /api/v1/service-accounts/{id}/browser/open  → 200 + status="pending" + open_browser
 - POST /api/v1/service-accounts/{id}/browser/login → 200 + status="pending" + naver_login URL
+- POST /api/v1/service-accounts/{id}/browser/check-login → 200 + status="pending" + naver_check_login
 - 404 for non-existent account_id
 """
 import json
@@ -133,4 +134,32 @@ class TestBrowserCommandsHttpContract:
         client, _ = client_and_db
 
         response = client.post("/api/v1/service-accounts/99999/browser/login")
+        assert response.status_code == 404
+
+    def test_right_check_login_creates_naver_check_login_command(self, client_and_db):
+        """[Right] POST /browser/check-login → 200 + naver_check_login command pending
+        비고: session_manager 직접 증명이 아닌 user surface(login-check 명령 생성) 계약 고정.
+        """
+        client, naver_id = client_and_db
+
+        response = client.post(f"/api/v1/service-accounts/{naver_id}/browser/check-login")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "pending"
+        assert "command_id" in data
+
+        db = TestingSessionLocal()
+        row = db.execute(sa_text(
+            "SELECT command_type, status, service_account_id FROM browser_commands WHERE id = :id"
+        ), {"id": data["command_id"]}).fetchone()
+        db.close()
+        assert row[0] == "naver_check_login"
+        assert row[1] == "pending"
+        assert row[2] == naver_id
+
+    def test_error_nonexistent_account_check_login_returns_404(self, client_and_db):
+        """[Error] 존재하지 않는 account_id → 404 (check-login)"""
+        client, _ = client_and_db
+
+        response = client.post("/api/v1/service-accounts/99999/browser/check-login")
         assert response.status_code == 404
