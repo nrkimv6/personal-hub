@@ -220,6 +220,20 @@ class TestCreateScheduleRight:
         assert data["target_type"] == "pytest_run"
         assert data["display_name"] == "pytest 자동 실행"
 
+    def test_create_plan_archive_schedule_success(self, client):
+        """plan_archive_analyze 스케줄 생성 성공."""
+        response = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "plan_archive_analyze",
+            "schedule_type": "time_window",
+            "schedule_value": {"daily_runs": 1, "time_windows": []},
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["target_type"] == "plan_archive_analyze"
+        assert data["enabled"] is True
+        assert data["display_name"] == "Plan Archive LLM 분석"
+
 
 class TestGetSchedules:
     """스케줄 목록 조회 테스트"""
@@ -276,6 +290,22 @@ class TestCreateScheduleErrors:
             needle in response.json()["detail"]
             for needle in ("saved_search_id", "target_config")
         )
+
+    def test_create_duplicate_plan_archive_schedule_error(self, client):
+        """plan_archive_analyze 스케줄 중복 생성 시 400 반환."""
+        payload = {
+            "target_type": "plan_archive_analyze",
+            "schedule_type": "time_window",
+            "schedule_value": {"daily_runs": 1, "time_windows": []},
+        }
+        # 첫 번째 생성
+        r1 = client.post(f"{API_PREFIX}/collect/schedules", json=payload)
+        assert r1.status_code == 200
+
+        # 두 번째 생성 — 중복
+        r2 = client.post(f"{API_PREFIX}/collect/schedules", json=payload)
+        assert r2.status_code == 400
+        assert "이미 plan archive 분석 스케줄이 존재합니다" in r2.json()["detail"]
 
     def test_create_google_with_nonexistent_saved_search(self, client):
         """Google 스케줄 - 존재하지 않는 저장된 검색"""

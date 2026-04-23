@@ -237,3 +237,70 @@ class TestIntentExtractionE2E:
 
         assert record.plan_date is not None, "git tracked 파일은 plan_date가 설정되어야 함"
         assert isinstance(record.plan_date, date), f"date 타입이어야 함, 실제: {type(record.plan_date)}"
+
+
+# ──────────────────────────────────────────────────────────────
+# Phase T4: queue_archived_plans.main() 진입점 E2E 검증
+# ──────────────────────────────────────────────────────────────
+
+class TestQueueScriptE2E:
+    """T4: queue_archived_plans.main() DB-first + skip 검증."""
+
+    def _make_db_and_seed(self):
+        import hashlib
+        from datetime import datetime
+        from app.models.base import Base
+        from app.models.plan_record import PlanRecord
+        from app.modules.claude_worker.models.llm_request import LLMRequest  # noqa
+
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        db = Session()
+
+        raw = "# DB 원본 계획서\n이 내용이 LLM 분석 대상"
+        h1 = hashlib.sha256(Path("/archive/2026-01-01_has-content.md").name.encode()).hexdigest()
+        from app.models.plan_record import PlanRecord as PR
+        db.add(PR(
+            filename_hash=h1, file_path="/archive/2026-01-01_has-content.md",
+            raw_content=raw, archived_at=datetime(2026, 1, 1), llm_processed_at=None,
+        ))
+
+        h2 = hashlib.sha256(Path("/nonexistent/2026-01-02_no-content.md").name.encode()).hexdigest()
+        db.add(PR(
+            filename_hash=h2, file_path="/nonexistent/2026-01-02_no-content.md",
+            raw_content=None, archived_at=datetime(2026, 1, 1), llm_processed_at=None,
+        ))
+        db.commit()
+        return db
+
+    def test_queue_script_e2e_raw_content_and_skip(self, capsys):
+        """E2E: raw_content 있는 record는 LLMRequest 생성, 없고 파일도 없으면 SKIP."""
+        import sys as _sys
+        import importlib
+
+        db = self._make_db_and_seed()
+        mock_session = MagicMock(wraps=db)
+        mock_session.close = MagicMock()
+
+        project_root = Path(__file__).resolve().parents[2]
+        scripts_path = str(project_root / "scripts" / "plan_runner")
+        if scripts_path not in _sys.path:
+            _sys.path.insert(0, scripts_path)
+
+        import queue_archived_plans
+        importlib.reload(queue_archived_plans)
+
+        with patch.object(_sys, "argv", ["queue_archived_plans.py"]):
+            with patch("queue_archived_plans.SessionLocal", return_value=mock_session):
+                queue_archived_plans.main()
+
+        captured = capsys.readouterr()
+        assert "[SKIP] 내용 없음" in captured.out
+        assert "INSERT: 1" in captured.out
+
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+        reqs = db.query(LLMRequest).filter_by(caller_type="plan_archive_analyze").all()
+        assert len(reqs) == 1
+        assert "DB 원본 계획서" in reqs[0].prompt
+        assert "2026-01-01_has-content.md" in reqs[0].prompt
