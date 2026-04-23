@@ -321,6 +321,8 @@ class CoupangMonitorWorker(BaseWorker):
             context = page.context
             if context not in self._popup_contexts:
                 async def _on_popup(popup):
+                    if hasattr(popup, '_tab_id'):
+                        return  # pool 관리 탭 (pending 또는 실제 id) — 닫지 않음
                     await popup.close()
                 context.on("page", _on_popup)
                 self._popup_contexts.add(context)
