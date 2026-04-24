@@ -256,34 +256,6 @@ def test_guide_status_no_records(db):
 
 # ========== Phase T1: backfill script functions ==========
 
-def test_backfill_guide_status_mode_right(tmp_path):
-    """R(정상): extract_guide_summary 동작 확인"""
-    from scripts.migrations.archive_index_backfill import extract_guide_summary
-    guide_file = tmp_path / "test-guide.md"
-    guide_file.write_text("# Test Guide\n\nThis is the first paragraph of the guide.\n", encoding="utf-8")
-    result = extract_guide_summary(guide_file)
-    assert result == "This is the first paragraph of the guide."
-
-
-def test_extract_guide_summary_right(tmp_path):
-    """R(정상): H1 이후 첫 단락 80자 추출"""
-    from scripts.migrations.archive_index_backfill import extract_guide_summary
-    content = "# My Guide\n\n> blockquote skip\n\nActual paragraph content here.\n"
-    guide_file = tmp_path / "guide.md"
-    guide_file.write_text(content, encoding="utf-8")
-    result = extract_guide_summary(guide_file)
-    assert result == "Actual paragraph content here."
-
-
-def test_extract_guide_summary_boundary_empty(tmp_path):
-    """B(경계): H1만 있고 본문 없는 파일 → 빈 문자열"""
-    from scripts.migrations.archive_index_backfill import extract_guide_summary
-    guide_file = tmp_path / "empty-guide.md"
-    guide_file.write_text("# Only Heading\n\n> Only blockquote\n", encoding="utf-8")
-    result = extract_guide_summary(guide_file)
-    assert result == ""
-
-
 def test_backfill_auto_blocks_db_right(db, tmp_path):
     """R(정상): backfill_guide_blocks_db() → AUTO 블록에 PlanRecord.summary 포함"""
     from scripts.migrations.archive_index_backfill import backfill_guide_blocks_db

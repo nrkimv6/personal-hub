@@ -26,6 +26,8 @@ def test_load_whitelist_real_schema():
 
 def test_backfill_real_small_sample():
     """실제 .worktrees/plans/docs/archive에서 최근 몇 건 추출 — date/title/tags 정상 필드 여부."""
+    if not m.ARCHIVE_DIR.exists() or not list(m.ARCHIVE_DIR.glob("*.md")):
+        pytest.skip(f"archive dir 없음 또는 비어있음 (worktree 환경): {m.ARCHIVE_DIR}")
     wl = m.load_whitelist()
     rows = m.scan_archive(m.ARCHIVE_DIR, wl)
     assert len(rows) >= 1
@@ -43,6 +45,8 @@ def test_backfill_real_small_sample():
 
 def test_backfill_watchdog_tag_matches():
     """실제 archive에서 'watchdog' 포함 파일이 watchdog 태그를 받는지 확인."""
+    if not m.ARCHIVE_DIR.exists() or not list(m.ARCHIVE_DIR.glob("*.md")):
+        pytest.skip(f"archive dir 없음 또는 비어있음 (worktree 환경): {m.ARCHIVE_DIR}")
     wl = m.load_whitelist()
     rows = m.scan_archive(m.ARCHIVE_DIR, wl)
     watchdog_rows = [r for r in rows if "watchdog" in Path(r.path).name.lower()]
