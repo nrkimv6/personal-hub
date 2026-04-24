@@ -214,52 +214,11 @@ class TabPoolManager:
 
                 # new_page()~풀 등록 사이에서 CancelledError가 와도 미등록 탭이 남지 않도록 보호
                 new_tab = None
-                # 해당 계정의 컨텍스트에서 새 탭 생성
                 try:
-                    try:
-                        # H2: context.new_page()에 자체 타임아웃 — IPC hang 시 30s 내 감지
-                        try:
-                            new_tab = await asyncio.wait_for(
-                                context.new_page(),
-                                timeout=self.NEW_PAGE_TIMEOUT,
-                            )
-                        except asyncio.TimeoutError:
-                            logger.warning(
-                                f"[TAB-POOL] new_page hang 감지 ({self.NEW_PAGE_TIMEOUT:.0f}s), "
-                                f"recreate 시도 (service_account_id={service_account_id})"
-                            )
-                            await self.handle_browser_closed_error(service_account_id, recreate=True)
-                            context = await self.context_manager.get_or_create_context(service_account_id)
-                            if service_account_id not in self.tab_pools:
-                                self.tab_pools[service_account_id] = {}
-                                await self.register_initial_tabs(service_account_id, context)
-                            new_tab = await asyncio.wait_for(
-                                context.new_page(),
-                                timeout=self.NEW_PAGE_TIMEOUT,
-                            )
-                        # 즉시 pending 마커 설정 (동기) — _on_popup 핸들러가 sleep(0) 후
-                        # 재확인 시 _tab_id가 있어 탭을 닫지 않도록 보호한다
-                        new_tab._tab_id = "__pending__"
-                    except asyncio.TimeoutError:
-                        logger.warning(f"탭 생성 실패(new_page hang 재시도도 초과), 브라우저 컨텍스트 재생성 시도 (service_account_id={service_account_id})")
-                        await self.handle_browser_closed_error(service_account_id, recreate=True)
-                        context = await self.context_manager.get_or_create_context(service_account_id)
-                        if service_account_id not in self.tab_pools:
-                            self.tab_pools[service_account_id] = {}
-                            await self.register_initial_tabs(service_account_id, context)
-                        new_tab = await asyncio.wait_for(context.new_page(), timeout=self.NEW_PAGE_TIMEOUT)
-                        new_tab._tab_id = "__pending__"
-                        logger.info(f"브라우저 복구 후 탭 생성 성공 (service_account_id={service_account_id})")
-                    except Exception as e:
-                        logger.warning(f"탭 생성 실패, 브라우저 컨텍스트 재생성 시도 (service_account_id={service_account_id}): {e}")
-                        await self.handle_browser_closed_error(service_account_id, recreate=True)
-                        context = await self.context_manager.get_or_create_context(service_account_id)
-                        if service_account_id not in self.tab_pools:
-                            self.tab_pools[service_account_id] = {}
-                            await self.register_initial_tabs(service_account_id, context)
-                        new_tab = await asyncio.wait_for(context.new_page(), timeout=self.NEW_PAGE_TIMEOUT)
-                        new_tab._tab_id = "__pending__"  # 재생성 경로도 동일하게 보호
-                        logger.info(f"브라우저 복구 후 탭 생성 성공 (service_account_id={service_account_id})")
+                    context, new_tab = await self._create_page_with_timeout(context, service_account_id)
+                    # helper 반환 직후 stale 참조 재바인딩 (recreate 시 self.tab_pools[id]가 교체됨)
+                    account_tab_pool = self.tab_pools[service_account_id]
+                    total_tabs = sum(len(pool) for pool in self.tab_pools.values())
 
                     # 자동화 감지 방지 설정
                     await new_tab.set_extra_http_headers({
@@ -673,6 +632,46 @@ class TabPoolManager:
                 # 복구 진행 중 플래그 해제
                 self._recovery_in_progress[service_account_id] = False
 
+    async def _create_page_with_timeout(
+        self,
+        context: BrowserContext,
+        service_account_id: int,
+    ) -> tuple[BrowserContext, Page]:
+        """context.new_page()를 NEW_PAGE_TIMEOUT으로 감싸고, hang/recoverable error 시
+        handle_browser_closed_error + get_or_create_context를 거쳐 fresh context로 재시도한다.
+
+        반환 전 page._tab_id = "__pending__"을 즉시 설정한다 (popup guard 계약 유지).
+        """
+        try:
+            page = await asyncio.wait_for(
+                context.new_page(),
+                timeout=self.NEW_PAGE_TIMEOUT,
+            )
+            page._tab_id = "__pending__"
+            return context, page
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"[TAB-POOL] new_page hang 감지 ({self.NEW_PAGE_TIMEOUT:.0f}s), "
+                f"recreate 시도 (service_account_id={service_account_id})"
+            )
+        except Exception as e:
+            logger.warning(
+                f"탭 생성 실패, 브라우저 컨텍스트 재생성 시도 (service_account_id={service_account_id}): {e}"
+            )
+
+        await self.handle_browser_closed_error(service_account_id, recreate=True)
+        context = await self.context_manager.get_or_create_context(service_account_id)
+        if service_account_id not in self.tab_pools:
+            self.tab_pools[service_account_id] = {}
+            await self.register_initial_tabs(service_account_id, context)
+        page = await asyncio.wait_for(
+            context.new_page(),
+            timeout=self.NEW_PAGE_TIMEOUT,
+        )
+        page._tab_id = "__pending__"
+        logger.info(f"브라우저 복구 후 탭 생성 성공 (service_account_id={service_account_id})")
+        return context, page
+
     async def close_all_tabs(self) -> int:
         """
         모든 탭을 강제로 닫습니다.
@@ -836,10 +835,8 @@ class TabPoolManager:
                         logger.warning(f"[TAB-WARMUP] 최대 탭 수 도달 ({total_tabs}/{self.TOTAL_MAX_TABS})")
                         break
 
-                    # 새 탭 생성
-                    page = await context.new_page()
-                    # 즉시 pending 마커 설정 (동기) — _on_popup 핸들러 오탐 방지
-                    page._tab_id = "__pending__"
+                    # 새 탭 생성 (helper로 hang/recreate 계약 공유)
+                    context, page = await self._create_page_with_timeout(context, target_account_id)
 
                     # 자동화 감지 방지 설정
                     await page.set_extra_http_headers({
