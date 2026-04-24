@@ -23,7 +23,7 @@ from _dr_constants import (
 )
 from _dr_merge import _execute_merge_with_lock, _pub_and_log
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process
-from _dr_process_utils import _cleanup_process_state, get_plan_git_root
+from _dr_process_utils import _cleanup_process_state, get_target_project_root
 from _dr_plan_runner import _do_inline_merge, _capture_runner_ownership_snapshot
 
 logger = logging.getLogger(__name__)
@@ -441,7 +441,7 @@ def _do_cleanup_worktree(runner_id: str, redis_client: redis.Redis, command_id: 
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file = None
-        _cw_base = (get_plan_git_root(plan_file) / ".worktrees") if plan_file else WORKTREE_BASE_DIR
+        _cw_base = (get_target_project_root(plan_file) / ".worktrees") if plan_file else WORKTREE_BASE_DIR
         WorktreeManager.remove(runner_id, _cw_base, plan_file=plan_file or None)
         redis_client.delete(
             f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",

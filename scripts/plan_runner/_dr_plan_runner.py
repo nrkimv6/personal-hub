@@ -29,7 +29,7 @@ from _dr_state import (
 from _dr_subprocess import _ANSI_ESCAPE, _make_plan_runner_env
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_log_framing import MultilineFrameBuffer
-from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, _DummyProcess
+from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, get_target_project_root, _DummyProcess
 from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
 from _dr_merge import _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 from _dr_stream_cleanup import (
@@ -488,7 +488,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             return
 
     # plan 파일의 git root 결정 (wtools 등 외부 레포 지원)
-    plan_project_root = get_plan_git_root(plan_file) if plan_file else _PR
+    plan_project_root = get_target_project_root(plan_file) if plan_file else _PR
     plan_worktree_base = plan_project_root / ".worktrees"
     if plan_project_root != _PR:
         logger.info(f"외부 레포 plan 감지: project_root={plan_project_root}")

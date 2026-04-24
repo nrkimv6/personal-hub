@@ -6,6 +6,8 @@ _sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
 del _sys_inject, _Path_inject
 
 import logging
+import os
+import re
 import sys
 import subprocess
 import threading
@@ -235,7 +237,6 @@ def _evict_stale_dead_process(max_age: int = 300) -> None:
 
 def get_plan_git_root(plan_file: str) -> Path:
     """Dynamically detect git root of a plan file."""
-    import subprocess
     try:
         plan_path = Path(plan_file)
         cwd = str(plan_path.parent) if plan_path.parent.is_dir() else str(plan_path.parent.parent)
@@ -249,6 +250,45 @@ def get_plan_git_root(plan_file: str) -> Path:
     except Exception as e:
         logger.warning(f"get_plan_git_root: git rev-parse failed (plan={plan_file}): {e}")
     logger.warning(f"get_plan_git_root: fallback to PROJECT_ROOT (plan={plan_file})")
+    return PROJECT_ROOT
+
+
+def get_target_project_root(plan_file: str) -> Path:
+    """plan file의 target project root를 반환 (plans storage root와 분리).
+
+    우선순위:
+    1. env PLAN_RUNNER_PROJECT_ROOT
+    2. git rev-parse --show-toplevel + .worktrees 감지 시 .worktrees 직전 반환
+    3. fallback: PROJECT_ROOT
+    """
+    env_root = os.environ.get("PLAN_RUNNER_PROJECT_ROOT")
+    if env_root:
+        return Path(env_root).resolve()
+
+    try:
+        plan_path = Path(plan_file)
+        cwd = str(plan_path.parent) if plan_path.parent.is_dir() else str(plan_path.parent.parent)
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=cwd, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            git_root = Path(result.stdout.strip())
+            parts = list(git_root.parts)
+            if ".worktrees" in parts:
+                i = parts.index(".worktrees")
+                candidate = Path(*parts[:i])
+                if (candidate / ".git").exists():
+                    logger.debug(
+                        f"get_target_project_root: .worktrees 감지 → {git_root} → {candidate}"
+                    )
+                    return candidate
+            return git_root
+    except Exception as e:
+        logger.warning(f"get_target_project_root: git rev-parse failed (plan={plan_file}): {e}")
+
+    logger.warning(f"get_target_project_root: fallback to PROJECT_ROOT (plan={plan_file})")
     return PROJECT_ROOT
 
 
@@ -398,7 +438,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         from plan_worktree_helpers import is_plan_in_progress as _is_plan_in_progress
         from plan_worktree_helpers import has_unmerged_commits as _has_unmerged_commits
 
-        _cleanup_worktree_base = (get_plan_git_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
+        _cleanup_worktree_base = (get_target_project_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
 
         if force_test_cleanup:
             _force_cleanup_test_runner_worktree(runner_id, redis_client)
@@ -416,7 +456,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                     f"plan/{Path(plan_file_val).stem}" if plan_file_val
                     else f"runner/{runner_id}"
                 )
-                if _has_unmerged_commits(_branch, get_plan_git_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
+                if _has_unmerged_commits(_branch, get_target_project_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
                     _preserve_worktree = True
                     logger.warning(
                         f"[cleanup] preserving worktree (unmerged commits exist): runner={runner_id}, branch={_branch}"
@@ -894,7 +934,7 @@ def _cleanup_orphan_plans(redis_client: redis.Redis) -> int:
 
                 try:
                     if not has_unmerged_commits(branch, PROJECT_ROOT):
-                        _orphan_base = get_plan_git_root(str(plan_file)) / ".worktrees"
+                        _orphan_base = get_target_project_root(str(plan_file)) / ".worktrees"
                         WorktreeManager.remove("", _orphan_base, plan_file=str(plan_file))
                         _remove_plan_header_fields(str(plan_file))
                         logger.info(f"[orphan-plan] {plan_file.name}: worktree/branch 정리 완료 (branch={branch})")

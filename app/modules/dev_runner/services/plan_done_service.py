@@ -117,8 +117,9 @@ class PlanDoneService:
         parts = p.parts
         for i, part in enumerate(parts):
             if part == "plan" and i > 0 and parts[i - 1] == "docs":
-                # parts[0..i-2] = project root
-                project_root = Path(*parts[:i - 1])
+                # .worktrees 포함 시 .worktrees 직전 경로를 project root로 사용
+                j = parts.index(".worktrees") if ".worktrees" in parts[:i - 1] else None
+                project_root = Path(*parts[:j]) if j is not None else Path(*parts[:i - 1])
                 if project_root.exists():
                     return project_root
         # fallback: \ud30c\uc77c \uae30\uc900 \uc0c1\uc704 3\ub2e8\uacc4

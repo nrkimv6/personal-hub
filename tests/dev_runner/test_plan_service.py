@@ -1457,3 +1457,52 @@ class TestCanDone:
         progress = PlanProgressResponse(done=0, total=0, percent=0)
         plan = self._make_plan(str(f), progress=progress)
         assert svc._can_done(plan) is True
+
+
+# -------------------------------------------------------------
+# TC: _resolve_source -- plans worktree 경로 오분류 방지
+# -------------------------------------------------------------
+
+class TestResolveSourcePlansWorktree:
+    '''PlanService._resolve_source plans worktree 경로 처리 검증'''
+
+    @pytest.fixture
+    def svc(self, dev_runner_config_isolation):
+        from app.modules.dev_runner.services.plan_service import PlanService
+        return PlanService()
+
+    def test_resolve_source_plans_worktree_returns_project_name_not_plans(self, tmp_path, svc):
+        '''R: .../monitor-page/.worktrees/plans/docs/plan -> monitor-page 반환 (plans 오분류 차단).'''
+        plans_dir = tmp_path / 'monitor-page' / '.worktrees' / 'plans' / 'docs' / 'plan'
+        plans_dir.mkdir(parents=True)
+
+        result = svc._resolve_source(plans_dir)
+
+        assert result == 'monitor-page', (
+            f'plans worktree 경로에서 _resolve_source()는 monitor-page를 반환해야 함, 실제: {result!r}'
+        )
+        assert result != 'plans', (
+            f'_resolve_source()가 plans를 반환하면 안 됨 (오분류): {result!r}'
+        )
+
+    def test_resolve_source_normal_docs_plan(self, tmp_path, svc):
+        '''R: .../my-project/docs/plan -> my-project 반환 (기존 동작 회귀 방어).'''
+        docs_plan = tmp_path / 'my-project' / 'docs' / 'plan'
+        docs_plan.mkdir(parents=True)
+
+        result = svc._resolve_source(docs_plan)
+
+        assert result == 'my-project', (
+            f'일반 docs/plan 경로에서 my-project 반환해야 함, 실제: {result!r}'
+        )
+
+    def test_resolve_source_common_docs_plan(self, tmp_path, svc):
+        '''R: .../common/docs/plan -> common 반환 (기존 동작 회귀 방어).'''
+        docs_plan = tmp_path / 'common' / 'docs' / 'plan'
+        docs_plan.mkdir(parents=True)
+
+        result = svc._resolve_source(docs_plan)
+
+        assert result == 'common', (
+            f'common/docs/plan 경로에서 common 반환해야 함, 실제: {result!r}'
+        )

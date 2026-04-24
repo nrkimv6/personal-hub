@@ -402,6 +402,11 @@ class PlanService:
         - .../폴더명 → 폴더명
         """
         parts = path.parts
+        # .worktrees 포함 시 .worktrees 직전 디렉토리명 반환 (plans 오분류 차단)
+        if ".worktrees" in parts:
+            wt_idx = list(parts).index(".worktrees")
+            if wt_idx > 0:
+                return parts[wt_idx - 1]
         for i, part in enumerate(parts):
             if part == "docs" and i + 1 < len(parts) and parts[i + 1] == "plan":
                 # docs/plan 직전 디렉토리 = 프로젝트명
@@ -892,8 +897,9 @@ class PlanService:
         parts = p.parts
         for i, part in enumerate(parts):
             if part == "plan" and i > 0 and parts[i - 1] == "docs":
-                # parts[0..i-2] = project root
-                project_root = Path(*parts[:i - 1])
+                # .worktrees 포함 시 .worktrees 직전 경로를 project root로 사용
+                j = parts.index(".worktrees") if ".worktrees" in parts[:i - 1] else None
+                project_root = Path(*parts[:j]) if j is not None else Path(*parts[:i - 1])
                 if project_root.exists():
                     return project_root
         # fallback: 파일 기준 상위 3단계

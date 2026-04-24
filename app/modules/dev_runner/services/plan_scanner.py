@@ -255,6 +255,11 @@ class PlanScanner:
         - .../폴더명 → 폴더명
         """
         parts = path.parts
+        # .worktrees 포함 시 .worktrees 직전 디렉토리명 반환 (plans 오분류 차단)
+        if ".worktrees" in parts:
+            wt_idx = list(parts).index(".worktrees")
+            if wt_idx > 0:
+                return parts[wt_idx - 1]
         for i, part in enumerate(parts):
             if part == "docs" and i + 1 < len(parts) and parts[i + 1] == "plan":
                 # docs/plan 직전 디렉토리 = 프로젝트명

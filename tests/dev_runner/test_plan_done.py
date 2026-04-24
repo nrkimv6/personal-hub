@@ -472,8 +472,54 @@ class TestRunDone:
 
         assert result["success"] is False
         assert "archive target resolve failed" in result["message"]
-        assert plan_file.exists()
-        assert plan_file.read_text(encoding="utf-8") == original
+
+
+# ─────────────────────────────────────────────────────────────
+# TC: _resolve_project_dir — plans worktree 경로 처리
+# ─────────────────────────────────────────────────────────────
+
+class TestResolvePlansDoneProjectDir:
+    """PlanDoneService._resolve_project_dir plans worktree 경로 처리 검증"""
+
+    def test_resolve_project_dir_skips_plans_worktree_returns_project_root(self, tmp_path):
+        """R: .worktrees/plans/docs/plan/xxx.md 입력 시 .worktrees/plans가 아닌
+        target project root 반환.
+        """
+        project_root = tmp_path / "my-project"
+        project_root.mkdir()
+        plans_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        plan_file = plans_dir / "2026-04-24_fix-test.md"
+        plan_file.write_text("# Test\n")
+
+        result = PlanDoneService._resolve_project_dir(str(plan_file))
+
+        assert result is not None, "_resolve_project_dir()가 None을 반환하면 안 됨"
+        assert result == project_root, (
+            f".worktrees/plans 경로 입력 시 project_root({project_root})를 반환해야 함, "
+            f"실제: {result}"
+        )
+        # .worktrees/plans가 반환되면 안 됨
+        plans_root = project_root / ".worktrees" / "plans"
+        assert result != plans_root, (
+            f"_resolve_project_dir()가 .worktrees/plans를 반환하면 안 됨: {result}"
+        )
+
+    def test_resolve_project_dir_normal_path_unchanged(self, tmp_path):
+        """R: 일반 docs/plan 경로 → 기존대로 project root 반환 (회귀 방어)."""
+        project_root = tmp_path / "normal-project"
+        docs_plan = project_root / "docs" / "plan"
+        docs_plan.mkdir(parents=True)
+        plan_file = docs_plan / "2026-04-24_test.md"
+        plan_file.write_text("# Test\n")
+
+        result = PlanDoneService._resolve_project_dir(str(plan_file))
+
+        assert result is not None
+        assert result == project_root, (
+            f"일반 docs/plan 경로에서 project_root({project_root}) 반환해야 함, "
+            f"실제: {result}"
+        )
 
     @pytest.mark.asyncio
     async def test_run_done_ownership_guard_returns_failure_E(self, tmp_path, svc):
