@@ -1,10 +1,4 @@
-"""schedule_date_expire 통합 테스트 (PostgreSQL).
-
-Phase T3:
-1. _execute_schedule_date_expire_run() — past rows disable, today/future 유지
-2. integrity fix와 동일 cutoff 기준 검증
-3. 0건 실행 및 seed idempotency
-"""
+"""schedule_date_expire 통합 테스트 (PostgreSQL)."""
 import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -12,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.orm import sessionmaker
 
 from app.models.business import Business
 from app.models.biz_item import BizItem
@@ -85,6 +80,35 @@ def _add_task_schedule(db) -> TaskSchedule:
     return ts
 
 
+async def _run_schedule_date_expire_handler(test_db_session, schedule_id: int, run_id: int) -> None:
+    from app.worker.schedule_handler_base import ClaimedRun, WorkerContext
+    from app.worker.scheduled_worker import ScheduledCrawlWorker
+    from app.worker.schedulers.schedule_date_expire_schedule import ScheduleDateExpireScheduler
+
+    SessionLocal = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=test_db_session.get_bind(),
+    )
+    worker = ScheduledCrawlWorker(browser_manager=MagicMock(is_initialized=False))
+    worker._log_worker_error = MagicMock()
+    worker._worker_ctx = WorkerContext(
+        worker_name="test_worker",
+        browser_manager=None,
+        db_factory=SessionLocal,
+    )
+
+    with patch("app.worker.scheduled_worker.SessionLocal", SessionLocal):
+        await worker._run_handler(
+            ScheduleDateExpireScheduler(),
+            MagicMock(id=schedule_id),
+            ClaimedRun(
+                run=MagicMock(id=run_id),
+                task_name=f"schedule_date_expire_{schedule_id}_run_{run_id}",
+            ),
+        )
+
+
 # ──────────────────────────────────────────
 # TC 1: past rows disable, today/future 유지
 # ──────────────────────────────────────────
@@ -93,7 +117,6 @@ def _add_task_schedule(db) -> TaskSchedule:
 @pytest.mark.asyncio
 async def test_execute_disables_only_past_rows_right(test_db_session):
     """R: 과거 날짜 row만 is_enabled=false, 오늘/미래 row는 유지."""
-    from app.worker.scheduled_worker import ScheduledCrawlWorker
 
     item = _make_biz_item(test_db_session)
     past_row = _add_schedule(test_db_session, item, _PAST_DATE)
@@ -111,13 +134,8 @@ async def test_execute_disables_only_past_rows_right(test_db_session):
     )
     test_db_session.commit()
 
-    worker = ScheduledCrawlWorker.__new__(ScheduledCrawlWorker)
-    worker.name = "test_worker"
-    worker._tasks = {}
-    worker._log_worker_error = MagicMock()
-
     with patch("app.services.monitor_schedule_cutoff.get_today_kst_iso", return_value=_FIXED_CUTOFF):
-        await worker._execute_schedule_date_expire_run(ts, run)
+        await _run_schedule_date_expire_handler(test_db_session, ts.id, run.id)
 
     # 워커 완료 후 test_db_session으로 재조회
     test_db_session.expire_all()
@@ -180,7 +198,6 @@ def test_integrity_fix_and_scheduler_target_same_rows_right(test_db_session):
 @pytest.mark.asyncio
 async def test_execute_zero_rows_completes_right(test_db_session):
     """R: 과거 enabled row 0건이면 completed 상태, 에러 없음."""
-    from app.worker.scheduled_worker import ScheduledCrawlWorker
 
     item = _make_biz_item(test_db_session)
     _add_schedule(test_db_session, item, _FUTURE_DATE)
@@ -195,13 +212,8 @@ async def test_execute_zero_rows_completes_right(test_db_session):
     )
     test_db_session.commit()
 
-    worker = ScheduledCrawlWorker.__new__(ScheduledCrawlWorker)
-    worker.name = "test_worker"
-    worker._tasks = {}
-    worker._log_worker_error = MagicMock()
-
     with patch("app.services.monitor_schedule_cutoff.get_today_kst_iso", return_value=_FIXED_CUTOFF):
-        await worker._execute_schedule_date_expire_run(ts, run)
+        await _run_schedule_date_expire_handler(test_db_session, ts.id, run.id)
 
     test_db_session.expire_all()
     run_status = test_db_session.execute(

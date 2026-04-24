@@ -114,7 +114,7 @@ def test_handle_archived_sync_creates_request_with_file_content(memory_db, liste
 def test_handle_archived_sync_skips_when_both_fail(memory_db, listener):
     """T3-3: raw_content=None, 파일 없음 → LLMRequest 미생성 + llm_processed_at=None 유지.
 
-    _process_unprocessed_plans의 재처리 대상에 남아 있음을 검증.
+    plan archive enqueue helper의 재처리 대상에 남아 있음을 검증.
     """
     filename = "/totally/missing/2026-03-03_no-content.md"
     record = _insert_record(memory_db, filename, raw_content=None)

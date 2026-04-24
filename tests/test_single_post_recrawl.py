@@ -281,13 +281,13 @@ class TestWorkerSinglePostProcessing:
         worker = OnDemandCrawlWorker(browser_manager=None)
         assert worker is not None
 
-    def test_scheduled_worker_has_execute_feed_crawl_method(self):
-        """ScheduledCrawlWorker에 _execute_feed_crawl 메서드 존재"""
+    def test_scheduled_worker_registers_instagram_feed_scheduler(self):
+        """ScheduledCrawlWorker registry에 InstagramFeedScheduler가 포함된다."""
+        from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
         from app.worker.scheduled_worker import ScheduledCrawlWorker
 
-        worker = ScheduledCrawlWorker(browser_manager=None)
-        assert hasattr(worker, '_execute_feed_crawl')
-        assert callable(worker._execute_feed_crawl)
+        worker = ScheduledCrawlWorker(browser_manager=MagicMock(is_initialized=False))
+        assert any(isinstance(handler, InstagramFeedScheduler) for handler in worker._handlers)
 
 
 # ============================================================

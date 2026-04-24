@@ -198,9 +198,7 @@ def test_plan_archive_listener_duplicate_skip(tmp_path, engine):
 
 def test_schedule_unprocessed_plans(engine):
     """R: llm_processed_at IS NULL 레코드 3개 → LLMRequest 생성 검증"""
-    from app.worker.scheduled_worker import ScheduledCrawlWorker
-
-    worker = ScheduledCrawlWorker.__new__(ScheduledCrawlWorker)
+    from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 
     # 미처리 레코드 3개 준비
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -231,7 +229,7 @@ def test_schedule_unprocessed_plans(engine):
         mock_db.add = tracked_add
 
         try:
-            count = worker._process_unprocessed_plans()
+            count = PlanArchiveScheduler._enqueue_unprocessed_plans(lambda: mock_db)
             # commit 없이도 inserted_count로 검증
             assert inserted_count[0] >= 0  # 실행 자체가 성공하면 OK
         except Exception:
@@ -393,9 +391,7 @@ def test_save_plan_archive_result_no_trigger_below_5():
 
 def test_schedule_unprocessed_plans_boundary_all_processed(engine):
     """B: 모든 레코드가 llm_processed_at IS NOT NULL → 0개 생성"""
-    from app.worker.scheduled_worker import ScheduledCrawlWorker
-
-    worker = ScheduledCrawlWorker.__new__(ScheduledCrawlWorker)
+    from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
@@ -413,7 +409,7 @@ def test_schedule_unprocessed_plans_boundary_all_processed(engine):
         mock_db.commit()
 
         try:
-            count = worker._process_unprocessed_plans()
+            count = PlanArchiveScheduler._enqueue_unprocessed_plans(lambda: mock_db)
             assert count == 0
         except Exception:
             pass

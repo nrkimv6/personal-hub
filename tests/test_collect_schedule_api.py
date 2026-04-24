@@ -234,6 +234,20 @@ class TestCreateScheduleRight:
         assert data["enabled"] is True
         assert data["display_name"] == "Plan Archive LLM 분석"
 
+    def test_create_devguide_staleness_schedule_success(self, client):
+        """devguide_staleness 스케줄 생성 성공."""
+        response = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "devguide_staleness",
+            "schedule_type": "time_window",
+            "schedule_value": {"daily_runs": 1, "time_windows": []},
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["target_type"] == "devguide_staleness"
+        assert data["enabled"] is True
+        assert data["display_name"] == "Dev-Guide 갱신 점검"
+
 
 class TestGetSchedules:
     """스케줄 목록 조회 테스트"""
@@ -458,6 +472,44 @@ class TestRunSchedule:
         assert queue_item.schedule_id == schedule_id
         assert queue_item.saved_search_id == sample_saved_search.id
         enqueue_mock.assert_awaited_once_with(queue_item, test_db)
+
+    def test_run_writing_source_schedule_creates_manual_run(self, client, test_db):
+        """writing_source_collect 즉시 실행은 manual run을 생성한다."""
+        schedule_id = _seed_run_supported_schedule(
+            test_db,
+            TaskSchedule.TARGET_TYPE_WRITING_SOURCE_COLLECT,
+            "소스 수집 태스크",
+        )
+
+        response = client.post(f"{API_PREFIX}/collect/schedules/{schedule_id}/run")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        run = test_db.query(TaskScheduleRun).filter_by(id=data["run_id"]).one()
+        assert run.schedule_id == schedule_id
+        assert run.worker_id == "manual"
+        assert run.status == TaskScheduleRun.STATUS_RUNNING
+        assert run.get_config_snapshot() == {"source": "manual"}
+
+    def test_run_keyword_analysis_schedule_creates_manual_run(self, client, test_db):
+        """keyword_analysis 즉시 실행은 manual run을 생성한다."""
+        schedule_id = _seed_run_supported_schedule(
+            test_db,
+            TaskSchedule.TARGET_TYPE_KEYWORD_ANALYSIS,
+            "키워드 분석 태스크",
+        )
+
+        response = client.post(f"{API_PREFIX}/collect/schedules/{schedule_id}/run")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        run = test_db.query(TaskScheduleRun).filter_by(id=data["run_id"]).one()
+        assert run.schedule_id == schedule_id
+        assert run.worker_id == "manual"
+        assert run.status == TaskScheduleRun.STATUS_RUNNING
+        assert run.get_config_snapshot() == {"source": "manual"}
 
     def test_run_nonexistent_schedule(self, client):
         """존재하지 않는 스케줄 실행"""
@@ -849,6 +901,22 @@ def _seed_internal_schedule(test_db, target_type: str) -> int:
     return ts.id
 
 
+def _seed_run_supported_schedule(test_db, target_type: str, display_name: str) -> int:
+    """즉시 실행 지원 타입 스케줄 1건을 DB에 직접 삽입하고 id 반환."""
+    ts = TaskSchedule(
+        name=f"manual_{target_type}_test",
+        display_name=display_name,
+        target_type=target_type,
+        schedule_type="time_window",
+        schedule_value='{"daily_runs": 1, "time_windows": []}',
+        enabled=True,
+    )
+    test_db.add(ts)
+    test_db.commit()
+    test_db.refresh(ts)
+    return ts.id
+
+
 class TestCollectScheduleHidesInternalSchedules:
     """collect /schedules 목록에서 internal schedule이 숨겨진다."""
 
@@ -870,44 +938,79 @@ class TestCollectScheduleHidesInternalSchedules:
         assert TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE not in types, \
             f"schedule_date_expire가 collect 목록에 노출됨: {types}"
 
-    def test_detail_internal_schedule_returns_404_right(self, client, test_db):
+    @pytest.mark.parametrize(
+        "target_type",
+        [
+            TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
+            TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+        ],
+    )
+    def test_detail_internal_schedule_returns_404_right(self, client, test_db, target_type):
         """[Right] GET /api/v1/collect/schedules/{internal_id} → 404."""
-        internal_id = _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE)
+        internal_id = _seed_internal_schedule(test_db, target_type)
         response = client.get(f"{API_PREFIX}/collect/schedules/{internal_id}")
         assert response.status_code == 404, \
             f"internal schedule 상세 조회가 404가 아님: {response.status_code}"
 
-    def test_update_internal_schedule_returns_404_right(self, client, test_db):
+    @pytest.mark.parametrize(
+        "target_type",
+        [
+            TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
+            TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+        ],
+    )
+    def test_update_internal_schedule_returns_404_right(self, client, test_db, target_type):
         """[Right] PUT /api/v1/collect/schedules/{internal_id} → 404."""
-        internal_id = _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE)
+        internal_id = _seed_internal_schedule(test_db, target_type)
         response = client.put(f"{API_PREFIX}/collect/schedules/{internal_id}", json={
             "target_config": {}
         })
         assert response.status_code == 404, \
             f"internal schedule 수정이 404가 아님: {response.status_code}"
 
-    def test_toggle_internal_schedule_returns_404_right(self, client, test_db):
+    @pytest.mark.parametrize(
+        "target_type",
+        [
+            TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
+            TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+        ],
+    )
+    def test_toggle_internal_schedule_returns_404_right(self, client, test_db, target_type):
         """[Right] POST /api/v1/collect/schedules/{internal_id}/toggle → 404."""
-        internal_id = _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE)
+        internal_id = _seed_internal_schedule(test_db, target_type)
         response = client.post(f"{API_PREFIX}/collect/schedules/{internal_id}/toggle?enabled=true")
         assert response.status_code == 404, \
             f"internal schedule toggle이 404가 아님: {response.status_code}"
 
-    def test_delete_internal_schedule_returns_404_right(self, client, test_db):
+    @pytest.mark.parametrize(
+        "target_type",
+        [
+            TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
+            TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+        ],
+    )
+    def test_delete_internal_schedule_returns_404_right(self, client, test_db, target_type):
         """[Right] DELETE /api/v1/collect/schedules/{internal_id} → 404."""
-        internal_id = _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE)
+        internal_id = _seed_internal_schedule(test_db, target_type)
         response = client.delete(f"{API_PREFIX}/collect/schedules/{internal_id}")
         assert response.status_code == 404, \
             f"internal schedule 삭제가 404가 아님: {response.status_code}"
 
-    def test_create_schedule_date_expire_is_unsupported_right(self, client, test_db):
-        """[Right] POST /api/v1/collect/schedules에 schedule_date_expire target_type → unsupported 오류."""
+    @pytest.mark.parametrize(
+        "target_type",
+        [
+            TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
+            TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+        ],
+    )
+    def test_create_internal_schedule_is_unsupported_right(self, client, target_type):
+        """[Right] POST /api/v1/collect/schedules에 internal target_type → unsupported 오류."""
         response = client.post(f"{API_PREFIX}/collect/schedules", json={
-            "target_type": "schedule_date_expire",
+            "target_type": target_type,
             "target_config": {},
             "schedule_type": "cron",
             "schedule_value": {"time": "01:00"},
         })
         assert response.status_code in (400, 422), \
-            f"schedule_date_expire create가 거부되지 않음: {response.status_code}"
+            f"{target_type} create가 거부되지 않음: {response.status_code}"
 
