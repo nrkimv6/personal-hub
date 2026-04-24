@@ -344,6 +344,35 @@ class TestDeleteHistoryAPI:
 
 
 @pytest.mark.http
+class TestSearchStatusAPI:
+    """GET /api/v1/google/search/{search_id}/status HTTP 계약 테스트."""
+
+    def test_failed_queue_returns_status_and_error_message_E(self, client, test_db_session):
+        """Error: failed 큐 row에 대해 status=failed + error_message를 반환한다."""
+        import uuid
+        search_id = f"test-failed-{uuid.uuid4().hex[:8]}"
+        queue_item = GoogleSearchQueue(
+            search_id=search_id,
+            query="target closed test",
+            status="failed",
+            error_message="Target page, context or browser has been closed",
+        )
+        test_db_session.add(queue_item)
+        test_db_session.commit()
+
+        response = client.get(f"/api/v1/google/search/{search_id}/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "failed"
+        assert data["error_message"] == "Target page, context or browser has been closed"
+
+    def test_status_not_found_E(self, client):
+        """Error: 존재하지 않는 search_id는 404."""
+        response = client.get("/api/v1/google/search/nonexistent-search-id/status")
+        assert response.status_code == 404
+
+
+@pytest.mark.http
 class TestSearchQueueHTTP:
     """Google 검색 큐 HTTP 계약 테스트."""
 
@@ -396,6 +425,58 @@ class TestSearchQueueHTTP:
         assert queue_item is not None
         assert queue_item.saved_search_id == sample_saved_search.id
         enqueue_mock.assert_awaited_once_with(queue_item, test_db_session)
+
+    def test_search_route_persists_service_account_id_in_db_R(self, client, test_db_session):
+        """Right: POST /google/search가 service_account_id 필드를 DB row에 저장한다 (None 경우 포함)."""
+        with patch(
+            "app.modules.google_search.routes.search.enqueue_google_search",
+            AsyncMock(return_value=GoogleSearchQueue.STATUS_QUEUED),
+        ):
+            response = client.post(
+                "/api/v1/google/search",
+                json={
+                    "query": "service account test",
+                    # service_account_id 미전달 → DB row에 None으로 저장
+                },
+            )
+
+        assert response.status_code == 202
+        data = response.json()
+        queue_item = (
+            test_db_session.query(GoogleSearchQueue)
+            .filter_by(search_id=data["search_id"])
+            .first()
+        )
+        assert queue_item is not None
+        assert queue_item.service_account_id is None
+
+    def test_saved_search_run_persists_service_account_id_R(self, client, test_db_session):
+        """Right: POST /google/saved/{id}/run이 saved_search_id를 queue row에 유지한다."""
+        saved = GoogleSavedSearch(
+            name="SA Test",
+            query="service account saved test",
+            # service_account_id=None (FK 없이 테스트 가능)
+        )
+        test_db_session.add(saved)
+        test_db_session.commit()
+        test_db_session.refresh(saved)
+
+        with patch(
+            "app.modules.google_search.routes.search.enqueue_google_search",
+            AsyncMock(return_value=GoogleSearchQueue.STATUS_QUEUED),
+        ):
+            response = client.post(f"/api/v1/google/saved/{saved.id}/run")
+
+        assert response.status_code == 202
+        data = response.json()
+        queue_item = (
+            test_db_session.query(GoogleSearchQueue)
+            .filter_by(search_id=data["search_id"])
+            .first()
+        )
+        assert queue_item is not None
+        assert queue_item.service_account_id is None
+        assert queue_item.saved_search_id == saved.id
 
     def test_admin_recover_pending_returns_recovery_counts(self, client):
         """POST /google/admin/recover-pending가 복구 집계를 그대로 반환한다."""
