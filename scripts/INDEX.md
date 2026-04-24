@@ -390,6 +390,8 @@
 |---|---|
 | `README_브라우저_프로필.md` | 브라우저 프로필 사용 가이드 — 루트 유지 (문서) |
 | `INDEX.md` | 본 파일 — scripts/ 인덱스 |
+| `archive-search.ps1` | LLM/사람용 archive 검색 단일 진입점. `--q keyword` DB API 조회, `--offline` 시 파일 grep. 호출 예: `.\scripts\archive-search.ps1 --q watchdog --limit 5` |
+| `archive_search.py` | `archive-search.ps1`의 Python 구현체. argparse: `--q`, `--tags`, `--date-from`, `--date-to`, `--content`(deep), `--offline`, `--format`(text\|json), `--limit` |
 
 ### 이관 보류 (wtools 선행 필요)
 
