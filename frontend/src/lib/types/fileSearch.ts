@@ -99,3 +99,12 @@ export interface SearchPollResponse {
 	result?: SearchResponse;
 	error_message?: string | null;
 }
+
+export interface FilePreviewResponse {
+	file_path: string;
+	file_name: string;
+	extension: string;
+	size_bytes: number;
+	encoding: string;
+	content: string;
+}

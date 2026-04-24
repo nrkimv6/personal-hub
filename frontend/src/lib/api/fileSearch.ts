@@ -4,6 +4,7 @@
 import { request } from './client';
 import type {
 	BrowseResponse,
+	FilePreviewResponse,
 	IgnorePattern,
 	Preset,
 	SearchAcceptedResponse,
@@ -56,6 +57,11 @@ export async function getStatus(): Promise<StatusResponse> {
 export async function browseDirectory(path: string): Promise<BrowseResponse> {
 	const encoded = encodeURIComponent(path);
 	return request<BrowseResponse>(`${BASE}/browse?path=${encoded}`);
+}
+
+export async function getFilePreview(path: string): Promise<FilePreviewResponse> {
+	const encoded = encodeURIComponent(path);
+	return request<FilePreviewResponse>(`${BASE}/preview?path=${encoded}`);
 }
 
 // ── 무시 패턴 CRUD ────────────────────────────────────────────────────

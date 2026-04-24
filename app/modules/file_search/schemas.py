@@ -87,6 +87,20 @@ class BrowseResponse(BaseModel):
 
 
 # ============================================================
+# Preview
+# ============================================================
+
+
+class FilePreviewResponse(BaseModel):
+    file_path: str
+    file_name: str
+    extension: str
+    size_bytes: int
+    encoding: str
+    content: str
+
+
+# ============================================================
 # Preset
 # ============================================================
 

@@ -8,6 +8,7 @@
   POST /api/v1/file-search/open               — 파일 열기 (Redis 위임)
   GET  /api/v1/file-search/status             — 도구 상태 확인 (DB 캐시)
   GET  /api/v1/file-search/browse             — 서버 디렉토리 탐색
+  GET  /api/v1/file-search/preview            — 텍스트 파일 미리보기 (direct read)
 
 변경 사항 (2026-02-23):
   - POST /search: 동기 → 비동기 (202 + search_id)
@@ -36,6 +37,7 @@ from app.modules.file_search.schemas import (
     IgnorePatternCreate,
     IgnorePatternResponse,
     IgnorePatternUpdate,
+    FilePreviewResponse,
     OpenFileRequest,
     PresetResponse,
     SearchAcceptedResponse,
@@ -45,7 +47,7 @@ from app.modules.file_search.schemas import (
     StatusResponse,
 )
 from app.modules.file_search.services.presets import PRESETS
-from app.modules.file_search.services.search_service import SearchService
+from app.modules.file_search.services.search_service import FilePreviewError, SearchService
 from app.shared.redis import RedisClient, RedisQueue
 from app.shared.redis.queue import FILE_SEARCH_QUEUE, FILE_SEARCH_OPEN_QUEUE
 
@@ -253,6 +255,20 @@ async def browse_directory(
 ):
     """서버 측 디렉토리 목록 조회 (폴더 브라우저 모달용)."""
     return _service.browse_directory(path)
+
+# ============================================================
+# GET /preview
+# ============================================================
+
+
+@router.get("/preview", response_model=FilePreviewResponse)
+async def get_file_preview(
+    path: str = Query(..., description="미리보기할 파일 경로"),
+):
+    try:
+        return _service.get_file_preview(path)
+    except FilePreviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
 # ============================================================

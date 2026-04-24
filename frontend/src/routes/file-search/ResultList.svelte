@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { openFile } from '$lib/api/fileSearch';
-	import type { FileMatch, ContentMatch } from '$lib/types/fileSearch';
-	import { AlertTriangle, FileText, ClipboardList, ChevronRight } from 'lucide-svelte';
+	import { getFilePreview, openFile } from '$lib/api/fileSearch';
+	import { toast } from '$lib/stores/toast';
+	import type { FileMatch, ContentMatch, FilePreviewResponse } from '$lib/types/fileSearch';
+	import { AlertTriangle, FileText, ClipboardList, ChevronRight, Copy } from 'lucide-svelte';
 
 	interface Props {
 		results: FileMatch[];
@@ -15,6 +16,29 @@
 	// 파일별 접기/펼치기 상태
 	let collapsed: Record<string, boolean> = $state({});
 
+	let activePreviewPath: string | null = $state(null);
+	let previewCache: Record<string, FilePreviewResponse> = $state({});
+	let previewLoadingPath: string | null = $state(null);
+	let previewErrorByPath: Record<string, string> = $state({});
+
+	$effect(() => {
+		const alive = new Set(results.map((r) => r.file_path));
+
+		if (activePreviewPath && !alive.has(activePreviewPath)) {
+			activePreviewPath = null;
+		}
+		if (previewLoadingPath && !alive.has(previewLoadingPath)) {
+			previewLoadingPath = null;
+		}
+
+		for (const key of Object.keys(previewCache)) {
+			if (!alive.has(key)) delete previewCache[key];
+		}
+		for (const key of Object.keys(previewErrorByPath)) {
+			if (!alive.has(key)) delete previewErrorByPath[key];
+		}
+	});
+
 	function toggleCollapse(filePath: string) {
 		collapsed[filePath] = !collapsed[filePath];
 	}
@@ -24,6 +48,40 @@
 			await openFile(filePath, lineNumber);
 		} catch (e) {
 			console.error('파일 열기 실패:', e);
+		}
+	}
+
+	async function loadPreview(filePath: string): Promise<void> {
+		if (previewCache[filePath]) return;
+
+		previewLoadingPath = filePath;
+		delete previewErrorByPath[filePath];
+		try {
+			previewCache[filePath] = await getFilePreview(filePath);
+		} catch (e) {
+			previewErrorByPath[filePath] = e instanceof Error ? e.message : String(e);
+		} finally {
+			if (previewLoadingPath === filePath) {
+				previewLoadingPath = null;
+			}
+		}
+	}
+
+	async function togglePreview(filePath: string): Promise<void> {
+		if (activePreviewPath === filePath) {
+			activePreviewPath = null;
+			return;
+		}
+		activePreviewPath = filePath;
+		await loadPreview(filePath);
+	}
+
+	async function copyFilePath(filePath: string): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(filePath);
+			toast.success('경로 복사됨');
+		} catch {
+			toast.error('클립보드 복사 실패');
 		}
 	}
 
@@ -116,7 +174,7 @@
 						<span
 							class="font-medium text-sm truncate cursor-pointer
 								   hover:text-primary transition-colors"
-							onclick={(e) => { e.stopPropagation(); handleOpenFile(file.file_path); }}
+							onclick={(e) => { e.stopPropagation(); void togglePreview(file.file_path); }}
 							title={file.file_path}
 						>
 							{file.file_name}
@@ -137,6 +195,13 @@
 
 				<!-- 메타 + 화살표 -->
 				<div class="flex items-center gap-3 shrink-0 text-xs text-muted-foreground">
+					<span
+						class="rounded p-1 hover:bg-muted/60 transition-colors cursor-pointer"
+						onclick={(e) => { e.stopPropagation(); void copyFilePath(file.file_path); }}
+						title="full path 복사"
+					>
+						<Copy size={16} />
+					</span>
 					{#if file.file_size}
 						<span>{formatSize(file.file_size)}</span>
 					{/if}
@@ -187,6 +252,28 @@
 							</div>
 						{/each}
 					{/each}
+				</div>
+			{/if}
+
+			<!-- 텍스트 미리보기 -->
+			{#if activePreviewPath === file.file_path}
+				<div class="border-t border-border">
+					{#if previewLoadingPath === file.file_path && !previewCache[file.file_path]}
+						<div class="px-3 py-3 text-xs text-muted-foreground animate-pulse">미리보기 로드 중...</div>
+					{:else if previewErrorByPath[file.file_path]}
+						<div class="px-3 py-3 text-xs text-destructive">
+							{previewErrorByPath[file.file_path]}
+						</div>
+					{:else if previewCache[file.file_path]}
+						<div class="flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-muted-foreground border-b border-border/60">
+							<span class="rounded bg-muted px-2 py-0.5 text-foreground font-medium">
+								{previewCache[file.file_path].extension ? previewCache[file.file_path].extension.toUpperCase() : 'TEXT'}
+							</span>
+							<span class="font-mono">{previewCache[file.file_path].encoding}</span>
+							<span class="font-mono">{formatSize(previewCache[file.file_path].size_bytes)}</span>
+						</div>
+						<pre class="max-h-[320px] overflow-auto whitespace-pre px-3 py-2 font-mono text-xs">{previewCache[file.file_path].content}</pre>
+					{/if}
 				</div>
 			{/if}
 		</div>

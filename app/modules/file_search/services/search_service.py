@@ -20,6 +20,7 @@ from app.modules.file_search.schemas import (
     ContentMatch,
     DirectoryItem,
     FileMatch,
+    FilePreviewResponse,
     SearchRequest,
     SearchResponse,
     StatusResponse,
@@ -32,6 +33,40 @@ logger = logging.getLogger("file_search.search_service")
 
 _everything = EverythingService()
 _ripgrep = RipgrepService()
+
+PREVIEW_TEXT_EXTENSIONS = {
+    ".md",
+    ".txt",
+    ".text",
+    ".py",
+    ".ps1",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".svelte",
+    ".json",
+    ".yml",
+    ".yaml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".sql",
+    ".css",
+    ".html",
+    ".xml",
+    ".csv",
+    ".log",
+}
+
+MAX_PREVIEW_BYTES = 256 * 1024
+
+
+class FilePreviewError(Exception):
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
 
 
 class SearchService:
@@ -135,6 +170,60 @@ class SearchService:
             logger.debug(f"디렉토리 탐색 실패: {path} — {exc}")
 
         return BrowseResponse(current=path, parent=parent, directories=directories)
+
+    # ------------------------------------------------------------------
+    # Preview
+    # ------------------------------------------------------------------
+
+    def get_file_preview(self, file_path: str) -> FilePreviewResponse:
+        """텍스트 파일 미리보기 내용을 반환한다.
+
+        NOTE: Session 0에서도 파일 읽기는 가능하므로, preview는 Redis queue를 타지 않는 direct read로 유지한다.
+        """
+        if not os.path.exists(file_path):
+            raise FilePreviewError(status_code=404, detail=f"파일을 찾을 수 없습니다: {file_path}")
+        if not os.path.isfile(file_path):
+            raise FilePreviewError(status_code=404, detail=f"디렉토리는 미리보기할 수 없습니다: {file_path}")
+
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext not in PREVIEW_TEXT_EXTENSIONS:
+            raise FilePreviewError(status_code=415, detail=f"지원하지 않는 확장자입니다: {ext or '(none)'}")
+
+        try:
+            size_bytes = int(os.path.getsize(file_path))
+        except OSError:
+            raise FilePreviewError(status_code=404, detail=f"파일 크기를 확인할 수 없습니다: {file_path}")
+
+        if size_bytes > MAX_PREVIEW_BYTES:
+            raise FilePreviewError(status_code=413, detail=f"미리보기 크기 제한(256KB)을 초과했습니다: {size_bytes} bytes")
+
+        with open(file_path, "rb") as f:
+            raw = f.read(MAX_PREVIEW_BYTES + 1)
+
+        if len(raw) > MAX_PREVIEW_BYTES:
+            raise FilePreviewError(status_code=413, detail=f"미리보기 크기 제한(256KB)을 초과했습니다: {len(raw)} bytes")
+        if b"\x00" in raw:
+            raise FilePreviewError(status_code=415, detail=f"미리보기 불가 (binary 파일): {file_path}")
+
+        content, encoding = self._decode_preview_text(raw, file_path)
+
+        return FilePreviewResponse(
+            file_path=file_path,
+            file_name=os.path.basename(file_path),
+            extension=ext.lstrip("."),
+            size_bytes=size_bytes,
+            encoding=encoding,
+            content=content,
+        )
+
+    @staticmethod
+    def _decode_preview_text(raw: bytes, file_path: str) -> tuple[str, str]:
+        for encoding in ("utf-8-sig", "utf-8", "cp949"):
+            try:
+                return raw.decode(encoding), encoding
+            except UnicodeDecodeError:
+                continue
+        raise FilePreviewError(status_code=415, detail=f"미리보기 불가 (지원하지 않는 인코딩): {file_path}")
 
     # ------------------------------------------------------------------
     # Internal helpers
