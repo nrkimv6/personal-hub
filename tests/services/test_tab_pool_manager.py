@@ -626,3 +626,168 @@ class TestGetTabUnregisteredCloseShield:
         assert close_completed.is_set(), (
             "미등록 탭 close가 완료되지 않음 — asyncio.shield 없이 cancel race로 중단됐음"
         )
+
+
+# ============================================================
+# H1: release_tab finally 보장 + H2: new_page timeout
+# ============================================================
+
+@pytest.fixture
+def _make_pool():
+    with patch('app.shared.browser.tab_pool_manager.settings') as ms:
+        ms.TAB_ROTATION_THRESHOLD = 600
+        ms.CACHE_CLEANUP_INTERVAL = 300
+        ms.TAB_REQUEST_TIMEOUT = 60
+        ms.TAB_WAIT_RETRY_INTERVAL = 5
+        ms.TOTAL_MAX_TABS = 5
+        ms.MAX_USES_PER_TAB = 50
+        from app.shared.browser.tab_pool_manager import TabPoolManager
+        yield TabPoolManager(MagicMock())
+
+
+class TestH1ReleaseFinallyGuarantee:
+    """H1: release_tab에서 _wake_waiters 예외가 나도 tab_in_use=False 보장."""
+
+    @pytest.mark.asyncio
+    async def test_right_release_in_use_false_even_if_wake_waiters_raises(self, _make_pool):
+        """R: _wake_waiters 예외 후에도 tab_in_use[tab_id] is False."""
+        pool = _make_pool
+        mock_tab = MagicMock()
+        mock_tab._tab_id = "t1"
+        pool.tab_in_use["t1"] = True
+        pool.tab_last_used["t1"] = 0.0
+
+        # 대기자가 있는 상태에서 _wake_waiters가 예외를 던짐
+        dummy_event = MagicMock()
+        dummy_event.is_set.return_value = False
+        dummy_event.set.side_effect = RuntimeError("wake_waiters broken")
+        pool.tab_waiters["req_x"] = dummy_event
+
+        await pool.release_tab(mock_tab)
+
+        assert pool.tab_in_use["t1"] is False, "in_use는 False여야 함 — wake_waiters 예외와 무관"
+
+    @pytest.mark.asyncio
+    async def test_boundary_release_tab_with_no_tab_id_is_noop(self, _make_pool):
+        """B: _tab_id 없는 탭 release는 DEBUG no-op — tab_in_use 변화 없음."""
+        pool = _make_pool
+        mock_tab = MagicMock(spec=[])  # _tab_id 없음
+
+        before = dict(pool.tab_in_use)
+        await pool.release_tab(mock_tab)
+        assert pool.tab_in_use == before
+
+    @pytest.mark.asyncio
+    async def test_boundary_release_pending_marker_tab_is_noop(self, _make_pool):
+        """B: _tab_id='__pending__' 탭 release는 no-op — in_use 변화 없음."""
+        pool = _make_pool
+        mock_tab = MagicMock()
+        mock_tab._tab_id = "__pending__"
+        pool.tab_in_use["__pending__"] = True  # 이 상태가 유지돼야 함
+
+        await pool.release_tab(mock_tab)
+        # pending marker는 release_tab 책임 밖 — 변화 없음
+        assert pool.tab_in_use.get("__pending__") is True
+
+    @pytest.mark.asyncio
+    async def test_error_release_tab_caplog(self, _make_pool, caplog):
+        """E: _wake_waiters 예외 시 [TAB-POOL] release error 키워드 로그 출력."""
+        import logging
+        pool = _make_pool
+        mock_tab = MagicMock()
+        mock_tab._tab_id = "t2"
+        pool.tab_in_use["t2"] = True
+
+        dummy_event = MagicMock()
+        dummy_event.is_set.return_value = False
+        dummy_event.set.side_effect = RuntimeError("boom")
+        pool.tab_waiters["req_y"] = dummy_event
+
+        with caplog.at_level(logging.WARNING, logger="app.shared.browser.tab_pool_manager"):
+            await pool.release_tab(mock_tab)
+
+        assert any("release error" in r.message for r in caplog.records), (
+            "[TAB-POOL] release error 키워드 로그가 없음"
+        )
+
+
+class TestH2NewPageTimeout:
+    """H2: context.new_page() hang 시 NEW_PAGE_TIMEOUT 후 recreate 경로 진입."""
+
+    @pytest.mark.asyncio
+    async def test_right_new_page_timeout_triggers_recreate(self, _make_pool):
+        """R: new_page가 30s hang -> TimeoutError -> handle_browser_closed_error 호출."""
+        pool = _make_pool
+        pool.TOTAL_MAX_TABS = 10
+        pool.NEW_PAGE_TIMEOUT = 0.05  # 테스트용 단축
+
+        # 모든 기존 탭이 in_use 상태여서 new_page 경로로 진입
+        pool.tab_pools[1] = {}
+
+        hang_event = asyncio.Event()
+
+        async def _hanging_new_page():
+            await asyncio.sleep(10)  # hang 시뮬레이션
+
+        mock_context = MagicMock()
+        # 1회는 hang, 이후에는 정상 탭 반환 (recreate 후)
+        created_tab = MagicMock()
+        created_tab._tab_id = "__pending__"
+        created_tab.set_extra_http_headers = AsyncMock()
+        call_count = 0
+
+        async def _conditional_new_page():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                await asyncio.sleep(10)  # hang
+            return created_tab
+
+        mock_context.new_page = _conditional_new_page
+        mock_context.pages = []
+        pool.context_manager.get_or_create_context = AsyncMock(return_value=mock_context)
+        pool.handle_browser_closed_error = AsyncMock(return_value=True)
+        pool.register_initial_tabs = AsyncMock(return_value=0)
+        pool.cleanup_old_tabs = AsyncMock(return_value=0)
+
+        # get_tab 호출 — new_page hang → timeout → handle_browser_closed_error 호출
+        try:
+            await asyncio.wait_for(
+                pool.get_tab(target_id=999, service_account_id=1),
+                timeout=2.0
+            )
+        except (asyncio.TimeoutError, Exception):
+            pass  # 전체 get_tab timeout 허용 — handle_browser_closed_error 호출 여부만 검증
+
+        pool.handle_browser_closed_error.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_boundary_retry_new_page_also_wrapped(self, _make_pool):
+        """B: 재시도 경로의 new_page도 NEW_PAGE_TIMEOUT으로 감싸짐 — timeout 발생."""
+        pool = _make_pool
+        pool.NEW_PAGE_TIMEOUT = 0.05  # 단축
+        pool.TOTAL_MAX_TABS = 10
+        pool.tab_pools[1] = {}
+
+        mock_context = MagicMock()
+
+        async def _always_hang():
+            await asyncio.sleep(10)
+
+        mock_context.new_page = _always_hang
+        mock_context.pages = []
+        pool.context_manager.get_or_create_context = AsyncMock(return_value=mock_context)
+        pool.handle_browser_closed_error = AsyncMock(return_value=True)
+        pool.register_initial_tabs = AsyncMock(return_value=0)
+        pool.cleanup_old_tabs = AsyncMock(return_value=0)
+
+        try:
+            await asyncio.wait_for(
+                pool.get_tab(target_id=998, service_account_id=1),
+                timeout=1.0
+            )
+        except (asyncio.TimeoutError, Exception):
+            pass
+
+        # handle_browser_closed_error 가 여러번 호출될 수 있음 (각 hang마다)
+        assert pool.handle_browser_closed_error.call_count >= 1

@@ -122,9 +122,9 @@ class Settings(BaseSettings):
     # 탭 관리 최적화 설정
     TAB_ROTATION_THRESHOLD: int = 600  # 탭 회전 임계값 (초)
     CACHE_CLEANUP_INTERVAL: int = 300  # 캐시 정리 간격 (초)
-    TAB_REQUEST_TIMEOUT: int = 60  # 탭 요청 시간 초과 (초)
+    TAB_REQUEST_TIMEOUT: int = 60  # 탭 요청 시간 초과 (초) — inner polling gate; BrowserManager outer = +5s
     TAB_WAIT_RETRY_INTERVAL: int = 5  # 탭 요청 재시도 간격 (초)
-    TOTAL_MAX_TABS: int = 5  # 전체 브라우저에서 사용할 최대 탭 수
+    TOTAL_MAX_TABS: int = 5  # 전체 최대 탭 수 — 시간 분할 재사용 전제 (5탭×12스케줄 정상); 상향으로 starvation 우회 금지
 
     # 프로세스 트리 추적 설정
     PROCESS_SCAN_INTERVAL: int = 60  # 프로세스 스캔 주기 (초)
