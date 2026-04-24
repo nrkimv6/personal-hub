@@ -20,12 +20,14 @@ Redis 큐 지원:
     - Redis 미연결 시: SQLite 폴링 fallback
 """
 import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 from app.core.database import db_circuit
 from app.shared.worker.base_worker import BaseWorker
+from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
 from app.models.google_search import (
     GoogleSearchQueue,
@@ -39,21 +41,55 @@ from app.modules.google_search.services.crawler import (
     CaptchaDetectedError,
 )
 from app.modules.google_search.services.queue_service import recover_pending_google_searches
+from app.shared.browser.browser_manager import BrowserManager
 from app.shared.redis import RedisClient, RedisQueue
 from app.shared.redis.queue import GOOGLE_SEARCH_QUEUE
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
-    from app.shared.browser.browser_manager import BrowserManager
 
 logger = logging.getLogger(__name__)
+
+# 페이지당 budget: goto(domcontentloaded ~10s) + sleep(1.5s) + wait_for_selector(10s)
+_PER_PAGE_BUDGET_SECONDS = 25.0
+# 페이지 사이 delay budget 배수 (max_delay 기준)
+_INTER_PAGE_DELAY_FACTOR = 1.0
+
+
+def _compute_search_operation_timeout(options: CrawlOptions) -> float:
+    """Google 검색 콜백 타임아웃 계산.
+
+    페이지당 25초(goto + sleep + selector) + 페이지 사이 max_delay를 기준으로
+    전체 예상 소요 시간을 산출한다.
+    DEFAULT_OPERATION_TIMEOUT(60s)를 하한으로 사용해 단일 페이지에서 과도하게 늘리지 않는다.
+    """
+    n = max(1, options.max_pages)
+    inter_page = options.max_delay * _INTER_PAGE_DELAY_FACTOR * (n - 1)
+    estimated = _PER_PAGE_BUDGET_SECONDS * n + inter_page
+    return max(BrowserManager.DEFAULT_OPERATION_TIMEOUT, estimated)
+
+
+def _deserialize_search_params(raw_search_params: Optional[str]) -> Optional[dict]:
+    """search_params JSON 문자열 역직렬화."""
+    if not raw_search_params:
+        return None
+    try:
+        return json.loads(raw_search_params)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _is_browser_closed_error(error: Exception) -> bool:
+    """브라우저 관련 closed 오류인지 확인 (CrawlWorkerBase.BROWSER_CLOSED_KEYWORDS 재사용)."""
+    error_str = str(error)
+    return any(keyword in error_str for keyword in CrawlWorkerBase.BROWSER_CLOSED_KEYWORDS)
 
 
 class GoogleSearchWorker(BaseWorker):
     """Google 검색 큐 처리 워커.
 
     큐에서 pending 상태의 검색 요청을 가져와 처리합니다.
-    BrowserManager를 통해 브라우저 탭을 획득하여 검색을 수행합니다.
+    BrowserManager.execute_with_tab()을 통해 managed tab 계약으로 탭을 획득합니다.
 
     Redis 큐 지원:
     - Redis 연결 시: Redis 큐에서 작업 수신 (즉각 반응)
@@ -234,44 +270,55 @@ class GoogleSearchWorker(BaseWorker):
         finally:
             db.close()
 
+    # ========== 검색 실행 (managed-tab 계약) ==========
+
+    def _build_search_options(self, queue_item: GoogleSearchQueue) -> CrawlOptions:
+        """queue_item에서 CrawlOptions를 조립한다."""
+        search_params = _deserialize_search_params(queue_item.search_params)
+        return CrawlOptions(
+            max_pages=queue_item.max_pages or 1,
+            date_filter=queue_item.date_filter,
+            search_params=search_params,
+        )
+
+    async def _run_search_with_tab(
+        self,
+        tab: "Page",
+        queue_item: GoogleSearchQueue,
+        options: CrawlOptions,
+        db,
+    ):
+        """managed tab을 받아 검색을 수행하는 execute_with_tab 콜백."""
+        crawler = GoogleSearchCrawler(tab, db)
+        return await self._search_with_queue_id(crawler, queue_item, options, db)
+
     async def _execute_search(self, queue_item: GoogleSearchQueue, db):
         """검색 요청 실행.
+
+        BrowserManager.execute_with_tab()을 통해 managed tab 계약으로 탭을 획득한다.
+        browser-closed 오류는 1회 재시도한다.
+        CaptchaDetectedError는 terminal 상태로 retry 없이 즉시 실패 처리한다.
 
         Args:
             queue_item: 큐 아이템
             db: DB 세션
         """
-        try:
-            # BrowserManager를 통해 탭 획득
-            if not self.browser or not self.browser.is_initialized:
-                raise RuntimeError("BrowserManager가 초기화되지 않았습니다.")
+        if not self.browser or not self.browser.is_initialized:
+            raise RuntimeError("BrowserManager가 초기화되지 않았습니다.")
 
-            # 컨텍스트 획득
-            context = await self.browser.get_context(queue_item.service_account_id)
-            page = await context.new_page()
+        options = self._build_search_options(queue_item)
+        operation_timeout = _compute_search_operation_timeout(options)
+        max_retries = 1
 
+        for retry_count in range(max_retries + 1):
             try:
-                # 크롤러 생성 및 검색 실행
-                crawler = GoogleSearchCrawler(page, db)
-                # search_params JSON 역직렬화
-                search_params = None
-                if queue_item.search_params:
-                    try:
-                        import json
-                        search_params = json.loads(queue_item.search_params)
-                    except (json.JSONDecodeError, TypeError):
-                        search_params = None
-
-                options = CrawlOptions(
-                    max_pages=queue_item.max_pages or 1,
-                    date_filter=queue_item.date_filter,
-                    search_params=search_params,
-                )
-
-                # 기존 검색 실행 (히스토리, 결과 저장은 크롤러 내부에서 처리)
-                # 단, search_id를 queue_item의 것으로 사용해야 함
-                result = await self._search_with_queue_id(
-                    crawler, queue_item, options, db
+                result = await self.browser.execute_with_tab(
+                    callback=lambda tab, **_kw: self._run_search_with_tab(
+                        tab, queue_item, options, db
+                    ),
+                    service_account_id=queue_item.service_account_id,
+                    target_id=queue_item.id,
+                    operation_timeout=operation_timeout,
                 )
 
                 # 완료 처리
@@ -293,28 +340,39 @@ class GoogleSearchWorker(BaseWorker):
                     f"search_id={queue_item.search_id}, "
                     f"total_results={result.total_results}"
                 )
+                return
 
-            finally:
-                await page.close()
+            except CaptchaDetectedError:
+                # CAPTCHA는 terminal 상태 — retry 없이 즉시 실패
+                logger.warning(
+                    f"[{self.name}] CAPTCHA detected: search_id={queue_item.search_id}"
+                )
+                queue_item.status = "failed"
+                queue_item.error_message = "CAPTCHA 감지됨. 수동 해결이 필요합니다."
+                queue_item.completed_at = datetime.now()
+                db.commit()
+                return
 
-        except CaptchaDetectedError as e:
-            logger.warning(
-                f"[{self.name}] CAPTCHA detected: search_id={queue_item.search_id}"
-            )
-            queue_item.status = "failed"
-            queue_item.error_message = "CAPTCHA 감지됨. 수동 해결이 필요합니다."
-            queue_item.completed_at = datetime.now()
-            db.commit()
+            except Exception as e:
+                if _is_browser_closed_error(e) and retry_count < max_retries:
+                    logger.warning(
+                        f"[{self.name}] Browser closed, retrying: "
+                        f"search_id={queue_item.search_id}, "
+                        f"service_account_id={queue_item.service_account_id}, "
+                        f"retry_count={retry_count + 1}"
+                    )
+                    continue
 
-        except Exception as e:
-            logger.error(
-                f"[{self.name}] Search failed: search_id={queue_item.search_id}, error={e}",
-                exc_info=True
-            )
-            queue_item.status = "failed"
-            queue_item.error_message = str(e)
-            queue_item.completed_at = datetime.now()
-            db.commit()
+                logger.error(
+                    f"[{self.name}] Search failed: "
+                    f"search_id={queue_item.search_id}, error={e}",
+                    exc_info=True,
+                )
+                queue_item.status = "failed"
+                queue_item.error_message = str(e)
+                queue_item.completed_at = datetime.now()
+                db.commit()
+                return
 
     async def _search_with_queue_id(
         self,

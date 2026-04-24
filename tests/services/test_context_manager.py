@@ -837,6 +837,37 @@ class TestPopupHandlerRegistration:
         asyncio.get_event_loop().run_until_complete(run())
         assert len(close_called) == 1
 
+    def test_mixed_orphan_and_managed_tab_only_orphan_closed_E(self):
+        """[Existence] _tab_id 있는 managed tab과 about:blank orphan이 섞여 있을 때 orphan만 닫힌다 (Phase T1 item 8)."""
+        import asyncio
+        manager = self._make_manager()
+
+        closed = []
+
+        orphan = MagicMock(spec=[])
+        orphan.url = "about:blank"
+        orphan.is_closed = MagicMock(return_value=False)
+        orphan.close = AsyncMock(side_effect=lambda: closed.append("orphan"))
+        # _tab_id 없음 — direct context.new_page() 경로
+
+        managed = MagicMock(spec=[])
+        managed.url = "about:blank"
+        managed.is_closed = MagicMock(return_value=False)
+        managed.close = AsyncMock(side_effect=lambda: closed.append("managed"))
+        managed._tab_id = "__pending__"  # tab_pool_manager 설정 마커
+
+        mock_context = MagicMock()
+        mock_context.pages = [orphan, managed]
+        mock_context.on = MagicMock()
+
+        async def run():
+            manager._register_popup_handler(service_account_id=3, context=mock_context)
+            await asyncio.sleep(0.1)
+
+        asyncio.get_event_loop().run_until_complete(run())
+        assert "orphan" in closed
+        assert "managed" not in closed
+
     def test_popup_handler_discard_on_close_context(self):
         """close_context 호출 시 _popup_handler_registered에서 제거됨"""
         import asyncio

@@ -191,3 +191,46 @@ class TestPopupHandlerRaceReproduction:
 
         for page in pages:
             page.close.assert_not_called()
+
+
+class TestDirectVsManagedPagePopupGuard:
+    """direct page(_tab_id 없음) vs managed page(__pending__) 혼합 시나리오 (Phase T1 item 8)."""
+
+    @pytest.mark.asyncio
+    async def test_direct_page_without_tab_id_is_closed_and_pending_page_survives_R(self):
+        """R(Right): direct page(tab_id 없음)는 닫히고 __pending__ managed page는 살아남는다."""
+        cm = ContextManager()
+        mock_ctx = _make_mock_context()
+        cm._register_popup_handler(1, mock_ctx)
+        handler = mock_ctx._page_handlers[0]
+
+        direct_page = _FakePage(tab_id=None)    # direct context.new_page() — 탭 풀 우회
+        managed_page = _FakePage(tab_id="__pending__")  # tab_pool_manager가 설정한 pending 마커
+
+        handler(direct_page)
+        handler(managed_page)
+
+        await asyncio.sleep(0.1)
+
+        direct_page.close.assert_called_once()
+        managed_page.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_mixed_pages_only_orphan_closed_in_same_event_loop_turn_R(self):
+        """R(Right): 같은 event-loop turn에 고아와 managed 탭이 혼재해도 orphan만 닫힌다."""
+        cm = ContextManager()
+        mock_ctx = _make_mock_context()
+        cm._register_popup_handler(1, mock_ctx)
+        handler = mock_ctx._page_handlers[0]
+
+        orphan = _FakePage(tab_id=None)
+        managed = _FakePage(tab_id="real-tab-id")
+
+        # 같은 event-loop turn에 두 핸들러 모두 호출
+        handler(orphan)
+        handler(managed)
+
+        await asyncio.sleep(0.1)
+
+        orphan.close.assert_called_once()
+        managed.close.assert_not_called()

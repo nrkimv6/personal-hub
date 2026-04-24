@@ -607,6 +607,261 @@ class TestGoogleSearchWorkerProcessing:
         mock_db.close.assert_called_once()
 
 
+class TestGoogleSearchWorkerExecuteSearch:
+    """execute_with_tab 기반 managed-tab 경로 TC (Phase T1 item 6)."""
+
+    def _make_queue_item(self, db_session):
+        item = GoogleSearchQueue(
+            search_id=str(uuid.uuid4()),
+            query="managed tab test",
+            max_pages=1,
+            service_account_id=2,
+        )
+        item.id = 99
+        db_session.add(item)
+        db_session.commit()
+        db_session.refresh(item)
+        return item
+
+    @pytest.mark.asyncio
+    async def test_execute_search_uses_execute_with_tab_and_target_id_R(self, db_session):
+        """R(Right): execute_with_tab이 service_account_id, target_id=queue_item.id로 호출된다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+        from app.modules.google_search.services.crawler import CrawlResult
+
+        queue_item = self._make_queue_item(db_session)
+
+        mock_result = CrawlResult(
+            search_id=queue_item.search_id,
+            query=queue_item.query,
+            results=[],
+            total_results=0,
+            status="completed",
+            started_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        mock_browser = Mock()
+        mock_browser.is_initialized = True
+        mock_browser.execute_with_tab = AsyncMock(return_value=mock_result)
+
+        worker = GoogleSearchWorker(browser_manager=mock_browser)
+        worker.browser = mock_browser
+
+        await worker._execute_search(queue_item, db_session)
+
+        mock_browser.execute_with_tab.assert_awaited_once()
+        call_kwargs = mock_browser.execute_with_tab.call_args
+        assert call_kwargs.kwargs.get("service_account_id") == 2
+        assert call_kwargs.kwargs.get("target_id") == queue_item.id
+
+    @pytest.mark.asyncio
+    async def test_execute_search_does_not_call_get_context_or_new_page_I(self, db_session):
+        """I(Inverse): execute_search 호출 시 get_context/new_page가 호출되지 않는다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+        from app.modules.google_search.services.crawler import CrawlResult
+
+        queue_item = self._make_queue_item(db_session)
+
+        mock_result = CrawlResult(
+            search_id=queue_item.search_id,
+            query=queue_item.query,
+            results=[],
+            total_results=0,
+            status="completed",
+            started_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        mock_browser = Mock()
+        mock_browser.is_initialized = True
+        mock_browser.execute_with_tab = AsyncMock(return_value=mock_result)
+        mock_browser.get_context = AsyncMock()
+
+        worker = GoogleSearchWorker(browser_manager=mock_browser)
+        worker.browser = mock_browser
+
+        await worker._execute_search(queue_item, db_session)
+
+        mock_browser.get_context.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_search_updates_saved_search_after_callback_result_Co(self, db_session):
+        """Co(Conformance): callback 완료 후 completed + saved_search update가 호출된다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+        from app.modules.google_search.services.crawler import CrawlResult
+
+        saved = GoogleSavedSearch(name="S1", query="q")
+        db_session.add(saved)
+        db_session.commit()
+        db_session.refresh(saved)
+
+        queue_item = GoogleSearchQueue(
+            search_id=str(uuid.uuid4()),
+            query="saved test",
+            max_pages=1,
+            service_account_id=1,
+            saved_search_id=saved.id,
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+        db_session.refresh(queue_item)
+
+        mock_result = CrawlResult(
+            search_id=queue_item.search_id,
+            query=queue_item.query,
+            results=[],
+            total_results=5,
+            status="completed",
+            started_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        mock_browser = Mock()
+        mock_browser.is_initialized = True
+        mock_browser.execute_with_tab = AsyncMock(return_value=mock_result)
+
+        worker = GoogleSearchWorker(browser_manager=mock_browser)
+        worker.browser = mock_browser
+
+        await worker._execute_search(queue_item, db_session)
+
+        db_session.refresh(queue_item)
+        assert queue_item.status == "completed"
+        db_session.refresh(saved)
+        assert saved.last_search_id == queue_item.search_id
+        assert saved.last_result_count == 5
+
+
+class TestComputeSearchOperationTimeout:
+    """_compute_search_operation_timeout 단위 TC (Phase T1 item 7)."""
+
+    def test_compute_search_operation_timeout_boundary_single_page_B(self):
+        """B(Boundary): max_pages=1이면 DEFAULT_OPERATION_TIMEOUT(60s) 이상이다."""
+        from app.worker.google_search_worker import _compute_search_operation_timeout
+        from app.modules.google_search.services.crawler import CrawlOptions
+        from app.shared.browser.browser_manager import BrowserManager
+
+        options = CrawlOptions(max_pages=1)
+        timeout = _compute_search_operation_timeout(options)
+        assert timeout >= BrowserManager.DEFAULT_OPERATION_TIMEOUT
+
+    def test_compute_search_operation_timeout_grows_with_max_pages_B(self):
+        """B(Boundary): max_pages 증가 시 timeout이 단조 증가한다."""
+        from app.worker.google_search_worker import _compute_search_operation_timeout
+        from app.modules.google_search.services.crawler import CrawlOptions
+
+        t1 = _compute_search_operation_timeout(CrawlOptions(max_pages=1))
+        t3 = _compute_search_operation_timeout(CrawlOptions(max_pages=3))
+        t10 = _compute_search_operation_timeout(CrawlOptions(max_pages=10))
+
+        assert t1 <= t3 <= t10
+
+    @pytest.mark.asyncio
+    async def test_execute_search_retries_browser_closed_once_R(self, db_session):
+        """R(Right): browser-closed 오류 첫 번째에 1회 재시도 후 성공한다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+        from app.modules.google_search.services.crawler import CrawlResult
+
+        queue_item = GoogleSearchQueue(
+            search_id=str(uuid.uuid4()),
+            query="retry test",
+            max_pages=1,
+            service_account_id=1,
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+        db_session.refresh(queue_item)
+
+        mock_result = CrawlResult(
+            search_id=queue_item.search_id,
+            query=queue_item.query,
+            results=[],
+            total_results=0,
+            status="completed",
+            started_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        call_count = 0
+
+        async def _side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("Target page, context or browser has been closed")
+            return mock_result
+
+        mock_browser = Mock()
+        mock_browser.is_initialized = True
+        mock_browser.execute_with_tab = AsyncMock(side_effect=_side_effect)
+
+        worker = GoogleSearchWorker(browser_manager=mock_browser)
+        worker.browser = mock_browser
+
+        await worker._execute_search(queue_item, db_session)
+
+        assert call_count == 2
+        db_session.refresh(queue_item)
+        assert queue_item.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_execute_search_marks_failed_after_retry_exhausted_E(self, db_session):
+        """E(Error): browser-closed 반복 시 max_retries 소진 후 failed + error_message가 기록된다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+
+        queue_item = GoogleSearchQueue(
+            search_id=str(uuid.uuid4()),
+            query="fail test",
+            max_pages=1,
+            service_account_id=1,
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+        db_session.refresh(queue_item)
+
+        mock_browser = Mock()
+        mock_browser.is_initialized = True
+        mock_browser.execute_with_tab = AsyncMock(
+            side_effect=RuntimeError("Target page, context or browser has been closed")
+        )
+
+        worker = GoogleSearchWorker(browser_manager=mock_browser)
+        worker.browser = mock_browser
+
+        await worker._execute_search(queue_item, db_session)
+
+        db_session.refresh(queue_item)
+        assert queue_item.status == "failed"
+        assert "Target page" in queue_item.error_message
+        assert queue_item.completed_at is not None
+
+
+class TestDeserializeSearchParams:
+    """_deserialize_search_params / _build_search_options 단위 TC."""
+
+    def test_deserialize_valid_json_R(self):
+        """R(Right): 유효한 JSON 문자열 → dict 반환."""
+        from app.worker.google_search_worker import _deserialize_search_params
+        result = _deserialize_search_params('{"lr": "lang_ko"}')
+        assert result == {"lr": "lang_ko"}
+
+    def test_deserialize_none_B(self):
+        """B(Boundary): None 입력 → None 반환."""
+        from app.worker.google_search_worker import _deserialize_search_params
+        assert _deserialize_search_params(None) is None
+
+    def test_deserialize_empty_string_B(self):
+        """B(Boundary): 빈 문자열 → None 반환."""
+        from app.worker.google_search_worker import _deserialize_search_params
+        assert _deserialize_search_params("") is None
+
+    def test_deserialize_invalid_json_E(self):
+        """E(Error): 잘못된 JSON → None 반환 (예외 전파 안 함)."""
+        from app.worker.google_search_worker import _deserialize_search_params
+        assert _deserialize_search_params("{bad json}") is None
+
+
 class TestBuildUrlSiteRestriction:
     """_build_url()의 site: 연산자 변환 TC (Phase T1)."""
 
