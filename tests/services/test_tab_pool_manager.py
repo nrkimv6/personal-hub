@@ -791,3 +791,123 @@ class TestH2NewPageTimeout:
 
         # handle_browser_closed_error 가 여러번 호출될 수 있음 (각 hang마다)
         assert pool.handle_browser_closed_error.call_count >= 1
+
+
+class TestCreatePageWithTimeout:
+    """_create_page_with_timeout helper 단위 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_create_page_with_timeout_right_returns_pending_tab(self, _make_pool):
+        """R: 정상 new_page 경로가 (context, page)를 반환하고 page._tab_id == '__pending__'을 보장한다."""
+        pool = _make_pool
+        pool.NEW_PAGE_TIMEOUT = 5.0
+
+        created_page = MagicMock()
+        mock_context = MagicMock()
+        mock_context.new_page = AsyncMock(return_value=created_page)
+
+        returned_ctx, returned_page = await pool._create_page_with_timeout(mock_context, service_account_id=1)
+
+        assert returned_ctx is mock_context
+        assert returned_page is created_page
+        assert returned_page._tab_id == "__pending__"
+
+    @pytest.mark.asyncio
+    async def test_create_page_with_timeout_error_hang_triggers_recreate(self, _make_pool):
+        """E: new_page hang(0.05s timeout) 시 handle_browser_closed_error와 fresh get_or_create_context가 호출된다."""
+        pool = _make_pool
+        pool.NEW_PAGE_TIMEOUT = 0.05
+
+        fresh_page = MagicMock()
+        fresh_ctx = MagicMock()
+
+        async def _always_hang():
+            await asyncio.sleep(10)
+
+        async def _ok():
+            return fresh_page
+
+        original_ctx = MagicMock()
+        original_ctx.new_page = _always_hang
+        fresh_ctx.new_page = _ok
+
+        pool.handle_browser_closed_error = AsyncMock(return_value=True)
+        pool.context_manager.get_or_create_context = AsyncMock(return_value=fresh_ctx)
+        pool.register_initial_tabs = AsyncMock(return_value=0)
+        pool.tab_pools[1] = {}
+
+        returned_ctx, returned_page = await pool._create_page_with_timeout(original_ctx, service_account_id=1)
+
+        pool.handle_browser_closed_error.assert_called_once_with(1, recreate=True)
+        pool.context_manager.get_or_create_context.assert_called_with(1)
+        assert returned_page is fresh_page
+        assert returned_page._tab_id == "__pending__"
+
+    @pytest.mark.asyncio
+    async def test_get_tab_after_recreate_registers_tab_into_live_account_pool(self, _make_pool):
+        """recreate 뒤 반환 탭이 분리된 옛 dict가 아니라 self.tab_pools[service_account_id]에 등록된다."""
+        pool = _make_pool
+        pool.TOTAL_MAX_TABS = 10
+        pool.NEW_PAGE_TIMEOUT = 5.0
+
+        old_dict: dict = {}
+        new_dict: dict = {}
+        pool.tab_pools[1] = old_dict
+
+        created_page = MagicMock()
+        created_page.set_extra_http_headers = AsyncMock()
+        fresh_ctx = MagicMock()
+        fresh_ctx.pages = []
+
+        async def _new_page():
+            return created_page
+
+        fresh_ctx.new_page = _new_page
+
+        async def _mock_create_page(context, service_account_id):
+            pool.tab_pools[service_account_id] = new_dict
+            created_page._tab_id = "__pending__"
+            return fresh_ctx, created_page
+
+        pool._create_page_with_timeout = _mock_create_page
+        pool.cleanup_old_tabs = AsyncMock(return_value=0)
+        pool.context_manager.get_or_create_context = AsyncMock(return_value=fresh_ctx)
+
+        tab = await pool.get_tab(target_id=1, service_account_id=1)
+
+        tab_id = tab._tab_id
+        assert tab_id in new_dict, "탭이 fresh dict에 등록돼야 한다"
+        assert tab_id not in old_dict, "탭이 stale dict에 등록되면 안 된다"
+
+    @pytest.mark.asyncio
+    async def test_warmup_recreate_refreshes_context_and_overwrites_pending_marker(self, _make_pool):
+        """warmup recreate 뒤 fresh context를 사용하고 __pending__ -> tab_id 전환 계약이 유지된다."""
+        pool = _make_pool
+        pool.TOTAL_MAX_TABS = 10
+        pool.NEW_PAGE_TIMEOUT = 5.0
+        pool.tab_pools[1] = {}
+
+        pages_created: list = []
+        call_count = 0
+        fresh_ctx = MagicMock()
+
+        async def _create_page_with_timeout_mock(context, service_account_id):
+            nonlocal call_count
+            call_count += 1
+            page = MagicMock()
+            page._tab_id = "__pending__"
+            page.set_extra_http_headers = AsyncMock()
+            pages_created.append(page)
+            return fresh_ctx, page
+
+        pool._create_page_with_timeout = _create_page_with_timeout_mock
+        pool.context_manager.get_or_create_context = AsyncMock(return_value=fresh_ctx)
+        fresh_ctx.pages = []
+
+        await pool.warmup(min_tabs=2, service_account_id=1)
+
+        assert call_count == 2, "탭 2개 생성 요청"
+        for page in pages_created:
+            assert page._tab_id != "__pending__", "__pending__ -> tab_id로 전환돼야 한다"
+
+
