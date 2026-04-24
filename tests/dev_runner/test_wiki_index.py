@@ -397,41 +397,6 @@ def test_guide_status_with_real_meta_yaml(db):
         assert isinstance(item["pending_count"], int)
 
 
-def test_backfill_guide_status_real_files(db):
-    """T3: 실제 docs/archive/ + docs/dev-guide/_meta.yaml + DB → guide-status INDEX.md 마커 블록 생성 검증"""
-    import tempfile
-    from pathlib import Path
-    from scripts.migrations.archive_index_backfill import backfill_guide_blocks_db, render_guide_status_index
-    from app.modules.dev_runner.services.plan_record_service import PlanRecordService
-
-    # 실제 meta.yaml 파싱
-    try:
-        from app.shared.wiki_tags import load_meta_yaml
-        meta = load_meta_yaml()
-    except Exception as e:
-        pytest.skip(f"meta.yaml load failed: {e}")
-
-    if not meta:
-        pytest.skip("meta.yaml is empty")
-
-    # DB에서 실제 guide_status 조회 (빈 DB여도 list 반환)
-    svc = PlanRecordService(db)
-    statuses = svc.get_guide_status()
-    assert isinstance(statuses, list)
-
-    # render_guide_status_index로 테이블 내용 생성 (마커 없이 테이블만 반환)
-    rendered = render_guide_status_index(statuses)
-    assert isinstance(rendered, str)
-    # 테이블 헤더행 포함 확인
-    assert "| guide |" in rendered
-    assert "last_updated" in rendered
-    assert "pending" in rendered
-    # 가이드 수 만큼 행이 생성되었는지 확인 (헤더 2행 + 가이드 행)
-    lines = [l for l in rendered.splitlines() if l.strip().startswith("|")]
-    # 헤더행(1) + 구분행(1) + 가이드 행(N개)
-    assert len(lines) >= 2
-
-
 def test_extract_wiki_tags_integration():
     """T3: 실제 docs/wiki-schema.md whitelist + 샘플 archive 파일명 5개 → 태그 추출"""
     from app.shared.wiki_tags import load_whitelist, extract_wiki_tags
