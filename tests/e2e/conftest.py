@@ -148,6 +148,20 @@ def _wait_for_http_available(url: str, timeout_seconds: float = 60.0) -> None:
     pytest.fail(f"HTTP endpoint not available: {url} ({last_error})")
 
 
+def _assert_frontend_available(url: str) -> None:
+    """One-shot healthcheck for tests that validate urlopen timeout behavior.
+
+    NOTE: Keep this as a single attempt (no retry loop) so unit/integration tests stay fast and deterministic.
+    """
+    try:
+        with urlopen(url, timeout=5):
+            return
+    except HTTPError:
+        return
+    except (URLError, OSError, TimeoutError) as exc:
+        pytest.fail(f"HTTP endpoint not available: {url} ({exc})")
+
+
 def _wait_for_frontend_available(url: str, companion_api_url: str | None = None) -> None:
     _wait_for_http_available(url)
     if companion_api_url:
