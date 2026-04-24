@@ -102,6 +102,7 @@
 						{#if item.merge_status}
 							<span class="ml-1 px-1 rounded text-[9px] {
 								item.merge_status === 'merged' ? 'bg-green-900 text-green-300' :
+								item.merge_status === 'approval_required' ? 'bg-yellow-900 text-yellow-300' :
 								item.merge_status === 'pending' ? 'bg-yellow-900 text-yellow-300' :
 								'bg-gray-700 text-gray-400'
 							}">{item.merge_status}</span>

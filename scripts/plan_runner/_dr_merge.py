@@ -774,12 +774,55 @@ def _handle_general_error(runner_id: str, redis_client: redis.Redis, plan_file, 
         return {"success": False, "message": f"exit_code={exit_code}", "merge_status": "error", "action": action_name}
 
 
+def _handle_approval_required(
+    runner_id: str,
+    redis_client: redis.Redis,
+    plan_file,
+    pub_fn,
+    action_name: str = "inline-merge",
+) -> dict:
+    """service_lock 같은 precheck에서 승인 대기(approval_required)로 중단된 merge 결과를 보존한다.
+
+    plan-runner(post-merge)가 이미 Redis에 merge_status/merge_reason/merge_message를 기록하므로,
+    dev-runner는 일반 resolver로 넘기지 않고 해당 값을 그대로 반환한다.
+    """
+    pub_fn("merge 승인 필요 감지 (approval_required) — 자동 resolver 스킵, worktree 보존")
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "approval_required")
+    except Exception:
+        pass
+
+    def _decode(val) -> str:
+        if isinstance(val, bytes):
+            try:
+                return val.decode("utf-8", errors="replace")
+            except Exception:
+                return str(val)
+        return "" if val is None else str(val)
+
+    try:
+        message = _decode(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message")) or "approval_required"
+        reason = _decode(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")) or "approval_required"
+    except Exception:
+        message = "approval_required"
+        reason = "approval_required"
+
+    return {
+        "success": False,
+        "message": message,
+        "merge_status": "approval_required",
+        "action": action_name,
+        "reason": reason,
+    }
+
+
 # dispatch table: exit_code → handler
 # handler signature: (runner_id, redis_client, plan_file, pub_fn, action_name, **kwargs) -> dict
 _EXIT_CODE_HANDLERS = {
     0: _handle_merge_success,
     2: _handle_test_failed,
     3: _handle_conflict,
+    5: _handle_approval_required,  # service_lock precheck 승인 대기
 }
 
 
@@ -788,7 +831,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
 
     _do_inline_merge, _do_retry_merge에서 공유하는 lock+subprocess+결과 패턴을 통합한다.
 
-    exit code 규약: 0=merged, 1=error, 2=test_failed, 3=conflict
+    exit code 규약: 0=merged, 1=error, 2=test_failed, 3=conflict, 5=approval_required(service_lock)
 
     Args:
         _test_fix_attempt: exit_code=2 자동 복구 시도 횟수 (무한루프 방지, 최대 2회)
@@ -890,13 +933,16 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
         # merge-results Redis list에 결과 push (merge history API 연동)
         try:
             _merge_status_final = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
+            if isinstance(_merge_status_final, bytes):
+                _merge_status_final = _merge_status_final.decode("utf-8", errors="replace")
+            _merge_status_final = str(_merge_status_final)
             _is_success = result.get("success", False)
             redis_client.lpush("plan-runner:merge-results", json.dumps({
                 "runner_id": runner_id,
                 "branch": branch_str,
                 "plan_file": plan_file,
                 "timestamp": datetime.now().isoformat(),
-                "status": "done" if _is_success else "failed",
+                "status": _merge_status_final,
                 "success": _is_success,
                 "message": result.get("message", f"merge_status={_merge_status_final}"),
                 "reason": result.get("reason"),

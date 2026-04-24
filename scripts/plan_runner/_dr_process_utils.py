@@ -316,7 +316,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     if reason and reason.startswith(("reconnect_", "heartbeat_")):
         try:
             merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-            if merge_status in MERGE_ACTIVE_STATUSES:
+            if merge_status in MERGE_ACTIVE_STATUSES or merge_status == "approval_required":
                 logger.warning(
                     f"[cleanup] denying cleanup for runner {runner_id} (merge in progress) "
                     f"(reason={reason}, merge_status={merge_status})"
@@ -469,7 +469,15 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                 logger.warning(f"[_cleanup_process_state] merge_requested=1 -> preserving worktree (runner={runner_id})")
                 redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
 
-            if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
+            # approval_required(service_lock) 보호: worktree를 제거하지 않고 사용자 승인 후 retry를 대기한다.
+            if merge_status == "approval_required":
+                _preserve_worktree = True
+                logger.warning(
+                    f"[_cleanup_process_state] merge_status=approval_required -> preserving worktree (runner={runner_id})"
+                )
+                redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+
+            if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued", "approval_required"):
                 try:
                     WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
                 except Exception as wt_e:
@@ -694,6 +702,9 @@ def _process_runner_entry(
             _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
         except Exception:
             _mr, _ms = None, None
+        if _ms == "approval_required":
+            logger.warning(f"[reconnect] {label} {runner_id} no PID but approval_required -> skip cleanup")
+            return
         if _mr or _ms in MERGE_ACTIVE_STATUSES:
             logger.warning(
                 f"[reconnect] {label} {runner_id} no PID but merge pending "
@@ -752,6 +763,9 @@ def _process_runner_entry(
         except Exception:
             _mr, _ms = None, None
 
+        if _ms == "approval_required":
+            logger.warning(f"[reconnect] {label} {runner_id} PID {pid} dead but approval_required -> skip cleanup")
+            return
         if _mr or _ms in MERGE_ACTIVE_STATUSES:
             logger.warning(
                 f"[reconnect] {label} {runner_id} PID {pid} dead but merge pending "
@@ -825,7 +839,7 @@ def _detect_orphan_workflows(redis_client: redis.Redis) -> int:
                     _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
                 except Exception:
                     _mr, _ms = None, None
-                if _mr or _ms in MERGE_ACTIVE_STATUSES:
+                if _ms == "approval_required" or _mr or _ms in MERGE_ACTIVE_STATUSES:
                     continue
                 _wf_manager.update_status(
                     wf["id"], "failed",

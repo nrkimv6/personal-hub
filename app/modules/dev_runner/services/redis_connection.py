@@ -47,7 +47,10 @@ COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생
 # scripts/dev-runner-command-listener.py도 동일 상수를 별도 정의하여 참조
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
-    "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
+    "engine", "fix_engine", "worktree_path", "branch",
+    "merge_status", "merge_requested", "merge_reason", "merge_message",
+    "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
+    "service_lock_approved",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
     "exit_reason", "subprocess_heartbeat", "reflect_final_path",
     # 관측 메타 키 (기존 누락 3개 — _dr_constants.py와 동기화)

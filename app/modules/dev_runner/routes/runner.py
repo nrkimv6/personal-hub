@@ -91,9 +91,10 @@ async def kill_runner(runner_id: str):
 
 
 @router.post("/runners/{runner_id}/retry-merge")
-async def retry_merge(runner_id: str):
-    """머지 충돌 후 재머지 시도"""
-    return await executor_service.send_runner_command(runner_id, "retry-merge")
+async def retry_merge(runner_id: str, request: RetryMergeRequest = RetryMergeRequest()):
+    """머지 충돌 후 재머지 시도 (service_lock 승인 플래그 포함)"""
+    extra = request.model_dump(exclude_none=True)
+    return await executor_service.send_runner_command(runner_id, "retry-merge", extra=extra)
 
 
 @router.delete("/runners/{runner_id}/worktree")
@@ -177,7 +178,10 @@ async def revert_merge_request(runner_id: str):
 async def direct_merge(request: DirectMergeRequest):
     """직접 머지 — 러너 없이 branch/worktree만으로 머지 실행 (삭제된 러너 재시도용)"""
     return await executor_service.send_direct_merge_command(
-        request.branch, request.worktree_path, request.plan_file
+        request.branch,
+        request.worktree_path,
+        request.plan_file,
+        approve_service_lock=request.approve_service_lock,
     )
 
 

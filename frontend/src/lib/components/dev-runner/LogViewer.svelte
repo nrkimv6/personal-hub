@@ -24,7 +24,7 @@
 
 	// 머지 진행 중 상태 판별
 	let isMerging = $derived(
-		mergeStatus === 'merge_pending' || mergeStatus === 'merging' || mergeStatus === 'testing'
+		['merge_pending', 'queued', 'merging', 'testing', 'fixing', 'resolving'].includes(mergeStatus ?? '')
 	);
 
 	// Phase 2: 전체실행 시 Plan 파일 리스트 추적

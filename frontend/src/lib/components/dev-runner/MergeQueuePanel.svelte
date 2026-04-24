@@ -25,8 +25,12 @@
 		merging:     'bg-purple-100 text-purple-800',
 		testing:     'bg-cyan-100 text-cyan-800',
 		fixing:      'bg-orange-100 text-orange-800',
-		done:        'bg-green-100 text-green-800',
-		failed:      'bg-red-100 text-red-800',
+		merged:      'bg-green-100 text-green-800',
+		approval_required: 'bg-yellow-100 text-yellow-900',
+		conflict:    'bg-red-100 text-red-800',
+		residue_blocked: 'bg-red-100 text-red-800',
+		done:        'bg-green-100 text-green-800',  // legacy
+		failed:      'bg-red-100 text-red-800',       // legacy
 		test_failed: 'bg-red-100 text-red-800',
 		error:       'bg-gray-100 text-gray-600',
 	};

@@ -50,6 +50,8 @@ export interface RunnerListItem {
 	worktree_path: string | null;
 	branch: string | null;
 	merge_status: string | null;
+	merge_reason?: string | null;
+	merge_message?: string | null;
 	trigger?: string | null;
 	visible: boolean;
 	orphan: boolean;
@@ -256,10 +258,17 @@ export const devRunnerRunnerApi = {
 			{ method: 'POST' }
 		),
 
-	retryMerge: (runnerId: string) =>
+	retryMerge: (
+		runnerId: string,
+		payload?: { worktree_path?: string | null; plan_file?: string | null; branch?: string | null; approve_service_lock?: boolean }
+	) =>
 		devRunnerRequest<{ success: boolean; message: string; conflict?: boolean }>(
 			`/runners/${runnerId}/retry-merge`,
-			{ method: 'POST' }
+			{
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload ?? {}),
+			}
 		),
 
 	resolveConflict: (runnerId: string) =>
@@ -274,13 +283,18 @@ export const devRunnerRunnerApi = {
 			{ method: 'DELETE' }
 		),
 
-	directMerge: (branch: string, worktreePath?: string, planFile?: string) =>
+	directMerge: (branch: string, worktreePath?: string, planFile?: string, approveServiceLock?: boolean) =>
 		devRunnerRequest<{ success: boolean; message: string; runner_id?: string }>(
 			'/merge/direct',
 			{
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ branch, worktree_path: worktreePath ?? null, plan_file: planFile ?? null }),
+				body: JSON.stringify({
+					branch,
+					worktree_path: worktreePath ?? null,
+					plan_file: planFile ?? null,
+					approve_service_lock: Boolean(approveServiceLock),
+				}),
 			}
 		),
 
@@ -502,6 +516,8 @@ export interface MergeStatusResponse {
 	test_passed: boolean | null;
 	fix_attempts: number;
 	message: string;
+	reason?: string | null;
+	quarantine_diff_path?: string | null;
 }
 
 export interface MergeHistoryItem {
@@ -516,6 +532,8 @@ export interface MergeHistoryItem {
 	test_passed: boolean | null;
 	fix_attempts: number;
 	message: string;
+	reason?: string | null;
+	quarantine_diff_path?: string | null;
 }
 
 export const devRunnerMergeApi = {
@@ -531,8 +549,15 @@ export const devRunnerMergeApi = {
 	status: (runnerId: string): Promise<MergeStatusResponse> =>
 		devRunnerRequest<MergeStatusResponse>(`/merge/${runnerId}`),
 
-	retry: (runnerId: string): Promise<unknown> =>
-		devRunnerRequest(`/merge/${runnerId}/retry`, { method: 'POST' }),
+	retry: (
+		runnerId: string,
+		payload?: { worktree_path?: string | null; plan_file?: string | null; branch?: string | null; approve_service_lock?: boolean }
+	): Promise<unknown> =>
+		devRunnerRequest(`/merge/${runnerId}/retry`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload ?? {}),
+		}),
 
 	revert: (runnerId: string): Promise<unknown> =>
 		devRunnerRequest(`/merge/${runnerId}/revert`, { method: 'POST' }),

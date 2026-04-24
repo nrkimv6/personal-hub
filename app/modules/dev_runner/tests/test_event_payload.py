@@ -160,12 +160,16 @@ class TestBuildStatusPayload:
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", "/tmp/wt/merge01")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", "service_lock")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]: blocked")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage", "post_review")
 
         payload = build_status_payload(event_service._sync, runner_id)
         assert payload is not None
         assert payload["worktree_path"] == "/tmp/wt/merge01"
         assert payload["merge_status"] == "merged"
+        assert payload["merge_reason"] == "service_lock"
+        assert "MERGE_PRECHECK_FAILED" in (payload.get("merge_message") or "")
         assert payload["stop_stage"] == "post_review"
 
     def test_build_status_payload_plan_file_none_when_key_missing(self, event_service, sync_redis):

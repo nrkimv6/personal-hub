@@ -21,6 +21,8 @@
 		worktreePath?: string | null;
 		branch?: string | null;
 		mergeStatus?: string | null;
+		mergeReason?: string | null;
+		mergeMessage?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
 		exitReason?: string | null;
@@ -34,7 +36,7 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, exitReason = null, error = null, displayPlanName = null, executionCount = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, exitReason = null, error = null, displayPlanName = null, executionCount = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -130,9 +132,30 @@
 		retryingMerge = true;
 		mergeError = null;
 		try {
-			await devRunnerRunnerApi.retryMerge(runnerId);
+			await devRunnerRunnerApi.retryMerge(runnerId, {
+				worktree_path: worktreePath ?? null,
+				plan_file: planFile ?? null,
+				branch: branch ?? null,
+			});
 		} catch (e) {
 			mergeError = e instanceof Error ? e.message : '머지 재시도 실패';
+		} finally {
+			retryingMerge = false;
+		}
+	}
+
+	async function handleApproveServiceLockAndRetryMerge() {
+		retryingMerge = true;
+		mergeError = null;
+		try {
+			await devRunnerRunnerApi.retryMerge(runnerId, {
+				worktree_path: worktreePath ?? null,
+				plan_file: planFile ?? null,
+				branch: branch ?? null,
+				approve_service_lock: true,
+			});
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : '승인 후 머지 재시도 실패';
 		} finally {
 			retryingMerge = false;
 		}
@@ -292,6 +315,31 @@
 			</svg>
 			<span class="text-yellow-700 font-medium">테스트 실패 자동 수정 중...</span>
 		</div>
+	{:else if mergeStatus === 'approval_required'}
+		<div class="flex flex-col gap-1.5 px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-xs">
+			<div class="flex items-center gap-2">
+				<span class="text-yellow-800 font-medium">service_lock 경고 확인이 필요합니다.</span>
+				<button
+					class="px-2 py-0.5 rounded border border-yellow-300 text-yellow-900 hover:bg-yellow-100 disabled:opacity-50 transition-colors"
+					onclick={handleApproveServiceLockAndRetryMerge}
+					disabled={retryingMerge}
+					title="경고 확인 후 같은 runner/worktree로 머지를 다시 진행합니다 (1회 override)"
+				>
+					{retryingMerge ? '승인 중...' : '경고 확인 후 머지'}
+				</button>
+				<button
+					class="px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+					onclick={handleCleanupWorktree}
+				>
+					Worktree 정리
+				</button>
+			</div>
+			{#if mergeReason || mergeMessage}
+				<div class="text-[11px] text-yellow-900/80 truncate" title={mergeMessage ?? mergeReason ?? ''}>
+					{mergeMessage ?? mergeReason}
+				</div>
+			{/if}
+		</div>
 	{:else if ['conflict', 'test_failed', 'error'].includes(mergeStatus ?? '')}
 		<div class="flex items-center gap-2 px-3 py-2 bg-red-50 border-b border-red-200 text-xs">
 			<span class="text-red-700 font-medium">
@@ -324,7 +372,7 @@
 		</div>
 	{/if}
 
-	{#if !running && branch && worktreePath && !['conflict', 'test_failed', 'error', 'resolving', 'fixing'].includes(mergeStatus ?? '')}
+	{#if !running && branch && worktreePath && !['conflict', 'test_failed', 'error', 'resolving', 'fixing', 'approval_required'].includes(mergeStatus ?? '')}
 		<div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-xs">
 			<button
 				class="px-2 py-0.5 rounded border border-purple-300 text-purple-700 hover:bg-purple-100 disabled:opacity-50 transition-colors"

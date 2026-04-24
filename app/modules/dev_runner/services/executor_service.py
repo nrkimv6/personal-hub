@@ -682,6 +682,7 @@ class ExecutorService:
                 for rid in all_ids:
                     d = await self._get_runner_fields(rid, "status", "pid", "plan_file", "engine",
                                                       "start_time", "execution_count", "worktree_path", "merge_status",
+                                                      "merge_reason", "merge_message",
                                                       "branch", "trigger", "exit_reason", "stop_stage", "error")
                     status = d["status"]
                     pid_str = d["pid"]
@@ -691,6 +692,8 @@ class ExecutorService:
                     execution_count_raw = d["execution_count"]
                     worktree_path = d["worktree_path"]
                     merge_status = d["merge_status"]
+                    merge_reason = d["merge_reason"]
+                    merge_message = d["merge_message"]
                     branch = d["branch"]
                     trigger = d["trigger"]
                     # trigger 미존재 시 recent-meta fallback (cleanup 후 타이밍 이슈 방어)
@@ -746,6 +749,8 @@ class ExecutorService:
                         worktree_path=worktree_path,
                         branch=branch,
                         merge_status=merge_status,
+                        merge_reason=merge_reason,
+                        merge_message=merge_message,
                         trigger=trigger,
                         visible=is_user,
                         orphan=is_orphan,
@@ -844,10 +849,18 @@ class ExecutorService:
             return {"success": False, "message": "Command timeout"}
         return result_data
 
-    async def send_direct_merge_command(self, branch: str, worktree_path: str | None, plan_file: str | None) -> dict:
+    async def send_direct_merge_command(
+        self,
+        branch: str,
+        worktree_path: str | None,
+        plan_file: str | None,
+        approve_service_lock: bool = False,
+    ) -> dict:
         """[deprecated shim] → self.merge.send_direct_merge_command()"""
         self._sync_merge()
-        return await self.merge.send_direct_merge_command(branch, worktree_path, plan_file)
+        return await self.merge.send_direct_merge_command(
+            branch, worktree_path, plan_file, approve_service_lock=approve_service_lock
+        )
 
     async def stop_all_runners(self) -> dict:
         """모든 active runner 일괄 중지 - asyncio.gather 병렬 호출"""

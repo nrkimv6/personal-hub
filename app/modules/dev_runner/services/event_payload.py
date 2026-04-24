@@ -31,6 +31,8 @@ def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
             "branch",
             "trigger",
             "merge_status",
+            "merge_reason",
+            "merge_message",
             "exit_reason",
             "stop_stage",
             "error",

@@ -43,7 +43,10 @@ ADMIN_API_PORT = int(os.environ.get("ADMIN_API_PORT", "8001"))
 # per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
-    "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
+    "engine", "fix_engine", "worktree_path", "branch",
+    "merge_status", "merge_requested", "merge_reason", "merge_message",
+    "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
+    "service_lock_approved",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
     "subprocess_heartbeat", "reflect_final_path",
     "accepted_at", "accepted_source", "started_at",  # 관측 메타 키 (Phase 1)

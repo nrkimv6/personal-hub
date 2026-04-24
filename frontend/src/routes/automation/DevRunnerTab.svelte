@@ -165,6 +165,8 @@
 		branch?: string | null;
 		worktree_path?: string | null;
 		merge_status?: string | null;
+		merge_reason?: string | null;
+		merge_message?: string | null;
 		stop_stage?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
@@ -186,6 +188,8 @@
 		branch?: string | null;
 		worktree_path?: string | null;
 		merge_status?: string | null;
+		merge_reason?: string | null;
+		merge_message?: string | null;
 		stop_stage?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
@@ -206,6 +210,8 @@
 			branch: runner.branch ?? null,
 			worktree_path: runner.worktree_path ?? null,
 			merge_status: runner.merge_status ?? null,
+			merge_reason: runner.merge_reason ?? null,
+			merge_message: runner.merge_message ?? null,
 			stop_stage: runner.stop_stage ?? null,
 			trigger: runner.trigger ?? null,
 			orphan: runner.orphan ?? false,
@@ -1065,6 +1071,8 @@
 										worktreePath={tab.worktree_path}
 										branch={tab.branch}
 										mergeStatus={tab.merge_status}
+										mergeReason={tab.merge_reason}
+										mergeMessage={tab.merge_message}
 										trigger={tab.trigger}
 										orphan={tab.orphan}
 										exitReason={tab.exit_reason}

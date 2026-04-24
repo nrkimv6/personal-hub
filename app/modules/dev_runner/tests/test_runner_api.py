@@ -684,3 +684,77 @@ class TestListRunners:
         response = await client.get("/api/v1/dev-runner/runners")
         assert response.status_code == 200
         assert response.json() == []
+
+
+class TestMergeApprovalPayload:
+    async def test_merge_retry_request_forwards_approve_service_lock(self, client):
+        """R: POST /merge/{runner_id}/retry with approve_service_lock=true → command payload 포함"""
+        rid = "merge-retry-001"
+        mocked = AsyncMock(return_value={"success": True, "message": "ok"})
+        with patch.object(executor_service, "_send_command", new=mocked):
+            response = await client.post(
+                f"/api/v1/dev-runner/merge/{rid}/retry",
+                json={
+                    "worktree_path": "D:/work/project/tools/monitor-page/.worktrees/impl-x",
+                    "plan_file": "docs/plan/test.md",
+                    "branch": "impl/test",
+                    "approve_service_lock": True,
+                },
+            )
+        assert response.status_code == 200
+        sent = mocked.call_args.args[0]
+        assert sent.get("action") == "retry-merge"
+        assert sent.get("runner_id") == rid
+        assert sent.get("approve_service_lock") is True
+        assert sent.get("worktree_path")
+        assert sent.get("plan_file")
+        assert sent.get("branch")
+
+    async def test_legacy_runner_retry_merge_forwards_approve_service_lock(self, client):
+        """B: POST /runners/{runner_id}/retry-merge도 approve_service_lock payload를 전달한다."""
+        rid = "merge-retry-legacy-001"
+        mocked = AsyncMock(return_value={"success": True, "message": "ok"})
+        with patch.object(executor_service, "_send_command", new=mocked):
+            response = await client.post(
+                f"/api/v1/dev-runner/runners/{rid}/retry-merge",
+                json={"approve_service_lock": True},
+            )
+        assert response.status_code == 200
+        sent = mocked.call_args.args[0]
+        assert sent.get("action") == "retry-merge"
+        assert sent.get("runner_id") == rid
+        assert sent.get("approve_service_lock") is True
+
+    async def test_direct_merge_request_forwards_approve_service_lock(self, client):
+        """R: POST /merge/direct with approve_service_lock=true → command payload 포함"""
+        mocked = AsyncMock(return_value={"success": True, "message": "ok"})
+        with patch.object(executor_service, "_send_command", new=mocked):
+            response = await client.post(
+                "/api/v1/dev-runner/merge/direct",
+                json={
+                    "branch": "impl/test",
+                    "worktree_path": "D:/work/project/tools/monitor-page/.worktrees/impl-test",
+                    "plan_file": "docs/plan/test.md",
+                    "approve_service_lock": True,
+                },
+            )
+        assert response.status_code == 200
+        sent = mocked.call_args.args[0]
+        assert sent.get("action") == "direct-merge"
+        assert sent.get("approve_service_lock") is True
+
+    async def test_get_merge_status_returns_reason_and_message_for_approval_required(self, client, mock_executor_redis):
+        """T5-R: GET /merge/{runner_id}는 approval_required + reason/message를 반환한다."""
+        fake_async = mock_executor_redis["async"]
+        rid = "merge-status-approval-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:merge_reason", "service_lock")
+        await fake_async.set(f"{prefix}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]: blocked")
+
+        response = await client.get(f"/api/v1/dev-runner/merge/{rid}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "approval_required"
+        assert data["reason"] == "service_lock"
+        assert "MERGE_PRECHECK_FAILED[service_lock]" in data["message"]

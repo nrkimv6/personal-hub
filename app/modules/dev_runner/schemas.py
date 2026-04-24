@@ -86,6 +86,8 @@ class RunnerListItem(BaseModel):
     worktree_path: Optional[str] = None
     branch: Optional[str] = None
     merge_status: Optional[str] = None
+    merge_reason: Optional[str] = None
+    merge_message: Optional[str] = None
     trigger: Optional[str] = None
     visible: bool = False  # 탭 표시 여부 (user/user:all 트리거만 True, 기본 숨김)
     orphan: bool = False  # Workflow DB에 running/merge_pending/merging 이지만 Redis에 없는 runner
@@ -341,6 +343,8 @@ class MergeHistoryItem(BaseModel):
     test_passed: Optional[bool] = None
     fix_attempts: int = 0
     message: str = ""
+    reason: Optional[str] = None
+    quarantine_diff_path: Optional[str] = None
 
 
 class DevRunnerSettingsResponse(BaseModel):
@@ -402,6 +406,7 @@ class DirectMergeRequest(BaseModel):
     branch: str = Field(..., description="머지할 브랜치명 (필수)")
     worktree_path: Optional[str] = Field(default=None, description="워크트리 경로 (없으면 branch로 추론)")
     plan_file: Optional[str] = Field(default=None, description="Plan 파일 경로 (없으면 전체 실행)")
+    approve_service_lock: bool = Field(default=False, description="service_lock 경고를 확인했음을 표시 (1회 override)")
 
 
 class RetryMergeRequest(BaseModel):
@@ -409,6 +414,7 @@ class RetryMergeRequest(BaseModel):
     worktree_path: Optional[str] = Field(default=None, description="워크트리 경로")
     plan_file: Optional[str] = Field(default=None, description="Plan 파일 경로")
     branch: Optional[str] = Field(default=None, description="브랜치명")
+    approve_service_lock: bool = Field(default=False, description="service_lock 경고를 확인했음을 표시 (1회 override)")
 
 
 class CommitDiffStat(BaseModel):
