@@ -472,22 +472,40 @@ class HealthMonitorService:
         if len(self.recent_alerts) > self._max_alerts:
             self.recent_alerts = self.recent_alerts[:self._max_alerts]
 
+    def _public_frontend_incident_suffix(self, service_name: str, *, check_type: str, recovered: bool = False) -> str:
+        if self._runtime_app_mode() != "public":
+            return ""
+
+        normalized_check_type = check_type.upper()
+        if service_name == "frontend" and normalized_check_type == "PID":
+            label = "PUBLIC 6100 recovered" if recovered else "PUBLIC 6100 down"
+            return f" ({label})"
+        if service_name in {"frontend_internal", "frontend_external"} and normalized_check_type == "HTTP":
+            label = "admin OAuth callback 영향 경로 복구" if recovered else "admin OAuth callback 영향 가능"
+            return f" ({label})"
+        return ""
+
     async def _send_pid_failure_alert(self, health: ServiceHealth):
         """PID/포트 장애 알림 발송"""
+        impact_suffix = self._public_frontend_incident_suffix(health.name, check_type="PID")
         message = f"""🔴 <b>프로세스 장애 감지</b>
 
-<b>서비스:</b> {health.name}
+<b>서비스:</b> {health.name}{impact_suffix}
 <b>오류:</b> {health.error_message}
 <b>저장된 PID:</b> {health.pid or 'N/A'}
 <b>예상 포트:</b> {health.expected_port or 'N/A'}
 <b>실제 포트 점유:</b> {health.actual_port_owner or 'N/A'}
 <b>시간:</b> {health.last_check.strftime('%Y-%m-%d %H:%M:%S')}"""
 
+        recent_message = health.error_message or "Unknown error"
+        if impact_suffix:
+            recent_message = f"{recent_message}{impact_suffix}"
+
         self._add_alert(RecentAlert(
             timestamp=datetime.now(),
             alert_type="failure",
             service=health.name,
-            message=health.error_message or "Unknown error",
+            message=recent_message,
             check_type="PID"
         ))
 
@@ -506,18 +524,23 @@ class HealthMonitorService:
 
     async def _send_http_failure_alert(self, health: ServiceHealth):
         """HTTP 장애 알림 발송"""
+        impact_suffix = self._public_frontend_incident_suffix(health.name, check_type="HTTP")
         message = f"""🟠 <b>서비스 응답 없음</b>
 
-<b>서비스:</b> {health.name}
+<b>서비스:</b> {health.name}{impact_suffix}
 <b>오류:</b> {health.error_message}
 <b>연속 실패:</b> {health.failure_count}회
 <b>시간:</b> {health.last_check.strftime('%Y-%m-%d %H:%M:%S')}"""
+
+        recent_message = health.error_message or "Unknown error"
+        if impact_suffix:
+            recent_message = f"{recent_message}{impact_suffix}"
 
         self._add_alert(RecentAlert(
             timestamp=datetime.now(),
             alert_type="failure",
             service=health.name,
-            message=health.error_message or "Unknown error",
+            message=recent_message,
             check_type="HTTP"
         ))
 
@@ -542,18 +565,23 @@ class HealthMonitorService:
         response_info = ""
         if health.response_time_ms:
             response_info = f"\n<b>응답 시간:</b> {health.response_time_ms:.0f}ms"
+        impact_suffix = self._public_frontend_incident_suffix(health.name, check_type=check_type, recovered=True)
 
         message = f"""🟢 <b>서비스 복구</b>
 
-<b>서비스:</b> {health.name}
+<b>서비스:</b> {health.name}{impact_suffix}
 <b>체크 유형:</b> {check_type}{response_info}
 <b>시간:</b> {health.last_check.strftime('%Y-%m-%d %H:%M:%S')}"""
+
+        recent_message = "서비스 복구"
+        if impact_suffix:
+            recent_message = f"{recent_message}{impact_suffix}"
 
         self._add_alert(RecentAlert(
             timestamp=datetime.now(),
             alert_type="recovery",
             service=health.name,
-            message="서비스 복구",
+            message=recent_message,
             check_type=check_type
         ))
 

@@ -19,6 +19,7 @@ sys.path.insert(0, _services_dir)
 
 import browser_workers
 import service_utils
+from scripts.services import frontend_mode
 from browser_workers import BrowserWorkerManager
 
 
@@ -55,6 +56,16 @@ def _make_manager(tmp_path: Path) -> BrowserWorkerManager:
     mgr.worker_pid_files = []
     mgr.legacy_pid_files = []
     return mgr
+
+
+def _prepare_frontend_runtime_files(frontend_dir: Path) -> None:
+    vite_bin = frontend_dir / "node_modules" / ".bin" / "vite.cmd"
+    vite_bin.parent.mkdir(parents=True, exist_ok=True)
+    vite_bin.write_text("@echo off\r\n", encoding="utf-8")
+
+    base_tsconfig = frontend_dir / ".svelte-kit" / "tsconfig.json"
+    base_tsconfig.parent.mkdir(parents=True, exist_ok=True)
+    base_tsconfig.write_text("{\"compilerOptions\":{}}", encoding="utf-8")
 
 
 class TestCheckWmiHealth:
@@ -281,6 +292,62 @@ class TestRestartFrontendBehavior:
 
         with patch("scripts.services.browser_worker_runtime.manager.subprocess.run", return_value=mock_result):
             assert mgr._run_frontend_build_if_needed(public=True) is True
+
+    def test_restart_frontend_public_build_failure_writes_shared_build_log_right(self, tmp_path):
+        """R: manual public restart failure도 공용 build log helper를 사용한다."""
+        mgr = _make_manager(tmp_path)
+        _prepare_frontend_runtime_files(mgr.frontend_dir)
+        (mgr.frontend_dir / "build").mkdir(parents=True, exist_ok=True)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 15
+        mock_result.stdout = "preview stdout"
+        mock_result.stderr = "preview stderr"
+
+        with patch("scripts.services.browser_worker_runtime.frontend_actions.PROJECT_ROOT", tmp_path), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.subprocess.run", return_value=mock_result
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.write_frontend_build_log",
+            wraps=frontend_mode.write_frontend_build_log,
+        ) as mock_write, patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.cprint"
+        ):
+            ok = mgr._run_frontend_build_if_needed(public=True, timestamp="20260424_102000")
+
+        assert ok is True
+        mock_write.assert_called_once()
+        assert mock_write.call_args.args[0] == tmp_path / "logs"
+        assert mock_write.call_args.kwargs["public"] is True
+        build_logs = list((tmp_path / "logs").glob("frontend_build_public_*.log"))
+        assert len(build_logs) == 1
+        content = build_logs[0].read_text(encoding="utf-8")
+        assert "preview stdout" in content
+        assert "preview stderr" in content
+
+    def test_restart_frontend_public_fallback_message_includes_build_log_boundary(self, tmp_path):
+        """B: fallback preview 문구에 build log 경로가 포함된다."""
+        mgr = _make_manager(tmp_path)
+        _prepare_frontend_runtime_files(mgr.frontend_dir)
+        (mgr.frontend_dir / "build").mkdir(parents=True, exist_ok=True)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 15
+        mock_result.stdout = ""
+        mock_result.stderr = "build failed"
+
+        with patch("scripts.services.browser_worker_runtime.frontend_actions.PROJECT_ROOT", tmp_path), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.subprocess.run", return_value=mock_result
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.cprint"
+        ) as mock_cprint:
+            ok = mgr._run_frontend_build_if_needed(public=True, timestamp="20260424_102100")
+
+        assert ok is True
+        build_logs = list((tmp_path / "logs").glob("frontend_build_public_*.log"))
+        assert len(build_logs) == 1
+        build_log = build_logs[0]
+        rendered = [str(call.args[0]) for call in mock_cprint.call_args_list if call.args]
+        assert f"Using previous build artifact for fallback preview (build_log={build_log})" in rendered
 
     def test_restart_frontend_error_port_in_use_not_success(self, tmp_path):
         """E: Port already in use 감지 시 성공 판정 금지."""

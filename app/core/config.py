@@ -221,8 +221,8 @@ class Settings(BaseSettings):
     # 프론트엔드 URL (OAuth 콜백 후 리디렉트)
     FRONTEND_URL: str = "http://localhost:6100"
 
-    # 백엔드 API URL (OAuth redirect_uri 생성용, Cloudflare Tunnel 사용 시 필수)
-    API_BASE_URL: str = ""  # 예: "https://monitor.woory.day/api/v1"
+    # 백엔드 API URL (OAuth redirect_uri single source, Cloudflare Tunnel 사용 시 필수)
+    API_BASE_URL: str = ""  # 예: "https://monitor.woory.day/api/v1" -> redirect_uri "https://monitor.woory.day/api/v1/auth/callback"
     ADMIN_TOOLS_BASE_URL: str = ""  # 예: "https://admin.woory.day"
 
     # Cloudflare Tunnel 설정 (선택)

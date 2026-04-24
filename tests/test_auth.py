@@ -7,6 +7,7 @@ Google OAuth 인증 및 JWT 토큰 관련 테스트
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from datetime import datetime, timedelta
+from urllib.parse import parse_qs, urlparse
 from fastapi.testclient import TestClient
 from jose import jwt
 
@@ -19,10 +20,43 @@ from app.core.auth import (
     UserInfo,
 )
 from app.core.config import settings
+from app.routes import auth as auth_routes
 
 
 # TestClient 생성
 client = TestClient(app)
+
+
+class _MockHTTPXResponse:
+    def __init__(self, status_code: int, payload: dict[str, object]):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = str(payload)
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+class _MockGoogleAsyncClient:
+    def __init__(self, *, email: str):
+        self.post_calls: list[dict[str, object]] = []
+        self.get_calls: list[dict[str, object]] = []
+        self._token_response = _MockHTTPXResponse(200, {"access_token": "google-access-token"})
+        self._userinfo_response = _MockHTTPXResponse(200, {"email": email})
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, url, data=None, **kwargs):
+        self.post_calls.append({"url": url, "data": data, **kwargs})
+        return self._token_response
+
+    async def get(self, url, headers=None, **kwargs):
+        self.get_calls.append({"url": url, "headers": headers, **kwargs})
+        return self._userinfo_response
 
 
 class TestJWTToken:
@@ -213,6 +247,78 @@ class TestAuthLoginEndpoint:
             assert response.status_code == 307  # Temporary Redirect
             assert "accounts.google.com" in response.headers["location"]
             assert "test-client-id" in response.headers["location"]
+
+    def test_auth_login_redirect_uses_api_base_url_right(self):
+        """R: redirect_uri는 API_BASE_URL single source를 따른다."""
+        local_client = TestClient(app)
+        with patch.object(settings, 'GOOGLE_CLIENT_ID', 'test-client-id'), patch.object(
+            settings, 'API_BASE_URL', 'https://monitor.woory.day/api/v1'
+        ):
+            response = local_client.get("/api/v1/auth/login", follow_redirects=False)
+
+        assert response.status_code == 307
+        redirect_uri = parse_qs(urlparse(response.headers["location"]).query)["redirect_uri"][0]
+        assert redirect_uri == "https://monitor.woory.day/api/v1/auth/callback"
+
+
+class TestAuthCallbackEndpoint:
+    """GET /api/v1/auth/callback 엔드포인트 테스트"""
+
+    def test_auth_callback_admin_redirects_to_dev_monitor_right(self):
+        """R: 관리자 callback 완료 후 landing은 dev-monitor."""
+        local_client = TestClient(app)
+        mock_google_client = _MockGoogleAsyncClient(email="admin@example.com")
+        state = auth_routes._serializer.dumps("callback-state")
+
+        with patch.object(settings, 'GOOGLE_CLIENT_ID', 'test-client-id'), patch.object(
+            settings, 'GOOGLE_CLIENT_SECRET', 'test-client-secret'
+        ), patch.object(
+            settings, 'ADMIN_EMAIL', 'admin@example.com'
+        ), patch.object(
+            settings, 'API_BASE_URL', 'https://monitor.woory.day/api/v1'
+        ), patch.object(
+            settings, 'FRONTEND_URL', 'https://monitor.woory.day'
+        ), patch(
+            "app.routes.auth.httpx.AsyncClient", return_value=mock_google_client
+        ), patch(
+            "app.routes.auth.create_access_token", return_value="jwt-admin-token"
+        ):
+            response = local_client.get(
+                f"/api/v1/auth/callback?code=test-code&state={state}",
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "https://dev-monitor.woory.day/auth/callback?token=jwt-admin-token"
+        assert mock_google_client.post_calls[0]["data"]["redirect_uri"] == "https://monitor.woory.day/api/v1/auth/callback"
+
+    def test_auth_callback_non_admin_redirects_to_frontend_url_right(self):
+        """R: 일반 사용자 callback 완료 후 landing은 FRONTEND_URL."""
+        local_client = TestClient(app)
+        mock_google_client = _MockGoogleAsyncClient(email="user@example.com")
+        state = auth_routes._serializer.dumps("callback-state")
+
+        with patch.object(settings, 'GOOGLE_CLIENT_ID', 'test-client-id'), patch.object(
+            settings, 'GOOGLE_CLIENT_SECRET', 'test-client-secret'
+        ), patch.object(
+            settings, 'ADMIN_EMAIL', 'admin@example.com'
+        ), patch.object(
+            settings, 'API_BASE_URL', 'https://monitor.woory.day/api/v1'
+        ), patch.object(
+            settings, 'FRONTEND_URL', 'https://monitor.woory.day'
+        ), patch(
+            "app.routes.auth.httpx.AsyncClient", return_value=mock_google_client
+        ), patch(
+            "app.routes.auth.create_access_token", return_value="jwt-user-token"
+        ):
+            response = local_client.get(
+                f"/api/v1/auth/callback?code=test-code&state={state}",
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "https://monitor.woory.day/auth/callback?token=jwt-user-token"
+        assert mock_google_client.post_calls[0]["data"]["redirect_uri"] == "https://monitor.woory.day/api/v1/auth/callback"
 
 
 class TestAuthLogoutEndpoint:

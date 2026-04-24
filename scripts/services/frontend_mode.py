@@ -47,6 +47,61 @@ def describe_frontend_runtime(public: bool) -> str:
     return f"mode={get_frontend_mode(public)} outDir={get_frontend_outdir(public)}"
 
 
+def build_frontend_build_log_path(log_dir: Path, timestamp: str, public: bool) -> Path:
+    mode = "public" if public else "admin"
+    return log_dir / f"frontend_build_{mode}_{timestamp}.log"
+
+
+def _normalize_frontend_build_output(output: str) -> str:
+    normalized = output.rstrip("\r\n")
+    return normalized if normalized.strip() else "(no output)"
+
+
+def render_frontend_build_log(
+    mode: str,
+    outdir: str,
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> str:
+    stdout_block = _normalize_frontend_build_output(stdout)
+    stderr_block = _normalize_frontend_build_output(stderr)
+    return (
+        "frontend build failure\n"
+        f"mode={mode}\n"
+        f"outDir={outdir}\n"
+        f"returncode={returncode}\n"
+        "\n[stdout]\n"
+        f"{stdout_block}\n"
+        "\n[stderr]\n"
+        f"{stderr_block}\n"
+    )
+
+
+def write_frontend_build_log(
+    log_dir: Path,
+    timestamp: str,
+    *,
+    public: bool,
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> Path:
+    log_path = build_frontend_build_log_path(log_dir, timestamp, public)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        render_frontend_build_log(
+            mode=get_frontend_mode(public),
+            outdir=get_frontend_outdir(public),
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+        ),
+        encoding="utf-8",
+    )
+    return log_path
+
+
 def ensure_frontend_runtime_tsconfigs(frontend_dir: Path) -> None:
     """Ensure mode-specific tsconfig copies exist for SvelteKit parsing.
 

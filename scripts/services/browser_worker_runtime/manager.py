@@ -223,8 +223,21 @@ class BrowserWorkerManager:
     def _frontend_runtime_env(self, public: bool) -> dict[str, str]:
         return _frontend_runtime_env_impl(self, public)
 
-    def _run_frontend_build_if_needed(self, public: bool, frontend_env: dict[str, str] | None = None) -> bool:
-        return _run_frontend_build_if_needed_impl(self, public, frontend_env=frontend_env)
+    def _run_frontend_build_if_needed(
+        self,
+        public: bool,
+        frontend_env: dict[str, str] | None = None,
+        *,
+        timestamp: str | None = None,
+        log_dir: Path | None = None,
+    ) -> bool:
+        return _run_frontend_build_if_needed_impl(
+            self,
+            public,
+            frontend_env=frontend_env,
+            timestamp=timestamp,
+            log_dir=log_dir,
+        )
 
     def _has_port_collision_error(self, stderr_log_path: Path, frontend_port: int) -> bool:
         return _has_port_collision_error_impl(self, stderr_log_path, frontend_port)

@@ -15,6 +15,7 @@ from scripts.services.frontend_mode import (
     build_frontend_env,
     ensure_frontend_runtime_tsconfigs,
     describe_frontend_runtime,
+    write_frontend_build_log,
 )
 from scripts.services.browser_worker_runtime.runtime import GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
 
@@ -116,12 +117,23 @@ def _prepare_frontend_env(manager, api_port: int, public: bool) -> None:
         cprint("Cleaned up stale build directory")
 
 
-def _run_frontend_build_if_needed(manager, public: bool, frontend_env: dict[str, str] | None = None) -> bool:
+def _run_frontend_build_if_needed(
+    manager,
+    public: bool,
+    frontend_env: dict[str, str] | None = None,
+    *,
+    timestamp: str | None = None,
+    log_dir: Path | None = None,
+) -> bool:
     if not public:
         return True
 
     if frontend_env is None:
         frontend_env = _frontend_runtime_env(manager, public)
+    if timestamp is None:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+    if log_dir is None:
+        _, _, _, _, log_dir = _frontend_mode(manager, public)
 
     ensure_frontend_runtime_tsconfigs(manager.frontend_dir)
     cprint("Building frontend for PUBLIC PREVIEW...", YELLOW)
@@ -137,15 +149,21 @@ def _run_frontend_build_if_needed(manager, public: bool, frontend_env: dict[str,
         cprint("Frontend build completed", GREEN)
         return True
 
-    err_msg = (build_result.stderr or build_result.stdout or "").strip()
-    short_err = err_msg[-500:] if err_msg else "(no output)"
-    cprint(f"Frontend build failed (rc={build_result.returncode}): {short_err}", RED)
+    build_log_path = write_frontend_build_log(
+        log_dir,
+        timestamp,
+        public=True,
+        returncode=build_result.returncode,
+        stdout=build_result.stdout or "",
+        stderr=build_result.stderr or "",
+    )
+    cprint(f"Frontend build failed (rc={build_result.returncode}, log={build_log_path})", RED)
 
     if not (manager.frontend_dir / "build").exists():
-        cprint("No previous build artifact found - cannot run PUBLIC PREVIEW", RED)
+        cprint(f"No previous build artifact found - cannot run PUBLIC PREVIEW (build_log={build_log_path})", RED)
         return False
 
-    cprint("Using previous build artifact for fallback preview", YELLOW)
+    cprint(f"Using previous build artifact for fallback preview (build_log={build_log_path})", YELLOW)
     return True
 
 
@@ -209,7 +227,12 @@ def restart_frontend(manager, public: bool = False) -> bool:
         time.sleep(2)
         manager._prepare_frontend_env(api_port=api_port, public=public)
 
-        if not manager._run_frontend_build_if_needed(public=public, frontend_env=frontend_env):
+        if not manager._run_frontend_build_if_needed(
+            public=public,
+            frontend_env=frontend_env,
+            timestamp=timestamp,
+            log_dir=log_dir,
+        ):
             return False
 
         start_cmd = (

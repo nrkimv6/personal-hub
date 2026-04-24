@@ -93,6 +93,7 @@ from scripts.services.frontend_mode import (
     build_frontend_env,
     ensure_frontend_runtime_tsconfigs,
     describe_frontend_runtime,
+    write_frontend_build_log,
 )
 
 import psutil
@@ -354,13 +355,22 @@ class ServiceRunner:
                 env=frontend_env,
             )
             if build_result.returncode != 0:
-                err_msg = (build_result.stderr or "")[-500:] or "(no stderr output)"
-                self.log.error(f"Frontend build failed (rc={build_result.returncode}): {err_msg}")
+                build_log_path = write_frontend_build_log(
+                    self.log_dir,
+                    timestamp,
+                    public=True,
+                    returncode=build_result.returncode,
+                    stdout=build_result.stdout or "",
+                    stderr=build_result.stderr or "",
+                )
+                self.log.error(f"Frontend build failed (rc={build_result.returncode}, log={build_log_path})")
                 # graceful degradation: 이전 빌드가 있으면 그것으로 preview, 없으면 API-only
                 if not (frontend_dir / "build").exists():
-                    self.log.warning("No previous build found - Frontend unavailable, API-only mode")
+                    self.log.warning(
+                        f"No previous build found - Frontend unavailable, API-only mode (build_log={build_log_path})"
+                    )
                     return None
-                self.log.warning("Using previous build for preview")
+                self.log.warning(f"Using previous build for preview (build_log={build_log_path})")
             else:
                 self.log.info("Frontend build completed")
 
