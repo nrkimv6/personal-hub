@@ -426,13 +426,13 @@ class TestRunSchedule:
         assert data["success"] is True
         assert "request_id" in data
 
-    def test_run_writing_schedule(self, client):
-        """글쓰기 스케줄 즉시 실행"""
-        # 스케줄 생성
-        create_resp = client.post(f"{API_PREFIX}/collect/schedules", json={
-            "target_type": "writing_task",
-        })
-        schedule_id = create_resp.json()["id"]
+    def test_run_writing_schedule(self, client, test_db):
+        """글쓰기 스케줄 즉시 실행 — manual-run snapshot까지 검증"""
+        schedule_id = _seed_run_supported_schedule(
+            test_db,
+            TaskSchedule.TARGET_TYPE_WRITING_TASK,
+            "글쓰기 태스크",
+        )
 
         response = client.post(f"{API_PREFIX}/collect/schedules/{schedule_id}/run")
 
@@ -440,6 +440,30 @@ class TestRunSchedule:
         data = response.json()
         assert data["success"] is True
         assert "run_id" in data
+        run = test_db.query(TaskScheduleRun).filter_by(id=data["run_id"]).one()
+        assert run.schedule_id == schedule_id
+        assert run.worker_id == "manual"
+        assert run.status == TaskScheduleRun.STATUS_RUNNING
+        assert run.get_config_snapshot() == {"source": "manual"}
+
+    def test_run_topic_extract_schedule_creates_manual_run_http(self, client, test_db):
+        """topic_extract 즉시 실행은 manual run을 생성한다."""
+        schedule_id = _seed_run_supported_schedule(
+            test_db,
+            TaskSchedule.TARGET_TYPE_TOPIC_EXTRACT,
+            "소재 추출 태스크",
+        )
+
+        response = client.post(f"{API_PREFIX}/collect/schedules/{schedule_id}/run")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        run = test_db.query(TaskScheduleRun).filter_by(id=data["run_id"]).one()
+        assert run.schedule_id == schedule_id
+        assert run.worker_id == "manual"
+        assert run.status == TaskScheduleRun.STATUS_RUNNING
+        assert run.get_config_snapshot() == {"source": "manual"}
 
     def test_run_google_schedule_uses_shared_enqueue_helper(self, client, test_db, sample_saved_search):
         """Google 즉시 실행이 공통 enqueue helper를 거쳐 search_id를 반환한다."""

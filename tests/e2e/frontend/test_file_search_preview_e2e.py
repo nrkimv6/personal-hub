@@ -127,17 +127,17 @@ def test_file_search_filename_preview_toggle_and_copy_path(
     page.wait_for_load_state("networkidle")
 
     page.get_by_placeholder("파일명 또는 내용 검색... (Ctrl+Enter)").fill("hello")
-    page.get_by_role("button", name="검색").click()
+    page.get_by_role("button", name="검색", exact=True).click()
 
-    expect(page.get_by_text("README.md")).to_be_visible()
+    expect(page.get_by_text("README.md", exact=True)).to_be_visible()
 
-    page.get_by_text("README.md").click()
+    page.get_by_text("README.md", exact=True).click()
     expect(page.get_by_text("# Hello")).to_be_visible()
 
     page.get_by_title("full path 복사").first.click()
     assert page.evaluate("() => navigator.clipboard.readText()") == r"D:\work\project\README.md"
 
-    page.get_by_text("README.md").click()
+    page.get_by_text("README.md", exact=True).click()
     expect(page.get_by_text("# Hello")).to_have_count(0)
 
 
@@ -211,9 +211,9 @@ def test_file_search_content_match_click_still_calls_open_endpoint(
     page.wait_for_load_state("networkidle")
 
     page.get_by_placeholder("파일명 또는 내용 검색... (Ctrl+Enter)").fill("hello")
-    page.get_by_role("button", name="검색").click()
+    page.get_by_role("button", name="검색", exact=True).click()
 
-    expect(page.get_by_text("main.py")).to_be_visible()
+    expect(page.get_by_text("main.py", exact=True)).to_be_visible()
     page.get_by_text("def hello():").click()
 
     assert len(open_calls) == 1

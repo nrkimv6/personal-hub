@@ -747,6 +747,21 @@ async def trigger_schedule_run(
             "run_id": run.id,
         }
 
+    # Topic Extract 스케줄의 경우
+    elif schedule.target_type == 'topic_extract':
+        schedule_service = TaskScheduleService(db)
+        run = schedule_service.start_run(
+            schedule_id=schedule.id,
+            worker_id="manual",
+            config_snapshot={"source": "manual"}
+        )
+
+        return {
+            "success": True,
+            "message": "소재 추출 태스크가 예약되었습니다",
+            "run_id": run.id,
+        }
+
     # Report 스케줄의 경우
     elif schedule.target_type == 'report':
         from datetime import timedelta
