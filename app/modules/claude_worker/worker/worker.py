@@ -65,6 +65,9 @@ try:
     )
     logger.debug("plan_analyze_handler import 완료")
 
+    from app.core.database import is_connection_error
+    logger.debug("is_connection_error import 완료")
+
     logger.info("모든 모듈 import 완료")
 
 except Exception as e:
@@ -379,7 +382,10 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save Instagram result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save Instagram result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -483,7 +489,10 @@ def save_universal_crawl_result(db, page_id: int, llm_result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save universal crawl result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save universal crawl result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -663,7 +672,10 @@ def save_writing_refine_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save writing refine result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save writing refine result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -779,7 +791,10 @@ def save_writing_generate_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save writing_generate result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save writing_generate result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -948,7 +963,10 @@ def save_writing_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save writing result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save writing result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -980,7 +998,10 @@ def mark_writing_failed(db, request, error_message: str) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to mark writing failed: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to mark writing failed: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -1045,7 +1066,10 @@ def save_event_import_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save event_import result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save event_import result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -1118,7 +1142,10 @@ def save_topic_extract_result(db, caller_id: str, llm_result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"topic_extract 결과 저장 실패: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"topic_extract 결과 저장 실패: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -1276,7 +1303,10 @@ def save_pytest_fix_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"pytest_fix: save_pytest_fix_result 오류: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"pytest_fix: save_pytest_fix_result 오류: {e}", exc_info=True)
         return False
 
 
@@ -1372,7 +1402,10 @@ def save_report_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"report 결과 저장 실패: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"report 결과 저장 실패: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -1580,7 +1613,10 @@ class LLMWorker:
                             count = service.reset_quota_failed_requests(provider)
                             logger.info(f"[QUOTA] {provider} 쿼터 재개. {count}건 요청 pending 전환")
         except Exception as e:
-            logger.error(f"quota resume 체크 오류: {e}", exc_info=True)
+            if is_connection_error(e):
+                logger.warning("PG connection error: %s", e)
+            else:
+                logger.error(f"quota resume 체크 오류: {e}", exc_info=True)
         finally:
             db.close()
 
@@ -1613,7 +1649,10 @@ class LLMWorker:
                     await self._execute_request(request, db, service)
 
         except Exception as e:
-            logger.error(f"Pending 요청 처리 오류: {e}", exc_info=True)
+            if is_connection_error(e):
+                logger.warning("PG connection error: %s", e)
+            else:
+                logger.error(f"Pending 요청 처리 오류: {e}", exc_info=True)
         finally:
             db.close()
 
