@@ -139,7 +139,7 @@
     interval: 10,
     custom_interval: false,
     service_account_id: null as number | null,
-    monitoring_mode: 'legacy' as 'legacy' | 'anonymous'
+    monitoring_mode: 'anonymous' as 'legacy' | 'anonymous'
   };
 
   // 간격 포맷팅
@@ -190,7 +190,8 @@
     date: '',
     times: '',
     is_enabled: true,
-    service_account_id: null as number | null
+    service_account_id: null as number | null,
+    monitoring_mode: 'anonymous' as 'legacy' | 'anonymous'
   };
   let selectedBusinessItems: BizItem[] = [];
   let createLoading = false;
@@ -632,7 +633,7 @@
       interval: schedule.interval || 30,
       custom_interval: schedule.custom_interval || false,
       service_account_id: schedule.service_account_id,
-      monitoring_mode: (schedule as any).monitoring_mode || 'legacy'
+      monitoring_mode: schedule.monitoring_mode || 'anonymous'
     };
     showEditModal = true;
   }
@@ -684,7 +685,8 @@
       date: '',
       times: '',
       is_enabled: true,
-      service_account_id: null
+      service_account_id: null,
+      monitoring_mode: 'anonymous'
     };
     selectedBusinessItems = [];
     createMode = 'select';
@@ -751,7 +753,8 @@
         date: createForm.date,
         times,
         is_enabled: createForm.is_enabled,
-        service_account_id: createForm.service_account_id
+        service_account_id: createForm.service_account_id,
+        monitoring_mode: createForm.monitoring_mode,
       };
       await itemApi.createSchedule(createForm.item_id, scheduleData);
       showCreateModal = false;
@@ -787,7 +790,8 @@
         date: duplicateForm.date,
         times,
         is_enabled: true,
-        service_account_id: duplicateForm.service_account_id
+        service_account_id: duplicateForm.service_account_id,
+        monitoring_mode: 'anonymous',
       };
       await itemApi.createSchedule(duplicateSchedule.biz_item_pk, scheduleData);
       showDuplicateModal = false;
@@ -1397,8 +1401,8 @@
         <div>
           <label for="edit-monitoring-mode" class="block text-sm font-medium text-foreground mb-1">모니터링 모드</label>
           <select id="edit-monitoring-mode" class="input" bind:value={editForm.monitoring_mode}>
+            <option value="anonymous">익명 모드 (기본값)</option>
             <option value="legacy">기존 방식 (로그인 탭 사용)</option>
-            <option value="anonymous">익명 모드 (효율 우선)</option>
           </select>
           <p class="text-xs text-muted-foreground mt-1">
             {#if editForm.monitoring_mode === 'anonymous'}

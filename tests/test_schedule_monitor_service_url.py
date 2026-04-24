@@ -110,6 +110,19 @@ class TestGetScheduleUrlSynthesis:
         assert result is not None
         assert "/booking/13/bizes/" in result["url"], f"폴백 미적용: {result['url']}"
 
+    def test_get_schedule_boundary_null_monitoring_mode_defaults_to_anonymous(self):
+        """B: monitoring_mode=None → 응답 dict는 anonymous로 정규화."""
+        from app.modules.naver_booking.services.schedule_service import ScheduleMonitorService
+
+        row = _make_row(monitoring_mode=None)
+        mock_db = _mock_session(row)
+
+        with patch("app.modules.naver_booking.services.schedule_service.SessionLocal", return_value=mock_db):
+            result = ScheduleMonitorService().get_schedule(430)
+
+        assert result is not None
+        assert result["monitoring_mode"] == "anonymous"
+
     def test_get_schedule_error_missing_schedule_returns_none(self):
         """E: 존재하지 않는 schedule_id → None 반환 (DB row 없음)"""
         from app.modules.naver_booking.services.schedule_service import ScheduleMonitorService

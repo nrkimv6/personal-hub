@@ -16,6 +16,7 @@ from app.schemas.monitor_schedule import (
     MonitorScheduleUpdate,
     BulkScheduleCreate,
     ScheduleWithContext,
+    coerce_monitoring_mode,
 )
 
 
@@ -218,7 +219,7 @@ class ScheduleService:
             "service_account_id": schedule.service_account_id,
             "account_name": schedule.service_account.profile.name if schedule.service_account else None,
             "auto_booking_enabled": getattr(schedule, 'auto_booking_enabled', False),
-            "monitoring_mode": getattr(schedule, 'monitoring_mode', 'legacy'),
+            "monitoring_mode": coerce_monitoring_mode(getattr(schedule, "monitoring_mode", None)),
             "created_at": schedule.created_at,
             "updated_at": schedule.updated_at,
             # BizItem 정보
@@ -267,7 +268,7 @@ class ScheduleService:
             interval=data.interval,
             custom_interval=data.custom_interval,
             service_account_id=data.service_account_id,
-            monitoring_mode=data.monitoring_mode,
+            monitoring_mode=coerce_monitoring_mode(data.monitoring_mode),
         )
         db.add(schedule)
         db.commit()
@@ -289,7 +290,7 @@ class ScheduleService:
                 interval=data.interval,
                 custom_interval=data.custom_interval,
                 service_account_id=data.service_account_id,
-                monitoring_mode=data.monitoring_mode,
+                monitoring_mode=coerce_monitoring_mode(data.monitoring_mode),
             )
             db.add(schedule)
             schedules.append(schedule)
@@ -313,6 +314,8 @@ class ScheduleService:
         # times JSON 변환
         if "times" in update_data and update_data["times"] is not None:
             update_data["times"] = self.serialize_times(update_data["times"])
+        if "monitoring_mode" in update_data:
+            update_data["monitoring_mode"] = coerce_monitoring_mode(update_data["monitoring_mode"])
 
         for key, value in update_data.items():
             setattr(schedule, key, value)
