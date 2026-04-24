@@ -9,8 +9,15 @@ RIGHT-BICEP:
 - B: 경계 케이스
 - E: 오류/에러 케이스
 - C: 교차(Cross-check) 케이스
+
+Phase T1 PG guard TC 5개 (추가):
+- B/E: PG 연결 오류 시 warning-only
+- R: 비DB 오류는 exc_info 유지
 """
 import json
+import logging
+import psycopg2
+import sqlalchemy.exc
 import pytest
 from datetime import datetime, timedelta, date
 from unittest.mock import MagicMock, patch
@@ -21,7 +28,10 @@ from app.models.plan_record import PlanRecord
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.plan_analyze_handler import (
     _get_scope_overlap_candidates,
+    _maybe_queue_requirements_sync,
+    detect_recurrence,
     save_recurrence_check_result,
+    save_recurrence_suggest_result,
     maybe_queue_recurrence_suggest,
 )
 
@@ -268,3 +278,137 @@ class TestMaybeQueueSuggest:
             caller_type="plan_recurrence_suggest", caller_id="root_hash_dup"
         ).count()
         assert count == 1
+
+
+# ──────────────────────────────────────────────────────────────────
+# Phase T1 PG guard TC — is_connection_error() guard 계약 검증
+# ──────────────────────────────────────────────────────────────────
+
+def test_queue_requirements_sync_pg_connection_error_no_traceback(caplog):
+    """B: _maybe_queue_requirements_sync DB commit 실패(PG) → warning 1회, traceback 없음."""
+    db = MagicMock()
+    # processed_count >= 5 리턴
+    db.query.return_value.filter.return_value.count.return_value = 10
+    # 중복 체크: 없음
+    db.query.return_value.filter.return_value.first.return_value = None
+    # records 쿼리 (summaries)
+    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+    db.commit.side_effect = psycopg2.OperationalError("could not connect to server")
+
+    with caplog.at_level(logging.DEBUG):
+        result = _maybe_queue_requirements_sync(db, "infra")
+
+    assert result is False
+    pg_warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "connection error" in r.message]
+    assert len(pg_warnings) == 1
+    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_traceback) == 0
+
+
+def test_scope_overlap_candidates_pg_connection_error_no_traceback(caplog):
+    """B: _get_scope_overlap_candidates DB query 실패(PG) → warning 1회, [] 반환, traceback 없음."""
+    db = MagicMock()
+    db.query.side_effect = psycopg2.OperationalError("could not connect to server")
+    record = MagicMock()
+    record.scope = json.dumps(["naver-booking"])
+    record.category = "naver-booking"
+    record.plan_date = None
+    record.filename_hash = "aabbccdd"
+
+    with caplog.at_level(logging.DEBUG):
+        result = _get_scope_overlap_candidates(db, record)
+
+    assert result == []
+    pg_warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "connection error" in r.message]
+    assert len(pg_warnings) == 1
+    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_traceback) == 0
+
+
+def test_detect_recurrence_pg_connection_error_no_traceback(caplog):
+    """B: detect_recurrence DB commit 실패(PG) → warning 1회, traceback 없음."""
+    db = MagicMock()
+    # _get_scope_overlap_candidates 결과: MagicMock 1개 반환
+    candidate = MagicMock()
+    candidate.scope = json.dumps(["naver-booking"])
+    candidate.category = "naver-booking"
+    candidate.applied_at = datetime.now()
+    candidate.filename_hash = "ccddee11"
+    candidate.plan_date = None
+    # candidates query (inner _get_scope_overlap_candidates)
+    db.query.return_value.filter.return_value.limit.return_value.all.return_value = [candidate]
+    # dedup check: 없음
+    db.query.return_value.filter.return_value.first.return_value = None
+    # commit raises PG error
+    db.commit.side_effect = psycopg2.OperationalError("could not connect to server")
+
+    record = MagicMock()
+    record.scope = json.dumps(["naver-booking"])
+    record.category = "naver-booking"
+    record.filename_hash = "aabb1122"
+    record.plan_date = None
+    record.intent = "test intent"
+
+    with patch(
+        "app.modules.claude_worker.services.plan_analyze_handler._get_scope_overlap_candidates",
+        return_value=[candidate],
+    ), caplog.at_level(logging.DEBUG):
+        result = detect_recurrence(db, record)
+
+    assert result is False
+    pg_warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "connection error" in r.message]
+    assert len(pg_warnings) == 1
+    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_traceback) == 0
+
+
+def test_save_recurrence_check_result_pg_connection_error_no_traceback(caplog):
+    """B: save_recurrence_check_result DB commit 실패(PG) → warning 1회, rollback, traceback 없음."""
+    db = MagicMock()
+    matched_record = MagicMock()
+    matched_record.chain_root_hash = None
+    matched_record.recurrence_count = 1
+    # record lookup
+    record_mock = MagicMock()
+    record_mock.chain_root_hash = None
+    db.query.return_value.filter_by.return_value.first.side_effect = [record_mock, matched_record]
+    db.commit.side_effect = psycopg2.OperationalError("could not connect to server")
+
+    request = MagicMock()
+    request.caller_id = "aabb1122"
+    result_data = {"result": {"is_recurrence": True, "matched_hash": "ccddee11"}, "success": True}
+
+    with caplog.at_level(logging.DEBUG):
+        result = save_recurrence_check_result(db, request, result_data)
+
+    assert result is False
+    pg_warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "connection error" in r.message]
+    assert len(pg_warnings) == 1
+    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_traceback) == 0
+    db.rollback.assert_called_once()
+
+
+def test_save_recurrence_suggest_result_non_pg_error_preserves_exc_info(caplog):
+    """R: save_recurrence_suggest_result에서 비DB 오류 → exc_info=True 유지."""
+    db = MagicMock()
+    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+    db.query.return_value.filter_by.return_value.first.return_value = None
+    # no record found → logger.error without exc_info (handled earlier path)
+    # But we need to test the except block, so force commit to raise
+    record_mock = MagicMock()
+    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = record_mock
+    db.commit.side_effect = RuntimeError("unexpected error")
+
+    request = MagicMock()
+    request.caller_id = "rootchain01"
+    result_data = {"result": {"root_cause": "test", "pattern": "p", "suggestion": "s"}, "success": True}
+
+    with caplog.at_level(logging.DEBUG):
+        result = save_recurrence_suggest_result(db, request, result_data)
+
+    assert result is False
+    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_traceback) >= 1
+    pg_warnings = [r for r in caplog.records if "connection error" in r.message]
+    assert len(pg_warnings) == 0

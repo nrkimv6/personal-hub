@@ -6,11 +6,18 @@ Phase T1 TC 7개:
 - B: 경계값
 - E: 에러/방어 케이스
 
+Phase T1 PG guard TC 4개 (추가):
+- B/E: PG 연결 오류 시 warning-only, traceback 없음
+- R: 비DB 오류는 exc_info=True 유지
+
 Phase T3 TC 2개:
 - 실제 _meta.yaml + DB 통합 검증
 - requirements_sync 제거 후 pipeline 무결성
 """
 import json
+import logging
+import psycopg2
+import sqlalchemy.exc
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -403,3 +410,83 @@ def test_http_schedule_run_devguide_staleness():
     else:
         target_types = []
     assert "plan_requirements_sync" not in target_types or "devguide_staleness" in target_types
+
+
+# ──────────────────────────────────────────────────────────────────
+# Phase T1 PG guard TC — is_connection_error() guard 계약 검증
+# ──────────────────────────────────────────────────────────────────
+
+def _make_db_commit_error(error):
+    """db mock: query().filter_by().first() → MagicMock record, commit raises error."""
+    db = MagicMock()
+    record_mock = MagicMock()
+    db.query.return_value.filter_by.return_value.first.return_value = record_mock
+    db.commit.side_effect = error
+    return db
+
+
+def test_save_plan_archive_result_pg_connection_error_no_traceback(caplog):
+    """B: save_plan_archive_result에서 psycopg2.OperationalError → warning 1회, traceback 없음."""
+    db = _make_db_commit_error(psycopg2.OperationalError("could not connect to server"))
+    request = MagicMock()
+    request.caller_id = "deadbeef1234"
+
+    with caplog.at_level(logging.DEBUG):
+        result = save_plan_archive_result(db, request, {"result": {"category": "infra"}, "success": True})
+
+    assert result is False
+    pg_warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "connection error" in r.message]
+    assert len(pg_warnings) == 1
+    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_traceback) == 0
+    db.rollback.assert_called_once()
+
+
+def test_build_devguide_staleness_report_pg_connection_error_no_traceback(caplog):
+    """B: build_devguide_staleness_report에서 PG 연결 오류 → warning 1회, traceback 없음."""
+    pg_err = psycopg2.OperationalError("could not connect to server")
+    db = MagicMock()
+
+    with patch(
+        "app.modules.dev_runner.services.plan_record_service.PlanRecordService.get_guide_status",
+        side_effect=pg_err,
+    ), caplog.at_level(logging.DEBUG):
+        result = build_devguide_staleness_report(db)
+
+    assert result == []
+    pg_warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "connection error" in r.message]
+    assert len(pg_warnings) == 1
+    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_traceback) == 0
+
+
+def test_save_devguide_staleness_result_pg_connection_error_no_traceback(caplog):
+    """B: save_devguide_staleness_result DB commit 실패(PG) → warning 1회, rollback, traceback 없음."""
+    db = MagicMock()
+    db.commit.side_effect = psycopg2.OperationalError("could not connect to server")
+
+    with caplog.at_level(logging.DEBUG):
+        result = save_devguide_staleness_result(db, [{"guide": "g1", "pending_count": 3}])
+
+    assert result is False
+    pg_warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "connection error" in r.message]
+    assert len(pg_warnings) == 1
+    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_traceback) == 0
+    db.rollback.assert_called_once()
+
+
+def test_save_plan_archive_result_non_pg_error_preserves_exc_info(caplog):
+    """R: save_plan_archive_result에서 비DB 오류(ValueError) → exc_info=True traceback 유지."""
+    db = _make_db_commit_error(ValueError("unexpected schema error"))
+    request = MagicMock()
+    request.caller_id = "deadbeef5678"
+
+    with caplog.at_level(logging.DEBUG):
+        result = save_plan_archive_result(db, request, {"result": {}, "success": True})
+
+    assert result is False
+    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_traceback) >= 1
+    pg_warnings = [r for r in caplog.records if "connection error" in r.message]
+    assert len(pg_warnings) == 0
