@@ -59,7 +59,7 @@
 		try {
 			previewCache[filePath] = await getFilePreview(filePath);
 		} catch (e) {
-			previewErrorByPath[filePath] = e instanceof Error ? e.message : String(e);
+			previewErrorByPath[filePath] = humanizePreviewError(e);
 		} finally {
 			if (previewLoadingPath === filePath) {
 				previewLoadingPath = null;
@@ -130,6 +130,28 @@
 		if (bytes < 1024) return `${bytes}B`;
 		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
 		return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+	}
+
+	function humanizePreviewError(e: unknown): string {
+		const raw = e instanceof Error ? e.message : String(e);
+
+		if (raw.includes('미리보기 크기 제한') || raw.includes('256KB')) {
+			return '파일이 256KB를 초과해 미리보기할 수 없습니다.';
+		}
+		if (raw.includes('지원하지 않는 확장자')) {
+			return '지원하지 않는 확장자입니다. 텍스트 파일만 미리보기할 수 있습니다.';
+		}
+		if (raw.includes('binary')) {
+			return '바이너리 파일은 미리보기할 수 없습니다.';
+		}
+		if (raw.includes('지원하지 않는 인코딩')) {
+			return '지원하지 않는 인코딩입니다. (utf-8/cp949만 지원)';
+		}
+		if (raw.includes('파일을 찾을 수 없습니다') || raw.includes('디렉토리는 미리보기할 수 없습니다')) {
+			return '파일을 찾을 수 없습니다.';
+		}
+
+		return raw;
 	}
 </script>
 
