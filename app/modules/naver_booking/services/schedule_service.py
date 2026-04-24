@@ -16,6 +16,7 @@ from app.database import SessionLocal
 from app.config import settings, logger
 from app.modules.naver_booking.utils.url_builder import build_naver_booking_url
 from app.services.schedule_service import calculate_default_interval
+from app.schemas.monitor_schedule import VALID_MONITORING_MODES
 
 
 class ScheduleMonitorService:
@@ -103,7 +104,7 @@ class ScheduleMonitorService:
                 "last_error": row["last_error"],
                 "booking_count": row["booking_count"] or 0,
                 "last_booking_time": row["last_booking_time"],
-                "monitoring_mode": row["monitoring_mode"] or "legacy",
+                "monitoring_mode": row["monitoring_mode"] if row["monitoring_mode"] in VALID_MONITORING_MODES else "legacy",
                 "biz_item_id": row["biz_item_id"],
                 "naver_biz_item_id": row["naver_biz_item_id"],
                 "item_name": row["item_name"],
