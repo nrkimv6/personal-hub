@@ -13,6 +13,7 @@ from app.models.writing import GeneratedWriting
 from app.models.writing_element import WritingElement, WritingElementUsage
 from app.modules.writing.models.writing_batch import WritingBatch
 from app.modules.claude_worker.models.llm_request import LLMRequest
+from app.core.database import is_connection_error
 
 
 logger = logging.getLogger(__name__)
@@ -85,8 +86,11 @@ class WritingCallbackHandler:
             return writing
 
         except Exception as e:
-            logger.error(f"글쓰기 결과 처리 실패: {e}", exc_info=True)
             self.db.rollback()
+            if is_connection_error(e):
+                logger.warning(f"PG 연결 오류 (글쓰기 결과 처리): {e}")
+            else:
+                logger.error(f"글쓰기 결과 처리 실패: {e}", exc_info=True)
             return None
 
     def handle_failure(
@@ -123,8 +127,11 @@ class WritingCallbackHandler:
             return True
 
         except Exception as e:
-            logger.error(f"글쓰기 실패 처리 중 에러: {e}", exc_info=True)
             self.db.rollback()
+            if is_connection_error(e):
+                logger.warning(f"PG 연결 오류 (글쓰기 실패 처리): {e}")
+            else:
+                logger.error(f"글쓰기 실패 처리 중 에러: {e}", exc_info=True)
             return False
 
     def _parse_metadata(self, metadata_json: Optional[str]) -> dict:

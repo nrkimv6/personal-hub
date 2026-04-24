@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import uuid
 
+from app.core.database import is_connection_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -319,7 +321,10 @@ class ProxyUsageLogger:
             logger.debug(f"Inserted {len(logs)} proxy usage logs")
         except Exception as e:
             session.rollback()
-            logger.error(f"Failed to insert proxy usage logs: {e}", exc_info=True)
+            if is_connection_error(e):
+                logger.warning(f"PG 연결 오류 (proxy usage log insert): {e}")
+            else:
+                logger.error(f"Failed to insert proxy usage logs: {e}", exc_info=True)
             raise
         finally:
             session.close()
