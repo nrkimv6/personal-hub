@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from app.core.database import is_connection_error
 from app.models import TaskSchedule
 from app.worker.schedule_handler_base import (
     ClaimedRun,
@@ -101,6 +102,8 @@ class KeywordAnalysisScheduler(ScheduleHandler):
                 return analyzer.analyze_all(min_freq=min_freq, min_length=min_length)
             return analyzer.analyze_incremental(min_freq=min_freq, min_length=min_length)
         except Exception as exc:
+            if is_connection_error(exc):
+                raise
             logger.error("[%s] KeywordAnalyzer 실행 오류: %s", worker_name, exc, exc_info=True)
             return {"error": str(exc)}
         finally:

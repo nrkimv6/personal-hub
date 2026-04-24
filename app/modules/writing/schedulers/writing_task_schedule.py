@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from app.core.database import is_connection_error
 from app.models import TaskSchedule, TaskScheduleRun
 from app.modules.writing.worker.writing_worker import WritingWorker
 from app.worker.schedule_handler_base import (
@@ -93,6 +94,8 @@ class WritingTaskScheduler(ScheduleHandler):
             worker = WritingWorker(db)
             return worker.run(schedule, run)
         except Exception as exc:
+            if is_connection_error(exc):
+                raise
             logger.error("[%s] WritingWorker 실행 오류: %s", worker_name, exc, exc_info=True)
             return {"error": str(exc)}
         finally:

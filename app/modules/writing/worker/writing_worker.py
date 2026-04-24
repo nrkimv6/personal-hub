@@ -19,6 +19,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.database import is_connection_error
 from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.writing import WritingSource, GeneratedWriting
 from app.models.writing_element import WritingElement
@@ -247,6 +248,8 @@ class WritingWorker:
             )
 
         except Exception as e:
+            if is_connection_error(e):
+                raise
             logger.error(f"WritingWorker 실행 실패: {e}", exc_info=True)
             run.mark_failed(str(e))
             self.db.commit()
@@ -324,6 +327,9 @@ class WritingWorker:
             return True
 
         except Exception as e:
+            if is_connection_error(e):
+                self.db.rollback()
+                raise
             logger.error(f"믹스 글쓰기 요청 생성 실패: {e}", exc_info=True)
             self.db.rollback()
             return False
@@ -416,6 +422,9 @@ class WritingWorker:
             return True
 
         except Exception as e:
+            if is_connection_error(e):
+                self.db.rollback()
+                raise
             logger.error(f"랜덤 글쓰기 요청 생성 실패: {e}", exc_info=True)
             self.db.rollback()
             return False
@@ -506,6 +515,9 @@ class WritingWorker:
             return True
 
         except Exception as e:
+            if is_connection_error(e):
+                self.db.rollback()
+                raise
             logger.error(f"키워드 전용 글쓰기 요청 생성 실패: {e}", exc_info=True)
             self.db.rollback()
             return False
@@ -568,6 +580,8 @@ class WritingWorker:
             }
 
         except Exception as e:
+            if is_connection_error(e):
+                raise
             logger.error(f"키워드 전용 요소 선택 실패: {e}", exc_info=True)
             return None
 
@@ -635,6 +649,8 @@ class WritingWorker:
             }
 
         except Exception as e:
+            if is_connection_error(e):
+                raise
             logger.error(f"요소 선택 실패: {e}", exc_info=True)
             return None
 
