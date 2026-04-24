@@ -187,7 +187,8 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
-            "scripts.services.browser_worker_runtime.manager.urllib.request.urlopen", return_value=_Response(200)
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
+            return_value=(True, None),
         ), patch(
             "scripts.services.browser_worker_runtime.manager.write_pid_file"
         ):
@@ -224,7 +225,8 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
-            "scripts.services.browser_worker_runtime.manager.urllib.request.urlopen", return_value=_Response(200)
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
+            return_value=(True, None),
         ), patch(
             "scripts.services.browser_worker_runtime.manager.write_pid_file"
         ):
@@ -370,7 +372,8 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
-            "scripts.services.browser_worker_runtime.manager.urllib.request.urlopen", return_value=_Response(200)
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
+            return_value=(True, None),
         ) as mock_urlopen:
             ok = mgr.restart_frontend(public=False)
 
@@ -400,8 +403,8 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
-            "scripts.services.browser_worker_runtime.manager.urllib.request.urlopen",
-            side_effect=OSError("connection refused"),
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
+            return_value=(False, "connection refused"),
         ), patch(
             "scripts.services.browser_worker_runtime.manager.write_pid_file"
         ) as mock_write, patch(
@@ -412,6 +415,41 @@ class TestRestartFrontendBehavior:
         assert ok is False
         mock_write.assert_not_called()
         mock_remove.assert_called()
+
+    def test_restart_frontend_boundary_listener_pid_unchanged_but_healthy_succeeds(self, tmp_path):
+        """B: listener PID가 유지돼도 HTTP health가 복구되면 성공으로 본다."""
+        mgr = _make_manager(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.pid = 9090
+
+        with patch.object(mgr, "_acquire_frontend_restart_lock", return_value=105), patch.object(
+            mgr, "_release_frontend_restart_lock"
+        ), patch.object(mgr, "_cleanup_frontend_runtime"), patch.object(mgr, "_prepare_frontend_env"), patch.object(
+            mgr, "_run_frontend_build_if_needed", return_value=True
+        ), patch.object(
+            mgr, "_has_port_collision_error", return_value=False
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", return_value=4444
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_listener", return_value=4444
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
+            return_value=(True, None),
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.write_pid_file"
+        ) as mock_write, patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.cprint"
+        ) as mock_cprint:
+            ok = mgr.restart_frontend(public=False)
+
+        assert ok is True
+        mock_write.assert_called_once()
+        rendered = [str(call.args[0]) for call in mock_cprint.call_args_list if call.args]
+        assert any("Listener PID unchanged after restart" in line and "frontend is healthy" in line for line in rendered)
 
 
 class TestListenerPidAndStatus:

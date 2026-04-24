@@ -6,6 +6,7 @@ E2E 테스트용 Playwright 픽스처
 
 import sys
 import os
+import time
 
 # Windows UTF-8 설정
 if sys.platform == 'win32':
@@ -94,7 +95,7 @@ def api_url():
 def frontend_url():
     """프론트엔드 URL"""
     url = E2E_CONFIG["frontend_url"]
-    _assert_frontend_available(url)
+    _wait_for_frontend_available(url, companion_api_url=E2E_CONFIG["api_url"])
     return url
 
 
@@ -102,7 +103,7 @@ def frontend_url():
 def public_frontend_url():
     """공개 프론트엔드 URL"""
     url = E2E_CONFIG["public_frontend_url"]
-    _assert_frontend_available(url)
+    _wait_for_frontend_available(url)
     return url
 
 
@@ -110,13 +111,7 @@ def public_frontend_url():
 def system_mode(api_url: str) -> str:
     """현재 API 모드(public/admin)."""
     mode_url = f"{api_url}/api/v1/system/mode"
-    try:
-        with urlopen(mode_url, timeout=5) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        pytest.fail(f"system/mode endpoint returned HTTP {exc.code}: {mode_url}")
-    except (URLError, OSError, json.JSONDecodeError) as exc:
-        pytest.fail(f"system/mode endpoint unavailable: {mode_url} ({exc})")
+    payload = _load_json_with_retry(mode_url)
     return str(payload.get("mode") or "public")
 
 
@@ -136,15 +131,44 @@ def wait_for_app_ready(page: Page, url: str, timeout: int = 30000):
     page.wait_for_selector("[data-sveltekit-hydrated]", timeout=timeout, state="attached")
 
 
-def _assert_frontend_available(url: str) -> None:
-    try:
-        # HTTPError(4xx/5xx)는 서버 기동 상태로 간주하고 테스트 진행
-        with urlopen(url, timeout=5):
-            pass
-    except HTTPError:
-        pass
-    except (URLError, OSError):
-        pytest.fail(f"Frontend not available: {url}")
+def _wait_for_http_available(url: str, timeout_seconds: float = 60.0) -> None:
+    deadline = time.time() + max(timeout_seconds, 1.0)
+    last_error: Exception | None = None
+
+    while time.time() <= deadline:
+        try:
+            with urlopen(url, timeout=5):
+                return
+        except HTTPError:
+            return
+        except (URLError, OSError, TimeoutError) as exc:
+            last_error = exc
+            time.sleep(1.0)
+
+    pytest.fail(f"HTTP endpoint not available: {url} ({last_error})")
+
+
+def _wait_for_frontend_available(url: str, companion_api_url: str | None = None) -> None:
+    _wait_for_http_available(url)
+    if companion_api_url:
+        _wait_for_http_available(f"{companion_api_url}/api/v1/system/liveness")
+
+
+def _load_json_with_retry(url: str, timeout_seconds: float = 60.0) -> dict:
+    deadline = time.time() + max(timeout_seconds, 1.0)
+    last_error: Exception | None = None
+
+    while time.time() <= deadline:
+        try:
+            with urlopen(url, timeout=5) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            pytest.fail(f"system/mode endpoint returned HTTP {exc.code}: {url}")
+        except (URLError, OSError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = exc
+            time.sleep(1.0)
+
+    pytest.fail(f"system/mode endpoint unavailable: {url} ({last_error})")
 
 
 def take_screenshot_on_failure(page: Page, request: pytest.FixtureRequest):

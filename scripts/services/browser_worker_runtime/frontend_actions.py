@@ -199,6 +199,27 @@ def _wait_for_frontend_listener(frontend_port: int, launcher_pid: int, timeout_s
     return None
 
 
+def _wait_for_frontend_http_ready(url: str, launcher_pid: int, timeout_seconds: float = 15.0) -> tuple[bool, str | None]:
+    mgr = _manager()
+    deadline = time.time() + max(timeout_seconds, 1.0)
+    last_error: str | None = None
+
+    while time.time() <= deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                if resp.status == 200:
+                    return True, None
+                last_error = f"unexpected status: {resp.status}"
+        except Exception as exc:
+            last_error = str(exc)
+            if launcher_pid and not mgr.is_process_alive(launcher_pid):
+                break
+
+        time.sleep(0.5)
+
+    return False, last_error
+
+
 def restart_frontend(manager, public: bool = False) -> bool:
     mgr = _manager()
     mode_label, api_port, frontend_port, pid_file, log_dir = _frontend_mode(manager, public)
@@ -275,21 +296,26 @@ def restart_frontend(manager, public: bool = False) -> bool:
             )
             return False
 
+        url = f"http://localhost:{frontend_port}"
+        healthy, last_error = _wait_for_frontend_http_ready(url, proc.pid)
+        if healthy:
+            if old_listener_pid is not None and new_listener_pid == old_listener_pid:
+                cprint(
+                    f"Listener PID unchanged after restart (PID: {new_listener_pid}) but frontend is healthy",
+                    YELLOW,
+                )
+            cprint(
+                f"Frontend healthy (mode={mode_label}, listener_pid={new_listener_pid}, url={url})",
+                GREEN,
+            )
+            return True
+
         if old_listener_pid is not None and new_listener_pid == old_listener_pid:
             cprint(f"Listener PID unchanged after restart (PID: {new_listener_pid})", RED)
-            return False
-
-        url = f"http://localhost:{frontend_port}"
-        try:
-            with urllib.request.urlopen(url, timeout=5) as resp:
-                if resp.status == 200:
-                    cprint(
-                        f"Frontend healthy (mode={mode_label}, listener_pid={new_listener_pid}, url={url})",
-                        GREEN,
-                    )
-                    return True
-        except Exception as e:
-            cprint(f"Frontend not responding yet (may still be starting): {e}", YELLOW)
+        elif last_error:
+            cprint(f"Frontend not responding yet (may still be starting): {last_error}", YELLOW)
+        else:
+            cprint("Frontend not responding yet (may still be starting)", YELLOW)
             return False
 
         cprint("Frontend health check returned unexpected status", YELLOW)
