@@ -1,18 +1,24 @@
 """
-archive_index_backfill.py — 1회성 백필 유틸
+archive_index_backfill.py — 태그 매칭 검증용 dry-run 유틸.
+
+INDEX.md는 더 이상 존재하지 않는다. 이 스크립트는 archive 파일 스캔·태그 추출·
+가이드 AUTO 블록 갱신에만 사용한다.
 
 `docs/archive/*.md` 전체를 스캔해:
-  1) `docs/archive/INDEX.md`의 INDEX:BEGIN/END 블록을 재생성 (idempotent)
-  2) `docs/dev-guide/*.md`의 AUTO:BEGIN/END 블록을 각 가이드의 owns_archive_tags와
-     매칭되는 최근 cutoff_days 이내 archive로 재생성
+  - `docs/dev-guide/*.md`의 AUTO:BEGIN/END 블록을 각 가이드의 owns_archive_tags와
+    매칭되는 최근 cutoff_days 이내 archive로 재생성
 
 LLM 호출 없음 — 파일명/첫 H1/본문 앞 100자에서 화이트리스트 규칙 매칭만 사용.
 운영 코드 아님. 태그 vocabulary 확장 시 `--apply` 재실행.
 
+가이드 AUTO 블록 갱신은 backfill_guide_blocks()(file-based) 또는
+backfill_guide_blocks_db()(DB-based)로 수행. 두 함수 모두 tests/dev_runner/에서
+직접 import하므로 유지 필수.
+
 사용법:
-  python scripts/archive_index_backfill.py --dry-run       # 임의 20건 stdout
-  python scripts/archive_index_backfill.py --apply         # INDEX + 가이드 전량 갱신
-  python scripts/archive_index_backfill.py --apply --cutoff-days 90
+  python scripts/migrations/archive_index_backfill.py --dry-run   # 임의 20건 stdout
+  python scripts/migrations/archive_index_backfill.py --apply     # 가이드 AUTO 블록 갱신
+  python scripts/migrations/archive_index_backfill.py --apply --cutoff-days 90
 """
 
 from __future__ import annotations
@@ -45,15 +51,13 @@ try:
 except ImportError:
     _WIKI_TAGS_AVAILABLE = False
 
-ROOT = Path(__file__).resolve().parent.parent
-ARCHIVE_DIR = ROOT / "docs" / "archive"
+# scripts/migrations/ → repo root (3단계 위)
+ROOT = Path(__file__).resolve().parents[2]
+ARCHIVE_DIR = ROOT / ".worktrees" / "plans" / "docs" / "archive"
 DEV_GUIDE_DIR = ROOT / "docs" / "dev-guide"
-INDEX_PATH = ARCHIVE_DIR / "INDEX.md"
 META_PATH = DEV_GUIDE_DIR / "_meta.yaml"
 SCHEMA_PATH = ROOT / "docs" / "wiki-schema.md"
 
-INDEX_BEGIN = "<!-- INDEX:BEGIN -->"
-INDEX_END = "<!-- INDEX:END -->"
 AUTO_BEGIN = "<!-- AUTO:BEGIN -->"
 AUTO_END = "<!-- AUTO:END -->"
 
@@ -224,13 +228,7 @@ def scan_archive(archive_dir: Path, whitelist: set[str], root: Path = ROOT) -> l
     return rows
 
 
-# ----- 렌더 -----
-
-def render_index(rows: Iterable[ArchiveRow]) -> str:
-    header = "| date | tags | title | one-liner | path |\n|------|------|-------|-----------|------|"
-    body = "\n".join(r.render_row() for r in rows)
-    return f"{header}\n{body}\n" if body else f"{header}\n"
-
+# ----- 마커 블록 치환 -----
 
 def replace_marker_block(text: str, begin: str, end: str, new_inner: str) -> str:
     pattern = re.compile(
@@ -242,15 +240,6 @@ def replace_marker_block(text: str, begin: str, end: str, new_inner: str) -> str
     replacement = f"{begin}\n{new_inner.rstrip()}\n{end}"
     # callable form avoids backref interpretation of '\|' etc. in replacement
     return pattern.sub(lambda _m: replacement, text)
-
-
-def write_index(rows: list[ArchiveRow], index_path: Path | None = None) -> None:
-    path = index_path if index_path is not None else INDEX_PATH
-    text = path.read_text(encoding="utf-8")
-    inner = render_index(rows)
-    new_text = replace_marker_block(text, INDEX_BEGIN, INDEX_END, inner)
-    if new_text != text:
-        path.write_text(new_text, encoding="utf-8")
 
 
 def backfill_guide_blocks(
@@ -328,98 +317,13 @@ def cmd_dry_run(rows: list[ArchiveRow], n: int = 20) -> None:
 
 
 def cmd_apply(rows: list[ArchiveRow], cutoff_days: int) -> None:
-    write_index(rows)
+    """가이드 AUTO 블록만 갱신. INDEX.md는 더 이상 존재하지 않음."""
     meta = load_meta_yaml()
     guide_result = backfill_guide_blocks(rows, meta, cutoff_days=cutoff_days)
     save_meta_yaml(meta)
-    print(f"[apply] INDEX.md: {len(rows)} rows")
     print(f"[apply] guide AUTO blocks updated: {len(guide_result)}")
     for name, count in sorted(guide_result.items()):
         print(f"  {name}: {count}")
-
-
-def extract_guide_summary(guide_path: Path) -> str:
-    """가이드 파일에서 H1 이후 첫 비공백·비블록쿼트 단락 80자 절단.
-
-    extract_meta()의 one_liner 추출 로직과 동일.
-    """
-    try:
-        text = guide_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return ""
-    one_liner = ""
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        if s.startswith("#") or s.startswith(">") or s.startswith("---"):
-            continue
-        one_liner = s
-        break
-    if len(one_liner) > 80:
-        one_liner = one_liner[:80].rstrip() + "…"
-    return one_liner
-
-
-def render_guide_status_index(statuses: list[dict], guide_dir: Path | None = None) -> str:
-    """guide-status 목록을 INDEX.md 테이블로 렌더링.
-
-    Args:
-        statuses: get_guide_status() 반환값 리스트
-        guide_dir: dev-guide 디렉토리 (summary 추출용). None이면 DEV_GUIDE_DIR.
-
-    Returns:
-        마커 블록 내 삽입용 텍스트 (헤더 포함).
-    """
-    guide_dir = guide_dir or DEV_GUIDE_DIR
-    header = "| guide | 현행 요약 | last_updated | pending |\n|-------|----------|--------------|---------|"
-    rows_str: list[str] = []
-    for item in statuses:
-        guide = item.get("guide", "")
-        last_updated = item.get("last_updated") or item.get("last_archive_scan", "")
-        pending = item.get("pending_count", 0)
-        # 현행 요약: 가이드 파일 첫 단락
-        summary = extract_guide_summary(guide_dir / guide) if guide else ""
-        guide_esc = guide.replace("|", "\\|")
-        summary_esc = summary.replace("|", "\\|")
-        rows_str.append(f"| {guide_esc} | {summary_esc} | {last_updated} | {pending} |")
-    body = "\n".join(rows_str)
-    return f"{header}\n{body}\n" if body else f"{header}\n"
-
-
-def cmd_guide_status(cutoff_days: int = 90) -> None:
-    """--mode guide-status: DB 기반 guide-status INDEX.md 재생성."""
-    if not _DB_AVAILABLE:
-        print("[guide-status] DB not available — DB 연결 필요", file=sys.stderr)
-        sys.exit(1)
-    try:
-        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
-    except ImportError as e:
-        print(f"[guide-status] PlanRecordService import 실패: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    db = get_db_session()
-    try:
-        svc = PlanRecordService(db)
-        statuses = svc.get_guide_status()
-    finally:
-        db.close()
-
-    inner = render_guide_status_index(statuses)
-
-    # INDEX.md에서 GUIDE_STATUS 마커 블록 치환 (없으면 생성 안 함)
-    GUIDE_STATUS_BEGIN = "<!-- GUIDE_STATUS:BEGIN -->"
-    GUIDE_STATUS_END = "<!-- GUIDE_STATUS:END -->"
-    text = INDEX_PATH.read_text(encoding="utf-8")
-    if GUIDE_STATUS_BEGIN not in text:
-        print(f"[guide-status] INDEX.md에 {GUIDE_STATUS_BEGIN} 마커 없음 — 출력만 합니다:")
-        print(inner)
-        return
-
-    new_text = replace_marker_block(text, GUIDE_STATUS_BEGIN, GUIDE_STATUS_END, inner)
-    if new_text != text:
-        INDEX_PATH.write_text(new_text, encoding="utf-8")
-    print(f"[guide-status] INDEX.md guide-status 섹션 갱신 완료 ({len(statuses)} guides)")
 
 
 def backfill_guide_blocks_db(
@@ -520,24 +424,13 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="임의 20건 추출 결과 stdout")
-    mode.add_argument("--apply", action="store_true", help="INDEX.md + 가이드 AUTO 블록 일괄 갱신 (legacy)")
+    mode.add_argument("--apply", action="store_true", help="가이드 AUTO 블록 일괄 갱신")
     ap.add_argument("--cutoff-days", type=int, default=90, help="가이드 AUTO 블록 최근 N일")
-    ap.add_argument(
-        "--mode",
-        choices=["legacy", "guide-status"],
-        default="legacy",
-        help="legacy: 기존 파일 기반(기본), guide-status: DB 기반 INDEX.md 재생성",
-    )
     args = ap.parse_args(argv)
 
     if not ARCHIVE_DIR.exists():
         print(f"archive dir not found: {ARCHIVE_DIR}", file=sys.stderr)
         return EXIT_NO_ARCHIVE
-
-    # guide-status 모드는 DB 필요, whitelist/rows 스캔 불필요
-    if args.mode == "guide-status":
-        cmd_guide_status(args.cutoff_days)
-        return EXIT_OK
 
     try:
         whitelist = load_whitelist()
