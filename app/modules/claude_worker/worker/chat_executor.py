@@ -29,6 +29,8 @@ from typing import Optional
 
 import redis
 
+from app.core.database import is_connection_error
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
 LOG_DIR = PROJECT_ROOT / "logs" / "admin"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -234,7 +236,10 @@ class ChatExecutor:
                 pass
 
         except Exception as e:
-            logger.error(f"chat session error request_id={request_id}: {e}", exc_info=True)
+            if is_connection_error(e):
+                logger.warning("chat session connection error request_id=%s: %s", request_id, e)
+            else:
+                logger.error(f"chat session error request_id={request_id}: {e}", exc_info=True)
             if service:
                 try:
                     service.mark_failed(request_id, error_message=str(e), raw_response="")

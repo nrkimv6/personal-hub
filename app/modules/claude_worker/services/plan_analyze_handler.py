@@ -12,6 +12,7 @@ from typing import Optional, List
 
 from sqlalchemy.orm import Session
 
+from app.core.database import is_connection_error
 from app.models.plan_record import PlanRecord
 from app.modules.claude_worker.services.llm_service import LLMService
 
@@ -93,7 +94,10 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         
         return True
     except Exception as e:
-        logger.error(f"save_plan_archive_result error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("save_plan_archive_result connection error: %s", e)
+        else:
+            logger.error(f"save_plan_archive_result error: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -123,7 +127,10 @@ def build_devguide_staleness_report(db: Session) -> list:
             if s.get("pending_count", 0) > 0
         ]
     except Exception as e:
-        logger.error(f"build_devguide_staleness_report error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("build_devguide_staleness_report connection error: %s", e)
+        else:
+            logger.error(f"build_devguide_staleness_report error: {e}", exc_info=True)
         return []
 
 
@@ -146,7 +153,10 @@ def save_devguide_staleness_result(db: Session, report: list) -> bool:
         logger.info(f"save_devguide_staleness_result: saved event with {len(report)} guides")
         return True
     except Exception as e:
-        logger.error(f"save_devguide_staleness_result error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("save_devguide_staleness_result connection error: %s", e)
+        else:
+            logger.error(f"save_devguide_staleness_result error: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -350,7 +360,10 @@ def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
         logger.info(f"_maybe_queue_requirements_sync: queued for category={category}")
         return True
     except Exception as e:
-        logger.error(f"_maybe_queue_requirements_sync error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("_maybe_queue_requirements_sync connection error: %s", e)
+        else:
+            logger.error(f"_maybe_queue_requirements_sync error: {e}", exc_info=True)
         return False
 
 
@@ -419,7 +432,10 @@ def _maybe_flag_guide_staleness(db: Session, file_path: str) -> bool:
                 created = True
         return created
     except Exception as e:
-        logger.error(f"_maybe_flag_guide_staleness error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("_maybe_flag_guide_staleness connection error: %s", e)
+        else:
+            logger.error(f"_maybe_flag_guide_staleness error: {e}", exc_info=True)
         return False
 
 
@@ -467,7 +483,10 @@ def _get_scope_overlap_candidates(db: Session, record: PlanRecord) -> list:
         overlapping.sort(key=sort_key)
         return overlapping[:20]
     except Exception as e:
-        logger.error(f"_get_scope_overlap_candidates error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("_get_scope_overlap_candidates connection error: %s", e)
+        else:
+            logger.error(f"_get_scope_overlap_candidates error: {e}", exc_info=True)
         return []
 
 
@@ -518,7 +537,10 @@ def detect_recurrence(db: Session, record: PlanRecord) -> bool:
         logger.info(f"detect_recurrence: LLM 큐 등록 hash={record.filename_hash[:8]}")
         return True
     except Exception as e:
-        logger.error(f"detect_recurrence error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("detect_recurrence connection error: %s", e)
+        else:
+            logger.error(f"detect_recurrence error: {e}", exc_info=True)
         return False
 
 
@@ -624,7 +646,10 @@ def save_recurrence_check_result(db: Session, request, result: dict) -> bool:
         
         return True
     except Exception as e:
-        logger.error(f"save_recurrence_check_result error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("save_recurrence_check_result connection error: %s", e)
+        else:
+            logger.error(f"save_recurrence_check_result error: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -698,7 +723,10 @@ def maybe_queue_recurrence_suggest(db: Session, record: PlanRecord) -> bool:
         logger.info(f"maybe_queue_recurrence_suggest: LLM 큐 등록 root={chain_root[:8]}")
         return True
     except Exception as e:
-        logger.error(f"maybe_queue_recurrence_suggest error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("maybe_queue_recurrence_suggest connection error: %s", e)
+        else:
+            logger.error(f"maybe_queue_recurrence_suggest error: {e}", exc_info=True)
         return False
 
 
@@ -779,6 +807,9 @@ def save_recurrence_suggest_result(db: Session, request, result: dict) -> bool:
         logger.info(f"save_recurrence_suggest_result: saved for record id={latest_record.id}")
         return True
     except Exception as e:
-        logger.error(f"save_recurrence_suggest_result error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("save_recurrence_suggest_result connection error: %s", e)
+        else:
+            logger.error(f"save_recurrence_suggest_result error: {e}", exc_info=True)
         db.rollback()
         return False
