@@ -16,10 +16,10 @@ def seeded_clusters(test_db):
 
     # 클러스터
     test_db.execute(text("""
-        INSERT INTO time_clusters (id, date, start_time, end_time, file_count, category_id) VALUES
-        (1, '2023-04-15', '2023-04-15 10:00:00', '2023-04-15 12:30:00', 2, 1),
-        (2, '2023-04-15', '2023-04-15 14:00:00', '2023-04-15 15:30:00', 1, 2),
-        (3, '2023-04-16', '2023-04-16 09:00:00', '2023-04-16 10:00:00', 0, NULL)
+        INSERT INTO time_clusters (id, date, start_time, end_time, file_count, category_id, reviewed) VALUES
+        (1, '2023-04-15', '2023-04-15 10:00:00', '2023-04-15 12:30:00', 2, 1, 1),
+        (2, '2023-04-15', '2023-04-15 14:00:00', '2023-04-15 15:30:00', 1, 2, 0),
+        (3, '2023-04-16', '2023-04-16 09:00:00', '2023-04-16 10:00:00', 0, NULL, NULL)
     """))
 
     # 파일 (cluster_id로 클러스터 연결)
@@ -308,3 +308,27 @@ def test_cluster_ordering_by_start_time(client, seeded_clusters):
 
     for i in range(len(start_times) - 1):
         assert start_times[i] >= start_times[i + 1], "클러스터가 내림차순 정렬되지 않음"
+
+
+def test_get_clusters_includes_reviewed_preview_file_ids_and_category_path(client, seeded_clusters):
+    response = client.get("/api/ic/clusters")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    cluster1 = next(cluster for cluster in data if cluster["cluster_id"] == 1)
+    assert cluster1["reviewed"] is True
+    assert cluster1["preview_file_ids"] == [1, 2]
+    assert cluster1["category_path"] == "여행"
+
+
+def test_get_cluster_detail_preserves_thumbnail_capture_time_and_category_path(client, seeded_clusters):
+    response = client.get("/api/ic/clusters/1")
+
+    assert response.status_code == 200
+    data = response.json()
+    first_file = data["files"][0]
+
+    assert data["category_path"] == "여행"
+    assert first_file["thumbnail_url"] == "/api/ic/files/1/thumbnail"
+    assert first_file["capture_time"].startswith("2023-04-15T10:15:00")

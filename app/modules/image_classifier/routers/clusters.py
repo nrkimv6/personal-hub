@@ -165,11 +165,11 @@ async def get_clusters(
         LEFT JOIN categories c ON tc.category_id = c.id
         ORDER BY tc.start_time DESC
         LIMIT :limit
-    """), {"limit": limit}).fetchall()
+    """), {"limit": limit}).mappings().all()
 
     clusters = []
     for row in result:
-        cid = row[0]
+        cid = row["id"]
         # 첫 5개 파일 ID
         preview_rows = db.execute(text("""
             SELECT id FROM file_classifications
@@ -180,12 +180,12 @@ async def get_clusters(
 
         clusters.append({
             "cluster_id": cid,
-            "start_time": row[1],
-            "end_time": row[2],
-            "file_count": row[3],
-            "duration_minutes": row[4] or 0,
-            "category_path": row[5],
-            "reviewed": bool(row[6]) if row[6] is not None else False,
+            "start_time": row["start_time"],
+            "end_time": row["end_time"],
+            "file_count": row["file_count"],
+            "duration_minutes": row["duration_minutes"] or 0,
+            "category_path": row["full_path"],
+            "reviewed": bool(row["reviewed"]) if row["reviewed"] is not None else False,
             "preview_file_ids": preview_ids,
         })
 
@@ -262,7 +262,7 @@ async def get_cluster_detail(
         FROM time_clusters tc
         LEFT JOIN categories c ON tc.category_id = c.id
         WHERE tc.id = :cluster_id
-    """), {"cluster_id": cluster_id}).fetchone()
+    """), {"cluster_id": cluster_id}).mappings().first()
 
     if not cluster_row:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
@@ -276,24 +276,24 @@ async def get_cluster_detail(
         FROM file_classifications f
         WHERE f.cluster_id = :cluster_id
         ORDER BY COALESCE(f.user_date, f.extracted_date) ASC
-    """), {"cluster_id": cluster_id}).fetchall()
+    """), {"cluster_id": cluster_id}).mappings().all()
 
     files = [
         ClusterFileResponse(
-            file_id=row[0],
-            file_path=row[1],
-            capture_time=row[2],
-            thumbnail_url=f"/api/ic/files/{row[0]}/thumbnail"
+            file_id=row["id"],
+            file_path=row["file_path"],
+            capture_time=row["capture_time"],
+            thumbnail_url=f"/api/ic/files/{row['id']}/thumbnail"
         )
         for row in files_result
     ]
 
     return ClusterDetailResponse(
-        cluster_id=cluster_row[0],
-        start_time=cluster_row[1],
-        end_time=cluster_row[2],
-        file_count=cluster_row[3],
-        duration_minutes=cluster_row[4] or 0,
-        category_path=cluster_row[5],
+        cluster_id=cluster_row["id"],
+        start_time=cluster_row["start_time"],
+        end_time=cluster_row["end_time"],
+        file_count=cluster_row["file_count"],
+        duration_minutes=cluster_row["duration_minutes"] or 0,
+        category_path=cluster_row["full_path"],
         files=files
     )
