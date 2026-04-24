@@ -880,6 +880,63 @@ class TestPopupHandlerRegistration:
 
 
 # ============================================================
+# _create_browser_context_visible popup handler 등록 테스트 (결함 2A)
+# ============================================================
+
+class TestCreateBrowserContextVisiblePopupHandler:
+    """_create_browser_context_visible()가 재사용/신규 양쪽에서 popup handler를 등록하는지 검증."""
+
+    @pytest.fixture
+    def manager(self):
+        from app.shared.browser.context_manager import ContextManager
+        return ContextManager()
+
+    @pytest.mark.asyncio
+    async def test_create_browser_context_visible_registers_popup_handler_on_reuse_E(self, manager):
+        """E(Existence): 재사용 경로에서 _register_popup_handler 1회 호출 검증."""
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_page.url = "https://naver.com"
+        mock_context.pages = [mock_page]
+        manager.browser_contexts[1] = mock_context
+
+        manager._register_popup_handler = MagicMock()
+
+        result = await manager._create_browser_context_visible(1)
+
+        assert result is mock_context
+        manager._register_popup_handler.assert_called_once_with(1, mock_context)
+
+    @pytest.mark.asyncio
+    async def test_create_browser_context_visible_registers_popup_handler_on_new_E(self, manager):
+        """E(Existence): 신규 생성 경로에서 _register_popup_handler 1회 호출 검증."""
+        mock_context = MagicMock()
+        mock_account = MagicMock()
+        mock_account.profile.profile_path = "/tmp/nonexistent_profile_test_abc"
+        mock_account.profile.profile_dir = "test_dir"
+        mock_db = MagicMock()
+
+        manager._register_popup_handler = MagicMock()
+
+        with (
+            patch("app.core.database.SessionLocal", return_value=mock_db),
+            patch("app.shared.service_account.service_account_service") as mock_svc,
+        ):
+            mock_svc.get_by_id.return_value = mock_account
+            mock_svc.update_last_used = MagicMock()
+
+            mock_playwright = MagicMock()
+            mock_playwright.chromium.launch_persistent_context = AsyncMock(return_value=mock_context)
+            manager.playwright_instance = mock_playwright
+
+            with patch.object(manager, "_bypass_automation_detection", new=AsyncMock()):
+                result = await manager._create_browser_context_visible(1)
+
+        assert result is mock_context
+        manager._register_popup_handler.assert_called_once_with(1, mock_context)
+
+
+# ============================================================
 # 실행
 # ============================================================
 

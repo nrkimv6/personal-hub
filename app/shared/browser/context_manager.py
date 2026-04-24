@@ -458,7 +458,8 @@ class ContextManager:
                 logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (service_account_id={service_account_id}): {e}")
 
             if context_valid:
-                logger.debug(f"기존 브라우저 컨텍스트 재사용 (service_account_id={service_account_id})")
+                logger.debug(f"기존 브라우저 컨텍스트 재사용 (service_account_id={service_account_id}, popup handler 등록 확인)")
+                self._register_popup_handler(service_account_id, context)
                 return context
             else:
                 logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (service_account_id={service_account_id})")
@@ -514,6 +515,7 @@ class ContextManager:
             # 마지막 사용 시간 업데이트
             service_account_service.update_last_used(db, service_account_id)
 
+            self._register_popup_handler(service_account_id, context)
             return context
 
         finally:

@@ -911,3 +911,100 @@ class TestCreatePageWithTimeout:
             assert page._tab_id != "__pending__", "__pending__ -> tab_id로 전환돼야 한다"
 
 
+# ============================================================
+# exact-limit orphan cleanup 테스트
+# ============================================================
+
+class TestExactLimitOrphanCleanup:
+    """결함 1 수정 검증 — _cleanup_orphan_tabs() >= 조건 + visible sentinel skip"""
+
+    def _make_page(self, url: str):
+        page = MagicMock()
+        page.url = url
+        page.is_closed = MagicMock(return_value=False)
+        page.close = AsyncMock()
+        return page
+
+    @pytest.fixture
+    def pool(self):
+        with patch('app.shared.browser.tab_pool_manager.settings') as ms:
+            ms.TAB_ROTATION_THRESHOLD = 600
+            ms.CACHE_CLEANUP_INTERVAL = 300
+            ms.TAB_REQUEST_TIMEOUT = 60
+            ms.TAB_WAIT_RETRY_INTERVAL = 5
+            ms.TOTAL_MAX_TABS = 5
+            ms.MAX_USES_PER_TAB = 50
+            from app.shared.browser.tab_pool_manager import TabPoolManager
+            yield TabPoolManager(MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphan_tabs_at_exact_limit_closes_nonblank_B(self, pool):
+        """B(Boundary): actual_pages == TOTAL_MAX_TABS + non-blank orphan → close() 호출."""
+        registered = self._make_page("about:blank")
+        orphan1 = self._make_page("https://booking.naver.com/123")
+        orphan2 = self._make_page("https://booking.naver.com/456")
+        orphan3 = self._make_page("https://booking.naver.com/789")
+        orphan4 = self._make_page("https://booking.naver.com/012")
+
+        mock_context = MagicMock()
+        mock_context.pages = [registered, orphan1, orphan2, orphan3, orphan4]
+
+        pool.tab_pools[1] = {"t1": registered}
+        pool.context_manager.browser_contexts = {1: mock_context}
+
+        count = await pool._cleanup_orphan_tabs()
+
+        assert count == 4
+        orphan1.close.assert_awaited_once()
+        orphan2.close.assert_awaited_once()
+        orphan3.close.assert_awaited_once()
+        orphan4.close.assert_awaited_once()
+        registered.close.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphan_tabs_logs_exact_limit_event_R(self, pool, caplog):
+        """R(Right): exact-limit cleanup 후 caplog에 [TAB-POOL] exact-limit orphan cleaned INFO 로그."""
+        import logging
+
+        registered = self._make_page("about:blank")
+        orphan = self._make_page("https://booking.naver.com/123")
+
+        mock_context = MagicMock()
+        mock_context.pages = [registered, orphan, self._make_page("x"), self._make_page("y"), self._make_page("z")]
+        for p in mock_context.pages:
+            p.is_closed = MagicMock(return_value=False)
+
+        pool.tab_pools[1] = {"t1": registered}
+        pool.context_manager.browser_contexts = {1: mock_context}
+
+        with caplog.at_level(logging.INFO):
+            await pool._cleanup_orphan_tabs()
+
+        assert any("[TAB-POOL] exact-limit orphan cleaned" in r.message for r in caplog.records)
+        assert any("actual_before=5" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphan_tabs_preserves_visible_sentinel_Co(self, pool):
+        """Co(Conformance): visible_1 sentinel 페이지는 actual_pages >= TOTAL_MAX_TABS라도 close 안 됨."""
+        registered = self._make_page("about:blank")
+        sentinel = self._make_page("https://booking.naver.com/open")
+        sentinel._tab_id = "visible_1"
+        orphan1 = self._make_page("https://booking.naver.com/123")
+        orphan2 = self._make_page("https://booking.naver.com/456")
+        orphan3 = self._make_page("https://booking.naver.com/789")
+
+        mock_context = MagicMock()
+        mock_context.pages = [registered, sentinel, orphan1, orphan2, orphan3]
+
+        pool.tab_pools[1] = {"t1": registered}
+        pool.context_manager.browser_contexts = {1: mock_context}
+
+        count = await pool._cleanup_orphan_tabs()
+
+        sentinel.close.assert_not_awaited()
+        orphan1.close.assert_awaited_once()
+        orphan2.close.assert_awaited_once()
+        orphan3.close.assert_awaited_once()
+        assert count == 3
+
+

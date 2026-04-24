@@ -447,19 +447,29 @@ class TabPoolManager:
                     if page in registered_pages:
                         continue
 
-                    # _tab_id가 있으면 탭 풀에서 관리되는 것
-                    if hasattr(page, '_tab_id') and page._tab_id in self.tab_pool:
-                        continue
+                    # _tab_id가 있으면 풀 관리 탭이거나 visible sentinel 탭 — 정리 대상 아님
+                    if hasattr(page, '_tab_id'):
+                        tab_id = page._tab_id
+                        # pool 등록 탭 또는 visible sentinel(사용자 가시 창) — session_manager가 수명 관리
+                        if tab_id in self.tab_pool or (isinstance(tab_id, str) and tab_id.startswith('visible_')):
+                            continue
 
                     # 탭 풀에 등록되지 않은 페이지 (고아 탭)
                     try:
                         page_url = page.url
-                        actual_pages = len([p for p in context.pages if not p.is_closed()])
+                        actual_pages_before = len([p for p in context.pages if not p.is_closed()])
                         if (page_url == "about:blank"
                                 or page_url.startswith("chrome-error://")
-                                or actual_pages > self.TOTAL_MAX_TABS):
+                                or actual_pages_before >= self.TOTAL_MAX_TABS):
                             await page.close()
                             orphan_count += 1
+                            actual_pages_after = len([p for p in context.pages if not p.is_closed()])
+                            logger.info(
+                                f"[TAB-POOL] exact-limit orphan cleaned: "
+                                f"sid={service_account_id}, url={page_url}, "
+                                f"actual_before={actual_pages_before}, actual_after={actual_pages_after}, "
+                                f"registered={len(registered_pages)}"
+                            )
                             logger.info(f"고아 탭 정리: service_account_id={service_account_id}, url={page_url}")
                     except Exception as e:
                         logger.debug(f"고아 탭 정리 중 오류 (무시): {e}")
