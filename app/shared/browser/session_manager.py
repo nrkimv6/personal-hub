@@ -7,6 +7,7 @@ BrowserService에서 분리된 독립 모듈입니다.
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Dict, Optional, TYPE_CHECKING
 
@@ -187,6 +188,7 @@ class SessionManager:
 
             context = await self.context_manager._create_browser_context_visible(service_account_id)
             page = await context.new_page()
+            page._tab_id = f"login_check_naver_{service_account_id}_{int(time.time())}"
 
             try:
                 await page.goto("https://www.naver.com", wait_until="domcontentloaded", timeout=15000)
@@ -259,6 +261,7 @@ class SessionManager:
 
             context = await self.context_manager._create_browser_context_visible(service_account_id)
             page = await context.new_page()
+            page._tab_id = f"login_check_ig_{service_account_id}_{int(time.time())}"
 
             try:
                 await page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=15000)

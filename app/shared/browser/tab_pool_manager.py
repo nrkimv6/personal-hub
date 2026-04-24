@@ -58,6 +58,43 @@ class TabPoolManager:
         # 계정별 브라우저 복구 진행 중 플래그 (race condition 방지)
         self._recovery_in_progress: Dict[int, bool] = {}
 
+    def _count_budgeted_pages(self, context: BrowserContext) -> int:
+        """visible sentinel(visible_*) 탭을 제외한 예산 소비 탭 수를 반환한다.
+
+        pool 탭과 orphan 탭은 그대로 카운트해 혼합 포화(pool+orphan)를 가리지 않는다.
+        secondary gate(`get_tab()`)의 starvation 판단 전용 — cleanup overflow 조건에는 사용하지 않는다.
+        """
+        count = 0
+        for p in context.pages:
+            if p.is_closed():
+                continue
+            tab_id = getattr(p, '_tab_id', None)
+            if isinstance(tab_id, str) and tab_id.startswith('visible_'):
+                continue
+            count += 1
+        return count
+
+    def _is_stale_login_check(self, page: Page) -> bool:
+        """login_check 마커가 있고 30초 이상 경과한 탭이면 True 반환.
+
+        형식: login_check_{type}_{sid}_{unix_ts}
+        파싱 실패 또는 prefix 불일치 시 False(안전 기본값).
+        """
+        tab_id = getattr(page, '_tab_id', None)
+        if not isinstance(tab_id, str):
+            return False
+        if not tab_id.startswith('login_check_'):
+            return False
+        parts = tab_id.split('_')
+        # login_check_{type}_{sid}_{ts} → 최소 4개 세그먼트
+        if len(parts) < 4:
+            return False
+        try:
+            ts = int(parts[-1])
+            return time.time() - ts > 30
+        except (ValueError, IndexError):
+            return False
+
     async def get_tab(
         self,
         target_id: int,
@@ -144,9 +181,11 @@ class TabPoolManager:
 
         # Phase 1 진입 로그: pool snapshot으로 starvation 진단 가능
         _entry_status = self.get_status()
+        _entry_budgeted = self._count_budgeted_pages(context)
         logger.info(
             f"[TAB-POOL] get_tab 진입: target={target_id}, account={service_account_id}, "
             f"total={_entry_status['total_active_tabs']}/{self.TOTAL_MAX_TABS}, "
+            f"budgeted={_entry_budgeted}/{self.TOTAL_MAX_TABS}, "
             f"in_use={_entry_status['in_use_count']}, waiters={_entry_status['waiter_count']}, "
             f"inner_timeout={max_wait_time:.0f}s"
         )
@@ -189,11 +228,13 @@ class TabPoolManager:
             # 새 탭 생성 가능 여부 확인 (전체 최대 탭 수 기준)
             total_tabs = sum(len(pool) for pool in self.tab_pools.values())
             if total_tabs < self.TOTAL_MAX_TABS:
-                # secondary gate: 풀 외부 탭(팝업 등)까지 포함한 실제 탭 수 체크
-                actual_pages = len([p for p in context.pages if not p.is_closed()])
+                # secondary gate: visible sentinel(visible_*) 제외 예산 탭 수 체크
+                # visible sentinel은 사용자 가시 창이므로 워커 예산에서 제외
+                # pool 탭/orphan은 계속 카운트해 혼합 포화를 가리지 않음
+                actual_pages = self._count_budgeted_pages(context)
                 if actual_pages >= self.TOTAL_MAX_TABS:
                     await self._cleanup_orphan_tabs()
-                    actual_pages = len([p for p in context.pages if not p.is_closed()])
+                    actual_pages = self._count_budgeted_pages(context)
                     if actual_pages >= self.TOTAL_MAX_TABS:
                         logger.warning(
                             f"[TAB-POOL] 실제 탭 초과({actual_pages}/{self.TOTAL_MAX_TABS}), 재시도 대기 "
@@ -204,9 +245,11 @@ class TabPoolManager:
 
                 # Phase 1: 새 탭 생성 직전 snapshot — new_page hang 원인 진단
                 _pre_create_status = self.get_status()
+                _pre_create_budgeted = self._count_budgeted_pages(context)
                 logger.info(
                     f"[TAB-POOL] new_page 생성 결정: account={service_account_id}, "
                     f"pool_total={_pre_create_status['total_active_tabs']}, "
+                    f"budgeted={_pre_create_budgeted}/{self.TOTAL_MAX_TABS}, "
                     f"in_use={_pre_create_status['in_use_count']}, "
                     f"waiters={_pre_create_status['waiter_count']}, "
                     f"account_pools={_pre_create_status['account_pool_sizes']}"
@@ -427,6 +470,10 @@ class TabPoolManager:
         특히 about:blank 상태로 방치된 탭들을 정리합니다.
         """
         orphan_count = 0
+        skipped_pool = 0
+        skipped_sentinel = 0
+        skipped_login_check = 0
+        skipped_other = 0
         try:
             # 모든 브라우저 컨텍스트의 페이지 확인
             for service_account_id, context in list(self.context_manager.browser_contexts.items()):
@@ -445,6 +492,12 @@ class TabPoolManager:
                 for page in pages:
                     # 이미 탭 풀에 등록된 페이지는 건너뜀
                     if page in registered_pages:
+                        skipped_pool += 1
+                        logger.debug(
+                            f"[TAB-POOL] cleanup skip: reason=pool, "
+                            f"url={getattr(page, 'url', '?')}, "
+                            f"tab_id={getattr(page, '_tab_id', None)}, sid={service_account_id}"
+                        )
                         continue
 
                     # _tab_id가 있으면 풀 관리 탭이거나 visible sentinel 탭 — 정리 대상 아님
@@ -452,6 +505,37 @@ class TabPoolManager:
                         tab_id = page._tab_id
                         # pool 등록 탭 또는 visible sentinel(사용자 가시 창) — session_manager가 수명 관리
                         if tab_id in self.tab_pool or (isinstance(tab_id, str) and tab_id.startswith('visible_')):
+                            reason = "sentinel" if isinstance(tab_id, str) and tab_id.startswith('visible_') else "pool"
+                            if reason == "sentinel":
+                                skipped_sentinel += 1
+                            else:
+                                skipped_pool += 1
+                            logger.debug(
+                                f"[TAB-POOL] cleanup skip: reason={reason}, "
+                                f"url={getattr(page, 'url', '?')}, "
+                                f"tab_id={tab_id}, sid={service_account_id}"
+                            )
+                            continue
+
+                        # login_check 마커: stale이면 정리, 근래 생성이면 보존
+                        if isinstance(tab_id, str) and tab_id.startswith('login_check_'):
+                            if self._is_stale_login_check(page):
+                                try:
+                                    await page.close()
+                                    orphan_count += 1
+                                    logger.info(
+                                        f"[TAB-POOL] stale login_check closed: "
+                                        f"sid={service_account_id}, tab_id={tab_id}"
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"[TAB-POOL] login_check close 실패 (무시): {e}")
+                            else:
+                                skipped_login_check += 1
+                                logger.debug(
+                                    f"[TAB-POOL] cleanup skip: reason=login_check_recent, "
+                                    f"url={getattr(page, 'url', '?')}, "
+                                    f"tab_id={tab_id}, sid={service_account_id}"
+                                )
                             continue
 
                     # 탭 풀에 등록되지 않은 페이지 (고아 탭)
@@ -471,6 +555,13 @@ class TabPoolManager:
                                 f"registered={len(registered_pages)}"
                             )
                             logger.info(f"고아 탭 정리: service_account_id={service_account_id}, url={page_url}")
+                        else:
+                            skipped_other += 1
+                            logger.debug(
+                                f"[TAB-POOL] cleanup skip: reason=other, "
+                                f"url={page_url}, tab_id={getattr(page, '_tab_id', None)}, "
+                                f"sid={service_account_id}"
+                            )
                     except Exception as e:
                         logger.debug(f"고아 탭 정리 중 오류 (무시): {e}")
 
@@ -479,6 +570,13 @@ class TabPoolManager:
 
         except Exception as e:
             logger.warning(f"고아 탭 정리 중 오류: {e}")
+
+        # cleanup 호출마다 summary 출력 — skip=0이어도 재발 진단에 필요
+        logger.info(
+            f"[TAB-POOL] cleanup summary: closed={orphan_count}, "
+            f"skipped_pool={skipped_pool}, skipped_sentinel={skipped_sentinel}, "
+            f"skipped_login_check={skipped_login_check}, skipped_other={skipped_other}"
+        )
 
         return orphan_count
 
@@ -768,7 +866,7 @@ class TabPoolManager:
         """탭 풀 상태 진단 정보 반환.
 
         Returns:
-            dict: total_active_tabs, in_use_count, waiter_count, dead_waiter_count, account_pool_sizes
+            dict: total_active_tabs, budgeted_pages, in_use_count, waiter_count, dead_waiter_count, account_pool_sizes
         """
         total_active = sum(len(pool) for pool in self.tab_pools.values())
         in_use_count = sum(1 for v in self.tab_in_use.values() if v)
@@ -777,8 +875,16 @@ class TabPoolManager:
             account_id: len(pool)
             for account_id, pool in self.tab_pools.items()
         }
+        # budgeted_pages: account별 visible sentinel 제외 예산 탭 수
+        budgeted_pages = {}
+        for account_id, ctx in list(self.context_manager.browser_contexts.items()):
+            try:
+                budgeted_pages[account_id] = self._count_budgeted_pages(ctx)
+            except Exception:
+                pass
         return {
             "total_active_tabs": total_active,
+            "budgeted_pages": budgeted_pages,
             "in_use_count": in_use_count,
             "waiter_count": len(self.tab_waiters),
             "dead_waiter_count": dead_waiter_count,

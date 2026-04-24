@@ -1008,3 +1008,239 @@ class TestExactLimitOrphanCleanup:
         assert count == 3
 
 
+# ============================================================
+# Phase T1 신규 TC: _count_budgeted_pages, _is_stale_login_check,
+#                   cleanup summary/skip logging
+# ============================================================
+
+@pytest.fixture()
+def pool_factory():
+    """TabPoolManager 팩토리 (make_pool과 동일, fixture 이름 충돌 방지)."""
+    def _create(total_max_tabs=5):
+        with patch('app.shared.browser.tab_pool_manager.settings') as ms:
+            ms.TAB_ROTATION_THRESHOLD = 100
+            ms.CACHE_CLEANUP_INTERVAL = 300
+            ms.TAB_REQUEST_TIMEOUT = 30
+            ms.TAB_WAIT_RETRY_INTERVAL = 0.5
+            ms.TOTAL_MAX_TABS = total_max_tabs
+            ms.MAX_USES_PER_TAB = 50
+            ms.TAB_CLEANUP_THRESHOLD = 3600
+            from app.shared.browser.tab_pool_manager import TabPoolManager
+            pool = TabPoolManager(MagicMock())
+            pool.TOTAL_MAX_TABS = total_max_tabs
+            return pool
+    return _create
+
+
+def _mock_page(is_closed=False, tab_id=None, url="about:blank"):
+    """테스트용 Page 목 생성 헬퍼."""
+    p = MagicMock()
+    p.is_closed = MagicMock(return_value=is_closed)
+    p.close = AsyncMock()
+    p.url = url
+    if tab_id is not None:
+        p._tab_id = tab_id
+    else:
+        # _tab_id 속성 없음
+        if hasattr(p, '_tab_id'):
+            del p._tab_id
+    return p
+
+
+class TestCountBudgetedPages:
+    """_count_budgeted_pages() helper TC"""
+
+    def test_count_budgeted_pages_R_counts_managed_and_orphan_pages(self, pool_factory):
+        """R: pool 등록 4, orphan 1, sentinel 0 → 반환 5 (혼합 포화 재오픈 방지)."""
+        pool = pool_factory()
+        pages = [_mock_page(tab_id=f"1_{i:04d}") for i in range(4)]  # pool 탭
+        pages.append(_mock_page(url="https://naver.com"))  # orphan (no _tab_id)
+
+        mock_ctx = MagicMock()
+        mock_ctx.pages = pages
+
+        result = pool._count_budgeted_pages(mock_ctx)
+        assert result == 5
+
+    def test_count_budgeted_pages_Co_excludes_visible_sentinels_only(self, pool_factory):
+        """Co: pool 등록 1, sentinel 2, orphan 1 → 반환 2 (sentinel 제외)."""
+        pool = pool_factory()
+        pool_page = _mock_page(tab_id="1_0001")
+        sentinel1 = _mock_page(tab_id="visible_1")
+        sentinel2 = _mock_page(tab_id="visible_2")
+        orphan = _mock_page(url="https://naver.com")
+
+        mock_ctx = MagicMock()
+        mock_ctx.pages = [pool_page, sentinel1, sentinel2, orphan]
+
+        result = pool._count_budgeted_pages(mock_ctx)
+        assert result == 2  # pool_page + orphan; sentinel 2개 제외
+
+    def test_count_budgeted_pages_B_empty_context(self, pool_factory):
+        """B: context.pages=[] → 반환 0."""
+        pool = pool_factory()
+        mock_ctx = MagicMock()
+        mock_ctx.pages = []
+
+        assert pool._count_budgeted_pages(mock_ctx) == 0
+
+    def test_count_budgeted_pages_B_all_sentinels(self, pool_factory):
+        """B: sentinel 5 + orphan 0 → 반환 0 (워커 예산 완전 가용)."""
+        pool = pool_factory()
+        sentinels = [_mock_page(tab_id=f"visible_{i}") for i in range(5)]
+
+        mock_ctx = MagicMock()
+        mock_ctx.pages = sentinels
+
+        assert pool._count_budgeted_pages(mock_ctx) == 0
+
+    def test_count_budgeted_pages_E_closed_page_excluded(self, pool_factory):
+        """E: is_closed()=True 인 page는 계산에서 제외."""
+        pool = pool_factory()
+        open_page = _mock_page(is_closed=False, tab_id="1_0001")
+        closed_page = _mock_page(is_closed=True, tab_id="1_0002")
+
+        mock_ctx = MagicMock()
+        mock_ctx.pages = [open_page, closed_page]
+
+        assert pool._count_budgeted_pages(mock_ctx) == 1
+
+
+class TestIsStaleLoginCheck:
+    """_is_stale_login_check() helper TC"""
+
+    def test_is_stale_login_check_R_recent_false(self, pool_factory):
+        """R: 근래 생성 login_check → False."""
+        pool = pool_factory()
+        page = _mock_page(tab_id=f"login_check_naver_1_{int(time.time())}")
+        assert pool._is_stale_login_check(page) is False
+
+    def test_is_stale_login_check_R_old_true(self, pool_factory):
+        """R: 31초 전 생성 login_check → True."""
+        pool = pool_factory()
+        old_ts = int(time.time()) - 31
+        page = _mock_page(tab_id=f"login_check_naver_1_{old_ts}")
+        assert pool._is_stale_login_check(page) is True
+
+    def test_is_stale_login_check_E_malformed_tab_id(self, pool_factory):
+        """E: timestamp 없는 login_check → False (안전 기본값)."""
+        pool = pool_factory()
+        page = _mock_page(tab_id="login_check_broken")
+        assert pool._is_stale_login_check(page) is False
+
+    def test_is_stale_login_check_E_non_login_prefix(self, pool_factory):
+        """E: visible_1 등 다른 prefix → False."""
+        pool = pool_factory()
+        page = _mock_page(tab_id="visible_1")
+        assert pool._is_stale_login_check(page) is False
+
+    def test_is_stale_login_check_Co_mixed_case_prefix(self, pool_factory):
+        """Co: 대문자 LOGIN_CHECK prefix → False (prefix 대소문자 구분)."""
+        pool = pool_factory()
+        old_ts = int(time.time()) - 31
+        page = _mock_page(tab_id=f"LOGIN_CHECK_NAVER_1_{old_ts}")
+        assert pool._is_stale_login_check(page) is False
+
+
+class TestCleanupOrphanTabsLogging:
+    """_cleanup_orphan_tabs() summary/skip DEBUG 로그 TC"""
+
+    @pytest.fixture
+    def pool(self):
+        with patch('app.shared.browser.tab_pool_manager.settings') as ms:
+            ms.TAB_ROTATION_THRESHOLD = 600
+            ms.CACHE_CLEANUP_INTERVAL = 300
+            ms.TAB_REQUEST_TIMEOUT = 60
+            ms.TAB_WAIT_RETRY_INTERVAL = 5
+            ms.TOTAL_MAX_TABS = 5
+            ms.MAX_USES_PER_TAB = 50
+            from app.shared.browser.tab_pool_manager import TabPoolManager
+            yield TabPoolManager(MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphan_tabs_logs_summary(self, pool, caplog):
+        """R: cleanup 호출 시 매번 summary INFO 로그 출력."""
+        import logging
+        mock_ctx = MagicMock()
+        mock_ctx.pages = []
+        pool.context_manager.browser_contexts = {1: mock_ctx}
+        pool.tab_pools[1] = {}
+
+        with caplog.at_level(logging.INFO, logger="app.shared.browser.tab_pool_manager"):
+            await pool._cleanup_orphan_tabs()
+
+        assert any(
+            "[TAB-POOL] cleanup summary:" in r.message
+            for r in caplog.records
+        ), "cleanup summary 로그 없음"
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphan_tabs_summary_counts_correct(self, pool, caplog):
+        """R: pool 탭 1개 + sentinel 1개 + orphan 1개 → summary에 counts 정확히 표시."""
+        import logging
+        registered = _mock_page(tab_id="1_0001", url="about:blank")
+        sentinel = _mock_page(tab_id="visible_1", url="https://naver.com")
+        orphan = _mock_page(url="about:blank")
+
+        mock_ctx = MagicMock()
+        mock_ctx.pages = [registered, sentinel, orphan]
+        pool.context_manager.browser_contexts = {1: mock_ctx}
+        pool.tab_pools[1] = {"1_0001": registered}
+
+        with caplog.at_level(logging.INFO, logger="app.shared.browser.tab_pool_manager"):
+            await pool._cleanup_orphan_tabs()
+
+        summary_records = [r for r in caplog.records if "[TAB-POOL] cleanup summary:" in r.message]
+        assert len(summary_records) == 1
+        msg = summary_records[0].message
+        # orphan(about:blank) 1건 닫힘, sentinel 1건 skip
+        assert "closed=1" in msg
+        assert "skipped_sentinel=1" in msg
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphan_tabs_logs_skip_reasons_debug(self, pool, caplog):
+        """E: skip된 페이지에 대해 DEBUG 레벨 skip reason 로그 출력."""
+        import logging
+        registered = _mock_page(tab_id="1_0001", url="about:blank")
+        mock_ctx = MagicMock()
+        mock_ctx.pages = [registered]
+        pool.context_manager.browser_contexts = {1: mock_ctx}
+        pool.tab_pools[1] = {"1_0001": registered}
+
+        with caplog.at_level(logging.DEBUG, logger="app.shared.browser.tab_pool_manager"):
+            await pool._cleanup_orphan_tabs()
+
+        debug_records = [r for r in caplog.records if "cleanup skip" in r.message and r.levelname == "DEBUG"]
+        assert len(debug_records) >= 1, "cleanup skip DEBUG 로그 없음"
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphan_tabs_stale_login_check_closed(self, pool):
+        """R: stale login_check 탭(31초 전) → cleanup에서 close() 호출."""
+        old_ts = int(time.time()) - 31
+        stale_lc = _mock_page(tab_id=f"login_check_naver_1_{old_ts}", url="https://naver.com")
+        stale_lc.is_closed = MagicMock(return_value=False)
+
+        mock_ctx = MagicMock()
+        mock_ctx.pages = [stale_lc]
+        pool.context_manager.browser_contexts = {1: mock_ctx}
+        pool.tab_pools[1] = {}
+
+        await pool._cleanup_orphan_tabs()
+        stale_lc.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_orphan_tabs_recent_login_check_preserved(self, pool):
+        """R: 근래 login_check 탭(10초 전) → cleanup에서 close() 미호출."""
+        recent_ts = int(time.time()) - 10
+        recent_lc = _mock_page(tab_id=f"login_check_naver_1_{recent_ts}", url="https://naver.com")
+        recent_lc.is_closed = MagicMock(return_value=False)
+
+        mock_ctx = MagicMock()
+        mock_ctx.pages = [recent_lc]
+        pool.context_manager.browser_contexts = {1: mock_ctx}
+        pool.tab_pools[1] = {}
+
+        await pool._cleanup_orphan_tabs()
+        recent_lc.close.assert_not_awaited()
+
+
