@@ -33,6 +33,9 @@
 	aria-modal="true"
 	tabindex="-1"
 	onclick={handleBackdropClick}
+	onkeydown={(event) => {
+		if (event.key === 'Escape') onClose();
+	}}
 >
 	<div class="flex max-h-[90vh] w-[min(1100px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
 		<div class="flex flex-wrap items-start gap-3 border-b border-border px-4 py-3">

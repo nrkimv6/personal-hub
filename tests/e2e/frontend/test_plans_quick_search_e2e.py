@@ -162,4 +162,8 @@ def test_plans_quick_search_click_focuses_plan_viewer(
     page.get_by_text(plan_filename, exact=True).click()
 
     expect(page.get_by_role("heading", name="Quick Search Plan")).to_be_visible()
+    # typography 통일 후 PlanViewer가 prose class wrapper를 가져야 한다
+    expect(page.locator(".prose").first).to_be_visible()
+    # raw <pre>만 존재하지 않음 (prose 내부 code block pre는 제외)
+    expect(page.locator("pre:not(.prose pre)")).to_have_count(0)
 

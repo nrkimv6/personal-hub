@@ -142,6 +142,8 @@ def test_file_search_filename_preview_toggle_and_copy_path(
 
     page.get_by_text("README.md", exact=True).click()
     expect(page.get_by_role("heading", name="Hello")).to_be_visible()
+    # typography 통일 후 MarkdownContent wrapper가 prose class를 가져야 한다
+    expect(page.locator(".prose")).to_be_visible()
 
     page.get_by_role("button", name="전체보기").click()
     dialog = page.get_by_role("dialog")
