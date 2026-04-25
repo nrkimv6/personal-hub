@@ -114,5 +114,9 @@
   {
     "path": "D:\\work\\project\\service\\wtools\\activity-hub\\docs\\archive",
     "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\memo-alarm\\.worktrees\\plans\\docs\\plan",
+    "type": "plan"
   }
 ]

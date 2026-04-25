@@ -35,6 +35,15 @@ def _stub_file_search_bootstrap(page: Page) -> None:
         "**/api/v1/file-search/ignore-patterns",
         lambda route: route.fulfill(status=200, content_type="application/json", body="[]"),
     )
+    # File search page loads these on mount (SearchHistoryBar)
+    page.route(
+        "**/api/v1/file-search/history*",
+        lambda route: route.fulfill(status=200, content_type="application/json", body="[]"),
+    )
+    page.route(
+        "**/api/v1/file-search/suggestions*",
+        lambda route: route.fulfill(status=200, content_type="application/json", body="[]"),
+    )
 
 
 def test_file_search_filename_preview_toggle_and_copy_path(
@@ -132,13 +141,20 @@ def test_file_search_filename_preview_toggle_and_copy_path(
     expect(page.get_by_text("README.md", exact=True)).to_be_visible()
 
     page.get_by_text("README.md", exact=True).click()
+    expect(page.get_by_role("heading", name="Hello")).to_be_visible()
+
+    # Markdown preview defaults to rendered view, but can be toggled to raw.
+    page.get_by_role("button", name="Raw 보기").click()
     expect(page.get_by_text("# Hello")).to_be_visible()
+    page.get_by_role("button", name="Markdown 보기").click()
+    expect(page.get_by_role("heading", name="Hello")).to_be_visible()
+    expect(page.get_by_text("# Hello")).to_have_count(0)
 
     page.get_by_title("full path 복사").first.click()
     assert page.evaluate("() => navigator.clipboard.readText()") == r"D:\work\project\README.md"
 
     page.get_by_text("README.md", exact=True).click()
-    expect(page.get_by_text("# Hello")).to_have_count(0)
+    expect(page.get_by_role("heading", name="Hello")).to_have_count(0)
 
 
 def test_file_search_content_match_click_still_calls_open_endpoint(

@@ -39,7 +39,8 @@ def test_get_history_skips_malformed_json():
             FileSearchRequest(
                 search_id="svc-hist-bad",
                 status=FileSearchRequest.STATUS_COMPLETED,
-                created_at="2026-04-25 12:00:00",
+                # Ensure this row stays within scan_limit even if the test DB already has many completed rows.
+                created_at="9999-12-31 23:59:58",
                 request_json="{not-json}",
                 result_json=mock_result.model_dump_json(),
                 search_time_ms=10,
@@ -49,7 +50,7 @@ def test_get_history_skips_malformed_json():
             FileSearchRequest(
                 search_id="svc-hist-ok",
                 status=FileSearchRequest.STATUS_COMPLETED,
-                created_at="2026-04-25 12:01:00",
+                created_at="9999-12-31 23:59:59",
                 request_json=json.dumps(
                     {
                         "query": "Alpha",
