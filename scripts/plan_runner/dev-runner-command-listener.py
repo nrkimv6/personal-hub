@@ -164,7 +164,7 @@ def _do_start_plan_runner(command, redis_client):
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
 
         try:
-            worktree_path, branch = WorktreeManager.create(runner_id, PROJECT_ROOT / ".worktrees", plan_file=plan_file)
+            worktree_path, branch = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file)
         except WorktreeError as e:
             _set_error_status(f"worktree 생성 실패: {e}")
             return
@@ -621,6 +621,7 @@ def main():
     logger.info(f"결과 큐: {RESULTS_KEY}")
     logger.info(f"Runner Key Prefix: {RUNNER_KEY_PREFIX}")
     logger.info(f"plan-runner 모듈: {PLAN_RUNNER_MODULE_PATH}")
+    logger.info(f"[startup] WORKTREE_BASE_DIR={WORKTREE_BASE_DIR}")
     logger.info("=" * 50)
 
     reconnect_delay = 1

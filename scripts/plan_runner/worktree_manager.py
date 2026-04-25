@@ -159,6 +159,13 @@ class WorktreeManager:
         """
         if not runner_id:
             raise WorktreeError("runner_id cannot be empty")
+        # Phase 2: nested .worktrees guard — 비정상 base_dir는 진입 즉시 거부
+        _bd_parts = list(Path(base_dir).parts)
+        if _bd_parts.count(".worktrees") >= 2:
+            raise WorktreeError(
+                f"비정상 base_dir 거부 (nested .worktrees): base_dir={base_dir}, "
+                f"runner_id={runner_id}, plan_file={plan_file}"
+            )
         if plan_file:
             stem = Path(plan_file).stem
             worktree_path = base_dir / stem
@@ -166,6 +173,22 @@ class WorktreeManager:
         else:
             worktree_path = base_dir / runner_id
             branch = f"runner/{runner_id}"
+        # Phase 1: 같은 branch가 기존 worktree에 등록되어 있으면 위치 무관 재사용
+        for _w in WorktreeManager.list_worktrees():
+            if _w.get("branch") == branch:
+                _existing = Path(_w["path"])
+                if WorktreeManager.validate(_existing):
+                    logger.info(
+                        f"[WorktreeManager] 같은 branch 기존 worktree 재사용 "
+                        f"(위치 무관): branch={branch}, path={_existing}"
+                    )
+                    WorktreeManager._apply_sparse_checkout(_existing)
+                    return _existing, branch
+                logger.warning(
+                    f"[WorktreeManager] 같은 branch 기존 worktree 발견했으나 validate 실패, "
+                    f"fallback 진행: branch={branch}, path={_existing}"
+                )
+                break
         try:
             base_dir.mkdir(parents=True, exist_ok=True)
             ensure_main_branch(base_dir.parent)
@@ -270,6 +293,14 @@ class WorktreeManager:
         else:
             worktree_path = base_dir / runner_id
             branch = f"runner/{runner_id}"
+        # Phase 2: nested .worktrees guard (멱등성 우선 — raise 대신 False 반환)
+        _bd_parts = list(Path(base_dir).parts)
+        if _bd_parts.count(".worktrees") >= 2:
+            logger.error(
+                f"[WorktreeManager] 비정상 base_dir 거부 (nested .worktrees): "
+                f"base_dir={base_dir}, runner_id={runner_id}"
+            )
+            return False
         try:
             result = _run_git(
                 ["worktree", "remove", str(worktree_path), "--force"],

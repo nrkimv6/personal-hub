@@ -344,3 +344,55 @@ class TestGetTargetProjectRoot:
         assert result == project_root, (
             f"일반 경로에서 git root 그대로 반환해야 함, 실제: {result}"
         )
+
+
+# ─────────────────────────────────────────────────────────────
+# Phase 3: _resolve_worktree_root() 단위 테스트
+# ─────────────────────────────────────────────────────────────
+
+class TestResolveWorktreeRoot:
+    """_dr_constants._resolve_worktree_root() 단위 테스트 — Phase 3 검증."""
+
+    def _get_resolve_fn(self):
+        pr_dir = _SCRIPTS_DIR / "plan_runner"
+        if str(pr_dir) not in sys.path:
+            sys.path.insert(0, str(pr_dir))
+        import _dr_constants
+        return _dr_constants._resolve_worktree_root
+
+    def test_resolve_worktree_root_in_plans_worktree_R(self, tmp_path):
+        """R: git rev-parse가 <repo>/.worktrees/plans 반환 시 <repo>를 반환."""
+        project_root = tmp_path / "my-project"
+        project_root.mkdir()
+        (project_root / ".git").mkdir()  # candidate/.git 존재 조건
+
+        plans_wt = project_root / ".worktrees" / "plans"
+        plans_wt.mkdir(parents=True)
+
+        resolve_fn = self._get_resolve_fn()
+
+        with patch("subprocess.run") as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = str(plans_wt) + "\n"
+            mock_run.return_value = mock_result
+
+            result = resolve_fn()
+
+        assert result.resolve() == project_root.resolve(), (
+            f"_resolve_worktree_root()은 project_root를 반환해야 함, 실제: {result}"
+        )
+
+    def test_resolve_worktree_root_fallback_on_git_failure_E(self):
+        """E: git 명령 실패 시 PROJECT_ROOT fallback 반환."""
+        resolve_fn = self._get_resolve_fn()
+
+        with patch("subprocess.run") as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 128
+            mock_result.stdout = ""
+            mock_run.return_value = mock_result
+
+            result = resolve_fn()
+
+        assert isinstance(result, Path), "결과는 Path 타입이어야 함"

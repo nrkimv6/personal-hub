@@ -76,7 +76,31 @@ MERGE_ACTIVE_STATUSES = ("pre_merge", "queued", "merging", "pending_merge", "res
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/plan_runner/ → scripts/ → project root
-WORKTREE_BASE_DIR = PROJECT_ROOT / ".worktrees"
+
+
+def _resolve_worktree_root() -> Path:
+    """PROJECT_ROOT 기반으로 nested .worktrees escape한 root 반환."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "-C", str(PROJECT_ROOT), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, encoding="utf-8", timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            git_root = Path(result.stdout.strip())
+            parts = list(git_root.parts)
+            if ".worktrees" in parts:
+                i = parts.index(".worktrees")
+                candidate = Path(*parts[:i])
+                if (candidate / ".git").exists():
+                    return candidate
+            return git_root
+    except Exception:
+        pass
+    return PROJECT_ROOT
+
+
+WORKTREE_BASE_DIR = _resolve_worktree_root() / ".worktrees"
 OWNERSHIP_SNAPSHOT_DIR = PROJECT_ROOT / "logs" / "dev_runner" / "ownership"
 WTOOLS_BASE_DIR = Path("D:/work/project/service/wtools")
 PLAN_RUNNER_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/plan-runner"
