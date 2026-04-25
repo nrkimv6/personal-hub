@@ -26,10 +26,11 @@ def test_read_frontmatter_R_blockquote_format(tmp_path):
 
 
 def test_read_frontmatter_R_yaml_block(tmp_path):
-    """--- YAML 블록 형식 파싱"""
+    """--- YAML 블록 형식 파싱 (yaml safe_load는 true→True, str()→'True')"""
     p = _write(tmp_path, "---\nauto_run: true\nauto_run_scope: docs\n---\n# Title\n")
     result = read_frontmatter(p)
-    assert result.get("auto_run") == "true"
+    # yaml.safe_load converts `true` → Python bool True → str(True) = "True"
+    assert result.get("auto_run") == "True"
     assert result.get("auto_run_scope") == "docs"
 
 
