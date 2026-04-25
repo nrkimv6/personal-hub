@@ -39,15 +39,16 @@ class TestPgBooleanCompatSourceCheck:
         return blocks
 
     def test_naver_monitor_worker_no_integer_boolean(self):
-        """재현 TC: naver_monitor_worker.py raw SQL에서 boolean=integer 제거 확인"""
-        from app.worker import naver_monitor_worker
-        source = inspect.getsource(naver_monitor_worker)
-        sql_blocks = self._get_raw_sql_from_source(source)
+        """재현 TC: naver_monitor_worker.py + 분리된 모듈 raw SQL에서 boolean=integer 제거 확인"""
+        from app.worker import naver_monitor_worker, naver_browser_command_handler, naver_monitor_cycle
         violations = []
-        for block in sql_blocks:
-            matches = self.BAD_PATTERN.findall(block)
-            if matches:
-                violations.extend(matches)
+        for module in [naver_monitor_worker, naver_browser_command_handler, naver_monitor_cycle]:
+            source = inspect.getsource(module)
+            sql_blocks = self._get_raw_sql_from_source(source)
+            for block in sql_blocks:
+                matches = self.BAD_PATTERN.findall(block)
+                if matches:
+                    violations.extend(matches)
         assert not violations, (
             f"boolean = integer 패턴 발견 (PG에서 UndefinedFunction 에러 발생): {violations}"
         )

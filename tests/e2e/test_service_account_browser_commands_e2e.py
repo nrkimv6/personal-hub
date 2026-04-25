@@ -106,6 +106,7 @@ def _insert_pending(Session, naver_id: int, command_type: str) -> int:
 
 def _make_worker(execute_mock=None):
     from app.worker.naver_monitor_worker import NaverMonitorWorker
+    from app.worker.naver_browser_command_handler import NaverBrowserCommandHandler
 
     mock_browser = MagicMock()
     mock_browser.is_initialized = True
@@ -114,6 +115,9 @@ def _make_worker(execute_mock=None):
 
     worker = NaverMonitorWorker(mock_browser)
     worker.browser = mock_browser
+    worker._browser_cmd_handler = NaverBrowserCommandHandler(
+        browser_manager=mock_browser, worker_name="test"
+    )
     return worker
 
 
@@ -129,7 +133,7 @@ class TestBrowserCommandE2EFlow:
 
         cmd_id = _insert_pending(TestingSessionLocal, naver_id, "open_browser")
 
-        with patch("app.worker.naver_monitor_worker.SessionLocal", TestingSessionLocal):
+        with patch("app.worker.naver_browser_command_handler.SessionLocal", TestingSessionLocal):
             await worker._process_browser_commands()
 
         db = TestingSessionLocal()
@@ -150,7 +154,7 @@ class TestBrowserCommandE2EFlow:
 
         _insert_pending(TestingSessionLocal, naver_id, "naver_login")
 
-        with patch("app.worker.naver_monitor_worker.SessionLocal", TestingSessionLocal):
+        with patch("app.worker.naver_browser_command_handler.SessionLocal", TestingSessionLocal):
             await worker._process_browser_commands()
 
         assert execute_mock.call_count == 1
@@ -164,7 +168,7 @@ class TestBrowserCommandE2EFlow:
 
         ids = [_insert_pending(TestingSessionLocal, naver_id, "open_browser") for _ in range(3)]
 
-        with patch("app.worker.naver_monitor_worker.SessionLocal", TestingSessionLocal):
+        with patch("app.worker.naver_browser_command_handler.SessionLocal", TestingSessionLocal):
             await worker._process_browser_commands()
 
         db = TestingSessionLocal()

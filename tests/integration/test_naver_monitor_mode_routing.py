@@ -72,11 +72,15 @@ class TestAnonymousScheduleRoutesIntegration:
         T1과의 차이: _run_anonymous_cycle을 mock하지 않고 실제 실행 — 체인 전체를 통과.
         """
         from app.worker.naver_monitor_worker import NaverMonitorWorker
+        from app.worker.naver_monitor_cycle import NaverMonitorCycleRunner
 
         worker = NaverMonitorWorker()
         worker._site_monitor = MagicMock()
         worker.browser = MagicMock()
         worker.browser.execute_with_tab = AsyncMock()
+        worker._cycle_runner = NaverMonitorCycleRunner(
+            site_monitor=worker._site_monitor, browser_manager=worker.browser
+        )
 
         mock_availability = _make_anon_availability(slots=[])
         mock_anon = MagicMock()
@@ -109,6 +113,7 @@ class TestAnonymousScheduleRoutesIntegration:
         T3: legacy 모드 → browser.execute_with_tab 호출, get_anonymous_monitor 미호출.
         """
         from app.worker.naver_monitor_worker import NaverMonitorWorker
+        from app.worker.naver_monitor_cycle import NaverMonitorCycleRunner
         from app.modules.naver_booking.services.site_monitor import FetchResult
 
         worker = NaverMonitorWorker()
@@ -116,6 +121,9 @@ class TestAnonymousScheduleRoutesIntegration:
         worker.browser = MagicMock()
         worker.browser.execute_with_tab = AsyncMock(
             return_value=FetchResult(hash=42, slots=[], status="no_slots")
+        )
+        worker._cycle_runner = NaverMonitorCycleRunner(
+            site_monitor=worker._site_monitor, browser_manager=worker.browser
         )
 
         schedule_meta = _make_schedule_meta(monitoring_mode="legacy")
@@ -137,9 +145,13 @@ class TestAnonymousScheduleRoutesIntegration:
         T1과의 차이: _run_anonymous_cycle 전체 코드 경로 실행 후 EventLogger 계약 확인.
         """
         from app.worker.naver_monitor_worker import NaverMonitorWorker
+        from app.worker.naver_monitor_cycle import NaverMonitorCycleRunner
 
         worker = NaverMonitorWorker()
         worker._site_monitor = MagicMock()
+        worker._cycle_runner = NaverMonitorCycleRunner(
+            site_monitor=worker._site_monitor, browser_manager=MagicMock()
+        )
 
         mock_anon = MagicMock()
         mock_anon.check_availability = AsyncMock(
@@ -175,16 +187,16 @@ class TestAdapterSlotFormatIntegration:
 
     def test_adapter_slot_format_matches_site_monitor_output(self):
         """T3: 어댑터 출력 슬롯 포맷이 legacy 정규식 패턴과 일치."""
-        from app.worker.naver_monitor_worker import NaverMonitorWorker
+        from app.worker.naver_monitor_cycle import NaverMonitorCycleRunner
 
-        worker = NaverMonitorWorker()
+        runner = NaverMonitorCycleRunner(site_monitor=MagicMock(), browser_manager=MagicMock())
         slots = [
             _make_slot("2026-04-25 10:00:00", unit_stock=5, unit_booking_count=2),
             _make_slot("2026-04-25 11:30:00", unit_stock=3, unit_booking_count=0),
         ]
         availability = _make_anon_availability(slots=slots)
 
-        result = worker._adapt_anonymous_result(availability, current_hash=0, current_slots=[])
+        result = runner._adapt_anonymous_result(availability, current_hash=0, current_slots=[])
 
         pattern = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \(\d+매\)$")
         assert len(result.slots) == 2
