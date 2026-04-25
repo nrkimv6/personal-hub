@@ -24,7 +24,7 @@ class RunRequest(BaseModel):
     projects: Optional[str] = Field(None, description="프로젝트 목록 (쉼표 구분)")
     worktree: bool = Field(True, description="worktree 모드 (격리 실행 + 머지 큐)")
     test_source: Optional[str] = Field(None, description="테스트 출처 (pytest TC 추적용)")
-    trigger: Optional[str] = Field(None, description="트리거 소스 (user, user:all, tc:{name}, api)")
+    trigger: Optional[str] = Field(None, description="트리거 소스 (user, user:all, tc:{name}, api, scheduler:{handler_name})")
     session_id: Optional[str] = Field(None, description="fused 세션 ID (UUID). 미지정 시 자동 발급.")
     fused_session: bool = Field(False, description="fused 세션 모드 활성화: 동일 session_id로 단계 간 CLI 세션 연속 유지")
     profile: Optional[str] = Field(None, description="AI 프로필 이름 (엔진별, claude/gemini만 지원)")

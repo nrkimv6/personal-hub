@@ -21,6 +21,7 @@ from datetime import datetime
 from app.database import SessionLocal
 from app.models import TaskScheduleRun
 from app.modules.dev_runner.schedulers.archive_rotation_schedule import ArchiveRotationScheduler
+from app.modules.dev_runner.schedulers.auto_dev_runner_schedule import AutoDevRunnerScheduler
 from app.modules.dev_runner.schedulers.devguide_staleness_schedule import DevguideStalenessScheduler
 from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 from app.modules.dev_runner.schedulers.pytest_run_schedule import PytestRunScheduler
@@ -90,6 +91,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             DevguideStalenessScheduler(),
             ArchiveRotationScheduler(),
             ScheduleDateExpireScheduler(),
+            AutoDevRunnerScheduler(),
         ]
 
     def _get_loop_interval(self) -> float:

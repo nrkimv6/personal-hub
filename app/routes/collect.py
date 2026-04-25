@@ -361,6 +361,17 @@ async def create_schedule(
         if not data.display_name:
             data.display_name = "Dev-Guide 갱신 점검"
 
+    elif data.target_type == "auto_dev_runner":
+        schedule_name = "auto_dev_runner_nightly"
+        existing = schedule_service.get_schedule_by_name(schedule_name)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="이미 야간 자동 dev-runner 스케줄이 존재합니다"
+            )
+        if not data.display_name:
+            data.display_name = "야간 자동 plan 실행 (02:00)"
+
     else:
         raise HTTPException(
             status_code=400,
