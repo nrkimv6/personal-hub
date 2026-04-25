@@ -1038,3 +1038,69 @@ class TestCollectScheduleHidesInternalSchedules:
         assert response.status_code in (400, 422), \
             f"{target_type} create가 거부되지 않음: {response.status_code}"
 
+
+# ============================================================
+# auto_dev_runner 스케줄 타입 테스트
+# ============================================================
+
+class TestAutoDevRunnerSchedule:
+    """auto_dev_runner 스케줄 create/list/toggle/run 시나리오"""
+
+    def test_create_auto_dev_runner_right(self, client):
+        """[Right] auto_dev_runner 스케줄 생성 성공"""
+        response = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "auto_dev_runner",
+            "schedule_type": "cron",
+            "schedule_value": {"time": "02:00"},
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["target_type"] == "auto_dev_runner"
+
+    def test_list_includes_auto_dev_runner_right(self, client):
+        """[Right] 생성된 auto_dev_runner 스케줄이 목록에 포함됨"""
+        client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "auto_dev_runner",
+            "schedule_type": "cron",
+            "schedule_value": {"time": "02:00"},
+        })
+        response = client.get(f"{API_PREFIX}/collect/schedules")
+        assert response.status_code == 200
+        types = [s["target_type"] for s in response.json()]
+        assert "auto_dev_runner" in types
+
+    def test_toggle_auto_dev_runner_right(self, client):
+        """[Right] auto_dev_runner 스케줄 비활성화 토글"""
+        create = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "auto_dev_runner",
+            "schedule_type": "cron",
+            "schedule_value": {"time": "02:00"},
+        })
+        sid = create.json()["id"]
+
+        response = client.post(f"{API_PREFIX}/collect/schedules/{sid}/toggle?enabled=false")
+        assert response.status_code == 200
+        assert response.json()["enabled"] is False
+
+    def test_run_auto_dev_runner_right(self, client):
+        """[Right] auto_dev_runner 수동 실행 요청 성공"""
+        create = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "auto_dev_runner",
+            "schedule_type": "cron",
+            "schedule_value": {"time": "02:00"},
+        })
+        sid = create.json()["id"]
+
+        response = client.post(f"{API_PREFIX}/collect/schedules/{sid}/run")
+        assert response.status_code == 200
+
+    def test_create_duplicate_auto_dev_runner_right(self, client):
+        """[Right] auto_dev_runner 중복 생성 시 400"""
+        payload = {
+            "target_type": "auto_dev_runner",
+            "schedule_type": "cron",
+            "schedule_value": {"time": "02:00"},
+        }
+        client.post(f"{API_PREFIX}/collect/schedules", json=payload)
+        response = client.post(f"{API_PREFIX}/collect/schedules", json=payload)
+        assert response.status_code == 400
