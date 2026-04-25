@@ -156,7 +156,7 @@ class WorkerService:
             if proc.returncode == 0:
                 return True, f"{label} (PID {pid})"
             else:
-                stderr = (await proc.stderr.read()).decode().strip()
+                stderr = (await proc.stderr.read()).decode('utf-8', errors='replace').strip()
                 return False, f"{label} (PID {pid}): {stderr}"
         except Exception as e:
             return False, f"{label}: {str(e)}"

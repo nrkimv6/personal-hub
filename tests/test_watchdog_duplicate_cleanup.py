@@ -352,3 +352,110 @@ class TestWatchdogRestartPath:
         killed = _stop_existing_processes_by_cmdline(_MARKER)
         # Windows venv에서 Popen 1개당 래퍼+자식 프로세스가 생길 수 있어 >= 2로 검증
         assert killed >= 2, f"더미 프로세스 2개 이상이 종료되어야 함 (실제: {killed})"
+
+
+# ─── Chat Executor watchdog 재시작 경로 전용 TC ──────────────────────────────
+
+class TestChatExecutorWatchdogRestart:
+    """
+    T4: Chat Executor watchdog 재시작 경로 — claude_worker.worker.chat_executor 토큰 기반.
+
+    실제 watchdog에서 사용하는 cmdline 토큰을 그대로 사용해
+    Stop-ExistingProcessesByCmdline이 chat_executor 전용 프로세스를 올바르게 정리하는지 확인.
+    """
+
+    _CE_TOKEN = "claude_worker.worker.chat_executor"
+
+    @pytest.fixture(autouse=True)
+    def cleanup_ce_procs(self):
+        """chat_executor 토큰을 가진 테스트 프로세스 사전/사후 정리."""
+        self._kill_ce_test_procs()
+        yield
+        self._kill_ce_test_procs()
+
+    def _kill_ce_test_procs(self):
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmdline = " ".join(proc.info['cmdline'] or [])
+                if self._CE_TOKEN in cmdline:
+                    proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+    def test_right_chat_executor_restart_cleans_existing_procs(self):
+        """
+        R: 재시작 직전 Stop-ExistingProcessesByCmdline이
+        claude_worker.worker.chat_executor 토큰을 가진 기존 프로세스를 모두 정리한다.
+        """
+        procs = []
+        for _ in range(2):
+            p = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(60)",
+                 self._CE_TOKEN],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            procs.append(p)
+        time.sleep(0.5)
+
+        killed = _stop_existing_processes_by_cmdline(self._CE_TOKEN)
+        time.sleep(0.3)
+
+        assert killed >= 2, f"chat_executor 프로세스 2개 이상이 종료되어야 함 (실제: {killed})"
+        for p in procs:
+            assert p.poll() is not None, f"PID {p.pid} chat_executor 프로세스가 종료되어야 함"
+
+    def test_boundary_chat_executor_stale_pid_no_blocking(self, tmp_path):
+        """
+        B: stale chat_executor_admin.pid가 있어도 재시작 후
+        새 process group 외부에 잔류 chat_executor 프로세스가 없다.
+        watchdog 3단계: Stop-ExistingProcessesByCmdline → PID파일제거 → 새 프로세스 시작.
+        """
+        pid_file = tmp_path / "chat_executor_admin.pid"
+
+        old_proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)",
+             self._CE_TOKEN],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(0.3)
+        pid_file.write_text(str(old_proc.pid))
+
+        # 1: Stop-ExistingProcessesByCmdline
+        _stop_existing_processes_by_cmdline(self._CE_TOKEN)
+        time.sleep(0.2)
+
+        # 2: stale PID 파일 선제 제거 (watchdog의 preemptive removal)
+        if pid_file.exists():
+            pid_file.unlink()
+        assert not pid_file.exists()
+
+        # 3: 새 프로세스 시작
+        new_proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)",
+             self._CE_TOKEN],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(0.5)
+
+        try:
+            allowed_pids = _get_canonical_pids(new_proc.pid)
+            running = [
+                p for p in psutil.process_iter(['pid', 'cmdline'])
+                if self._CE_TOKEN in " ".join(p.info.get('cmdline') or [])
+            ]
+            outside = [p for p in running if p.pid not in allowed_pids]
+            assert len(outside) == 0, (
+                f"재시작 후 new_proc 그룹 외부의 chat_executor 프로세스가 없어야 함 "
+                f"(외부 PID: {[p.pid for p in outside]})"
+            )
+            assert new_proc.poll() is None, "새로 시작한 프로세스는 살아있어야 함"
+            assert old_proc.poll() is not None, "기존 프로세스는 종료되어야 함"
+        finally:
+            new_proc.kill()
+            new_proc.wait(timeout=5)
