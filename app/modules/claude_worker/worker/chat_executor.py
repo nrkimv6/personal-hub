@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import psutil
 import redis
 
 from app.core.database import is_connection_error
@@ -64,6 +65,15 @@ def _is_pid_alive(pid: int) -> bool:
         kernel32.CloseHandle(handle)
         return exit_code.value == 259  # STILL_ACTIVE
     except Exception:
+        return False
+
+
+def _is_chat_executor_pid(pid: int) -> bool:
+    """PID의 cmdline에 chat_executor 토큰이 있는지 확인 (PID 재활용 위양성 방지)."""
+    try:
+        cmdline = " ".join(psutil.Process(pid).cmdline())
+        return "claude_worker.worker.chat_executor" in cmdline or "monitorpage-chat" in cmdline
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return False
 
 
@@ -144,12 +154,26 @@ class ChatExecutor:
         if PID_FILE.exists():
             try:
                 pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+                if pid == os.getpid():
+                    # Windows PID 재활용으로 자기 자신을 이전 인스턴스로 오인하는 케이스
+                    logger.info(f"PID file contains own PID ({pid}), removing stale file.")
+                    PID_FILE.unlink(missing_ok=True)
+                    return
                 if _is_pid_alive(pid):
-                    logger.warning(f"Already running (PID={pid}). Exiting.")
-                    sys.exit(1)
+                    if not _is_chat_executor_pid(pid):
+                        # 동일 PID를 다른 프로세스가 점유 (PID 재활용) → stale 처리
+                        logger.info(
+                            f"PID {pid} alive but not chat_executor (unrelated process), treating as stale."
+                        )
+                        PID_FILE.unlink(missing_ok=True)
+                    else:
+                        logger.warning(f"Already running (PID={pid}). Exiting.")
+                        sys.exit(1)
                 else:
                     logger.info(f"Stale PID file removed: {pid}")
                     PID_FILE.unlink(missing_ok=True)
+            except ValueError:
+                PID_FILE.unlink(missing_ok=True)
             except Exception:
                 PID_FILE.unlink(missing_ok=True)
 

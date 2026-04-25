@@ -47,6 +47,12 @@ function Start-ChatExecutor {
     # 재시작 직전: cmdline 패턴으로 기존 프로세스 정리
     Stop-ExistingProcessesByCmdline -Label "chat executor" -CmdlinePattern 'claude_worker\.worker\.chat_executor'
 
+    # stale PID 파일 선제 제거 (Windows PID 재활용 시 self-PID 오인 방지 다층 방어)
+    if (Test-Path $WorkerPidFile) {
+        Remove-Item -Force -ErrorAction SilentlyContinue $WorkerPidFile
+        Write-Log "Removed stale PID file before launch"
+    }
+
     $stderrLogFile = Join-Path $LogDir "chat_executor_stderr.log"
 
     Write-Log "Starting Chat Executor process..."
