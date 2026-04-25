@@ -16,30 +16,32 @@ from app.modules.dev_runner.services.event_routing import (
 )
 from app.modules.dev_runner.services.visibility import is_visible_runner
 
+# 새 필드 추가 시 _status_values() defaults에 키를 추가하면 자동 동기화됨
+STATUS_FIELDS: tuple[str, ...] = (
+    "status",
+    "pid",
+    "current_cycle",
+    "start_time",
+    "plan_file",
+    "engine",
+    "worktree_path",
+    "branch",
+    "trigger",
+    "merge_status",
+    "merge_reason",
+    "merge_message",
+    "exit_reason",
+    "stop_stage",
+    "error",
+    "execution_count",
+)
+
 
 def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
     """특정 runner의 현재 상태를 Redis에서 읽어 dict로 반환"""
     try:
-        fields = [
-            "status",
-            "pid",
-            "current_cycle",
-            "start_time",
-            "plan_file",
-            "engine",
-            "worktree_path",
-            "branch",
-            "trigger",
-            "merge_status",
-            "merge_reason",
-            "merge_message",
-            "exit_reason",
-            "stop_stage",
-            "error",
-            "execution_count",
-        ]
-        values = sync_redis.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
-        data = dict(zip(fields, values))
+        values = sync_redis.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in STATUS_FIELDS])
+        data = dict(zip(STATUS_FIELDS, values))
         data["runner_id"] = runner_id
         data["visible"] = is_visible_runner(data.get("trigger"), runner_id)
         # plan_file이 None(Redis 키 미설정)이면 None 반환 — sentinel fallback 제거

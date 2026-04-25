@@ -6,6 +6,8 @@
 """
 from unittest.mock import MagicMock, patch
 
+from app.modules.dev_runner.services.event_payload import STATUS_FIELDS
+
 SENTINEL = "__ALL_PLANS__"
 
 
@@ -19,7 +21,7 @@ def _make_service():
 
 
 def _status_values(**overrides):
-    fields = {
+    defaults = {
         "status": "running",
         "pid": "1234",
         "current_cycle": "1",
@@ -37,25 +39,11 @@ def _status_values(**overrides):
         "error": None,
         "execution_count": None,
     }
-    fields.update(overrides)
-    return [
-        fields["status"],
-        fields["pid"],
-        fields["current_cycle"],
-        fields["start_time"],
-        fields["plan_file"],
-        fields["engine"],
-        fields["worktree_path"],
-        fields["branch"],
-        fields["trigger"],
-        fields["merge_status"],
-        fields["merge_reason"],
-        fields["merge_message"],
-        fields["exit_reason"],
-        fields["stop_stage"],
-        fields["error"],
-        fields["execution_count"],
-    ]
+    assert set(defaults.keys()) >= set(STATUS_FIELDS), (
+        f"_status_values defaults missing: {set(STATUS_FIELDS) - set(defaults.keys())}"
+    )
+    defaults.update(overrides)
+    return [defaults[f] for f in STATUS_FIELDS]
 
 
 class TestBuildStatusPayloadPlanFileNullDefense:
