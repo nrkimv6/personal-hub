@@ -162,3 +162,24 @@ class TestHttpE2EChain:
 
         assert cleaned is True, "active_runners가 10초 내 비워지지 않음"
         print("\n[STOP OK] HTTP E2E Start+Stop Lifecycle Verified")
+
+
+def test_worktree_base_dir_not_nested_T5():
+    """T5: WORKTREE_BASE_DIR이 nested .worktrees를 escape하여 로드됨 (Phase 3 검증).
+
+    _dr_constants._resolve_worktree_root()이 실제 import 시에도 동작하여
+    WORKTREE_BASE_DIR이 .worktrees를 정확히 1회만 포함함을 검증.
+    """
+    import importlib
+    import sys as _sys
+    pr_dir = Path(__file__).parent.parent.parent / "scripts" / "plan_runner"
+    if str(pr_dir) not in _sys.path:
+        _sys.path.insert(0, str(pr_dir))
+    import _dr_constants
+    importlib.reload(_dr_constants)
+
+    worktree_base = _dr_constants.WORKTREE_BASE_DIR
+    parts = list(worktree_base.parts)
+    assert parts.count(".worktrees") == 1, (
+        f"WORKTREE_BASE_DIR에 nested .worktrees 감지 (Phase 3 escape 미동작): {worktree_base}"
+    )
