@@ -13,8 +13,6 @@ import pytest
 import redis as redis_lib
 from fastapi.testclient import TestClient
 
-from app.main import app
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from _dr_constants import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
 
@@ -23,6 +21,8 @@ from tests.dev_runner.conftest_e2e import (
     listener_process,
     REDIS_TEST_DB,
 )
+
+pytestmark = pytest.mark.http
 
 BASE_URL = "/api/v1/dev-runner"
 RUNNER_KEY = RUNNER_KEY_PREFIX
@@ -42,6 +42,7 @@ def _seed_running_runner(r: redis_lib.Redis, runner_id: str, plan_file: str, pid
 @pytest.fixture(scope="class")
 def http_client_for_orphan():
     """attach 테스트 전용 TestClient (이벤트 루프 유지)"""
+    from app.main import app
     with TestClient(app) as client:
         yield client
 

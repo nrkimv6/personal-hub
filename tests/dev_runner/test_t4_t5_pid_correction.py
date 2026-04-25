@@ -9,9 +9,10 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
 from app.modules.dev_runner.schemas import RunnerListItem
+
+pytestmark = pytest.mark.http
 
 BASE_URL = "/api/v1/dev-runner"
 
@@ -28,6 +29,7 @@ def dev_runner_config_isolation(tmp_path):
 
 @pytest.fixture
 def client():
+    from app.main import app
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -37,6 +39,8 @@ def client():
 
 class TestE2ERunnersPidCorrection:
     """get_all_runners() PID 기반 보정 E2E 검증"""
+
+    pytestmark = pytest.mark.http
 
     def _make_runner_mock_redis(self, rid, status, pid_str):
         """runner 1개 등록된 Redis mock 반환"""
@@ -106,6 +110,8 @@ class TestE2ERunnersPidCorrection:
 
 class TestHttpRunnersPidCorrection:
     """GET /api/v1/dev-runner/runners HTTP 레이어 + PID 보정 검증"""
+
+    pytestmark = pytest.mark.http
 
     def _mock_get_all_runners(self, runners):
         """get_all_runners()를 주어진 runners 목록으로 mock"""

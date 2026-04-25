@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
-from app.main import app
+pytestmark = pytest.mark.http
 
 BASE_URL = "/api/v1/dev-runner"
 
@@ -21,6 +21,7 @@ def dev_runner_config_isolation(tmp_path):
 @pytest.fixture
 def client():
     """TestClient — DB/Redis 연결 없이 HTTP 레이어 테스트"""
+    from app.main import app
     return TestClient(app, raise_server_exceptions=True)
 
 

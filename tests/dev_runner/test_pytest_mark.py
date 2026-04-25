@@ -364,3 +364,44 @@ class TestDevRunnerAsyncHttpImportBoundary:
             "http + asyncio marker 계약 미충족 파일:\n"
             + "\n".join(f"  {f}" for f in failures)
         )
+
+
+class TestRemainingHttpRunnerMarkerContract:
+    """markerless / class decorator-only 6건 전용 guard."""
+
+    _TARGETS = [
+        "tests/dev_runner/test_executor_redis_guard_http.py",
+        "tests/dev_runner/test_http_cleanup_stale.py",
+        "tests/dev_runner/test_http_stop_all.py",
+        "tests/dev_runner/test_t4_t5_pid_correction.py",
+        "tests/dev_runner/test_redis_reconnect_http.py",
+        "tests/dev_runner/test_rerun_orphan_http.py",
+    ]
+
+    def test_targets_have_no_module_level_app_main_import(self):
+        """TC-Right: 대상 파일 텍스트에 모듈 레벨 'from app.main import app'가 없다."""
+        import re
+        pattern = re.compile(r"^from app\.main import app\b", re.MULTILINE)
+        failures = []
+        for target in self._TARGETS:
+            text = (PROJECT_ROOT / target).read_text(encoding="utf-8")
+            if pattern.search(text):
+                failures.append(target)
+        assert not failures, (
+            f"모듈 레벨 'from app.main import app' 발견 — lazy import로 이동 필요:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
+
+    def test_targets_keep_http_marker_boundary(self):
+        """TC-Right: 대상 파일이 module-level pytestmark = pytest.mark.http를 포함한다."""
+        import re
+        pattern = re.compile(r"pytestmark\s*=\s*(?:pytest\.mark\.http|\[pytest\.mark\.http)")
+        failures = []
+        for target in self._TARGETS:
+            text = (PROJECT_ROOT / target).read_text(encoding="utf-8")
+            if not pattern.search(text):
+                failures.append(target)
+        assert not failures, (
+            "module-level pytestmark = pytest.mark.http 미설정 파일:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
