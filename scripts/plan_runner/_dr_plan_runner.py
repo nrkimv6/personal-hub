@@ -333,6 +333,12 @@ def _stream_output(
         logger.error(f"Output streaming error: {e}")
     finally:
         logger.info(f"[_stream_output] 종료: ok={publish_ok} fail={publish_fail} lines={_line_count} runner_id={runner_id!r}")
+        # stdout 마커 종료 — extract-plan-log.ps1이 범위를 추출하는 기준점
+        try:
+            log_handle.write(f"[plan:{runner_id} end]\n")
+            log_handle.flush()
+        except Exception:
+            pass
         try:
             log_handle.flush()
             log_handle.close()
@@ -926,6 +932,13 @@ def _launch_plan_runner_process(
 
         _running_processes[runner_id] = process
         _running_log_files[runner_id] = log_file
+
+        # stdout 마커 — extract-plan-log.ps1이 범위를 추출하는 기준점
+        try:
+            log_handle.write(f"[plan:{runner_id} start]\n")
+            log_handle.flush()
+        except Exception:
+            pass
 
         # 별도 스레드에서 stdout 을 파일 + Redis publish (stderr는 별도 파이프로 분리)
         thread = threading.Thread(

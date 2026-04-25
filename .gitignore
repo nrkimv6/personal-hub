@@ -3,6 +3,7 @@
 __pycache__/
 error_screenshots/
 logs/
+!scripts/logs/
 *.log
 app_bin
 /.venv/

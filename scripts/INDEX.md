@@ -281,6 +281,7 @@
 | ✅ | `split-cloudflared-log.ps1` | cloudflared 로그 분할 |
 | ✅ | `setup-log-cleanup-task.ps1` | 로그 정리 작업 등록 (Task Scheduler) |
 | ✅ | `cleanup-logs.ps1` | 로그 정리 스크립트 |
+| ✅ | `extract-plan-log.ps1` | runner_id 마커([plan:id start/end]) 기반으로 로그 구간 추출 → logs/plan-runs/<id>.log |
 | ⏳ | `listener_noise_filter.py` | listener 로그 노이즈 필터 |
 | ⏳ | `Send-TelegramAlert.ps1` | 텔레그램 알림 전송 (운영 알림) |
 
