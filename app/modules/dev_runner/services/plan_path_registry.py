@@ -13,6 +13,7 @@ from app.modules.dev_runner.services.plan_path_helpers import (
     load_wtools_project_roots,
     iter_repo_plan_path_candidates,
     extract_repo_root_from_plan_path,
+    backfill_dual_paths,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,30 +168,7 @@ class PlanPathRegistry:
 
     def _backfill_dual_paths(self, entries: List[dict]) -> tuple[List[dict], bool]:
         """기존 등록 목록에서 docs <-> worktree 상호 보완 경로를 backfill한다."""
-        existing_keys: set[tuple[str, str]] = {
-            (e["path"], e.get("type", "plan")) for e in entries
-        }
-        additions: List[dict] = []
-
-        for entry in entries:
-            raw_path = entry.get("path", "")
-            path_type = entry.get("type", "plan")
-            repo_root_str = extract_repo_root_from_plan_path(raw_path)
-            if not repo_root_str:
-                continue
-            repo_root = Path(repo_root_str)
-            for candidate_path, cand_type in iter_repo_plan_path_candidates(repo_root):
-                if cand_type != path_type:
-                    continue
-                resolved = str(candidate_path.resolve())
-                key = (resolved, cand_type)
-                if key not in existing_keys and candidate_path.exists():
-                    additions.append({"path": resolved, "type": cand_type})
-                    existing_keys.add(key)
-
-        if additions:
-            return entries + additions, True
-        return entries, False
+        return backfill_dual_paths(entries)
 
     def _save_registered_paths(self):
         """등록된 경로 목록 저장 — 객체 배열 {"path", "type"}"""

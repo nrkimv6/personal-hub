@@ -1,4 +1,9 @@
-"""plan 경로 후보 계산 및 wtools 프로젝트 루트 로더 — plan_service/plan_path_registry 공유 헬퍼"""
+"""plan 경로 후보 계산 및 wtools 프로젝트 루트 로더 — plan_service/plan_path_registry 공유 헬퍼
+
+이 모듈에 함수를 추가할 때 순환 import에 주의한다.
+현재 허용 import 체인: plan_path_helpers → config, schemas (pydantic only)
+plan_service / plan_scanner / plan_path_registry → plan_path_helpers (역방향 금지)
+"""
 
 import json
 import logging
@@ -48,6 +53,78 @@ def iter_repo_plan_path_candidates(repo_root: Path) -> List[Tuple[Path, str]]:
         (repo_root / ".worktrees" / "plans" / "docs" / "plan", "plan"),
         (repo_root / ".worktrees" / "plans" / "docs" / "archive", "archive"),
     ]
+
+
+def backfill_dual_paths(entries: List[dict]) -> tuple:
+    """기존 등록 목록에서 docs <-> worktree 상호 보완 경로를 backfill한다.
+
+    docs/plan 만 등록되어 있고 .worktrees/plans/docs/plan 이 실재하면 추가 (vice versa).
+
+    동작:
+    - entries 각 항목의 repo_root를 추출
+    - iter_repo_plan_path_candidates()로 4개 후보 경로를 얻음
+    - 같은 타입(plan/archive)의 누락 경로가 실재(exists())하면 추가
+    - 이미 존재하는 경로(path 문자열 + type 키)는 중복 추가하지 않음 (no-op)
+
+    반환: (entries_with_additions: List[dict], changed: bool)
+    """
+    existing_keys: set = {
+        (e["path"], e.get("type", "plan")) for e in entries
+    }
+    additions: List[dict] = []
+
+    for entry in entries:
+        raw_path = entry.get("path", "")
+        path_type = entry.get("type", "plan")
+        repo_root_str = extract_repo_root_from_plan_path(raw_path)
+        if not repo_root_str:
+            continue
+        repo_root = Path(repo_root_str)
+        for candidate_path, cand_type in iter_repo_plan_path_candidates(repo_root):
+            if cand_type != path_type:
+                continue
+            resolved = str(candidate_path.resolve())
+            key = (resolved, cand_type)
+            if key not in existing_keys and candidate_path.exists():
+                additions.append({"path": resolved, "type": cand_type})
+                existing_keys.add(key)
+
+    if additions:
+        return entries + additions, True
+    return entries, False
+
+
+def dedupe_prefer_worktree(results: List) -> List:
+    """같은 (repo_root, filename)이면 worktree 경로를 남기고 docs 경로를 제거한다.
+
+    인자: PlanFileResponse 목록 (path, filename 속성 필요)
+    반환: 중복 제거된 PlanFileResponse 목록
+
+    규칙:
+    - repo_root가 추출되지 않는 항목은 그대로 유지 (ungrouped)
+    - 같은 (repo_root, filename) 그룹 내에서 .worktrees 포함 경로 우선 선택
+    - worktree 경로가 없으면 그룹 첫 번째 항목 선택
+    """
+    groups: dict = {}
+    ungrouped: List = []
+
+    for item in results:
+        repo_root = extract_repo_root_from_plan_path(item.path)
+        if repo_root:
+            key = (repo_root, item.filename)
+            groups.setdefault(key, []).append(item)
+        else:
+            ungrouped.append(item)
+
+    deduped: List = list(ungrouped)
+    for group in groups.values():
+        if len(group) == 1:
+            deduped.append(group[0])
+            continue
+        worktree_items = [g for g in group if ".worktrees" in Path(g.path).parts]
+        deduped.append(worktree_items[0] if worktree_items else group[0])
+
+    return deduped
 
 
 def extract_repo_root_from_plan_path(path_str: str) -> Optional[str]:

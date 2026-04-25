@@ -12,7 +12,10 @@ from app.modules.dev_runner.schemas import (
     PlanPhaseResponse,
     PlanProgressResponse,
 )
-from app.modules.dev_runner.services.plan_path_helpers import extract_repo_root_from_plan_path
+from app.modules.dev_runner.services.plan_path_helpers import (
+    extract_repo_root_from_plan_path,
+    dedupe_prefer_worktree,
+)
 
 import logging
 
@@ -151,26 +154,7 @@ class PlanScanner:
     @staticmethod
     def _dedupe_prefer_worktree(results: List[PlanFileResponse]) -> List[PlanFileResponse]:
         """같은 (repo_root, filename)이면 worktree 경로를 남기고 docs 경로를 제거한다."""
-        groups: dict[tuple[str, str], List[PlanFileResponse]] = {}
-        ungrouped: List[PlanFileResponse] = []
-
-        for item in results:
-            repo_root = extract_repo_root_from_plan_path(item.path)
-            if repo_root:
-                key = (repo_root, item.filename)
-                groups.setdefault(key, []).append(item)
-            else:
-                ungrouped.append(item)
-
-        deduped: List[PlanFileResponse] = list(ungrouped)
-        for group in groups.values():
-            if len(group) == 1:
-                deduped.append(group[0])
-                continue
-            worktree_items = [g for g in group if ".worktrees" in Path(g.path).parts]
-            deduped.append(worktree_items[0] if worktree_items else group[0])
-
-        return deduped
+        return dedupe_prefer_worktree(results)
 
     def _scan_plan_dir(
         self,

@@ -17,6 +17,8 @@ from app.modules.dev_runner.services.plan_path_helpers import (
     load_wtools_project_roots,
     iter_repo_plan_path_candidates,
     extract_repo_root_from_plan_path,
+    backfill_dual_paths,
+    dedupe_prefer_worktree,
 )
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle, resolve_archive_target_or_raise
@@ -203,30 +205,7 @@ class PlanService:
 
         docs/plan 만 등록되어 있고 .worktrees/plans/docs/plan 이 실재하면 추가 (vice versa).
         """
-        existing_keys: set[tuple[str, str]] = {
-            (e["path"], e.get("type", "plan")) for e in entries
-        }
-        additions: List[dict] = []
-
-        for entry in entries:
-            raw_path = entry.get("path", "")
-            path_type = entry.get("type", "plan")
-            repo_root_str = extract_repo_root_from_plan_path(raw_path)
-            if not repo_root_str:
-                continue
-            repo_root = Path(repo_root_str)
-            for candidate_path, cand_type in iter_repo_plan_path_candidates(repo_root):
-                if cand_type != path_type:
-                    continue
-                resolved = str(candidate_path.resolve())
-                key = (resolved, cand_type)
-                if key not in existing_keys and candidate_path.exists():
-                    additions.append({"path": resolved, "type": cand_type})
-                    existing_keys.add(key)
-
-        if additions:
-            return entries + additions, True
-        return entries, False
+        return backfill_dual_paths(entries)
 
     def _save_registered_paths(self):
         """등록된 경로 목록 저장 — 객체 배열 {"path", "type"}"""
@@ -418,26 +397,7 @@ class PlanService:
     @staticmethod
     def _dedupe_prefer_worktree(results: List[PlanFileResponse]) -> List[PlanFileResponse]:
         """같은 (repo_root, filename)이면 worktree 경로를 남기고 docs 경로를 제거한다."""
-        groups: dict[tuple[str, str], List[PlanFileResponse]] = {}
-        ungrouped: List[PlanFileResponse] = []
-
-        for item in results:
-            repo_root = extract_repo_root_from_plan_path(item.path)
-            if repo_root:
-                key = (repo_root, item.filename)
-                groups.setdefault(key, []).append(item)
-            else:
-                ungrouped.append(item)
-
-        deduped: List[PlanFileResponse] = list(ungrouped)
-        for group in groups.values():
-            if len(group) == 1:
-                deduped.append(group[0])
-                continue
-            worktree_items = [g for g in group if ".worktrees" in Path(g.path).parts]
-            deduped.append(worktree_items[0] if worktree_items else group[0])
-
-        return deduped
+        return dedupe_prefer_worktree(results)
 
     def list_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
         """
