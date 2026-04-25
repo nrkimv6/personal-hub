@@ -6,7 +6,7 @@
   GET  /api/v1/file-search/search/{search_id} — 검색 결과 폴링
   GET  /api/v1/file-search/presets            — 프리셋 목록
   POST /api/v1/file-search/open               — 파일 열기 (Redis 위임)
-  GET  /api/v1/file-search/status             — 도구 상태 확인 (DB 캐시)
+  GET  /api/v1/file-search/status             — 도구 상태 확인 (직접 체크 + ripgrep DB 캐시 폴백)
   GET  /api/v1/file-search/browse             — 서버 디렉토리 탐색
   GET  /api/v1/file-search/preview            — 텍스트 파일 미리보기 (direct read)
 
@@ -46,7 +46,9 @@ from app.modules.file_search.schemas import (
     SearchResponse,
     StatusResponse,
 )
+from app.modules.file_search.services.everything import EverythingService
 from app.modules.file_search.services.presets import PRESETS
+from app.modules.file_search.services.ripgrep import RipgrepService
 from app.modules.file_search.services.search_service import FilePreviewError, SearchService
 from app.shared.redis import RedisClient, RedisQueue
 from app.shared.redis.queue import FILE_SEARCH_QUEUE, FILE_SEARCH_OPEN_QUEUE
@@ -203,44 +205,63 @@ async def open_file(request: OpenFileRequest):
 
 
 # ============================================================
-# GET /status — DB 캐시 조회
+# GET /status — 직접 체크 + 캐시 폴백
 # ============================================================
+
+# ripgrep 즉석 체크 실패 시에만 DB 캐시를 폴백으로 사용 (24시간 이내)
+_RIPGREP_CACHE_FALLBACK_SECONDS = 24 * 60 * 60
 
 
 @router.get("/status", response_model=StatusResponse)
 async def get_status(db: Session = Depends(get_db)):
-    """Everything/ripgrep 상태 확인 (DB 캐시).
+    """Everything/ripgrep 상태 확인 (API 프로세스에서 직접 체크).
 
-    FileSearchWorker가 30초마다 체크하고 file_search_status 테이블에 캐싱.
-    캐시 없거나 60초 이상 경과 시 unknown 반환.
+    Everything: httpx 3초 timeout — Session 0/유저세션 무관, 폴백 없음.
+    ripgrep: shutil.which + glob — Session 0의 PATH/USERPROFILE 차이로 실패 시
+    DB `file_search_status` 캐시(워커가 시드)를 24시간 이내·실파일 존재 조건으로 폴백.
     """
-    CACHE_TTL_SECONDS = 60
-
+    everything_ok = False
+    everything_message = ""
     try:
-        row = db.query(FileSearchStatus).filter_by(id=1).first()
-        if row and row.checked_at:
-            # 캐시 유효성 확인
-            try:
-                checked = datetime.strptime(row.checked_at, "%Y-%m-%d %H:%M:%S")
-                age = (datetime.now() - checked).total_seconds()
-                if age <= CACHE_TTL_SECONDS:
-                    return StatusResponse(
-                        everything_ok=bool(row.everything_ok),
-                        everything_message="" if row.everything_ok else "Everything 연결 불가 (워커 상태 확인)",
-                        ripgrep_ok=bool(row.ripgrep_ok),
-                        ripgrep_path=row.ripgrep_path,
-                    )
-            except ValueError:
-                pass
+        ok, msg = await EverythingService().is_available()
+        everything_ok = bool(ok)
+        if not everything_ok:
+            everything_message = msg or ""
     except Exception as e:
-        logger.warning(f"[file_search] 상태 캐시 조회 실패: {e}")
+        logger.warning(f"[file_search] Everything 즉석 체크 실패: {e}")
+        everything_message = str(e)
 
-    # 캐시 없거나 만료
+    ripgrep_ok = False
+    ripgrep_path: Optional[str] = None
+    try:
+        rg_ok, rg_path = RipgrepService().is_available()
+        if rg_ok and rg_path and os.path.exists(rg_path):
+            ripgrep_ok = True
+            ripgrep_path = rg_path
+    except Exception as e:
+        logger.warning(f"[file_search] ripgrep 즉석 체크 실패: {e}")
+
+    # ripgrep 즉석 체크 실패 → 워커가 시드한 DB 캐시로 1단 폴백
+    if not ripgrep_ok:
+        try:
+            row = db.query(FileSearchStatus).filter_by(id=1).first()
+            if row and row.ripgrep_ok and row.ripgrep_path and row.checked_at:
+                try:
+                    checked = datetime.strptime(row.checked_at, "%Y-%m-%d %H:%M:%S")
+                    age = (datetime.now() - checked).total_seconds()
+                    if age <= _RIPGREP_CACHE_FALLBACK_SECONDS and os.path.exists(row.ripgrep_path):
+                        ripgrep_ok = True
+                        ripgrep_path = row.ripgrep_path
+                except ValueError:
+                    pass
+        except Exception as e:
+            logger.warning(f"[file_search] ripgrep 캐시 폴백 조회 실패: {e}")
+
     return StatusResponse(
-        everything_ok=False,
-        everything_message="상태 정보 없음 (워커 미실행 또는 체크 대기 중)",
-        ripgrep_ok=False,
-        ripgrep_path=None,
+        everything_ok=everything_ok,
+        everything_message=everything_message,
+        ripgrep_ok=ripgrep_ok,
+        ripgrep_path=ripgrep_path,
     )
 
 
