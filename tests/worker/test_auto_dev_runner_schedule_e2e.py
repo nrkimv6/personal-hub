@@ -125,6 +125,48 @@ def test_claim_run_consumes_manual_run_first(session):
     assert result is manual_claimed
 
 
+# ── T3: manual run claim 통합 경로 (실제 DB 레이어) ──────────────────────────
+
+def test_t3_real_manual_run_claimed_from_db(session):
+    """DB에 worker_id='manual' run 생성 → claim_pending_manual_run이 소비하고 worker_id 갱신"""
+    from app.services.task_schedule_service import TaskScheduleService
+    from app.worker.schedule_handler_base import claim_pending_manual_run
+
+    sched = _make_schedule(session)
+    svc = TaskScheduleService(db=session)
+    manual_run = svc.start_run(schedule_id=sched.id, worker_id="manual")
+    session.commit()
+
+    ctx = _make_ctx(session)
+    result = claim_pending_manual_run(session, sched, svc, ctx, "auto_dev_runner")
+
+    assert result is not None
+    assert result.run.id == manual_run.id
+    assert result.run.worker_id == ctx.worker_name  # "test-worker"로 갱신
+
+
+def test_t3_manual_run_prior_to_cron_in_claim_run(session):
+    """manual run + cron 동시 발생 → manual run 먼저 소비, cron 경로(start_claimed_run) 미호출"""
+    from app.services.task_schedule_service import TaskScheduleService
+
+    sched = _make_schedule(session)
+    svc = TaskScheduleService(db=session)
+    manual_run = svc.start_run(schedule_id=sched.id, worker_id="manual")
+    session.commit()
+
+    ctx = _make_ctx(session)
+
+    _MODULE = "app.modules.dev_runner.schedulers.auto_dev_runner_schedule"
+    with patch(f"{_MODULE}.should_run_cron", return_value=True), \
+         patch(f"{_MODULE}.start_claimed_run") as mock_start:
+        handler = AutoDevRunnerScheduler()
+        result = handler.claim_run(session, sched, svc, ctx)
+
+    mock_start.assert_not_called()
+    assert result is not None
+    assert result.run.id == manual_run.id
+
+
 # ── execute ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
