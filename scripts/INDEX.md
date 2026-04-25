@@ -147,6 +147,7 @@
 | ✅ | `verify_crawl_migration.py` | 크롤 데이터 마이그레이션 검증 |
 | ✅ | `fix_pg_sequences.py` | PG serial sequence 동기화 (2026-04-11 plan 결과) |
 | ✅ | `import_urls_bulk.py` | URL 대량 import |
+| ✅ | `seed_auto_dev_runner_schedule.py` | auto_dev_runner 스케줄 레코드 insert-if-missing seed (cron 0 2 * * *) |
 
 ---
 
@@ -355,6 +356,7 @@
 | ✅ | `claude-session-manager.ps1` | Claude Code 세션 관리 헬퍼 |
 | ✅ | `auto-update.ps1` | 자동 업데이트 훅 |
 | ✅ | `Send-TelegramAlert.ps1` | 텔레그램 알림 함수 (watchdog crash-loop 감지 등에서 dot-source) |
+| ⏳ | `register-daily-report-popup.ps1` | Windows 작업 스케줄러에 매일 08:00 일일 보고서 팝업 등록 (Phase D 구현 예정) |
 
 ---
 
