@@ -2,13 +2,12 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-from app.main import app
-
 pytestmark = [pytest.mark.http, pytest.mark.asyncio]
 
 
 @pytest.fixture
 async def client():
+    from app.main import app
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

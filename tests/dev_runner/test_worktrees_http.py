@@ -3,7 +3,6 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from httpx import AsyncClient, ASGITransport
 
-from app.main import app
 from app.modules.dev_runner.schemas import (
     MainDirtyStatus,
     WorktreeInfo,
@@ -48,6 +47,7 @@ _MOCK_RESPONSE = WorktreeListResponse(
 
 @pytest.fixture
 async def client():
+    from app.main import app
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

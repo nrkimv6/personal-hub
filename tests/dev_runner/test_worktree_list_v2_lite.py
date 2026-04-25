@@ -6,8 +6,6 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.main import app
-
 pytestmark = [pytest.mark.http, pytest.mark.asyncio]
 
 
@@ -62,6 +60,7 @@ def _commit_file(repo: Path, relative_path: str, message: str, date: str) -> Non
 
 @pytest.fixture
 async def client():
+    from app.main import app
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
         yield async_client

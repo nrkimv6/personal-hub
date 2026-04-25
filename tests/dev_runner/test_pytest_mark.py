@@ -321,3 +321,46 @@ class TestDevguideStalenessMarkerContract:
         assert self._CASE not in combined or "no tests collected" in combined, (
             f"'{self._CASE}' should NOT appear in default collect: {combined[:800]}"
         )
+
+
+class TestDevRunnerAsyncHttpImportBoundary:
+    """diagnostics/worktrees 계열 6개 파일의 lazy import + http marker 계약 guard."""
+
+    _TARGETS = [
+        PROJECT_ROOT / "tests/dev_runner/test_diagnostics_http.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktree_cleanup_http.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktree_list_v1_v2_coexist.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktree_list_v2_lite.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktrees_commits_endpoint.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktrees_http.py",
+    ]
+
+    def test_targets_have_no_module_level_app_main_import(self):
+        """TC-Right: 대상 파일 텍스트에 모듈 레벨 'from app.main import app'가 없다."""
+        import re
+        pattern = re.compile(r"^from app\.main import app", re.MULTILINE)
+        failures = []
+        for target in self._TARGETS:
+            text = target.read_text(encoding="utf-8")
+            if pattern.search(text):
+                failures.append(str(target.relative_to(PROJECT_ROOT)))
+        assert not failures, (
+            f"모듈 레벨 'from app.main import app' 발견 — lazy import로 이동 필요:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
+
+    def test_targets_keep_http_asyncio_boundary(self):
+        """TC-Right: 대상 파일이 pytestmark에 http + asyncio 조합을 유지한다."""
+        failures = []
+        for target in self._TARGETS:
+            text = target.read_text(encoding="utf-8")
+            has_http = "pytest.mark.http" in text
+            has_asyncio = "pytest.mark.asyncio" in text
+            if not (has_http and has_asyncio):
+                failures.append(
+                    f"{target.relative_to(PROJECT_ROOT)}: http={has_http}, asyncio={has_asyncio}"
+                )
+        assert not failures, (
+            "http + asyncio marker 계약 미충족 파일:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
