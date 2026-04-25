@@ -143,9 +143,19 @@ def test_file_search_filename_preview_toggle_and_copy_path(
     page.get_by_text("README.md", exact=True).click()
     expect(page.get_by_role("heading", name="Hello")).to_be_visible()
 
-    # Markdown preview defaults to rendered view, but can be toggled to raw.
-    page.get_by_role("button", name="Raw 보기").click()
+    page.get_by_role("button", name="전체보기").click()
+    dialog = page.get_by_role("dialog")
+    expect(dialog).to_be_visible()
+    expect(dialog.get_by_role("heading", name="Hello")).to_be_visible()
+
+    dialog.get_by_role("button", name="Raw 보기").click()
+    expect(dialog.get_by_text("# Hello")).to_be_visible()
+
+    dialog.get_by_role("button", name="닫기").click()
+    expect(page.get_by_role("dialog")).to_have_count(0)
     expect(page.get_by_text("# Hello")).to_be_visible()
+
+    # Raw/Markdown toggle state is shared between inline preview and full view.
     page.get_by_role("button", name="Markdown 보기").click()
     expect(page.get_by_role("heading", name="Hello")).to_be_visible()
     expect(page.get_by_text("# Hello")).to_have_count(0)

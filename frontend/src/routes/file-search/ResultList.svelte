@@ -3,6 +3,7 @@
 	import MarkdownContent from '$lib/components/markdown/MarkdownContent.svelte';
 	import { toast } from '$lib/stores/toast';
 	import type { FileMatch, ContentMatch, FilePreviewResponse } from '$lib/types/fileSearch';
+	import MarkdownPreviewModal from './MarkdownPreviewModal.svelte';
 	import { AlertTriangle, FileText, ClipboardList, ChevronRight, Copy } from 'lucide-svelte';
 
 	interface Props {
@@ -18,16 +19,21 @@
 	let collapsed: Record<string, boolean> = $state({});
 
 	let activePreviewPath: string | null = $state(null);
+	let fullPreviewPath: string | null = $state(null);
 	let previewCache: Record<string, FilePreviewResponse> = $state({});
 	let previewLoadingPath: string | null = $state(null);
 	let previewErrorByPath: Record<string, string> = $state({});
 	let previewRawByPath: Record<string, boolean> = $state({});
+	let fullPreview = $derived(fullPreviewPath ? previewCache[fullPreviewPath] ?? null : null);
 
 	$effect(() => {
 		const alive = new Set(results.map((r) => r.file_path));
 
 		if (activePreviewPath && !alive.has(activePreviewPath)) {
 			activePreviewPath = null;
+		}
+		if (fullPreviewPath && !alive.has(fullPreviewPath)) {
+			fullPreviewPath = null;
 		}
 		if (previewLoadingPath && !alive.has(previewLoadingPath)) {
 			previewLoadingPath = null;
@@ -79,6 +85,22 @@
 		}
 		activePreviewPath = filePath;
 		await loadPreview(filePath);
+	}
+
+	async function openFullPreview(filePath: string): Promise<void> {
+		activePreviewPath = filePath;
+		await loadPreview(filePath);
+
+		if (previewErrorByPath[filePath]) return;
+
+		const preview = previewCache[filePath];
+		if (!preview || preview.extension !== 'md') return;
+
+		fullPreviewPath = filePath;
+	}
+
+	function closeFullPreview() {
+		fullPreviewPath = null;
 	}
 
 	function toggleRawPreview(filePath: string) {
@@ -303,13 +325,24 @@
 							<span class="font-mono">{previewCache[file.file_path].encoding}</span>
 							<span class="font-mono">{formatSize(previewCache[file.file_path].size_bytes)}</span>
 							{#if previewCache[file.file_path].extension === 'md'}
-								<button
-									onclick={() => toggleRawPreview(file.file_path)}
-									class="ml-auto rounded-md border border-border bg-background px-2 py-1 text-[11px]
-										   text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-								>
-									{previewRawByPath[file.file_path] ? 'Markdown 보기' : 'Raw 보기'}
-								</button>
+								<div class="ml-auto flex items-center gap-2">
+									<button
+										type="button"
+										onclick={() => void openFullPreview(file.file_path)}
+										class="rounded-md border border-border bg-background px-2 py-1 text-[11px]
+											   text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+									>
+										전체보기
+									</button>
+									<button
+										type="button"
+										onclick={() => toggleRawPreview(file.file_path)}
+										class="rounded-md border border-border bg-background px-2 py-1 text-[11px]
+											   text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+									>
+										{previewRawByPath[file.file_path] ? 'Markdown 보기' : 'Raw 보기'}
+									</button>
+								</div>
 							{/if}
 						</div>
 						{#if previewCache[file.file_path].extension === 'md' && !previewRawByPath[file.file_path]}
@@ -323,3 +356,14 @@
 		</div>
 	{/each}
 </div>
+
+{#if fullPreviewPath && fullPreview}
+	<MarkdownPreviewModal
+		preview={fullPreview}
+		raw={!!previewRawByPath[fullPreviewPath]}
+		onClose={closeFullPreview}
+		onToggleRaw={() => toggleRawPreview(fullPreviewPath)}
+		onOpenFile={() => void handleOpenFile(fullPreviewPath)}
+		onCopyPath={() => void copyFilePath(fullPreviewPath)}
+	/>
+{/if}
