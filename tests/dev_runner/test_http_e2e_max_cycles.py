@@ -26,15 +26,19 @@ def _plan_runner_redis_db_guard(monkeypatch):
 import fakeredis.aioredis
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.modules.dev_runner.services.executor_service import ExecutorService, executor_service
 
 
 # ========== Fixtures ==========
 
+
+def _build_test_client(**kwargs) -> TestClient:
+    from app.main import app
+    return TestClient(app, **kwargs)
+
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(app)
+    return _build_test_client()
 
 
 @pytest.fixture
@@ -275,7 +279,7 @@ class TestHttpE2EErrorPaths:
         async_mock.ping = AsyncMock(side_effect=redis_lib.exceptions.ConnectionError("down"))
 
         with patch.object(executor_service, "async_redis", async_mock):
-            client = TestClient(app, raise_server_exceptions=False)
+            client = _build_test_client(raise_server_exceptions=False)
             resp = client.post("/api/v1/dev-runner/run", json={
                 "plan_file": "t.md",
                 "max_cycles": 0,

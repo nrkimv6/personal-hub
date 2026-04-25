@@ -24,7 +24,6 @@ import pytest
 import redis as redis_lib
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.modules.dev_runner.config import DevRunnerConfig
 from app.modules.dev_runner.services.executor_service import RUNNER_KEY_SUFFIXES, ACTIVE_RUNNERS_KEY
 from tests.dev_runner.conftest_e2e import (
@@ -40,6 +39,11 @@ pytestmark = pytest.mark.full_e2e
 BASE_URL = "/api/v1/dev-runner"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _config = DevRunnerConfig()
+
+
+def _build_app():
+    from app.main import app
+    return app
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -157,7 +161,7 @@ def http_client():
     RuntimeError: Event loop is closed 발생.
     scope="class"로 동일 TestClient 인스턴스를 클래스 내 모든 테스트가 공유.
     """
-    with TestClient(app) as client:
+    with TestClient(_build_app()) as client:
         yield client
 
 

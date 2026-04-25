@@ -6,7 +6,6 @@ import pytest
 import subprocess
 from pathlib import Path
 from fastapi.testclient import TestClient
-from app.main import app
 import redis
 
 import redis.asyncio as aioredis
@@ -23,6 +22,11 @@ pytestmark = pytest.mark.http
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 BASE_URL = "/api/v1/dev-runner"
+
+
+def _build_test_client(**kwargs) -> TestClient:
+    from app.main import app
+    return TestClient(app, **kwargs)
 
 
 
@@ -58,7 +62,7 @@ class TestHttpE2EChain:
             active = isolated_redis_db15.smembers(ACTIVE_RUNNERS_KEY)
 
             # 2. 각 runner에 stop 요청 (API 레벨)
-            _client = TestClient(app)
+            _client = _build_test_client()
             for runner_id in active:
                 try:
                     _client.post(f"{BASE_URL}/stop/{runner_id}")
@@ -83,7 +87,7 @@ class TestHttpE2EChain:
 
     def test_http_start_and_stop_lifecycle(self, isolated_redis_db15, listener_process):
         """E2E: POST /run → running 확인 → POST /stop → active_runners 비어짐 확인"""
-        client = TestClient(app)
+        client = _build_test_client()
         from app.modules.dev_runner.services.executor_service import (
             RUNNER_KEY_PREFIX,
             ACTIVE_RUNNERS_KEY,

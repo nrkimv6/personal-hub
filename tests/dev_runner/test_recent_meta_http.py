@@ -9,7 +9,6 @@ import json
 import time
 import pytest
 from fastapi.testclient import TestClient
-from app.main import app
 import redis.asyncio as aioredis
 from tests.dev_runner.conftest_e2e import (
     TEST_PLAN_FILE,
@@ -24,6 +23,11 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 BASE_URL = "/api/v1/dev-runner"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
+
+
+def _build_test_client() -> TestClient:
+    from app.main import app
+    return TestClient(app)
 
 
 class TestRecentMetaHttp:
@@ -55,7 +59,7 @@ class TestRecentMetaHttp:
 
     def test_accepted_at_set_after_run(self, isolated_redis_db15, listener_process):
         """POST /run → accepted_at + accepted_source 키 세팅 확인"""
-        client = TestClient(app)
+        client = _build_test_client()
         payload = {
             "engine": "gemini",
             "plan_file": TEST_PLAN_FILE,
@@ -81,7 +85,7 @@ class TestRecentMetaHttp:
 
     def test_recent_meta_after_cleanup(self, isolated_redis_db15, listener_process):
         """dry_run 완료 후 cleanup 시 recent-meta에 trigger 보존 확인"""
-        client = TestClient(app)
+        client = _build_test_client()
         payload = {
             "engine": "gemini",
             "plan_file": TEST_PLAN_FILE,

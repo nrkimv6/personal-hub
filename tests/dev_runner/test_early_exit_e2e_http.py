@@ -21,8 +21,6 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-
 BASE_URL = os.environ.get("ADMIN_SERVER_URL", "http://localhost:8001")
 API_PREFIX = "/api/v1/dev-runner"
 STATUS_PATH = "/api/v1/system/status"

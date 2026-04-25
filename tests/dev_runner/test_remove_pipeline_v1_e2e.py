@@ -16,7 +16,6 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from pathlib import Path
-from app.main import app
 
 import os
 import signal
@@ -42,6 +41,11 @@ COMMANDS_KEY = "plan-runner:commands"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 
 BASE_URL = "/api/v1/dev-runner"
+
+
+def _build_test_client() -> TestClient:
+    from app.main import app
+    return TestClient(app)
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +75,7 @@ class TestRemovePipelineT5:
     @pytest.fixture(autouse=True)
     def stop_runners_after_test(self, isolated_redis_db15, listener_process):
         """각 테스트 후 생성된 runner 정리 (다음 테스트 간섭 방지)"""
-        client = TestClient(app)
+        client = _build_test_client()
         yield
         try:
             active = isolated_redis_db15.smembers("plan-runner:active-runners")
@@ -85,7 +89,7 @@ class TestRemovePipelineT5:
 
     def test_T5_start_run_without_pipeline_R(self, isolated_redis_db15, listener_process):
         """R(정상): pipeline 필드 없이 POST /run → 200 또는 runner_id 포함 응답"""
-        client = TestClient(app)
+        client = _build_test_client()
         payload = {
             "engine": "claude",
             "plan_file": TEST_PLAN_FILE,
@@ -102,7 +106,7 @@ class TestRemovePipelineT5:
 
     def test_T5_start_run_with_pipeline_field_ignored_B(self, isolated_redis_db15, listener_process):
         """B(경계): pipeline 필드 포함 payload → 422 아님 (미지 필드 무시), 200 응답"""
-        client = TestClient(app)
+        client = _build_test_client()
         payload = {
             "engine": "claude",
             "plan_file": TEST_PLAN_FILE,
@@ -124,7 +128,7 @@ class TestRemovePipelineT5:
 
     def test_T5_run_schema_has_no_pipeline_field_E(self, isolated_redis_db15, listener_process):
         """E(에러): /run 엔드포인트 OpenAPI 스키마에 pipeline 필드 없음"""
-        client = TestClient(app)
+        client = _build_test_client()
         response = client.get("/openapi.json")
         assert response.status_code == 200
         schema = response.json()

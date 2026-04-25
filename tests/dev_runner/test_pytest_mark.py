@@ -405,3 +405,50 @@ class TestRemainingHttpRunnerMarkerContract:
             "module-level pytestmark = pytest.mark.http 미설정 파일:\n"
             + "\n".join(f"  {f}" for f in failures)
         )
+
+
+class TestDevRunnerHttpE2EImportBoundary:
+    """http/e2e/integration 잔존 12개 파일의 lazy import + marker 계약 guard."""
+
+    _TARGETS = {
+        "tests/dev_runner/test_full_e2e_real.py": "full_e2e",
+        "tests/dev_runner/test_early_exit_e2e_http.py": "http",
+        "tests/dev_runner/test_exit_reason_e2e.py": "http",
+        "tests/dev_runner/test_heartbeat_merge_guard_http.py": "http",
+        "tests/dev_runner/test_http_e2e.py": "http",
+        "tests/dev_runner/test_http_e2e_max_cycles.py": "http",
+        "tests/dev_runner/test_recent_meta_http.py": "http",
+        "tests/dev_runner/test_remove_pipeline_v1_e2e.py": "http",
+        "tests/dev_runner/test_runner_dry_run.py": "integration",
+        "tests/dev_runner/test_t4_http_integration.py": "http",
+        "tests/dev_runner/test_t4t5_no_backtick_e2e.py": "http",
+        "tests/dev_runner/test_trigger_http.py": "http",
+    }
+
+    def test_targets_have_no_module_level_app_main_import(self):
+        """TC-Right: 대상 파일 텍스트에 모듈 레벨 'from app.main import app'가 없다."""
+        import re
+
+        pattern = re.compile(r"^from app\.main import app\b", re.MULTILINE)
+        failures = []
+        for target in self._TARGETS:
+            text = (PROJECT_ROOT / target).read_text(encoding="utf-8")
+            if pattern.search(text):
+                failures.append(target)
+        assert not failures, (
+            f"모듈 레벨 'from app.main import app' 발견 — lazy import로 이동 필요:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
+
+    def test_targets_keep_marker_boundary(self):
+        """TC-Right: 대상 파일이 기대 marker를 그대로 유지한다."""
+        failures = []
+        for target, expected_marker in self._TARGETS.items():
+            text = (PROJECT_ROOT / target).read_text(encoding="utf-8")
+            marker_token = f"pytest.mark.{expected_marker}"
+            if marker_token not in text:
+                failures.append(f"{target}: expected={expected_marker}")
+        assert not failures, (
+            "marker boundary 미충족 파일:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )

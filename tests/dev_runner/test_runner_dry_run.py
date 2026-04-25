@@ -14,7 +14,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.main import app
 from app.modules.dev_runner.config import DevRunnerConfig
 from tests.dev_runner.conftest_e2e import (
     e2e_redis_cleanup,
@@ -31,6 +30,11 @@ pytestmark = pytest.mark.integration
 BASE_URL = "http://test/api/v1/dev-runner"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 _config = DevRunnerConfig()
+
+
+def _build_app():
+    from app.main import app
+    return app
 
 
 @pytest.fixture
@@ -79,7 +83,7 @@ async def reset_executor_async_redis():
 
 
 async def _make_client():
-    transport = httpx.ASGITransport(app=app)
+    transport = httpx.ASGITransport(app=_build_app())
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
 
@@ -127,7 +131,7 @@ class TestRunnerDryRun:
     async def test_dry_run_lifecycle(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup):
         """POST /run (dry_run) → running=True → stop → running=False"""
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
             runner_id = await _post_dry_run(client)
 
@@ -153,7 +157,7 @@ class TestRunnerDryRun:
     async def test_dry_run_redis_keys(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup):
         """dry_run 실행 후 per-runner Redis 키 (status/pid/plan_file/start_time) 세팅 확인"""
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
             runner_id = await _post_dry_run(client)
 
@@ -175,7 +179,7 @@ class TestRunnerDryRun:
     async def test_dry_run_log_file_created(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup):
         """dry_run 실행 후 stream_log_path 파일 생성 확인"""
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
             runner_id = await _post_dry_run(client)
 
@@ -200,7 +204,7 @@ class TestRunnerDryRun:
         서로 다른 plan_file 사용 — 동일 plan_file이면 WorktreeManager 브랜치명 충돌 발생
         """
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
             runner_id_1 = await _post_dry_run(client, plan_file=TEST_PLAN_FILE_A)
             runner_id_2 = await _post_dry_run(client, plan_file=TEST_PLAN_FILE_B)
@@ -232,7 +236,7 @@ class TestRunnerDryRun:
         """
         from datetime import datetime
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
             runner_id = await _post_dry_run(client)
 

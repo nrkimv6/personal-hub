@@ -7,9 +7,12 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
-from app.main import app
-
 pytestmark = pytest.mark.http
+
+
+def _build_test_client() -> TestClient:
+    from app.main import app
+    return TestClient(app, raise_server_exceptions=True)
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +23,7 @@ def dev_runner_config_isolation(tmp_path):
 
 @pytest.fixture
 def client():
-    return TestClient(app, raise_server_exceptions=True)
+    return _build_test_client()
 
 
 class TestExitReasonHttpRunners:
