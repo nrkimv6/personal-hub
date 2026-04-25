@@ -180,6 +180,59 @@ class TestPytestMarkInfra:
             "pytest.ini addopts에 'not http_live' 가 없음 — 기본 실행 시 실서버 TC가 포함됨"
 
 
+class TestMergeRetryHttpMarkerContract:
+    """test_merge_retry_http.py의 http marker 계약 고정 guard."""
+
+    _TARGET = "tests/dev_runner/test_merge_retry_http.py"
+
+    _HTTP_CASES = [
+        "test_direct_merge_success",
+        "test_direct_merge_safe_doc_payload_preserved",
+        "test_direct_merge_missing_branch_422",
+        "test_retry_merge_endpoint_regression",
+        "test_retry_merge_conflict_payload_preserved",
+        "test_logs_recent_redis_list_fallback",
+        "test_retry_merge_returns_test_failed_then_fixing_http",
+    ]
+
+    _NON_HTTP_CASES = [
+        "test_build_status_payload_dm_runner_keeps_plan_file_none",
+        "test_normal_runner_plan_file_none_regression",
+    ]
+
+    def test_http_marker_collects_all_testclient_cases(self):
+        """TC-Right: `-m http`로 collect-only 시 TestClient 7건이 모두 수집된다."""
+        result = _run_collect_only(self._TARGET, "http")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._HTTP_CASES:
+            assert name in combined, f"'{name}' not found in -m http collect: {combined[:800]}"
+
+    def test_http_marker_excludes_fakeredis_cases(self):
+        """TC-Boundary: `-m http` collect-only에서 fakeredis 2건은 나타나지 않는다."""
+        result = _run_collect_only(self._TARGET, "http")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._NON_HTTP_CASES:
+            assert name not in combined, f"fakeredis case '{name}' should NOT appear in -m http collect: {combined[:800]}"
+
+    def test_default_addopts_collects_only_fakeredis_cases(self):
+        """TC-Right: marker 인자 없는 기본 실행(not http addopts)에서 fakeredis 2건만 수집된다."""
+        result = _run_collect_only(self._TARGET, "not http and not http_live and not integration and not e2e")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._NON_HTTP_CASES:
+            assert name in combined, f"'{name}' should appear in default collect: {combined[:800]}"
+
+    def test_default_addopts_excludes_testclient_cases(self):
+        """TC-Boundary: 기본 addopts 필터에서 TestClient 7건은 수집 대상에서 제외된다."""
+        result = _run_collect_only(self._TARGET, "not http and not http_live and not integration and not e2e")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._HTTP_CASES:
+            assert name not in combined, f"TestClient case '{name}' should NOT appear in default collect: {combined[:800]}"
+
+
 class TestDbDirEnvVar:
     def test_right_test_db_dir_env_var_used(self, tmp_path):
         """TC-Right: TEST_DB_DIR 환경변수 설정 → 해당 경로에 test_monitor.db 생성 가능"""

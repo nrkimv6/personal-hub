@@ -15,6 +15,8 @@ def client():
 
 
 class TestDirectMergeHttp:
+    pytestmark = pytest.mark.http
+
     def test_direct_merge_success(self, client):
         """R(Right): POST /merge/direct → 200 + success=True"""
         mock_result = {"success": True, "message": "accepted", "action": "direct-merge"}
@@ -116,6 +118,8 @@ class TestDirectMergePlanFileInSSE:
 class TestLogsRecentRedisListFallback:
     """T4: GET /logs/recent dm-* runner Redis list fallback"""
 
+    pytestmark = pytest.mark.http
+
     def test_logs_recent_redis_list_fallback(self, client):
         """T4-22: dm-* runner 로그 파일 없음 + Redis list 존재 → merge 로그 반환"""
         from app.modules.dev_runner.schemas import LogResponse
@@ -160,6 +164,8 @@ class TestNormalRunnerPlanFileAllRegression:
 
 class TestRetryMergeExitCode2Http:
     """T5 HTTP: POST /runners/{id}/retry-merge → exit_code=2 → fixing → merged 상태 흐름"""
+
+    pytestmark = pytest.mark.http
 
     @pytest.mark.http
     def test_retry_merge_returns_test_failed_then_fixing_http(self, client):
