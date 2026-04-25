@@ -12,6 +12,7 @@ from app.modules.dev_runner.schemas import (
     PlanPhaseResponse,
     PlanProgressResponse,
 )
+from app.modules.dev_runner.services.plan_path_helpers import extract_repo_root_from_plan_path
 
 import logging
 
@@ -95,9 +96,13 @@ class PlanScanner:
     # ========== 파일시스템 스캔 ==========
 
     def _scan_all_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
-        """실제 파일시스템 스캔 (캐시 미스 시 호출)"""
+        """실제 파일시스템 스캔 (캐시 미스 시 호출).
+
+        같은 (repo_root, filename) 조합이 docs와 .worktrees/plans/docs 양쪽에 있으면
+        worktree 경로를 우선 노출하고 docs 경로는 제거한다.
+        """
         seen: set = set()
-        results: List[PlanFileResponse] = []
+        raw_results: List[PlanFileResponse] = []
 
         for entry in self.registry._registered_paths:
             is_archive = entry.get("type") == "archive"
@@ -110,7 +115,7 @@ class PlanScanner:
                 continue
             if p.is_dir():
                 self._scan_plan_dir(
-                    p, seen, results, include_ignored,
+                    p, seen, raw_results, include_ignored,
                     path_type="folder",
                     recursive=is_archive,
                 )
@@ -126,7 +131,7 @@ class PlanScanner:
                             summary = self._extract_summary(content)
                         except Exception:
                             summary = None
-                        results.append(
+                        raw_results.append(
                             PlanFileResponse(
                                 path=str(p),
                                 filename=p.name,
@@ -139,8 +144,33 @@ class PlanScanner:
                             )
                         )
 
+        results = self._dedupe_prefer_worktree(raw_results)
         results.sort(key=lambda x: x.filename, reverse=True)
         return results
+
+    @staticmethod
+    def _dedupe_prefer_worktree(results: List[PlanFileResponse]) -> List[PlanFileResponse]:
+        """같은 (repo_root, filename)이면 worktree 경로를 남기고 docs 경로를 제거한다."""
+        groups: dict[tuple[str, str], List[PlanFileResponse]] = {}
+        ungrouped: List[PlanFileResponse] = []
+
+        for item in results:
+            repo_root = extract_repo_root_from_plan_path(item.path)
+            if repo_root:
+                key = (repo_root, item.filename)
+                groups.setdefault(key, []).append(item)
+            else:
+                ungrouped.append(item)
+
+        deduped: List[PlanFileResponse] = list(ungrouped)
+        for group in groups.values():
+            if len(group) == 1:
+                deduped.append(group[0])
+                continue
+            worktree_items = [g for g in group if ".worktrees" in Path(g.path).parts]
+            deduped.append(worktree_items[0] if worktree_items else group[0])
+
+        return deduped
 
     def _scan_plan_dir(
         self,

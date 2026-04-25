@@ -168,6 +168,7 @@
 	let ignoredLoading = $state(false);
 	let showAddForm = $state(false);
 	let newPath = $state('');
+	let newPathType = $state<'plan' | 'archive'>('plan');
 	let addError = $state<string | null>(null);
 	let addLoading = $state(false);
 
@@ -229,7 +230,7 @@
 		addLoading = true;
 		addError = null;
 		try {
-			await devRunnerPlanApi.addPath(newPath.trim());
+			await devRunnerPlanApi.addPath(newPath.trim(), newPathType);
 			newPath = '';
 			onPlansChange?.();
 			await loadRegisteredPaths();
@@ -362,6 +363,13 @@
 				placeholder="Plan 파일 또는 폴더 경로 (예: D:\work\project\...)"
 			/>
 			<div class="flex gap-2">
+				<select
+					bind:value={newPathType}
+					class="text-xs px-2 py-1 border border-border rounded bg-background text-foreground focus:outline-none"
+				>
+					<option value="plan">plan</option>
+					<option value="archive">archive</option>
+				</select>
 				<button
 					class="text-xs px-3 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
 					onclick={handleAddPath}

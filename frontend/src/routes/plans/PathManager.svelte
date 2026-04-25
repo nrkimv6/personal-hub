@@ -48,7 +48,7 @@
     adding = true;
     addError = '';
     try {
-      await devRunnerPlanApi.addPath(inputPath.trim());
+      await devRunnerPlanApi.addPath(inputPath.trim(), inputType);
       inputPath = '';
       onChanged();
       await loadPaths();
@@ -151,9 +151,9 @@
       {/if}
     </div>
   {:else}
-    <!-- 프로젝트 루트 추가 폼 (docs/plan + docs/archive 동시 등록) -->
+    <!-- 프로젝트 루트 추가 폼 (docs/plan + docs/archive + worktree/plan + worktree/archive 동시 등록) -->
     <div class="flex flex-col gap-1">
-      <p class="text-[10px] text-muted-foreground">프로젝트 루트를 입력하면 docs/plan과 docs/archive를 자동 등록합니다.</p>
+      <p class="text-[10px] text-muted-foreground">프로젝트 루트를 입력하면 docs/* 및 .worktrees/plans/docs/* (최대 4개 경로)를 자동 등록합니다.</p>
       <div class="flex gap-1">
         <input
           type="text"

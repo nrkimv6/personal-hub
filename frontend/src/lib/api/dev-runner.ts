@@ -346,10 +346,10 @@ export const devRunnerPlanApi = {
 
 	sync: () => devRunnerRequest<{ synced: number; added: number; removed: number; updated: number }>('/plans/sync', { method: 'POST' }),
 
-	addPath: (path: string) =>
+	addPath: (path: string, pathType: 'plan' | 'archive' = 'plan') =>
 		devRunnerRequest<{ success: boolean; path: string; type: 'file' | 'folder' }>('/plans/paths', {
 			method: 'POST',
-			body: JSON.stringify({ path })
+			body: JSON.stringify({ path, path_type: pathType })
 		}),
 
 	removePath: (path: string) =>

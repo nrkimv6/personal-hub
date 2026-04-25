@@ -391,7 +391,10 @@ def dev_runner_config_isolation(tmp_path):
     mock_config.LOG_DIR = Path("common/logs")
     mock_config.LOG_FILE_PATTERN = "plan-runner-*.log"
 
-    with patch("app.modules.dev_runner.services.plan_service.config", mock_config):
+    with patch("app.modules.dev_runner.services.plan_service.config", mock_config), \
+         patch("app.modules.dev_runner.services.plan_path_registry.config", mock_config), \
+         patch("app.modules.dev_runner.services.plan_path_helpers.config", mock_config), \
+         patch("app.modules.dev_runner.services.plan_scanner.config", mock_config, create=True):
         yield mock_config
 
 

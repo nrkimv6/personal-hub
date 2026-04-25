@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import List, Optional
 
 from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services.plan_path_helpers import (
+    load_wtools_project_roots,
+    iter_repo_plan_path_candidates,
+    extract_repo_root_from_plan_path,
+)
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle, resolve_archive_target_or_raise
 from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL, REDIS_HOST, REDIS_PORT
@@ -131,47 +136,53 @@ class PlanService:
                 pass
             return
 
-        paths: List[str] = []
+        entries: List[dict] = []
+        existing_keys: set[tuple[str, str]] = set()
+
+        def _add_entry(path: Path, path_type: str) -> None:
+            if path.exists():
+                resolved = str(path.resolve())
+                key = (resolved, path_type)
+                if key not in existing_keys:
+                    entries.append({"path": resolved, "type": path_type})
+                    existing_keys.add(key)
 
         # 기존 external_plans.json에서 가져오기
         ext_path = config.EXTERNAL_PLANS_FILE
         if ext_path.exists():
             try:
-                paths = json.loads(ext_path.read_text(encoding="utf-8"))
-                logger.info(f"[마이그레이션] external_plans.json에서 {len(paths)}개 경로 로드")
+                raw = json.loads(ext_path.read_text(encoding="utf-8"))
+                for p in raw:
+                    if isinstance(p, str):
+                        _add_entry(Path(p), "plan")
+                logger.info(f"[마이그레이션] external_plans.json에서 로드")
             except Exception:
-                paths = []
+                pass
 
-        # WTOOLS_BASE_DIR 시드: 존재하는 프로젝트 plan 폴더를 자동 등록
-        existing = set(paths)
-        base = config.WTOOLS_BASE_DIR
-        if base.exists():
-            # common/docs/plan
-            common_dir = base / config.PLAN_DIR
-            if common_dir.exists():
-                resolved = str(common_dir.resolve())
-                if resolved not in existing:
-                    paths.append(resolved)
-                    existing.add(resolved)
+        # .claude/projects.json 기반 시드 (우선)
+        project_roots = load_wtools_project_roots()
+        if project_roots:
+            for root in project_roots:
+                for candidate_path, path_type in iter_repo_plan_path_candidates(root):
+                    _add_entry(candidate_path, path_type)
+            logger.info(f"[마이그레이션] projects.json 시드 완료 — {len(project_roots)}개 repo")
+        else:
+            # fallback: WTOOLS_BASE_DIR + PROJECT_DIRS (projects.json 없는 환경)
+            base = config.WTOOLS_BASE_DIR
+            if base.exists():
+                for candidate_path, path_type in iter_repo_plan_path_candidates(base):
+                    _add_entry(candidate_path, path_type)
+                for project in config.PROJECT_DIRS:
+                    project_root = base / project
+                    for candidate_path, path_type in iter_repo_plan_path_candidates(project_root):
+                        _add_entry(candidate_path, path_type)
+                logger.info(f"[마이그레이션] WTOOLS fallback 시드 완료")
 
-            # 각 프로젝트의 docs/plan
-            for project in config.PROJECT_DIRS:
-                project_dir = base / project / "docs" / "plan"
-                if project_dir.exists():
-                    resolved = str(project_dir.resolve())
-                    if resolved not in existing:
-                        paths.append(resolved)
-                        existing.add(resolved)
-
-            logger.info(f"[마이그레이션] WTOOLS 시드 완료 — 총 {len(paths)}개 경로")
-
-        # 객체 배열로 저장
-        if paths:
-            entries = [{"path": p, "type": "plan"} for p in paths]
-            entries, _ = self._normalize_registered_paths(entries)
+        if entries:
+            normalized, _ = self._normalize_registered_paths(entries)
             reg_path.parent.mkdir(parents=True, exist_ok=True)
-            reg_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(entries)}개)")
+            reg_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(normalized)}개)")
 
     def _load_registered_paths(self):
         """등록된 경로 목록 로드 (JSON 파일) — 객체 배열 {"path", "type"}"""
@@ -180,11 +191,42 @@ class PlanService:
             try:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
                 normalized, changed = self._normalize_registered_paths(loaded)
-                self._registered_paths = normalized
-                if changed:
-                    path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+                backfilled, backfill_changed = self._backfill_dual_paths(normalized)
+                self._registered_paths = backfilled
+                if changed or backfill_changed:
+                    path.write_text(json.dumps(backfilled, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 self._registered_paths = []
+
+    def _backfill_dual_paths(self, entries: List[dict]) -> tuple[List[dict], bool]:
+        """기존 등록 목록에서 docs <-> worktree 상호 보완 경로를 backfill한다.
+
+        docs/plan 만 등록되어 있고 .worktrees/plans/docs/plan 이 실재하면 추가 (vice versa).
+        """
+        existing_keys: set[tuple[str, str]] = {
+            (e["path"], e.get("type", "plan")) for e in entries
+        }
+        additions: List[dict] = []
+
+        for entry in entries:
+            raw_path = entry.get("path", "")
+            path_type = entry.get("type", "plan")
+            repo_root_str = extract_repo_root_from_plan_path(raw_path)
+            if not repo_root_str:
+                continue
+            repo_root = Path(repo_root_str)
+            for candidate_path, cand_type in iter_repo_plan_path_candidates(repo_root):
+                if cand_type != path_type:
+                    continue
+                resolved = str(candidate_path.resolve())
+                key = (resolved, cand_type)
+                if key not in existing_keys and candidate_path.exists():
+                    additions.append({"path": resolved, "type": cand_type})
+                    existing_keys.add(key)
+
+        if additions:
+            return entries + additions, True
+        return entries, False
 
     def _save_registered_paths(self):
         """등록된 경로 목록 저장 — 객체 배열 {"path", "type"}"""
@@ -318,9 +360,13 @@ class PlanService:
         self._plans_cache_time = 0
 
     def _scan_all_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
-        """실제 파일시스템 스캔 (캐시 미스 시 호출)"""
+        """실제 파일시스템 스캔 (캐시 미스 시 호출).
+
+        같은 (repo_root, filename) 조합이 docs와 .worktrees/plans/docs 양쪽에 있으면
+        worktree 경로를 우선 노출하고 docs 경로는 제거한다.
+        """
         seen: set[str] = set()
-        results: List[PlanFileResponse] = []
+        raw_results: List[PlanFileResponse] = []
 
         for entry in self._registered_paths:
             is_archive = entry.get("type") == "archive"
@@ -333,7 +379,7 @@ class PlanService:
                 continue
             if p.is_dir():
                 self._scan_plan_dir(
-                    p, seen, results, include_ignored,
+                    p, seen, raw_results, include_ignored,
                     path_type="folder",
                     recursive=is_archive,
                 )
@@ -351,7 +397,7 @@ class PlanService:
                         except Exception:
                             summary = None
                             created_at = _extract_created_at('', p)
-                        results.append(
+                        raw_results.append(
                             PlanFileResponse(
                                 path=str(p),
                                 filename=p.name,
@@ -365,8 +411,33 @@ class PlanService:
                             )
                         )
 
+        results = self._dedupe_prefer_worktree(raw_results)
         results.sort(key=lambda x: x.created_at or x.filename, reverse=True)
         return results
+
+    @staticmethod
+    def _dedupe_prefer_worktree(results: List[PlanFileResponse]) -> List[PlanFileResponse]:
+        """같은 (repo_root, filename)이면 worktree 경로를 남기고 docs 경로를 제거한다."""
+        groups: dict[tuple[str, str], List[PlanFileResponse]] = {}
+        ungrouped: List[PlanFileResponse] = []
+
+        for item in results:
+            repo_root = extract_repo_root_from_plan_path(item.path)
+            if repo_root:
+                key = (repo_root, item.filename)
+                groups.setdefault(key, []).append(item)
+            else:
+                ungrouped.append(item)
+
+        deduped: List[PlanFileResponse] = list(ungrouped)
+        for group in groups.values():
+            if len(group) == 1:
+                deduped.append(group[0])
+                continue
+            worktree_items = [g for g in group if ".worktrees" in Path(g.path).parts]
+            deduped.append(worktree_items[0] if worktree_items else group[0])
+
+        return deduped
 
     def list_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
         """
