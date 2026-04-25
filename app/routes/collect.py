@@ -832,6 +832,20 @@ async def trigger_schedule_run(
                 detail=f"보고서 생성 요청 실패: {str(e)}"
             )
 
+    # auto_dev_runner: manual run을 생성하면 워커가 claim_pending_manual_run으로 소비
+    elif schedule.target_type == 'auto_dev_runner':
+        schedule_service = TaskScheduleService(db)
+        run = schedule_service.start_run(
+            schedule_id=schedule.id,
+            worker_id="manual",
+            config_snapshot={"source": "manual"}
+        )
+        return {
+            "success": True,
+            "message": "자동 dev-runner 실행 요청이 예약되었습니다",
+            "run_id": run.id,
+        }
+
     # 지원하지 않는 스케줄 타입
     else:
         return {
