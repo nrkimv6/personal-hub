@@ -4,9 +4,12 @@
 
 export type SearchMode = 'filename' | 'content' | 'both';
 export type MatchSource = 'filename' | 'content' | 'both';
+export type SearchOrigin = 'file-search' | 'plan-quick';
 
 export interface SearchRequest {
 	query: string;
+	/** 요청 출처 (검색어 추천/이력 집계 분리용) */
+	origin?: SearchOrigin;
 	mode: SearchMode;
 	regex: boolean;
 	case_sensitive: boolean;
@@ -98,6 +101,24 @@ export interface SearchPollResponse {
 	status: string;
 	result?: SearchResponse;
 	error_message?: string | null;
+}
+
+export interface SearchHistoryItem {
+	search_id: string;
+	request: SearchRequest;
+	query: string;
+	mode: SearchMode;
+	created_at: string;
+	total_count: number;
+	search_time_ms: number;
+	sample_files: string[];
+	origin: SearchOrigin;
+}
+
+export interface SearchSuggestionItem {
+	query: string;
+	count: number;
+	last_used_at: string;
 }
 
 export interface FilePreviewResponse {

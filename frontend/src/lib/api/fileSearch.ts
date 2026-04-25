@@ -8,9 +8,11 @@ import type {
 	IgnorePattern,
 	Preset,
 	SearchAcceptedResponse,
+	SearchHistoryItem,
 	SearchPollResponse,
 	SearchRequest,
 	SearchResponse,
+	SearchSuggestionItem,
 	StatusResponse
 } from '$lib/types/fileSearch';
 
@@ -37,6 +39,14 @@ export async function search(
  */
 export async function pollSearchResult(searchId: string): Promise<SearchPollResponse> {
 	return request<SearchPollResponse>(`${BASE}/search/${searchId}`);
+}
+
+export async function getHistory(limit = 20): Promise<SearchHistoryItem[]> {
+	return request<SearchHistoryItem[]>(`${BASE}/history?limit=${limit}`);
+}
+
+export async function getSuggestions(limit = 10): Promise<SearchSuggestionItem[]> {
+	return request<SearchSuggestionItem[]>(`${BASE}/suggestions?limit=${limit}`);
 }
 
 export async function getPresets(): Promise<Preset[]> {

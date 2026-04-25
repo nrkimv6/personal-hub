@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getFilePreview, openFile } from '$lib/api/fileSearch';
+	import MarkdownContent from '$lib/components/markdown/MarkdownContent.svelte';
 	import { toast } from '$lib/stores/toast';
 	import type { FileMatch, ContentMatch, FilePreviewResponse } from '$lib/types/fileSearch';
 	import { AlertTriangle, FileText, ClipboardList, ChevronRight, Copy } from 'lucide-svelte';
@@ -20,6 +21,7 @@
 	let previewCache: Record<string, FilePreviewResponse> = $state({});
 	let previewLoadingPath: string | null = $state(null);
 	let previewErrorByPath: Record<string, string> = $state({});
+	let previewRawByPath: Record<string, boolean> = $state({});
 
 	$effect(() => {
 		const alive = new Set(results.map((r) => r.file_path));
@@ -36,6 +38,9 @@
 		}
 		for (const key of Object.keys(previewErrorByPath)) {
 			if (!alive.has(key)) delete previewErrorByPath[key];
+		}
+		for (const key of Object.keys(previewRawByPath)) {
+			if (!alive.has(key)) delete previewRawByPath[key];
 		}
 	});
 
@@ -74,6 +79,10 @@
 		}
 		activePreviewPath = filePath;
 		await loadPreview(filePath);
+	}
+
+	function toggleRawPreview(filePath: string) {
+		previewRawByPath[filePath] = !previewRawByPath[filePath];
 	}
 
 	async function copyFilePath(filePath: string): Promise<void> {
@@ -293,8 +302,21 @@
 							</span>
 							<span class="font-mono">{previewCache[file.file_path].encoding}</span>
 							<span class="font-mono">{formatSize(previewCache[file.file_path].size_bytes)}</span>
+							{#if previewCache[file.file_path].extension === 'md'}
+								<button
+									onclick={() => toggleRawPreview(file.file_path)}
+									class="ml-auto rounded-md border border-border bg-background px-2 py-1 text-[11px]
+										   text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+								>
+									{previewRawByPath[file.file_path] ? 'Markdown 보기' : 'Raw 보기'}
+								</button>
+							{/if}
 						</div>
-						<pre class="max-h-[320px] overflow-auto whitespace-pre px-3 py-2 font-mono text-xs">{previewCache[file.file_path].content}</pre>
+						{#if previewCache[file.file_path].extension === 'md' && !previewRawByPath[file.file_path]}
+							<MarkdownContent content={previewCache[file.file_path].content} class="max-h-[320px] overflow-auto px-3 py-2" />
+						{:else}
+							<pre class="max-h-[320px] overflow-auto whitespace-pre px-3 py-2 font-mono text-xs">{previewCache[file.file_path].content}</pre>
+						{/if}
 					{/if}
 				</div>
 			{/if}

@@ -13,9 +13,12 @@ from pydantic import BaseModel, Field
 # Request
 # ============================================================
 
+SearchOrigin = Literal["file-search", "plan-quick"]
+
 
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1, description="검색 키워드")
+    origin: SearchOrigin = Field("file-search", description="요청 출처 (UI/내부 검색 구분)")
     mode: Literal["filename", "content", "both"] = "both"
     regex: bool = False
     case_sensitive: bool = False
@@ -131,6 +134,29 @@ class SearchPollResponse(BaseModel):
     status: str  # pending / queued / processing / completed / failed
     result: Optional[SearchResponse] = None
     error_message: Optional[str] = None
+
+
+# ============================================================
+# History / Suggestions
+# ============================================================
+
+
+class SearchHistoryItem(BaseModel):
+    search_id: str
+    request: SearchRequest
+    query: str
+    mode: Literal["filename", "content", "both"]
+    created_at: str
+    total_count: int
+    search_time_ms: int
+    sample_files: List[str] = Field(default_factory=list, description="대표 파일명 목록")
+    origin: SearchOrigin
+
+
+class SearchSuggestionItem(BaseModel):
+    query: str
+    count: int
+    last_used_at: str
 
 
 # ============================================================

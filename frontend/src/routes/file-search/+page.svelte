@@ -2,17 +2,21 @@
 	import { onMount } from 'svelte';
 	import { onDestroy } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
-	import { search, pollSearchResult, getPresets, getStatus } from '$lib/api/fileSearch';
+	import { search, pollSearchResult, getHistory, getSuggestions, getPresets, getStatus } from '$lib/api/fileSearch';
 	import type {
 		FileMatch,
 		Preset,
+		SearchHistoryItem,
 		SearchMode,
+		SearchRequest,
 		SearchResponse,
+		SearchSuggestionItem,
 		StatusResponse
 	} from '$lib/types/fileSearch';
 	import { Search, Languages, XCircle, Loader2, Inbox, AlertTriangle, ChevronRight } from 'lucide-svelte';
 
 	import SearchForm from './SearchForm.svelte';
+	import SearchHistoryBar from './SearchHistoryBar.svelte';
 	import PresetBar from './PresetBar.svelte';
 	import ExtensionFilter from './ExtensionFilter.svelte';
 	import IgnorePatterns from './IgnorePatterns.svelte';
@@ -65,6 +69,13 @@
 
 	let showFilters = $state(true);
 
+	let historyItems: SearchHistoryItem[] = $state([]);
+	let suggestionItems: SearchSuggestionItem[] = $state([]);
+	let historyLoading = $state(false);
+	let historyError = $state('');
+
+	let snapshotSearchId: string | null = $state(null);
+
 	// 검색 AbortController
 	let abortController: AbortController | null = null;
 
@@ -83,6 +94,20 @@
 	// ────────────────────────────────────────────────────────────
 	// 초기화
 	// ────────────────────────────────────────────────────────────
+	async function refreshHistory() {
+		historyLoading = true;
+		historyError = '';
+		try {
+			const [h, s] = await Promise.all([getHistory(20), getSuggestions(10)]);
+			historyItems = h;
+			suggestionItems = s;
+		} catch (e) {
+			historyError = e instanceof Error ? e.message : '최근 검색/추천을 불러오지 못했습니다.';
+		} finally {
+			historyLoading = false;
+		}
+	}
+
 	onMount(async () => {
 		try {
 			presets = await getPresets();
@@ -90,6 +115,7 @@
 		try {
 			status = await getStatus();
 		} catch {}
+		await refreshHistory();
 	});
 
 	// ────────────────────────────────────────────────────────────
@@ -136,6 +162,7 @@
 	// ────────────────────────────────────────────────────────────
 	async function handleSearch() {
 		if (!query.trim() || loading) return;
+		snapshotSearchId = null;
 
 		// 이전 요청 취소 및 폴링 정리
 		abortController?.abort();
@@ -196,6 +223,9 @@
 					}
 				}, 200);
 			});
+
+			// 최근 검색/추천 갱신 (실패해도 검색 결과는 유지)
+			void refreshHistory();
 		} catch (err: unknown) {
 			clearPolling();
 			if (err instanceof Error && err.name === 'AbortError') return; // 취소됨
@@ -218,6 +248,60 @@
 		clearPolling();
 		loading = false;
 		pollStatus = '';
+	}
+
+	function applySearchRequestToForm(req: SearchRequest) {
+		query = req.query ?? '';
+		mode = req.mode ?? 'both';
+		regex = !!req.regex;
+		caseSensitive = !!req.case_sensitive;
+		path = Array.isArray(req.paths) && req.paths.length > 0 ? req.paths[0] : '';
+		extensions = Array.isArray(req.extensions) ? [...req.extensions] : [];
+		excludes = Array.isArray(req.excludes) ? [...req.excludes] : [];
+		selectedPresetId = req.preset ?? null;
+	}
+
+	function handleSuggestionClick(q: string) {
+		query = q;
+		handleSearch();
+	}
+
+	async function handleHistoryClick(item: SearchHistoryItem) {
+		// 진행 중 검색이 있으면 정리
+		abortController?.abort();
+		clearPolling();
+
+		loading = true;
+		error = '';
+		hasSearched = true;
+		pollStatus = '';
+		snapshotSearchId = item.search_id;
+
+		try {
+			applySearchRequestToForm(item.request);
+			const poll = await pollSearchResult(item.search_id);
+			if (poll.status === 'completed') {
+				if (poll.result) {
+					results = poll.result.results;
+					searchTimeMs = poll.result.search_time_ms;
+					truncated = poll.result.truncated;
+				} else {
+					results = [];
+				}
+			} else if (poll.status === 'failed') {
+				error = poll.error_message ?? '저장된 검색 결과를 불러오지 못했습니다.';
+				results = [];
+			} else {
+				error = `저장된 검색이 아직 완료되지 않았습니다: ${poll.status}`;
+				results = [];
+			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : '저장된 검색 결과를 불러오지 못했습니다.';
+			results = [];
+		} finally {
+			loading = false;
+			pollStatus = '';
+		}
 	}
 </script>
 
@@ -304,9 +388,42 @@
 		bind:regex
 		bind:caseSensitive
 		{loading}
+		{snapshotSearchId}
 		onsearch={handleSearch}
 		oncancel={handleCancel}
 	/>
+
+	<SearchHistoryBar
+		history={historyItems}
+		suggestions={suggestionItems}
+		loading={historyLoading}
+		error={historyError}
+		onsuggestion={handleSuggestionClick}
+		onhistory={handleHistoryClick}
+	/>
+
+	{#if snapshotSearchId}
+		<div class="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground flex items-center justify-between gap-3">
+			<div class="min-w-0">
+				<span class="font-medium text-foreground">저장 결과 보기</span>
+				<span class="ml-2 truncate">search_id: <code class="text-[11px]">{snapshotSearchId}</code></span>
+			</div>
+			<div class="flex items-center gap-2 shrink-0">
+				<button
+					onclick={() => (snapshotSearchId = null)}
+					class="rounded-md border border-border bg-background px-2.5 py-1 hover:bg-muted/40 transition-colors"
+				>
+					닫기
+				</button>
+				<button
+					onclick={handleSearch}
+					class="rounded-md bg-primary px-2.5 py-1 text-primary-foreground hover:opacity-90 transition-opacity"
+				>
+					다시 검색
+				</button>
+			</div>
+		</div>
+	{/if}
 
 	<!-- 필터 영역 (접기/펼치기) -->
 	<div class="rounded-lg border border-border bg-card">

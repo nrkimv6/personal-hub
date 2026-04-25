@@ -41,9 +41,11 @@ from app.modules.file_search.schemas import (
     OpenFileRequest,
     PresetResponse,
     SearchAcceptedResponse,
+    SearchHistoryItem,
     SearchPollResponse,
     SearchRequest,
     SearchResponse,
+    SearchSuggestionItem,
     StatusResponse,
 )
 from app.modules.file_search.services.everything import EverythingService
@@ -146,6 +148,34 @@ async def get_search_result(search_id: str, db: Session = Depends(get_db)):
         result=result,
         error_message=req.error_message,
     )
+
+
+# ============================================================
+# GET /history — 최근 검색 이력
+# ============================================================
+
+
+@router.get("/history", response_model=List[SearchHistoryItem])
+async def get_search_history(
+    limit: int = Query(20, ge=1, le=100, description="반환할 최근 이력 개수"),
+    db: Session = Depends(get_db),
+):
+    """최근 검색 이력 (completed 스냅샷 기반)."""
+    return _service.get_history(db=db, limit=limit, origin="file-search")
+
+
+# ============================================================
+# GET /suggestions — 검색어 추천
+# ============================================================
+
+
+@router.get("/suggestions", response_model=List[SearchSuggestionItem])
+async def get_search_suggestions(
+    limit: int = Query(10, ge=1, le=50, description="반환할 추천 검색어 개수"),
+    db: Session = Depends(get_db),
+):
+    """검색어 추천 (completed 이력 집계)."""
+    return _service.get_suggestions(db=db, limit=limit, origin="file-search")
 
 
 # ============================================================

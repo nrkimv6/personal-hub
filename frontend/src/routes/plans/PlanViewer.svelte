@@ -2,8 +2,7 @@
 	import { onMount } from 'svelte';
 	import { devRunnerPlanApi } from '$lib/api/dev-runner';
 	import { planRecordsApi, type PlanRecord } from '$lib/api/plan-records';
-	import { renderMarkdown } from '../notes/utils/markdown';
-	import 'highlight.js/styles/github.css';
+	import MarkdownContent from '$lib/components/markdown/MarkdownContent.svelte';
 
 	interface Props {
 		filePath: string;
@@ -12,7 +11,7 @@
 
 	let { filePath, recordId }: Props = $props();
 
-	let html = $state('');
+	let content = $state('');
 	let loading = $state(false);
 	let error = $state('');
 
@@ -24,11 +23,11 @@
 		if (!path) return;
 		loading = true;
 		error = '';
-		html = '';
+		content = '';
 		try {
 			const encoded = btoa(unescape(encodeURIComponent(path)));
 			const res = await devRunnerPlanApi.content(encoded);
-			html = renderMarkdown(res.content);
+			content = res.content;
 		} catch (e: any) {
 			error = e?.message ?? '내용을 불러오지 못했습니다.';
 		} finally {
@@ -110,7 +109,7 @@
 	{/if}
 
 	<!-- 마크다운 내용 -->
-	<div class="prose prose-sm overflow-auto max-h-[60vh] px-1">{@html html}</div>
+	<MarkdownContent content={content} class="overflow-auto max-h-[60vh] px-1" />
 
 	<!-- AI 제안 카드 -->
 	{#if suggestion}

@@ -308,3 +308,175 @@ class TestBrowseEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["directories"] == []
+
+
+# ── history / suggestions 엔드포인트 ─────────────────────────────────────
+
+class TestHistorySuggestions:
+    def test_history_excludes_plan_quick(self, client):
+        """Right: GET /history는 origin=file-search completed만 반환."""
+        from app.database import SessionLocal
+        from app.models.file_search_request import FileSearchRequest
+        from app.modules.file_search.schemas import FileMatch, SearchResponse
+
+        db = SessionLocal()
+        try:
+            mock_result = SearchResponse(
+                results=[FileMatch(file_path="D:\\work\\a.md", file_name="a.md")],
+                total_count=1,
+                search_time_ms=10,
+                mode="content",
+                truncated=False,
+            )
+            req_file_search = FileSearchRequest(
+                search_id="hist-file-search",
+                status=FileSearchRequest.STATUS_COMPLETED,
+                created_at="2026-04-25 21:00:00",
+                request_json=json.dumps({
+                    "query": "Alpha",
+                    "origin": "file-search",
+                    "mode": "content",
+                    "regex": False,
+                    "case_sensitive": False,
+                    "paths": [],
+                    "extensions": [],
+                    "excludes": [],
+                    "preset": None,
+                    "max_results": 100,
+                    "context_lines": 2,
+                }),
+                result_json=mock_result.model_dump_json(),
+                search_time_ms=10,
+            )
+            req_plan_quick = FileSearchRequest(
+                search_id="hist-plan-quick",
+                status=FileSearchRequest.STATUS_COMPLETED,
+                created_at="2026-04-25 21:01:00",
+                request_json=json.dumps({
+                    "query": "Alpha",
+                    "origin": "plan-quick",
+                    "mode": "content",
+                    "regex": False,
+                    "case_sensitive": False,
+                    "paths": [],
+                    "extensions": [],
+                    "excludes": [],
+                    "preset": None,
+                    "max_results": 100,
+                    "context_lines": 2,
+                }),
+                result_json=mock_result.model_dump_json(),
+                search_time_ms=10,
+            )
+            db.add(req_file_search)
+            db.add(req_plan_quick)
+            db.commit()
+        finally:
+            db.close()
+
+        resp = client.get("/api/v1/file-search/history?limit=10")
+        assert resp.status_code == 200
+        data = resp.json()
+        ids = [x["search_id"] for x in data]
+        assert "hist-file-search" in ids
+        assert "hist-plan-quick" not in ids
+        item = next(x for x in data if x["search_id"] == "hist-file-search")
+        assert item["origin"] == "file-search"
+        assert item["request"]["origin"] == "file-search"
+        assert item["query"] == "Alpha"
+        assert item["total_count"] == 1
+        assert "a.md" in item["sample_files"]
+
+        # 정리
+        db = SessionLocal()
+        try:
+            db.query(FileSearchRequest).filter(
+                FileSearchRequest.search_id.in_(["hist-file-search", "hist-plan-quick"])
+            ).delete(synchronize_session=False)
+            db.commit()
+        finally:
+            db.close()
+
+    def test_suggestions_normalizes_and_excludes_plan_quick(self, client):
+        """Right: GET /suggestions는 빈도 desc + 최근 사용 desc 정렬, plan-quick 제외."""
+        from app.database import SessionLocal
+        from app.models.file_search_request import FileSearchRequest
+
+        query_base = "hello___UNITTEST__2026-04-25"
+        file_search_count = 40
+        plan_quick_count = 10
+
+        db = SessionLocal()
+        try:
+            rows = []
+            for i in range(file_search_count):
+                rows.append(
+                    FileSearchRequest(
+                        search_id=f"sug-fs-{i}",
+                        status=FileSearchRequest.STATUS_COMPLETED,
+                        created_at=f"2026-04-25 10:{i:02d}:00",
+                        request_json=json.dumps({
+                            "query": query_base if i % 2 == 0 else query_base.upper(),
+                            "origin": "file-search",
+                            "mode": "both",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [],
+                            "extensions": [],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }),
+                        result_json="{}",
+                        search_time_ms=1,
+                    )
+                )
+
+            for i in range(plan_quick_count):
+                rows.append(
+                    FileSearchRequest(
+                        search_id=f"sug-pq-{i}",
+                        status=FileSearchRequest.STATUS_COMPLETED,
+                        created_at=f"2026-04-25 10:{50 + i:02d}:00",
+                        request_json=json.dumps({
+                            "query": query_base,
+                            "origin": "plan-quick",
+                            "mode": "both",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [],
+                            "extensions": [],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }),
+                        result_json="{}",
+                        search_time_ms=1,
+                    )
+                )
+
+            for r in rows:
+                db.add(r)
+            db.commit()
+        finally:
+            db.close()
+
+        resp = client.get("/api/v1/file-search/suggestions?limit=50")
+        assert resp.status_code == 200
+        data = resp.json()
+        item = next((x for x in data if x["query"].lower() == query_base.lower()), None)
+        assert item is not None
+        assert item["count"] == file_search_count
+        assert item["last_used_at"] == "2026-04-25 10:39:00"
+
+        # 정리
+        db = SessionLocal()
+        try:
+            db.query(FileSearchRequest).filter(
+                FileSearchRequest.search_id.like("sug-fs-%") | FileSearchRequest.search_id.like("sug-pq-%")
+            ).delete(synchronize_session=False)
+            db.commit()
+        finally:
+            db.close()

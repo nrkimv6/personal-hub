@@ -5,6 +5,9 @@
   import MemoEditor from './MemoEditor.svelte';
   import PlanViewer from './PlanViewer.svelte';
 
+  export let focusPath: string | null = null;
+  export let onFocusConsumed: (() => void) | null = null;
+
   // ── 목록 상태 ──────────────────────────────────────────────
   let records: PlanRecord[] = [];
   let loading = true;
@@ -217,6 +220,26 @@
   function selectRecord(record: PlanRecord) {
     selectedRecord = selectedRecord?.id === record.id ? null : record;
     detailTab = 'content';
+  }
+
+  // 외부 quick search 포커싱: file_path로 record get_or_create 후 자동 선택
+  let lastFocusPath: string | null = null;
+  $: if (focusPath && focusPath !== lastFocusPath) {
+    lastFocusPath = focusPath;
+    void (async () => {
+      try {
+        const record = await planRecordsApi.byPath(focusPath);
+        selectedRecord = record;
+        detailTab = 'content';
+        if (!records.some((r) => r.id === record.id)) {
+          records = [record, ...records];
+        }
+      } catch (e) {
+        error = e instanceof Error ? e.message : '계획서를 열지 못했습니다.';
+      } finally {
+        onFocusConsumed?.();
+      }
+    })();
   }
 
   function formatDate(iso: string | null) {

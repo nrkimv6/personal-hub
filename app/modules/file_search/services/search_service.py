@@ -7,6 +7,7 @@ both 모드: file_path 기준 중복 제거 — content 매칭 파일은 matches
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -15,14 +16,17 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.models.file_search_request import FileSearchRequest
 from app.modules.file_search.schemas import (
     BrowseResponse,
     ContentMatch,
     DirectoryItem,
     FileMatch,
     FilePreviewResponse,
+    SearchHistoryItem,
     SearchRequest,
     SearchResponse,
+    SearchSuggestionItem,
     StatusResponse,
 )
 from app.modules.file_search.services.everything import EverythingService
@@ -100,6 +104,170 @@ class SearchService:
             mode=request.mode,
             truncated=truncated,
         )
+
+    @staticmethod
+    def _safe_json_loads(raw: Optional[str]) -> Optional[dict]:
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _normalize_query(query: str) -> str:
+        # Normalize for suggestions: ignore case and collapse whitespace.
+        return " ".join(query.lower().split())
+
+    def get_history(self, db: Session, limit: int = 20, origin: str = "file-search") -> List[SearchHistoryItem]:
+        """최근 검색 이력 (저장된 스냅샷 기반).
+
+        - v1: request_json/result_json 파싱 기반, 별도 마이그레이션 없음
+        - completed만 반환 (UI에서 스냅샷 복원용)
+        """
+        scan_limit = min(max(limit * 5, limit), 500)
+        rows = (
+            db.query(FileSearchRequest)
+            .filter(FileSearchRequest.status == FileSearchRequest.STATUS_COMPLETED)
+            .order_by(FileSearchRequest.created_at.desc())
+            .limit(scan_limit)
+            .all()
+        )
+
+        items: List[SearchHistoryItem] = []
+        for row in rows:
+            req_data = self._safe_json_loads(row.request_json)
+            if not req_data:
+                continue
+            try:
+                request = SearchRequest(**req_data)
+            except Exception:
+                continue
+
+            if origin and request.origin != origin:
+                continue
+
+            query = request.query.strip()
+            if not query:
+                continue
+
+            result_data = self._safe_json_loads(row.result_json) if row.result_json else None
+            total_count = 0
+            sample_files: List[str] = []
+            if result_data:
+                try:
+                    total_count = int(result_data.get("total_count") or 0)
+                except (TypeError, ValueError):
+                    total_count = 0
+
+                raw_results = result_data.get("results") or []
+                if isinstance(raw_results, list):
+                    for r in raw_results[:10]:
+                        if not isinstance(r, dict):
+                            continue
+                        name = r.get("file_name")
+                        if not name:
+                            fp = r.get("file_path") or ""
+                            name = os.path.basename(fp) if fp else ""
+                        if name:
+                            sample_files.append(str(name))
+
+            # Deduplicate while preserving order.
+            dedup: List[str] = []
+            seen = set()
+            for name in sample_files:
+                if name in seen:
+                    continue
+                seen.add(name)
+                dedup.append(name)
+            sample_files = dedup[:5]
+
+            search_time_ms = 0
+            try:
+                search_time_ms = int(row.search_time_ms or 0)
+            except (TypeError, ValueError):
+                search_time_ms = 0
+            if search_time_ms == 0 and result_data:
+                try:
+                    search_time_ms = int(result_data.get("search_time_ms") or 0)
+                except (TypeError, ValueError):
+                    search_time_ms = 0
+
+            items.append(
+                SearchHistoryItem(
+                    search_id=row.search_id,
+                    request=request,
+                    query=query,
+                    mode=request.mode,
+                    created_at=row.created_at,
+                    total_count=total_count,
+                    search_time_ms=search_time_ms,
+                    sample_files=sample_files,
+                    origin=request.origin,
+                )
+            )
+            if len(items) >= limit:
+                break
+
+        return items
+
+    def get_suggestions(self, db: Session, limit: int = 10, origin: str = "file-search") -> List[SearchSuggestionItem]:
+        """검색어 추천 (최근 completed 이력 기반)."""
+        scan_limit = 2000
+        rows = (
+            db.query(FileSearchRequest)
+            .filter(FileSearchRequest.status == FileSearchRequest.STATUS_COMPLETED)
+            .order_by(FileSearchRequest.created_at.desc())
+            .limit(scan_limit)
+            .all()
+        )
+
+        buckets: dict[str, dict] = {}
+        for row in rows:
+            req_data = self._safe_json_loads(row.request_json)
+            if not req_data:
+                continue
+
+            row_origin = req_data.get("origin") or "file-search"
+            if row_origin not in ("file-search", "plan-quick"):
+                row_origin = "file-search"
+            if origin and row_origin != origin:
+                continue
+
+            query_raw = (req_data.get("query") or "").strip()
+            if not query_raw:
+                continue
+
+            norm = self._normalize_query(query_raw)
+            if not norm:
+                continue
+
+            bucket = buckets.get(norm)
+            if not bucket:
+                buckets[norm] = {
+                    "query": query_raw,
+                    "count": 1,
+                    "last_used_at": row.created_at or "",
+                }
+                continue
+
+            bucket["count"] += 1
+            created_at = row.created_at or ""
+            if created_at and created_at >= bucket["last_used_at"]:
+                bucket["last_used_at"] = created_at
+                bucket["query"] = query_raw
+
+        suggestions = [
+            SearchSuggestionItem(
+                query=v["query"],
+                count=int(v["count"]),
+                last_used_at=v["last_used_at"],
+            )
+            for v in buckets.values()
+        ]
+        suggestions.sort(key=lambda s: (s.count, s.last_used_at), reverse=True)
+        return suggestions[:limit]
 
     # ------------------------------------------------------------------
     # 파일 열기

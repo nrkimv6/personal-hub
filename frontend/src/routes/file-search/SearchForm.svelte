@@ -4,6 +4,7 @@
 
 	interface Props {
 		query: string;
+		snapshotSearchId?: string | null;
 		mode: SearchMode;
 		regex: boolean;
 		caseSensitive: boolean;
@@ -14,6 +15,7 @@
 
 	let {
 		query = $bindable(''),
+		snapshotSearchId = null,
 		mode = $bindable('both'),
 		regex = $bindable(false),
 		caseSensitive = $bindable(false),
@@ -92,6 +94,11 @@
 <svelte:document onclick={handleDocClick} />
 
 <div class="search-form-container space-y-3">
+	{#if snapshotSearchId}
+		<div class="text-xs text-muted-foreground">
+			저장 결과 보기 중입니다. 다시 검색하려면 검색 버튼을 누르세요.
+		</div>
+	{/if}
 	<!-- 검색어 input -->
 	<div class="relative">
 		<div class="flex gap-2">
