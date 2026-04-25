@@ -261,3 +261,63 @@ class TestDbDirEnvVar:
         # makedirs 호출
         new_dir.mkdir(parents=True, exist_ok=True)
         assert new_dir.exists()
+
+
+class TestHttpRunnerMarkerContract:
+    """test_http_runner.py의 http marker 계약 고정 guard."""
+
+    _TARGET = "tests/dev_runner/test_http_runner.py"
+
+    _HTTP_CASES = [
+        "test_cleanup_stale_endpoint_returns_200",
+        "test_cleanup_stale_endpoint_empty_returns_200",
+        "test_cleanup_stale_endpoint_idempotent",
+        "test_cleanup_stale_response_schema",
+        "test_delete_tab_removes_runner_from_list",
+        "test_cleanup_stale_preserves_then_delete_tab_removes",
+        "test_cleanup_stale_and_dismiss_order_is_consistent",
+        "test_logs_history_visible_only_returns_user_runner",
+        "test_logs_history_visible_only_excludes_tc_runner",
+        "test_logs_history_default_not_visible_only",
+    ]
+
+    def test_http_marker_collects_all_testclient_cases(self):
+        """TC-Right: `-m http` collect-only에서 TestClient 10건이 모두 수집된다."""
+        result = _run_collect_only(self._TARGET, "http")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._HTTP_CASES:
+            assert name in combined, f"'{name}' not found in -m http collect: {combined[:800]}"
+
+    def test_default_addopts_excludes_testclient_cases(self):
+        """TC-Boundary: 기본 addopts 필터에서 TestClient 10건이 모두 제외된다."""
+        result = _run_collect_only(self._TARGET, "not http and not http_live and not integration and not e2e")
+        combined = result.stdout + result.stderr
+        # exit 5 = no tests collected — all deselected, which is the correct outcome
+        assert result.returncode in (0, 5), combined
+        for name in self._HTTP_CASES:
+            assert name not in combined, f"TestClient case '{name}' should NOT appear in default collect: {combined[:800]}"
+
+
+class TestDevguideStalenessMarkerContract:
+    """test_devguide_staleness.py의 http marker 계약 고정 guard."""
+
+    _TARGET = "tests/dev_runner/test_devguide_staleness.py"
+    _CASE = "test_e2e_guide_status_with_history"
+
+    def test_e2e_guide_status_with_history_collects_under_http(self):
+        """TC-Right: `-m http` collect-only에서 test_e2e_guide_status_with_history가 수집된다."""
+        result = _run_collect_only(self._TARGET, "http", "-k", self._CASE)
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert self._CASE in combined, f"'{self._CASE}' not found in -m http collect: {combined[:800]}"
+
+    def test_e2e_guide_status_with_history_excluded_from_default(self):
+        """TC-Boundary: 기본 addopts marker 식에서 test_e2e_guide_status_with_history가 제외된다."""
+        result = _run_collect_only(self._TARGET, "not http and not http_live and not integration and not e2e", "-k", self._CASE)
+        combined = result.stdout + result.stderr
+        # exit 5 = no tests collected — all deselected, which is the correct outcome
+        assert result.returncode in (0, 5), combined
+        assert self._CASE not in combined or "no tests collected" in combined, (
+            f"'{self._CASE}' should NOT appear in default collect: {combined[:800]}"
+        )

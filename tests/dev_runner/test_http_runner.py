@@ -7,8 +7,6 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
-from app.main import app
-
 BASE_URL = "/api/v1/dev-runner"
 
 
@@ -21,6 +19,7 @@ def dev_runner_config_isolation(tmp_path):
 @pytest.fixture
 def client():
     """TestClient — DB/Redis 연결 없이 HTTP 레이어 테스트"""
+    from app.main import app
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -40,6 +39,7 @@ def _mock_cleanup_stale(cleaned_active: int = 0, cleaned_recent: int = 0, bugs: 
 
 
 class TestCleanupStaleEndpoint200:
+    pytestmark = pytest.mark.http
     """POST /runners/cleanup-stale → 200 + success: true 검증"""
 
     def test_cleanup_stale_endpoint_returns_200(self, client):
@@ -67,6 +67,7 @@ class TestCleanupStaleEndpoint200:
 
 
 class TestCleanupStaleEndpointIdempotent:
+    pytestmark = pytest.mark.http
     """두 번 호출해도 동일한 응답 확인 (멱등성 검증)"""
 
     def test_cleanup_stale_endpoint_idempotent(self, client):
@@ -109,6 +110,7 @@ class TestCleanupStaleEndpointIdempotent:
 
 
 class TestDismissRunnerTabContract:
+    pytestmark = pytest.mark.http
     """DELETE /runners/{runner_id}/tab 계약 검증"""
 
     def test_delete_tab_removes_runner_from_list(self, client):
@@ -226,6 +228,7 @@ class TestDismissRunnerTabContract:
 # ──────────────────────────────────────────────
 
 class TestHttpLogHistoryVisibleOnly:
+    pytestmark = pytest.mark.http
     """GET /logs/history?visible_only=true — stopped user 보존 계약 TC"""
 
     def test_logs_history_visible_only_returns_user_runner(self, client):

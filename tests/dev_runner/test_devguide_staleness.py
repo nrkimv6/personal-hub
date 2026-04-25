@@ -356,6 +356,7 @@ def api_client_staleness(test_db_engine):
     app.dependency_overrides.clear()
 
 
+@pytest.mark.http
 def test_e2e_guide_status_with_history(api_client_staleness):
     """T4: GET /api/v1/plans/records/guide-status?include_history=true → 200 + staleness_history 필드"""
     resp = api_client_staleness.get("/api/v1/plans/records/guide-status?include_history=true")
