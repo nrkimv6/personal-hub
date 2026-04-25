@@ -32,6 +32,7 @@
 		"@capacitor/cli": "^8.0.0",
 		"@capacitor/core": "^8.0.0",
 		"@tailwindcss/postcss": "^4.1.17",
+		"@tailwindcss/typography": "^0.5.19",
 		"@types/dompurify": "^3.0.5",
 		"chart.js": "^4.5.1",
 		"dompurify": "^3.3.1",

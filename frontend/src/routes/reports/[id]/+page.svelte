@@ -5,6 +5,7 @@
 	import { Button } from '$lib/components/ui';
 	import { isAdmin } from '$lib/stores/auth';
   import { fetchWithTimeout } from '$lib/api/client';
+	import MarkdownContent from '$lib/components/markdown/MarkdownContent.svelte';
 
 	type Report = {
 		id: number;
@@ -180,9 +181,11 @@
 
 			<!-- 본문 -->
 			<div class="p-6">
-				<div class="prose dark:prose-invert max-w-none">
+				{#if report.format === 'markdown'}
+					<MarkdownContent content={report.content} variant="document" />
+				{:else}
 					<pre class="whitespace-pre-wrap font-sans text-sm text-neutral-700 dark:text-neutral-300 bg-neutral-50 dark:bg-neutral-900 rounded-lg p-4 overflow-x-auto">{report.content}</pre>
-				</div>
+				{/if}
 			</div>
 
 			<!-- 통계 (있는 경우) -->

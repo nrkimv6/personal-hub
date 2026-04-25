@@ -219,7 +219,7 @@
       {/if}
       <div
         bind:this={contentEl}
-        class="prose-notes"
+        class="prose prose-sm dark:prose-invert max-w-none leading-relaxed"
       >
         <!-- eslint-disable-next-line svelte/no-at-html-tags -->
         {@html renderedHtml}

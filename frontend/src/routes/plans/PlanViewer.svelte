@@ -109,7 +109,7 @@
 	{/if}
 
 	<!-- 마크다운 내용 -->
-	<MarkdownContent content={content} class="overflow-auto max-h-[60vh] px-1" />
+	<MarkdownContent content={content} variant="document" class="overflow-auto max-h-[60vh]" />
 
 	<!-- AI 제안 카드 -->
 	{#if suggestion}

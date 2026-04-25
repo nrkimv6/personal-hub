@@ -313,7 +313,7 @@
 							{/if}
 						</div>
 						{#if previewCache[file.file_path].extension === 'md' && !previewRawByPath[file.file_path]}
-							<MarkdownContent content={previewCache[file.file_path].content} class="max-h-[320px] overflow-auto px-3 py-2" />
+							<MarkdownContent content={previewCache[file.file_path].content} variant="compact" class="max-h-[320px] overflow-auto px-3 py-2" />
 						{:else}
 							<pre class="max-h-[320px] overflow-auto whitespace-pre px-3 py-2 font-mono text-xs">{previewCache[file.file_path].content}</pre>
 						{/if}
