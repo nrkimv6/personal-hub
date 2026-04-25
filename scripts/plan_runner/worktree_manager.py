@@ -174,7 +174,7 @@ class WorktreeManager:
             worktree_path = base_dir / runner_id
             branch = f"runner/{runner_id}"
         # Phase 1: 같은 branch가 기존 worktree에 등록되어 있으면 위치 무관 재사용
-        for _w in WorktreeManager.list_worktrees():
+        for _w in WorktreeManager.list_worktrees(cwd=str(base_dir.parent)):
             if _w.get("branch") == branch:
                 _existing = Path(_w["path"])
                 if WorktreeManager.validate(_existing):
@@ -440,11 +440,16 @@ class WorktreeManager:
                     pass
 
     @staticmethod
-    def list_worktrees() -> list:
-        """git worktree list --porcelain ?뚯떛"""
+    def list_worktrees(cwd: Optional[str] = None) -> list:
+        """git worktree list --porcelain ?뚯떛.
+
+        cwd=None?대㈃ subprocess ?꾩옱 ?붾젆?좊━瑜?洹몃?濡??ъ슜?쒕떎.
+        ?ㅽ뻾 ?⑥쐞媛 ?ㅻⅨ git repo濡?諛붾? ??寃쎌슦 ?몄텧痢??쒕챸?쟻 cwd瑜?꽆寃⑥빞 ?쒕떎.
+        """
         try:
             result = _run_git(
                 ["worktree", "list", "--porcelain"],
+                cwd=cwd,
                 capture_output=True, text=True, encoding="utf-8"
             )
             worktrees = []

@@ -50,9 +50,6 @@ class DevRunnerConfig(BaseSettings):
     # 동시 실행 가능한 최대 runner 수
     MAX_CONCURRENT_RUNNERS: int = 3
 
-    # worktree 기본 디렉토리
-    WORKTREE_BASE_DIR: Path = Path(r"D:\work\project\tools\monitor-page\.worktrees")
-
     class Config:
         env_prefix = "DEV_RUNNER_"
         case_sensitive = True

@@ -109,6 +109,16 @@ class TestWorktreeManagerCreate:
         runner_ids = [w.get("runner_id") for w in worktrees]
         assert "listtest" in runner_ids
 
+    def test_create_passes_correct_cwd_to_list_worktrees_R(self, worktrees_dir):
+        """R: create()는 branch 재사용 조회를 repo root cwd로 고정한다."""
+        from unittest.mock import patch
+        base_dir, repo = worktrees_dir
+
+        with patch.object(WorktreeManager, "list_worktrees", return_value=[]) as mock_list:
+            WorktreeManager.create("cwd-pass", base_dir)
+
+        assert mock_list.call_args.kwargs["cwd"] == str(repo)
+
     def test_correct_conformance_path_pattern(self, worktrees_dir):
         """TC-CORRECT-Conformance: return path follows {base_dir}/{runner_id} pattern"""
         base_dir, repo = worktrees_dir
@@ -369,6 +379,20 @@ class TestWorktreeManagerList:
             assert "path" in wt
             assert "branch" in wt
             assert "runner_id" in wt
+
+    def test_list_worktrees_uses_explicit_cwd_R(self, worktrees_dir):
+        """R: list_worktrees(cwd=...)는 _run_git에 같은 cwd를 전달한다."""
+        from unittest.mock import patch, MagicMock
+        base_dir, repo = worktrees_dir
+
+        fake_result = MagicMock(
+            stdout=f"worktree {repo}\nbranch refs/heads/main\n",
+            returncode=0,
+        )
+        with patch("worktree_manager._run_git", return_value=fake_result) as mock_run_git:
+            WorktreeManager.list_worktrees(cwd=str(repo))
+
+        assert mock_run_git.call_args.kwargs["cwd"] == str(repo)
 
 
 # ── TestMergeToMainStash: Phase 2 stash-pop verification ────────────────────────
@@ -709,6 +733,34 @@ class TestWorktreeManagerT3Real:
         nested_base = tmp_git_repo / ".worktrees" / "inner" / ".worktrees"
         with pytest.raises(WorktreeError, match="nested .worktrees"):
             WorktreeManager.create("real-nested-guard", nested_base)
+
+    def test_list_worktrees_different_repo_isolation_T3(self, tmp_path):
+        """T3: explicit cwd로 다른 repo worktree 목록이 섞이지 않는다."""
+        repo_a = tmp_path / "repo_a"
+        repo_b = tmp_path / "repo_b"
+
+        for repo in (repo_a, repo_b):
+            subprocess.run(["git", "init", "-b", "main", str(repo)], capture_output=True)
+            subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(repo))
+            subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(repo))
+            subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(repo))
+            (repo / "README.md").write_text(repo.name)
+            subprocess.run(["git", "add", "."], capture_output=True, cwd=str(repo))
+            subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(repo))
+            (repo / ".worktrees").mkdir(exist_ok=True)
+
+        WorktreeManager.create("repo-a-only", repo_a / ".worktrees")
+        WorktreeManager.create("repo-b-only", repo_b / ".worktrees")
+
+        worktrees_a = WorktreeManager.list_worktrees(cwd=str(repo_a))
+        worktrees_b = WorktreeManager.list_worktrees(cwd=str(repo_b))
+
+        runner_ids_a = {w.get("runner_id") for w in worktrees_a if w.get("runner_id")}
+        runner_ids_b = {w.get("runner_id") for w in worktrees_b if w.get("runner_id")}
+        assert "repo-a-only" in runner_ids_a
+        assert "repo-b-only" not in runner_ids_a
+        assert "repo-b-only" in runner_ids_b
+        assert "repo-a-only" not in runner_ids_b
 
 
 def _list_worktrees_in_repo(repo: Path) -> list:
