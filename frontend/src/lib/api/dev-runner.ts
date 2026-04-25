@@ -758,3 +758,40 @@ export const devRunnerWorkflowApi = {
 	resetAllOrphans: (): Promise<{ reset_count: number }> =>
 		devRunnerRequest<{ reset_count: number }>('/workflows/reset-all-orphans', { method: 'POST' }),
 };
+
+// ─── Daily Reports ─────────────────────────────────────────────────────────
+
+export interface DailyReportSummary {
+	date: string;
+	generated_at?: string;
+	summary: { total: number; completed: number; failed: number; skipped: number };
+	html_available: boolean;
+}
+
+export interface DailyReportRun {
+	plan_id: string;
+	scope: string;
+	status: string;
+	merged: boolean;
+	changed_files: string[];
+	tc_results: Record<string, unknown>;
+	suspicions: string[];
+	log_path: string;
+	started_at: string;
+	ended_at: string;
+}
+
+export interface DailyReport {
+	date: string;
+	generated_at: string;
+	summary: DailyReportSummary['summary'];
+	runs: DailyReportRun[];
+}
+
+export const dailyReportApi = {
+	list: (): Promise<DailyReportSummary[]> =>
+		devRunnerRequest<DailyReportSummary[]>('/daily-reports'),
+
+	get: (reportDate: string): Promise<DailyReport> =>
+		devRunnerRequest<DailyReport>(`/daily-reports/${reportDate}`),
+};

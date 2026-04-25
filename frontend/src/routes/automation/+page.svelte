@@ -7,12 +7,13 @@
 	import type { FileMatch } from '$lib/types/fileSearch';
 	import DevRunnerTab from './DevRunnerTab.svelte';
 	import GitReposTab from './GitReposTab.svelte';
+	import DailyReportTab from './DailyReportTab.svelte';
 	import PlanListTab from '../plans/PlanListTab.svelte';
 	import ArchiveTab from '../plans/ArchiveTab.svelte';
 	import HistoryTab from '../plans/HistoryTab.svelte';
 	import WorktreeTab from '../plans/WorktreeTab.svelte';
 
-	type MainTab = 'dev-runner' | 'git-repos' | 'plans';
+	type MainTab = 'dev-runner' | 'git-repos' | 'plans' | 'daily-report';
 	let mainTab = $state<MainTab>('dev-runner');
 	let initialPlan = $state('');
 	let initialRunner = $state('');
@@ -51,6 +52,7 @@
 		{ id: 'dev-runner', label: 'Dev Runner' },
 		{ id: 'git-repos', label: 'Git 관리' },
 		{ id: 'plans', label: '계획서' },
+		{ id: 'daily-report', label: '일일 보고서' },
 	];
 
 	const plansSubTabs = [
@@ -241,6 +243,10 @@
 						<WorktreeTab />
 					{/if}
 				</div>
+			</div>
+		{:else if mainTab === 'daily-report'}
+			<div class="overflow-auto h-full">
+				<DailyReportTab />
 			</div>
 		{/if}
 	</div>
