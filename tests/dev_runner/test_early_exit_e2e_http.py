@@ -27,9 +27,6 @@ STATUS_PATH = "/api/v1/system/status"
 HTTP_TIMEOUT = float(os.environ.get("ADMIN_SERVER_TIMEOUT", "30"))
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-pytestmark = pytest.mark.http
-
-
 # ─────────────────────────────────────────────────────────────────
 #  Live server helpers
 # ─────────────────────────────────────────────────────────────────
@@ -73,6 +70,7 @@ def _git_worktree_branches() -> set[str]:
 # ─────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.http_live
 class TestRunApiEarlyExitE2E:
     """T4-1: plan-runner subprocess 즉시 실패 시 진단 정보 검증"""
 
@@ -146,6 +144,7 @@ class TestRunApiEarlyExitE2E:
 # ─────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.http
 class TestRunApiMemoryRejectE2E:
     """T4-2: 메모리 부족 상태 mock → 거부 응답 + 사유 메시지 검증"""
 
@@ -217,6 +216,7 @@ class TestRunApiMemoryRejectE2E:
 # ─────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.http_live
 class TestRunApiEnvHeaderHttp:
     """T5-1: POST /run 후 logs/recent 에서 [ENV] 헤더 줄 존재 확인"""
 
@@ -319,6 +319,7 @@ class TestRunApiEnvHeaderHttp:
 # ─────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.http_live
 class TestRunnersErrorFieldDiagnostic:
     """T5-2: GET /runners 에서 실패 runner의 error 필드에 진단 메시지 포함 확인"""
 
