@@ -109,6 +109,10 @@
 	}
 
 	onMount(async () => {
+		if (window.matchMedia('(max-width: 639px)').matches) {
+			showFilters = false;
+		}
+
 		try {
 			presets = await getPresets();
 		} catch {}
@@ -475,7 +479,7 @@
 	</div>
 
 	<!-- 결과 영역 -->
-	<div class="flex-1 overflow-y-auto">
+	<div class="min-h-64 flex-1 overflow-y-auto sm:min-h-72">
 		{#if loading}
 			<!-- 폴링 상태 표시 -->
 			<div class="space-y-2">

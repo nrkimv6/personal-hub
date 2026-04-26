@@ -73,7 +73,7 @@
 		{:else if history.length === 0}
 			<div class="text-xs text-muted-foreground">최근 검색 이력이 없습니다.</div>
 		{:else}
-			<div class="space-y-2">
+			<div class="max-h-80 space-y-2 overflow-y-auto pr-1">
 				{#each history as h (h.search_id)}
 					<button
 						onclick={() => onhistory(h)}
