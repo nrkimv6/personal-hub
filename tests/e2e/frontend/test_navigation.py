@@ -272,10 +272,10 @@ class TestSidebar:
         """automation 진입 시 개발 작업 표면 문구가 보여야 한다."""
         _skip_admin_mode_if_public(system_mode)
         page.goto(f"{frontend_url}/automation")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
         _skip_if_frontend_error_title(page)
 
-        expect(page.locator("h1").first).to_contain_text("개발 작업")
+        expect(page.locator("main h1").first).to_contain_text("개발 작업")
 
     def test_dashboard_loads_after_restart_frontend_admin_e2e(
         self, page: Page, frontend_url: str, api_url: str, system_mode: str
