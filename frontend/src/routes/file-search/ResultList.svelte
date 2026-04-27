@@ -362,8 +362,8 @@
 		preview={fullPreview}
 		raw={!!previewRawByPath[fullPreviewPath]}
 		onClose={closeFullPreview}
-		onToggleRaw={() => toggleRawPreview(fullPreviewPath)}
-		onOpenFile={() => void handleOpenFile(fullPreviewPath)}
-		onCopyPath={() => void copyFilePath(fullPreviewPath)}
+		onToggleRaw={() => toggleRawPreview(fullPreview.file_path)}
+		onOpenFile={() => void handleOpenFile(fullPreview.file_path)}
+		onCopyPath={() => void copyFilePath(fullPreview.file_path)}
 	/>
 {/if}
