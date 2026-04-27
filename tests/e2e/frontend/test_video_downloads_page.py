@@ -25,7 +25,7 @@ def test_collect_video_tab_shows_instagram_option(page: Page, frontend_url: str,
     page.wait_for_load_state("networkidle")
     _skip_if_frontend_error_title(page)
 
-    expect(page.locator("h1")).to_contain_text(re.compile("비디오 다운로드"))
+    expect(page.get_by_role("heading", name="비디오 다운로드")).to_be_visible()
     page.locator("#typeFilter").select_option("instagram")
     assert page.locator("#typeFilter").input_value() == "instagram"
 

@@ -82,6 +82,8 @@ class TestCommandListenerRestartE2E:
             text=True,
             timeout=30,
             cwd=str(PROJECT_ROOT),
+            encoding="utf-8",
+            errors="replace",
         )
         # restart 명령이 성공적으로 요청됐거나 already restarted 응답
         assert result.returncode == 0, (
@@ -106,7 +108,12 @@ class TestCommandListenerRestartE2E:
 
         subprocess.run(
             [python, str(browser_workers), "restart-infra", "command_listener"],
-            capture_output=True, text=True, timeout=30, cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(PROJECT_ROOT),
+            encoding="utf-8",
+            errors="replace",
         )
 
         # PID 파일 갱신 대기 (최대 30초)
