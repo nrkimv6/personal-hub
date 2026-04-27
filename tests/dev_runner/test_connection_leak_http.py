@@ -199,7 +199,7 @@ def test_http_frontend_restart_frontend_admin_keeps_api_alive():
     )
 
 
-def test_http_frontend_restart_public_keeps_api_alive():
+def test_http_frontend_restart_frontend_public_keeps_api_alive():
     """restart-frontend(--public) 이후 public preview와 admin API가 함께 회복되어야 한다."""
     before = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=5)
     assert before.status_code == 200
