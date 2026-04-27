@@ -30,6 +30,8 @@ def test_worker_command_listener_check_imports_right():
         [_python(), str(SCRIPT_PATH), "--check-imports"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=str(REPO_ROOT),
         timeout=15,
     )
@@ -46,6 +48,8 @@ def test_worker_command_listener_check_imports_boundary_script_dir_cwd():
         [_python(), str(SCRIPT_PATH), "--check-imports"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=str(script_dir),
         timeout=15,
     )
@@ -60,6 +64,8 @@ def test_worker_command_listener_check_imports_error_no_modulenotfound():
         [_python(), str(SCRIPT_PATH), "--check-imports"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=str(REPO_ROOT),
         timeout=15,
     )
