@@ -225,33 +225,57 @@ class TestSidebar:
         page.wait_for_load_state("networkidle")
         expect(page).to_have_url(f"{frontend_url}/monitoring")
 
-    def test_sidebar_contains_mp4_gif_link(self, page: Page, frontend_url: str, system_mode: str):
-        """사이드바에 /mp4-gif 링크가 보여야 한다."""
+    def test_sidebar_contains_file_tools_link(self, page: Page, frontend_url: str, system_mode: str):
+        """사이드바에 파일 도구 링크가 보여야 한다."""
         _skip_admin_mode_if_public(system_mode)
         page.set_viewport_size({"width": 1280, "height": 720})
         page.goto(f"{frontend_url}/dashboard")
         page.wait_for_load_state("networkidle")
         _skip_if_frontend_error_title(page)
 
-        mp4_gif_link = page.locator("aside a[href='/mp4-gif']").first
-        if mp4_gif_link.count() == 0:
-            pytest.skip("현재 프런트 빌드에 /mp4-gif 사이드바 링크가 없음")
-        expect(mp4_gif_link).to_be_visible()
+        file_tools_link = page.locator("aside a[href='/file-search']").first
+        if file_tools_link.count() == 0:
+            pytest.skip("현재 프런트 빌드에 /file-search 사이드바 링크가 없음")
+        expect(file_tools_link).to_be_visible()
+        expect(file_tools_link).to_contain_text("파일 도구")
 
-    def test_sidebar_navigation_to_mp4_gif(self, page: Page, frontend_url: str, system_mode: str):
-        """사이드바에서 /mp4-gif 페이지로 이동할 수 있어야 한다."""
+    def test_sidebar_navigation_to_file_tools(self, page: Page, frontend_url: str, system_mode: str):
+        """사이드바에서 파일 도구 페이지로 이동할 수 있어야 한다."""
         _skip_admin_mode_if_public(system_mode)
         page.set_viewport_size({"width": 1280, "height": 720})
         page.goto(f"{frontend_url}/dashboard")
         page.wait_for_load_state("networkidle")
         _skip_if_frontend_error_title(page)
 
-        mp4_gif_link = page.locator("aside a[href='/mp4-gif']").first
-        if mp4_gif_link.count() == 0:
-            pytest.skip("현재 프런트 빌드에 /mp4-gif 사이드바 링크가 없음")
-        mp4_gif_link.click(timeout=5000)
+        file_tools_link = page.locator("aside a[href='/file-search']").first
+        if file_tools_link.count() == 0:
+            pytest.skip("현재 프런트 빌드에 /file-search 사이드바 링크가 없음")
+        file_tools_link.click(timeout=5000)
         page.wait_for_load_state("networkidle")
-        expect(page).to_have_url(f"{frontend_url}/mp4-gif")
+        expect(page).to_have_url(f"{frontend_url}/file-search")
+
+    def test_sidebar_contains_dev_work_label(self, page: Page, frontend_url: str, system_mode: str):
+        """사이드바에 개발 작업 라벨이 보여야 한다."""
+        _skip_admin_mode_if_public(system_mode)
+        page.set_viewport_size({"width": 1280, "height": 720})
+        page.goto(f"{frontend_url}/dashboard")
+        page.wait_for_load_state("networkidle")
+        _skip_if_frontend_error_title(page)
+
+        dev_work_link = page.locator("aside a[href='/automation']").first
+        if dev_work_link.count() == 0:
+            pytest.skip("현재 프런트 빌드에 /automation 사이드바 링크가 없음")
+        expect(dev_work_link).to_be_visible()
+        expect(dev_work_link).to_contain_text("개발 작업")
+
+    def test_automation_page_title_uses_dev_work(self, page: Page, frontend_url: str, system_mode: str):
+        """automation 진입 시 개발 작업 표면 문구가 보여야 한다."""
+        _skip_admin_mode_if_public(system_mode)
+        page.goto(f"{frontend_url}/automation")
+        page.wait_for_load_state("networkidle")
+        _skip_if_frontend_error_title(page)
+
+        expect(page.locator("h1").first).to_contain_text("개발 작업")
 
     def test_dashboard_loads_after_restart_frontend_admin_e2e(
         self, page: Page, frontend_url: str, api_url: str, system_mode: str

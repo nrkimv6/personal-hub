@@ -6,6 +6,11 @@ from playwright.sync_api import Page, expect
 pytestmark = pytest.mark.e2e
 
 
+def _goto_mp4_gif_tab(page: Page, frontend_url: str) -> None:
+    page.goto(f"{frontend_url}/file-search?tab=mp4-gif")
+    page.wait_for_load_state("networkidle")
+
+
 def _skip_if_frontend_error_title(page: Page) -> None:
     title = page.title() or ""
     if any(m in title for m in ("ENOENT:", "Vite", "Internal Server Error", "Error")):
@@ -18,15 +23,25 @@ def _skip_admin_mode_if_public(system_mode: str) -> None:
 
 
 class TestMp4GifPageLoad:
-    """메뉴 진입 시나리오: /mp4-gif 페이지 기본 요소 확인."""
+    """메뉴 진입 시나리오: 파일 도구 내부 MP4 -> GIF 탭 기본 요소 확인."""
 
-    def test_page_title_visible(self, page: Page, frontend_url: str, system_mode: str):
-        """시나리오: /mp4-gif 진입 시 페이지 제목이 보인다.
-        기대 요소: h1 또는 제목 영역에 'MP4' 또는 'GIF' 문자열이 포함된다.
-        """
+    def test_legacy_route_redirects_to_file_tools_tab(
+        self, page: Page, frontend_url: str, system_mode: str
+    ):
+        """시나리오: /mp4-gif 진입 시 파일 도구 탭으로 리다이렉트된다."""
         _skip_admin_mode_if_public(system_mode)
         page.goto(f"{frontend_url}/mp4-gif")
         page.wait_for_load_state("networkidle")
+        _skip_if_frontend_error_title(page)
+
+        expect(page).to_have_url(f"{frontend_url}/file-search?tab=mp4-gif")
+
+    def test_page_title_visible(self, page: Page, frontend_url: str, system_mode: str):
+        """시나리오: file-search 내부 mp4-gif 탭 진입 시 페이지 제목이 보인다.
+        기대 요소: h1 또는 제목 영역에 'MP4' 또는 'GIF' 문자열이 포함된다.
+        """
+        _skip_admin_mode_if_public(system_mode)
+        _goto_mp4_gif_tab(page, frontend_url)
         _skip_if_frontend_error_title(page)
 
         heading = page.locator("h1, h2").first
@@ -35,12 +50,11 @@ class TestMp4GifPageLoad:
         assert "MP4" in page_text or "GIF" in page_text, "페이지에 MP4/GIF 관련 제목이 없습니다."
 
     def test_file_input_visible(self, page: Page, frontend_url: str, system_mode: str):
-        """시나리오: /mp4-gif 진입 시 파일 선택 input이 보인다.
+        """시나리오: file-search 내부 mp4-gif 탭 진입 시 파일 선택 input이 보인다.
         기대 요소: input[type=file] 또는 파일 드롭존이 DOM에 존재한다.
         """
         _skip_admin_mode_if_public(system_mode)
-        page.goto(f"{frontend_url}/mp4-gif")
-        page.wait_for_load_state("networkidle")
+        _goto_mp4_gif_tab(page, frontend_url)
         _skip_if_frontend_error_title(page)
 
         file_input = page.locator("input[type='file']")
@@ -57,8 +71,7 @@ class TestMp4GifPageInteraction:
         기대 요소: 변환 시작 또는 Submit 버튼이 disabled 아님.
         """
         _skip_admin_mode_if_public(system_mode)
-        page.goto(f"{frontend_url}/mp4-gif")
-        page.wait_for_load_state("networkidle")
+        _goto_mp4_gif_tab(page, frontend_url)
         _skip_if_frontend_error_title(page)
 
         dummy_mp4 = tmp_path / "sample.mp4"
@@ -77,8 +90,7 @@ class TestMp4GifPageInteraction:
         기대 요소: 상태 카드에 queued 또는 running 텍스트가 포함된다.
         """
         _skip_admin_mode_if_public(system_mode)
-        page.goto(f"{frontend_url}/mp4-gif")
-        page.wait_for_load_state("networkidle")
+        _goto_mp4_gif_tab(page, frontend_url)
         _skip_if_frontend_error_title(page)
 
         dummy_mp4 = tmp_path / "sample.mp4"
@@ -127,8 +139,7 @@ class TestMp4GifTrimPreview:
         기대 요소: video 태그가 visible 상태가 된다.
         """
         _skip_admin_mode_if_public(system_mode)
-        page.goto(f"{frontend_url}/mp4-gif")
-        page.wait_for_load_state("networkidle")
+        _goto_mp4_gif_tab(page, frontend_url)
         _skip_if_frontend_error_title(page)
 
         dummy_mp4 = tmp_path / "sample.mp4"
@@ -147,8 +158,7 @@ class TestMp4GifTrimPreview:
         기대 요소: '시작점 지정' 텍스트를 가진 버튼이 attached 상태다.
         """
         _skip_admin_mode_if_public(system_mode)
-        page.goto(f"{frontend_url}/mp4-gif")
-        page.wait_for_load_state("networkidle")
+        _goto_mp4_gif_tab(page, frontend_url)
         _skip_if_frontend_error_title(page)
 
         dummy_mp4 = tmp_path / "sample.mp4"
@@ -167,8 +177,7 @@ class TestMp4GifTrimPreview:
         기대 요소: '종료점 지정' 버튼이 disabled 속성을 갖는다.
         """
         _skip_admin_mode_if_public(system_mode)
-        page.goto(f"{frontend_url}/mp4-gif")
-        page.wait_for_load_state("networkidle")
+        _goto_mp4_gif_tab(page, frontend_url)
         _skip_if_frontend_error_title(page)
 
         dummy_mp4 = tmp_path / "sample.mp4"
@@ -187,8 +196,7 @@ class TestMp4GifTrimPreview:
         기대 요소: 시작점 클릭 → 종료점 버튼 not_to_be_disabled.
         """
         _skip_admin_mode_if_public(system_mode)
-        page.goto(f"{frontend_url}/mp4-gif")
-        page.wait_for_load_state("networkidle")
+        _goto_mp4_gif_tab(page, frontend_url)
         _skip_if_frontend_error_title(page)
 
         dummy_mp4 = tmp_path / "sample.mp4"

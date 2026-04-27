@@ -63,7 +63,7 @@
 	];
 
 	const pageTitle = $derived(
-		mainTab === 'git-repos' ? 'Git 관리' : mainTab === 'plans' ? '계획서 관리' : '개발 파이프라인'
+		mainTab === 'git-repos' ? 'Git 관리' : mainTab === 'plans' ? '계획서 관리' : '개발 작업'
 	);
 
 	function isArchivePath(path: string) {
@@ -163,7 +163,7 @@
 </script>
 
 <svelte:head>
-	<title>{mainTab === 'git-repos' ? 'Git 관리' : mainTab === 'plans' ? '계획서 관리' : '개발 파이프라인'} | Monitor Page</title>
+	<title>{mainTab === 'git-repos' ? 'Git 관리' : mainTab === 'plans' ? '계획서 관리' : '개발 작업'} | Monitor Page</title>
 </svelte:head>
 
 <div class="flex flex-col h-full overflow-hidden">

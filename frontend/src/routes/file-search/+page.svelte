@@ -32,10 +32,11 @@
 	import PathInput from './PathInput.svelte';
 	import ResultList from './ResultList.svelte';
 	import EncodingFixer from '../utils/EncodingFixer.svelte';
+	import Mp4GifTab from './Mp4GifTab.svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 
-	type PageTab = 'search' | 'encoding';
+	type PageTab = 'search' | 'encoding' | 'mp4-gif';
 	type SearchRecord = {
 		request: SearchRequest;
 		weight: number;
@@ -45,7 +46,7 @@
 
 	$effect(() => {
 		const tab = $page.url.searchParams.get('tab');
-		pageTab = tab === 'encoding' ? 'encoding' : 'search';
+		pageTab = tab === 'encoding' || tab === 'mp4-gif' ? tab : 'search';
 	});
 
 	function setPageTab(tab: PageTab) {
@@ -549,14 +550,26 @@
 		>
 			<Languages size={16} /> 인코딩 변환
 		</button>
+		<button
+			onclick={() => setPageTab('mp4-gif')}
+			class="flex items-center gap-2 rounded-t px-3 py-1.5 text-sm font-medium transition-colors {pageTab === 'mp4-gif'
+				? 'bg-primary/10 text-primary'
+				: 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'}"
+		>
+			MP4 → GIF
+		</button>
 	</div>
 
 	{#if pageTab === 'encoding'}
+		<PageHeader title="파일 도구" subtitle="텍스트 파일의 인코딩 문제를 점검하고 변환합니다." />
 		<EncodingFixer />
+	{:else if pageTab === 'mp4-gif'}
+		<PageHeader title="파일 도구" subtitle="MP4 파일을 업로드하고 GIF로 변환합니다." />
+		<Mp4GifTab />
 	{/if}
 
 	{#if pageTab === 'search'}
-		<PageHeader title="파일 검색" subtitle="로컬 파일을 빠르게 검색합니다">
+		<PageHeader title="파일 도구" subtitle="로컬 파일 검색, 인코딩 변환, MP4 → GIF 작업을 한곳에서 처리합니다.">
 			{#if status}
 				<div class="flex items-center gap-2">
 					<span
