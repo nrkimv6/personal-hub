@@ -568,10 +568,11 @@ class TestHistorySuggestions:
                 db.add(row)
             db.commit()
 
-            resp = client.get("/api/v1/file-search/frequent-combos?limit=10")
+            resp = client.get("/api/v1/file-search/frequent-combos?limit=50")
             assert resp.status_code == 200
             data = resp.json()
             target = [item for item in data if item["label"].lower() in {"alpha combo", "beta combo"}]
+            assert len(target) == 2
             assert target[0]["label"] == "alpha combo"
             assert target[0]["count"] == 2
             assert target[0]["last_used_at"] == "9999-12-31 23:59:52"
@@ -604,7 +605,7 @@ class TestHistorySuggestions:
                 FileSearchRequest(
                     search_id=ids[0],
                     status=FileSearchRequest.STATUS_COMPLETED,
-                    created_at="2026-04-27 12:10:00",
+                    created_at="9999-12-31 23:59:58",
                     request_json="{bad-json}",
                     result_json="{}",
                     search_time_ms=1,
@@ -614,7 +615,7 @@ class TestHistorySuggestions:
                 FileSearchRequest(
                     search_id=ids[1],
                     status=FileSearchRequest.STATUS_COMPLETED,
-                    created_at="2026-04-27 12:11:00",
+                    created_at="9999-12-31 23:59:59",
                     request_json=json.dumps({
                         "query": "Good Combo",
                         "origin": "file-search",
@@ -634,11 +635,12 @@ class TestHistorySuggestions:
             )
             db.commit()
 
-            resp = client.get("/api/v1/file-search/frequent-combos?limit=10")
+            resp = client.get("/api/v1/file-search/frequent-combos?limit=50")
             assert resp.status_code == 200
             data = resp.json()
-            labels = [item["label"] for item in data]
-            assert "Good Combo" in labels
+            good_combo = next((item for item in data if item["label"] == "Good Combo"), None)
+            assert good_combo is not None
+            assert good_combo["last_used_at"] == "9999-12-31 23:59:59"
             assert all(item["label"] != "{bad-json}" for item in data)
         finally:
             db.close()
