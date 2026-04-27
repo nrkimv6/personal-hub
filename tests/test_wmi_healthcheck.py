@@ -143,6 +143,23 @@ class TestRestartFrontendCliArgs:
         assert exc.value.code == 0
         mgr.restart_frontend.assert_called_once_with(public=True)
 
+    @pytest.mark.parametrize(("argv", "public"), [
+        (["browser_workers.py", "restart-frontend"], False),
+        (["browser_workers.py", "restart-frontend", "--public"], True),
+    ])
+    def test_restart_frontend_mode_error_failure_returns_exit_one(self, monkeypatch, argv, public):
+        """E: restart 실패는 admin/public 모두 exit 1이어야 한다."""
+        mgr = MagicMock()
+        mgr.restart_frontend.return_value = False
+        monkeypatch.setattr(browser_workers, "BrowserWorkerManager", lambda: mgr)
+        monkeypatch.setattr(sys, "argv", argv)
+
+        with pytest.raises(SystemExit) as exc:
+            browser_workers.main()
+
+        assert exc.value.code == 1
+        mgr.restart_frontend.assert_called_once_with(public=public)
+
     def test_restart_frontend_mode_error_invalid_combo(self, monkeypatch, capsys):
         """E: status + --public 조합은 에러."""
         monkeypatch.setattr(sys, "argv", ["browser_workers.py", "status", "--public"])
@@ -515,6 +532,45 @@ class TestRestartFrontendBehavior:
         mock_write.assert_called_once()
         rendered = [str(call.args[0]) for call in mock_cprint.call_args_list if call.args]
         assert any("Listener PID unchanged after restart" in line and "frontend is healthy" in line for line in rendered)
+
+    def test_restart_frontend_error_listener_pid_unchanged_and_unhealthy_fails(self, tmp_path):
+        """E: listener PID가 유지되고 health도 복구되지 않으면 실패해야 한다."""
+        mgr = _make_manager(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.pid = 9191
+
+        with patch.object(mgr, "_acquire_frontend_restart_lock", return_value=106), patch.object(
+            mgr, "_release_frontend_restart_lock"
+        ), patch.object(mgr, "_cleanup_frontend_runtime"), patch.object(mgr, "_prepare_frontend_env"), patch.object(
+            mgr, "_run_frontend_build_if_needed", return_value=True
+        ), patch.object(
+            mgr, "_has_port_collision_error", return_value=False
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", return_value=5555
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_listener", return_value=5555
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
+            return_value=(False, "connection refused"),
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.write_pid_file"
+        ) as mock_write, patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._emit_listener_diagnostics"
+        ) as mock_diag, patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.cprint"
+        ) as mock_cprint:
+            ok = mgr.restart_frontend(public=False)
+
+        assert ok is False
+        mock_write.assert_called_once()
+        rendered = [str(call.args[0]) for call in mock_cprint.call_args_list if call.args]
+        assert any(line == "Listener PID unchanged after restart (PID: 5555)" for line in rendered)
+        mock_diag.assert_any_call(6101, "Listener PID remained unchanged and frontend health did not recover", frontend_actions.RED)
+        mock_diag.assert_any_call(6101, "Frontend restart failed health gate", frontend_actions.RED)
 
 
 class TestListenerPidAndStatus:
