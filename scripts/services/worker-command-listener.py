@@ -11,7 +11,8 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
     - 결과를 worker:command_results에 반환
 
 사용법:
-    python scripts/worker-command-listener.py
+    python scripts/services/worker-command-listener.py
+    python scripts/services/worker-command-listener.py --check-imports  # import 확인 후 즉시 종료
 
 아키텍처:
     API (Session 0) → Redis LPUSH worker:commands → [이 리스너 (Session 1)] → browser-workers.ps1
@@ -25,6 +26,13 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+# sys.path bootstrap — app import 이전에 PROJECT_ROOT를 경로에 추가
+# 직접 실행 시 sys.path[0]은 스크립트 디렉토리(scripts/services/)이므로 app/ 패키지를 찾지 못함
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/services/ → scripts/ → project root
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import redis
 
@@ -47,8 +55,6 @@ PODMAN_RECOVERY_COOLDOWN = 600  # 초 (10분) — 쿨다운 내 재시도 방지
 # 마지막 Podman 복구 시도 시각 (Unix timestamp, 0 = 미시도)
 _last_podman_recovery_time: float = 0.0
 
-SCRIPT_DIR = Path(__file__).parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/services/ → scripts/ → project root
 BROWSER_WORKERS_SCRIPT = SCRIPT_DIR / "browser-workers.ps1"
 
 # 로깅 설정
@@ -400,4 +406,7 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--check-imports" in sys.argv:
+        print("import check ok")
+        sys.exit(0)
     main()
