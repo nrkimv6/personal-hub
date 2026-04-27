@@ -27,6 +27,7 @@ import type {
   UnifiedDashboard,
   VideoDownload,
   VideoDownloadCreate,
+  VideoDownloadCreateResponse,
   VideoDownloadList,
   VideoDownloadStats,
   VideoDownloadBatchCreate,
@@ -1142,13 +1143,13 @@ export const videoDownloadApi = {
     status?: string;
     download_type?: string;
     page?: number;
-    limit?: number;
+    page_size?: number;
   }) => {
     const searchParams = new URLSearchParams();
     if (params?.status) searchParams.set('status', params.status);
     if (params?.download_type) searchParams.set('download_type', params.download_type);
     if (params?.page) searchParams.set('page', params.page.toString());
-    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.page_size) searchParams.set('page_size', params.page_size.toString());
     const query = searchParams.toString();
     return requestVideoDownload<VideoDownloadList>(`${query ? `?${query}` : ''}`);
   },
@@ -1159,7 +1160,7 @@ export const videoDownloadApi = {
 
   // 다운로드 요청 생성
   create: (data: VideoDownloadCreate) =>
-    requestVideoDownload<VideoDownload>('', {
+    requestVideoDownload<VideoDownloadCreateResponse>('', {
       method: 'POST',
       body: JSON.stringify(data)
     }),

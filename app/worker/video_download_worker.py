@@ -1,7 +1,7 @@
 """
 비디오 다운로드 워커.
 
-YouTube/Vimeo 등 비디오 다운로드 요청을 처리합니다:
+YouTube/Vimeo/Instagram Reel 등 비디오 다운로드 요청을 처리합니다:
 - pending 상태의 VideoDownload 요청을 폴링
 - python-youtube-stream-download 프로젝트의 함수를 호출하여 다운로드
 - 진행률 및 완료/실패 상태 업데이트
@@ -160,6 +160,8 @@ class VideoDownloadWorker(BaseWorker):
             # 다운로드 타입에 따라 분기
             if request.download_type == VideoDownload.TYPE_VIMEO:
                 result = await self._download_vimeo(request)
+            elif request.download_type == VideoDownload.TYPE_INSTAGRAM:
+                result = await self._download_instagram(request)
             elif request.download_type == VideoDownload.TYPE_YOUTUBE_STREAM:
                 result = await self._download_youtube_stream(request)
             else:  # youtube
@@ -316,8 +318,6 @@ class VideoDownloadWorker(BaseWorker):
             결과 딕셔너리 {success, output_path, file_size, title, error}
         """
         try:
-            import subprocess
-
             current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
             # 사용자 지정 파일명이 있으면 사용, 없으면 기본 패턴
             if request.output_filename:
@@ -325,81 +325,126 @@ class VideoDownloadWorker(BaseWorker):
             else:
                 output_filename = os.path.join(self.output_dir, f'vimeo_{current_datetime}')
 
-            # yt-dlp 명령 구성
-            cmd = [
-                'yt-dlp',
-                '--no-warnings',
-                '--progress',
-                '--newline',  # 진행률을 한 줄씩 출력
-                '--merge-output-format', 'mp4',
-                '-o', f'{output_filename}.%(ext)s',
-            ]
-
-            # 임베딩 URL이 있으면 referer 설정
-            if request.embedding_url:
-                cmd.extend(['--referer', request.embedding_url])
-
-            cmd.append(request.url)
-
-            logger.info(f"[{self.name}] yt-dlp 시작: {request.url[:60]}...")
-
-            # subprocess로 실행하면서 출력 파싱
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            return await self._download_with_yt_dlp(
+                request=request,
+                output_filename=output_filename,
+                referer=request.embedding_url,
             )
-
-            last_progress = -1
-            while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
-                line = line.decode('utf-8', errors='ignore').strip()
-
-                # 진행률 파싱 (예: [download]  45.2% of 100.00MiB)
-                if '[download]' in line and '%' in line:
-                    try:
-                        # 퍼센트 추출
-                        percent_str = line.split('%')[0].split()[-1]
-                        percent = int(float(percent_str))
-                        # 10% 단위로 로그 출력 (너무 많이 찍지 않도록)
-                        if percent >= last_progress + 10:
-                            logger.info(f"[{self.name}] 다운로드 진행: {percent}%")
-                            last_progress = percent
-                    except (ValueError, IndexError):
-                        pass
-                elif '[Merger]' in line or 'Merging' in line:
-                    logger.info(f"[{self.name}] 비디오/오디오 병합 중...")
-
-            # stderr도 읽기
-            stderr_output = await process.stderr.read()
-            await process.wait()
-
-            if process.returncode != 0:
-                error_msg = stderr_output.decode('utf-8', errors='ignore')[:200]
-                return {"success": False, "error": f"yt-dlp 실패: {error_msg}"}
-
-            # 다운로드된 파일 찾기
-            possible_extensions = ['.mp4', '.webm', '.mkv']
-            for ext in possible_extensions:
-                output_path = f"{output_filename}{ext}"
-                if os.path.exists(output_path):
-                    file_size = os.path.getsize(output_path)
-                    title = self._extract_title_from_filename(output_path)
-                    logger.info(f"[{self.name}] 다운로드 완료: {file_size / 1024 / 1024:.1f}MB")
-                    return {
-                        "success": True,
-                        "output_path": output_path,
-                        "file_size": file_size,
-                        "title": title
-                    }
-
-            return {"success": False, "error": "다운로드된 파일을 찾을 수 없음"}
 
         except Exception as e:
             logger.error(f"[{self.name}] Vimeo 다운로드 오류: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+
+    async def _download_instagram(self, request: VideoDownload) -> dict:
+        """Instagram Reel 다운로드 (yt-dlp 직접 호출)."""
+        try:
+            current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if request.output_filename:
+                output_filename = os.path.join(self.output_dir, request.output_filename)
+            else:
+                output_filename = os.path.join(self.output_dir, f'instagram_{current_datetime}')
+
+            return await self._download_with_yt_dlp(
+                request=request,
+                output_filename=output_filename,
+            )
+        except Exception as e:
+            logger.error(f"[{self.name}] Instagram 다운로드 오류: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _download_with_yt_dlp(
+        self,
+        request: VideoDownload,
+        output_filename: str,
+        referer: Optional[str] = None,
+    ) -> dict:
+        """yt-dlp 기반 다운로드 공통 처리."""
+        cmd = [
+            'yt-dlp',
+            '--no-warnings',
+            '--progress',
+            '--newline',
+            '--merge-output-format', 'mp4',
+            '-o', f'{output_filename}.%(ext)s',
+        ]
+
+        if referer:
+            cmd.extend(['--referer', referer])
+
+        cmd.append(request.url)
+
+        logger.info(f"[{self.name}] yt-dlp 시작: type={request.download_type}, url={request.url[:60]}...")
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        last_progress = -1
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            decoded = line.decode('utf-8', errors='ignore').strip()
+
+            if '[download]' in decoded and '%' in decoded:
+                try:
+                    percent_str = decoded.split('%')[0].split()[-1]
+                    percent = int(float(percent_str))
+                    if percent >= last_progress + 10:
+                        logger.info(f"[{self.name}] 다운로드 진행: {percent}%")
+                        last_progress = percent
+                except (ValueError, IndexError):
+                    pass
+            elif '[Merger]' in decoded or 'Merging' in decoded:
+                logger.info(f"[{self.name}] 비디오/오디오 병합 중...")
+
+        stderr_output = await process.stderr.read()
+        await process.wait()
+
+        if process.returncode != 0:
+            error_msg = self._format_yt_dlp_error(
+                request.download_type,
+                stderr_output.decode('utf-8', errors='ignore')
+            )
+            return {"success": False, "error": error_msg}
+
+        possible_extensions = ['.mp4', '.webm', '.mkv']
+        for ext in possible_extensions:
+            output_path = f"{output_filename}{ext}"
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                title = self._extract_title_from_filename(output_path)
+                logger.info(f"[{self.name}] 다운로드 완료: {file_size / 1024 / 1024:.1f}MB")
+                return {
+                    "success": True,
+                    "output_path": output_path,
+                    "file_size": file_size,
+                    "title": title
+                }
+
+        return {"success": False, "error": "다운로드된 파일을 찾을 수 없음"}
+
+    def _format_yt_dlp_error(self, download_type: str, stderr_text: str) -> str:
+        """yt-dlp stderr를 사용자 친화적인 메시지로 정규화."""
+        stderr_text = (stderr_text or "").strip()
+        lowered = stderr_text.lower()
+
+        if download_type == VideoDownload.TYPE_INSTAGRAM:
+            if "login required" in lowered:
+                return "Instagram 로그인 필요: 공개 Reel만 1차 지원합니다."
+            if "private" in lowered or "not available" in lowered:
+                return "Instagram 비공개 또는 접근 불가 Reel입니다."
+            if "429" in lowered or "too many requests" in lowered:
+                return "Instagram 요청 제한에 걸렸습니다. 잠시 후 다시 시도해주세요."
+            if "requested content is not available" in lowered:
+                return "Instagram Reel을 찾을 수 없습니다."
+
+        if "sign in" in lowered or "login" in lowered:
+            return f"yt-dlp 실패: 접근 권한 또는 로그인 필요 ({stderr_text[:160]})"
+
+        return f"yt-dlp 실패: {stderr_text[:200] or '알 수 없는 오류'}"
 
     def _find_converted_file(self, directory: str, timestamp: str) -> Optional[str]:
         """변환된 파일을 찾습니다.

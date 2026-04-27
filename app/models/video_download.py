@@ -9,7 +9,7 @@ from .base import Base
 class VideoDownload(Base):
     """비디오 다운로드 요청 모델.
 
-    YouTube/Vimeo 등 비디오 다운로드 요청을 관리합니다.
+    YouTube/Vimeo/Instagram Reel 등 비디오 다운로드 요청을 관리합니다.
     VideoDownloadWorker가 pending 상태의 요청을 처리합니다.
     """
 
@@ -19,7 +19,7 @@ class VideoDownload(Base):
 
     # 요청 정보
     url = Column(Text, nullable=False)
-    download_type = Column(String(20), nullable=False, index=True)  # youtube, youtube_stream, vimeo
+    download_type = Column(String(20), nullable=False, index=True)  # youtube, youtube_stream, vimeo, instagram
 
     # 상태
     # pending: 대기중
@@ -64,6 +64,7 @@ class VideoDownload(Base):
     TYPE_YOUTUBE = "youtube"
     TYPE_YOUTUBE_STREAM = "youtube_stream"
     TYPE_VIMEO = "vimeo"
+    TYPE_INSTAGRAM = "instagram"
 
     def __repr__(self):
         return f"<VideoDownload(id={self.id}, type={self.download_type}, status={self.status})>"

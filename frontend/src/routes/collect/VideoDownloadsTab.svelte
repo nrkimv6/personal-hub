@@ -10,7 +10,7 @@
 
   // 페이지네이션
   let page = 1;
-  let limit = 20;
+  let pageSize = 20;
   let total = 0;
   let totalPages = 0;
 
@@ -44,6 +44,7 @@
     youtube: { label: 'YouTube', color: 'text-error bg-error-light' },
     youtube_stream: { label: 'YouTube Live', color: 'text-error bg-red-200' },
     vimeo: { label: 'Vimeo', color: 'text-primary bg-primary-light' },
+    instagram: { label: 'Instagram Reel', color: 'text-pink-700 bg-pink-100' },
   };
 
   // 상태별 스타일
@@ -60,9 +61,9 @@
     loading = true;
     error = null;
     try {
-      const params: { status?: string; download_type?: string; page?: number; limit?: number } = {
+      const params: { status?: string; download_type?: string; page?: number; page_size?: number } = {
         page,
-        limit,
+        page_size: pageSize,
       };
       if (statusFilter) params.status = statusFilter;
       if (typeFilter) params.download_type = typeFilter;
@@ -70,7 +71,7 @@
       const result = await videoDownloadApi.list(params);
       downloads = result.items;
       total = result.total;
-      totalPages = result.pages;
+      totalPages = result.total_pages;
     } catch (e) {
       error = e instanceof Error ? e.message : '데이터 로드 실패';
     } finally {
@@ -275,7 +276,7 @@
   <div class="flex items-center justify-between mb-6">
     <div>
       <h1 class="text-2xl font-bold text-foreground">비디오 다운로드</h1>
-      <p class="text-sm text-muted-foreground mt-1">YouTube, Vimeo 영상 다운로드</p>
+      <p class="text-sm text-muted-foreground mt-1">YouTube, Vimeo, Instagram Reel 다운로드 큐</p>
     </div>
     <button
       onclick={() => showAddModal = true}
@@ -356,6 +357,7 @@
           <option value="youtube">YouTube</option>
           <option value="youtube_stream">YouTube Live</option>
           <option value="vimeo">Vimeo</option>
+          <option value="instagram">Instagram Reel</option>
         </select>
       </div>
     </div>
@@ -406,6 +408,8 @@
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
                   {:else if download.download_type === 'vimeo'}
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-.7-.1-1.4.5-1.7l15.4-4.5c.7-.2 1.4.1 1.7.9l.5 2.7Z"/><path d="M4 11v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10l-16 1Z"/></svg>
+                  {:else if download.download_type === 'instagram'}
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>
                   {/if}
                   {typeStyles[download.download_type]?.label || download.download_type}
                 </span>
@@ -509,7 +513,7 @@
     {#if totalPages > 1}
       <div class="flex items-center justify-between mt-4">
         <div class="text-sm text-muted-foreground">
-          총 {total}개 중 {(page - 1) * limit + 1}-{Math.min(page * limit, total)}개
+          총 {total}개 중 {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)}개
         </div>
         <div class="flex items-center gap-2">
           <button
@@ -569,7 +573,7 @@
                     type="url"
                     value={url}
                     oninput={(e) => updateBatchUrl(index, (e.target as HTMLInputElement).value)}
-                    placeholder="https://vimeo.com/..."
+                    placeholder="https://www.instagram.com/reel/... 또는 https://vimeo.com/..."
                     class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring text-sm"
                   />
                   <button
@@ -617,11 +621,11 @@
               type="url"
               id="url"
               bind:value={newUrl}
-              placeholder="https://www.youtube.com/watch?v=..."
+              placeholder="https://www.instagram.com/reel/... 또는 https://www.youtube.com/watch?v=..."
               required
               class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
             />
-            <p class="text-xs text-muted-foreground mt-1">YouTube, YouTube Live, Vimeo URL 지원</p>
+            <p class="text-xs text-muted-foreground mt-1">YouTube, YouTube Live, Vimeo, Instagram Reel URL 지원</p>
           </div>
 
           <div>
@@ -653,7 +657,9 @@
             <option value="youtube">YouTube (일반 영상)</option>
             <option value="youtube_stream">YouTube Live (스트림)</option>
             <option value="vimeo">Vimeo</option>
+            <option value="instagram">Instagram Reel</option>
           </select>
+          <p class="text-xs text-muted-foreground mt-1">Instagram은 1차로 공개 Reel만 지원하며 로그인 필요/비공개 URL은 실패할 수 있습니다.</p>
         </div>
 
         <div>
