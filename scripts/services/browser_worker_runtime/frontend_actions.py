@@ -18,6 +18,7 @@ from scripts.services.frontend_mode import (
     get_frontend_outdir,
     write_frontend_build_log,
 )
+from scripts.services.service_utils import classify_frontend_failure, describe_listener, format_listener_metadata
 from scripts.services.browser_worker_runtime.runtime import GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
 
 
@@ -80,7 +81,13 @@ def _cleanup_frontend_runtime(manager, frontend_port: int, pid_file: Path) -> li
         if pid <= 0:
             return
         cprint(message)
-        mgr.kill_pid(pid)
+        if not mgr.kill_pid(pid):
+            _emit_listener_diagnostics(
+                frontend_port,
+                f"Failed to terminate PID {pid} while clearing port {frontend_port}",
+                RED,
+            )
+            return
         if pid not in terminated_pids:
             terminated_pids.append(pid)
 
@@ -207,13 +214,33 @@ def _run_frontend_build_if_needed(
         stdout=build_result.stdout or "",
         stderr=build_result.stderr or "",
     )
-    cprint(f"Frontend build failed (rc={build_result.returncode}, log={build_log_path})", RED)
+    failure_class = classify_frontend_failure(build_result.stdout, build_result.stderr)
+    listener_metadata = describe_listener(_frontend_mode(manager, public)[2])
+    rendered_listener = format_listener_metadata(listener_metadata)
+    cprint(
+        "Frontend build failed "
+        f"(rc={build_result.returncode}, class={failure_class}, log={build_log_path}, listener={rendered_listener})",
+        RED,
+    )
+    if failure_class == "build_lock_permission":
+        cprint(
+            "Build lock/permission detected; check Session 0 service ownership or elevate before retrying PUBLIC PREVIEW.",
+            YELLOW,
+        )
 
     if not (manager.frontend_dir / "build").exists():
-        cprint(f"No previous build artifact found - cannot run PUBLIC PREVIEW (build_log={build_log_path})", RED)
+        cprint(
+            "No previous build artifact found - cannot run PUBLIC PREVIEW "
+            f"(class={failure_class}, build_log={build_log_path})",
+            RED,
+        )
         return False
 
-    cprint(f"Using previous build artifact for fallback preview (build_log={build_log_path})", YELLOW)
+    cprint(
+        "Using previous build artifact for fallback preview "
+        f"(class={failure_class}, build_log={build_log_path})",
+        YELLOW,
+    )
     return True
 
 
@@ -230,6 +257,17 @@ def _read_log_tail(log_path: Path, max_chars: int = 4000) -> str:
 def _has_port_collision_error(manager, stderr_log_path: Path, frontend_port: int) -> bool:
     tail = _read_log_tail(stderr_log_path)
     return f"Port {frontend_port} is already in use" in tail
+
+
+def _emit_listener_diagnostics(frontend_port: int, reason: str, color: str = YELLOW) -> None:
+    listener_metadata = describe_listener(frontend_port)
+    cprint(f"{reason} ({format_listener_metadata(listener_metadata)})", color)
+    if listener_metadata.get("pid") is not None:
+        cprint(
+            "Listener cleanup may require elevation or another session owns the port. "
+            "Access denied / EPERM class failures should be treated as permission or service-lock issues.",
+            YELLOW,
+        )
 
 
 def _wait_for_frontend_listener(frontend_port: int, launcher_pid: int, timeout_seconds: float = 15.0) -> int | None:
@@ -295,7 +333,8 @@ def restart_frontend(manager, public: bool = False) -> bool:
 
     try:
         terminated_pids = manager._cleanup_frontend_runtime(frontend_port, pid_file)
-        _wait_for_terminated_pids(terminated_pids)
+        if not _wait_for_terminated_pids(terminated_pids):
+            _emit_listener_diagnostics(frontend_port, f"Old frontend listener still present after cleanup on :{frontend_port}")
         _reset_frontend_runtime_types(manager, public)
         time.sleep(2)
         manager._prepare_frontend_env(api_port=api_port, public=public)
@@ -342,7 +381,8 @@ def restart_frontend(manager, public: bool = False) -> bool:
                 )
 
         if manager._has_port_collision_error(stderr_log_path, frontend_port):
-            cprint(
+            _emit_listener_diagnostics(
+                frontend_port,
                 f"Port collision detected in {stderr_log_path.name}: Port {frontend_port} is already in use",
                 RED,
             )
@@ -364,13 +404,12 @@ def restart_frontend(manager, public: bool = False) -> bool:
 
         if old_listener_pid is not None and new_listener_pid == old_listener_pid:
             cprint(f"Listener PID unchanged after restart (PID: {new_listener_pid})", RED)
+            _emit_listener_diagnostics(frontend_port, "Listener PID remained unchanged and frontend health did not recover", RED)
         elif last_error:
             cprint(f"Frontend not responding yet (may still be starting): {last_error}", YELLOW)
         else:
             cprint("Frontend not responding yet (may still be starting)", YELLOW)
-            return False
-
-        cprint("Frontend health check returned unexpected status", YELLOW)
+        _emit_listener_diagnostics(frontend_port, "Frontend restart failed health gate", RED)
         return False
     finally:
         manager._release_frontend_restart_lock(lock_fd)

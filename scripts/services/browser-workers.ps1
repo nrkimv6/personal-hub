@@ -50,4 +50,11 @@ if ($Public) {
 }
 
 & $PythonExe @Arguments
-exit $LASTEXITCODE
+$exitCode = $LASTEXITCODE
+
+if ($Action -eq "restart-frontend" -and $exitCode -ne 0) {
+    Write-Host "restart-frontend failed. Review the emitted listener/build_log/class diagnostics above." -ForegroundColor Yellow
+    Write-Host "If the output mentions Access denied, EPERM, or another session owning the listener, treat it as a permission or service-lock issue." -ForegroundColor Yellow
+}
+
+exit $exitCode

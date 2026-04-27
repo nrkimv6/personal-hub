@@ -87,6 +87,39 @@ function Set-FrontendRuntimeEnv {
     }
 }
 
+function Get-FrontendFailureClass {
+    param([string]$Text)
+
+    $normalized = ($Text ?? "").ToLowerInvariant()
+    if ($normalized -match "access is denied|access denied|eperm|eacces|permission denied|file is being used by another process") {
+        return "build_lock_permission"
+    }
+    if ($normalized -match "vite\.cmd|module not found|cannot find module|package.*not found|not recognized as an internal or external command") {
+        return "dependency_failure"
+    }
+    if ($normalized -match "already in use|eaddrinuse") {
+        return "listener_port_collision"
+    }
+    return "other"
+}
+
+function Get-ListenerSummary {
+    param([int]$Port)
+
+    try {
+        $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $conn) {
+            return "no-listener-metadata"
+        }
+        $pid = [int]$conn.OwningProcess
+        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $name = if ($proc) { $proc.ProcessName } else { "unknown" }
+        return "port=$Port, pid=$pid, name=$name"
+    } catch {
+        return "listener-query-failed"
+    }
+}
+
 Write-ServiceLog "=========================================="
 Write-ServiceLog "Monitor Page Service Starting"
 Write-ServiceLog "Mode: $AppMode"
@@ -387,7 +420,7 @@ if ($Admin) {
 
     # Build frontend using cmd.exe for proper output redirection
     Write-ServiceLog "Building frontend for public..."
-    $buildLogFile = Join-Path $LogDir "frontend_build_$Timestamp.log"
+    $buildLogFile = Join-Path $LogDir "frontend_build_public_$Timestamp.log"
 
     # Use cmd /c to run npm build with output redirection
     $buildResult = Start-Process -FilePath "cmd.exe" `
@@ -397,8 +430,13 @@ if ($Admin) {
 
     $canStartPreview = $true
     if ($buildResult.ExitCode -ne 0) {
-        Write-ServiceLog "ERROR: Frontend build failed (exit code: $($buildResult.ExitCode))"
-        Write-ServiceLog "Check build log: $buildLogFile"
+        $buildLogText = if (Test-Path $buildLogFile) { Get-Content $buildLogFile -Raw -ErrorAction SilentlyContinue } else { "" }
+        $failureClass = Get-FrontendFailureClass -Text $buildLogText
+        $listenerSummary = Get-ListenerSummary -Port $FrontendPort
+        Write-ServiceLog "ERROR: Frontend build failed (rc=$($buildResult.ExitCode), class=$failureClass, log=$buildLogFile, listener=$listenerSummary)"
+        if ($failureClass -eq "build_lock_permission") {
+            Write-ServiceLog "WARNING: Build lock/permission detected — check Session 0 service ownership or elevate before retry."
+        }
         # Show last few lines of build log
         if (Test-Path $buildLogFile) {
             $lastLines = Get-Content $buildLogFile -Tail 10
@@ -408,9 +446,9 @@ if ($Admin) {
         }
         $buildDir = Join-Path $FrontendDir "build"
         if (Test-Path $buildDir) {
-            Write-ServiceLog "WARNING: Using previous build artifact for preview fallback"
+            Write-ServiceLog "WARNING: Using previous build artifact for preview fallback (class=$failureClass, build_log=$buildLogFile)"
         } else {
-            Write-ServiceLog "WARNING: No previous build artifact found — frontend unavailable, API-only mode"
+            Write-ServiceLog "WARNING: No previous build artifact found — frontend unavailable, API-only mode (class=$failureClass, build_log=$buildLogFile)"
             $canStartPreview = $false
         }
     } else {

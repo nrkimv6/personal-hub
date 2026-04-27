@@ -19,6 +19,8 @@ pytestmark = pytest.mark.e2e
 _FRONTEND_ERROR_TITLE_MARKERS = ("ENOENT:", "EPERM", "Vite", "Internal Server Error", "Error")
 _ADMIN_RESTART_REUSE_WINDOW_SECONDS = 45.0
 _recent_admin_restart: dict[str, object] = {"at": 0.0, "result": None}
+_PUBLIC_RESTART_REUSE_WINDOW_SECONDS = 45.0
+_recent_public_restart: dict[str, object] = {"at": 0.0, "result": None}
 
 
 def _wait_for_frontend_available(url: str, timeout_seconds: float = 20.0) -> None:
@@ -54,6 +56,14 @@ def _wait_for_api_available(api_url: str, timeout_seconds: float = 20.0) -> None
         time.sleep(0.5)
 
     pytest.fail(f"API did not recover after frontend restart: {ready_url} ({last_error})")
+
+
+def _restart_failure_context(result: subprocess.CompletedProcess) -> str:
+    return (
+        f"rc={result.returncode}\n"
+        f"[stdout]\n{(result.stdout or '').strip() or '(no output)'}\n"
+        f"[stderr]\n{(result.stderr or '').strip() or '(no output)'}"
+    )
 
 
 def _is_frontend_error_title(title: str) -> bool:
@@ -96,12 +106,33 @@ def _run_restart_frontend_admin(frontend_url: str, api_url: str) -> subprocess.C
     return result
 
 
+def _run_restart_frontend_public(public_frontend_url: str, api_url: str) -> subprocess.CompletedProcess:
+    root = Path(__file__).resolve().parents[3]
+    script = root / "scripts" / "services" / "browser_workers.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "restart-frontend", "--public"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        encoding="utf-8",
+        errors="replace",
+    )
+    _wait_for_frontend_available(f"{public_frontend_url}/dashboard")
+    _wait_for_api_available(api_url)
+    return result
+
+
 def _ensure_recent_admin_restart(frontend_url: str, api_url: str) -> subprocess.CompletedProcess:
     now = time.time()
     cached_at = float(_recent_admin_restart.get("at") or 0.0)
     cached_result = _recent_admin_restart.get("result")
 
-    if isinstance(cached_result, subprocess.CompletedProcess) and (now - cached_at) <= _ADMIN_RESTART_REUSE_WINDOW_SECONDS:
+    if (
+        isinstance(cached_result, subprocess.CompletedProcess)
+        and cached_result.returncode == 0
+        and (now - cached_at) <= _ADMIN_RESTART_REUSE_WINDOW_SECONDS
+    ):
         _wait_for_frontend_available(f"{frontend_url}/dashboard")
         _wait_for_api_available(api_url)
         return cached_result
@@ -109,6 +140,26 @@ def _ensure_recent_admin_restart(frontend_url: str, api_url: str) -> subprocess.
     result = _run_restart_frontend_admin(frontend_url, api_url)
     _recent_admin_restart["at"] = time.time()
     _recent_admin_restart["result"] = result
+    return result
+
+
+def _ensure_recent_public_restart(public_frontend_url: str, api_url: str) -> subprocess.CompletedProcess:
+    now = time.time()
+    cached_at = float(_recent_public_restart.get("at") or 0.0)
+    cached_result = _recent_public_restart.get("result")
+
+    if (
+        isinstance(cached_result, subprocess.CompletedProcess)
+        and cached_result.returncode == 0
+        and (now - cached_at) <= _PUBLIC_RESTART_REUSE_WINDOW_SECONDS
+    ):
+        _wait_for_frontend_available(f"{public_frontend_url}/dashboard")
+        _wait_for_api_available(api_url)
+        return cached_result
+
+    result = _run_restart_frontend_public(public_frontend_url, api_url)
+    _recent_public_restart["at"] = time.time()
+    _recent_public_restart["result"] = result
     return result
 
 
@@ -283,7 +334,7 @@ class TestSidebar:
         """CLI restart-frontend 직후 /dashboard가 정상 로드되어야 한다."""
         _skip_admin_mode_if_public(system_mode)
         result = _ensure_recent_admin_restart(frontend_url, api_url)
-        assert result.returncode in (0, 1)
+        assert result.returncode == 0, _restart_failure_context(result)
 
         _goto_stable_frontend_page(page, f"{frontend_url}/dashboard")
         _skip_if_frontend_error_title(page)
@@ -296,7 +347,7 @@ class TestSidebar:
         """CLI restart-frontend 직후 사이드바 내비게이션이 동작해야 한다."""
         _skip_admin_mode_if_public(system_mode)
         result = _ensure_recent_admin_restart(frontend_url, api_url)
-        assert result.returncode in (0, 1)
+        assert result.returncode == 0, _restart_failure_context(result)
 
         page.set_viewport_size({"width": 1280, "height": 720})
         _goto_stable_frontend_page(page, f"{frontend_url}/dashboard")
@@ -308,6 +359,18 @@ class TestSidebar:
         monitoring_link.click(timeout=5000)
         page.wait_for_load_state("networkidle")
         expect(page).to_have_url(f"{frontend_url}/monitoring")
+
+    def test_dashboard_loads_after_restart_frontend_public_e2e(
+        self, page: Page, public_frontend_url: str, api_url: str
+    ):
+        """CLI restart-frontend --public 직후 public dashboard가 정상 로드되어야 한다."""
+        result = _ensure_recent_public_restart(public_frontend_url, api_url)
+        assert result.returncode == 0, _restart_failure_context(result)
+
+        _goto_stable_frontend_page(page, f"{public_frontend_url}/dashboard")
+        _skip_if_frontend_error_title(page)
+        expect(page).to_have_title(re.compile(r"(모니터링 시스템|통합 대시보드|Monitor Page|통합 모니터링)"))
+        expect(page.locator("main").first).to_be_visible()
 
 
 class TestMobileNavigation:

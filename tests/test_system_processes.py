@@ -441,8 +441,11 @@ def test_http_system_mode_survives_restart_frontend_admin():
         encoding="utf-8",
         errors="replace",
     )
-    # 포트 권한/충돌 환경에서는 1이 나올 수 있으므로 API 생존성 검증을 우선한다.
-    assert result.returncode in (0, 1)
+    assert result.returncode == 0, (
+        f"rc={result.returncode}\n"
+        f"[stdout]\n{(result.stdout or '').strip() or '(no output)'}\n"
+        f"[stderr]\n{(result.stderr or '').strip() or '(no output)'}"
+    )
 
     # 재시작 직후 잠깐의 공백 허용
     for _ in range(10):

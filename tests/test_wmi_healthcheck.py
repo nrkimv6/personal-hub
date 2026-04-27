@@ -414,7 +414,7 @@ class TestRestartFrontendBehavior:
         assert len(build_logs) == 1
         build_log = build_logs[0]
         rendered = [str(call.args[0]) for call in mock_cprint.call_args_list if call.args]
-        assert f"Using previous build artifact for fallback preview (build_log={build_log})" in rendered
+        assert f"Using previous build artifact for fallback preview (class=other, build_log={build_log})" in rendered
 
     def test_restart_frontend_error_port_in_use_not_success(self, tmp_path):
         """E: Port already in use 감지 시 성공 판정 금지."""
@@ -518,6 +518,63 @@ class TestRestartFrontendBehavior:
 
 
 class TestListenerPidAndStatus:
+    def test_describe_listener_owner_error_returns_structured_field(self):
+        """B: owner 조회 실패는 owner_error 구조 필드로 남긴다."""
+        proc = MagicMock()
+        proc.name.return_value = "node.exe"
+        proc.username.side_effect = PermissionError("Access denied")
+        proc.cmdline.return_value = ["npm.cmd", "run", "preview", "--", "--port", "6100"]
+        proc.exe.return_value = r"C:\Program Files\nodejs\node.exe"
+
+        with patch("service_utils.pick_listener_pid", return_value=5151), patch(
+            "service_utils.psutil.Process", return_value=proc
+        ):
+            metadata = service_utils.describe_listener(6100)
+
+        assert metadata["pid"] == 5151
+        assert metadata["name"] == "node.exe"
+        assert metadata["owner"] is None
+        assert "PermissionError: Access denied" == metadata["owner_error"]
+        assert "--port 6100" in str(metadata["cmdline"])
+        assert str(metadata["exe"]).endswith("node.exe")
+
+    def test_restart_frontend_error_access_denied_emits_listener_metadata(self, tmp_path):
+        """E: listener 종료 실패 시 metadata와 권한 힌트를 함께 출력한다."""
+        mgr = _make_manager(tmp_path)
+        pid_file = mgr.pid_dir / "frontend_admin.pid"
+
+        with patch(
+            "scripts.services.browser_worker_runtime.manager.read_pid_file", return_value=4444
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.is_process_alive", return_value=True
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.find_pids_on_port", return_value=[]
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.kill_pid", return_value=False
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.remove_pid_file"
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.describe_listener",
+            return_value={
+                "port": 6101,
+                "pid": 4444,
+                "name": "node.exe",
+                "owner": None,
+                "owner_error": "PermissionError: Access denied",
+                "cmdline": "npm.cmd run dev -- --host --port 6101",
+                "exe": r"C:\Program Files\nodejs\node.exe",
+            },
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.cprint"
+        ) as mock_cprint:
+            terminated = frontend_actions._cleanup_frontend_runtime(mgr, mgr.frontend_port, pid_file)
+
+        assert terminated == []
+        rendered = [str(call.args[0]) for call in mock_cprint.call_args_list if call.args]
+        assert any("Failed to terminate PID 4444 while clearing port 6101" in line for line in rendered)
+        assert any("owner_error=PermissionError: Access denied" in line for line in rendered)
+        assert any("Listener cleanup may require elevation or another session owns the port" in line for line in rendered)
+
     def test_pick_listener_pid_right_single_listener(self):
         """R: listener PID 1개일 때 그대로 반환."""
         with patch("service_utils.find_pids_on_port", return_value=[4444]):

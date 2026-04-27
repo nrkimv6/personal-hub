@@ -165,16 +165,10 @@ def test_public_build_failure_writes_frontend_build_log_right(tmp_path):
     assert "outDir=.svelte-kit-public" in content
     assert "vite stdout" in content
     assert "vite stderr" in content
-    assert any(
-        str(call.args[0]) == f"Frontend build failed (rc=15, log={build_log})"
-        for call in logger.error.call_args_list
-        if call.args
-    )
-    assert any(
-        str(call.args[0]) == f"Using previous build for preview (build_log={build_log})"
-        for call in logger.warning.call_args_list
-        if call.args
-    )
+    error_messages = [str(call.args[0]) for call in logger.error.call_args_list if call.args]
+    warning_messages = [str(call.args[0]) for call in logger.warning.call_args_list if call.args]
+    assert any("Frontend build failed (rc=%s, class=%s, log=%s, listener=%s)" in msg for msg in error_messages)
+    assert any("Using previous build for preview (class=other, build_log=" in msg for msg in warning_messages)
     assert mock_run.call_args.kwargs["env"]["MONITOR_FRONTEND_MODE"] == "public"
 
 
@@ -203,10 +197,34 @@ def test_public_build_failure_empty_streams_boundary(tmp_path):
     assert "[stdout]\n(no output)" in content
     assert "[stderr]\n(no output)" in content
     assert any(
-        str(call.args[0]) == f"No previous build found - Frontend unavailable, API-only mode (build_log={build_log})"
+        "No previous build found - Frontend unavailable, API-only mode (class=other, build_log="
         for call in logger.warning.call_args_list
         if call.args
     )
+
+
+def test_public_build_failure_logs_permission_classification_right(tmp_path):
+    frontend_dir = tmp_path / "frontend"
+    _prepare_frontend_workspace(frontend_dir, with_build=True)
+    logger = MagicMock()
+    build_result = MagicMock(returncode=1, stdout="", stderr="EPERM: Access denied")
+    preview_proc = MagicMock(pid=1357)
+
+    with patch.object(service_run, "PROJECT_ROOT", tmp_path), patch.object(
+        service_run, "setup_service_logger", return_value=logger
+    ), patch(
+        "scripts.services.service_run.subprocess.run", return_value=build_result
+    ), patch(
+        "scripts.services.service_run.subprocess.Popen", return_value=preview_proc
+    ), patch(
+        "scripts.services.service_run.write_pid_file"
+    ):
+        runner = service_run.ServiceRunner(dev=False)
+        proc = runner.start_frontend()
+
+    assert proc is preview_proc
+    assert any("class=build_lock_permission" in str(call.args[0]) for call in logger.warning.call_args_list if call.args)
+    assert any("Build lock/permission detected" in str(call.args[0]) for call in logger.warning.call_args_list if call.args)
 
 
 def test_public_build_failure_stdout_only_integration(tmp_path):
