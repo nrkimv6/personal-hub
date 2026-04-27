@@ -15,6 +15,7 @@ from scripts.services.frontend_mode import (
     build_frontend_env,
     ensure_frontend_runtime_tsconfigs,
     describe_frontend_runtime,
+    get_frontend_outdir,
     write_frontend_build_log,
 )
 from scripts.services.browser_worker_runtime.runtime import GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
@@ -71,17 +72,25 @@ def _release_frontend_restart_lock(manager, lock_fd: int | None) -> None:
     _manager().remove_pid_file(manager.frontend_restart_lock)
 
 
-def _cleanup_frontend_runtime(manager, frontend_port: int, pid_file: Path) -> None:
+def _cleanup_frontend_runtime(manager, frontend_port: int, pid_file: Path) -> list[int]:
     mgr = _manager()
+    terminated_pids: list[int] = []
+
+    def _record_kill(pid: int, message: str) -> None:
+        if pid <= 0:
+            return
+        cprint(message)
+        mgr.kill_pid(pid)
+        if pid not in terminated_pids:
+            terminated_pids.append(pid)
+
     pid = mgr.read_pid_file(pid_file)
     if pid and mgr.is_process_alive(pid):
-        cprint(f"Stopping frontend process (PID: {pid})...")
-        mgr.kill_pid(pid)
+        _record_kill(pid, f"Stopping frontend process (PID: {pid})...")
     mgr.remove_pid_file(pid_file)
 
     for pid_on_port in mgr.find_pids_on_port(frontend_port):
-        cprint(f"Killing process on port {frontend_port} (PID: {pid_on_port})...")
-        mgr.kill_pid(pid_on_port)
+        _record_kill(pid_on_port, f"Killing process on port {frontend_port} (PID: {pid_on_port})...")
 
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
@@ -91,10 +100,51 @@ def _cleanup_frontend_runtime(manager, frontend_port: int, pid_file: Path) -> No
             has_target_port = f"--port {frontend_port}" in cmdline
             has_frontend_server = "vite" in cmdline or "preview" in cmdline
             if has_target_port and has_frontend_server:
-                cprint(f"Killing orphan frontend process (PID: {proc.pid})...")
-                mgr.kill_pid(proc.pid)
+                _record_kill(proc.pid, f"Killing orphan frontend process (PID: {proc.pid})...")
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
+
+    return terminated_pids
+
+
+def _wait_for_terminated_pids(pids: object, timeout_seconds: float = 15.0) -> bool:
+    mgr = _manager()
+    if isinstance(pids, int):
+        tracked_pids = [pids] if pids > 0 else []
+    elif isinstance(pids, (list, tuple, set)):
+        tracked_pids = [int(pid) for pid in pids if isinstance(pid, int) and pid > 0]
+    else:
+        tracked_pids = []
+
+    if not tracked_pids:
+        return True
+
+    deadline = time.time() + max(timeout_seconds, 1.0)
+    remaining = tracked_pids
+    while time.time() <= deadline:
+        remaining = [pid for pid in tracked_pids if mgr.is_process_alive(pid)]
+        if not remaining:
+            return True
+        time.sleep(0.5)
+
+    cprint(
+        f"Timed out waiting for old frontend processes to exit: {', '.join(str(pid) for pid in remaining)}",
+        YELLOW,
+    )
+    return False
+
+
+def _reset_frontend_runtime_types(manager, public: bool) -> None:
+    runtime_outdir = manager.frontend_dir / get_frontend_outdir(public)
+    runtime_types_dir = runtime_outdir / "types"
+    if not runtime_types_dir.exists():
+        return
+
+    try:
+        shutil.rmtree(runtime_types_dir, ignore_errors=False)
+        cprint(f"Cleared stale frontend runtime types: {runtime_types_dir}", YELLOW)
+    except Exception as exc:
+        cprint(f"Could not clear stale frontend runtime types ({runtime_types_dir}): {exc}", YELLOW)
 
 
 def _frontend_runtime_env(manager, public: bool) -> dict[str, str]:
@@ -244,7 +294,9 @@ def restart_frontend(manager, public: bool = False) -> bool:
         cprint(f"Pre-restart listener PID on :{frontend_port} = {old_listener_pid}", YELLOW)
 
     try:
-        manager._cleanup_frontend_runtime(frontend_port, pid_file)
+        terminated_pids = manager._cleanup_frontend_runtime(frontend_port, pid_file)
+        _wait_for_terminated_pids(terminated_pids)
+        _reset_frontend_runtime_types(manager, public)
         time.sleep(2)
         manager._prepare_frontend_env(api_port=api_port, public=public)
 

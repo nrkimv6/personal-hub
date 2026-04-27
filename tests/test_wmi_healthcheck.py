@@ -20,6 +20,7 @@ sys.path.insert(0, _services_dir)
 import browser_workers
 import service_utils
 from scripts.services import frontend_mode
+from scripts.services.browser_worker_runtime import frontend_actions
 from browser_workers import BrowserWorkerManager
 
 
@@ -166,6 +167,70 @@ class TestRestartFrontendCliArgs:
 
 
 class TestRestartFrontendBehavior:
+    def test_reset_frontend_runtime_types_clears_types_only_right(self, tmp_path):
+        """R: runtime types만 비우고 tsconfig는 유지한다."""
+        mgr = _make_manager(tmp_path)
+        runtime_outdir = mgr.frontend_dir / ".svelte-kit-admin"
+        runtime_types = runtime_outdir / "types" / "src" / "routes"
+        runtime_types.mkdir(parents=True, exist_ok=True)
+        (runtime_outdir / "tsconfig.json").write_text("{\"compilerOptions\":{}}", encoding="utf-8")
+        (runtime_types / "proxy+page.server.ts").write_text("// generated", encoding="utf-8")
+
+        frontend_actions._reset_frontend_runtime_types(mgr, public=False)
+
+        assert (runtime_outdir / "tsconfig.json").exists()
+        assert not (runtime_outdir / "types").exists()
+
+    def test_restart_frontend_waits_for_release_and_clears_types_before_start_boundary(self, tmp_path):
+        """B: 재시작 전에 이전 frontend 종료 대기와 runtime types 정리를 수행한다."""
+        mgr = _make_manager(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.pid = 4321
+        call_order: list[str] = []
+
+        def _record(name: str):
+            def _inner(*args, **kwargs):
+                call_order.append(name)
+                return None
+
+            return _inner
+
+        with patch.object(mgr, "_acquire_frontend_restart_lock", return_value=100), patch.object(
+            mgr, "_release_frontend_restart_lock"
+        ), patch.object(
+            mgr, "_cleanup_frontend_runtime", side_effect=lambda *args, **kwargs: [1111, 2222]
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_terminated_pids",
+            side_effect=lambda pids, timeout_seconds=15.0: call_order.append(f"wait:{','.join(str(pid) for pid in pids)}")
+            or True,
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._reset_frontend_runtime_types",
+            side_effect=lambda manager, public: call_order.append(f"reset:{public}"),
+        ), patch.object(
+            mgr, "_prepare_frontend_env", side_effect=_record("prepare")
+        ), patch.object(
+            mgr, "_run_frontend_build_if_needed", return_value=True
+        ), patch.object(
+            mgr, "_has_port_collision_error", return_value=False
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", return_value=1234
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_listener", return_value=5678
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
+            return_value=(True, None),
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.write_pid_file"
+        ):
+            ok = mgr.restart_frontend(public=False)
+
+        assert ok is True
+        assert call_order[:3] == ["wait:1111,2222", "reset:False", "prepare"]
+
     def test_restart_frontend_dev_right_runs_npm_dev(self, tmp_path):
         """R: admin 모드에서 npm run dev 호출."""
         mgr = _make_manager(tmp_path)

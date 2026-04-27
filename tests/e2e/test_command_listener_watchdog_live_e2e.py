@@ -63,6 +63,10 @@ def _get_latest_stderr_log() -> Path | None:
 class TestCommandListenerRestartE2E:
     """command_listener restart 후 ModuleNotFoundError 회귀 검증."""
 
+    @staticmethod
+    def _combined_output(result) -> str:
+        return f"{result.stdout or ''}{result.stderr or ''}"
+
     def test_right_restart_infra_no_module_not_found(self):
         """browser_workers.py restart-infra command_listener 후 ModuleNotFoundError 없음."""
         import subprocess
@@ -84,7 +88,7 @@ class TestCommandListenerRestartE2E:
             f"restart-infra 실패: returncode={result.returncode}\n"
             f"stdout={result.stdout}\nstderr={result.stderr}"
         )
-        assert "ModuleNotFoundError" not in result.stdout + result.stderr, (
+        assert "ModuleNotFoundError" not in self._combined_output(result), (
             f"restart 과정에서 ModuleNotFoundError 감지\n"
             f"stdout={result.stdout}\nstderr={result.stderr}"
         )
