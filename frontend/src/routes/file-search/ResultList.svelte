@@ -40,20 +40,25 @@
 	$effect(() => {
 		const alive = new Set(results.map((result) => result.file_path));
 		const nextCollapsed = { ...collapsed };
+		let collapsedChanged = false;
 
 		for (const file of results) {
 			if (!(file.file_path in nextCollapsed)) {
 				nextCollapsed[file.file_path] = file.matches.length > 0;
+				collapsedChanged = true;
 			}
 		}
 
 		for (const key of Object.keys(nextCollapsed)) {
 			if (!alive.has(key)) {
 				delete nextCollapsed[key];
+				collapsedChanged = true;
 			}
 		}
 
-		collapsed = nextCollapsed;
+		if (collapsedChanged) {
+			collapsed = nextCollapsed;
+		}
 
 		if (activePreviewPath && !alive.has(activePreviewPath)) {
 			activePreviewPath = null;
@@ -65,14 +70,40 @@
 			previewLoadingPath = null;
 		}
 
-		for (const key of Object.keys(previewCache)) {
-			if (!alive.has(key)) delete previewCache[key];
+		const nextPreviewCache = { ...previewCache };
+		let previewCacheChanged = false;
+		for (const key of Object.keys(nextPreviewCache)) {
+			if (!alive.has(key)) {
+				delete nextPreviewCache[key];
+				previewCacheChanged = true;
+			}
 		}
-		for (const key of Object.keys(previewErrorByPath)) {
-			if (!alive.has(key)) delete previewErrorByPath[key];
+		if (previewCacheChanged) {
+			previewCache = nextPreviewCache;
 		}
-		for (const key of Object.keys(previewRawByPath)) {
-			if (!alive.has(key)) delete previewRawByPath[key];
+
+		const nextPreviewErrorByPath = { ...previewErrorByPath };
+		let previewErrorChanged = false;
+		for (const key of Object.keys(nextPreviewErrorByPath)) {
+			if (!alive.has(key)) {
+				delete nextPreviewErrorByPath[key];
+				previewErrorChanged = true;
+			}
+		}
+		if (previewErrorChanged) {
+			previewErrorByPath = nextPreviewErrorByPath;
+		}
+
+		const nextPreviewRawByPath = { ...previewRawByPath };
+		let previewRawChanged = false;
+		for (const key of Object.keys(nextPreviewRawByPath)) {
+			if (!alive.has(key)) {
+				delete nextPreviewRawByPath[key];
+				previewRawChanged = true;
+			}
+		}
+		if (previewRawChanged) {
+			previewRawByPath = nextPreviewRawByPath;
 		}
 	});
 
