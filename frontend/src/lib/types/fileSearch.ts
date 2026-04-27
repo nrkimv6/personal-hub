@@ -115,10 +115,19 @@ export interface SearchHistoryItem {
 	origin: SearchOrigin;
 }
 
+/** @deprecated file-search primary surface now uses frequent combos. */
 export interface SearchSuggestionItem {
 	query: string;
 	count: number;
 	last_used_at: string;
+}
+
+export interface FrequentSearchComboItem {
+	request: SearchRequest;
+	label: string;
+	count: number;
+	last_used_at: string;
+	summary_tokens: string[];
 }
 
 export interface FilePreviewResponse {

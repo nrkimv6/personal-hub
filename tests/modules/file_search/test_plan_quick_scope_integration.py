@@ -151,7 +151,7 @@ def test_plan_quick_scope_registered_paths_snapshot_and_exclusion(integrated_cli
     finally:
         db.close()
 
-    # 5) origin=plan-quick은 file-search suggestions/history 집계에서 제외되어야 함
+    # 5) origin=plan-quick은 file-search suggestions/history/frequent-combos 집계에서 제외되어야 함
     sug = client.get("/api/v1/file-search/suggestions?limit=50")
     assert sug.status_code == 200
     assert all(query.lower() != s["query"].lower() for s in sug.json())
@@ -160,6 +160,10 @@ def test_plan_quick_scope_registered_paths_snapshot_and_exclusion(integrated_cli
     assert hist.status_code == 200
     ids = [h["search_id"] for h in hist.json()]
     assert search_id not in ids
+
+    combos = client.get("/api/v1/file-search/frequent-combos?limit=50")
+    assert combos.status_code == 200
+    assert all(query.lower() != item["label"].lower() for item in combos.json())
 
     # cleanup
     db = SessionLocal()

@@ -5,6 +5,7 @@ import { request } from './client';
 import type {
 	BrowseResponse,
 	FilePreviewResponse,
+	FrequentSearchComboItem,
 	IgnorePattern,
 	Preset,
 	SearchAcceptedResponse,
@@ -47,6 +48,10 @@ export async function getHistory(limit = 20): Promise<SearchHistoryItem[]> {
 
 export async function getSuggestions(limit = 10): Promise<SearchSuggestionItem[]> {
 	return request<SearchSuggestionItem[]>(`${BASE}/suggestions?limit=${limit}`);
+}
+
+export async function getFrequentCombos(limit = 10): Promise<FrequentSearchComboItem[]> {
+	return request<FrequentSearchComboItem[]>(`${BASE}/frequent-combos?limit=${limit}`);
 }
 
 export async function getPresets(): Promise<Preset[]> {

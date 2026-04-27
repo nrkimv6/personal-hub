@@ -159,6 +159,14 @@ class SearchSuggestionItem(BaseModel):
     last_used_at: str
 
 
+class FrequentSearchComboItem(BaseModel):
+    request: SearchRequest
+    label: str
+    count: int
+    last_used_at: str
+    summary_tokens: List[str] = Field(default_factory=list)
+
+
 # ============================================================
 # Ignore Patterns
 # ============================================================

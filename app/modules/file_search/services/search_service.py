@@ -12,7 +12,7 @@ import logging
 import os
 import subprocess
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,7 @@ from app.modules.file_search.schemas import (
     DirectoryItem,
     FileMatch,
     FilePreviewResponse,
+    FrequentSearchComboItem,
     SearchHistoryItem,
     SearchRequest,
     SearchResponse,
@@ -119,6 +120,86 @@ class SearchService:
     def _normalize_query(query: str) -> str:
         # Normalize for suggestions: ignore case and collapse whitespace.
         return " ".join(query.lower().split())
+
+    @staticmethod
+    def _normalize_combo_values(values: Any, *, casefold: bool = False) -> tuple[str, ...]:
+        if not isinstance(values, list):
+            return ()
+        normalized: list[str] = []
+        for value in values:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            normalized.append(text.lower() if casefold else text)
+        return tuple(sorted(set(normalized)))
+
+    def _normalize_combo_key(self, request: SearchRequest) -> tuple:
+        return (
+            self._normalize_query(request.query),
+            request.mode,
+            bool(request.regex),
+            bool(request.case_sensitive),
+            (request.preset or "").strip().lower(),
+            self._normalize_combo_values(request.paths, casefold=True),
+            self._normalize_combo_values(request.extensions, casefold=True),
+            self._normalize_combo_values(request.excludes, casefold=True),
+        )
+
+    @staticmethod
+    def _summarize_paths(paths: list[str]) -> list[str]:
+        tokens: list[str] = []
+        for path in paths[:2]:
+            raw = str(path).strip()
+            if not raw:
+                continue
+            label = os.path.basename(raw.rstrip("\\/")) or raw
+            tokens.append(label)
+        extra = len(paths) - len(tokens)
+        if extra > 0:
+            tokens.append(f"+경로 {extra}")
+        return tokens
+
+    @staticmethod
+    def _build_summary_tokens(request: SearchRequest) -> list[str]:
+        mode_labels = {
+            "filename": "파일명",
+            "content": "내용",
+            "both": "둘다",
+        }
+        tokens: list[str] = [mode_labels.get(request.mode, request.mode)]
+
+        if request.preset:
+            tokens.append(f"프리셋:{request.preset}")
+
+        if request.regex:
+            tokens.append("정규식")
+        if request.case_sensitive:
+            tokens.append("대소문자")
+
+        tokens.extend(SearchService._summarize_paths(list(request.paths)))
+
+        if request.extensions:
+            tokens.extend([f".{ext.lstrip('.')}" for ext in list(request.extensions)[:2]])
+            if len(request.extensions) > 2:
+                tokens.append(f"+확장자 {len(request.extensions) - 2}")
+
+        if request.excludes:
+            first_exclude = str(request.excludes[0]).strip()
+            if first_exclude:
+                tokens.append(f"제외:{first_exclude}")
+            if len(request.excludes) > 1:
+                tokens.append(f"+제외 {len(request.excludes) - 1}")
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for token in tokens:
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            deduped.append(token)
+        return deduped
 
     def get_history(self, db: Session, limit: int = 20, origin: str = "file-search") -> List[SearchHistoryItem]:
         """최근 검색 이력 (저장된 스냅샷 기반).
@@ -268,6 +349,72 @@ class SearchService:
         ]
         suggestions.sort(key=lambda s: (s.count, s.last_used_at), reverse=True)
         return suggestions[:limit]
+
+    def get_frequent_combos(
+        self, db: Session, limit: int = 10, origin: str = "file-search"
+    ) -> List[FrequentSearchComboItem]:
+        """검색 폼 조합 추천 (최근 completed 이력 기반)."""
+        scan_limit = 2000
+        rows = (
+            db.query(FileSearchRequest)
+            .filter(FileSearchRequest.status == FileSearchRequest.STATUS_COMPLETED)
+            .order_by(FileSearchRequest.created_at.desc())
+            .limit(scan_limit)
+            .all()
+        )
+
+        buckets: dict[tuple, dict[str, Any]] = {}
+        for row in rows:
+            req_data = self._safe_json_loads(row.request_json)
+            if not req_data:
+                continue
+
+            try:
+                request = SearchRequest(**req_data)
+            except Exception:
+                continue
+
+            if origin and request.origin != origin:
+                continue
+
+            if not request.query.strip():
+                continue
+
+            key = self._normalize_combo_key(request)
+            if not key[0]:
+                continue
+
+            bucket = buckets.get(key)
+            if not bucket:
+                buckets[key] = {
+                    "request": request,
+                    "label": request.query.strip(),
+                    "count": 1,
+                    "last_used_at": row.created_at or "",
+                    "summary_tokens": self._build_summary_tokens(request),
+                }
+                continue
+
+            bucket["count"] += 1
+            created_at = row.created_at or ""
+            if created_at and created_at >= bucket["last_used_at"]:
+                bucket["request"] = request
+                bucket["label"] = request.query.strip()
+                bucket["last_used_at"] = created_at
+                bucket["summary_tokens"] = self._build_summary_tokens(request)
+
+        items = [
+            FrequentSearchComboItem(
+                request=value["request"],
+                label=value["label"],
+                count=int(value["count"]),
+                last_used_at=value["last_used_at"],
+                summary_tokens=value["summary_tokens"],
+            )
+            for value in buckets.values()
+        ]
+        items.sort(key=lambda item: (item.count, item.last_used_at), reverse=True)
+        return items[:limit]
 
     # ------------------------------------------------------------------
     # 파일 열기

@@ -2,15 +2,21 @@
 	import { onMount } from 'svelte';
 	import { onDestroy } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
-	import { search, pollSearchResult, getHistory, getSuggestions, getPresets, getStatus } from '$lib/api/fileSearch';
+	import {
+		search,
+		pollSearchResult,
+		getFrequentCombos,
+		getHistory,
+		getPresets,
+		getStatus
+	} from '$lib/api/fileSearch';
 	import type {
 		FileMatch,
+		FrequentSearchComboItem,
 		Preset,
 		SearchHistoryItem,
 		SearchMode,
 		SearchRequest,
-		SearchResponse,
-		SearchSuggestionItem,
 		StatusResponse
 	} from '$lib/types/fileSearch';
 	import { Search, Languages, XCircle, Loader2, Inbox, AlertTriangle, ChevronRight } from 'lucide-svelte';
@@ -70,9 +76,11 @@
 	let showFilters = $state(true);
 
 	let historyItems: SearchHistoryItem[] = $state([]);
-	let suggestionItems: SearchSuggestionItem[] = $state([]);
+	let frequentComboItems: FrequentSearchComboItem[] = $state([]);
 	let historyLoading = $state(false);
+	let comboLoading = $state(false);
 	let historyError = $state('');
+	let comboError = $state('');
 
 	let snapshotSearchId: string | null = $state(null);
 
@@ -96,15 +104,35 @@
 	// ────────────────────────────────────────────────────────────
 	async function refreshHistory() {
 		historyLoading = true;
+		comboLoading = true;
 		historyError = '';
+		comboError = '';
 		try {
-			const [h, s] = await Promise.all([getHistory(20), getSuggestions(10)]);
-			historyItems = h;
-			suggestionItems = s;
-		} catch (e) {
-			historyError = e instanceof Error ? e.message : '최근 검색/추천을 불러오지 못했습니다.';
+			const [historyResult, comboResult] = await Promise.allSettled([
+				getHistory(20),
+				getFrequentCombos(10)
+			]);
+			if (historyResult.status === 'fulfilled') {
+				historyItems = historyResult.value;
+			} else {
+				historyItems = [];
+				historyError =
+					historyResult.reason instanceof Error
+						? historyResult.reason.message
+						: '최근 검색을 불러오지 못했습니다.';
+			}
+			if (comboResult.status === 'fulfilled') {
+				frequentComboItems = comboResult.value;
+			} else {
+				frequentComboItems = [];
+				comboError =
+					comboResult.reason instanceof Error
+						? comboResult.reason.message
+						: '자주 쓰는 조합을 불러오지 못했습니다.';
+			}
 		} finally {
 			historyLoading = false;
+			comboLoading = false;
 		}
 	}
 
@@ -265,11 +293,6 @@
 		selectedPresetId = req.preset ?? null;
 	}
 
-	function handleSuggestionClick(q: string) {
-		query = q;
-		handleSearch();
-	}
-
 	async function handleHistoryClick(item: SearchHistoryItem) {
 		// 진행 중 검색이 있으면 정리
 		abortController?.abort();
@@ -306,6 +329,14 @@
 			loading = false;
 			pollStatus = '';
 		}
+	}
+
+	function handleFrequentComboClick(item: FrequentSearchComboItem) {
+		abortController?.abort();
+		clearPolling();
+		snapshotSearchId = null;
+		applySearchRequestToForm(item.request);
+		void handleSearch();
 	}
 </script>
 
@@ -399,10 +430,12 @@
 
 	<SearchHistoryBar
 		history={historyItems}
-		suggestions={suggestionItems}
-		loading={historyLoading}
-		error={historyError}
-		onsuggestion={handleSuggestionClick}
+		frequentCombos={frequentComboItems}
+		{historyLoading}
+		{comboLoading}
+		{historyError}
+		{comboError}
+		oncombo={handleFrequentComboClick}
 		onhistory={handleHistoryClick}
 	/>
 

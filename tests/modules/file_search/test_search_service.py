@@ -162,3 +162,202 @@ def test_get_suggestions_normalizes_and_excludes_plan_quick():
     finally:
         _cleanup_requests(db, ids)
         db.close()
+
+
+def test_get_frequent_combos_groups_same_query_and_filters():
+    from app.database import SessionLocal
+    from app.models.file_search_request import FileSearchRequest
+    from app.modules.file_search.services.search_service import SearchService
+
+    db = SessionLocal()
+    ids: list[str] = []
+    try:
+        rows = [
+            {
+                "search_id": "svc-combo-group-1",
+                "created_at": "2026-04-27 09:00:00",
+                "request_json": {
+                    "query": "Alpha Search",
+                    "origin": "file-search",
+                    "mode": "content",
+                    "regex": False,
+                    "case_sensitive": False,
+                    "paths": [r"D:\work\project\tools\monitor-page\frontend"],
+                    "extensions": ["ts", "svelte"],
+                    "excludes": ["node_modules"],
+                    "preset": "frontend",
+                    "max_results": 100,
+                    "context_lines": 2,
+                },
+            },
+            {
+                "search_id": "svc-combo-group-2",
+                "created_at": "2026-04-27 09:01:00",
+                "request_json": {
+                    "query": " alpha   search ",
+                    "origin": "file-search",
+                    "mode": "content",
+                    "regex": False,
+                    "case_sensitive": False,
+                    "paths": [r"D:\WORK\PROJECT\TOOLS\MONITOR-PAGE\FRONTEND"],
+                    "extensions": ["svelte", "ts"],
+                    "excludes": ["node_modules"],
+                    "preset": "frontend",
+                    "max_results": 100,
+                    "context_lines": 2,
+                },
+            },
+            {
+                "search_id": "svc-combo-group-3",
+                "created_at": "2026-04-27 09:02:00",
+                "request_json": {
+                    "query": "ALPHA SEARCH",
+                    "origin": "file-search",
+                    "mode": "content",
+                    "regex": False,
+                    "case_sensitive": False,
+                    "paths": [r"D:\work\project\tools\monitor-page\frontend"],
+                    "extensions": ["ts", "svelte"],
+                    "excludes": ["node_modules"],
+                    "preset": "frontend",
+                    "max_results": 100,
+                    "context_lines": 2,
+                },
+            },
+        ]
+        ids.extend(row["search_id"] for row in rows)
+        for row in rows:
+            db.add(
+                FileSearchRequest(
+                    search_id=row["search_id"],
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=row["created_at"],
+                    request_json=json.dumps(row["request_json"]),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+        db.commit()
+
+        svc = SearchService()
+        combos = svc.get_frequent_combos(db=db, limit=10, origin="file-search")
+        combo = next((item for item in combos if item.label == "ALPHA SEARCH"), None)
+        assert combo is not None
+        assert combo.count == 3
+        assert combo.last_used_at == "2026-04-27 09:02:00"
+        assert combo.request.preset == "frontend"
+        assert combo.request.paths == [r"D:\work\project\tools\monitor-page\frontend"]
+        assert "내용" in combo.summary_tokens
+    finally:
+        _cleanup_requests(db, ids)
+        db.close()
+
+
+def test_get_frequent_combos_splits_different_filter_sets():
+    from app.database import SessionLocal
+    from app.models.file_search_request import FileSearchRequest
+    from app.modules.file_search.services.search_service import SearchService
+
+    db = SessionLocal()
+    ids = ["svc-combo-split-1", "svc-combo-split-2"]
+    try:
+        requests = [
+            {
+                "query": "Beta Search",
+                "origin": "file-search",
+                "mode": "content",
+                "regex": False,
+                "case_sensitive": False,
+                "paths": [r"D:\work\project\tools\monitor-page\app"],
+                "extensions": ["py"],
+                "excludes": ["__pycache__"],
+                "preset": None,
+                "max_results": 100,
+                "context_lines": 2,
+            },
+            {
+                "query": "Beta Search",
+                "origin": "file-search",
+                "mode": "content",
+                "regex": False,
+                "case_sensitive": False,
+                "paths": [r"D:\work\project\tools\monitor-page\app"],
+                "extensions": ["ts"],
+                "excludes": ["node_modules"],
+                "preset": None,
+                "max_results": 100,
+                "context_lines": 2,
+            },
+        ]
+        for idx, request_json in enumerate(requests):
+            db.add(
+                FileSearchRequest(
+                    search_id=ids[idx],
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=f"2026-04-27 10:0{idx}:00",
+                    request_json=json.dumps(request_json),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+        db.commit()
+
+        svc = SearchService()
+        combos = [item for item in svc.get_frequent_combos(db=db, limit=10, origin="file-search") if item.label == "Beta Search"]
+        assert len(combos) == 2
+        token_sets = [set(item.summary_tokens) for item in combos]
+        assert any(".py" in tokens for tokens in token_sets)
+        assert any(".ts" in tokens for tokens in token_sets)
+    finally:
+        _cleanup_requests(db, ids)
+        db.close()
+
+
+def test_get_frequent_combos_excludes_plan_quick():
+    from app.database import SessionLocal
+    from app.models.file_search_request import FileSearchRequest
+    from app.modules.file_search.services.search_service import SearchService
+
+    db = SessionLocal()
+    ids = ["svc-combo-fs", "svc-combo-pq"]
+    try:
+        payloads = [
+            ("svc-combo-fs", "file-search", "2026-04-27 11:00:00"),
+            ("svc-combo-pq", "plan-quick", "2026-04-27 11:01:00"),
+        ]
+        for search_id, origin, created_at in payloads:
+            db.add(
+                FileSearchRequest(
+                    search_id=search_id,
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=created_at,
+                    request_json=json.dumps(
+                        {
+                            "query": "Gamma Search",
+                            "origin": origin,
+                            "mode": "both",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [],
+                            "extensions": [],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }
+                    ),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+        db.commit()
+
+        svc = SearchService()
+        combos = svc.get_frequent_combos(db=db, limit=10, origin="file-search")
+        combo = next((item for item in combos if item.label == "Gamma Search"), None)
+        assert combo is not None
+        assert combo.count == 1
+        assert combo.last_used_at == "2026-04-27 11:00:00"
+    finally:
+        _cleanup_requests(db, ids)
+        db.close()

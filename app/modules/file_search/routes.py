@@ -38,6 +38,7 @@ from app.modules.file_search.schemas import (
     IgnorePatternResponse,
     IgnorePatternUpdate,
     FilePreviewResponse,
+    FrequentSearchComboItem,
     OpenFileRequest,
     PresetResponse,
     SearchAcceptedResponse,
@@ -165,6 +166,20 @@ async def get_search_history(
 
 
 # ============================================================
+# GET /frequent-combos — 자주 쓰는 검색 조합
+# ============================================================
+
+
+@router.get("/frequent-combos", response_model=List[FrequentSearchComboItem])
+async def get_frequent_combos(
+    limit: int = Query(10, ge=1, le=50, description="반환할 자주 쓰는 검색 조합 개수"),
+    db: Session = Depends(get_db),
+):
+    """검색 폼 조합 추천 (completed 이력 집계)."""
+    return _service.get_frequent_combos(db=db, limit=limit, origin="file-search")
+
+
+# ============================================================
 # GET /suggestions — 검색어 추천
 # ============================================================
 
@@ -174,7 +189,7 @@ async def get_search_suggestions(
     limit: int = Query(10, ge=1, le=50, description="반환할 추천 검색어 개수"),
     db: Session = Depends(get_db),
 ):
-    """검색어 추천 (completed 이력 집계)."""
+    """검색어 추천 (legacy query-only 계약 유지용)."""
     return _service.get_suggestions(db=db, limit=limit, origin="file-search")
 
 

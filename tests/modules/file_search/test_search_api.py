@@ -487,3 +487,230 @@ class TestHistorySuggestions:
                 cleanup_db.commit()
             finally:
                 cleanup_db.close()
+
+    def test_frequent_combos_returns_count_desc_then_last_used_desc(self, client):
+        """Right: GET /frequent-combos는 count desc + 최근 사용 desc 정렬로 반환."""
+        import uuid
+        from app.database import SessionLocal
+        from app.models.file_search_request import FileSearchRequest
+
+        seed = uuid.uuid4().hex[:8]
+        ids = [
+            f"combo-alpha-{seed}-1",
+            f"combo-alpha-{seed}-2",
+            f"combo-beta-{seed}",
+        ]
+        db = SessionLocal()
+        try:
+            rows = [
+                FileSearchRequest(
+                    search_id=ids[0],
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at="2026-04-27 12:00:00",
+                    request_json=json.dumps({
+                        "query": "Alpha Combo",
+                        "origin": "file-search",
+                        "mode": "content",
+                        "regex": False,
+                        "case_sensitive": False,
+                        "paths": [r"D:\work\project\tools\monitor-page\frontend"],
+                        "extensions": ["svelte"],
+                        "excludes": ["node_modules"],
+                        "preset": "frontend",
+                        "max_results": 100,
+                        "context_lines": 2,
+                    }),
+                    result_json="{}",
+                    search_time_ms=1,
+                ),
+                FileSearchRequest(
+                    search_id=ids[1],
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at="2026-04-27 12:03:00",
+                    request_json=json.dumps({
+                        "query": "alpha combo",
+                        "origin": "file-search",
+                        "mode": "content",
+                        "regex": False,
+                        "case_sensitive": False,
+                        "paths": [r"D:\work\project\tools\monitor-page\frontend"],
+                        "extensions": ["svelte"],
+                        "excludes": ["node_modules"],
+                        "preset": "frontend",
+                        "max_results": 100,
+                        "context_lines": 2,
+                    }),
+                    result_json="{}",
+                    search_time_ms=1,
+                ),
+                FileSearchRequest(
+                    search_id=ids[2],
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at="2026-04-27 12:02:00",
+                    request_json=json.dumps({
+                        "query": "Beta Combo",
+                        "origin": "file-search",
+                        "mode": "filename",
+                        "regex": False,
+                        "case_sensitive": False,
+                        "paths": [r"D:\work\project\tools\monitor-page\app"],
+                        "extensions": ["py"],
+                        "excludes": [],
+                        "preset": None,
+                        "max_results": 100,
+                        "context_lines": 2,
+                    }),
+                    result_json="{}",
+                    search_time_ms=1,
+                ),
+            ]
+            for row in rows:
+                db.add(row)
+            db.commit()
+
+            resp = client.get("/api/v1/file-search/frequent-combos?limit=10")
+            assert resp.status_code == 200
+            data = resp.json()
+            target = [item for item in data if item["label"].lower() in {"alpha combo", "beta combo"}]
+            assert target[0]["label"] == "alpha combo"
+            assert target[0]["count"] == 2
+            assert target[0]["last_used_at"] == "2026-04-27 12:03:00"
+            assert target[1]["label"] == "Beta Combo"
+            assert target[1]["count"] == 1
+            assert target[0]["request"]["preset"] == "frontend"
+            assert "summary_tokens" in target[0]
+        finally:
+            db.close()
+            cleanup_db = SessionLocal()
+            try:
+                cleanup_db.query(FileSearchRequest).filter(
+                    FileSearchRequest.search_id.in_(ids)
+                ).delete(synchronize_session=False)
+                cleanup_db.commit()
+            finally:
+                cleanup_db.close()
+
+    def test_frequent_combos_skips_malformed_request_json(self, client):
+        """Error: malformed request_json row는 /frequent-combos 집계에서 건너뛴다."""
+        import uuid
+        from app.database import SessionLocal
+        from app.models.file_search_request import FileSearchRequest
+
+        seed = uuid.uuid4().hex[:8]
+        ids = [f"combo-bad-{seed}", f"combo-good-{seed}"]
+        db = SessionLocal()
+        try:
+            db.add(
+                FileSearchRequest(
+                    search_id=ids[0],
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at="2026-04-27 12:10:00",
+                    request_json="{bad-json}",
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+            db.add(
+                FileSearchRequest(
+                    search_id=ids[1],
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at="2026-04-27 12:11:00",
+                    request_json=json.dumps({
+                        "query": "Good Combo",
+                        "origin": "file-search",
+                        "mode": "both",
+                        "regex": False,
+                        "case_sensitive": False,
+                        "paths": [],
+                        "extensions": [],
+                        "excludes": [],
+                        "preset": None,
+                        "max_results": 100,
+                        "context_lines": 2,
+                    }),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+            db.commit()
+
+            resp = client.get("/api/v1/file-search/frequent-combos?limit=10")
+            assert resp.status_code == 200
+            data = resp.json()
+            labels = [item["label"] for item in data]
+            assert "Good Combo" in labels
+            assert all(item["label"] != "{bad-json}" for item in data)
+        finally:
+            db.close()
+            cleanup_db = SessionLocal()
+            try:
+                cleanup_db.query(FileSearchRequest).filter(
+                    FileSearchRequest.search_id.in_(ids)
+                ).delete(synchronize_session=False)
+                cleanup_db.commit()
+            finally:
+                cleanup_db.close()
+
+    def test_frequent_combos_splits_different_paths_extensions_and_excludes(self, client):
+        """Right: paths/extensions/excludes 조합이 다르면 별도 item으로 분리된다."""
+        import uuid
+        from app.database import SessionLocal
+        from app.models.file_search_request import FileSearchRequest
+
+        seed = uuid.uuid4().hex[:8]
+        ids = [f"combo-split-{seed}-1", f"combo-split-{seed}-2"]
+        db = SessionLocal()
+        try:
+            variants = [
+                {
+                    "paths": [r"D:\work\project\tools\monitor-page\app"],
+                    "extensions": ["py"],
+                    "excludes": ["__pycache__"],
+                },
+                {
+                    "paths": [r"D:\work\project\tools\monitor-page\frontend"],
+                    "extensions": ["svelte"],
+                    "excludes": ["node_modules"],
+                },
+            ]
+            for idx, variant in enumerate(variants):
+                db.add(
+                    FileSearchRequest(
+                        search_id=ids[idx],
+                        status=FileSearchRequest.STATUS_COMPLETED,
+                        created_at=f"2026-04-27 12:2{idx}:00",
+                        request_json=json.dumps({
+                            "query": "Split Combo",
+                            "origin": "file-search",
+                            "mode": "content",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": variant["paths"],
+                            "extensions": variant["extensions"],
+                            "excludes": variant["excludes"],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }),
+                        result_json="{}",
+                        search_time_ms=1,
+                    )
+                )
+            db.commit()
+
+            resp = client.get("/api/v1/file-search/frequent-combos?limit=10")
+            assert resp.status_code == 200
+            data = [item for item in resp.json() if item["label"] == "Split Combo"]
+            assert len(data) == 2
+            assert any(item["request"]["paths"] == [r"D:\work\project\tools\monitor-page\app"] for item in data)
+            assert any(item["request"]["paths"] == [r"D:\work\project\tools\monitor-page\frontend"] for item in data)
+        finally:
+            db.close()
+            cleanup_db = SessionLocal()
+            try:
+                cleanup_db.query(FileSearchRequest).filter(
+                    FileSearchRequest.search_id.in_(ids)
+                ).delete(synchronize_session=False)
+                cleanup_db.commit()
+            finally:
+                cleanup_db.close()
