@@ -5,6 +5,7 @@
 	interface Props {
 		query: string;
 		snapshotSearchId?: string | null;
+		helperOverlayOpen?: boolean;
 		mode: SearchMode;
 		regex: boolean;
 		caseSensitive: boolean;
@@ -16,6 +17,7 @@
 	let {
 		query = $bindable(''),
 		snapshotSearchId = null,
+		helperOverlayOpen = false,
 		mode = $bindable('both'),
 		regex = $bindable(false),
 		caseSensitive = $bindable(false),
@@ -76,11 +78,11 @@
 
 	function onInputFocus() {
 		loadHistory();
-		if (historyItems.length > 0 && !query) showHistory = true;
+		if (!helperOverlayOpen && historyItems.length > 0 && !query) showHistory = true;
 	}
 
 	function onInputClick() {
-		if (historyItems.length > 0 && !query) showHistory = true;
+		if (!helperOverlayOpen && historyItems.length > 0 && !query) showHistory = true;
 	}
 
 	// 외부 클릭 시 히스토리 닫기
@@ -89,6 +91,12 @@
 			showHistory = false;
 		}
 	}
+
+	$effect(() => {
+		if (helperOverlayOpen) {
+			showHistory = false;
+		}
+	});
 </script>
 
 <svelte:document onclick={handleDocClick} />
@@ -101,7 +109,7 @@
 	{/if}
 	<!-- 검색어 input -->
 	<div class="relative">
-		<div class="flex gap-2">
+		<div class="flex flex-col gap-2 sm:flex-row">
 			<input
 				bind:this={inputEl}
 				bind:value={query}
@@ -128,7 +136,7 @@
 				<button
 					onclick={handleSubmit}
 					disabled={!query.trim()}
-					class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground
+					class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground sm:min-w-[112px]
 						   shadow-sm transition-colors hover:bg-primary/90
 						   disabled:cursor-not-allowed disabled:opacity-50"
 				>
@@ -157,9 +165,10 @@
 	</div>
 
 	<!-- 모드 + 옵션 -->
-	<div class="flex flex-wrap items-center gap-4">
+	<div class="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
 		<!-- 검색 모드 -->
-		<div class="flex items-center gap-1 rounded-lg border border-border bg-background p-1">
+		<div class="flex flex-wrap items-center gap-2">
+			<div class="flex items-center gap-1 rounded-lg border border-border bg-background p-1">
 			{#each [['filename', '파일명'], ['content', '내용'], ['both', '둘 다']] as [val, label]}
 				<button
 					onclick={() => (mode = val as SearchMode)}
@@ -171,36 +180,36 @@
 					{label}
 				</button>
 			{/each}
+			</div>
 		</div>
 
-		<!-- 정규식 토글 -->
-		<label class="flex cursor-pointer items-center gap-1.5 text-sm">
-			<input
-				type="checkbox"
-				bind:checked={regex}
-				class="h-4 w-4 rounded accent-primary"
-			/>
-			<span class="font-mono text-xs text-muted-foreground">.*</span>
-			<span>정규식</span>
-		</label>
+		<div class="flex flex-wrap items-center gap-3 sm:justify-end">
+			<label class="flex cursor-pointer items-center gap-1.5 text-sm">
+				<input
+					type="checkbox"
+					bind:checked={regex}
+					class="h-4 w-4 rounded accent-primary"
+				/>
+				<span class="font-mono text-xs text-muted-foreground">.*</span>
+				<span>정규식</span>
+			</label>
 
-		<!-- 대소문자 토글 -->
-		<label class="flex cursor-pointer items-center gap-1.5 text-sm">
-			<input
-				type="checkbox"
-				bind:checked={caseSensitive}
-				class="h-4 w-4 rounded accent-primary"
-			/>
-			<span class="font-mono text-xs text-muted-foreground">Aa</span>
-			<span>대소문자 구분</span>
-		</label>
+			<label class="flex cursor-pointer items-center gap-1.5 text-sm">
+				<input
+					type="checkbox"
+					bind:checked={caseSensitive}
+					class="h-4 w-4 rounded accent-primary"
+				/>
+				<span class="font-mono text-xs text-muted-foreground">Aa</span>
+				<span>대소문자 구분</span>
+			</label>
 
-		<!-- 로딩 표시 -->
-		{#if loading}
-			<span class="flex items-center gap-1.5 text-sm text-muted-foreground animate-pulse">
-				<span class="inline-block h-2 w-2 rounded-full bg-primary animate-pulse"></span>
-				검색 중...
-			</span>
-		{/if}
+			{#if loading}
+				<span class="flex items-center gap-1.5 text-sm text-muted-foreground animate-pulse">
+					<span class="inline-block h-2 w-2 rounded-full bg-primary animate-pulse"></span>
+					검색 중...
+				</span>
+			{/if}
+		</div>
 	</div>
 </div>

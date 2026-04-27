@@ -255,6 +255,8 @@ def test_file_search_content_match_click_still_calls_open_endpoint(
     page.get_by_role("button", name="검색", exact=True).click()
 
     expect(page.get_by_text("main.py", exact=True)).to_be_visible()
+    expect(page.get_by_text("def hello():")).to_have_count(0)
+    page.get_by_role("button", name="main.py 결과 펼치기").click()
     page.get_by_text("def hello():").click()
 
     assert len(open_calls) == 1
@@ -262,7 +264,7 @@ def test_file_search_content_match_click_still_calls_open_endpoint(
     assert open_calls[0]["line_number"] == 10
 
 
-def test_file_search_default_tab_uses_frequent_combos_and_hides_history_until_tab_click(
+def test_file_search_helper_overlay_opens_history_and_combo_tabs_on_demand(
     page: Page,
     frontend_url: str,
     system_mode: str,
@@ -353,11 +355,17 @@ def test_file_search_default_tab_uses_frequent_combos_and_hides_history_until_ta
     page.goto(f"{frontend_url}/file-search")
     page.wait_for_load_state("networkidle")
 
-    expect(page.get_by_role("button", name="자주 쓰는 조합")).to_be_visible()
+    expect(page.get_by_role("button", name="자주 쓰는 조합 열기")).to_be_visible()
     expect(page.get_by_text("watchdog loop", exact=True)).to_be_visible()
     expect(page.get_by_text("legacy history item", exact=True)).to_have_count(0)
+    expect(page.get_by_role("dialog", name="탐색도우미")).to_have_count(0)
 
-    page.get_by_text("watchdog loop", exact=True).click()
+    page.get_by_role("button", name="자주 쓰는 조합 전체 보기").click()
+    dialog = page.get_by_role("dialog", name="탐색도우미")
+    expect(dialog).to_be_visible()
+    expect(dialog.get_by_text("watchdog loop", exact=True)).to_be_visible()
+
+    dialog.get_by_text("watchdog loop", exact=True).click()
 
     assert len(search_calls) == 1
     assert search_calls[0]["query"] == "watchdog loop"
@@ -366,5 +374,174 @@ def test_file_search_default_tab_uses_frequent_combos_and_hides_history_until_ta
     assert search_calls[0]["extensions"] == ["ps1"]
     assert search_calls[0]["preset"] == "frontend"
 
-    page.get_by_role("button", name="최근 검색").click()
-    expect(page.get_by_text("legacy history item", exact=True)).to_be_visible()
+    page.get_by_role("button", name="최근 검색 열기").click()
+    dialog = page.get_by_role("dialog", name="탐색도우미")
+    expect(dialog.get_by_text("legacy history item", exact=True)).to_be_visible()
+
+
+def test_file_search_extension_suggestion_chip_updates_payload(
+    page: Page,
+    frontend_url: str,
+    system_mode: str,
+):
+    _skip_admin_mode_if_public(system_mode)
+
+    combo_payload = [
+        {
+            "request": {
+                "query": "watchdog loop",
+                "origin": "file-search",
+                "mode": "content",
+                "regex": False,
+                "case_sensitive": False,
+                "paths": [r"D:\work\project\tools\monitor-page\scripts"],
+                "extensions": ["ps1", "md"],
+                "excludes": [],
+                "preset": "frontend",
+                "max_results": 100,
+                "context_lines": 2,
+            },
+            "label": "watchdog loop",
+            "count": 4,
+            "last_used_at": "2026-04-27 12:30:00",
+            "summary_tokens": ["내용", "프리셋:frontend", "scripts", ".ps1"],
+        }
+    ]
+    history_payload = [
+        {
+            "search_id": "history-item-1",
+            "request": {
+                "query": "watchdog notes",
+                "origin": "file-search",
+                "mode": "content",
+                "regex": False,
+                "case_sensitive": False,
+                "paths": [],
+                "extensions": ["md"],
+                "excludes": [],
+                "preset": None,
+                "max_results": 100,
+                "context_lines": 2,
+            },
+            "query": "watchdog notes",
+            "mode": "content",
+            "created_at": "2026-04-27 12:20:00",
+            "total_count": 2,
+            "search_time_ms": 30,
+            "sample_files": ["watchdog.md"],
+            "origin": "file-search",
+        }
+    ]
+    _stub_file_search_bootstrap(page, history=history_payload, frequent_combos=combo_payload)
+
+    search_calls: list[dict] = []
+
+    def _handle_search(route):
+        search_calls.append(route.request.post_data_json)
+        route.fulfill(
+            status=202,
+            content_type="application/json",
+            body=json.dumps({"search_id": "suggestion-search-id", "status": "queued"}),
+        )
+
+    page.route("**/api/v1/file-search/search", _handle_search)
+    page.route(
+        "**/api/v1/file-search/search/suggestion-search-id",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "search_id": "suggestion-search-id",
+                    "status": "completed",
+                    "result": {
+                        "results": [],
+                        "total_count": 0,
+                        "search_time_ms": 15,
+                        "mode": "content",
+                        "truncated": False,
+                    },
+                    "error_message": None,
+                }
+            ),
+        ),
+    )
+
+    page.goto(f"{frontend_url}/file-search")
+    page.wait_for_load_state("networkidle")
+
+    page.get_by_placeholder("파일명 또는 내용 검색... (Ctrl+Enter)").fill("watchdog")
+    page.get_by_role("button", name=".ps1").click()
+    page.get_by_role("button", name="검색", exact=True).click()
+
+    assert len(search_calls) == 1
+    assert search_calls[0]["extensions"] == ["ps1"]
+
+
+def test_file_search_mobile_result_card_starts_collapsed(
+    page: Page,
+    frontend_url: str,
+    system_mode: str,
+):
+    _skip_admin_mode_if_public(system_mode)
+    _stub_file_search_bootstrap(page)
+    page.set_viewport_size({"width": 390, "height": 844})
+
+    search_id = "mobile-search-id"
+    results_payload = {
+        "results": [
+            {
+                "file_path": r"D:\work\project\tools\monitor-page\app\main.py",
+                "file_name": "main.py",
+                "file_size": 1024,
+                "modified": None,
+                "matches": [
+                    {
+                        "line_number": 10,
+                        "line_text": "def hello():",
+                        "context_before": [],
+                        "context_after": [],
+                        "submatches": [],
+                    }
+                ],
+                "match_source": "content",
+            }
+        ],
+        "total_count": 1,
+        "search_time_ms": 123,
+        "mode": "content",
+        "truncated": False,
+    }
+
+    page.route(
+        "**/api/v1/file-search/search",
+        lambda route: route.fulfill(
+            status=202,
+            content_type="application/json",
+            body=json.dumps({"search_id": search_id, "status": "queued"}),
+        ),
+    )
+    page.route(
+        f"**/api/v1/file-search/search/{search_id}",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "search_id": search_id,
+                    "status": "completed",
+                    "result": results_payload,
+                    "error_message": None,
+                }
+            ),
+        ),
+    )
+
+    page.goto(f"{frontend_url}/file-search")
+    page.wait_for_load_state("networkidle")
+
+    page.get_by_placeholder("파일명 또는 내용 검색... (Ctrl+Enter)").fill("hello")
+    page.get_by_role("button", name="검색", exact=True).click()
+
+    expect(page.get_by_text("L10")).to_be_visible()
+    expect(page.get_by_text("def hello():")).to_have_count(0)

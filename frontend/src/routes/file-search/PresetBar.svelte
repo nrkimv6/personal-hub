@@ -10,11 +10,11 @@
 	let { presets, selectedPresetId, onselect }: Props = $props();
 </script>
 
-<div class="flex flex-wrap gap-2">
+<div class="flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
 	{#each presets as preset}
 		<button
 			onclick={() => onselect(selectedPresetId === preset.id ? null : preset)}
-			class="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium
+			class="shrink-0 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium
 				   transition-all
 				   {selectedPresetId === preset.id
 				? 'border-primary bg-primary text-primary-foreground shadow-sm'

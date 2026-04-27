@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import {
 		search,
@@ -11,6 +10,8 @@
 		getStatus
 	} from '$lib/api/fileSearch';
 	import type {
+		ExtensionSuggestionItem,
+		ExtensionSuggestionSection,
 		FileMatch,
 		FrequentSearchComboItem,
 		Preset,
@@ -23,6 +24,8 @@
 
 	import SearchForm from './SearchForm.svelte';
 	import SearchHistoryBar from './SearchHistoryBar.svelte';
+	import SearchHelperOverlay from './SearchHelperOverlay.svelte';
+	import type { SearchHelperTab } from './SearchHelperOverlay.svelte';
 	import PresetBar from './PresetBar.svelte';
 	import ExtensionFilter from './ExtensionFilter.svelte';
 	import IgnorePatterns from './IgnorePatterns.svelte';
@@ -33,11 +36,16 @@
 	import { goto } from '$app/navigation';
 
 	type PageTab = 'search' | 'encoding';
+	type SearchRecord = {
+		request: SearchRequest;
+		weight: number;
+	};
+
 	let pageTab: PageTab = $state('search');
 
 	$effect(() => {
-		const t = $page.url.searchParams.get('tab');
-		pageTab = t === 'encoding' ? 'encoding' : 'search';
+		const tab = $page.url.searchParams.get('tab');
+		pageTab = tab === 'encoding' ? 'encoding' : 'search';
 	});
 
 	function setPageTab(tab: PageTab) {
@@ -50,9 +58,6 @@
 		goto(url.toString(), { replaceState: true, keepFocus: true });
 	}
 
-	// ────────────────────────────────────────────────────────────
-	// 상태
-	// ────────────────────────────────────────────────────────────
 	let query = $state('');
 	let mode: SearchMode = $state('both');
 	let regex = $state(false);
@@ -74,6 +79,9 @@
 	let status: StatusResponse | null = $state(null);
 
 	let showFilters = $state(true);
+	let showHelperOverlay = $state(false);
+	let helperTab: SearchHelperTab = $state('combos');
+	let isMobileViewport = $state(false);
 
 	let historyItems: SearchHistoryItem[] = $state([]);
 	let frequentComboItems: FrequentSearchComboItem[] = $state([]);
@@ -83,13 +91,9 @@
 	let comboError = $state('');
 
 	let snapshotSearchId: string | null = $state(null);
-
-	// 검색 AbortController
 	let abortController: AbortController | null = null;
-
-	// 폴링 상태
 	let pollInterval: ReturnType<typeof setInterval> | null = null;
-	let pollStatus = $state<string>(''); // pending / queued / processing / completed / failed
+	let pollStatus = $state<string>('');
 
 	const POLL_STATUS_LABELS: Record<string, string> = {
 		pending: '큐 대기중',
@@ -99,9 +103,109 @@
 		failed: '실패'
 	};
 
-	// ────────────────────────────────────────────────────────────
-	// 초기화
-	// ────────────────────────────────────────────────────────────
+	const selectedPreset = $derived(
+		selectedPresetId ? presets.find((preset) => preset.id === selectedPresetId) ?? null : null
+	);
+
+	const totalExcludeCount = $derived(excludes.length + ignorePatternExcludes.length);
+
+	const filterSummaryItems = $derived.by(() => {
+		const items: string[] = [];
+
+		if (selectedPreset) {
+			items.push(`프리셋 ${selectedPreset.name}`);
+		}
+		if (path.trim()) {
+			items.push(shortPath(path.trim(), 30));
+		}
+		if (extensions.length > 0) {
+			const [first, ...rest] = extensions;
+			items.push(rest.length > 0 ? `.${first} +${rest.length}` : `.${first}`);
+		}
+		if (totalExcludeCount > 0) {
+			items.push(`제외 ${totalExcludeCount}`);
+		}
+
+		return items;
+	});
+
+	const helperSummary = $derived.by(() => {
+		const items: string[] = [];
+		if (frequentComboItems.length > 0) {
+			items.push(`조합 ${frequentComboItems.length}`);
+		}
+		if (historyItems.length > 0) {
+			items.push(`최근 ${historyItems.length}`);
+		}
+		return items;
+	});
+
+	const searchRecords = $derived.by(() => {
+		const records: SearchRecord[] = [];
+
+		for (const item of historyItems) {
+			records.push({
+				request: item.request,
+				weight: 1
+			});
+		}
+
+		for (const item of frequentComboItems) {
+			records.push({
+				request: item.request,
+				weight: Math.max(item.count, 1)
+			});
+		}
+
+		return records;
+	});
+
+	const extensionSuggestionGroups = $derived.by(() => {
+		const selected = new Set(extensions.map(normalizeExtension));
+		const used = new Set<string>();
+		const sections: ExtensionSuggestionSection[] = [];
+
+		const recentItems = collectExtensionItems(
+			historyItems.flatMap((item) => item.request.extensions ?? []),
+			selected,
+			used,
+			4
+		);
+		if (recentItems.length > 0) {
+			sections.push({
+				id: 'recent',
+				label: '최근 사용',
+				items: recentItems
+			});
+		}
+
+		const contextualRecords = searchRecords.filter((record) => matchesCurrentContext(record.request));
+		const contextualItems = collectExtensionItemsFromRecords(contextualRecords, selected, used, 5);
+		if (contextualItems.length > 0) {
+			sections.push({
+				id: 'context',
+				label: query.trim() ? '현재 검색과 함께 자주 사용' : '현재 모드/경로와 자주 사용',
+				items: contextualItems
+			});
+		}
+
+		const presetAndPathRecords = searchRecords.filter((record) => {
+			if (selectedPresetId && record.request.preset === selectedPresetId) return true;
+			if (!path.trim()) return false;
+			return record.request.paths?.some((itemPath) => pathMatches(path, itemPath)) ?? false;
+		});
+		const presetItems = collectExtensionItemsFromRecords(presetAndPathRecords, selected, used, 5);
+		if (presetItems.length > 0) {
+			sections.push({
+				id: 'preset',
+				label: selectedPreset ? `${selectedPreset.name} 추천` : '경로 기반 추천',
+				items: presetItems
+			});
+		}
+
+		return sections;
+	});
+
 	async function refreshHistory() {
 		historyLoading = true;
 		comboLoading = true;
@@ -136,33 +240,37 @@
 		}
 	}
 
-	onMount(async () => {
-		if (window.matchMedia('(max-width: 639px)').matches) {
-			showFilters = false;
-		}
+	onMount(() => {
+		const mediaQuery = window.matchMedia('(max-width: 639px)');
+		const syncViewport = () => {
+			isMobileViewport = mediaQuery.matches;
+			if (mediaQuery.matches) {
+				showFilters = false;
+			}
+		};
+		syncViewport();
+		mediaQuery.addEventListener('change', syncViewport);
 
-		try {
-			presets = await getPresets();
-		} catch {}
-		try {
-			status = await getStatus();
-		} catch {}
-		await refreshHistory();
+		void (async () => {
+			try {
+				presets = await getPresets();
+			} catch {}
+			try {
+				status = await getStatus();
+			} catch {}
+			await refreshHistory();
+		})();
+
+		return () => mediaQuery.removeEventListener('change', syncViewport);
 	});
 
-	// ────────────────────────────────────────────────────────────
-	// 전역 단축키 (Ctrl+Enter)
-	// ────────────────────────────────────────────────────────────
-	function handleGlobalKeydown(e: KeyboardEvent) {
-		if (e.ctrlKey && e.key === 'Enter') {
-			e.preventDefault();
+	function handleGlobalKeydown(event: KeyboardEvent) {
+		if (event.ctrlKey && event.key === 'Enter') {
+			event.preventDefault();
 			handleSearch();
 		}
 	}
 
-	// ────────────────────────────────────────────────────────────
-	// 프리셋 선택
-	// ────────────────────────────────────────────────────────────
 	function handlePresetSelect(preset: Preset | null) {
 		if (!preset) {
 			selectedPresetId = null;
@@ -174,9 +282,6 @@
 		if (preset.paths.length > 0) path = preset.paths[0];
 	}
 
-	// ────────────────────────────────────────────────────────────
-	// 폴링 정리
-	// ────────────────────────────────────────────────────────────
 	function clearPolling() {
 		if (pollInterval !== null) {
 			clearInterval(pollInterval);
@@ -189,14 +294,11 @@
 		abortController?.abort();
 	});
 
-	// ────────────────────────────────────────────────────────────
-	// 검색 실행
-	// ────────────────────────────────────────────────────────────
 	async function handleSearch() {
 		if (!query.trim() || loading) return;
 		snapshotSearchId = null;
+		showHelperOverlay = false;
 
-		// 이전 요청 취소 및 폴링 정리
 		abortController?.abort();
 		clearPolling();
 		abortController = new AbortController();
@@ -207,7 +309,6 @@
 		pollStatus = '';
 
 		try {
-			// 202 비동기 → search_id 수신
 			const accepted = await search(
 				{
 					query: query.trim(),
@@ -226,7 +327,6 @@
 
 			pollStatus = accepted.status;
 
-			// 폴링 시작 (200ms 간격)
 			await new Promise<void>((resolve, reject) => {
 				pollInterval = setInterval(async () => {
 					try {
@@ -249,18 +349,17 @@
 							results = [];
 							resolve();
 						}
-					} catch (e) {
+					} catch (pollError) {
 						clearPolling();
-						reject(e);
+						reject(pollError);
 					}
 				}, 200);
 			});
 
-			// 최근 검색/추천 갱신 (실패해도 검색 결과는 유지)
 			void refreshHistory();
 		} catch (err: unknown) {
 			clearPolling();
-			if (err instanceof Error && err.name === 'AbortError') return; // 취소됨
+			if (err instanceof Error && err.name === 'AbortError') return;
 			if (err instanceof Error && err.message.includes('타임아웃')) {
 				error = '검색 시간이 초과되었습니다. RIPGREP_TIMEOUT 설정을 확인하세요.';
 			} else if (err instanceof Error && err.message.includes('잘못된 정규식')) {
@@ -282,21 +381,23 @@
 		pollStatus = '';
 	}
 
-	function applySearchRequestToForm(req: SearchRequest) {
-		query = req.query ?? '';
-		mode = req.mode ?? 'both';
-		regex = !!req.regex;
-		caseSensitive = !!req.case_sensitive;
-		path = Array.isArray(req.paths) && req.paths.length > 0 ? req.paths[0] : '';
-		extensions = Array.isArray(req.extensions) ? [...req.extensions] : [];
-		excludes = Array.isArray(req.excludes) ? [...req.excludes] : [];
-		selectedPresetId = req.preset ?? null;
+	function applySearchRequestToForm(request: SearchRequest) {
+		query = request.query ?? '';
+		mode = request.mode ?? 'both';
+		regex = !!request.regex;
+		caseSensitive = !!request.case_sensitive;
+		path = Array.isArray(request.paths) && request.paths.length > 0 ? request.paths[0] : '';
+		extensions = Array.isArray(request.extensions)
+			? [...new Set(request.extensions.map(normalizeExtension))]
+			: [];
+		excludes = Array.isArray(request.excludes) ? [...request.excludes] : [];
+		selectedPresetId = request.preset ?? null;
 	}
 
 	async function handleHistoryClick(item: SearchHistoryItem) {
-		// 진행 중 검색이 있으면 정리
 		abortController?.abort();
 		clearPolling();
+		showHelperOverlay = false;
 
 		loading = true;
 		error = '';
@@ -322,8 +423,11 @@
 				error = `저장된 검색이 아직 완료되지 않았습니다: ${poll.status}`;
 				results = [];
 			}
-		} catch (e) {
-			error = e instanceof Error ? e.message : '저장된 검색 결과를 불러오지 못했습니다.';
+		} catch (historyErrorValue) {
+			error =
+				historyErrorValue instanceof Error
+					? historyErrorValue.message
+					: '저장된 검색 결과를 불러오지 못했습니다.';
 			results = [];
 		} finally {
 			loading = false;
@@ -335,29 +439,113 @@
 		abortController?.abort();
 		clearPolling();
 		snapshotSearchId = null;
+		showHelperOverlay = false;
 		applySearchRequestToForm(item.request);
 		void handleSearch();
+	}
+
+	function openHelper(tab: SearchHelperTab) {
+		helperTab = tab;
+		showHelperOverlay = true;
+	}
+
+	function closeHelper() {
+		showHelperOverlay = false;
+	}
+
+	function normalizeExtension(ext: string): string {
+		return ext.trim().replace(/^\./, '').toLowerCase();
+	}
+
+	function shortPath(value: string, maxLen = 32): string {
+		if (value.length <= maxLen) return value;
+		const normalized = value.replace(/\\/g, '/');
+		const parts = normalized.split('/').filter(Boolean);
+		if (parts.length <= 2) return value;
+		return `${parts[0]}/.../${parts[parts.length - 1]}`;
+	}
+
+	function pathMatches(currentPath: string, candidatePath: string): boolean {
+		const current = currentPath.trim().replace(/\\/g, '/').toLowerCase();
+		const candidate = candidatePath.trim().replace(/\\/g, '/').toLowerCase();
+		return current.length > 0 && candidate.length > 0 && (candidate.includes(current) || current.includes(candidate));
+	}
+
+	function matchesCurrentContext(request: SearchRequest): boolean {
+		const normalizedQuery = query.trim().toLowerCase();
+		const requestQuery = request.query?.trim().toLowerCase() ?? '';
+		const hasQueryMatch =
+			normalizedQuery.length > 0 &&
+			requestQuery.length > 0 &&
+			(requestQuery.includes(normalizedQuery) || normalizedQuery.includes(requestQuery));
+		const hasModeMatch = request.mode === mode;
+		const hasPresetMatch = selectedPresetId ? request.preset === selectedPresetId : false;
+		const hasPathMatch =
+			path.trim().length > 0 &&
+			(request.paths?.some((itemPath) => pathMatches(path, itemPath)) ?? false);
+		return hasQueryMatch || hasPresetMatch || hasPathMatch || hasModeMatch;
+	}
+
+	function collectExtensionItems(
+		source: string[],
+		selected: Set<string>,
+		used: Set<string>,
+		limit: number
+	): ExtensionSuggestionItem[] {
+		const items: ExtensionSuggestionItem[] = [];
+		for (const ext of source) {
+			const normalized = normalizeExtension(ext);
+			if (!normalized || selected.has(normalized) || used.has(normalized)) continue;
+			used.add(normalized);
+			items.push({ ext: normalized });
+			if (items.length >= limit) break;
+		}
+		return items;
+	}
+
+	function collectExtensionItemsFromRecords(
+		records: SearchRecord[],
+		selected: Set<string>,
+		used: Set<string>,
+		limit: number
+	): ExtensionSuggestionItem[] {
+		const counts = new Map<string, number>();
+
+		for (const record of records) {
+			const recordExtensions = [...new Set((record.request.extensions ?? []).map(normalizeExtension))];
+			for (const ext of recordExtensions) {
+				if (!ext || selected.has(ext) || used.has(ext)) continue;
+				counts.set(ext, (counts.get(ext) ?? 0) + record.weight);
+			}
+		}
+
+		return [...counts.entries()]
+			.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+			.slice(0, limit)
+			.map(([ext, count]) => {
+				used.add(ext);
+				return { ext, count };
+			});
 	}
 </script>
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="flex h-full flex-col gap-4 p-6">
-	<!-- 탭 네비게이션 -->
 	<div class="flex items-center gap-1 border-b border-border pb-2">
 		<button
 			onclick={() => setPageTab('search')}
-			class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-t transition-colors {pageTab === 'search'
+			class="flex items-center gap-2 rounded-t px-3 py-1.5 text-sm font-medium transition-colors {pageTab === 'search'
 				? 'bg-primary/10 text-primary'
-				: 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}"
+				: 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'}"
 		>
 			<Search size={16} /> 파일 검색
 		</button>
 		<button
 			onclick={() => setPageTab('encoding')}
-			class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-t transition-colors {pageTab === 'encoding'
+			class="flex items-center gap-2 rounded-t px-3 py-1.5 text-sm font-medium transition-colors {pageTab === 'encoding'
 				? 'bg-primary/10 text-primary'
-				: 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}"
+				: 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'}"
 		>
 			<Languages size={16} /> 인코딩 변환
 		</button>
@@ -368,181 +556,210 @@
 	{/if}
 
 	{#if pageTab === 'search'}
-	<!-- 페이지 제목 + 상태 뱃지 -->
-	<PageHeader title="파일 검색" subtitle="로컬 파일을 빠르게 검색합니다">
-		{#if status}
-			<div class="flex items-center gap-2">
-				<span
-					class="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium
-						   {status.everything_ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}"
-					title={status.everything_message}
-				>
-					<span class="h-1.5 w-1.5 rounded-full {status.everything_ok ? 'bg-success' : 'bg-destructive'}"></span>
-					Everything
-				</span>
-				<span
-					class="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium
-						   {status.ripgrep_ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}"
-					title={status.ripgrep_path ?? '미설치'}
-				>
-					<span class="h-1.5 w-1.5 rounded-full {status.ripgrep_ok ? 'bg-success' : 'bg-destructive'}"></span>
-					ripgrep
-				</span>
-			</div>
-		{/if}
-	</PageHeader>
-
-	<!-- 도구 문제 경고 -->
-	{#if status && (!status.everything_ok || !status.ripgrep_ok)}
-		<div class="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning flex items-start gap-2">
-			<AlertTriangle size={18} class="shrink-0 mt-0.5" />
-			<div>
-				{#if !status.everything_ok}
-					<p>Everything HTTP 서버에 연결할 수 없습니다 ({status.everything_message}). 파일명 검색이 불가합니다.</p>
-				{/if}
-				{#if !status.ripgrep_ok}
-					<p>ripgrep이 설치되지 않았습니다. 내용 검색이 불가합니다. (<code>winget install BurntSushi.ripgrep.MSVC</code>)</p>
-				{/if}
-			</div>
-		</div>
-	{/if}
-
-	<!-- 검색 에러 -->
-	{#if error}
-		<div class="flex items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-			<XCircle size={18} class="shrink-0" />
-			<span class="flex-1">{error}</span>
-			<button onclick={() => (error = '')} class="shrink-0 opacity-60 hover:opacity-100">×</button>
-		</div>
-	{/if}
-
-	<!-- 검색 폼 -->
-	<SearchForm
-		bind:query
-		bind:mode
-		bind:regex
-		bind:caseSensitive
-		{loading}
-		{snapshotSearchId}
-		onsearch={handleSearch}
-		oncancel={handleCancel}
-	/>
-
-	<SearchHistoryBar
-		history={historyItems}
-		frequentCombos={frequentComboItems}
-		{historyLoading}
-		{comboLoading}
-		{historyError}
-		{comboError}
-		oncombo={handleFrequentComboClick}
-		onhistory={handleHistoryClick}
-	/>
-
-	{#if snapshotSearchId}
-		<div class="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground flex items-center justify-between gap-3">
-			<div class="min-w-0">
-				<span class="font-medium text-foreground">저장 결과 보기</span>
-				<span class="ml-2 truncate">search_id: <code class="text-[11px]">{snapshotSearchId}</code></span>
-			</div>
-			<div class="flex items-center gap-2 shrink-0">
-				<button
-					onclick={() => (snapshotSearchId = null)}
-					class="rounded-md border border-border bg-background px-2.5 py-1 hover:bg-muted/40 transition-colors"
-				>
-					닫기
-				</button>
-				<button
-					onclick={handleSearch}
-					class="rounded-md bg-primary px-2.5 py-1 text-primary-foreground hover:opacity-90 transition-opacity"
-				>
-					다시 검색
-				</button>
-			</div>
-		</div>
-	{/if}
-
-	<!-- 필터 영역 (접기/펼치기) -->
-	<div class="rounded-lg border border-border bg-card">
-		<button
-			onclick={() => (showFilters = !showFilters)}
-			class="flex w-full items-center justify-between px-4 py-2.5 text-sm font-medium
-				   hover:bg-muted/50 transition-colors"
-		>
-			<span>필터 & 범위</span>
-			<ChevronRight size={14} class="text-muted-foreground transition-transform {showFilters ? 'rotate-90' : ''}" />
-		</button>
-
-		{#if showFilters}
-			<div class="border-t border-border px-4 py-3 space-y-3">
-				<!-- 프리셋 -->
-				<div class="space-y-1.5">
-					<div class="text-xs font-medium text-muted-foreground">프리셋</div>
-					<PresetBar
-						{presets}
-						{selectedPresetId}
-						onselect={handlePresetSelect}
-					/>
+		<PageHeader title="파일 검색" subtitle="로컬 파일을 빠르게 검색합니다">
+			{#if status}
+				<div class="flex items-center gap-2">
+					<span
+						class="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium {status.everything_ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}"
+						title={status.everything_message}
+					>
+						<span class="h-1.5 w-1.5 rounded-full {status.everything_ok ? 'bg-success' : 'bg-destructive'}"></span>
+						Everything
+					</span>
+					<span
+						class="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium {status.ripgrep_ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}"
+						title={status.ripgrep_path ?? '미설치'}
+					>
+						<span class="h-1.5 w-1.5 rounded-full {status.ripgrep_ok ? 'bg-success' : 'bg-destructive'}"></span>
+						ripgrep
+					</span>
 				</div>
+			{/if}
+		</PageHeader>
 
-				<!-- 경로 -->
-				<div class="space-y-1.5">
-					<div class="text-xs font-medium text-muted-foreground">검색 경로</div>
-					<PathInput
-						bind:path
-						onchange={(p) => (path = p)}
-					/>
-				</div>
-
-				<!-- 확장자 -->
-				<div class="space-y-1.5">
-					<div class="text-xs font-medium text-muted-foreground">확장자 필터</div>
-					<ExtensionFilter
-						bind:extensions
-						onchange={(exts) => (extensions = exts)}
-					/>
-				</div>
-
-				<!-- 무시 패턴 -->
-				<div class="space-y-1.5">
-					<IgnorePatterns onchange={(patterns) => (ignorePatternExcludes = patterns)} />
+		{#if status && (!status.everything_ok || !status.ripgrep_ok)}
+			<div class="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
+				<AlertTriangle size={18} class="mt-0.5 shrink-0" />
+				<div>
+					{#if !status.everything_ok}
+						<p>Everything HTTP 서버에 연결할 수 없습니다 ({status.everything_message}). 파일명 검색이 불가합니다.</p>
+					{/if}
+					{#if !status.ripgrep_ok}
+						<p>ripgrep이 설치되지 않았습니다. 내용 검색이 불가합니다. (<code>winget install BurntSushi.ripgrep.MSVC</code>)</p>
+					{/if}
 				</div>
 			</div>
 		{/if}
-	</div>
 
-	<!-- 결과 영역 -->
-	<div class="min-h-64 flex-1 overflow-y-auto sm:min-h-72">
-		{#if loading}
-			<!-- 폴링 상태 표시 -->
-			<div class="space-y-2">
-				{#if pollStatus}
-					<div class="flex items-center gap-2 text-sm text-muted-foreground px-2 py-1">
-						<Loader2 size={16} class="animate-spin" />
-						<span>{POLL_STATUS_LABELS[pollStatus] ?? pollStatus}</span>
+		{#if error}
+			<div class="flex items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+				<XCircle size={18} class="shrink-0" />
+				<span class="flex-1">{error}</span>
+				<button onclick={() => (error = '')} class="shrink-0 opacity-60 hover:opacity-100">×</button>
+			</div>
+		{/if}
+
+		<div class="space-y-4">
+			<SearchForm
+				bind:query
+				bind:mode
+				bind:regex
+				bind:caseSensitive
+				{loading}
+				{snapshotSearchId}
+				helperOverlayOpen={showHelperOverlay}
+				onsearch={handleSearch}
+				oncancel={handleCancel}
+			/>
+
+			<SearchHistoryBar
+				history={historyItems}
+				frequentCombos={frequentComboItems}
+				{historyLoading}
+				{comboLoading}
+				{historyError}
+				{comboError}
+				onopen={openHelper}
+				oncombo={handleFrequentComboClick}
+				onhistory={handleHistoryClick}
+			/>
+
+			{#if snapshotSearchId}
+				<div class="flex flex-col gap-3 rounded-2xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+					<div class="min-w-0">
+						<span class="font-medium text-foreground">저장 결과 보기</span>
+						<span class="ml-2 truncate">search_id: <code class="text-[11px]">{snapshotSearchId}</code></span>
+					</div>
+					<div class="flex items-center gap-2 shrink-0">
+						<button
+							onclick={() => (snapshotSearchId = null)}
+							class="rounded-md border border-border bg-background px-2.5 py-1 transition-colors hover:bg-muted/40"
+						>
+							닫기
+						</button>
+						<button
+							onclick={handleSearch}
+							class="rounded-md bg-primary px-2.5 py-1 text-primary-foreground transition-opacity hover:opacity-90"
+						>
+							다시 검색
+						</button>
+					</div>
+				</div>
+			{/if}
+
+			<div class="rounded-2xl border border-border bg-card">
+				<button
+					onclick={() => (showFilters = !showFilters)}
+					class="flex w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm font-medium transition-colors hover:bg-muted/50"
+					aria-label="필터 및 범위 토글"
+				>
+					<div class="min-w-0 flex-1">
+						<div class="text-sm font-medium text-foreground">필터 & 범위</div>
+						<div class="mt-1 flex flex-wrap gap-1.5">
+							{#if filterSummaryItems.length > 0}
+								{#each filterSummaryItems.slice(0, isMobileViewport ? 2 : 4) as item (`filter-${item}`)}
+									<span class="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
+										{item}
+									</span>
+								{/each}
+							{:else}
+								<span class="text-xs font-normal text-muted-foreground">전체 범위 · 확장자 제한 없음</span>
+							{/if}
+						</div>
+					</div>
+					<div class="flex items-center gap-2 shrink-0">
+						{#if helperSummary.length > 0}
+							<span class="hidden text-[11px] text-muted-foreground sm:inline">
+								{helperSummary.join(' · ')}
+							</span>
+						{/if}
+						<ChevronRight size={14} class="text-muted-foreground transition-transform {showFilters ? 'rotate-90' : ''}" />
+					</div>
+				</button>
+
+				{#if showFilters}
+					<div class="space-y-4 border-t border-border px-4 py-4">
+						<div class="space-y-1.5">
+							<div class="text-xs font-medium text-muted-foreground">프리셋</div>
+							<PresetBar {presets} {selectedPresetId} onselect={handlePresetSelect} />
+						</div>
+
+						<div class="space-y-1.5">
+							<div class="text-xs font-medium text-muted-foreground">검색 경로</div>
+							<PathInput bind:path onchange={(nextPath) => (path = nextPath)} />
+						</div>
+
+						<div class="space-y-1.5">
+							<div class="text-xs font-medium text-muted-foreground">확장자 필터</div>
+							<ExtensionFilter
+								bind:extensions
+								suggestionGroups={extensionSuggestionGroups}
+								onchange={(nextExtensions) => (extensions = nextExtensions)}
+							/>
+						</div>
+
+						<div class="space-y-1.5">
+							<IgnorePatterns onchange={(patterns) => (ignorePatternExcludes = patterns)} />
+						</div>
 					</div>
 				{/if}
-				{#each Array(4) as _}
-					<div class="h-14 rounded-lg border border-border bg-card animate-skeleton-shimmer"></div>
-				{/each}
 			</div>
-		{:else if !hasSearched}
-			<!-- 초기 상태 -->
-			<div class="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
-				<Search size={48} class="mb-4 opacity-20" />
-				<p class="text-sm">검색어를 입력하고 Enter를 눌러 검색하세요</p>
-				<p class="text-xs mt-1 opacity-70">파일명 검색 (Everything) + 내용 검색 (ripgrep)</p>
-			</div>
-		{:else if results.length === 0}
-			<!-- 빈 결과 -->
-			<div class="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
-				<Inbox size={48} class="mb-4 opacity-20" />
-				<p class="text-sm font-medium">검색 결과가 없습니다</p>
-				<p class="text-xs mt-1 opacity-70">검색어나 필터 조건을 변경해 보세요</p>
-			</div>
-		{:else}
-			<ResultList {results} {query} {searchTimeMs} {truncated} />
-		{/if}
-	</div>
+		</div>
+
+		<div class="min-h-64 flex-1 overflow-y-auto sm:min-h-72">
+			{#if loading && results.length === 0}
+				<div class="space-y-2">
+					{#if pollStatus}
+						<div class="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground">
+							<Loader2 size={16} class="animate-spin" />
+							<span>{POLL_STATUS_LABELS[pollStatus] ?? pollStatus}</span>
+						</div>
+					{/if}
+					{#each Array(4) as _, index}
+						<div class="h-14 rounded-lg border border-border bg-card animate-skeleton-shimmer" data-skeleton={index}></div>
+					{/each}
+				</div>
+			{:else if !hasSearched}
+				<div class="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
+					<Search size={48} class="mb-4 opacity-20" />
+					<p class="text-sm">검색어를 입력하고 Enter를 눌러 검색하세요</p>
+					<p class="mt-1 text-xs opacity-70">파일명 검색 (Everything) + 내용 검색 (ripgrep)</p>
+				</div>
+			{:else if results.length === 0}
+				<div class="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
+					<Inbox size={48} class="mb-4 opacity-20" />
+					<p class="text-sm font-medium">검색 결과가 없습니다</p>
+					<p class="mt-1 text-xs opacity-70">검색어나 필터 조건을 변경해 보세요</p>
+				</div>
+			{:else}
+				<div class="space-y-3">
+					{#if loading}
+						<div class="sticky top-0 z-10 flex justify-center">
+							<div class="flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
+								<Loader2 size={14} class="animate-spin" />
+								<span>{POLL_STATUS_LABELS[pollStatus] ?? '검색 중...'}</span>
+							</div>
+						</div>
+					{/if}
+
+					<ResultList {results} {query} {searchTimeMs} {truncated} />
+				</div>
+			{/if}
+		</div>
+
+		<SearchHelperOverlay
+			open={showHelperOverlay}
+			activeTab={helperTab}
+			history={historyItems}
+			frequentCombos={frequentComboItems}
+			{historyLoading}
+			{comboLoading}
+			{historyError}
+			{comboError}
+			onclose={closeHelper}
+			ontabchange={(tab) => (helperTab = tab)}
+			oncombo={handleFrequentComboClick}
+			onhistory={handleHistoryClick}
+		/>
 	{/if}
 </div>

@@ -130,6 +130,18 @@ export interface FrequentSearchComboItem {
 	summary_tokens: string[];
 }
 
+export interface ExtensionSuggestionItem {
+	ext: string;
+	count?: number;
+	reason?: string;
+}
+
+export interface ExtensionSuggestionSection {
+	id: string;
+	label: string;
+	items: ExtensionSuggestionItem[];
+}
+
 export interface FilePreviewResponse {
 	file_path: string;
 	file_name: string;
