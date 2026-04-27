@@ -12,7 +12,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 # worker-command-listener.py는 스크립트이므로 importlib로 로드
-_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "worker-command-listener.py"
+_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "services" / "worker-command-listener.py"
 
 
 @pytest.fixture(scope="module")
