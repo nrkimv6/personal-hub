@@ -175,7 +175,7 @@ def test_get_frequent_combos_groups_same_query_and_filters():
         rows = [
             {
                 "search_id": "svc-combo-group-1",
-                "created_at": "2026-04-27 09:00:00",
+                "created_at": "9999-12-31 23:59:50",
                 "request_json": {
                     "query": "Alpha Search",
                     "origin": "file-search",
@@ -192,7 +192,7 @@ def test_get_frequent_combos_groups_same_query_and_filters():
             },
             {
                 "search_id": "svc-combo-group-2",
-                "created_at": "2026-04-27 09:01:00",
+                "created_at": "9999-12-31 23:59:51",
                 "request_json": {
                     "query": " alpha   search ",
                     "origin": "file-search",
@@ -209,7 +209,7 @@ def test_get_frequent_combos_groups_same_query_and_filters():
             },
             {
                 "search_id": "svc-combo-group-3",
-                "created_at": "2026-04-27 09:02:00",
+                "created_at": "9999-12-31 23:59:52",
                 "request_json": {
                     "query": "ALPHA SEARCH",
                     "origin": "file-search",
@@ -244,7 +244,7 @@ def test_get_frequent_combos_groups_same_query_and_filters():
         combo = next((item for item in combos if item.label == "ALPHA SEARCH"), None)
         assert combo is not None
         assert combo.count == 3
-        assert combo.last_used_at == "2026-04-27 09:02:00"
+        assert combo.last_used_at == "9999-12-31 23:59:52"
         assert combo.request.preset == "frontend"
         assert combo.request.paths == [r"D:\work\project\tools\monitor-page\frontend"]
         assert "내용" in combo.summary_tokens
@@ -294,7 +294,7 @@ def test_get_frequent_combos_splits_different_filter_sets():
                 FileSearchRequest(
                     search_id=ids[idx],
                     status=FileSearchRequest.STATUS_COMPLETED,
-                    created_at=f"2026-04-27 10:0{idx}:00",
+                    created_at=f"9999-12-31 23:59:5{idx}",
                     request_json=json.dumps(request_json),
                     result_json="{}",
                     search_time_ms=1,
@@ -322,8 +322,8 @@ def test_get_frequent_combos_excludes_plan_quick():
     ids = ["svc-combo-fs", "svc-combo-pq"]
     try:
         payloads = [
-            ("svc-combo-fs", "file-search", "2026-04-27 11:00:00"),
-            ("svc-combo-pq", "plan-quick", "2026-04-27 11:01:00"),
+            ("svc-combo-fs", "file-search", "9999-12-31 23:59:50"),
+            ("svc-combo-pq", "plan-quick", "9999-12-31 23:59:51"),
         ]
         for search_id, origin, created_at in payloads:
             db.add(
@@ -357,7 +357,310 @@ def test_get_frequent_combos_excludes_plan_quick():
         combo = next((item for item in combos if item.label == "Gamma Search"), None)
         assert combo is not None
         assert combo.count == 1
-        assert combo.last_used_at == "2026-04-27 11:00:00"
+        assert combo.last_used_at == "9999-12-31 23:59:50"
+    finally:
+        _cleanup_requests(db, ids)
+        db.close()
+
+
+def test_get_history_bias_scan_continues_past_recent_plan_quick_rows():
+    from app.database import SessionLocal
+    from app.models.file_search_request import FileSearchRequest
+    from app.modules.file_search.schemas import FileMatch, SearchResponse
+    from app.modules.file_search.services.search_service import SearchService
+
+    db = SessionLocal()
+    ids: list[str] = []
+    try:
+        for i in range(300):
+            search_id = f"svc-hist-noise-{i}"
+            ids.append(search_id)
+            db.add(
+                FileSearchRequest(
+                    search_id=search_id,
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=f"2026-04-27 23:{59 - (i % 60):02d}:{59 - (i // 60):02d}",
+                    request_json=json.dumps(
+                        {
+                            "query": f"noise-{i}",
+                            "origin": "plan-quick",
+                            "mode": "content",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [],
+                            "extensions": [],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }
+                    ),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+
+        target_id = "svc-hist-target"
+        ids.append(target_id)
+        db.add(
+            FileSearchRequest(
+                search_id=target_id,
+                status=FileSearchRequest.STATUS_COMPLETED,
+                created_at="2026-04-27 20:00:00",
+                request_json=json.dumps(
+                    {
+                        "query": "Recovered History",
+                        "origin": "file-search",
+                        "mode": "content",
+                        "regex": False,
+                        "case_sensitive": False,
+                        "paths": [],
+                        "extensions": [],
+                        "excludes": [],
+                        "preset": None,
+                        "max_results": 100,
+                        "context_lines": 2,
+                    }
+                ),
+                result_json=SearchResponse(
+                    results=[FileMatch(file_path="D:\\work\\target.md", file_name="target.md")],
+                    total_count=1,
+                    search_time_ms=4,
+                    mode="content",
+                    truncated=False,
+                ).model_dump_json(),
+                search_time_ms=4,
+            )
+        )
+        db.commit()
+
+        svc = SearchService()
+        items = svc.get_history(db=db, limit=1, origin="file-search")
+        assert len(items) == 1
+        assert items[0].search_id == target_id
+        assert items[0].query == "Recovered History"
+    finally:
+        _cleanup_requests(db, ids)
+        db.close()
+
+
+def test_get_suggestions_bias_scan_counts_target_origin_after_recent_noise():
+    from app.database import SessionLocal
+    from app.models.file_search_request import FileSearchRequest
+    from app.modules.file_search.services.search_service import SearchService
+
+    db = SessionLocal()
+    ids: list[str] = []
+    try:
+        for i in range(2100):
+            search_id = f"svc-sug-noise-{i}"
+            ids.append(search_id)
+            db.add(
+                FileSearchRequest(
+                    search_id=search_id,
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=f"2026-04-27 23:{59 - (i % 60):02d}:{59 - (i // 60):02d}",
+                    request_json=json.dumps(
+                        {
+                            "query": f"noise-{i}",
+                            "origin": "plan-quick",
+                            "mode": "both",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [],
+                            "extensions": [],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }
+                    ),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+
+        target_query = "Recovered Suggestion"
+        for i in range(3):
+            search_id = f"svc-sug-target-{i}"
+            ids.append(search_id)
+            db.add(
+                FileSearchRequest(
+                    search_id=search_id,
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=f"2026-04-27 10:0{i}:00",
+                    request_json=json.dumps(
+                        {
+                            "query": target_query if i != 1 else target_query.upper(),
+                            "origin": "file-search",
+                            "mode": "both",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [],
+                            "extensions": [],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }
+                    ),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+        db.commit()
+
+        svc = SearchService()
+        suggestions = svc.get_suggestions(db=db, limit=20, origin="file-search")
+        item = next((s for s in suggestions if s.query.lower() == target_query.lower()), None)
+        assert item is not None
+        assert item.count == 3
+        assert item.last_used_at == "2026-04-27 10:02:00"
+    finally:
+        _cleanup_requests(db, ids)
+        db.close()
+
+
+def test_get_frequent_combos_bias_scan_skips_malformed_and_unknown_origin_rows():
+    from app.database import SessionLocal
+    from app.models.file_search_request import FileSearchRequest
+    from app.modules.file_search.services.search_service import SearchService
+
+    db = SessionLocal()
+    ids: list[str] = []
+    try:
+        for i in range(2050):
+            search_id = f"svc-combo-noise-{i}"
+            ids.append(search_id)
+            db.add(
+                FileSearchRequest(
+                    search_id=search_id,
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=f"2026-04-27 23:{59 - (i % 60):02d}:{59 - (i // 60):02d}",
+                    request_json=json.dumps(
+                        {
+                            "query": f"noise-{i}",
+                            "origin": "plan-quick",
+                            "mode": "content",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [],
+                            "extensions": [],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }
+                    ),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+
+        ids.append("svc-combo-malformed")
+        db.add(
+            FileSearchRequest(
+                search_id="svc-combo-malformed",
+                status=FileSearchRequest.STATUS_COMPLETED,
+                created_at="2026-04-27 09:30:00",
+                request_json="{bad-json}",
+                result_json="{}",
+                search_time_ms=1,
+            )
+        )
+
+        for i, created_at in enumerate(["2026-04-27 09:00:00", "2026-04-27 09:01:00"]):
+            search_id = f"svc-combo-legacy-{i}"
+            ids.append(search_id)
+            db.add(
+                FileSearchRequest(
+                    search_id=search_id,
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=created_at,
+                    request_json=json.dumps(
+                        {
+                            "query": "Legacy Combo",
+                            "origin": "legacy-tool",
+                            "mode": "content",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [r"D:\work\project\tools\monitor-page\app"],
+                            "extensions": ["py"],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }
+                    ),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+        db.commit()
+
+        svc = SearchService()
+        combo = next(
+            item for item in svc.get_frequent_combos(db=db, limit=10, origin="file-search") if item.label == "Legacy Combo"
+        )
+        assert combo.count == 2
+        assert combo.request.origin == "file-search"
+        assert combo.last_used_at == "2026-04-27 09:01:00"
+    finally:
+        _cleanup_requests(db, ids)
+        db.close()
+
+
+def test_iter_completed_origin_rows_uses_deterministic_created_at_id_order():
+    from app.database import SessionLocal
+    from app.models.file_search_request import FileSearchRequest
+    from app.modules.file_search.services.search_service import SearchService
+
+    db = SessionLocal()
+    ids = ["svc-order-old", "svc-order-skip", "svc-order-latest"]
+    created_at = "9999-12-31 23:59:00"
+    try:
+        payloads = [
+            ("svc-order-old", "file-search", "Ordered Old"),
+            ("svc-order-skip", "plan-quick", "Noise"),
+            ("svc-order-latest", "legacy-tool", "Ordered Latest"),
+        ]
+        for search_id, origin, query in payloads:
+            db.add(
+                FileSearchRequest(
+                    search_id=search_id,
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=created_at,
+                    request_json=json.dumps(
+                        {
+                            "query": query,
+                            "origin": origin,
+                            "mode": "content",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [],
+                            "extensions": [],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }
+                    ),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+        db.commit()
+
+        svc = SearchService()
+        rows = svc._iter_completed_origin_rows(
+            db,
+            origin="file-search",
+            target_matches=2,
+            chunk_size=1,
+            max_scanned_rows=3,
+        )
+        assert [row.search_id for row, _request in rows] == ["svc-order-latest", "svc-order-old"]
+        assert [request.query for _row, request in rows] == ["Ordered Latest", "Ordered Old"]
     finally:
         _cleanup_requests(db, ids)
         db.close()

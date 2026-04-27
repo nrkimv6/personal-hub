@@ -65,6 +65,7 @@ PREVIEW_TEXT_EXTENSIONS = {
 }
 
 MAX_PREVIEW_BYTES = 256 * 1024
+KNOWN_SEARCH_ORIGINS = {"file-search", "plan-quick"}
 
 
 class FilePreviewError(Exception):
@@ -201,34 +202,89 @@ class SearchService:
             deduped.append(token)
         return deduped
 
+    @staticmethod
+    def _normalize_history_origin(req_data: dict[str, Any]) -> str:
+        origin = str(req_data.get("origin") or "file-search").strip()
+        if origin not in KNOWN_SEARCH_ORIGINS:
+            return "file-search"
+        return origin
+
+    def _parse_history_request(self, req_data: Optional[dict[str, Any]]) -> Optional[SearchRequest]:
+        if not req_data:
+            return None
+
+        normalized = dict(req_data)
+        normalized["origin"] = self._normalize_history_origin(normalized)
+        try:
+            return SearchRequest(**normalized)
+        except Exception:
+            return None
+
+    def _iter_completed_origin_rows(
+        self,
+        db: Session,
+        *,
+        origin: str,
+        target_matches: int,
+        chunk_size: int = 250,
+        max_scanned_rows: Optional[int] = None,
+    ) -> List[tuple[FileSearchRequest, SearchRequest]]:
+        if target_matches <= 0:
+            return []
+
+        if max_scanned_rows is None:
+            max_scanned_rows = max(chunk_size, target_matches * 5)
+        max_scanned_rows = max(chunk_size, max_scanned_rows)
+
+        matched_rows: List[tuple[FileSearchRequest, SearchRequest]] = []
+        offset = 0
+        scanned_rows = 0
+
+        while scanned_rows < max_scanned_rows and len(matched_rows) < target_matches:
+            rows_to_fetch = min(chunk_size, max_scanned_rows - scanned_rows)
+            rows = (
+                db.query(FileSearchRequest)
+                .filter(FileSearchRequest.status == FileSearchRequest.STATUS_COMPLETED)
+                .order_by(FileSearchRequest.created_at.desc(), FileSearchRequest.id.desc())
+                .offset(offset)
+                .limit(rows_to_fetch)
+                .all()
+            )
+            if not rows:
+                break
+
+            offset += len(rows)
+            scanned_rows += len(rows)
+
+            for row in rows:
+                request = self._parse_history_request(self._safe_json_loads(row.request_json))
+                if not request:
+                    continue
+                if origin and request.origin != origin:
+                    continue
+
+                matched_rows.append((row, request))
+                if len(matched_rows) >= target_matches:
+                    break
+
+        return matched_rows
+
     def get_history(self, db: Session, limit: int = 20, origin: str = "file-search") -> List[SearchHistoryItem]:
         """최근 검색 이력 (저장된 스냅샷 기반).
 
         - v1: request_json/result_json 파싱 기반, 별도 마이그레이션 없음
         - completed만 반환 (UI에서 스냅샷 복원용)
         """
-        scan_limit = min(max(limit * 5, limit), 500)
-        rows = (
-            db.query(FileSearchRequest)
-            .filter(FileSearchRequest.status == FileSearchRequest.STATUS_COMPLETED)
-            .order_by(FileSearchRequest.created_at.desc())
-            .limit(scan_limit)
-            .all()
+        rows = self._iter_completed_origin_rows(
+            db,
+            origin=origin,
+            target_matches=limit,
+            chunk_size=100,
+            max_scanned_rows=max(5000, limit * 50),
         )
 
         items: List[SearchHistoryItem] = []
-        for row in rows:
-            req_data = self._safe_json_loads(row.request_json)
-            if not req_data:
-                continue
-            try:
-                request = SearchRequest(**req_data)
-            except Exception:
-                continue
-
-            if origin and request.origin != origin:
-                continue
-
+        for row, request in rows:
             query = request.query.strip()
             if not query:
                 continue
@@ -288,35 +344,22 @@ class SearchService:
                     origin=request.origin,
                 )
             )
-            if len(items) >= limit:
-                break
 
         return items
 
     def get_suggestions(self, db: Session, limit: int = 10, origin: str = "file-search") -> List[SearchSuggestionItem]:
         """검색어 추천 (최근 completed 이력 기반)."""
-        scan_limit = 2000
-        rows = (
-            db.query(FileSearchRequest)
-            .filter(FileSearchRequest.status == FileSearchRequest.STATUS_COMPLETED)
-            .order_by(FileSearchRequest.created_at.desc())
-            .limit(scan_limit)
-            .all()
+        rows = self._iter_completed_origin_rows(
+            db,
+            origin=origin,
+            target_matches=2000,
+            chunk_size=250,
+            max_scanned_rows=10000,
         )
 
         buckets: dict[str, dict] = {}
-        for row in rows:
-            req_data = self._safe_json_loads(row.request_json)
-            if not req_data:
-                continue
-
-            row_origin = req_data.get("origin") or "file-search"
-            if row_origin not in ("file-search", "plan-quick"):
-                row_origin = "file-search"
-            if origin and row_origin != origin:
-                continue
-
-            query_raw = (req_data.get("query") or "").strip()
+        for row, request in rows:
+            query_raw = request.query.strip()
             if not query_raw:
                 continue
 
@@ -354,29 +397,16 @@ class SearchService:
         self, db: Session, limit: int = 10, origin: str = "file-search"
     ) -> List[FrequentSearchComboItem]:
         """검색 폼 조합 추천 (최근 completed 이력 기반)."""
-        scan_limit = 2000
-        rows = (
-            db.query(FileSearchRequest)
-            .filter(FileSearchRequest.status == FileSearchRequest.STATUS_COMPLETED)
-            .order_by(FileSearchRequest.created_at.desc())
-            .limit(scan_limit)
-            .all()
+        rows = self._iter_completed_origin_rows(
+            db,
+            origin=origin,
+            target_matches=2000,
+            chunk_size=250,
+            max_scanned_rows=10000,
         )
 
         buckets: dict[tuple, dict[str, Any]] = {}
-        for row in rows:
-            req_data = self._safe_json_loads(row.request_json)
-            if not req_data:
-                continue
-
-            try:
-                request = SearchRequest(**req_data)
-            except Exception:
-                continue
-
-            if origin and request.origin != origin:
-                continue
-
+        for row, request in rows:
             if not request.query.strip():
                 continue
 

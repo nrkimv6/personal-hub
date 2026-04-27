@@ -173,3 +173,133 @@ def test_plan_quick_scope_registered_paths_snapshot_and_exclusion(integrated_cli
     finally:
         db.close()
 
+
+def test_history_suggestions_and_combos_scan_past_recent_plan_quick_noise(integrated_client, tmp_path):
+    """최근 registered plan noise가 많아도 file-search 집계는 뒤쪽 target row를 복구해야 한다."""
+    client, reg_file = integrated_client
+
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    target_file = plan_dir / "2026-04-27_target.md"
+    target_file.write_text("# target\n\nRecovered Query\n", encoding="utf-8")
+
+    reg_file.write_text(
+        json.dumps([{"path": str(plan_dir.resolve()), "type": "plan"}], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    plan_service._load_registered_paths()
+
+    from app.database import SessionLocal
+    from app.models.file_search_request import FileSearchRequest
+    from app.modules.file_search.schemas import FileMatch, SearchResponse
+
+    db = SessionLocal()
+    ids: list[str] = []
+    try:
+        for i in range(2050):
+            search_id = f"int-noise-{i}"
+            ids.append(search_id)
+            db.add(
+                FileSearchRequest(
+                    search_id=search_id,
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=f"2026-04-27 23:{59 - (i % 60):02d}:{59 - (i // 60):02d}",
+                    request_json=json.dumps(
+                        {
+                            "query": f"noise-{i}",
+                            "origin": "plan-quick",
+                            "mode": "content",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [str(plan_dir.resolve())],
+                            "extensions": ["md"],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }
+                    ),
+                    result_json="{}",
+                    search_time_ms=1,
+                )
+            )
+
+        db.add(
+            FileSearchRequest(
+                search_id="int-malformed",
+                status=FileSearchRequest.STATUS_COMPLETED,
+                created_at="2026-04-27 12:30:00",
+                request_json="{bad-json}",
+                result_json="{}",
+                search_time_ms=1,
+            )
+        )
+        ids.append("int-malformed")
+
+        target_payloads = [
+            ("int-target-history", "file-search", "Recovered Query", "9999-12-31 23:59:50"),
+            ("int-target-combo", "legacy-tool", "Recovered Query", "9999-12-31 23:59:51"),
+        ]
+        for search_id, origin, query, created_at in target_payloads:
+            ids.append(search_id)
+            db.add(
+                FileSearchRequest(
+                    search_id=search_id,
+                    status=FileSearchRequest.STATUS_COMPLETED,
+                    created_at=created_at,
+                    request_json=json.dumps(
+                        {
+                            "query": query,
+                            "origin": origin,
+                            "mode": "content",
+                            "regex": False,
+                            "case_sensitive": False,
+                            "paths": [str(plan_dir.resolve())],
+                            "extensions": ["md"],
+                            "excludes": [],
+                            "preset": None,
+                            "max_results": 100,
+                            "context_lines": 2,
+                        }
+                    ),
+                    result_json=SearchResponse(
+                        results=[FileMatch(file_path=str(target_file), file_name=target_file.name, match_source="content")],
+                        total_count=1,
+                        search_time_ms=1,
+                        mode="content",
+                        truncated=False,
+                    ).model_dump_json(),
+                    search_time_ms=1,
+                )
+            )
+        db.commit()
+
+        hist = client.get("/api/v1/file-search/history?limit=10")
+        assert hist.status_code == 200
+        hist_ids = [item["search_id"] for item in hist.json()]
+        assert "int-target-combo" in hist_ids
+        assert all(not item_id.startswith("int-noise-") for item_id in hist_ids)
+
+        sug = client.get("/api/v1/file-search/suggestions?limit=10")
+        assert sug.status_code == 200
+        sug_item = next((item for item in sug.json() if item["query"] == "Recovered Query"), None)
+        assert sug_item is not None
+        assert sug_item["count"] == 2
+
+        combos = client.get("/api/v1/file-search/frequent-combos?limit=10")
+        assert combos.status_code == 200
+        combo_item = next((item for item in combos.json() if item["label"] == "Recovered Query"), None)
+        assert combo_item is not None
+        assert combo_item["count"] == 2
+        assert combo_item["request"]["origin"] == "file-search"
+    finally:
+        db.close()
+        cleanup_db = SessionLocal()
+        try:
+            cleanup_db.query(FileSearchRequest).filter(
+                FileSearchRequest.search_id.in_(ids)
+            ).delete(synchronize_session=False)
+            cleanup_db.commit()
+        finally:
+            cleanup_db.close()
+
