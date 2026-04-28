@@ -233,6 +233,28 @@ def test_get_workers_http_keeps_other_workers_without_monitoring_summary(client)
     assert "monitoring_summary" not in chat_executor
 
 
+def test_get_workers_http_includes_refactored_watchdog_targets(client):
+    """T5: GET /api/v1/system/services/workers → claude/chat_executor/unified_worker 항목 계약 유지"""
+    with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", FAKE_PROJECTS_WITH_CHAT), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._read_pid_status",
+             new=AsyncMock(return_value={"pid": 303, "running": True}),
+         ), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._get_naver_monitoring_summary",
+             return_value={"queued": 0, "running": 0, "pending": 0, "stuck_pending": 0, "hint": None},
+         ):
+        resp = client.get("/api/v1/system/services/workers")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    by_name = {entry["name"]: entry for entry in data}
+
+    for required in ("claude_worker", "chat_executor", "unified_worker"):
+        assert required in by_name, f"{required} 없음: {list(by_name)}"
+        assert "watchdog" in by_name[required], f"{required} watchdog 필드 없음"
+
+
 # ---------------------------------------------------------------------------
 # Phase T5 HTTP 통합 테스트 — /merge-test에서 실행
 # ---------------------------------------------------------------------------
