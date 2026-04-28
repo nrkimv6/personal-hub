@@ -20,6 +20,7 @@ from tests.dev_runner.conftest_e2e import (
     isolated_redis_db15,
     listener_process,
     REDIS_TEST_DB,
+    copy_fixture_plan_to_tmp,
 )
 
 pytestmark = pytest.mark.http
@@ -52,13 +53,13 @@ class TestRerunOrphanAttachHTTP:
     """HTTP 통합: POST /run attach 응답 검증"""
 
     def test_run_endpoint_attached_response(
-        self, http_client_for_orphan, isolated_redis_db15, listener_process
+        self, http_client_for_orphan, isolated_redis_db15, listener_process, tmp_path
     ):
         """attach: 동일 plan 실행 중 POST /run → 200 + attached=True"""
         # listener_process.pid를 살아있는 PID로 활용
         live_pid = listener_process.pid
         existing_runner_id = f"http-existing-{uuid.uuid4().hex[:8]}"
-        plan_file = "tests/dev_runner/fixtures/test_minimal_plan.md"
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan.md"))
 
         # Redis에 running 상태 등록
         _seed_running_runner(isolated_redis_db15, existing_runner_id, plan_file, live_pid)
@@ -82,10 +83,10 @@ class TestRerunOrphanAttachHTTP:
         assert body.get("running") is True, f"running=True 기대: {body}"
 
     def test_run_endpoint_normal_after_stop(
-        self, http_client_for_orphan, isolated_redis_db15, listener_process
+        self, http_client_for_orphan, isolated_redis_db15, listener_process, tmp_path
     ):
         """신규: stop 후 재실행 → attached=False + 새 runner_id"""
-        plan_file = "tests/dev_runner/fixtures/test_minimal_plan_b.md"
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan_b.md"))
         stopped_id = f"http-stopped-{uuid.uuid4().hex[:8]}"
 
         # stopped 상태 (ACTIVE_RUNNERS에 없음)

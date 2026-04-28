@@ -27,12 +27,16 @@ def test_record_scan_sets_zero_baseline_and_tracks_nonzero(tmp_path):
         "plan/test_demo",
         "runner/t-demo-001",
     ]
+    assert nonzero_status["latest_legacy_test_branch_count"] == 1
+    assert nonzero_status["latest_legacy_test_branches"] == ["plan/test_demo"]
 
     lines = events_path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) >= 2
     latest_event = json.loads(lines[-1])
     assert latest_event["type"] == "scan"
     assert latest_event["test_branch_count"] == 2
+    assert latest_event["legacy_test_branch_count"] == 1
+    assert latest_event["legacy_test_branches"] == ["plan/test_demo"]
 
 
 def test_record_scan_emits_review_due_event_once(tmp_path):

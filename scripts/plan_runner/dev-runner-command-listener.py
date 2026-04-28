@@ -164,7 +164,12 @@ def _do_start_plan_runner(command, redis_client):
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
 
         try:
-            worktree_path, branch = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file)
+            worktree_path, branch = WorktreeManager.create(
+                runner_id,
+                WORKTREE_BASE_DIR,
+                plan_file=plan_file,
+                use_runner_identity=bool(command.get("test_source")),
+            )
         except WorktreeError as e:
             _set_error_status(f"worktree 생성 실패: {e}")
             return

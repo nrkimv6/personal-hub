@@ -4,6 +4,7 @@ from app.modules.dev_runner.services.worktree_service import (
     _iter_plan_dirs,
     compute_cleanable,
     find_plan_file,
+    is_legacy_test_branch,
     is_test_branch,
 )
 
@@ -41,6 +42,13 @@ def test_is_test_branch_ignores_impl_branch():
 
 def test_is_test_branch_ignores_non_test_plan_branch():
     assert is_test_branch("plan/2026-04-20_foo") is False
+
+
+def test_is_legacy_test_branch_matches_plan_test_only():
+    assert is_legacy_test_branch("plan/test_minimal_plan") is True
+    assert is_legacy_test_branch("plan/t-test-foo") is True
+    assert is_legacy_test_branch("runner/t-t5envhdr-1e2c") is False
+    assert is_legacy_test_branch("plan/2026-04-20_foo") is False
 
 
 def test_compute_cleanable_accepts_no_plan_when_ahead_zero():

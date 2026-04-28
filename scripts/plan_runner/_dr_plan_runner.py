@@ -515,7 +515,12 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
                     _remove_plan_header_fields(plan_file)
                     logger.info(f"워크트리 없음 또는 검증 실패, 신규 생성: plan={plan_file}")
         if not _reused_worktree:
-            worktree_path, branch = WorktreeManager.create(runner_id, plan_worktree_base, plan_file=plan_file)
+            worktree_path, branch = WorktreeManager.create(
+                runner_id,
+                plan_worktree_base,
+                plan_file=plan_file,
+                use_runner_identity=bool(command.get("test_source")),
+            )
             # Phase 4: plan 헤더에 branch/worktree 기록 (수동 /implement와 동일 패턴)
             if plan_file:
                 worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")

@@ -133,6 +133,38 @@ class TestWorktreeManagerCreate:
         )
         assert "runner/brtest" in result.stdout
 
+    def test_test_source_runner_uses_runner_identity_with_plan_file(self, worktrees_dir):
+        """R: test_source runner keeps runner/* identity even when plan_file exists."""
+        base_dir, repo = worktrees_dir
+        path, branch = WorktreeManager.create(
+            "t-static-plan-1234",
+            base_dir,
+            plan_file="tests/dev_runner/fixtures/test_minimal_plan.md",
+            use_runner_identity=True,
+        )
+
+        assert path == base_dir / "t-static-plan-1234"
+        assert branch == "runner/t-static-plan-1234"
+        assert "runner/t-static-plan-1234" in subprocess.run(
+            ["git", "branch", "--list", "runner/t-static-plan-1234"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+        ).stdout
+
+    def test_t_prefixed_runner_uses_runner_identity_with_plan_file(self, worktrees_dir):
+        """B: t-* runner_id is enough to avoid plan/{stem} fallback."""
+        base_dir, _repo = worktrees_dir
+
+        path, branch = WorktreeManager.create(
+            "t-inferred-1234",
+            base_dir,
+            plan_file="tests/dev_runner/fixtures/test_minimal_plan.md",
+        )
+
+        assert path == base_dir / "t-inferred-1234"
+        assert branch == "runner/t-inferred-1234"
+
     def test_create_E_already_exists_with_unmerged_commits_reuses_branch(self, worktrees_dir):
         """E: worktree add fail (already exists) + dir missing + unmerged commits -> reuse branch"""
         base_dir, repo = worktrees_dir
@@ -242,6 +274,31 @@ class TestWorktreeManagerRemove:
         result = WorktreeManager.remove("fallback01", base_dir, branch=None)
         assert result is True
         assert not wt_path.exists()
+
+    def test_remove_t_prefixed_plan_file_uses_runner_identity(self, worktrees_dir):
+        """R: cleanup for t-* plan-backed runners removes .worktrees/{runner_id}."""
+        base_dir, repo = worktrees_dir
+        runner_id = "t-remove-plan-1234"
+        path, branch = WorktreeManager.create(
+            runner_id,
+            base_dir,
+            plan_file="tests/dev_runner/fixtures/test_minimal_plan.md",
+        )
+
+        result = WorktreeManager.remove(
+            runner_id,
+            base_dir,
+            plan_file="tests/dev_runner/fixtures/test_minimal_plan.md",
+        )
+
+        assert result is True
+        assert not path.exists()
+        assert branch not in subprocess.run(
+            ["git", "branch", "--list", branch],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+        ).stdout
 
 
 # ── merge_to_main() ───────────────────────────────────────────────────────────

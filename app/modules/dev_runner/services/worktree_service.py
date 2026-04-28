@@ -29,6 +29,10 @@ TEST_BRANCH_PATTERNS = (
     re.compile(r"^plan/test_"),
     re.compile(r"^plan/t-test"),
 )
+LEGACY_TEST_BRANCH_PATTERNS = (
+    re.compile(r"^plan/test_"),
+    re.compile(r"^plan/t-test"),
+)
 _cleanup_lock = asyncio.Lock()
 _COMMIT_SENTINEL = "__WT_COMMIT__"
 PlanScanMap = dict[str, tuple[str, str]]
@@ -117,6 +121,10 @@ def _iter_active_plan_dirs(repo_root: Path) -> list[Path]:
 
 def is_test_branch(branch: str) -> bool:
     return any(pattern.match(branch) for pattern in TEST_BRANCH_PATTERNS)
+
+
+def is_legacy_test_branch(branch: str) -> bool:
+    return any(pattern.match(branch) for pattern in LEGACY_TEST_BRANCH_PATTERNS)
 
 
 def compute_cleanable(

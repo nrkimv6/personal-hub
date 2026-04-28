@@ -34,6 +34,8 @@ class WorktreeResidueMonitor:
                 "latest_source": None,
                 "latest_test_branch_count": 0,
                 "latest_test_branches": [],
+                "latest_legacy_test_branch_count": 0,
+                "latest_legacy_test_branches": [],
                 "max_test_branch_count_since_baseline": 0,
                 "nonzero_seen_since_baseline": False,
                 "monitoring_reason": "Watch for recurring test worktree residue after zero baseline.",
@@ -70,6 +72,16 @@ class WorktreeResidueMonitor:
         cls.EVENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
         with cls.EVENTS_PATH.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    @staticmethod
+    def _legacy_test_branches(branches: list[str]) -> list[str]:
+        return sorted(
+            {
+                branch
+                for branch in branches
+                if branch.startswith("plan/test_") or branch.startswith("plan/t-test")
+            }
+        )
 
     @classmethod
     def _ensure_monitor_metadata(cls, status: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -153,6 +165,7 @@ class WorktreeResidueMonitor:
     @classmethod
     def record_scan(cls, branches: list[str], *, source: str) -> dict[str, Any]:
         normalized = sorted({branch for branch in branches if branch})
+        legacy_branches = cls._legacy_test_branches(normalized)
         now = cls._utcnow()
 
         with cls._lock:
@@ -167,6 +180,8 @@ class WorktreeResidueMonitor:
             status["latest_source"] = source
             status["latest_test_branch_count"] = len(normalized)
             status["latest_test_branches"] = normalized
+            status["latest_legacy_test_branch_count"] = len(legacy_branches)
+            status["latest_legacy_test_branches"] = legacy_branches
 
             if normalized:
                 if status.get("baseline_zero_confirmed_at"):
@@ -191,6 +206,8 @@ class WorktreeResidueMonitor:
                             "source": source,
                             "test_branch_count": len(normalized),
                             "test_branches": normalized,
+                            "legacy_test_branch_count": len(legacy_branches),
+                            "legacy_test_branches": legacy_branches,
                         }
                     )
                 return status
@@ -206,6 +223,8 @@ class WorktreeResidueMonitor:
                         "source": source,
                         "test_branch_count": len(normalized),
                         "test_branches": normalized,
+                        "legacy_test_branch_count": len(legacy_branches),
+                        "legacy_test_branches": legacy_branches,
                     }
                 )
                 cls._logger.warning(
@@ -224,6 +243,8 @@ class WorktreeResidueMonitor:
                         "source": source,
                         "test_branch_count": len(normalized),
                         "test_branches": normalized,
+                        "legacy_test_branch_count": len(legacy_branches),
+                        "legacy_test_branches": legacy_branches,
                     }
                 )
 

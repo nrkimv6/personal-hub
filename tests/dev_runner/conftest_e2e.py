@@ -159,6 +159,21 @@ def test_plan_file(tmp_path):
     return plan
 
 
+def copy_fixture_plan_to_tmp(
+    tmp_path: Path,
+    fixture_name: str = "test_minimal_plan.md",
+) -> Path:
+    """Copy a shared fixture plan into a per-test path before runner execution."""
+    src = FIXTURES_DIR / fixture_name
+    content = src.read_text(encoding="utf-8")
+    content = re.sub(r"^> branch:.*\n", "", content, flags=re.MULTILINE)
+    content = re.sub(r"^> worktree:.*\n", "", content, flags=re.MULTILINE)
+    content = re.sub(r"^> worktree-owner:.*\n", "", content, flags=re.MULTILINE)
+    plan = tmp_path / fixture_name
+    plan.write_text(content, encoding="utf-8")
+    return plan
+
+
 def _cleanup_test_worktrees() -> None:
     """테스트 고정 plan 파일의 worktree/branch 잔여물 제거 (멱등)"""
     worktree_list = subprocess.run(

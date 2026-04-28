@@ -403,7 +403,7 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
         branch_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
         if branch_str:
             branch = branch_str
-        elif plan_file:
+        elif plan_file and not runner_id.startswith("t-"):
             branch = f"plan/{Path(plan_file).stem}"
         else:
             branch = f"runner/{runner_id}"
@@ -481,8 +481,15 @@ def _do_cleanup_worktree(runner_id: str, redis_client: redis.Redis, command_id: 
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file = None
+        branch_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
         _cw_base = (get_target_project_root(plan_file) / ".worktrees") if plan_file else WORKTREE_BASE_DIR
-        WorktreeManager.remove(runner_id, _cw_base, plan_file=plan_file or None)
+        WorktreeManager.remove(
+            runner_id,
+            _cw_base,
+            plan_file=plan_file or None,
+            branch=branch_str or None,
+            use_runner_identity=runner_id.startswith("t-"),
+        )
         redis_client.delete(
             f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status",

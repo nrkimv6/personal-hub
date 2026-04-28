@@ -452,8 +452,9 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
             # unmerged commits protection
             if not _preserve_worktree:
-                _branch = (
-                    f"plan/{Path(plan_file_val).stem}" if plan_file_val
+                _branch = branch_val or (
+                    f"plan/{Path(plan_file_val).stem}"
+                    if plan_file_val and not runner_id.startswith("t-")
                     else f"runner/{runner_id}"
                 )
                 if _has_unmerged_commits(_branch, get_target_project_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
@@ -479,12 +480,24 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
             if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued", "approval_required"):
                 try:
-                    WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+                    WorktreeManager.remove(
+                        runner_id,
+                        _cleanup_worktree_base,
+                        plan_file=plan_file_val or None,
+                        branch=branch_val or None,
+                        use_runner_identity=runner_id.startswith("t-"),
+                    )
                 except Exception as wt_e:
                     logger.warning(f"worktree removal failed (runner_id: {runner_id}): {wt_e}")
             elif not _preserve_worktree and merge_status in ("merging", "testing"):
                 try:
-                    WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+                    WorktreeManager.remove(
+                        runner_id,
+                        _cleanup_worktree_base,
+                        plan_file=plan_file_val or None,
+                        branch=branch_val or None,
+                        use_runner_identity=runner_id.startswith("t-"),
+                    )
                     logger.info(f"cleaning up stale intermediate worktree: {runner_id} (merge_status={merge_status})")
                 except Exception as wt_e:
                     logger.warning(f"stale worktree cleanup failed (runner_id: {runner_id}): {wt_e}")
