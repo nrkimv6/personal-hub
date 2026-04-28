@@ -132,6 +132,23 @@ def restore_listener_noise_filter():
         sys.modules["listener_noise_filter"] = original
 
 
+@pytest.fixture(autouse=True)
+def restore_worktree_manager_module():
+    """worktree_manager sys.modules 참조를 테스트 전후로 격리.
+
+    test_worktree_manager.py 등이 del sys.modules["worktree_manager"] 후 재import하면
+    sys.modules의 module identity가 바뀌어 tests/test_workflow_e2e.py의 patch.object 대상과
+    merge_workflow.py 내 late-import(from worktree_manager import WorktreeManager)가
+    서로 다른 class를 가리키게 된다. → "argument of type 'Mock' is not iterable" TypeError.
+    """
+    original = sys.modules.get("worktree_manager")
+    yield
+    if original is None:
+        sys.modules.pop("worktree_manager", None)
+    else:
+        sys.modules["worktree_manager"] = original
+
+
 def _try_connect_redis():
     """Redis 연결 시도. 실패 시 None 반환."""
     try:

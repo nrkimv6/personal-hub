@@ -3,14 +3,11 @@ import subprocess
 import pytest
 from pathlib import Path
 
-# add scripts/plan_runner to sys.path
+# add scripts/plan_runner to sys.path (tests/conftest.py already adds this, kept for standalone run safety)
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "plan_runner"))
 
-import sys
-if "worktree_manager" in sys.modules: del sys.modules["worktree_manager"]
 import worktree_manager
-print(f"DEBUG TEST: worktree_manager file={worktree_manager.__file__}")
 from worktree_manager import WorktreeManager, WorktreeError, MergeResult, ensure_main_branch
 
 
