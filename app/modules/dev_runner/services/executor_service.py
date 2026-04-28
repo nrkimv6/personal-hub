@@ -614,7 +614,8 @@ class ExecutorService:
     async def get_runner_status(self, runner_id: str) -> RunStatusResponse:
         """특정 runner 상태 조회 (per-runner Redis 키 기반)"""
         data = await self._get_runner_fields(
-            runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count"
+            runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count",
+            "exit_reason", "error"
         )
         status = data["status"]
         pid_str = data["pid"]
@@ -622,6 +623,8 @@ class ExecutorService:
         start_time_str = data["start_time"]
         engine = data["engine"] or "claude"
         execution_count_raw = data["execution_count"]
+        exit_reason = data["exit_reason"]
+        error = data["error"]
         running = status == "running"
 
         running, pid_str = await self._correct_pid_state(runner_id, status, pid_str, caller="get_runner_status")
@@ -650,6 +653,8 @@ class ExecutorService:
             listener_alive=True,
             redis_connected=True,
             session_id=session_id,
+            exit_reason=exit_reason,
+            error=error,
         )
 
     async def get_all_runners(self) -> list:

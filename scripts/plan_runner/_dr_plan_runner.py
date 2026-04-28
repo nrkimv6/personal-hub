@@ -543,7 +543,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     engine = command.get("engine")
     fix_engine = command.get("fix_engine")
     is_parallel = command.get("parallel", False)
-    if not plan_file and not is_parallel:
+    if not plan_file and not is_parallel and not command.get("dry_run"):
         _set_error_status("plan_file required (use parallel mode for batch execution)")
         return
 

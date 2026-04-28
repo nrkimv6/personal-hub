@@ -179,7 +179,7 @@ def _do_start_plan_runner(command, redis_client):
                 slug = f"{slug}-{runner_id[:4]}"
             _wf_id = wf_manager.create(slug, plan_file)
 
-        if not plan_file and not is_parallel:
+        if not plan_file and not is_parallel and not command.get("dry_run"):
             _set_error_status("plan_file required (use parallel mode for batch execution)")
             return
 

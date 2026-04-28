@@ -72,6 +72,8 @@ class RunStatusResponse(BaseModel):
     runner_id: Optional[str] = None
     attached: bool = False  # True = 기존 워커에 연결됨 (새 워커 생성 안 함)
     session_id: Optional[str] = None  # fused 세션 ID (UUID4 형식)
+    exit_reason: Optional[str] = None  # 종료 사유 (completed/no_progress/rate_limit/error 등)
+    error: Optional[str] = None  # 종료 에러 요약
 
 
 class RunnerListItem(BaseModel):
