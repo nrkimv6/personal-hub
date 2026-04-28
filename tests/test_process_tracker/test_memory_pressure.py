@@ -20,6 +20,7 @@ def make_orphan_detector():
     detector.scan = AsyncMock(return_value=[])
     detector.cleanup = AsyncMock(return_value=[])
     detector._orphan_first_seen = {}
+    detector.registry = MagicMock()
     return detector
 
 
@@ -242,6 +243,100 @@ def test_attempt_pre_fatal_mitigation_kills_single_heavy_test():
     assert killed[0]["pid"] == 4321
     killer.terminate.assert_called_once()
     killer.wait.assert_called_once()
+
+
+def test_attempt_pre_fatal_mitigation_ignores_invalid_threshold():
+    """B: 임계값 0 → 안전 최소값으로 보정되어 200MB 테스트 프로세스는 건드리지 않음"""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+    from app.core.config import settings
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    light_mem = MagicMock()
+    light_mem.rss = 200 * 1024 * 1024
+    light_proc = MagicMock()
+    light_proc.info = {
+        "pid": 2468,
+        "name": "python.exe",
+        "memory_info": light_mem,
+        "cmdline": ["python", "tests/test_light_worker.py"],
+    }
+
+    with patch.object(settings, "MEMORY_HEAVY_TEST_PROCESS_MB", 0), \
+         patch("app.shared.process.memory_pressure.psutil.process_iter", return_value=[light_proc]), \
+         patch("app.shared.process.memory_pressure.psutil.Process") as mock_process:
+        recovered, available_after_mb, killed = responder._attempt_pre_fatal_mitigation(120.0)
+
+    assert recovered is False
+    assert available_after_mb == 120.0
+    assert killed == []
+    mock_process.assert_not_called()
+
+
+def test_attempt_pre_fatal_mitigation_uses_configured_threshold():
+    """R: 명시 설정 임계값을 사용해 기본값보다 작은 고메모리 테스트 프로세스를 종료한다."""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+    from app.core.config import settings
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    heavy_mem = MagicMock()
+    heavy_mem.rss = 1300 * 1024 * 1024
+    heavy_proc = MagicMock()
+    heavy_proc.info = {
+        "pid": 3579,
+        "name": "python.exe",
+        "memory_info": heavy_mem,
+        "cmdline": ["python", "tests/test_mid_heavy_worker.py"],
+    }
+
+    killer = MagicMock()
+    with patch.object(settings, "MEMORY_HEAVY_TEST_PROCESS_MB", 1200), \
+         patch("app.shared.process.memory_pressure.psutil.process_iter", return_value=[heavy_proc]), \
+         patch("app.shared.process.memory_pressure.psutil.Process", return_value=killer), \
+         patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(700)), \
+         patch("app.shared.process.memory_pressure.time.sleep", MagicMock()):
+        recovered, available_after_mb, killed = responder._attempt_pre_fatal_mitigation(120.0)
+
+    assert recovered is True
+    assert available_after_mb == 700
+    assert [item["pid"] for item in killed] == [3579]
+
+
+def test_pre_fatal_mitigation_records_kill_action():
+    """R: pre-fatal 선제 종료 성공 시 process-watch action 로그를 남긴다."""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    heavy_mem = MagicMock()
+    heavy_mem.rss = 2400 * 1024 * 1024
+    heavy_proc = MagicMock()
+    heavy_proc.info = {
+        "pid": 4321,
+        "name": "python.exe",
+        "memory_info": heavy_mem,
+        "cmdline": ["python", "tests/dev_runner/test_merge_retry_e2e.py"],
+    }
+
+    killer = MagicMock()
+    with patch("app.shared.process.memory_pressure.psutil.process_iter", return_value=[heavy_proc]), \
+         patch("app.shared.process.memory_pressure.psutil.Process", return_value=killer), \
+         patch("app.shared.process.memory_pressure.psutil.virtual_memory", return_value=make_memory_mock(600)), \
+         patch("app.shared.process.memory_pressure.time.sleep", MagicMock()), \
+         patch("app.shared.process.snapshot_writer.SnapshotWriter.record_kill_action") as mock_record:
+        responder._attempt_pre_fatal_mitigation(120.0)
+
+    assert mock_record.call_count == 1
+    kwargs = mock_record.call_args.kwargs
+    assert kwargs["action"] == "pre_fatal_kill"
+    assert kwargs["pid"] == 4321
+    assert kwargs["reason"] == "memory_pressure_pre_fatal"
+    assert kwargs["result"] == "success"
+    assert kwargs["actor"] == "memory_pressure"
 
 
 # ── _extract_script_path ──────────────────────────────────────────────────────
@@ -851,3 +946,36 @@ async def test_on_fatal_recovery_skips_shutdown():
     assert persist_level == "fatal_recovered"
     mock_telegram.assert_awaited_once()
     mock_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_fatal_recovery_records_enriched_snapshot():
+    """R: fatal_recovered 스냅샷에 종료 대상/전후 메모리/임계값 메타가 담긴다."""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    responder = MemoryPressureResponder(detector)
+
+    killed = [{"pid": 4321, "script_path": "tests/dev_runner/test_merge_retry_e2e.py", "memory_mb": 2400.0}]
+
+    with patch.object(
+        responder,
+        "_attempt_pre_fatal_mitigation",
+        return_value=(True, 480.0, killed),
+    ), \
+         patch.object(responder, "_get_top_processes", return_value=[]), \
+         patch.object(responder, "_send_telegram", AsyncMock()), \
+         patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
+         patch("app.shared.process.memory_pressure._format_process_tree", return_value=""), \
+         patch("app.shared.process.memory_pressure.subprocess.run", MagicMock()), \
+         patch.object(responder, "_persist_snapshot", MagicMock()) as mock_persist:
+        await responder._on_fatal(120.0)
+
+    extra = mock_persist.call_args.kwargs["extra"]
+    mitigation = extra["mitigation"]
+    assert mitigation["available_before_mb"] == 120.0
+    assert mitigation["available_after_mb"] == 480.0
+    assert mitigation["threshold_mb"] == 1500.0
+    assert mitigation["killed_targets"] == killed
+    assert mitigation["repeat_count"] == 1
+    assert mitigation["last_recovered_at"]
