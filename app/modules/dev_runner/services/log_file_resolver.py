@@ -42,25 +42,35 @@ class LogFileResolver:
     # ------------------------------------------------------------------
 
     def find_current_log(self, runner_id: str) -> Optional[Path]:
-        """특정 runner의 stream 로그 파일 (Redis에서 조회)
+        """특정 runner의 로그 파일 (Redis에서 조회)
 
-        stream_log_path 존재 시 즉시 반환. 없거나 파일 미존재 시 log_file_path로 fallback.
+        stream_log_path와 log_file_path 둘 다 있으면 더 많은 내용(크기)을 가진 파일 반환.
+        stream 스텁이 START 마커만 있는 경우 log_file_path가 더 크므로 실제 진단 로그 반환.
         """
         try:
             stream_path_str = self._redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
             log_path_str = self._redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
 
-            # stream_log_path 존재 시 즉시 반환 (크기 무관)
-            if stream_path_str:
-                stream_path = Path(stream_path_str)
-                if stream_path.exists():
-                    return stream_path
+            stream_path = None
+            log_path = None
 
-            # fallback: 실제 로그가 기록된 log_file_path
+            if stream_path_str:
+                p = Path(stream_path_str)
+                if p.exists():
+                    stream_path = p
+
             if log_path_str:
-                log_path = Path(log_path_str)
-                if log_path.exists():
+                p = Path(log_path_str)
+                if p.exists():
+                    log_path = p
+
+            # 둘 다 있으면 더 큰 파일 반환 (진단 내용이 더 많음)
+            if stream_path and log_path:
+                if log_path.stat().st_size > stream_path.stat().st_size:
                     return log_path
+                return stream_path
+
+            return stream_path or log_path
         except redis.ConnectionError:
             pass
 
