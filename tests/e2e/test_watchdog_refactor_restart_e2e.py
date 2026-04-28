@@ -50,7 +50,7 @@ def _watchdogs_running() -> bool:
     names = {
         item.get("name")
         for item in data
-        if item.get("watchdog", {}).get("running") is True
+        if ((item.get("watchdog") or {}).get("running") is True)
     }
     return required.issubset(names)
 
