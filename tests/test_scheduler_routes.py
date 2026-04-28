@@ -122,6 +122,18 @@ class TestSchedulerRunTaskAPI:
         assert data["task_name"] == "InstagramWatchdog"
 
     @patch("app.routes.scheduler.scheduler_service")
+    def test_run_task_R_apiwatchdog_success(self, mock_service):
+        """R: APIWatchdog 작업명도 HTTP 레벨에서 정상 수용한다."""
+        mock_service.run_task.return_value = True
+
+        response = client.post("/api/v1/scheduler/tasks/APIWatchdog/run")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "started"
+        assert data["task_name"] == "APIWatchdog"
+
+    @patch("app.routes.scheduler.scheduler_service")
     def test_run_task_failure(self, mock_service):
         """작업 실행 실패 시 500 반환"""
         mock_service.run_task.return_value = False
