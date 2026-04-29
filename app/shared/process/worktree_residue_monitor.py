@@ -84,6 +84,54 @@ class WorktreeResidueMonitor:
         )
 
     @classmethod
+    def _normalize_path(cls, value: str | Path | None) -> Path | None:
+        if value is None:
+            return None
+        try:
+            return Path(value).expanduser().resolve()
+        except Exception:
+            return Path(value)
+
+    @staticmethod
+    def _is_relative_to(path: Path, parent: Path) -> bool:
+        try:
+            path.relative_to(parent)
+            return True
+        except ValueError:
+            return False
+
+    @classmethod
+    def _scope_metadata(
+        cls,
+        *,
+        repo_root: str | Path | None = None,
+        worktree_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        project_root = cls.PROJECT_ROOT.resolve()
+        normalized_repo_root = cls._normalize_path(repo_root)
+        normalized_worktree_path = cls._normalize_path(worktree_path)
+
+        scope_path = normalized_worktree_path or normalized_repo_root
+        if scope_path is None or cls._is_relative_to(scope_path, project_root):
+            return {
+                "scope": "operational",
+                "ignored_reason": None,
+                "repo_root": str(normalized_repo_root) if normalized_repo_root is not None else None,
+                "worktree_path": (
+                    str(normalized_worktree_path) if normalized_worktree_path is not None else None
+                ),
+            }
+
+        return {
+            "scope": "ignored",
+            "ignored_reason": "outside_project_root",
+            "repo_root": str(normalized_repo_root) if normalized_repo_root is not None else None,
+            "worktree_path": (
+                str(normalized_worktree_path) if normalized_worktree_path is not None else None
+            ),
+        }
+
+    @classmethod
     def _ensure_monitor_metadata(cls, status: dict[str, Any]) -> tuple[str | None, str | None]:
         baseline = status.get("baseline_zero_confirmed_at")
         if not baseline:
@@ -163,13 +211,37 @@ class WorktreeResidueMonitor:
         )
 
     @classmethod
-    def record_scan(cls, branches: list[str], *, source: str) -> dict[str, Any]:
+    def record_scan(
+        cls,
+        branches: list[str],
+        *,
+        source: str,
+        repo_root: str | Path | None = None,
+    ) -> dict[str, Any]:
         normalized = sorted({branch for branch in branches if branch})
         legacy_branches = cls._legacy_test_branches(normalized)
         now = cls._utcnow()
+        scope = cls._scope_metadata(repo_root=repo_root)
 
         with cls._lock:
             status = cls._read_status()
+            if scope["scope"] != "operational":
+                cls._append_event(
+                    {
+                        "type": "scan_ignored",
+                        "recorded_at": now,
+                        "source": source,
+                        "scope": scope["scope"],
+                        "ignored_reason": scope["ignored_reason"],
+                        "repo_root": scope["repo_root"],
+                        "test_branch_count": len(normalized),
+                        "test_branches": normalized,
+                        "legacy_test_branch_count": len(legacy_branches),
+                        "legacy_test_branches": legacy_branches,
+                    }
+                )
+                return status
+
             previous_count = int(status.get("latest_test_branch_count") or 0)
             previous_branches = list(status.get("latest_test_branches") or [])
             previous_nonzero_seen = bool(status.get("nonzero_seen_since_baseline"))
@@ -204,6 +276,8 @@ class WorktreeResidueMonitor:
                             "type": "scan",
                             "recorded_at": now,
                             "source": source,
+                            "scope": scope["scope"],
+                            "repo_root": scope["repo_root"],
                             "test_branch_count": len(normalized),
                             "test_branches": normalized,
                             "legacy_test_branch_count": len(legacy_branches),
@@ -221,6 +295,8 @@ class WorktreeResidueMonitor:
                         "type": "baseline_regressed",
                         "recorded_at": now,
                         "source": source,
+                        "scope": scope["scope"],
+                        "repo_root": scope["repo_root"],
                         "test_branch_count": len(normalized),
                         "test_branches": normalized,
                         "legacy_test_branch_count": len(legacy_branches),
@@ -241,6 +317,8 @@ class WorktreeResidueMonitor:
                         "type": "scan",
                         "recorded_at": now,
                         "source": source,
+                        "scope": scope["scope"],
+                        "repo_root": scope["repo_root"],
                         "test_branch_count": len(normalized),
                         "test_branches": normalized,
                         "legacy_test_branch_count": len(legacy_branches),
@@ -260,23 +338,34 @@ class WorktreeResidueMonitor:
         runner_id: str | None = None,
         test_source: str | None = None,
         worktree_path: str | None = None,
+        repo_root: str | Path | None = None,
     ) -> dict[str, Any]:
         now = cls._utcnow()
         normalized = sorted({branch for branch in branches if branch})
+        scope = cls._scope_metadata(repo_root=repo_root, worktree_path=worktree_path)
 
         with cls._lock:
             status = cls._read_status()
-            status["updated_at"] = now
 
             payload = {
                 "type": event_type,
                 "recorded_at": now,
                 "source": source,
+                "scope": scope["scope"],
+                "ignored_reason": scope["ignored_reason"],
+                "repo_root": scope["repo_root"],
                 "branches": normalized,
                 "runner_id": runner_id,
                 "test_source": test_source,
-                "worktree_path": worktree_path,
+                "worktree_path": scope["worktree_path"] or worktree_path,
             }
+
+            if scope["scope"] != "operational":
+                payload["type"] = f"{event_type}_ignored"
+                cls._append_event(payload)
+                return status
+
+            status["updated_at"] = now
 
             if event_type == "force_cleanup":
                 status["force_cleanup_event_count"] = int(
@@ -297,4 +386,58 @@ class WorktreeResidueMonitor:
 
             cls._write_status(status)
             cls._append_event(payload)
+            return status
+
+    @classmethod
+    def rebase_status_to_operational_scope(
+        cls,
+        *,
+        source: str,
+        latest_branches: list[str],
+        reason: str,
+        repo_root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Reset monitor status to an explicit operational-scope scan result."""
+        normalized = sorted({branch for branch in latest_branches if branch})
+        legacy_branches = cls._legacy_test_branches(normalized)
+        now = cls._utcnow()
+        scope = cls._scope_metadata(repo_root=repo_root)
+        if scope["scope"] != "operational":
+            raise ValueError("monitor scope rebase requires an operational repo_root")
+
+        with cls._lock:
+            status = cls._read_status()
+            status["updated_at"] = now
+            status["latest_scan_at"] = now
+            status["latest_source"] = source
+            status["latest_test_branch_count"] = len(normalized)
+            status["latest_test_branches"] = normalized
+            status["latest_legacy_test_branch_count"] = len(legacy_branches)
+            status["latest_legacy_test_branches"] = legacy_branches
+            status["max_test_branch_count_since_baseline"] = len(normalized)
+            status["nonzero_seen_since_baseline"] = bool(normalized)
+            status["baseline_zero_confirmed_at"] = None if normalized else now
+            status["last_nonzero_at"] = now if normalized else None
+            status["last_nonzero_branches"] = normalized
+            status["review_due_logged_at"] = None
+            due_at, _ = cls._ensure_monitor_metadata(status)
+            if not normalized and due_at:
+                status["review_due_at"] = due_at
+                status["remove_monitor_candidate_at"] = due_at
+
+            cls._write_status(status)
+            cls._append_event(
+                {
+                    "type": "monitor_scope_rebased",
+                    "recorded_at": now,
+                    "source": source,
+                    "scope": scope["scope"],
+                    "repo_root": scope["repo_root"],
+                    "reason": reason,
+                    "test_branch_count": len(normalized),
+                    "test_branches": normalized,
+                    "legacy_test_branch_count": len(legacy_branches),
+                    "legacy_test_branches": legacy_branches,
+                }
+            )
             return status

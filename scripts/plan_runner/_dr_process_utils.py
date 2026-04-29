@@ -50,6 +50,7 @@ def _record_worktree_cleanup_monitor_event(
     runner_id: str | None = None,
     test_source: str | None = None,
     worktree_path: str | None = None,
+    repo_root: Path | str | None = None,
 ) -> None:
     try:
         if str(PROJECT_ROOT) not in sys.path:
@@ -63,6 +64,7 @@ def _record_worktree_cleanup_monitor_event(
             runner_id=runner_id,
             test_source=test_source,
             worktree_path=worktree_path,
+            repo_root=repo_root,
         )
     except Exception as exc:
         logger.debug("[cleanup] worktree residue monitor record skipped: %s", exc)
@@ -147,6 +149,7 @@ def _force_cleanup_test_runner_worktree(runner_id: str, redis_client: redis.Redi
         runner_id=runner_id,
         test_source=str(test_source),
         worktree_path=str(worktree_path),
+        repo_root=repo_root,
     )
 
     return True

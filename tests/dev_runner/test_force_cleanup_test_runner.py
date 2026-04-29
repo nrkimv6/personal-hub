@@ -52,6 +52,7 @@ def test_force_cleanup_test_runner_worktree_when_test_source_present():
         runner_id="t-clean-1234",
         test_source="cleanup",
         worktree_path="D:/repo/.worktrees/t-clean-1234",
+        repo_root=mod.PROJECT_ROOT,
     )
 
 
@@ -87,7 +88,8 @@ def test_force_cleanup_test_runner_worktree_tolerates_missing_worktree():
         ),
     ]
 
-    with patch.object(mod.subprocess, "run", side_effect=responses):
+    with patch.object(mod.subprocess, "run", side_effect=responses), \
+         patch.object(mod, "_record_worktree_cleanup_monitor_event"):
         result = mod._force_cleanup_test_runner_worktree("t-clean-missing", redis_client)
 
     assert result is True
@@ -108,7 +110,8 @@ def test_force_cleanup_test_runner_worktree_ignores_lock_and_ahead_metadata():
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    with patch.object(mod.subprocess, "run", side_effect=_fake_run):
+    with patch.object(mod.subprocess, "run", side_effect=_fake_run), \
+         patch.object(mod, "_record_worktree_cleanup_monitor_event"):
         result = mod._force_cleanup_test_runner_worktree("t-clean-locked", redis_client)
 
     assert result is True

@@ -334,6 +334,7 @@ class OrphanDetector:
                             event_type="orphan_cleanup",
                             branches=stale_test_branches,
                             source="orphan_detector",
+                            repo_root=self.repo_root,
                         )
                         logger.info(
                             "[orphan-worktree] cleaned %d stale test worktrees: %s",
@@ -343,6 +344,7 @@ class OrphanDetector:
                     WorktreeResidueMonitor.record_scan(
                         self._list_test_worktree_branches(),
                         source="orphan_detector",
+                        repo_root=self.repo_root,
                     )
                     next_scan_at = time.monotonic() + scan_interval
 

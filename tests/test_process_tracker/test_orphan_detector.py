@@ -152,7 +152,8 @@ async def test_run_periodic_checks_memory_more_frequently_than_scan():
     fake_pressure.check = AsyncMock(return_value="normal")
 
     with patch("app.shared.process.memory_pressure.MemoryPressureResponder", return_value=fake_pressure), \
-         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 999):
+         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 999), \
+         patch("app.shared.process.orphan_detector.WorktreeResidueMonitor.record_scan"):
         task = asyncio.create_task(
             detector.run_periodic(interval=0.20, memory_check_interval=0.05)
         )
@@ -318,5 +319,6 @@ async def test_run_periodic_invokes_test_worktree_cleanup():
         event_type="orphan_cleanup",
         branches=["runner/t-stale-002"],
         source="orphan_detector",
+        repo_root=detector.repo_root,
     )
-    mock_record_scan.assert_called_with([], source="orphan_detector")
+    mock_record_scan.assert_called_with([], source="orphan_detector", repo_root=detector.repo_root)
