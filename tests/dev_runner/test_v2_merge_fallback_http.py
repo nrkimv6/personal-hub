@@ -9,13 +9,24 @@ TC: v2 merge fallback HTTP 통합 테스트 (Phase T5)
 import base64
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import requests
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from app.modules.dev_runner.routes.plans import router as plans_router
 from tests.dev_runner.live_done_http_helpers import isolated_live_done_project
 
 BASE_URL = os.environ.get("ADMIN_API_BASE", "http://localhost:8001/api/v1/dev-runner")
 REQUEST_TIMEOUT = 5
+
+
+@pytest.fixture
+def client():
+    app = FastAPI()
+    app.include_router(plans_router, prefix="/api/v1/dev-runner")
+    return TestClient(app, raise_server_exceptions=True)
 
 
 @pytest.fixture(scope="module")
@@ -69,6 +80,44 @@ def test_v2_merge_fallback_done_api_R(tmp_merged_plan):
     except requests.RequestException as exc:
         pytest.skip(f"admin api unavailable: {exc}")
     assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
+
+
+@pytest.mark.http
+def test_v2_merge_fallback_dirty_cleanup_success_allows_done_response_R(client, tmp_path):
+    """T5: hook auto-commit success remains a normal done response for the next runner step."""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = plan_dir / "2026-04-29-http-dirty-cleaned.md"
+    plan_path.write_text(
+        "# HTTP dirty cleaned test\n"
+        "> 상태: 구현완료\n"
+        "> 진행률: 1/1 (100%)\n"
+        "\n"
+        "- [x] task\n",
+        encoding="utf-8",
+    )
+    encoded = base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("=")
+
+    with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), \
+         patch("app.modules.dev_runner.routes.plans.plan_service.run_done", new=AsyncMock(return_value={
+             "success": True,
+             "message": "post-merge dirty cleanup committed: tests/dev_runner/fixtures/test_plan_e2e_mock.md",
+             "output": None,
+             "remaining_tasks": 0,
+             "total_tasks": 1,
+             "plan_status": "구현완료",
+         })), \
+         patch("app.modules.dev_runner.routes.plans.plan_service.list_plans", return_value=[]):
+        resp = client.post(
+            f"/api/v1/dev-runner/plans/{encoded}/done",
+            headers={"X-Plan-Runner-Id": "runner-dirty-cleaned"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert "dirty guard" not in body["message"].lower()
+    assert "Traceback" not in resp.text
 
 
 def test_v2_merge_fallback_done_archive_R(tmp_merged_plan):

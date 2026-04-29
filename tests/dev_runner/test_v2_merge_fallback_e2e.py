@@ -136,3 +136,12 @@ def test_v2_merge_fallback_e2e_stream_output_residue_guard_E(monkeypatch, tmp_pa
     mock_cleanup.assert_called_once_with(runner_id, redis_mock)
 
 
+def test_v2_merge_fallback_e2e_post_merge_hook_installer_contract_R():
+    """T4: monitor-page exposes a post-merge dirty hook installer for merge fallback runs."""
+    installer = Path(__file__).resolve().parents[2] / "scripts" / "git-hooks" / "install-post-merge-dirty-check.ps1"
+    assert installer.exists()
+    body = installer.read_text(encoding="utf-8")
+    assert "enable-post-merge-dirty-check.ps1" in body
+    assert "-RepoRoot $RepoRoot" in body
+
+

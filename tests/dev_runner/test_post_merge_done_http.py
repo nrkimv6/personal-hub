@@ -133,6 +133,46 @@ def test_done_http_returns_ownership_guard_reason_with_runner_header(client, tmp
 
 
 @pytest.mark.http
+def test_done_http_returns_post_merge_dirty_block_without_traceback(client, tmp_path):
+    """T5: post-merge dirty hook failure is surfaced as a clean failure body, not a traceback."""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = plan_dir / "2026-04-29-http-post-merge-dirty.md"
+    plan_path.write_text(
+        "# HTTP post-merge dirty test\n"
+        "> 상태: 구현완료\n"
+        "> 진행률: 1/1 (100%)\n"
+        "\n"
+        "- [x] task\n",
+        encoding="utf-8",
+    )
+    encoded = base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("=")
+
+    with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), \
+         patch("app.modules.dev_runner.routes.plans.plan_service.run_done", new=AsyncMock(return_value={
+             "success": False,
+             "message": "post-merge dirty blocked: .env",
+             "reason": "post_merge_dirty_blocked",
+             "output": None,
+             "remaining_tasks": 0,
+             "total_tasks": 1,
+             "plan_status": "구현완료",
+         })), \
+         patch("app.modules.dev_runner.routes.plans.plan_service.list_plans", return_value=[]):
+        resp = client.post(
+            f"/api/v1/dev-runner/plans/{encoded}/done",
+            headers={"X-Plan-Runner-Id": "runner-dirty"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert body["reason"] == "post_merge_dirty_blocked"
+    assert "post-merge dirty blocked" in body["message"]
+    assert "Traceback" not in resp.text
+
+
+@pytest.mark.http
 def test_done_http_without_runner_header_stays_manual_contract(client, tmp_path):
     """T5: header 없이 같은 endpoint를 호출하면 manual contract(None runner_id)를 유지한다."""
     plan_dir = tmp_path / "docs" / "plan"
