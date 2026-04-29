@@ -8,12 +8,13 @@
 	import DevRunnerTab from './DevRunnerTab.svelte';
 	import GitReposTab from './GitReposTab.svelte';
 	import DailyReportTab from './DailyReportTab.svelte';
+	import TrackingTab from './TrackingTab.svelte';
 	import PlanListTab from '../plans/PlanListTab.svelte';
 	import ArchiveTab from '../plans/ArchiveTab.svelte';
 	import HistoryTab from '../plans/HistoryTab.svelte';
 	import WorktreeTab from '../plans/WorktreeTab.svelte';
 
-	type MainTab = 'dev-runner' | 'git-repos' | 'plans' | 'daily-report';
+	type MainTab = 'dev-runner' | 'git-repos' | 'plans' | 'daily-report' | 'tracking';
 	let mainTab = $state<MainTab>('dev-runner');
 	let initialPlan = $state('');
 	let initialRunner = $state('');
@@ -38,6 +39,10 @@
 		const hasValidPlansSubtab = !!(subParam && ['plans', 'archive', 'history', 'worktrees'].includes(subParam));
 		if (tabParam === 'git-repos') {
 			mainTab = 'git-repos';
+		} else if (tabParam === 'tracking') {
+			mainTab = 'tracking';
+		} else if (tabParam === 'daily-report') {
+			mainTab = 'daily-report';
 		} else if (tabParam === 'plans' || (!tabParam && hasValidPlansSubtab)) {
 			mainTab = 'plans';
 			plansSubTab = hasValidPlansSubtab ? subParam! : 'plans';
@@ -52,6 +57,7 @@
 		{ id: 'dev-runner', label: 'Dev Runner' },
 		{ id: 'git-repos', label: 'Git 관리' },
 		{ id: 'plans', label: '계획서' },
+		{ id: 'tracking', label: 'Tracking' },
 		{ id: 'daily-report', label: '일일 보고서' },
 	];
 
@@ -63,7 +69,11 @@
 	];
 
 	const pageTitle = $derived(
-		mainTab === 'git-repos' ? 'Git 관리' : mainTab === 'plans' ? '계획서 관리' : '개발 작업'
+		mainTab === 'git-repos' ? 'Git 관리' :
+		mainTab === 'plans' ? '계획서 관리' :
+		mainTab === 'tracking' ? 'Tracking' :
+		mainTab === 'daily-report' ? '일일 보고서' :
+		'개발 작업'
 	);
 
 	function isArchivePath(path: string) {
@@ -163,7 +173,7 @@
 </script>
 
 <svelte:head>
-	<title>{mainTab === 'git-repos' ? 'Git 관리' : mainTab === 'plans' ? '계획서 관리' : '개발 작업'} | Monitor Page</title>
+	<title>{pageTitle} | Monitor Page</title>
 </svelte:head>
 
 <div class="flex flex-col h-full overflow-hidden">
@@ -243,6 +253,10 @@
 						<WorktreeTab />
 					{/if}
 				</div>
+			</div>
+		{:else if mainTab === 'tracking'}
+			<div class="overflow-auto h-full">
+				<TrackingTab />
 			</div>
 		{:else if mainTab === 'daily-report'}
 			<div class="overflow-auto h-full">
