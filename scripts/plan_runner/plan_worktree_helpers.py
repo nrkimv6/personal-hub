@@ -100,10 +100,14 @@ def is_worktree_active(plan_file: str, project_root: "Path | None" = None) -> tu
         return False, None, None
 
     if project_root is None:
-        # plan_file 경로에서 .worktrees 이전까지를 project_root로 추론
         p = Path(plan_file).resolve()
-        # docs/plan/*.md → 상위 2단계
-        project_root = p.parent.parent.parent
+        parts = list(p.parts)
+        if ".worktrees" in parts:
+            i = parts.index(".worktrees")
+            candidate = Path(*parts[:i])
+            project_root = candidate if (candidate / ".git").exists() else p.parent.parent.parent
+        else:
+            project_root = p.parent.parent.parent
 
     worktree_abs = (Path(project_root) / worktree_rel).resolve()
     if not worktree_abs.is_dir():

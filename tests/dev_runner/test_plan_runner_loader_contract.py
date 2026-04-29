@@ -128,3 +128,50 @@ def test_get_target_project_root_detects_worktrees_without_env(tmp_path):
     assert result == project_root, (
         f".worktrees/plans git root 입력 시 project_root({project_root}) 반환해야 함, 실제: {result}"
     )
+
+
+# ─────────────────────────────────────────────────────────────
+# T3: is_worktree_active plans-root 경로 계약 (재현/통합 TC)
+# ─────────────────────────────────────────────────────────────
+
+def test_is_worktree_active_plans_root_plan_uses_correct_project_root(tmp_path):
+    """T3/R: plans-root plan 입력(project_root=None)에서 is_worktree_active()가
+    .worktrees/plans가 아닌 monitor-page root 기준으로 worktree 경로를 계산함을 검증.
+
+    수정 전 버그 재현 경로:
+      p.parent.parent.parent = .worktrees/plans → worktree_abs 오산출 → active=False
+    수정 후 기대:
+      .worktrees 직전 경로(.git 존재) = monitor-page → worktree_abs 정확 → active=True
+    """
+    scripts_dir = Path(__file__).parent.parent.parent / "scripts" / "plan_runner"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    from plan_worktree_helpers import is_worktree_active
+
+    # plans-root 구조: project_root/.worktrees/plans/docs/plan/test.md
+    project_root = tmp_path / "monitor-page"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+
+    impl_wt = project_root / ".worktrees" / "impl-test"
+    impl_wt.mkdir(parents=True)
+    (impl_wt / ".git").write_text("gitdir: ../../.git/worktrees/impl-test", encoding="utf-8")
+
+    plans_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+    plans_dir.mkdir(parents=True)
+    plan_file = plans_dir / "test.md"
+    plan_file.write_text(
+        "# Test\n\n> branch: impl/test\n> worktree: .worktrees/impl-test\n",
+        encoding="utf-8",
+    )
+
+    # project_root 생략 — 버그 재현 경로
+    active, branch, wt_abs = is_worktree_active(str(plan_file))
+
+    assert active is True, (
+        f"plans-root 경로 입력 시 active=True 여야 함. "
+        f"수정 전이면 .worktrees/plans를 root로 오산출해 False가 됨. wt_abs={wt_abs}"
+    )
+    assert branch == "impl/test"
+    assert wt_abs is not None

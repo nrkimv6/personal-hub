@@ -203,3 +203,63 @@ def test_has_unmerged_commits_exception_E(tmp_path):
 
         result = has_unmerged_commits("impl/test-branch", tmp_path)
         assert result is True
+
+
+# ---------------------------------------------------------------------------
+# is_worktree_active — project_root=None 추론 분기
+# (plans-root 경로 및 일반 경로 fallback 검증)
+# ---------------------------------------------------------------------------
+
+def _write_plan_with_worktree_header(plan_path: Path, branch: str, worktree: str) -> None:
+    plan_path.write_text(
+        f"# Test Plan\n\n> branch: {branch}\n> worktree: {worktree}\n",
+        encoding="utf-8",
+    )
+
+
+def test_is_worktree_active_plans_worktree_path_uses_correct_root(tmp_path):
+    """R: plans-root 경로(project_root=None)에서 .git 있는 monitor-page root 계산.
+
+    수정 전: p.parent.parent.parent = .worktrees/plans → worktree 경로 오산출 → False
+    수정 후: .worktrees 직전 경로(.git 존재) → 올바른 project_root → True
+    """
+    project_root = tmp_path / "monitor-page"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+
+    impl_wt = project_root / ".worktrees" / "impl-test"
+    impl_wt.mkdir(parents=True)
+    (impl_wt / ".git").write_text("gitdir: ../../.git/worktrees/impl-test", encoding="utf-8")
+
+    plans_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+    plans_dir.mkdir(parents=True)
+    plan_file = plans_dir / "2026-01-01_test.md"
+    _write_plan_with_worktree_header(plan_file, "impl/test", ".worktrees/impl-test")
+
+    active, branch, wt_abs = is_worktree_active(str(plan_file))
+    assert active is True, (
+        f"plans-root 경로 입력 시 is_worktree_active=True 여야 함. "
+        f"project_root가 .worktrees/plans로 오산출되면 False. wt_abs={wt_abs}"
+    )
+    assert branch == "impl/test"
+    assert wt_abs is not None and "impl-test" in wt_abs
+
+
+def test_is_worktree_active_regular_path_fallback_B(tmp_path):
+    """B: .worktrees 없는 일반 docs/plan 경로에서 parent.parent.parent fallback 동작 유지."""
+    project_root = tmp_path / "monitor-page"
+    docs_plan = project_root / "docs" / "plan"
+    docs_plan.mkdir(parents=True)
+
+    impl_wt = project_root / ".worktrees" / "impl-test"
+    impl_wt.mkdir(parents=True)
+    (impl_wt / ".git").write_text("gitdir: ../../.git/worktrees/impl-test", encoding="utf-8")
+
+    plan_file = docs_plan / "2026-01-01_test.md"
+    _write_plan_with_worktree_header(plan_file, "impl/test", ".worktrees/impl-test")
+
+    active, branch, wt_abs = is_worktree_active(str(plan_file))
+    assert active is True, (
+        f"일반 docs/plan 경로에서 fallback이 monitor-page를 root로 잡아야 함. wt_abs={wt_abs}"
+    )
+    assert branch == "impl/test"
