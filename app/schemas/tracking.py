@@ -49,6 +49,19 @@ class TrackingItemUpdate(BaseModel):
         return stripped
 
 
+class LinkedPlan(BaseModel):
+    plan_record_id: int
+    filename_hash: str
+    title: str | None = None
+    status: str | None = None
+    file_path: str
+    archived: bool
+    file_removed: bool
+
+    class Config:
+        from_attributes = True
+
+
 class TrackingItemResponse(BaseModel):
     id: int
     title: str
@@ -59,9 +72,28 @@ class TrackingItemResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     status: TrackingStatus
+    linked_plans: list["LinkedPlan"] = []
 
     class Config:
         from_attributes = True
+
+
+class LinkPlansRequest(BaseModel):
+    plan_record_ids: list[int] = Field(default_factory=list, description="연결할 plan_record_id 목록")
+
+    @field_validator("plan_record_ids")
+    @classmethod
+    def validate_ids(cls, v: list[int]) -> list[int]:
+        for pid in v:
+            if pid <= 0:
+                raise ValueError(f"plan_record_id must be > 0, got {pid}")
+        seen: set[int] = set()
+        deduped = []
+        for pid in v:
+            if pid not in seen:
+                seen.add(pid)
+                deduped.append(pid)
+        return deduped
 
 
 class TrackingItemListResponse(BaseModel):

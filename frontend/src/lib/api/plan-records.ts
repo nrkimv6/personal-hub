@@ -92,6 +92,8 @@ export const planRecordsApi = {
 		tags?: string;
 		skip?: number;
 		limit?: number;
+		q?: string;
+		deep?: boolean;
 	}) => {
 		const q = new URLSearchParams();
 		if (params?.project) q.set('project', params.project);
@@ -100,6 +102,8 @@ export const planRecordsApi = {
 		if (params?.tags) q.set('tags', params.tags);
 		if (params?.skip != null) q.set('skip', String(params.skip));
 		if (params?.limit != null) q.set('limit', String(params.limit));
+		if (params?.q) q.set('q', params.q);
+		if (params?.deep !== undefined) q.set('deep', String(params.deep));
 		const qs = q.toString();
 		return planRecordsRequest<PlanRecord[]>(`/records${qs ? '?' + qs : ''}`);
 	},

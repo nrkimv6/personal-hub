@@ -9,6 +9,8 @@
 		getTrackingStatusLabel,
 		sortTrackingItems
 	} from '$lib/utils/tracking.js';
+	import TrackingPlanPicker from './TrackingPlanPicker.svelte';
+	import type { LinkedPlan } from '$lib/api/tracking';
 
 	type Filter = TrackingStatus | 'all';
 
@@ -20,6 +22,8 @@
 	let showModal = $state(false);
 	let editingItem = $state<TrackingItem | null>(null);
 	let form = $state({ title: '', description: '', start_at: '', due_at: '' });
+	let pickerValue = $state<number[]>([]);
+	let pickerSaving = $state(false);
 
 	const summary = $derived({
 		total: items.length,
@@ -65,6 +69,7 @@
 	function openCreateModal() {
 		editingItem = null;
 		form = { title: '', description: '', start_at: '', due_at: '' };
+		pickerValue = [];
 		showModal = true;
 	}
 
@@ -76,6 +81,7 @@
 			start_at: toInputValue(item.start_at),
 			due_at: toInputValue(item.due_at)
 		};
+		pickerValue = [];
 		showModal = true;
 	}
 
@@ -98,12 +104,35 @@
 					? sortTrackingItems(nextItems)
 					: nextItems.filter((item) => item.id !== updated.id);
 				toast.success('Tracking 항목을 수정했습니다.');
+				// plan 링크 diff 처리
+				if (pickerValue.length > 0) {
+					try {
+						const linked = await trackingApi.linkPlans(updated.id, pickerValue);
+						const nextItems2 = items.map((item) => (item.id === linked.id ? linked : item));
+						items = activeFilter === 'all' || linked.status === activeFilter
+							? sortTrackingItems(nextItems2)
+							: nextItems2.filter((item) => item.id !== linked.id);
+					} catch {
+						toast.error('항목은 수정됐지만 plan 연결에 실패했습니다.');
+					}
+				}
 			} else {
 				const created = await trackingApi.create(payload);
 				items = activeFilter === 'all' || created.status === activeFilter
 					? sortTrackingItems([created, ...items])
 					: items;
 				toast.success('Tracking 항목을 추가했습니다.');
+				// 신규 항목 생성 후 plan 링크
+				if (pickerValue.length > 0) {
+					try {
+						const linked = await trackingApi.linkPlans(created.id, pickerValue);
+						items = activeFilter === 'all' || linked.status === activeFilter
+							? sortTrackingItems([linked, ...items.filter((i) => i.id !== linked.id)])
+							: items;
+					} catch {
+						toast.error('항목은 추가됐지만 plan 연결에 실패했습니다.');
+					}
+				}
 			}
 			showModal = false;
 		} catch (e) {
@@ -215,6 +244,11 @@
 										{#if item.completed_at}
 											<span>완료: {formatDate(item.completed_at)}</span>
 										{/if}
+										{#if item.linked_plans.length > 0}
+											<span class="rounded-full bg-primary/10 px-2 py-0.5 text-primary">
+												계획서 {item.linked_plans.length}건
+											</span>
+										{/if}
 									</div>
 								</div>
 							</label>
@@ -266,6 +300,46 @@
 						<span class="text-sm font-medium">마감기한</span>
 						<input type="datetime-local" class="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm" bind:value={form.due_at} />
 					</label>
+				</div>
+				<!-- 연결된 계획서 섹션 -->
+				<div class="space-y-2">
+					<div class="text-sm font-medium">연결된 계획서</div>
+					{#if editingItem && editingItem.linked_plans.length > 0}
+						<div class="flex flex-wrap gap-1">
+							{#each editingItem.linked_plans as lp}
+								<span class="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">
+									<span class="max-w-32 truncate">{lp.title ?? lp.file_path.split('/').pop()}</span>
+									{#if lp.archived}<span class="text-amber-600">archived</span>{/if}
+									{#if lp.file_removed}<span class="text-muted-foreground">(파일 없음)</span>{/if}
+									<button
+										type="button"
+										class="ml-0.5 hover:text-destructive"
+										disabled={pickerSaving}
+										onclick={async () => {
+											pickerSaving = true;
+											try {
+												const updated = await trackingApi.unlinkPlan(editingItem!.id, lp.plan_record_id);
+												editingItem = updated;
+												const nextItems = items.map((i) => (i.id === updated.id ? updated : i));
+												items = sortTrackingItems(nextItems);
+												toast.success('계획서 연결을 해제했습니다.');
+											} catch {
+												toast.error('연결 해제 실패');
+											} finally {
+												pickerSaving = false;
+											}
+										}}
+										aria-label="연결 해제"
+									>×</button>
+								</span>
+							{/each}
+						</div>
+					{/if}
+					<TrackingPlanPicker
+						value={pickerValue}
+						alreadyLinked={editingItem?.linked_plans ?? []}
+						onChange={(ids) => { pickerValue = ids; }}
+					/>
 				</div>
 			</div>
 

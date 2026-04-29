@@ -2,6 +2,16 @@ import { request } from './client';
 
 export type TrackingStatus = 'done' | 'overdue' | 'ready' | 'upcoming';
 
+export interface LinkedPlan {
+	plan_record_id: number;
+	filename_hash: string;
+	title: string | null;
+	status: string | null;
+	file_path: string;
+	archived: boolean;
+	file_removed: boolean;
+}
+
 export interface TrackingItem {
 	id: number;
 	title: string;
@@ -12,6 +22,7 @@ export interface TrackingItem {
 	created_at: string;
 	updated_at: string;
 	status: TrackingStatus;
+	linked_plans: LinkedPlan[];
 }
 
 export interface TrackingItemListResponse {
@@ -68,5 +79,18 @@ export const trackingApi = {
 
 	reopen(id: number): Promise<TrackingItem> {
 		return request<TrackingItem>(`/tracking/items/${id}/reopen`, { method: 'POST' });
+	},
+
+	linkPlans(id: number, planRecordIds: number[]): Promise<TrackingItem> {
+		return request<TrackingItem>(`/tracking/items/${id}/plans`, {
+			method: 'POST',
+			body: JSON.stringify({ plan_record_ids: planRecordIds }),
+		});
+	},
+
+	unlinkPlan(id: number, planRecordId: number): Promise<TrackingItem> {
+		return request<TrackingItem>(`/tracking/items/${id}/plans/${planRecordId}`, {
+			method: 'DELETE',
+		});
 	},
 };

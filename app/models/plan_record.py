@@ -42,6 +42,7 @@ class PlanRecord(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     events = relationship("PlanEvent", back_populates="record", order_by="PlanEvent.created_at")
+    tracking_links = relationship("TrackingItemPlanLink", back_populates="plan_record", lazy="select", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_plan_records_project", "project"),

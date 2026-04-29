@@ -2,10 +2,10 @@
 
 from datetime import datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.models.tracking_item import TrackingItem
-from app.schemas.tracking import TrackingItemCreate, TrackingItemResponse, TrackingItemUpdate, TrackingStatus
+from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
+from app.schemas.tracking import LinkedPlan, TrackingItemCreate, TrackingItemResponse, TrackingItemUpdate, TrackingStatus
 
 
 def calculate_tracking_status(item: TrackingItem, now: datetime | None = None) -> TrackingStatus:
@@ -31,6 +31,18 @@ def _sort_key(item: TrackingItem):
 
 
 def serialize_tracking_item(item: TrackingItem) -> TrackingItemResponse:
+    linked = [
+        LinkedPlan(
+            plan_record_id=link.plan_record_id,
+            filename_hash=link.plan_record.filename_hash,
+            title=link.plan_record.title,
+            status=link.plan_record.status,
+            file_path=link.plan_record.file_path,
+            archived=link.plan_record.archived_at is not None,
+            file_removed=link.plan_record.file_removed_at is not None,
+        )
+        for link in item.linked_plans
+    ]
     return TrackingItemResponse(
         id=item.id,
         title=item.title,
@@ -41,6 +53,7 @@ def serialize_tracking_item(item: TrackingItem) -> TrackingItemResponse:
         created_at=item.created_at,
         updated_at=item.updated_at,
         status=calculate_tracking_status(item),
+        linked_plans=linked,
     )
 
 
@@ -50,7 +63,7 @@ def list_tracking_items(
     status: TrackingStatus | None = None,
     include_done: bool = True,
 ) -> list[TrackingItem]:
-    items = db.query(TrackingItem).all()
+    items = db.query(TrackingItem).options(selectinload(TrackingItem.linked_plans).selectinload(TrackingItemPlanLink.plan_record)).all()
     filtered = []
     for item in items:
         item_status = calculate_tracking_status(item)

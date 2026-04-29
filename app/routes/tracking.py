@@ -1,12 +1,15 @@
 """Tracking item API routes."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.auth import UserInfo, require_admin
 from app.database import get_db
-from app.models.tracking_item import TrackingItem
+from app.models.plan_record import PlanRecord
+from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
 from app.schemas.tracking import (
+    LinkedPlan,
+    LinkPlansRequest,
     TrackingItemCreate,
     TrackingItemListResponse,
     TrackingItemResponse,
@@ -26,7 +29,14 @@ router = APIRouter(prefix="/api/v1/tracking", tags=["tracking"])
 
 
 def _get_item_or_404(db: Session, item_id: int) -> TrackingItem:
-    item = db.query(TrackingItem).filter(TrackingItem.id == item_id).first()
+    item = (
+        db.query(TrackingItem)
+        .options(
+            selectinload(TrackingItem.linked_plans).selectinload(TrackingItemPlanLink.plan_record)
+        )
+        .filter(TrackingItem.id == item_id)
+        .first()
+    )
     if item is None:
         raise HTTPException(status_code=404, detail="Tracking item not found")
     return item
@@ -43,6 +53,11 @@ def get_items(
         items=[serialize_tracking_item(item) for item in items],
         total=len(items),
     )
+
+
+@router.get("/items/{item_id}", response_model=TrackingItemResponse)
+def get_item(item_id: int, db: Session = Depends(get_db)):
+    return serialize_tracking_item(_get_item_or_404(db, item_id))
 
 
 @router.post("/items", response_model=TrackingItemResponse, status_code=201)
@@ -101,3 +116,44 @@ def reopen_item(
 ):
     item = _get_item_or_404(db, item_id)
     return serialize_tracking_item(reopen_tracking_item(db, item))
+
+
+@router.post("/items/{item_id}/plans", response_model=TrackingItemResponse)
+def link_plans(
+    item_id: int,
+    data: LinkPlansRequest,
+    db: Session = Depends(get_db),
+    _: UserInfo = Depends(require_admin),
+):
+    item = _get_item_or_404(db, item_id)
+    existing_ids = {link.plan_record_id for link in item.linked_plans}
+    for pid in data.plan_record_ids:
+        if db.query(PlanRecord).filter(PlanRecord.id == pid).first() is None:
+            raise HTTPException(status_code=422, detail=f"plan_record_id {pid} not found")
+    for pid in data.plan_record_ids:
+        if pid not in existing_ids:
+            db.add(TrackingItemPlanLink(tracking_item_id=item_id, plan_record_id=pid))
+    db.commit()
+    return serialize_tracking_item(_get_item_or_404(db, item_id))
+
+
+@router.delete("/items/{item_id}/plans/{plan_record_id}", response_model=TrackingItemResponse)
+def unlink_plan(
+    item_id: int,
+    plan_record_id: int,
+    db: Session = Depends(get_db),
+    _: UserInfo = Depends(require_admin),
+):
+    item = _get_item_or_404(db, item_id)
+    link = (
+        db.query(TrackingItemPlanLink)
+        .filter(
+            TrackingItemPlanLink.tracking_item_id == item_id,
+            TrackingItemPlanLink.plan_record_id == plan_record_id,
+        )
+        .first()
+    )
+    if link:
+        db.delete(link)
+        db.commit()
+    return serialize_tracking_item(_get_item_or_404(db, item_id))
