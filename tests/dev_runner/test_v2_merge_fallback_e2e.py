@@ -142,6 +142,7 @@ def test_v2_merge_fallback_e2e_post_merge_hook_installer_contract_R():
     assert installer.exists()
     body = installer.read_text(encoding="utf-8")
     assert "enable-post-merge-dirty-check.ps1" in body
-    assert "-RepoRoot $RepoRoot" in body
+    assert "Resolve-Path -LiteralPath $RepoRoot" in body
+    assert "-RepoRoot $resolvedRepoRoot" in body
 
 
