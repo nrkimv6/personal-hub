@@ -58,6 +58,7 @@ export function formatUptime(seconds: number | null): string {
 
 export function serviceVariant(svc: NssmService): SectionVariant {
   if (svc.status === 'Unregistered') return 'error';
+  if (svc.status === 'Running' && svc.frontend_health && svc.frontend_health !== 'healthy') return 'warning';
   if (svc.status === 'Running') return 'success';
   if (svc.status === 'StartPending' || svc.status === 'StopPending') return 'warning';
   return 'error';

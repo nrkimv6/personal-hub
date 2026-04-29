@@ -29,6 +29,62 @@ class NssmService:
 
         return result
 
+    async def _check_public_frontend_health(self, project_path: str) -> dict:
+        """Check public frontend health via port 6100 and PID file.
+
+        Returns dict with frontend_health, frontend_port, frontend_pid, degraded_reason.
+        """
+        pid_file = Path(project_path) / ".pids" / "frontend.pid"
+        frontend_port = 6100
+
+        # Port check (primary gate)
+        port_alive = False
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("localhost", frontend_port),
+                timeout=2.0
+            )
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            port_alive = True
+        except (OSError, asyncio.TimeoutError):
+            pass
+
+        if not port_alive:
+            return {
+                "frontend_health": "degraded",
+                "frontend_port": frontend_port,
+                "frontend_pid": None,
+                "degraded_reason": "port_dead",
+            }
+
+        # PID file check (secondary gate)
+        frontend_pid: int | None = None
+        if pid_file.exists():
+            try:
+                pid_str = pid_file.read_text(encoding="utf-8").strip()
+                frontend_pid = int(pid_str)
+            except (ValueError, OSError):
+                pass
+
+        if frontend_pid is None:
+            return {
+                "frontend_health": "degraded",
+                "frontend_port": frontend_port,
+                "frontend_pid": None,
+                "degraded_reason": "pid_missing",
+            }
+
+        return {
+            "frontend_health": "healthy",
+            "frontend_port": frontend_port,
+            "frontend_pid": frontend_pid,
+            "degraded_reason": None,
+        }
+
     async def _query_services_by_prefix(self, prefix: str, project_name: str) -> list:
         """Query Windows services by name prefix"""
         ps_cmd = f"Get-Service -Name '{prefix}*' -ErrorAction SilentlyContinue | Select-Object Name, Status, StartType, DisplayName | ConvertTo-Json -Compress"
@@ -43,18 +99,29 @@ class NssmService:
         if not stdout:
             return [self._unregistered_sentinel(prefix, project_name)]
 
+        config = MANAGED_PROJECTS.get(project_name, {})
+        project_path = config.get("path", "")
+
         try:
             data = json.loads(stdout.decode('utf-8'))
             if isinstance(data, dict):
                 data = [data]
 
-            result = [{
-                "name": svc.get("Name", ""),
-                "project": project_name,
-                "status": self._normalize_status(svc.get("Status")),
-                "start_type": str(svc.get("StartType", "Unknown")),
-                "display_name": svc.get("DisplayName", "")
-            } for svc in data]
+            result = []
+            for svc in data:
+                svc_name = svc.get("Name", "")
+                status = self._normalize_status(svc.get("Status"))
+                entry = {
+                    "name": svc_name,
+                    "project": project_name,
+                    "status": status,
+                    "start_type": str(svc.get("StartType", "Unknown")),
+                    "display_name": svc.get("DisplayName", "")
+                }
+                if svc_name == "MonitorPage-Public" and status == "Running" and project_path:
+                    health = await self._check_public_frontend_health(project_path)
+                    entry.update(health)
+                result.append(entry)
 
             if not result:
                 return [self._unregistered_sentinel(prefix, project_name)]
@@ -78,13 +145,21 @@ class NssmService:
 
         try:
             svc = json.loads(stdout.decode('utf-8'))
-            return {
+            status = self._normalize_status(svc.get("Status"))
+            entry = {
                 "name": svc.get("Name", ""),
                 "project": project_name,
-                "status": self._normalize_status(svc.get("Status")),
+                "status": status,
                 "start_type": str(svc.get("StartType", "Unknown")),
                 "display_name": svc.get("DisplayName", "")
             }
+            if svc.get("Name") == "MonitorPage-Public" and status == "Running":
+                config = MANAGED_PROJECTS.get(project_name, {})
+                project_path = config.get("path", "")
+                if project_path:
+                    health = await self._check_public_frontend_health(project_path)
+                    entry.update(health)
+            return entry
         except json.JSONDecodeError:
             return self._unregistered_sentinel(name, project_name)
 

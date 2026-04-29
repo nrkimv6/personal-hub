@@ -80,6 +80,11 @@
           <span class="font-mono text-[11px] text-muted-foreground truncate hidden sm:inline">{svc.name}</span>
           <div class="ml-auto flex items-center gap-2 shrink-0">
             <StatusBadge variant={serviceVariant(svc)} size="sm">{svc.status === 'Unregistered' ? '미등록' : svc.status}</StatusBadge>
+            {#if svc.frontend_health && svc.frontend_health !== 'healthy'}
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning font-medium">
+                6100 down{svc.degraded_reason ? ` (${svc.degraded_reason})` : ''}
+              </span>
+            {/if}
             <span class="text-[10px] text-muted-foreground">{svc.start_type}</span>
             {#if svc.status === 'Running'}
               <button
