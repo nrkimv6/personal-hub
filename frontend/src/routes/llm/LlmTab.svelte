@@ -776,7 +776,13 @@
 		</div>
 	{/if}
 
-	<TabNav tabs={llmTabs} bind:activeTab variant="primary" size="compact" onTabChange={switchTab} />
+	<TabNav
+		tabs={llmTabs}
+		bind:activeTab
+		variant="primary"
+		size="compact"
+		onTabChange={(tabId) => switchTab(tabId as Tab)}
+	/>
 
 	{#if activeTab === 'queue' || activeTab === 'history'}
 		<!-- 필터 -->
