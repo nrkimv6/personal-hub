@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import TabNav from '$lib/components/layout/TabNav.svelte';
-	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
 	import { devRunnerPlanApi } from '$lib/api/dev-runner';
 	import { search as fileSearchSearch, pollSearchResult as pollFileSearchResult } from '$lib/api/fileSearch';
 	import type { FileMatch } from '$lib/types/fileSearch';
@@ -176,12 +175,67 @@
 	<title>{pageTitle} | Monitor Page</title>
 </svelte:head>
 
-<div class="flex flex-col h-full overflow-hidden">
-	<div class="p-4 lg:p-6 space-y-4">
-		<PageHeader title={pageTitle} />
-		<TabNav tabs={autoTabs} bind:activeTab={mainTab} variant="primary" queryParam="tab" />
-	</div>
+{#snippet plansToolbar()}
+	<div class="rounded-lg border border-border bg-card px-3 py-2 space-y-2">
+		<div class="flex flex-wrap items-center gap-2">
+			<input
+				bind:value={quickQuery}
+				type="text"
+				placeholder="plan/archive 빠른 검색..."
+				class="flex-1 min-w-[14rem] rounded-md border border-border bg-background px-3 py-2 text-sm
+					   shadow-sm outline-none transition-colors
+					   focus:border-primary focus:ring-2 focus:ring-primary/20"
+				onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void runQuickSearch(); } }}
+				disabled={quickLoading}
+			/>
+			<button
+				onclick={() => runQuickSearch()}
+				disabled={!quickQuery.trim() || quickLoading}
+				class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground
+					   shadow-sm transition-colors hover:bg-primary/90
+					   disabled:cursor-not-allowed disabled:opacity-50"
+			>
+				검색
+			</button>
+		</div>
 
+		{#if quickError}
+			<div class="text-xs text-destructive">{quickError}</div>
+		{:else if quickLoading && quickPollStatus}
+			<div class="text-xs text-muted-foreground">검색 중... ({quickPollStatus})</div>
+		{/if}
+
+		{#if quickResults.length > 0}
+			<div class="max-h-[220px] overflow-auto rounded-md border border-border bg-background">
+				{#each quickResults as r (r.file_path)}
+					<button
+						onclick={() => openQuickResult(r.file_path)}
+						class="w-full border-b border-border/50 px-3 py-2 text-left text-sm transition-colors last:border-b-0 hover:bg-muted/40"
+					>
+						<div class="font-medium truncate">{r.file_name}</div>
+						<div class="text-xs text-muted-foreground truncate">{r.file_path}</div>
+					</button>
+				{/each}
+			</div>
+		{:else if !quickLoading && quickQuery.trim()}
+			<div class="text-xs text-muted-foreground">검색 결과가 없습니다.</div>
+		{/if}
+	</div>
+{/snippet}
+
+<TabbedPageLayout
+	title={pageTitle}
+	primaryTabs={autoTabs}
+	bind:activePrimaryTab={mainTab}
+	primaryQueryParam="tab"
+	secondaryTabs={mainTab === 'plans' ? plansSubTabs : []}
+	bind:activeSecondaryTab={plansSubTab}
+	secondaryQueryParam="subtab"
+	toolbar={mainTab === 'plans' ? plansToolbar : undefined}
+	density="compact"
+	containerClass="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-4 lg:p-6"
+	contentClass="min-h-0 flex-1 overflow-hidden"
+>
 	<div class="flex-1 overflow-hidden">
 		{#if mainTab === 'dev-runner'}
 			<DevRunnerTab {initialPlan} {initialRunner} />
@@ -190,58 +244,7 @@
 				<GitReposTab />
 			</div>
 		{:else if mainTab === 'plans'}
-			<div class="space-y-4 flex flex-col h-full overflow-hidden">
-				<!-- plan/archive 빠른 검색 -->
-				<div class="px-4 lg:px-6">
-					<div class="rounded-lg border border-border bg-card px-3 py-2 space-y-2">
-						<div class="flex flex-wrap items-center gap-2">
-							<input
-								bind:value={quickQuery}
-								type="text"
-								placeholder="plan/archive 빠른 검색..."
-								class="flex-1 min-w-[14rem] rounded-md border border-border bg-background px-3 py-2 text-sm
-									   shadow-sm outline-none transition-colors
-									   focus:border-primary focus:ring-2 focus:ring-primary/20"
-								onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void runQuickSearch(); } }}
-								disabled={quickLoading}
-							/>
-							<button
-								onclick={() => runQuickSearch()}
-								disabled={!quickQuery.trim() || quickLoading}
-								class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground
-									   shadow-sm transition-colors hover:bg-primary/90
-									   disabled:cursor-not-allowed disabled:opacity-50"
-							>
-								검색
-							</button>
-						</div>
-
-						{#if quickError}
-							<div class="text-xs text-destructive">{quickError}</div>
-						{:else if quickLoading && quickPollStatus}
-							<div class="text-xs text-muted-foreground">검색 중... ({quickPollStatus})</div>
-						{/if}
-
-						{#if quickResults.length > 0}
-							<div class="max-h-[220px] overflow-auto rounded-md border border-border bg-background">
-								{#each quickResults as r (r.file_path)}
-									<button
-										onclick={() => openQuickResult(r.file_path)}
-										class="w-full px-3 py-2 text-left text-sm hover:bg-muted/40 transition-colors border-b border-border/50 last:border-b-0"
-									>
-										<div class="font-medium truncate">{r.file_name}</div>
-										<div class="text-xs text-muted-foreground truncate">{r.file_path}</div>
-									</button>
-								{/each}
-							</div>
-						{:else if !quickLoading && quickQuery.trim()}
-							<div class="text-xs text-muted-foreground">검색 결과가 없습니다.</div>
-						{/if}
-					</div>
-				</div>
-
-				<!-- 계획서 서브탭 -->
-				<TabNav tabs={plansSubTabs} bind:activeTab={plansSubTab} variant="secondary" size="compact" queryParam="subtab" />
+			<div class="flex h-full flex-col overflow-hidden">
 				<div class="flex-1 overflow-auto">
 					{#if plansSubTab === 'plans'}
 						<PlanListTab {focusPath} onFocusConsumed={() => (focusPath = null)} />
@@ -264,4 +267,4 @@
 			</div>
 		{/if}
 	</div>
-</div>
+</TabbedPageLayout>

@@ -5,7 +5,7 @@
   import NoteArchiveList from './components/NoteArchiveList.svelte';
   import NoteTagManager from './components/NoteTagManager.svelte';
   import NoteFormModal from './components/NoteFormModal.svelte';
-  import TabNav from '$lib/components/layout/TabNav.svelte';
+  import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
 
   type Tab = 'notes' | 'archive' | 'tags';
 
@@ -63,25 +63,29 @@
   });
 </script>
 
-<div class="flex flex-col h-full">
-  <!-- 헤더 -->
-  <div class="flex items-center justify-between px-6 py-4 border-b border-border bg-card">
-    <h1 class="text-xl font-bold tracking-tight text-foreground">메모</h1>
-    {#if activeTab === 'notes'}
-      <button
-        onclick={() => (showCreateModal = true)}
-        class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-lg hover:bg-primary-hover transition-colors"
-      >
-        <Plus class="w-4 h-4" />
-        새 메모
-      </button>
-    {/if}
-  </div>
+{#snippet headerActions()}
+  {#if activeTab === 'notes'}
+    <button
+      onclick={() => (showCreateModal = true)}
+      class="hidden items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover md:flex"
+    >
+      <Plus class="h-4 w-4" />
+      새 메모
+    </button>
+  {/if}
+{/snippet}
 
-  <!-- 탭 -->
-  <TabNav tabs={noteTabs} bind:activeTab variant="primary" queryParam="tab" />
-
-  <!-- 탭 콘텐츠 -->
+<TabbedPageLayout
+  title="메모"
+  subtitle="메모, 아카이브, 태그 관리를 같은 규약으로 다룹니다."
+  actions={headerActions}
+  primaryTabs={noteTabs}
+  bind:activePrimaryTab={activeTab}
+  primaryQueryParam="tab"
+  density="compact"
+  containerClass="flex h-full min-h-0 flex-col gap-3 p-4 lg:p-6"
+  contentClass="min-h-0 flex-1 overflow-hidden"
+>
   <div class="flex-1 overflow-hidden">
     {#if activeTab === 'notes'}
       <NoteList bind:this={noteListRef} />
@@ -91,7 +95,7 @@
       <NoteTagManager />
     {/if}
   </div>
-</div>
+</TabbedPageLayout>
 
 <!-- FAB (모바일) -->
 {#if activeTab === 'notes'}
