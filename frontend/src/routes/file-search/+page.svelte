@@ -137,7 +137,10 @@
 		}
 		return '로컬 파일 검색, 인코딩 변환, MP4 → GIF 작업을 한곳에서 처리합니다.';
 	});
-	const hasStatusIssue = $derived(Boolean(status && (!status.everything_ok || !status.ripgrep_ok)));
+	const hasStatusIssue = $derived.by(() => {
+		const currentStatus = status;
+		return currentStatus ? !currentStatus.everything_ok || !currentStatus.ripgrep_ok : false;
+	});
 
 	const searchRecords = $derived.by(() => {
 		const records: SearchRecord[] = [];
@@ -585,122 +588,123 @@
 	{:else if pageTab === 'mp4-gif'}
 		<Mp4GifTab />
 	{:else}
-		<div class="space-y-4">
-			{#if error}
-				<div class="flex items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-					<XCircle size={18} class="shrink-0" />
-					<span class="flex-1">{error}</span>
-					<button onclick={() => (error = '')} class="shrink-0 opacity-60 hover:opacity-100">×</button>
-				</div>
-			{/if}
-
-			<SearchForm
-				bind:query
-				bind:mode
-				bind:regex
-				bind:caseSensitive
-				{loading}
-				{snapshotSearchId}
-				helperOverlayOpen={showHelperOverlay}
-				onsearch={handleSearch}
-				oncancel={handleCancel}
-			/>
-
-			<SearchHistoryBar
-				history={historyItems}
-				frequentCombos={frequentComboItems}
-				{historyLoading}
-				{comboLoading}
-				{historyError}
-				{comboError}
-				onopen={openHelper}
-				oncombo={handleFrequentComboClick}
-				onhistory={handleHistoryClick}
-			/>
-
-			{#if snapshotSearchId}
-				<div class="flex flex-col gap-3 rounded-2xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-					<div class="min-w-0">
-						<span class="font-medium text-foreground">저장 결과 보기</span>
-						<span class="ml-2 truncate">search_id: <code class="text-[11px]">{snapshotSearchId}</code></span>
+		<div class="flex h-full min-h-0 flex-col gap-4">
+			<div class="space-y-4">
+				{#if error}
+					<div class="flex items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+						<XCircle size={18} class="shrink-0" />
+						<span class="flex-1">{error}</span>
+						<button onclick={() => (error = '')} class="shrink-0 opacity-60 hover:opacity-100">×</button>
 					</div>
-					<div class="flex items-center gap-2 shrink-0">
-						<button
-							onclick={() => (snapshotSearchId = null)}
-							class="rounded-md border border-border bg-background px-2.5 py-1 transition-colors hover:bg-muted/40"
-						>
-							닫기
-						</button>
-						<button
-							onclick={handleSearch}
-							class="rounded-md bg-primary px-2.5 py-1 text-primary-foreground transition-opacity hover:opacity-90"
-						>
-							다시 검색
-						</button>
-					</div>
-				</div>
-			{/if}
+				{/if}
 
-			<div class="rounded-2xl border border-border bg-card">
-				<button
-					onclick={() => (showFilters = !showFilters)}
-					class="flex w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm font-medium transition-colors hover:bg-muted/50"
-					aria-label="필터 및 범위 토글"
-				>
-					<div class="min-w-0 flex-1">
-						<div class="text-sm font-medium text-foreground">필터 & 범위</div>
-						<div class="mt-1 flex flex-wrap gap-1.5">
-							{#if filterSummaryItems.length > 0}
-								{#each filterSummaryItems.slice(0, isMobileViewport ? 2 : 4) as item (`filter-${item}`)}
-									<span class="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
-										{item}
-									</span>
-								{/each}
-							{:else}
-								<span class="text-xs font-normal text-muted-foreground">전체 범위 · 확장자 제한 없음</span>
-							{/if}
+				<SearchForm
+					bind:query
+					bind:mode
+					bind:regex
+					bind:caseSensitive
+					{loading}
+					{snapshotSearchId}
+					helperOverlayOpen={showHelperOverlay}
+					onsearch={handleSearch}
+					oncancel={handleCancel}
+				/>
+
+				<SearchHistoryBar
+					history={historyItems}
+					frequentCombos={frequentComboItems}
+					{historyLoading}
+					{comboLoading}
+					{historyError}
+					{comboError}
+					onopen={openHelper}
+					oncombo={handleFrequentComboClick}
+					onhistory={handleHistoryClick}
+				/>
+
+				{#if snapshotSearchId}
+					<div class="flex flex-col gap-3 rounded-2xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+						<div class="min-w-0">
+							<span class="font-medium text-foreground">저장 결과 보기</span>
+							<span class="ml-2 truncate">search_id: <code class="text-[11px]">{snapshotSearchId}</code></span>
 						</div>
-					</div>
-					<div class="flex items-center gap-2 shrink-0">
-						{#if helperSummary.length > 0}
-							<span class="hidden text-[11px] text-muted-foreground sm:inline">
-								{helperSummary.join(' · ')}
-							</span>
-						{/if}
-						<ChevronRight size={14} class="text-muted-foreground transition-transform {showFilters ? 'rotate-90' : ''}" />
-					</div>
-				</button>
-
-				{#if showFilters}
-					<div class="space-y-4 border-t border-border px-4 py-4">
-						<div class="space-y-1.5">
-							<div class="text-xs font-medium text-muted-foreground">프리셋</div>
-							<PresetBar {presets} {selectedPresetId} onselect={handlePresetSelect} />
-						</div>
-
-						<div class="space-y-1.5">
-							<div class="text-xs font-medium text-muted-foreground">검색 경로</div>
-							<PathInput bind:path onchange={(nextPath) => (path = nextPath)} />
-						</div>
-
-						<div class="space-y-1.5">
-							<div class="text-xs font-medium text-muted-foreground">확장자 필터</div>
-							<ExtensionFilter
-								bind:extensions
-								suggestionGroups={extensionSuggestionGroups}
-								onchange={(nextExtensions) => (extensions = nextExtensions)}
-							/>
-						</div>
-
-						<div class="space-y-1.5">
-							<IgnorePatterns onchange={(patterns) => (ignorePatternExcludes = patterns)} />
+						<div class="flex items-center gap-2 shrink-0">
+							<button
+								onclick={() => (snapshotSearchId = null)}
+								class="rounded-md border border-border bg-background px-2.5 py-1 transition-colors hover:bg-muted/40"
+							>
+								닫기
+							</button>
+							<button
+								onclick={handleSearch}
+								class="rounded-md bg-primary px-2.5 py-1 text-primary-foreground transition-opacity hover:opacity-90"
+							>
+								다시 검색
+							</button>
 						</div>
 					</div>
 				{/if}
-			</div>
-		</div>
 
-		<div class="min-h-64 flex-1 overflow-y-auto sm:min-h-72">
+				<div class="rounded-2xl border border-border bg-card">
+					<button
+						onclick={() => (showFilters = !showFilters)}
+						class="flex w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm font-medium transition-colors hover:bg-muted/50"
+						aria-label="필터 및 범위 토글"
+					>
+						<div class="min-w-0 flex-1">
+							<div class="text-sm font-medium text-foreground">필터 & 범위</div>
+							<div class="mt-1 flex flex-wrap gap-1.5">
+								{#if filterSummaryItems.length > 0}
+									{#each filterSummaryItems.slice(0, isMobileViewport ? 2 : 4) as item (`filter-${item}`)}
+										<span class="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
+											{item}
+										</span>
+									{/each}
+								{:else}
+									<span class="text-xs font-normal text-muted-foreground">전체 범위 · 확장자 제한 없음</span>
+								{/if}
+							</div>
+						</div>
+						<div class="flex items-center gap-2 shrink-0">
+							{#if helperSummary.length > 0}
+								<span class="hidden text-[11px] text-muted-foreground sm:inline">
+									{helperSummary.join(' · ')}
+								</span>
+							{/if}
+							<ChevronRight size={14} class="text-muted-foreground transition-transform {showFilters ? 'rotate-90' : ''}" />
+						</div>
+					</button>
+
+					{#if showFilters}
+						<div class="space-y-4 border-t border-border px-4 py-4">
+							<div class="space-y-1.5">
+								<div class="text-xs font-medium text-muted-foreground">프리셋</div>
+								<PresetBar {presets} {selectedPresetId} onselect={handlePresetSelect} />
+							</div>
+
+							<div class="space-y-1.5">
+								<div class="text-xs font-medium text-muted-foreground">검색 경로</div>
+								<PathInput bind:path onchange={(nextPath) => (path = nextPath)} />
+							</div>
+
+							<div class="space-y-1.5">
+								<div class="text-xs font-medium text-muted-foreground">확장자 필터</div>
+								<ExtensionFilter
+									bind:extensions
+									suggestionGroups={extensionSuggestionGroups}
+									onchange={(nextExtensions) => (extensions = nextExtensions)}
+								/>
+							</div>
+
+							<div class="space-y-1.5">
+								<IgnorePatterns onchange={(patterns) => (ignorePatternExcludes = patterns)} />
+							</div>
+						</div>
+					{/if}
+				</div>
+			</div>
+
+			<div class="min-h-64 flex-1 overflow-y-auto sm:min-h-72">
 			{#if loading && results.length === 0}
 				<div class="space-y-2">
 					{#if pollStatus}
@@ -739,7 +743,7 @@
 					<ResultList {results} {query} {searchTimeMs} {truncated} />
 				</div>
 			{/if}
-		</div>
+			</div>
 
 			<SearchHelperOverlay
 				open={showHelperOverlay}

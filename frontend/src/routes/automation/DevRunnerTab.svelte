@@ -41,6 +41,7 @@
 	let showModal = $state(false);
 	let taskHistoryOpen = $state(false);
 	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge' | 'logs'>('plans');
+	let mergeQueuedCount = $state(0);
 	const sidePanelTabs = $derived([
 		{ id: 'plans', label: 'Plans', shortLabel: 'Plans' },
 		{ id: 'tasks', label: 'Tasks', shortLabel: 'Tasks' },
@@ -153,7 +154,6 @@
 	}
 
 	// Merge 탭 대기 건수 뱃지 (MergeQueuePanel onCountChange 콜백으로 갱신)
-	let mergeQueuedCount = $state(0);
 
 	function handleMergeQueueCount(count: number) {
 		mergeQueuedCount = count;

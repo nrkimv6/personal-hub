@@ -326,10 +326,13 @@
     return new Date(str).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
 
-  const pageTitle = $derived(
-    repo ? repo.alias || repo.path.split(/[/\\]/).pop() || 'Git 저장소' : 'Git 저장소'
-  );
-  const pageSubtitle = $derived(repo?.path ?? '저장소 상태, 변경사항, 작업 이력을 관리합니다.');
+  const pageTitle = $derived.by(() => {
+    const currentRepo = repo;
+    return currentRepo
+      ? currentRepo.alias || currentRepo.path.split(/[/\\]/).pop() || 'Git 저장소'
+      : 'Git 저장소';
+  });
+  const pageSubtitle = $derived.by(() => repo?.path ?? '저장소 상태, 변경사항, 작업 이력을 관리합니다.');
 </script>
 
 {#snippet headerActions()}
@@ -347,7 +350,9 @@
 {/snippet}
 
 <div class="max-w-5xl mx-auto space-y-4 p-4 md:p-6">
-  <PageHeader title={pageTitle} subtitle={pageSubtitle} actions={headerActions} density="compact" />
+  <PageHeader title={pageTitle} subtitle={pageSubtitle} density="compact">
+    {@render headerActions()}
+  </PageHeader>
 
   {#if loading}
     <div class="text-center py-16 text-gray-400">
