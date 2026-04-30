@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import TabNav from '$lib/components/layout/TabNav.svelte';
+  import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
   import CoupangMonitoringHistory from '$lib/components/CoupangMonitoringHistory.svelte';
   import MegabeautyHistoryTab from '$lib/components/coupang/MegabeautyHistoryTab.svelte';
   import {
@@ -446,22 +446,19 @@
   onDestroy(() => {
     cleanupPolling();
   });
-
-
 </script>
 
-<div class="space-y-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-2xl font-bold">쿠팡 여행상품 모니터링</h1>
-    <button
-      class="btn btn-secondary btn-sm"
-      onclick={() => loadAll(true)}
-      disabled={loading}
-    >
-      새로고침
-    </button>
-  </div>
+{#snippet headerActions()}
+  <button
+    class="btn btn-secondary btn-sm"
+    onclick={() => loadAll(true)}
+    disabled={loading}
+  >
+    새로고침
+  </button>
+{/snippet}
 
+{#snippet pageToolbar()}
   {#if error}
     <div class="rounded bg-red-100 px-4 py-3 text-red-800" role="alert">
       {error}
@@ -514,7 +511,7 @@
     </div>
   {/if}
 
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+  <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
     <div class="card text-center">
       <div class="text-3xl font-bold text-foreground">{statusSummary.total_schedules}</div>
       <div class="text-sm text-muted-foreground">전체 일정</div>
@@ -540,8 +537,19 @@
       </span>
     {/if}
   </div>
+{/snippet}
 
-  <TabNav tabs={coupangTabs} bind:activeTab variant="primary" queryParam="tab" />
+<TabbedPageLayout
+  title="쿠팡 여행상품 모니터링"
+  subtitle="등록, 일정, 히스토리를 같은 상단 계약으로 정렬합니다."
+  actions={headerActions}
+  primaryTabs={coupangTabs}
+  bind:activePrimaryTab={activeTab}
+  primaryQueryParam="tab"
+  toolbar={pageToolbar}
+  density="compact"
+  containerClass="space-y-4 p-4 lg:p-6"
+>
 
   {#if activeTab === 'schedules'}
     <section class="card">
@@ -825,4 +833,4 @@
   {#if activeTab === 'cancellation-history'}
     <MegabeautyHistoryTab />
   {/if}
-</div>
+</TabbedPageLayout>

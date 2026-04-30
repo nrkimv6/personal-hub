@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import TaskList from '$lib/components/dev-runner/TaskList.svelte';
 	import RunControl from '$lib/components/dev-runner/RunControl.svelte';
 	import PlanList from '$lib/components/dev-runner/PlanList.svelte';
@@ -40,6 +41,12 @@
 	let showModal = $state(false);
 	let taskHistoryOpen = $state(false);
 	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge' | 'logs'>('plans');
+	const sidePanelTabs = $derived([
+		{ id: 'plans', label: 'Plans', shortLabel: 'Plans' },
+		{ id: 'tasks', label: 'Tasks', shortLabel: 'Tasks' },
+		{ id: 'merge', label: 'Merge', shortLabel: 'Merge', count: mergeQueuedCount || undefined },
+		{ id: 'logs', label: 'Logs', shortLabel: 'Logs' }
+	]);
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let taskListRefreshTick = $state(0);
@@ -897,47 +904,28 @@
 			/>
 
 			<!-- 모바일 액션 바 (sm 미만에서만 표시) -->
-			<div class="flex items-center gap-1 sm:hidden shrink-0 px-2 pb-1">
-				<!-- Plans -->
-				<button
-					onclick={() => { taskHistoryOpen = true; taskHistoryTab = 'plans'; }}
-					class="flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-					title="Plans"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-				</button>
-				<!-- Execute -->
+			<div class="flex items-center gap-2 sm:hidden shrink-0 px-2 pb-1">
+				<div class="min-w-0 flex-1">
+					<TabNav
+						tabs={sidePanelTabs}
+						bind:activeTab={taskHistoryTab}
+						variant="secondary"
+						size="compact"
+						onTabChange={() => { taskHistoryOpen = true; }}
+					/>
+				</div>
 				<button
 					onclick={() => { openExecutionModal(); }}
-					class="flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+					class="flex items-center justify-center h-8 w-8 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground shrink-0"
 					title="Execute"
 				>
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-				</button>
-				<!-- Tasks -->
-				<button
-					onclick={() => { taskHistoryOpen = true; taskHistoryTab = 'tasks'; }}
-					class="flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-					title="Tasks"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/></svg>
-				</button>
-				<!-- Merge (+ 대기 건수 뱃지) -->
-				<button
-					onclick={() => { taskHistoryOpen = true; taskHistoryTab = 'merge'; }}
-					class="relative flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-					title="Merge"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
-					{#if mergeQueuedCount > 0}
-						<span class="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[8px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5">{mergeQueuedCount}</span>
-					{/if}
 				</button>
 				<!-- 종료된 탭 일괄 닫기 -->
 				{#if runnerTabs.some(t => !t.running)}
 					<button
 						onclick={() => { for (const t of runnerTabs.filter(r => !r.running)) { handleCloseTab(t.id); } }}
-						class="flex items-center justify-center h-7 w-7 border border-red-200 rounded-md hover:bg-red-100 transition-colors text-red-400 hover:text-red-600"
+						class="flex items-center justify-center h-8 w-8 border border-red-200 rounded-md hover:bg-red-100 transition-colors text-red-400 hover:text-red-600 shrink-0"
 						title="종료된 runner 탭 모두 닫기"
 					>
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
@@ -966,41 +954,13 @@
 					fixed sm:static inset-y-0 left-0 z-50 sm:z-auto
 					bg-card rounded-md border border-border
 				">
-					<!-- 탭 바 -->
-					<div class="flex items-center border-b border-border shrink-0">
-						<button
-							onclick={() => { taskHistoryTab = 'plans'; }}
-							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'plans' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-							Plans
-						</button>
-						<button
-							onclick={() => { taskHistoryTab = 'tasks'; }}
-							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'tasks' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/></svg>
-							Tasks
-						</button>
-												<button
-							onclick={() => { taskHistoryTab = 'merge'; }}
-							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'merge' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
-							Merge
-							{#if mergeQueuedCount > 0}<span class="bg-primary text-primary-foreground text-[8px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5">{mergeQueuedCount}</span>{/if}
-						</button>
-						<button
-							onclick={() => { taskHistoryTab = 'logs'; }}
-							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'logs' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-							Logs
-						</button>
-												<!-- 모바일 닫기 버튼 -->
+					<div class="flex items-center gap-2 border-b border-border p-2 shrink-0">
+						<div class="min-w-0 flex-1">
+							<TabNav tabs={sidePanelTabs} bind:activeTab={taskHistoryTab} variant="secondary" size="compact" />
+						</div>
 						<button
 							onclick={() => { taskHistoryOpen = false; }}
-							class="sm:hidden ml-auto p-1 rounded-md hover:bg-secondary text-muted-foreground transition-colors shrink-0"
+							class="sm:hidden p-1 rounded-md hover:bg-secondary text-muted-foreground transition-colors shrink-0"
 							title="Close"
 						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>

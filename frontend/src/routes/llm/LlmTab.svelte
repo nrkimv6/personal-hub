@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	import { onMount } from 'svelte';
 	import { llmApi, type LLMBootstrapResponse, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap, type ProviderInfo } from '$lib/api';
@@ -51,6 +52,13 @@
 	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능), claude-sessions(세션 뷰어)
 	type Tab = 'queue' | 'history' | 'create' | 'performance' | 'claude-sessions';
 	let activeTab = $state<Tab>('queue');
+	const llmTabs = [
+		{ id: 'queue', label: '대기열', shortLabel: '대기' },
+		{ id: 'history', label: '이력', shortLabel: '이력' },
+		{ id: 'create', label: '수동 요청 생성', shortLabel: '생성' },
+		{ id: 'performance', label: '성능 분석', shortLabel: '성능' },
+		{ id: 'claude-sessions', label: 'Claude 세션', shortLabel: '세션' }
+	];
 
 	// 모달
 	let selectedRequest = $state<LLMRequest | null>(null);
@@ -697,10 +705,8 @@
 	});
 </script>
 
-<div>
-	<!-- 헤더 -->
-	<div class="mb-6 flex justify-between items-center">
-		<h2 class="text-lg font-bold text-foreground">LLM 요청 관리</h2>
+<div class="space-y-4">
+	<div class="flex flex-wrap justify-end gap-2">
 		<div class="flex gap-2">
 			<Button variant="secondary" size="sm" onclick={runCleanup} title="Stale 정리 및 오래된 이력 삭제">
 				정리
@@ -770,41 +776,7 @@
 		</div>
 	{/if}
 
-	<!-- 탭 -->
-	<div class="mb-4 border-b border-border">
-		<nav class="flex gap-4">
-			<button
-				onclick={() => switchTab('queue')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				대기열 (pending/processing)
-			</button>
-			<button
-				onclick={() => switchTab('history')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				이력 (completed/failed)
-			</button>
-			<button
-				onclick={() => switchTab('create')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				수동 요청 생성
-			</button>
-			<button
-				onclick={() => switchTab('performance')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				성능 분석
-			</button>
-			<button
-				onclick={() => switchTab('claude-sessions')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'claude-sessions' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				Claude 세션
-			</button>
-		</nav>
-	</div>
+	<TabNav tabs={llmTabs} bind:activeTab variant="primary" size="compact" onTabChange={switchTab} />
 
 	{#if activeTab === 'queue' || activeTab === 'history'}
 		<!-- 필터 -->

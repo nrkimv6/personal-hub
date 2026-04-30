@@ -24,23 +24,26 @@
   }: Props = $props();
 
   const isCompact = $derived(density === 'compact');
+  // Compact headers are the default contract for tabbed surfaces:
+  // keep the header copy/actions within roughly one 56-64px visual band
+  // so the first tab row can start immediately below it.
   const containerClass = $derived(
     isCompact
-      ? `flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between ${className}`.trim()
+      ? `flex flex-col gap-2.5 sm:min-h-[3.5rem] sm:flex-row sm:items-start sm:justify-between ${className}`.trim()
       : `flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between ${className}`.trim()
   );
   const titleClass = $derived(
     isCompact
-      ? 'text-lg font-semibold tracking-tight sm:text-xl'
+      ? 'text-lg font-semibold leading-tight tracking-tight sm:text-xl'
       : 'text-xl font-bold tracking-tight sm:text-2xl'
   );
   const subtitleClass = $derived(
-    isCompact ? 'mt-1 text-xs text-muted-foreground sm:text-sm' : 'mt-1 text-sm text-muted-foreground'
+    isCompact ? 'mt-1 text-xs leading-5 text-muted-foreground sm:text-sm' : 'mt-1 text-sm text-muted-foreground'
   );
   const actionsClass = $derived(
     actionsAlign === 'start'
-      ? 'flex shrink-0 flex-wrap items-center gap-2 sm:justify-start'
-      : 'flex shrink-0 flex-wrap items-center gap-2 sm:justify-end'
+      ? 'flex shrink-0 flex-wrap items-center gap-2 sm:self-start sm:justify-start'
+      : 'flex shrink-0 flex-wrap items-center gap-2 sm:self-start sm:justify-end'
   );
 </script>
 

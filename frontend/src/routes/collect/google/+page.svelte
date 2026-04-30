@@ -662,7 +662,7 @@
 <div class="p-4 lg:p-6 space-y-4">
 	<PageHeader title="구글 검색" subtitle="Google 검색 결과를 수집하고 관리합니다" />
 
-	<TabNav tabs={googleMainTabs} bind:activeTab={mainTab} variant="primary" queryParam="tab" />
+	<TabNav tabs={googleMainTabs} bind:activeTab={mainTab} variant="secondary" queryParam="tab" />
 
 	{#if mainTab === 'results'}
 		<GoogleResultsTab />

@@ -1,10 +1,16 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	// 탭
 	type TabId = 'explore' | 'classify' | 'extract';
 	let activeTab = $state<TabId>('explore');
+	const obsidianTabs = [
+		{ id: 'explore', label: '탐색' },
+		{ id: 'classify', label: '분류' },
+		{ id: 'extract', label: '추출' }
+	];
 
 	// === 탐색 탭 ===
 	let vaultPath = $state('');
@@ -64,6 +70,11 @@
 		}[];
 	}>({ total: 0, items: [] });
 	let extractTab = $state<'todos' | 'urls' | 'code'>('todos');
+	const extractTabs = [
+		{ id: 'todos', label: 'TODO' },
+		{ id: 'urls', label: 'URL' },
+		{ id: 'code', label: '코드' }
+	];
 
 	let pollInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -210,19 +221,7 @@
 <div class="space-y-4">
 	<PageHeader title="옵시디언 분석기" subtitle="옵시디언 파일을 탐색하고 분류합니다" />
 
-	<!-- 탭 -->
-	<div class="flex gap-1 rounded-lg border border-border bg-card p-1">
-		{#each [{ id: 'explore', label: '탐색' }, { id: 'classify', label: '분류' }, { id: 'extract', label: '추출' }] as tab}
-			<button
-				class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-all {activeTab === tab.id
-					? 'bg-primary text-primary-foreground'
-					: 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-				onclick={() => onTabChange(tab.id as TabId)}
-			>
-				{tab.label}
-			</button>
-		{/each}
-	</div>
+	<TabNav tabs={obsidianTabs} bind:activeTab variant="secondary" onTabChange={(tabId) => onTabChange(tabId as TabId)} />
 
 	<!-- 탐색 탭 -->
 	{#if activeTab === 'explore'}
@@ -483,19 +482,7 @@
 			</div>
 
 			{#if extractResults.total > 0}
-				<!-- 추출 결과 탭 -->
-				<div class="flex gap-1 rounded-lg border border-border bg-card p-1">
-					{#each [{ id: 'todos', label: 'TODO' }, { id: 'urls', label: 'URL' }, { id: 'code', label: '코드' }] as t}
-						<button
-							class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-all {extractTab === t.id
-								? 'bg-primary text-primary-foreground'
-								: 'text-muted-foreground hover:bg-accent'}"
-							onclick={() => (extractTab = t.id as typeof extractTab)}
-						>
-							{t.label}
-						</button>
-					{/each}
-				</div>
+				<TabNav tabs={extractTabs} bind:activeTab={extractTab} variant="secondary" />
 
 				<div class="space-y-3">
 					{#each extractResults.items as item}

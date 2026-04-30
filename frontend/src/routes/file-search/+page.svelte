@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
 	import {
 		search,
 		pollSearchResult,
@@ -33,8 +33,6 @@
 	import ResultList from './ResultList.svelte';
 	import EncodingFixer from '../utils/EncodingFixer.svelte';
 	import Mp4GifTab from './Mp4GifTab.svelte';
-	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
 
 	type PageTab = 'search' | 'encoding' | 'mp4-gif';
 	type SearchRecord = {
@@ -43,21 +41,11 @@
 	};
 
 	let pageTab: PageTab = $state('search');
-
-	$effect(() => {
-		const tab = $page.url.searchParams.get('tab');
-		pageTab = tab === 'encoding' || tab === 'mp4-gif' ? tab : 'search';
-	});
-
-	function setPageTab(tab: PageTab) {
-		const url = new URL($page.url);
-		if (tab === 'search') {
-			url.searchParams.delete('tab');
-		} else {
-			url.searchParams.set('tab', tab);
-		}
-		goto(url.toString(), { replaceState: true, keepFocus: true });
-	}
+	const pageTabs = [
+		{ id: 'search', label: '파일 검색', icon: Search },
+		{ id: 'encoding', label: '인코딩 변환', icon: Languages },
+		{ id: 'mp4-gif', label: 'MP4 → GIF' }
+	];
 
 	let query = $state('');
 	let mode: SearchMode = $state('both');
@@ -140,6 +128,16 @@
 		}
 		return items;
 	});
+	const pageSubtitle = $derived.by(() => {
+		if (pageTab === 'encoding') {
+			return '텍스트 파일의 인코딩 문제를 점검하고 변환합니다.';
+		}
+		if (pageTab === 'mp4-gif') {
+			return 'MP4 파일을 업로드하고 GIF로 변환합니다.';
+		}
+		return '로컬 파일 검색, 인코딩 변환, MP4 → GIF 작업을 한곳에서 처리합니다.';
+	});
+	const hasStatusIssue = $derived(Boolean(status && (!status.everything_ok || !status.ripgrep_ok)));
 
 	const searchRecords = $derived.by(() => {
 		const records: SearchRecord[] = [];
@@ -532,87 +530,70 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<div class="flex h-full flex-col gap-4 p-6">
-	<div class="flex items-center gap-1 border-b border-border pb-2">
-		<button
-			onclick={() => setPageTab('search')}
-			class="flex items-center gap-2 rounded-t px-3 py-1.5 text-sm font-medium transition-colors {pageTab === 'search'
-				? 'bg-primary/10 text-primary'
-				: 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'}"
-		>
-			<Search size={16} /> 파일 검색
-		</button>
-		<button
-			onclick={() => setPageTab('encoding')}
-			class="flex items-center gap-2 rounded-t px-3 py-1.5 text-sm font-medium transition-colors {pageTab === 'encoding'
-				? 'bg-primary/10 text-primary'
-				: 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'}"
-		>
-			<Languages size={16} /> 인코딩 변환
-		</button>
-		<button
-			onclick={() => setPageTab('mp4-gif')}
-			class="flex items-center gap-2 rounded-t px-3 py-1.5 text-sm font-medium transition-colors {pageTab === 'mp4-gif'
-				? 'bg-primary/10 text-primary'
-				: 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'}"
-		>
-			MP4 → GIF
-		</button>
-	</div>
+{#snippet headerActions()}
+	{#if pageTab === 'search' && status}
+		<div class="flex flex-wrap items-center gap-2">
+			<span
+				class="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium {status.everything_ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}"
+				title={status.everything_message}
+			>
+				<span class="h-1.5 w-1.5 rounded-full {status.everything_ok ? 'bg-success' : 'bg-destructive'}"></span>
+				Everything
+			</span>
+			<span
+				class="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium {status.ripgrep_ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}"
+				title={status.ripgrep_path ?? '미설치'}
+			>
+				<span class="h-1.5 w-1.5 rounded-full {status.ripgrep_ok ? 'bg-success' : 'bg-destructive'}"></span>
+				ripgrep
+			</span>
+		</div>
+	{/if}
+{/snippet}
 
+{#snippet searchToolbar()}
+	{#if pageTab === 'search' && hasStatusIssue}
+		<div class="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
+			<AlertTriangle size={18} class="mt-0.5 shrink-0" />
+			<div>
+				{#if status && !status.everything_ok}
+					<p>Everything HTTP 서버에 연결할 수 없습니다 ({status.everything_message}). 파일명 검색이 불가합니다.</p>
+				{/if}
+				{#if status && !status.ripgrep_ok}
+					<p>ripgrep이 설치되지 않았습니다. 내용 검색이 불가합니다. (<code>winget install BurntSushi.ripgrep.MSVC</code>)</p>
+				{/if}
+			</div>
+		</div>
+	{/if}
+{/snippet}
+
+<TabbedPageLayout
+	title="파일 도구"
+	subtitle={pageSubtitle}
+	actions={pageTab === 'search' ? headerActions : undefined}
+	primaryTabs={pageTabs}
+	bind:activePrimaryTab={pageTab}
+	primaryQueryParam="tab"
+	primaryReplaceState={false}
+	toolbar={pageTab === 'search' ? searchToolbar : undefined}
+	density="compact"
+	containerClass="flex h-full min-h-0 flex-col gap-3 p-4 lg:p-6"
+	contentClass="min-h-0 flex-1"
+>
 	{#if pageTab === 'encoding'}
-		<PageHeader title="파일 도구" subtitle="텍스트 파일의 인코딩 문제를 점검하고 변환합니다." />
 		<EncodingFixer />
 	{:else if pageTab === 'mp4-gif'}
-		<PageHeader title="파일 도구" subtitle="MP4 파일을 업로드하고 GIF로 변환합니다." />
 		<Mp4GifTab />
-	{/if}
-
-	{#if pageTab === 'search'}
-		<PageHeader title="파일 도구" subtitle="로컬 파일 검색, 인코딩 변환, MP4 → GIF 작업을 한곳에서 처리합니다.">
-			{#if status}
-				<div class="flex items-center gap-2">
-					<span
-						class="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium {status.everything_ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}"
-						title={status.everything_message}
-					>
-						<span class="h-1.5 w-1.5 rounded-full {status.everything_ok ? 'bg-success' : 'bg-destructive'}"></span>
-						Everything
-					</span>
-					<span
-						class="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium {status.ripgrep_ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}"
-						title={status.ripgrep_path ?? '미설치'}
-					>
-						<span class="h-1.5 w-1.5 rounded-full {status.ripgrep_ok ? 'bg-success' : 'bg-destructive'}"></span>
-						ripgrep
-					</span>
+	{:else}
+		<div class="space-y-4">
+			{#if error}
+				<div class="flex items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+					<XCircle size={18} class="shrink-0" />
+					<span class="flex-1">{error}</span>
+					<button onclick={() => (error = '')} class="shrink-0 opacity-60 hover:opacity-100">×</button>
 				</div>
 			{/if}
-		</PageHeader>
 
-		{#if status && (!status.everything_ok || !status.ripgrep_ok)}
-			<div class="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
-				<AlertTriangle size={18} class="mt-0.5 shrink-0" />
-				<div>
-					{#if !status.everything_ok}
-						<p>Everything HTTP 서버에 연결할 수 없습니다 ({status.everything_message}). 파일명 검색이 불가합니다.</p>
-					{/if}
-					{#if !status.ripgrep_ok}
-						<p>ripgrep이 설치되지 않았습니다. 내용 검색이 불가합니다. (<code>winget install BurntSushi.ripgrep.MSVC</code>)</p>
-					{/if}
-				</div>
-			</div>
-		{/if}
-
-		{#if error}
-			<div class="flex items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-				<XCircle size={18} class="shrink-0" />
-				<span class="flex-1">{error}</span>
-				<button onclick={() => (error = '')} class="shrink-0 opacity-60 hover:opacity-100">×</button>
-			</div>
-		{/if}
-
-		<div class="space-y-4">
 			<SearchForm
 				bind:query
 				bind:mode
@@ -760,9 +741,9 @@
 			{/if}
 		</div>
 
-		<SearchHelperOverlay
-			open={showHelperOverlay}
-			activeTab={helperTab}
+			<SearchHelperOverlay
+				open={showHelperOverlay}
+				activeTab={helperTab}
 			history={historyItems}
 			frequentCombos={frequentComboItems}
 			{historyLoading}
@@ -772,7 +753,8 @@
 			onclose={closeHelper}
 			ontabchange={(tab) => (helperTab = tab)}
 			oncombo={handleFrequentComboClick}
-			onhistory={handleHistoryClick}
-		/>
+				onhistory={handleHistoryClick}
+			/>
+		</div>
 	{/if}
-</div>
+</TabbedPageLayout>

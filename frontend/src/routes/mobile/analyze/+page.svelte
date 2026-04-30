@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	// Sample HTML for testing
 	const SAMPLE_HTML = `<!DOCTYPE html>
@@ -172,9 +171,7 @@
 	});
 </script>
 
-<div class="container mx-auto p-4 max-w-7xl">
-	<PageHeader title="HTML 분석 도구" subtitle="샘플 HTML을 분석하여 크롤링 설정을 생성합니다" />
-
+<div class="mx-auto max-w-7xl space-y-6">
 	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 		<!-- 왼쪽: HTML 입력 및 셀렉터 테스트 -->
 		<div class="space-y-6">

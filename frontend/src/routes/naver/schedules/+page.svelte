@@ -874,7 +874,7 @@
   </div>
 
   <!-- 탭 네비게이션 -->
-  <TabNav tabs={scheduleTabs} bind:activeTab variant="primary" queryParam="tab" />
+  <TabNav tabs={scheduleTabs} bind:activeTab variant="secondary" queryParam="tab" />
 
   {#if activeTab === 'schedules'}
   <!-- 필터 영역 -->

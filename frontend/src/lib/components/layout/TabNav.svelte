@@ -116,11 +116,11 @@
   const sizeClass = $derived(
     variant === 'secondary'
       ? size === 'compact'
-        ? 'px-3 py-1.5 text-sm'
-        : 'px-4 py-2 text-sm'
+        ? 'min-h-9 px-3 py-1.5 text-sm'
+        : 'min-h-10 px-4 py-2 text-sm'
       : size === 'compact'
-        ? 'px-3 py-2 text-sm'
-        : 'px-3.5 py-2.5 text-sm sm:text-[15px]'
+        ? 'min-h-10 px-3 py-2 text-sm'
+        : 'min-h-[2.75rem] px-3.5 py-2.5 text-sm sm:text-[15px]'
   );
   const outerClass = $derived(
     `${sticky ? 'sticky top-0 z-20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80' : ''} ${
@@ -134,11 +134,11 @@
   const navClass = $derived(
     overflow === 'wrap'
       ? 'flex flex-wrap gap-1'
-      : 'flex min-w-max gap-1 whitespace-nowrap'
+      : 'inline-flex min-w-max gap-1 whitespace-nowrap'
   );
   const scrollClass = $derived(
     overflow === 'scroll'
-      ? 'overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+      ? 'overflow-x-auto scroll-smooth pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
       : ''
   );
 
@@ -152,7 +152,7 @@
     <nav class={navClass} aria-label="Tabs">
       {#each tabs as tab (tab.id)}
         {@const active = isTabActive(tab)}
-        {@const tabClass = `${sizeClass} ${variant === 'secondary' ? 'rounded-md' : 'border-b-2'} inline-flex items-center gap-1.5 font-medium transition-colors ${getStyles(active)}`}
+        {@const tabClass = `${sizeClass} ${variant === 'secondary' ? 'rounded-md' : 'rounded-t-md border-b-2'} inline-flex items-center gap-1.5 font-medium transition-colors ${getStyles(active)}`}
         {#if urlBased && tab.href}
           <a href={tab.href} data-sveltekit-preload-data class={tabClass} aria-current={active ? 'page' : undefined}>
             {#if tab.icon}
