@@ -18,6 +18,7 @@ from app.modules.dev_runner.services.plan_path_helpers import (
     iter_repo_plan_path_candidates,
     extract_repo_root_from_plan_path,
     backfill_dual_paths,
+    canonicalize_wtools_legacy_common_path,
     dedupe_prefer_worktree,
 )
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
@@ -256,6 +257,14 @@ class PlanService:
                     changed = True
                 item["path"] = path_value
                 item["type"] = expected_type
+            else:
+                canonical = canonicalize_wtools_legacy_common_path(resolved, item["type"])
+                if canonical is not None:
+                    path_value, expected_type = canonical
+                    if item["type"] != expected_type or item["path"] != path_value:
+                        changed = True
+                    item["path"] = path_value
+                    item["type"] = expected_type
 
             dedupe_key = (item["path"], item["type"])
             if dedupe_key in seen:

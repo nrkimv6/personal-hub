@@ -114,6 +114,24 @@ class TestBackfillDualPaths:
         types = [e.get("type") for e in result]
         assert all(t == "archive" for t in types), f"plan 타입 혼입: {types}"
 
+    def test_backfills_worktree_from_wtools_legacy_common_plan_root(self, tmp_path, dev_runner_config_isolation):
+        """Right: wtools/common/docs/plan만 등록돼도 canonical plans worktree path를 보강한다."""
+        from app.modules.dev_runner.services.plan_path_helpers import backfill_dual_paths
+
+        cfg = dev_runner_config_isolation
+        cfg.WTOOLS_BASE_DIR = tmp_path / "wtools"
+        legacy_common = cfg.WTOOLS_BASE_DIR / "common" / "docs" / "plan"
+        canonical_worktree = cfg.WTOOLS_BASE_DIR / ".worktrees" / "plans" / "docs" / "plan"
+        legacy_common.mkdir(parents=True)
+        canonical_worktree.mkdir(parents=True)
+
+        entries = [{"path": str(legacy_common), "type": "plan"}]
+        result, changed = backfill_dual_paths(entries)
+
+        assert changed is True
+        paths = [e["path"] for e in result]
+        assert str(canonical_worktree.resolve()) in paths
+
 
 # ========== dedupe_prefer_worktree TC ==========
 

@@ -35,6 +35,15 @@ class TestPlanPathHelpers:
         result = extract_repo_root_from_plan_path(plan_file)
         assert result == str(tmp_path / "repo")
 
+    def test_extract_repo_root_from_wtools_legacy_common_path(self, tmp_path, dev_runner_config_isolation):
+        """Right: wtools/common/docs/plan/foo.md → repo root는 wtools여야 한다."""
+        from app.modules.dev_runner.services.plan_path_helpers import extract_repo_root_from_plan_path
+        cfg = dev_runner_config_isolation
+        cfg.WTOOLS_BASE_DIR = tmp_path / "wtools"
+        plan_file = str(cfg.WTOOLS_BASE_DIR / "common" / "docs" / "plan" / "foo.md")
+        result = extract_repo_root_from_plan_path(plan_file)
+        assert result == str(cfg.WTOOLS_BASE_DIR)
+
     def test_extract_repo_root_unknown_returns_none(self, tmp_path):
         """extract_repo_root_from_plan_path: 패턴 미일치 → None 반환"""
         from app.modules.dev_runner.services.plan_path_helpers import extract_repo_root_from_plan_path
@@ -42,7 +51,7 @@ class TestPlanPathHelpers:
         assert result is None
 
     def test_load_wtools_project_roots_returns_paths(self, tmp_path, dev_runner_config_isolation):
-        """Right: .claude/projects.json 있으면 Path 목록 반환"""
+        """Right: .claude/projects.json 있으면 wtools root + project roots 반환"""
         from app.modules.dev_runner.services.plan_path_helpers import load_wtools_project_roots
         cfg = dev_runner_config_isolation
         claude_dir = tmp_path / "wtools" / ".claude"
@@ -57,7 +66,8 @@ class TestPlanPathHelpers:
         cfg.WTOOLS_BASE_DIR = tmp_path / "wtools"
 
         roots = load_wtools_project_roots()
-        assert len(roots) == 2
+        assert len(roots) == 3
+        assert cfg.WTOOLS_BASE_DIR in roots
         assert any("proj1" in str(r) for r in roots)
         assert any("proj2" in str(r) for r in roots)
 
@@ -96,6 +106,20 @@ class TestDualPathRegistry:
         assert any(".worktrees" not in p for p in paths)
         assert any(".worktrees" in p for p in paths)
 
+    def test_normalize_registered_paths_canonicalizes_wtools_legacy_common_root(self, tmp_path, svc, dev_runner_config_isolation):
+        """Right: wtools/common/docs/plan 등록은 canonical plans worktree root로 치환된다."""
+        cfg = dev_runner_config_isolation
+        cfg.WTOOLS_BASE_DIR = tmp_path / "wtools"
+        legacy_common = cfg.WTOOLS_BASE_DIR / "common" / "docs" / "plan"
+        canonical_worktree = cfg.WTOOLS_BASE_DIR / ".worktrees" / "plans" / "docs" / "plan"
+        legacy_common.mkdir(parents=True)
+        canonical_worktree.mkdir(parents=True)
+
+        normalized, changed = svc._normalize_registered_paths([{"path": str(legacy_common), "type": "plan"}])
+
+        assert changed is True
+        assert normalized == [{"path": str(canonical_worktree.resolve()), "type": "plan"}]
+
     def test_load_registered_paths_backfills_missing_worktree_path(self, tmp_path, dev_runner_config_isolation):
         """Right: 기존 registered_paths.json에 docs만 있어도 load 시 worktree 경로가 backfill된다."""
         cfg = dev_runner_config_isolation
@@ -123,7 +147,9 @@ class TestDualPathRegistry:
         claude_dir.mkdir(parents=True)
         repo_root = tmp_path / "wtools" / "my-project"
         plan_dir = repo_root / "docs" / "plan"
+        root_worktree_plan_dir = cfg.WTOOLS_BASE_DIR / ".worktrees" / "plans" / "docs" / "plan"
         plan_dir.mkdir(parents=True)
+        root_worktree_plan_dir.mkdir(parents=True)
         (claude_dir / "projects.json").write_text(
             json.dumps({"projects": [{"name": "my-project", "path": str(repo_root)}]}),
             encoding="utf-8",
@@ -135,6 +161,8 @@ class TestDualPathRegistry:
         paths = [e["path"] for e in svc._registered_paths]
         assert any("my-project" in p for p in paths), \
             f"projects.json 기반 시드 실패 — paths: {paths}"
+        assert any(str((cfg.WTOOLS_BASE_DIR / ".worktrees" / "plans" / "docs" / "plan").resolve()) == p for p in paths), \
+            f"wtools root canonical seed 누락 — paths: {paths}"
 
     def test_seed_falls_back_when_claude_projects_json_missing(self, tmp_path, dev_runner_config_isolation):
         """Boundary: .claude/projects.json 미존재 → PROJECT_DIRS 기반 legacy fallback."""

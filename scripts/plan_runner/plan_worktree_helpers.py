@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 def _extract_plan_filename_tail(plan_file: str) -> Optional[Path]:
     """plan 경로 문자열에서 docs/plan 이하 상대 경로를 추출한다.
 
-    common/docs/plan은 project plans 워크트리로 매핑하면 안 되므로 제외한다.
+    common/docs/plan은 active source가 아니라 legacy compatibility 경로이므로
+    project plans 워크트리 매핑 후보에서 제외한다.
     """
     normalized = plan_file.replace("\\", "/").strip()
     lower = normalized.lower()

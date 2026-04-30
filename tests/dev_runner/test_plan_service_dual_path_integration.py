@@ -124,3 +124,28 @@ class TestT3DualPathIntegration:
         plans = svc.list_plans()
         names = [p.filename for p in plans]
         assert names.count(plan_file) == 1, f"list_plans dedupe 실패 — {names.count(plan_file)}개 노출"
+
+    def test_legacy_wtools_common_root_rewritten_to_canonical_worktree(self, tmp_path, dev_runner_config_isolation):
+        """T3: legacy common/docs/plan만 등록된 상태로 시작해도 canonical wtools plans root가 복구된다."""
+        cfg = dev_runner_config_isolation
+        cfg.WTOOLS_BASE_DIR = tmp_path / "wtools"
+        legacy_common = cfg.WTOOLS_BASE_DIR / "common" / "docs" / "plan"
+        canonical_worktree = cfg.WTOOLS_BASE_DIR / ".worktrees" / "plans" / "docs" / "plan"
+        legacy_common.mkdir(parents=True)
+        canonical_worktree.mkdir(parents=True)
+        (canonical_worktree / "2026-01-01_root.md").write_text(PLAN_CONTENT, encoding="utf-8")
+
+        cfg.REGISTERED_PATHS_FILE.write_text(
+            json.dumps([{"path": str(legacy_common), "type": "plan"}]),
+            encoding="utf-8",
+        )
+
+        from app.modules.dev_runner.services.plan_service import PlanService
+        svc = PlanService()
+
+        registered_paths = [e.path for e in svc.list_registered_paths()]
+        assert str(canonical_worktree.resolve()) in registered_paths
+        assert str(legacy_common.resolve()) not in registered_paths
+
+        plans = svc.list_plans()
+        assert any(p.path == str((canonical_worktree / "2026-01-01_root.md").resolve()) for p in plans)

@@ -15,6 +15,35 @@ from app.modules.dev_runner.config import config
 logger = logging.getLogger(__name__)
 
 
+def _dedupe_paths(paths: List[Path]) -> List[Path]:
+    deduped: List[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            resolved = str(path.resolve())
+        except Exception:
+            resolved = str(path)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        deduped.append(path)
+    return deduped
+
+
+def canonicalize_wtools_legacy_common_path(path_str: str, path_type: str) -> Optional[tuple[str, str]]:
+    """wtools legacy common/docs/{plan|archive} 등록 경로를 canonical plans worktree로 치환한다."""
+    try:
+        resolved = Path(path_str).resolve()
+        base = config.WTOOLS_BASE_DIR.resolve()
+        legacy = base / "common" / "docs" / path_type
+        canonical = base / ".worktrees" / "plans" / "docs" / path_type
+        if resolved == legacy:
+            return str(canonical.resolve()), path_type
+    except Exception:
+        return None
+    return None
+
+
 def load_wtools_project_roots() -> List[Path]:
     """wtools .claude/projects.json에서 프로젝트 루트 목록을 반환한다.
 
@@ -28,12 +57,15 @@ def load_wtools_project_roots() -> List[Path]:
         data = json.loads(projects_json.read_text(encoding="utf-8"))
         projects = data.get("projects", [])
         roots: List[Path] = []
+        if config.WTOOLS_BASE_DIR.is_absolute():
+            roots.append(config.WTOOLS_BASE_DIR)
         for proj in projects:
             path_str = proj.get("path")
             if path_str:
                 p = Path(path_str)
                 if p.is_absolute():
                     roots.append(p)
+        roots = _dedupe_paths(roots)
         logger.debug(f"[projects.json] {len(roots)}개 프로젝트 루트 로드")
         return roots
     except Exception as e:
@@ -136,6 +168,12 @@ def extract_repo_root_from_plan_path(path_str: str) -> Optional[str]:
     """
     try:
         p = Path(path_str)
+        resolved = p.resolve()
+        wtools_root = config.WTOOLS_BASE_DIR.resolve()
+        for path_type in ("plan", "archive"):
+            legacy_common_root = wtools_root / "common" / "docs" / path_type
+            if resolved == legacy_common_root or legacy_common_root in resolved.parents:
+                return str(wtools_root)
         parts = list(p.parts)
         # .worktrees/plans/docs 패턴 탐지
         for i, part in enumerate(parts):

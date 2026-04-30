@@ -12,7 +12,7 @@ class DevRunnerConfig(BaseSettings):
     WTOOLS_BASE_DIR: Path = Path(r"D:\work\project\service\wtools")
 
     # plan 문서 디렉토리
-    PLAN_DIR: Path = Path("common/docs/plan")
+    PLAN_DIR: Path = Path(".worktrees/plans/docs/plan")
 
     # 로그 디렉토리
     LOG_DIR: Path = Path("common/logs")
