@@ -1,5 +1,6 @@
 """OrphanDetector TC"""
 import asyncio
+import logging
 import time
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -167,6 +168,78 @@ async def test_run_periodic_checks_memory_more_frequently_than_scan():
             await task
 
     assert fake_pressure.check.await_count > detector.scan.await_count
+
+
+@pytest.mark.asyncio
+async def test_run_periodic_invokes_process_watch_capture_every_loop():
+    """R: worker periodic 루프가 SnapshotWriter.capture_python_processes() 경로를 직접 호출한다."""
+    from app.shared.process.orphan_detector import OrphanDetector
+
+    registry = make_registry({})
+    detector = OrphanDetector(registry)
+    detector.scan = AsyncMock(return_value=[])
+    detector.cleanup = AsyncMock(return_value=[])
+    detector.detect_orphan_test_worktrees = AsyncMock(return_value=[])
+    detector._list_test_worktree_branches = MagicMock(return_value=[])
+
+    fake_pressure = MagicMock()
+    fake_pressure.check = AsyncMock(return_value="normal")
+    fake_writer = MagicMock()
+    fake_writer.capture_python_processes = AsyncMock(return_value=1)
+
+    with patch("app.shared.process.memory_pressure.MemoryPressureResponder", return_value=fake_pressure), \
+         patch("app.shared.process.snapshot_writer.SnapshotWriter", return_value=fake_writer), \
+         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 1), \
+         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_TIMEOUT_SEC", 2), \
+         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_LIMIT", 17), \
+         patch("app.shared.process.orphan_detector.WorktreeResidueMonitor.record_scan"):
+        task = asyncio.create_task(detector.run_periodic(interval=0.05, memory_check_interval=0.50))
+        deadline = time.monotonic() + 0.8
+        while time.monotonic() < deadline and fake_writer.capture_python_processes.await_count == 0:
+            await asyncio.sleep(0.02)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    fake_writer.capture_python_processes.assert_awaited()
+    kwargs = fake_writer.capture_python_processes.await_args.kwargs
+    assert kwargs["limit"] == 17
+    assert kwargs["captured_by"] == "periodic"
+
+
+@pytest.mark.asyncio
+async def test_run_periodic_capture_failure_is_logged_and_loop_continues(caplog):
+    """R: periodic capture 실패는 worker 루프를 죽이지 않고 warning 후 scan/cleanup을 계속한다."""
+    from app.shared.process.orphan_detector import OrphanDetector
+
+    registry = make_registry({})
+    detector = OrphanDetector(registry)
+    detector.scan = AsyncMock(return_value=[])
+    detector.cleanup = AsyncMock(return_value=[])
+    detector.detect_orphan_test_worktrees = AsyncMock(return_value=[])
+    detector._list_test_worktree_branches = MagicMock(return_value=[])
+
+    fake_pressure = MagicMock()
+    fake_pressure.check = AsyncMock(return_value="normal")
+    fake_writer = MagicMock()
+    fake_writer.capture_python_processes = AsyncMock(side_effect=RuntimeError("pg write failed"))
+
+    caplog.set_level(logging.WARNING)
+    with patch("app.shared.process.memory_pressure.MemoryPressureResponder", return_value=fake_pressure), \
+         patch("app.shared.process.snapshot_writer.SnapshotWriter", return_value=fake_writer), \
+         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 1), \
+         patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_TIMEOUT_SEC", 2), \
+         patch("app.shared.process.orphan_detector.WorktreeResidueMonitor.record_scan"):
+        task = asyncio.create_task(detector.run_periodic(interval=0.05, memory_check_interval=0.50))
+        deadline = time.monotonic() + 0.8
+        while time.monotonic() < deadline and detector.scan.await_count == 0:
+            await asyncio.sleep(0.02)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert detector.scan.await_count >= 1
+    assert any("periodic capture failed" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.asyncio

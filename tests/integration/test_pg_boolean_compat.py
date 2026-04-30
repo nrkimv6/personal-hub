@@ -8,12 +8,15 @@ import re
 import inspect
 import sys
 import uuid
+import asyncio
+import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import psycopg2
 import pytest
 from sqlalchemy import create_engine, text as sa_text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -290,8 +293,7 @@ class TestSnapshotWriterPgRuntimeCompat:
              patch("app.shared.process.snapshot_writer.is_pg", True), \
              patch("app.shared.process.snapshot_writer.psutil.process_iter", return_value=[proc]), \
              patch("app.shared.process.snapshot_writer.psutil.Process", return_value=parent_proc), \
-             patch("app.shared.process.snapshot_writer.psutil.pid_exists", return_value=False), \
-             patch.object(SnapshotWriter, "_purge_watch_rows", return_value=None):
+             patch("app.shared.process.snapshot_writer.psutil.pid_exists", return_value=False):
             writer = SnapshotWriter(registry)
             count = await writer.capture_python_processes(limit=10, captured_by="test")
 
@@ -309,3 +311,85 @@ class TestSnapshotWriterPgRuntimeCompat:
         assert row["is_orphan"] is True
         assert row["scope"] == "external"
         assert row["captured_by"] == "test"
+
+
+class TestProcessWatchWorkerPeriodicPgRuntime:
+    """worker periodic 루프가 실제 PG SnapshotWriter 경로를 한 번 이상 통과하는지 검증한다."""
+
+    @pytest.mark.asyncio
+    async def test_run_periodic_captures_process_watch_snapshot_in_pg(self, pg_session_factory):
+        from app.shared.process.orphan_detector import OrphanDetector
+        from app.shared.process.snapshot_writer import SnapshotWriter
+
+        session_factory, engine = pg_session_factory
+        SnapshotWriter._watch_tables_ready["pg"] = False
+        registry = MagicMock()
+        registry.get_all = AsyncMock(return_value={})
+
+        mem = MagicMock()
+        mem.rss = 384 * 1024 * 1024
+        proc = _FakeProc(
+            {
+                "pid": 82345,
+                "name": "python.exe",
+                "exe": r"D:\Python39\python.exe",
+                "ppid": 5000,
+                "cmdline": ["python", "scripts/services/browser_workers.py", "start"],
+                "memory_info": mem,
+                "create_time": 1712100000.0,
+            }
+        )
+        parent_proc = MagicMock()
+        parent_proc.name.return_value = "cmd.exe"
+        parent_proc.ppid.return_value = 1000
+
+        detector = OrphanDetector(registry)
+        detector.scan = AsyncMock(return_value=[])
+        detector.cleanup = AsyncMock(return_value=[])
+        detector.detect_orphan_test_worktrees = AsyncMock(return_value=[])
+        detector._list_test_worktree_branches = MagicMock(return_value=[])
+
+        fake_pressure = MagicMock()
+        fake_pressure.check = AsyncMock(return_value="normal")
+
+        with patch("app.shared.process.memory_pressure.MemoryPressureResponder", return_value=fake_pressure), \
+             patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_EVERY_LOOPS", 1), \
+             patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_TIMEOUT_SEC", 3), \
+             patch("app.shared.process.orphan_detector.settings.PROCESS_WATCH_CAPTURE_LIMIT", 10), \
+             patch("app.shared.process.orphan_detector.WorktreeResidueMonitor.record_scan"), \
+             patch("app.shared.process.snapshot_writer.SessionLocal", session_factory), \
+             patch("app.shared.process.snapshot_writer.is_pg", True), \
+             patch("app.shared.process.snapshot_writer.psutil.process_iter", return_value=[proc]), \
+             patch("app.shared.process.snapshot_writer.psutil.Process", return_value=parent_proc), \
+             patch("app.shared.process.snapshot_writer.psutil.pid_exists", return_value=True):
+            task = asyncio.create_task(detector.run_periodic(interval=0.05, memory_check_interval=0.50))
+            try:
+                deadline = time.monotonic() + 3
+                row = None
+                while time.monotonic() < deadline:
+                    try:
+                        with engine.begin() as conn:
+                            row = conn.execute(
+                                sa_text(
+                                    """
+                                    SELECT pid, is_orphan, captured_by
+                                    FROM process_watch_snapshots
+                                    WHERE captured_by = 'periodic'
+                                    """
+                                )
+                            ).mappings().first()
+                    except SQLAlchemyError:
+                        row = None
+                    if row is not None:
+                        break
+                    await asyncio.sleep(0.05)
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+        SnapshotWriter._watch_tables_ready["pg"] = False
+        assert row is not None
+        assert row["pid"] == 82345
+        assert row["is_orphan"] is False
+        assert row["captured_by"] == "periodic"
