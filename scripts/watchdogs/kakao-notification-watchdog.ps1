@@ -16,7 +16,10 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $LogDir = Join-Path $ProjectRoot "logs\admin"
 $PidDir = Join-Path $ProjectRoot ".pids"
 $PidFile = Join-Path $PidDir "kakao_notification_listener.pid"
-$GuardStateFile = Join-Path $ProjectRoot "logs\kakao_guard_state.json"
+# Watchdog lifecycle diagnostics only. This is intentionally separate from
+# Kakao queue/input-guard state files.
+$WatchdogPidFile = Join-Path $PidDir "kakao_notification_watchdog_admin_self.pid"
+$SentinelFile = Join-Path $LogDir "kakao_watchdog_alive_$($PID).flag"
 
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
@@ -107,6 +110,8 @@ Write-Log "Kakao Notification Watchdog Started"
 Write-Log "Check interval: ${CheckInterval}s"
 Write-Log "Max restarts: $MaxRestarts in ${RestartWindow}s"
 Write-Log ("=" * 50)
+$PID | Out-File $WatchdogPidFile -Encoding ascii
+New-Item -ItemType File -Path $SentinelFile -Force | Out-Null
 
 Set-Location $ProjectRoot
 
@@ -119,6 +124,9 @@ if (-not (Test-KakaoNotificationListenerRunning)) {
 
 try {
     while ($true) {
+        if (Test-Path $SentinelFile) {
+            (Get-Item $SentinelFile).LastWriteTime = Get-Date
+        }
         Start-Sleep -Seconds $CheckInterval
 
         $timeSinceLastRestart = ((Get-Date) - $lastRestartTime).TotalSeconds
@@ -146,8 +154,13 @@ try {
     }
 }
 catch {
-    Write-Log "Watchdog error: $_" "ERROR"
+    Write-Log "Watchdog error: $($_.Exception.Message)" "ERROR"
+    if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {
+        Write-Log "Watchdog error position: $($_.InvocationInfo.PositionMessage)" "ERROR"
+    }
 }
 finally {
+    Remove-Item -LiteralPath $WatchdogPidFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $SentinelFile -ErrorAction SilentlyContinue
     Write-Log "Watchdog stopped"
 }

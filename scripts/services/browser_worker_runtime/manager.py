@@ -139,7 +139,7 @@ class BrowserWorkerManager:
             {
                 "name": "Kakao Notification Watchdog",
                 "pid_file": f"kakao_notification_watchdog{self.pid_suffix}.pid",
-                "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
+                "cmd": [_ps_alias("monitorpage-wdog-kakao.exe"), "-ExecutionPolicy", "Bypass", "-File",
                         str(self.watchdogs_dir / "kakao-notification-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
                 "role": "listener",

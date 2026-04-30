@@ -48,6 +48,7 @@ $PsAliases = [ordered]@{
     "monitorpage-wdog-worker"   = "Worker Watchdog (unified)"
     "monitorpage-wdog-claude"   = "Claude Worker Watchdog"
     "monitorpage-wdog-cmd"      = "Command Listener Watchdog"
+    "monitorpage-wdog-kakao"    = "Kakao Notification Watchdog"
     "monitorpage-wdog-chat"     = "Chat Executor Watchdog"
 }
 
