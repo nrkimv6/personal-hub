@@ -324,12 +324,14 @@
 ## tracking/
 
 > 현재 위치: `scripts/tracking/` ✅
-> 위험도: 🟡 중 — Tracking item 등록의 표준 진입점. `CLAUDE.md`가 직접 API 호출 대신 이 wrapper 사용을 요구한다.
+> 위험도: 🟡 중 — Tracking item 등록/수정의 표준 진입점. `CLAUDE.md`가 직접 API 호출 대신 이 wrapper 사용을 요구한다.
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
 | ✅ | `add-tracking-item.ps1` | `python -m app.cli.tracking_add` PowerShell thin wrapper. GNU long option 그대로 forward |
 | ✅ | `add-tracking-item.sh` | Git Bash/WSL thin wrapper. Python CLI에 인자 그대로 forward |
+| ✅ | `update-tracking-item.ps1` | `python -m app.cli.tracking_update` PowerShell thin wrapper. GNU long option 그대로 forward |
+| ✅ | `update-tracking-item.sh` | Git Bash/WSL thin wrapper. Python CLI에 인자 그대로 forward |
 
 ---
 

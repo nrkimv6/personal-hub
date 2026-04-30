@@ -118,6 +118,10 @@ def build_headers() -> dict[str, str]:
     return headers
 
 
+def build_auth_headers() -> dict[str, str]:
+    return build_headers()
+
+
 def resolve_api_base(api_base: str | None) -> str:
     return (api_base or os.environ.get("MONITOR_ADMIN_API_BASE") or DEFAULT_API_BASE).rstrip("/")
 
