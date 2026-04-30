@@ -1,14 +1,14 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import type { Component } from 'svelte';
+  import type { Component, ComponentType } from 'svelte';
 
   export type TabItem = {
     id: string;
     label: string;
     shortLabel?: string;
     href?: string;
-    icon?: string | Component;
+    icon?: string | Component | ComponentType;
     count?: number;
     color?: string;
     countVariant?: 'default' | 'error' | 'warning';
