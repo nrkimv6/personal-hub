@@ -4,7 +4,7 @@
 > 작성: 2026-04-11 (Phase 1 — 이동 없음, 문서화만)
 > 관련 plan: [2026-04-11_scripts-reorganization.md](../.worktrees/plans/docs/plan/2026-04-11_scripts-reorganization.md)
 >
-> 현재 `scripts/` 루트에는 148개 파일이 플랫하게 쌓여 있고, 하위 디렉토리 4개(`archive/`, `_deprecated/`, `dumptruck_templates/`, `__pycache__/`)가 존재합니다. 본 plan의 Phase 2~5에 걸쳐 아래 13개 카테고리 폴더로 단계적으로 이동합니다.
+> 현재 `scripts/` 루트에는 148개 파일이 플랫하게 쌓여 있고, 하위 디렉토리 4개(`archive/`, `_deprecated/`, `dumptruck_templates/`, `__pycache__/`)가 존재합니다. 본 plan의 Phase 2~5에 걸쳐 아래 14개 카테고리 폴더로 단계적으로 이동합니다.
 
 ## 목차
 
@@ -20,6 +20,7 @@
 - [probes/](#probes)
 - [logs/](#logs)
 - [fixes/](#fixes)
+- [tracking/](#tracking)
 - [dumptruck/](#dumptruck)
 - [setup/](#setup)
 - [archive/ (기존)](#archive-기존)
@@ -320,6 +321,18 @@
 
 ---
 
+## tracking/
+
+> 현재 위치: `scripts/tracking/` ✅
+> 위험도: 🟡 중 — Tracking item 등록의 표준 진입점. `CLAUDE.md`가 직접 API 호출 대신 이 wrapper 사용을 요구한다.
+
+| 상태 | 파일 | 설명 |
+|:-:|---|---|
+| ✅ | `add-tracking-item.ps1` | `python -m app.cli.tracking_add` PowerShell thin wrapper. GNU long option 그대로 forward |
+| ✅ | `add-tracking-item.sh` | Git Bash/WSL thin wrapper. Python CLI에 인자 그대로 forward |
+
+---
+
 ## dumptruck/
 
 > 현재 위치: `scripts/` + `scripts/dumptruck_templates/` (**이관 보류**)
@@ -431,6 +444,7 @@
 | `session_*.py` (`.claude/projects/*.jsonl` 파싱) | `session_tools/` | `session_dump.py` |
 | `_fix_*`, `fix-*`, `fix_*` (일회성) | `fixes/` | `_fix_plan_header.py` |
 | `dumptruck_*` | `dumptruck/` | `dumptruck_run.ps1` |
+| `add-tracking-*`, `tracking-*` | `tracking/` | `add-tracking-item.ps1` |
 | `setup-*`, `startup-*`, `daily_*`, `auto-update*`, `_build_*`, `_setup_*` | `setup/` | `setup-exe-aliases.ps1` |
 | 서비스 런타임 (`start/stop/run/service*/browser_workers`) | `services/` | `browser_workers.py` |
 | 로그 도구 (`logs*`, `*-log*.ps1`, `*noise_filter*`) | `logs/` | `logs.ps1` |
