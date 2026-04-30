@@ -1,47 +1,15 @@
 # pre-commit-plans-block.ps1
 #
 # 목적: plans lineage가 아닌 checkout에서 docs/plan, docs/archive staged commit을 차단한다.
+# 구현성 root worktree 차단은 pre-commit-root-worktree-block.ps1가 먼저 처리한다.
 #
 # --no-verify 사용 절대 금지
+$helperPath = Join-Path $PSScriptRoot "pre-commit-root-worktree-block.ps1"
+. $helperPath -AsLibrary
 
-function Get-HookValue {
-    param(
-        [string]$Name,
-        [scriptblock]$Fallback
-    )
-
-    if ($env:PLAN_HOOK_DRY_RUN -eq "1") {
-        $override = Get-Item -Path "Env:$Name" -ErrorAction SilentlyContinue
-        if ($null -ne $override) {
-            return $override.Value
-        }
-    }
-
-    return & $Fallback
-}
-
-function ConvertTo-HookBool {
-    param([string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $false
-    }
-
-    return @("1", "true", "yes", "on") -contains $Value.Trim().ToLowerInvariant()
-}
-
-function Get-NormalizedPath {
-    param([string]$PathValue)
-
-    if ([string]::IsNullOrWhiteSpace($PathValue)) {
-        return $null
-    }
-
-    try {
-        return [System.IO.Path]::GetFullPath($PathValue).TrimEnd('\', '/').Replace('\', '/')
-    } catch {
-        return $PathValue.TrimEnd('\', '/').Replace('\', '/')
-    }
+$rootFence = Invoke-PreCommitRootWorktreeBlock
+if (-not $rootFence.Allowed) {
+    exit $rootFence.ExitCode
 }
 
 function Test-GitRefExists {
