@@ -1,5 +1,11 @@
 export const TRACKING_FILTERS = ['all', 'overdue', 'ready', 'upcoming', 'done'];
 
+/** @typedef {import('$lib/api/tracking').TrackingItem} TrackingItem */
+
+/**
+ * @param {string | null | undefined} status
+ * @returns {string}
+ */
 export function getTrackingStatusLabel(status) {
 	switch (status) {
 		case 'done':
@@ -15,6 +21,10 @@ export function getTrackingStatusLabel(status) {
 	}
 }
 
+/**
+ * @param {string | null | undefined} status
+ * @returns {string}
+ */
 export function getTrackingStatusClass(status) {
 	switch (status) {
 		case 'done':
@@ -30,6 +40,10 @@ export function getTrackingStatusClass(status) {
 	}
 }
 
+/**
+ * @param {{ title?: unknown; description?: unknown; start_at?: string | null; due_at?: string | null }} form
+ * @returns {{ title: string; description: string | null; start_at: string | null; due_at: string | null }}
+ */
 export function buildTrackingPayload(form) {
 	const payload = {
 		title: String(form.title || '').trim(),
@@ -46,14 +60,22 @@ export function buildTrackingPayload(form) {
 	return payload;
 }
 
+/**
+ * @param {string | null | undefined} value
+ * @returns {number}
+ */
 function itemDateValue(value) {
 	if (!value) return Number.POSITIVE_INFINITY;
 	const time = new Date(value).getTime();
 	return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
 }
 
+/**
+ * @param {TrackingItem[]} items
+ * @returns {TrackingItem[]}
+ */
 export function sortTrackingItems(items) {
-	const statusRank = { overdue: 0, ready: 1, upcoming: 2 };
+	const statusRank = /** @type {Record<string, number>} */ ({ overdue: 0, ready: 1, upcoming: 2, done: 3 });
 	return [...items].sort((a, b) => {
 		if (a.status === 'done' || b.status === 'done') {
 			if (a.status !== b.status) return a.status === 'done' ? 1 : -1;
