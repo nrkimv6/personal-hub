@@ -2,7 +2,21 @@ param(
     [switch]$AsLibrary
 )
 
-$script:RootWorktreeContract = Import-PowerShellDataFile -Path (Join-Path $PSScriptRoot "root-worktree-contract.psd1")
+function Import-RootWorktreeContract {
+    param([string]$Path)
+
+    $psDataLoader = Get-Command -Name "Import-PowerShellDataFile" -ErrorAction SilentlyContinue
+    if ($null -ne $psDataLoader) {
+        return Import-PowerShellDataFile -Path $Path
+    }
+
+    # Git hook hosts can miss Import-PowerShellDataFile; fall back to evaluating
+    # the local psd1 expression directly so the allowlist contract still loads.
+    $raw = Get-Content -LiteralPath $Path -Raw
+    return & ([scriptblock]::Create($raw))
+}
+
+$script:RootWorktreeContract = Import-RootWorktreeContract -Path (Join-Path $PSScriptRoot "root-worktree-contract.psd1")
 
 function Get-HookValue {
     param(
