@@ -110,3 +110,36 @@ test("Card shows plan link count badge when linked_plans present", () => {
   assert.match(src, /linked_plans\.length/);
   assert.match(src, /계획서/);
 });
+
+test("TrackingTab exposes linked plan quick actions", () => {
+  const src = readFileSync(
+    new URL("../src/routes/automation/TrackingTab.svelte", import.meta.url),
+    "utf8"
+  );
+  assert.match(src, /copyPlanPath/);
+  assert.match(src, /openPlanInEditor/);
+  assert.match(src, /openPlanInExplorer/);
+  assert.match(src, /getPlanActionDisabledReason/);
+  assert.match(src, /disabled=\{Boolean\(disabledReason\)\}/);
+});
+
+test("plan actions helper uses file-search open as editor SSOT", () => {
+  const src = readFileSync(
+    new URL("../src/lib/utils/plan-actions.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(src, /from '\$lib\/api\/fileSearch'/);
+  assert.match(src, /openFile\(filePath\)/);
+  assert.match(src, /navigator\.clipboard\.writeText/);
+});
+
+test("CurrentTrackingCard exposes plan file actions", () => {
+  const src = readFileSync(
+    new URL("../src/lib/components/dev-runner/CurrentTrackingCard.svelte", import.meta.url),
+    "utf8"
+  );
+  assert.match(src, /copyPlanPath/);
+  assert.match(src, /openPlanInEditor/);
+  assert.match(src, /openPlanInExplorer/);
+  assert.match(src, /getPlanFileName/);
+});

@@ -1,7 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { ChevronDown, Copy, ExternalLink, FolderOpen } from 'lucide-svelte';
 	import { trackingApi, type TrackingItem, type TrackingStatus } from '$lib/api/tracking';
 	import { toast } from '$lib/stores/toast';
+	import {
+		copyPlanPath,
+		getPlanActionDisabledReason,
+		getPlanDisplayName,
+		openPlanInEditor,
+		openPlanInExplorer
+	} from '$lib/utils/plan-actions';
 	import {
 		TRACKING_FILTERS,
 		buildTrackingPayload,
@@ -24,6 +32,7 @@
 	let form = $state({ title: '', description: '', start_at: '', due_at: '' });
 	let pickerValue = $state<number[]>([]);
 	let pickerSaving = $state(false);
+	let expandedPlansItemId = $state<number | null>(null);
 
 	const summary = $derived({
 		total: items.length,
@@ -83,6 +92,56 @@
 		};
 		pickerValue = [];
 		showModal = true;
+	}
+
+	function togglePlanActions(itemId: number) {
+		expandedPlansItemId = expandedPlansItemId === itemId ? null : itemId;
+	}
+
+	function stopPlanAction(event: MouseEvent) {
+		event.stopPropagation();
+	}
+
+	async function handleCopyPlanPath(plan: LinkedPlan) {
+		const disabledReason = getPlanActionDisabledReason(plan);
+		if (disabledReason) {
+			toast.warning(disabledReason);
+			return;
+		}
+		try {
+			await copyPlanPath(plan.file_path);
+			toast.success('계획서 경로를 복사했습니다.');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '계획서 경로 복사 실패');
+		}
+	}
+
+	async function handleOpenPlanInEditor(plan: LinkedPlan) {
+		const disabledReason = getPlanActionDisabledReason(plan);
+		if (disabledReason) {
+			toast.warning(disabledReason);
+			return;
+		}
+		try {
+			await openPlanInEditor(plan.file_path);
+			toast.success('VSCode에서 계획서를 여는 요청을 보냈습니다.');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '계획서 열기 실패');
+		}
+	}
+
+	async function handleOpenPlanInExplorer(plan: LinkedPlan) {
+		const disabledReason = getPlanActionDisabledReason(plan);
+		if (disabledReason) {
+			toast.warning(disabledReason);
+			return;
+		}
+		try {
+			await openPlanInExplorer(plan.file_path);
+			toast.success('계획서 폴더 경로를 복사했습니다.');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '계획서 폴더 경로 복사 실패');
+		}
 	}
 
 	async function saveItem() {
@@ -227,35 +286,95 @@
 			{:else}
 				<div class="divide-y divide-border">
 					{#each items as item (item.id)}
-						<article class="flex flex-col gap-4 p-4 transition-colors hover:bg-muted/20 lg:flex-row lg:items-center">
-							<label class="flex items-start gap-3 lg:flex-1">
-								<input type="checkbox" class="mt-1 h-4 w-4 rounded border-border" checked={item.status === 'done'} onchange={() => toggleComplete(item)} />
-								<div class="min-w-0">
-									<div class="flex flex-wrap items-center gap-2">
-										<h3 class="font-semibold {item.status === 'done' ? 'text-muted-foreground line-through' : 'text-foreground'}">{item.title}</h3>
-										<span class="rounded-full px-2 py-0.5 text-xs font-medium {getTrackingStatusClass(item.status)}">{getTrackingStatusLabel(item.status)}</span>
-									</div>
-									{#if item.description}
-										<p class="mt-1 text-sm text-muted-foreground">{item.description}</p>
-									{/if}
-									<div class="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-										<span>시작가능일: {formatDate(item.start_at)}</span>
-										<span>마감기한: {formatDate(item.due_at)}</span>
-										{#if item.completed_at}
-											<span>완료: {formatDate(item.completed_at)}</span>
+						<article class="p-4 transition-colors hover:bg-muted/20">
+							<div class="flex flex-col gap-4 lg:flex-row lg:items-center">
+								<div class="flex items-start gap-3 lg:flex-1">
+									<input type="checkbox" class="mt-1 h-4 w-4 rounded border-border" checked={item.status === 'done'} onchange={() => toggleComplete(item)} />
+									<div class="min-w-0">
+										<div class="flex flex-wrap items-center gap-2">
+											<h3 class="font-semibold {item.status === 'done' ? 'text-muted-foreground line-through' : 'text-foreground'}">{item.title}</h3>
+											<span class="rounded-full px-2 py-0.5 text-xs font-medium {getTrackingStatusClass(item.status)}">{getTrackingStatusLabel(item.status)}</span>
+										</div>
+										{#if item.description}
+											<p class="mt-1 text-sm text-muted-foreground">{item.description}</p>
 										{/if}
-										{#if item.linked_plans.length > 0}
-											<span class="rounded-full bg-primary/10 px-2 py-0.5 text-primary">
-												계획서 {item.linked_plans.length}건
-											</span>
-										{/if}
+										<div class="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+											<span>시작가능일: {formatDate(item.start_at)}</span>
+											<span>마감기한: {formatDate(item.due_at)}</span>
+											{#if item.completed_at}
+												<span>완료: {formatDate(item.completed_at)}</span>
+											{/if}
+											{#if item.linked_plans.length > 0}
+												<button
+													type="button"
+													class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/20"
+													aria-expanded={expandedPlansItemId === item.id}
+													aria-controls={`tracking-plan-actions-${item.id}`}
+													onclick={(event) => {
+														stopPlanAction(event);
+														togglePlanActions(item.id);
+													}}
+												>
+													계획서 {item.linked_plans.length}건
+													<ChevronDown size={12} class="transition-transform {expandedPlansItemId === item.id ? 'rotate-180' : ''}" />
+												</button>
+											{/if}
+										</div>
 									</div>
 								</div>
-							</label>
-							<div class="flex gap-2 lg:justify-end">
-								<button class="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted" onclick={() => openEditModal(item)}>수정</button>
-								<button class="rounded-md border border-destructive/30 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10" onclick={() => deleteItem(item)}>삭제</button>
+								<div class="flex gap-2 lg:justify-end">
+									<button class="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted" onclick={() => openEditModal(item)}>수정</button>
+									<button class="rounded-md border border-destructive/30 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10" onclick={() => deleteItem(item)}>삭제</button>
+								</div>
 							</div>
+							{#if expandedPlansItemId === item.id && item.linked_plans.length > 0}
+								<div id={`tracking-plan-actions-${item.id}`} class="mt-3 rounded-xl border border-border bg-muted/20 p-3">
+									<div class="space-y-2">
+										{#each item.linked_plans as plan}
+											{@const disabledReason = getPlanActionDisabledReason(plan)}
+											<div class="flex flex-col gap-2 rounded-lg bg-background px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+												<div class="min-w-0">
+													<div class="flex flex-wrap items-center gap-2">
+														<span class="truncate font-medium text-foreground" title={plan.file_path}>{getPlanDisplayName(plan)}</span>
+														{#if plan.archived}<span class="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">archived</span>{/if}
+														{#if plan.file_removed}<span class="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">파일 없음</span>{/if}
+													</div>
+													<div class="mt-0.5 truncate font-mono text-muted-foreground" title={plan.file_path}>{plan.file_path}</div>
+												</div>
+												<div class="flex shrink-0 flex-wrap gap-1">
+													<button
+														type="button"
+														class="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+														disabled={Boolean(disabledReason)}
+														onclick={() => handleCopyPlanPath(plan)}
+														title={disabledReason ?? '계획서 경로 복사'}
+													>
+														<Copy size={13} /> 복사
+													</button>
+													<button
+														type="button"
+														class="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+														disabled={Boolean(disabledReason)}
+														onclick={() => handleOpenPlanInEditor(plan)}
+														title={disabledReason ?? 'VSCode에서 열기'}
+													>
+														<ExternalLink size={13} /> 열기
+													</button>
+													<button
+														type="button"
+														class="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+														disabled={Boolean(disabledReason)}
+														onclick={() => handleOpenPlanInExplorer(plan)}
+														title={disabledReason ?? '계획서 폴더 경로 복사'}
+													>
+														<FolderOpen size={13} /> 폴더
+													</button>
+												</div>
+											</div>
+										{/each}
+									</div>
+								</div>
+							{/if}
 						</article>
 					{/each}
 				</div>
@@ -305,33 +424,70 @@
 				<div class="space-y-2">
 					<div class="text-sm font-medium">연결된 계획서</div>
 					{#if editingItem && editingItem.linked_plans.length > 0}
-						<div class="flex flex-wrap gap-1">
+						<div class="space-y-2">
 							{#each editingItem.linked_plans as lp}
-								<span class="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">
-									<span class="max-w-32 truncate">{lp.title ?? lp.file_path.split('/').pop()}</span>
-									{#if lp.archived}<span class="text-amber-600">archived</span>{/if}
-									{#if lp.file_removed}<span class="text-muted-foreground">(파일 없음)</span>{/if}
-									<button
-										type="button"
-										class="ml-0.5 hover:text-destructive"
-										disabled={pickerSaving}
-										onclick={async () => {
-											pickerSaving = true;
-											try {
-												const updated = await trackingApi.unlinkPlan(editingItem!.id, lp.plan_record_id);
-												editingItem = updated;
-												const nextItems = items.map((i) => (i.id === updated.id ? updated : i));
-												items = sortTrackingItems(nextItems);
-												toast.success('계획서 연결을 해제했습니다.');
-											} catch {
-												toast.error('연결 해제 실패');
-											} finally {
-												pickerSaving = false;
-											}
-										}}
-										aria-label="연결 해제"
-									>×</button>
-								</span>
+								{@const disabledReason = getPlanActionDisabledReason(lp)}
+								<div class="rounded-lg bg-muted px-3 py-2 text-xs">
+									<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+										<div class="min-w-0">
+											<div class="flex flex-wrap items-center gap-1">
+												<span class="max-w-64 truncate font-medium" title={lp.file_path}>{getPlanDisplayName(lp)}</span>
+												{#if lp.archived}<span class="text-amber-600">archived</span>{/if}
+												{#if lp.file_removed}<span class="text-muted-foreground">(파일 없음)</span>{/if}
+											</div>
+											<div class="mt-0.5 truncate font-mono text-muted-foreground" title={lp.file_path}>{lp.file_path}</div>
+										</div>
+										<div class="flex shrink-0 flex-wrap gap-1">
+											<button
+												type="button"
+												class="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+												disabled={Boolean(disabledReason)}
+												onclick={() => handleCopyPlanPath(lp)}
+												title={disabledReason ?? '계획서 경로 복사'}
+											>
+												<Copy size={13} /> 복사
+											</button>
+											<button
+												type="button"
+												class="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+												disabled={Boolean(disabledReason)}
+												onclick={() => handleOpenPlanInEditor(lp)}
+												title={disabledReason ?? 'VSCode에서 열기'}
+											>
+												<ExternalLink size={13} /> 열기
+											</button>
+											<button
+												type="button"
+												class="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+												disabled={Boolean(disabledReason)}
+												onclick={() => handleOpenPlanInExplorer(lp)}
+												title={disabledReason ?? '계획서 폴더 경로 복사'}
+											>
+												<FolderOpen size={13} /> 폴더
+											</button>
+											<button
+												type="button"
+												class="rounded-md border border-destructive/30 bg-background px-2 py-1 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+												disabled={pickerSaving}
+												onclick={async () => {
+													pickerSaving = true;
+													try {
+														const updated = await trackingApi.unlinkPlan(editingItem!.id, lp.plan_record_id);
+														editingItem = updated;
+														const nextItems = items.map((i) => (i.id === updated.id ? updated : i));
+														items = sortTrackingItems(nextItems);
+														toast.success('계획서 연결을 해제했습니다.');
+													} catch {
+														toast.error('연결 해제 실패');
+													} finally {
+														pickerSaving = false;
+													}
+												}}
+												aria-label="연결 해제"
+											>해제</button>
+										</div>
+									</div>
+								</div>
 							{/each}
 						</div>
 					{/if}
