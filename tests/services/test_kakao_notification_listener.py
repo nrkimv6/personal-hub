@@ -93,3 +93,111 @@ async def test_process_payload_drops_expired_message(listener):
                 "expires_at": "2026-04-15T10:00:00",
             }
         )
+
+
+def test_input_guard_acquire_release_writes_state(listener, tmp_path):
+    state_file = tmp_path / "kakao_guard_state.json"
+
+    with patch.object(listener, "GUARD_STATE_FILE", state_file), \
+         patch.object(listener, "_block_input", side_effect=[True, True]):
+        with listener.KakaoInputGuard(enabled=True, timeout_seconds=5, abort_on_remote_session=True):
+            assert state_file.exists()
+
+    state = state_file.read_text(encoding="utf-8")
+    assert '"state": "released"' in state
+
+
+@pytest.mark.asyncio
+async def test_guard_failure_requeues_without_cli(listener):
+    queue = MagicMock()
+    queue.requeue = AsyncMock(return_value=True)
+    queue.dead_letter = AsyncMock(return_value=True)
+    queue.client.set = AsyncMock(return_value=True)
+
+    payload = {
+        "id": "payload-guard",
+        "room_name": "소나무봇",
+        "message": "메시지",
+        "metadata": {"retry_count": 0, "guard_required": True},
+    }
+
+    with patch.object(listener, "is_payload_expired", return_value=False), \
+         patch.object(listener, "_get_setting", side_effect=lambda name, default: {
+             "MEGABEAUTY_KAKAO_INPUT_GUARD_ENABLED": True,
+             "MEGABEAUTY_KAKAO_INPUT_GUARD_TIMEOUT_SECONDS": 5,
+             "MEGABEAUTY_KAKAO_INPUT_GUARD_ABORT_ON_REMOTE_SESSION": True,
+             "MEGABEAUTY_KAKAO_INPUT_GUARD_MAX_RETRIES": 3,
+         }.get(name, default)), \
+         patch.object(listener, "_preflight_kakao_room", return_value=listener.SendResult(True)), \
+         patch.object(listener, "_block_input", return_value=False), \
+         patch.object(listener, "_send_via_cli_raw", new=AsyncMock()) as mock_send:
+        await listener._process_payload(payload, queue)
+
+    mock_send.assert_not_called()
+    queue.requeue.assert_awaited_once()
+    queue.dead_letter.assert_not_called()
+    requeue_kwargs = queue.requeue.await_args.kwargs
+    assert "BlockInput acquire failed" in requeue_kwargs["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_retry_exceeded_goes_to_dead_letter(listener):
+    queue = MagicMock()
+    queue.requeue = AsyncMock(return_value=True)
+    queue.dead_letter = AsyncMock(return_value=True)
+    queue.client.set = AsyncMock(return_value=False)
+
+    payload = {
+        "id": "payload-dead",
+        "room_name": "소나무봇",
+        "message": "메시지",
+        "metadata": {"retry_count": 3, "guard_required": True},
+    }
+
+    with patch.object(listener, "is_payload_expired", return_value=False), \
+         patch.object(listener, "_get_setting", side_effect=lambda name, default: {
+             "MEGABEAUTY_KAKAO_INPUT_GUARD_MAX_RETRIES": 3,
+         }.get(name, default)), \
+         patch.object(
+             listener,
+             "_send_via_cli_guarded",
+             new=AsyncMock(return_value=listener.SendResult(False, retryable=True, error="timeout")),
+         ):
+        await listener._process_payload(payload, queue)
+
+    queue.requeue.assert_not_called()
+    queue.dead_letter.assert_awaited_once()
+    assert queue.dead_letter.await_args.kwargs["last_error"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_fake_cli_guard_order(listener):
+    events = []
+
+    class FakeGuard:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            events.append("guard_acquire")
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            events.append("guard_release")
+
+    async def fake_send(room_name, message, *, timeout_seconds):
+        events.append("cli_send")
+        return listener.SendResult(True)
+
+    with patch.object(listener, "_get_setting", side_effect=lambda name, default: {
+             "MEGABEAUTY_KAKAO_INPUT_GUARD_ENABLED": True,
+             "MEGABEAUTY_KAKAO_INPUT_GUARD_TIMEOUT_SECONDS": 5,
+             "MEGABEAUTY_KAKAO_INPUT_GUARD_ABORT_ON_REMOTE_SESSION": True,
+         }.get(name, default)), \
+         patch.object(listener, "_preflight_kakao_room", return_value=listener.SendResult(True)), \
+         patch.object(listener, "KakaoInputGuard", FakeGuard), \
+         patch.object(listener, "_send_via_cli_raw", side_effect=fake_send):
+        result = await listener._send_via_cli_guarded("소나무봇", "메시지", guard_required=True)
+
+    assert result.success is True
+    assert events == ["guard_acquire", "cli_send", "guard_release"]

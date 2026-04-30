@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+import json
 
 from app.shared.process.subprocess_text import with_text_subprocess_defaults
 from scripts.services.browser_worker_runtime.runtime import BOLD, CYAN, GRAY, GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
@@ -66,6 +67,18 @@ def status(manager):
             print(f"    {GREEN}[+] {name} (PID: {pid}){RESET}")
         else:
             print(f"    {YELLOW}[-] {name}: Not running{RESET}")
+
+    guard_state_path = PROJECT_ROOT / "logs" / "kakao_guard_state.json"
+    if guard_state_path.exists():
+        try:
+            state = json.loads(guard_state_path.read_text(encoding="utf-8"))
+            color = GREEN if state.get("state") == "released" else YELLOW
+            print(
+                f"    {color}[~] Kakao Input Guard: {state.get('state')} "
+                f"(pid={state.get('pid')}, session={state.get('session_id')}){RESET}"
+            )
+        except Exception as exc:
+            print(f"    {YELLOW}[?] Kakao Input Guard state unreadable: {exc}{RESET}")
 
     has_legacy = False
     for pf in manager.legacy_pid_files:

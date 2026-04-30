@@ -57,3 +57,33 @@ async def test_enqueue_kakao_notification_triggers_backlog_telegram(notification
     assert mock_send_telegram.call_args.kwargs["force_send"] is True
     cooldown_client.set.assert_awaited_once()
 
+
+@pytest.mark.asyncio
+async def test_kakao_enqueue_guard_failure_stays_kakao_scoped(notification_service):
+    fake_queue = MagicMock()
+    fake_queue.enqueue = AsyncMock(return_value={
+        "enqueued": False,
+        "duplicate": False,
+        "disabled": False,
+        "queue_length": 0,
+        "payload": {"id": "abc", "metadata": {"guard_required": True}},
+        "error": "guard failed",
+    })
+    fake_queue.queue_name = "monitor:notification:kakao"
+
+    redis_client = AsyncMock()
+    redis_client.aclose = AsyncMock()
+
+    with patch("app.shared.notification.notification_service.KakaoNotificationQueue", return_value=fake_queue), \
+         patch("redis.asyncio.Redis", return_value=redis_client), \
+         patch.object(notification_service, "send_telegram", AsyncMock()) as mock_send_telegram:
+        result = await notification_service._enqueue_kakao_notification(
+            "메가뷰티쇼 공석 알림",
+            metadata={"guard_required": True},
+        )
+
+    assert result is False
+    fake_queue.enqueue.assert_awaited_once()
+    mock_send_telegram.assert_not_called()
+    redis_client.aclose.assert_awaited_once()
+

@@ -16,6 +16,7 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $LogDir = Join-Path $ProjectRoot "logs\admin"
 $PidDir = Join-Path $ProjectRoot ".pids"
 $PidFile = Join-Path $PidDir "kakao_notification_listener.pid"
+$GuardStateFile = Join-Path $ProjectRoot "logs\kakao_guard_state.json"
 
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
@@ -30,8 +31,20 @@ $script:watchdogLogFile = Join-Path $LogDir "kakao_notification_watchdog_$(Get-D
 
 . (Join-Path $ScriptDir "watchdog-utils.ps1")
 
+function Clear-KakaoGuardState {
+    if (Test-Path $GuardStateFile) {
+        try {
+            Remove-Item -LiteralPath $GuardStateFile -Force
+            Write-Log "Cleared stale Kakao guard state file"
+        } catch {
+            Write-Log "Failed to clear Kakao guard state file: $_" "WARN"
+        }
+    }
+}
+
 function Start-KakaoNotificationListener {
     Stop-ExistingProcessesByCmdline -Label "kakao-notification-listener" -CmdlinePattern 'kakao-notification-listener\.py|monitorpage-kakao'
+    Clear-KakaoGuardState
 
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $stdoutLogFile = Join-Path $LogDir "stdout_kakao_notification_$Timestamp.log"

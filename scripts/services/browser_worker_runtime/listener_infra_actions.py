@@ -26,6 +26,8 @@ def restart_listener(manager):
         manager.pid_dir / f"command_listener{manager.pid_suffix}.pid",
         manager.pid_dir / f"dev_runner_watchdog{manager.pid_suffix}.pid",
         manager.pid_dir / f"dev_runner_command_listener{manager.pid_suffix}.pid",
+        manager.pid_dir / f"kakao_notification_watchdog{manager.pid_suffix}.pid",
+        manager.pid_dir / "kakao_notification_listener.pid",
     ]
     for pid_path in listener_pids:
         pid = mgr.read_pid_file(pid_path)
@@ -33,6 +35,14 @@ def restart_listener(manager):
             cprint(f"Stopping {pid_path.name} (PID: {pid})...", YELLOW)
             mgr.kill_pid(pid)
         mgr.remove_pid_file(pid_path)
+
+    kakao_guard_state = PROJECT_ROOT / "logs" / "kakao_guard_state.json"
+    if kakao_guard_state.exists():
+        try:
+            kakao_guard_state.unlink()
+            cprint("Cleared stale Kakao input guard state", YELLOW)
+        except Exception as exc:
+            cprint(f"Failed to clear Kakao input guard state: {exc}", RED)
 
     time.sleep(1)
 
