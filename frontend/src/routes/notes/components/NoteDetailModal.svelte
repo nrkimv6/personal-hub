@@ -6,6 +6,7 @@
   import { linkifyText } from '../utils/url';
   import { notesApi } from '$lib/api/notes';
   import { llmApi } from '$lib/api/system';
+  import { variantClasses } from '$lib/components/markdown/markdownVariants';
   import { ArrowLeft, Copy, Archive, Pencil, Pin, Star, ChevronDown, ChevronUp, Check, X } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
 
@@ -219,7 +220,7 @@
       {/if}
       <div
         bind:this={contentEl}
-        class="prose prose-sm dark:prose-invert max-w-none leading-relaxed"
+        class={variantClasses.default}
       >
         <!-- eslint-disable-next-line svelte/no-at-html-tags -->
         {@html renderedHtml}
