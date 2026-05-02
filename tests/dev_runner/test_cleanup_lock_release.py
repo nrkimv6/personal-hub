@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 import redis
+from tests.dev_runner.conftest import attach_default_redis_behaviors
 
 try:
     import fakeredis
@@ -110,7 +111,7 @@ def _patch_eval_for_fakeredis(client):
 class TestCleanupLockRelease:
     def test_cleanup_calls_release_merge_lock_R(self):
         """R(Right): _cleanup_process_state 호출 시 release_merge_lock 1회 호출"""
-        mock_redis = MagicMock()
+        mock_redis = attach_default_redis_behaviors(MagicMock())
         mock_redis.get.return_value = None
 
         with patch("merge_queue.release_merge_turn") as mock_release, \
@@ -132,7 +133,7 @@ class TestCleanupLockRelease:
         assert redis_client.lindex(get_queue_key("test-repo"), 0) == "runner-a"
 
         # runner_b cleanup → runner_a lock에 영향 없음
-        mock_redis = MagicMock()
+        mock_redis = attach_default_redis_behaviors(MagicMock())
         mock_redis.get.return_value = None
         with patch("merge_queue.release_merge_turn") as mock_release, \
              patch("merge_queue._get_repo_id", return_value="test-repo"), \
@@ -145,7 +146,7 @@ class TestCleanupLockRelease:
 
     def test_cleanup_release_exception_does_not_block_E(self):
         """E(Error): release_merge_lock 예외 발생 → cleanup 나머지 로직 정상 실행"""
-        mock_redis = MagicMock()
+        mock_redis = attach_default_redis_behaviors(MagicMock())
         mock_redis.get.return_value = None
 
         with patch("merge_queue.release_merge_turn", side_effect=RuntimeError("redis down")), \
@@ -173,7 +174,7 @@ class TestCleanupLockRelease:
 
     def test_cleanup_uses_per_repo_queue_key_R(self):
         """R(Right): cleanup이 per-repo 큐 키 사용 + 글로벌 키에 영향 없음"""
-        mock_redis = MagicMock()
+        mock_redis = attach_default_redis_behaviors(MagicMock())
         mock_redis.get.return_value = None
         captured_keys = []
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+from tests.dev_runner.conftest import attach_default_redis_behaviors
 
 _SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -54,7 +55,7 @@ def test__handle_post_merge_done_right_calls_done_api(cl, tmp_path):
     plan.write_text("- [x] 항목1\n- [x] 항목2\n", encoding="utf-8")
 
     pub_msgs = []
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {"success": True}
@@ -77,7 +78,7 @@ def test__handle_post_merge_done_right_skips_incomplete(cl, tmp_path):
     plan.write_text("- [x] 완료\n- [ ] 미완료\n", encoding="utf-8")
 
     pub_msgs = []
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
 
     with patch("plan_worktree_helpers.remove_plan_header_fields"), \
          patch("_dr_merge._call_done_api") as mock_done:
@@ -96,7 +97,7 @@ def test__handle_post_merge_done_right_skips_incomplete(cl, tmp_path):
 def test__handle_post_merge_done_boundary_no_plan_file(cl):
     """B: plan_file=None → 스킵, done API 미호출"""
     pub_msgs = []
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
 
     with patch("plan_worktree_helpers.remove_plan_header_fields") as mock_remove, \
          patch("_dr_merge._call_done_api") as mock_done:
@@ -112,7 +113,7 @@ def test__handle_post_merge_done_boundary_no_plan_file(cl):
 def test__handle_post_merge_done_boundary_all_mode(cl):
     """B: plan_file=--all → 스킵, done API 미호출"""
     pub_msgs = []
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
 
     with patch("plan_worktree_helpers.remove_plan_header_fields") as mock_remove, \
          patch("_dr_merge._call_done_api") as mock_done:
@@ -130,7 +131,7 @@ def test__handle_post_merge_done_error_api_failure_no_raise(cl, tmp_path):
     plan.write_text("- [x] 항목1\n", encoding="utf-8")
 
     pub_msgs = []
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
     mock_resp = MagicMock()
     mock_resp.status_code = 500
 
@@ -151,7 +152,7 @@ def test_handle_post_merge_done_propagates_done_failure_E(cl, tmp_path):
     plan.write_text("- [x] 항목1\n- [x] 항목2\n", encoding="utf-8")
 
     pub_msgs = []
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
 
     with patch("plan_worktree_helpers.remove_plan_header_fields"), \
          patch("_dr_merge._call_done_api", return_value={"success": False, "reason": "done_api_failed", "message": "done API failed"}) as mock_done:
@@ -169,7 +170,7 @@ def test_handle_post_merge_done_preserves_ownership_guard_reason_E(cl, tmp_path)
     plan.write_text("- [x] 항목1\n", encoding="utf-8")
 
     pub_msgs = []
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
 
     with patch("plan_worktree_helpers.remove_plan_header_fields"), \
          patch("_dr_merge._register_post_merge_owned_files"), \
@@ -191,7 +192,7 @@ def test_handle_post_merge_done_residue_blocked_skips_restart_E(cl, tmp_path):
     plan.write_text("- [x] 항목1\n", encoding="utf-8")
 
     pub_msgs = []
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
 
     def redis_get(key):
         if "merge_status" in key:
@@ -237,7 +238,7 @@ def test_conflict_resolve_success_triggers_done_flow(cl, tmp_path):
             return str(tmp_path / "worktree")
         return None
 
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
     mock_redis.get.side_effect = redis_get_side_effect
 
     # subprocess: exit_code=3(충돌)
@@ -286,7 +287,7 @@ def test_conflict_resolve_unsafe_does_not_trigger_done_flow(cl, tmp_path):
             return str(tmp_path / "worktree")
         return None
 
-    mock_redis = MagicMock()
+    mock_redis = attach_default_redis_behaviors(MagicMock())
     mock_redis.get.side_effect = redis_get_side_effect
 
     merge_result_conflict = MagicMock()
