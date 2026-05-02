@@ -46,6 +46,11 @@
 		noiseCount?: number;
 	}
 
+	interface ResultSegment {
+		num: string;
+		text: string;
+	}
+
 	let lines = $state<ParsedLine[]>([]);
 	let expandedNoiseIndices = $state<number[]>([]);
         let showNoiseIndicator = $state(false);
@@ -186,6 +191,22 @@
 		if (normalized.length <= MAX_RENDER_CHARS) return normalized;
 		const hiddenChars = normalized.length - MAX_RENDER_CHARS;
 		return `${normalized.slice(0, MAX_RENDER_CHARS)}\n… ${hiddenChars} chars truncated`;
+	}
+
+	function parseResultSegments(message: string): ResultSegment[] {
+		const normalized = normalizeLogText(message);
+		const markerPattern = /(\d+)→/g;
+		const markers = [...normalized.matchAll(markerPattern)];
+		if (markers.length === 0) return [];
+
+		return markers.map((marker, index) => {
+			const markerIndex = marker.index ?? 0;
+			const nextMarkerIndex = markers[index + 1]?.index ?? normalized.length;
+			const textStart = markerIndex + marker[0].length;
+			let text = normalized.slice(textStart, nextMarkerIndex);
+			if (text.startsWith(' ')) text = text.slice(1);
+			return { num: marker[1], text };
+		});
 	}
 
 	function getPreviewLines(message: string, maxLines: number = PREVIEW_LINE_LIMIT): string {
@@ -869,18 +890,36 @@
 					</div>
 				{:else if line.tag === 'RESULT'}
 					{@const style = getTagStyle(line.tag)}
-					{@const resultMatch = line.message.match(/^(\d+)→\s?(.*)/)}
-					{@const resultBody = resultMatch ? resultMatch[2] : line.message}
+					{@const resultSegments = parseResultSegments(line.message)}
+					{@const hasMultiResultSegments = resultSegments.length >= 2}
+					{@const resultMatch = resultSegments.length === 1 ? resultSegments[0] : null}
+					{@const resultBody = resultMatch ? resultMatch.text : line.message}
 					{@const resultExpanded = isExpanded(line.id)}
 					{@const resultCollapsed = shouldCollapseMessage(resultBody)}
 					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 opacity-60 {line.isStale ? 'opacity-20' : ''}">
-						{#if resultMatch}
+						{#if hasMultiResultSegments}
+							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
+							<span class="shrink-0 w-[42px] text-right {style.text} mr-1">
+								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
+							</span>
+							<div class="flex-1 min-w-0 bg-gray-900/60 rounded px-2 py-1 mt-0.5 font-mono">
+								{#each resultSegments as segment}
+									<div class="flex min-w-0 items-baseline leading-5">
+										<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{segment.num}</span>
+										<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
+										<span class="flex-1 min-w-0 min-h-[1rem] break-all whitespace-pre-wrap text-emerald-300/80 text-[11px]">
+											{getRenderableText(segment.text)}
+										</span>
+									</div>
+								{/each}
+							</div>
+						{:else if resultMatch}
 							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
 							<span class="shrink-0 w-[42px] text-right {style.text} mr-1">
 								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 							</span>
 							<span class="flex-1 min-w-0 flex items-baseline bg-gray-900/60 rounded px-1 font-mono">
-								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch[1]}</span>
+								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch.num}</span>
 								<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
 								<span class="flex-1 min-w-0 break-all whitespace-pre-wrap text-emerald-300/80 text-[11px]">
 									{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
