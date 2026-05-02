@@ -149,7 +149,7 @@
 
 <div class="space-y-6">
 	<!-- 헤더 -->
-	<PageHeader title="파일 정리기 대시보드" subtitle="PC 파일을 스캔하고 자동 분류합니다">
+	<PageHeader title="파일 정리기 대시보드">
 		<button
 			onclick={fetchStats}
 			class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent"

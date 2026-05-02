@@ -8,6 +8,6 @@
 </svelte:head>
 
 <div class="p-4 lg:p-6 space-y-4">
-	<PageHeader title="LLM 관리" subtitle="LLM 모델과 프롬프트를 관리합니다" />
+	<PageHeader title="LLM 관리" />
 	<LlmTab />
 </div>

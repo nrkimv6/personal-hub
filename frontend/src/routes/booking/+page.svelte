@@ -151,7 +151,7 @@
 </script>
 
 <div class="p-6">
-  <PageHeader title="예약 관리" subtitle="자동 예약 스케줄을 관리합니다">
+  <PageHeader title="예약 관리">
     <Button variant="secondary" size="sm" onclick={fetchSchedules}>
       새로고침
     </Button>

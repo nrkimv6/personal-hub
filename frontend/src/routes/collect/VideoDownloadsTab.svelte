@@ -275,7 +275,7 @@
   <!-- 헤더 -->
   <div class="flex items-center justify-between mb-6">
     <div>
-      <h1 class="text-2xl font-bold text-foreground">비디오 다운로드</h1>
+      <h2 class="text-xl font-semibold text-foreground">비디오 다운로드</h2>
       <p class="text-sm text-muted-foreground mt-1">YouTube, Vimeo, Instagram Reel 다운로드 큐</p>
     </div>
     <button

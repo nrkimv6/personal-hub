@@ -18,7 +18,7 @@
 
 <TabbedPageLayout
 	title="작업 스케줄러"
-	subtitle="스케줄 목록과 실행 이력을 같은 상단 계약으로 전환합니다."
+
 	primaryTabs={tabs}
 	bind:activePrimaryTab={activeTab}
 	primaryQueryParam="tab"

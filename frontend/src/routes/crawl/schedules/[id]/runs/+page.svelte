@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { crawlApi } from '$lib/api';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import type { CrawlSchedule, CrawlScheduleRun, CrawlRunStats, RunPost } from '$lib/types';
 
 	let schedule: CrawlSchedule | null = null;
@@ -183,20 +184,12 @@
 </script>
 
 <div class="p-6 max-w-7xl mx-auto">
-	<div class="mb-6 flex justify-between items-center">
-		<div>
-			<h2 class="text-2xl font-bold text-foreground">
-				{#if schedule}
-					{schedule.display_name || schedule.name}
-				{:else}
-					스케줄 #{scheduleId}
-				{/if}
-				실행 이력
-			</h2>
-			<p class="text-sm text-muted-foreground mt-1">스케줄 실행 기록</p>
-		</div>
+	<PageHeader
+		title={schedule ? `${schedule.display_name || schedule.name} 실행 이력` : `스케줄 #${scheduleId} 실행 이력`}
+		density="compact"
+	>
 		<a href="/crawl/schedules" class="btn btn-secondary btn-sm">스케줄 목록</a>
-	</div>
+	</PageHeader>
 
 	<!-- 통계 요약 -->
 	{#if stats}

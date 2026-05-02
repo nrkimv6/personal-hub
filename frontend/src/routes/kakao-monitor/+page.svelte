@@ -242,7 +242,7 @@
 </script>
 
 <div class="p-4 lg:p-6">
-<PageHeader title="카카오 모니터" subtitle="카카오톡 채팅방 자동 감시 및 게시물 수집" />
+<PageHeader title="카카오 모니터" />
 
 <!-- 탭 네비게이션 -->
 <TabNav tabs={tabList} bind:activeTab variant="primary" />

@@ -196,7 +196,7 @@
 </svelte:head>
 
 <div class="p-4 space-y-4">
-	<PageHeader title="문화/체육센터 강좌" subtitle="문화/체육센터 강좌 수강 신청을 모니터링합니다" />
+	<PageHeader title="문화/체육센터 강좌" />
 
 	{#if error}
 		<div class="mb-4 rounded-lg bg-error-light p-4 text-error">{error}</div>

@@ -100,7 +100,7 @@
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="분류 결과 리뷰" subtitle="파일 분류 결과를 검토하고 승인합니다">
+	<PageHeader title="분류 결과 리뷰">
 		<button
 			onclick={startRuleClassify}
 			class="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"

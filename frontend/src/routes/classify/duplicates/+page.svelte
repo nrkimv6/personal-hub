@@ -16,7 +16,7 @@
 
 <div class="space-y-4">
   <!-- 헤더 -->
-  <PageHeader title="중복/유사" subtitle="중복 이미지 제거와 유사 이미지 분류를 관리합니다" />
+  <PageHeader title="중복/유사" />
 
   <!-- 서브탭 -->
   <TabNav tabs={subTabs} bind:activeTab variant="secondary" queryParam="tab" />

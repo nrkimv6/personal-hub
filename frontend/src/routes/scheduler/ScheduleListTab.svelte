@@ -658,7 +658,7 @@
 
 <div>
 	<!-- 헤더 -->
-	<PageHeader title="스케줄 설정" subtitle="수집 스케줄을 관리합니다">
+	<PageHeader title="스케줄 설정">
 		<Button variant="secondary" onclick={previewLegacyRepair} disabled={loadingLegacyRepair}>
 			{loadingLegacyRepair ? '복구 조회 중...' : 'legacy 복구'}
 		</Button>

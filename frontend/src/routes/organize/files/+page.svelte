@@ -107,7 +107,7 @@
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="파일 목록" subtitle="분류된 파일 목록을 관리합니다" />
+	<PageHeader title="파일 목록" />
 
 	<!-- 필터 -->
 	<div class="flex flex-wrap gap-2">

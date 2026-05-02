@@ -630,7 +630,7 @@
 
 <div class="space-y-6">
 	<!-- 헤더 -->
-	<PageHeader title="스캐너" subtitle="폴더를 카테고리에 매핑하여 전체 파일의 ~70%를 자동 분류합니다.">
+	<PageHeader title="스캐너">
 		{#snippet children()}
 			<FolderSearch class="size-5 text-primary" />
 		{/snippet}

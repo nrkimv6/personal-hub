@@ -354,7 +354,7 @@
 
 <div>
 	<div class="mb-6 flex items-center justify-between">
-		<h1 class="text-2xl font-bold text-foreground">Sleep Now</h1>
+		<h2 class="text-xl font-semibold text-foreground">Sleep Now</h2>
 		<button
 			onclick={fetchData}
 			class="px-4 py-2 text-sm bg-muted hover:bg-secondary rounded-lg transition-colors"

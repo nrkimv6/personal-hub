@@ -110,7 +110,7 @@
 </script>
 
 <div class="space-y-6">
-	<PageHeader title="규칙 관리" subtitle="파일 분류 규칙을 관리합니다" />
+	<PageHeader title="규칙 관리" />
 
 	{#if message}
 		<div class="rounded-md bg-blue-500/10 px-3 py-2 text-sm text-blue-600">{message}</div>

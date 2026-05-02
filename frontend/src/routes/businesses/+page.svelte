@@ -355,7 +355,7 @@
 </script>
 
 <div class="p-6">
-  <PageHeader title="업체 관리" subtitle="모니터링 업체와 일정을 관리합니다">
+  <PageHeader title="업체 관리">
     <div class="flex gap-2">
       <Button variant="secondary" size="sm" onclick={fetchBusinesses}>
         새로고침

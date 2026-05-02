@@ -368,7 +368,7 @@
 <div class="p-6">
   <div class="max-w-7xl mx-auto">
     <!-- 헤더 -->
-    <PageHeader title="계정 관리" subtitle="네이버 계정별 브라우저 프로필 관리">
+    <PageHeader title="계정 관리">
       <button
         onclick={openCreateModal}
         class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"

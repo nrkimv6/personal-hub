@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+
+	const crawlTabs = [
+		{ id: 'history', label: '이력', href: '/crawl', exact: true },
+		{ id: 'requests', label: '단건 요청', href: '/crawl/requests' },
+		{ id: 'schedules', label: '스케줄', href: '/crawl/schedules' }
+	];
 	import { crawlApi } from '$lib/api';
 	import type { CrawlSchedule, CrawlRunStats } from '$lib/types';
 
@@ -94,7 +101,8 @@
 </script>
 
 <div class="p-6 max-w-7xl mx-auto">
-	<PageHeader title="크롤링 스케줄" subtitle="정기 크롤링 스케줄 관리" />
+	<PageHeader title="크롤링 스케줄" />
+	<TabNav tabs={crawlTabs} variant="primary" urlBased size="compact" />
 
 	<!-- 필터 -->
 	<div class="card mb-6">

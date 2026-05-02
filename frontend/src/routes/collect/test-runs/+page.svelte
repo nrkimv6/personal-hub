@@ -143,7 +143,7 @@
 </script>
 
 <div>
-	<PageHeader title="테스트 실행 이력" subtitle="pytest 자동 실행 결과를 확인합니다">
+	<PageHeader title="테스트 실행 이력">
 		<div class="flex items-center gap-2">
 			<select
 				bind:value={filterStatus}

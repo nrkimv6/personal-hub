@@ -148,7 +148,7 @@
 <div class="p-6 max-w-7xl mx-auto">
   <!-- 헤더 -->
   <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">Git 레포지토리 관리</h1>
+    <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100">Git 레포지토리 관리</h2>
     <div class="flex gap-2">
       <button
         class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-200 disabled:opacity-50"

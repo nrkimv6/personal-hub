@@ -390,7 +390,7 @@
 </svelte:head>
 
 <!-- 헤더 -->
-<PageHeader title="카테고리" subtitle="멀티레벨 카테고리 트리를 생성하고 편집합니다.">
+<PageHeader title="카테고리">
 	{#snippet children()}
 		<FolderTree class="size-5 text-primary" />
 	{/snippet}

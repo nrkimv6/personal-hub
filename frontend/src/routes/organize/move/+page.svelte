@@ -86,7 +86,7 @@
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="파일 이동" subtitle="분류된 파일을 지정 경로로 이동합니다">
+	<PageHeader title="파일 이동">
 		{#if moveStatus}
 			<span class="text-sm text-muted-foreground">
 				이동됨: {moveStatus.moved}개 | 대기: {moveStatus.pending_move}개

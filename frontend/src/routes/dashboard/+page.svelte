@@ -60,7 +60,7 @@
 
 <div class="p-6 space-y-6">
   <!-- 헤더 -->
-  <PageHeader title="통합 대시보드" subtitle="서비스 상태와 모니터링 현황을 한눈에 확인합니다">
+  <PageHeader title="통합 대시보드">
     <div class="flex items-center gap-4">
       {#if lastUpdated}
         <span class="text-sm text-muted-foreground">

@@ -232,10 +232,7 @@
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="옵시디언 분석기" subtitle="옵시디언 파일을 탐색하고 분류합니다" />
-	{#if apiMessage}
-		<div class="rounded-md border border-warning/30 bg-warning-light p-3 text-sm text-warning-foreground">{apiMessage}</div>
-	{/if}
+	<PageHeader title="옵시디언 분석기" />
 
 	<TabNav tabs={obsidianTabs} bind:activeTab variant="secondary" onTabChange={(tabId) => onTabChange(tabId as TabId)} />
 

@@ -20,7 +20,7 @@
 
 <div class="space-y-4">
   <!-- 헤더 -->
-  <PageHeader title="이미지" subtitle="이미지를 갤러리, 클러스터, 검토, 이력으로 관리합니다" />
+  <PageHeader title="이미지" />
 
   <!-- 서브탭 -->
   <TabNav tabs={subTabs} bind:activeTab variant="secondary" queryParam="tab" />
