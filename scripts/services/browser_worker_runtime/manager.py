@@ -1,6 +1,7 @@
 """Browser Workers runtime manager.
 
 Usage:
+  Service commands must be run from the root checkout, not .worktrees/*.
   python scripts/services/browser_workers.py start
   python scripts/services/browser_workers.py stop
   python scripts/services/browser_workers.py restart
@@ -32,6 +33,7 @@ from scripts.services.browser_worker_runtime.runtime import (
     RESET,
     YELLOW,
     cprint,
+    assert_repo_root_checkout,
     _kill_by_cmdline,
 )
 from scripts.services.browser_worker_runtime.frontend_actions import (
@@ -83,6 +85,7 @@ from scripts.services.service_utils import (
 
 class BrowserWorkerManager:
     def __init__(self):
+        assert_repo_root_checkout()
         self.pid_dir = PROJECT_ROOT / ".pids"
         self.log_dir = PROJECT_ROOT / "logs" / "admin"
         self.scripts_dir = PROJECT_ROOT / "scripts"

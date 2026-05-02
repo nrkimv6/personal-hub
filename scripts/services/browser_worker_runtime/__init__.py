@@ -9,6 +9,8 @@ from .runtime import (
     RED,
     RESET,
     YELLOW,
+    RepoCheckoutError,
+    assert_repo_root_checkout,
     cprint,
     _kill_by_cmdline,
 )

@@ -1,4 +1,7 @@
-"""Facade for browser worker management CLI."""
+"""Facade for browser worker management CLI.
+
+Service commands must be run from the root checkout, not .worktrees/*.
+"""
 
 from __future__ import annotations
 

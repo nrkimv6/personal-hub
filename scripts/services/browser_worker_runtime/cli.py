@@ -5,6 +5,11 @@ from __future__ import annotations
 import argparse
 import sys
 
+from scripts.services.browser_worker_runtime.runtime import (
+    RepoCheckoutError,
+    assert_repo_root_checkout,
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Browser Workers Management")
@@ -53,6 +58,12 @@ def main(manager_cls, argv: list[str] | None = None) -> int:
         parser.error("--public can only be used with restart-frontend")
     if args.action == "restart-infra" and not args.target:
         parser.error("restart-infra requires target argument")
+
+    try:
+        assert_repo_root_checkout()
+    except RepoCheckoutError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     mgr = manager_cls()
     action_map = {
