@@ -17,24 +17,15 @@ from app.shared.notification.kakao_queue import (
     KakaoNotificationQueue,
     get_kakao_backlog_alert_key,
 )
+from app.shared.process.session import is_session_0 as _detect_session_0
 from app.modules.naver_booking.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
 from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_naver_page_info
 from app.utils.parsers import extract_date_from_url
 from app.core.database import SessionLocal, get_db
 
 def _is_session_0() -> bool:
-    """Windows Session 0 (NSSM 서비스) 환경인지 감지합니다.
-    Session 0에서는 네트워크/UI 접근이 제한되어 Telegram/Desktop 알림이 hang합니다."""
-    try:
-        import ctypes
-        session_id = ctypes.c_ulong()
-        ctypes.windll.kernel32.ProcessIdToSessionId(
-            ctypes.windll.kernel32.GetCurrentProcessId(),
-            ctypes.byref(session_id)
-        )
-        return session_id.value == 0
-    except Exception:
-        return False
+    """Windows Session 0 (NSSM 서비스) 환경인지 감지합니다."""
+    return _detect_session_0()
 
 _IN_SESSION_0 = _is_session_0()
 

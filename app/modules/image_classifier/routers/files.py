@@ -21,6 +21,7 @@ from ..config import settings
 from ..workers.thumbnail import get_thumbnail_path
 from ..workers.feedback import FeedbackLearner
 from ..utils.pagination import validate_sort, apply_pagination
+from app.shared.process.relay import OpenAppRelayError, relay_open_app
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -435,8 +436,6 @@ async def open_local_file_or_folder(
     db: Session = Depends(get_db)
 ):
     """로컬 파일/폴더를 기본 뷰어/탐색기로 열기 (개발 환경 전용)"""
-    import os
-
     # file_id로 경로 조회
     if request.file_id is not None:
         file_query = text("SELECT file_path FROM file_classifications WHERE id = :file_id")
@@ -455,12 +454,13 @@ async def open_local_file_or_folder(
         raise HTTPException(status_code=404, detail=f"경로를 찾을 수 없습니다: {target}")
 
     try:
-        import subprocess
         if target_path.is_dir():
-            subprocess.Popen(['explorer', str(target_path)])
+            await relay_open_app("explorer", [str(target_path)])
         else:
-            subprocess.Popen(['explorer', '/select,', str(target_path)])
+            await relay_open_app("explorer", ["/select,", str(target_path)])
         return {"status": "ok", "opened": str(target_path)}
+    except OpenAppRelayError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"열기 실패: {e}")
 
@@ -482,7 +482,6 @@ async def open_folder_in_explorer(
     - 보안: SCAN_ROOT_FOLDERS 내 경로만 허용, 경로 트래버설 차단
     """
     import os
-    import subprocess
 
     # 파일 경로 조회
     file_query = text("SELECT file_path FROM file_classifications WHERE id = :file_id")
@@ -513,7 +512,9 @@ async def open_folder_in_explorer(
 
     try:
         # Windows: explorer /select, "파일경로"
-        subprocess.Popen(['explorer', '/select,', file_path])
+        await relay_open_app("explorer", ["/select,", file_path])
         return {"status": "ok", "file_path": file_path}
+    except OpenAppRelayError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"탐색기 열기 실패: {e}")

@@ -33,6 +33,7 @@ from app.modules.file_search.schemas import (
 from app.modules.file_search.services.everything import EverythingService
 from app.modules.file_search.services.presets import PRESETS
 from app.modules.file_search.services.ripgrep import RipgrepService
+from app.shared.process.session import is_session_0
 
 logger = logging.getLogger("file_search.search_service")
 
@@ -452,6 +453,9 @@ class SearchService:
 
     def open_file(self, file_path: str, line_number: Optional[int] = None) -> None:
         """파일을 VSCode 또는 기본 프로그램으로 열기."""
+        if is_session_0():
+            raise RuntimeError("Session 0에서는 파일 열기를 직접 실행할 수 없습니다. Redis file_search:open 큐를 사용하세요.")
+
         try:
             if line_number:
                 subprocess.Popen(["code", "--goto", f"{file_path}:{line_number}"])
