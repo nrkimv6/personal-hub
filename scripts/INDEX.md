@@ -207,9 +207,9 @@
 
 ## cleanup/
 
-> 현재 위치: `scripts/cleanup/` (`kill-orphan-procs.ps1` 제외)
+> 현재 위치: `scripts/cleanup/`
 > 위험도: **🟡 중** — 수동 실행 + 일부 daily_maintenance 연동
-> 제외: `kill-orphan-procs.ps1` — `.claude/skills/implement/SKILL.md`, `.claude/skills/done/SKILL.md`, `.claude/agents/auto-impl.md`, `.claude/agents/auto-done.md`에서 절대경로 `scripts/kill-orphan-procs.ps1` 참조. monitor-page에서 `.claude/*` 직접 수정 금지 규칙에 따라 wtools 스킬 업데이트 선행 필요. 현재 `scripts/` 루트 유지. (추가: `scripts/port-utils.ps1` 포함, 포트 정리 유틸)
+> 참고: 고아 pytest 프로세스 정리는 Python `OrphanDetector`가 담당한다. 별도 PowerShell 정리 스크립트는 유지하지 않는다.
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
@@ -221,7 +221,6 @@
 | ✅ | `clear_death_log.py` | death log 초기화 |
 | ✅ | `kill_all.ps1` | 전체 프로세스 강제 종료 (start/stop 이후 정리용) |
 | ✅ | `port-utils.ps1` | 좀비 포트 탐지/정리 공용 모듈 |
-| ⏳ | `kill-orphan-procs.ps1` | 고아 pytest 프로세스 정리 (`/implement` 선제 정리) — wtools 스킬 경로 수정 후 이관 |
 
 ---
 
@@ -419,7 +418,6 @@
 |:-:|---|---|
 | ⏳ | `dumptruck_run.ps1` | → `scripts/dumptruck/` 예정 |
 | ⏳ | `dumptruck_builder.py` | → `scripts/dumptruck/` 예정 |
-| ⏳ | `kill-orphan-procs.ps1` | → `scripts/cleanup/` 예정 (wtools kill-orphan 스킬 참조) |
 
 ---
 
