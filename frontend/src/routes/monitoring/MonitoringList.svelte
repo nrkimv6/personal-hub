@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { UnifiedMonitorItem } from '$lib/types/monitoring';
 	import { MONITOR_TYPE_META } from '$lib/types/monitoring';
+	import { iconMap, type IconName } from '$lib/iconMap';
 	import { goto } from '$app/navigation';
 
 	interface Props {
@@ -42,6 +43,7 @@
 		<tbody class="divide-y divide-border">
 			{#each items as item (item.id)}
 				{@const meta = MONITOR_TYPE_META[item.type]}
+				{@const TypeIcon = iconMap[meta.icon as IconName]}
 				{@const statusInfo = STATUS_LABELS[item.status] ?? STATUS_LABELS.idle}
 				<tr
 					class="cursor-pointer transition-colors hover:bg-muted/30"
@@ -50,6 +52,7 @@
 					<td class="px-4 py-3 font-medium">{item.name}</td>
 					<td class="px-4 py-3">
 						<span class="inline-flex items-center gap-1 text-xs {meta.color}">
+							<svelte:component this={TypeIcon} size={14} class={meta.color} />
 							{meta.label}
 						</span>
 					</td>
