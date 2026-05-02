@@ -145,9 +145,9 @@
 								{reportTypeNames[report.report_type] || report.report_type}
 							</span>
 						</div>
-						<h1 class="text-2xl font-bold text-neutral-800 dark:text-neutral-100">
+						<h2 class="text-2xl font-bold text-neutral-800 dark:text-neutral-100">
 							{report.title || '제목 없음'}
-						</h1>
+						</h2>
 						{#if report.summary}
 							<p class="text-sm text-neutral-600 dark:text-neutral-400 mt-2">
 								{report.summary}

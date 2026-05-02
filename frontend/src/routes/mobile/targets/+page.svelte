@@ -72,7 +72,7 @@
 
 <div class="container mx-auto p-4">
 	<div class="flex flex-wrap justify-between items-center mb-6 gap-2">
-		<h1 class="text-2xl font-bold">모바일 크롤링 대상</h1>
+		<h2 class="text-xl font-semibold">모바일 크롤링 대상</h2>
 		<button
 			class="btn btn-primary"
 			onclick={() => goto("/mobile/targets/new")}

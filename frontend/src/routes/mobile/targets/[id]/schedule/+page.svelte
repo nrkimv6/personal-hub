@@ -159,7 +159,7 @@
 				</ul>
 			</div>
 
-			<h1 class="text-2xl font-bold mt-2">{target.name} - 스케줄 관리</h1>
+			<h2 class="text-xl font-semibold mt-2">{target.name} - 스케줄 관리</h2>
 			<p class="text-gray-600 mt-1">주기적 크롤링 스케줄을 설정합니다.</p>
 		</div>
 

@@ -90,9 +90,9 @@
 				class="flex flex-col sm:flex-row justify-between items-start gap-4"
 			>
 				<div class="w-full min-w-0">
-					<h1 class="text-2xl font-bold break-words">
+					<h2 class="text-xl font-semibold break-words">
 						{target.name}
-					</h1>
+					</h2>
 					<p class="text-gray-600 mt-1 break-all">{target.url}</p>
 				</div>
 				<div class="flex gap-2 flex-wrap w-full sm:w-auto mt-4 sm:mt-0">

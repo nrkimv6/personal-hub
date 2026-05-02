@@ -203,7 +203,7 @@
 <div class="min-h-screen bg-gray-950 text-gray-100 flex flex-col items-center justify-start py-12 px-4">
 	<div class="w-full max-w-6xl">
 		<div class="mb-8 text-center">
-			<h1 class="text-2xl font-bold text-white mb-1">🛠 긴급 복구</h1>
+			<h2 class="text-2xl font-bold text-white mb-1">🛠 긴급 복구</h2>
 			<p class="text-gray-400 text-sm">6101에서 process-watch 폴백 조회/종료를 수행합니다.</p>
 		</div>
 

@@ -108,7 +108,7 @@
 
 <div class="container mx-auto p-4">
 	<div class="mb-6">
-		<h1 class="text-2xl font-bold">실행 이력</h1>
+		<h2 class="text-xl font-semibold">실행 이력</h2>
 		<p class="text-gray-600 mt-1">모바일 크롤링 실행 이력을 조회합니다.</p>
 	</div>
 
