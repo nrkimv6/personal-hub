@@ -4,7 +4,7 @@
 
 BeforeAll {
     $RepoRoot = Split-Path $PSScriptRoot -Parent
-    $LogsScript = Join-Path $RepoRoot "scripts\logs.ps1"
+    $LogsScript = Join-Path $RepoRoot "scripts\logs\logs.ps1"
 
     # Helper: Replicate $useRedis initialization logic (lines 440-442 of logs.ps1)
     function Invoke-UseRedisInit {
@@ -95,6 +95,21 @@ BeforeAll {
         }
 
         return $null
+    }
+
+    function Invoke-StreamMissWarning {
+        param(
+            [hashtable]$Seen,
+            [string]$Key,
+            [string]$PlanLogFileName,
+            [string]$RunnerId = ""
+        )
+        if (-not $Key) { $Key = "PS:unknown" }
+        if ($Seen.ContainsKey($Key)) { return $null }
+        $Seen[$Key] = $true
+        $runnerHint = if ($RunnerId) { " runner=$RunnerId" } else { "" }
+        $fileHint = if ($PlanLogFileName) { " planLog=$PlanLogFileName" } else { "" }
+        return "[$Key] [WARN] matching plan-runner stream log not found.$runnerHint$fileHint"
     }
 }
 
@@ -229,9 +244,26 @@ Describe "T2: Redis Fallback Mode" {
             $result = Invoke-MatchStreamFile -LogDir $tmpDir2 -PlanLogFileName "plan-runner-7bdb249d-20260403-001108.log" -RunnerId "7bdb249d"
             $result | Should -BeNullOrEmpty
         }
+
+        It "Returns null for non-standard plan-runner names without selecting global latest stream" {
+            $result = Invoke-MatchStreamFile -LogDir $tmpDir2 -PlanLogFileName "plan-runner-x-token.log" -RunnerId ""
+            $result | Should -BeNullOrEmpty
+        }
     }
 
-    Context "6. logs.ps1 script syntax" {
+    Context "6. Stream mismatch diagnostics" {
+        It "Emits one warning per PS key when stream matching fails" {
+            $seen = @{}
+            $first = Invoke-StreamMissWarning -Seen $seen -Key "PS:plan#7bdb" -PlanLogFileName "plan-runner-x-token.log" -RunnerId "7bdb249d"
+            $second = Invoke-StreamMissWarning -Seen $seen -Key "PS:plan#7bdb" -PlanLogFileName "plan-runner-x-token.log" -RunnerId "7bdb249d"
+
+            $first | Should -BeLike "*matching plan-runner stream log not found*"
+            $first | Should -BeLike "*runner=7bdb249d*"
+            $second | Should -BeNullOrEmpty
+        }
+    }
+
+    Context "7. logs.ps1 script syntax" {
         It "logs.ps1 file exists" {
             $LogsScript | Should -Exist
         }

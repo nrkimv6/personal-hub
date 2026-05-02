@@ -425,10 +425,31 @@ function Find-MatchingPlanRunnerStreamLog {
     return $null
 }
 
+$script:PlanRunnerStreamMissWarningKeys = @{}
+
+function Write-PlanRunnerStreamMissWarning {
+    param(
+        [string]$Key,
+        [string]$PlanLogFileName,
+        [string]$RunnerId = ""
+    )
+    if (-not $Key) { $Key = "PS:unknown" }
+    if ($script:PlanRunnerStreamMissWarningKeys.ContainsKey($Key)) { return }
+    $script:PlanRunnerStreamMissWarningKeys[$Key] = $true
+
+    $runnerHint = if ($RunnerId) { " runner=$RunnerId" } else { "" }
+    $fileHint = if ($PlanLogFileName) { " planLog=$PlanLogFileName" } else { "" }
+    Write-Host "[$Key] [WARN] matching plan-runner stream log not found.$runnerHint$fileHint" -ForegroundColor Yellow
+}
+
 if ($planRunnerLogFile) {
     $planRunnerStreamLogFile = Find-MatchingPlanRunnerStreamLog `
         -LogDir $planRunnerLogDir `
         -PlanLogFileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+    if (-not $planRunnerStreamLogFile) {
+        $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+        Write-PlanRunnerStreamMissWarning -Key "PS:$prFileId" -PlanLogFileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+    }
 }
 
 # Redis에서 활성 plan-runner 목록 조회
@@ -592,6 +613,11 @@ function Show-TodayPlanRunnerLogs {
             -RunnerId $runnerHint
         if ($streamPath) {
             Show-LogContent -FilePath $streamPath -Label "PS:$prFileId" -Color DarkGray -TailLines ([Math]::Min($TailLines, 20))
+        } else {
+            Write-PlanRunnerStreamMissWarning `
+                -Key "PS:$prFileId" `
+                -PlanLogFileName $lf.Name `
+                -RunnerId $runnerHint
         }
     }
 }
@@ -771,6 +797,11 @@ function Start-CombinedLogTail {
                 $logConfig[$prKey] = @{ Path = $runner.LogPath; Color = "White";    Tail = 10 }
                 if ($psPath) {
                     $logConfig[$psKey] = @{ Path = $psPath; Color = "DarkGray"; Tail = 5 }
+                } elseif ($runner.LogPath) {
+                    Write-PlanRunnerStreamMissWarning `
+                        -Key $psKey `
+                        -PlanLogFileName ([System.IO.Path]::GetFileName($runner.LogPath)) `
+                        -RunnerId $runner.RunnerId
                 }
             }
         } else {
@@ -963,12 +994,19 @@ function Start-CombinedLogTail {
                         $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
                         $activeKeys[$prKey] = $true
                         $activeKeys[$psKey] = $true
+                        $runnerStreamPath = $runner.StreamPath
+                        if (-not $runnerStreamPath -and $runner.LogPath) {
+                            $runnerStreamPath = Find-MatchingPlanRunnerStreamLog `
+                                -LogDir $planRunnerLogDir `
+                                -PlanLogFileName ([System.IO.Path]::GetFileName($runner.LogPath)) `
+                                -RunnerId $runner.RunnerId
+                        }
 
                         if (-not $logConfig.Contains($prKey)) {
                             # 새 runner 감지
                             Write-Host "[$prKey] === New runner detected: $($runner.RunnerId) ===" -ForegroundColor Green
                             $logConfig[$prKey] = @{ Path = $runner.LogPath;    Color = "White";    Tail = 10 }
-                            $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
+                            $logConfig[$psKey] = @{ Path = $runnerStreamPath; Color = "DarkGray"; Tail = 5  }
                             if ($runner.LogPath) {
                                 # LogPath가 유효한 경우에만 $logFiles에 등록 (null이면 다음 refresh에서 재시도)
                                 $logFiles[$prKey]      = $runner.LogPath
@@ -987,13 +1025,18 @@ function Start-CombinedLogTail {
                             $filePositions[$prKey] = 0
                         }
                         # StreamPath 지연 등록: 초기에 null이었거나 파일 미존재였지만 이후 설정된 경우
-                        if ($runner.StreamPath -and (-not $logFiles.ContainsKey($psKey) -or ($logFiles.ContainsKey($psKey) -and $logFiles[$psKey] -and -not (Test-Path $logFiles[$psKey])))) {
-                            Write-Host "[$psKey] === Stream log detected: $([System.IO.Path]::GetFileName($runner.StreamPath)) ===" -ForegroundColor Green
-                            $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
-                            $logFiles[$psKey]      = $runner.StreamPath
-                            $logFileNames[$psKey]  = [System.IO.Path]::GetFileName($runner.StreamPath)
+                        if ($runnerStreamPath -and (-not $logFiles.ContainsKey($psKey) -or ($logFiles.ContainsKey($psKey) -and $logFiles[$psKey] -and -not (Test-Path $logFiles[$psKey])))) {
+                            Write-Host "[$psKey] === Stream log detected: $([System.IO.Path]::GetFileName($runnerStreamPath)) ===" -ForegroundColor Green
+                            $logConfig[$psKey] = @{ Path = $runnerStreamPath; Color = "DarkGray"; Tail = 5  }
+                            $logFiles[$psKey]      = $runnerStreamPath
+                            $logFileNames[$psKey]  = [System.IO.Path]::GetFileName($runnerStreamPath)
                             $logColors[$psKey]     = "DarkGray"
                             $filePositions[$psKey] = 0
+                        } elseif ($runner.LogPath) {
+                            Write-PlanRunnerStreamMissWarning `
+                                -Key $psKey `
+                                -PlanLogFileName ([System.IO.Path]::GetFileName($runner.LogPath)) `
+                                -RunnerId $runner.RunnerId
                         }
                     }
                     # 종료된 runner 정리 (30초 grace period — 마지막 버퍼 flush 대기)
@@ -1066,6 +1109,11 @@ function Start-CombinedLogTail {
                                 $logFileNames[$newPsKey]  = [System.IO.Path]::GetFileName($matchedStreamPath)
                                 $logColors[$newPsKey]     = "DarkGray"
                                 $filePositions[$newPsKey] = 0
+                            } else {
+                                Write-PlanRunnerStreamMissWarning `
+                                    -Key $newPsKey `
+                                    -PlanLogFileName $latest.Name `
+                                    -RunnerId $runnerHint
                             }
                         }
                     }

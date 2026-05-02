@@ -44,8 +44,9 @@ class LogFileResolver:
     def find_current_log(self, runner_id: str) -> Optional[Path]:
         """특정 runner의 로그 파일 (Redis에서 조회)
 
-        stream_log_path와 log_file_path 둘 다 있으면 더 많은 내용(크기)을 가진 파일 반환.
-        stream 스텁이 START 마커만 있는 경우 log_file_path가 더 크므로 실제 진단 로그 반환.
+        stream_log_path와 log_file_path 둘 다 있으면 stream 로그를 우선한다.
+        runner 탭의 실시간/후속 조회 계약은 PS stream 로그 기준이며, 작은 START marker만 있어도
+        일반 plan log로 바꾸면 runner/log 매핑이 다시 어긋난다.
         """
         try:
             stream_path_str = self._redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
@@ -64,10 +65,7 @@ class LogFileResolver:
                 if p.exists():
                     log_path = p
 
-            # 둘 다 있으면 더 큰 파일 반환 (진단 내용이 더 많음)
             if stream_path and log_path:
-                if log_path.stat().st_size > stream_path.stat().st_size:
-                    return log_path
                 return stream_path
 
             return stream_path or log_path
