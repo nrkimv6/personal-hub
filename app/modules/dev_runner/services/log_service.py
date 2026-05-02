@@ -91,6 +91,16 @@ FILE_POLL_TIMEOUT = 5.0  # pub/sub 미수신 N초 후 파일 폴링 전환 (테�
 _ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
 
 
+def _resolve_history_file_scan_limit() -> int:
+    try:
+        return max(1, int(os.environ.get("DEV_RUNNER_HISTORY_FILE_SCAN_LIMIT", "500")))
+    except (TypeError, ValueError):
+        return 500
+
+
+HISTORY_FILE_SCAN_LIMIT = _resolve_history_file_scan_limit()
+
+
 class LogService:
     """로그 스트리밍 서비스 - Redis Pub/Sub 기반"""
 
@@ -563,11 +573,13 @@ class LogService:
         if log_dir.exists():
             # stream log 파일 패턴: plan-runner-stream-{runner_id}-YYYYMMDD*.log
             pattern = str(log_dir / "plan-runner-stream-*.log")
+            raw_candidates: list[tuple[str, Path, str]] = []
+            candidates: list[tuple[float, Path, str]] = []
             for log_path in glob.glob(pattern):
                 path = Path(log_path)
                 fname = path.name
                 # runner_id 추출: 신규 형식 plan-runner-stream-{8hex}-*.log
-                m = re.match(r"plan-runner-stream-([0-9a-f]{8})-", fname)
+                m = re.match(r"plan-runner-stream-([0-9a-f]{8})-(.+)\.log$", fname)
                 if not m:
                     # 레거시 형식 plan-runner-stream-{timestamp}.log
                     m2 = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", fname)
@@ -575,9 +587,28 @@ class LogService:
                         continue
                     ts = m2.group(1)
                     runner_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
-                    self._legacy_map[runner_id] = path
+                    sort_token = ts
                 else:
                     runner_id = m.group(1)
+                    sort_token = m.group(2)
+                raw_candidates.append((sort_token, path, runner_id))
+
+            scan_limit = max(HISTORY_FILE_SCAN_LIMIT, offset + limit)
+            if len(raw_candidates) > scan_limit:
+                raw_candidates.sort(key=lambda item: item[0], reverse=True)
+                raw_candidates = raw_candidates[:scan_limit]
+
+            for _sort_token, path, runner_id in raw_candidates:
+                try:
+                    mtime = path.stat().st_mtime
+                except OSError:
+                    continue
+                candidates.append((mtime, path, runner_id))
+
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            for mtime, path, runner_id in candidates[:scan_limit]:
+                if runner_id.startswith("lg-"):
+                    self._legacy_map[runner_id] = path
 
                 # 이미 Redis에서 수집한 running runner면 log_file만 보정
                 if runner_id in runs:
@@ -587,11 +618,7 @@ class LogService:
                     continue
 
                 # 파일 수정 시간을 start_time 대용으로 사용
-                try:
-                    mtime = path.stat().st_mtime
-                    start_time = datetime.fromtimestamp(mtime)
-                except OSError:
-                    start_time = None
+                start_time = datetime.fromtimestamp(mtime)
 
                 file_meta = self._parse_meta_from_log(str(path))
                 file_trigger = file_meta.get("trigger")
