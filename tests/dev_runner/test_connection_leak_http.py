@@ -1,4 +1,8 @@
-"""Redis 연결 누수 HTTP 통합 테스트 — TestClient 기반 SSE + diagnostics 검증."""
+"""Redis 연결 누수 HTTP 통합 테스트 — TestClient 기반 SSE + diagnostics 검증.
+
+[MUTATING] restart-frontend tests in this file restart live frontend services.
+Run them sequentially; concurrent restart validation can trip the frontend lock.
+"""
 import time
 import sys
 import subprocess
@@ -7,6 +11,8 @@ from pathlib import Path
 import pytest
 import redis
 import requests
+
+from tests.helpers.restart_frontend_validation import restart_frontend_failure_context
 
 
 ADMIN_BASE = "http://localhost:8001"
@@ -33,14 +39,6 @@ pytestmark = pytest.mark.skipif(
     not _is_http_env_available(),
     reason="admin api 또는 Redis가 실행 중이 아닙니다.",
 )
-
-
-def _restart_failure_context(result: subprocess.CompletedProcess[str]) -> str:
-    return (
-        f"rc={result.returncode}\n"
-        f"[stdout]\n{(result.stdout or '').strip() or '(no output)'}\n"
-        f"[stderr]\n{(result.stderr or '').strip() or '(no output)'}"
-    )
 
 
 def _run_restart_frontend(*extra_args: str) -> subprocess.CompletedProcess[str]:
@@ -191,7 +189,7 @@ def test_http_frontend_restart_frontend_admin_keeps_api_alive():
     assert before.status_code == 200
 
     result = _run_restart_frontend()
-    assert result.returncode == 0, _restart_failure_context(result)
+    assert result.returncode == 0, restart_frontend_failure_context(result)
     _wait_until_http_ok(
         f"{ADMIN_BASE}/api/v1/dev-runner/runners",
         timeout_seconds=20.0,
@@ -205,7 +203,7 @@ def test_http_frontend_restart_frontend_public_keeps_api_alive():
     assert before.status_code == 200
 
     result = _run_restart_frontend("--public")
-    assert result.returncode == 0, _restart_failure_context(result)
+    assert result.returncode == 0, restart_frontend_failure_context(result)
     wait_until_public_preview_ready()
     _wait_until_http_ok(
         f"{ADMIN_BASE}/api/v1/dev-runner/runners",

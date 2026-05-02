@@ -2,6 +2,9 @@
 프론트엔드 네비게이션 E2E 테스트
 
 주요 페이지 로드 및 기본 네비게이션을 테스트합니다.
+
+[MUTATING] restart-frontend tests in this file restart live frontend services.
+Run them sequentially; concurrent restart validation can trip the frontend lock.
 """
 
 import pytest
@@ -13,6 +16,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from playwright.sync_api import Page, expect
+from tests.helpers.restart_frontend_validation import restart_frontend_failure_context
 
 pytestmark = pytest.mark.e2e
 
@@ -56,14 +60,6 @@ def _wait_for_api_available(api_url: str, timeout_seconds: float = 20.0) -> None
         time.sleep(0.5)
 
     pytest.fail(f"API did not recover after frontend restart: {ready_url} ({last_error})")
-
-
-def _restart_failure_context(result: subprocess.CompletedProcess) -> str:
-    return (
-        f"rc={result.returncode}\n"
-        f"[stdout]\n{(result.stdout or '').strip() or '(no output)'}\n"
-        f"[stderr]\n{(result.stderr or '').strip() or '(no output)'}"
-    )
 
 
 def _is_frontend_error_title(title: str) -> bool:
@@ -334,7 +330,7 @@ class TestSidebar:
         """CLI restart-frontend 직후 /dashboard가 정상 로드되어야 한다."""
         _skip_admin_mode_if_public(system_mode)
         result = _ensure_recent_admin_restart(frontend_url, api_url)
-        assert result.returncode == 0, _restart_failure_context(result)
+        assert result.returncode == 0, restart_frontend_failure_context(result)
 
         _goto_stable_frontend_page(page, f"{frontend_url}/dashboard")
         _skip_if_frontend_error_title(page)
@@ -347,7 +343,7 @@ class TestSidebar:
         """CLI restart-frontend 직후 사이드바 내비게이션이 동작해야 한다."""
         _skip_admin_mode_if_public(system_mode)
         result = _ensure_recent_admin_restart(frontend_url, api_url)
-        assert result.returncode == 0, _restart_failure_context(result)
+        assert result.returncode == 0, restart_frontend_failure_context(result)
 
         page.set_viewport_size({"width": 1280, "height": 720})
         _goto_stable_frontend_page(page, f"{frontend_url}/dashboard")
@@ -365,7 +361,7 @@ class TestSidebar:
     ):
         """CLI restart-frontend --public 직후 public dashboard가 정상 로드되어야 한다."""
         result = _ensure_recent_public_restart(public_frontend_url, api_url)
-        assert result.returncode == 0, _restart_failure_context(result)
+        assert result.returncode == 0, restart_frontend_failure_context(result)
 
         _goto_stable_frontend_page(page, f"{public_frontend_url}/dashboard")
         _skip_if_frontend_error_title(page)

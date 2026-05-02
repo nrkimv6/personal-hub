@@ -3,6 +3,9 @@
 이 파일의 테스트는 실제 서버가 기동된 상태에서만 의미 있다.
 실서버 미기동 시 pytest.skip()으로 자동 건너뜀.
 
+[MUTATING] restart-frontend tests in this file restart live frontend services.
+Run them sequentially; concurrent restart validation can trip the frontend lock.
+
 사용법:
     pytest -m http_live -v          # 실서버 기동 상태에서 실행
     pytest -m "not http_live" -v    # 기본 실행 (이 파일 제외)
@@ -16,6 +19,7 @@ import pytest
 import httpx
 
 from app.core.runtime_fingerprint import build_runtime_fingerprint_snapshot
+from tests.helpers.restart_frontend_validation import restart_frontend_failure_context
 
 pytestmark = pytest.mark.http_live
 
@@ -23,14 +27,6 @@ BASE_URL = "http://localhost:8001"
 PUBLIC_FRONTEND_URL = "http://127.0.0.2:6100"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "services" / "browser_workers.py"
-
-
-def _restart_failure_context(result: subprocess.CompletedProcess[str]) -> str:
-    return (
-        f"rc={result.returncode}\n"
-        f"[stdout]\n{(result.stdout or '').strip() or '(no output)'}\n"
-        f"[stderr]\n{(result.stderr or '').strip() or '(no output)'}"
-    )
 
 
 def _run_restart_frontend(*extra_args: str) -> subprocess.CompletedProcess[str]:
@@ -108,13 +104,13 @@ def test_live_runtime_fingerprint_endpoint():
 def test_live_restart_frontend_admin_returns_exit_zero_and_recovers_liveness():
     """R: admin restart live smoke는 exit 0과 liveness 회복을 함께 보장해야 한다."""
     result = _run_restart_frontend()
-    assert result.returncode == 0, _restart_failure_context(result)
+    assert result.returncode == 0, restart_frontend_failure_context(result)
     _wait_for_http_200(f"{BASE_URL}/api/v1/system/liveness")
 
 
 def test_live_restart_frontend_public_returns_exit_zero_and_recovers_public_preview():
     """R: public restart live smoke는 exit 0과 public preview 회복을 함께 보장해야 한다."""
     result = _run_restart_frontend("--public")
-    assert result.returncode == 0, _restart_failure_context(result)
+    assert result.returncode == 0, restart_frontend_failure_context(result)
     _wait_for_http_200(PUBLIC_FRONTEND_URL)
     _wait_for_http_200(f"{BASE_URL}/api/v1/system/liveness")
