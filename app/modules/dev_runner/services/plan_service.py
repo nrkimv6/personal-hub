@@ -27,6 +27,7 @@ from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL, REDI
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 from app.core.config import PROJECT_ROOT
+from app.shared.io import write_json_atomic
 from app.modules.dev_runner.schemas import (
     PlanFileResponse, PlanProgressResponse,
     PlanDetailResponse, PlanPhaseResponse, PlanItemResponse,
@@ -134,7 +135,7 @@ class PlanService:
                     logger.info(f"[마이그레이션] 문자열→객체 배열 변환 완료 ({len(migrated)}개)")
                 normalized, normalized_changed = self._normalize_registered_paths(data)
                 if normalized_changed or changed:
-                    reg_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+                    write_json_atomic(reg_path, normalized)
             except Exception:
                 pass
             return
@@ -142,13 +143,20 @@ class PlanService:
         entries: List[dict] = []
         existing_keys: set[tuple[str, str]] = set()
 
-        def _add_entry(path: Path, path_type: str) -> None:
-            if path.exists():
-                resolved = str(path.resolve())
-                key = (resolved, path_type)
-                if key not in existing_keys:
-                    entries.append({"path": resolved, "type": path_type})
-                    existing_keys.add(key)
+        def _add_entry(
+            path: Path,
+            path_type: str,
+            *,
+            require_exists: bool = True,
+            raw_path: str | None = None,
+        ) -> None:
+            if require_exists and not path.exists():
+                return
+            resolved = raw_path if raw_path is not None else str(path.resolve())
+            key = (resolved, path_type)
+            if key not in existing_keys:
+                entries.append({"path": resolved, "type": path_type})
+                existing_keys.add(key)
 
         # 기존 external_plans.json에서 가져오기
         ext_path = config.EXTERNAL_PLANS_FILE
@@ -157,7 +165,7 @@ class PlanService:
                 raw = json.loads(ext_path.read_text(encoding="utf-8"))
                 for p in raw:
                     if isinstance(p, str):
-                        _add_entry(Path(p), "plan")
+                        _add_entry(Path(p), "plan", require_exists=False, raw_path=p)
                 logger.info(f"[마이그레이션] external_plans.json에서 로드")
             except Exception:
                 pass
@@ -183,8 +191,7 @@ class PlanService:
 
         if entries:
             normalized, _ = self._normalize_registered_paths(entries)
-            reg_path.parent.mkdir(parents=True, exist_ok=True)
-            reg_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+            write_json_atomic(reg_path, normalized)
             logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(normalized)}개)")
 
     def _load_registered_paths(self):
@@ -197,7 +204,7 @@ class PlanService:
                 backfilled, backfill_changed = self._backfill_dual_paths(normalized)
                 self._registered_paths = backfilled
                 if changed or backfill_changed:
-                    path.write_text(json.dumps(backfilled, ensure_ascii=False, indent=2), encoding="utf-8")
+                    write_json_atomic(path, backfilled)
             except Exception:
                 self._registered_paths = []
 
@@ -211,10 +218,9 @@ class PlanService:
     def _save_registered_paths(self):
         """등록된 경로 목록 저장 — 객체 배열 {"path", "type"}"""
         path = config.REGISTERED_PATHS_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
         normalized, _ = self._normalize_registered_paths(self._registered_paths)
         self._registered_paths = normalized
-        path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(path, normalized)
 
     def _get_registered_path_strs(self) -> List[str]:
         """등록 경로를 문자열 목록으로 반환 (내부 탐색용)"""
@@ -223,7 +229,10 @@ class PlanService:
     @staticmethod
     def _resolve_path_str(path_str: str) -> str:
         try:
-            return str(Path(path_str).resolve())
+            path = Path(path_str)
+            if path_str.startswith("/") and not path.exists():
+                return path_str
+            return str(path.resolve())
         except Exception:
             return path_str
 
@@ -287,8 +296,7 @@ class PlanService:
     def _save_ignored_plans(self):
         """수동 무시 plan 목록 저장"""
         path = config.IGNORED_PLANS_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self._ignored_plans, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(path, self._ignored_plans)
 
     # ========== 경로 관리 ==========
 

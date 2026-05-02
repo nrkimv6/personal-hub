@@ -60,6 +60,12 @@ async def client(tmp_path: Path):
 
 
 class TestEnginesApi:
+    def test_get_engines_json_path_uses_patchable_config_path(self, tmp_path):
+        engines_path = tmp_path / "engines.json"
+
+        with patch.object(engines_module, "ENGINES_JSON_PATH", engines_path):
+            assert engines_module.get_engines_json_path() == engines_path
+
     async def test_get_engines_includes_cc_codex_key(self, client):
         response = await client.get("/api/v1/dev-runner/engines")
         assert response.status_code == 200
@@ -118,6 +124,19 @@ class TestEnginesApi:
 
         after = json.loads(engines_module.ENGINES_JSON_PATH.read_text(encoding="utf-8-sig"))
         assert after == before
+
+    async def test_put_engines_write_failure_returns_500_and_keeps_file(self, client):
+        before_text = engines_module.ENGINES_JSON_PATH.read_text(encoding="utf-8")
+
+        with patch.object(engines_module, "write_json_atomic", side_effect=OSError("disk full")):
+            response = await client.put(
+                "/api/v1/dev-runner/engines/codex",
+                json={"default_model": "gpt-5.4-codex"},
+            )
+
+        assert response.status_code == 500
+        assert "Failed to update settings" in response.text
+        assert engines_module.ENGINES_JSON_PATH.read_text(encoding="utf-8") == before_text
 
     async def test_put_engines_default_model_only_keeps_models_unchanged(self, client):
         before = (await client.get("/api/v1/dev-runner/engines")).json()["codex"]["models"]

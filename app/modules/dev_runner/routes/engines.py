@@ -4,20 +4,29 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
 
+from app.modules.dev_runner.config import config as dev_runner_config
+from app.shared.io import write_json_atomic
+
 router = APIRouter()
 
 # engines.json 경로 설정 (plan-runner 위치 기준)
-ENGINES_JSON_PATH = Path("D:/work/project/service/wtools/common/tools/plan-runner/engines.json")
+ENGINES_JSON_PATH = dev_runner_config.PLAN_RUNNER_MODULE_PATH / "engines.json"
+
+
+def get_engines_json_path() -> Path:
+    """현재 설정 기준 engines.json 경로를 반환한다."""
+    return Path(ENGINES_JSON_PATH)
 
 
 @router.get("")
 async def get_engines_config():
     """모든 엔진 설정 조회"""
-    if not ENGINES_JSON_PATH.exists():
+    engines_path = get_engines_json_path()
+    if not engines_path.exists():
         raise HTTPException(status_code=404, detail="engines.json file not found")
 
     try:
-        content = ENGINES_JSON_PATH.read_text(encoding="utf-8-sig")
+        content = engines_path.read_text(encoding="utf-8-sig")
         return json.loads(content)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read settings: {str(e)}")
@@ -26,11 +35,12 @@ async def get_engines_config():
 @router.put("/{engine}")
 async def update_engine_config(engine: str, config: Dict[str, Any]):
     """특정 엔진의 설정(모델, 플래그 등) 업데이트"""
-    if not ENGINES_JSON_PATH.exists():
+    engines_path = get_engines_json_path()
+    if not engines_path.exists():
         raise HTTPException(status_code=404, detail="engines.json file not found")
 
     try:
-        content = ENGINES_JSON_PATH.read_text(encoding="utf-8-sig")
+        content = engines_path.read_text(encoding="utf-8-sig")
         full_config = json.loads(content)
 
         engine_config = full_config.get(engine, {})
@@ -91,10 +101,7 @@ async def update_engine_config(engine: str, config: Dict[str, Any]):
             next_engine_config[key] = value
 
         full_config[engine] = next_engine_config
-        ENGINES_JSON_PATH.write_text(
-            json.dumps(full_config, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        write_json_atomic(engines_path, full_config)
         return {"success": True, "message": f"Engine '{engine}' updated successfully"}
     except HTTPException:
         raise

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import PROJECT_ROOT
+from app.shared.io import write_json_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +93,8 @@ def build_report(target_date: date) -> dict:
     }
 
     # JSON 저장
-    _DAILY_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     json_path = _DAILY_REPORTS_DIR / f"{target_date}.json"
-    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(json_path, report)
 
     # HTML 저장
     html = render_html(report)
