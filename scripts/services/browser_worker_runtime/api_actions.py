@@ -76,11 +76,47 @@ def _fetch_json(url: str, timeout: int = 3) -> dict[str, object] | None:
         return None
 
 
+def _frontend_port_for_api_port(api_port: int) -> int | None:
+    if api_port == 8001:
+        return 6101
+    if api_port == 8000:
+        return 6100
+    return None
+
+
+def _close_api_gate(api_port: int) -> None:
+    frontend_port = _frontend_port_for_api_port(api_port)
+    if frontend_port is None:
+        cprint(f"API gate close skipped: unsupported API port {api_port}", YELLOW)
+        return
+
+    url = f"http://127.0.0.1:{frontend_port}/__local/api-gate/close"
+    payload = json.dumps(
+        {"api_port": api_port, "reason": "browser_workers restart-api"}
+    ).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status == 200:
+                cprint("API gate closed before restart", GREEN)
+            else:
+                cprint(f"API gate close returned HTTP {resp.status}; restart continues", YELLOW)
+    except Exception as exc:
+        cprint(f"API gate close failed, restart continues: {exc}", YELLOW)
+
+
 def restart_api(manager):
     mgr = _manager()
     print(f"\n{YELLOW}{'=' * 40}")
     print(f"  Restarting API")
     print(f"{'=' * 40}{RESET}\n")
+
+    _close_api_gate(manager.api_port)
 
     if not manager._check_wmi_health():
         cprint("WMI not healthy, attempting fix...", YELLOW)

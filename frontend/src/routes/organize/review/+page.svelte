@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import { isApiGateClosedError } from '$lib/api/client';
 
 	let files = $state<any[]>([]);
 	let categories = $state<any[]>([]);
@@ -17,25 +18,31 @@
 				const data = await res.json();
 				files = data.items || [];
 			}
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '분류 파일 로드 실패';
 		} finally {
 			isLoading = false;
 		}
 	}
 
 	async function fetchCategories() {
-		const res = await fetch('/api/fc/categories');
-		if (res.ok) {
-			const tree = await res.json();
-			// 트리를 평탄화
-			const flat: any[] = [];
-			function flatten(nodes: any[], depth = 0) {
-				for (const node of nodes) {
-					flat.push({ ...node, depth });
-					if (node.children?.length) flatten(node.children, depth + 1);
+		try {
+			const res = await fetch('/api/fc/categories');
+			if (res.ok) {
+				const tree = await res.json();
+				// 트리를 평탄화
+				const flat: any[] = [];
+				function flatten(nodes: any[], depth = 0) {
+					for (const node of nodes) {
+						flat.push({ ...node, depth });
+						if (node.children?.length) flatten(node.children, depth + 1);
+					}
 				}
+				flatten(tree);
+				categories = flat;
 			}
-			flatten(tree);
-			categories = flat;
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '카테고리 로드 실패';
 		}
 	}
 
@@ -60,22 +67,30 @@
 			message = '카테고리를 선택하세요';
 			return;
 		}
-		const res = await fetch('/api/fc/classify/approve', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ file_ids: [...selectedIds], category_id: bulkCategoryId })
-		});
-		if (res.ok) {
-			message = `${selectedIds.size}개 파일 승인 완료`;
-			clearSelection();
-			await fetchFiles();
+		try {
+			const res = await fetch('/api/fc/classify/approve', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ file_ids: [...selectedIds], category_id: bulkCategoryId })
+			});
+			if (res.ok) {
+				message = `${selectedIds.size}개 파일 승인 완료`;
+				clearSelection();
+				await fetchFiles();
+			}
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '승인 실패';
 		}
 	}
 
 	async function startRuleClassify() {
-		await fetch('/api/fc/classify/rule/start', { method: 'POST' });
-		message = '규칙 분류 시작됨';
-		setTimeout(fetchFiles, 2000);
+		try {
+			await fetch('/api/fc/classify/rule/start', { method: 'POST' });
+			message = '규칙 분류 시작됨';
+			setTimeout(fetchFiles, 2000);
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '규칙 분류 시작 실패';
+		}
 	}
 
 	onMount(() => {

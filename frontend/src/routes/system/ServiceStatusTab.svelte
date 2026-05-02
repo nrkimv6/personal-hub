@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { serviceDashboardApi, systemApi, processWatchApi } from '$lib/api';
+  import { apiGate } from '$lib/stores/apiGate.svelte';
   import type {
     ServiceDashboardStatus,
     RedisStatus,
@@ -415,9 +416,10 @@
     for (let i = 1; i <= maxPoll; i += 1) {
       let isReady = false;
       try {
-        const checkUrl = `http://${location.hostname}:${port}/api/v1/system/status`;
+        const checkUrl = `http://${location.hostname}:${port}/api/v1/ready`;
         const response = await fetch(checkUrl);
-        isReady = response.ok;
+        const payload = response.ok ? await response.json().catch(() => null) : null;
+        isReady = payload?.ready === true;
       } catch {
         isReady = false;
       }
@@ -443,6 +445,7 @@
     selfRestartMessage = `${label} Self-restart 요청 중...`;
 
     try {
+      await systemApi.closeApiGate(port, 'UI self-restart');
       const response = await systemApi.selfRestartByPort(port, 2.0);
       selfRestartState = 'waiting';
       selfRestartMessage = `${label} PID ${response.pid} 종료 대기 중...`;
@@ -594,6 +597,15 @@
     }, '리셋 실패');
   }
 
+  async function openApiGateManually() {
+    await fetch('/__local/api-gate/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: 'manual service status open' })
+    });
+    await apiGate.refreshStatus();
+  }
+
   async function restartCommandListener() {
     await runWithActionLoading('restart-listener', async () => {
       await devRunnerRunnerApi.restartListener();
@@ -653,6 +665,30 @@
       <button onclick={fetchStatus} class="mt-2 text-sm text-error underline hover:no-underline">다시 시도</button>
     </div>
   {:else if status}
+    <div class="bg-card rounded-lg border border-border shadow-card p-3 flex flex-wrap items-center gap-3">
+      <span class="text-sm font-medium text-foreground">API 게이트</span>
+      <span
+        class="px-2 py-0.5 text-xs rounded font-medium"
+        class:bg-success-light={apiGate.state === 'open'}
+        class:text-success={apiGate.state === 'open'}
+        class:bg-warning-light={apiGate.state !== 'open'}
+        class:text-warning-foreground={apiGate.state !== 'open'}
+      >
+        {apiGate.state}
+      </span>
+      {#if apiGate.reason}
+        <span class="text-xs text-muted-foreground">{apiGate.reason}</span>
+      {/if}
+      {#if apiGate.state !== 'open'}
+        <button
+          onclick={openApiGateManually}
+          class="ml-auto h-8 px-3 text-xs rounded-md font-medium bg-primary text-white hover:bg-primary-hover transition-colors"
+        >
+          게이트 열기
+        </button>
+      {/if}
+    </div>
+
     <ServiceDashboardSection
       {status}
       {refreshing}

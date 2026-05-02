@@ -5,6 +5,7 @@
  * - getQuotaWarning(provider) 로 토스트 메시지 문자열 반환
  */
 import { writable, get } from 'svelte/store';
+import { isApiGateClosedError } from '$lib/api/client';
 
 export interface QuotaProviderStatus {
 	paused: boolean;
@@ -38,7 +39,8 @@ export async function fetchQuotaStatus(force = false): Promise<void> {
 		const data: QuotaStatusMap = await res.json();
 		quotaStatus.set(data);
 		lastFetchedAt = now;
-	} catch {
+	} catch (e) {
+		if (isApiGateClosedError(e)) return;
 		// 네트워크 오류 시 기존 store 유지
 	}
 }

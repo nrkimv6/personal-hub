@@ -87,6 +87,21 @@ export const systemApi = {
     const res = await fetch(url, { method: 'POST' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json() as Promise<{ status: string; pid: number; delay: number; message: string }>;
+  },
+
+  closeApiGate: async (apiPort: number, reason: string): Promise<void> => {
+    try {
+      const res = await fetch('/__local/api-gate/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_port: apiPort, reason })
+      });
+      if (!res.ok) {
+        console.warn(`[api-gate] close failed: HTTP ${res.status}`);
+      }
+    } catch (error) {
+      console.warn('[api-gate] close failed, restart continues', error);
+    }
   }
 };
 

@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { Search, ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import { isApiGateClosedError } from '$lib/api/client';
 
 	// 필터 상태
 	let fileGroup = $state('');
@@ -15,6 +16,7 @@
 	// 데이터
 	let result = $state<any>(null);
 	let isLoading = $state(false);
+	let error = $state<string | null>(null);
 
 	const FILE_GROUP_OPTIONS = [
 		{ value: '', label: '전체' },
@@ -52,6 +54,9 @@
 
 			const res = await fetch(`/api/fc/files?${params}`);
 			if (res.ok) result = await res.json();
+			error = null;
+		} catch (e) {
+			error = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '파일 목록 로드 실패';
 		} finally {
 			isLoading = false;
 		}
@@ -155,6 +160,8 @@
 	<!-- 테이블 -->
 	{#if isLoading}
 		<div class="text-center text-sm text-muted-foreground py-8">로딩 중...</div>
+	{:else if error}
+		<div class="rounded-md border border-warning/30 bg-warning-light p-3 text-sm text-warning-foreground">{error}</div>
 	{:else if result}
 		<div class="overflow-x-auto rounded-lg border border-border">
 			<table class="w-full text-sm">

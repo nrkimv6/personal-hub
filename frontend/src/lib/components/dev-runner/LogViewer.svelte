@@ -1,6 +1,7 @@
 ﻿<script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
+	import { apiGate } from '$lib/stores/apiGate.svelte';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 	import { shouldShowMergeCompletionBanner } from '$lib/utils/dev-runner-merge-banner';
 
@@ -397,6 +398,12 @@
 	async function connectSSE() {
 		if (eventSource) eventSource.close();
                         if (noiseTimer) clearTimeout(noiseTimer);
+
+		if (apiGate.state !== 'open') {
+			connected = 'disconnected';
+			redisAvailable = false;
+			return;
+		}
 
 		// SSE 연결 전 status API로 실행 상태 + Redis 상태 확인
 		await fetchStatus();

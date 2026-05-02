@@ -1,7 +1,8 @@
 /**
  * Dev Runner API - dev-runner 모니터링 및 제어
  */
-import { request, API_BASE, getAuthToken, fetchWithTimeout } from './client';
+import { apiGate } from '$lib/stores/apiGate.svelte';
+import { request, API_BASE, getAuthToken, fetchWithTimeout, ApiGateClosedError } from './client';
 
 // ============================================================
 // Types
@@ -171,6 +172,11 @@ const DEV_RUNNER_BASE = '/api/v1/dev-runner';
 
 async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}, timeout?: number): Promise<T> {
 	const url = `${DEV_RUNNER_BASE}${endpoint}`;
+
+	// dev-runner uses fetchWithTimeout directly, so apply the same gate policy here.
+	if (apiGate.state !== 'open') {
+		throw new ApiGateClosedError();
+	}
 
 	const token = getAuthToken();
 	const headers: HeadersInit = {
@@ -457,10 +463,16 @@ export const devRunnerLogApi = {
 		devRunnerRequest<{ steps: DiagStep[] }>('/logs/diagnostics'),
 
 	connectStream: (runnerId: string, sinceLine: number = 0): EventSource => {
+		if (apiGate.state !== 'open') {
+			throw new ApiGateClosedError();
+		}
 		return new EventSource(`${DEV_RUNNER_BASE}/logs/stream?runner_id=${runnerId}&since_line=${sinceLine}`);
 	},
 
 	connectMergeStream: (runnerId: string): EventSource => {
+		if (apiGate.state !== 'open') {
+			throw new ApiGateClosedError();
+		}
 		return new EventSource(`${DEV_RUNNER_BASE}/merge-log/stream?runner_id=${runnerId}`);
 	},
 

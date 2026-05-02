@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { gitReposApi } from '$lib/api/gitRepos';
   import { llmApi, type ProviderInfo } from '$lib/api';
+  import { apiGate } from '$lib/stores/apiGate.svelte';
   import type { GitRepo, GitStatus, GitLogEntry, OperationLog, AutoCleanupResult } from '$lib/types/gitRepos';
   import {
     ArrowLeft,
@@ -269,6 +270,12 @@
     try {
       const res = await gitReposApi.autoCleanup(repoId, { provider: llmProvider });
       cleanupRequestId = res.request_id;
+
+      if (apiGate.state !== 'open') {
+        showToast('API 서버 재시작 중입니다', 'error');
+        working = false;
+        return;
+      }
       
       const eventSource = new EventSource(`/api/v1/llm/chat/${cleanupRequestId}/stream`);
       
