@@ -38,6 +38,13 @@ test('client fetch guard blocks same-origin api calls and preserves bypasses', (
 	assert.match(hook, /x-api-gate-bypass/);
 });
 
+test('api gate singleton does not create component effects at module scope', () => {
+	const store = read('../src/lib/stores/apiGate.svelte.ts');
+	assert.doesNotMatch(store, /\$effect\s*\(/);
+	assert.match(store, /scheduleStaleTimer\(\)/);
+	assert.match(store, /clearStaleTimer\(\)/);
+});
+
 test('restart-api closes frontend gate before self restart', () => {
 	const src = read('../../scripts/services/browser_worker_runtime/api_actions.py');
 	assert.match(src, /def _close_api_gate\(api_port: int\)/);

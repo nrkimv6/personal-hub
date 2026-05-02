@@ -11,6 +11,7 @@ const STATUS_URL = '/__local/api-gate/status';
 const STREAM_URL = '/__local/api-gate/stream';
 const POLL_INTERVAL_MS = 2000;
 const RECONNECT_DELAYS_MS = [2000, 4000, 8000, 30000];
+const STALE_AFTER_MS = 600000;
 
 function createApiGateStore() {
 	let state = $state<GateStateName>('open');
@@ -21,6 +22,7 @@ function createApiGateStore() {
 	let eventSource: EventSource | null = null;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	let staleTimer: ReturnType<typeof setTimeout> | null = null;
 	let reconnectAttempt = 0;
 
 	function applySnapshot(snapshot: GateSnapshot) {
@@ -29,6 +31,7 @@ function createApiGateStore() {
 		reason = snapshot.reason;
 		since = snapshot.since;
 		apiPort = snapshot.apiPort;
+		scheduleStaleTimer();
 		if (previousState !== 'open' && state === 'open') {
 			void reportGateRecoveryToApiHealth();
 		}
@@ -39,6 +42,25 @@ function createApiGateStore() {
 			clearTimeout(reconnectTimer);
 			reconnectTimer = null;
 		}
+	}
+
+	function clearStaleTimer() {
+		if (staleTimer !== null) {
+			clearTimeout(staleTimer);
+			staleTimer = null;
+		}
+	}
+
+	function scheduleStaleTimer() {
+		clearStaleTimer();
+		if (typeof window === 'undefined' || state === 'open' || since === null) return;
+
+		const elapsedMs = Date.now() - since;
+		const remainingMs = Math.max(0, STALE_AFTER_MS - elapsedMs);
+		staleTimer = setTimeout(() => {
+			staleTimer = null;
+			window.dispatchEvent(new CustomEvent('api-gate:stale'));
+		}, remainingMs);
 	}
 
 	function stopPollingFallback() {
@@ -110,23 +132,10 @@ function createApiGateStore() {
 
 	function stop(): void {
 		clearReconnectTimer();
+		clearStaleTimer();
 		stopPollingFallback();
 		closeEventSource();
 	}
-
-	$effect(() => {
-		if (typeof window === 'undefined' || state === 'open' || since === null) return;
-
-		const elapsedMs = Date.now() - since;
-		const remainingMs = Math.max(0, 600000 - elapsedMs);
-		const timer = setTimeout(() => {
-			window.dispatchEvent(new CustomEvent('api-gate:stale'));
-		}, remainingMs);
-
-		return () => {
-			clearTimeout(timer);
-		};
-	});
 
 	return {
 		get state() {
