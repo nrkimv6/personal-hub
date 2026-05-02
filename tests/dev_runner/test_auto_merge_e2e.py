@@ -115,6 +115,35 @@ def _make_subprocess_router(repo_dir: str, post_merge_returncode: int = 0):
 
 
 class TestAutoMergeE2E:
+    def test_determine_merge_requested_cleanup_flag_none_commits_T4(
+        self, real_git_repo_with_feature_branch, fr
+    ):
+        """T4 R: cleanup helper 직접 경로 — flag 없음 + 완료 + 커밋 있음 → merge 요청."""
+        repo_dir, branch = real_git_repo_with_feature_branch
+        runner_id = "t4-dmr-flag-none-001"
+
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch)
+        assert fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested") is None
+
+        ctx = stream_cleanup_mod._StreamCleanupCtx(
+            runner_id=runner_id,
+            redis_client=fr,
+            log_channel="plan-runner:log",
+            exit_code=0,
+            exit_reason="completed",
+            completed_for_flow=True,
+        )
+
+        with patch.object(stream_cleanup_mod, "_pub_and_log") as mock_pub_and_log, \
+             patch("_dr_constants.PROJECT_ROOT", Path(repo_dir)):
+            result = stream_cleanup_mod._determine_merge_requested(ctx)
+
+        assert result is True
+        assert mock_pub_and_log.call_count >= 2
+        published_messages = [call.args[1] for call in mock_pub_and_log.call_args_list]
+        assert any("merge_requested 플래그 없음" in msg for msg in published_messages)
+        assert any("merge 분기 판정" in msg for msg in published_messages)
+
     def test_auto_merge_on_completed_merge_status_transitions(
         self, real_git_repo_with_feature_branch, fr
     ):

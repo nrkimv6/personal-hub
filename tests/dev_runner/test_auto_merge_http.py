@@ -91,6 +91,35 @@ class TestAutoMergeHTTP:
             f"auto-merge 진행 중 상태가 queued여야 함: {runner.get('merge_status')}"
         )
 
+    def test_auto_merge_http_flag_none_with_commits_T5_contract(self, api_client):
+        """T5 contract: live runner 실행은 merge-test 소유, HTTP는 결과 상태 노출만 검증한다."""
+        client, fr = api_client
+        runner_id = "t5-http-flag-none-commits-001"
+
+        fr.sadd("plan-runner:active_runners", runner_id)
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "impl/flag-none-with-commits")
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+        assert fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested") is None
+
+        list_resp = client.get(f"{BASE_URL}/runners")
+        assert list_resp.status_code == 200
+        runners = list_resp.json()
+        matched = [r for r in runners if r.get("runner_id") == runner_id]
+        assert matched, f"runner_id={runner_id} 미포함"
+
+        runner = matched[0]
+        assert runner.get("branch") == "impl/flag-none-with-commits"
+        assert runner.get("exit_reason") == "completed"
+        assert runner.get("merge_status") == "queued"
+
+        merge_resp = client.get(f"{BASE_URL}/merge/{runner_id}")
+        assert merge_resp.status_code == 200
+        merge_payload = merge_resp.json()
+        assert merge_payload["runner_id"] == runner_id
+        assert merge_payload["status"] == "queued"
+
     def test_runner_status_includes_merge_status_field(self, api_client):
         """T5 R: runner 상태 조회 시 merge_status 필드가 존재해야 한다"""
         client, fr = api_client
