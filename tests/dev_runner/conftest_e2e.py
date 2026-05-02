@@ -162,16 +162,37 @@ def test_plan_file(tmp_path):
 def copy_fixture_plan_to_tmp(
     tmp_path: Path,
     fixture_name: str = "test_minimal_plan.md",
+    *,
+    strip_merge_fields: bool = True,
 ) -> Path:
     """Copy a shared fixture plan into a per-test path before runner execution."""
     src = FIXTURES_DIR / fixture_name
     content = src.read_text(encoding="utf-8")
-    content = re.sub(r"^> branch:.*\n", "", content, flags=re.MULTILINE)
-    content = re.sub(r"^> worktree:.*\n", "", content, flags=re.MULTILINE)
-    content = re.sub(r"^> worktree-owner:.*\n", "", content, flags=re.MULTILINE)
+    if strip_merge_fields:
+        content = re.sub(r"^> branch:.*\n", "", content, flags=re.MULTILINE)
+        content = re.sub(r"^> worktree:.*\n", "", content, flags=re.MULTILINE)
+        content = re.sub(r"^> worktree-owner:.*\n", "", content, flags=re.MULTILINE)
     plan = tmp_path / fixture_name
     plan.write_text(content, encoding="utf-8")
     return plan
+
+
+@pytest.fixture
+def isolated_plan_file(tmp_path):
+    """Per-test copy of test_minimal_plan.md for mutable runner input."""
+    return str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan.md"))
+
+
+@pytest.fixture
+def isolated_plan_file_a(tmp_path):
+    """Per-test copy of test_minimal_plan_a.md for mutable runner input."""
+    return str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan_a.md"))
+
+
+@pytest.fixture
+def isolated_plan_file_b(tmp_path):
+    """Per-test copy of test_minimal_plan_b.md for mutable runner input."""
+    return str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan_b.md"))
 
 
 def _cleanup_test_worktrees() -> None:
@@ -251,17 +272,6 @@ def _cleanup_test_worktrees() -> None:
         )
         if res2.returncode != 0 and b"not found" not in res2.stderr:
             print(f"[cleanup] git branch remove failed for {stem}: {res2.stderr.decode('utf-8', errors='ignore').strip()}")
-
-        # runner/prunable cleanup 뒤에도 반복 호출이 같은 fixture 상태를 유지하도록 header residue를 정리한다.
-        fixture_path = FIXTURES_DIR / f"{stem}.md"
-        if fixture_path.exists():
-            try:
-                lines = fixture_path.read_text(encoding="utf-8").splitlines(keepends=True)
-                cleaned = [ln for ln in lines if not re.match(r"^>\s*(branch|worktree|worktree-owner):", ln)]
-                if cleaned != lines:
-                    fixture_path.write_text("".join(cleaned), encoding="utf-8")
-            except Exception as e:
-                print(f"[cleanup] fixture header cleanup failed for {stem}: {e}")
 
 
 _PRESERVE_KEYS = {

@@ -7,6 +7,8 @@ import os
 import pytest
 from unittest.mock import AsyncMock, patch
 
+from tests.dev_runner.conftest_e2e import isolated_plan_file
+
 
 # ---------------------------------------------------------------------------
 # 헬퍼: start_dev_runner 원본 함수 가져오기
@@ -23,7 +25,7 @@ def _get_original_start_dev_runner():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_redis_db_guard_R(monkeypatch):
+async def test_redis_db_guard_R(monkeypatch, isolated_plan_file):
     """R: PLAN_RUNNER_REDIS_DB=15 설정 시 guard가 통과하여 start_dev_runner 호출 성공"""
     monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
 
@@ -32,7 +34,7 @@ async def test_redis_db_guard_R(monkeypatch):
 
     req = RunRequest(
         engine="gemini",
-        plan_file="tests/dev_runner/fixtures/test_minimal_plan.md",
+        plan_file=isolated_plan_file,
         dry_run=True,
         test_source="test_redis_db_guard_R",
         trigger="tc:test_redis_db_guard_R",
@@ -96,8 +98,8 @@ def test_plan_file_path_uses_fixture_R():
     assert "docs/plan/test_e2e_plan" not in content, (
         "test_remove_pipeline_v1_e2e.py에 아직 아카이브된 plan 경로가 하드코딩됨"
     )
-    assert "TEST_PLAN_FILE" in content or "fixtures/test_minimal_plan" in content, (
-        "fixture 파일 경로가 사용되어야 함"
+    assert "isolated_plan_file" in content or "copy_fixture_plan_to_tmp" in content, (
+        "runner plan_file은 격리된 fixture copy를 사용해야 함"
     )
 
 

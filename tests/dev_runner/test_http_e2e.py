@@ -10,7 +10,7 @@ import redis
 
 import redis.asyncio as aioredis
 from tests.dev_runner.conftest_e2e import (
-    TEST_PLAN_FILE,
+    isolated_plan_file,
     isolated_redis_db15,
     listener_process,
     REDIS_TEST_DB,
@@ -85,7 +85,7 @@ class TestHttpE2EChain:
         except Exception:
             pass
 
-    def test_http_start_and_stop_lifecycle(self, isolated_redis_db15, listener_process):
+    def test_http_start_and_stop_lifecycle(self, isolated_redis_db15, listener_process, isolated_plan_file):
         """E2E: POST /run → running 확인 → POST /stop → active_runners 비어짐 확인"""
         client = _build_test_client()
         from app.modules.dev_runner.services.executor_service import (
@@ -96,7 +96,7 @@ class TestHttpE2EChain:
 
         payload = {
             "engine": "gemini",
-            "plan_file": TEST_PLAN_FILE,
+            "plan_file": isolated_plan_file,
             "dry_run": True,
             "test_source": "test_http_start_and_stop_lifecycle"
         }

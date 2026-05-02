@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "plan_r
 
 import worktree_manager
 from worktree_manager import WorktreeManager, WorktreeError, MergeResult, ensure_main_branch
+from tests.dev_runner.conftest_e2e import copy_fixture_plan_to_tmp
 
 
 @pytest.fixture
@@ -133,13 +134,14 @@ class TestWorktreeManagerCreate:
         )
         assert "runner/brtest" in result.stdout
 
-    def test_test_source_runner_uses_runner_identity_with_plan_file(self, worktrees_dir):
+    def test_test_source_runner_uses_runner_identity_with_plan_file(self, worktrees_dir, tmp_path):
         """R: test_source runner keeps runner/* identity even when plan_file exists."""
         base_dir, repo = worktrees_dir
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path))
         path, branch = WorktreeManager.create(
             "t-static-plan-1234",
             base_dir,
-            plan_file="tests/dev_runner/fixtures/test_minimal_plan.md",
+            plan_file=plan_file,
             use_runner_identity=True,
         )
 
@@ -152,14 +154,15 @@ class TestWorktreeManagerCreate:
             cwd=str(repo),
         ).stdout
 
-    def test_t_prefixed_runner_uses_runner_identity_with_plan_file(self, worktrees_dir):
+    def test_t_prefixed_runner_uses_runner_identity_with_plan_file(self, worktrees_dir, tmp_path):
         """B: t-* runner_id is enough to avoid plan/{stem} fallback."""
         base_dir, _repo = worktrees_dir
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path))
 
         path, branch = WorktreeManager.create(
             "t-inferred-1234",
             base_dir,
-            plan_file="tests/dev_runner/fixtures/test_minimal_plan.md",
+            plan_file=plan_file,
         )
 
         assert path == base_dir / "t-inferred-1234"
@@ -275,20 +278,21 @@ class TestWorktreeManagerRemove:
         assert result is True
         assert not wt_path.exists()
 
-    def test_remove_t_prefixed_plan_file_uses_runner_identity(self, worktrees_dir):
+    def test_remove_t_prefixed_plan_file_uses_runner_identity(self, worktrees_dir, tmp_path):
         """R: cleanup for t-* plan-backed runners removes .worktrees/{runner_id}."""
         base_dir, repo = worktrees_dir
         runner_id = "t-remove-plan-1234"
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path))
         path, branch = WorktreeManager.create(
             runner_id,
             base_dir,
-            plan_file="tests/dev_runner/fixtures/test_minimal_plan.md",
+            plan_file=plan_file,
         )
 
         result = WorktreeManager.remove(
             runner_id,
             base_dir,
-            plan_file="tests/dev_runner/fixtures/test_minimal_plan.md",
+            plan_file=plan_file,
         )
 
         assert result is True
