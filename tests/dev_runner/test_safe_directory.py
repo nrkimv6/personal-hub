@@ -1,6 +1,7 @@
 """safe.directory=* 방어 TC — _run_git(scripts), git_utils(app), worktree_service, archive_service"""
 import subprocess
 import asyncio
+import importlib.util
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -10,6 +11,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
 from worktree_manager import _run_git
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
+
+
+def _load_deprecated_merge_workflow_module():
+    module_path = Path(__file__).parent.parent.parent / "scripts" / "_deprecated" / "merge_workflow.py"
+    spec = importlib.util.spec_from_file_location("_test_deprecated_merge_workflow", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 # ─── _run_git (scripts/worktree_manager.py) ───────────────────────────────────
@@ -182,6 +192,56 @@ class TestArchiveServiceGitMv:
         import inspect
         source = inspect.getsource(archive_service)
         assert 'safe.directory=*' in source, "archive_service에 safe.directory=* 미적용"
+
+
+# ─── deprecated merge_workflow git subprocess 방어 ────────────────────────────
+
+class TestDeprecatedMergeWorkflowSafeDirectory:
+    def test_skip_path_git_calls_use_safe_directory_R(self, tmp_path):
+        """R(Right): 변경 없음 skip 경로의 git add/commit/log/diff 호출에 safe.directory=* 포함"""
+        module = _load_deprecated_merge_workflow_module()
+        redis_client = MagicMock()
+        redis_client.lrange.return_value = []
+        workflow = module.MergeWorkflow(tmp_path, redis_client)
+
+        results = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+        ]
+        with patch.object(module.subprocess, "run", side_effect=results) as mock_run:
+            workflow.run("runner-1", tmp_path / "worktree", tmp_path, branch="impl/test")
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        assert commands == [
+            module.GIT_CMD + ["add", "-A"],
+            module.GIT_CMD + ["commit", "-m", "feat: runner/runner-1 구현 완료"],
+            module.GIT_CMD + ["log", "main..impl/test", "--oneline"],
+            module.GIT_CMD + ["diff", "main..impl/test"],
+        ]
+
+    def test_merge_success_commit_hash_git_call_uses_safe_directory_R(self, tmp_path):
+        """R(Right): merge 성공 후 commit hash 조회 git log 호출에도 safe.directory=* 포함"""
+        module = _load_deprecated_merge_workflow_module()
+        redis_client = MagicMock()
+        redis_client.lrange.return_value = []
+        workflow = module.MergeWorkflow(tmp_path, redis_client)
+
+        merge_result = MagicMock(success=True, already_merged=False, conflict=False, message="ok")
+        with patch.object(module.subprocess, "run") as mock_run, \
+             patch("worktree_manager.WorktreeManager.merge_to_main", return_value=merge_result), \
+             patch("worktree_manager.WorktreeManager.remove"):
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=""),
+                MagicMock(returncode=0, stdout=""),
+                MagicMock(returncode=0, stdout="abc commit\n"),
+                MagicMock(returncode=0, stdout="abc123\n"),
+            ]
+            workflow.run("runner-2", tmp_path / "worktree", tmp_path, branch="impl/test")
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        assert module.GIT_CMD + ["log", "-1", "--format=%H"] in commands
 
 
 # ─── Phase T3: 재현/통합 TC (실물 git repo 사용) ───────────────────────────────
