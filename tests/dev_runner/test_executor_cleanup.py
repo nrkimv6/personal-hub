@@ -58,7 +58,7 @@ def svc(fake_redis, fake_async_redis):
 
 # ─────────────────────────── helpers ─────────────────────────────
 
-async def _seed_recent(r, rid, *, status, plan_file, start_time_iso=None, score_ts=None):
+async def _seed_recent(r, rid, *, status, plan_file, start_time_iso=None, score_ts=None, trigger=None):
     """recent_runners에 runner 시드"""
     await r.zadd(RECENT_RUNNERS_KEY, {rid: score_ts if score_ts is not None else time.time()})
     await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", status)
@@ -66,6 +66,8 @@ async def _seed_recent(r, rid, *, status, plan_file, start_time_iso=None, score_
         await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", plan_file)
     if start_time_iso:
         await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:start_time", start_time_iso)
+    if trigger:
+        await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:trigger", trigger)
 
 
 async def _seed_active(r, rid, *, pid):
@@ -79,7 +81,7 @@ async def _seed_active(r, rid, *, pid):
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_archived_plan(svc, fake_async_redis, tmp_path):
-    """plan 없음 + archive 있음 + stopped + TTL 내 recent → 보존 (R)."""
+    """plan 없음 + archive 있음 + visible stopped + TTL 내 recent → 보존 (R)."""
     archive_file = tmp_path / "archive" / "2026-01-01_foo.md"
     archive_file.parent.mkdir(parents=True)
     archive_file.write_text("archived plan")
@@ -94,7 +96,7 @@ async def test_cleanup_stale_archived_plan(svc, fake_async_redis, tmp_path):
     archive_file2.write_text("archived")
 
     rid = "t-arch-001"
-    await _seed_recent(fake_async_redis, rid, status="stopped", plan_file=plan_file_path)
+    await _seed_recent(fake_async_redis, rid, status="stopped", plan_file=plan_file_path, trigger="user")
 
     result = await svc.cleanup_stale_runners()
 
@@ -134,13 +136,13 @@ async def test_cleanup_stale_auto_history_plan_R(svc, fake_async_redis, tmp_path
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_file_lost(svc, fake_async_redis, tmp_path):
-    """plan 없음 + archive도 없음 + stopped + TTL 내 recent → 보존 (R)."""
+    """plan 없음 + archive도 없음 + visible stopped + TTL 내 recent → 보존 (R)."""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     plan_file_path = str(plan_dir / "2026-02-01_lost.md")
 
     rid = "t-lost-001"
-    await _seed_recent(fake_async_redis, rid, status="stopped", plan_file=plan_file_path)
+    await _seed_recent(fake_async_redis, rid, status="stopped", plan_file=plan_file_path, trigger="user")
 
     result = await svc.cleanup_stale_runners()
 
@@ -155,7 +157,7 @@ async def test_cleanup_stale_file_lost(svc, fake_async_redis, tmp_path):
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_file_lost_after_ttl_removed(svc, fake_async_redis, tmp_path):
-    """plan 없음 + stopped + TTL 초과 recent → stale 정리 + bugs=1 (R)"""
+    """trigger 없는 invisible stopped + TTL 초과 recent → stale 정리 + bugs 미증가 (R)"""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     plan_file_path = str(plan_dir / "2026-02-01_lost_old.md")
@@ -174,7 +176,7 @@ async def test_cleanup_stale_file_lost_after_ttl_removed(svc, fake_async_redis, 
 
     assert result["cleaned_recent"] == 1
     assert result["preserved_recent"] == 0
-    assert result["bugs"] == 1
+    assert result["bugs"] == 0
     assert result["total"] == 1
 
     remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
@@ -237,7 +239,7 @@ async def test_cleanup_stale_running_new_skipped(svc, fake_async_redis, tmp_path
 
 @pytest.mark.asyncio
 async def test_cleanup_stale_plan_exists_skipped(svc, fake_async_redis, tmp_path):
-    """plan 파일 존재 → 정리 안 됨 (B)"""
+    """visible stopped + plan 파일 존재 → 정리 안 됨 (B)"""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     plan_file = plan_dir / "2026-02-01_exists.md"
@@ -248,6 +250,7 @@ async def test_cleanup_stale_plan_exists_skipped(svc, fake_async_redis, tmp_path
         fake_async_redis, rid,
         status="stopped",
         plan_file=str(plan_file),
+        trigger="user",
     )
 
     result = await svc.cleanup_stale_runners()
