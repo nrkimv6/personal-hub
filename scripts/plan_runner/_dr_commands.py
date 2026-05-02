@@ -1,10 +1,4 @@
 """_dr_commands.py — dev-runner 명령 처리 모듈"""
-
-import sys as _sys_inject
-from pathlib import Path as _Path_inject
-_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
-del _sys_inject, _Path_inject
-
 import json
 import logging
 import subprocess
@@ -23,35 +17,10 @@ from _dr_constants import (
 )
 from _dr_merge import _execute_merge_with_lock, _pub_and_log
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process
-from _dr_process_utils import _cleanup_process_state, get_target_project_root
-from _dr_plan_runner import _do_inline_merge, _capture_runner_ownership_snapshot
+from _dr_process_utils import _cleanup_process_state, get_plan_git_root
+from _dr_stream_cleanup import _do_inline_merge
 
 logger = logging.getLogger(__name__)
-
-
-def _refresh_runner_ownership_snapshot(runner_id: str, redis_client: redis.Redis | None = None, action: str = "") -> None:
-    """retry/direct merge 진입 직전에 ownership snapshot을 다시 캡처한다."""
-    try:
-        payload = _capture_runner_ownership_snapshot(runner_id, PROJECT_ROOT)
-    except Exception as exc:
-        logger.warning("[ownership] snapshot refresh failed: runner=%s action=%s error=%s", runner_id, action, exc)
-        if redis_client and runner_id:
-            try:
-                _pub_and_log(runner_id, f"[ownership] snapshot refresh failed ({action}): {exc}", redis_client, "MERGE")
-            except Exception:
-                pass
-        return
-
-    if payload.get("capture_error") and redis_client and runner_id:
-        try:
-            _pub_and_log(
-                runner_id,
-                f"[ownership] snapshot refresh warning ({action}): {payload['capture_error']}",
-                redis_client,
-                "MERGE",
-            )
-        except Exception:
-            pass
 
 
 def _log_memory_stage(
@@ -96,28 +65,8 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         _pub_and_log(runner_id, msg, redis_client, "MERGE")
 
     result = {"success": False, "message": "unknown error", "action": "retry-merge"}
-    approve_service_lock = False
-    service_lock_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:service_lock_approved"
     try:
         _log_memory_stage("retry-merge", "start", runner_id, redis_client)
-        try:
-            raw_approve = (command or {}).get("approve_service_lock")
-            if isinstance(raw_approve, bool):
-                approve_service_lock = raw_approve
-            elif isinstance(raw_approve, (str, bytes)):
-                raw_str = raw_approve.decode("utf-8", errors="replace") if isinstance(raw_approve, bytes) else str(raw_approve)
-                approve_service_lock = raw_str.strip().lower() in {"1", "true", "yes", "y", "on"}
-        except Exception:
-            approve_service_lock = False
-
-        if approve_service_lock:
-            try:
-                redis_client.set(service_lock_key, "true")
-                redis_client.expire(service_lock_key, 600)  # 1회 승인 플래그: 다음 merge attempt까지만 유지
-                _pub("[RETRY-MERGE] service_lock 승인 플래그 설정: approve_service_lock=true (1회)")
-            except Exception:
-                pass
-
         # Redis 키 만료 시 command payload로 재발급
         worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         if not worktree_path_str and command:
@@ -174,7 +123,6 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
             _pub(f"[RETRY-MERGE] pre_merge_gate 통과 — merge 진행")
 
         # lock + subprocess + 결과 처리는 공통 헬퍼에 위임
-        _refresh_runner_ownership_snapshot(runner_id, redis_client, action="retry-merge")
         _log_memory_stage("retry-merge", "mid", runner_id, redis_client)
         merge_result = _execute_merge_with_lock(runner_id, redis_client, action_name="retry-merge")
         result = merge_result
@@ -184,11 +132,6 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         result = {"success": False, "message": str(e), "action": "retry-merge"}
 
     finally:
-        if approve_service_lock:
-            try:
-                redis_client.delete(service_lock_key)
-            except Exception:
-                pass
         _log_memory_stage("retry-merge", "end", runner_id, redis_client)
         _cleanup_process_state(runner_id, redis_client)
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
@@ -221,7 +164,7 @@ def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
     return None
 
 
-def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: redis.Redis, command_id: str, approve_service_lock: bool = False) -> None:
+def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: redis.Redis, command_id: str) -> None:
     """direct-merge 실제 작업 (백그라운드 스레드에서 실행) — 임시 runner_id로 _do_inline_merge 호출"""
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     from uuid import uuid4
@@ -230,7 +173,6 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
     result = {"success": False, "message": "unknown error", "action": "direct-merge", "runner_id": runner_id}
     logger.info(f"[direct_merge] _do_direct_merge 스레드 진입: runner_id={runner_id}, branch={branch}, worktree={worktree_path_str}")
     _log_memory_stage("direct-merge", "start", runner_id, redis_client)
-    service_lock_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:service_lock_approved"
 
     try:
         # worktree_path 결정
@@ -291,47 +233,26 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
 
         logger.info(f"[direct_merge] 임시 runner {runner_id} 생성, branch={branch}, worktree={worktree_path}")
 
-        if approve_service_lock:
-            try:
-                redis_client.set(service_lock_key, "true")
-                redis_client.expire(service_lock_key, 600)
-                redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", "[MERGE] service_lock 승인 플래그 설정: approve_service_lock=true (1회)")
-            except Exception:
-                pass
-
         # _do_inline_merge 호출 (lock+cleanup+로그 발행 포함)
-        _refresh_runner_ownership_snapshot(runner_id, redis_client, action="direct-merge")
         _log_memory_stage("direct-merge", "mid", runner_id, redis_client)
         _do_inline_merge(runner_id, redis_client)
 
         # 머지 결과 읽기
         final_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
-        merge_message = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message") or f"direct-merge 완료: {final_status}"
-        merge_reason = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason") or None
-        quarantine_diff_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path") or None
         success = final_status == "merged"
         result = {
             "success": success,
-            "message": merge_message,
+            "message": f"direct-merge 완료: {final_status}",
             "merge_status": final_status,
             "action": "direct-merge",
             "runner_id": runner_id,
         }
-        if merge_reason:
-            result["reason"] = merge_reason
-        if quarantine_diff_path:
-            result["quarantine_diff_path"] = quarantine_diff_path
 
     except Exception as e:
         import traceback
         logger.error(f"[direct_merge] 실패: {e}\n{traceback.format_exc()}")
         result = {"success": False, "message": str(e), "action": "direct-merge", "runner_id": runner_id}
     finally:
-        if approve_service_lock:
-            try:
-                redis_client.delete(service_lock_key)
-            except Exception:
-                pass
         _log_memory_stage("direct-merge", "end", runner_id, redis_client)
         # merge_status Redis 키 보장 (스레드 실패 시에도 상태 추적 가능)
         try:
@@ -362,7 +283,6 @@ def direct_merge(command: Dict, redis_client: redis.Redis) -> None:
     worktree_path = command.get("worktree_path")
     plan_file = command.get("plan_file")
     command_id = command.get("command_id", "")
-    approve_service_lock = bool(command.get("approve_service_lock", False))
 
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     accepted = {
@@ -377,7 +297,7 @@ def direct_merge(command: Dict, redis_client: redis.Redis) -> None:
     logger.info(f"[direct_merge] accepted 응답 즉시 반환 (branch: {branch})")
     thread = threading.Thread(
         target=_do_direct_merge,
-        args=(branch, worktree_path, plan_file, redis_client, command_id, approve_service_lock),
+        args=(branch, worktree_path, plan_file, redis_client, command_id),
         daemon=False,
     )
     thread.start()
@@ -403,7 +323,7 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
         branch_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
         if branch_str:
             branch = branch_str
-        elif plan_file and not runner_id.startswith("t-"):
+        elif plan_file:
             branch = f"plan/{Path(plan_file).stem}"
         else:
             branch = f"runner/{runner_id}"
@@ -415,31 +335,12 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
             engine=_get_fix_engine(redis_client, runner_id)
         )
 
-        merge_status = str(resolve_result.get("merge_status") or "").strip().lower()
-        if resolve_result["success"] and merge_status in ("", "merged"):
+        if resolve_result["success"]:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
-            result = {
-                "success": True,
-                "message": resolve_result["message"],
-                "merge_status": "merged",
-                "action": "resolve-conflict",
-            }
-        elif merge_status == "conflict" or resolve_result.get("conflict"):
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
-            result = {
-                "success": False,
-                "message": resolve_result["message"],
-                "merge_status": "conflict",
-                "action": "resolve-conflict",
-            }
+            result = {"success": True, "message": "충돌 자동 해결 완료", "action": "resolve-conflict"}
         else:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
-            result = {
-                "success": False,
-                "message": resolve_result["message"],
-                "merge_status": "error",
-                "action": "resolve-conflict",
-            }
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+            result = {"success": False, "message": resolve_result["message"], "action": "resolve-conflict"}
     except Exception as e:
         logger.error(f"[resolve_conflict] 실패: {e}")
         result = {"success": False, "message": str(e), "action": "resolve-conflict"}
@@ -481,15 +382,8 @@ def _do_cleanup_worktree(runner_id: str, redis_client: redis.Redis, command_id: 
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file = None
-        branch_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
-        _cw_base = (get_target_project_root(plan_file) / ".worktrees") if plan_file else WORKTREE_BASE_DIR
-        WorktreeManager.remove(
-            runner_id,
-            _cw_base,
-            plan_file=plan_file or None,
-            branch=branch_str or None,
-            use_runner_identity=runner_id.startswith("t-"),
-        )
+        _cw_base = (get_plan_git_root(plan_file) / ".worktrees") if plan_file else WORKTREE_BASE_DIR
+        WorktreeManager.remove(runner_id, _cw_base, plan_file=plan_file or None)
         redis_client.delete(
             f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status",

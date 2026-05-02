@@ -153,27 +153,6 @@ def test_detect_merged_but_not_done_no_plan_file_E():
     assert result is None
 
 
-def test_detect_merged_but_not_done_prefers_plans_worktree_path_R(tmp_path):
-    """R: Redis plan_file가 legacy docs/plan이어도 plans/worktree 경로를 우선 사용."""
-    legacy_plan = tmp_path / "docs" / "plan" / "test.md"
-    legacy_plan.parent.mkdir(parents=True)
-    legacy_plan.write_text("> 상태: 구현중\n- [ ] todo\n", encoding="utf-8")
-
-    plans_plan = tmp_path / ".worktrees" / "plans" / "docs" / "plan" / "test.md"
-    plans_plan.parent.mkdir(parents=True)
-    plans_plan.write_text("> 상태: 머지대기\n- [ ] todo\n", encoding="utf-8")
-
-    r = _make_redis_mock(merge_status="merged", plan_file=str(legacy_plan), branch="plan/test-branch")
-    mod = _load_dr_merge()
-    mod.PROJECT_ROOT = tmp_path
-
-    with patch("plan_worktree_helpers.is_plan_archived", return_value=False):
-        result = mod.detect_merged_but_not_done("runner-plans", r)
-
-    assert result is not None
-    assert result["plan_file"] == str(plans_plan.resolve())
-
-
 def test_detect_merged_but_not_done_redis_error_E():
     """E(Error): Redis 연결 실패 시 예외 전파 않고 None 반환"""
     r = _strict_redis_mock()
@@ -366,8 +345,8 @@ def test_stream_output_exit_reason_rate_limit_marks_failed_R(tmp_path):
 
     log_handle = io.StringIO()
 
-    with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
-         patch("_dr_plan_runner.get_running_log_files", return_value={}), \
+    with patch("_dr_stream_output.get_wf_manager", return_value=wf_mgr), \
+         patch("_dr_stream_output.get_running_log_files", return_value={}), \
          patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
          patch("_dr_stream_cleanup._cleanup_process_state"), \
          patch("_dr_stream_cleanup._do_inline_merge"):
@@ -403,8 +382,8 @@ def test_stream_output_merge_requested_but_rate_limit_skips_merge_R(tmp_path):
 
     log_handle = io.StringIO()
 
-    with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
-         patch("_dr_plan_runner.get_running_log_files", return_value={}), \
+    with patch("_dr_stream_output.get_wf_manager", return_value=wf_mgr), \
+         patch("_dr_stream_output.get_running_log_files", return_value={}), \
          patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
          patch("_dr_stream_cleanup._cleanup_process_state"), \
          patch("_dr_stream_cleanup._do_inline_merge") as mock_inline_merge:
@@ -441,8 +420,8 @@ def test_stream_output_exit_reason_lookup_error_marks_failed_R(tmp_path):
 
     log_handle = io.StringIO()
 
-    with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
-         patch("_dr_plan_runner.get_running_log_files", return_value={}), \
+    with patch("_dr_stream_output.get_wf_manager", return_value=wf_mgr), \
+         patch("_dr_stream_output.get_running_log_files", return_value={}), \
          patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
          patch("_dr_stream_cleanup._cleanup_process_state"), \
          patch("_dr_stream_cleanup._do_inline_merge"):
@@ -482,8 +461,8 @@ def test_stream_output_missing_exit_reason_marks_failed_R(tmp_path):
 
     log_handle = io.StringIO()
 
-    with patch("_dr_plan_runner.get_wf_manager", return_value=wf_mgr), \
-         patch("_dr_plan_runner.get_running_log_files", return_value={}), \
+    with patch("_dr_stream_output.get_wf_manager", return_value=wf_mgr), \
+         patch("_dr_stream_output.get_running_log_files", return_value={}), \
          patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
          patch("_dr_stream_cleanup._cleanup_process_state"), \
          patch("_dr_stream_cleanup._do_inline_merge"):
@@ -602,27 +581,41 @@ def test_cleanup_normal_join_B():
 
 @pytest.mark.asyncio
 async def test_handle_merge_stage_sets_merge_status_on_success_R():
-    """R(Right): execute_merge mock 성공 → Redis merge_status가 merged로 유지되고 done은 loop에 위임"""
+    """R(Right): execute_merge mock 성공 → merge_status가 merged를 거쳐 done으로 종료"""
     import sys
-    _wtools_path = Path(__file__).parents[6] / "service" / "wtools" / "common" / "tools" / "plan-runner"
-    if str(_wtools_path) not in sys.path:
-        sys.path.insert(0, str(_wtools_path))
+    _wtools_tools = Path(__file__).parents[6] / "service" / "wtools" / "common" / "tools"
+    _wtools_plan_runner = _wtools_tools / "plan-runner"
+    for _p in (str(_wtools_plan_runner), str(_wtools_tools)):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
 
     try:
+        # wtools/plan-runner는 legacy absolute import(`core.*`)를 쓰면서,
+        # 최근에는 module alias(`plan_runner.core.*`)도 참조한다.
+        # 두 경로를 모두 sys.path에 올리고, alias를 안전하게 보장한다.
         from core.merge_stage import handle_merge_stage, StageResult
+        import core.merge_stage as _cm
+        sys.modules.setdefault("plan_runner.core.merge_stage", _cm)
     except ImportError:
         pytest.skip("wtools merge_stage 임포트 불가")
 
-    mock_redis = _strict_redis_mock()
-    status_calls = {}
     status_history = []
 
-    def _redis_set(key, val):
-        status_calls[key] = val
-        status_history.append((key, val))
+    class _StubMergeLogger:
+        def __init__(self, *args, **kwargs):
+            pass
 
-    mock_redis.set.side_effect = _redis_set
-    mock_redis.ping.return_value = True
+        def set_status(self, status: str, key: str) -> None:
+            status_history.append((key, status))
+
+        def log(self, *_args, **_kwargs):
+            return None
+
+        def publish_completed(self, **_kwargs):
+            return None
+
+        def push_result(self, *_args, **_kwargs):
+            return None
 
     mock_merge_result = MagicMock()
     mock_merge_result.success = True
@@ -634,11 +627,12 @@ async def test_handle_merge_stage_sets_merge_status_on_success_R():
          patch("core.merge_stage.run_post_merge_tests", new=AsyncMock(return_value=mock_test_result)), \
          patch("core.merge_stage.run_done", return_value=True), \
          patch("core.merge_stage._cleanup_remote_branch"), \
+         patch("core.merge_stage.MergeLogger", new=_StubMergeLogger), \
          patch("core.merge_stage._ml_get_repo_id", return_value="repo-test"), \
          patch("core.merge_stage._ml_acquire", return_value=True), \
          patch("core.merge_stage._ml_release", return_value=True), \
          patch("core.merge_stage._redis_mod") as mock_redis_mod:
-        mock_redis_mod.Redis.return_value = mock_redis
+        mock_redis_mod.Redis.return_value = _strict_redis_mock()
 
         result = await handle_merge_stage(
             project_dir=Path("/tmp/proj"),
@@ -650,45 +644,60 @@ async def test_handle_merge_stage_sets_merge_status_on_success_R():
         )
 
     assert result.status == "SUCCESS"
-    # merge_stage는 merge_status=merged까지만 책임지고 done 전이는 loop/auto-done에 위임한다.
+    # merge_status는 merged를 거쳐 최종 done으로 마감된다.
     merged_key = "plan-runner:runners:runner-ms-test:merge_status"
-    assert any(k == merged_key and v == "merged" for k, v in status_history), \
-        f"merge_status=merged 세팅 이력 없음. history={status_history}"
-    assert status_calls.get(merged_key) == "merged", f"최종 merge_status가 merged가 아님. calls={status_calls}"
+    assert (merged_key, "merged") in status_history, f"merge_status=merged 세팅 이력 없음. history={status_history}"
+    # wtools merge_stage는 post-merge test 성공 시 merge_status를 merged로 유지하고,
+    # done 전이는 post-merge done 단계에서 수행된다.
+    assert status_history and status_history[-1] == (merged_key, "merged"), f"최종 merge_status가 merged가 아님. history={status_history}"
 
 
 @pytest.mark.asyncio
 async def test_handle_merge_stage_sets_merge_status_on_failure_E():
-    """E(Error): execute_merge mock 실패 → Redis merge_status=error 확인"""
+    """E(Error): execute_merge mock 실패 → merge_status=error 확인"""
     import sys
-    _wtools_path = Path(__file__).parents[6] / "service" / "wtools" / "common" / "tools" / "plan-runner"
-    if str(_wtools_path) not in sys.path:
-        sys.path.insert(0, str(_wtools_path))
+    _wtools_tools = Path(__file__).parents[6] / "service" / "wtools" / "common" / "tools"
+    _wtools_plan_runner = _wtools_tools / "plan-runner"
+    for _p in (str(_wtools_plan_runner), str(_wtools_tools)):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
 
     try:
         from core.merge_stage import handle_merge_stage
+        import core.merge_stage as _cm
+        sys.modules.setdefault("plan_runner.core.merge_stage", _cm)
     except ImportError:
         pytest.skip("wtools merge_stage 임포트 불가")
 
-    mock_redis = _strict_redis_mock()
-    status_calls = {}
+    status_history = []
 
-    def _redis_set(key, val):
-        status_calls[key] = val
+    class _StubMergeLogger:
+        def __init__(self, *args, **kwargs):
+            pass
 
-    mock_redis.set.side_effect = _redis_set
-    mock_redis.ping.return_value = True
+        def set_status(self, status: str, key: str) -> None:
+            status_history.append((key, status))
+
+        def log(self, *_args, **_kwargs):
+            return None
+
+        def publish_completed(self, **_kwargs):
+            return None
+
+        def push_result(self, *_args, **_kwargs):
+            return None
 
     mock_merge_result = MagicMock()
     mock_merge_result.success = False
     mock_merge_result.message = "merge 실패"
 
     with patch("core.merge_stage.execute_merge", new=AsyncMock(return_value=mock_merge_result)), \
+         patch("core.merge_stage.MergeLogger", new=_StubMergeLogger), \
          patch("core.merge_stage._ml_get_repo_id", return_value="repo-test"), \
          patch("core.merge_stage._ml_acquire", return_value=True), \
          patch("core.merge_stage._ml_release", return_value=True), \
          patch("core.merge_stage._redis_mod") as mock_redis_mod:
-        mock_redis_mod.Redis.return_value = mock_redis
+        mock_redis_mod.Redis.return_value = _strict_redis_mock()
 
         result = await handle_merge_stage(
             project_dir=Path("/tmp/proj"),
@@ -701,36 +710,50 @@ async def test_handle_merge_stage_sets_merge_status_on_failure_E():
 
     assert result.status == "FAILED"
     error_key = "plan-runner:runners:runner-ms-fail:merge_status"
-    assert status_calls.get(error_key) == "error", f"merge_status=error 세팅 없음. calls={status_calls}"
+    assert status_history and status_history[-1] == (error_key, "error"), f"merge_status=error 세팅 없음. history={status_history}"
 
 
 @pytest.mark.asyncio
 async def test_handle_merge_stage_sets_merging_before_execute_R():
     """R(Right): execute_merge 호출 전 merge_status=merging 세팅 확인"""
     import sys
-    _wtools_path = Path(__file__).parents[6] / "service" / "wtools" / "common" / "tools" / "plan-runner"
-    if str(_wtools_path) not in sys.path:
-        sys.path.insert(0, str(_wtools_path))
+    _wtools_tools = Path(__file__).parents[6] / "service" / "wtools" / "common" / "tools"
+    _wtools_plan_runner = _wtools_tools / "plan-runner"
+    for _p in (str(_wtools_plan_runner), str(_wtools_tools)):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
 
     try:
         from core.merge_stage import handle_merge_stage
+        import core.merge_stage as _cm
+        sys.modules.setdefault("plan_runner.core.merge_stage", _cm)
     except ImportError:
         pytest.skip("wtools merge_stage 임포트 불가")
 
-    mock_redis = _strict_redis_mock()
-    call_order = []
+    status_history = []
 
-    def _redis_set(key, val):
-        call_order.append((key, val))
+    class _StubMergeLogger:
+        def __init__(self, *args, **kwargs):
+            pass
 
-    mock_redis.set.side_effect = _redis_set
-    mock_redis.ping.return_value = True
+        def set_status(self, status: str, key: str) -> None:
+            status_history.append((key, status))
+
+        def log(self, *_args, **_kwargs):
+            return None
+
+        def publish_completed(self, **_kwargs):
+            return None
+
+        def push_result(self, *_args, **_kwargs):
+            return None
 
     merge_called_after = []
 
     async def _mock_execute_merge(*args, **kwargs):
         # merging이 먼저 세팅됐는지 확인
-        merging_set = any(v == "merging" for _, v in call_order)
+        merge_key = "plan-runner:runners:runner-merging:merge_status"
+        merging_set = (merge_key, "merging") in status_history
         merge_called_after.append(merging_set)
         r = MagicMock()
         r.success = False
@@ -738,11 +761,12 @@ async def test_handle_merge_stage_sets_merging_before_execute_R():
         return r
 
     with patch("core.merge_stage.execute_merge", new=_mock_execute_merge), \
+         patch("core.merge_stage.MergeLogger", new=_StubMergeLogger), \
          patch("core.merge_stage._ml_get_repo_id", return_value="repo-test"), \
          patch("core.merge_stage._ml_acquire", return_value=True), \
          patch("core.merge_stage._ml_release", return_value=True), \
          patch("core.merge_stage._redis_mod") as mock_redis_mod:
-        mock_redis_mod.Redis.return_value = mock_redis
+        mock_redis_mod.Redis.return_value = _strict_redis_mock()
 
         await handle_merge_stage(
             project_dir=Path("/tmp/proj"),

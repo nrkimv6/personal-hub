@@ -1,19 +1,15 @@
-"""Compatibility shim for legacy imports/tests.
+"""Facade for dev-runner plan-runner helpers.
 
-Actual implementation lives in scripts/plan_runner/_dr_plan_runner.py.
-This shim executes the real source in the current module namespace so
-monkeypatches against the loaded module affect the live globals.
+The implementation lives under `scripts/plan_runner/` to keep the scripts
+namespace organized, but existing callers/tests import from `scripts/_dr_*`.
 """
 
-from pathlib import Path
-import importlib
 import sys
+from pathlib import Path
 
-_IMPL_DIR = Path(__file__).resolve().parent / "plan_runner"
-if str(_IMPL_DIR) not in sys.path:
-    sys.path.insert(0, str(_IMPL_DIR))
+_BASE = Path(__file__).resolve().parent / "plan_runner"
+if str(_BASE) not in sys.path:
+    sys.path.insert(0, str(_BASE))
 
-importlib.import_module("_dr_state")
+from _dr_plan_runner import *  # noqa: F401,F403
 
-_IMPL_PATH = _IMPL_DIR / "_dr_plan_runner.py"
-exec(compile(_IMPL_PATH.read_text(encoding="utf-8"), str(_IMPL_PATH), "exec"), globals())

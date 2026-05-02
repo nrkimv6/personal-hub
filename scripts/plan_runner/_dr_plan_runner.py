@@ -79,6 +79,18 @@ def _register_canonical_alias() -> None:
 
 _register_canonical_alias()
 
+# Lifecycle control lives in `_dr_runner_control` so tests can patch that module
+# and observe behavior through the facade imports.
+from _dr_runner_control import (  # noqa: E402
+    start_plan_runner,
+    stop_plan_runner,
+    get_status,
+    force_stop_plan_runner,
+    force_kill_plan_runner,
+    _do_start_plan_runner,
+    _launch_plan_runner_process,
+)
+
 def _ownership_snapshot_dir(project_root: Path = PROJECT_ROOT) -> Path:
     return project_root / "logs" / "dev_runner" / "ownership"
 
@@ -161,6 +173,16 @@ def _stream_output(
     - 억제된 줄이 있으면 정상 라인 직전에 요약 1줄 publish
     - rate-limiter: 동일 라인 0.5초 내 10회 이상 반복 시 burst 억제
     """
+    # 테스트는 `_dr_stream_output.*`를 patch하므로, 구현은 항상 분리 모듈로 위임한다.
+    from _dr_stream_output import _stream_output as _impl
+
+    return _impl(
+        process,
+        log_handle,
+        redis_client,
+        runner_id,
+        stderr_handle=stderr_handle,
+    )
     import time
     logger.info(f"[_stream_output] 시작 runner_id={runner_id!r}")
     _running_log_files = get_running_log_files()
