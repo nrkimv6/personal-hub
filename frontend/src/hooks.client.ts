@@ -1,7 +1,8 @@
 import { apiGate } from '$lib/stores/apiGate.svelte';
 import { ApiGateClosedError, GATE_BLOCK_PATTERN, GATE_BYPASS_PATHS } from '$lib/api/client';
 
-const originalFetch = window.fetch.bind(window);
+let originalFetch: typeof fetch | null = null;
+let fetchGateInstalled = false;
 
 function resolveRequestUrl(input: RequestInfo | URL): URL | null {
 	const raw = input instanceof Request ? input.url : input.toString();
@@ -33,20 +34,29 @@ function shouldBypassGate(url: URL, input: RequestInfo | URL, init?: RequestInit
 	return hasBypassHeader(input, init);
 }
 
-window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = resolveRequestUrl(input);
-	if (
-		url !== null &&
-		url.origin === window.location.origin &&
-		GATE_BLOCK_PATTERN.test(url.pathname) &&
-		!shouldBypassGate(url, input, init) &&
-		apiGate.state !== 'open'
-	) {
-		return Promise.reject(new ApiGateClosedError());
-	}
+function installFetchGate() {
+	if (fetchGateInstalled || typeof window === 'undefined') return;
+	originalFetch = window.fetch.bind(window);
+	window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+		const url = resolveRequestUrl(input);
+		if (
+			url !== null &&
+			url.origin === window.location.origin &&
+			GATE_BLOCK_PATTERN.test(url.pathname) &&
+			!shouldBypassGate(url, input, init) &&
+			apiGate.state !== 'open'
+		) {
+			return Promise.reject(new ApiGateClosedError());
+		}
 
-	return originalFetch(input, init);
-}) as typeof fetch;
+		return originalFetch!(input, init);
+	}) as typeof fetch;
+	fetchGateInstalled = true;
+}
+
+export function init() {
+	installFetchGate();
+}
 
 export function handleError({ error }: { error: unknown }) {
 	if (error instanceof ApiGateClosedError) {
