@@ -371,6 +371,8 @@ class TestWorktreeListHttp:
         }
         assert len(v2_data["worktrees"]) == len(v1_data) == 1
         assert v2_data["worktrees"][0]["branch"] == v1_data[0]["branch"]
+        assert "prunable" not in v1_data[0]
+        assert "prunable" not in v2_data["worktrees"][0]
         assert "commits" in v1_data[0]
         assert "commit_count" in v2_data["worktrees"][0]
         assert "commits" not in v2_data["worktrees"][0]

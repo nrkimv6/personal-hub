@@ -1,3 +1,7 @@
+import shutil
+import subprocess
+
+from tests.dev_runner import conftest_e2e
 from tests.dev_runner.conftest_e2e import (
     TEST_PLAN_STEMS,
     FIXTURES_DIR,
@@ -23,3 +27,59 @@ def test_cleanup_test_worktrees_is_idempotent():
     # 2회 연속 호출 - Exception 없이 완료되는지 확인
     _cleanup_test_worktrees()
     _cleanup_test_worktrees()
+
+
+def _git(repo, *args):
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_cleanup_test_worktrees_prunes_prunable_registration_and_runner_branch(tmp_path, monkeypatch):
+    """T3: runner branch + prunable registration cleanup is idempotent in a real git repo."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "init")
+
+    fixtures_dir = tmp_path / "fixtures"
+    fixtures_dir.mkdir()
+    fixture = fixtures_dir / "test_minimal_plan.md"
+    fixture.write_text(
+        "# test\n> branch: runner/t-prunable-001\n> worktree: .worktrees/runner-prunable\n",
+        encoding="utf-8",
+    )
+
+    worktree_base = repo / ".worktrees"
+    prunable_path = worktree_base / "runner-prunable"
+    _git(repo, "worktree", "add", "-b", "runner/t-prunable-001", str(prunable_path))
+    shutil.rmtree(prunable_path)
+
+    porcelain = _git(repo, "worktree", "list", "--porcelain").stdout
+    assert "prunable" in porcelain
+    assert "runner/t-prunable-001" in porcelain
+
+    monkeypatch.setattr(conftest_e2e, "PROJECT_ROOT", repo)
+    monkeypatch.setattr(conftest_e2e, "WORKTREE_BASE", worktree_base)
+    monkeypatch.setattr(conftest_e2e, "FIXTURES_DIR", fixtures_dir)
+    monkeypatch.setattr(conftest_e2e, "TEST_PLAN_STEMS", ["test_minimal_plan"])
+
+    conftest_e2e._cleanup_test_worktrees()
+    conftest_e2e._cleanup_test_worktrees()
+
+    porcelain = _git(repo, "worktree", "list", "--porcelain").stdout
+    branches = _git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").stdout
+    fixture_content = fixture.read_text(encoding="utf-8")
+
+    assert "prunable" not in porcelain
+    assert "runner/t-prunable-001" not in branches
+    assert "> branch:" not in fixture_content
+    assert "> worktree:" not in fixture_content
