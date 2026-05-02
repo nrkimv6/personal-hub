@@ -231,6 +231,19 @@
 		return getHiddenLineCount(message) > 0 || getHiddenCharCount(message) > 0;
 	}
 
+	function isFailureResultBody(message: string): boolean {
+		const lower = normalizeLogText(message).toLowerCase();
+		return (
+			lower.includes('(empty aggregated_output)') ||
+			lower.includes('positional parameter') ||
+			lower.includes('error parsing glob') ||
+			lower.includes('not recognized') ||
+			lower.includes('os error') ||
+			lower.includes('traceback') ||
+			lower.includes('[error]')
+		);
+	}
+
 	function getExpandLabel(message: string): string {
 		const hiddenLines = getHiddenLineCount(message);
 		const hiddenChars = getHiddenCharCount(message);
@@ -896,24 +909,9 @@
 					{@const resultBody = resultMatch ? resultMatch.text : line.message}
 					{@const resultExpanded = isExpanded(line.id)}
 					{@const resultCollapsed = shouldCollapseMessage(resultBody)}
-					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 opacity-60 {line.isStale ? 'opacity-20' : ''}">
-						{#if hasMultiResultSegments}
-							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
-							<span class="shrink-0 w-[42px] text-right {style.text} mr-1">
-								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-							</span>
-							<div class="flex-1 min-w-0 bg-gray-900/60 rounded px-2 py-1 mt-0.5 font-mono">
-								{#each resultSegments as segment}
-									<div class="flex min-w-0 items-baseline leading-5">
-										<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{segment.num}</span>
-										<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
-										<span class="flex-1 min-w-0 min-h-[1rem] break-all whitespace-pre-wrap text-emerald-300/80 text-[11px]">
-											{getRenderableText(segment.text)}
-										</span>
-									</div>
-								{/each}
-							</div>
-						{:else if resultMatch}
+					{@const resultIsFailure = isFailureResultBody(resultBody)}
+					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 {resultIsFailure ? 'opacity-100 bg-red-950/35 border-l-2 border-red-500 -mx-1 px-1 rounded' : 'opacity-60'} {line.isStale ? 'opacity-20' : ''}">
+						{#if resultMatch}
 							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
 							<span class="shrink-0 w-[42px] text-right {style.text} mr-1">
 								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
@@ -921,7 +919,10 @@
 							<span class="flex-1 min-w-0 flex items-baseline bg-gray-900/60 rounded px-1 font-mono">
 								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch.num}</span>
 								<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
-								<span class="flex-1 min-w-0 break-all whitespace-pre-wrap text-emerald-300/80 text-[11px]">
+								{#if resultIsFailure}
+									<span class="shrink-0 mr-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">FAIL</span>
+								{/if}
+								<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {resultIsFailure ? 'text-red-200' : 'text-emerald-300/80'} text-[11px]">
 									{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
 								</span>
 								{#if resultCollapsed}
@@ -942,7 +943,10 @@
 							<span class="shrink-0 w-[42px] text-right {style.text}">
 								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 							</span>
-							<span class="flex-1 min-w-0 break-all whitespace-pre-wrap text-gray-400 text-xs">
+							{#if resultIsFailure}
+								<span class="shrink-0 mx-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">FAIL</span>
+							{/if}
+							<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {resultIsFailure ? 'text-red-200' : 'text-gray-400'} text-xs">
 								{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
 							</span>
 							{#if resultCollapsed}
