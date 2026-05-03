@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.plan_record import PlanRecord, PlanEvent
-from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+from app.modules.dev_runner.services.plan_record_service import PlanRecordService, _compute_filename_hash
 
 
 def _create_plan_tables(eng):
@@ -111,6 +111,43 @@ class TestRotationRoundtripIntegration:
         assert fetched is not None
         assert fetched.raw_content == content
         assert fetched.project == "test-project"
+
+    def test_ingest_single_updates_plan_to_archive_path_integration(self, int_svc, int_db, tmp_path):
+        """통합: 같은 filename hash의 plan record를 archive ingest가 갱신한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        archive_dir = tmp_path / "docs" / "archive"
+        plan_dir.mkdir(parents=True)
+        archive_dir.mkdir(parents=True)
+
+        filename = "2026-05-03_archive-path-integration.md"
+        plan_path = plan_dir / filename
+        archive_path = archive_dir / filename
+        plan_path.write_text("# Active Plan\n\nold body", encoding="utf-8")
+        archive_path.write_text("# Archived Plan\n\nnew body", encoding="utf-8")
+
+        active = int_svc.get_or_create(str(plan_path), title="Active Plan", project="monitor-page")
+        int_db.flush()
+
+        assert _compute_filename_hash(str(plan_path)) == _compute_filename_hash(str(archive_path))
+
+        updated = int_svc.ingest_single(
+            file_path=str(archive_path),
+            project="monitor-page",
+            raw_content=archive_path.read_text(encoding="utf-8"),
+            title="Archived Plan",
+            status="archived",
+        )
+        int_db.commit()
+
+        assert updated.id == active.id
+        assert updated.file_path == str(archive_path)
+        assert updated.raw_content == "# Archived Plan\n\nnew body"
+        assert updated.archived_at is not None
+
+        count = int_db.query(PlanRecord).filter_by(
+            filename_hash=_compute_filename_hash(str(plan_path))
+        ).count()
+        assert count == 1
 
     def test_deep_search_integration(self, int_svc, int_db, tmp_path):
         """통합: deep=True 검색 → raw_content 키워드 매칭"""

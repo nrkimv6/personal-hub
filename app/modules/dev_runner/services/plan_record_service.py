@@ -216,6 +216,20 @@ class PlanRecordService:
         record = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
         if record:
             # update
+            now = datetime.now()
+            old_path = record.file_path
+            path_changed = old_path != file_path
+            if path_changed:
+                record.file_path = file_path
+                _add_event(
+                    self.db,
+                    record,
+                    "path_changed",
+                    {"from": old_path, "to": file_path, "source": "ingest_single"},
+                )
+            record.file_removed_at = None
+            if record.archived_at is None:
+                record.archived_at = now
             if project:
                 record.project = project
             if raw_content:
@@ -224,8 +238,18 @@ class PlanRecordService:
                 record.title = title
             if status:
                 record.status = status
-            record.updated_at = datetime.now()
-            _add_event(self.db, record, "ingested", {"source": "ingest_single", "updated": True})
+            record.updated_at = now
+            _add_event(
+                self.db,
+                record,
+                "ingested",
+                {
+                    "source": "ingest_single",
+                    "updated": True,
+                    "old_path": old_path if path_changed else None,
+                    "new_path": file_path,
+                },
+            )
         else:
             # create
             if title is None:

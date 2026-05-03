@@ -308,6 +308,54 @@ class TestGetRecordByPath:
         assert data["id"] is not None
 
 
+# ========== /api/v1/plans/records/ingest ==========
+
+class TestIngestSingleRecord:
+
+    def test_ingest_single_updates_existing_record_archive_path_http(self, client, test_db_session):
+        """POST /records/ingest updates existing filename-hash record to archive path."""
+        from app.models.plan_record import PlanRecord
+        from app.modules.dev_runner.services.plan_record_service import _compute_filename_hash
+
+        plan_path = "/workspace/docs/plan/2026-05-03_http-archive-path.md"
+        archive_path = "/workspace/docs/archive/2026-05-03_http-archive-path.md"
+        filename_hash = _compute_filename_hash(plan_path)
+        test_db_session.query(PlanRecord).filter_by(filename_hash=filename_hash).delete(synchronize_session=False)
+        test_db_session.commit()
+
+        record = PlanRecord(
+            filename_hash=filename_hash,
+            file_path=plan_path,
+            title="Old HTTP Plan",
+            project="monitor-page",
+            status="planned",
+            raw_content="# Old HTTP Plan",
+        )
+        test_db_session.add(record)
+        test_db_session.commit()
+
+        resp = client.post(
+            "/api/v1/plans/records/ingest",
+            json={
+                "file_path": archive_path,
+                "project": "monitor-page",
+                "raw_content": "# Archived HTTP Plan\n\nnew body",
+                "title": "Archived HTTP Plan",
+                "status": "archived",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == record.id
+        assert data["filename_hash"] == filename_hash
+        assert data["file_path"] == archive_path
+        assert data["file_path"] != plan_path
+
+        content_resp = client.get(f"/api/v1/plans/records/{record.id}/content")
+        assert content_resp.status_code == 200
+        assert content_resp.json()["raw_content"] == "# Archived HTTP Plan\n\nnew body"
+
+
 # ========== Phase T4: import-archived + category/tags 필터 ==========
 
 class TestImportArchived:

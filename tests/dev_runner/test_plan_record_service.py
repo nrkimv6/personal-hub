@@ -3,6 +3,7 @@
 대상 소스: app/modules/dev_runner/services/plan_record_service.py
 """
 import pytest
+from datetime import datetime
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -246,6 +247,88 @@ class TestMarkArchived:
 
         assert result is not None
         assert result.archived_at is not None
+
+
+# ========== ingest_single ==========
+
+class TestIngestSingle:
+
+    def test_ingest_single_updates_existing_record_archive_path(self, svc, db):
+        """기존 active record를 archive path ingest로 갱신한다."""
+        plan_path = "/workspace/docs/plan/2026-05-03_archive-path-update.md"
+        archive_path = "/workspace/docs/archive/2026-05-03_archive-path-update.md"
+        record = svc.get_or_create(plan_path, title="Old Title", project="old-project")
+        record.file_removed_at = datetime.now()
+        db.flush()
+
+        updated = svc.ingest_single(
+            file_path=archive_path,
+            project="new-project",
+            raw_content="# New Title\n\nnew body",
+            title="New Title",
+            status="archived",
+        )
+        db.flush()
+
+        assert updated.id == record.id
+        assert updated.file_path == archive_path
+        assert updated.raw_content == "# New Title\n\nnew body"
+        assert updated.status == "archived"
+        assert updated.project == "new-project"
+        assert updated.title == "New Title"
+        assert updated.archived_at is not None
+        assert updated.file_removed_at is None
+
+        count = db.query(PlanRecord).filter(
+            PlanRecord.filename_hash == _compute_filename_hash(plan_path)
+        ).count()
+        assert count == 1
+
+    def test_ingest_single_records_path_changed_event(self, svc, db):
+        """archive ingest path 이동은 path_changed와 ingested detail에 남긴다."""
+        plan_path = "/workspace/docs/plan/2026-05-03_path-event.md"
+        archive_path = "/workspace/docs/archive/2026-05-03_path-event.md"
+        record = svc.get_or_create(plan_path)
+        db.flush()
+
+        updated = svc.ingest_single(file_path=archive_path, raw_content="# Archived")
+        db.flush()
+
+        path_events = db.query(PlanEvent).filter_by(
+            plan_record_id=updated.id,
+            event_type="path_changed",
+        ).all()
+        assert len(path_events) == 1
+        assert path_events[0].detail == {
+            "from": plan_path,
+            "to": archive_path,
+            "source": "ingest_single",
+        }
+
+        ingested = db.query(PlanEvent).filter_by(
+            plan_record_id=record.id,
+            event_type="ingested",
+        ).order_by(PlanEvent.id.desc()).first()
+        assert ingested is not None
+        assert ingested.detail["updated"] is True
+        assert ingested.detail["old_path"] == plan_path
+        assert ingested.detail["new_path"] == archive_path
+
+    def test_ingest_single_same_path_does_not_duplicate_path_changed_event(self, svc, db):
+        """같은 path 재ingest는 path_changed 이벤트를 추가하지 않는다."""
+        archive_path = "/workspace/docs/archive/2026-05-03_same-path.md"
+
+        first = svc.ingest_single(file_path=archive_path, raw_content="first")
+        db.flush()
+        second = svc.ingest_single(file_path=archive_path, raw_content="second")
+        db.flush()
+
+        assert first.id == second.id
+        events = db.query(PlanEvent).filter_by(
+            plan_record_id=second.id,
+            event_type="path_changed",
+        ).all()
+        assert events == []
 
 
 # ========== sync_all ==========
