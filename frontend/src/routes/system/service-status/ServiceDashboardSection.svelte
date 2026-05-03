@@ -13,7 +13,7 @@
   import WorkersSection from './WorkersSection.svelte';
   import TasksSection from './TasksSection.svelte';
   import InfrastructureSection from './InfrastructureSection.svelte';
-  import type { ConfirmAction, RestartStep, WorkerStatusVariant } from './types';
+  import type { ConfirmAction, DbCircuitStatus, RestartStep, WorkerStatusVariant } from './types';
 
   interface Props {
     status: ServiceDashboardStatus;
@@ -30,6 +30,7 @@
     workerTierProcs: WorkerProcess[];
     infraTierProcs: WorkerProcess[];
     redisStatus: RedisStatus | null;
+    dbStatus: DbCircuitStatus | null;
     devRunnerStatus: RunStatusResponse | null;
     selfRestartState: 'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed';
     selfRestartMessage: string;
@@ -88,6 +89,7 @@
     workerTierProcs,
     infraTierProcs,
     redisStatus,
+    dbStatus,
     devRunnerStatus,
     selfRestartState,
     selfRestartMessage,
@@ -190,6 +192,7 @@
 
   <InfrastructureSection
     {redisStatus}
+    {dbStatus}
     {devRunnerStatus}
     {allStartups}
     {actionLoading}

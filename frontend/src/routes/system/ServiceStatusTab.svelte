@@ -30,7 +30,7 @@
     processWatchKey,
     formatProcessDelta
   } from './service-status/utils';
-  import type { ConfirmAction, RestartStep, RestartStepKey } from './service-status/types';
+  import type { ConfirmAction, DbCircuitStatus, RestartStep, RestartStepKey } from './service-status/types';
 
   interface Props {
     onStatusChange?: (runningCount: number, totalCount: number) => void;
@@ -47,6 +47,7 @@
   let selfRestartMessage = $state('');
 
   let devRunnerStatus = $state<RunStatusResponse | null>(null);
+  let dbStatus = $state<DbCircuitStatus | null>(null);
   let redisStatus = $state<RedisStatus | null>({
     connected: false,
     container_running: null,
@@ -293,11 +294,13 @@
 
   async function fetchExtraStatus() {
     try {
-      const [runnerStatus, redis] = await Promise.all([
+      const [runnerStatus, redis, systemStatus] = await Promise.all([
         devRunnerRunnerApi.status().catch(() => null),
-        serviceDashboardApi.redisStatus().catch(() => null)
+        serviceDashboardApi.redisStatus().catch(() => null),
+        systemApi.status().catch(() => null)
       ]);
       if (runnerStatus !== null) devRunnerStatus = runnerStatus;
+      dbStatus = systemStatus?.db_status ?? null;
       redisStatus = redis ?? {
         connected: false,
         container_running: null,
@@ -704,6 +707,7 @@
       {workerTierProcs}
       {infraTierProcs}
       {redisStatus}
+      {dbStatus}
       {devRunnerStatus}
       {selfRestartState}
       {selfRestartMessage}

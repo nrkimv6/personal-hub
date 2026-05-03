@@ -16,6 +16,12 @@ export type WorkerStatusVariant = 'success' | 'warning' | 'error';
 export type SelfRestartState = 'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed';
 export type RestartStepKey = 'requested' | 'waiting' | 'checking' | 'done';
 
+export interface DbCircuitStatus {
+  state: 'closed' | 'open' | 'half_open' | string;
+  fail_count: number;
+  last_failure_iso: string | null;
+}
+
 export interface WorkerStatusInfo {
   text: string;
   variant: WorkerStatusVariant;
@@ -107,6 +113,7 @@ export interface TasksSectionProps {
 
 export interface InfrastructureSectionProps {
   redisStatus: RedisStatus | null;
+  dbStatus: DbCircuitStatus | null;
   devRunnerStatus: RunStatusResponse | null;
   allStartups: StartupProgram[];
   actionLoading: string | null;
