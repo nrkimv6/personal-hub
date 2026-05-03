@@ -20,8 +20,10 @@ def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 def _copy_hook_scripts(src_root: Path, dst_root: Path) -> None:
     dst_hooks = dst_root / "scripts" / "git-hooks"
     dst_hooks.mkdir(parents=True, exist_ok=True)
-    for name in ("pre-commit-root-worktree-block.ps1", "pre-commit-plans-block.ps1"):
-        shutil.copy2(src_root / "scripts" / "git-hooks" / name, dst_hooks / name)
+    shutil.copy2(
+        src_root / "scripts" / "git-hooks" / "pre-commit-plans-block.ps1",
+        dst_hooks / "pre-commit-plans-block.ps1",
+    )
 
 
 def _init_repo(tmp_path: Path) -> Path:
@@ -56,16 +58,28 @@ def _run_hook(repo_cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_root_worktree_blocks_impl_scope_stage(tmp_path):
+def test_root_worktree_allows_impl_scope_stage(tmp_path):
     repo = _init_repo(tmp_path)
     target = repo / ".claude" / "skills" / "done" / "SKILL.md"
-    target.write_text("root dirty\n", encoding="utf-8")
+    target.write_text("root impl change\n", encoding="utf-8")
     _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
 
     result = _run_hook(repo)
 
+    assert result.returncode == 0
+
+
+def test_root_worktree_blocks_plan_docs_stage(tmp_path):
+    repo = _init_repo(tmp_path)
+    doc = repo / "docs" / "plan" / "sample.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text("# plan\n", encoding="utf-8")
+    _run(["git", "add", "docs/plan/sample.md"], repo)
+
+    result = _run_hook(repo)
+
     assert result.returncode != 0
-    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+    assert "disallowed_worktree" in (result.stdout + result.stderr)
 
 
 def test_linked_worktree_allows_impl_scope_stage(tmp_path):
