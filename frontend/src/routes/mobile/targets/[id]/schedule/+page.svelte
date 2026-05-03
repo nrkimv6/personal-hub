@@ -4,6 +4,8 @@
 	import { goto } from "$app/navigation";
 	import { fetchWithTimeout } from '$lib/api/client';
 	import type { MobileTarget, MobileSchedule } from '$lib/types/mobile';
+	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 
 	const targetId = $derived($page.params.id);
 
@@ -18,6 +20,10 @@
 		interval_days: 7, // 기본 주 1회
 		enabled: true,
 	});
+
+	function errorMessage(err: unknown): string {
+		return err instanceof Error ? err.message : '알 수 없는 오류';
+	}
 
 	async function loadData() {
 		try {
@@ -77,11 +83,11 @@
 
 			if (!response.ok) throw new Error("스케줄 생성 실패");
 
-			alert("스케줄이 생성되었습니다.");
+			toast.success("스케줄이 생성되었습니다.");
 			showNewScheduleForm = false;
 			await loadData();
 		} catch (err) {
-			alert(`스케줄 생성 실패: ${(err as Error).message}`);
+			toast.error(`스케줄 생성 실패: ${errorMessage(err)}`);
 		}
 	}
 
@@ -100,15 +106,21 @@
 
 			if (!response.ok) throw new Error("스케줄 업데이트 실패");
 
-			alert("스케줄 상태가 변경되었습니다.");
+			toast.success("스케줄 상태가 변경되었습니다.");
 			await loadData();
 		} catch (err) {
-			alert(`스케줄 업데이트 실패: ${(err as Error).message}`);
+			toast.error(`스케줄 업데이트 실패: ${errorMessage(err)}`);
 		}
 	}
 
 	async function deleteSchedule(schedule: MobileSchedule) {
-		if (!confirm("스케줄을 삭제하시겠습니까?")) return;
+		const confirmed = await confirm({
+			title: '스케줄 삭제',
+			message: '스케줄을 삭제하시겠습니까?',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 
 		try {
 			const response = await fetchWithTimeout(`/api/v1/schedules/${schedule.id}`, {
@@ -117,10 +129,10 @@
 
 			if (!response.ok) throw new Error("스케줄 삭제 실패");
 
-			alert("스케줄이 삭제되었습니다.");
+			toast.success("스케줄이 삭제되었습니다.");
 			await loadData();
 		} catch (err) {
-			alert(`스케줄 삭제 실패: ${(err as Error).message}`);
+			toast.error(`스케줄 삭제 실패: ${errorMessage(err)}`);
 		}
 	}
 
