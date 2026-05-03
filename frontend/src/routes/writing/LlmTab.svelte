@@ -6,6 +6,7 @@
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
 	import { createSelection } from '$lib/utils/selection.svelte';
 	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 
@@ -75,6 +76,10 @@
 	let createLoading = false;
 	let createError: string | null = null;
 	let createSuccess = false;
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
 
 	// Provider별 모델 목록
 	// Provider 목록 (API에서 동적 로드)
@@ -173,13 +178,13 @@
 	}
 
 	async function retryAllFailedWithoutSuccess() {
-		if (!confirm(`성공한 적 없는 모든 caller의 실패 요청을 재시도하시겠습니까?`)) return;
+		if (!await confirm({ title: '일괄 재시도', message: '성공한 적 없는 모든 caller의 실패 요청을 재시도하시겠습니까?', confirmText: '재시도' })) return;
 		try {
 			const result = await llmApi.retryFailedCallersWithoutSuccess(filterCallerType || undefined);
-			alert(`재시도 완료: ${result.retried}개 요청 (${result.callers}개 caller)`);
+			toast.success(`재시도 완료: ${result.retried}개 요청 (${result.callers}개 caller)`);
 			await fetchGroupedData();
 		} catch (e) {
-			alert('재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재시도 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -217,20 +222,20 @@
 		}
 
 		if (failedRequestIds.length === 0) {
-			alert('선택된 그룹에 재시도할 실패 요청이 없습니다.');
+			toast.warning('선택된 그룹에 재시도할 실패 요청이 없습니다.');
 			return;
 		}
 
-		if (!confirm(`선택된 ${selectedGroups.length}개 그룹의 ${failedRequestIds.length}개 실패 요청을 재시도하시겠습니까?`)) return;
+		if (!await confirm({ title: '선택 그룹 재시도', message: `선택된 ${selectedGroups.length}개 그룹의 ${failedRequestIds.length}개 실패 요청을 재시도하시겠습니까?`, confirmText: '재시도' })) return;
 
 		try {
 			const result = await llmApi.batchRetry(failedRequestIds);
-			alert(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
+			toast.success(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
 			selectedGroupKeys = [];
 			groupSelectAll = false;
 			await fetchGroupedData();
 		} catch (e) {
-			alert('일괄 재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 재시도 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -306,7 +311,7 @@
 			await llmApi.cancel(id);
 			await fetchData();
 		} catch (e) {
-			alert('취소 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('취소 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -315,17 +320,17 @@
 			await llmApi.retry(id);
 			await fetchData();
 		} catch (e) {
-			alert('재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재시도 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function deleteRequest(id: number) {
-		if (!confirm('이 요청을 삭제하시겠습니까?')) return;
+		if (!await confirm({ title: '요청 삭제', message: '이 요청을 삭제하시겠습니까?', confirmText: '삭제', variant: 'danger' })) return;
 		try {
 			await llmApi.delete(id);
 			await fetchData();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -333,35 +338,35 @@
 		if (selection.count === 0) return;
 		try {
 			const result = await llmApi.batchRetry(selection.toArray());
-			alert(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
+			toast.success(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
 			selection.clear();
 			await fetchData();
 		} catch (e) {
-			alert('일괄 재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 재시도 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function batchDelete() {
 		if (selection.count === 0) return;
-		if (!confirm(`선택한 ${selection.count}개 요청을 삭제하시겠습니까?`)) return;
+		if (!await confirm({ title: '일괄 삭제', message: `선택한 ${selection.count}개 요청을 삭제하시겠습니까?`, confirmText: '삭제', variant: 'danger' })) return;
 		try {
 			const result = await llmApi.batchDelete(selection.toArray());
-			alert(`삭제 완료: ${result.deleted}개`);
+			toast.success(`삭제 완료: ${result.deleted}개`);
 			selection.clear();
 			await fetchData();
 		} catch (e) {
-			alert('일괄 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 삭제 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function runCleanup() {
-		if (!confirm('Stale 요청 정리 및 오래된 이력 삭제를 실행하시겠습니까?')) return;
+		if (!await confirm({ title: '요청 정리', message: 'Stale 요청 정리 및 오래된 이력 삭제를 실행하시겠습니까?', confirmText: '정리', variant: 'danger' })) return;
 		try {
 			const result = await llmApi.cleanup();
-			alert(`정리 완료: stale ${result.stale_processing}개, 이력 ${result.old_history}개 삭제`);
+			toast.success(`정리 완료: stale ${result.stale_processing}개, 이력 ${result.old_history}개 삭제`);
 			await fetchData();
 		} catch (e) {
-			alert('정리 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('정리 실패: ' + errorMessage(e));
 		}
 	}
 
