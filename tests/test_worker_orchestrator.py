@@ -94,7 +94,65 @@ class TestOrchestratorResults:
         assert "shutdown_requested" in status
         assert "worker_count" in status
         assert "worker_states" in status
+        assert status["memory_pressure"]["recommended_action"] == "resume"
         assert status["worker_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_memory_pressure_warning_throttles_but_runs_iteration(self):
+        """R: warning pressure는 신규 루프를 지연하되 기존 iteration은 실행한다."""
+        orchestrator = WorkerOrchestrator()
+        worker = DummyWorker("pressure_warning")
+        worker._main_loop_iteration = AsyncMock(return_value=None)
+        orchestrator.register_worker("pressure_warning", worker)
+        orchestrator._install_memory_pressure_guard("pressure_warning", worker)
+        orchestrator._apply_memory_pressure_state({
+            "level": "warning",
+            "recommended_action": "throttle",
+            "available_mb": 1500.0,
+        })
+
+        with patch.object(WorkerOrchestrator, "MEMORY_PRESSURE_WARNING_THROTTLE_SECONDS", 0):
+            await worker._main_loop_iteration()
+
+        orchestrator._memory_pressure_original_iterations["pressure_warning"].assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_memory_pressure_critical_blocks_new_iteration(self):
+        """R: critical pressure는 신규 worker iteration을 시작하지 않는다."""
+        orchestrator = WorkerOrchestrator()
+        worker = DummyWorker("pressure_critical")
+        worker._main_loop_iteration = AsyncMock(return_value=None)
+        orchestrator.register_worker("pressure_critical", worker)
+        orchestrator._install_memory_pressure_guard("pressure_critical", worker)
+        orchestrator._apply_memory_pressure_state({
+            "level": "critical",
+            "recommended_action": "pause_new_work",
+            "available_mb": 700.0,
+        })
+
+        with patch.object(WorkerOrchestrator, "MEMORY_PRESSURE_BLOCK_SLEEP_SECONDS", 0):
+            await worker._main_loop_iteration()
+
+        orchestrator._memory_pressure_original_iterations["pressure_critical"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_memory_pressure_refresh_fail_open(self, caplog):
+        """E: pressure state 조회 실패 시 워커 루프를 막지 않고 resume으로 복구한다."""
+        orchestrator = WorkerOrchestrator()
+        orchestrator._apply_memory_pressure_state({
+            "level": "critical",
+            "recommended_action": "pause_new_work",
+            "available_mb": 700.0,
+        })
+
+        with patch(
+            "app.worker.orchestrator.read_memory_pressure_state",
+            new=AsyncMock(side_effect=RuntimeError("redis down")),
+        ):
+            await orchestrator._refresh_memory_pressure_state()
+
+        assert orchestrator._memory_pressure_action == "resume"
+        assert "memory pressure state 조회 실패" in caplog.text
 
 
 # ============================================================

@@ -39,6 +39,78 @@ async def test_check_normal_above_4gb():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("available_mb", "expected_level", "expected_action"),
+    [
+        (5000, "normal", "resume"),
+        (1500, "warning", "throttle"),
+        (700, "critical", "pause_new_work"),
+        (500, "emergency", "pause_workers"),
+    ],
+)
+async def test_check_publishes_worker_pressure_state(
+    available_mb,
+    expected_level,
+    expected_action,
+):
+    """R: check()는 워커 backpressure용 state payload를 기록한다."""
+    from app.shared.process.memory_pressure import MemoryPressureResponder
+
+    detector = make_orphan_detector()
+    writer = AsyncMock()
+    responder = MemoryPressureResponder(detector, state_writer=writer)
+
+    with patch(
+        "app.shared.process.memory_pressure.psutil.virtual_memory",
+        return_value=make_memory_mock(available_mb),
+    ), \
+         patch.object(responder, "_get_top_processes", return_value=[]), \
+         patch.object(responder, "_persist_snapshot", MagicMock()), \
+         patch("app.shared.process.memory_pressure._collect_process_tree", return_value={}), \
+         patch("app.shared.process.memory_pressure._format_process_tree", return_value=""):
+        level = await responder.check()
+
+    assert level == expected_level
+    writer.assert_awaited_once()
+    payload = writer.await_args.args[0]
+    assert payload["level"] == expected_level
+    assert payload["available_mb"] == float(available_mb)
+    assert payload["recommended_action"] == expected_action
+    assert payload["updated_at"]
+
+
+@pytest.mark.asyncio
+async def test_write_memory_pressure_state_uses_redis_key():
+    """R: Redis state writer는 고정 키와 TTL로 JSON payload를 저장한다."""
+    from app.shared.process.memory_pressure import (
+        MEMORY_PRESSURE_STATE_KEY,
+        write_memory_pressure_state,
+    )
+
+    redis = MagicMock()
+    redis.set = AsyncMock()
+    payload = {
+        "level": "critical",
+        "available_mb": 700.0,
+        "updated_at": "2026-05-03T00:00:00",
+        "recommended_action": "pause_new_work",
+    }
+
+    with patch(
+        "app.shared.process.memory_pressure.RedisClient.get_client",
+        new=AsyncMock(return_value=redis),
+    ):
+        await write_memory_pressure_state(payload)
+
+    redis.set.assert_awaited_once()
+    args = redis.set.await_args.args
+    kwargs = redis.set.await_args.kwargs
+    assert args[0] == MEMORY_PRESSURE_STATE_KEY
+    assert '"level": "critical"' in args[1]
+    assert kwargs["ex"] > 0
+
+
+@pytest.mark.asyncio
 async def test_check_caution_below_4gb():
     """R: available=3GB → 'caution', Telegram 알림 없음 (caution은 로그만)"""
     from app.shared.process.memory_pressure import MemoryPressureResponder

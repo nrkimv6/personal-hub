@@ -21,11 +21,12 @@ import time
 from collections import Counter, deque
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Awaitable, Callable, TYPE_CHECKING
 
 import psutil
 
 from app.core.config import settings
+from app.shared.redis import RedisClient
 
 if TYPE_CHECKING:
     from app.shared.process.orphan_detector import OrphanDetector
@@ -45,6 +46,74 @@ _MEMORY_PRESSURE_HISTORY_LEVELS = {
     "fatal",
     "fatal_recovered",
 }
+MEMORY_PRESSURE_STATE_KEY = "monitor:memory-pressure:state"
+_MEMORY_PRESSURE_STATE_TTL_SEC = 120
+MemoryPressureStateWriter = Callable[[dict[str, object]], Awaitable[None]]
+
+
+def get_recommended_action(level: str) -> str:
+    """메모리 압박 단계별 워커 backpressure 권고 동작을 반환한다."""
+    normalized = str(level or "").strip().lower()
+    if normalized == "warning":
+        return "throttle"
+    if normalized == "critical":
+        return "pause_new_work"
+    if normalized in {"emergency", "fatal"}:
+        return "pause_workers"
+    if normalized == "normal":
+        return "resume"
+    return "observe"
+
+
+def build_memory_pressure_state(level: str, available_mb: float) -> dict[str, object]:
+    """워커가 소비할 수 있는 memory pressure state payload를 만든다."""
+    normalized = str(level or "normal").strip().lower()
+    return {
+        "level": normalized,
+        "available_mb": round(float(available_mb), 1),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "recommended_action": get_recommended_action(normalized),
+    }
+
+
+async def write_memory_pressure_state(payload: dict[str, object]) -> None:
+    """현재 memory pressure state를 Redis에 기록한다.
+
+    Redis가 비활성/불능인 경우에는 워커가 fail-open 하도록 경고 로그만 남기고
+    예외를 전파하지 않는다.
+    """
+    try:
+        client = await RedisClient.get_client()
+        if client is None:
+            logger.warning("[memory-pressure] state_write_skipped reason=redis_unavailable")
+            return
+        await client.set(
+            MEMORY_PRESSURE_STATE_KEY,
+            json.dumps(payload, ensure_ascii=False),
+            ex=_MEMORY_PRESSURE_STATE_TTL_SEC,
+        )
+    except Exception as exc:
+        logger.warning("[memory-pressure] state_write_failed reason=%s", exc)
+
+
+async def read_memory_pressure_state() -> dict[str, object] | None:
+    """Redis에 기록된 memory pressure state를 읽는다.
+
+    호출자는 예외 발생 시 fail-open 정책을 적용할 수 있도록 JSON 파싱/Redis
+    예외를 그대로 받는다. 키가 없거나 Redis가 없으면 None을 반환한다.
+    """
+    client = await RedisClient.get_client()
+    if client is None:
+        return None
+    raw = await client.get(MEMORY_PRESSURE_STATE_KEY)
+    if not raw:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    data = json.loads(str(raw))
+    if not isinstance(data, dict):
+        return None
+    return data
 
 
 def _shorten_path(path: str, max_len: int = 80) -> str:
@@ -291,11 +360,17 @@ def read_persisted_history(
 class MemoryPressureResponder:
     """시스템 메모리 압박을 감지하고 단계별 대응을 수행한다."""
 
-    def __init__(self, orphan_detector: "OrphanDetector") -> None:
+    def __init__(
+        self,
+        orphan_detector: "OrphanDetector",
+        *,
+        state_writer: MemoryPressureStateWriter | None = None,
+    ) -> None:
         self.orphan_detector = orphan_detector
         self._last_alert_time: dict[str, float] = {}  # 단계명 → 최종 알림 시각
         self._fatal_triggered: bool = False
         self._pre_fatal_recovery_times: deque[float] = deque()
+        self._state_writer = state_writer or write_memory_pressure_state
 
     async def check(self) -> str:
         """현재 가용 메모리를 확인하고 단계를 판정하여 대응한다.
@@ -307,22 +382,33 @@ class MemoryPressureResponder:
         available_mb = available_bytes / (1024 * 1024)
 
         if available_mb >= settings.MEMORY_CAUTION_MB:
-            return "normal"
+            level = "normal"
         elif available_mb >= settings.MEMORY_WARNING_MB:
             await self._on_caution(available_mb)
-            return "caution"
+            level = "caution"
         elif available_mb >= settings.MEMORY_CRITICAL_MB:
             await self._on_warning(available_mb)
-            return "warning"
+            level = "warning"
         elif available_mb >= settings.MEMORY_EMERGENCY_MB:
             await self._on_critical(available_mb)
-            return "critical"
+            level = "critical"
         elif available_mb >= settings.MEMORY_FATAL_MB:
             await self._on_emergency(available_mb)
-            return "emergency"
+            level = "emergency"
         else:
             await self._on_fatal(available_mb)
-            return "fatal"
+            level = "fatal"
+
+        await self._publish_pressure_state(level, available_mb)
+        return level
+
+    async def _publish_pressure_state(self, level: str, available_mb: float) -> None:
+        """워커 backpressure용 상태를 기록한다. 실패해도 메모리 대응은 계속된다."""
+        payload = build_memory_pressure_state(level, available_mb)
+        try:
+            await self._state_writer(payload)
+        except Exception as exc:
+            logger.warning("[memory-pressure] state_writer_failed reason=%s", exc)
 
     def _should_alert(self, level: str) -> bool:
         """해당 단계의 알림을 보낼 수 있는지 확인한다 (쿨다운 적용)."""
