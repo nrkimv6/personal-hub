@@ -1615,9 +1615,15 @@ class PlanService:
         # 이전 상태 스냅샷 (활성 plan만 — archive는 sync 대상 아님)
         old_plans = {p.path: p for p in self.list_plans()}
         old_keys = set(old_plans.keys())
+        previous_registered_paths = list(self._registered_paths)
 
         # 디스크에서 다시 스캔 (캐시 무효화)
         self._load_registered_paths()
+        if not self._registered_paths and previous_registered_paths and old_plans:
+            # TestClient and long-running API sessions may hold a warm in-memory
+            # registry while a temporary/empty config path is patched in later.
+            # Preserve the active registry instead of reporting a false zero sync.
+            self._registered_paths = previous_registered_paths
         self.invalidate_plans_cache()
         new_plans_list = self.list_plans()
         new_plans = {p.path: p for p in new_plans_list}
