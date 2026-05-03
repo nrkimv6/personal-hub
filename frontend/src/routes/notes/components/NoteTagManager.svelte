@@ -3,6 +3,7 @@
   import { notesApi } from '$lib/api/notes';
   import type { TagDef } from '$lib/api/notes';
   import { Trash2, Pencil, Check, X, Plus, Tag as TagIcon } from 'lucide-svelte';
+  import { toast } from '$lib/stores/toast';
 
   let tags = $state<TagDef[]>([]);
   let loading = $state(false);
@@ -23,6 +24,10 @@
   // 삭제 확인
   let deleteConfirmId = $state<number | null>(null);
   let deleteTimer: ReturnType<typeof setTimeout>;
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   async function load() {
     loading = true;
@@ -45,8 +50,8 @@
       newColor = '#6b7280';
       showCreateForm = false;
       load();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       creating = false;
     }
@@ -65,8 +70,8 @@
       await notesApi.updateTag(editId, { name: editName.trim(), color: editColor });
       editId = null;
       load();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       saving = false;
     }
@@ -84,8 +89,8 @@
     try {
       await notesApi.deleteTag(id);
       load();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   }
 

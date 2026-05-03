@@ -4,6 +4,8 @@
 	import { goto } from "$app/navigation";
 	import { fetchWithTimeout } from '$lib/api/client';
 	import type { MobileTarget, MobileStats, MobileItem } from '$lib/types/mobile';
+	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 
 	const targetId = $derived($page.params.id);
 
@@ -12,6 +14,10 @@
 	let items: MobileItem[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
+
+	function errorMessage(err: unknown): string {
+		return err instanceof Error ? err.message : '알 수 없는 오류';
+	}
 
 	async function loadData() {
 		try {
@@ -45,7 +51,12 @@
 	}
 
 	async function executeTarget() {
-		if (!confirm("즉시 크롤링을 실행하시겠습니까?")) return;
+		const confirmed = await confirm({
+			title: '즉시 크롤링 실행',
+			message: '즉시 크롤링을 실행하시겠습니까?',
+			confirmText: '실행'
+		});
+		if (!confirmed) return;
 
 		try {
 			const response = await fetchWithTimeout(
@@ -58,7 +69,7 @@
 			const result = await response.json();
 
 			if (result.success) {
-				alert(
+				toast.success(
 					`크롤링 완료!\n` +
 						`수집: ${result.collected_count}건\n` +
 						`신규: ${result.new_count}건\n` +
@@ -67,10 +78,10 @@
 				);
 				await loadData();
 			} else {
-				alert(`실행 실패: ${result.error}`);
+				toast.error(`실행 실패: ${result.error}`);
 			}
 		} catch (err) {
-			alert((err as Error).message);
+			toast.error(errorMessage(err));
 		}
 	}
 
