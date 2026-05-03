@@ -276,7 +276,7 @@ def write_plan_worktree_info(plan_file: str, branch: str, worktree_rel: str, own
         if replaced_branch and replaced_worktree and replaced_owner:
             with open(plan_file, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
-            return
+            return True
 
         # 없으면 상태 줄 다음에 삽입 (없으면 첫 번째 # 제목 다음)
         insert_idx = None
@@ -303,8 +303,10 @@ def write_plan_worktree_info(plan_file: str, branch: str, worktree_rel: str, own
 
         with open(plan_file, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
+        return True
     except Exception as e:
         logger.warning(f"[write_plan_worktree_info] 기록 실패 (무시): {e}")
+        return False
 
 
 def get_plan_completion(plan_file: str | None) -> tuple[int, int]:
