@@ -106,17 +106,19 @@ class TestParsePlanWorktreeInfo:
 
 class TestWritePlanWorktreeInfo:
     def test_right_inserts_after_status(self, tmp_path):
-        """R: 상태 줄 다음에 branch/worktree 삽입"""
+        """R: 상태 줄 다음에 branch/worktree/worktree-owner 삽입"""
         p = tmp_path / "plan.md"
         p.write_text("# 제목\n> 상태: 구현중\n\n## 내용\n", encoding="utf-8")
         _write_plan_worktree_info(str(p), "impl/feat", ".worktrees/impl-feat")
         content = p.read_text(encoding="utf-8")
         assert "> branch: impl/feat" in content
         assert "> worktree: .worktrees/impl-feat" in content
+        assert f"> worktree-owner: {p.resolve()}" in content
         # 상태 줄 다음에 삽입됐는지 확인
         lines = content.splitlines()
         status_idx = next(i for i, l in enumerate(lines) if "상태:" in l)
         assert "> branch: impl/feat" in lines[status_idx + 1]
+        assert f"> worktree-owner: {p.resolve()}" in lines[status_idx + 3]
 
     def test_right_replaces_existing(self, tmp_path):
         """R: 이미 있으면 교체"""
@@ -129,6 +131,7 @@ class TestWritePlanWorktreeInfo:
         content = p.read_text(encoding="utf-8")
         assert "impl/new" in content
         assert "impl/old" not in content
+        assert f"> worktree-owner: {p.resolve()}" in content
 
     def test_boundary_no_status_line(self, tmp_path):
         """B: 상태 줄 없으면 제목(#) 다음에 삽입"""
@@ -137,6 +140,56 @@ class TestWritePlanWorktreeInfo:
         _write_plan_worktree_info(str(p), "impl/feat", ".worktrees/impl-feat")
         content = p.read_text(encoding="utf-8")
         assert "> branch: impl/feat" in content
+        assert f"> worktree-owner: {p.resolve()}" in content
+
+    def test_right_replaces_empty_worktree_owner(self, tmp_path):
+        """R: 빈 worktree-owner 헤더가 있으면 non-empty owner로 교체"""
+        p = tmp_path / "plan.md"
+        p.write_text(
+            "# 제목\n> 상태: 구현중\n> branch: impl/old\n> worktree: .worktrees/impl-old\n> worktree-owner:\n",
+            encoding="utf-8"
+        )
+        _write_plan_worktree_info(str(p), "impl/new", ".worktrees/impl-new", owner=str(p))
+        content = p.read_text(encoding="utf-8")
+        assert "> branch: impl/new" in content
+        assert "> worktree: .worktrees/impl-new" in content
+        assert f"> worktree-owner: {p.resolve()}" in content
+        assert "> worktree-owner:\n" not in content
+
+    def test_right_written_header_satisfies_non_empty_gate_contract(self, tmp_path):
+        """R: writer 출력은 wtools pre-edit gate의 3필드 non-empty 조건을 만족한다."""
+        p = tmp_path / "plan.md"
+        p.write_text("# 제목\n> 상태: 구현중\n", encoding="utf-8")
+        _write_plan_worktree_info(str(p), "impl/feat", ".worktrees/impl-feat", owner=str(p))
+
+        header_values = {}
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.startswith("> branch:"):
+                header_values["branch"] = line.split(":", 1)[1].strip()
+            if line.startswith("> worktree:"):
+                header_values["worktree"] = line.split(":", 1)[1].strip()
+            if line.startswith("> worktree-owner:"):
+                header_values["worktree-owner"] = line.split(":", 1)[1].strip()
+
+        assert header_values == {
+            "branch": "impl/feat",
+            "worktree": ".worktrees/impl-feat",
+            "worktree-owner": str(p.resolve()),
+        }
+        assert all(header_values.values())
+
+    def test_right_remove_header_fields_removes_owner(self, tmp_path):
+        """R: branch/worktree/worktree-owner 3필드 모두 제거"""
+        p = tmp_path / "plan.md"
+        p.write_text(
+            "# 제목\n> 상태: 구현중\n> branch: impl/old\n> worktree: .worktrees/impl-old\n> worktree-owner: owner.md\n\n## 내용\n",
+            encoding="utf-8"
+        )
+        _remove_plan_header_fields(str(p))
+        content = p.read_text(encoding="utf-8")
+        assert "> branch:" not in content
+        assert "> worktree:" not in content
+        assert "> worktree-owner:" not in content
 
 
 # ── E2E 통합 테스트 ───────────────────────────────────────────────────────────

@@ -244,30 +244,36 @@ def parse_plan_worktree_info(plan_file: str) -> tuple:
     return branch, worktree_rel
 
 
-def write_plan_worktree_info(plan_file: str, branch: str, worktree_rel: str):
-    """plan 파일 헤더에 branch/worktree 기록 (이미 있으면 교체, 없으면 상태 줄 다음에 삽입)"""
+def write_plan_worktree_info(plan_file: str, branch: str, worktree_rel: str, owner: str | None = None):
+    """plan 파일 헤더에 branch/worktree/worktree-owner를 기록한다."""
     try:
         with open(plan_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
+        owner_value = str(Path(owner).resolve()) if owner else str(Path(plan_file).resolve())
         branch_line = f"> branch: {branch}\n"
         worktree_line = f"> worktree: {worktree_rel}\n"
+        owner_line = f"> worktree-owner: {owner_value}\n"
 
         # 이미 존재하면 교체
         new_lines = []
         replaced_branch = False
         replaced_worktree = False
+        replaced_owner = False
         for line in lines:
             if re.match(r"^>\s*branch:", line):
                 new_lines.append(branch_line)
                 replaced_branch = True
+            elif re.match(r"^>\s*worktree-owner:", line):
+                new_lines.append(owner_line)
+                replaced_owner = True
             elif re.match(r"^>\s*worktree:", line):
                 new_lines.append(worktree_line)
                 replaced_worktree = True
             else:
                 new_lines.append(line)
 
-        if replaced_branch and replaced_worktree:
+        if replaced_branch and replaced_worktree and replaced_owner:
             with open(plan_file, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
             return
@@ -291,6 +297,8 @@ def write_plan_worktree_info(plan_file: str, branch: str, worktree_rel: str):
             inserts.append(branch_line)
         if not replaced_worktree:
             inserts.append(worktree_line)
+        if not replaced_owner:
+            inserts.append(owner_line)
         new_lines = new_lines[:insert_idx] + inserts + new_lines[insert_idx:]
 
         with open(plan_file, "w", encoding="utf-8") as f:
@@ -384,11 +392,11 @@ def validate_done_preconditions(file_path: str, content: str) -> list:
 
 
 def remove_plan_header_fields(plan_file: str):
-    """plan 파일에서 '> branch:' / '> worktree:' 줄 제거"""
+    """plan 파일에서 '> branch:' / '> worktree:' / '> worktree-owner:' 줄 제거"""
     try:
         with open(plan_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
-        new_lines = [l for l in lines if not re.match(r"^>\s*(branch|worktree):", l)]
+        new_lines = [l for l in lines if not re.match(r"^>\s*(branch|worktree-owner|worktree):", l)]
         with open(plan_file, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
     except Exception as e:

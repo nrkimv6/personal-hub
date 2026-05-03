@@ -575,6 +575,11 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
                     worktree_path = Path(existing_wt_abs)
                     branch = existing_branch
                     _reused_worktree = True
+                    try:
+                        worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")
+                    except ValueError:
+                        worktree_rel = str(worktree_path)
+                    _write_plan_worktree_info(plan_file, branch, worktree_rel, owner=plan_file)
                     logger.info(f"기존 워크트리 재사용: {worktree_path} (branch: {branch})")
             else:
                     # 경로 없음 또는 worktree 검증 실패 → plan 헤더에서 필드 제거 후 신규 생성
@@ -590,7 +595,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             # Phase 4: plan 헤더에 branch/worktree 기록 (수동 /implement와 동일 패턴)
             if plan_file:
                 worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")
-                _write_plan_worktree_info(plan_file, branch, worktree_rel)
+                _write_plan_worktree_info(plan_file, branch, worktree_rel, owner=plan_file)
     except WorktreeError as e:
         logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
         _set_error_status(f"worktree 생성 실패: {e}")
