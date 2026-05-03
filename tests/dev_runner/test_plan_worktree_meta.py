@@ -1,13 +1,13 @@
-"""plan_service._extract_worktree_meta / _update_plan_headers / _validate_done_preconditions ?⑥쐞 ?뚯뒪??"""
+"""Unit tests for plan worktree metadata helpers."""
 import pytest
 from app.modules.dev_runner.services.plan_service import PlanService
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 
 
-# ??? _extract_worktree_meta ???????????????????????????????????????????????????
+# _extract_worktree_meta
 
 def test__extract_worktree_meta_right():
-    """R(Right): 3媛??꾨뱶 紐⑤몢 ?ы븿 ???뺥솗??異붿텧 + ?뺢퇋??"""
+    """R(Right): extracts and normalizes all three metadata fields."""
     content = (
         "# plan title\n"
         "> created_at: 2026-04-06\n"
@@ -24,7 +24,7 @@ def test__extract_worktree_meta_right():
 
 
 def test__extract_worktree_meta_empty():
-    """B(Boundary): 硫뷀? ?꾨뱶 ?녿뒗 content ??3媛???紐⑤몢 None"""
+    """B(Boundary): returns None for all metadata fields when headers are absent."""
     content = "# plan title\n> status: unknown\n\n---\n## overview\ncontent"
     result = PlanService._extract_worktree_meta(content)
     assert result["branch"] is None
@@ -33,7 +33,7 @@ def test__extract_worktree_meta_empty():
 
 
 def test__extract_worktree_meta_partial():
-    """B(Boundary): branch留??덇퀬 worktree-owner ?녿뒗 寃쎌슦"""
+    """B(Boundary): handles content with only branch metadata."""
     content = "# plan\n> branch: impl/feature\n> status: in_progress\n"
     result = PlanService._extract_worktree_meta(content)
     assert result["branch"] == "impl/feature"
@@ -42,12 +42,12 @@ def test__extract_worktree_meta_partial():
 
 
 def test__extract_worktree_meta_normalize():
-    """R(Right): ?ㅼ뼇??寃쎈줈 ?뺤떇 ???숈씪 ?뺢퇋??寃곌낵"""
+    """R(Right): normalizes equivalent path formats to the same result."""
     from pathlib import Path
 
     project_root = str(Path(__file__).resolve().parents[2]).replace("\\", "/").rstrip("/")
 
-    # 諛깆뒳?섏떆 ?덈?寃쎈줈
+    # Absolute path with backslashes.
     content_backslash = (
         f"> branch: impl/f\n"
         f"> worktree: .worktrees/impl-f\n"
@@ -55,7 +55,7 @@ def test__extract_worktree_meta_normalize():
     )
     result_bs = PlanService._extract_worktree_meta(content_backslash)
 
-    # ?щ옒???덈?寃쎈줈
+    # Absolute path with forward slashes.
     content_slash = (
         f"> branch: impl/f\n"
         f"> worktree: .worktrees/impl-f\n"
@@ -63,7 +63,7 @@ def test__extract_worktree_meta_normalize():
     )
     result_sl = PlanService._extract_worktree_meta(content_slash)
 
-    # ?곷?寃쎈줈
+    # Relative path.
     content_rel = (
         "> branch: impl/f\n"
         "> worktree: .worktrees/impl-f\n"
@@ -71,19 +71,19 @@ def test__extract_worktree_meta_normalize():
     )
     result_rel = PlanService._extract_worktree_meta(content_rel)
 
-    # 諛깆뒳?섏떆? ?щ옒???덈?寃쎈줈???숈씪?섍쾶 ?뺢퇋??(?곷?寃쎈줈)
+    # Backslash and forward-slash absolute paths normalize identically.
     assert result_bs["worktree_owner"] == result_sl["worktree_owner"]
-    # ?덈?寃쎈줈 ???곷?寃쎈줈 蹂??紐낆떆 寃利?
+    # Absolute paths normalize to project-relative paths.
     assert result_bs["worktree_owner"] == "docs/plan/test.md", f"諛깆뒳?섏떆 ?덈?寃쎈줈?믪긽?寃쎈줈 蹂???ㅽ뙣: {result_bs['worktree_owner']}"
     assert result_sl["worktree_owner"] == "docs/plan/test.md", f"?щ옒???덈?寃쎈줈?믪긽?寃쎈줈 蹂???ㅽ뙣: {result_sl['worktree_owner']}"
-    # ?곷?寃쎈줈 ?낅젰? 洹몃?濡??좎?
+    # Relative input remains unchanged.
     assert result_rel["worktree_owner"] == "docs/plan/test.md"
 
 
-# ??? _update_plan_headers ?????????????????????????????????????????????????????
+# _update_plan_headers
 
 def test__update_plan_headers_removes_worktree_owner():
-    """R(Right): branch/worktree/worktree-owner 3以?紐⑤몢 ?쒓굅??"""
+    """R(Right): removes all branch/worktree/worktree-owner metadata fields."""
     content = (
         "# plan\n"
         "> status: in_progress\n"
@@ -102,10 +102,10 @@ def test__update_plan_headers_removes_worktree_owner():
     assert "in_progress" in result
 
 
-# ??? _validate_done_preconditions ?????????????????????????????????????????????
+# _validate_done_preconditions
 
 def test__validate_done_preconditions_detects_worktree_owner():
-    """E(Error): worktree-owner留??붿〈?대룄 ?먮윭 媛먯?"""
+    """E(Error): detects stale worktree metadata even when only owner remains."""
     content = (
         "# plan\n"
         "> status: completed\n"
@@ -117,10 +117,10 @@ def test__validate_done_preconditions_detects_worktree_owner():
     assert any("branch/worktree" in e for e in errors), f"?먮윭 誘멸컧吏: {errors}"
 
 
-# ??? Phase 3 異붽? TC ?????????????????????????????????????????????????????????
+# Additional normalization coverage
 
 def test__extract_worktree_meta_worktree_path_normalize():
-    """R(Right): worktree ?꾨뱶瑜??덈?寃쎈줈濡??낅젰 ???곷?寃쎈줈濡?蹂?섎맖"""
+    """R(Right): absolute worktree header values normalize to relative paths."""
     from pathlib import Path
 
     project_root = str(Path(__file__).resolve().parents[2]).replace("\\", "/").rstrip("/")
@@ -137,16 +137,16 @@ def test__extract_worktree_meta_worktree_path_normalize():
 
 
 def test_project_root_is_monitor_page_dir():
-    """R(Right): config.PROJECT_ROOT ???꾨줈?앺듃 猷⑦듃 ?붾젆?좊━瑜?媛由ы궓??
+    """R(Right): config.PROJECT_ROOT points at a monitor-page project root.
 
-    worktree ?댁뿉???ㅽ뻾 ??PROJECT_ROOT??worktree 猷⑦듃(=?꾨줈?앺듃 蹂듭궗蹂??대ŉ,
-    癒몄? ??main?먯꽌??monitor-page ?붾젆?좊━媛 ?쒕떎.
-    怨듯넻 寃利? PROJECT_ROOT???ㅼ젣 議댁옱?섎뒗 ?붾젆?좊━?닿퀬, app/ ?섏쐞 ?붾젆?좊━瑜?媛吏꾨떎.
+    In a linked worktree, PROJECT_ROOT should be the worktree root. In the main
+    checkout, it should be the monitor-page root. In both cases it must exist
+    and contain the app/ directory.
     """
     from app.core.config import PROJECT_ROOT
     assert PROJECT_ROOT.exists(), f"PROJECT_ROOT 議댁옱?섏? ?딆쓬: {PROJECT_ROOT}"
     assert (PROJECT_ROOT / "app").exists(), f"PROJECT_ROOT/app ?놁쓬: {PROJECT_ROOT}"
-    # monitor-page ?먮뒗 worktree ?붾젆?좊━紐??덉슜
+    # Allow either the main monitor-page directory or an implementation worktree.
     is_worktree = ".worktrees" in str(PROJECT_ROOT).replace("\\", "/")
     assert PROJECT_ROOT.name == "monitor-page" or is_worktree, (
         f"?덉긽移??딆? PROJECT_ROOT.name: '{PROJECT_ROOT.name}'"

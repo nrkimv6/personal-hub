@@ -102,6 +102,25 @@ class TestPytestMarkInfra:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "tests/dev_runner/test_live_server_http.py" in result.stdout
 
+    def test_http_live_marker_collects_llm_live_suite_R(self):
+        """TC-Right: LLM live HTTP suite is independently collectable under http_live."""
+        result = _run_collect_only("tests/test_llm_live_http.py", "http_live")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "test_live_llm_providers_returns_200" in combined, combined
+        assert "test_live_llm_retry_unknown_numeric_id_returns_400_not_422" in combined, combined
+        assert "process_watch" not in combined, combined
+        assert "process-watch" not in combined, combined
+
+    def test_http_live_marker_collects_process_watch_live_suite_R(self):
+        """TC-Right: process-watch live HTTP suite is separately collectable under http_live."""
+        result = _run_collect_only("tests/test_process_watch_live_http.py", "http_live")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "test_live_process_watch_latest_returns_200" in combined, combined
+        assert "test_live_process_watch_history_schema" in combined, combined
+        assert "test_live_llm_" not in combined, combined
+
     def test_read_only_coupang_live_http_case_still_collects_under_http_live(self):
         """TC-Right: 쿠팡 live HTTP read-only 케이스는 기본 http_live 수집 대상이다."""
         result = _run_collect_only(
