@@ -3,6 +3,7 @@
   import { notesApi } from '$lib/api/notes';
   import type { TagDef } from '$lib/api/notes';
   import { X } from 'lucide-svelte';
+  import { toast } from '$lib/stores/toast';
 
   interface Props {
     noteIds: number[];
@@ -17,6 +18,10 @@
   let removeTagIds = $state<Set<number>>(new Set());
   let loading = $state(false);
   let applying = $state(false);
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   onMount(async () => {
     loading = true;
@@ -60,8 +65,8 @@
     try {
       await notesApi.bulkTag(noteIds, [...addTagIds], [...removeTagIds]);
       onApply();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       applying = false;
     }

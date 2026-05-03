@@ -5,6 +5,7 @@
   import TagBadge from './TagBadge.svelte';
   import { extractUrls, getDomain } from '../utils/url';
   import { navEntries, isNavGroup, type NavSingleItem } from '$lib/navigation';
+  import { toast } from '$lib/stores/toast';
 
   function getMenuInfo(id: string | null): { icon: string; label: string; href: string } | null {
     if (!id) return null;
@@ -32,6 +33,10 @@
   let starring = $state(false);
   let showArchiveConfirm = $state(false);
   let showDeleteConfirm = $state(false);
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   async function handleStar(e: Event) {
     e.stopPropagation();
@@ -62,8 +67,8 @@
     try {
       await notesApi.archive(note.id);
       onRefresh();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
       archiving = false;
     }

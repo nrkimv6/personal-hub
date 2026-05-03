@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { Badge, Button } from '$lib/components/ui';
   import { popupMonitorApi, serviceAccountApi } from '$lib/api';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
   import type {
     MonitoringMode,
     PopupFallbackStrategy,
@@ -194,7 +196,7 @@
 
   async function saveMonitor(): Promise<void> {
     if (!form.url.trim()) {
-      alert('URL을 입력해주세요.');
+      toast.warning('URL을 입력해주세요.');
       return;
     }
 
@@ -266,7 +268,13 @@
 
   async function deleteSelected(): Promise<void> {
     if (!selectedMonitor) return;
-    if (!confirm(`선택한 모니터 #${selectedMonitor.id}를 삭제하시겠습니까?`)) return;
+    const confirmed = await confirm({
+      title: '팝업 URL 모니터 삭제',
+      message: `선택한 모니터 #${selectedMonitor.id}를 삭제하시겠습니까?`,
+      confirmText: '삭제',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
 
     deleting = true;
     notice = null;

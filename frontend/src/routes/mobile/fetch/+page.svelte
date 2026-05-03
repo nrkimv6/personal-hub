@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from "svelte";
   import { fetchWithTimeout } from '$lib/api/client';
+	import { toast } from '$lib/stores/toast';
 
 	let url = $state("");
 	let waitForSelector = $state("");
@@ -58,7 +59,7 @@
 	function copyHtml() {
 		if (result?.html) {
 			navigator.clipboard.writeText(result.html);
-			alert("HTML이 클립보드에 복사되었습니다.");
+			toast.success("HTML이 클립보드에 복사되었습니다.");
 		}
 	}
 </script>

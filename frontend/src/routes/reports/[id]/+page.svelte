@@ -6,6 +6,8 @@
 	import { isAdmin } from '$lib/stores/auth';
   import { fetchWithTimeout } from '$lib/api/client';
 	import MarkdownContent from '$lib/components/markdown/MarkdownContent.svelte';
+	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 
 	type Report = {
 		id: number;
@@ -27,6 +29,10 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let deleting = $state(false);
+
+	function errorMessage(err: unknown): string {
+		return err instanceof Error ? err.message : '삭제 중 오류가 발생했습니다.';
+	}
 
 	const reportTypeNames: Record<string, string> = {
 		nightly_cleanup: 'WTools 아카이빙 보고서',
@@ -57,7 +63,13 @@
 	}
 
 	async function deleteReport() {
-		if (!confirm('정말 이 보고서를 삭제하시겠습니까?')) {
+		const confirmed = await confirm({
+			title: '보고서 삭제',
+			message: '정말 이 보고서를 삭제하시겠습니까?',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) {
 			return;
 		}
 
@@ -75,7 +87,7 @@
 
 			goto('/reports');
 		} catch (err: unknown) {
-			alert(err instanceof Error ? err.message : '삭제 중 오류가 발생했습니다.');
+			toast.error(errorMessage(err));
 		} finally {
 			deleting = false;
 		}

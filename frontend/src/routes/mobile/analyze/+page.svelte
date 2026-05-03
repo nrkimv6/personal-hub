@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { toast } from '$lib/stores/toast';
 
 	// Sample HTML for testing
 	const SAMPLE_HTML = `<!DOCTYPE html>
@@ -162,7 +163,7 @@
 	function copyConfig() {
 		if (generatedConfig) {
 			navigator.clipboard.writeText(generatedConfig);
-			alert("설정이 클립보드에 복사되었습니다.");
+			toast.success("설정이 클립보드에 복사되었습니다.");
 		}
 	}
 
