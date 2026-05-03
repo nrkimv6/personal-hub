@@ -5,6 +5,7 @@
   import type { GitRepo } from '$lib/types/gitRepos';
   import AddRepoModal from './AddRepoModal.svelte';
   import { createSelection } from '$lib/utils/selection.svelte';
+  import { confirm } from '$lib/stores/confirm';
 
   let repos: GitRepo[] = $state([]);
   let loading = $state(true);
@@ -78,7 +79,13 @@
   }
 
   async function handleDelete(id: number) {
-    if (!confirm('등록을 해제하시겠습니까?')) return;
+    const confirmed = await confirm({
+      title: '레포지토리 등록 해제',
+      message: '등록을 해제하시겠습니까?',
+      confirmText: '해제',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await gitReposApi.deleteRepo(id);
       repos = repos.filter((r) => r.id !== id);
@@ -115,7 +122,12 @@
 
   async function handleBatchPush() {
     if (selection.count === 0) return;
-    if (!confirm(`선택한 ${selection.count}개 레포지토리를 푸시하시겠습니까?`)) return;
+    const confirmed = await confirm({
+      title: '레포지토리 일괄 푸시',
+      message: `선택한 ${selection.count}개 레포지토리를 푸시하시겠습니까?`,
+      confirmText: '푸시'
+    });
+    if (!confirmed) return;
     batchWorking = true;
     try {
       const result = await gitReposApi.batchPush(selection.toArray());

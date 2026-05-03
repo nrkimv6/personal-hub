@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { devRunnerPlanApi, type RegisteredPathResponse } from '$lib/api/dev-runner';
+  import { confirm } from '$lib/stores/confirm';
 
   let { onChanged }: { onChanged: () => void } = $props();
 
@@ -33,7 +34,13 @@
   }
 
   async function handleRemove(path: string) {
-    if (!confirm('경로를 제거하시겠습니까?')) return;
+    const confirmed = await confirm({
+      title: '경로 제거',
+      message: '경로를 제거하시겠습니까?',
+      confirmText: '제거',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await devRunnerPlanApi.removePath(path);
       onChanged();
