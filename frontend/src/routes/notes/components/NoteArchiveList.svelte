@@ -4,6 +4,7 @@
   import type { NoteArchive, TagDef } from '$lib/api/notes';
   import { RotateCcw, Trash2, Archive, FileText, ChevronLeft, ChevronRight } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let items = $state<NoteArchive[]>([]);
   let tags = $state<TagDef[]>([]);
@@ -14,6 +15,10 @@
   let loading = $state(false);
   let error = $state('');
   let deleteConfirmId = $state<number | null>(null);
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   async function load() {
     loading = true;
@@ -38,8 +43,8 @@
     try {
       await notesApi.restoreArchive(id);
       load();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   }
 
@@ -48,8 +53,8 @@
     try {
       await notesApi.deleteArchive(id);
       load();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   }
 
