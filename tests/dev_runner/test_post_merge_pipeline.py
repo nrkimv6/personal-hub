@@ -401,6 +401,30 @@ class TestMergeCompletedSentinelEmission:
             ("plan-runner:merge-log:r_retry_ok", "__MERGE_COMPLETED__")
         ]
 
+    def test_execute_merge_with_lock_blocks_stale_branch_before_subprocess_E(self, cl, tmp_path):
+        """E: stale gate BLOCK이면 plan-runner post-merge subprocess를 실행하지 않는다."""
+        redis = _make_redis_mock(worktree_path=tmp_path, plan_file=None, branch="plan/stale-branch")
+
+        with _merge_lock_patch(), \
+             patch("plan_worktree_helpers.get_branch_divergence", return_value=(301, 1)), \
+             patch("subprocess.run") as mock_run:
+            result = cl._execute_merge_with_lock("r_stale_block", redis)
+
+        assert result["success"] is False
+        assert result["merge_status"] == "error"
+        assert result["reason"] == "stale_merge_blocked"
+        assert result["stale_merge"] == {
+            "risk": "BLOCK",
+            "behind": 301,
+            "ahead": 1,
+            "branch": "plan/stale-branch",
+        }
+        post_merge_calls = [
+            c for c in mock_run.call_args_list
+            if "plan_runner" in str(c) and "post-merge" in str(c)
+        ]
+        assert post_merge_calls == []
+
 
 class TestConflictResolverWrapperNormalization:
     def test_launch_conflict_resolver_process_normalizes_safe_doc_R(self, cl):
@@ -594,6 +618,8 @@ class TestInlineMergeE2ESubprocessFlow:
         proc_result.returncode = 0
 
         with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
+             patch("plan_worktree_helpers.get_branch_divergence", return_value=(0, 1)), \
+             patch("_dr_merge._write_pre_merge_snapshot", return_value="logs/snapshot.md"), \
              patch("subprocess.run", return_value=proc_result), \
              patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup:
             cl._do_inline_merge(runner_id, fake_r)
@@ -637,6 +663,8 @@ class TestInlineMergeE2ESubprocessFlow:
         proc_result.returncode = 0
 
         with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
+             patch("plan_worktree_helpers.get_branch_divergence", return_value=(0, 1)), \
+             patch("_dr_merge._write_pre_merge_snapshot", return_value="logs/snapshot.md"), \
              patch("subprocess.run", return_value=proc_result), \
              patch("_dr_commands._cleanup_process_state") as mock_cleanup:
             cl._do_retry_merge(runner_id, fake_r, "cmd_e2e")
@@ -691,6 +719,8 @@ class TestInlineMergeE2ESubprocessFlow:
         }
 
         with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
+             patch("plan_worktree_helpers.get_branch_divergence", return_value=(0, 1)), \
+             patch("_dr_merge._write_pre_merge_snapshot", return_value="logs/snapshot.md"), \
              patch("subprocess.run", return_value=proc_result), \
              patch.object(dr_merge_mod, "_check_post_merge_residue", return_value=residue_result):
             result = cl._execute_merge_with_lock(runner_id, fake_r)
@@ -708,7 +738,7 @@ class TestInlineMergeE2ESubprocessFlow:
         assert len(results) > 0
         result_data = json.loads(results[0])
         assert result_data["runner_id"] == runner_id
-        assert result_data["status"] == "failed"
+        assert result_data["status"] == "residue_blocked"
         assert result_data["success"] is False
         assert result_data["reason"] == "residue_guard"
 
@@ -845,6 +875,8 @@ class TestExitCode2IntegrationFakeRedis:
         proc_result.returncode = 2
 
         with patch.dict("sys.modules", {"merge_queue": mock_lock_mod}), \
+             patch("plan_worktree_helpers.get_branch_divergence", return_value=(0, 1)), \
+             patch("_dr_merge._write_pre_merge_snapshot", return_value="logs/snapshot.md"), \
              patch("subprocess.run", return_value=proc_result), \
              patch.object(dr_merge_mod, "_launch_auto_impl_post_merge_process", return_value={"success": False, "message": "fail"}):
             result = cl._execute_merge_with_lock(runner_id, fake_r)

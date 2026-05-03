@@ -455,11 +455,14 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
             # unmerged commits protection
             if not _preserve_worktree:
-                _branch = branch_val or (
-                    f"plan/{Path(plan_file_val).stem}"
-                    if plan_file_val and not runner_id.startswith("t-")
-                    else f"runner/{runner_id}"
-                )
+                if plan_file_val:
+                    _branch = branch_val or (
+                        f"plan/{Path(plan_file_val).stem}"
+                        if not runner_id.startswith("t-")
+                        else f"runner/{runner_id}"
+                    )
+                else:
+                    _branch = f"runner/{runner_id}"
                 if _has_unmerged_commits(_branch, get_target_project_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
                     _preserve_worktree = True
                     logger.warning(

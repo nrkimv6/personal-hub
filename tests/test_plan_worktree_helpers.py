@@ -21,6 +21,8 @@ from plan_worktree_helpers import (
     is_worktree_active,
     is_plan_archived,
     has_unmerged_commits,
+    get_branch_divergence,
+    classify_merge_risk,
     resolve_active_plan_file,
 )
 
@@ -214,6 +216,48 @@ def test_has_unmerged_commits_exception_E(tmp_path):
 
         result = has_unmerged_commits("impl/test-branch", tmp_path)
         assert result is True
+
+
+def test_get_branch_divergence_returns_counts_R(tmp_path):
+    """R: git rev-list --left-right --count 출력 → (behind, ahead)."""
+    with patch("plan_worktree_helpers.subprocess") as mock_sp:
+        mock_result = MagicMock()
+        mock_result.stdout = "121\t3\n"
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_sp.run.return_value = mock_result
+
+        assert get_branch_divergence("impl/test-branch", tmp_path) == (121, 3)
+        mock_sp.run.assert_called_once()
+        assert "main...impl/test-branch" in mock_sp.run.call_args.args[0]
+
+
+def test_get_branch_divergence_failure_E(tmp_path):
+    """E: git 실패는 안전하지 않은 상태로 반환해 caller가 BLOCK 처리하게 한다."""
+    with patch("plan_worktree_helpers.subprocess") as mock_sp:
+        mock_result = MagicMock()
+        mock_result.stdout = ""
+        mock_result.stderr = "unknown revision"
+        mock_result.returncode = 128
+        mock_sp.run.return_value = mock_result
+
+        assert get_branch_divergence("missing", tmp_path) == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("behind", "ahead", "expected"),
+    [
+        (0, 0, "PASS"),
+        (500, 0, "PASS"),
+        (120, 1, "PASS"),
+        (121, 1, "WARN"),
+        (300, 1, "WARN"),
+        (301, 1, "BLOCK"),
+        (None, None, "BLOCK"),
+    ],
+)
+def test_classify_merge_risk_RBE(behind, ahead, expected):
+    assert classify_merge_risk(behind, ahead) == expected
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,9 @@ from _dr_plan_paths import is_archive_or_history_path
 
 logger = logging.getLogger(__name__)
 
+STALE_MERGE_WARN_BEHIND = 120
+STALE_MERGE_BLOCK_BEHIND = 300
+
 
 def _extract_plan_filename_tail(plan_file: str) -> Optional[Path]:
     """plan 경로 문자열에서 docs/plan 이하 상대 경로를 추출한다.
@@ -142,6 +145,65 @@ def has_unmerged_commits(branch: str, cwd: "Path | None" = None) -> bool:
     except Exception as e:
         logger.warning(f"[has_unmerged_commits] 확인 실패 (보수적으로 True 반환): {e}")
         return True  # 확인 불가 → 안전하게 True
+
+
+def get_branch_divergence(branch: str, cwd: "Path | None" = None, base: str = "main") -> tuple[Optional[int], Optional[int]]:
+    """base...branch 발산도를 계산한다.
+
+    Returns:
+        (behind, ahead)
+        - behind: base에는 있고 branch에는 없는 커밋 수
+        - ahead: branch에는 있고 base에는 없는 커밋 수
+        - 실패 시 (None, None). 호출자는 이를 안전하지 않은 상태로 처리해야 한다.
+    """
+    if not branch or not str(branch).strip():
+        return (None, None)
+    try:
+        result = subprocess.run(
+            ["git", "rev-list", "--left-right", "--count", f"{base}...{branch}"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(cwd) if cwd else None,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip() if isinstance(result.stderr, str) else ""
+            logger.warning(
+                "[get_branch_divergence] git rev-list 실패 (branch=%s, base=%s, rc=%s): %s",
+                branch,
+                base,
+                result.returncode,
+                stderr,
+            )
+            return (None, None)
+
+        stdout = result.stdout if isinstance(result.stdout, str) else ""
+        parts = stdout.strip().split()
+        if len(parts) != 2:
+            logger.warning(
+                "[get_branch_divergence] 출력 파싱 실패 (branch=%s, base=%s, stdout=%r)",
+                branch,
+                base,
+                stdout.strip(),
+            )
+            return (None, None)
+        return (int(parts[0]), int(parts[1]))
+    except Exception as e:
+        logger.warning(f"[get_branch_divergence] 확인 실패 (보수적으로 BLOCK 대상): {e}")
+        return (None, None)
+
+
+def classify_merge_risk(behind: Optional[int], ahead: Optional[int]) -> str:
+    """브랜치 발산도를 PASS/WARN/BLOCK으로 분류한다."""
+    if behind is None or ahead is None:
+        return "BLOCK"
+    if ahead <= 0 or behind <= STALE_MERGE_WARN_BEHIND:
+        return "PASS"
+    if behind <= STALE_MERGE_BLOCK_BEHIND:
+        return "WARN"
+    return "BLOCK"
 
 
 def is_plan_in_progress(plan_file: str) -> bool:

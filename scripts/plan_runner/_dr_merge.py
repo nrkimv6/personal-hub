@@ -9,6 +9,7 @@ import base64
 import functools
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -28,6 +29,15 @@ from _dr_runtime_utils import _publish_with_retry
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _launch_auto_impl_post_merge_process, _launch_general_merge_resolver_process, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_redis_value(val) -> str:
+    if isinstance(val, bytes):
+        try:
+            return val.decode("utf-8", errors="replace")
+        except Exception:
+            return str(val)
+    return "" if val is None else str(val)
 
 
 def _normalize_ownership_key(path: Path, project_root: Path) -> Optional[str]:
@@ -312,6 +322,8 @@ def _persist_merge_result_metadata(runner_id: str, redis_client: redis.Redis, re
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path", str(quarantine_diff_path))
         else:
             redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path")
+        if result.get("snapshot_path"):
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_snapshot_path", str(result["snapshot_path"]))
     except Exception:
         pass
 
@@ -605,7 +617,7 @@ def _handle_merge_success(runner_id: str, redis_client: redis.Redis, plan_file, 
         pass
     pub_fn("merge 성공 (exit_code=0)")
     done_result = _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
-    return _compose_merge_result_with_done(
+    result = _compose_merge_result_with_done(
         runner_id=runner_id,
         redis_client=redis_client,
         action_name=action_name,
@@ -613,6 +625,8 @@ def _handle_merge_success(runner_id: str, redis_client: redis.Redis, plan_file, 
         done_result=done_result,
         pub_fn=pub_fn,
     )
+    result["post_merge_loss_check"] = _run_post_merge_loss_check(runner_id, redis_client, plan_file, pub_fn)
+    return result
 
 
 def _handle_test_failed(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn, action_name: str = "inline-merge", _test_fix_attempt: int = 0) -> dict:
@@ -788,17 +802,9 @@ def _handle_approval_required(
     except Exception:
         pass
 
-    def _decode(val) -> str:
-        if isinstance(val, bytes):
-            try:
-                return val.decode("utf-8", errors="replace")
-            except Exception:
-                return str(val)
-        return "" if val is None else str(val)
-
     try:
-        message = _decode(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message")) or "approval_required"
-        reason = _decode(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")) or "approval_required"
+        message = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message")) or "approval_required"
+        reason = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")) or "approval_required"
     except Exception:
         message = "approval_required"
         reason = "approval_required"
@@ -820,6 +826,150 @@ _EXIT_CODE_HANDLERS = {
     3: _handle_conflict,
     5: _handle_approval_required,  # service_lock precheck 승인 대기
 }
+
+
+def _write_pre_merge_snapshot(runner_id: str, branch: str, project_root: Path, pub_fn) -> Optional[str]:
+    if not branch:
+        return None
+
+    snapshot_dir = project_root / "logs" / "dev_runner" / "merge_snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_runner = re.sub(r"[^A-Za-z0-9_.-]+", "_", runner_id)[:80] or "runner"
+    snapshot_path = snapshot_dir / f"{safe_runner}-{timestamp}.md"
+
+    commands = [
+        ("commit_log", ["git", "log", "--oneline", f"main..{branch}"]),
+        ("name_status", ["git", "diff", "--name-status", f"main...{branch}"]),
+    ]
+    sections: list[tuple[str, str]] = []
+    for label, cmd in commands:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        stdout = proc.stdout if isinstance(proc.stdout, str) else ""
+        stderr = proc.stderr if isinstance(proc.stderr, str) else ""
+        if proc.returncode != 0:
+            raise RuntimeError(f"pre-merge snapshot {label} failed ({proc.returncode}): {stderr.strip()}")
+        sections.append((label, stdout.strip() or "(empty)"))
+
+    lines = [
+        f"# pre-merge snapshot: {runner_id}",
+        f"- captured_at: {datetime.now().isoformat()}",
+        f"- branch: {branch}",
+        f"- base: main",
+        "",
+    ]
+    for label, body in sections:
+        lines.extend([f"## {label}", "", "```", body, "```", ""])
+
+    snapshot_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    pub_fn(f"pre-merge snapshot 저장: {snapshot_path}")
+    return str(snapshot_path)
+
+
+def _check_stale_merge_gate(
+    runner_id: str,
+    redis_client: redis.Redis,
+    branch: str,
+    pub_fn,
+) -> tuple[Optional[dict], Optional[str]]:
+    if not branch:
+        pub_fn("merge branch 없음 — stale merge gate/snapshot skip")
+        return None, None
+
+    from plan_worktree_helpers import classify_merge_risk, get_branch_divergence
+
+    behind, ahead = get_branch_divergence(branch, PROJECT_ROOT)
+    risk = classify_merge_risk(behind, ahead)
+    message = f"stale merge gate: risk={risk}, behind={behind}, ahead={ahead}, branch={branch}"
+    pub_fn(message)
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stale_merge_risk", risk)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stale_merge_behind", "" if behind is None else str(behind))
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stale_merge_ahead", "" if ahead is None else str(ahead))
+    except Exception:
+        pass
+
+    if risk == "WARN":
+        pub_fn("stale merge WARN — 수동 확인 필요 로그를 남기고 merge를 계속 진행")
+
+    allow_override = os.environ.get("DEV_RUNNER_ALLOW_STALE_MERGE") == "1"
+    if risk == "BLOCK" and not allow_override:
+        reason = "stale_merge_blocked"
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", reason)
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message", message)
+        except Exception:
+            pass
+        return {
+            "success": False,
+            "message": message,
+            "merge_status": "error",
+            "action": "inline-merge",
+            "reason": reason,
+            "stale_merge": {"risk": risk, "behind": behind, "ahead": ahead, "branch": branch},
+        }, None
+
+    if risk == "BLOCK":
+        approver = os.environ.get("DEV_RUNNER_STALE_MERGE_APPROVER", "").strip() or "unknown"
+        override_reason = os.environ.get("DEV_RUNNER_STALE_MERGE_REASON", "").strip() or "not provided"
+        pub_fn(
+            "stale merge BLOCK override 사용: "
+            f"approver={approver}, reason={override_reason}, at={datetime.now().isoformat()}"
+        )
+
+    try:
+        snapshot_path = _write_pre_merge_snapshot(runner_id, branch, PROJECT_ROOT, pub_fn)
+        if snapshot_path:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_snapshot_path", snapshot_path)
+    except Exception as exc:
+        reason = "pre_merge_snapshot_failed"
+        snapshot_message = f"{reason}: {exc}"
+        pub_fn(snapshot_message)
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", reason)
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message", snapshot_message)
+        except Exception:
+            pass
+        return {
+            "success": False,
+            "message": snapshot_message,
+            "merge_status": "error",
+            "action": "inline-merge",
+            "reason": reason,
+        }, None
+
+    return None, snapshot_path
+
+
+def _run_post_merge_loss_check(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn) -> dict:
+    snapshot_path = ""
+    try:
+        snapshot_path = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_snapshot_path"))
+    except Exception:
+        snapshot_path = ""
+
+    checks: list[str] = []
+    if snapshot_path:
+        checks.append("snapshot_exists" if Path(snapshot_path).exists() else "snapshot_missing")
+    else:
+        checks.append("snapshot_not_recorded")
+
+    if plan_file:
+        plan_path = Path(str(plan_file))
+        checks.append("active_plan_absent_after_done" if not plan_path.exists() else "active_plan_still_present")
+
+    pub_fn(f"post-merge loss checklist: {', '.join(checks)}")
+    return {"checks": checks, "snapshot_path": snapshot_path or None}
 
 
 def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_name: str = "inline-merge", _test_fix_attempt: int = 0) -> dict:
@@ -865,12 +1015,18 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             return result
 
         try:
-            branch_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
-            plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+            branch_str = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")).strip() or None
+            plan_file = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")).strip() or None
             if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
                 plan_file = None
         except Exception:
             pass
+
+        gate_result, snapshot_path = _check_stale_merge_gate(runner_id, redis_client, branch_str or "", _pub)
+        if gate_result is not None:
+            gate_result["action"] = action_name
+            result = gate_result
+            return result
 
         # 2. lock 획득 후 merge_status = "merging"
         try:
@@ -910,6 +1066,8 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             )
         else:
             result = handler(runner_id, redis_client, plan_file, _pub, action_name)
+        if snapshot_path and isinstance(result, dict):
+            result.setdefault("snapshot_path", snapshot_path)
 
     except Exception as e:
         logger.error(f"[_execute_merge_with_lock] 예외 발생 (runner_id={runner_id}, action={action_name}): {e}")
