@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.database import get_db
 from app.models.instagram_post import InstagramPost
+from app.models.task_schedule import TaskSchedule
 
 
 @pytest.fixture
@@ -80,6 +81,76 @@ def sample_posts(test_db_session):
         test_db_session.refresh(post)
 
     return posts, unique_id  # unique_id도 반환
+
+
+@pytest.fixture
+def clean_instagram_schedule(test_db_session):
+    """Instagram 피드 스케줄 테스트 데이터 정리."""
+    test_db_session.query(TaskSchedule).filter(
+        TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED
+    ).delete(synchronize_session=False)
+    test_db_session.commit()
+
+
+class TestInstagramScheduleAPI:
+    """GET/PUT /api/v1/instagram/schedule 계약 테스트."""
+
+    def test_update_exact_slots_and_today_schedule_returns_all_slots(
+        self,
+        client,
+        clean_instagram_schedule,
+    ):
+        """exact slot 10개 저장 후 today 응답도 10개 슬롯을 반환."""
+        windows = [
+            {"start": f"{hour:02d}:00", "end": f"{hour:02d}:00"}
+            for hour in range(0, 20, 2)
+        ]
+
+        response = client.put(
+            "/api/v1/instagram/schedule",
+            json={
+                "enabled": True,
+                "daily_runs": 10,
+                "time_windows": windows,
+                "min_interval_hours": 0,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["daily_runs"] == 10
+        assert data["time_windows"] == windows
+
+        today_response = client.get("/api/v1/instagram/schedule/today")
+
+        assert today_response.status_code == 200
+        today_items = today_response.json()
+        assert [item["scheduled_time"] for item in today_items] == [
+            window["start"] for window in windows
+        ]
+        assert len(today_items) == 10
+
+    def test_update_exact_slots_rejects_min_interval_conflict(
+        self,
+        client,
+        clean_instagram_schedule,
+    ):
+        """exact slot 간격보다 큰 min_interval_hours는 API 422로 거부."""
+        response = client.put(
+            "/api/v1/instagram/schedule",
+            json={
+                "enabled": True,
+                "daily_runs": 2,
+                "time_windows": [
+                    {"start": "09:00", "end": "09:00"},
+                    {"start": "10:00", "end": "10:00"},
+                ],
+                "min_interval_hours": 2,
+            },
+        )
+
+        assert response.status_code == 422
+        assert "min_interval_hours" in response.json()["detail"]
 
 
 class TestInstagramPostsSearchAPI:
