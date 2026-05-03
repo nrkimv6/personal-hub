@@ -48,6 +48,14 @@ def test_powershell_wrapper_forwards_dry_run_args():
     assert "마감기한(due_at) = <없음>" in result.stdout
 
 
+def test_powershell_wrapper_has_worktree_venv_fallback_contract():
+    script = REPO_ROOT / "scripts" / "tracking" / "add-tracking-item.ps1"
+    source = script.read_text(encoding="utf-8")
+    assert ".worktrees" in source
+    assert ".venv\\Scripts\\python.exe" in source
+    assert "$fallbackPython" in source
+
+
 def test_bash_wrapper_forwards_dry_run_args():
     bash = shutil.which("bash")
     if not bash:
@@ -78,3 +86,11 @@ def test_bash_wrapper_forwards_dry_run_args():
     assert '"title": "T"' in result.stdout
     assert '"start_at"' in result.stdout
     assert "마감기한(due_at) = <없음>" in result.stdout
+
+
+def test_bash_wrapper_has_worktree_venv_fallback_contract():
+    script = REPO_ROOT / "scripts" / "tracking" / "add-tracking-item.sh"
+    source = script.read_text(encoding="utf-8")
+    assert "/.worktrees/" in source
+    assert "FALLBACK_PYTHON" in source
+    assert ".venv/Scripts/python.exe" in source
