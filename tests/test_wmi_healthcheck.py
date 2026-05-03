@@ -117,6 +117,30 @@ class TestFixWmi:
 
 
 class TestRestartFrontendCliArgs:
+    def test_restart_api_mode_right_default_admin(self, monkeypatch):
+        """R: restart-api 기본 호출은 admin API."""
+        mgr = MagicMock()
+        monkeypatch.setattr(browser_workers, "BrowserWorkerManager", lambda: mgr)
+        monkeypatch.setattr(sys, "argv", ["browser_workers.py", "restart-api"])
+
+        with pytest.raises(SystemExit) as exc:
+            browser_workers.main()
+
+        assert exc.value.code == 0
+        mgr.restart_api.assert_called_once_with(public=False)
+
+    def test_restart_api_mode_right_public_flag(self, monkeypatch):
+        """R: restart-api --public 전달 시 public API."""
+        mgr = MagicMock()
+        monkeypatch.setattr(browser_workers, "BrowserWorkerManager", lambda: mgr)
+        monkeypatch.setattr(sys, "argv", ["browser_workers.py", "restart-api", "--public"])
+
+        with pytest.raises(SystemExit) as exc:
+            browser_workers.main()
+
+        assert exc.value.code == 0
+        mgr.restart_api.assert_called_once_with(public=True)
+
     def test_restart_frontend_mode_right_default_admin(self, monkeypatch):
         """R: restart-frontend 기본 호출은 admin 모드."""
         mgr = MagicMock()
@@ -160,16 +184,17 @@ class TestRestartFrontendCliArgs:
         assert exc.value.code == 1
         mgr.restart_frontend.assert_called_once_with(public=public)
 
-    def test_restart_frontend_mode_error_invalid_combo(self, monkeypatch, capsys):
-        """E: status + --public 조합은 에러."""
-        monkeypatch.setattr(sys, "argv", ["browser_workers.py", "status", "--public"])
+    @pytest.mark.parametrize("action", ["status", "restart"])
+    def test_public_flag_error_invalid_combo(self, monkeypatch, capsys, action):
+        """E: --public은 restart-api/restart-frontend 조합에만 허용된다."""
+        monkeypatch.setattr(sys, "argv", ["browser_workers.py", action, "--public"])
 
         with pytest.raises(SystemExit) as exc:
             browser_workers.main()
 
         assert exc.value.code == 2
         captured = capsys.readouterr()
-        assert "--public can only be used with restart-frontend" in captured.err
+        assert "--public can only be used with restart-api or restart-frontend" in captured.err
 
     def test_restart_frontend_mode_boundary_legacy_option_hint(self, monkeypatch):
         """B: --restart-frontend 오입력 시 교정 힌트 반환."""

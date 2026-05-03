@@ -122,6 +122,23 @@ def test_service_runner_frontend_runtime_env_separates_admin_and_public_modes():
     assert "VITE_API_PORT" not in public_env
 
 
+def test_public_service_runner_cleanup_uses_public_pid_files_only(tmp_path):
+    runner = service_run.ServiceRunner(dev=False)
+    runner.pid_dir = tmp_path / ".pids"
+    runner.pid_dir.mkdir()
+    for name in ["api.pid", "frontend.pid", "api_admin.pid", "frontend_admin.pid"]:
+        (runner.pid_dir / name).write_text("1234", encoding="utf-8")
+
+    removed: list[str] = []
+
+    with patch("scripts.services.service_run.read_pid_file", return_value=1234), patch(
+        "scripts.services.service_run.is_process_alive", return_value=False
+    ), patch("scripts.services.service_run.remove_pid_file", side_effect=lambda path: removed.append(path.name)):
+        runner._cleanup_stale_pids()
+
+    assert removed == ["api.pid", "frontend.pid"]
+
+
 def test_ensure_frontend_runtime_tsconfigs_copies_base_config_for_both_modes(tmp_path):
     frontend_dir = tmp_path / "frontend"
     base_dir = frontend_dir / ".svelte-kit"

@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--public",
         action="store_true",
-        help="Use PUBLIC PREVIEW mode for restart-frontend (port 6100, build+preview)",
+        help="Use public mode for restart-api (port 8000) or restart-frontend (port 6100, build+preview)",
     )
     return parser
 
@@ -54,8 +54,8 @@ def main(manager_cls, argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.public and args.action != "restart-frontend":
-        parser.error("--public can only be used with restart-frontend")
+    if args.public and args.action not in {"restart-api", "restart-frontend"}:
+        parser.error("--public can only be used with restart-api or restart-frontend")
     if args.action == "restart-infra" and not args.target:
         parser.error("restart-infra requires target argument")
 
@@ -71,7 +71,7 @@ def main(manager_cls, argv: list[str] | None = None) -> int:
         "stop": mgr.stop,
         "restart": mgr.restart,
         "status": mgr.status,
-        "restart-api": mgr.restart_api,
+        "restart-api": lambda: mgr.restart_api(public=args.public),
         "redis-status": mgr.redis_status,
         "redis-restart": mgr.redis_restart,
         "redis-cleanup": mgr.redis_cleanup,

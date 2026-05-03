@@ -6,6 +6,8 @@ import json
 import subprocess
 import time
 import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
 
 from app.core.runtime_fingerprint import build_runtime_fingerprint_snapshot
 from scripts.services.browser_worker_runtime.runtime import GRAY, GREEN, RED, RESET, YELLOW, cprint
@@ -84,6 +86,36 @@ def _frontend_port_for_api_port(api_port: int) -> int | None:
     return None
 
 
+@dataclass(frozen=True)
+class RestartApiTarget:
+    api_port: int
+    app_mode: str
+    pid_suffix: str
+    pid_file: Path
+    service_name: str
+
+
+def _restart_api_target(manager, public: bool) -> RestartApiTarget:
+    if public:
+        return RestartApiTarget(
+            api_port=8000,
+            app_mode="public",
+            pid_suffix="",
+            pid_file=manager.pid_dir / "api.pid",
+            service_name="MonitorPage-Public",
+        )
+
+    pid_suffix = getattr(manager, "pid_suffix", "_admin")
+    app_mode = _manager_app_mode(manager)
+    return RestartApiTarget(
+        api_port=getattr(manager, "api_port", 8001),
+        app_mode=app_mode,
+        pid_suffix=pid_suffix,
+        pid_file=manager.pid_dir / f"api{pid_suffix}.pid",
+        service_name="MonitorPage-Admin" if pid_suffix == "_admin" else "MonitorPage-Public",
+    )
+
+
 def _close_api_gate(api_port: int) -> None:
     frontend_port = _frontend_port_for_api_port(api_port)
     if frontend_port is None:
@@ -110,13 +142,14 @@ def _close_api_gate(api_port: int) -> None:
         cprint(f"API gate close failed, restart continues: {exc}", YELLOW)
 
 
-def restart_api(manager):
+def restart_api(manager, public: bool = False):
     mgr = _manager()
+    target = _restart_api_target(manager, public)
     print(f"\n{YELLOW}{'=' * 40}")
-    print(f"  Restarting API")
+    print(f"  Restarting {'PUBLIC ' if public else ''}API")
     print(f"{'=' * 40}{RESET}\n")
 
-    _close_api_gate(manager.api_port)
+    _close_api_gate(target.api_port)
 
     if not manager._check_wmi_health():
         cprint("WMI not healthy, attempting fix...", YELLOW)
@@ -131,17 +164,16 @@ def restart_api(manager):
     else:
         cprint("WMI OK", GREEN)
 
-    app_mode = _manager_app_mode(manager)
-    expected_snapshot = build_runtime_fingerprint_snapshot(app_mode=app_mode)
+    expected_snapshot = build_runtime_fingerprint_snapshot(app_mode=target.app_mode)
     expected_fingerprint = str(expected_snapshot["runtime_fingerprint"])
     expected_source_fingerprint = str(expected_snapshot.get("source_fingerprint", ""))
     cprint(
-        f"API restart target: port={manager.api_port} app_mode={app_mode} "
+        f"API restart target: port={target.api_port} app_mode={target.app_mode} "
         f"expected_fp={expected_fingerprint[:12]}...",
         GRAY,
     )
 
-    url = f"http://localhost:{manager.api_port}/api/v1/system/self-restart?delay=2&reason=browser_workers_py"
+    url = f"http://localhost:{target.api_port}/api/v1/system/self-restart?delay=2&reason=browser_workers_py"
     killed = False
     try:
         req = urllib.request.Request(url, method="POST")
@@ -152,39 +184,37 @@ def restart_api(manager):
     except Exception as e:
         cprint(f"Self-restart API unavailable: {e}", YELLOW)
 
-        pids = mgr.find_pids_on_port(manager.api_port)
+        pids = mgr.find_pids_on_port(target.api_port)
         if pids:
-            cprint(f"API port {manager.api_port} live pids: {pids}", GRAY)
+            cprint(f"API port {target.api_port} live pids: {pids}", GRAY)
             for pid in pids:
                 cprint(f"Killing API process (PID: {pid})...")
                 mgr.kill_pid(pid)
             cprint("API process stopped. NSSM will auto-restart.", YELLOW)
             killed = True
         else:
-            cprint(f"No process found on port {manager.api_port}", YELLOW)
-            service_name = "MonitorPage-Admin" if manager.pid_suffix == "_admin" else "MonitorPage-Public"
-            api_pid_file = manager.pid_dir / f"api{manager.pid_suffix}.pid"
-            stale_pid = mgr.read_pid_file(api_pid_file)
+            cprint(f"No process found on port {target.api_port}", YELLOW)
+            stale_pid = mgr.read_pid_file(target.pid_file)
             if stale_pid and mgr.is_process_alive(stale_pid):
                 cprint(
                     f"Service runner alive (PID: {stale_pid}) but API port dead; "
-                    f"restarting {service_name}",
+                    f"restarting {target.service_name}",
                     YELLOW,
                 )
-                killed = manager._nssm_restart_elevated(service_name)
+                killed = manager._nssm_restart_elevated(target.service_name)
             elif stale_pid:
                 cprint(
-                    f"Stale PID file for {service_name} (PID: {stale_pid}, already dead)",
+                    f"Stale PID file for {target.service_name} (PID: {stale_pid}, already dead)",
                     YELLOW,
                 )
-                mgr.remove_pid_file(api_pid_file)
-                killed = manager._nssm_restart_elevated(service_name)
+                mgr.remove_pid_file(target.pid_file)
+                killed = manager._nssm_restart_elevated(target.service_name)
 
     if killed:
         cprint("Waiting for NSSM to restart API (up to 60s)...")
         healthy = False
-        fingerprint_url = f"http://localhost:{manager.api_port}/api/v1/system/runtime-fingerprint"
-        status_url = f"http://localhost:{manager.api_port}/api/v1/system/status"
+        fingerprint_url = f"http://localhost:{target.api_port}/api/v1/system/runtime-fingerprint"
+        status_url = f"http://localhost:{target.api_port}/api/v1/system/status"
         for i in range(12):
             time.sleep(5)
             fingerprint_data = _fetch_json(fingerprint_url, timeout=3)
@@ -199,7 +229,7 @@ def restart_api(manager):
                 if (
                     actual_source_fingerprint
                     and actual_source_fingerprint == expected_source_fingerprint
-                    and actual_app_mode == app_mode
+                    and actual_app_mode == target.app_mode
                 ):
                     cprint(
                         f"API source fingerprint matched (runtime drift allowed, took ~{(i + 1) * 5}s)",
@@ -224,4 +254,4 @@ def restart_api(manager):
         if not healthy:
             cprint("API not responding after 60s - check NSSM service status", RED)
     else:
-        cprint("No API process found to restart. Check NSSM service 'MonitorPage-Admin'.", RED)
+        cprint(f"No API process found to restart. Check NSSM service '{target.service_name}'.", RED)

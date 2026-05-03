@@ -50,7 +50,7 @@ def test_browser_workers_main_dispatches_restart_frontend_public_R(monkeypatch):
         def status(self) -> bool:
             return True
 
-        def restart_api(self) -> bool:
+        def restart_api(self, public: bool = False) -> bool:
             return True
 
         def redis_status(self) -> bool:
@@ -75,6 +75,56 @@ def test_browser_workers_main_dispatches_restart_frontend_public_R(monkeypatch):
     monkeypatch.setattr(browser_workers, "BrowserWorkerManager", FakeManager)
     monkeypatch.setattr(runtime_cli, "assert_repo_root_checkout", lambda: None)
     monkeypatch.setattr(sys, "argv", ["browser_workers.py", "restart-frontend", "--public"])
+
+    with pytest.raises(SystemExit) as exc:
+        browser_workers.main()
+
+    assert exc.value.code == 0
+    assert calls == [True]
+
+
+def test_browser_workers_main_dispatches_restart_api_public_R(monkeypatch):
+    """R: facade main() passes --public through to restart-api."""
+    calls: list[bool] = []
+
+    class FakeManager:
+        def start(self) -> bool:
+            return True
+
+        def stop(self) -> bool:
+            return True
+
+        def restart(self) -> bool:
+            return True
+
+        def status(self) -> bool:
+            return True
+
+        def restart_api(self, public: bool = False) -> bool:
+            calls.append(public)
+            return True
+
+        def redis_status(self) -> bool:
+            return True
+
+        def redis_restart(self) -> bool:
+            return True
+
+        def redis_cleanup(self) -> bool:
+            return True
+
+        def restart_listener(self) -> bool:
+            return True
+
+        def restart_infra(self, target: str) -> bool:
+            return True
+
+        def restart_frontend(self, public: bool = False) -> bool:
+            return True
+
+    monkeypatch.setattr(browser_workers, "BrowserWorkerManager", FakeManager)
+    monkeypatch.setattr(runtime_cli, "assert_repo_root_checkout", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["browser_workers.py", "restart-api", "--public"])
 
     with pytest.raises(SystemExit) as exc:
         browser_workers.main()
