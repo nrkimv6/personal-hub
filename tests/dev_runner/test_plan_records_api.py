@@ -9,6 +9,45 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="module")
+def test_db_engine(tmp_path_factory):
+    """Plan records API 전용 SQLite 엔진.
+
+    이 모듈은 plan_records/plan_events만 직접 검증하므로, 세션 범위 전체 모델
+    create_all을 타지 않게 해서 전역 테스트 DB 부트스트랩 timeout을 피한다.
+    """
+    from sqlalchemy import create_engine, event
+    from app.models.base import Base
+    from app.models.plan_record import PlanEvent, PlanRecord
+    from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
+
+    db_path = tmp_path_factory.mktemp("plan_records_api_db") / "test.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            PlanRecord.__table__,
+            PlanEvent.__table__,
+            TrackingItem.__table__,
+            TrackingItemPlanLink.__table__,
+        ],
+    )
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture(scope="module")
 def client(test_db_engine):
     """TestClient (module scope) + test_db_engine 오버라이드
 
