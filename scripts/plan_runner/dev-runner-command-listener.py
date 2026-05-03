@@ -72,6 +72,7 @@ from _dr_runner_control import (
     _do_start_plan_runner, start_plan_runner, _launch_plan_runner_process,
     stop_plan_runner, get_status, force_stop_plan_runner, force_kill_plan_runner,
 )
+from _dr_plan_runner import _kill_process_tree
 from _dr_commands import (
     _do_retry_merge, retry_merge, _do_direct_merge, direct_merge,
     _do_resolve_conflict, resolve_conflict, _do_cleanup_worktree, cleanup_worktree,
@@ -336,6 +337,7 @@ def _handle_zombie_heartbeat(runner_id: str, proc, redis_client: redis.Redis, wf
         f"heartbeat_elapsed={zombie_elapsed:.0f}s → force-kill"
     )
     try:
+        _kill_process_tree(proc.pid)
         proc.kill()
         proc.wait(timeout=5)
     except Exception:

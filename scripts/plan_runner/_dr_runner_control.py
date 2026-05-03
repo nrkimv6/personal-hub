@@ -7,12 +7,18 @@ helpers (e.g. `get_running_processes`).
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any, Dict, Optional
 
 import redis
 
-from _dr_process_utils import _cleanup_process_state
 from _dr_state import get_running_log_files, get_running_processes
+
+
+def _cleanup_runner_state(runner_id: str, redis_client: redis.Redis) -> None:
+    from _dr_plan_runner import _cleanup_process_state as cleanup_process_state
+
+    cleanup_process_state(runner_id, redis_client)
 
 
 def start_plan_runner(command: Dict[str, Any], redis_client: redis.Redis) -> Dict[str, Any]:
@@ -39,10 +45,20 @@ def stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict[str, Any
         return {"success": False, "message": "Not running"}
 
     try:
+        from _dr_plan_runner import _kill_process_tree
+
+        _kill_process_tree(proc.pid)
         proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc.pid)
+            proc.kill()
+            proc.wait()
     except Exception:
         pass
-    return {"success": True, "message": "Stopping"}
+    _cleanup_runner_state(runner_id, redis_client)
+    return {"success": True, "message": "Stopped successfully"}
 
 
 def get_status(redis_client: redis.Redis) -> Dict[str, Any]:
@@ -56,7 +72,17 @@ def get_status(redis_client: redis.Redis) -> Dict[str, Any]:
 
 
 def force_stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict[str, Any]:
-    _cleanup_process_state(runner_id, redis_client)
+    proc = get_running_processes().get(runner_id)
+    if proc and getattr(proc, "poll", lambda: 0)() is None:
+        try:
+            from _dr_plan_runner import _kill_process_tree
+
+            _kill_process_tree(proc.pid)
+            proc.kill()
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+    _cleanup_runner_state(runner_id, redis_client)
     return {"success": True, "message": "Stopped"}
 
 
@@ -67,10 +93,13 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict[st
     proc = get_running_processes().get(runner_id)
     if proc and getattr(proc, "poll", lambda: 0)() is None:
         try:
+            from _dr_plan_runner import _kill_process_tree
+
+            _kill_process_tree(proc.pid)
             proc.kill()
         except Exception:
             pass
-    _cleanup_process_state(runner_id, redis_client)
+    _cleanup_runner_state(runner_id, redis_client)
     return {"success": True, "message": "Killed"}
 
 

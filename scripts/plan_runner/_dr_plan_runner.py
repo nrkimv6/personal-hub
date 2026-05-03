@@ -79,6 +79,51 @@ def _register_canonical_alias() -> None:
 
 _register_canonical_alias()
 
+
+def _kill_process_tree(pid: int, timeout: int = 5) -> None:
+    """Terminate child processes for a runner PID before killing the runner itself."""
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+    except psutil.NoSuchProcess:
+        logger.debug("process tree cleanup skipped; PID %s no longer exists", pid)
+        return
+    except (psutil.AccessDenied, psutil.ZombieProcess) as exc:
+        logger.debug("process tree cleanup skipped for PID %s: %s", pid, exc)
+        return
+
+    for child in children:
+        try:
+            child.terminate()
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            logger.debug("child terminate skipped for PID %s: %s", getattr(child, "pid", None), exc)
+
+    if not children:
+        return
+
+    try:
+        _gone, alive = psutil.wait_procs(children, timeout=timeout)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as exc:
+        logger.debug("process tree wait skipped for PID %s: %s", pid, exc)
+        alive = []
+
+    for child in alive:
+        try:
+            child.kill()
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            logger.debug("child kill skipped for PID %s: %s", getattr(child, "pid", None), exc)
+
+    if alive:
+        try:
+            psutil.wait_procs(alive, timeout=timeout)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            logger.debug("process tree kill wait skipped for PID %s: %s", pid, exc)
+
+
 # Lifecycle control lives in `_dr_runner_control` so tests can patch that module
 # and observe behavior through the facade imports.
 from _dr_runner_control import (  # noqa: E402
@@ -1045,6 +1090,7 @@ def stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
         logger.info(f"Stopping plan-runner (runner_id: {runner_id}, PID: {proc.pid})...")
 
         # Windows: terminate() 호출
+        _kill_process_tree(proc.pid)
         proc.terminate()
 
         # 5초 대기
@@ -1052,6 +1098,7 @@ def stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             # 강제 종료
+            _kill_process_tree(proc.pid)
             proc.kill()
             proc.wait()
 
@@ -1116,6 +1163,7 @@ def force_stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
         pid = proc.pid if proc else None
         if proc:
             try:
+                _kill_process_tree(proc.pid)
                 proc.kill()
                 proc.wait(timeout=5)
             except Exception:
@@ -1129,6 +1177,7 @@ def force_stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
             if proc:
                 pids.append(proc.pid)
                 try:
+                    _kill_process_tree(proc.pid)
                     proc.kill()
                     proc.wait(timeout=5)
                 except Exception:
@@ -1154,6 +1203,7 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
     if proc and hasattr(proc, "kill") and not isinstance(proc, _DummyProcess):
         pid = proc.pid
         try:
+            _kill_process_tree(proc.pid)
             proc.kill()
             proc.wait(timeout=5)
         except Exception:
@@ -1163,6 +1213,7 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
         if pid_str:
             try:
                 pid = int(pid_str)
+                _kill_process_tree(pid)
                 import ctypes
                 PROCESS_TERMINATE = 0x0001
                 handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)

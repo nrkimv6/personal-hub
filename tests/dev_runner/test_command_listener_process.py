@@ -458,6 +458,58 @@ class TestStopPlanRunner:
         assert result["success"] is True
         mock_cleanup.assert_called_once_with(RUNNER_ID, fr)
 
+    def test_stop_kills_child_processes(self, listener_mod, fr, mock_popen):
+        """R(Right): stop 전에 runner child process tree를 terminate한다."""
+        child1 = MagicMock()
+        child1.pid = 20001
+        child2 = MagicMock()
+        child2.pid = 20002
+        parent = MagicMock()
+        parent.children.return_value = [child1, child2]
+
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+
+        with patch("_dr_plan_runner.psutil.Process", return_value=parent), \
+             patch("_dr_plan_runner.psutil.wait_procs", return_value=([child1, child2], [])) as mock_wait:
+            result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
+
+        assert result["success"] is True
+        parent.children.assert_called_once_with(recursive=True)
+        child1.terminate.assert_called_once()
+        child2.terminate.assert_called_once()
+        mock_wait.assert_called_once_with([child1, child2], timeout=5)
+
+    def test_stop_child_kill_on_timeout(self, listener_mod, fr, mock_popen):
+        """B(Boundary): terminate timeout child는 kill로 정리한다."""
+        child1 = MagicMock()
+        child1.pid = 20003
+        child2 = MagicMock()
+        child2.pid = 20004
+        parent = MagicMock()
+        parent.children.return_value = [child1, child2]
+
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+
+        with patch("_dr_plan_runner.psutil.Process", return_value=parent), \
+             patch("_dr_plan_runner.psutil.wait_procs", side_effect=[([child1], [child2]), ([child2], [])]):
+            result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
+
+        assert result["success"] is True
+        child1.kill.assert_not_called()
+        child2.kill.assert_called_once()
+
+    def test_stop_child_nosuchprocess_ignored(self, listener_mod, fr, mock_popen):
+        """E(Error): psutil parent 조회 실패는 stop 자체를 막지 않는다."""
+        import psutil
+
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+
+        with patch("_dr_plan_runner.psutil.Process", side_effect=psutil.NoSuchProcess(pid=mock_popen.pid)):
+            result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
+
+        assert result["success"] is True
+        mock_popen.terminate.assert_called_once()
+
     def test_stop_not_running_returns_error(self, listener_mod, fr):
         """미실행 runner_id stop → 실패"""
         result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
