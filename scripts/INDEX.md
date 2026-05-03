@@ -169,6 +169,7 @@
 | ✅ | `_check_visible.py` | visible 상태 검증 |
 | ✅ | `analyze_duplicates.py` | DB 중복 분석 |
 | ✅ | `analyze-dump.ps1` | 메모리 덤프 분석 |
+| ✅ | `analyze-bsod.ps1` | BSOD 이벤트 로그 상관분석 |
 | ✅ | `check_profile_config.py` | 브라우저 프로필 설정 검증 |
 | ✅ | `check_requests.py` | 요청 로그 검사 |
 | ✅ | `check_schedules.py` | 스케줄 상태 점검 |
