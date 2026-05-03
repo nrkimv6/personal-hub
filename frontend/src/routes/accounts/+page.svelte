@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import { fetchWithTimeout } from '$lib/api/client';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
   import { 
     Circle, ChevronUp, ChevronDown, RefreshCw, AlertTriangle, 
     Lock, Mail, Folder, MessageSquare, Clock, Globe, X, 
@@ -58,6 +60,10 @@
 
   // 자동 새로고침
   let refreshInterval: ReturnType<typeof setInterval>;
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   // 생성/수정 폼 데이터
   let formData = {
@@ -172,7 +178,7 @@
   async function handleSubmit() {
     try {
       if (!formData.name || !formData.profile_dir) {
-        alert('계정명과 프로필 디렉토리는 필수입니다');
+        toast.warning('계정명과 프로필 디렉토리는 필수입니다');
         return;
       }
 
@@ -196,12 +202,18 @@
       await loadAccounts();
       closeModal();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(errorMessage(e));
     }
   }
 
   async function deleteAccount(id: number, name: string) {
-    if (!confirm(`"${name}" 계정을 삭제하시겠습니까?\n(프로필 디렉토리는 유지됩니다)`)) {
+    const confirmed = await confirm({
+      title: '계정 삭제',
+      message: `"${name}" 계정을 삭제하시겠습니까?\n(프로필 디렉토리는 유지됩니다)`,
+      confirmText: '삭제',
+      variant: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
 
@@ -213,7 +225,7 @@
       if (!res.ok) throw new Error('삭제 실패');
       await loadAccounts();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(errorMessage(e));
     }
   }
 
@@ -228,7 +240,7 @@
       if (!res.ok) throw new Error('상태 변경 실패');
       await loadAccounts();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(errorMessage(e));
     }
   }
 
