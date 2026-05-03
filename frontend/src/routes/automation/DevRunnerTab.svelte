@@ -995,7 +995,7 @@
 								<div class="min-h-0 flex-[3] overflow-hidden">
 									<MergeQueuePanel onCountChange={handleMergeQueueCount} />
 								</div>
-								<div class="min-h-0 flex-[2] overflow-hidden border-t border-gray-200">
+								<div class="min-h-0 flex-[2] overflow-hidden border-t border-border">
 									<WorkflowList />
 								</div>
 							</div>

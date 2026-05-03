@@ -212,10 +212,10 @@
 
 <div class="flex flex-col h-full">
 	<!-- 헤더 바 -->
-	<div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-xs shrink-0">
+	<div class="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b border-border text-xs shrink-0">
 		<span class="text-base leading-none">{statusIcon}</span>
 
-		<span class="font-mono font-medium text-gray-700 truncate max-w-[160px]" title={isAllPlans(planFile) ? '전체 실행' : planFile!}>
+		<span class="font-mono font-medium text-foreground truncate max-w-[160px]" title={isAllPlans(planFile) ? '전체 실행' : planFile!}>
 			{planBasename}
 		</span>
 
@@ -231,7 +231,7 @@
 			</span>
 		{/if}
 
-		<span class="text-gray-400 font-mono text-[10px]">{runnerId}</span>
+		<span class="text-muted-foreground font-mono text-[10px]">{runnerId}</span>
 
 		{#if branch}
 			<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-100 text-purple-700" title={worktreePath ?? branch}>
@@ -258,7 +258,7 @@
 		{/if}
 
 		{#if elapsed}
-			<span class="text-gray-400 text-[10px] ml-auto shrink-0">{elapsed}</span>
+			<span class="text-muted-foreground text-[10px] ml-auto shrink-0">{elapsed}</span>
 		{/if}
 
 		{#if running}
@@ -328,7 +328,7 @@
 					{retryingMerge ? '승인 중...' : '경고 확인 후 머지'}
 				</button>
 				<button
-					class="px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+					class="px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors"
 					onclick={handleCleanupWorktree}
 				>
 					Worktree 정리
@@ -364,7 +364,7 @@
 				{retryingMerge ? '재시도 중...' : '머지 재시도'}
 			</button>
 			<button
-				class="px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+				class="px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors"
 				onclick={handleCleanupWorktree}
 			>
 				Worktree 정리
@@ -373,7 +373,7 @@
 	{/if}
 
 	{#if !running && branch && worktreePath && !['conflict', 'test_failed', 'error', 'resolving', 'fixing', 'approval_required'].includes(mergeStatus ?? '')}
-		<div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-xs">
+		<div class="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b border-border text-xs">
 			<button
 				class="px-2 py-0.5 rounded border border-purple-300 text-purple-700 hover:bg-purple-100 disabled:opacity-50 transition-colors"
 				onclick={handleDirectMerge}

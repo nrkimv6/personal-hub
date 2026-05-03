@@ -68,7 +68,7 @@
 			case 'completed': return 'bg-green-50 border-green-200';
 			case 'failed': return 'bg-red-50 border-red-200';
 			case 'skipped': return 'bg-yellow-50 border-yellow-200';
-			default: return 'bg-gray-50 border-gray-200';
+			default: return 'bg-muted border-border';
 		}
 	}
 

@@ -48,7 +48,7 @@
 
 <div class="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto dr-scrollbar-thin">
 	{#if !planPath}
-		<div class="text-center py-8 text-xs text-gray-400">
+		<div class="text-center py-8 text-xs text-muted-foreground">
 			Plan을 선택하면 항목이 표시됩니다
 		</div>
 	{:else if loading}
@@ -60,8 +60,8 @@
 	{:else if detail}
 		<!-- Header -->
 		<div class="flex items-center justify-between px-1 shrink-0">
-			<span class="text-[10px] text-gray-500 font-mono truncate max-w-[200px]">{detail.filename}</span>
-			<span class="text-[10px] font-mono text-gray-500">{detail.progress.done}/{detail.progress.total} ({detail.progress.percent}%)</span>
+			<span class="text-[10px] text-muted-foreground font-mono truncate max-w-[200px]">{detail.filename}</span>
+			<span class="text-[10px] font-mono text-muted-foreground">{detail.progress.done}/{detail.progress.total} ({detail.progress.percent}%)</span>
 		</div>
 
 		<!-- Summary card -->
@@ -94,17 +94,17 @@
 
 		<!-- Phases -->
 		{#each detail.phases as phase}
-			<div class="border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
+			<div class="border border-border rounded-lg overflow-hidden bg-card text-card-foreground shadow-sm">
 				<!-- Phase header -->
-				<div class="flex items-center justify-between px-3 py-2 bg-gray-50/50 border-b border-gray-100">
-					<span class="text-[11px] font-bold text-gray-800 truncate">{phase.name}</span>
-					<span class="text-[10px] font-mono font-medium text-gray-500 shrink-0 ml-2 bg-gray-200/50 px-1.5 py-0.5 rounded">{phase.done_count}/{phase.total_count}</span>
+				<div class="flex items-center justify-between px-3 py-2 bg-muted/50 border-b border-border">
+					<span class="text-[11px] font-bold text-foreground truncate">{phase.name}</span>
+					<span class="text-[10px] font-mono font-medium text-muted-foreground shrink-0 ml-2 bg-muted px-1.5 py-0.5 rounded">{phase.done_count}/{phase.total_count}</span>
 				</div>
 
 				<!-- Items -->
-				<div class="divide-y divide-gray-50">
+				<div class="divide-y divide-border">
 					{#each phase.items as item}
-						<div class="px-3 py-2.5 flex items-start gap-2.5 hover:bg-gray-50/30 transition-colors">
+						<div class="px-3 py-2.5 flex items-start gap-2.5 hover:bg-muted/50 transition-colors">
 							<!-- Checkbox icon -->
 							<span class="shrink-0 mt-0.5">
 								{#if item.checked}
@@ -114,12 +114,12 @@
 										</svg>
 									</div>
 								{:else}
-									<div class="w-4 h-4 rounded border-2 border-gray-200 bg-white"></div>
+									<div class="w-4 h-4 rounded border-2 border-border bg-background"></div>
 								{/if}
 							</span>
 
 							<div class="flex flex-col gap-1 min-w-0 flex-1">
-								<span class="text-[12px] leading-relaxed break-words whitespace-pre-wrap {item.checked ? 'text-gray-400 line-through' : 'text-gray-700'}">{item.text}</span>
+								<span class="text-[12px] leading-relaxed break-words whitespace-pre-wrap {item.checked ? 'text-muted-foreground line-through' : 'text-foreground'}">{item.text}</span>
 								{#if item.file_path}
 									<div class="flex items-center gap-1.5">
 										<svg class="w-2.5 h-2.5 text-blue-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
@@ -129,7 +129,7 @@
 
 								<!-- Sub-items -->
 								{#if item.children.length > 0}
-									<div class="mt-2 flex flex-col gap-1.5 pl-3 border-l-2 border-gray-100">
+									<div class="mt-2 flex flex-col gap-1.5 pl-3 border-l-2 border-border">
 										{#each item.children as child}
 											<div class="flex items-start gap-2">
 												<span class="shrink-0 mt-1">
@@ -138,10 +138,10 @@
 															<polyline points="20 6 9 17 4 12" />
 														</svg>
 													{:else}
-														<div class="w-2.5 h-2.5 rounded-sm border border-gray-200"></div>
+														<div class="w-2.5 h-2.5 rounded-sm border border-border"></div>
 													{/if}
 												</span>
-												<span class="text-[11px] leading-relaxed break-words whitespace-pre-wrap {child.checked ? 'text-gray-400/80 line-through' : 'text-gray-500'}">{child.text}</span>
+												<span class="text-[11px] leading-relaxed break-words whitespace-pre-wrap {child.checked ? 'text-muted-foreground/80 line-through' : 'text-muted-foreground'}">{child.text}</span>
 											</div>
 										{/each}
 									</div>
@@ -153,6 +153,6 @@
 			</div>
 		{/each}
 	{:else}
-		<div class="text-center py-8 text-xs text-gray-400">항목이 없습니다</div>
+		<div class="text-center py-8 text-xs text-muted-foreground">항목이 없습니다</div>
 	{/if}
 </div>

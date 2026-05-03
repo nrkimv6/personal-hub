@@ -10,13 +10,13 @@
 	let selectedId = $state<number | null>(null);
 
 	const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
-		planned:       { label: '예정',           cls: 'bg-gray-100 text-gray-600' },
+		planned:       { label: '예정',           cls: 'bg-muted text-muted-foreground' },
 		running:       { label: '실행중',          cls: 'bg-blue-100 text-blue-700 animate-pulse' },
 		merge_pending: { label: '머지 대기',       cls: 'bg-yellow-100 text-yellow-700' },
 		merging:       { label: '머지중',          cls: 'bg-orange-100 text-orange-700' },
 		merged:        { label: '완료',            cls: 'bg-green-100 text-green-700' },
 		failed:        { label: '실패',            cls: 'bg-red-100 text-red-700' },
-		cancelled:     { label: '취소',            cls: 'bg-gray-100 text-gray-400 line-through' },
+		cancelled:     { label: '취소',            cls: 'bg-muted text-muted-foreground line-through' },
 	};
 
 	async function load() {
@@ -68,11 +68,11 @@
 <div class="flex flex-col gap-3 p-4 h-full min-h-0 overflow-hidden">
 	<!-- 헤더 -->
 	<div class="flex items-center justify-between shrink-0">
-		<h3 class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Workflows</h3>
+		<h3 class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Workflows</h3>
 		<div class="flex items-center gap-1.5">
 			<select
 				bind:value={statusFilter}
-				class="text-[10px] border border-gray-200 rounded bg-white px-1 py-0.5 outline-none focus:border-primary"
+				class="text-[10px] border border-border rounded bg-background text-foreground px-1 py-0.5 outline-none focus:border-primary"
 			>
 				<option value="">All</option>
 				{#each Object.entries(STATUS_BADGE) as [val, { label }]}
@@ -89,7 +89,7 @@
 			</button>
 			<button
 				onclick={load}
-				class="p-1 rounded hover:bg-gray-100 text-gray-400 transition-colors"
+				class="p-1 rounded hover:bg-muted text-muted-foreground transition-colors"
 				title="Refresh"
 			>
 				<svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 {loading ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -106,37 +106,37 @@
 		{:else if error}
 			<div class="bg-red-50 border border-red-100 text-red-600 text-[10px] p-2 rounded mb-3">{error}</div>
 		{:else if workflows.length === 0}
-			<div class="flex flex-col items-center justify-center py-10 text-gray-400">
+			<div class="flex flex-col items-center justify-center py-10 text-muted-foreground">
 				<svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 mb-2 opacity-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
 				<p class="text-[11px] italic">No workflows found</p>
 			</div>
 		{:else}
 			<div class="space-y-2 pb-2">
 				{#each workflows as wf}
-					{@const badge = STATUS_BADGE[wf.status] ?? { label: wf.status, cls: 'bg-gray-100 text-gray-500' }}
+					{@const badge = STATUS_BADGE[wf.status] ?? { label: wf.status, cls: 'bg-muted text-muted-foreground' }}
 					<div 
-						class="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col transition-all hover:border-gray-300 {selectedId === wf.id ? 'ring-1 ring-primary/30 border-primary/30' : ''}"
+						class="rounded-lg border border-border bg-card text-card-foreground shadow-sm overflow-hidden flex flex-col transition-all hover:border-primary/30 {selectedId === wf.id ? 'ring-1 ring-primary/30 border-primary/30' : ''}"
 					>
 						<!-- 요약 정보 행 -->
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
 						<div 
-							class="px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors flex flex-col gap-1.5"
+							class="px-3 py-2.5 cursor-pointer hover:bg-muted transition-colors flex flex-col gap-1.5"
 							onclick={() => selectedId = selectedId === wf.id ? null : wf.id}
 							role="button"
 							tabindex="0"
 						>
 							<div class="flex items-center justify-between gap-2">
-								<span class="text-[11px] font-mono font-bold text-gray-700 truncate flex-1">{wf.slug}</span>
+								<span class="text-[11px] font-mono font-bold text-foreground truncate flex-1">{wf.slug}</span>
 								<span class="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase shrink-0 {badge.cls}">
 									{badge.label}
 								</span>
 							</div>
 							
 							<div class="flex items-center justify-between">
-								<div class="flex items-center gap-2 text-[9px] text-gray-400">
+								<div class="flex items-center gap-2 text-[9px] text-muted-foreground">
 									<span class="flex items-center gap-1"><svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{formatDt(wf.created_at)}</span>
 									{#if wf.engine}
-										<span class="bg-gray-100 px-1 rounded text-gray-500 font-mono">{wf.engine}</span>
+										<span class="bg-muted px-1 rounded text-muted-foreground font-mono">{wf.engine}</span>
 									{/if}
 								</div>
 								
@@ -150,31 +150,31 @@
 											<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 										</button>
 									{/if}
-									<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 text-gray-300 transition-transform {selectedId === wf.id ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+									<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 text-muted-foreground transition-transform {selectedId === wf.id ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
 								</div>
 							</div>
 						</div>
 
 						<!-- 상세 정보 (선택 시) -->
 						{#if selectedId === wf.id}
-							<div class="px-3 py-3 border-t border-gray-100 bg-gray-50/50 flex flex-col gap-2 text-[10px]">
+							<div class="px-3 py-3 border-t border-border bg-muted/50 flex flex-col gap-2 text-[10px]">
 								{#if wf.plan_file}
 									<div class="flex flex-col gap-0.5">
-										<span class="text-gray-400 font-bold uppercase text-[8px] tracking-tighter">Plan File</span>
-										<span class="font-mono text-gray-600 break-all">{wf.plan_file}</span>
+										<span class="text-muted-foreground font-bold uppercase text-[8px] tracking-tighter">Plan File</span>
+										<span class="font-mono text-muted-foreground break-all">{wf.plan_file}</span>
 									</div>
 								{/if}
 								<div class="grid grid-cols-2 gap-2">
 									{#if wf.branch}
 										<div class="flex flex-col gap-0.5">
-											<span class="text-gray-400 font-bold uppercase text-[8px] tracking-tighter">Branch</span>
+											<span class="text-muted-foreground font-bold uppercase text-[8px] tracking-tighter">Branch</span>
 											<span class="font-mono text-blue-600 truncate">{wf.branch}</span>
 										</div>
 									{/if}
 									{#if wf.commit_hash}
 										<div class="flex flex-col gap-0.5">
-											<span class="text-gray-400 font-bold uppercase text-[8px] tracking-tighter">Commit</span>
-											<span class="font-mono text-gray-600">{wf.commit_hash.slice(0, 8)}</span>
+											<span class="text-muted-foreground font-bold uppercase text-[8px] tracking-tighter">Commit</span>
+											<span class="font-mono text-muted-foreground">{wf.commit_hash.slice(0, 8)}</span>
 										</div>
 									{/if}
 								</div>

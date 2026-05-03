@@ -141,7 +141,7 @@
 							class="w-full text-left px-3 py-2.5 hover:bg-secondary/50 transition-colors flex flex-col gap-0.5"
 						>
 							<div class="flex items-center gap-1.5 min-w-0">
-								<span class="text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 {item.status === 'running' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}">
+								<span class="text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 {item.status === 'running' ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}">
 									{item.status === 'running' ? 'RUN' : 'DONE'}
 								</span>
 								<span class="text-xs font-mono truncate text-foreground">{planName(item.plan_file)}</span>

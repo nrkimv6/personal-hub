@@ -215,7 +215,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	}
 
 	function getEngineThemeClasses(engine: string): string {
-		return ENGINE_THEME_CLASSES[engine] ?? 'text-gray-700 bg-gray-50 border-gray-200';
+		return ENGINE_THEME_CLASSES[engine] ?? 'text-muted-foreground bg-muted border-border';
 	}
 
 	async function fetchEngineConfigs() {

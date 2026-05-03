@@ -134,17 +134,17 @@
 	}
 
 	function getPlanItemBg(plan: DevRunnerPlanFileResponse, isRunning: boolean, isLastRun: boolean, batchStatus: string | null) {
-		if (isArchivePlan(plan)) return 'bg-gray-100 opacity-50 cursor-not-allowed';
+		if (isArchivePlan(plan)) return 'bg-muted opacity-50 cursor-not-allowed';
 		if (batchStatus === 'running') return 'border border-cyan-300 bg-cyan-50';
 		if (isRunning) return 'border border-green-300 bg-green-50';
-		if (batchStatus === 'done' || isLastRun) return 'bg-gray-50 opacity-60';
+		if (batchStatus === 'done' || isLastRun) return 'bg-muted opacity-60';
 
 		const status = plan.status;
 		if (status === '구현중') return 'bg-blue-50/50 hover:bg-blue-100/50';
-		if (status === '완료' || status === '배포완료') return 'bg-gray-700 text-white hover:bg-gray-800';
-		if (['구현완료', '수정 완료', '수정완료'].includes(status)) return 'bg-gray-200 opacity-60 hover:opacity-100';
+		if (status === '완료' || status === '배포완료') return 'bg-foreground text-background hover:bg-foreground/90';
+		if (['구현완료', '수정 완료', '수정완료'].includes(status)) return 'bg-muted opacity-60 hover:opacity-100';
 
-		return 'bg-white hover:bg-gray-50';
+		return 'bg-card hover:bg-muted';
 	}
 
 	// batch plan name → status 매핑
@@ -280,10 +280,10 @@
 			'구현중': 'bg-blue-100 text-blue-700 border border-blue-200',
 			'구현완료': 'bg-green-100 text-green-700 border border-green-200',
 			'검토완료': 'bg-purple-100 text-purple-700 border border-purple-200',
-			'초안': 'bg-gray-100 text-gray-600',
+			'초안': 'bg-muted text-muted-foreground',
 			'보류': 'bg-yellow-100 text-yellow-700 border border-yellow-200'
 		};
-		return map[status] || 'bg-gray-100 text-gray-600';
+		return map[status] || 'bg-muted text-muted-foreground';
 	}
 
 	let displayPlans = $derived.by(() => {
@@ -378,7 +378,7 @@
 					{addLoading ? '추가 중...' : '추가'}
 				</button>
 				<button
-					class="text-xs px-3 py-1 rounded bg-gray-200 text-gray-600 hover:bg-gray-300"
+					class="text-xs px-3 py-1 rounded bg-muted text-muted-foreground hover:bg-secondary"
 					onclick={() => { showAddForm = false; addError = null; }}
 				>
 					취소
@@ -399,7 +399,7 @@
 						{:else}
 							<svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
 						{/if}
-						<span class="truncate flex-1 text-gray-600" title={ep.path}>{ep.path}</span>
+						<span class="truncate flex-1 text-muted-foreground" title={ep.path}>{ep.path}</span>
 						<span class="shrink-0 text-gray-400 font-mono">{ep.plan_count}개</span>
 						<button
 							class="shrink-0 text-red-400 hover:text-red-600 px-1"
