@@ -60,5 +60,5 @@ test('restart-api closes frontend gate before self restart', () => {
 	const src = read('../../scripts/services/browser_worker_runtime/api_actions.py');
 	assert.match(src, /def _close_api_gate\(api_port: int\)/);
 	assert.match(src, /http:\/\/127\.0\.0\.1:\{frontend_port\}\/__local\/api-gate\/close/);
-	assert.match(src, /_close_api_gate\(manager\.api_port\)[\s\S]+if not manager\._check_wmi_health/);
+	assert.match(src, /_close_api_gate\(target\.api_port\)[\s\S]+if not manager\._check_wmi_health/);
 });
