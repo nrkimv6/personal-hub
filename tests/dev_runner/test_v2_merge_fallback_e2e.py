@@ -90,7 +90,6 @@ def test_v2_merge_fallback_e2e_stream_output_no_merge_B(monkeypatch, tmp_path):
 def test_v2_merge_fallback_e2e_stream_output_residue_guard_E(monkeypatch, tmp_path):
     """T3 E: detect success + residue_guard failure면 workflow에 같은 reason을 남기고 cleanup한다."""
     from _dr_plan_runner import _stream_output
-    import _dr_plan_runner as plan_runner_mod
 
     monkeypatch.setattr("plan_worktree_helpers.is_plan_in_progress", lambda *a, **kw: False, raising=False)
     monkeypatch.setattr("plan_worktree_helpers.has_unmerged_commits", lambda *a, **kw: False, raising=False)
@@ -115,8 +114,8 @@ def test_v2_merge_fallback_e2e_stream_output_residue_guard_E(monkeypatch, tmp_pa
         "quarantine_diff_path": "logs/dev_runner/residue/e2e-test-runner-t4-residue.diff",
     }
 
-    with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
-         patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+    with patch("_dr_stream_output.get_wf_manager", return_value=wf_mgr), \
+         patch("_dr_stream_output.get_running_log_files", return_value={}), \
          patch("_dr_stream_cleanup.detect_merged_but_not_done",
                return_value={"plan_file": plan_file, "branch": "plan/e2e-test-residue"}) as mock_detect, \
          patch("_dr_stream_cleanup._handle_post_merge_done", return_value=done_result) as mock_done, \
