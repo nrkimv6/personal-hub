@@ -7,6 +7,7 @@
   import { Button } from '$lib/components/ui';
   import { createSelection } from '$lib/utils/selection.svelte';
   import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
   import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
   import { createPagePagination } from '$lib/utils/pagination.svelte';
   import { 
@@ -92,6 +93,10 @@
 
   let canPrevPage = $derived.by(() => pager.page > 1);
   let canNextPage = $derived.by(() => pager.page < pager.totalPages);
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   async function fetchPosts() {
     loading = true;
@@ -250,11 +255,11 @@
     showBatchActionMenu = false;
     try {
       const result = await collectApi.batchAnalyze(selection.toArray());
-      alert(`${result.created_count}개 게시물 AI 분석 요청 완료`);
+      toast.success(`${result.created_count}개 게시물 AI 분석 요청 완료`);
       toggleSelectMode();
     } catch (e) {
       console.error('일괄 AI 분석 실패:', e);
-      alert('AI 분석 요청에 실패했습니다.');
+      toast.error('AI 분석 요청에 실패했습니다.');
     } finally {
       isBatchProcessing = false;
     }
@@ -266,12 +271,12 @@
     showBatchActionMenu = false;
     try {
       const result = await collectApi.batchDeactivate(selection.toArray());
-      alert(`${result.updated}개 게시물 비활성화 완료`);
+      toast.success(`${result.updated}개 게시물 비활성화 완료`);
       await fetchPosts();
       toggleSelectMode();
     } catch (e) {
       console.error('일괄 비활성화 실패:', e);
-      alert('비활성화에 실패했습니다.');
+      toast.error('비활성화에 실패했습니다.');
     } finally {
       isBatchProcessing = false;
     }
@@ -288,12 +293,12 @@
     showDeleteConfirmModal = false;
     try {
       const result = await collectApi.batchDelete(selection.toArray());
-      alert(`${result.deleted}개 게시물 삭제 완료`);
+      toast.success(`${result.deleted}개 게시물 삭제 완료`);
       await fetchPosts();
       toggleSelectMode();
     } catch (e) {
       console.error('일괄 삭제 실패:', e);
-      alert('삭제에 실패했습니다.');
+      toast.error('삭제에 실패했습니다.');
     } finally {
       isBatchProcessing = false;
     }
@@ -348,15 +353,15 @@
 
   async function submitUrlCrawl() {
     if (!urlCrawlInput.trim()) {
-      alert('URL을 입력해주세요.');
+      toast.warning('URL을 입력해주세요.');
       return;
     }
     if (!urlCrawlAccountId) {
-      alert('수집에 사용할 계정을 선택해주세요.');
+      toast.warning('수집에 사용할 계정을 선택해주세요.');
       return;
     }
     if (parsedUrl?.url_type === 'story') {
-      alert('스토리 크롤링은 지원되지 않습니다.');
+      toast.warning('스토리 크롤링은 지원되지 않습니다.');
       return;
     }
 
@@ -370,10 +375,10 @@
       } else {
         await collectApi.crawlByGenericUrl(urlCrawlInput.trim(), urlCrawlAccountId);
       }
-      alert('수집 요청이 등록되었습니다. 워커가 처리하면 게시물이 추가됩니다.');
+      toast.success('수집 요청이 등록되었습니다. 워커가 처리하면 게시물이 추가됩니다.');
       closeUrlCrawlModal();
     } catch (e) {
-      alert('수집 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('수집 요청 실패: ' + errorMessage(e));
     } finally {
       isUrlCrawling = false;
     }
@@ -381,22 +386,28 @@
 
   // ============== 상세보기 액션 ==============
   async function deletePost(id: number) {
-    if (!confirm('이 게시물을 삭제하시겠습니까?')) return;
+    const confirmed = await confirm({
+      title: '게시물 삭제',
+      message: '이 게시물을 삭제하시겠습니까?',
+      confirmText: '삭제',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await collectApi.deletePost(id);
       closeDetail();
       await fetchPosts();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('삭제 실패: ' + errorMessage(e));
     }
   }
 
   async function recrawlPost(id: number) {
     try {
       await collectApi.recrawlPost(id);
-      alert('재크롤링 요청이 등록되었습니다. 워커가 처리하면 게시물 정보가 업데이트됩니다.');
+      toast.success('재크롤링 요청이 등록되었습니다. 워커가 처리하면 게시물 정보가 업데이트됩니다.');
     } catch (e) {
-      alert('재크롤링 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('재크롤링 요청 실패: ' + errorMessage(e));
     }
   }
 
@@ -408,9 +419,9 @@
     }
     try {
       await collectApi.requestLlmAnalysisSingle(id);
-      alert('AI 분석 요청이 등록되었습니다.');
+      toast.success('AI 분석 요청이 등록되었습니다.');
     } catch (e) {
-      alert('AI 분석 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('AI 분석 요청 실패: ' + errorMessage(e));
     }
   }
 
