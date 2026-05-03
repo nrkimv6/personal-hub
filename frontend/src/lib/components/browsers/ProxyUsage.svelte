@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { proxyUsageApi } from '$lib/api';
   import type { ProxyUsageStatsResponse, ProxyUsageLog, RetryHistoryResponse } from '$lib/types';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
 
   // 상태
   let stats: ProxyUsageStatsResponse | null = null;
@@ -20,6 +22,10 @@
   // 필터
   let hoursFilter = 24;
   let minFailures = 3;
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   onMount(async () => {
     await loadData();
@@ -47,14 +53,20 @@
   }
 
   async function handleCleanup() {
-    if (!confirm('30일 이전의 로그를 삭제하시겠습니까?')) return;
+    const confirmed = await confirm({
+      title: '프록시 로그 정리',
+      message: '30일 이전의 로그를 삭제하시겠습니까?',
+      confirmText: '정리',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       const result = await proxyUsageApi.cleanup(30);
-      alert(`${result.deleted_count}개의 로그가 삭제되었습니다.`);
+      toast.success(`${result.deleted_count}개의 로그가 삭제되었습니다.`);
       await loadData();
     } catch (e) {
-      alert('정리 중 오류가 발생했습니다: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('정리 중 오류가 발생했습니다: ' + errorMessage(e));
     }
   }
 
