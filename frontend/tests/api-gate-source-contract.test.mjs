@@ -38,6 +38,22 @@ test('api gate local routes use generic RequestEvent source', () => {
 	}
 });
 
+test('api gate stream route guards close and enqueue races', () => {
+	const stream = read('../src/routes/__local/api-gate/stream/+server.ts');
+
+	assert.match(stream, /let streamClosed = false/);
+	assert.match(stream, /function cleanup\(\)/);
+	assert.match(stream, /function safeClose\(\)/);
+	assert.match(stream, /function safeEnqueue\(eventName: string, data: unknown\)/);
+	assert.match(stream, /try\s*\{[\s\S]+controller\.close\(\);[\s\S]+\}\s*catch\s*\{/);
+	assert.match(stream, /subscribe\(\(snapshot\) => \{[\s\S]+safeEnqueue\('gate_state', snapshot\)/);
+	assert.match(stream, /setInterval\(\(\) => \{[\s\S]+safeEnqueue\('heartbeat', \{\}\)/);
+	assert.match(stream, /addEventListener\('abort', \(\) => \{[\s\S]+safeClose\(\)/);
+	assert.match(stream, /cancel\(\) \{[\s\S]+streamClosed = true;[\s\S]+cleanup\(\)/);
+	assert.doesNotMatch(stream, /addEventListener\('abort'[\s\S]+controller\.close\(\)/);
+	assert.doesNotMatch(stream, /cancel\(\) \{[\s\S]+controller\.close\(\)/);
+});
+
 test('client fetch guard blocks same-origin api calls and preserves bypasses', () => {
 	const hook = read('../src/hooks.client.ts');
 	assert.match(hook, /GATE_BLOCK_PATTERN\.test\(url\.pathname\)/);
