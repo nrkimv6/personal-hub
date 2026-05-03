@@ -16,9 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.plan_record import PlanRecord, PlanEvent
 from app.modules.claude_worker.services.plan_analyze_handler import (
     save_plan_archive_result,
-    save_requirements_sync_result,
     build_plan_analyze_prompt,
-    build_requirements_sync_prompt,
 )
 
 
@@ -115,20 +113,6 @@ def test_build_plan_analyze_prompt_right():
     assert "naver-booking" in prompt
     assert "instagram" in prompt
     assert "2026-01-01_test-plan.md" in prompt
-
-
-def test_build_requirements_sync_prompt_right():
-    """R: 카테고리 + plan summaries → 프롬프트 생성"""
-    summaries = [
-        {"date": "2026-01-01", "filename": "plan-a.md", "summary": "기능 A 추가", "tags": ["feat"]},
-        {"date": "2026-01-05", "filename": "plan-b.md", "summary": "버그 B 수정", "tags": ["fix"]},
-    ]
-    prompt = build_requirements_sync_prompt("instagram", summaries)
-
-    assert "instagram" in prompt
-    assert "requirements" in prompt
-    assert "plan-a.md" in prompt
-    assert "plan-b.md" in prompt
 
 
 # ── PlanArchiveListener ──────────────────────────────────────
@@ -254,8 +238,8 @@ def _make_engine_with_llm():
     return eng
 
 
-def test_save_plan_archive_result_triggers_staleness_flag():
-    """R: 5번째 plan_archive_analyze 완료 → _maybe_flag_guide_staleness 호출 확인"""
+def test_save_plan_archive_result_triggers_staleness_flag_without_requirements_sync_queue():
+    """R: 5번째 plan_archive_analyze 완료 → staleness만 호출되고 requirements_sync 큐는 미생성"""
     from app.modules.claude_worker.models.llm_request import LLMRequest as LLMRequestModel
 
     eng = _make_engine_with_llm()
@@ -316,6 +300,7 @@ def test_save_plan_archive_result_triggers_staleness_flag():
 
         # 검증: _maybe_flag_guide_staleness가 호출됐는지
         assert len(staleness_called) > 0, "5번째 완료 후 _maybe_flag_guide_staleness가 호출되어야 함"
+        assert db.query(LLMRequestModel).filter_by(caller_type="plan_requirements_sync").count() == 0
 
     finally:
         db.close()

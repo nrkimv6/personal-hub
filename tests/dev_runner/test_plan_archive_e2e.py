@@ -69,8 +69,8 @@ class TestPlanArchiveE2E:
         # prompt에 파일 내용이 있어야 함
         assert len(req.prompt) > 100
 
-    def test_e2e_requirements_sync_triggered_after_5th_analyze(self, db):
-        """R: plan_records 4개 + 1개 신규 analyze 결과 저장 → plan_requirements_sync LLMRequest 자동 생성"""
+    def test_e2e_requirements_sync_not_queued_after_5th_analyze(self, db):
+        """R: plan_records 4개 + 1개 신규 analyze 결과 저장 → staleness만 호출, requirements_sync 미생성"""
         # 1. 4개 이미 처리됨
         for i in range(4):
             db.add(PlanRecord(
@@ -109,6 +109,7 @@ class TestPlanArchiveE2E:
 
         # 4. 검증: _maybe_flag_guide_staleness가 호출됐는지
         assert len(staleness_called) > 0, "analyze 완료 후 _maybe_flag_guide_staleness가 호출되어야 함"
+        assert db.query(LLMRequest).filter_by(caller_type="plan_requirements_sync").count() == 0
 
 class TestRecurrenceDetectionE2E:
     """반복 감지 전체 흐름 E2E 테스트"""

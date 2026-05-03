@@ -282,6 +282,9 @@ class TestDevguideStalenessIntegration:
     def test_requirements_sync_removal_no_regression(self, db):
         """T3: requirements sync 함수 제거 후 save_plan_archive_result() → detect_recurrence까지 정상 동작"""
         import json as _json
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+
+        LLMRequest.__table__.create(bind=db.get_bind(), checkfirst=True)
 
         # Arrange: scope 겹침 기존 record
         existing = PlanRecord(
@@ -318,9 +321,7 @@ class TestDevguideStalenessIntegration:
             "raw_response": "",
         }
 
-        # _maybe_flag_guide_staleness와 _maybe_queue_requirements_sync 모두 mock
-        with patch("app.modules.claude_worker.services.plan_analyze_handler._maybe_flag_guide_staleness", return_value=False), \
-             patch("app.modules.claude_worker.services.plan_analyze_handler._maybe_queue_requirements_sync", return_value=False):
+        with patch("app.modules.claude_worker.services.plan_analyze_handler._maybe_flag_guide_staleness", return_value=False):
             # Act: 예외 없이 완료되어야 함
             save_plan_archive_result(db, mock_req, result)
 
@@ -329,6 +330,7 @@ class TestDevguideStalenessIntegration:
         assert updated is not None
         assert updated.category == "naver-booking"
         assert updated.summary == "현재 버그 수정"
+        assert db.query(LLMRequest).filter_by(caller_type="plan_requirements_sync").count() == 0
 
 
 # ========== Phase T4: E2E (TestClient) ==========

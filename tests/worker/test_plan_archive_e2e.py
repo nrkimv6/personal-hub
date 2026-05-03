@@ -1,5 +1,5 @@
 """
-Phase T3/T4: plan_archive_analyze / plan_requirements_sync E2E 테스트
+Phase T3/T4: plan_archive_analyze / devguide_staleness E2E 테스트
 
 DB-driven dispatch 흐름 검증:
 - in-memory SQLite에 task_schedules INSERT
@@ -26,6 +26,40 @@ SCHEDULED_WORKER_PATH = Path(__file__).resolve().parents[2] / "app" / "worker" /
 
 class TestPlanArchiveE2E:
     """Registry-based plan archive dispatch tests."""
+
+    def test_migration_seeds_devguide_and_disables_legacy_requirements_sync(self):
+        from app.models.base import Base
+        from app.models.task_schedule import TaskSchedule
+
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        root = Path(__file__).resolve().parents[2]
+        sql = "\n".join(
+            [
+                (root / "app" / "migrations" / "109_plan_schedule_seed.sql").read_text(encoding="utf-8"),
+                (root / "app" / "migrations" / "110_devguide_staleness_seed.sql").read_text(encoding="utf-8"),
+            ]
+        )
+        conn = engine.raw_connection()
+        try:
+            conn.executescript(sql)
+            conn.commit()
+        finally:
+            conn.close()
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            devguide = db.query(TaskSchedule).filter_by(name="devguide_staleness_daily").one()
+            legacy = db.query(TaskSchedule).filter_by(name="plan_requirements_sync_daily").one()
+
+            assert devguide.target_type == TaskSchedule.TARGET_TYPE_DEVGUIDE_STALENESS
+            assert devguide.enabled is True
+            assert legacy.target_type == "plan_requirements_sync"
+            assert legacy.enabled is False
+        finally:
+            db.close()
+            engine.dispose()
 
     def test_registry_includes_plan_archive_and_devguide_handlers(self):
         from app.models.task_schedule import TaskSchedule

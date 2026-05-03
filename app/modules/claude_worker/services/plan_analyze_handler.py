@@ -81,10 +81,6 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         db.commit()
         logger.info(f"save_plan_archive_result: updated record id={record.id} category={category}")
 
-        # requirements_sync 트리거 판단
-        if category:
-            _maybe_queue_requirements_sync(db, category)
-
         # dev-guide staleness 자동 감지
         _maybe_flag_guide_staleness(db, record.file_path)
 
@@ -161,47 +157,6 @@ def save_devguide_staleness_result(db: Session, report: list) -> bool:
         return False
 
 
-def save_requirements_sync_result(db: Session, request, result: dict) -> bool:
-    """plan_requirements_sync caller_type 결과 저장
-
-    LLM 결과에서 요구사항 텍스트 추출 →
-    docs/requirements/{category}.md 파일 생성/갱신
-
-    Args:
-        db: SQLAlchemy Session
-        request: LLMRequest 인스턴스
-        result: {"success": bool, "result": dict, "raw_response": str}
-    """
-    try:
-        llm_result = result.get("result") or {}
-        if isinstance(llm_result, str):
-            try:
-                llm_result = json.loads(llm_result)
-            except Exception:
-                llm_result = {}
-
-        category = llm_result.get("category") or request.caller_id
-        requirements_text = llm_result.get("requirements") or result.get("raw_response", "")
-
-        if not requirements_text:
-            logger.warning(f"save_requirements_sync_result: empty requirements for category={category}")
-            return False
-
-        # docs/requirements/ 디렉토리 생성
-        from pathlib import Path
-        base_dir = Path(__file__).parent.parent.parent.parent.parent  # monitor-page root
-        req_dir = base_dir / "docs" / "requirements"
-        req_dir.mkdir(parents=True, exist_ok=True)
-
-        req_file = req_dir / f"{category}.md"
-        req_file.write_text(requirements_text, encoding="utf-8")
-        logger.info(f"save_requirements_sync_result: written {req_file}")
-        return True
-    except Exception as e:
-        logger.error(f"save_requirements_sync_result error: {e}", exc_info=True)
-        return False
-
-
 def build_plan_analyze_prompt(
     file_content: str,
     filename: str,
@@ -245,127 +200,6 @@ def build_plan_analyze_prompt(
 
 JSON만 출력하세요. 다른 설명은 불필요합니다."""
     return prompt
-
-
-def build_requirements_sync_prompt(category: str, plan_summaries: List[dict]) -> str:
-    """요구사항 문서 생성 프롬프트
-
-    Args:
-        category: 카테고리명
-        plan_summaries: [{"filename": str, "summary": str, "tags": list, "date": str}, ...]
-
-    Returns:
-        LLM에 전달할 프롬프트 문자열
-    """
-    summaries_text = "\n".join([
-        f"- [{s.get('date', '')}] {s.get('filename', '')}: {s.get('summary', '')}"
-        for s in plan_summaries
-    ])
-
-    prompt = f"""다음은 '{category}' 모듈의 개발 히스토리입니다.
-
-{summaries_text}
-
-위 히스토리를 바탕으로 이 모듈의 **기능 요구사항 문서**를 Markdown 형식으로 작성해주세요.
-
-**출력 JSON 스키마:**
-{{
-  "category": "{category}",
-  "requirements": "# {category} 요구사항\\n\\n## 주요 기능\\n...\\n## 이력\\n..."
-}}
-
-JSON만 출력하세요."""
-    return prompt
-
-
-def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
-    """category별 processed 5개+ 조건 충족 시 plan_requirements_sync LLM 큐 등록.
-
-    Args:
-        db: SQLAlchemy Session
-        category: 카테고리명
-
-    Returns:
-        True if LLMRequest가 새로 등록됨, False otherwise
-    """
-    try:
-        from app.modules.claude_worker.models.llm_request import LLMRequest
-        from sqlalchemy import and_
-
-        # processed 개수 확인
-        processed_count = db.query(PlanRecord).filter(
-            and_(
-                PlanRecord.category == category,
-                PlanRecord.llm_processed_at.isnot(None),
-            )
-        ).count()
-
-        if processed_count < 5:
-            return False
-
-        # 24시간 내 중복 요청 확인
-        cutoff = datetime.now()
-        from datetime import timedelta
-        cutoff = cutoff - timedelta(hours=24)
-        existing = db.query(LLMRequest).filter(
-            and_(
-                LLMRequest.caller_type == "plan_requirements_sync",
-                LLMRequest.caller_id == category,
-                LLMRequest.requested_at > cutoff,
-            )
-        ).first()
-
-        if existing:
-            return False
-
-        # summaries 최신 50개
-        records = db.query(PlanRecord).filter(
-            and_(
-                PlanRecord.category == category,
-                PlanRecord.llm_processed_at.isnot(None),
-                PlanRecord.summary.isnot(None),
-            )
-        ).order_by(PlanRecord.llm_processed_at.desc()).limit(50).all()
-
-        plan_summaries = [
-            {
-                "filename": Path(r.file_path).name if r.file_path else "",
-                "summary": r.summary or "",
-                "tags": r.tags or [],
-                "date": r.archived_at.strftime("%Y-%m-%d") if r.archived_at else (
-                    r.llm_processed_at.strftime("%Y-%m-%d") if r.llm_processed_at else ""
-                ),
-            }
-            for r in records
-        ]
-
-        prompt = build_requirements_sync_prompt(category, plan_summaries)
-        llm_service = LLMService(db)
-        provider, model = llm_service.resolve_provider_model(
-            caller_type="plan_requirements_sync",
-            provider=None,
-            model=None,
-        )
-        llm_req = LLMRequest(
-            caller_type="plan_requirements_sync",
-            caller_id=category,
-            prompt=prompt,
-            queue_name="utility",
-            requested_by="scheduler",
-            provider=provider,
-            model=model,
-        )
-        db.add(llm_req)
-        db.commit()
-        logger.info(f"_maybe_queue_requirements_sync: queued for category={category}")
-        return True
-    except Exception as e:
-        if is_connection_error(e):
-            logger.warning("_maybe_queue_requirements_sync connection error: %s", e)
-        else:
-            logger.error(f"_maybe_queue_requirements_sync error: {e}", exc_info=True)
-        return False
-
 
 def _maybe_flag_guide_staleness(db: Session, file_path: str) -> bool:
     """archive 분석 완료 후 관련 가이드의 staleness 자동 감지.

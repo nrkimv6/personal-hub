@@ -28,7 +28,6 @@ from app.models.plan_record import PlanRecord
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.plan_analyze_handler import (
     _get_scope_overlap_candidates,
-    _maybe_queue_requirements_sync,
     detect_recurrence,
     save_recurrence_check_result,
     save_recurrence_suggest_result,
@@ -283,27 +282,6 @@ class TestMaybeQueueSuggest:
 # ──────────────────────────────────────────────────────────────────
 # Phase T1 PG guard TC — is_connection_error() guard 계약 검증
 # ──────────────────────────────────────────────────────────────────
-
-def test_queue_requirements_sync_pg_connection_error_no_traceback(caplog):
-    """B: _maybe_queue_requirements_sync DB commit 실패(PG) → warning 1회, traceback 없음."""
-    db = MagicMock()
-    # processed_count >= 5 리턴
-    db.query.return_value.filter.return_value.count.return_value = 10
-    # 중복 체크: 없음
-    db.query.return_value.filter.return_value.first.return_value = None
-    # records 쿼리 (summaries)
-    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-    db.commit.side_effect = psycopg2.OperationalError("could not connect to server")
-
-    with caplog.at_level(logging.DEBUG):
-        result = _maybe_queue_requirements_sync(db, "infra")
-
-    assert result is False
-    pg_warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "connection error" in r.message]
-    assert len(pg_warnings) == 1
-    error_with_traceback = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
-    assert len(error_with_traceback) == 0
-
 
 def test_scope_overlap_candidates_pg_connection_error_no_traceback(caplog):
     """B: _get_scope_overlap_candidates DB query 실패(PG) → warning 1회, [] 반환, traceback 없음."""
