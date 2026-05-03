@@ -16,11 +16,54 @@ from _dr_constants import (
     RECENT_RUNNERS_TTL, ACTIVE_RUNNERS_KEY,
 )
 from _dr_merge import _execute_merge_with_lock, _pub_and_log
+from _dr_runtime_utils import _publish_with_retry
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process
 from _dr_process_utils import _cleanup_process_state, get_plan_git_root
 from _dr_stream_cleanup import _do_inline_merge
 
 logger = logging.getLogger(__name__)
+
+
+def _redis_text(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _refresh_runner_ownership_snapshot(
+    runner_id: str,
+    worktree_path: str | Path | None = None,
+    *,
+    action: str,
+) -> dict:
+    """Refresh ownership snapshot before a merge action uses the worktree."""
+    try:
+        from _dr_plan_runner import _capture_runner_ownership_snapshot
+
+        project_root = Path(worktree_path).resolve() if worktree_path else PROJECT_ROOT
+        if not (project_root / ".git").exists():
+            try:
+                result = subprocess.run(
+                    ["git", "rev-parse", "--show-toplevel"],
+                    cwd=str(project_root),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    project_root = Path(result.stdout.strip()).resolve()
+            except Exception:
+                pass
+        payload = _capture_runner_ownership_snapshot(runner_id, project_root)
+        payload["action"] = action
+        return payload
+    except Exception as exc:
+        logger.warning("[%s] ownership snapshot refresh failed: %s", action, exc)
+        return {"runner_id": runner_id, "action": action, "capture_error": str(exc)}
 
 
 def _log_memory_stage(
@@ -124,6 +167,7 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
 
         # lock + subprocess + 결과 처리는 공통 헬퍼에 위임
         _log_memory_stage("retry-merge", "mid", runner_id, redis_client)
+        _refresh_runner_ownership_snapshot(runner_id, worktree_path_str, action="retry-merge")
         merge_result = _execute_merge_with_lock(runner_id, redis_client, action_name="retry-merge")
         result = merge_result
 
@@ -235,10 +279,13 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
 
         # _do_inline_merge 호출 (lock+cleanup+로그 발행 포함)
         _log_memory_stage("direct-merge", "mid", runner_id, redis_client)
+        _refresh_runner_ownership_snapshot(runner_id, worktree_path, action="direct-merge")
         _do_inline_merge(runner_id, redis_client)
 
         # 머지 결과 읽기
-        final_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
+        final_status = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")) or "unknown"
+        reason = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason"))
+        quarantine_diff_path = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path"))
         success = final_status == "merged"
         result = {
             "success": success,
@@ -247,6 +294,10 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
             "action": "direct-merge",
             "runner_id": runner_id,
         }
+        if reason:
+            result["reason"] = reason
+        if quarantine_diff_path:
+            result["quarantine_diff_path"] = quarantine_diff_path
 
     except Exception as e:
         import traceback
@@ -264,12 +315,9 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         except Exception:
             pass
         # SSE 채널에 최종 결과 publish
-        try:
-            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
-            status_msg = result.get("message", "unknown")
-            redis_client.publish(log_channel, f"[MERGE] direct-merge 최종 결과: {status_msg}")
-        except Exception:
-            pass
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+        status_msg = result.get("message", "unknown")
+        _publish_with_retry(redis_client, log_channel, f"[MERGE] direct-merge 최종 결과: {status_msg}")
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
         redis_client.expire(result_key, 60)
 

@@ -36,12 +36,26 @@ def test_publish_with_retry_error_connection_drop():
     assert mock_redis.publish.call_count == 2
 
 
+def test_publish_with_retry_error_max_retry_exceeded():
+    mock_redis = attach_default_redis_behaviors(MagicMock())
+    mock_redis.publish.side_effect = redis.ConnectionError("drop")
+    mock_redis.ping.return_value = True
+
+    assert _publish_with_retry(mock_redis, "plan-runner:logs:test", "hello") is False
+    assert mock_redis.ping.call_count == 1
+    assert mock_redis.publish.call_count == 2
+
+
 def test_publish_with_retry_reference_listener_path():
     """listener/runtime modules use the shared publish helper, not local copies."""
+    import _dr_commands
+    import _dr_merge
     import _dr_plan_runner
     import _dr_process_utils
 
     assert _dr_plan_runner._publish_with_retry is _dr_runtime_utils._publish_with_retry
     assert _dr_process_utils._publish_with_retry is _dr_runtime_utils._publish_with_retry
+    assert _dr_merge._publish_with_retry is _dr_runtime_utils._publish_with_retry
+    assert _dr_commands._publish_with_retry is _dr_runtime_utils._publish_with_retry
     assert _dr_plan_runner._normalize_exit_reason is _dr_runtime_utils._normalize_exit_reason
     assert _dr_process_utils._normalize_exit_reason is _dr_runtime_utils._normalize_exit_reason

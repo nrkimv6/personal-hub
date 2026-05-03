@@ -526,9 +526,8 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "error")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
             logger.error(f"[_do_start_plan_runner] 실패 상태 기록 (runner_id: {runner_id}): {message}")
-            try:
-                redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", f"[ERROR] {message}")
-            except Exception as pub_err:
+            if not _publish_with_retry(redis_client, f"{LOG_CHANNEL_PREFIX}:{runner_id}", f"[ERROR] {message}"):
+                pub_err = "publish retry failed"
                 logger.warning(f"[_set_error_status] publish 실패 (무시): {pub_err}")
             # Workflow 실패 상태 업데이트
             if _wf_manager and _wf_id:
@@ -916,10 +915,7 @@ def _launch_plan_runner_process(
         log_handle.flush()
         # ────────────────────────────────────────────────────────────────
 
-        try:
-            redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", run_meta_line)
-        except Exception:
-            pass
+        _publish_with_retry(redis_client, f"{LOG_CHANNEL_PREFIX}:{runner_id}", run_meta_line)
 
         import os
         import re as _re
@@ -955,10 +951,7 @@ def _launch_plan_runner_process(
                     log_handle.flush()
                 except Exception:
                     pass
-                try:
-                    redis_client.publish(_log_ch_pre, f"[REJECT] {_reject_msg}")
-                except Exception:
-                    pass
+                _publish_with_retry(redis_client, _log_ch_pre, f"[REJECT] {_reject_msg}")
                 try:
                     log_handle.close()
                 except Exception:
@@ -986,10 +979,7 @@ def _launch_plan_runner_process(
                 log_handle.flush()
             except Exception:
                 pass
-            try:
-                redis_client.publish(_log_ch_pre, _warn_msg)
-            except Exception:
-                pass
+            _publish_with_retry(redis_client, _log_ch_pre, _warn_msg)
 
         process = subprocess.Popen(
             cmd,

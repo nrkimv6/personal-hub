@@ -24,6 +24,7 @@ from _dr_constants import (
     PLAN_RUNNER_PYTHON, PLAN_RUNNER_MODULE_PATH, OWNERSHIP_SNAPSHOT_DIR, get_redis_db, get_admin_api_base,
 )
 from _dr_plan_paths import classify_plan_stage, read_plan_status
+from _dr_runtime_utils import _publish_with_retry
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _launch_auto_impl_post_merge_process, _launch_general_merge_resolver_process, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
@@ -485,10 +486,7 @@ def _pub_and_log(runner_id: str, msg: str, redis_client: redis.Redis, tag: str =
     logger.info(tagged)
     log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
     log_list_key = f"plan-runner:logs:list:{runner_id}"
-    try:
-        redis_client.publish(log_channel, tagged)
-    except Exception:
-        pass
+    _publish_with_retry(redis_client, log_channel, tagged)
     try:
         redis_client.rpush(log_list_key, tagged)
         redis_client.expire(log_list_key, 86400)
@@ -521,10 +519,8 @@ def _publish_merge_completed_sentinel(runner_id: str, redis_client: redis.Redis,
     """terminal merge sentinel만 merge-log 채널에 1회 publish한다."""
     channel = f"plan-runner:merge-log:{runner_id}"
     payload = _build_merge_completed_sentinel(result)
-    try:
-        redis_client.publish(channel, payload)
-    except Exception as _e:
-        logger.debug(f"[_publish_merge_completed_sentinel] publish 실패 (무시): {_e}")
+    if not _publish_with_retry(redis_client, channel, payload):
+        logger.debug("[_publish_merge_completed_sentinel] publish retry failed (ignored)")
 
 
 def _extract_post_merge_done_failure(done_result) -> tuple[bool, str]:

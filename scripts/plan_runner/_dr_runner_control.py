@@ -22,18 +22,9 @@ def _cleanup_runner_state(runner_id: str, redis_client: redis.Redis) -> None:
 
 
 def start_plan_runner(command: Dict[str, Any], redis_client: redis.Redis) -> Dict[str, Any]:
-    runner_id = (command or {}).get("runner_id")
-    if not runner_id:
-        return {"success": False, "message": "runner_id is required"}
+    from _dr_plan_runner import start_plan_runner as _impl
 
-    # already running?
-    if get_running_processes().get(runner_id):
-        return {"success": False, "message": "Already running"}
-
-    from _dr_plan_runner import _do_start_plan_runner
-
-    _do_start_plan_runner(command, redis_client)
-    return {"success": True, "message": "Started"}
+    return _impl(command, redis_client)
 
 
 def stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict[str, Any]:
@@ -62,13 +53,9 @@ def stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict[str, Any
 
 
 def get_status(redis_client: redis.Redis) -> Dict[str, Any]:
-    runners = []
-    procs = get_running_processes()
-    logs = get_running_log_files()
-    for rid, proc in procs.items():
-        if proc and getattr(proc, "poll", lambda: 0)() is None:
-            runners.append({"runner_id": rid, "pid": getattr(proc, "pid", None), "log_file": logs.get(rid)})
-    return {"success": True, "running": bool(runners), "runners": runners}
+    from _dr_plan_runner import get_status as _impl
+
+    return _impl(redis_client)
 
 
 def force_stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict[str, Any]:
