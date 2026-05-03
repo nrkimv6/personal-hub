@@ -82,6 +82,38 @@ def _make_record(session, path, **kwargs):
     return r
 
 
+class TestPlanRecordsApiDbBootstrap:
+    """Plan records API 전용 DB fixture 계약."""
+
+    def test_plan_records_bootstrap_right_creates_required_tables(self, test_db_engine):
+        from sqlalchemy import inspect
+
+        tables = set(inspect(test_db_engine).get_table_names())
+
+        assert "plan_records" in tables
+        assert "plan_events" in tables
+        assert "tracking_items" in tables
+        assert "tracking_item_plan_links" in tables
+
+    def test_plan_records_bootstrap_right_supports_event_fk(self, test_db_session):
+        from app.models.plan_record import PlanEvent, PlanRecord
+
+        record = PlanRecord(
+            filename_hash="bootstrap_contract_001",
+            file_path="/plan/2026-05-03-bootstrap-contract.md",
+            title="Bootstrap Contract",
+        )
+        test_db_session.add(record)
+        test_db_session.flush()
+
+        event = PlanEvent(plan_record_id=record.id, event_type="created")
+        test_db_session.add(event)
+        test_db_session.commit()
+
+        saved = test_db_session.query(PlanEvent).filter_by(id=event.id).one()
+        assert saved.record.id == record.id
+
+
 # ========== /api/v1/plans/records ==========
 
 class TestListRecords:
