@@ -13,6 +13,7 @@
 - 파괴적 git 금지: `git clean -fd`, `git reset --hard`, `git checkout .`, `git restore .`
 - 서비스 충돌 방지: `run.ps1`, `stop.ps1` 직접 실행 금지 (NSSM과 충돌)
 - frontend verify 경계: `implement`/worktree 단계에서는 `frontend verify(sync/check/build)` 금지, `/merge-test` + main에서만 허용한다. 예시로 `npm run build`, `npm run check`, `npm run check:watch`, `svelte-kit sync`, `svelte-check`, `vite build`, `node ... svelte-kit.js sync`가 모두 포함된다.
+- 탐색성/상담성 발화(`있을까?`, `가능할까?`, `추천해줘`, `좋겠어`, `현황 확인`)는 구현 승인으로 보지 않는다. 상태 요약·선택지·필요한 승인 문장까지만 답하고, `구현해`/`고쳐`/`적용해` 같은 명시 실행 의도가 있을 때만 구현 흐름으로 진입한다.
 - 사용자가 `/merge-test` 같은 특정 스킬을 명시 호출한 경우, precondition 실패가 아닌 한 해당 스킬의 주행동을 우선 수행한다. 설명/탐색이나 인접 워크플로우(`done`, `reflect`)로 대체하지 않는다.
 - `_build_worktree.ps1`는 setup 전용 helper 예외이며, implement 중 임의 probe 근거로 사용하면 안 된다.
 - 스킬 원본 수정: monitor-page의 `.claude/skills`, `.claude/agents` 직접 수정 금지  
