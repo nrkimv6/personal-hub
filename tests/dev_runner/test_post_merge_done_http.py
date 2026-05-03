@@ -54,6 +54,7 @@ def tmp_plan_file():
         }
 
 
+@pytest.mark.http_live
 def test_post_done_returns_200_R(tmp_plan_file):
     """R: POST /api/plans/{path}/done → 200 응답"""
     encoded = base64.urlsafe_b64encode(tmp_plan_file["plan_path"].encode()).decode()
@@ -64,6 +65,7 @@ def test_post_done_returns_200_R(tmp_plan_file):
     assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
 
 
+@pytest.mark.http_live
 def test_done_moves_file_to_archive_R(tmp_plan_file):
     """R: done 처리 후 temp project archive로 이동되고 temp TODO/DONE만 갱신된다."""
     plan_path = Path(tmp_plan_file["plan_path"])
@@ -82,6 +84,7 @@ def test_done_moves_file_to_archive_R(tmp_plan_file):
     assert "HTTP 테스트용 임시 plan" in Path(tmp_plan_file["done_path"]).read_text(encoding="utf-8")
 
 
+@pytest.mark.http_live
 def test_done_nonexistent_plan_returns_error_E():
     """E: 존재하지 않는 plan 경로 → 4xx 응답"""
     encoded = base64.urlsafe_b64encode(b"/nonexistent/path/to/plan.md").decode()
@@ -207,6 +210,7 @@ def test_done_http_without_runner_header_stays_manual_contract(client, tmp_path)
 
 
 @pytest.mark.skipif(STRICT_CONTRACT, reason="strict 모드에서는 strict 전용 케이스만 실행")
+@pytest.mark.http_live
 def test_done_resolver_error_contract_compat_E():
     """E(compat): active plan root 밖 경로 done 호출 시 hard-fail/legacy fallback 둘 다 허용."""
     with isolated_live_done_project("resolver-compat-http") as project:
@@ -235,6 +239,7 @@ def test_done_resolver_error_contract_compat_E():
 
 
 @pytest.mark.skipif(not STRICT_CONTRACT, reason="DONE_API_CONTRACT_STRICT=1 환경에서만 strict 계약 검증")
+@pytest.mark.http_live
 def test_done_resolver_error_contract_strict_E():
     """E(strict): active plan root 밖 경로 done 호출은 hard-fail(success=false, no move)이어야 한다."""
     with isolated_live_done_project("resolver-strict-http") as project:

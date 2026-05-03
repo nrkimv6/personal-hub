@@ -48,6 +48,7 @@ def tmp_merged_plan():
         }
 
 
+@pytest.mark.http_live
 def test_v2_merge_fallback_status_endpoint_R():
     """R: GET /status → 응답 200 + runner 상태 필드 포함"""
     try:
@@ -61,6 +62,7 @@ def test_v2_merge_fallback_status_endpoint_R():
     assert "redis_connected" in data, f"'redis_connected' 필드 없음: {data}"
 
 
+@pytest.mark.http_live
 def test_v2_merge_fallback_runners_endpoint_R():
     """R: GET /runners → 응답 200 + 리스트 형태"""
     try:
@@ -72,6 +74,7 @@ def test_v2_merge_fallback_runners_endpoint_R():
     assert isinstance(data, list), f"runners 응답이 리스트가 아님: {type(data)}"
 
 
+@pytest.mark.http_live
 def test_v2_merge_fallback_done_api_R(tmp_merged_plan):
     """R: POST /plans/{path}/done → 머지대기 상태 plan fallback 처리 확인 (200 응답 + archive 이동)"""
     encoded = base64.urlsafe_b64encode(tmp_merged_plan["plan_path"].encode()).decode()
@@ -120,6 +123,7 @@ def test_v2_merge_fallback_dirty_cleanup_success_allows_done_response_R(client, 
     assert "Traceback" not in resp.text
 
 
+@pytest.mark.http_live
 def test_v2_merge_fallback_done_archive_R(tmp_merged_plan):
     """R: done 처리 후 temp project archive로 이동되고 temp TODO/DONE만 갱신된다."""
     plan_path = Path(tmp_merged_plan["plan_path"])
@@ -137,6 +141,7 @@ def test_v2_merge_fallback_done_archive_R(tmp_merged_plan):
     assert "v2 fallback HTTP 테스트용 임시 plan" in Path(tmp_merged_plan["done_path"]).read_text(encoding="utf-8")
 
 
+@pytest.mark.http_live
 def test_v2_merge_fallback_done_nonexistent_E():
     """E: 존재하지 않는 plan → 4xx 응답"""
     encoded = base64.urlsafe_b64encode(b"/nonexistent/fallback-test-plan.md").decode()

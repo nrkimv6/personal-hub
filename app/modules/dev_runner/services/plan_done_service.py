@@ -144,17 +144,48 @@ class PlanDoneService:
             raise ValueError(str(path_err)) from path_err
 
     @staticmethod
-    def _update_todo_done(project_dir: Path, plan_title: str) -> None:
-        """TODO.md\uc5d0\uc11c plan_title \uad00\ub828 \ud56d\ubaa9 \uc81c\uac70, DONE.md \uc0c1\ub2e8\uc5d0 \ucd94\uac00"""
+    def _todo_line_matches_plan(line: str, plan_title: str, plan_path: Path | None = None) -> bool:
+        """Return True only for the TODO checkbox item for this completed plan."""
+        checkbox_match = re.match(r'^\s*[-*]\s*\[[ xX→]\]\s*(.+?)\s*$', line)
+        if not checkbox_match:
+            return False
+
+        body = checkbox_match.group(1).strip()
+        normalized_body = body.replace("\\", "/")
+
+        if plan_path is not None:
+            plan_path_text = str(plan_path).replace("\\", "/")
+            path_tokens = {
+                plan_path_text,
+                plan_path.as_posix(),
+                plan_path.name,
+            }
+            if any(token and token in normalized_body for token in path_tokens):
+                return True
+            stem_pattern = rf'(?<![A-Za-z0-9_-]){re.escape(plan_path.stem)}(?![A-Za-z0-9_-])'
+            if re.search(stem_pattern, normalized_body):
+                return True
+
+        title_patterns = [
+            rf'^{re.escape(plan_title)}$',
+            rf'^{re.escape(plan_title)}\s+\(',
+            rf'^{re.escape(plan_title)}\s+\[',
+            rf'^\*\*{re.escape(plan_title)}\*\*(?:\s|$)',
+        ]
+        return any(re.search(pattern, body) for pattern in title_patterns)
+
+    @classmethod
+    def _update_todo_done(cls, project_dir: Path, plan_title: str, plan_path: Path | None = None) -> None:
+        """TODO.md\uc5d0\uc11c \ud574\ub2f9 plan \ud56d\ubaa9 \uc81c\uac70, DONE.md \uc0c1\ub2e8\uc5d0 \ucd94\uac00"""
         today = date.today().isoformat()
 
-        # TODO.md: plan_title\uc744 \ud3ec\ud568\ud558\ub294 \uccb4\ud06c\ubc15\uc2a4 \uc904 \uc81c\uac70
+        # TODO.md: completed plan\uc5d0 \ud574\ub2f9\ud558\ub294 \uccb4\ud06c\ubc15\uc2a4 \uc904\ub9cc \uc81c\uac70
         todo_path = project_dir / "TODO.md"
         if todo_path.exists():
             lines = todo_path.read_text(encoding="utf-8").splitlines(keepends=True)
             filtered = [
                 l for l in lines
-                if not (plan_title in l and re.search(r'\[[ x→]\]', l))
+                if not cls._todo_line_matches_plan(l, plan_title, plan_path)
             ]
             if len(filtered) < len(lines):
                 todo_path.write_text("".join(filtered), encoding="utf-8")
@@ -284,7 +315,7 @@ class PlanDoneService:
 
             # 4. TODO.md / DONE.md \uc5c5\ub370\uc774\ud2b8
             if project_dir:
-                self._update_todo_done(project_dir, title)
+                self._update_todo_done(project_dir, title, path)
                 done_path = project_dir / "docs" / "DONE.md"
                 self._archive_done_if_needed(done_path)
 

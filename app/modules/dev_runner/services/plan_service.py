@@ -976,17 +976,48 @@ class PlanService:
             raise ValueError(str(path_err)) from path_err
 
     @staticmethod
-    def _update_todo_done(project_dir: Path, plan_title: str) -> None:
-        """TODO.md에서 plan_title 관련 항목 제거, DONE.md 상단에 추가"""
+    def _todo_line_matches_plan(line: str, plan_title: str, plan_path: Path | None = None) -> bool:
+        """Return True only for the TODO checkbox item for this completed plan."""
+        checkbox_match = re.match(r'^\s*[-*]\s*\[[ xX→]\]\s*(.+?)\s*$', line)
+        if not checkbox_match:
+            return False
+
+        body = checkbox_match.group(1).strip()
+        normalized_body = body.replace("\\", "/")
+
+        if plan_path is not None:
+            plan_path_text = str(plan_path).replace("\\", "/")
+            path_tokens = {
+                plan_path_text,
+                plan_path.as_posix(),
+                plan_path.name,
+            }
+            if any(token and token in normalized_body for token in path_tokens):
+                return True
+            stem_pattern = rf'(?<![A-Za-z0-9_-]){re.escape(plan_path.stem)}(?![A-Za-z0-9_-])'
+            if re.search(stem_pattern, normalized_body):
+                return True
+
+        title_patterns = [
+            rf'^{re.escape(plan_title)}$',
+            rf'^{re.escape(plan_title)}\s+\(',
+            rf'^{re.escape(plan_title)}\s+\[',
+            rf'^\*\*{re.escape(plan_title)}\*\*(?:\s|$)',
+        ]
+        return any(re.search(pattern, body) for pattern in title_patterns)
+
+    @classmethod
+    def _update_todo_done(cls, project_dir: Path, plan_title: str, plan_path: Path | None = None) -> None:
+        """TODO.md에서 해당 plan 항목 제거, DONE.md 상단에 추가"""
         today = date.today().isoformat()
 
-        # TODO.md: plan_title을 포함하는 체크박스 줄 제거
+        # TODO.md: completed plan에 해당하는 체크박스 줄만 제거
         todo_path = project_dir / "TODO.md"
         if todo_path.exists():
             lines = todo_path.read_text(encoding="utf-8").splitlines(keepends=True)
             filtered = [
                 l for l in lines
-                if not (plan_title in l and re.search(r'\[[ x→]\]', l))
+                if not cls._todo_line_matches_plan(l, plan_title, plan_path)
             ]
             if len(filtered) < len(lines):
                 todo_path.write_text("".join(filtered), encoding="utf-8")
@@ -1321,7 +1352,7 @@ class PlanService:
 
             # 4. TODO.md / DONE.md 업데이트
             if project_dir:
-                self._update_todo_done(project_dir, title)
+                self._update_todo_done(project_dir, title, path)
                 done_path = project_dir / "docs" / "DONE.md"
                 done_history_path = self._archive_done_if_needed(done_path)
 
