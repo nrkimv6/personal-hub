@@ -24,6 +24,7 @@ from app.modules.dev_runner.services.plan_path_helpers import (
 )
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle, resolve_archive_target_or_raise
+from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
 from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL, REDIS_HOST, REDIS_PORT
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
@@ -1249,39 +1250,12 @@ class PlanService:
         if ownership_error:
             return ownership_error
 
-        # 존재하는 파일(신규/수정) + 삭제된 파일(git mv로 이미 staged된 경우도 포함)을 모두 add
-        # git add는 삭제된 파일 경로도 처리 가능 (staging에 반영)
-        existing_files = [str(f) for f in files_to_add if f.exists()]
-        deleted_files = [str(f) for f in files_to_add if not f.exists()]
-        all_files = existing_files + deleted_files
-        if not all_files:
-            return "커밋할 파일 없음"
-
-        cwd = str(project_dir) if project_dir and project_dir.exists() else None
-
-        # git add (존재하는 파일 먼저, 삭제된 파일은 별도 처리)
-        add_proc = await asyncio.create_subprocess_exec(
-            "git", "-c", "safe.directory=*", "add", *all_files,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        return await commit_files_by_git_root(
+            files_to_add=files_to_add,
+            default_root=project_dir,
+            commit_command=commit_command,
+            decode_output=self._decode_subprocess_output,
         )
-        add_stdout, _ = await add_proc.communicate()
-        if add_proc.returncode != 0:
-            output = self._decode_subprocess_output(add_stdout)
-            raise RuntimeError(f"git add failed ({add_proc.returncode}): {output}".strip())
-
-        commit_proc = await asyncio.create_subprocess_exec(
-            *commit_command,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await asyncio.wait_for(commit_proc.communicate(), timeout=60)
-        output = self._decode_subprocess_output(stdout)
-        if commit_proc.returncode != 0:
-            raise RuntimeError(f"commit script failed ({commit_proc.returncode}): {output}".strip())
-        return output
 
     @classmethod
     def _resolve_commit_command(cls, commit_msg: str) -> list[str]:
@@ -1401,8 +1375,9 @@ class PlanService:
                 done_history_path = self._archive_done_if_needed(done_path)
 
             # 5. git commit
-            files_to_commit: List[Path] = [archive_path]
+            files_to_commit: List[Path] = [path, archive_path]
             if todo_archive_path:
+                files_to_commit.append(path.parent / todo_archive_path.name)
                 files_to_commit.append(todo_archive_path)
             if project_dir:
                 files_to_commit += [

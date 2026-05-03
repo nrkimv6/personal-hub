@@ -12,6 +12,7 @@ from typing import List, Optional
 from app.modules.dev_runner.schemas import PlanFileResponse
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle
+from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.log_service import publish_log, log_service
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
@@ -256,38 +257,12 @@ class PlanDoneService:
         """
         commit_command = self._resolve_commit_command(commit_msg)
 
-        # \uc874\uc7ac\ud558\ub294 \ud30c\uc77c(\uc2e0\uaddc/\uc218\uc815) + \uc0ad\uc81c\ub41c \ud30c\uc77c(git mv\ub85c \uc774\ubbf8 staged\ub41c \uacbd\uc6b0\ub3c4 \ud3ec\ud568)\uc744 \ubaa8\ub450 add
-        existing_files = [str(f) for f in files_to_add if f.exists()]
-        deleted_files = [str(f) for f in files_to_add if not f.exists()]
-        all_files = existing_files + deleted_files
-        if not all_files:
-            return "\ucf54\ubc0b\ud560 \ud30c\uc77c \uc5c6\uc74c"
-
-        cwd = str(project_dir) if project_dir and project_dir.exists() else None
-
-        # git add
-        add_proc = await asyncio.create_subprocess_exec(
-            "git", "-c", "safe.directory=*", "add", *all_files,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        return await commit_files_by_git_root(
+            files_to_add=files_to_add,
+            default_root=project_dir,
+            commit_command=commit_command,
+            decode_output=self._decode_subprocess_output,
         )
-        add_stdout, _ = await add_proc.communicate()
-        if add_proc.returncode != 0:
-            output = self._decode_subprocess_output(add_stdout)
-            raise RuntimeError(f"git add failed ({add_proc.returncode}): {output}".strip())
-
-        commit_proc = await asyncio.create_subprocess_exec(
-            *commit_command,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await asyncio.wait_for(commit_proc.communicate(), timeout=60)
-        output = self._decode_subprocess_output(stdout)
-        if commit_proc.returncode != 0:
-            raise RuntimeError(f"commit script failed ({commit_proc.returncode}): {output}".strip())
-        return output
 
     @classmethod
     def _resolve_commit_command(cls, commit_msg: str) -> list[str]:
@@ -364,8 +339,9 @@ class PlanDoneService:
                 self._archive_done_if_needed(done_path)
 
             # 5. git commit
-            files_to_commit: List[Path] = [archive_path]
+            files_to_commit: List[Path] = [path, archive_path]
             if todo_archive_path:
+                files_to_commit.append(path.parent / todo_archive_path.name)
                 files_to_commit.append(todo_archive_path)
             if project_dir:
                 files_to_commit += [

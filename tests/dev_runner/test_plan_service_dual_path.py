@@ -28,6 +28,13 @@ class TestPlanPathHelpers:
         result = extract_repo_root_from_plan_path(plan_file)
         assert result == str(tmp_path / "repo")
 
+    def test_extract_repo_root_from_worktree_archive_path(self, tmp_path):
+        """extract_repo_root_from_plan_path: .worktrees/plans/docs/archive/foo.md → repo root"""
+        from app.modules.dev_runner.services.plan_path_helpers import extract_repo_root_from_plan_path
+        archive_file = str(tmp_path / "repo" / ".worktrees" / "plans" / "docs" / "archive" / "foo.md")
+        result = extract_repo_root_from_plan_path(archive_file)
+        assert result == str(tmp_path / "repo")
+
     def test_extract_repo_root_from_docs_path(self, tmp_path):
         """extract_repo_root_from_plan_path: docs/plan/foo.md → repo root"""
         from app.modules.dev_runner.services.plan_path_helpers import extract_repo_root_from_plan_path

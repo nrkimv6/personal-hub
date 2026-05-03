@@ -13,6 +13,7 @@
 
 import asyncio
 import json
+import subprocess
 import pytest
 from datetime import date
 from pathlib import Path
@@ -464,9 +465,17 @@ class TestRunDone:
         commit_proc.communicate = AsyncMock(return_value=(b"commit failed hard", None))
         commit_proc.returncode = 17
 
+        def _run_side_effect(args, cwd=None, **kwargs):
+            if "rev-parse" in args:
+                return MagicMock(returncode=0, stdout=str(tmp_path), stderr="")
+            if "diff" in args:
+                return MagicMock(returncode=1, stdout="", stderr="")
+            raise AssertionError(f"unexpected subprocess.run args={args}")
+
         with patch.object(type(done_svc), "COMMIT_PS1", commit_ps1), \
              patch.object(type(done_svc), "COMMIT_SH", tmp_path / "missing-commit.sh"), \
-             patch("asyncio.create_subprocess_exec", side_effect=[add_proc, commit_proc]), \
+             patch("app.modules.dev_runner.services.git_commit_roots.subprocess.run", side_effect=_run_side_effect), \
+             patch("app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec", side_effect=[add_proc, commit_proc]), \
              patch.object(done_svc, "_archive_plan", new=AsyncMock(return_value=(archive_file, None))), \
              patch.object(done_svc, "_update_todo_done"), \
              patch.object(done_svc, "_archive_done_if_needed"):
@@ -475,6 +484,117 @@ class TestRunDone:
         assert result["success"] is False
         assert "commit script failed (17)" in result["message"]
         assert "commit failed hard" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_git_commit_routes_mixed_project_and_plans_roots_R(self, tmp_path):
+        """R: TODO/DONE은 project root, archive plan은 plans worktree root에서 각각 commit한다."""
+        project_root = tmp_path / "monitor-page"
+        plans_root = project_root / ".worktrees" / "plans"
+        project_root.mkdir()
+        (plans_root / "docs" / "archive").mkdir(parents=True)
+        project_file = project_root / "TODO.md"
+        archive_file = plans_root / "docs" / "archive" / "2026-05-03-test.md"
+        project_file.write_text("# TODO\n", encoding="utf-8")
+        archive_file.write_text("# Plan\n", encoding="utf-8")
+
+        scanner = MagicMock()
+        done_svc = PlanDoneService(scanner=scanner, registry=MagicMock())
+
+        def _run_side_effect(args, cwd=None, **kwargs):
+            if "rev-parse" in args:
+                root = plans_root if str(cwd).startswith(str(plans_root)) else project_root
+                return MagicMock(returncode=0, stdout=str(root), stderr="")
+            if "diff" in args:
+                return MagicMock(returncode=1, stdout="", stderr="")
+            raise AssertionError(f"unexpected subprocess.run args={args}")
+
+        def _proc(stdout: bytes = b"ok", returncode: int = 0):
+            proc = AsyncMock()
+            proc.communicate = AsyncMock(return_value=(stdout, None))
+            proc.returncode = returncode
+            return proc
+
+        with patch.object(type(done_svc), "_resolve_commit_command", return_value=["commit-tool", "msg"]), \
+             patch("app.modules.dev_runner.services.git_commit_roots.subprocess.run", side_effect=_run_side_effect), \
+             patch(
+                 "app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec",
+                 side_effect=[_proc(), _proc(b"root commit"), _proc(), _proc(b"plans commit")],
+             ) as mock_exec:
+            output = await done_svc._git_commit(
+                project_root,
+                [project_file, archive_file],
+                "docs: mixed roots",
+            )
+
+        cwd_sequence = [Path(call.kwargs["cwd"]) for call in mock_exec.call_args_list]
+        assert cwd_sequence == [project_root, project_root, plans_root, plans_root]
+        assert "root commit" in output
+        assert "plans commit" in output
+
+    @pytest.mark.asyncio
+    async def test_commit_files_by_git_root_cleans_project_and_plans_repos_T3(self, tmp_path):
+        """T3: 실제 git repo 두 개에서 active 삭제와 archive 추가를 각각 commit한다."""
+        from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
+
+        project_root = tmp_path / "monitor-page"
+        plans_root = project_root / ".worktrees" / "plans"
+        project_root.mkdir(parents=True)
+        (plans_root / "docs" / "plan").mkdir(parents=True)
+        (plans_root / "docs" / "archive").mkdir(parents=True)
+
+        for repo in (project_root, plans_root):
+            subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+        todo_path = project_root / "TODO.md"
+        plan_path = plans_root / "docs" / "plan" / "2026-05-03-test.md"
+        archive_path = plans_root / "docs" / "archive" / plan_path.name
+        todo_path.write_text("# TODO\n\n- [ ] item\n", encoding="utf-8")
+        (project_root / ".gitignore").write_text(".worktrees/\n", encoding="utf-8")
+        plan_path.write_text("# Plan\n\n> 상태: 구현완료\n", encoding="utf-8")
+
+        commit_cmd = [
+            "git",
+            "-c",
+            "user.name=Test User",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "test commit",
+        ]
+        subprocess.run(["git", "add", "TODO.md", ".gitignore"], cwd=project_root, check=True, capture_output=True, text=True)
+        subprocess.run(commit_cmd, cwd=project_root, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "add", "."], cwd=plans_root, check=True, capture_output=True, text=True)
+        subprocess.run(commit_cmd, cwd=plans_root, check=True, capture_output=True, text=True)
+
+        todo_path.write_text("# TODO\n\n- [x] item\n", encoding="utf-8")
+        archive_path.write_text(plan_path.read_text(encoding="utf-8"), encoding="utf-8")
+        plan_path.unlink()
+
+        output = await commit_files_by_git_root(
+            files_to_add=[todo_path, plan_path, archive_path],
+            default_root=project_root,
+            commit_command=commit_cmd,
+            decode_output=PlanDoneService._decode_subprocess_output,
+        )
+
+        root_status = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        plans_status = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=plans_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert output
+        assert root_status == ""
+        assert plans_status == ""
 
     @pytest.mark.asyncio
     async def test_run_done_file_not_found(self, svc):

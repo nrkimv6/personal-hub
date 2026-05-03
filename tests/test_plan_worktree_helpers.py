@@ -154,6 +154,17 @@ def test_resolve_active_plan_file_keeps_current_physical_path_R(tmp_path):
     assert resolved == current.resolve()
 
 
+def test_resolve_active_plan_file_archive_path_does_not_recreate_active_B(tmp_path):
+    """B: archive path 입력으로 active plan 후보를 새로 만들지 않는다."""
+    archive = tmp_path / ".worktrees" / "plans" / "docs" / "archive" / "2026-01-03_test.md"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_text("# archived\n", encoding="utf-8")
+
+    resolved = resolve_active_plan_file(str(archive), project_root=tmp_path)
+    assert resolved == archive.resolve()
+    assert not (tmp_path / ".worktrees" / "plans" / "docs" / "plan" / archive.name).exists()
+
+
 def test_resolve_active_plan_file_prefers_current_physical_path_for_logical_relative_input_R(tmp_path):
     """R: logical 상대경로 입력이어도 current physical path(.worktrees/plans)를 우선한다"""
     legacy = tmp_path / "docs" / "plan" / "2026-01-04_test.md"
