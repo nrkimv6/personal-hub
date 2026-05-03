@@ -1,4 +1,4 @@
-import type { RequestEvent } from './$types';
+import type { RequestEvent } from '@sveltejs/kit';
 import { subscribe } from '$lib/server/api-gate-state';
 
 const encoder = new TextEncoder();

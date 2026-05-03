@@ -1,5 +1,4 @@
-import { json } from '@sveltejs/kit';
-import type { RequestEvent } from './$types';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { getGateSnapshot, openGate } from '$lib/server/api-gate-state';
 import { assertLocalRequest } from '$lib/server/recovery-guard';
 

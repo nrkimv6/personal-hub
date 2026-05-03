@@ -27,6 +27,17 @@ test('api gate local routes expose status close open and stream', () => {
 	assert.match(stream, /event: \$\{event\}\\ndata:/);
 });
 
+test('api gate local routes use generic RequestEvent source', () => {
+	const close = read('../src/routes/__local/api-gate/close/+server.ts');
+	const open = read('../src/routes/__local/api-gate/open/+server.ts');
+	const stream = read('../src/routes/__local/api-gate/stream/+server.ts');
+
+	for (const source of [close, open, stream]) {
+		assert.doesNotMatch(source, /from ['"]\.\/\$types['"]/);
+		assert.match(source, /RequestEvent[\s\S]+from ['"]@sveltejs\/kit['"]/);
+	}
+});
+
 test('client fetch guard blocks same-origin api calls and preserves bypasses', () => {
 	const hook = read('../src/hooks.client.ts');
 	assert.match(hook, /GATE_BLOCK_PATTERN\.test\(url\.pathname\)/);
