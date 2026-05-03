@@ -431,6 +431,52 @@ class TestRunDone:
         assert len(archives) == 1
 
     @pytest.mark.asyncio
+    async def test_run_done_commit_nonzero_returns_failure_E(self, tmp_path):
+        """E: PlanDoneService도 commit script non-zero를 success=False로 반환한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        archive_dir = tmp_path / "docs" / "archive"
+        plan_dir.mkdir(parents=True)
+        archive_dir.mkdir(parents=True)
+        plan_file = plan_dir / "2026-04-03-commit-fail.md"
+        archive_file = archive_dir / plan_file.name
+        plan_file.write_text(
+            "# commit fail\n\n"
+            "> 상태: 구현완료\n"
+            "> 진행률: 1/1 (100%)\n\n"
+            "- [x] done\n",
+            encoding="utf-8",
+        )
+        archive_file.write_text("# archived\n", encoding="utf-8")
+        commit_ps1 = tmp_path / "commit.ps1"
+        commit_ps1.write_text("throw 'fail'\n", encoding="utf-8")
+
+        scanner = MagicMock()
+        scanner.get_plan_progress.return_value = MagicMock(total=1, done=1)
+        scanner.get_plan_status.return_value = "구현완료"
+        scanner._extract_pending_checkboxes.return_value = []
+        scanner._find_todo_file.return_value = None
+        done_svc = PlanDoneService(scanner=scanner, registry=MagicMock())
+
+        add_proc = AsyncMock()
+        add_proc.communicate = AsyncMock(return_value=(b"add ok", None))
+        add_proc.returncode = 0
+        commit_proc = AsyncMock()
+        commit_proc.communicate = AsyncMock(return_value=(b"commit failed hard", None))
+        commit_proc.returncode = 17
+
+        with patch.object(type(done_svc), "COMMIT_PS1", commit_ps1), \
+             patch.object(type(done_svc), "COMMIT_SH", tmp_path / "missing-commit.sh"), \
+             patch("asyncio.create_subprocess_exec", side_effect=[add_proc, commit_proc]), \
+             patch.object(done_svc, "_archive_plan", new=AsyncMock(return_value=(archive_file, None))), \
+             patch.object(done_svc, "_update_todo_done"), \
+             patch.object(done_svc, "_archive_done_if_needed"):
+            result = await done_svc.run_done(str(plan_file))
+
+        assert result["success"] is False
+        assert "commit script failed (17)" in result["message"]
+        assert "commit failed hard" in result["message"]
+
+    @pytest.mark.asyncio
     async def test_run_done_file_not_found(self, svc):
         result = await svc.run_done("/nonexistent/path/plan.md")
         assert result["success"] is False

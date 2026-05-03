@@ -698,6 +698,41 @@ class TestRunDone:
         mock_sync.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_run_done_commit_nonzero_returns_failure_E(self, svc, tmp_path):
+        """E: commit script non-zero는 run_done success=False로 전파된다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        archive_dir = tmp_path / "docs" / "archive"
+        plan_dir.mkdir(parents=True)
+        archive_dir.mkdir(parents=True)
+        plan = plan_dir / "2026-04-03-commit-fail.md"
+        archive = archive_dir / plan.name
+        plan.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] task\n", encoding="utf-8")
+        archive.write_text("# archived\n", encoding="utf-8")
+        commit_ps1 = tmp_path / "commit.ps1"
+        commit_ps1.write_text("throw 'fail'\n", encoding="utf-8")
+
+        add_proc = AsyncMock()
+        add_proc.communicate = AsyncMock(return_value=(b"add ok", None))
+        add_proc.returncode = 0
+        commit_proc = AsyncMock()
+        commit_proc.communicate = AsyncMock(return_value=(b"commit failed hard", None))
+        commit_proc.returncode = 17
+
+        with patch.object(type(svc), "COMMIT_PS1", commit_ps1), \
+             patch.object(type(svc), "COMMIT_SH", tmp_path / "missing-commit.sh"), \
+             patch("asyncio.create_subprocess_exec", side_effect=[add_proc, commit_proc]), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(archive, None))), \
+             patch.object(svc, "_update_todo_done"), \
+             patch.object(svc, "_archive_done_if_needed", return_value=None), \
+             patch.object(svc, "_resolve_project_dir", return_value=tmp_path), \
+             patch.object(svc, "sync_plans"):
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is False
+        assert "commit script failed (17)" in result["message"]
+        assert "commit failed hard" in result["message"]
+
+    @pytest.mark.asyncio
     async def test_failure_returns_false(self, svc, tmp_plan_dir):
         """Inverse: _archive_plan 예외 → success=False"""
         plan = tmp_plan_dir / "fail_test.md"

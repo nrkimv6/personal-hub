@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import re
 import subprocess
 from datetime import date
@@ -34,6 +35,7 @@ class PlanDoneService:
     - plan_record_service: DB \uae30\ub85d (lazy import)
     """
 
+    COMMIT_PS1 = Path("D:/work/project/tools/common/commit.ps1")
     COMMIT_SH = Path("D:/work/project/tools/common/commit.sh")
 
     # \uc644\ub8cc \uacc4\uc5f4 \uc0c1\ud0dc (batch_done \ud310\ub2e8\uc6a9, PlanScanner._DONE_STATUSES\uc640 \ub3d9\uc77c)
@@ -247,9 +249,12 @@ class PlanDoneService:
     async def _git_commit(
         self, project_dir: Optional[Path], files_to_add: List[Path], commit_msg: str
     ) -> str:
-        """git add + commit.sh \ud638\ucd9c"""
-        if not self.COMMIT_SH.exists():
-            return f"commit.sh not found: {self.COMMIT_SH}"
+        """git add + commit script \ud638\ucd9c.
+
+        Windows\uc5d0\uc11c\ub294 commit.ps1\uc744 \uc6b0\uc120 \uc0ac\uc6a9\ud558\uace0, \uac01 subprocess\uc758 non-zero
+        \uc885\ub8cc \ucf54\ub4dc\ub294 run_done \uc2e4\ud328\ub85c \uc804\ud30c\ud55c\ub2e4.
+        """
+        commit_command = self._resolve_commit_command(commit_msg)
 
         # \uc874\uc7ac\ud558\ub294 \ud30c\uc77c(\uc2e0\uaddc/\uc218\uc815) + \uc0ad\uc81c\ub41c \ud30c\uc77c(git mv\ub85c \uc774\ubbf8 staged\ub41c \uacbd\uc6b0\ub3c4 \ud3ec\ud568)\uc744 \ubaa8\ub450 add
         existing_files = [str(f) for f in files_to_add if f.exists()]
@@ -267,17 +272,56 @@ class PlanDoneService:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        await add_proc.communicate()
+        add_stdout, _ = await add_proc.communicate()
+        if add_proc.returncode != 0:
+            output = self._decode_subprocess_output(add_stdout)
+            raise RuntimeError(f"git add failed ({add_proc.returncode}): {output}".strip())
 
-        # commit.sh
         commit_proc = await asyncio.create_subprocess_exec(
-            "bash", str(self.COMMIT_SH), commit_msg,
+            *commit_command,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
         stdout, _ = await asyncio.wait_for(commit_proc.communicate(), timeout=60)
-        return stdout.decode("utf-8", errors="replace") if stdout else ""
+        output = self._decode_subprocess_output(stdout)
+        if commit_proc.returncode != 0:
+            raise RuntimeError(f"commit script failed ({commit_proc.returncode}): {output}".strip())
+        return output
+
+    @classmethod
+    def _resolve_commit_command(cls, commit_msg: str) -> list[str]:
+        if os.name == "nt" and cls.COMMIT_PS1.exists():
+            return [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(cls.COMMIT_PS1),
+                commit_msg,
+            ]
+        if cls.COMMIT_SH.exists():
+            return ["bash", str(cls.COMMIT_SH), commit_msg]
+        if cls.COMMIT_PS1.exists():
+            return [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(cls.COMMIT_PS1),
+                commit_msg,
+            ]
+        raise FileNotFoundError(f"commit script not found: {cls.COMMIT_PS1} or {cls.COMMIT_SH}")
+
+    @staticmethod
+    def _decode_subprocess_output(output) -> str:
+        if not output:
+            return ""
+        if isinstance(output, bytes):
+            return output.decode("utf-8", errors="replace")
+        return str(output)
 
     async def run_done(self, plan_path: str) -> dict:
         """Python \ub124\uc774\ud2f0\ube0c plan \uc644\ub8cc \ucc98\ub9ac (\uc544\uce74\uc774\ube0c, TODO\u2192DONE, git commit)"""

@@ -8,6 +8,48 @@ import re
 from pathlib import Path
 
 
+def _remove_fenced_code_blocks(content: str) -> str:
+    return re.sub(r"```.*?```", "", content, flags=re.DOTALL)
+
+
+def _extract_phase_r_section(content: str) -> str:
+    match = re.search(r"### Phase R.*?(?=\n### |\Z)", content, re.DOTALL)
+    return match.group(0) if match else ""
+
+
+_UNDEFENDED_COMPLETE_RE = re.compile(
+    r"미방어\s*(?:경로|항목)?\s*(?:[:：-]?\s*)?(?:없음|없다|없습니다|0\s*건|0\s*개)",
+    re.IGNORECASE,
+)
+
+
+def _line_has_undefended_marker(line: str) -> bool:
+    if "미방어" not in line:
+        return False
+    if _UNDEFENDED_COMPLETE_RE.search(line):
+        return False
+
+    stripped = line.strip()
+    is_table_row = "|" in stripped
+    is_check_item = re.match(r"^(?:\d+\.\s*)?[-*]\s*\[[ xX]\]\s+", stripped) is not None
+    has_status_label = re.search(r"(?:방어\s*상태|방어여부|상태)\s*[:：]", stripped) is not None
+    return is_table_row or is_check_item or has_status_label
+
+
+def has_undefended_paths(content: str) -> bool:
+    """Phase R 내 실제 미방어 경로 잔존 여부.
+
+    판정 순서가 중요하다. 먼저 fenced code block을 제거해 예시 텍스트를 제외하고,
+    남은 Phase R의 표/체크항목/상태 라인만 검사한다. 이때 "미방어 0건",
+    "미방어 경로 없음" 같은 완료형 문구는 실패 토큰에서 제외한다.
+    """
+    section = _extract_phase_r_section(content)
+    if not section:
+        return False
+    section_no_code = _remove_fenced_code_blocks(section)
+    return any(_line_has_undefended_marker(line) for line in section_no_code.splitlines())
+
+
 def validate_done_preconditions(file_path: str, content: str) -> list:
     """done 처리 전 사전 검증. 실패 사유 리스트 반환 (빈 리스트 = 통과)"""
     errors = []
@@ -28,12 +70,8 @@ def validate_done_preconditions(file_path: str, content: str) -> list:
         has_pr = "Phase R" in content or "재발 경로 분석" in content
         if not has_pr:
             errors.append("fix plan Phase R 섹션 필수 — /implement에서 Phase R 먼저 실행")
-        elif has_pr:
-            m = re.search(r"### Phase R.*?(?=\n### |\Z)", content, re.DOTALL)
-            if m:
-                section = re.sub(r"```.*?```", "", m.group(0), flags=re.DOTALL)
-                if "미방어" in section:
-                    errors.append("Phase R에 미방어 경로 잔존 — 모든 경로 방어 완료 필요")
+        elif has_undefended_paths(content):
+            errors.append("Phase R에 미방어 경로 잔존 — 모든 경로 방어 완료 필요")
     return errors
 
 

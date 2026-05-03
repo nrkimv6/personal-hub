@@ -294,13 +294,17 @@ def has_phase_r(content: str) -> bool:
 
 
 def has_undefended_paths(content: str) -> bool:
-    """Phase R 내 '미방어' 경로 잔존 여부"""
-    m = re.search(r"### Phase R.*?(?=\n### |\Z)", content, re.DOTALL)
-    if not m:
-        return False
-    section = m.group(0)
-    section_no_code = re.sub(r"```.*?```", "", section, flags=re.DOTALL)
-    return "미방어" in section_no_code
+    """Phase R 내 실제 '미방어' 경로 잔존 여부.
+
+    _plan_header_utils 공통 구현으로 위임해 code block 제외와 완료형 문구 제외
+    규칙을 validate_done_preconditions()와 동일하게 유지한다.
+    """
+    import sys as _sys
+    _project_root = str(Path(__file__).resolve().parent.parent.parent)
+    if _project_root not in _sys.path:
+        _sys.path.insert(0, _project_root)
+    from app.modules.dev_runner.services._plan_header_utils import has_undefended_paths as _utils_has_undefended
+    return _utils_has_undefended(content)
 
 
 def validate_done_preconditions(file_path: str, content: str) -> list:
@@ -310,7 +314,7 @@ def validate_done_preconditions(file_path: str, content: str) -> list:
     이 함수는 하위 호환성 유지용으로 존재한다.
     """
     import sys as _sys
-    _project_root = str(Path(__file__).resolve().parent.parent)
+    _project_root = str(Path(__file__).resolve().parent.parent.parent)
     if _project_root not in _sys.path:
         _sys.path.insert(0, _project_root)
     from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions as _utils_validate

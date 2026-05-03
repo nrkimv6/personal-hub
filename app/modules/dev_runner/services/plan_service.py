@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import redis
 import shutil
@@ -861,6 +862,7 @@ class PlanService:
 
     # ========== done 처리 (Python 네이티브) ==========
 
+    COMMIT_PS1 = Path("D:/work/project/tools/common/commit.ps1")
     COMMIT_SH = Path("D:/work/project/tools/common/commit.sh")
 
     @staticmethod
@@ -1236,9 +1238,12 @@ class PlanService:
         commit_msg: str,
         runner_id: Optional[str] = None,
     ) -> str:
-        """git add + commit.sh 호출"""
-        if not self.COMMIT_SH.exists():
-            return f"commit.sh not found: {self.COMMIT_SH}"
+        """git add + commit script 호출.
+
+        Windows에서는 commit.ps1을 우선 사용하고, 각 subprocess의 non-zero
+        종료 코드는 run_done 실패로 전파한다.
+        """
+        commit_command = self._resolve_commit_command(commit_msg)
 
         ownership_error = self._validate_runner_ownership(project_dir, files_to_add, runner_id)
         if ownership_error:
@@ -1261,17 +1266,56 @@ class PlanService:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        await add_proc.communicate()
+        add_stdout, _ = await add_proc.communicate()
+        if add_proc.returncode != 0:
+            output = self._decode_subprocess_output(add_stdout)
+            raise RuntimeError(f"git add failed ({add_proc.returncode}): {output}".strip())
 
-        # commit.sh
         commit_proc = await asyncio.create_subprocess_exec(
-            "bash", str(self.COMMIT_SH), commit_msg,
+            *commit_command,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
         stdout, _ = await asyncio.wait_for(commit_proc.communicate(), timeout=60)
-        return stdout.decode("utf-8", errors="replace") if stdout else ""
+        output = self._decode_subprocess_output(stdout)
+        if commit_proc.returncode != 0:
+            raise RuntimeError(f"commit script failed ({commit_proc.returncode}): {output}".strip())
+        return output
+
+    @classmethod
+    def _resolve_commit_command(cls, commit_msg: str) -> list[str]:
+        if os.name == "nt" and cls.COMMIT_PS1.exists():
+            return [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(cls.COMMIT_PS1),
+                commit_msg,
+            ]
+        if cls.COMMIT_SH.exists():
+            return ["bash", str(cls.COMMIT_SH), commit_msg]
+        if cls.COMMIT_PS1.exists():
+            return [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(cls.COMMIT_PS1),
+                commit_msg,
+            ]
+        raise FileNotFoundError(f"commit script not found: {cls.COMMIT_PS1} or {cls.COMMIT_SH}")
+
+    @staticmethod
+    def _decode_subprocess_output(output) -> str:
+        if not output:
+            return ""
+        if isinstance(output, bytes):
+            return output.decode("utf-8", errors="replace")
+        return str(output)
 
     async def run_done(self, plan_path: str, runner_id: Optional[str] = None) -> dict:
         """Python 네이티브 plan 완료 처리 (아카이브, TODO→DONE, git commit)"""
