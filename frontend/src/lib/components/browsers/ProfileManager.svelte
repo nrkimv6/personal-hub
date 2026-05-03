@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { profileApi, serviceAccountApi } from '$lib/api';
   import type { BrowserProfile, ServiceAccount, BrowserProfileCreate, ServiceAccountCreate } from '$lib/types';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
 
   let profiles: BrowserProfile[] = [];
   let loading = true;
@@ -71,7 +73,7 @@
   async function handleSubmit() {
     try {
       if (!formData.name || !formData.profile_dir) {
-        alert('프로필명과 프로필 디렉토리는 필수입니다');
+        toast.warning('프로필명과 프로필 디렉토리는 필수입니다');
         return;
       }
 
@@ -88,12 +90,17 @@
       await loadProfiles();
       closeModal();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(e instanceof Error ? e.message : '알 수 없는 오류');
     }
   }
 
   async function deleteProfile(id: number, name: string) {
-    if (!confirm(`"${name}" 프로필을 삭제하시겠습니까?\n(브라우저 데이터는 유지됩니다)`)) {
+    if (!await confirm({
+      title: '프로필 삭제',
+      message: `"${name}" 프로필을 삭제하시겠습니까?\n(브라우저 데이터는 유지됩니다)`,
+      confirmText: '삭제',
+      variant: 'danger'
+    })) {
       return;
     }
 
@@ -101,7 +108,7 @@
       await profileApi.delete(id);
       await loadProfiles();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(e instanceof Error ? e.message : '알 수 없는 오류');
     }
   }
 
@@ -110,7 +117,7 @@
       await profileApi.update(profile.id, { is_active: !profile.is_active });
       await loadProfiles();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(e instanceof Error ? e.message : '알 수 없는 오류');
     }
   }
 
@@ -142,12 +149,17 @@
       await loadProfiles();
       closeAddAccountModal();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(e instanceof Error ? e.message : '알 수 없는 오류');
     }
   }
 
   async function deleteServiceAccount(accountId: number, identifier: string | null) {
-    if (!confirm(`"${identifier || '(미설정)'}" 서비스 계정을 삭제하시겠습니까?`)) {
+    if (!await confirm({
+      title: '서비스 계정 삭제',
+      message: `"${identifier || '(미설정)'}" 서비스 계정을 삭제하시겠습니까?`,
+      confirmText: '삭제',
+      variant: 'danger'
+    })) {
       return;
     }
 
@@ -155,7 +167,7 @@
       await serviceAccountApi.delete(accountId);
       await loadProfiles();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(e instanceof Error ? e.message : '알 수 없는 오류');
     }
   }
 
@@ -166,9 +178,9 @@
     browserLoading[account.id] = 'open';
     try {
       const result = await serviceAccountApi.openBrowser(account.id);
-      alert(`브라우저가 열렸습니다: ${result.message}`);
+      toast.success(`브라우저가 열렸습니다: ${result.message}`);
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(e instanceof Error ? e.message : '알 수 없는 오류');
     } finally {
       delete browserLoading[account.id];
       browserLoading = browserLoading;
@@ -181,9 +193,9 @@
       await serviceAccountApi.openLoginPage(account.id);
       const serviceName = account.service_type === 'naver' ? '네이버' :
                          account.service_type === 'instagram' ? 'Instagram' : '쿠팡';
-      alert(`${serviceName} 로그인 페이지가 열렸습니다.\n브라우저에서 로그인 후 "상태 확인" 버튼을 눌러주세요.`);
+      toast.info(`${serviceName} 로그인 페이지가 열렸습니다.\n브라우저에서 로그인 후 "상태 확인" 버튼을 눌러주세요.`, 5000);
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(e instanceof Error ? e.message : '알 수 없는 오류');
     } finally {
       delete browserLoading[account.id];
       browserLoading = browserLoading;
@@ -195,9 +207,13 @@
     try {
       const result = await serviceAccountApi.checkLogin(account.id);
       await loadProfiles();
-      alert(result.is_logged_in ? '로그인 확인됨' : '로그인 필요');
+      if (result.is_logged_in) {
+        toast.success('로그인 확인됨');
+      } else {
+        toast.warning('로그인 필요');
+      }
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(e instanceof Error ? e.message : '알 수 없는 오류');
     } finally {
       delete browserLoading[account.id];
       browserLoading = browserLoading;
@@ -208,9 +224,9 @@
     browserLoading[account.id] = 'close';
     try {
       const result = await serviceAccountApi.closeBrowser(account.id);
-      alert(result.message);
+      toast.success(result.message);
     } catch (e) {
-      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+      toast.error(e instanceof Error ? e.message : '알 수 없는 오류');
     } finally {
       delete browserLoading[account.id];
       browserLoading = browserLoading;

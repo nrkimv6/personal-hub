@@ -5,6 +5,8 @@
 	import { Button } from '$lib/components/ui';
 	import { createOffsetPagination, createPagePagination } from '$lib/utils/pagination.svelte';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 
 	// 상태
 	let writings: GeneratedWriting[] = [];
@@ -73,6 +75,10 @@
 	// 수동 실행
 	let running = false;
 	let runResult: { success: boolean; mix_count: number; random_count: number } | null = null;
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
 
 	async function fetchData() {
 		loading = true;
@@ -174,12 +180,12 @@
 	}
 
 	async function deleteElement(id: number, name: string) {
-		if (!confirm(`"${name}" 소재를 삭제하시겠습니까?`)) return;
+		if (!await confirm({ title: '소재 삭제', message: `"${name}" 소재를 삭제하시겠습니까?`, confirmText: '삭제', variant: 'danger' })) return;
 		try {
 			await writingApi.deleteElement(id);
 			await fetchElements();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -189,7 +195,7 @@
 		if (!limitStr) return;
 		const limit = parseInt(limitStr);
 		if (isNaN(limit) || limit < 1 || limit > 500) {
-			alert('1~500 사이의 숫자를 입력하세요.');
+			toast.warning('1~500 사이의 숫자를 입력하세요.');
 			return;
 		}
 
@@ -198,9 +204,9 @@
 		try {
 			const result = await writingApi.extractTopics(limit);
 			extractResult = result;
-			alert(`${result.created_requests}개의 추출 요청이 생성되었습니다. Claude Worker가 처리합니다.`);
+			toast.success(`${result.created_requests}개의 추출 요청이 생성되었습니다. Claude Worker가 처리합니다.`);
 		} catch (e) {
-			alert('추출 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('추출 요청 실패: ' + errorMessage(e));
 		} finally {
 			extracting = false;
 		}
@@ -247,7 +253,7 @@
 		const confirmMsg = mode === 'full'
 			? '전체 분석을 실행하시겠습니까? (기존 데이터가 초기화됩니다)'
 			: '증분 분석을 실행하시겠습니까?';
-		if (!confirm(confirmMsg)) return;
+		if (!await confirm({ title: '키워드 분석', message: confirmMsg, confirmText: '실행', variant: mode === 'full' ? 'danger' : 'default' })) return;
 
 		analyzing = true;
 		analyzeResult = null;
@@ -256,42 +262,42 @@
 			analyzeResult = result;
 			await fetchKeywords();
 		} catch (e) {
-			alert('분석 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('분석 실패: ' + errorMessage(e));
 		} finally {
 			analyzing = false;
 		}
 	}
 
 	async function promoteKeyword(kw: KeywordStats) {
-		if (!confirm(`"${kw.keyword}"를 writing_elements로 승격하시겠습니까?`)) return;
+		if (!await confirm({ title: '키워드 승격', message: `"${kw.keyword}"를 writing_elements로 승격하시겠습니까?`, confirmText: '승격' })) return;
 		try {
 			await keywordApi.promote(kw.id);
-			alert(`"${kw.keyword}" 승격 완료`);
+			toast.success(`"${kw.keyword}" 승격 완료`);
 			await fetchKeywords();
 		} catch (e) {
-			alert('승격 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('승격 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function demoteKeyword(kw: KeywordStats) {
-		if (!confirm(`"${kw.keyword}" 승격을 취소하시겠습니까?`)) return;
+		if (!await confirm({ title: '승격 취소', message: `"${kw.keyword}" 승격을 취소하시겠습니까?`, confirmText: '취소' })) return;
 		try {
 			await keywordApi.demote(kw.id);
-			alert(`"${kw.keyword}" 승격 취소 완료`);
+			toast.success(`"${kw.keyword}" 승격 취소 완료`);
 			await fetchKeywords();
 		} catch (e) {
-			alert('승격 취소 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('승격 취소 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function markAsStopword(kw: KeywordStats) {
-		if (!confirm(`"${kw.keyword}"를 불용어로 마킹하시겠습니까?`)) return;
+		if (!await confirm({ title: '불용어 처리', message: `"${kw.keyword}"를 불용어로 마킹하시겠습니까?`, confirmText: '처리' })) return;
 		try {
 			await keywordApi.markStopword(kw.id);
-			alert(`"${kw.keyword}" 불용어 처리 완료`);
+			toast.success(`"${kw.keyword}" 불용어 처리 완료`);
 			await fetchKeywords();
 		} catch (e) {
-			alert('불용어 마킹 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('불용어 마킹 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -306,10 +312,10 @@
 				limit: parseInt(limit),
 				min_frequency: parseInt(minFreq)
 			});
-			alert(`${result.promoted_count}개 키워드가 승격되었습니다.`);
+			toast.success(`${result.promoted_count}개 키워드가 승격되었습니다.`);
 			await fetchKeywords();
 		} catch (e) {
-			alert('일괄 승격 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 승격 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -371,7 +377,7 @@
 			editMode = false;
 			showModal = true;
 		} catch (e) {
-			alert('상세 조회 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('상세 조회 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -387,7 +393,7 @@
 			selectedSource = full;
 			showSourceModal = true;
 		} catch (e) {
-			alert('소스 조회 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('소스 조회 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -400,14 +406,14 @@
 		if (!selectedWriting) return;
 		try {
 			await writingApi.updateGenerated(selectedWriting.id, { content: editContent });
-			alert('저장되었습니다.');
+			toast.success('저장되었습니다.');
 			editMode = false;
 			await fetchData();
 			// 모달 내용 업데이트
 			const updated = await writingApi.getGenerated(selectedWriting.id);
 			selectedWriting = updated;
 		} catch (e) {
-			alert('저장 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('저장 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -418,37 +424,37 @@
 			selectedWriting.rating = rating;
 			await fetchData();
 		} catch (e) {
-			alert('평가 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('평가 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function deleteWriting() {
 		if (!selectedWriting) return;
-		if (!confirm('이 글을 삭제하시겠습니까?')) return;
+		if (!await confirm({ title: '글 삭제', message: '이 글을 삭제하시겠습니까?', confirmText: '삭제', variant: 'danger' })) return;
 		try {
 			await writingApi.deleteGenerated(selectedWriting.id);
 			closeModal();
 			await fetchData();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function deleteSource() {
 		if (!selectedSource) return;
-		if (!confirm('이 소스를 삭제하시겠습니까?')) return;
+		if (!await confirm({ title: '소스 삭제', message: '이 소스를 삭제하시겠습니까?', confirmText: '삭제', variant: 'danger' })) return;
 		try {
 			await writingApi.deleteSource(selectedSource.id);
 			closeSourceModal();
 			await fetchSources();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function runWritingTask() {
 		if (running) return;
-		if (!confirm('작문 태스크를 수동 실행하시겠습니까? (mix 5개 + random 3개)')) return;
+		if (!await confirm({ title: '작문 태스크 실행', message: '작문 태스크를 수동 실행하시겠습니까? (mix 5개 + random 3개)', confirmText: '실행' })) return;
 
 		running = true;
 		runResult = null;
@@ -457,7 +463,7 @@
 			runResult = result;
 			await fetchData();
 		} catch (e) {
-			alert('실행 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('실행 실패: ' + errorMessage(e));
 		} finally {
 			running = false;
 		}
@@ -505,17 +511,17 @@
 
 	async function createBatch() {
 		if (creatingBatch) return;
-		if (!confirm('새 글쓰기 배치를 생성하시겠습니까? (11개 LLM 요청)')) return;
+		if (!await confirm({ title: '배치 생성', message: '새 글쓰기 배치를 생성하시겠습니까? (11개 LLM 요청)', confirmText: '생성' })) return;
 
 		creatingBatch = true;
 		try {
 			const result = await writingApi.createBatch();
-			alert(result.message);
+			toast.success(result.message);
 			await fetchBatches();
 			// 생성 후 바로 해당 배치 상태 확인
 			await viewBatchStatus(result.batch_id);
 		} catch (e) {
-			alert('배치 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('배치 생성 실패: ' + errorMessage(e));
 		} finally {
 			creatingBatch = false;
 		}
@@ -529,7 +535,7 @@
 				startBatchPolling(batchId);
 			}
 		} catch (e) {
-			alert('배치 상태 조회 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('배치 상태 조회 실패: ' + errorMessage(e));
 		}
 	}
 

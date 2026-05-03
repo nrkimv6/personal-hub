@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 	import { getErrorMessage } from '$lib/utils/error';
 	import { createSelection } from '$lib/utils/selection.svelte';
 	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square, ChevronLeft, ChevronRight, FolderOpen, X, ExternalLink, Eye, Clipboard, Merge, Archive, LayoutGrid, LayoutList, HelpCircle } from 'lucide-svelte';
@@ -329,7 +330,12 @@
 	}
 
 	async function resolveGroup(groupId: number, keepFileId: number) {
-		if (!confirm(`파일 ID ${keepFileId}를 보관하고 나머지를 휴지통으로 이동하시겠습니까?`)) {
+		if (!await confirm({
+			title: '중복 그룹 해결',
+			message: `파일 ID ${keepFileId}를 보관하고 나머지를 휴지통으로 이동하시겠습니까?`,
+			confirmText: '이동',
+			variant: 'danger'
+		})) {
 			return;
 		}
 
@@ -425,7 +431,12 @@
 	async function discardAll(groupId: number) {
 		const detail = groupDetails[groupId];
 		const count = detail?.members?.length ?? '?';
-		if (!confirm(`이 그룹의 모든 이미지(${count}개)를 휴지통으로 이동하시겠습니까?\n\n보관하는 파일 없이 전부 삭제됩니다.`)) return;
+		if (!await confirm({
+			title: '전체 삭제',
+			message: `이 그룹의 모든 이미지(${count}개)를 휴지통으로 이동하시겠습니까?\n\n보관하는 파일 없이 전부 삭제됩니다.`,
+			confirmText: '삭제',
+			variant: 'danger'
+		})) return;
 
 		try {
 			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}/discard-all`, { method: 'POST' });
@@ -482,7 +493,11 @@
 	async function keepAll(groupId: number) {
 		const detail = groupDetails[groupId];
 		const count = detail?.members?.length ?? '?';
-		if (!confirm(`이 그룹의 모든 이미지(${count}개)를 보관하시겠습니까?\n(삭제 없이 해결됩니다)`)) return;
+		if (!await confirm({
+			title: '전체 보관',
+			message: `이 그룹의 모든 이미지(${count}개)를 보관하시겠습니까?\n(삭제 없이 해결됩니다)`,
+			confirmText: '보관'
+		})) return;
 		try {
 			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}/keep-all`, { method: 'POST' });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -500,7 +515,11 @@
 			toast.warning('병합하려면 2개 이상의 그룹을 선택하세요.');
 			return;
 		}
-		if (!confirm(`선택한 ${ids.length}개 그룹을 그룹 #${ids[0]}으로 병합하시겠습니까?`)) return;
+		if (!await confirm({
+			title: '그룹 병합',
+			message: `선택한 ${ids.length}개 그룹을 그룹 #${ids[0]}으로 병합하시겠습니까?`,
+			confirmText: '병합'
+		})) return;
 		try {
 			const res = await fetchWithTimeout('/api/ic/duplicates/merge', {
 				method: 'POST',
@@ -546,9 +565,17 @@
 			return;
 		}
 		if (resolutions.length < ids.length) {
-			if (!confirm(`${ids.length}개 선택 중 ${resolutions.length}개만 확정 가능합니다.\n(나머지는 상세 로드 필요)\n\n계속하시겠습니까?`)) return;
+			if (!await confirm({
+				title: '일괄 확정',
+				message: `${ids.length}개 선택 중 ${resolutions.length}개만 확정 가능합니다.\n(나머지는 상세 로드 필요)\n\n계속하시겠습니까?`,
+				confirmText: '계속'
+			})) return;
 		} else {
-			if (!confirm(`선택한 ${resolutions.length}개 그룹을 일괄 확정하시겠습니까?`)) return;
+			if (!await confirm({
+				title: '일괄 확정',
+				message: `선택한 ${resolutions.length}개 그룹을 일괄 확정하시겠습니까?`,
+				confirmText: '확정'
+			})) return;
 		}
 
 		try {
@@ -680,7 +707,12 @@
 		if (!selectedPair || !pairKeepFolder || pairGroupIds.length === 0) return;
 		const keepFolder = pairKeepFolder === 'a' ? selectedPair.folder_a : selectedPair.folder_b;
 		const otherFolder = pairKeepFolder === 'a' ? selectedPair.folder_b : selectedPair.folder_a;
-		if (!confirm(`${pairGroupIds.length}개 그룹을 일괄 해결하시겠습니까?\n\n보관 폴더: ${keepFolder}\n삭제 대상 폴더: ${otherFolder}`)) return;
+		if (!await confirm({
+			title: '폴더 쌍 해결',
+			message: `${pairGroupIds.length}개 그룹을 일괄 해결하시겠습니까?\n\n보관 폴더: ${keepFolder}\n삭제 대상 폴더: ${otherFolder}`,
+			confirmText: '해결',
+			variant: 'danger'
+		})) return;
 
 		pairResolving = true;
 		try {
@@ -759,7 +791,12 @@
 
 	async function resolveByFolder() {
 		if (!selectedKeepFolder || folderAffectedGroupIds.length === 0) return;
-		if (!confirm(`${folderAffectedGroupIds.length}개 그룹을 일괄 해결하시겠습니까?\n\n보관 폴더: ${selectedKeepFolder}\n삭제 예정: ${folderDeleteFiles.length}개 파일`)) return;
+		if (!await confirm({
+			title: '폴더 기준 해결',
+			message: `${folderAffectedGroupIds.length}개 그룹을 일괄 해결하시겠습니까?\n\n보관 폴더: ${selectedKeepFolder}\n삭제 예정: ${folderDeleteFiles.length}개 파일`,
+			confirmText: '해결',
+			variant: 'danger'
+		})) return;
 
 		folderResolving = true;
 		try {
