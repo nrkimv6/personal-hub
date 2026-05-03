@@ -4,6 +4,7 @@
 	import { toPng } from 'html-to-image';
 	import type { InstagramPost, InstagramTag, LLMRequest } from '$lib/types';
 	import { shareWithFallback, isKakaoAvailable } from '$lib/utils/kakao';
+	import { toast } from '$lib/stores/toast';
 
 	interface Props {
 		post: InstagramPost;
@@ -284,7 +285,7 @@
 				link.click();
 			} catch (retryError) {
 				console.error('캡쳐 재시도 실패:', retryError);
-				alert('캡쳐에 실패했습니다. 이미지 로딩 문제일 수 있습니다.');
+				toast.error('캡쳐에 실패했습니다. 이미지 로딩 문제일 수 있습니다.');
 			}
 		} finally {
 			// 숨긴 요소들 복원
@@ -309,13 +310,13 @@
 			});
 
 			if (result === 'clipboard') {
-				alert('링크가 복사되었습니다!');
+				toast.success('링크가 복사되었습니다!');
 			}
 		} catch (error) {
 			// 사용자 취소는 무시
 			if ((error as Error).name === 'AbortError') return;
 			console.error('공유 실패:', error);
-			alert('공유에 실패했습니다.');
+			toast.error('공유에 실패했습니다.');
 		} finally {
 			isSharing = false;
 		}
