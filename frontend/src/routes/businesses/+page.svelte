@@ -6,6 +6,8 @@
   import { businessApi, itemApi, scheduleApi, serviceAccountApi } from '$lib/api';
   import type { Business, BusinessWithItems, BizItem, MonitorSchedule, ServiceAccountWithProfile } from '$lib/types';
   import SlotCheckModal from '$lib/components/SlotCheckModal.svelte';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
 
   let businesses: Business[] = [];
   let accounts: ServiceAccountWithProfile[] = [];
@@ -72,6 +74,10 @@
     service_account_id: null as number | null
   };
 
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
+
   async function fetchBusinesses() {
     loading = true;
     try {
@@ -106,7 +112,7 @@
     try {
       selectedBusiness = await businessApi.get(business.id);
     } catch (e) {
-      alert('아이템 로드 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('아이템 로드 실패: ' + errorMessage(e));
     } finally {
       loadingItems = false;
     }
@@ -124,7 +130,7 @@
     try {
       itemSchedules = await itemApi.getSchedules(item.id);
     } catch (e) {
-      alert('일정 로드 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('일정 로드 실패: ' + errorMessage(e));
     } finally {
       loadingSchedules = false;
     }
@@ -137,7 +143,7 @@
       newBusiness = { business_id: '', business_type_id: '', name: '', category: 'default', service_type: 'naver', is_enabled: true };
       await fetchBusinesses();
     } catch (e) {
-      alert('업체 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('업체 생성 실패: ' + errorMessage(e));
     }
   }
 
@@ -156,12 +162,17 @@
         selectedBusiness = await businessApi.get(selectedBusiness.id);
       }
     } catch (e) {
-      alert('수정 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('수정 실패: ' + errorMessage(e));
     }
   }
 
   async function handleDeleteBusiness(business: Business) {
-    if (!confirm(`"${business.name}" 업체와 모든 하위 아이템/일정이 삭제됩니다. 계속하시겠습니까?`)) return;
+    if (!await confirm({
+      title: '업체 삭제',
+      message: `"${business.name}" 업체와 모든 하위 아이템/일정이 삭제됩니다. 계속하시겠습니까?`,
+      confirmText: '삭제',
+      variant: 'danger'
+    })) return;
     try {
       await businessApi.delete(business.id);
       await fetchBusinesses();
@@ -171,7 +182,7 @@
         itemSchedules = [];
       }
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('삭제 실패: ' + errorMessage(e));
     }
   }
 
@@ -180,7 +191,7 @@
       await businessApi.update(business.id, { is_enabled: !business.is_enabled });
       await fetchBusinesses();
     } catch (e) {
-      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('상태 변경 실패: ' + errorMessage(e));
     }
   }
 
@@ -199,7 +210,7 @@
       newItem = { biz_item_id: '', name: '', time_range: '', is_enabled: true, auto_booking_enabled: false, max_bookings_per_schedule: 1 };
       selectedBusiness = await businessApi.get(selectedBusiness.id);
     } catch (e) {
-      alert('아이템 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('아이템 생성 실패: ' + errorMessage(e));
     }
   }
 
@@ -217,12 +228,17 @@
       editItem = null;
       selectedBusiness = await businessApi.get(selectedBusiness.id);
     } catch (e) {
-      alert('수정 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('수정 실패: ' + errorMessage(e));
     }
   }
 
   async function handleDeleteItem(item: BizItem) {
-    if (!confirm(`"${item.name}" 아이템과 모든 일정이 삭제됩니다. 계속하시겠습니까?`)) return;
+    if (!await confirm({
+      title: '아이템 삭제',
+      message: `"${item.name}" 아이템과 모든 일정이 삭제됩니다. 계속하시겠습니까?`,
+      confirmText: '삭제',
+      variant: 'danger'
+    })) return;
     try {
       await itemApi.delete(item.id);
       if (selectedBusiness) {
@@ -233,7 +249,7 @@
         itemSchedules = [];
       }
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('삭제 실패: ' + errorMessage(e));
     }
   }
 
@@ -244,7 +260,7 @@
         selectedBusiness = await businessApi.get(selectedBusiness.id);
       }
     } catch (e) {
-      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('상태 변경 실패: ' + errorMessage(e));
     }
   }
 
@@ -262,19 +278,24 @@
       newSchedule = { date: '', times: '', is_enabled: true, service_account_id: null };
       itemSchedules = await itemApi.getSchedules(selectedItem.id);
     } catch (e) {
-      alert('일정 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('일정 생성 실패: ' + errorMessage(e));
     }
   }
 
   async function handleDeleteSchedule(schedule: MonitorSchedule) {
-    if (!confirm('이 일정을 삭제하시겠습니까?')) return;
+    if (!await confirm({
+      title: '일정 삭제',
+      message: '이 일정을 삭제하시겠습니까?',
+      confirmText: '삭제',
+      variant: 'danger'
+    })) return;
     try {
       await scheduleApi.delete(schedule.id);
       if (selectedItem) {
         itemSchedules = await itemApi.getSchedules(selectedItem.id);
       }
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('삭제 실패: ' + errorMessage(e));
     }
   }
 
@@ -289,7 +310,7 @@
         itemSchedules = await itemApi.getSchedules(selectedItem.id);
       }
     } catch (e) {
-      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('상태 변경 실패: ' + errorMessage(e));
     }
   }
 
@@ -309,7 +330,7 @@
 
   async function handleUrlImport() {
     if (!urlImport.url) {
-      alert('URL을 입력해주세요.');
+      toast.warning('URL을 입력해주세요.');
       return;
     }
 
