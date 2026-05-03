@@ -92,12 +92,12 @@ class Settings(BaseSettings):
     #     return create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
     
     # 알림 설정
-    TELEGRAM_BOT_TOKEN: str = "7912548094:AAGp1Ii05IPFpM3uec75NTzJceYwrq2Lb4g"
-    TELEGRAM_CHAT_ID: str = "7774293093"
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
     ENABLE_DESKTOP_NOTIFICATION: bool = True
-    EMAIL_ADDRESS:str = "g100mkrw1@gmail.com"
-    EMAIL_PASSWORD:str = "Caww@60925"  # Gmail 앱 비밀번호
-    RECIPIENT_EMAIL:str = "orangepie2236@email.com"
+    EMAIL_ADDRESS: str = ""
+    EMAIL_PASSWORD: str = ""  # Gmail 앱 비밀번호
+    RECIPIENT_EMAIL: str = ""
     
     # 중복 메시지 필터링 설정
     MESSAGE_DEDUPLICATION: bool = True  # 중복 메시지 필터링 활성화 여부
