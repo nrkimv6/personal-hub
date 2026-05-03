@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { videoDownloadApi } from '$lib/api';
   import type { VideoDownload, VideoDownloadStats, VideoDownloadType, VideoDownloadStatus } from '$lib/types';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
 
   let downloads: VideoDownload[] = [];
   let stats: VideoDownloadStats | null = null;
@@ -35,6 +37,10 @@
   // 자동 새로고침
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
   let autoRefresh = true;
+
+  function errorMessage(e: unknown, fallback: string): string {
+    return e instanceof Error ? e.message : fallback;
+  }
 
   $: canPrevPage = page > 1;
   $: canNextPage = page < totalPages;
@@ -110,8 +116,9 @@
 
       // 새로고침
       await Promise.all([fetchDownloads(), fetchStats()]);
+      toast.success('다운로드 요청이 등록되었습니다.');
     } catch (e) {
-      alert(e instanceof Error ? e.message : '다운로드 요청 실패');
+      toast.error(errorMessage(e, '다운로드 요청 실패'));
     } finally {
       isSubmitting = false;
     }
@@ -120,7 +127,7 @@
   async function handleBatchSubmit() {
     const validUrls = batchUrls.filter(url => url.trim());
     if (validUrls.length === 0) {
-      alert('URL을 입력해주세요.');
+      toast.warning('URL을 입력해주세요.');
       return;
     }
 
@@ -134,7 +141,7 @@
         output_prefix: batchOutputPrefix.trim() || undefined,
       });
 
-      alert(result.message);
+      toast.success(result.message);
 
       // 폼 초기화
       resetForm();
@@ -142,7 +149,7 @@
       // 새로고침
       await Promise.all([fetchDownloads(), fetchStats()]);
     } catch (e) {
-      alert(e instanceof Error ? e.message : '배치 다운로드 요청 실패');
+      toast.error(errorMessage(e, '배치 다운로드 요청 실패'));
     } finally {
       isSubmitting = false;
     }
@@ -184,13 +191,19 @@
   $: validUrlCount = batchUrls.filter(url => url.trim()).length;
 
   async function handleCancel(id: number) {
-    if (!confirm('다운로드를 취소하시겠습니까?')) return;
+    const confirmed = await confirm({
+      title: '다운로드 취소',
+      message: '다운로드를 취소하시겠습니까?',
+      confirmText: '취소',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await videoDownloadApi.cancel(id);
       await Promise.all([fetchDownloads(), fetchStats()]);
     } catch (e) {
-      alert(e instanceof Error ? e.message : '취소 실패');
+      toast.error(errorMessage(e, '취소 실패'));
     }
   }
 
@@ -199,18 +212,24 @@
       await videoDownloadApi.retry(id);
       await Promise.all([fetchDownloads(), fetchStats()]);
     } catch (e) {
-      alert(e instanceof Error ? e.message : '재시도 실패');
+      toast.error(errorMessage(e, '재시도 실패'));
     }
   }
 
   async function handleDelete(id: number) {
-    if (!confirm('이 다운로드 기록을 삭제하시겠습니까?')) return;
+    const confirmed = await confirm({
+      title: '다운로드 기록 삭제',
+      message: '이 다운로드 기록을 삭제하시겠습니까?',
+      confirmText: '삭제',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await videoDownloadApi.delete(id);
       await Promise.all([fetchDownloads(), fetchStats()]);
     } catch (e) {
-      alert(e instanceof Error ? e.message : '삭제 실패');
+      toast.error(errorMessage(e, '삭제 실패'));
     }
   }
 
