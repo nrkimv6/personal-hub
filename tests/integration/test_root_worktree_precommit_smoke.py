@@ -24,6 +24,10 @@ def _copy_hook_scripts(src_root: Path, dst_root: Path) -> None:
         src_root / "scripts" / "git-hooks" / "pre-commit-plans-block.ps1",
         dst_hooks / "pre-commit-plans-block.ps1",
     )
+    shutil.copy2(
+        src_root / "scripts" / "git-hooks" / "root-branch-guard.ps1",
+        dst_hooks / "root-branch-guard.ps1",
+    )
 
 
 def _init_repo(tmp_path: Path) -> Path:
@@ -58,11 +62,23 @@ def _run_hook(repo_cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_root_worktree_allows_impl_scope_stage(tmp_path):
+def test_root_worktree_blocks_impl_scope_stage(tmp_path):
     repo = _init_repo(tmp_path)
     target = repo / ".claude" / "skills" / "done" / "SKILL.md"
     target.write_text("root impl change\n", encoding="utf-8")
     _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
+
+    result = _run_hook(repo)
+
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
+def test_root_worktree_allows_task_ledger_stage(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / "TODO.md"
+    target.write_text("# TODO\n\n- [ ] ledger\n", encoding="utf-8")
+    _run(["git", "add", "TODO.md"], repo)
 
     result = _run_hook(repo)
 
@@ -94,6 +110,18 @@ def test_linked_worktree_allows_impl_scope_stage(tmp_path):
     result = _run_hook(worktree)
 
     assert result.returncode == 0
+
+
+def test_root_non_main_blocks_any_commit(tmp_path):
+    repo = _init_repo(tmp_path)
+    _run(["git", "switch", "-c", "impl/accidental-root"], repo)
+    (repo / "TODO.md").write_text("# TODO\n\n- [ ] ledger\n", encoding="utf-8")
+    _run(["git", "add", "TODO.md"], repo)
+
+    result = _run_hook(repo)
+
+    assert result.returncode != 0
+    assert "root_branch_guard_blocked" in (result.stdout + result.stderr)
 
 
 def test_plans_worktree_docs_stage_passes_without_conflict(tmp_path):

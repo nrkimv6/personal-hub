@@ -12,6 +12,7 @@
 - [services/](#services)
 - [watchdogs/](#watchdogs)
 - [plan_runner/](#plan_runner)
+- [git-hooks/](#git-hooks)
 - [migrations/](#migrations)
 - [diagnostics/](#diagnostics)
 - [session_tools/](#session_tools)
@@ -122,6 +123,20 @@
 | ✅ | `worktree_manager.py` | worktree 수명 관리 |
 | ✅ | `conflict_resolver.py` | merge 충돌 자동 해결 |
 | ✅ | `queue_archived_plans.py` | 아카이브된 plan 큐잉 유틸 |
+
+---
+
+## git-hooks/
+
+> 현재 위치: `scripts/git-hooks/` ✅
+> 위험도: **🔴 고** — root checkout, plans lineage, post-merge dirty guard를 차단하는 Git hook/commit wrapper 연동 경로
+
+| 상태 | 파일 | 설명 |
+|:-:|---|---|
+| ✅ | `pre-commit-plans-block.ps1` | root branch guard와 plans lineage staged docs guard를 실행하는 pre-commit hook 본체 |
+| ✅ | `root-branch-guard.ps1` | root checkout non-main commit, root main implementation-scope staged commit, root branch drift sentinel을 차단 |
+| ✅ | `post-checkout-root-branch-guard.ps1` | root checkout이 main 밖으로 이동하면 `.git/root-branch-guard.violation` sentinel 생성 |
+| ✅ | `install-post-merge-dirty-check.ps1` | post-merge dirty check hook 설치 |
 
 ---
 

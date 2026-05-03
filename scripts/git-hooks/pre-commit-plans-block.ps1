@@ -4,6 +4,14 @@
 #
 # --no-verify 사용 절대 금지
 
+$rootBranchGuard = Join-Path $PSScriptRoot "root-branch-guard.ps1"
+if (Test-Path -LiteralPath $rootBranchGuard) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $rootBranchGuard -Mode Commit
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
 function Get-HookValue {
     param(
         [string]$Name,
