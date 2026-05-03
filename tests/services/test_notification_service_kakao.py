@@ -1,4 +1,6 @@
 """NotificationService Kakao queue tests."""
+import json
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,6 +25,7 @@ def notification_service():
         mock_settings.MEGABEAUTY_KAKAO_ALERT_BACKLOG_COOLDOWN_SECONDS = 600
         mock_settings.REDIS_HOST = "localhost"
         mock_settings.REDIS_PORT = 6379
+        mock_settings.REDIS_QUEUE_PREFIX = "monitor"
 
         from app.shared.notification.notification_service import NotificationService
         yield NotificationService()
@@ -85,5 +88,25 @@ async def test_kakao_enqueue_guard_failure_stays_kakao_scoped(notification_servi
     assert result is False
     fake_queue.enqueue.assert_awaited_once()
     mock_send_telegram.assert_not_called()
+    redis_client.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_desktop_relay_uses_notification_service_settings_patch(notification_service):
+    redis_client = AsyncMock()
+
+    with patch("redis.asyncio.Redis", return_value=redis_client), \
+         patch("app.shared.notification.notification_service.settings") as mock_settings:
+        mock_settings.REDIS_HOST = "patched-host"
+        mock_settings.REDIS_PORT = 6380
+        mock_settings.REDIS_QUEUE_PREFIX = "patched-prefix"
+
+        result = await notification_service._relay_desktop_via_redis("데스크톱 릴레이")
+
+    assert result is True
+    redis_client.lpush.assert_awaited_once()
+    queue_name, raw_payload = redis_client.lpush.await_args.args
+    assert queue_name == "patched-prefix:notification:desktop"
+    assert json.loads(raw_payload) == {"message": "데스크톱 릴레이"}
     redis_client.aclose.assert_awaited_once()
 

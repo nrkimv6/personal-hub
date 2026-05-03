@@ -448,12 +448,11 @@ class NotificationService:
         try:
             import redis.asyncio as aioredis
             from app.shared.redis.queue import DESKTOP_NOTIFICATION_QUEUE
-            from app.core.config import settings as _settings
 
-            queue_name = f"{_settings.REDIS_QUEUE_PREFIX}:{DESKTOP_NOTIFICATION_QUEUE}"
+            queue_name = f"{settings.REDIS_QUEUE_PREFIX}:{DESKTOP_NOTIFICATION_QUEUE}"
             payload = json.dumps({"message": message})
 
-            client = aioredis.Redis(host=_settings.REDIS_HOST, port=_settings.REDIS_PORT, decode_responses=True)
+            client = aioredis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, decode_responses=True)
             try:
                 await client.lpush(queue_name, payload)
                 logger.info(f"Desktop 알림 Redis 릴레이 성공: {queue_name}")

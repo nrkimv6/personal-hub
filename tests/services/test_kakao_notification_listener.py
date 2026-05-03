@@ -64,6 +64,10 @@ async def test_send_via_cli_missing_exe_returns_false(listener):
 
 @pytest.mark.asyncio
 async def test_send_via_cli_timeout_kills_process(listener):
+    async def timeout_without_await_leak(awaitable, *, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
     fake_cli_path = Path(r"D:\work\project\tools\kakaocli-win\.venv\Scripts\kakaocli-win.exe")
     proc = MagicMock()
     proc.communicate = AsyncMock(return_value=(b"", b""))
@@ -74,7 +78,7 @@ async def test_send_via_cli_timeout_kills_process(listener):
     with patch.object(listener, "_get_cli_path", return_value=fake_cli_path), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)), \
-         patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+         patch("asyncio.wait_for", side_effect=timeout_without_await_leak):
         result = await listener._send_via_cli("소나무봇", "메시지")
 
     assert result is False
