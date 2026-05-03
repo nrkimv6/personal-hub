@@ -48,6 +48,7 @@ def mobile_sync_e2e_context(
 
     migrations_dir = Path(__file__).resolve().parents[2] / "app" / "modules" / "slide_scanner" / "migrations"
     _apply_sql_file(engine, migrations_dir / "001_initial.sql")
+    _apply_sql_file(engine, migrations_dir / "006_tags.sql")
     _apply_sql_file(engine, migrations_dir / "010_mobile_ingest.sql")
     _apply_sql_file(engine, migrations_dir / "011_slides_source_device.sql")
     _apply_sql_file(engine, migrations_dir / "012_rectifier_detect_meta.sql")

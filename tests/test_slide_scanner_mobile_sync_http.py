@@ -156,6 +156,7 @@ def slide_scanner_http_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     _apply_sql_file(engine, migrations_dir / "003_aspect_ratio.sql")
     _apply_sql_file(engine, migrations_dir / "004_filters.sql")
     _apply_sql_file(engine, migrations_dir / "005_ocr.sql")
+    _apply_sql_file(engine, migrations_dir / "006_tags.sql")
     _apply_sql_file(engine, migrations_dir / "010_mobile_ingest.sql")
     _apply_sql_file(engine, migrations_dir / "011_slides_source_device.sql")
     _apply_sql_file(engine, migrations_dir / "012_rectifier_detect_meta.sql")
@@ -387,6 +388,7 @@ def test_mobile_review_handoff_http_slide_lookup_by_response_slide_id(
                     captured_at,
                     source_app,
                     source_device_id,
+                    tag,
                     thumbnail,
                     is_archived
                 ) VALUES (
@@ -396,6 +398,7 @@ def test_mobile_review_handoff_http_slide_lookup_by_response_slide_id(
                     '2026-04-03T12:00:00+00:00',
                     'mobile:phone-a',
                     'phone-a',
+                    'mobile-review',
                     :thumbnail,
                     0
                 )
@@ -436,3 +439,4 @@ def test_mobile_review_handoff_http_slide_lookup_by_response_slide_id(
     assert slide_response.status_code == 200
     slide_payload = slide_response.json()
     assert slide_payload["id"] == slide_id
+    assert slide_payload["tag"] == "mobile-review"
