@@ -15,6 +15,7 @@
 	import type { Event, EventCreate, EventUpdate, ExpoMapDocument, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
 	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
 	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 	import { localParticipation } from '$lib/stores/localParticipation';
 	import { Link } from 'lucide-svelte';
@@ -72,6 +73,10 @@
 	let sortOrder = $state('asc');
 	let unknownPeriodFilter = $state('include');  // exclude/include/only
 	let showFilters = $state(false);
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
 
 	// =========================================================
 	// URL 파라미터 동기화 헬퍼
@@ -466,13 +471,19 @@
 
 	async function handleDeleteEvent() {
 		if (!viewingEvent) return;
-		if (!confirm('이 이벤트를 삭제하시겠습니까?')) return;
+		const confirmed = await confirm({
+			title: '이벤트 삭제',
+			message: '이 이벤트를 삭제하시겠습니까?',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 		try {
 			await eventApi.delete(viewingEvent.id);
 			closeFeedViewer();
 			await fetchEvents();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -628,10 +639,10 @@
 	async function handleRecrawl(postId: number): Promise<void> {
 		try {
 			await collectApi.recrawlPost(postId);
-			alert('재크롤링 요청이 등록되었습니다.');
+			toast.success('재크롤링 요청이 등록되었습니다.');
 		} catch (e) {
 			console.error('재크롤링 요청 실패:', e);
-			alert('재크롤링 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재크롤링 요청 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -643,20 +654,26 @@
 			}
 		} catch (e) {
 			console.error('태그 저장 실패:', e);
-			alert('태그 저장 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('태그 저장 실패: ' + errorMessage(e));
 			throw e;
 		}
 	}
 
 	async function handleDeletePost(postId: number): Promise<void> {
-		if (!confirm('이 게시물을 삭제하시겠습니까?')) return;
+		const confirmed = await confirm({
+			title: '게시물 삭제',
+			message: '이 게시물을 삭제하시겠습니까?',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 		try {
 			await collectApi.deletePost(postId);
 			closeFeedViewer();
 			await fetchEvents();
 		} catch (e) {
 			console.error('삭제 실패:', e);
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -668,10 +685,10 @@
 		}
 		try {
 			await collectApi.requestLlmAnalysisSingle(postId);
-			alert('AI 분석 요청이 등록되었습니다.');
+			toast.success('AI 분석 요청이 등록되었습니다.');
 		} catch (e) {
 			console.error('AI 분석 요청 실패:', e);
-			alert('AI 분석 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('AI 분석 요청 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -682,11 +699,11 @@
 	async function handleReclassify(post: UncategorizedPost, target: 'event' | 'popup') {
 		try {
 			await uncategorizedApi.reclassify(post.id, { target, title: post.title || undefined });
-			alert(`${target === 'event' ? '이벤트' : '팝업'}로 재분류되었습니다.`);
+			toast.success(`${target === 'event' ? '이벤트' : '팝업'}로 재분류되었습니다.`);
 			await fetchEvents();
 		} catch (e) {
 			console.error('재분류 실패:', e);
-			alert('재분류 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재분류 실패: ' + errorMessage(e));
 		}
 	}
 
