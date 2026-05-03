@@ -143,6 +143,8 @@ class Settings(BaseSettings):
     MEMORY_FATAL_MB: int = 256      # 강제 재부팅 임계값 (MB)
     MEMORY_HEAVY_TEST_PROCESS_MB: float = 1500.0  # pre-fatal 완화에서 선제 종료 후보로 간주할 test_*.py RSS 임계값 (MB)
     MEMORY_PRESSURE_OUTBOUND_ALERT_MAX_MB: int = 500  # 500MB 이상은 history-only, 미만만 outbound 허용
+    MEMORY_SINGLE_PROCESS_LIMIT_MB: float = 0.0  # 단일 프로세스 RSS 경고 임계값(MB). 0이면 비활성, 자동 종료 없음
+    MEMORY_SINGLE_PROCESS_ALERT_COOLDOWN_SEC: int = 600  # 같은 PID 단일 프로세스 RSS 경고 쿨다운(초)
 
     # bizItems API 캐싱 설정 (REQ-MON-006)
     BIZ_ITEMS_CACHE_TTL_NORMAL: int = 300  # 정상 운영 시 캐시 TTL (초) - 5분

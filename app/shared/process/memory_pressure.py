@@ -40,6 +40,8 @@ _HEAVY_TEST_PROCESS_MB_MIN = 256.0
 _PRE_FATAL_REPEAT_WINDOW_SEC = 1800
 _PRE_FATAL_REPEAT_ALERT_THRESHOLD = 3
 _PRE_FATAL_KILL_REASON = "memory_pressure_pre_fatal"
+_SINGLE_PROCESS_LIMIT_ACTION = "single_process_memory_limit"
+_SINGLE_PROCESS_LIMIT_REASON = "memory_single_process_limit"
 _MEMORY_PRESSURE_HISTORY_LEVELS = {
     "critical",
     "emergency",
@@ -368,6 +370,7 @@ class MemoryPressureResponder:
     ) -> None:
         self.orphan_detector = orphan_detector
         self._last_alert_time: dict[str, float] = {}  # 단계명 → 최종 알림 시각
+        self._last_single_process_alert_time: dict[int, float] = {}
         self._fatal_triggered: bool = False
         self._pre_fatal_recovery_times: deque[float] = deque()
         self._state_writer = state_writer or write_memory_pressure_state
@@ -400,6 +403,7 @@ class MemoryPressureResponder:
             level = "fatal"
 
         await self._publish_pressure_state(level, available_mb)
+        self._record_single_process_limit_violations()
         return level
 
     async def _publish_pressure_state(self, level: str, available_mb: float) -> None:
@@ -429,6 +433,89 @@ class MemoryPressureResponder:
     def _record_alert(self, level: str) -> None:
         """알림 시각을 기록한다."""
         self._last_alert_time[level] = time.time()
+
+    def _resolve_single_process_limit_mb(self) -> float:
+        """단일 프로세스 RSS 경고 임계값을 정규화한다. 0 이하는 비활성."""
+        raw_value = getattr(settings, "MEMORY_SINGLE_PROCESS_LIMIT_MB", 0.0)
+        try:
+            limit_mb = float(raw_value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[memory-pressure] event=single_process_limit_invalid raw=%r disabled=true",
+                raw_value,
+            )
+            return 0.0
+        if not math.isfinite(limit_mb) or limit_mb <= 0:
+            return 0.0
+        return limit_mb
+
+    def _should_record_single_process_limit(self, pid: int) -> bool:
+        cooldown = max(1, int(getattr(settings, "MEMORY_SINGLE_PROCESS_ALERT_COOLDOWN_SEC", 600)))
+        now = time.time()
+        last = self._last_single_process_alert_time.get(pid, 0.0)
+        if now - last < cooldown:
+            return False
+        self._last_single_process_alert_time[pid] = now
+        return True
+
+    def _record_single_process_limit_action(self, proc: dict, threshold_mb: float) -> None:
+        """threshold 초과 단일 프로세스를 process-watch action log에 기록한다."""
+        registry = getattr(self.orphan_detector, "registry", None)
+        if registry is None:
+            return
+        try:
+            from app.shared.process.snapshot_writer import SnapshotWriter
+
+            writer = SnapshotWriter(registry)
+            writer.record_kill_action(
+                action=_SINGLE_PROCESS_LIMIT_ACTION,
+                pid=int(proc["pid"]),
+                cmdline_hash=str(proc.get("cmdline_hash") or ""),
+                reason=_SINGLE_PROCESS_LIMIT_REASON,
+                actor="memory_pressure",
+                result="observed",
+                detail=(
+                    f"memory_mb={float(proc.get('memory_mb', 0.0)):.1f} "
+                    f"threshold_mb={threshold_mb:.1f} "
+                    f"name={proc.get('name') or ''} "
+                    f"script_path={proc.get('script_path') or ''} "
+                    "auto_kill=false"
+                ),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[memory-pressure] event=single_process_limit_action_log_failed pid=%s reason=%s",
+                proc.get("pid"),
+                exc,
+            )
+
+    def _record_single_process_limit_violations(self) -> list[dict]:
+        """단일 프로세스 RSS 임계값 초과를 경고/감사 로그로 남긴다.
+
+        자동 종료는 기본 동작이 아니다. 위험한 운영 프로세스 오탐을 피하기 위해
+        먼저 관측 가능한 process-watch action log만 남긴다.
+        """
+        threshold_mb = self._resolve_single_process_limit_mb()
+        if threshold_mb <= 0:
+            return []
+        violations = [
+            proc
+            for proc in self._get_top_processes(20)
+            if float(proc.get("memory_mb", 0.0)) >= threshold_mb
+        ]
+        for proc in violations:
+            pid = int(proc.get("pid", 0) or 0)
+            if pid <= 0 or not self._should_record_single_process_limit(pid):
+                continue
+            logger.warning(
+                "[memory-pressure] event=single_process_limit_exceeded pid=%s name=%s memory_mb=%.1f threshold_mb=%.1f auto_kill=false",
+                pid,
+                proc.get("name"),
+                float(proc.get("memory_mb", 0.0)),
+                threshold_mb,
+            )
+            self._record_single_process_limit_action(proc, threshold_mb)
+        return violations
 
     def _resolve_heavy_test_threshold_mb(self) -> float:
         """pre-fatal 완화 후보 선별 임계값을 정규화한다."""
@@ -637,6 +724,12 @@ class MemoryPressureResponder:
                     cmdline = []
 
                 script_path = _extract_script_path(cmdline)
+                cmdline_hash = hashlib.sha256(
+                    " ".join(str(part) for part in cmdline if part).strip().encode(
+                        "utf-8",
+                        errors="ignore",
+                    )
+                ).hexdigest()[:32] if cmdline else ""
 
                 # 부모 프로세스 정보
                 try:
@@ -671,6 +764,7 @@ class MemoryPressureResponder:
                     "name": proc.info["name"],
                     "memory_mb": round(rss / (1024 * 1024), 1),
                     "script_path": script_path,
+                    "cmdline_hash": cmdline_hash,
                     "ppid": ppid,
                     "parent_name": parent_name,
                     "ppid_alive": ppid_alive,

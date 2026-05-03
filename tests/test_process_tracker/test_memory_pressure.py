@@ -563,6 +563,7 @@ def test_get_top_processes_includes_extended_fields():
     assert "parent_name" in entry
     assert "ppid_alive" in entry
     assert "is_orphan" in entry
+    assert "cmdline_hash" in entry
     assert entry["script_path"] == "app/worker/orchestrator.py"
 
 
@@ -592,6 +593,82 @@ def test_get_top_processes_access_denied_graceful():
 
     assert len(result) == 1
     assert result[0]["script_path"] is None
+
+
+# ── single process limit 관측 ─────────────────────────────────────────────────
+
+def test_single_process_limit_disabled_skips_top_process_scan():
+    """B: MEMORY_SINGLE_PROCESS_LIMIT_MB=0 → 단일 프로세스 한도 관측 비활성."""
+    responder = make_responder()
+
+    with patch.object(
+        responder,
+        "_get_top_processes",
+        MagicMock(return_value=[{"pid": 1, "memory_mb": 9999.0}]),
+    ) as mock_top, \
+         patch.object(
+             __import__("app.shared.process.memory_pressure", fromlist=["settings"]).settings,
+             "MEMORY_SINGLE_PROCESS_LIMIT_MB",
+             0.0,
+         ):
+        result = responder._record_single_process_limit_violations()
+
+    assert result == []
+    mock_top.assert_not_called()
+
+
+def test_single_process_limit_records_process_watch_action():
+    """R: threshold 초과 프로세스 → 자동 종료 없이 process-watch action log 기록."""
+    from app.shared.process import memory_pressure
+
+    detector = make_orphan_detector()
+    responder = memory_pressure.MemoryPressureResponder(detector)
+    heavy_proc = {
+        "pid": 1234,
+        "name": "python.exe",
+        "memory_mb": 800.0,
+        "script_path": "tests/test_heavy.py",
+        "cmdline_hash": "abc123",
+    }
+
+    with patch.object(memory_pressure.settings, "MEMORY_SINGLE_PROCESS_LIMIT_MB", 500.0), \
+         patch.object(memory_pressure.settings, "MEMORY_SINGLE_PROCESS_ALERT_COOLDOWN_SEC", 600), \
+         patch.object(responder, "_get_top_processes", return_value=[heavy_proc]), \
+         patch("app.shared.process.snapshot_writer.SnapshotWriter") as writer_cls:
+        result = responder._record_single_process_limit_violations()
+
+    assert result == [heavy_proc]
+    writer = writer_cls.return_value
+    writer.record_kill_action.assert_called_once()
+    kwargs = writer.record_kill_action.call_args.kwargs
+    assert kwargs["action"] == "single_process_memory_limit"
+    assert kwargs["pid"] == 1234
+    assert kwargs["reason"] == "memory_single_process_limit"
+    assert kwargs["result"] == "observed"
+    assert "auto_kill=false" in kwargs["detail"]
+
+
+def test_single_process_limit_respects_pid_cooldown():
+    """B: 같은 PID의 threshold 초과 반복 관측은 cooldown 동안 action log를 중복 기록하지 않는다."""
+    from app.shared.process import memory_pressure
+
+    detector = make_orphan_detector()
+    responder = memory_pressure.MemoryPressureResponder(detector)
+    heavy_proc = {
+        "pid": 1234,
+        "name": "python.exe",
+        "memory_mb": 800.0,
+        "cmdline_hash": "abc123",
+    }
+
+    with patch.object(memory_pressure.settings, "MEMORY_SINGLE_PROCESS_LIMIT_MB", 500.0), \
+         patch.object(memory_pressure.settings, "MEMORY_SINGLE_PROCESS_ALERT_COOLDOWN_SEC", 600), \
+         patch.object(responder, "_get_top_processes", return_value=[heavy_proc]), \
+         patch("app.shared.process.snapshot_writer.SnapshotWriter") as writer_cls:
+        responder._record_single_process_limit_violations()
+        responder._record_single_process_limit_violations()
+
+    writer_cls.return_value.record_kill_action.assert_called_once()
 
 
 # ── warning 로그 출력 ─────────────────────────────────────────────────────────
