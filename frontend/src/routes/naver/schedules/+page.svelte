@@ -10,6 +10,8 @@
   import BusinessManager from '$lib/components/businesses/BusinessManager.svelte';
   import PopupUrlMonitorPanel from '$lib/components/naver/PopupUrlMonitorPanel.svelte';
   import { createSelection } from '$lib/utils/selection.svelte';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
 
   let schedules: ScheduleWithContext[] = [];
   let businesses: Business[] = [];
@@ -20,9 +22,18 @@
   // 멀티 선택
   const selection = createSelection();
 
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
+
   async function bulkToggleEnabled(enable: boolean) {
     if (selection.count === 0) return;
-    if (!confirm(`선택한 ${selection.count}개 일정을 ${enable ? '활성화' : '비활성화'}하시겠습니까?`)) return;
+    const confirmed = await confirm({
+      title: enable ? '일정 일괄 활성화' : '일정 일괄 비활성화',
+      message: `선택한 ${selection.count}개 일정을 ${enable ? '활성화' : '비활성화'}하시겠습니까?`,
+      confirmText: enable ? '활성화' : '비활성화'
+    });
+    if (!confirmed) return;
     try {
       for (const id of selection.toArray()) {
         if (enable) {
@@ -34,13 +45,19 @@
       selection.clear();
       await fetchSchedules();
     } catch (e) {
-      alert('일괄 처리 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('일괄 처리 실패: ' + errorMessage(e));
     }
   }
 
   async function bulkDelete() {
     if (selection.count === 0) return;
-    if (!confirm(`선택한 ${selection.count}개 일정을 삭제하시겠습니까?`)) return;
+    const confirmed = await confirm({
+      title: '일정 일괄 삭제',
+      message: `선택한 ${selection.count}개 일정을 삭제하시겠습니까?`,
+      confirmText: '삭제',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       for (const id of selection.toArray()) {
         await scheduleApi.delete(id);
@@ -48,7 +65,7 @@
       selection.clear();
       await fetchSchedules();
     } catch (e) {
-      alert('일괄 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('일괄 삭제 실패: ' + errorMessage(e));
     }
   }
 
@@ -244,29 +261,40 @@
       }
       await fetchRecurringRules();
     } catch (e) {
-      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('상태 변경 실패: ' + errorMessage(e));
     }
   }
 
   async function handleDeleteRecurringRule(rule: RecurringRuleWithContext) {
-    if (!confirm(`${rule.business_name} - ${rule.item_name}\n"${rule.name}" 반복 규칙을 삭제하시겠습니까?`)) return;
+    const confirmed = await confirm({
+      title: '반복 규칙 삭제',
+      message: `${rule.business_name} - ${rule.item_name}\n"${rule.name}" 반복 규칙을 삭제하시겠습니까?`,
+      confirmText: '삭제',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await scheduleRecurringApi.delete(rule.id);
       await fetchRecurringRules();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('삭제 실패: ' + errorMessage(e));
     }
   }
 
   async function handleTriggerRecurringRule(rule: RecurringRuleWithContext) {
-    if (!confirm(`"${rule.name}" 규칙을 수동으로 트리거하시겠습니까?\n일정이 즉시 생성됩니다.`)) return;
+    const confirmed = await confirm({
+      title: '반복 규칙 수동 실행',
+      message: `"${rule.name}" 규칙을 수동으로 트리거하시겠습니까?\n일정이 즉시 생성됩니다.`,
+      confirmText: '실행'
+    });
+    if (!confirmed) return;
     try {
       const result = await scheduleRecurringApi.trigger(rule.id);
-      alert(`${result.created_count}개의 일정이 생성되었습니다.`);
+      toast.success(`${result.created_count}개의 일정이 생성되었습니다.`);
       await fetchRecurringRules();
       await fetchSchedules();
     } catch (e) {
-      alert('트리거 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('트리거 실패: ' + errorMessage(e));
     }
   }
 
@@ -598,7 +626,7 @@
       }
       await fetchSchedules();
     } catch (e) {
-      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('상태 변경 실패: ' + errorMessage(e));
     }
   }
 
@@ -609,17 +637,23 @@
       });
       await fetchSchedules();
     } catch (e) {
-      alert('자동예약 설정 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('자동예약 설정 변경 실패: ' + errorMessage(e));
     }
   }
 
   async function handleDeleteSchedule(schedule: ScheduleWithContext) {
-    if (!confirm(`${schedule.business_name} - ${schedule.item_name}\n${schedule.date} 일정을 삭제하시겠습니까?`)) return;
+    const confirmed = await confirm({
+      title: '일정 삭제',
+      message: `${schedule.business_name} - ${schedule.item_name}\n${schedule.date} 일정을 삭제하시겠습니까?`,
+      confirmText: '삭제',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await scheduleApi.delete(schedule.id);
       await fetchSchedules();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('삭제 실패: ' + errorMessage(e));
     }
   }
 
@@ -657,7 +691,7 @@
       editSchedule = null;
       await fetchSchedules();
     } catch (e) {
-      alert('수정 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('수정 실패: ' + errorMessage(e));
     }
   }
 
@@ -712,7 +746,7 @@
   // URL로 일정 생성
   async function handleCreateFromUrl() {
     if (!createForm.url) {
-      alert('URL을 입력해주세요.');
+      toast.warning('URL을 입력해주세요.');
       return;
     }
     createLoading = true;
@@ -729,12 +763,12 @@
         const nameInfo = bizName || itemName ? ` (${[bizName, itemName].filter(Boolean).join(' / ')})` : '';
         showCreateModal = false;
         await fetchSchedules();
-        alert(`일정이 등록되었습니다.${nameInfo}`);
+        toast.success(`일정이 등록되었습니다.${nameInfo}`);
       } else {
-        alert(result.message || '등록 실패');
+        toast.error(result.message || '등록 실패');
       }
     } catch (e) {
-      alert('등록 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('등록 실패: ' + errorMessage(e));
     } finally {
       createLoading = false;
     }
@@ -743,7 +777,7 @@
   // 아이템 선택으로 일정 생성
   async function handleCreateFromSelect() {
     if (!createForm.item_id || !createForm.date) {
-      alert('아이템과 날짜를 선택해주세요.');
+      toast.warning('아이템과 날짜를 선택해주세요.');
       return;
     }
     createLoading = true;
@@ -759,9 +793,9 @@
       await itemApi.createSchedule(createForm.item_id, scheduleData);
       showCreateModal = false;
       await fetchSchedules();
-      alert('일정이 등록되었습니다.');
+      toast.success('일정이 등록되었습니다.');
     } catch (e) {
-      alert('등록 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('등록 실패: ' + errorMessage(e));
     } finally {
       createLoading = false;
     }
@@ -781,7 +815,7 @@
   // 일정 복제
   async function handleDuplicate() {
     if (!duplicateSchedule || !duplicateForm.date) {
-      alert('날짜를 입력해주세요.');
+      toast.warning('날짜를 입력해주세요.');
       return;
     }
     try {
@@ -798,7 +832,7 @@
       duplicateSchedule = null;
       await fetchSchedules();
     } catch (e) {
-      alert('복제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('복제 실패: ' + errorMessage(e));
     }
   }
 
@@ -837,7 +871,7 @@
       }, 2000);
     } catch (e) {
       console.error('클립보드 복사 실패:', e);
-      alert('클립보드 복사에 실패했습니다.');
+      toast.error('클립보드 복사에 실패했습니다.');
     }
   }
 
