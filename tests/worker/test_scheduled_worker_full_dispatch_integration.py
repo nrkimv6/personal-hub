@@ -205,6 +205,90 @@ async def test_main_loop_iteration_consumes_manual_run_without_duplicate_start(s
 
 
 @pytest.mark.asyncio
+async def test_main_loop_iteration_records_instagram_exact_slot_scheduled_for(session_factory):
+    from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
+    from app.worker.schedule_handler_base import HandlerRunOutcome
+
+    now = datetime.now().replace(second=0, microsecond=0)
+    slot = now.strftime("%H:%M")
+    with session_factory() as db:
+        _create_schedule(
+            db,
+            name="instagram-feed-exact-slot",
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            target_config={"service_account_id": 1, "min_interval_hours": 0},
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            schedule_value=json.dumps(
+                {
+                    "daily_runs": 1,
+                    "time_windows": [{"start": slot, "end": slot}],
+                }
+            ),
+        )
+
+    worker = _build_worker(session_factory)
+    worker._handlers = [InstagramFeedScheduler()]
+
+    with patch.object(
+        InstagramFeedScheduler,
+        "execute",
+        AsyncMock(return_value=HandlerRunOutcome(collected_count=0, saved_count=0)),
+    ), patch("app.worker.scheduled_worker.SessionLocal", session_factory):
+        await worker._main_loop_iteration()
+        await _drain_running_tasks(worker)
+
+    with session_factory() as db:
+        run = db.query(TaskScheduleRun).one()
+
+    assert run.status == TaskScheduleRun.STATUS_COMPLETED
+    assert run.get_config_snapshot()["scheduled_for"] == now.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_main_loop_iteration_records_instagram_overnight_rollover_slot(session_factory):
+    from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
+    from app.modules.instagram.services.scheduler import InstagramScheduler
+    from app.worker.schedule_handler_base import HandlerRunOutcome
+
+    due_run_time = datetime(2026, 5, 4, 0, 1)
+    with session_factory() as db:
+        _create_schedule(
+            db,
+            name="instagram-feed-overnight-slot",
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            target_config={"service_account_id": 1, "min_interval_hours": 0},
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            schedule_value=json.dumps(
+                {
+                    "daily_runs": 1,
+                    "time_windows": [{"start": "23:59", "end": "00:01"}],
+                }
+            ),
+        )
+
+    worker = _build_worker(session_factory)
+    worker._handlers = [InstagramFeedScheduler()]
+
+    with patch.object(
+        InstagramScheduler,
+        "get_due_run_time",
+        return_value=due_run_time,
+    ), patch.object(
+        InstagramFeedScheduler,
+        "execute",
+        AsyncMock(return_value=HandlerRunOutcome(collected_count=0, saved_count=0)),
+    ), patch("app.worker.scheduled_worker.SessionLocal", session_factory):
+        await worker._main_loop_iteration()
+        await _drain_running_tasks(worker)
+
+    with session_factory() as db:
+        run = db.query(TaskScheduleRun).one()
+
+    assert run.status == TaskScheduleRun.STATUS_COMPLETED
+    assert run.get_config_snapshot()["scheduled_for"] == due_run_time.isoformat()
+
+
+@pytest.mark.asyncio
 async def test_main_loop_iteration_uses_counts_only_complete_run_for_system_handler(session_factory):
     from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
     from app.services.task_schedule_service import TaskScheduleService

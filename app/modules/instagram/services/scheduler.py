@@ -1,17 +1,18 @@
-"""Instagram Scheduler - 하루 3번 랜덤 시간 스케줄링."""
+"""Deterministic time-window scheduler used by scheduled workers."""
 
-import random
 import hashlib
-from datetime import datetime, time, timedelta
+import random
+from datetime import date as date_type, datetime, time, timedelta
 from typing import List, Optional, Tuple
 
 from ..models.schemas import TimeWindow
 
 
 class InstagramScheduler:
-    """하루 3번 랜덤 시간에 크롤링 실행하는 스케줄러.
+    """Time-window based scheduler.
 
-    동일한 날짜에는 동일한 스케줄을 생성합니다 (결정적 랜덤).
+    동일한 날짜에는 동일한 스케줄을 생성합니다. ``start == end``는 하루
+    전체 범위가 아니라 정확한 실행 시각으로 처리합니다.
     """
 
     def __init__(
@@ -38,7 +39,7 @@ class InstagramScheduler:
         else:
             self.time_windows = time_windows
 
-    def _get_seed_for_date(self, date: datetime.date) -> int:
+    def _get_seed_for_date(self, date: date_type) -> int:
         """날짜별 결정적 시드 생성."""
         seed_str = f"{self.seed_prefix}_{date.isoformat()}"
         hash_value = hashlib.md5(seed_str.encode()).hexdigest()
@@ -57,7 +58,29 @@ class InstagramScheduler:
         """분 단위를 time 객체로 변환."""
         return time(hour=minutes // 60, minute=minutes % 60)
 
-    def generate_daily_schedule(self, date: datetime.date = None) -> List[datetime]:
+    def _window_to_minutes(self, window: TimeWindow) -> tuple[int, int]:
+        """윈도우 시작/종료 시각을 분 단위로 변환."""
+        start = self._parse_time(window.start)
+        end = self._parse_time(window.end)
+        return self._time_to_minutes(start), self._time_to_minutes(end)
+
+    def _datetime_from_minutes(self, base_date: date_type, minutes: int) -> datetime:
+        """기준 날짜와 분 단위 시각을 datetime으로 변환."""
+        run_date = base_date
+        if minutes >= 24 * 60:
+            minutes -= 24 * 60
+            run_date = base_date + timedelta(days=1)
+        return datetime.combine(run_date, self._minutes_to_time(minutes))
+
+    def generate_calendar_day_schedule(self, day: date_type) -> List[datetime]:
+        """Calendar day에 표시/판정할 스케줄 후보를 반환."""
+        candidates = (
+            self.generate_daily_schedule(day - timedelta(days=1))
+            + self.generate_daily_schedule(day)
+        )
+        return sorted(run_time for run_time in candidates if run_time.date() == day)
+
+    def generate_daily_schedule(self, date: date_type = None) -> List[datetime]:
         """하루의 실행 시간 목록 생성.
 
         Args:
@@ -73,34 +96,36 @@ class InstagramScheduler:
         seed = self._get_seed_for_date(date)
         rng = random.Random(seed)
 
-        times = []
+        if self.daily_runs <= 0 or not self.time_windows:
+            return []
 
-        # 각 시간대에서 랜덤 시간 선택
-        for window in self.time_windows[:self.daily_runs]:
-            start = self._parse_time(window.start)
-            end = self._parse_time(window.end)
+        times: list[datetime] = []
+        exact_seen: set[int] = set()
+        exact_windows: list[tuple[int, TimeWindow]] = []
+        range_windows: list[tuple[int, int, TimeWindow]] = []
 
-            start_minutes = self._time_to_minutes(start)
-            end_minutes = self._time_to_minutes(end)
-
-            # 종료가 시작보다 작으면 (예: 23:00-01:00) 다음날로 간주
-            if end_minutes <= start_minutes:
+        for window in self.time_windows:
+            start_minutes, end_minutes = self._window_to_minutes(window)
+            if start_minutes == end_minutes:
+                if start_minutes not in exact_seen:
+                    exact_windows.append((start_minutes, window))
+                    exact_seen.add(start_minutes)
+                continue
+            if end_minutes < start_minutes:
                 end_minutes += 24 * 60
+            range_windows.append((start_minutes, end_minutes, window))
 
-            random_minutes = rng.randint(start_minutes, end_minutes)
+        # Exact windows are explicit slots. When only exact slots exist, daily_runs is
+        # an upper bound because inventing extra times would change the saved intent.
+        for exact_minutes, _window in exact_windows[:self.daily_runs]:
+            times.append(self._datetime_from_minutes(date, exact_minutes))
 
-            # 24시간 초과 처리
-            if random_minutes >= 24 * 60:
-                random_minutes -= 24 * 60
-                run_date = date + timedelta(days=1)
-            else:
-                run_date = date
-
-            run_time = datetime.combine(
-                run_date,
-                self._minutes_to_time(random_minutes)
-            )
-            times.append(run_time)
+        remaining_runs = self.daily_runs - len(times)
+        if remaining_runs > 0 and range_windows:
+            for index in range(remaining_runs):
+                start_minutes, end_minutes, _window = range_windows[index % len(range_windows)]
+                random_minutes = rng.randint(start_minutes, end_minutes)
+                times.append(self._datetime_from_minutes(date, random_minutes))
 
         return sorted(times)
 
@@ -116,18 +141,48 @@ class InstagramScheduler:
         if now is None:
             now = datetime.now()
 
-        # 오늘 스케줄에서 남은 실행 시간 확인
-        today_schedule = self.generate_daily_schedule(now.date())
-        for run_time in today_schedule:
+        candidate_dates = [
+            now.date() - timedelta(days=1),
+            now.date(),
+            now.date() + timedelta(days=1),
+        ]
+        candidates = sorted(
+            run_time
+            for candidate_date in candidate_dates
+            for run_time in self.generate_daily_schedule(candidate_date)
+        )
+        for run_time in candidates:
             if run_time > now:
                 return run_time
 
-        # 오늘 모두 지남 → 내일 첫 실행
-        tomorrow = now.date() + timedelta(days=1)
-        tomorrow_schedule = self.generate_daily_schedule(tomorrow)
+        return None
 
-        if tomorrow_schedule:
-            return tomorrow_schedule[0]
+    def get_due_run_time(
+        self,
+        last_run: Optional[datetime] = None,
+        now: datetime = None,
+        tolerance_minutes: int = 5,
+        min_interval_hours: int = 0
+    ) -> Optional[datetime]:
+        """현재 허용 오차 내에서 실행해야 할 예정 시각 반환."""
+        if now is None:
+            now = datetime.now()
+
+        if min_interval_hours > 0 and last_run is not None:
+            min_interval = timedelta(hours=min_interval_hours)
+            if (now - last_run) < min_interval:
+                return None
+
+        tolerance = timedelta(minutes=tolerance_minutes)
+        candidates = sorted(
+            self.generate_daily_schedule(now.date() - timedelta(days=1))
+            + self.generate_daily_schedule(now.date())
+        )
+
+        for run_time in candidates:
+            if run_time <= now <= run_time + tolerance:
+                if last_run is None or last_run < run_time:
+                    return run_time
 
         return None
 
@@ -149,31 +204,17 @@ class InstagramScheduler:
         Returns:
             실행해야 하면 True
         """
-        if now is None:
-            now = datetime.now()
-
-        # 최소 간격 체크: 마지막 실행 후 min_interval_hours 시간이 지나지 않았으면 스킵
-        if min_interval_hours > 0 and last_run is not None:
-            min_interval = timedelta(hours=min_interval_hours)
-            if (now - last_run) < min_interval:
-                return False
-
-        today_schedule = self.generate_daily_schedule(now.date())
-        tolerance = timedelta(minutes=tolerance_minutes)
-
-        for run_time in today_schedule:
-            # 예정 시간이 지났고, 허용 범위 내
-            if run_time <= now <= run_time + tolerance:
-                # 마지막 실행이 이 시간 이전이면 실행
-                if last_run is None or last_run < run_time:
-                    return True
-
-        return False
+        return self.get_due_run_time(
+            last_run=last_run,
+            now=now,
+            tolerance_minutes=tolerance_minutes,
+            min_interval_hours=min_interval_hours,
+        ) is not None
 
     def get_completed_count(
         self,
         last_runs: List[datetime],
-        date: datetime.date = None
+        date: date_type = None
     ) -> int:
         """오늘 완료된 실행 횟수.
 
@@ -206,7 +247,7 @@ class InstagramScheduler:
         if now is None:
             now = datetime.now()
 
-        schedule = self.generate_daily_schedule(now.date())
+        schedule = self.generate_calendar_day_schedule(now.date())
         result = []
 
         for run_time in schedule:

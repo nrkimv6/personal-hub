@@ -608,6 +608,55 @@ class CrawlService:
             TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED
         ).first()
 
+    def _validate_schedule_config(
+        self,
+        daily_runs: int,
+        time_windows: List[TimeWindow],
+        min_interval_hours: int,
+    ) -> None:
+        """Reject saved schedules that cannot represent the requested run count."""
+        if daily_runs < 1:
+            raise ValueError("daily_runs는 1 이상이어야 합니다.")
+        if not time_windows:
+            raise ValueError("time_windows는 최소 1개 이상이어야 합니다.")
+        if min_interval_hours < 0:
+            raise ValueError("min_interval_hours는 0 이상이어야 합니다.")
+
+        exact_minutes: list[int] = []
+        range_count = 0
+        for window in time_windows:
+            start_hour, start_minute = [int(part) for part in window.start.split(":")]
+            end_hour, end_minute = [int(part) for part in window.end.split(":")]
+            start_minutes = start_hour * 60 + start_minute
+            end_minutes = end_hour * 60 + end_minute
+            if start_minutes == end_minutes:
+                exact_minutes.append(start_minutes)
+            else:
+                range_count += 1
+
+        unique_exact_minutes = sorted(set(exact_minutes))
+        if len(unique_exact_minutes) != len(exact_minutes):
+            raise ValueError("exact slot time_windows에 중복 시각이 있습니다.")
+
+        if exact_minutes and range_count == 0 and len(unique_exact_minutes) != daily_runs:
+            raise ValueError(
+                "exact slot만 사용할 때 daily_runs는 중복 제거된 time_windows 개수와 같아야 합니다."
+            )
+
+        if min_interval_hours and len(unique_exact_minutes) > 1:
+            gaps = [
+                later - earlier
+                for earlier, later in zip(unique_exact_minutes, unique_exact_minutes[1:])
+            ]
+            gaps.append((unique_exact_minutes[0] + 24 * 60) - unique_exact_minutes[-1])
+            min_gap = min(gaps)
+            if min_gap < min_interval_hours * 60:
+                raise ValueError(
+                    "min_interval_hours가 exact slot 간격보다 커서 일부 예약이 실행될 수 없습니다."
+                )
+        elif min_interval_hours and daily_runs > 1 and min_interval_hours * (daily_runs - 1) >= 24:
+            raise ValueError("min_interval_hours가 daily_runs에 비해 커서 하루 실행 횟수를 만족할 수 없습니다.")
+
     def update_schedule_config(
         self,
         enabled: Optional[bool] = None,
@@ -647,6 +696,8 @@ class CrawlService:
 
         # target_config 업데이트
         target_config = schedule.get_target_config()
+        if not isinstance(target_config, dict):
+            target_config = {}
 
         if max_posts is not None:
             target_config["max_posts"] = max_posts
@@ -684,6 +735,25 @@ class CrawlService:
 
         if time_windows is not None:
             schedule_value["time_windows"] = [tw.model_dump() for tw in time_windows]
+
+        effective_daily_runs = schedule_value.get("daily_runs", 3)
+        default_time_windows_data = [
+            {"start": "07:00", "end": "10:00"},
+            {"start": "12:00", "end": "15:00"},
+            {"start": "19:00", "end": "23:00"},
+        ]
+        effective_time_windows_data = schedule_value.get("time_windows", default_time_windows_data)
+        if time_windows is None and not effective_time_windows_data:
+            effective_time_windows_data = default_time_windows_data
+        effective_time_windows = [
+            TimeWindow(**tw) for tw in effective_time_windows_data
+        ]
+        effective_min_interval = target_config.get("min_interval_hours", 2)
+        self._validate_schedule_config(
+            daily_runs=effective_daily_runs,
+            time_windows=effective_time_windows,
+            min_interval_hours=effective_min_interval,
+        )
 
         schedule.schedule_value = json.dumps(schedule_value, ensure_ascii=False)
         schedule.updated_at = datetime.now()
@@ -819,20 +889,32 @@ class CrawlService:
         ).all()
 
         now = datetime.now()
-        schedule_times = scheduler.generate_daily_schedule(now.date())
+        schedule_times = scheduler.generate_calendar_day_schedule(now.date())
 
         result = []
+        matched_count = 0
         for run_time in schedule_times:
-            # 해당 시간대에 실행된 기록 찾기 (1시간 이내)
+            # 해당 시간대에 실행된 기록 찾기. scheduled_for가 있는 신규 실행은
+            # 정확히 매칭하고, 과거 실행 기록은 시작 시각 기준 1시간 허용 오차로 매칭한다.
             matching_run = None
             for run in today_runs:
-                if abs((run.started_at - run_time).total_seconds()) < 3600:
+                scheduled_for = self._parse_run_scheduled_for(run)
+                if scheduled_for == run_time:
+                    matching_run = run
+                    break
+                if scheduled_for is None and abs((run.started_at - run_time).total_seconds()) < 3600:
                     matching_run = run
                     break
 
             # 상태 결정 (status 필드 사용)
             if matching_run:
-                status = "completed" if matching_run.status == TaskScheduleRun.STATUS_COMPLETED else "missed"
+                matched_count += 1
+                if matching_run.status == TaskScheduleRun.STATUS_RUNNING:
+                    status = "running"
+                elif matching_run.status == TaskScheduleRun.STATUS_COMPLETED:
+                    status = "completed"
+                else:
+                    status = "missed"
                 run_id = matching_run.id
             elif run_time <= now:
                 status = "missed"
@@ -847,7 +929,22 @@ class CrawlService:
                 run_id=run_id,
             ))
 
+        logger.debug(
+            "today_schedule_slots schedule_count=%s matched_run_count=%s",
+            len(schedule_times),
+            matched_count,
+        )
         return result
+
+    def _parse_run_scheduled_for(self, run: TaskScheduleRun) -> Optional[datetime]:
+        """Run config_snapshot의 scheduled_for를 datetime으로 파싱."""
+        scheduled_for = run.get_config_snapshot().get("scheduled_for")
+        if not scheduled_for:
+            return None
+        try:
+            return datetime.fromisoformat(scheduled_for)
+        except (TypeError, ValueError):
+            return None
 
     def classify_failure(self, error: Exception) -> str:
         """실패 원인 분류.

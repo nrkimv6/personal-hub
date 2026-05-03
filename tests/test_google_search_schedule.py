@@ -28,6 +28,8 @@ from app.models.google_search import (
     GoogleSearchHistory,
     GoogleSavedSearch,
 )
+from app.modules.instagram.models.schemas import TimeWindow
+from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.main import app
 from app.database import get_db
 
@@ -114,6 +116,18 @@ class TestTaskScheduleConstants:
 
 class TestGoogleScheduleResults:
     """Google 검색 스케줄 결과 테스트."""
+
+    def test_exact_slot_time_window_is_not_randomized(self):
+        """Google 검색도 공유 due checker의 exact slot 의미를 따른다."""
+        scheduler = InstagramScheduler(
+            daily_runs=1,
+            time_windows=[TimeWindow(start="09:00", end="09:00")],
+            seed_prefix="google_search_schedule",
+        )
+
+        run_time = scheduler.generate_daily_schedule(datetime(2026, 5, 3).date())
+
+        assert run_time == [datetime(2026, 5, 3, 9, 0)]
 
     def test_schedule_creation_with_google_search_type(self, db_session, sample_saved_search):
         """Google 검색 타입으로 스케줄 생성."""

@@ -8,6 +8,7 @@ import pytest
 from app.modules.writing.schedulers.keyword_analysis_schedule import KeywordAnalysisScheduler
 from app.modules.writing.schedulers.writing_source_schedule import WritingSourceScheduler
 from app.modules.writing.schedulers.writing_task_schedule import WritingTaskScheduler
+from app.worker.schedule_time_utils import build_time_window_scheduler
 from app.worker.schedule_handler_base import ClaimedRun, HandlerRunOutcome, WorkerContext
 from app.worker.scheduled_worker import ScheduledCrawlWorker
 
@@ -51,6 +52,25 @@ def test_claim_run_starts_run_when_time_window_is_due():
         worker_id="scheduled_worker",
         config_snapshot=schedule.get_target_config.return_value,
     )
+
+
+def test_shared_time_window_scheduler_supports_exact_slots():
+    scheduler = build_time_window_scheduler(
+        {
+            "daily_runs": 2,
+            "time_windows": [
+                {"start": "09:00", "end": "09:00"},
+                {"start": "18:00", "end": "18:00"},
+            ],
+        }
+    )
+
+    schedule = scheduler.generate_daily_schedule(datetime(2026, 5, 3).date())
+
+    assert schedule == [
+        datetime(2026, 5, 3, 9, 0),
+        datetime(2026, 5, 3, 18, 0),
+    ]
 
 
 def test_claim_run_prefers_pending_manual_run_over_due_check():

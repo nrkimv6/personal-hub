@@ -50,20 +50,50 @@ class InstagramFeedScheduler(ScheduleHandler):
         last_run_time = last_run.started_at if last_run else None
         min_interval = config.get("min_interval_hours", 2)
 
-        if not scheduler.should_run_now(last_run=last_run_time, min_interval_hours=min_interval):
+        due_run_time = scheduler.get_due_run_time(last_run=last_run_time, min_interval_hours=min_interval)
+        if due_run_time is None:
+            next_due = scheduler.get_next_run_time()
+            logger.debug(
+                "[%s] Instagram schedule not due: schedule_id=%s next_due=%s last_run=%s "
+                "min_interval_hours=%s daily_runs=%s time_windows_count=%s",
+                ctx.worker_name,
+                schedule.id,
+                next_due.isoformat() if next_due else None,
+                last_run_time.isoformat() if last_run_time else None,
+                min_interval,
+                schedule_value.get("daily_runs", 3),
+                len(schedule_value.get("time_windows", [])),
+            )
             return None
 
-        logger.info("[%s] 스케줄 실행 시간 도래: schedule_id=%s", ctx.worker_name, schedule.id)
+        logger.info(
+            "[%s] 스케줄 실행 시간 도래: schedule_id=%s, scheduled_for=%s",
+            ctx.worker_name,
+            schedule.id,
+            due_run_time.isoformat(),
+        )
         if svc.has_active_run(schedule.id):
             logger.info("[%s] 이미 활성 실행 존재, 스킵", ctx.worker_name)
             return None
+
+        config_snapshot = dict(config)
+        config_snapshot.update(
+            {
+                "scheduled_for": due_run_time.isoformat(),
+                "schedule_params": {
+                    "daily_runs": schedule_value.get("daily_runs", 3),
+                    "time_windows": schedule_value.get("time_windows", []),
+                    "min_interval_hours": min_interval,
+                },
+            }
+        )
 
         return start_claimed_run(
             schedule=schedule,
             svc=svc,
             ctx=ctx,
             task_name_prefix="instagram_schedule",
-            config_snapshot=config,
+            config_snapshot=config_snapshot,
         )
 
     async def execute(

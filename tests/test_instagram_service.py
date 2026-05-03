@@ -152,14 +152,35 @@ class TestSchedulerBoundary:
         assert len(schedule) == 1
 
     def test_many_runs_schedule(self, sample_time_windows):
-        """많은 횟수의 스케줄 생성 (윈도우 개수 초과시 윈도우 개수만큼)"""
+        """많은 횟수의 스케줄 생성 (범위 윈도우는 daily_runs만큼 반복 배분)"""
         from app.modules.instagram.services.scheduler import InstagramScheduler
         # 10회 요청하지만 윈도우는 3개만 있음
         scheduler = InstagramScheduler(daily_runs=10, time_windows=sample_time_windows)
         schedule = scheduler.generate_daily_schedule()
 
-        # 윈도우 개수만큼만 생성됨
-        assert len(schedule) == 3
+        assert len(schedule) == 10
+
+    def test_exact_time_windows_schedule(self):
+        """start == end 시간 윈도우는 정확한 예약 시각으로 생성"""
+        from app.modules.instagram.services.scheduler import InstagramScheduler
+
+        run_date = date(2026, 5, 3)
+        scheduler = InstagramScheduler(
+            daily_runs=4,
+            time_windows=[
+                TimeWindow(start="07:00", end="07:00"),
+                TimeWindow(start="09:00", end="09:00"),
+                TimeWindow(start="12:00", end="12:00"),
+                TimeWindow(start="15:00", end="15:00"),
+            ],
+        )
+
+        assert scheduler.generate_daily_schedule(run_date) == [
+            datetime(2026, 5, 3, 7, 0),
+            datetime(2026, 5, 3, 9, 0),
+            datetime(2026, 5, 3, 12, 0),
+            datetime(2026, 5, 3, 15, 0),
+        ]
 
     def test_default_time_windows(self):
         """기본 시간 윈도우 사용"""
@@ -492,6 +513,74 @@ class TestCrawlService:
         updated = service.update_schedule_config(enabled=False, daily_runs=5)
 
         assert updated.enabled is False
+
+    def test_get_today_schedule_matches_scheduled_for_snapshot(self, mock_db):
+        """오늘 스케줄은 config_snapshot.scheduled_for로 실행 슬롯을 매칭"""
+        import json
+        from app.modules.instagram.services.crawl_service import CrawlService
+        from app.models.task_schedule import TaskScheduleRun
+
+        today = date.today()
+        scheduled_for = datetime.combine(today, datetime.min.time().replace(hour=9))
+        schedule_config = MagicMock()
+        schedule_config.enabled = True
+        schedule_config.schedule_value = json.dumps(
+            {
+                "daily_runs": 1,
+                "time_windows": [{"start": "09:00", "end": "09:00"}],
+            }
+        )
+
+        run = MagicMock(spec=TaskScheduleRun)
+        run.id = 77
+        run.started_at = scheduled_for + timedelta(hours=2)
+        run.status = TaskScheduleRun.STATUS_COMPLETED
+        run.get_config_snapshot.return_value = {"scheduled_for": scheduled_for.isoformat()}
+
+        mock_db.query.return_value.join.return_value.filter.return_value.all.return_value = [run]
+        service = CrawlService(mock_db)
+        service.get_schedule_config = MagicMock(return_value=schedule_config)
+
+        result = service.get_today_schedule()
+
+        assert len(result) == 1
+        assert result[0].scheduled_time == "09:00"
+        assert result[0].status == "completed"
+        assert result[0].run_id == 77
+
+    def test_update_schedule_config_rejects_exact_slot_daily_runs_mismatch(self, mock_db):
+        """exact slot만 있을 때 daily_runs와 슬롯 개수 불일치를 거부"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+
+        service = CrawlService(mock_db)
+        service.get_schedule_config = MagicMock(return_value=None)
+
+        with pytest.raises(ValueError, match="daily_runs"):
+            service.update_schedule_config(
+                daily_runs=3,
+                time_windows=[
+                    TimeWindow(start="09:00", end="09:00"),
+                    TimeWindow(start="18:00", end="18:00"),
+                ],
+                min_interval_hours=0,
+            )
+
+    def test_update_schedule_config_rejects_exact_slot_min_interval_conflict(self, mock_db):
+        """exact slot 간격보다 큰 min_interval_hours를 거부"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+
+        service = CrawlService(mock_db)
+        service.get_schedule_config = MagicMock(return_value=None)
+
+        with pytest.raises(ValueError, match="min_interval_hours"):
+            service.update_schedule_config(
+                daily_runs=2,
+                time_windows=[
+                    TimeWindow(start="09:00", end="09:00"),
+                    TimeWindow(start="10:00", end="10:00"),
+                ],
+                min_interval_hours=2,
+            )
 
 
 # ============================================================
