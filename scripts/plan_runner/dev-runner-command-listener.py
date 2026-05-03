@@ -150,9 +150,10 @@ def _propagate_fallback_done_failure(
         return
 
     reason = str(done_result.get("reason") or done_result.get("status") or "done_post_merge_failed")
+    merge_status = "residue_blocked" if reason == "residue_guard" else "error"
     _pub_and_log(runner_id, f"{context} fallback done 실패 전파: {reason}", redis_client, "MERGE-FALLBACK")
     try:
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", merge_status)
     except Exception:
         pass
 
