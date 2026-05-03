@@ -2,6 +2,7 @@
 	import { devRunnerPlanApi } from '$lib/api';
 	import type { DevRunnerPlanFileResponse, DevRunnerRegisteredPathResponse } from '$lib/api';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
+	import { confirm } from '$lib/stores/confirm';
 
 	let doneLoadingPath = $state<string | null>(null);
 	let doneMessage = $state<{ path: string; success: boolean; text: string; remaining?: number; total?: number; planStatus?: string } | null>(null);
@@ -10,7 +11,11 @@
 
 	async function handleDone(e: Event, plan: DevRunnerPlanFileResponse) {
 		e.stopPropagation();
-		if (!confirm('완료 처리를 실행하시겠습니까?\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.')) return;
+		if (!await confirm({
+			title: '완료 처리',
+			message: '완료 처리를 실행하시겠습니까?\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.',
+			confirmText: '실행'
+		})) return;
 		doneLoadingPath = plan.path;
 		doneMessage = null;
 		try {
@@ -36,7 +41,12 @@
 
 	async function handleBatchDone() {
 		// 백엔드가 무시 목록(구현완료 등) 포함 전체 대상 처리
-		if (!confirm('완료 가능한 plan을 일괄 완료 처리하시겠습니까?\n(구현완료 상태 포함)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.')) return;
+		if (!await confirm({
+			title: '완료 일괄 처리',
+			message: '완료 가능한 plan을 일괄 완료 처리하시겠습니까?\n(구현완료 상태 포함)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.',
+			confirmText: '일괄 처리',
+			variant: 'danger'
+		})) return;
 		batchDoneLoading = true;
 		doneMessage = null;
 		try {
@@ -56,7 +66,12 @@
 	}
 
 	async function handleBatchVerifyDone() {
-		if (!confirm('코드베이스 검증 기반으로 완료 가능한 plan을 일괄 처리하시겠습니까?\n(파일 존재 여부 + 체크박스 기반 판정)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.')) return;
+		if (!await confirm({
+			title: '검증 기반 완료 처리',
+			message: '코드베이스 검증 기반으로 완료 가능한 plan을 일괄 처리하시겠습니까?\n(파일 존재 여부 + 체크박스 기반 판정)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.',
+			confirmText: '일괄 처리',
+			variant: 'danger'
+		})) return;
 		batchVerifyDoneLoading = true;
 		doneMessage = null;
 		try {

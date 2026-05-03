@@ -4,6 +4,7 @@
 	import type { DevRunnerRunStatusResponse } from '$lib/api';
 	import LogViewer from './LogViewer.svelte';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
+	import { confirm } from '$lib/stores/confirm';
 
 	interface LogViewerRef {
 		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
@@ -101,7 +102,7 @@
 	});
 
 	async function handleStop() {
-		if (!confirm('이 runner를 중지하시겠습니까?')) return;
+		if (!await confirm({ title: 'Runner 중지', message: '이 runner를 중지하시겠습니까?', confirmText: '중지' })) return;
 		stopping = true;
 		stopError = null;
 		try {
@@ -115,7 +116,12 @@
 	}
 
 	async function handleKill() {
-		if (!confirm(`runner ${runnerId}를 강제 종료합니까? 진행 중인 작업이 유실됩니다.`)) return;
+		if (!await confirm({
+			title: 'Runner 강제 종료',
+			message: `runner ${runnerId}를 강제 종료합니까? 진행 중인 작업이 유실됩니다.`,
+			confirmText: '강제 종료',
+			variant: 'danger'
+		})) return;
 		killing = true;
 		stopError = null;
 		try {
@@ -187,7 +193,12 @@
 	}
 
 	async function handleCleanupWorktree() {
-		if (!confirm('worktree를 정리하시겠습니까? 미저장 변경사항이 삭제됩니다.')) return;
+		if (!await confirm({
+			title: 'Worktree 정리',
+			message: 'worktree를 정리하시겠습니까? 미저장 변경사항이 삭제됩니다.',
+			confirmText: '정리',
+			variant: 'danger'
+		})) return;
 		try {
 			await devRunnerRunnerApi.cleanupWorktree(runnerId);
 		} catch (e) {

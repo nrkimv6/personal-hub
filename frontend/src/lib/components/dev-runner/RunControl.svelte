@@ -15,6 +15,7 @@ import PlanIdentityHeader from '$lib/components/dev-runner/execute-modal/PlanIde
 import ActionBar from '$lib/components/dev-runner/execute-modal/ActionBar.svelte';
 import ExecutionSettingsForm from '$lib/components/dev-runner/execute-modal/ExecutionSettingsForm.svelte';
 import SummaryProgress from '$lib/components/dev-runner/execute-modal/SummaryProgress.svelte';
+import { confirm } from '$lib/stores/confirm';
 
 	interface Props {
 		open?: boolean;
@@ -267,10 +268,11 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	async function updateModel(phase: string, model: string) {
 		if (!selectedEngineConfig || !selectedEngine) return;
 		try {
-			const overwriteAll = confirm(
-				`"${selectedEngine}" 엔진의 모든 phase 모델을 "${model}"로 덮어쓸까요?\n` +
-				"취소하면 현재 phase만 변경됩니다."
-			);
+			const overwriteAll = await confirm({
+				title: 'Phase 모델 덮어쓰기',
+				message: `"${selectedEngine}" 엔진의 모든 phase 모델을 "${model}"로 덮어쓸까요?\n취소하면 현재 phase만 변경됩니다.`,
+				confirmText: '전체 덮어쓰기'
+			});
 			if (overwriteAll) {
 				await devRunnerEngineApi.update(selectedEngine, {
 					default_model: model,
@@ -359,7 +361,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	}
 
 	async function handleStop() {
-		if (!confirm('실행을 중지하시겠습니까?')) return;
+		if (!await confirm({ title: '실행 중지', message: '실행을 중지하시겠습니까?', confirmText: '중지' })) return;
 		actionLoading = true;
 		actionError = null;
 		try {
@@ -405,7 +407,12 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		const msg = fullReset
 			? '전체 리셋: 모든 작업 기록을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.'
 			: 'RUNNING 상태를 초기화하시겠습니까?\n미완료 작업이 PENDING으로 복구됩니다.';
-		if (!confirm(msg)) return;
+		if (!await confirm({
+			title: fullReset ? '전체 리셋' : 'RUNNING 상태 초기화',
+			message: msg,
+			confirmText: fullReset ? '전체 리셋' : '초기화',
+			variant: fullReset ? 'danger' : 'default'
+		})) return;
 		actionLoading = true;
 		actionError = null;
 		try {
