@@ -12,13 +12,12 @@ Admin API GET /events 엔드포인트의 initial status 응답을 검증한다.
    visible runner 검증은 app/modules/dev_runner/tests/test_event_service.py에서 fakeredis로 수행.
 """
 
-import json
-import time
 import uuid
 
 import pytest
 import redis as redis_lib
-import requests
+
+from tests.dev_runner.sse_filter_helpers import collect_initial_status_with_retry
 
 ADMIN_API = "http://localhost:8001"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
@@ -27,26 +26,19 @@ ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 SSE_EVENTS_URL = f"{ADMIN_API}/api/v1/dev-runner/events"
 
 
-def _collect_initial_status_http(timeout: float = 5.0) -> list[dict]:
+def _collect_initial_status_http(
+    timeout: float = 5.0,
+    max_retries: int | None = None,
+    retry_delay: float | None = None,
+) -> list[dict]:
     """SSE /events 연결 후 초기 status 이벤트의 runners 목록 반환"""
-    try:
-        with requests.get(SSE_EVENTS_URL, stream=True, timeout=timeout + 1) as resp:
-            assert resp.status_code == 200, f"GET /events HTTP {resp.status_code}"
-            current_event = "message"
-            deadline = time.monotonic() + timeout
-            for raw_line in resp.iter_lines(decode_unicode=True):
-                if time.monotonic() > deadline:
-                    break
-                if not raw_line:
-                    current_event = "message"
-                    continue
-                if raw_line.startswith("event:"):
-                    current_event = raw_line[6:].strip()
-                elif raw_line.startswith("data:") and current_event == "status":
-                    return json.loads(raw_line[5:].strip()).get("runners", [])
-    except Exception:
-        pass
-    return []
+    return collect_initial_status_with_retry(
+        SSE_EVENTS_URL,
+        timeout=timeout,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
+        require_status_code=200,
+    )
 
 
 @pytest.fixture
