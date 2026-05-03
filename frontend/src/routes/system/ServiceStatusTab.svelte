@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { serviceDashboardApi, systemApi, processWatchApi } from '$lib/api';
   import { apiGate } from '$lib/stores/apiGate.svelte';
+  import { toast } from '$lib/stores/toast';
   import type {
     ServiceDashboardStatus,
     RedisStatus,
@@ -15,7 +16,9 @@
   import SectionSkeleton from '$lib/components/ui/SectionSkeleton.svelte';
   import ServiceDashboardSection from './service-status/ServiceDashboardSection.svelte';
   import ProcessWatchSection from './service-status/ProcessWatchSection.svelte';
+  import ProcessKillReasonDialog from './service-status/ProcessKillReasonDialog.svelte';
   import CleanupStatsSection from './service-status/CleanupStatsSection.svelte';
+  import { createServiceStatusActions } from './service-status/actions';
   import {
     groupBy,
     groupTasksByFolder,
@@ -85,6 +88,9 @@
   let processPollingInterval: ReturnType<typeof setInterval> | null = null;
   let processMemBaseline = $state<Record<string, { memoryMb: number; capturedAtMs: number }>>({});
   let processMemDeltaRate = $state<Record<string, number | null>>({});
+  let killDialogOpen = $state(false);
+  let killDialogItem = $state<ProcessWatchItem | null>(null);
+  let killReasonDefault = $state('');
 
   const PROCESS_REFRESH_INTERVAL = 5000;
   const REFRESH_INTERVAL = 30000;
@@ -229,20 +235,18 @@
     confirmDialog = { open: true, title, description, confirmText, destructive, action };
   }
 
-  async function runWithActionLoading(
-    actionKey: string,
-    work: () => Promise<void>,
-    onErrorPrefix: string
-  ): Promise<void> {
-    actionLoading = actionKey;
-    try {
-      await work();
-    } catch (e) {
-      alert(`${onErrorPrefix}: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally {
-      actionLoading = null;
-    }
-  }
+  const actions = createServiceStatusActions({
+    serviceDashboardApi,
+    devRunnerRunnerApi,
+    fetchStatus,
+    fetchExtraStatus,
+    getRedisStatus: () => redisStatus,
+    getDevRunnerRunnerId: () => devRunnerStatus?.runner_id,
+    setActionLoading: (actionKey) => {
+      actionLoading = actionKey;
+    },
+    toast
+  });
 
   async function fetchStatus() {
     try {
@@ -355,18 +359,28 @@
     }
   }
 
-  async function handleKillProcess(item: ProcessWatchItem) {
+  function requestKillProcess(item: ProcessWatchItem) {
     const scope = item.scope ?? 'external';
-    const defaultReason = scope === 'monitor_page'
+    killDialogItem = item;
+    killReasonDefault = scope === 'monitor_page'
       ? 'memory pressure cleanup'
       : 'external process emergency cleanup';
+    killDialogOpen = true;
+  }
 
-    const reason = window.prompt(
-      `PID ${item.pid} 종료 사유를 입력하세요 (최소 8자).\nscope=${scope}`,
-      defaultReason
-    );
-    if (!reason || reason.trim().length < 8) {
-      alert('종료 사유는 최소 8자 이상이어야 합니다.');
+  function cancelKillProcess() {
+    killDialogOpen = false;
+    killDialogItem = null;
+    killReasonDefault = '';
+  }
+
+  async function confirmKillProcess(reason: string) {
+    const trimmedReason = reason.trim();
+    const item = killDialogItem;
+    if (!item) return;
+
+    if (trimmedReason.length < 8) {
+      toast.error('종료 사유는 최소 8자 이상이어야 합니다.');
       return;
     }
 
@@ -379,18 +393,20 @@
             pid: item.pid,
             expected_create_time: item.create_time,
             expected_cmdline_hash: item.cmdline_hash,
-            reason: reason.trim(),
-            force: scope !== 'monitor_page'
+            reason: trimmedReason,
+            force: (item.scope ?? 'external') !== 'monitor_page'
           });
           await fetchProcessWatch();
         } catch (e) {
           console.error('프로세스 종료 실패:', e);
-          alert(`프로세스 종료 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+          toast.error(`프로세스 종료 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
         }
       },
       true,
       '강제 종료'
     );
+    killDialogItem = null;
+    killReasonDefault = '';
   }
 
   async function fetchCleanupStats() {
@@ -487,119 +503,6 @@
     }
   }
 
-  async function stopDevRunnerWithFallback() {
-    const runnerId = devRunnerStatus?.runner_id;
-    if (runnerId) {
-      await devRunnerRunnerApi.stop(runnerId);
-      return;
-    }
-    await devRunnerRunnerApi.stopLegacy();
-  }
-
-  async function stopService(name: string) {
-    await runWithActionLoading(`nssm-stop-${name}`, async () => {
-      await serviceDashboardApi.stopNssm(name);
-      await fetchStatus();
-    }, '중지 실패');
-  }
-
-  async function startService(name: string) {
-    await runWithActionLoading(`nssm-start-${name}`, async () => {
-      await serviceDashboardApi.startNssm(name);
-      await fetchStatus();
-    }, '시작 실패');
-  }
-
-  async function removeStartup(name: string) {
-    await runWithActionLoading(`startup-${name}`, async () => {
-      await serviceDashboardApi.removeStartup(name);
-      await fetchStatus();
-    }, '제거 실패');
-  }
-
-  async function runTask(folder: string, name: string) {
-    await runWithActionLoading(`run-${folder}-${name}`, async () => {
-      await serviceDashboardApi.runTask(folder, name);
-      await fetchStatus();
-    }, '실행 실패');
-  }
-
-  async function removeTask(folder: string, name: string) {
-    await runWithActionLoading(`task-${folder}-${name}`, async () => {
-      await serviceDashboardApi.removeTask(folder, name);
-      await fetchStatus();
-    }, '제거 실패');
-  }
-
-  async function restartWorkers() {
-    await runWithActionLoading('workers', async () => {
-      await serviceDashboardApi.restartWorkers();
-      await fetchStatus();
-    }, '재시작 실패');
-  }
-
-  async function restartSingleWorker(name: string) {
-    await runWithActionLoading(`worker-${name}`, async () => {
-      await serviceDashboardApi.restartWorker(name);
-      await fetchStatus();
-    }, '재시작 실패');
-  }
-
-  async function restartInfra(name: string) {
-    await runWithActionLoading(`infra-${name}`, async () => {
-      await serviceDashboardApi.restartInfra(name);
-      await fetchStatus();
-    }, '재시작 실패');
-  }
-
-  async function stopWatchdogs() {
-    await runWithActionLoading('watchdogs-stop', async () => {
-      await serviceDashboardApi.stopWatchdogs();
-      await fetchStatus();
-    }, '중지 실패');
-  }
-
-  async function startWatchdogs() {
-    if (redisStatus && !redisStatus.connected) {
-      alert('Redis가 연결되지 않았습니다.\nwatchdog 시작은 Redis Command Listener를 경유합니다.\n\nCLI에서 실행: python scripts/services/browser_workers.py start');
-      return;
-    }
-
-    await runWithActionLoading('watchdogs-start', async () => {
-      await serviceDashboardApi.startWatchdogs();
-      await fetchStatus();
-    }, '시작 실패\n\nCLI에서 실행: python scripts/services/browser_workers.py start');
-  }
-
-  async function startDevRunner() {
-    await runWithActionLoading('dev-runner-start', async () => {
-      await devRunnerRunnerApi.start({});
-      await fetchExtraStatus();
-    }, '시작 실패');
-  }
-
-  async function stopDevRunner() {
-    await runWithActionLoading('dev-runner-stop', async () => {
-      await stopDevRunnerWithFallback();
-      await fetchExtraStatus();
-    }, '중지 실패');
-  }
-
-  async function restartDevRunner() {
-    await runWithActionLoading('dev-runner-restart', async () => {
-      await stopDevRunnerWithFallback();
-      await devRunnerRunnerApi.start({});
-      await fetchExtraStatus();
-    }, '재시작 실패');
-  }
-
-  async function resetDevRunner() {
-    await runWithActionLoading('dev-runner-reset', async () => {
-      await devRunnerRunnerApi.resetState();
-      await fetchExtraStatus();
-    }, '리셋 실패');
-  }
-
   async function openApiGateManually() {
     await fetch('/__local/api-gate/open', {
       method: 'POST',
@@ -607,21 +510,6 @@
       body: JSON.stringify({ reason: 'manual service status open' })
     });
     await apiGate.refreshStatus();
-  }
-
-  async function restartCommandListener() {
-    await runWithActionLoading('restart-listener', async () => {
-      await devRunnerRunnerApi.restartListener();
-      await fetchExtraStatus();
-    }, '리스너 재시작 실패');
-  }
-
-  async function restartRedis() {
-    await runWithActionLoading('redis-restart', async () => {
-      const result = await serviceDashboardApi.restartRedis();
-      alert(result.message);
-      await fetchExtraStatus();
-    }, '재시작 실패\n\nCLI: scripts/services/browser_workers.py redis-restart');
   }
 
   onMount(() => {
@@ -650,6 +538,14 @@
   destructive={confirmDialog.destructive}
   onConfirm={confirmDialog.action}
   onCancel={() => {}}
+/>
+
+<ProcessKillReasonDialog
+  bind:open={killDialogOpen}
+  item={killDialogItem}
+  defaultReason={killReasonDefault}
+  onConfirm={confirmKillProcess}
+  onCancel={cancelKillProcess}
 />
 
 <div class="space-y-4 max-w-6xl mx-auto">
@@ -727,22 +623,7 @@
       {refreshStatus}
       {selfRestartApi}
       {resetSelfRestartState}
-      {stopService}
-      {startService}
-      {restartWorkers}
-      {stopWatchdogs}
-      {startWatchdogs}
-      {restartSingleWorker}
-      {restartInfra}
-      {runTask}
-      {removeTask}
-      {restartRedis}
-      {restartDevRunner}
-      {stopDevRunner}
-      {resetDevRunner}
-      {startDevRunner}
-      {removeStartup}
-      {restartCommandListener}
+      {actions}
     />
   {:else}
     <div class="bg-card rounded-lg border border-border shadow-card p-8 text-center">
@@ -766,7 +647,7 @@
     {processLoading}
     {toggleProcessPolling}
     {fetchProcessWatch}
-    {handleKillProcess}
+    {requestKillProcess}
     {getProcessDeltaRate}
     {formatProcessDelta}
     {processDeltaTextClass}
