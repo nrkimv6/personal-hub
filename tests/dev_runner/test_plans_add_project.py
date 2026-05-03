@@ -164,7 +164,7 @@ class TestAddProjectPlansWorktree:
     """plans worktree가 있으면 worktree 경로도 추가 등록 (dual-path contract)"""
 
     def test_prefers_plans_worktree_paths(self, client, tmp_path):
-        """기존 TC 업데이트: dual-path 환경에서 4개 모두 등록"""
+        """dual-path 환경에서 worktree 경로를 먼저 등록하고 4개 모두 등록"""
         project_root = tmp_path / "monitor-page"
         (project_root / ".worktrees" / "plans" / "docs" / "plan").mkdir(parents=True)
         (project_root / ".worktrees" / "plans" / "docs" / "archive").mkdir(parents=True)
@@ -176,5 +176,7 @@ class TestAddProjectPlansWorktree:
         data = resp.json()
 
         assert any(".worktrees" in item for item in data["added"])
+        assert ".worktrees" in data["added"][0]
+        assert ".worktrees" in data["added"][1]
         assert len(data["added"]) == 4  # docs + worktree 모두 등록
         assert len(data["skipped"]) == 0

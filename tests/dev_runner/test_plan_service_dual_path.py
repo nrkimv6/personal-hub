@@ -20,6 +20,8 @@ class TestPlanPathHelpers:
         types = [t for _, t in candidates]
         assert types.count("plan") == 2
         assert types.count("archive") == 2
+        assert ".worktrees" in str(candidates[0][0])
+        assert ".worktrees" in str(candidates[1][0])
 
     def test_extract_repo_root_from_worktree_path(self, tmp_path):
         """extract_repo_root_from_plan_path: .worktrees/plans/docs/plan/foo.md → repo root"""

@@ -80,10 +80,10 @@ def iter_repo_plan_path_candidates(repo_root: Path) -> List[Tuple[Path, str]]:
     존재 여부와 무관하게 4개 후보를 모두 반환한다. 존재 확인은 호출처에서 수행.
     """
     return [
-        (repo_root / "docs" / "plan", "plan"),
-        (repo_root / "docs" / "archive", "archive"),
         (repo_root / ".worktrees" / "plans" / "docs" / "plan", "plan"),
         (repo_root / ".worktrees" / "plans" / "docs" / "archive", "archive"),
+        (repo_root / "docs" / "plan", "plan"),
+        (repo_root / "docs" / "archive", "archive"),
     ]
 
 
