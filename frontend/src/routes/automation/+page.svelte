@@ -234,7 +234,7 @@
 	toolbar={mainTab === 'plans' ? plansToolbar : undefined}
 	density="compact"
 	containerClass="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-4 lg:p-6"
-	contentClass="min-h-0 flex-1 overflow-hidden"
+	contentClass="min-h-0 flex-1 flex flex-col overflow-hidden"
 >
 	<div class="flex-1 overflow-hidden">
 		{#if mainTab === 'dev-runner'}
