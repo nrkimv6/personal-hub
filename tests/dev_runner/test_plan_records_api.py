@@ -8,6 +8,9 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 
+pytestmark = pytest.mark.http
+
+
 @pytest.fixture(scope="module")
 def test_db_engine(tmp_path_factory):
     """Plan records API 전용 SQLite 엔진.
