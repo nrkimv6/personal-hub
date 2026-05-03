@@ -3,11 +3,16 @@
 	import { notificationApi } from '$lib/api';
 	import type { NotificationSettings } from '$lib/types';
 	import Button from '$lib/components/ui/Button.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	let notificationSettings: NotificationSettings | null = null;
 	let loading = true;
 	let saving = false;
 	let error: string | null = null;
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
 
 	const notifyStateOptions = [
 		{ value: 'available', label: '예약 가능 발견' },
@@ -40,9 +45,9 @@
 		saving = true;
 		try {
 			await notificationApi.updateSettings(notificationSettings);
-			alert('설정이 저장되었습니다.');
+			toast.success('설정이 저장되었습니다.');
 		} catch (e) {
-			alert('저장 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('저장 실패: ' + errorMessage(e));
 		} finally {
 			saving = false;
 		}
