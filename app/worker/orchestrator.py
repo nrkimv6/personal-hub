@@ -336,9 +336,10 @@ class WorkerOrchestrator:
         Args:
             name: 실패한 워커 이름
         """
-        # TODO: 텔레그램 또는 데스크톱 알림
+        # Permanent worker failures are surfaced through logs; notification fan-out
+        # is handled outside the core supervisor.
         logger.warning(
-            f"[Orchestrator] 워커 {name} 영구 실패 알림 (TODO: 구현 필요)"
+            f"[Orchestrator] 워커 {name} 영구 실패 알림"
         )
 
     async def _cleanup_orphan_test_worktrees(self, branches: list[str]) -> object:

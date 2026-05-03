@@ -214,8 +214,8 @@ class ContextManager:
             if self.playwright_instance:
                 try:
                     await self.playwright_instance.stop()
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"Playwright 정리 실패 (무시): {exc}")
                 self.playwright_instance = None
             self.browser_context = None
             raise

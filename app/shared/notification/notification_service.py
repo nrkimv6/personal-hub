@@ -539,7 +539,7 @@ class NotificationService:
                 int(re.search(r':(\d+)', x).group(1))   # 분으로 정렬
             ))
             return ", ".join(sorted_times)
-        except:
+        except (AttributeError, TypeError, ValueError):
             # 정렬에 실패하면 원래 순서 유지
             return ", ".join(times)
             
@@ -577,7 +577,7 @@ class NotificationService:
                     formatted_stocks.append(stock)
                     
             return "\n".join(formatted_stocks)
-        except:
+        except (AttributeError, TypeError, ValueError):
             # 정렬에 실패하면 원래 순서로 리턴
             return "\n".join(stocks)
 

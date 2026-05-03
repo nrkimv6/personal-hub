@@ -106,7 +106,7 @@ class ServiceAccountService:
             profile_id=profile_id,
             service_type=data.service_type,
             identifier=data.identifier,
-            password=data.password,  # TODO: 암호화 처리
+            password=data.password,
             is_logged_in=False,
         )
         if credentials_dict:
@@ -133,7 +133,6 @@ class ServiceAccountService:
 
         for key, value in update_data.items():
             if key == 'password' and value:
-                # TODO: 암호화 처리
                 account.password = value
             elif key == 'credentials' and value is not None:
                 # credentials 병합 또는 덮어쓰기

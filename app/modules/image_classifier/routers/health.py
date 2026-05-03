@@ -136,7 +136,7 @@ async def diagnostic_check(db: Session = Depends(get_db)):
             "message": f"중복 그룹 {len(dup_count)}개",
             "details": {"groups": len(dup_count)}
         }
-    except:
+    except Exception:
         results["duplicates"] = {
             "status": "ok",
             "message": "중복 데이터 없음",

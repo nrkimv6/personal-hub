@@ -222,8 +222,8 @@ class SessionManager:
                         if user_elem:
                             is_logged_in = True
                             break
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"계정 {service_account_id} 로그인 상태 셀렉터 확인 실패: {exc}")
 
                 service_account_service.update_login_status(db, service_account_id, is_logged_in)
 
