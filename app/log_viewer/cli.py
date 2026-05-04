@@ -69,6 +69,17 @@ def _resolve_logs_root() -> Path:
 
 console: "Console | None" = Console() if _RICH else None
 
+_TARGET_ALIASES = {
+    "DEVRUNNER": "DEV-RUNNER",
+    "DEV_RUNNER": "DEV-RUNNER",
+    "DEV-RUNNER": "DEV-RUNNER",
+}
+
+
+def _normalize_target(target: str) -> str:
+    key = target.strip().upper()
+    return _TARGET_ALIASES.get(key, key)
+
 
 # ---------------------------------------------------------------------------
 # 출력 헬퍼
@@ -187,7 +198,7 @@ def _print_source(source_name: str, files: list[Path], color: str, lines: int, f
 
 def show_source(name: str, admin: bool, lines_override: int | None, cleanup: bool = False) -> None:
     """단일 소스를 찾아 출력한다."""
-    src = get_source_by_name(name.upper())
+    src = get_source_by_name(_normalize_target(name))
     if src is None:
         print(f"알 수 없는 소스: {name!r}", file=sys.stderr)
         return
@@ -218,7 +229,7 @@ def show_all_sources(admin: bool, lines_override: int | None, cleanup: bool = Fa
 
 def follow_source(name: str, admin: bool, cleanup: bool = False) -> None:
     """단일 소스를 실시간 tail한다."""
-    src = get_source_by_name(name.upper())
+    src = get_source_by_name(_normalize_target(name))
     if src is None:
         print(f"알 수 없는 소스: {name!r}", file=sys.stderr)
         return
@@ -387,6 +398,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     target: str | None = args.target
+    normalized_target = _normalize_target(target) if target is not None else None
     admin: bool = args.admin
     lines: int | None = args.lines
     cleanup: bool = args.cleanup
@@ -395,21 +407,21 @@ def main(argv: list[str] | None = None) -> None:
     if follow:
         # plan-runner는 RunnerWatcher가 follow_all_sources 내부에서 처리
         try:
-            if target is None or target.lower() == "plan-runner":
+            if normalized_target is None or normalized_target == "PLAN-RUNNER":
                 follow_all_sources(admin, cleanup=cleanup)
             else:
-                follow_source(target, admin, cleanup=cleanup)
+                follow_source(normalized_target, admin, cleanup=cleanup)
         except KeyboardInterrupt:
             pass
         return
 
-    if target is None:
+    if normalized_target is None:
         show_all_sources(admin, lines, cleanup=cleanup)
         show_plan_runners(admin, lines, cleanup=cleanup)
-    elif target.lower() == "plan-runner":
+    elif normalized_target == "PLAN-RUNNER":
         show_plan_runners(admin, lines, cleanup=cleanup)
     else:
-        show_source(target, admin, lines, cleanup=cleanup)
+        show_source(normalized_target, admin, lines, cleanup=cleanup)
 
 
 if __name__ == "__main__":

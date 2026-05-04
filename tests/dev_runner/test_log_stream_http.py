@@ -7,7 +7,7 @@ GET /api/v1/dev-runner/logs/stream?runner_id=X 엔드포인트 검증
 import json
 import threading
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import redis
@@ -89,6 +89,114 @@ def local_events_client():
     app = FastAPI()
     app.include_router(events_router, prefix=BASE_URL)
     return TestClient(app, raise_server_exceptions=True)
+
+
+def _write_start_only_pair(tmp_path, runner_id: str):
+    stream_file = tmp_path / f"plan-runner-stream-{runner_id}-20260504_164810.log"
+    stream_file.write_text(
+        "[2026-05-04T16:48:10] START | log_path=plan-runner-d31509ad-20260504-164804.log\n",
+        encoding="utf-8",
+    )
+    main_file = tmp_path / f"plan-runner-{runner_id}-20260504-164804.log"
+    main_file.write_text(
+        "[TRIGGER] user | plan=2026-04-16_feat-mp4-gif-options-followup.md\n"
+        "[RUN_META] started_at=2026-05-04T16:48:09 | execution_count=1 | plan_key=feat-mp4\n"
+        "[16:48:15] [PLAN-RUNNER#feat-mp4@d315] [ERROR] pre-write scope gate failed\n"
+        "WRITE_SCOPE_REROUTE_REQUIRED:target_path=D:\\work\\project\\tools\\monitor-page\\.worktrees\\plans\\docs\\plan\\2026-04-16_feat-mp4-gif-tool-integration.md\n",
+        encoding="utf-8",
+    )
+    return stream_file, main_file
+
+
+def _filesystem_only_log_service(tmp_path):
+    import app.modules.dev_runner.routes.logs as logs_module
+
+    fake_redis = MagicMock()
+    fake_redis.get.side_effect = redis.ConnectionError
+    fake_redis.smembers.side_effect = redis.ConnectionError
+    return (
+        patch.object(logs_module.log_service, "redis_client", fake_redis),
+        patch.object(logs_module.log_service, "resolver", None),
+        patch(
+            "app.modules.dev_runner.services.log_file_resolver.LogFileResolver.get_log_dir",
+            return_value=tmp_path,
+        ),
+    )
+
+
+@pytest.mark.http
+def test_http_recent_uses_main_log_when_stream_is_start_marker_only(local_client, tmp_path):
+    runner_id = "d31509ad"
+    _write_start_only_pair(tmp_path, runner_id)
+
+    patches = _filesystem_only_log_service(tmp_path)
+    with patches[0], patches[1], patches[2]:
+        response = local_client.get(f"{BASE_URL}/logs/recent", params={"runner_id": runner_id, "lines": 20})
+
+    assert response.status_code == 200
+    payload = response.json()
+    joined = "\n".join(payload["lines"])
+    assert "WRITE_SCOPE_REROUTE_REQUIRED" in joined
+    assert "START | log_path" not in joined
+
+
+@pytest.mark.http
+def test_http_full_uses_main_log_when_stream_is_start_marker_only(local_client, tmp_path):
+    runner_id = "d31509ad"
+    _write_start_only_pair(tmp_path, runner_id)
+
+    patches = _filesystem_only_log_service(tmp_path)
+    with patches[0], patches[1], patches[2]:
+        response = local_client.get(f"{BASE_URL}/logs/full", params={"runner_id": runner_id})
+
+    assert response.status_code == 200
+    payload = response.json()
+    joined = "\n".join(payload["lines"])
+    assert payload["total_lines"] >= 4
+    assert "WRITE_SCOPE_REROUTE_REQUIRED" in joined
+
+
+@pytest.mark.http
+def test_http_history_uses_main_log_pair_as_representative(local_client, tmp_path):
+    runner_id = "d31509ad"
+    _, main_file = _write_start_only_pair(tmp_path, runner_id)
+
+    patches = _filesystem_only_log_service(tmp_path)
+    with patches[0], patches[1], patches[2]:
+        response = local_client.get(f"{BASE_URL}/logs/history", params={"visible_only": "true"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    run = next(item for item in payload["runs"] if item["runner_id"] == runner_id)
+    assert run["log_file"] == str(main_file)
+    assert run["has_log"] is True
+
+
+@pytest.mark.http
+def test_http_recent_uses_main_log_when_redis_has_start_only_stream_pair(local_client, tmp_path):
+    runner_id = "d31509ad"
+    stream_file, main_file = _write_start_only_pair(tmp_path, runner_id)
+    import app.modules.dev_runner.routes.logs as logs_module
+
+    fake_redis = MagicMock()
+
+    def _get(key):
+        if key.endswith(":stream_log_path"):
+            return str(stream_file)
+        if key.endswith(":log_file_path"):
+            return str(main_file)
+        return None
+
+    fake_redis.get.side_effect = _get
+
+    with patch.object(logs_module.log_service, "redis_client", fake_redis), \
+         patch.object(logs_module.log_service, "resolver", None):
+        response = local_client.get(f"{BASE_URL}/logs/recent", params={"runner_id": runner_id, "lines": 20})
+
+    assert response.status_code == 200
+    joined = "\n".join(response.json()["lines"])
+    assert "WRITE_SCOPE_REROUTE_REQUIRED" in joined
+    assert "START | log_path" not in joined
 
 
 @pytest.mark.http

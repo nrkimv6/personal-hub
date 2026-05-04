@@ -71,11 +71,11 @@ class TestFindCurrentLog:
     """_find_current_log() stream_log_path 우선순위 + 유효성 검증 테스트"""
 
     def test_find_current_log_right_prefers_logfile_over_empty_stream(self, tmp_path):
-        """R: stream_log_path 200B 이하 + log_file_path 정상 → stream_file 반환 (200B 기준 제거됨)"""
+        """R: START-only stream + 본로그 정상 → 본로그 반환"""
         svc = _make_log_service()
 
         stream_file = tmp_path / "stream.log"
-        stream_file.write_bytes(b"[START] " + b"x" * 100)  # 108B — 200B 이하지만 크기 체크 없음
+        stream_file.write_text("[2026-05-04T16:48:10] START | log_path=log.log\n", encoding="utf-8")
         log_file = tmp_path / "log.log"
         log_file.write_text("[20:00:00] [INFO] 실제 로그\n" * 10, encoding="utf-8")
 
@@ -85,7 +85,7 @@ class TestFindCurrentLog:
         )
 
         result = svc._find_current_log("test-runner")
-        assert result == stream_file
+        assert result == log_file
 
     def test_find_current_log_right_returns_stream_when_valid(self, tmp_path):
         """R: stream_log_path 1KB 이상 → stream_log_path 반환 (기존 동작 유지)"""
@@ -121,10 +121,10 @@ class TestFindCurrentLog:
 
 
 class TestTailLogFileE2E:
-    """tail_log_file E2E 흐름 — stream_log_path 소형이어도 stream 내용 반환 (200B 기준 제거)"""
+    """tail_log_file E2E 흐름 — START-only stream은 본로그를 가리지 않는다."""
 
-    def test_tail_log_file_e2e_returns_stream_even_when_small(self, tmp_path):
-        """T3 E2E: stream_log 200B 이하 + log_file 정상 → 200B 기준 제거 후 stream 파일 내용 반환"""
+    def test_tail_log_file_e2e_returns_main_log_when_stream_is_start_marker_only(self, tmp_path):
+        """T3 E2E: START-only stream + log_file 정상 → 본로그 tail 반환"""
         svc = _make_log_service()
 
         stream_file = tmp_path / "stream.log"
@@ -145,9 +145,10 @@ class TestTailLogFileE2E:
 
         result = svc.tail_log_file("runner-abc123", n_lines=100)
 
-        # 200B 기준 제거 → stream 파일(1줄) 내용 반환
-        assert len(result.lines) == 1
-        assert "START" in result.lines[0]
+        assert len(result.lines) == 3
+        assert result.from_line == 0
+        assert "PLAN-RUNNER" in result.lines[0]
+        assert "START" not in "\n".join(result.lines)
 
 
 # ─── Phase 1: get_run_history() 정규식 이중 매칭 ──────────────────────────────
@@ -538,7 +539,7 @@ class TestFindCurrentLogNoBytesCheck:
         assert result == stream_file
 
     def test_find_current_log_stream_exists_log_file_ignored(self, tmp_path):
-        """R: stream_log_path 50B 존재 + log_file_path 1KB → stream 반환"""
+        """R: START-only stream + log_file_path 1KB → 본로그 반환"""
         svc = _make_log_service()
         stream_file = tmp_path / "stream.log"
         stream_file.write_bytes(b"[START] " + b"x" * 50)  # 58B
@@ -551,7 +552,7 @@ class TestFindCurrentLogNoBytesCheck:
         )
 
         result = svc._find_current_log("test-runner")
-        assert result == stream_file
+        assert result == log_file
 
     def test_find_current_log_stream_absent_uses_log_file(self, tmp_path):
         """R: stream_log_path 키는 있으나 파일 미존재 → log_file_path 반환"""
@@ -566,6 +567,25 @@ class TestFindCurrentLogNoBytesCheck:
 
         result = svc._find_current_log("test-runner")
         assert result == log_file
+
+    def test_find_current_log_keeps_stream_when_stream_has_real_output_right(self, tmp_path):
+        """R: stream 파일에 실제 출력이 있으면 stream 우선 계약 유지"""
+        svc = _make_log_service()
+        stream_file = tmp_path / "stream.log"
+        stream_file.write_text(
+            "[16:48:10] [PLAN-RUNNER#feat@abcd] [INFO] 실행 환경\n",
+            encoding="utf-8",
+        )
+        log_file = tmp_path / "log.log"
+        log_file.write_text("[16:48:10] [INFO] 본로그\n", encoding="utf-8")
+
+        svc.redis_client.get.side_effect = lambda key: (
+            str(stream_file) if "stream_log_path" in key else
+            str(log_file) if "log_file_path" in key else None
+        )
+
+        result = svc._find_current_log("test-runner")
+        assert result == stream_file
 
 
 # ─── Phase 1: tail_log_file() from_line 필드 TC ───────────────────────────────
@@ -597,6 +617,25 @@ class TestTailLogFileFromLine:
 
         assert result.from_line == 0
         assert len(result.lines) == 50
+
+    def test_tail_log_file_from_line_uses_selected_main_log_correct(self, tmp_path):
+        """CORRECT: paired resolver가 본로그를 선택하면 from_line도 본로그 기준으로 계산"""
+        svc = _make_log_service()
+        stream_file = tmp_path / "stream.log"
+        stream_file.write_text("[START] marker only\n", encoding="utf-8")
+        log_file = tmp_path / "log.log"
+        log_file.write_text("\n".join(f"[INFO] main line {i}" for i in range(12)) + "\n", encoding="utf-8")
+
+        svc.redis_client.get.side_effect = lambda key: (
+            str(stream_file) if "stream_log_path" in key else
+            str(log_file) if "log_file_path" in key else None
+        )
+
+        result = svc.tail_log_file("test-runner", n_lines=5)
+
+        assert result.from_line == 7
+        assert result.total_lines == 5
+        assert result.lines[0] == "[INFO] main line 7"
 
 
 # ─── Phase 1: stream_log_file() since_line TC ────────────────────────────────
@@ -1006,17 +1045,10 @@ class TestFindCurrentLogMtimeLatest:
 
 
 class TestFilePosEofInitialization:
-    """_file_pos 초기화: since_line=0 파일 폴링 fallback 진입 시 파일 처음부터 읽기 TC
+    """_file_pos 초기화: since_line=0 파일 폴링 fallback 진입 시 파일 처음부터 읽기 TC"""
 
-    2026-04-10: fallback 진입 시 기존 내용을 재전송하지 않도록 EOF 기준으로 초기화.
-    """
-
-    def test_file_pos_eof_init_no_resend_existing_content(self, tmp_path):
-        """since_line=0 + 파일 기존 내용 존재 + 폴링 fallback → 기존 내용은 재전송되지 않아야 함.
-
-        fallback 진입 시점의 파일 내용은 클라이언트가 이미 보유한 것으로 간주하고,
-        추가 중복 전송은 막는다.
-        """
+    def test_file_pos_init_sends_existing_content_when_since_line_zero(self, tmp_path):
+        """since_line=0 + 파일 기존 내용 존재 + 폴링 fallback → 기존 내용을 1회 전송해야 함."""
         import asyncio as _asyncio
         from unittest.mock import AsyncMock, patch as _patch
 
@@ -1073,11 +1105,11 @@ class TestFilePosEofInitialization:
 
         chunks = _asyncio.run(collect())
 
-        # 기존 내용은 재전송되지 않아야 함
+        # since_line=0은 클라이언트가 아직 파일 내용을 받지 못한 초기 연결로 보고 1회 전송한다.
         data_chunks = [c for c in chunks if "existing line" in c]
-        assert len(data_chunks) == 0, (
-            f"기존 내용이 재전송됨: {data_chunks}\n"
-            "fallback 진입 시 EOF 기준으로 초기화되어야 함"
+        assert len(data_chunks) >= 1, (
+            f"기존 내용이 전송되지 않음: {chunks}\n"
+            "fallback 첫 진입에서 since_line=0이면 파일 처음부터 읽어야 합니다."
         )
         # 스트림이 정상 완료됨 확인
         completed = [c for c in chunks if "event: completed" in c]

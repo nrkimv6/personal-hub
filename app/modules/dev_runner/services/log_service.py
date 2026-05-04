@@ -144,15 +144,16 @@ class LogService:
         if runner_id.startswith("lg-"):
             return None
         log_dir = self._get_log_dir()
-        if log_dir.exists():
-            for pattern in [
-                f"plan-runner-stream-{runner_id}-*.log",
-                f"plan-runner-{runner_id}-*.log",
-            ]:
-                matches = list(log_dir.glob(pattern))
-                if matches:
-                    return max(matches, key=lambda p: p.stat().st_mtime)
-        return None
+        return self._find_filesystem_log(runner_id, log_dir)
+
+    def _find_filesystem_log(self, runner_id: str, log_dir: Path) -> Optional[Path]:
+        """테스트 shim까지 포함한 파일시스템 pair 탐색."""
+        resolver = getattr(self, "resolver", None)
+        if type(resolver) is LogFileResolver:
+            return resolver.find_filesystem_log(runner_id, log_dir=log_dir)
+        stream_path = LogFileResolver._latest_existing(log_dir.glob(f"plan-runner-stream-{runner_id}-*.log"))
+        log_path = LogFileResolver._latest_existing(log_dir.glob(f"plan-runner-{runner_id}-*.log"))
+        return LogFileResolver.select_display_log(stream_path, log_path)
 
     def _resolve_legacy_log(self, runner_id: str) -> Optional[Path]:
         """[shim] → self.resolver.resolve_legacy_log()"""
@@ -346,6 +347,7 @@ class LogService:
         _no_msg_since = time.monotonic()
         _file_pos = _file_pos_init
         _fallback_entered = False
+        _poll_file_path: Path | None = None
         _poll_chunk_buffer = ""
         _poll_framer = _PollFrameBuffer()
 
@@ -392,10 +394,15 @@ class LogService:
                         if now - _no_msg_since >= FILE_POLL_TIMEOUT:
                             log_file = self._find_current_log(runner_id)
                             if log_file and log_file.exists():
+                                if _poll_file_path != log_file:
+                                    _poll_file_path = log_file
+                                    _file_pos = _file_pos_init if since_line > 0 else 0
+                                    _poll_chunk_buffer = ""
+                                    _poll_framer = _PollFrameBuffer()
                                 if not _fallback_entered:
-                                    # fallback 첫 진입 시점의 기존 파일 내용을 재전송하지 않도록
-                                    # 현재 EOF를 기준 위치로 잡는다.
-                                    if _file_pos == 0:
+                                    # since_line > 0 gap-fill 이후에는 EOF부터 이어 읽는다.
+                                    # since_line == 0인 종료 직후 fallback은 기존 파일 tail을 1회 전송한다.
+                                    if since_line > 0 and _file_pos == 0:
                                         try:
                                             with open(log_file, "r", encoding="utf-8", errors="replace") as f:
                                                 f.seek(0, 2)
@@ -516,7 +523,11 @@ class LogService:
                 pid_str = self.redis_client.get(f"{prefix}:pid")
                 start_time_str = self.redis_client.get(f"{prefix}:start_time")
                 stream_log = self.redis_client.get(f"{prefix}:stream_log_path")
-                log_file_path = stream_log or self.redis_client.get(f"{prefix}:log_file_path")
+                main_log = self.redis_client.get(f"{prefix}:log_file_path")
+                stream_path = LogFileResolver._existing_path(stream_log)
+                main_path = LogFileResolver._existing_path(main_log)
+                selected_path = LogFileResolver.select_display_log(stream_path, main_path)
+                log_file_path = str(selected_path) if selected_path else (stream_log or main_log)
                 worktree_path = self.redis_client.get(f"{prefix}:worktree_path")
                 merge_status = self.redis_client.get(f"{prefix}:merge_status")
                 trigger = self.redis_client.get(f"{prefix}:trigger")
@@ -535,7 +546,7 @@ class LogService:
                     except ValueError:
                         pass
 
-                has_log = bool(log_file_path and Path(log_file_path).exists())
+                has_log = bool(selected_path and selected_path.exists())
                 branch = f"runner/{runner_id}" if worktree_path else None
                 if trigger is None and log_file_path:
                     trigger = self._parse_trigger_from_log(log_file_path)
@@ -571,11 +582,10 @@ class LogService:
         # 2. 로그 파일 스캔 — 종료된 runner 포함
         log_dir = self._get_log_dir()
         if log_dir.exists():
-            # stream log 파일 패턴: plan-runner-stream-{runner_id}-YYYYMMDD*.log
-            pattern = str(log_dir / "plan-runner-stream-*.log")
             raw_candidates: list[tuple[str, Path, str]] = []
             candidates: list[tuple[float, Path, str]] = []
-            for log_path in glob.glob(pattern):
+            seen_candidate_paths: set[Path] = set()
+            for log_path in glob.glob(str(log_dir / "plan-runner-stream-*.log")):
                 path = Path(log_path)
                 fname = path.name
                 # runner_id 추출: 신규 형식 plan-runner-stream-{8hex}-*.log
@@ -592,6 +602,16 @@ class LogService:
                     runner_id = m.group(1)
                     sort_token = m.group(2)
                 raw_candidates.append((sort_token, path, runner_id))
+                seen_candidate_paths.add(path)
+
+            for log_path in glob.glob(str(log_dir / "plan-runner-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*.log")):
+                path = Path(log_path)
+                if path in seen_candidate_paths:
+                    continue
+                m = re.match(r"plan-runner-([0-9a-f]{8})-(.+)\.log$", path.name)
+                if not m:
+                    continue
+                raw_candidates.append((m.group(2), path, m.group(1)))
 
             scan_limit = max(HISTORY_FILE_SCAN_LIMIT, offset + limit)
             if len(raw_candidates) > scan_limit:
@@ -609,12 +629,23 @@ class LogService:
             for mtime, path, runner_id in candidates[:scan_limit]:
                 if runner_id.startswith("lg-"):
                     self._legacy_map[runner_id] = path
+                else:
+                    paired_path = self._find_filesystem_log(runner_id, log_dir)
+                    if paired_path and paired_path.exists():
+                        path = paired_path
+                        try:
+                            mtime = path.stat().st_mtime
+                        except OSError:
+                            pass
 
                 # 이미 Redis에서 수집한 running runner면 log_file만 보정
                 if runner_id in runs:
                     if not runs[runner_id].log_file:
                         runs[runner_id].log_file = str(path)
-                        runs[runner_id].has_log = path.exists()
+                        runs[runner_id].has_log = path.exists() and (
+                            not LogFileResolver._is_start_marker_only(path)
+                            or LogFileResolver._has_runner_output(path)
+                        )
                     continue
 
                 # 파일 수정 시간을 start_time 대용으로 사용
@@ -671,10 +702,7 @@ class LogService:
                 # 레거시 pseudo runner_id → _legacy_map 또는 전체 스캔
                 log_file = self._resolve_legacy_log(runner_id)
             else:
-                pattern = str(log_dir / f"plan-runner-stream-{runner_id}-*.log")
-                matches = glob.glob(pattern)
-                if matches:
-                    log_file = Path(sorted(matches, key=lambda p: Path(p).stat().st_mtime)[-1])
+                log_file = self._find_filesystem_log(runner_id, log_dir)
 
         if log_file is None or not log_file.exists():
             return FullLogResponse(lines=[], total_lines=0, offset=offset, has_more=False)

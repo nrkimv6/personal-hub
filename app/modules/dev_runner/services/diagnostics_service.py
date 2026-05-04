@@ -4,6 +4,8 @@ from pathlib import Path
 
 import redis
 
+from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
 from app.shared.redis.client import RedisClient
 
 REDIS_HOST = "localhost"
@@ -20,6 +22,7 @@ class DiagnosticsService:
         self.redis_client = sync_client if sync_client is not None else redis.Redis(
             host=REDIS_HOST, port=REDIS_PORT, decode_responses=True, socket_connect_timeout=5,
         )
+        self.resolver = LogFileResolver(config, self.redis_client)
 
     def run_diagnostics(self) -> dict:
         """파이프라인 진단 (1회성) — 5단계 순차 점검"""
@@ -55,9 +58,13 @@ class DiagnosticsService:
         runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
         if runner_ids:
             first_id = next(iter(runner_ids))
-            log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:stream_log_path")
-            if not log_path:
-                log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:log_file_path")
+            resolved = self.resolver.find_current_log(first_id)
+            if resolved:
+                log_path = str(resolved)
+            else:
+                log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:stream_log_path")
+                if not log_path:
+                    log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:log_file_path")
 
         if log_path and Path(log_path).exists():
             size = Path(log_path).stat().st_size

@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
 	import { apiGate } from '$lib/stores/apiGate.svelte';
+	import { isStartOnlyRecentLog } from '$lib/dev-runner/log-recent-fallback.js';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 	import { shouldShowMergeCompletionBanner } from '$lib/utils/dev-runner-merge-banner';
 
@@ -479,8 +480,19 @@
 			addLine(event.data, false);
 		};
 		// Redis 연결 끊김 이벤트 처리
-		eventSource.addEventListener('redis_disconnected', () => {
+		eventSource.addEventListener('redis_disconnected', (event) => {
 			redisAvailable = false;
+			const data = (event as MessageEvent).data;
+			addLine(`[SSE] redis_disconnected: ${data || 'Redis not available'}`, false);
+		});
+		eventSource.addEventListener('fallback_mode', (event) => {
+			const data = (event as MessageEvent).data;
+			addLine(`[SSE] fallback_mode: ${data || 'file polling active'}`, false);
+		});
+		eventSource.addEventListener('stream_error', (event) => {
+			connected = 'disconnected';
+			const data = (event as MessageEvent).data;
+			addLine(`[SSE] stream_error: ${data || 'stream stopped'}`, false);
 		});
 		// Redis 재연결 시 connected 이벤트로 복구
 		eventSource.addEventListener('connected', () => {
@@ -538,7 +550,19 @@
 		try {
 			const res = await devRunnerLogApi.recent(runnerId, 500);
 			fromLine = res.from_line ?? 0;
-			const parsed = res.lines.map((text: string) => parseLine(text, true));
+			let sourceLines = res.lines;
+			if (!running && isStartOnlyRecentLog(sourceLines)) {
+				try {
+					const fullRes = await devRunnerLogApi.full(runnerId, 0, 500);
+					if (fullRes.lines.length > 0) {
+						sourceLines = fullRes.lines;
+						fromLine = fullRes.offset ?? 0;
+					}
+				} catch {
+					// full 로그 없을 수 있음
+				}
+			}
+			const parsed = sourceLines.map((text: string) => parseLine(text, true));
 
 			if (running) {
 				// running 중이면 마지막 SEPARATOR 이후 구간은 현재 세션 → isStale: false
