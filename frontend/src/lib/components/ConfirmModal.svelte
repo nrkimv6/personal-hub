@@ -20,6 +20,17 @@
 		}
 	}
 
+	function confirmButtonClass(variant: ConfirmRequest['variant']): string {
+		switch (variant) {
+			case 'danger':
+				return 'bg-destructive text-white hover:bg-destructive/90';
+			case 'warning':
+				return 'bg-warning text-warning-foreground hover:bg-warning/90';
+			default:
+				return 'bg-primary text-white hover:bg-primary-hover';
+		}
+	}
+
 	onMount(() => {
 		window.addEventListener('keydown', handleKeydown);
 	});
@@ -57,7 +68,7 @@
 				</button>
 				<button
 					type="button"
-					class="rounded-md px-3 py-1.5 text-sm font-medium text-white transition-colors {request.variant === 'danger' ? 'bg-destructive hover:bg-destructive/90' : 'bg-primary hover:bg-primary-hover'}"
+					class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors {confirmButtonClass(request.variant)}"
 					onclick={() => close(true)}
 				>
 					{request.confirmText}

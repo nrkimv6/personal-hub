@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 
-export type ConfirmVariant = 'default' | 'danger';
+export type ConfirmVariant = 'default' | 'warning' | 'danger';
 
 export interface ConfirmOptions {
 	title?: string;
