@@ -8,6 +8,9 @@ const REAL_LOG_MARKERS = [
 	"WRITE_SCOPE_REROUTE_REQUIRED",
 ];
 
+/**
+ * @param {unknown[] | null | undefined} lines
+ */
 export function isStartOnlyRecentLog(lines) {
 	const nonEmpty = (lines ?? []).map((line) => String(line).trim()).filter(Boolean);
 	if (nonEmpty.length === 0 || nonEmpty.length > 3) return false;
