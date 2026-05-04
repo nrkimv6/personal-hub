@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { ListChecks, Plus, GripVertical, Pencil, Trash2, Save, X, ArrowRight, Eye, Loader2 } from 'lucide-svelte';
+	import { confirm } from '$lib/stores/confirm';
 	import { toast } from '$lib/stores/toast';
 
 	interface Rule {
@@ -87,7 +88,14 @@
 	}
 
 	async function deleteRule(id: number) {
-		if (!confirm('이 규칙을 삭제하시겠습니까?')) return;
+		if (
+			!(await confirm({
+				title: '규칙 삭제',
+				message: '이 규칙을 삭제하시겠습니까?',
+				confirmText: '삭제',
+				variant: 'danger'
+			}))
+		) return;
 
 		try {
 			await fetchWithTimeout(`/api/ic/rules/${id}`, { method: 'DELETE' });

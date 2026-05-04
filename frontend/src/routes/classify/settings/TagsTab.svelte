@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
   import { Tags, Search, Plus, Trash2, X, Tag, Loader2, FolderSymlink, Save } from 'lucide-svelte';
+  import { confirm } from '$lib/stores/confirm';
   import { toast } from '$lib/stores/toast';
 
   interface TagItem {
@@ -76,7 +77,14 @@
   }
 
   async function deleteTag(tag: TagItem) {
-    if (!confirm(`태그 "${tag.name}"를 삭제하시겠습니까?`)) return;
+    if (
+      !(await confirm({
+        title: '태그 삭제',
+        message: `태그 "${tag.name}"를 삭제하시겠습니까?`,
+        confirmText: '삭제',
+        variant: 'danger'
+      }))
+    ) return;
     deletingTagId = tag.id;
     try {
       const res = await fetchWithTimeout(`/api/ic/tags/${tag.id}?force=true`, {
