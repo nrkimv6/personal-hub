@@ -19,6 +19,8 @@ import redis as redis_lib
 
 from tests.dev_runner.sse_filter_helpers import collect_initial_status_with_retry
 
+pytestmark = pytest.mark.http_live
+
 ADMIN_API = "http://localhost:8001"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"

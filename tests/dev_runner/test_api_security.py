@@ -39,6 +39,8 @@ class TestDecodePathFunction:
 class TestApiPathSecurity:
     """API 엔드포인트 보안 테스트"""
 
+    pytestmark = pytest.mark.http
+
     @pytest.fixture
     def client(self):
         from fastapi import FastAPI

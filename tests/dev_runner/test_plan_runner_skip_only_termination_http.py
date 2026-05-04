@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 
 from app.modules.dev_runner.routes.runner import router as runner_router
 
+pytestmark = pytest.mark.http
+
 BASE_URL = "/api/v1/dev-runner"
 
 

@@ -98,6 +98,7 @@ def test_restart_listener_heartbeat_stuck_restarting_timeout(mock_redis):
     assert "15s" in result["message"] or "heartbeat" in result["message"].lower()
 
 
+@pytest.mark.http
 def test_restart_listener_http_endpoint():
     """POST /dev-runner/restart-listener HTTP 엔드포인트 응답 확인"""
     from app.main import app

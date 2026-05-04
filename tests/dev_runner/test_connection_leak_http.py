@@ -35,10 +35,13 @@ def _is_http_env_available() -> bool:
     return True
 
 
-pytestmark = pytest.mark.skipif(
-    not _is_http_env_available(),
-    reason="admin api 또는 Redis가 실행 중이 아닙니다.",
-)
+pytestmark = [
+    pytest.mark.http_live,
+    pytest.mark.skipif(
+        not _is_http_env_available(),
+        reason="admin api 또는 Redis가 실행 중이 아닙니다.",
+    ),
+]
 
 
 def _run_restart_frontend(*extra_args: str) -> subprocess.CompletedProcess[str]:

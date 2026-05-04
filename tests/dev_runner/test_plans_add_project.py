@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
+pytestmark = pytest.mark.http
+
 
 BASE = "/api/v1/dev-runner"
 

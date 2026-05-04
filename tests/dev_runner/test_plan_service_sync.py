@@ -194,6 +194,8 @@ def api_client():
 class TestSyncPlansHTTP:
     """POST /api/v1/dev-runner/plans/sync HTTP 통합 테스트"""
 
+    pytestmark = pytest.mark.http
+
     def test_http_post_sync_plans_response_structure(self, api_client):
         """T5: POST /plans/sync → 200 응답, 필수 키 존재 확인"""
         resp = api_client.post("/api/v1/dev-runner/plans/sync")

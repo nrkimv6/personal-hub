@@ -51,6 +51,8 @@ def client():
 class TestGetRunners:
     """GET /runners — 활성 runner 목록"""
 
+    pytestmark = pytest.mark.http
+
     def test_get_runners_returns_list(self, client):
         """Redis mock → 200 + list 형식 응답"""
         mock_items = [
@@ -87,6 +89,8 @@ class TestGetRunners:
 class TestStopRunner:
     """POST /runners/{runner_id}/stop"""
 
+    pytestmark = pytest.mark.http
+
     def test_stop_existing_runner(self, client):
         """존재하는 runner → 200"""
         with patch.object(executor_service, "stop_dev_runner", new_callable=AsyncMock,
@@ -108,6 +112,8 @@ class TestStopRunner:
 
 class TestPostRun:
     """POST /run — runner_id 필드 존재 확인"""
+
+    pytestmark = pytest.mark.http
 
     def test_run_response_contains_runner_id(self, client):
         """POST /run 성공 응답 JSON에 runner_id 필드 존재 + 8자 hex"""
@@ -145,6 +151,8 @@ class TestPostRun:
 
 class TestGetRecentLogs:
     """GET /logs/recent?runner_id=...&lines=N"""
+
+    pytestmark = pytest.mark.http
 
     def test_get_recent_logs_with_runner_id(self, client):
         """runner_id 있으면 200 + LogResponse 스키마"""

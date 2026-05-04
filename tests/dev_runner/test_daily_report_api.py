@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 
 from app.modules.dev_runner.routes.daily_reports import router
 
+pytestmark = pytest.mark.http
+
 app = FastAPI()
 app.include_router(router, prefix="/api/v1/dev-runner")
 client = TestClient(app)

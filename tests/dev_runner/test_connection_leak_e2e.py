@@ -5,6 +5,8 @@ import pytest
 import redis
 import requests
 
+pytestmark = pytest.mark.http_live
+
 
 ADMIN_BASE = "http://localhost:8001"
 

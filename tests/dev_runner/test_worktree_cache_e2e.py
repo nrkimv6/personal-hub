@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-pytestmark = pytest.mark.e2e
+pytestmark = [pytest.mark.e2e, pytest.mark.http_live]
 
 BASE_URL = "http://localhost:8001"
 
