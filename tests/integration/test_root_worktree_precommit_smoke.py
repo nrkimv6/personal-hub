@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -50,11 +51,15 @@ def _init_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _run_hook(repo_cwd: Path) -> subprocess.CompletedProcess[str]:
+def _run_hook(repo_cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     hook = repo_cwd / "scripts" / "git-hooks" / "pre-commit-plans-block.ps1"
+    process_env = os.environ.copy()
+    if env:
+        process_env.update(env)
     return subprocess.run(
         ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(hook)],
         cwd=str(repo_cwd),
+        env=process_env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -74,7 +79,99 @@ def test_root_worktree_blocks_impl_scope_stage(tmp_path):
     assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
 
 
-def test_root_worktree_allows_commit_ready_merge_with_impl_scope_stage(tmp_path):
+def test_root_worktree_blocks_mirror_stage_without_merge_head(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / ".claude" / "skills" / "done" / "SKILL.md"
+    target.write_text("mirror sync change\n", encoding="utf-8")
+    _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
+
+    result = _run_hook(repo)
+
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
+def test_root_worktree_blocks_sync_merge_subject_mismatch(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / ".claude" / "skills" / "done" / "SKILL.md"
+    target.write_text("branch impl change\n", encoding="utf-8")
+    _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
+
+    result = _run_hook(
+        repo,
+        {
+            "ROOT_GUARD_DRY_RUN": "1",
+            "ROOT_GUARD_MERGE_HEAD": "1",
+            "ROOT_GUARD_MERGE_SUBJECT": "impl change",
+            "ROOT_GUARD_UNMERGED": "",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
+def test_root_worktree_blocks_sync_merge_with_non_mirror_stage(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / "app" / "worker.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("implementation change\n", encoding="utf-8")
+    _run(["git", "add", "app/worker.py"], repo)
+
+    result = _run_hook(
+        repo,
+        {
+            "ROOT_GUARD_DRY_RUN": "1",
+            "ROOT_GUARD_MERGE_HEAD": "1",
+            "ROOT_GUARD_MERGE_SUBJECT": "chore: sync skills and agent files",
+            "ROOT_GUARD_UNMERGED": "",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
+def test_root_worktree_allows_sync_merge_with_mirror_only_stage(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / ".claude" / "skills" / "done" / "SKILL.md"
+    target.write_text("mirror sync change\n", encoding="utf-8")
+    _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
+
+    result = _run_hook(
+        repo,
+        {
+            "ROOT_GUARD_DRY_RUN": "1",
+            "ROOT_GUARD_MERGE_HEAD": "1",
+            "ROOT_GUARD_MERGE_SUBJECT": "chore: sync skills and agent files",
+            "ROOT_GUARD_UNMERGED": "",
+        },
+    )
+
+    assert result.returncode == 0
+
+
+def test_root_worktree_blocks_sync_merge_with_unmerged_mirror_stage(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / ".claude" / "skills" / "done" / "SKILL.md"
+    target.write_text("mirror sync change\n", encoding="utf-8")
+    _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
+
+    result = _run_hook(
+        repo,
+        {
+            "ROOT_GUARD_DRY_RUN": "1",
+            "ROOT_GUARD_MERGE_HEAD": "1",
+            "ROOT_GUARD_MERGE_SUBJECT": "chore: sync skills and agent files",
+            "ROOT_GUARD_UNMERGED": ".claude/skills/done/SKILL.md",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
+def test_root_worktree_blocks_commit_ready_merge_subject_mismatch(tmp_path):
     repo = _init_repo(tmp_path)
     _run(["git", "switch", "-c", "impl/root-merge"], repo)
     target = repo / ".claude" / "skills" / "done" / "SKILL.md"
@@ -94,7 +191,8 @@ def test_root_worktree_allows_commit_ready_merge_with_impl_scope_stage(tmp_path)
     assert merge.returncode == 0
     result = _run_hook(repo)
 
-    assert result.returncode == 0
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_blocks_unresolved_merge_with_impl_scope_stage(tmp_path):
