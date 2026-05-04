@@ -637,9 +637,9 @@ def test_http_log_recent_small_stream_file():
     if not log_dir:
         pytest.skip("log_dir 확인 불가")
 
-    runner_id = "t5-small-stream-test"
-    stream_path = os.path.join(log_dir, "plan-runner-stream-t5-small-stream-test.log")
-    log_path = os.path.join(log_dir, "plan-runner-t5-small-stream-test.log")
+    runner_id = "t5abc123"
+    stream_path = os.path.join(log_dir, "plan-runner-stream-t5abc123-20991231_235958.log")
+    log_path = os.path.join(log_dir, "plan-runner-t5abc123-20991231_235958.log")
     with open(stream_path, "w", encoding="utf-8") as sf:
         sf.write("[START] marker\n")
     with open(log_path, "w", encoding="utf-8") as lf:
