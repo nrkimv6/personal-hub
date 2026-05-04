@@ -378,6 +378,11 @@ class ExecutorService:
 
             if not result_data.get("success"):
                 message = result_data.get("message", "Failed to start")
+                if result_data.get("reason") == "reserved_status":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=message,
+                    )
                 if self._is_codex_preflight_failure(resolved_engine, resolved_fix_engine, message):
                     raise HTTPException(
                         status_code=422,

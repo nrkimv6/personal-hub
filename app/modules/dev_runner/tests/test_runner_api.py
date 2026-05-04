@@ -281,6 +281,28 @@ class TestStartRun:
         })
         assert response.status_code == 504
 
+    async def test_start_reserved_status_returns_409_not_timeout(self, client, mock_executor_redis):
+        """예약대기 blocked listener 결과는 listener timeout/500이 아니라 409로 노출한다."""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+        brpop_result = (
+            "plan-runner:command_results:abc123",
+            json.dumps({
+                "success": False,
+                "reason": "reserved_status",
+                "status": "예약대기",
+                "message": "예약대기 plan은 실행할 수 없습니다: reserved.md",
+            }, ensure_ascii=False),
+        )
+
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "reserved.md"
+            })
+
+        assert response.status_code == 409
+        assert "예약대기" in response.json()["detail"]
+
     async def test_start_run_fix_engine_stored_in_command(self, client, mock_executor_redis):
         """T4.1: fix_engine 필드가 Redis command에 포함되는지 확인"""
         fake_async = mock_executor_redis["async"]

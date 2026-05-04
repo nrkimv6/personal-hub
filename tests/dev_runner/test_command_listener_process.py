@@ -139,6 +139,32 @@ class TestStartPlanRunner:
         assert result["success"] is False
         assert "Already running" in result["message"]
 
+    def test_start_reserved_plan_blocks_before_thread(self, listener_mod, fr, tmp_path):
+        """R: 예약대기 plan은 accepted/thread/worktree 생성 전에 blocked 결과를 반환."""
+        plan_path = tmp_path / "reserved.md"
+        plan_path.write_text(
+            "# Reserved\n\n"
+            "> 상태: 예약대기\n"
+            "> 진행률: 0/0 (0%)\n",
+            encoding="utf-8",
+        )
+        before = plan_path.read_text(encoding="utf-8")
+        command = {
+            "action": "run",
+            "runner_id": RUNNER_ID,
+            "plan_file": str(plan_path),
+        }
+
+        with patch("_dr_plan_runner.threading.Thread") as mock_thread:
+            result = listener_mod.start_plan_runner(command, fr)
+
+        assert result["success"] is False
+        assert result["reason"] == "reserved_status"
+        assert result["status"] == "예약대기"
+        assert "예약대기" in result["message"]
+        mock_thread.assert_not_called()
+        assert plan_path.read_text(encoding="utf-8") == before
+
 
 class TestLaunchPlanRunnerProcess:
     """_launch_plan_runner_process — Popen 호출 및 Redis 상태 검증"""

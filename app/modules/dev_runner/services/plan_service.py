@@ -1729,9 +1729,13 @@ class PlanService:
 
         - 파일 상단 20줄에서 `> 상태: ...` 라인을 찾아 교체
         - 라인이 없으면 첫 번째 `#` 제목 다음 줄에 삽입
-        - 허용 상태: 초안, 검토대기, 검토완료, 구현중, 구현완료, 보류
+        - 허용 상태: plan lifecycle 표준 상태 및 예약대기
         """
-        ALLOWED_STATUSES = ["초안", "검토대기", "검토완료", "구현중", "테스트중", "머지대기", "구현완료", "보류"]
+        ALLOWED_STATUSES = [
+            "초안", "검토대기", "예약대기", "검토완료", "구현중",
+            "검증중", "수정필요", "테스트중", "머지대기",
+            "통합테스트중", "구현완료", "완료", "보류",
+        ]
         if new_status not in ALLOWED_STATUSES:
             raise ValueError(
                 f"허용되지 않은 상태: '{new_status}'. 허용 목록: {ALLOWED_STATUSES}"

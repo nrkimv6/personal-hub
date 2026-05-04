@@ -41,6 +41,10 @@ _PRE_REVIEW_STATUSES = {
     "검증중",
 }
 
+_RESERVED_STATUSES = {
+    "예약대기",
+}
+
 _POST_REVIEW_STATUSES = {
     "검토완료",
     "구현중",
@@ -178,9 +182,15 @@ def classify_plan_stage(status: str) -> PlanStage:
     normalized = (status or "").strip()
     if not normalized:
         return "unknown"
+    if normalized in _RESERVED_STATUSES:
+        return "pre_review"
     if normalized in _PRE_REVIEW_STATUSES:
         return "pre_review"
     if normalized in _POST_REVIEW_STATUSES:
         return "post_review"
     return "unknown"
+
+
+def is_reserved_plan_status(status: str) -> bool:
+    return (status or "").strip() in _RESERVED_STATUSES
 

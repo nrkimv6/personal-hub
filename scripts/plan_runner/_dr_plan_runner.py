@@ -506,7 +506,12 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     """plan-runner CLI 실행 (백그라운드 스레드에서 호출 — worktree 생성 포함)"""
     from worktree_manager import WorktreeManager, WorktreeError, ensure_main_branch
     from workflow_manager import WorkflowManager
-    from _dr_plan_paths import classify_plan_stage, read_plan_status, resolve_plan_target
+    from _dr_plan_paths import (
+        classify_plan_stage,
+        is_reserved_plan_status,
+        read_plan_status,
+        resolve_plan_target,
+    )
     from plan_worktree_helpers import (
         is_plan_archived,
         is_worktree_active,
@@ -553,6 +558,9 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
                 _path_resolution.target_kind,
                 _plan_stage,
             )
+            if is_reserved_plan_status(_status):
+                _set_error_status(f"예약대기 plan은 실행할 수 없습니다: {plan_file}")
+                return
         except Exception as _path_err:
             logger.debug(f"[_do_start_plan_runner] plan rule 해석 실패 (무시): {_path_err}")
         if is_plan_archived(plan_file):
@@ -685,6 +693,27 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     if not runner_id:
         return {"success": False, "message": "runner_id required"}
 
+    plan_file_req = command.get("plan_file")
+    if plan_file_req and plan_file_req not in (PLAN_FILE_ALL, _LEGACY_ALL):
+        try:
+            from _dr_plan_paths import is_reserved_plan_status, read_plan_status
+
+            plan_status = read_plan_status(plan_file_req)
+            if is_reserved_plan_status(plan_status):
+                message = f"예약대기 plan은 실행할 수 없습니다: {plan_file_req}"
+                logger.info("[start_plan_runner] reserved plan blocked before accepted: %s", plan_file_req)
+                return {
+                    "success": False,
+                    "reason": "reserved_status",
+                    "status": plan_status,
+                    "message": message,
+                    "runner_id": runner_id,
+                    "action": "run",
+                    "executed_at": datetime.now().isoformat(),
+                }
+        except Exception as status_err:
+            logger.warning("[start_plan_runner] reserved status preflight failed: %s", status_err)
+
     # 동일 runner_id로 이미 실행 중이면 에러 (stale 프로세스 자동 정리 포함)
     redis_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
     redis_pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
@@ -712,7 +741,6 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         _cleanup_process_state(runner_id, redis_client)
 
     # plan_file 기준 기존 워커 감지 (재실행 시 attach — runner_id는 달라도 같은 plan 실행 중)
-    plan_file_req = command.get("plan_file")
     if plan_file_req and plan_file_req not in (PLAN_FILE_ALL, _LEGACY_ALL):
         from _dr_constants import RESULTS_KEY as _RESULTS_KEY_EARLY
         _command_id_early = command.get("command_id", "")
