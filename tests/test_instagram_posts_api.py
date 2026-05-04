@@ -4,19 +4,25 @@ Instagram Posts API 통합 테스트
 검색 기능 및 필터 테스트 (2025-12-24 추가)
 """
 
-import pytest
 from datetime import datetime
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.main import app
 from app.database import get_db
 from app.models.instagram_post import InstagramPost
-from app.models.task_schedule import TaskSchedule
+from app.models.task_schedule import TaskSchedule, TaskScheduleRun
+from app.modules.instagram.routes.instagram import router as instagram_router
 
 
 @pytest.fixture
 def client(test_db_session):
     """테스트용 FastAPI 클라이언트"""
+    from app.main import app
+
     def override_get_db():
         try:
             yield test_db_session
@@ -24,8 +30,62 @@ def client(test_db_session):
             pass
 
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def create_schedule_test_app() -> FastAPI:
+    """Schedule API 계약만 검증하는 lightweight FastAPI app."""
+    schedule_app = FastAPI()
+    schedule_app.include_router(instagram_router)
+    schedule_app.state.instagram_schedule_fixture_scope = "schedule-only"
+    return schedule_app
+
+
+@pytest.fixture
+def schedule_app():
+    app = create_schedule_test_app()
+    yield app
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def schedule_db_session():
+    """Schedule API에 필요한 테이블만 가진 빠른 테스트 DB 세션."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TaskSchedule.__table__.create(bind=engine)
+    TaskScheduleRun.__table__.create(bind=engine)
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    session = Session()
+
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+        engine.dispose()
+
+
+@pytest.fixture
+def schedule_client(schedule_app, schedule_db_session):
+    """Instagram schedule API 전용 TestClient."""
+    def override_get_db():
+        try:
+            yield schedule_db_session
+        finally:
+            pass
+
+    schedule_app.dependency_overrides[get_db] = override_get_db
+    try:
+        yield TestClient(schedule_app)
+    finally:
+        schedule_app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -84,12 +144,22 @@ def sample_posts(test_db_session):
 
 
 @pytest.fixture
-def clean_instagram_schedule(test_db_session):
+def clean_instagram_schedule(schedule_db_session):
     """Instagram 피드 스케줄 테스트 데이터 정리."""
-    test_db_session.query(TaskSchedule).filter(
+    schedule_ids = [
+        schedule_id
+        for (schedule_id,) in schedule_db_session.query(TaskSchedule.id)
+        .filter(TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED)
+        .all()
+    ]
+    if schedule_ids:
+        schedule_db_session.query(TaskScheduleRun).filter(
+            TaskScheduleRun.schedule_id.in_(schedule_ids)
+        ).delete(synchronize_session=False)
+    schedule_db_session.query(TaskSchedule).filter(
         TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED
     ).delete(synchronize_session=False)
-    test_db_session.commit()
+    schedule_db_session.commit()
 
 
 class TestInstagramScheduleAPI:
@@ -97,7 +167,7 @@ class TestInstagramScheduleAPI:
 
     def test_update_exact_slots_and_today_schedule_returns_all_slots(
         self,
-        client,
+        schedule_client,
         clean_instagram_schedule,
     ):
         """exact slot 10개 저장 후 today 응답도 10개 슬롯을 반환."""
@@ -106,7 +176,7 @@ class TestInstagramScheduleAPI:
             for hour in range(0, 20, 2)
         ]
 
-        response = client.put(
+        response = schedule_client.put(
             "/api/v1/instagram/schedule",
             json={
                 "enabled": True,
@@ -121,7 +191,7 @@ class TestInstagramScheduleAPI:
         assert data["daily_runs"] == 10
         assert data["time_windows"] == windows
 
-        today_response = client.get("/api/v1/instagram/schedule/today")
+        today_response = schedule_client.get("/api/v1/instagram/schedule/today")
 
         assert today_response.status_code == 200
         today_items = today_response.json()
@@ -132,11 +202,11 @@ class TestInstagramScheduleAPI:
 
     def test_update_exact_slots_rejects_min_interval_conflict(
         self,
-        client,
+        schedule_client,
         clean_instagram_schedule,
     ):
         """exact slot 간격보다 큰 min_interval_hours는 API 422로 거부."""
-        response = client.put(
+        response = schedule_client.put(
             "/api/v1/instagram/schedule",
             json={
                 "enabled": True,
@@ -151,6 +221,30 @@ class TestInstagramScheduleAPI:
 
         assert response.status_code == 422
         assert "min_interval_hours" in response.json()["detail"]
+
+    def test_schedule_client_uses_lightweight_app_without_posts_fixture(
+        self,
+        schedule_client,
+    ):
+        """schedule API fixture는 posts sample fixture와 full app bootstrap을 공유하지 않는다."""
+        assert schedule_client.app.state.instagram_schedule_fixture_scope == "schedule-only"
+
+    def test_schedule_app_clears_dependency_overrides(
+        self,
+        schedule_app,
+        schedule_db_session,
+    ):
+        """schedule app fixture의 DB override는 사용 후 제거 가능해야 한다."""
+        def override_get_db():
+            yield schedule_db_session
+
+        schedule_app.dependency_overrides[get_db] = override_get_db
+
+        assert get_db in schedule_app.dependency_overrides
+
+        schedule_app.dependency_overrides.clear()
+
+        assert schedule_app.dependency_overrides == {}
 
 
 class TestInstagramPostsSearchAPI:
