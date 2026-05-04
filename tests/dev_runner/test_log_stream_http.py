@@ -614,8 +614,8 @@ def test_http_log_stream_since_line_param():
 
 @pytest.mark.http_live
 def test_http_log_recent_small_stream_file():
-    """T5: stream_log_path 50B여도 해당 파일 내용 반환 (200B 기준 제거 검증)"""
-    import tempfile, os
+    """T5: START-only stream + 본로그 pair면 본로그 내용을 반환한다."""
+    import os
 
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
     try:
@@ -623,14 +623,28 @@ def test_http_log_recent_small_stream_file():
     except Exception:
         pytest.fail("Redis not available")
 
+    log_dir = None
+    try:
+        import sys, os as _os
+        sys.path.insert(0, "D:/work/project/tools/monitor-page")
+        _orig = _os.getcwd()
+        _os.chdir("D:/work/project/tools/monitor-page")
+        from app.modules.dev_runner.services.log_service import log_service as _ls
+        log_dir = str(_ls._get_log_dir())
+        _os.chdir(_orig)
+    except Exception as e:
+        pytest.skip(f"log_dir 확인 불가: {e}")
+    if not log_dir:
+        pytest.skip("log_dir 확인 불가")
+
     runner_id = "t5-small-stream-test"
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False, encoding="utf-8") as sf:
-        sf.write("[START] marker\n")  # ~17B
-        stream_path = sf.name
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False, encoding="utf-8") as lf:
+    stream_path = os.path.join(log_dir, "plan-runner-stream-t5-small-stream-test.log")
+    log_path = os.path.join(log_dir, "plan-runner-t5-small-stream-test.log")
+    with open(stream_path, "w", encoding="utf-8") as sf:
+        sf.write("[START] marker\n")
+    with open(log_path, "w", encoding="utf-8") as lf:
         for i in range(10):
             lf.write(f"[12:00:00] [INFO] old line {i}\n")
-        log_path = lf.name
 
     try:
         r.set(f"plan-runner:runners:{runner_id}:stream_log_path", stream_path)
@@ -643,10 +657,9 @@ def test_http_log_recent_small_stream_file():
         )
         assert resp.status_code == 200
         data = resp.json()
-        # stream 파일 내용만 반환돼야 함 (old line이 없어야 함)
         combined = " ".join(data.get("lines", []))
-        assert "old line" not in combined, f"이전 실행 로그가 반환됨: {combined[:100]}"
-        assert "START" in combined or len(data["lines"]) == 0, f"stream 파일 내용 아님: {combined[:100]}"
+        assert "old line" in combined, f"본로그가 반환되지 않음: {combined[:100]}"
+        assert "START" not in combined, f"START-only stream이 본로그를 가림: {combined[:100]}"
     except requests.exceptions.RequestException as e:
         pytest.skip(f"API server unavailable: {e}")
     finally:
@@ -664,6 +677,7 @@ def test_http_log_recent_small_stream_file():
 def test_http_log_recent_legacy_pseudo_id_after_size_removal():
     """T5: stream-filename-mismatch T5 재실행 — 200B 기준 제거 후 레거시 pseudo runner_id 동작 유지"""
     import tempfile, os, hashlib
+    from datetime import datetime
 
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
     try:
@@ -687,7 +701,7 @@ def test_http_log_recent_legacy_pseudo_id_after_size_removal():
     if not log_dir:
         pytest.skip("log_dir 확인 불가")
 
-    ts = "20260101_120000"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     legacy_filename = f"plan-runner-stream-{ts}.log"
     legacy_path = os.path.join(log_dir, legacy_filename)
     pseudo_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
@@ -698,7 +712,7 @@ def test_http_log_recent_legacy_pseudo_id_after_size_removal():
                 f.write(f"[12:00:00] [INFO] legacy line {i}\n")
 
         # history에서 pseudo_id 확인
-        hist_resp = _live_get(f"{ADMIN_API}/api/v1/dev-runner/logs/history")
+        hist_resp = _live_get(f"{ADMIN_API}/api/v1/dev-runner/logs/history", params={"limit": 100})
         assert hist_resp.status_code == 200
         runs = hist_resp.json().get("runs", [])
         found = any(r_item["runner_id"] == pseudo_id for r_item in runs)
