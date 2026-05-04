@@ -7,10 +7,18 @@
  * @typedef {{ dirty: boolean, changedFields: string[] }} DirtyResult
  */
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeText(value) {
-	return (value ?? '').trim();
+	return String(value ?? '').trim();
 }
 
+/**
+ * @param {LlmDefaultValue | null | undefined} value
+ * @returns {{ provider: string, model: string }}
+ */
 function normalizeLlmValue(value) {
 	return {
 		provider: normalizeText(value?.provider),

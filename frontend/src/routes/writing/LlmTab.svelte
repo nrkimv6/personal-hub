@@ -89,7 +89,7 @@
 	};
 
 	// Provider 변경 시 model 초기화
-	let prevProvider = $state(createForm.provider);
+	let prevProvider = $state('claude');
 	$effect(() => {
 		if (createForm.provider !== prevProvider) {
 			prevProvider = createForm.provider;
