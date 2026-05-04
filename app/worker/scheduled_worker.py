@@ -25,6 +25,7 @@ from app.modules.dev_runner.schedulers.auto_dev_runner_schedule import AutoDevRu
 from app.modules.dev_runner.schedulers.devguide_staleness_schedule import DevguideStalenessScheduler
 from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 from app.modules.dev_runner.schedulers.pytest_run_schedule import PytestRunScheduler
+from app.modules.dev_runner.schedulers.worktree_hygiene_schedule import WorktreeHygieneScheduler
 from app.modules.google_search.schedulers.search_schedule import GoogleSearchScheduler
 from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
 from app.modules.writing.schedulers.keyword_analysis_schedule import KeywordAnalysisScheduler
@@ -92,6 +93,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             ArchiveRotationScheduler(),
             ScheduleDateExpireScheduler(),
             AutoDevRunnerScheduler(),
+            WorktreeHygieneScheduler(),
         ]
 
     def _get_loop_interval(self) -> float:

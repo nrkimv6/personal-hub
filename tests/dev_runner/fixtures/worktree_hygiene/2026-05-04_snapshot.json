@@ -1,0 +1,7 @@
+{
+  "locked_clean_worktree": "impl/locked-clean",
+  "dirty_worktree": "impl/dirty",
+  "clean_ahead0_worktree": "impl/archived-clean",
+  "plans_state": "ahead_or_dirty_review",
+  "file_artifact": ".worktrees/api_gate_live_coverage.patch"
+}
