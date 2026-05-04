@@ -48,7 +48,7 @@ RUNNER_KEY_SUFFIXES = (
     "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
     "service_lock_approved",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
-    "subprocess_heartbeat", "reflect_final_path",
+    "subprocess_heartbeat", "pid_create_time", "process_cmdline_hash", "reflect_final_path",
     "accepted_at", "accepted_source", "started_at",  # 관측 메타 키 (Phase 1)
     # profile 관련 키 (신규 4개) — redis_connection.py의 RUNNER_KEY_SUFFIXES와 동기화 필수
     "profile", "profile_env_key", "profile_config_dir", "profile_extra_env",

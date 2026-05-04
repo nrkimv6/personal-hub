@@ -22,7 +22,7 @@ from _dr_constants import (
     RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, PLAN_FILE_ALL, _LEGACY_ALL,
     LOG_CHANNEL_PREFIX, MERGE_ACTIVE_STATUSES, WORKTREE_BASE_DIR,
     RECENT_RUNNERS_TTL, RUNNER_KEY_SUFFIXES, PROJECT_ROOT, RECENT_META_TTL,
-    OWNERSHIP_SNAPSHOT_DIR,
+    OWNERSHIP_SNAPSHOT_DIR, SUBPROCESS_HEARTBEAT_TTL,
 )
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_state import (
@@ -38,6 +38,7 @@ from _dr_runner_predicates import (
     _is_pid_alive,
     _parse_start_elapsed_seconds,
     _is_recent_runner_without_hb,
+    _runner_identity_matches,
 )
 
 logger = logging.getLogger(__name__)
@@ -754,27 +755,53 @@ def _process_runner_entry(
         return
 
     if _is_pid_alive(pid):
-        _is_zombie = False
-        try:
-            subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
-            if subprocess_hb is None:
-                _legacy, _elapsed = _is_recent_runner_without_hb(redis_client, runner_id)
-                if not _legacy:
-                    _is_zombie = True
-        except Exception:
-            pass
-        if _is_zombie:
+        identity_ok, identity_reason = _runner_identity_matches(redis_client, runner_id, pid)
+        if not identity_ok:
             try:
                 from _dr_merge import _pub_and_log as _pal
-                _pal(runner_id, f"{label} {runner_id} PID {pid} alive but no subprocess_heartbeat -> zombie cleanup", redis_client, "ZOMBIE")
+                _pal(
+                    runner_id,
+                    f"{label} {runner_id} PID {pid} alive but identity check failed "
+                    f"({identity_reason}) -> cleanup",
+                    redis_client,
+                    "RECONNECT",
+                )
             except Exception:
                 pass
-            logger.warning(f"[reconnect] zombie {label} {runner_id} PID={pid} no subprocess_heartbeat -> cleanup")
-            _cleanup_process_state(runner_id, redis_client, reason="reconnect_zombie")
-        else:
-            if is_orphan:
-                logger.info(f"[reconnect] {label} {runner_id} PID {pid} alive -> re-attached")
-            _attach_to_running_process(runner_id, pid, redis_client)
+            logger.warning(
+                "[reconnect] %s %s PID=%s alive but identity check failed (%s) -> cleanup",
+                label,
+                runner_id,
+                pid,
+                identity_reason,
+            )
+            _cleanup_process_state(runner_id, redis_client, reason=f"reconnect_{identity_reason}")
+            return
+
+        try:
+            redis_client.set(
+                f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat",
+                str(time.time()),
+                ex=SUBPROCESS_HEARTBEAT_TTL,
+            )
+        except Exception as hb_err:
+            logger.warning(
+                "[reconnect] %s %s PID=%s identity=%s but heartbeat republish failed: %s",
+                label,
+                runner_id,
+                pid,
+                identity_reason,
+                hb_err,
+            )
+        if is_orphan:
+            logger.info(
+                "[reconnect] %s %s PID %s alive identity=%s -> re-attached",
+                label,
+                runner_id,
+                pid,
+                identity_reason,
+            )
+        _attach_to_running_process(runner_id, pid, redis_client)
     else:
         try:
             _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")

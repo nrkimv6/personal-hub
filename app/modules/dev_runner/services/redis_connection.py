@@ -52,7 +52,7 @@ RUNNER_KEY_SUFFIXES = (
     "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
     "service_lock_approved",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
-    "exit_reason", "subprocess_heartbeat", "reflect_final_path",
+    "exit_reason", "subprocess_heartbeat", "pid_create_time", "process_cmdline_hash", "reflect_final_path",
     # 관측 메타 키 (기존 누락 3개 — _dr_constants.py와 동기화)
     "accepted_at", "accepted_source", "started_at",
     # profile 관련 키 (신규 4개)

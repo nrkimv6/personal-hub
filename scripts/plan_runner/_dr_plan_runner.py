@@ -30,6 +30,7 @@ from _dr_subprocess import _ANSI_ESCAPE, _make_plan_runner_env
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_log_framing import MultilineFrameBuffer
 from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, get_target_project_root, _DummyProcess
+from _dr_runner_predicates import _get_process_identity, _hash_process_cmdline
 from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
 from _dr_merge import _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 from _dr_stream_cleanup import (
@@ -1053,6 +1054,23 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path", str(log_file))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", process.pid)
+        try:
+            identity = _get_process_identity(process.pid, fallback_cmdline=cmd)
+            if identity is None:
+                identity = {
+                    "pid_create_time": "",
+                    "process_cmdline_hash": _hash_process_cmdline(cmd),
+                }
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid_create_time", identity["pid_create_time"])
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:process_cmdline_hash", identity["process_cmdline_hash"])
+        except Exception as identity_err:
+            logger.warning(
+                "_launch_plan_runner_process: process identity 저장 실패 "
+                "(runner_id=%s, pid=%s, reason=%s)",
+                runner_id,
+                process.pid,
+                identity_err,
+            )
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file or PLAN_FILE_ALL)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch or f"runner/{runner_id}")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", started_at_text)
@@ -1066,9 +1084,16 @@ def _launch_plan_runner_process(
             # Problem A 디버깅: SET 직후 GET 확인 — 불일치 시 Redis 경로/연결 의심
             _hb_check = redis_client.get(_hb_key)
             if _hb_check is None:
+                try:
+                    _hb_ttl = redis_client.ttl(_hb_key)
+                    _hb_exists = redis_client.exists(_hb_key)
+                    _hb_db = getattr(getattr(redis_client, "connection_pool", None), "connection_kwargs", {}).get("db", "unknown")
+                except Exception:
+                    _hb_ttl, _hb_exists, _hb_db = "unknown", "unknown", "unknown"
                 logger.error(
                     f"_launch_plan_runner_process: 초기 heartbeat SET 직후 GET=None — "
-                    f"Redis 경로 불일치 의심 (runner_id={runner_id}, key={_hb_key})"
+                    f"Redis 경로 불일치 의심 "
+                    f"(runner_id={runner_id}, key={_hb_key}, db={_hb_db}, ttl={_hb_ttl}, exists={_hb_exists})"
                 )
         except Exception:
             logger.warning(f"_launch_plan_runner_process: 초기 heartbeat 저장 실패 (runner_id={runner_id})")

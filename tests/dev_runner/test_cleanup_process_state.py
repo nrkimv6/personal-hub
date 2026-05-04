@@ -508,6 +508,14 @@ class TestRunnerKeySuffixesCompleteness:
             f"executor_service.py의 RUNNER_KEY_SUFFIXES에 추가하세요."
         )
 
+    def test_runner_key_suffixes_include_process_identity_correct(self):
+        """CORRECT: process identity 키는 listener/API cleanup suffix 계약에 포함된다."""
+        from app.modules.dev_runner.services.executor_service import RUNNER_KEY_SUFFIXES
+
+        required = {"pid_create_time", "process_cmdline_hash"}
+        missing = required - set(RUNNER_KEY_SUFFIXES)
+        assert not missing, f"process identity suffix 누락: {missing}"
+
 
 # ──────────────────────────────────────────────
 # 미머지 커밋 보호 가드 TC

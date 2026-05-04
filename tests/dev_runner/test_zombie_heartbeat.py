@@ -36,6 +36,14 @@ def process_utils_mod():
 
 
 @pytest.fixture(scope="module")
+def runner_predicates_mod():
+    bootstrap_plan_runner_modules()
+    import _dr_runner_predicates
+
+    return _dr_runner_predicates
+
+
+@pytest.fixture(scope="module")
 def state_mod():
     state, _process_utils_mod = bootstrap_plan_runner_modules()
     return state
@@ -85,19 +93,80 @@ def _seed_orphan_runner(fr, runner_id: str, pid: int, start_time: str, with_hear
         fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat", str(time.time()), ex=120)
 
 
-def test_reconnect_zombie_pid_alive_no_heartbeat(listener_mod, process_utils_mod, fr):
-    """R(Right): PID alive + heartbeat 없음(오래된 start_time) -> reconnect_zombie cleanup."""
+def test_runner_identity_matches_create_time_and_cmdline_hash_right(runner_predicates_mod, fr):
+    """R(Right): Redis identity와 OS identity가 모두 같으면 match."""
+    runner_id = "identity-match-helper"
+    pid = 1234
+    cmd_hash = runner_predicates_mod._hash_process_cmdline(["python", "-m", "plan_runner", "run"])
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid_create_time", "111.25")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:process_cmdline_hash", cmd_hash)
+
+    with patch.object(
+        runner_predicates_mod,
+        "_get_process_identity",
+        return_value={"pid_create_time": 111.25, "process_cmdline_hash": cmd_hash},
+    ):
+        matched, reason = runner_predicates_mod._runner_identity_matches(fr, runner_id, pid)
+
+    assert matched is True
+    assert reason == "identity_match"
+
+
+def test_runner_identity_matches_missing_metadata_uses_start_grace_boundary(runner_predicates_mod, fr):
+    """B(Boundary): legacy metadata missing은 start_time grace 안에서 compatible."""
+    runner_id = "identity-missing-grace"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
+
+    matched, reason = runner_predicates_mod._runner_identity_matches(fr, runner_id, 1234)
+
+    assert matched is True
+    assert reason == "legacy_grace"
+
+
+def test_runner_identity_matches_missing_metadata_outside_grace(runner_predicates_mod, fr):
+    """B(Boundary): legacy metadata missing이 grace 밖이면 cleanup 사유가 된다."""
+    runner_id = "identity-missing-old"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", (datetime.now() - timedelta(minutes=20)).isoformat())
+
+    matched, reason = runner_predicates_mod._runner_identity_matches(fr, runner_id, 1234)
+
+    assert matched is False
+    assert reason == "identity_missing"
+
+
+def test_runner_identity_matches_mismatch_reason(runner_predicates_mod, fr):
+    """B(Boundary): create_time mismatch reason을 구분한다."""
+    runner_id = "identity-mismatch-helper"
+    cmd_hash = runner_predicates_mod._hash_process_cmdline(["python", "-m", "plan_runner", "run"])
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid_create_time", "111.25")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:process_cmdline_hash", cmd_hash)
+
+    with patch.object(
+        runner_predicates_mod,
+        "_get_process_identity",
+        return_value={"pid_create_time": 222.25, "process_cmdline_hash": cmd_hash},
+    ):
+        matched, reason = runner_predicates_mod._runner_identity_matches(fr, runner_id, 1234)
+
+    assert matched is False
+    assert reason == "pid_create_time_mismatch"
+
+
+def test_reconnect_attaches_alive_identity_match_without_heartbeat_right(listener_mod, process_utils_mod, fr):
+    """R(Right): PID alive + heartbeat 없음이어도 identity match이면 attach."""
     runner_id = "zombie-reconnect-1"
     old_start = (datetime.now() - timedelta(minutes=20)).isoformat()
     _seed_active_runner(fr, runner_id, pid=4321, start_time=old_start, with_heartbeat=False)
 
     with patch.object(process_utils_mod, "_is_pid_alive", return_value=True), \
          patch.object(process_utils_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(process_utils_mod, "_attach_to_running_process") as mock_attach:
+         patch.object(process_utils_mod, "_attach_to_running_process") as mock_attach, \
+         patch.object(process_utils_mod, "_runner_identity_matches", return_value=(True, "identity_match")):
         listener_mod._reconnect_surviving_runners(fr)
 
-    mock_cleanup.assert_called_once_with(runner_id, fr, reason="reconnect_zombie")
-    mock_attach.assert_not_called()
+    mock_cleanup.assert_not_called()
+    mock_attach.assert_called_once_with(runner_id, 4321, fr)
+    assert fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat") is not None
 
 
 def test_reconnect_healthy_pid_alive_with_heartbeat(listener_mod, process_utils_mod, fr):
@@ -108,25 +177,43 @@ def test_reconnect_healthy_pid_alive_with_heartbeat(listener_mod, process_utils_
 
     with patch.object(process_utils_mod, "_is_pid_alive", return_value=True), \
          patch.object(process_utils_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(process_utils_mod, "_attach_to_running_process") as mock_attach:
+         patch.object(process_utils_mod, "_attach_to_running_process") as mock_attach, \
+         patch.object(process_utils_mod, "_runner_identity_matches", return_value=(True, "identity_match")):
         listener_mod._reconnect_surviving_runners(fr)
 
     mock_cleanup.assert_not_called()
     mock_attach.assert_called_once_with(runner_id, 5678, fr)
 
 
-def test_reconnect_orphan_zombie_cleanup(listener_mod, process_utils_mod, fr):
-    """R(Right): orphan scan에서 PID alive + heartbeat 없음 -> reconnect_zombie cleanup."""
+def test_reconnect_orphan_alive_identity_match_without_heartbeat_right(listener_mod, process_utils_mod, fr):
+    """R(Right): orphan scan에서도 identity match이면 heartbeat 없음만으로 cleanup하지 않는다."""
     orphan_id = "orphan-zombie-1"
     old_start = (datetime.now() - timedelta(minutes=20)).isoformat()
     _seed_orphan_runner(fr, orphan_id, pid=7777, start_time=old_start, with_heartbeat=False)
 
     with patch.object(process_utils_mod, "_is_pid_alive", return_value=True), \
          patch.object(process_utils_mod, "_cleanup_process_state") as mock_cleanup, \
-         patch.object(process_utils_mod, "_attach_to_running_process") as mock_attach:
+         patch.object(process_utils_mod, "_attach_to_running_process") as mock_attach, \
+         patch.object(process_utils_mod, "_runner_identity_matches", return_value=(True, "identity_match")):
         listener_mod._reconnect_surviving_runners(fr)
 
-    mock_cleanup.assert_called_once_with(orphan_id, fr, reason="reconnect_zombie")
+    mock_cleanup.assert_not_called()
+    mock_attach.assert_called_once_with(orphan_id, 7777, fr)
+
+
+def test_reconnect_cleans_alive_identity_mismatch_boundary(listener_mod, process_utils_mod, fr):
+    """B(Boundary): PID alive라도 identity mismatch이면 cleanup하고 attach하지 않는다."""
+    runner_id = "identity-mismatch-1"
+    old_start = (datetime.now() - timedelta(minutes=20)).isoformat()
+    _seed_active_runner(fr, runner_id, pid=4321, start_time=old_start, with_heartbeat=True)
+
+    with patch.object(process_utils_mod, "_is_pid_alive", return_value=True), \
+         patch.object(process_utils_mod, "_cleanup_process_state") as mock_cleanup, \
+         patch.object(process_utils_mod, "_attach_to_running_process") as mock_attach, \
+         patch.object(process_utils_mod, "_runner_identity_matches", return_value=(False, "pid_create_time_mismatch")):
+        listener_mod._reconnect_surviving_runners(fr)
+
+    mock_cleanup.assert_called_once_with(runner_id, fr, reason="reconnect_pid_create_time_mismatch")
     mock_attach.assert_not_called()
 
 

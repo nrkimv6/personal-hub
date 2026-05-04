@@ -21,7 +21,7 @@ RUNNER_KEY_SUFFIXES = (
     "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
     "service_lock_approved",
     "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
-    "subprocess_heartbeat",
+    "subprocess_heartbeat", "pid_create_time", "process_cmdline_hash",
 )
 
 

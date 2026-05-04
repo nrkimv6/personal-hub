@@ -45,7 +45,7 @@ def seed_active(r, runner_id, pid, branch="main", status="running"):
 class TestOrphanScan:
     """고아 키 탐색 로직 검증."""
 
-    def _run_reconnect(self, r, alive_pids=None):
+    def _run_reconnect(self, r, alive_pids=None, identity_matches=True):
         """_reconnect_surviving_runners를 fakeredis + 모킹으로 실행.
 
         Returns:
@@ -80,6 +80,7 @@ class TestOrphanScan:
 
         with (
             patch.object(process_utils_mod, "_is_pid_alive", side_effect=fake_is_alive),
+            patch.object(process_utils_mod, "_runner_identity_matches", return_value=(identity_matches, "identity_match" if identity_matches else "process_cmdline_mismatch")),
             patch.object(process_utils_mod, "_cleanup_process_state", side_effect=fake_cleanup),
             patch.object(process_utils_mod, "_attach_to_running_process", side_effect=fake_attach),
         ):
@@ -107,6 +108,21 @@ class TestOrphanScan:
 
         assert "orphan-002" in attach_calls
         assert "orphan-002" not in cleanup_calls
+
+    def test_orphan_alive_pid_identity_mismatch_is_cleaned_up(self):
+        """고아 키의 PID가 alive여도 identity mismatch면 cleanup 호출."""
+        r = make_fake_redis()
+        seed_orphan(r, "orphan-identity-mismatch", 12345)
+        r.set(f"{RUNNER_KEY_PREFIX}:orphan-identity-mismatch:subprocess_heartbeat", "alive", ex=120)
+
+        cleanup_calls, attach_calls = self._run_reconnect(
+            r,
+            alive_pids={12345},
+            identity_matches=False,
+        )
+
+        assert "orphan-identity-mismatch" in cleanup_calls
+        assert "orphan-identity-mismatch" not in attach_calls
 
     def test_active_runner_not_double_processed(self):
         """active_runners에 있는 runner는 고아 스캔에서 중복 처리되지 않는다."""

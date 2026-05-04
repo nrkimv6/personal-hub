@@ -298,7 +298,14 @@ def _handle_zombie_heartbeat(runner_id: str, proc, redis_client: redis.Redis, wf
 
     try:
         subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
-    except Exception:
+    except Exception as hb_read_err:
+        logger.warning(
+            "heartbeat: steady-state zombie check skipped for runner %s PID=%s "
+            "reason=redis_failure error=%s; reconnect uses process identity instead",
+            runner_id,
+            getattr(proc, "pid", "unknown"),
+            hb_read_err,
+        )
         return False
 
     if subprocess_hb is not None:
@@ -317,6 +324,12 @@ def _handle_zombie_heartbeat(runner_id: str, proc, redis_client: redis.Redis, wf
 
     if runner_id not in _zombie_first_seen:
         _zombie_first_seen[runner_id] = time.time()
+        logger.warning(
+            "heartbeat: steady-state missing subprocess_heartbeat first_seen "
+            "runner=%s PID=%s reason=key_missing; reconnect uses process identity instead",
+            runner_id,
+            getattr(proc, "pid", "unknown"),
+        )
 
     zombie_elapsed = time.time() - _zombie_first_seen[runner_id]
     if zombie_elapsed < ZOMBIE_GRACE_SECONDS:
@@ -391,7 +404,14 @@ def _handle_running_process_heartbeat(runner_id: str, proc, redis_client: redis.
             str(time.time()),
             ex=SUBPROCESS_HEARTBEAT_TTL,
         )
-    except Exception:
+    except Exception as hb_set_err:
+        logger.warning(
+            "heartbeat: subprocess_heartbeat renew failed runner=%s PID=%s "
+            "reason=redis_failure error=%s",
+            runner_id,
+            getattr(proc, "pid", "unknown"),
+            hb_set_err,
+        )
         pass  # Redis 실패 시 무시 — zombie 체크는 계속 진행
 
     _handle_zombie_heartbeat(runner_id, proc, redis_client, wf_manager)

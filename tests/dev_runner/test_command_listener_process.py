@@ -349,6 +349,24 @@ class TestLaunchPlanRunnerProcess:
         assert fr.get(f"{RKP}:{RUNNER_ID}:pid") == "12345"
         assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "test.md"
 
+    def test_launch_stores_process_identity_right(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """R(Right): launch 직후 PID create_time과 cmdline hash를 Redis에 저장한다."""
+        RKP = listener_mod.RUNNER_KEY_PREFIX
+        command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen), \
+             patch(
+                 "_dr_plan_runner._get_process_identity",
+                 return_value={"pid_create_time": 123.5, "process_cmdline_hash": "cmd-hash"},
+             ):
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, "test.md", None)
+
+        assert fr.get(f"{RKP}:{RUNNER_ID}:pid_create_time") == "123.5"
+        assert fr.get(f"{RKP}:{RUNNER_ID}:process_cmdline_hash") == "cmd-hash"
+
     def test_launch_sets_stream_log_path_in_redis(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """T3: stream_log_path가 Redis에 실제 로그 파일 경로로 저장되는지 확인 (nil 아님)
 

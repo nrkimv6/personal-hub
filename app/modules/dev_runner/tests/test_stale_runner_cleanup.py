@@ -159,6 +159,7 @@ class TestReconnectSurvivingRunners:
 
         with (
             patch.object(_proc_utils, "_is_pid_alive", return_value=True),
+            patch.object(_proc_utils, "_runner_identity_matches", return_value=(True, "identity_match")),
             patch.object(_proc_utils, "_attach_to_running_process") as mock_attach,
         ):
             _reconnect_surviving_runners(r)
