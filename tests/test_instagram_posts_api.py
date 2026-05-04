@@ -162,6 +162,7 @@ def clean_instagram_schedule(schedule_db_session):
     schedule_db_session.commit()
 
 
+@pytest.mark.http
 class TestInstagramScheduleAPI:
     """GET/PUT /api/v1/instagram/schedule 계약 테스트."""
 
