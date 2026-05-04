@@ -3,6 +3,7 @@
 	import { confirmState, resolveConfirm, type ConfirmRequest } from '$lib/stores/confirm';
 
 	let request = $state<ConfirmRequest | null>(null);
+	let dialogElement = $state<HTMLElement | null>(null);
 
 	const unsubscribe = confirmState.subscribe((value) => {
 		request = value;
@@ -31,6 +32,12 @@
 		}
 	}
 
+	$effect(() => {
+		if (request && dialogElement) {
+			dialogElement.focus();
+		}
+	});
+
 	onMount(() => {
 		window.addEventListener('keydown', handleKeydown);
 	});
@@ -42,15 +49,21 @@
 </script>
 
 {#if request}
-	<div class="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 px-4">
-		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-		<div class="absolute inset-0" onclick={() => close(false)}></div>
-		<section
-			class="relative w-full max-w-md rounded-lg border border-border bg-card p-5 text-card-foreground shadow-xl"
+	<div class="fixed inset-0 z-[80] flex items-center justify-center px-4">
+		<button
+			type="button"
+			class="absolute inset-0 z-0 cursor-default bg-black/50"
+			aria-label="확인 모달 닫기"
+			onclick={() => close(false)}
+		></button>
+		<div
+			bind:this={dialogElement}
+			class="relative z-10 w-full max-w-md rounded-lg border border-border bg-card p-5 text-card-foreground shadow-xl focus:outline-none"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="confirm-modal-title"
 			aria-describedby="confirm-modal-message"
+			tabindex="-1"
 		>
 			<h2 id="confirm-modal-title" class="text-base font-semibold text-foreground">
 				{request.title}
@@ -74,6 +87,6 @@
 					{request.confirmText}
 				</button>
 			</div>
-		</section>
+		</div>
 	</div>
 {/if}
