@@ -18,6 +18,7 @@
 		ChevronRight,
 		ClipboardList
 	} from 'lucide-svelte';
+	import { confirm } from '$lib/stores/confirm';
 	import { toast } from '$lib/stores/toast';
 
 	// === 타입 정의 ===
@@ -350,9 +351,12 @@
 
 	async function propagateParent(folder: Folder) {
 		const categoryName = getCategoryName(folder.category_id);
-		const confirmed = window.confirm(
-			`상위(부모) 폴더에 '${categoryName}' 카테고리를 적용하시겠습니까?\n(부모 폴더에 이미 카테고리가 있으면 적용되지 않습니다)`
-		);
+		const confirmed = await confirm({
+			title: '부모 폴더 전파',
+			message: `상위(부모) 폴더에 '${categoryName}' 카테고리를 적용하시겠습니까?\n(부모 폴더에 이미 카테고리가 있으면 적용되지 않습니다)`,
+			confirmText: '적용',
+			variant: 'warning'
+		});
 		if (!confirmed) return;
 
 		try {
@@ -382,9 +386,12 @@
 
 	async function propagateSiblings(folder: Folder) {
 		const categoryName = getCategoryName(folder.category_id);
-		const confirmed = window.confirm(
-			`같은 레벨의 미분류 폴더에 '${categoryName}' 카테고리를 적용하시겠습니까?\n(카테고리가 없는 형제 폴더에만 적용됩니다)`
-		);
+		const confirmed = await confirm({
+			title: '형제 폴더 전파',
+			message: `같은 레벨의 미분류 폴더에 '${categoryName}' 카테고리를 적용하시겠습니까?\n(카테고리가 없는 형제 폴더에만 적용됩니다)`,
+			confirmText: '적용',
+			variant: 'warning'
+		});
 		if (!confirmed) return;
 
 		try {
