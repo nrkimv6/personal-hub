@@ -94,6 +94,7 @@
 		}, 1000);
 		if (logViewer && logRef) {
 			logRef({ injectLine: logViewer.injectLine, injectCompleted: logViewer.injectCompleted, injectMergeCompleted: logViewer.injectMergeCompleted, catchUp: logViewer.catchUp });
+			void logViewer.catchUp?.();
 		}
 	});
 

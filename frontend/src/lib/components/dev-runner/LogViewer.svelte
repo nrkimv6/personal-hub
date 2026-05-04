@@ -68,13 +68,18 @@
 	let pendingStale = $state(false);
 	let exitBanner = $state<{ show: boolean; reason: string }>({ show: false, reason: 'completed' }); // runner 종료 배너
 	let failureBanner = $state<{ show: boolean; message: string } | null>(null); // FAILURE 태그 sticky 배너
+	let lastLogLoadError = $state<string | null>(null);
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
 	const PREVIEW_LINE_LIMIT = 3;
 	const MAX_RENDER_CHARS = 8 * 1024;
 	const PREVIEW_TOGGLE_STORAGE_KEY = 'devRunnerPreviewCollapse';
+	const RECENT_RETRY_BASE_DELAY_MS = 600;
+	const MAX_RECENT_RETRY_ATTEMPTS = 4;
 	let previewCollapsedEnabled = $state(true);
 	let lineSequence = 0;
+	let recentRetryTimer: ReturnType<typeof setTimeout> | null = null;
+	let recentRetryAttempt = 0;
 
 	let copied = $state(false);
 	let expandedLongLines = $state<Set<string>>(new Set());
@@ -387,6 +392,49 @@
 		pushLine(parsed);
 	}
 
+	function describeError(error: unknown): string {
+		if (error instanceof Error && error.message) return error.message;
+		if (typeof error === 'string' && error) return error;
+		return 'unknown error';
+	}
+
+	function clearRecentRetryTimer() {
+		if (!recentRetryTimer) return;
+		clearTimeout(recentRetryTimer);
+		recentRetryTimer = null;
+	}
+
+	function hasLoadedLogContent(): boolean {
+		return lines.some((line) => line.tag !== 'DIAG');
+	}
+
+	function recordLogLoadError(stage: string, error: unknown) {
+		const message = describeError(error);
+		lastLogLoadError = `${stage}: ${message}`;
+		addLine(`[DIAG] ${stage} 실패: ${message}`, false);
+	}
+
+	function scheduleManagedRecentRetry(reason: string) {
+		if (mode !== 'managed' || hasLoadedLogContent() || recentRetryTimer) return;
+		if (recentRetryAttempt >= MAX_RECENT_RETRY_ATTEMPTS) {
+			if (lastLogLoadError) {
+				addLine(`[DIAG] 로그 catch-up 재시도 중단: ${lastLogLoadError}`, false);
+			}
+			return;
+		}
+		const delay = RECENT_RETRY_BASE_DELAY_MS * Math.pow(2, recentRetryAttempt);
+		recentRetryAttempt += 1;
+		recentRetryTimer = setTimeout(async () => {
+			recentRetryTimer = null;
+			if (mode !== 'managed' || hasLoadedLogContent()) return;
+			addLine(`[DIAG] 로그 catch-up 재시도 #${recentRetryAttempt}: ${reason}`, false);
+			await loadRecent();
+			if (!hasLoadedLogContent() && (running || apiGate.state === 'open')) {
+				scheduleManagedRecentRetry(reason);
+			}
+		}, delay);
+	}
+
 	function pushLine(parsed: ParsedLine) {
 		lines.push(parsed);
 		if (lines.length > MAX_LINES) {
@@ -538,9 +586,12 @@
 			if (res.lines.length > 0) {
 				lines = res.lines.map((text: string) => parseLine(text, true));
 				expandedLongLines = new Set();
+				lastLogLoadError = null;
+				recentRetryAttempt = 0;
+				clearRecentRetryTimer();
 			}
-		} catch {
-			// full 로그 없을 수 있음
+		} catch (error) {
+			recordLogLoadError('full 로그 로드', error);
 		}
 	}
 
@@ -558,8 +609,8 @@
 						sourceLines = fullRes.lines;
 						fromLine = fullRes.offset ?? 0;
 					}
-				} catch {
-					// full 로그 없을 수 있음
+				} catch (error) {
+					recordLogLoadError('recent fallback full 로그 로드', error);
 				}
 			}
 			const parsed = sourceLines.map((text: string) => parseLine(text, true));
@@ -599,8 +650,14 @@
 			if (parsed.some((l: ParsedLine) => l.raw.includes(SEPARATOR_PATTERN))) {
 				pendingStale = true;
 			}
-		} catch {
-			// 로그 없을 수 있음
+			lastLogLoadError = null;
+			if (sourceLines.length > 0) {
+				recentRetryAttempt = 0;
+				clearRecentRetryTimer();
+			}
+		} catch (error) {
+			recordLogLoadError('recent 로그 로드', error);
+			scheduleManagedRecentRetry('recent 로그 로드 실패');
 		}
 	}
 
@@ -625,7 +682,7 @@
 		} catch {
 			// localStorage unavailable in some environments
 		}
-		await runDiagnostics();
+		void runDiagnostics();
 		await loadRecent();
 		// 초기 로드 후 스크롤을 맨 아래로 이동
 		requestAnimationFrame(() => scrollToBottom());
@@ -634,6 +691,7 @@
 		} else {
 			// managed 모드: SSE 미연결이므로 fetchStatus()로 redisAvailable 초기화
 			await fetchStatus();
+			if (!hasLoadedLogContent()) scheduleManagedRecentRetry('managed mount');
 		}
 	});
 
@@ -643,6 +701,7 @@
                         if (noiseTimer) clearTimeout(noiseTimer);
 			eventSource = null;
 		}
+		clearRecentRetryTimer();
 	});
 
 	function getTagStyle(tag: string) {
@@ -681,9 +740,25 @@
 		prevMerging = cur;
 	});
 
+	let previousManagedRetryKey = '';
+	$effect(() => {
+		const retryKey = `${runnerId}|${running ? 'running' : 'stopped'}|${apiGate.state}`;
+		if (mode !== 'managed') {
+			previousManagedRetryKey = retryKey;
+			return;
+		}
+		if (previousManagedRetryKey === retryKey) return;
+		previousManagedRetryKey = retryKey;
+		recentRetryAttempt = 0;
+		if (!hasLoadedLogContent()) {
+			scheduleManagedRecentRetry('runner/api state changed');
+		}
+	});
+
 	// ── managed 모드 공개 API ───────────────────────────────────────────────────
 
 	let _catchUpInProgress = false;
+	let _catchUpPromise: Promise<void> | null = null;
 	let _pendingInjectBuffer: string[] = [];
 
 	export function injectLine(payload: string | { text: string; meta?: Record<string, unknown> }) {
@@ -697,27 +772,33 @@
 	}
 
 	export async function catchUp(): Promise<void> {
-		if (mode !== 'managed' || _catchUpInProgress) return;
-		_catchUpInProgress = true;
-		try {
-			await loadRecent();
-			// loadRecent 후 파일의 마지막 라인 이후에 도착한 펜딩 라인만 flush
-			if (_pendingInjectBuffer.length > 0) {
-				const lastFileLine = lines.length > 0 ? lines[lines.length - 1].raw : null;
-				let startIdx = 0;
-				if (lastFileLine) {
-					const matchIdx = _pendingInjectBuffer.lastIndexOf(lastFileLine);
-					if (matchIdx >= 0) startIdx = matchIdx + 1;
+		if (mode !== 'managed') return;
+		if (_catchUpPromise) return _catchUpPromise;
+		_catchUpPromise = (async () => {
+			_catchUpInProgress = true;
+			try {
+				await loadRecent();
+				// loadRecent 후 파일의 마지막 라인 이후에 도착한 펜딩 라인만 flush
+				if (_pendingInjectBuffer.length > 0) {
+					const lastFileLine = lines.length > 0 ? lines[lines.length - 1].raw : null;
+					let startIdx = 0;
+					if (lastFileLine) {
+						const matchIdx = _pendingInjectBuffer.lastIndexOf(lastFileLine);
+						if (matchIdx >= 0) startIdx = matchIdx + 1;
+					}
+					for (let i = startIdx; i < _pendingInjectBuffer.length; i++) {
+						addLine(_pendingInjectBuffer[i], false);
+					}
 				}
-				for (let i = startIdx; i < _pendingInjectBuffer.length; i++) {
-					addLine(_pendingInjectBuffer[i], false);
-				}
+				if (!hasLoadedLogContent()) scheduleManagedRecentRetry('managed catch-up');
+			} finally {
+				_pendingInjectBuffer = [];
+				_catchUpInProgress = false;
+				_catchUpPromise = null;
+				requestAnimationFrame(() => scrollToBottom());
 			}
-		} finally {
-			_pendingInjectBuffer = [];
-			_catchUpInProgress = false;
-			requestAnimationFrame(() => scrollToBottom());
-		}
+		})();
+		return _catchUpPromise;
 	}
 
 	export function injectCompleted(reason: string = 'completed') {
@@ -866,6 +947,12 @@
 				class="shrink-0 text-red-400 hover:text-red-200 leading-none"
 				aria-label="배너 닫기"
 			>✕</button>
+		</div>
+	{/if}
+
+	{#if lastLogLoadError}
+		<div class="px-3 py-1.5 bg-yellow-950/50 border-b border-yellow-800/60 text-[11px] text-yellow-200 shrink-0 font-mono">
+			[DIAG] {lastLogLoadError}
 		</div>
 	{/if}
 

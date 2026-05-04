@@ -142,6 +142,21 @@
 	const injectedLineFingerprints = new Map<string, string[]>();
 	const INJECT_LINE_DEDUP_LIMIT = 160;
 
+	function catchUpRunnerLogRef(runnerId: string, ref: LogViewerRef | undefined = logRefs.get(runnerId)) {
+		if (!ref) return;
+		const tab = runnerTabs.find(t => t.id === runnerId);
+		if (!tab) return;
+		if (tab.running || activeTabId === runnerId) {
+			void ref.catchUp?.();
+		}
+	}
+
+	function catchUpVisibleRunnerRefs(runners: RunnerSource[]) {
+		for (const runner of runners) {
+			catchUpRunnerLogRef(runner.runner_id);
+		}
+	}
+
 	function handlePlanModalOpen(plan: DevRunnerPlanFileResponse) {
 		resetPlanSummaryState();
 		modalPlan = plan;
@@ -373,6 +388,7 @@
 		if (opts.selectActive !== false && !activeTabId && runnerTabs.length > 0) {
 			activeTabId = runnerTabs[runnerTabs.length - 1].id;
 		}
+		catchUpVisibleRunnerRefs(runners);
 		return runners;
 	}
 
@@ -612,8 +628,7 @@
 				}
 				// SSE 재연결 시 running 탭에 catch-up 신호 전달
 				for (const [id, ref] of logRefs) {
-					const tab = runnerTabs.find(t => t.id === id);
-					if (tab) void ref.catchUp?.();
+					catchUpRunnerLogRef(id, ref);
 				}
 			},
 			onError: handleSSEError,
@@ -802,6 +817,9 @@
 
 
 	$effect(() => {
+		if (activeTabId) {
+			catchUpRunnerLogRef(activeTabId);
+		}
 
 		// current_cycle 변화 감지 → plans 갱신
 		const currentCycle = runStatus?.current_cycle ?? null;
@@ -1043,7 +1061,10 @@
 										onClose={() => handleCloseTab(tab.id)}
 										onRestart={() => handleRestart(tab)}
 										onBatchPlansChange={(plans) => { batchPlans = plans; }}
-										logRef={(ref) => logRefs.set(tab.id, ref)}
+										logRef={(ref) => {
+											logRefs.set(tab.id, ref);
+											catchUpRunnerLogRef(tab.id, ref);
+										}}
 									/>
 								</div>
 							{/each}
