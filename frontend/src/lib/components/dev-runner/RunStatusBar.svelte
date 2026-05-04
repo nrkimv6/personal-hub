@@ -26,12 +26,27 @@
 		display_plan_name?: string | null;
 	}
 
-	function resolveLabel(runner: RunnerTab): string {
+	function resolveFullLabel(runner: RunnerTab): string {
 		if (runner.plan_file) {
 			if (runner.plan_file === '__ALL_PLANS__' || runner.plan_file === 'ALL') return '전체 실행';
 			return runner.plan_file.split(/[/\\]/).pop() ?? runner.plan_file;
 		}
 		return runner.display_plan_name ?? '(알 수 없음)';
+	}
+
+	function resolveVisibleLabel(index: number): string {
+		return `Runner ${index + 1}`;
+	}
+
+	function resolveMetaTitle(runner: RunnerTab, index: number): string {
+		const rows = [
+			`runner: ${resolveVisibleLabel(index)}`,
+			`plan: ${resolveFullLabel(runner)}`,
+			runner.plan_file ? `file: ${runner.plan_file}` : null,
+			runner.engine ? `engine: ${runner.engine}` : null,
+			runner.branch ? `branch: ${runner.branch}` : null,
+		];
+		return rows.filter(Boolean).join('\n');
 	}
 
 	interface RunStatus {
@@ -83,7 +98,9 @@
 	let anyCrashed = $derived(!anyRunning && !!runStatus?.crashed);
 	let stoppedCount = $derived(runners.length - runningCount);
 	let activeRunner = $derived(runners.find(r => r.id === activeRunnerId) ?? null);
-	let activeRunnerLabel = $derived(activeRunner ? resolveLabel(activeRunner) : null);
+	let activeRunnerIndex = $derived(activeRunner ? runners.findIndex(r => r.id === activeRunner.id) : -1);
+	let activeRunnerLabel = $derived(activeRunner && activeRunnerIndex >= 0 ? `Selected ${resolveVisibleLabel(activeRunnerIndex)}` : null);
+	let activeRunnerMetaTitle = $derived(activeRunner && activeRunnerIndex >= 0 ? resolveMetaTitle(activeRunner, activeRunnerIndex) : '');
 	let summaryText = $derived(
 		`${sseConnected ? 'Online' : 'Offline'} · ${runningCount}/${runners.length} active${anyRunning && elapsed ? ` · ${elapsed}` : ''}`
 	);
@@ -109,7 +126,7 @@
 					{/if}
 				</div>
 				{#if activeRunnerLabel}
-					<div class="hidden truncate text-[10px] font-mono text-muted-foreground md:block" title={activeRunnerLabel}>
+					<div class="hidden truncate text-[10px] font-mono text-muted-foreground md:block" title={activeRunnerMetaTitle}>
 						{activeRunnerLabel}
 					</div>
 				{/if}
@@ -235,13 +252,14 @@
 	<!-- Runner 목록 행 (runner가 1개 이상일 때) -->
 	{#if runners.length > 0 && !collapsed}
 		<div class="divide-y divide-border overflow-y-auto" style="max-height: 5.25rem;">
-			{#each runners as runner (runner.id)}
+			{#each runners as runner, index (runner.id)}
 				<div
 				class="flex items-center gap-2 px-3 py-1.5 text-xs group hover:bg-secondary/50 cursor-pointer {activeRunnerId === runner.id ? 'bg-primary/10' : ''}"
 				onclick={() => onSelectRunner?.(runner.id)}
 				role="button"
 				tabindex="0"
 				onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelectRunner?.(runner.id); }}
+				title={resolveMetaTitle(runner, index)}
 			>
 					<!-- 상태 dot -->
 					{#if runner.running}
@@ -251,19 +269,14 @@
 						<div class="w-1.5 h-1.5 rounded-full {exitDisplay.dotClass} shrink-0"></div>
 					{/if}
 
-					<!-- plan 파일명 (display_plan_name → plan_file → '(알 수 없음)') -->
-					<span class="truncate flex-1 min-w-0 font-mono text-[11px] text-foreground" title={runner.plan_file ?? runner.display_plan_name ?? ''}>
-						{resolveLabel(runner)}
+					<!-- 짧은 선택 라벨. 상세 plan/branch는 title 및 선택된 Run meta에서 확인한다. -->
+					<span class="min-w-0 max-w-[6rem] shrink-0 truncate font-mono text-[11px] text-foreground sm:max-w-[7rem]">
+						{resolveVisibleLabel(index)}
 					</span>
 
 					<!-- engine (sm 이상) -->
 					{#if runner.engine}
 						<span class="hidden sm:block text-[10px] text-muted-foreground shrink-0 font-mono">{runner.engine}</span>
-					{/if}
-
-					<!-- worktree branch (md 이상) -->
-					{#if runner.branch}
-						<span class="hidden md:block text-[10px] text-muted-foreground shrink-0 font-mono truncate max-w-[120px]" title={runner.branch}>{runner.branch}</span>
 					{/if}
 
 					<!-- Stop/Kill/Close 아이콘 버튼 -->
