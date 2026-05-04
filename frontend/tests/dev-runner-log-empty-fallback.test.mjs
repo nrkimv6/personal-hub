@@ -11,6 +11,10 @@ test("START-only recent log is detected for full fallback", () => {
 	);
 });
 
+test("plan start marker only recent log is detected for full fallback", () => {
+	assert.equal(isStartOnlyRecentLog(["[plan:d31509ad start]"]), true);
+});
+
 test("real plan-runner output does not trigger full fallback", () => {
 	assert.equal(
 		isStartOnlyRecentLog([

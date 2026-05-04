@@ -8,6 +8,8 @@ const REAL_LOG_MARKERS = [
 	"WRITE_SCOPE_REROUTE_REQUIRED",
 ];
 
+const PLAN_START_MARKER = /^\[plan:[^\]]+\s+start\]$/i;
+
 /**
  * @param {unknown[] | null | undefined} lines
  */
@@ -19,6 +21,7 @@ export function isStartOnlyRecentLog(lines) {
 	}
 	return nonEmpty.every(
 		(line) =>
+			PLAN_START_MARKER.test(line) ||
 			line.includes("START") ||
 			line.includes("log_path=") ||
 			line.toLowerCase().includes("marker"),
