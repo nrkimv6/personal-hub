@@ -71,7 +71,9 @@ import { confirm } from '$lib/stores/confirm';
 	let planSummary = $derived(plans.find(p => p.path === selectedPlan)?.summary ?? '');
 	let selectedPlanArchived = $derived(mode === 'single' && selectedPlan ? isArchivedPlanPath(selectedPlan) : false);
 	let anyRunning = $derived(runnerTabs.some(t => t.running));
-	let actionLoading = $state(false);
+	type RunAction = 'start' | 'sync' | 'reset' | 'fullReset' | 'stop' | 'forceStop';
+	let activeAction = $state<RunAction | null>(null);
+	let actionLoading = $derived(activeAction !== null);
 	let actionError = $state<string | null>(null);
 	let syncMessage = $state<string | null>(null);
 	let forceStopNeeded = $state(false);
@@ -126,6 +128,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	}
 
 	function resetTransientActionState() {
+		activeAction = null;
 		actionError = null;
 		syncMessage = null;
 		forceStopNeeded = false;
@@ -308,7 +311,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				return;
 			}
 		}
-		actionLoading = true;
+		activeAction = 'start';
 		actionError = null;
 		forceStopNeeded = false;
 		try {
@@ -342,12 +345,12 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				actionError = msg;
 			}
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
 	async function handleForceStop() {
-		actionLoading = true;
+		activeAction = 'forceStop';
 		actionError = null;
 		forceStopNeeded = false;
 		try {
@@ -356,13 +359,13 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '강제 중지 실패';
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
 	async function handleStop() {
 		if (!await confirm({ title: '실행 중지', message: '실행을 중지하시겠습니까?', confirmText: '중지' })) return;
-		actionLoading = true;
+		activeAction = 'stop';
 		actionError = null;
 		try {
 			await devRunnerRunnerApi.stopAll();
@@ -370,12 +373,12 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '중지 실패';
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
 	async function handleSync() {
-		actionLoading = true;
+		activeAction = 'sync';
 		actionError = null;
 		syncMessage = null;
 		if (syncMessageTimer) {
@@ -399,7 +402,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '동기화 실패';
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
@@ -413,7 +416,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 			confirmText: fullReset ? '전체 리셋' : '초기화',
 			variant: fullReset ? 'danger' : 'default'
 		})) return;
-		actionLoading = true;
+		activeAction = fullReset ? 'fullReset' : 'reset';
 		actionError = null;
 		try {
 			const result = await devRunnerRunnerApi.resetState(fullReset);
@@ -422,7 +425,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '초기화 실패';
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
@@ -540,7 +543,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				<ActionBar
 					status={status}
 					anyRunning={anyRunning}
-					actionLoading={actionLoading}
+					activeAction={activeAction}
 					mode={mode}
 					selectedPlan={selectedPlan}
 					selectedPlanArchived={selectedPlanArchived}

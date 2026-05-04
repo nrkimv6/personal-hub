@@ -209,13 +209,37 @@
 	const isAllPlans = (f: string | null | undefined) =>
 		f === '__ALL_PLANS__' || f === 'ALL';
 
-	let planBasename = $derived(
-		!planFile
-			? (displayPlanName ?? '(알 수 없음)')
-			: isAllPlans(planFile)
-				? '전체 실행'
-				: planFile.split(/[\\/]/).pop() ?? planFile
-	);
+	const ENGINE_LABELS: Record<string, string> = {
+		claude: 'CLD',
+		gemini: 'GEM',
+		codex: 'COD',
+		'cc-codex': 'CCX'
+	};
+
+	function getEngineLabel(value: string | null): string {
+		if (!value) return '';
+		return ENGINE_LABELS[value] ?? value.slice(0, 3).toUpperCase();
+	}
+
+	function getEngineClass(value: string | null): string {
+		if (value === 'gemini') return 'bg-orange-100 text-orange-700 border-orange-200';
+		if (value === 'codex') return 'bg-slate-100 text-slate-700 border-slate-300';
+		if (value === 'cc-codex') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+		return 'bg-green-100 text-green-700 border-green-200';
+	}
+
+	let metaTitle = $derived.by(() => {
+		const rows = [
+			displayPlanName ? `plan: ${displayPlanName}` : null,
+			planFile && !isAllPlans(planFile) ? `file: ${planFile}` : null,
+			executionCount != null ? `run: ${executionCount}` : null,
+			`runner: ${runnerId}`,
+			engine ? `engine: ${engine}` : null,
+			branch ? `branch: ${branch}` : null,
+			worktreePath ? `worktree: ${worktreePath}` : null
+		];
+		return rows.filter(Boolean).join('\n');
+	});
 
 	let exitDisplay = $derived(getExitReasonDisplay(exitReason));
 	let statusIcon = $derived(running ? '실행중' : exitDisplay.statusIcon);
@@ -223,54 +247,38 @@
 
 <div class="flex flex-col h-full">
 	<!-- 헤더 바 -->
-	<div class="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b border-border text-xs shrink-0">
-		<span class="text-base leading-none">{statusIcon}</span>
+	<div class="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b border-border text-xs shrink-0" title={metaTitle}>
+		<div class="flex min-w-0 flex-1 items-center gap-2">
+			<span class="shrink-0 text-xs font-medium text-foreground">{statusIcon}</span>
 
-		<span class="font-mono font-medium text-foreground truncate max-w-[160px]" title={isAllPlans(planFile) ? '전체 실행' : planFile!}>
-			{planBasename}
-		</span>
+			{#if engine}
+				<span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase {getEngineClass(engine)}" title={engine}>
+					{getEngineLabel(engine)}
+				</span>
+			{/if}
 
-		{#if engine}
-			<span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase {engine === 'gemini' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}">
-				{engine}
-			</span>
-		{/if}
+			{#if mergeStatus === 'merged'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700">머지됨</span>
+			{:else if mergeStatus === 'merge_pending'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 대기</span>
+			{:else if mergeStatus === 'merging' || mergeStatus === 'testing'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 중</span>
+			{:else if mergeStatus === 'conflict'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">충돌</span>
+			{:else if mergeStatus === 'test_failed'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700">테스트 실패</span>
+			{:else if mergeStatus === 'error'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">머지 오류</span>
+			{:else if mergeStatus === 'fixing'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700 animate-pulse">자동 수정 중</span>
+			{:else if mergeStatus === 'resolving'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
+			{/if}
 
-		{#if executionCount != null}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-indigo-100 text-indigo-700">
-				{executionCount}번째 실행
-			</span>
-		{/if}
-
-		<span class="text-muted-foreground font-mono text-[10px]">{runnerId}</span>
-
-		{#if branch}
-			<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-100 text-purple-700" title={worktreePath ?? branch}>
-				{branch}
-			</span>
-		{/if}
-
-		{#if mergeStatus === 'merged'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700">머지됨</span>
-		{:else if mergeStatus === 'merge_pending'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 대기</span>
-		{:else if mergeStatus === 'merging' || mergeStatus === 'testing'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 중</span>
-		{:else if mergeStatus === 'conflict'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">충돌</span>
-		{:else if mergeStatus === 'test_failed'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700">테스트 실패</span>
-		{:else if mergeStatus === 'error'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">머지 오류</span>
-		{:else if mergeStatus === 'fixing'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700 animate-pulse">자동 수정 중</span>
-		{:else if mergeStatus === 'resolving'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
-		{/if}
-
-		{#if elapsed}
-			<span class="text-muted-foreground text-[10px] ml-auto shrink-0">{elapsed}</span>
-		{/if}
+			{#if elapsed}
+				<span class="ml-auto shrink-0 text-[10px] text-muted-foreground">{elapsed}</span>
+			{/if}
+		</div>
 
 		{#if running}
 			<button
@@ -286,7 +294,7 @@
 				disabled={stopping || killing}
 				title="강제 종료 (SIGKILL) — 진행 중인 작업이 유실됩니다"
 			>
-				{killing ? '종료 중...' : '강제 종료'}
+				{killing ? '종료 중...' : '강제'}
 			</button>
 		{:else if exitReason && !['completed', 'stopped', 'archived'].includes(exitReason) && onRestart}
 			<button
@@ -297,9 +305,7 @@
 				재실행
 			</button>
 		{/if}
-
 	</div>
-
 	{#if stopError}
 		<div class="px-3 py-1 text-xs text-red-600 bg-red-50 border-b border-red-100">{stopError}</div>
 	{/if}
@@ -409,6 +415,6 @@
 
 	<!-- 로그 뷰어 -->
 	<div class="flex-1 min-h-0">
-		<LogViewer bind:this={logViewer} {runnerId} planFile={planFile ?? undefined} {running} {mergeStatus} {trigger} {engine} {worktreePath} {branch} mode="managed" {onBatchPlansChange} />
+		<LogViewer bind:this={logViewer} {runnerId} planFile={planFile ?? undefined} {running} {mergeStatus} {trigger} {engine} {worktreePath} {branch} {executionCount} mode="managed" {onBatchPlansChange} />
 	</div>
 </div>

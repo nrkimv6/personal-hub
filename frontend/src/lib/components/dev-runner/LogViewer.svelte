@@ -16,11 +16,12 @@
 		engine?: string | null;
 		worktreePath?: string | null;
 		branch?: string | null;
+		executionCount?: number | null;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 		onMergeCompleted?: (reason?: string, status?: string) => void;
 	}
 
-	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
+	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, executionCount = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
 	let isCodexEngine = $derived((engine ?? '').toLowerCase() === 'codex');
 
 	// 머지 진행 중 상태 판별
@@ -76,6 +77,7 @@
 
 	let copied = $state(false);
 	let expandedLongLines = $state<Set<string>>(new Set());
+	let runMetaExpanded = $state(false);
 
 	const BASE_DELAY = 3000;
 
@@ -111,6 +113,25 @@
 	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
 	const MERGE_TAG_PATTERN = /^\[MERGE\]\[(\w+)\]\s*(.*)/;
 	const PR_PREFIX_PATTERN = /^\[PR:[^\]]+\]\s*/;
+
+	let planBasename = $derived(
+		planFile ? (planFile.split(/[\\/]/).pop() ?? planFile) : (currentPlanName ?? null)
+	);
+	let runMetaRows = $derived.by(() => [
+		planBasename ? { label: 'Plan', value: planBasename } : null,
+		{ label: 'Runner', value: runnerId },
+		engine ? { label: 'Engine', value: engine } : null,
+		branch ? { label: 'Branch', value: branch } : null,
+		worktreePath ? { label: 'Worktree', value: worktreePath } : null,
+		executionCount != null ? { label: 'Execution #', value: String(executionCount) } : null,
+		trigger ? { label: 'Trigger', value: trigger } : null
+	].filter((row): row is { label: string; value: string } => row !== null));
+	let runMetaSummary = $derived.by(() => {
+		const parts = [`runner ${runnerId}`];
+		if (engine) parts.push(engine);
+		if (trigger) parts.push(trigger);
+		return `Run meta · ${parts.join(' · ')}`;
+	});
 
 	function normalizeLogText(text: string): string {
 		return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -287,6 +308,7 @@
 		if (engine) headerLines.push(`[Engine] ${engine}`);
 		if (branch) headerLines.push(`[Branch] ${branch}`);
 		if (worktreePath) headerLines.push(`[Worktree] ${worktreePath}`);
+		if (executionCount != null) headerLines.push(`[Execution] ${executionCount}`);
 		if (trigger) headerLines.push(`[Trigger] ${trigger}`);
 		headerLines.push('---');
 
@@ -699,7 +721,7 @@
 	<!-- Toolbar -->
 	<div class="flex items-center justify-between px-3 py-2 border-b border-border shrink-0 bg-gray-900">
 		<div class="flex items-center gap-2">
-			<span class="text-xs font-medium uppercase tracking-wider text-gray-300">Live Logs</span>
+			<span class="hidden text-xs font-medium uppercase tracking-wider text-gray-300 sm:inline">Live Logs</span>
 			<!-- trigger 배지 -->
 			{#if trigger}
 				{@const t = trigger}
@@ -772,6 +794,29 @@
 				{/if}
 			</button>
 		</div>
+	</div>
+
+	<div class="shrink-0 border-b border-gray-800 bg-gray-950/80 px-3 py-1 text-[10px] text-gray-400">
+		<button
+			type="button"
+			class="flex w-full min-w-0 items-center gap-1 text-left font-mono text-gray-400 hover:text-gray-200 focus:outline-none focus:ring-1 focus:ring-gray-600"
+			aria-expanded={runMetaExpanded}
+			onclick={() => runMetaExpanded = !runMetaExpanded}
+			title="runner, plan, branch, worktree 메타 정보"
+		>
+			<span class="shrink-0">{runMetaExpanded ? '▾' : '▸'}</span>
+			<span class="min-w-0 truncate">{runMetaSummary}</span>
+		</button>
+		{#if runMetaExpanded}
+			<div class="mt-1 grid gap-x-3 gap-y-1 sm:grid-cols-2">
+				{#each runMetaRows as row}
+					<div class="flex min-w-0 gap-1.5">
+						<span class="shrink-0 text-gray-500">{row.label}</span>
+						<span class="min-w-0 truncate text-gray-300" title={row.value}>{row.value}</span>
+					</div>
+				{/each}
+			</div>
+		{/if}
 	</div>
 
 	{#if !redisAvailable && connected === 'connected'}
