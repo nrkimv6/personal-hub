@@ -32,9 +32,9 @@
 			case '머지대기':
 				return 'bg-teal-100 text-teal-700';
 			case '보류':
-				return 'bg-gray-100 text-gray-500';
+				return 'bg-muted text-muted-foreground';
 			default:
-				return 'bg-gray-100 text-gray-600';
+				return 'bg-muted text-muted-foreground';
 		}
 	}
 </script>
