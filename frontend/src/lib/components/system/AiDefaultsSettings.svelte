@@ -8,6 +8,7 @@
 		type DevRunnerSettings,
 		type AllEnginesConfig
 	} from '$lib/api/dev-runner';
+	import { confirm } from '$lib/stores/confirm';
 	import type { CrawlSchedule } from '$lib/types';
 
 	type CallerDraft = { provider: string; model: string };
@@ -161,7 +162,14 @@
 			errorMessage = '모델명을 입력하세요.';
 			return;
 		}
-		if (!confirm(`${bulkEngine} 엔진의 모든 phase 모델을 "${nextModel}"으로 덮어쓸까요?`)) {
+		if (
+			!(await confirm({
+				title: 'Phase 모델 덮어쓰기',
+				message: `${bulkEngine} 엔진의 모든 phase 모델을 "${nextModel}"으로 덮어쓸까요?`,
+				confirmText: '덮어쓰기',
+				variant: 'warning'
+			}))
+		) {
 			return;
 		}
 

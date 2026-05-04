@@ -18,6 +18,7 @@
     type WorktreeListResponse,
     type RepoOption,
   } from '$lib/api/dev-runner';
+  import { confirm } from '$lib/stores/confirm';
   import { toast } from '$lib/stores/toast';
   import { createSelection } from '$lib/utils/selection.svelte';
 
@@ -295,7 +296,14 @@
         toast.warning('정리 가능한 워크트리가 없습니다.');
         return;
       }
-      if (!confirm(cleanupSummaryText(preview))) {
+      if (
+        !(await confirm({
+          title: '워크트리 정리',
+          message: cleanupSummaryText(preview),
+          confirmText: '정리',
+          variant: 'danger'
+        }))
+      ) {
         return;
       }
 

@@ -5,6 +5,7 @@
   import { gitReposApi } from '$lib/api/gitRepos';
   import { llmApi, type ProviderInfo } from '$lib/api';
   import { apiGate } from '$lib/stores/apiGate.svelte';
+  import { confirm } from '$lib/stores/confirm';
   import type { GitRepo, GitStatus, GitLogEntry, OperationLog, AutoCleanupResult } from '$lib/types/gitRepos';
   import {
     ArrowLeft,
@@ -259,7 +260,14 @@
   }
 
   async function handleAutoCleanup() {
-    if (!confirm('미커밋 파일을 자동 분류·커밋하시겠습니까?\n(tmp_* 패턴 파일은 archive로 이동됩니다)')) return;
+    if (
+      !(await confirm({
+        title: '자동 정리 실행',
+        message: '미커밋 파일을 자동 분류·커밋하시겠습니까?\n(tmp_* 패턴 파일은 archive로 이동됩니다)',
+        confirmText: '실행',
+        variant: 'warning'
+      }))
+    ) return;
     
     working = true;
     cleanupRequestId = null;
