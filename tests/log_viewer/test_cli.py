@@ -201,6 +201,14 @@ class TestMainCleanupArgv:
         show_source.assert_called_once_with("DEV-RUNNER", True, None, cleanup=False)
         show_plan_runners.assert_not_called()
 
+    def test_logs_ps1_validate_set_accepts_dev_runner_alias(self):
+        """R: PowerShell wrapper도 dev-runner alias를 ValidateSet에서 차단하지 않는다."""
+        script = Path(__file__).resolve().parents[2] / "scripts" / "logs" / "logs.ps1"
+        text = script.read_text(encoding="utf-8")
+
+        assert '"devrunner"' in text
+        assert '"dev-runner"' in text
+
 
 class TestWorkerSourceSelection:
     def test_show_source_worker_prefers_structured_worker_log_over_stdout_capture(self, tmp_path: Path, monkeypatch):

@@ -3,7 +3,7 @@
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("all", "api", "worker", "frontend", "list", "watchdog", "devrunner")]
+    [ValidateSet("all", "api", "worker", "frontend", "list", "watchdog", "devrunner", "dev-runner")]
     [string]$Target = "all",
 
     [Parameter()]
@@ -59,6 +59,7 @@ Targets:
     worker    Show Worker logs only
     frontend  Show Frontend logs only
     devrunner Show Dev-Runner listener logs only
+    dev-runner Alias for devrunner
     list      List available log files
 
 Options:
