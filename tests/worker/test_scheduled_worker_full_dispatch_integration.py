@@ -87,10 +87,10 @@ def _create_schedule(
 
 
 @pytest.mark.asyncio
-async def test_full_dispatch_registry_contains_all_12_handlers(session_factory):
+async def test_full_dispatch_registry_contains_all_handlers(session_factory):
     worker = _build_worker(session_factory)
 
-    assert len(worker._handlers) == 13
+    assert len(worker._handlers) == 14
     assert [handler.target_type for handler in worker._handlers] == [
         TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
         TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
@@ -105,6 +105,7 @@ async def test_full_dispatch_registry_contains_all_12_handlers(session_factory):
         TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
         TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
         TaskSchedule.TARGET_TYPE_AUTO_DEV_RUNNER,
+        TaskSchedule.TARGET_TYPE_WORKTREE_HYGIENE,
     ]
 
 

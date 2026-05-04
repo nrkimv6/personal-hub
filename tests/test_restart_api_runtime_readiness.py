@@ -5,7 +5,12 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from app.core.runtime_fingerprint import build_runtime_fingerprint_snapshot, get_runtime_fingerprint_snapshot
+from app.core.runtime_fingerprint import (
+    WORKER_SOURCE_FILES,
+    build_runtime_fingerprint_snapshot,
+    get_runtime_fingerprint_snapshot,
+    get_worker_runtime_fingerprint_snapshot,
+)
 from scripts.services.browser_worker_runtime import api_actions
 
 
@@ -70,6 +75,50 @@ def test_runtime_fingerprint_snapshot_reflects_current_app_mode(monkeypatch):
     assert admin_snapshot["app_mode"] == "admin"
     assert public_snapshot["app_mode"] == "public"
     assert admin_snapshot["runtime_fingerprint"] != public_snapshot["runtime_fingerprint"]
+
+
+def test_worker_runtime_fingerprint_includes_instagram_scheduler_sources():
+    assert "app/worker/main.py" in WORKER_SOURCE_FILES
+    assert "app/worker/scheduled_worker.py" in WORKER_SOURCE_FILES
+    assert "app/modules/instagram/services/scheduler.py" in WORKER_SOURCE_FILES
+    assert "app/modules/instagram/schedulers/feed_schedule.py" in WORKER_SOURCE_FILES
+
+
+def test_worker_runtime_source_fingerprint_changes_when_scheduler_source_changes(tmp_path: Path):
+    worker_main = tmp_path / "app" / "worker" / "main.py"
+    scheduler_source = tmp_path / "app" / "modules" / "instagram" / "services" / "scheduler.py"
+    worker_main.parent.mkdir(parents=True, exist_ok=True)
+    scheduler_source.parent.mkdir(parents=True, exist_ok=True)
+    worker_main.write_text("worker", encoding="utf-8")
+    scheduler_source.write_text("alpha", encoding="utf-8")
+
+    first = build_runtime_fingerprint_snapshot(
+        project_root=tmp_path,
+        app_mode="admin",
+        source_files=["app/worker/main.py", "app/modules/instagram/services/scheduler.py"],
+        pid=111,
+        cwd=tmp_path,
+        python_executable="python.exe",
+    )
+    scheduler_source.write_text("bravo", encoding="utf-8")
+    second = build_runtime_fingerprint_snapshot(
+        project_root=tmp_path,
+        app_mode="admin",
+        source_files=["app/worker/main.py", "app/modules/instagram/services/scheduler.py"],
+        pid=111,
+        cwd=tmp_path,
+        python_executable="python.exe",
+    )
+
+    assert first["source_fingerprint"] != second["source_fingerprint"]
+
+
+def test_get_worker_runtime_fingerprint_snapshot_uses_worker_source_files():
+    snapshot = get_worker_runtime_fingerprint_snapshot()
+
+    paths = [item["path"] for item in snapshot["source_files"]]
+    for expected in WORKER_SOURCE_FILES:
+        assert expected in paths
 
 
 def test_restart_api_waits_for_runtime_fingerprint_match(tmp_path: Path):

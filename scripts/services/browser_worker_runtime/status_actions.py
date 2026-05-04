@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import subprocess
 import time
 import json
 
+from app.core.runtime_fingerprint import get_worker_runtime_fingerprint_snapshot
 from app.shared.process.subprocess_text import with_text_subprocess_defaults
 from scripts.services.browser_worker_runtime.runtime import BOLD, CYAN, GRAY, GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
 
@@ -14,6 +16,76 @@ def _manager():
     from scripts.services.browser_worker_runtime import manager as manager_mod
 
     return manager_mod
+
+
+def _format_epoch_utc(timestamp: float | None) -> str | None:
+    if timestamp is None:
+        return None
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
+
+def _cmdline_matches_worker_main(cmdline: list[str]) -> bool:
+    normalized = " ".join(cmdline).replace("\\", "/").lower()
+    return "-m app.worker.main" in normalized or "app/worker/main.py" in normalized
+
+
+def collect_worker_process_evidence(pid: int) -> dict[str, object]:
+    """Collect process identity evidence for the unified worker PID."""
+    evidence: dict[str, object] = {
+        "pid": pid,
+        "alive": False,
+        "create_time": None,
+        "create_time_iso": None,
+        "cmdline": [],
+        "matches_worker_main": False,
+        "error": None,
+    }
+    try:
+        import psutil
+
+        proc = psutil.Process(pid)
+        cmdline = proc.cmdline()
+        create_time = float(proc.create_time())
+        evidence.update(
+            {
+                "alive": proc.is_running(),
+                "create_time": create_time,
+                "create_time_iso": _format_epoch_utc(create_time),
+                "cmdline": cmdline,
+                "matches_worker_main": _cmdline_matches_worker_main(cmdline),
+            }
+        )
+    except Exception as exc:
+        evidence["error"] = f"{type(exc).__name__}: {exc}"
+
+    worker_snapshot = get_worker_runtime_fingerprint_snapshot()
+    evidence["source_fingerprint"] = worker_snapshot["source_fingerprint"]
+    evidence["source_files"] = [item["path"] for item in worker_snapshot["source_files"]]
+    return evidence
+
+
+def evaluate_worker_restart_evidence(before: dict[str, object] | None, after: dict[str, object] | None) -> dict[str, object]:
+    """Evaluate whether after evidence proves a fresh worker process."""
+    if not after or not after.get("alive"):
+        return {"ok": False, "reason": "worker_not_running"}
+    if not after.get("matches_worker_main"):
+        return {"ok": False, "reason": "worker_cmdline_mismatch"}
+    if not before or not before.get("alive"):
+        return {"ok": True, "reason": "worker_running_no_previous_process"}
+
+    before_pid = before.get("pid")
+    after_pid = after.get("pid")
+    before_create_time = before.get("create_time")
+    after_create_time = after.get("create_time")
+    if before_pid == after_pid and before_create_time == after_create_time:
+        return {"ok": False, "reason": "stale_worker_process"}
+    if (
+        isinstance(before_create_time, (int, float))
+        and isinstance(after_create_time, (int, float))
+        and after_create_time <= before_create_time
+    ):
+        return {"ok": False, "reason": "worker_create_time_not_newer"}
+    return {"ok": True, "reason": "worker_process_replaced"}
 
 
 def _print_redis_status(manager):
@@ -65,6 +137,16 @@ def status(manager):
         pid = mgr.read_pid_file(pid_path)
         if pid and mgr.is_process_alive(pid):
             print(f"    {GREEN}[+] {name} (PID: {pid}){RESET}")
+            if pf == f"unified_worker{manager.pid_suffix}.pid":
+                evidence = collect_worker_process_evidence(pid)
+                cmdline = " ".join(str(part) for part in evidence.get("cmdline", []))
+                print(
+                    f"        {GRAY}created={evidence.get('create_time_iso')} "
+                    f"worker_main={evidence.get('matches_worker_main')} "
+                    f"source={evidence.get('source_fingerprint')}{RESET}"
+                )
+                if cmdline:
+                    print(f"        {GRAY}cmdline={cmdline}{RESET}")
         else:
             print(f"    {YELLOW}[-] {name}: Not running{RESET}")
 

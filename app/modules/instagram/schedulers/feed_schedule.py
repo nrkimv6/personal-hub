@@ -50,9 +50,13 @@ class InstagramFeedScheduler(ScheduleHandler):
         last_run_time = last_run.started_at if last_run else None
         min_interval = config.get("min_interval_hours", 2)
 
-        due_run_time = scheduler.get_due_run_time(last_run=last_run_time, min_interval_hours=min_interval)
+        due_run_time = scheduler.get_due_run_time(
+            last_run=last_run_time,
+            now=ctx.now,
+            min_interval_hours=min_interval,
+        )
         if due_run_time is None:
-            next_due = scheduler.get_next_run_time()
+            next_due = scheduler.get_next_run_time(now=ctx.now)
             logger.debug(
                 "[%s] Instagram schedule not due: schedule_id=%s next_due=%s last_run=%s "
                 "min_interval_hours=%s daily_runs=%s time_windows_count=%s",
@@ -195,7 +199,11 @@ class InstagramFeedScheduler(ScheduleHandler):
         crawler = InstagramCrawler(tab)
         logger.info("[%s] InstagramCrawler 생성 완료, 크롤링 시작...", ctx.worker_name)
 
-        crawl_run = await crawl_service.run_crawl(crawler=crawler, service_account_id=account.id)
+        crawl_run = await crawl_service.run_crawl(
+            crawler=crawler,
+            service_account_id=account.id,
+            schedule_run_id=run.id,
+        )
         if ctx.update_worker_state:
             ctx.update_worker_state("crawling", account.identifier, run.id)
 

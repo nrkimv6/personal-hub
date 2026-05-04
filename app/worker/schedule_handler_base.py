@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, Protocol
 
 from app.models import TaskSchedule, TaskScheduleRun
@@ -28,6 +29,7 @@ class WorkerContext:
     update_worker_state: Optional[Callable[[str, Optional[str], Optional[int]], None]] = None
     is_browser_closed_error: Optional[Callable[[Exception], bool]] = None
     reset_browser_manager: Optional[Callable[[], Awaitable[None]]] = None
+    now: Optional[datetime] = None
 
 
 @dataclass
