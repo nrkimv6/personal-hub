@@ -59,6 +59,33 @@ function Get-StagedPaths {
     return @($raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { ConvertTo-RelativeGitPath $_ })
 }
 
+function Get-StatusPorcelain {
+    $raw = Get-GuardValue -Name "ROOT_GUARD_STATUS" -Fallback { git status --porcelain=v1 2>$null }
+    return @($raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
+function Test-MergeHeadExists {
+    $mergeHeadValue = Get-GuardValue -Name "ROOT_GUARD_MERGE_HEAD" -Fallback {
+        $mergeHeadPath = git rev-parse --git-path MERGE_HEAD 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($mergeHeadPath)) {
+            return ""
+        }
+        if (Test-Path -LiteralPath $mergeHeadPath) {
+            return "1"
+        }
+        return ""
+    }
+    return -not [string]::IsNullOrWhiteSpace($mergeHeadValue)
+}
+
+function Test-CommitReadyMerge {
+    if (-not (Test-MergeHeadExists)) {
+        return $false
+    }
+    $unmerged = @(Get-StatusPorcelain | Where-Object { $_ -match '^(UU|AA|DD|AU|UA|DU|UD)\s' })
+    return $unmerged.Count -eq 0
+}
+
 function Test-AllowedRootCommitPath {
     param([string]$PathValue)
 
@@ -155,6 +182,9 @@ if ($Mode -eq "Commit") {
     $staged = Get-StagedPaths
     $blocked = @($staged | Where-Object { -not (Test-AllowedRootCommitPath $_) })
     if ($blocked.Count -gt 0) {
+        if (Test-CommitReadyMerge) {
+            exit 0
+        }
         Write-Error "root_worktree_impl_scope_blocked: root main worktree cannot commit implementation-scope files directly. Use an impl worktree."
         Write-Error "blocked staged files:"
         $blocked | ForEach-Object { Write-Error "  - $_" }

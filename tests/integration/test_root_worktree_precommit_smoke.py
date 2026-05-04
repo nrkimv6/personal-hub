@@ -74,6 +74,57 @@ def test_root_worktree_blocks_impl_scope_stage(tmp_path):
     assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
 
 
+def test_root_worktree_allows_commit_ready_merge_with_impl_scope_stage(tmp_path):
+    repo = _init_repo(tmp_path)
+    _run(["git", "switch", "-c", "impl/root-merge"], repo)
+    target = repo / ".claude" / "skills" / "done" / "SKILL.md"
+    target.write_text("branch impl change\n", encoding="utf-8")
+    _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
+    _run(["git", "commit", "-m", "impl change"], repo)
+    _run(["git", "switch", "main"], repo)
+    merge = subprocess.run(
+        ["git", "merge", "impl/root-merge", "--no-ff", "--no-commit"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert merge.returncode == 0
+    result = _run_hook(repo)
+
+    assert result.returncode == 0
+
+
+def test_root_worktree_blocks_unresolved_merge_with_impl_scope_stage(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / ".claude" / "skills" / "done" / "SKILL.md"
+    target.write_text("main impl change\n", encoding="utf-8")
+    _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
+    _run(["git", "commit", "-m", "main impl change"], repo)
+
+    _run(["git", "switch", "-c", "impl/root-merge-conflict", "HEAD~1"], repo)
+    target.write_text("branch impl change\n", encoding="utf-8")
+    _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
+    _run(["git", "commit", "-m", "branch impl change"], repo)
+    _run(["git", "switch", "main"], repo)
+    merge = subprocess.run(
+        ["git", "merge", "impl/root-merge-conflict", "--no-ff", "--no-commit"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert merge.returncode != 0
+    result = _run_hook(repo)
+
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
 def test_root_worktree_allows_task_ledger_stage(tmp_path):
     repo = _init_repo(tmp_path)
     target = repo / "TODO.md"
