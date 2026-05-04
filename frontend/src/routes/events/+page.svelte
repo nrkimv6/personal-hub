@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
 	import { Button } from '$lib/components/ui';
 	import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
 
@@ -18,6 +17,7 @@
 	import { confirm } from '$lib/stores/confirm';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 	import { localParticipation } from '$lib/stores/localParticipation';
+	import { getExpoRouteContract } from '$lib/utils/publicRouteMode';
 	import { Link } from 'lucide-svelte';
 
 	// 컴포넌트 import
@@ -151,21 +151,16 @@
 	// 탭/필터 관련 함수
 	// =========================================================
 
-	function isLocalAdminOrigin() {
-		if (!browser) {
-			return false;
-		}
-
-		const isLocalhost = window.location.hostname === 'localhost' ||
-			window.location.hostname === '127.0.0.1' ||
-			window.location.hostname === '::1';
-
-		return isLocalhost && window.location.port === '6101';
-	}
+	const canOpenExpoAdminWorkspace = $derived.by(() =>
+		getExpoRouteContract({
+			isAdmin: $isAdmin,
+			url: $pageStore.url
+		}).canOpenExpoAdminWorkspace
+	);
 
 	// 탭 전환 탭 목록 (TabNav용)
 	const eventTabs = $derived.by(() => {
-		if (!$isAdmin && !isLocalAdminOrigin()) {
+		if (!canOpenExpoAdminWorkspace) {
 			return [...baseEventTabs];
 		}
 
@@ -178,7 +173,7 @@
 	const isExpoTab = $derived(activeTab === ADMIN_EXPO_TAB);
 
 	function getAvailableTabs(): TabMode[] {
-		return (($isAdmin || isLocalAdminOrigin())
+		return (canOpenExpoAdminWorkspace
 			? [...baseEventTabs.map((tab) => tab.id), ADMIN_EXPO_TAB]
 			: [...baseEventTabs.map((tab) => tab.id)]) as TabMode[];
 	}

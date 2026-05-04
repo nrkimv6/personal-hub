@@ -6,11 +6,37 @@ type RouteModeContext = {
   url?: URL;
 };
 
-export function getLocalhostRouteModeFallback(hostname: string, port: string): PublicRouteMode | null {
+type HostRouteContext = {
+  hostname?: string;
+  port?: string;
+  url?: URL;
+};
+
+export type ExpoRouteContract = {
+  isPublicPreview: boolean;
+  isLocalAdminDev: boolean;
+  canOpenExpoAdminWorkspace: boolean;
+  shouldRedirectExpoAuthor: boolean;
+};
+
+type ExpoRouteContractContext = HostRouteContext & {
+  mode?: PublicRouteMode | null;
+  isAdmin?: boolean;
+};
+
+function resolveHostRouteMode(context: HostRouteContext): PublicRouteMode | null {
+  const hostname = context.url?.hostname ?? context.hostname;
+  const port = context.url?.port ?? context.port ?? '';
+
+  if (!hostname) {
+    return null;
+  }
+
   const normalizedHostname = hostname.toLowerCase();
   const isLocalhost =
     normalizedHostname === 'localhost' ||
     normalizedHostname === '127.0.0.1' ||
+    normalizedHostname === '127.0.0.2' ||
     normalizedHostname === '::1';
 
   if (!isLocalhost) {
@@ -24,14 +50,21 @@ export function getLocalhostRouteModeFallback(hostname: string, port: string): P
   return 'admin';
 }
 
+export function getLocalhostRouteModeFallback(hostname: string, port: string): PublicRouteMode | null {
+  return resolveHostRouteMode({ hostname, port });
+}
+
 function getRouteModeFallback(url?: URL): PublicRouteMode {
-  const fallbackFromUrl = url ? getLocalhostRouteModeFallback(url.hostname, url.port) : null;
+  const fallbackFromUrl = resolveHostRouteMode({ url });
   if (fallbackFromUrl) {
     return fallbackFromUrl;
   }
 
   if (typeof window !== 'undefined') {
-    const fallbackFromWindow = getLocalhostRouteModeFallback(window.location.hostname, window.location.port);
+    const fallbackFromWindow = resolveHostRouteMode({
+      hostname: window.location.hostname,
+      port: window.location.port
+    });
     if (fallbackFromWindow) {
       return fallbackFromWindow;
     }
@@ -70,4 +103,20 @@ export function getLandingPathForMode(mode: PublicRouteMode): PublicLandingPath 
 
 export async function resolvePublicLandingPath(context: RouteModeContext = {}): Promise<PublicLandingPath> {
   return getLandingPathForMode(await resolvePublicRouteMode(context));
+}
+
+export function getExpoRouteContract(context: ExpoRouteContractContext = {}): ExpoRouteContract {
+  const hostRouteMode = resolveHostRouteMode(context);
+  const isPublicPreview = hostRouteMode === 'public' || context.mode === 'public';
+  const isLocalAdminDev = hostRouteMode === 'admin';
+  const isAdminMode = hostRouteMode === 'admin' || context.mode === 'admin';
+  const canOpenExpoAdminWorkspace =
+    !isPublicPreview && (context.isAdmin === true || isAdminMode);
+
+  return {
+    isPublicPreview,
+    isLocalAdminDev,
+    canOpenExpoAdminWorkspace,
+    shouldRedirectExpoAuthor: isPublicPreview
+  };
 }

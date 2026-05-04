@@ -27,8 +27,8 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 E2E_CONFIG = {
     "api_url": os.environ.get("E2E_API_URL", "http://localhost:8001"),
     "frontend_url": os.environ.get("E2E_FRONTEND_URL", "http://localhost:6101"),
-    # public PREVIEW는 localhost auth fallback을 피하기 위해 127.0.0.2를 기본 호스트로 사용한다.
-    "public_frontend_url": os.environ.get("E2E_PUBLIC_FRONTEND_URL", "http://127.0.0.2:6100"),
+    # public PREVIEW의 기본 host/port는 frontend route-mode helper의 public 계약과 동일하게 유지한다.
+    "public_frontend_url": os.environ.get("E2E_PUBLIC_FRONTEND_URL", "http://localhost:6100"),
     "headless": True,  # CI에서는 True, 디버깅 시 False
     "slow_mo": 0,  # 디버깅 시 100~500 설정
     "timeout": 30000,  # 30초

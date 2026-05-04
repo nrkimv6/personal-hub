@@ -1,22 +1,13 @@
 import { redirect } from '@sveltejs/kit';
+import { getExpoRouteContract, resolvePublicRouteMode } from '$lib/utils/publicRouteMode';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ fetch }) => {
-  try {
-    const response = await fetch('/api/v1/system/mode', {
-      headers: {
-        Accept: 'application/json'
-      }
-    });
+export const load: PageServerLoad = async ({ fetch, url }) => {
+  const mode = await resolvePublicRouteMode({ fetch, url });
+  const routeContract = getExpoRouteContract({ mode, url });
 
-    if (response.ok) {
-      const payload = await response.json();
-      if (payload?.mode === 'public') {
-        redirect(302, '/expo/coffee-expo-2026');
-      }
-    }
-  } catch {
-    // If mode lookup fails, keep the admin helper reachable in local/dev usage.
+  if (routeContract.shouldRedirectExpoAuthor) {
+    throw redirect(302, '/expo/coffee-expo-2026');
   }
 
   return {};
