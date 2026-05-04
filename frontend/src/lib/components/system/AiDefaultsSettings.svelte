@@ -3,6 +3,12 @@
 	import { collectApi } from '$lib/api';
 	import { llmApi, type LLMDefaultsResponse } from '$lib/api/system';
 	import {
+		computeDevRunnerDirty,
+		computeLlmDirty,
+		formatDevRunnerSummary,
+		formatLlmSummary
+	} from '$lib/utils/ai-defaults-state.js';
+	import {
 		devRunnerSettingsApi,
 		devRunnerEngineApi,
 		type DevRunnerSettings,
@@ -12,34 +18,92 @@
 	import type { CrawlSchedule } from '$lib/types';
 
 	type CallerDraft = { provider: string; model: string };
+	type LlmDirtySnapshot = {
+		provider: string;
+		model: string;
+		callerDefaults: Record<string, CallerDraft>;
+	};
+	type DevRunnerDirtySnapshot = {
+		defaultEngine: string;
+		defaultFixEngine: string;
+	};
 
 	const ENGINE_OPTIONS = ['claude', 'gemini', 'codex', 'cc-codex'];
+	const CLEAN_DIRTY = { dirty: false, changedFields: [] };
 
-	let loading = true;
-	let savingLlm = false;
-	let savingEngines = false;
-	let savingModels = false;
-	let errorMessage = '';
-	let successMessage = '';
+	let loading = $state(true);
+	let savingLlm = $state(false);
+	let savingEngines = $state(false);
+	let savingModels = $state(false);
+	let errorMessage = $state('');
+	let successMessage = $state('');
 
-	let llmDefaults: LLMDefaultsResponse | null = null;
-	let devRunnerSettings: DevRunnerSettings | null = null;
-	let engineConfigs: AllEnginesConfig = {};
-	let schedulerSchedules: CrawlSchedule[] = [];
-	let schedulerRuntimeSummary: Awaited<ReturnType<typeof llmApi.getSchedulerRuntimeSummary>> | null = null;
+	let llmDefaults: LLMDefaultsResponse | null = $state(null);
+	let devRunnerSettings: DevRunnerSettings | null = $state(null);
+	let engineConfigs: AllEnginesConfig = $state({});
+	let schedulerSchedules: CrawlSchedule[] = $state([]);
+	let schedulerRuntimeSummary: Awaited<ReturnType<typeof llmApi.getSchedulerRuntimeSummary>> | null = $state(null);
 
-	let globalProvider = 'claude';
-	let globalModel = '';
-	let callerDrafts: Record<string, CallerDraft> = {};
+	let globalProvider = $state('claude');
+	let globalModel = $state('');
+	let callerDrafts: Record<string, CallerDraft> = $state({});
+	let llmSnapshot: LlmDirtySnapshot | null = $state(null);
 
-	let defaultEngine = 'claude';
-	let defaultFixEngine = 'claude';
+	let defaultEngine = $state('claude');
+	let defaultFixEngine = $state('claude');
+	let devRunnerSnapshot: DevRunnerDirtySnapshot | null = $state(null);
 
-	let bulkEngine = '';
-	let bulkModel = '';
+	let bulkEngine = $state('');
+	let bulkModel = $state('');
+
+	const llmDirty = $derived.by(() =>
+		llmSnapshot
+			? computeLlmDirty(llmSnapshot, {
+					provider: globalProvider,
+					model: globalModel,
+					callerDefaults: callerDrafts
+				})
+			: CLEAN_DIRTY
+	);
+	const devRunnerDirty = $derived.by(() =>
+		devRunnerSnapshot
+			? computeDevRunnerDirty(devRunnerSnapshot, {
+					defaultEngine,
+					defaultFixEngine
+				})
+			: CLEAN_DIRTY
+	);
+	const llmSnapshotSummary = $derived(llmSnapshot ? formatLlmSummary(llmSnapshot) : 'global 기본 / global 기본');
+	const devRunnerSnapshotSummary = $derived(
+		devRunnerSnapshot ? formatDevRunnerSummary(devRunnerSnapshot) : '기본 엔진 없음 / 기본 수정 엔진 없음'
+	);
+
+	function createLlmSnapshot(data: LLMDefaultsResponse): LlmDirtySnapshot {
+		const callerDefaults: Record<string, CallerDraft> = {};
+		for (const callerType of data.known_caller_types ?? []) {
+			const current = data.caller_defaults?.[callerType];
+			callerDefaults[callerType] = {
+				provider: current?.provider ?? '',
+				model: current?.model ?? ''
+			};
+		}
+		return {
+			provider: data.global_default?.provider ?? 'claude',
+			model: data.global_default?.model ?? '',
+			callerDefaults
+		};
+	}
+
+	function createDevRunnerSnapshot(data: DevRunnerSettings): DevRunnerDirtySnapshot {
+		return {
+			defaultEngine: data.default_engine || 'claude',
+			defaultFixEngine: data.default_fix_engine || 'claude'
+		};
+	}
 
 	function setLlmDrafts(data: LLMDefaultsResponse) {
 		llmDefaults = data;
+		llmSnapshot = createLlmSnapshot(data);
 		globalProvider = data.global_default?.provider ?? 'claude';
 		globalModel = data.global_default?.model ?? '';
 
@@ -56,6 +120,7 @@
 
 	function setDevRunnerDrafts(data: DevRunnerSettings) {
 		devRunnerSettings = data;
+		devRunnerSnapshot = createDevRunnerSnapshot(data);
 		defaultEngine = data.default_engine || 'claude';
 		defaultFixEngine = data.default_fix_engine || 'claude';
 	}
@@ -239,10 +304,14 @@
 				<div>
 					<h3 class="text-sm font-semibold">LLMWorker 기본값</h3>
 					<p class="text-xs text-muted-foreground">요청값 미지정 시 caller별 기본 provider/model을 적용합니다.</p>
+					<p class="text-xs text-muted-foreground">저장된 global: {llmSnapshotSummary}</p>
 				</div>
-				<button class="save-btn" onclick={saveLlmDefaults} disabled={savingLlm}>
-					{savingLlm ? '저장 중...' : '저장'}
-				</button>
+				<div class="section-actions">
+					<span class:dirty={llmDirty.dirty} class="dirty-badge">{llmDirty.dirty ? '변경 있음' : '변경 없음'}</span>
+					<button class="save-btn" onclick={saveLlmDefaults} disabled={savingLlm || !llmDirty.dirty}>
+						{savingLlm ? '저장 중...' : '저장'}
+					</button>
+				</div>
 			</div>
 
 			<div class="grid gap-3 sm:grid-cols-2">
@@ -296,10 +365,14 @@
 				<div>
 					<h3 class="text-sm font-semibold">dev-runner 기본 엔진</h3>
 					<p class="text-xs text-muted-foreground">Run 요청에서 engine/fix_engine 미지정 시 적용됩니다.</p>
+					<p class="text-xs text-muted-foreground">저장된 엔진: {devRunnerSnapshotSummary}</p>
 				</div>
-				<button class="save-btn" onclick={saveDevRunnerDefaults} disabled={savingEngines}>
-					{savingEngines ? '저장 중...' : '저장'}
-				</button>
+				<div class="section-actions">
+					<span class:dirty={devRunnerDirty.dirty} class="dirty-badge">{devRunnerDirty.dirty ? '변경 있음' : '변경 없음'}</span>
+					<button class="save-btn" onclick={saveDevRunnerDefaults} disabled={savingEngines || !devRunnerDirty.dirty}>
+						{savingEngines ? '저장 중...' : '저장'}
+					</button>
+				</div>
 			</div>
 
 			<div class="grid gap-3 sm:grid-cols-2">
@@ -332,7 +405,7 @@
 					<h3 class="text-sm font-semibold">dev-runner 모델 일괄 설정</h3>
 					<p class="text-xs text-muted-foreground">선택한 엔진의 `default_model`과 모든 phase `models[*]`를 동시에 덮어씁니다.</p>
 				</div>
-				<button class="save-btn" onclick={overwriteAllPhaseModels} disabled={savingModels}>
+				<button class="save-btn" onclick={overwriteAllPhaseModels} disabled={savingModels || !bulkEngine || !bulkModel.trim()}>
 					{savingModels ? '적용 중...' : '전체 phase 덮어쓰기'}
 				</button>
 			</div>
@@ -367,6 +440,31 @@
 </div>
 
 <style>
+	.section-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+
+	.dirty-badge {
+		border: 1px solid #d1d5db;
+		background: #f9fafb;
+		color: #374151;
+		padding: 0.25rem 0.55rem;
+		font-size: 0.7rem;
+		font-weight: 700;
+		border-radius: 999px;
+		white-space: nowrap;
+	}
+
+	.dirty-badge.dirty {
+		border-color: #f59e0b;
+		background: #fffbeb;
+		color: #92400e;
+	}
+
 	.save-btn {
 		border: 1px solid #2563eb;
 		background: #2563eb;
