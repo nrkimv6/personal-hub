@@ -5,12 +5,46 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.core.config import PROJECT_ROOT, settings
 
 _SAFE_FILE_RE = re.compile(r"[^0-9A-Za-z가-힣._-]+")
+
+# ── 후속 범위 밖 (1차 통합에서 제외된 옵션) ────────────────────────────────
+# 아래 ffmpeg 옵션은 이번 후속 계획 범위 밖이다.
+# loop_count, dither_mode, palette_stats_mode, crop, reverse, caption
+# 필요할 때 별도 계획으로 추가한다.
+# ────────────────────────────────────────────────────────────────────────────
+
+# 허용하는 overwrite 모드 (route 상수와 일치)
+ALLOWED_OVERWRITE_MODES = ("overwrite", "suffix", "fail_if_exists")
+
+
+@dataclass
+class Mp4GifOptionPreset:
+    fps: int
+    width: int | None
+
+
+def resolve_preset(name: str) -> Mp4GifOptionPreset:
+    """preset 이름을 옵션 조합으로 변환한다.
+
+    preset 이름과 화면 문구는 REQUIREMENTS.md 기준 wording을 따른다.
+    - 고화질: fps=15, 원본 해상도
+    - 균형:   fps=10, 720px 폭
+    - 저용량:  fps=6,  480px 폭
+    """
+    presets: dict[str, Mp4GifOptionPreset] = {
+        "고화질": Mp4GifOptionPreset(fps=15, width=None),
+        "균형": Mp4GifOptionPreset(fps=10, width=720),
+        "저용량": Mp4GifOptionPreset(fps=6, width=480),
+    }
+    if name not in presets:
+        raise ValueError(f"알 수 없는 preset 이름입니다: {name!r}. 허용: {list(presets)}")
+    return presets[name]
 
 
 def get_work_root() -> Path:
@@ -55,16 +89,28 @@ def build_ffmpeg_command(
     output_path: Path,
     fps: int,
     *,
+    width: int | None = None,
     start_seconds: float | None = None,
     duration_seconds: float | None = None,
 ) -> list[str]:
+    if fps <= 0:
+        raise ValueError(f"fps must be >= 1, got {fps}")
+    if width is not None and width <= 0:
+        raise ValueError(f"width must be >= 1, got {width}")
     if start_seconds is not None and start_seconds < 0:
         raise ValueError(f"start_seconds must be >= 0, got {start_seconds}")
     if duration_seconds is not None and duration_seconds <= 0:
         raise ValueError(f"duration_seconds must be > 0, got {duration_seconds}")
 
+    # scale 필터: width가 있으면 축소, 없으면 원본 해상도
+    if width is not None:
+        scale_filter = f"scale={width}:-1,"
+    else:
+        scale_filter = ""
+
+    # palette 필터는 scale 뒤에 고정 위치로 작성해 테스트 가능성을 높인다
     filter_graph = (
-        f"fps={fps},split[s0][s1];"
+        f"{scale_filter}fps={fps},split[s0][s1];"
         f"[s0]palettegen[p];"
         f"[s1][p]paletteuse"
     )
@@ -98,16 +144,51 @@ def summarize_ffmpeg_error(stderr_text: str) -> str:
     return candidates[-1] if candidates else "ffmpeg 변환에 실패했습니다."
 
 
+def build_internal_output_name(source_name: str) -> str:
+    """task 내부 저장에 쓰는 GIF 파일명을 계산한다.
+
+    task 디렉토리는 UUID별로 격리되므로 파일명은 stem + .gif만으로 충분하다.
+    """
+    stem = Path(sanitize_source_name(source_name)).stem
+    return f"{stem}.gif"
+
+
+def build_download_filename(
+    source_name: str,
+    *,
+    fps: int | None = None,
+    width: int | None = None,
+    overwrite_mode: str = "overwrite",
+) -> str:
+    """사용자 다운로드 파일명을 계산한다.
+
+    - overwrite_mode='suffix' → stem_gif_fpsN_wW.gif (옵션 요약 suffix)
+    - 그 외 → stem.gif (기본)
+    """
+    stem = Path(sanitize_source_name(source_name)).stem
+    if overwrite_mode == "suffix":
+        parts: list[str] = ["gif"]
+        if fps is not None:
+            parts.append(f"fps{fps}")
+        if width is not None:
+            parts.append(f"w{width}")
+        suffix_str = "_".join(parts)
+        return f"{stem}_{suffix_str}.gif"
+    return f"{stem}.gif"
+
+
 def run_ffmpeg_conversion(
     input_path: Path,
     output_path: Path,
     fps: int,
     *,
+    width: int | None = None,
     start_seconds: float | None = None,
     duration_seconds: float | None = None,
 ) -> str | None:
     command = build_ffmpeg_command(
         input_path, output_path, fps,
+        width=width,
         start_seconds=start_seconds,
         duration_seconds=duration_seconds,
     )

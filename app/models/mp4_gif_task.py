@@ -20,8 +20,11 @@ class Mp4GifTask(Base):
     stored_input_path = Column(Text, nullable=False)
     stored_output_path = Column(Text, nullable=False)
     fps = Column(Integer, nullable=False, default=10)
+    width = Column(Integer, nullable=True)
     start_seconds = Column(Float, nullable=True)
     duration_seconds = Column(Float, nullable=True)
+    overwrite_mode = Column(String(20), nullable=False, default="overwrite")
+    download_filename = Column(String(255), nullable=True)
     error_message = Column(Text, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.now)

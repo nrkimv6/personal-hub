@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field
 
 Mp4GifTaskStatus = Literal["queued", "running", "completed", "failed"]
 
+# 허용하는 overwrite 모드 목록 (route 상수와 일치시킨다)
+OverwriteMode = Literal["overwrite", "suffix", "fail_if_exists"]
+
 
 class Mp4GifTaskAcceptedResponse(BaseModel):
     task_id: str
@@ -19,8 +22,11 @@ class Mp4GifTaskStatusResponse(BaseModel):
     status: Mp4GifTaskStatus
     source_name: str
     fps: int
+    width: int | None = None
     start_seconds: float | None = None
     duration_seconds: float | None = None
+    overwrite_mode: OverwriteMode = "overwrite"
+    download_filename: str | None = None
     error_message: str | None = None
     created_at: datetime
     started_at: datetime | None = None

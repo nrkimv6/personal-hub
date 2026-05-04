@@ -7,13 +7,18 @@ export interface Mp4GifTaskAcceptedResponse {
   status: Mp4GifTaskStatus;
 }
 
+export type OverwriteMode = 'overwrite' | 'suffix' | 'fail_if_exists';
+
 export interface Mp4GifTaskStatusResponse {
   task_id: string;
   status: Mp4GifTaskStatus;
   source_name: string;
   fps: number;
+  width?: number | null;
   start_seconds?: number | null;
   duration_seconds?: number | null;
+  overwrite_mode: OverwriteMode;
+  download_filename?: string | null;
   error_message?: string | null;
   created_at: string;
   started_at?: string | null;

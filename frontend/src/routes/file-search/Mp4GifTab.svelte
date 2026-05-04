@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { AlertTriangle, Download, Loader2, Upload } from 'lucide-svelte';
+	import { AlertTriangle, ChevronDown, ChevronUp, Download, Loader2, Upload } from 'lucide-svelte';
 
 	import {
 		createTask,
@@ -9,12 +9,35 @@
 		getTask,
 		type Mp4GifHealthResponse,
 		type Mp4GifTaskStatus,
-		type Mp4GifTaskStatusResponse
+		type Mp4GifTaskStatusResponse,
+		type OverwriteMode
 	} from '$lib/api/mp4-gif';
 	import { toast } from '$lib/stores/toast';
 
+	interface Preset {
+		label: string;
+		fps: number;
+		width: number | null;
+	}
+
+	const PRESETS: Preset[] = [
+		{ label: '고화질', fps: 15, width: null },
+		{ label: '균형', fps: 10, width: 720 },
+		{ label: '저용량', fps: 6, width: 480 }
+	];
+
+	const OVERWRITE_MODE_LABELS: Record<OverwriteMode, string> = {
+		overwrite: '덮어쓰기',
+		suffix: '옵션 suffix 붙이기',
+		fail_if_exists: '기존 파일 있으면 실패'
+	};
+
 	let selectedFile: File | null = null;
 	let fps = 10;
+	let width: number | null = null;
+	let overwriteMode: OverwriteMode = 'overwrite';
+	let selectedPreset: string | null = '균형';
+	let showAdvanced = false;
 	let tasks: Mp4GifTaskStatusResponse[] = [];
 	let loading = false;
 	let errorMessage = '';
@@ -27,6 +50,32 @@
 	let startSeconds: number | null = null;
 	let endSeconds: number | null = null;
 	let trimErrorMessage = '';
+
+	function applyPreset(preset: Preset) {
+		selectedPreset = preset.label;
+		fps = preset.fps;
+		width = preset.width;
+	}
+
+	function onCustomInput() {
+		selectedPreset = null;
+	}
+
+	function formatBytes(bytes: number): string {
+		if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+		if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+		return `${bytes} B`;
+	}
+
+	function fileSizeDelta(originalBytes: number, resultBytes: number): string {
+		const ratio = resultBytes / originalBytes;
+		const pct = Math.abs((ratio - 1) * 100).toFixed(0);
+		if (ratio < 1) return `${pct}% 감소`;
+		return `${pct}% 증가`;
+	}
+
+	// Apply default preset on load
+	applyPreset(PRESETS[1]);
 
 	const STATUS_LABELS: Record<Mp4GifTaskStatus, string> = {
 		queued: '대기 중',
@@ -149,6 +198,10 @@
 			toast.warning('fps는 1 이상이어야 합니다.');
 			return;
 		}
+		if (width !== null && width < 1) {
+			toast.warning('width는 1 이상이어야 합니다.');
+			return;
+		}
 
 		loading = true;
 		errorMessage = '';
@@ -156,6 +209,10 @@
 			const formData = new FormData();
 			formData.append('file', selectedFile);
 			formData.append('fps', String(fps));
+			if (width !== null) {
+				formData.append('width', String(width));
+			}
+			formData.append('overwrite_mode', overwriteMode);
 			if (startSeconds !== null) {
 				formData.append('start_seconds', startSeconds.toFixed(3));
 				if (endSeconds !== null && endSeconds > startSeconds && !trimErrorMessage) {
@@ -322,17 +379,85 @@
 			</div>
 		{/if}
 
+		<!-- Preset cards -->
 		<div class="mt-4">
-			<label class="mb-2 block text-sm font-medium" for="fps">FPS</label>
-			<input
-				id="fps"
-				class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-				type="number"
-				min="1"
-				step="1"
-				bind:value={fps}
-			/>
+			<div class="mb-2 text-sm font-medium">품질 프리셋</div>
+			<div class="grid grid-cols-3 gap-2">
+				{#each PRESETS as preset}
+					<button
+						type="button"
+						class={`rounded-lg border px-3 py-2 text-center text-xs font-medium transition ${
+							selectedPreset === preset.label
+								? 'border-primary bg-primary/10 text-primary'
+								: 'border-border hover:bg-muted/40'
+						}`}
+						onclick={() => applyPreset(preset)}
+					>
+						<div class="font-semibold">{preset.label}</div>
+						<div class="mt-0.5 text-muted-foreground">
+							{preset.fps}fps{preset.width ? ` · ${preset.width}px` : ' · 원본'}
+						</div>
+					</button>
+				{/each}
+			</div>
 		</div>
+
+		<!-- Advanced options toggle -->
+		<button
+			type="button"
+			class="mt-3 flex w-full items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+			onclick={() => { showAdvanced = !showAdvanced; }}
+		>
+			{#if showAdvanced}
+				<ChevronUp size={14} />
+			{:else}
+				<ChevronDown size={14} />
+			{/if}
+			고급 옵션
+		</button>
+
+		{#if showAdvanced}
+			<div class="mt-3 space-y-3">
+				<div>
+					<label class="mb-1 block text-xs font-medium" for="fps-input">FPS</label>
+					<input
+						id="fps-input"
+						class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+						type="number"
+						min="1"
+						step="1"
+						placeholder="기본: 10"
+						bind:value={fps}
+						oninput={onCustomInput}
+					/>
+				</div>
+				<div>
+					<label class="mb-1 block text-xs font-medium" for="width-input">폭 (px)</label>
+					<input
+						id="width-input"
+						class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+						type="number"
+						min="1"
+						step="1"
+						placeholder="원본 해상도 (비워두면 유지)"
+						bind:value={width}
+						oninput={onCustomInput}
+					/>
+				</div>
+				<div>
+					<label class="mb-1 block text-xs font-medium" for="overwrite-select">파일명 모드</label>
+					<select
+						id="overwrite-select"
+						class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+						bind:value={overwriteMode}
+					>
+						{#each Object.entries(OVERWRITE_MODE_LABELS) as [value, label]}
+							<option {value}>{label}</option>
+						{/each}
+					</select>
+				</div>
+			</div>
+		{/if}
 
 		<button
 			class="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -386,7 +511,23 @@
 							</div>
 						</div>
 
-						<div class="mt-3 text-xs text-muted-foreground">
+						<!-- 적용 옵션 메타 -->
+						<div class="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+							<span>fps {task.fps}</span>
+							{#if task.width}
+								<span>· {task.width}px</span>
+							{/if}
+							{#if task.start_seconds != null && task.duration_seconds != null}
+								<span>· 구간: {formatTrimSeconds(task.start_seconds)} ~ {formatTrimSeconds(task.start_seconds + task.duration_seconds)}</span>
+							{:else if task.start_seconds != null}
+								<span>· 시작: {formatTrimSeconds(task.start_seconds)} 이후</span>
+							{/if}
+							{#if task.overwrite_mode && task.overwrite_mode !== 'overwrite'}
+								<span>· {OVERWRITE_MODE_LABELS[task.overwrite_mode]}</span>
+							{/if}
+						</div>
+
+						<div class="mt-1 text-xs text-muted-foreground">
 							생성 {new Date(task.created_at).toLocaleString('ko-KR')}
 						</div>
 
@@ -394,7 +535,7 @@
 							<div class="mt-4 overflow-hidden rounded-xl border border-border bg-muted/20">
 								<img class="max-h-[360px] w-full object-contain" src={previewUrl(task)} alt={task.source_name} />
 							</div>
-							<div class="mt-4">
+							<div class="mt-4 flex items-center gap-3">
 								<a
 									class="inline-flex items-center rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted/40"
 									href={getResultUrl(task.task_id)}
@@ -402,12 +543,21 @@
 									rel="noreferrer"
 								>
 									<Download size={16} class="mr-2" />
-									GIF 다운로드
+									GIF 다운로드{task.download_filename ? ` (${task.download_filename})` : ''}
 								</a>
 							</div>
 						{:else if task.status === 'failed'}
 							<div class="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-								{task.error_message ?? '변환에 실패했습니다.'}
+								<div>{task.error_message ?? '변환에 실패했습니다.'}</div>
+								<div class="mt-2 text-xs text-destructive/80">
+									{#if (task.width ?? 0) > 480}
+										용량이 크다면 폭을 줄여보세요 (현재 {task.width}px → 480px 이하 권장)
+									{:else if task.fps > 8}
+										용량이 크다면 fps를 줄여보세요 (현재 {task.fps} → 6~8 권장)
+									{:else}
+										trim을 사용해 변환 구간을 줄이면 용량을 크게 줄일 수 있습니다.
+									{/if}
+								</div>
 							</div>
 						{/if}
 					</article>

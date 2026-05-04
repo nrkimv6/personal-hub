@@ -256,3 +256,73 @@ def test_build_ffmpeg_command_ss_before_input(tmp_path):
     assert "-ss" in cmd
     assert "-i" in cmd
     assert cmd.index("-ss") < cmd.index("-i"), "-ss가 -i보다 앞에 있어야 합니다."
+
+
+# ─── width 옵션 T3 TC ──────────────────────────────────────────────────────────
+
+def test_run_ffmpeg_conversion_width_creates_output(tmp_path):
+    """width=480로 stub ffmpeg를 실행해도 GIF가 생성된다."""
+    from unittest.mock import MagicMock
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"\x00" * 64)
+    output_file = tmp_path / "output.gif"
+
+    def _fake_run(cmd, **kwargs):
+        out_path = Path(cmd[-1])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"GIF89a" + b"\x00" * 16)
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = b""
+        return result
+
+    with patch("app.services.mp4_gif_service.subprocess.run", side_effect=_fake_run):
+        error_msg = run_ffmpeg_conversion(input_file, output_file, fps=10, width=480)
+
+    assert error_msg is None, f"성공 stub인데 에러: {error_msg}"
+    assert output_file.exists()
+
+
+def test_run_ffmpeg_conversion_trim_creates_output_with_width(tmp_path):
+    """width + trim 조합으로 stub ffmpeg를 실행해도 GIF가 생성된다."""
+    from unittest.mock import MagicMock
+
+    input_file = tmp_path / "input.mp4"
+    input_file.write_bytes(b"\x00" * 64)
+    output_file = tmp_path / "output.gif"
+
+    def _fake_run(cmd, **kwargs):
+        out_path = Path(cmd[-1])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"GIF89a" + b"\x00" * 16)
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = b""
+        return result
+
+    with patch("app.services.mp4_gif_service.subprocess.run", side_effect=_fake_run):
+        error_msg = run_ffmpeg_conversion(
+            input_file, output_file, fps=8, width=540, start_seconds=2.0, duration_seconds=5.0
+        )
+
+    assert error_msg is None
+    assert output_file.exists()
+
+
+# ─── overwrite_mode / download_filename T3 TC ────────────────────────────────
+
+def test_build_download_filename_suffix_roundtrip(tmp_path):
+    """suffix 모드의 download_filename 계산이 저장된 파일명과 일치한다."""
+    from app.services.mp4_gif_service import build_download_filename
+
+    name = build_download_filename("i2.mp4", fps=6, width=480, overwrite_mode="suffix")
+    assert name == "i2_gif_fps6_w480.gif"
+
+
+def test_build_download_filename_fail_if_exists_default_name(tmp_path):
+    """fail_if_exists 모드에서도 다운로드 파일명은 기본(stem.gif)이다."""
+    from app.services.mp4_gif_service import build_download_filename
+
+    name = build_download_filename("clip.mp4", fps=10, width=None, overwrite_mode="fail_if_exists")
+    assert name == "clip.gif"

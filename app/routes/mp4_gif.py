@@ -18,6 +18,8 @@ from app.schemas.mp4_gif import (
     Mp4GifTaskStatusResponse,
 )
 from app.services.mp4_gif_service import (
+    ALLOWED_OVERWRITE_MODES,
+    build_download_filename,
     cleanup_expired_workdirs,
     ffmpeg_health,
     get_task_input_path,
@@ -36,8 +38,11 @@ def _serialize_task(task: Mp4GifTask) -> Mp4GifTaskStatusResponse:
         status=task.status,
         source_name=task.source_name,
         fps=task.fps,
+        width=task.width,
         start_seconds=task.start_seconds,
         duration_seconds=task.duration_seconds,
+        overwrite_mode=task.overwrite_mode or "overwrite",
+        download_filename=task.download_filename,
         error_message=task.error_message,
         created_at=task.created_at,
         started_at=task.started_at,
@@ -62,6 +67,7 @@ def _run_task(task_id: str) -> None:
 
         error_message = run_ffmpeg_conversion(
             input_path, output_path, task.fps,
+            width=task.width,
             start_seconds=task.start_seconds,
             duration_seconds=task.duration_seconds,
         )
@@ -80,16 +86,25 @@ async def create_task(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     fps: int = Form(10),
+    width: int | None = Form(None),
     start_seconds: float | None = Form(None),
     duration_seconds: float | None = Form(None),
+    overwrite_mode: str = Form("overwrite"),
     db: Session = Depends(get_db),
 ):
     if fps <= 0:
         raise HTTPException(status_code=400, detail="fps는 1 이상의 정수여야 합니다.")
+    if width is not None and width <= 0:
+        raise HTTPException(status_code=400, detail="width는 1 이상의 정수여야 합니다.")
     if start_seconds is not None and start_seconds < 0:
         raise HTTPException(status_code=400, detail="start_seconds는 0 이상이어야 합니다.")
     if duration_seconds is not None and duration_seconds <= 0:
         raise HTTPException(status_code=400, detail="duration_seconds는 0보다 커야 합니다.")
+    if overwrite_mode not in ALLOWED_OVERWRITE_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"overwrite_mode는 {list(ALLOWED_OVERWRITE_MODES)} 중 하나여야 합니다.",
+        )
 
     source_name = file.filename or "video.mp4"
     file_bytes = await file.read()
@@ -108,6 +123,10 @@ async def create_task(
     input_path.parent.mkdir(parents=True, exist_ok=True)
     input_path.write_bytes(file_bytes)
 
+    dl_filename = build_download_filename(
+        source_name, fps=fps, width=width, overwrite_mode=overwrite_mode
+    )
+
     task = Mp4GifTask(
         task_id=task_id,
         status=Mp4GifTask.STATUS_QUEUED,
@@ -115,8 +134,11 @@ async def create_task(
         stored_input_path=str(input_path),
         stored_output_path=str(output_path),
         fps=fps,
+        width=width,
         start_seconds=start_seconds,
         duration_seconds=duration_seconds,
+        overwrite_mode=overwrite_mode,
+        download_filename=dl_filename,
     )
     db.add(task)
     db.commit()
@@ -147,10 +169,11 @@ def get_task_result(task_id: str, db: Session = Depends(get_db)):
     if not result_path.exists():
         raise HTTPException(status_code=404, detail="결과 GIF 파일을 찾을 수 없습니다.")
 
+    dl_name = task.download_filename or f"{Path(task.source_name).stem}.gif"
     return FileResponse(
         path=str(result_path),
         media_type="image/gif",
-        filename=f"{Path(task.source_name).stem}.gif",
+        filename=dl_name,
     )
 
 

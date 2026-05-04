@@ -114,3 +114,98 @@ def test_run_ffmpeg_conversion_success_requires_output(tmp_path: Path, monkeypat
     message = mp4_gif_service.run_ffmpeg_conversion(tmp_path / "a.mp4", output_path, 10)
     assert message is None
     assert output_path.read_bytes() == b"GIF89a"
+
+
+# ─── width TC (Phase T1/T2) ───────────────────────────────────────────────────
+
+def test_build_ffmpeg_command_right_width(tmp_path: Path):
+    """Right: width=540 이면 -vf 값에 scale=540:-1 이 포함된다."""
+    cmd = mp4_gif_service.build_ffmpeg_command(tmp_path / "i.mp4", tmp_path / "o.gif", 10, width=540)
+    vf_value = cmd[cmd.index("-vf") + 1]
+    assert "scale=540:-1" in vf_value
+
+
+def test_build_ffmpeg_command_right_no_width_no_scale(tmp_path: Path):
+    """Right: width 없으면 scale 필터가 포함되지 않는다."""
+    cmd = mp4_gif_service.build_ffmpeg_command(tmp_path / "i.mp4", tmp_path / "o.gif", 10)
+    vf_value = cmd[cmd.index("-vf") + 1]
+    assert "scale=" not in vf_value
+
+
+def test_build_ffmpeg_command_error_fps_zero(tmp_path: Path):
+    """Error: fps=0은 ValueError를 던진다."""
+    with pytest.raises(ValueError, match="fps"):
+        mp4_gif_service.build_ffmpeg_command(tmp_path / "i.mp4", tmp_path / "o.gif", 0)
+
+
+def test_build_ffmpeg_command_error_fps_negative(tmp_path: Path):
+    """Error: 음수 fps는 ValueError를 던진다."""
+    with pytest.raises(ValueError, match="fps"):
+        mp4_gif_service.build_ffmpeg_command(tmp_path / "i.mp4", tmp_path / "o.gif", -1)
+
+
+def test_build_ffmpeg_command_error_width_zero(tmp_path: Path):
+    """Error: width=0은 ValueError를 던진다."""
+    with pytest.raises(ValueError, match="width"):
+        mp4_gif_service.build_ffmpeg_command(tmp_path / "i.mp4", tmp_path / "o.gif", 10, width=0)
+
+
+def test_build_ffmpeg_command_error_width_negative(tmp_path: Path):
+    """Error: 음수 width는 ValueError를 던진다."""
+    with pytest.raises(ValueError, match="width"):
+        mp4_gif_service.build_ffmpeg_command(tmp_path / "i.mp4", tmp_path / "o.gif", 10, width=-10)
+
+
+def test_build_ffmpeg_command_boundary_trim_zero_rejected(tmp_path: Path):
+    """Boundary: duration_seconds=0은 ValueError(duration_seconds)를 던진다."""
+    with pytest.raises(ValueError, match="duration_seconds"):
+        mp4_gif_service.build_ffmpeg_command(tmp_path / "i.mp4", tmp_path / "o.gif", 10, duration_seconds=0.0)
+
+
+# ─── overwrite mode TC ────────────────────────────────────────────────────────
+
+def test_build_download_filename_overwrite_mode_default(tmp_path: Path):
+    """Right: overwrite 모드에서는 기본 stem.gif 반환."""
+    name = mp4_gif_service.build_download_filename("sample.mp4", fps=10, width=540, overwrite_mode="overwrite")
+    assert name == "sample.gif"
+
+
+def test_build_download_filename_suffix_mode_includes_options(tmp_path: Path):
+    """Right: suffix 모드에서는 fps/width 요약 suffix가 붙는다."""
+    name = mp4_gif_service.build_download_filename("clip.mp4", fps=8, width=540, overwrite_mode="suffix")
+    assert name == "clip_gif_fps8_w540.gif"
+
+
+def test_build_download_filename_suffix_no_width(tmp_path: Path):
+    """Right: suffix 모드 + width=None 이면 width suffix가 없다."""
+    name = mp4_gif_service.build_download_filename("clip.mp4", fps=10, width=None, overwrite_mode="suffix")
+    assert name == "clip_gif_fps10.gif"
+
+
+def test_build_ffmpeg_command_error_unknown_overwrite_mode(tmp_path: Path):
+    """Error: resolve_preset에서 알 수 없는 이름이면 ValueError를 던진다."""
+    with pytest.raises(ValueError, match="preset"):
+        mp4_gif_service.resolve_preset("존재하지않는프리셋")
+
+
+# ─── resolve_preset TC ────────────────────────────────────────────────────────
+
+def test_resolve_preset_균형():
+    """Right: '균형' preset은 fps=10, width=720 이다."""
+    p = mp4_gif_service.resolve_preset("균형")
+    assert p.fps == 10
+    assert p.width == 720
+
+
+def test_resolve_preset_저용량():
+    """Right: '저용량' preset은 fps=6, width=480 이다."""
+    p = mp4_gif_service.resolve_preset("저용량")
+    assert p.fps == 6
+    assert p.width == 480
+
+
+def test_resolve_preset_고화질():
+    """Right: '고화질' preset은 fps=15, width=None 이다."""
+    p = mp4_gif_service.resolve_preset("고화질")
+    assert p.fps == 15
+    assert p.width is None
