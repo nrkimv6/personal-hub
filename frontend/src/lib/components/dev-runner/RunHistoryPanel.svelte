@@ -12,7 +12,7 @@
 	let total = $state(0);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
-	let limit = 30;
+	const limit = 30;
 	let offset = $state(0);
 
 	async function loadHistory() {

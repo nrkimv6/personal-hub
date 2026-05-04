@@ -21,7 +21,7 @@
 	let requests: UniversalCrawlRequest[] = $state([]);
 	let total = $state(0);
 	let currentPage = $state(1);
-	let pageSize = 20;
+	const pageSize = 20;
 	let loading = $state(true);
 	let error: string | null = $state(null);
 

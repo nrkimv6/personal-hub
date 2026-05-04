@@ -9,48 +9,43 @@
 	import { confirm } from '$lib/stores/confirm';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import { createPagePagination } from '$lib/utils/pagination.svelte';
 
 	// 상태
-	let requests: LLMRequest[] = [];
-	let stats: LLMStats | null = null;
-	let workerStatus: LLMWorkerStatus | null = null;
-	let historyStats: LLMHistoryStats | null = null;
+	let requests = $state<LLMRequest[]>([]);
+	let stats = $state<LLMStats | null>(null);
+	let workerStatus = $state<LLMWorkerStatus | null>(null);
+	let historyStats = $state<LLMHistoryStats | null>(null);
 
 	// 그룹 뷰 상태
-	let callerGroups: LLMCallerGroup[] = [];
-	let groupedResponse: LLMGroupedListResponse | null = null;
-	let viewMode: 'individual' | 'grouped' = 'individual';
-	let onlyWithoutSuccess = false;
+	let callerGroups = $state<LLMCallerGroup[]>([]);
+	let groupedResponse = $state<LLMGroupedListResponse | null>(null);
+	let viewMode = $state<'individual' | 'grouped'>('individual');
+	let onlyWithoutSuccess = $state(false);
 
-	let loading = true;
-	let error: string | null = null;
+	let loading = $state(true);
+	let error = $state<string | null>(null);
 
 	// 페이지네이션
-	let currentPage = 1;
-	let pageSize = 20;
-	let total = 0;
-	let pages = 0;
+	const pager = createPagePagination(20);
 
 	// 그룹 뷰 페이지네이션
-	let groupCurrentPage = 1;
-	let groupPageSize = 50;
-	let groupTotal = 0;
-	let groupPages = 0;
+	const groupPager = createPagePagination(50);
 
 	// 그룹 선택 (multi-재요청용)
-	let selectedGroupKeys: string[] = [];  // "caller_type:caller_id" 형식
-	let groupSelectAll = false;
+	let selectedGroupKeys = $state<string[]>([]);  // "caller_type:caller_id" 형식
+	let groupSelectAll = $state(false);
 
 	// 필터 (탭에 따라 다르게 설정)
-	let filterCallerType = '';
-	let filterRequestedBy = '';
+	let filterCallerType = $state('');
+	let filterRequestedBy = $state('');
 
 	// 선택
 	const selection = createSelection();
 
 	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능)
 	type Tab = 'queue' | 'history' | 'create' | 'performance';
-	let activeTab: Tab = 'queue';
+	let activeTab = $state<Tab>('queue');
 
 	const llmSubTabs = [
 		{ id: 'queue', label: '대기열 (pending/processing)' },
@@ -60,8 +55,8 @@
 	];
 
 	// 모달
-	let selectedRequest: LLMRequest | null = null;
-	let showModal = false;
+	let selectedRequest = $state<LLMRequest | null>(null);
+	let showModal = $state(false);
 
 	// 수동 요청 생성 폼
 	let createForm = $state({
@@ -73,9 +68,9 @@
 		provider: 'claude',
 		model: ''
 	});
-	let createLoading = false;
-	let createError: string | null = null;
-	let createSuccess = false;
+	let createLoading = $state(false);
+	let createError = $state<string | null>(null);
+	let createSuccess = $state(false);
 
 	function errorMessage(e: unknown): string {
 		return e instanceof Error ? e.message : '알 수 없는 오류';
@@ -94,7 +89,7 @@
 	};
 
 	// Provider 변경 시 model 초기화
-	let prevProvider = createForm.provider;
+	let prevProvider = $state(createForm.provider);
 	$effect(() => {
 		if (createForm.provider !== prevProvider) {
 			prevProvider = createForm.provider;
@@ -121,8 +116,8 @@
 					status: getStatusFilter(),
 					caller_type: filterCallerType || undefined,
 					requested_by: filterRequestedBy || undefined,
-					page: currentPage,
-					page_size: pageSize
+					page: pager.page,
+					page_size: pager.pageSize
 				}),
 				llmApi.getStats(),
 				llmApi.getWorkerStatus()
@@ -130,8 +125,7 @@
 
 			// 서버에서 이미 status 필터링된 결과 사용
 			requests = listRes.items;
-			total = listRes.total;
-			pages = listRes.pages || 1;
+			pager.total = listRes.total;
 			stats = statsRes;
 			workerStatus = workerRes;
 		} catch (e) {
@@ -157,8 +151,8 @@
 				llmApi.listGroupedByCaller({
 					caller_type: filterCallerType || undefined,
 					only_without_success: onlyWithoutSuccess,
-					page: groupCurrentPage,
-					page_size: groupPageSize
+					page: groupPager.page,
+					page_size: groupPager.pageSize
 				}),
 				llmApi.getStats(),
 				llmApi.getWorkerStatus()
@@ -166,8 +160,7 @@
 
 			callerGroups = res.items;
 			groupedResponse = res;
-			groupTotal = res.total;
-			groupPages = res.pages;
+			groupPager.total = res.total;
 			stats = statsRes;
 			workerStatus = workerRes;
 		} catch (e) {
@@ -248,35 +241,35 @@
 	function toggleViewMode() {
 		viewMode = viewMode === 'individual' ? 'grouped' : 'individual';
 		if (viewMode === 'grouped') {
-			groupCurrentPage = 1;
+			groupPager.reset();
 			fetchGroupedData();
 		} else {
-			currentPage = 1;
+			pager.reset();
 			fetchData();
 		}
 	}
 
 	function handleGroupFilter() {
-		groupCurrentPage = 1;
+		groupPager.reset();
 		fetchGroupedData();
 	}
 
 	function groupPrevPage() {
-		if (groupCurrentPage > 1) {
-			groupCurrentPage--;
+		if (groupPager.page > 1) {
+			groupPager.prev();
 			fetchGroupedData();
 		}
 	}
 
 	function groupNextPage() {
-		if (groupCurrentPage < groupPages) {
-			groupCurrentPage++;
+		if (groupPager.page < groupPager.totalPages) {
+			groupPager.next();
 			fetchGroupedData();
 		}
 	}
 
 	function handleFilter() {
-		currentPage = 1;
+		pager.reset();
 		selection.clear();
 		fetchData();
 	}
@@ -293,15 +286,15 @@
 	}
 
 	function prevPage() {
-		if (currentPage > 1) {
-			currentPage--;
+		if (pager.page > 1) {
+			pager.prev();
 			fetchData();
 		}
 	}
 
 	function nextPage() {
-		if (currentPage < pages) {
-			currentPage++;
+		if (pager.page < pager.totalPages) {
+			pager.next();
 			fetchData();
 		}
 	}
@@ -465,7 +458,7 @@
 	function switchTab(tab: Tab) {
 		activeTab = tab;
 		if (tab === 'queue' || tab === 'history') {
-			currentPage = 1;
+			pager.reset();
 			selection.clear();
 			fetchData();
 		}
@@ -716,23 +709,23 @@
 				</div>
 
 				<!-- 그룹 뷰 페이지네이션 -->
-				{#if groupPages > 1}
+				{#if groupPager.totalPages > 1}
 					<div class="flex justify-between items-center">
 						<span class="text-sm text-muted-foreground">
-							전체 {groupTotal}개 중 {(groupCurrentPage - 1) * groupPageSize + 1} - {Math.min(groupCurrentPage * groupPageSize, groupTotal)}
+							전체 {groupPager.total}개 중 {(groupPager.page - 1) * groupPager.pageSize + 1} - {Math.min(groupPager.page * groupPager.pageSize, groupPager.total)}
 						</span>
 						<div class="flex gap-2">
 							<button
 								onclick={groupPrevPage}
-								disabled={groupCurrentPage === 1}
+								disabled={groupPager.page === 1}
 								class="btn btn-secondary btn-sm disabled:opacity-50"
 							>
 								이전
 							</button>
-							<span class="px-3 py-1.5 text-sm">{groupCurrentPage} / {groupPages}</span>
+							<span class="px-3 py-1.5 text-sm">{groupPager.page} / {groupPager.totalPages}</span>
 							<button
 								onclick={groupNextPage}
-								disabled={groupCurrentPage >= groupPages}
+								disabled={groupPager.page >= groupPager.totalPages}
 								class="btn btn-secondary btn-sm disabled:opacity-50"
 							>
 								다음
@@ -829,23 +822,23 @@
 			</div>
 
 			<!-- 페이지네이션 -->
-			{#if pages > 1}
+			{#if pager.totalPages > 1}
 				<div class="flex justify-between items-center">
 					<span class="text-sm text-muted-foreground">
-						전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
+						전체 {pager.total}개 중 {(pager.page - 1) * pager.pageSize + 1} - {Math.min(pager.page * pager.pageSize, pager.total)}
 					</span>
 					<div class="flex gap-2">
 						<button
 							onclick={prevPage}
-							disabled={currentPage === 1}
+							disabled={pager.page === 1}
 							class="btn btn-secondary btn-sm disabled:opacity-50"
 						>
 							이전
 						</button>
-						<span class="px-3 py-1.5 text-sm">{currentPage} / {pages}</span>
+						<span class="px-3 py-1.5 text-sm">{pager.page} / {pager.totalPages}</span>
 						<button
 							onclick={nextPage}
-							disabled={currentPage >= pages}
+							disabled={pager.page >= pager.totalPages}
 							class="btn btn-secondary btn-sm disabled:opacity-50"
 						>
 							다음
