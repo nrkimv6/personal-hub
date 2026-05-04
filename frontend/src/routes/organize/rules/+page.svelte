@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { isApiGateClosedError } from '$lib/api/client';
+	import { confirm } from '$lib/stores/confirm';
 
 	let rules = $state<any[]>([]);
 	let categories = $state<any[]>([]);
@@ -94,7 +95,14 @@
 	}
 
 	async function deleteRule(id: number) {
-		if (!confirm('삭제하시겠습니까?')) return;
+		if (
+			!(await confirm({
+				title: '규칙 삭제',
+				message: '삭제하시겠습니까?',
+				confirmText: '삭제',
+				variant: 'danger'
+			}))
+		) return;
 		try {
 			await fetch(`/api/fc/rules/${id}`, { method: 'DELETE' });
 			await fetchRules();

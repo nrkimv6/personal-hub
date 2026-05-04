@@ -13,6 +13,7 @@
   import { serviceAccountApi } from '$lib/api/common';
   import type { ServiceAccountWithProfile } from '$lib/types';
   import { createSelection } from '$lib/utils/selection.svelte';
+  import { confirm } from '$lib/stores/confirm';
   import { toast } from '$lib/stores/toast';
 
   type WorkerRecoveryAction = 'start' | 'restart';
@@ -425,7 +426,14 @@
   }
 
   async function cleanupLegacySchedules(): Promise<void> {
-    if (!confirm('과거 날짜 및 계정 미연결 일정을 삭제합니다.')) return;
+    if (
+      !(await confirm({
+        title: '일정 정리',
+        message: '과거 날짜 및 계정 미연결 일정을 삭제합니다.',
+        confirmText: '정리',
+        variant: 'danger'
+      }))
+    ) return;
     try {
       const result = await coupangTravelApi.cleanupSchedules();
       toast.success(`${result.deleted}건 정리되었습니다.`);

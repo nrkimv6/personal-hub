@@ -8,6 +8,7 @@
   import NoteDetailModal from './NoteDetailModal.svelte';
   import NoteFormModal from './NoteFormModal.svelte';
   import BulkTagModal from './BulkTagModal.svelte';
+  import { confirm } from '$lib/stores/confirm';
 
   let notes = $state<Note[]>([]);
   let tags = $state<TagDef[]>([]);
@@ -176,7 +177,14 @@
 
   async function handleBulkDelete() {
     if (!selectedIds.size) return;
-    if (!confirm(`선택한 ${selectedIds.size}개 메모를 삭제하시겠습니까?`)) return;
+    if (
+      !(await confirm({
+        title: '메모 삭제',
+        message: `선택한 ${selectedIds.size}개 메모를 삭제하시겠습니까?`,
+        confirmText: '삭제',
+        variant: 'danger'
+      }))
+    ) return;
     await notesApi.bulkDelete([...selectedIds]);
     selectedIds = new Set();
     load();

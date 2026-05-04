@@ -9,6 +9,7 @@
   import { isCodeLike, detectLanguage } from '../utils/codeDetect';
   import MarkdownContent from '$lib/components/markdown/MarkdownContent.svelte';
   import { extractNoteLinkAtCursor } from '../utils/noteLink';
+  import { confirm } from '$lib/stores/confirm';
 
   interface Props {
     mode: 'create' | 'edit';
@@ -312,16 +313,21 @@
     return { label: item.label };
   }
 
-  onMount(() => {
-    loadTags();
-    // draft 복원 (create 모드만)
+  async function restoreDraft() {
     if (mode === 'create') {
       const raw = sessionStorage.getItem(draftKey);
       if (raw) {
         try {
           const draft = JSON.parse(raw) as { title: string; content: string };
           if (draft.title || draft.content) {
-            if (confirm('임시 저장된 내용을 복원하시겠습니까?')) {
+            if (
+              await confirm({
+                title: '임시 저장 복원',
+                message: '임시 저장된 내용을 복원하시겠습니까?',
+                confirmText: '복원',
+                variant: 'warning'
+              })
+            ) {
               title = draft.title ?? '';
               content = draft.content ?? '';
             } else {
@@ -333,6 +339,11 @@
         }
       }
     }
+  }
+
+  onMount(() => {
+    loadTags();
+    void restoreDraft();
   });
 </script>
 
