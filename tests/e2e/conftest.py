@@ -16,7 +16,7 @@ if sys.platform == 'win32':
 import json
 import pytest
 from pathlib import Path
-from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
+from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext, expect
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
@@ -123,10 +123,11 @@ def wait_for_app_ready(page: Page, url: str, timeout: int = 30000):
     """
     앱이 준비될 때까지 대기
 
-    SvelteKit 앱이 완전히 로드되고 JS가 실행될 때까지 기다립니다.
+    SvelteKit 앱 shell과 hydration marker가 준비될 때까지 기다립니다.
+    Background polling can keep network activity open after the product surface is usable.
     """
-    page.goto(url)
-    page.wait_for_load_state("networkidle")
+    page.goto(url, wait_until="domcontentloaded")
+    expect(page.locator("main").first).to_be_visible(timeout=timeout)
     # SvelteKit hydration 완료 대기
     page.wait_for_selector("[data-sveltekit-hydrated]", timeout=timeout, state="attached")
 

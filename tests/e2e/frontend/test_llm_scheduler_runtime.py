@@ -1,8 +1,9 @@
 """LLM / scheduler runtime smoke tests."""
 
 import json
+import time
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Locator, Page, expect
 
 pytestmark = pytest.mark.e2e
 
@@ -11,9 +12,52 @@ def _assert_no_loading_spinner(page: Page) -> None:
     expect(page.locator(".animate-spin")).to_have_count(0, timeout=15000)
 
 
-def _wait_for_runtime_page(page: Page) -> None:
-    page.wait_for_load_state("domcontentloaded")
+def _goto_runtime_page(page: Page, url: str) -> None:
+    page.goto(url, wait_until="domcontentloaded")
     expect(page.locator("main").first).to_be_visible(timeout=15000)
+
+
+def _wait_for_any_visible(conditions: list[tuple[str, Locator]], message: str, timeout: int = 15000) -> str:
+    deadline = time.monotonic() + timeout / 1000
+    while time.monotonic() <= deadline:
+        for label, locator in conditions:
+            if locator.first.is_visible(timeout=100):
+                return label
+        time.sleep(0.1)
+
+    labels = ", ".join(label for label, _ in conditions)
+    raise AssertionError(f"{message} (waited for one of: {labels})")
+
+
+def _wait_for_llm_runtime_ready(page: Page) -> str:
+    _assert_no_loading_spinner(page)
+    return _wait_for_any_visible(
+        [
+            ("queue empty state", page.get_by_text("대기열이 비어있습니다")),
+            ("history empty state", page.get_by_text("이력이 없습니다")),
+            ("history tab action", page.get_by_text("이력 보기")),
+            ("request table rows", page.locator("table tbody tr")),
+        ],
+        "LLM 화면이 빈 상태로 남아있거나 목록이 렌더되지 않았습니다",
+    )
+
+
+def _wait_for_scheduler_runtime_ready(page: Page) -> str:
+    _assert_no_loading_spinner(page)
+    return _wait_for_any_visible(
+        [
+            ("parsed schedule summary", page.get_by_text("해석:")),
+            ("schedule list row", page.locator("table tbody tr")),
+            ("empty schedule state", page.get_by_text("등록된 스케줄이 없습니다")),
+            ("scheduler settings header", page.get_by_text("스케줄 설정")),
+        ],
+        "Scheduler 화면에서 해석 요약, 목록, 또는 empty state가 렌더되지 않았습니다",
+    )
+
+
+def _wait_for_system_settings_ready(page: Page) -> None:
+    _assert_no_loading_spinner(page)
+    expect(page.get_by_text("AI 기본값")).to_be_visible(timeout=15000)
 
 
 def _json_response(route, payload) -> None:
@@ -160,17 +204,10 @@ def _install_profile_pool_routes(page: Page, calls: list[str]) -> None:
 
 class TestLlmRuntime:
     def test_llm_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str):
-        page.goto(f"{frontend_url}/llm")
-        _wait_for_runtime_page(page)
+        _goto_runtime_page(page, f"{frontend_url}/llm")
 
-        _assert_no_loading_spinner(page)
-        expect(page.locator("main").first).to_be_visible()
-        assert (
-            page.get_by_text("대기열이 비어있습니다").count() > 0
-            or page.get_by_text("이력이 없습니다").count() > 0
-            or page.get_by_text("이력 보기").count() > 0
-            or page.locator("table tbody tr").count() > 0
-        ), "LLM 화면이 빈 상태로 남아있거나 목록이 렌더되지 않았습니다"
+        ready_condition = _wait_for_llm_runtime_ready(page)
+        assert ready_condition
 
     @pytest.mark.parametrize(
         ("quota_status", "badge_text", "modal_text"),
@@ -325,18 +362,16 @@ class TestLlmRuntime:
 
 class TestSchedulerRuntime:
     def test_scheduler_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str):
-        page.goto(f"{frontend_url}/scheduler")
-        _wait_for_runtime_page(page)
+        _goto_runtime_page(page, f"{frontend_url}/scheduler")
 
-        _assert_no_loading_spinner(page)
-        expect(page.locator("main").first).to_be_visible()
-        assert page.get_by_text("해석:").count() > 0, "Scheduler 화면에서 해석 요약이 렌더되지 않았습니다"
+        ready_condition = _wait_for_scheduler_runtime_ready(page)
+        assert ready_condition
 
 
 class TestSystemSettingsRuntime:
     def test_system_settings_exposes_scheduler_contract(self, page: Page, frontend_url: str):
-        page.goto(f"{frontend_url}/system?tab=settings")
-        _wait_for_runtime_page(page)
+        _goto_runtime_page(page, f"{frontend_url}/system?tab=settings")
+        _wait_for_system_settings_ready(page)
         page.get_by_text("AI 기본값").click()
 
         _assert_no_loading_spinner(page)
@@ -350,8 +385,8 @@ class TestSystemSettingsRuntime:
         calls: list[str] = []
         _install_profile_pool_routes(page, calls)
 
-        page.goto(f"{frontend_url}/system?tab=settings")
-        _wait_for_runtime_page(page)
+        _goto_runtime_page(page, f"{frontend_url}/system?tab=settings")
+        _wait_for_system_settings_ready(page)
         page.get_by_text("AI 프로필").click()
 
         expect(page.get_by_placeholder("프로필 이름 (예: work, personal)").first).to_have_value("work")
