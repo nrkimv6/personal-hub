@@ -93,40 +93,42 @@
 		{error}
 	</div>
 {:else}
-	<!-- 반복 체인 섹션 (2개 이상일 때만 표시) -->
-	{#if chainRecords.length >= 2}
-		<div class="mb-3 p-3 bg-orange-50 border border-orange-200 rounded text-sm">
-			<div class="font-semibold text-orange-700 mb-1">🔁 반복 이력 ({chainRecords.length}회)</div>
-			<div class="flex flex-wrap gap-1 text-xs text-orange-600">
-				{#each chainRecords as r, i}
-					<span>
-						{i + 1}회 {formatDate(r.archived_at ?? r.created_at)}
-						{#if i < chainRecords.length - 1}<span class="text-orange-400">→</span>{:else}<span class="text-orange-400 font-semibold">(현재)</span>{/if}
-					</span>
-				{/each}
+	<div class="min-h-full px-4 py-3">
+		<!-- 반복 체인 섹션 (2개 이상일 때만 표시) -->
+		{#if chainRecords.length >= 2}
+			<div class="mb-3 p-3 bg-orange-50 border border-orange-200 rounded text-xs">
+				<div class="font-semibold text-orange-700 mb-1">🔁 반복 이력 ({chainRecords.length}회)</div>
+				<div class="flex flex-wrap gap-1 text-orange-600">
+					{#each chainRecords as r, i}
+						<span>
+							{i + 1}회 {formatDate(r.archived_at ?? r.created_at)}
+							{#if i < chainRecords.length - 1}<span class="text-orange-400">→</span>{:else}<span class="text-orange-400 font-semibold">(현재)</span>{/if}
+						</span>
+					{/each}
+				</div>
 			</div>
-		</div>
-	{/if}
+		{/if}
 
-	<!-- 마크다운 내용 -->
-	<MarkdownContent content={content} variant="document" class="overflow-auto max-h-[60vh]" />
+		<!-- 마크다운 내용 -->
+		<MarkdownContent content={content} variant="plan" />
 
-	<!-- AI 제안 카드 -->
-	{#if suggestion}
-		<div class="mt-3 border-l-4 border-orange-400 bg-orange-50 p-3 text-sm">
-			<div class="font-semibold text-orange-700 mb-1">🤖 반복 수정 AI 분석</div>
-			<div class="mb-1">
-				<span class="font-medium text-orange-600">근본 원인:</span>
-				<span class="text-gray-700"> {suggestion.root_cause}</span>
+		<!-- AI 제안 카드 -->
+		{#if suggestion}
+			<div class="mt-3 border-l-4 border-orange-400 bg-orange-50 p-3 text-xs">
+				<div class="font-semibold text-orange-700 mb-1">🤖 반복 수정 AI 분석</div>
+				<div class="mb-1">
+					<span class="font-medium text-orange-600">근본 원인:</span>
+					<span class="text-gray-700"> {suggestion.root_cause}</span>
+				</div>
+				<div class="mb-1">
+					<span class="font-medium text-orange-600">패턴:</span>
+					<span class="text-gray-700"> {suggestion.pattern}</span>
+				</div>
+				<div>
+					<span class="font-medium text-orange-600">개선 제안:</span>
+					<span class="text-gray-700"> {suggestion.suggestion}</span>
+				</div>
 			</div>
-			<div class="mb-1">
-				<span class="font-medium text-orange-600">패턴:</span>
-				<span class="text-gray-700"> {suggestion.pattern}</span>
-			</div>
-			<div>
-				<span class="font-medium text-orange-600">개선 제안:</span>
-				<span class="text-gray-700"> {suggestion.suggestion}</span>
-			</div>
-		</div>
-	{/if}
+		{/if}
+	</div>
 {/if}
