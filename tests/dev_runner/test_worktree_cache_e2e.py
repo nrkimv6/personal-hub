@@ -3,16 +3,15 @@
 import httpx
 import pytest
 
+from tests.dev_runner.live_http_readiness import live_get_after_readiness
+
 pytestmark = [pytest.mark.e2e, pytest.mark.http_live]
 
 BASE_URL = "http://localhost:8001"
 
 
 def _get(path: str) -> httpx.Response:
-    try:
-        return httpx.get(f"{BASE_URL}{path}", timeout=10)
-    except httpx.ConnectError:
-        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+    return live_get_after_readiness(path, base_url=BASE_URL)
 
 
 def test_worktree_list_v2_cache_live_returns_same_body_on_repeat():

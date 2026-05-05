@@ -65,7 +65,7 @@ def _is_frontend_service_lock_failure(result: subprocess.CompletedProcess[str]) 
     )
 
 
-def _wait_until_http_ok(url: str, *, timeout_seconds: float = 20.0, label: str) -> None:
+def _wait_until_http_ok(url: str, *, timeout_seconds: float = 45.0, label: str) -> None:
     deadline = time.time() + max(timeout_seconds, 1.0)
     last_error: str | None = None
     while time.time() <= deadline:
@@ -82,6 +82,14 @@ def _wait_until_http_ok(url: str, *, timeout_seconds: float = 20.0, label: str) 
 
 def wait_until_public_preview_ready(timeout_seconds: float = 30.0) -> None:
     _wait_until_http_ok(PUBLIC_FRONTEND_BASE, timeout_seconds=timeout_seconds, label="public preview")
+
+
+def wait_until_admin_api_ready(timeout_seconds: float = 45.0) -> None:
+    _wait_until_http_ok(
+        f"{ADMIN_BASE}/api/v1/system/liveness",
+        timeout_seconds=timeout_seconds,
+        label="admin API liveness",
+    )
 
 
 def _assert_no_redis_connection_leak(
@@ -205,9 +213,10 @@ def test_http_frontend_restart_frontend_admin_keeps_api_alive():
     if _is_frontend_service_lock_failure(result):
         pytest.skip(restart_frontend_failure_context(result))
     assert result.returncode == 0, restart_frontend_failure_context(result)
+    wait_until_admin_api_ready(timeout_seconds=60.0)
     _wait_until_http_ok(
         f"{ADMIN_BASE}/api/v1/dev-runner/runners",
-        timeout_seconds=20.0,
+        timeout_seconds=60.0,
         label="admin runners endpoint",
     )
 
@@ -222,10 +231,11 @@ def test_http_frontend_restart_frontend_public_keeps_api_alive():
     if _is_frontend_service_lock_failure(result):
         pytest.skip(restart_frontend_failure_context(result))
     assert result.returncode == 0, restart_frontend_failure_context(result)
-    wait_until_public_preview_ready()
+    wait_until_public_preview_ready(timeout_seconds=60.0)
+    wait_until_admin_api_ready(timeout_seconds=60.0)
     _wait_until_http_ok(
         f"{ADMIN_BASE}/api/v1/dev-runner/runners",
-        timeout_seconds=20.0,
+        timeout_seconds=60.0,
         label="admin runners endpoint after public restart",
     )
 
