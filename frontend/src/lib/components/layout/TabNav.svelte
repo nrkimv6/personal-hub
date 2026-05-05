@@ -23,7 +23,7 @@
     urlBased?: boolean;
     queryParam?: string;
     replaceState?: boolean;
-    size?: 'default' | 'compact';
+    size?: 'default' | 'compact' | 'header';
     sticky?: boolean;
     overflow?: 'scroll' | 'wrap';
     onTabChange?: (tabId: string) => void;
@@ -54,6 +54,11 @@
     inactive: 'border-transparent text-muted-foreground hover:border-muted hover:text-foreground',
   };
 
+  const headerStyles = {
+    active: 'bg-primary/15 text-primary',
+    inactive: 'text-muted-foreground hover:bg-accent hover:text-foreground',
+  };
+
   const secondaryStyles = {
     active: 'bg-card text-foreground shadow-sm',
     inactive: 'text-muted-foreground hover:bg-background/70 hover:text-foreground',
@@ -65,6 +70,9 @@
   };
 
   function getStyles(active: boolean) {
+    if (size === 'header' && variant === 'primary') {
+      return active ? headerStyles.active : headerStyles.inactive;
+    }
     if (variant === 'secondary') {
       return active ? secondaryStyles.active : secondaryStyles.inactive;
     }
@@ -75,6 +83,15 @@
   }
 
   function getCountStyles(tab: TabItem): string {
+    if (size === 'header') {
+      if (tab.countVariant === 'error') {
+        return 'ml-1 rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive';
+      }
+      if (tab.countVariant === 'warning') {
+        return 'ml-1 rounded-full bg-yellow-500/10 px-1.5 py-0.5 text-[10px] text-yellow-600';
+      }
+      return 'ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground';
+    }
     if (tab.countVariant === 'error') {
       return 'ml-1 text-[11px] bg-destructive/10 text-destructive px-1.5 py-0.5 rounded-full';
     }
@@ -114,7 +131,9 @@
   }
 
   const sizeClass = $derived(
-    variant === 'secondary'
+    size === 'header'
+      ? 'min-h-8 px-2.5 py-1.5 text-xs'
+      : variant === 'secondary'
       ? size === 'compact'
         ? 'min-h-9 px-3 py-1.5 text-sm'
         : 'min-h-10 px-4 py-2 text-sm'
@@ -123,13 +142,18 @@
         : 'min-h-[2.75rem] px-3.5 py-2.5 text-sm sm:text-[15px]'
   );
   const outerClass = $derived(
-    `${sticky ? 'sticky top-0 z-20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80' : ''} ${
-      variant === 'secondary'
-        ? 'rounded-lg border border-border/70 bg-muted/60 p-1'
-        : variant === 'underline'
-          ? 'border-b border-border/70'
-          : 'border-b border-border'
-    }`.trim()
+    [
+      sticky ? 'sticky top-0 z-20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80' : '',
+      size === 'header' && variant === 'primary'
+        ? ''
+        : variant === 'secondary'
+          ? 'rounded-lg border border-border/70 bg-muted/60 p-1'
+          : variant === 'underline'
+            ? 'border-b border-border/70'
+            : 'border-b border-border',
+    ]
+      .filter(Boolean)
+      .join(' ')
   );
   const navClass = $derived(
     overflow === 'wrap'
@@ -138,9 +162,18 @@
   );
   const scrollClass = $derived(
     overflow === 'scroll'
-      ? 'overflow-x-auto scroll-smooth pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+      ? `overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${size === 'header' ? '' : 'pb-1'}`.trim()
       : ''
   );
+
+  const tabShapeClass = $derived(
+    size === 'header' && variant === 'primary'
+      ? 'rounded-md'
+      : variant === 'secondary'
+        ? 'rounded-md'
+        : 'rounded-t-md border-b-2'
+  );
+  const iconSize = $derived(size === 'header' ? 14 : 16);
 
   function renderLabel(tab: TabItem) {
     return tab.shortLabel ?? tab.label;
@@ -152,7 +185,7 @@
     <nav class={navClass} aria-label="Tabs">
       {#each tabs as tab (tab.id)}
         {@const active = isTabActive(tab)}
-        {@const tabClass = `${sizeClass} ${variant === 'secondary' ? 'rounded-md' : 'rounded-t-md border-b-2'} inline-flex items-center gap-1.5 font-medium transition-colors ${getStyles(active)}`}
+        {@const tabClass = `${sizeClass} ${tabShapeClass} inline-flex items-center gap-1.5 font-medium transition-colors ${getStyles(active)}`}
         {#if urlBased && tab.href}
           <a href={tab.href} data-sveltekit-preload-data class={tabClass} aria-current={active ? 'page' : undefined}>
             {#if tab.icon}
@@ -160,7 +193,7 @@
                 {#if typeof tab.icon === 'string'}
                   {tab.icon}
                 {:else}
-                  <svelte:component this={tab.icon} size={16} />
+                  <svelte:component this={tab.icon} size={iconSize} />
                 {/if}
               </span>
             {/if}
@@ -181,7 +214,7 @@
                 {#if typeof tab.icon === 'string'}
                   {tab.icon}
                 {:else}
-                  <svelte:component this={tab.icon} size={16} />
+                  <svelte:component this={tab.icon} size={iconSize} />
                 {/if}
               </span>
             {/if}

@@ -18,6 +18,7 @@
     secondaryUrlBased?: boolean;
     primaryReplaceState?: boolean;
     secondaryReplaceState?: boolean;
+    primaryTabsPlacement?: 'header' | 'below';
     density?: 'default' | 'compact';
     hideTitleOnMobile?: boolean;
     hideSubtitleOnMobile?: boolean;
@@ -42,6 +43,7 @@
     secondaryUrlBased = false,
     primaryReplaceState = true,
     secondaryReplaceState = true,
+    primaryTabsPlacement = 'header',
     density = 'compact',
     hideTitleOnMobile = false,
     hideSubtitleOnMobile = false,
@@ -50,14 +52,31 @@
     contentClass = '',
   }: Props = $props();
 
-  // Slot order is intentionally fixed for every tabbed surface:
-  // header -> primary tabs -> toolbar -> secondary tabs -> content.
+  // Slot order is intentionally fixed for every tabbed surface. Primary tabs
+  // default to PageHeader's navigation region; toolbar and secondary tabs stay
+  // below the header so filters do not compete with section navigation.
   const resolvedContainerClass = $derived(
     containerClass ?? (density === 'compact' ? 'space-y-3 p-4 lg:p-6' : 'space-y-4 p-4 lg:p-6')
   );
   const contentWrapperClass = $derived(contentClass || 'min-w-0');
-  const hasHeader = $derived(!!title || !!subtitle || !!actions);
+  const primaryTabsInHeader = $derived(primaryTabsPlacement === 'header' && primaryTabs.length > 0);
+  const hasHeader = $derived(!!title || !!subtitle || !!actions || primaryTabsInHeader);
 </script>
+
+{#snippet primaryTabsNavigation()}
+  <TabNav
+    tabs={primaryTabs}
+    bind:activeTab={activePrimaryTab}
+    variant="primary"
+    level="primary"
+    queryParam={primaryQueryParam}
+    urlBased={primaryUrlBased}
+    replaceState={primaryReplaceState}
+    size="header"
+    sticky={false}
+    overflow="scroll"
+  />
+{/snippet}
 
 <div class={resolvedContainerClass}>
   {#if hasHeader}
@@ -68,6 +87,7 @@
         density={density}
         {hideTitleOnMobile}
         {hideSubtitleOnMobile}
+        navigation={primaryTabsInHeader ? primaryTabsNavigation : undefined}
       >
         {#if actions}
           {@render actions()}
@@ -76,7 +96,7 @@
     </div>
   {/if}
 
-  {#if primaryTabs.length > 0}
+  {#if primaryTabs.length > 0 && primaryTabsPlacement === 'below'}
     <div data-layout-slot="primary-tabs">
       <TabNav
         tabs={primaryTabs}
