@@ -198,8 +198,9 @@ class TestUploadExpoMap:
         assert res2.status_code == 200
         url2 = res2.json()["image_url"]
 
-        # 파일명이 바뀌어야 한다
-        assert url2 != url1 or url2.endswith(".webp")
+        # 두 번째 업로드 URL은 동일한 /image 엔드포인트 경로여야 한다
+        assert url2.endswith("/image"), f"image_url은 /image 엔드포인트여야 한다: {url2}"
+        assert url1.endswith("/image"), f"image_url은 /image 엔드포인트여야 한다: {url1}"
 
         # 이전 PNG 파일이 남아있지 않아야 한다
         slug_dir = patched_data_root / "coffee-expo-2026"
@@ -277,7 +278,7 @@ class TestExpoMapFilesystemIntegration:
         assert image_path.read_bytes() == png
 
     def test_get_returns_public_accessible_url(self, client, patched_data_root, admin_headers):
-        """GET 응답의 image_url이 공개 URL 형식이다."""
+        """GET 응답의 image_url이 /api/v1/expo/maps/{slug}/image 엔드포인트 형식이다."""
         png = _make_png_bytes()
         client.post(
             "/api/v1/expo/maps/coffee-expo-2026/upload",
@@ -287,7 +288,8 @@ class TestExpoMapFilesystemIntegration:
 
         res = client.get("/api/v1/expo/maps/coffee-expo-2026")
         url = res.json()["image_url"]
-        assert url.startswith("/"), f"공개 URL은 /로 시작해야 한다: {url}"
+        assert url.startswith("/api/v1/expo/maps/"), f"image_url은 /api/v1/expo/maps/로 시작해야 한다: {url}"
+        assert url.endswith("/image"), f"image_url은 /image로 끝나야 한다: {url}"
         assert "coffee-expo-2026" in url
 
     def test_delete_removes_meta_and_file(self, client, patched_data_root, admin_headers):

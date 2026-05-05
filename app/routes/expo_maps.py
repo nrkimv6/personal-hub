@@ -12,8 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi.responses import FileResponse as _FileResponse
 
 from app.core.auth import UserInfo, get_current_user_required
+from app.core.config import settings
 from app.schemas.expo import ExpoMapMetaResponse, ExpoMapUploadResponse
 
 router = APIRouter(prefix="/api/v1/expo/maps", tags=["expo-maps"])
@@ -28,12 +30,12 @@ ALLOWED_EXTENSIONS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"
 # 업로드 파일 최대 크기: 20 MB
 MAX_FILE_BYTES = 20 * 1024 * 1024
 
-# 저장 루트: app/data/expo/{slug}/
-DATA_ROOT = Path(__file__).parent.parent / "data" / "expo"
+# 저장 루트: {settings.DATA_DIR}/expo/{slug}/ — ExpoService._export_record_path()와 동일 기준
+DATA_ROOT = Path(settings.DATA_DIR) / "expo"
 
-# 공개 URL prefix — 같은 FastAPI 앱이 /data/expo/... 를 정적 파일로 서빙한다고 가정
-# 실제 서빙은 main.py 의 StaticFiles 마운트로 처리 (또는 Nginx)
-_PUBLIC_URL_PREFIX = "/data/expo"
+# 공개 이미지 URL prefix — /api/v1/expo/maps/{slug}/image 엔드포인트로 서빙
+# 프론트엔드 vite proxy가 /api → API 서버로 중계하므로 /data 직접 서빙 불필요
+_IMAGE_ENDPOINT_PREFIX = "/api/v1/expo/maps"
 
 
 def _slug_dir(slug: str) -> Path:
@@ -169,8 +171,8 @@ async def upload_expo_map(
     dest = slug_dir / f"map{suffix}"
     dest.write_bytes(data)
 
-    # public URL
-    image_url = f"{_PUBLIC_URL_PREFIX}/{slug}/map{suffix}"
+    # public URL — /api/v1/expo/maps/{slug}/image 엔드포인트로 서빙 (vite proxy → API 서버)
+    image_url = f"{_IMAGE_ENDPOINT_PREFIX}/{slug}/image"
     uploaded_at = datetime.now(tz=timezone.utc).isoformat()
 
     # 메타 JSON 저장
@@ -193,6 +195,36 @@ async def upload_expo_map(
         width=width,
         height=height,
         uploaded_at=datetime.fromisoformat(uploaded_at),
+    )
+
+
+@router.get("/{slug}/image", response_class=_FileResponse)
+async def serve_expo_map_image(slug: str) -> _FileResponse:
+    """업로드된 배치도 이미지를 서빙한다. 인증 불필요 (public). 없으면 404."""
+    if slug not in ALLOWED_SLUGS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Expo slug '{slug}'이(가) 존재하지 않습니다.",
+        )
+
+    slug_dir = _slug_dir(slug)
+    for ext in ALLOWED_EXTENSIONS:
+        candidate = slug_dir / f"map{ext}"
+        if candidate.exists():
+            media_type_map = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+            }
+            return _FileResponse(
+                path=str(candidate),
+                media_type=media_type_map.get(ext, "application/octet-stream"),
+            )
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="업로드된 배치도 이미지가 없습니다.",
     )
 
 
