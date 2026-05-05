@@ -90,7 +90,7 @@
 
 		<div class="min-h-0 flex-1 overflow-auto px-4 py-4">
 			{#if preview.extension === 'md' && !raw}
-				<MarkdownContent content={preview.content} class="min-h-full pb-8" />
+				<MarkdownContent content={preview.content} variant="filePreview" class="min-h-full pb-8" />
 			{:else}
 				<pre class="whitespace-pre-wrap break-words rounded-xl bg-muted/30 p-4 font-mono text-xs text-foreground">{preview.content}</pre>
 			{/if}
