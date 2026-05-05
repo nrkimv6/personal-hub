@@ -167,6 +167,29 @@ class TestMergeQueueE2EConflictPath:
         assert pushed["success"] is False
 
 
+class TestMergeQueueE2ERedisUnavailable:
+    """Redis unavailable 분기에서 lock 없이 merge subprocess로 진행하지 않는지 검증."""
+
+    def test_redis_unavailable_connection_failure_hard_stops(self, fr):
+        runner_id = "e2e-runner-redis-unavailable"
+        fr.set(f"{_RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/redis-unavailable")
+        fr.set(f"{_RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/redis-unavailable.md")
+
+        with patch("merge_queue.acquire_merge_turn", side_effect=ConnectionError("REDIS_UNAVAILABLE")), \
+             patch("merge_queue.release_merge_turn") as mock_release, \
+             patch("subprocess.run") as mock_run, \
+             patch("_dr_merge._pub_and_log"):
+            from _dr_merge import _execute_merge_with_lock
+
+            result = _execute_merge_with_lock(runner_id, fr)
+
+        assert result["success"] is False
+        assert result["merge_status"] == "error"
+        assert "REDIS_UNAVAILABLE" in result["message"]
+        mock_run.assert_not_called()
+        mock_release.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # TC-3: queued runner gets turn — 실물 Redis DB15 + threading
 # ---------------------------------------------------------------------------
