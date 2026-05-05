@@ -168,6 +168,12 @@ if ($Mode -eq "Commit") {
         exit 1
     }
 
+    # merge commit 허용: MERGE_HEAD가 존재하면 git merge 완료 단계이므로 impl-scope 차단 적용 안 함
+    $mergeHeadPath = git rev-parse --git-path MERGE_HEAD 2>$null
+    if ($mergeHeadPath -and (Test-Path -LiteralPath $mergeHeadPath)) {
+        exit 0
+    }
+
     $staged = Get-StagedPaths
     $blocked = @($staged | Where-Object { -not (Test-AllowedRootCommitPath $_) })
     if ($blocked.Count -gt 0) {
