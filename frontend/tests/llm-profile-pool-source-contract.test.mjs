@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const apiSource = readFileSync(new URL('../src/lib/api/system.ts', import.meta.url), 'utf8');
+const apiIndexSource = readFileSync(new URL('../src/lib/api/index.ts', import.meta.url), 'utf8');
 const aiProfilesSource = readFileSync(new URL('../src/lib/components/system/AiProfilesSettings.svelte', import.meta.url), 'utf8');
 const quotaStoreSource = readFileSync(new URL('../src/lib/stores/quotaStore.ts', import.meta.url), 'utf8');
 const llmTabSource = readFileSync(new URL('../src/routes/writing/LlmTab.svelte', import.meta.url), 'utf8');
@@ -37,6 +38,8 @@ test('schedule profile policy API client is exposed', () => {
   assert.match(apiSource, /listScheduleProfilePolicies/);
   assert.match(apiSource, /updateScheduleProfilePolicies/);
   assert.match(apiSource, /\/llm\/schedule-profile-policies/);
+  assert.match(apiIndexSource, /type LLMScheduleProfilePolicyItem/);
+  assert.match(apiIndexSource, /type LLMScheduleProfilePolicyWindow/);
 });
 
 test('LLM tab exposes schedule profile policy matrix controls', () => {
