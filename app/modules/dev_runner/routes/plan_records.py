@@ -25,14 +25,9 @@ from app.modules.dev_runner.services.plan_record_service import PlanRecordServic
 from app.modules.dev_runner.services.plan_service import plan_service as _plan_service
 from app.modules.dev_runner.services.plan_archive_context_service import PlanArchiveContextService
 from app.modules.dev_runner.services.plan_archive_index_service import PlanArchiveIndexService
-from app.modules.dev_runner.services.plan_archive_insight_service import (
-    PlanArchiveInsightBatchQuery,
-    PlanArchiveInsightService,
+from app.modules.dev_runner.services.plan_archive_embedding_service import (
+    PlanArchiveEmbeddingService,
 )
-from app.modules.dev_runner.services.plan_archive_insight_review_service import (
-    PlanArchiveInsightReviewService,
-)
-from app.modules.dev_runner.services.plan_archive_doc_patch_service import PlanArchiveDocPatchService
 from app.modules.dev_runner.services.plan_archive_metrics_service import PlanArchiveMetricsService
 from app.modules.dev_runner.services.plan_archive_retrieval_service import (
     PlanArchiveRetrievalService,
@@ -46,16 +41,8 @@ from app.modules.dev_runner.schemas import (
     PlanArchiveContextRequest,
     PlanArchiveIndexRequest,
     PlanArchiveIndexResponse,
-    PlanArchiveInsightBatchRequest,
-    PlanArchiveInsightBatchResponse,
-    PlanArchiveInsightPromotePlanRequest,
-    PlanArchiveInsightPromotePlanResponse,
-    PlanArchiveInsightReportDetailResponse,
-    PlanArchiveInsightReportListResponse,
-    PlanArchiveInsightReviewUpdateRequest,
-    PlanArchiveDocPatchApplyRequest,
-    PlanArchiveDocPatchPreviewRequest,
-    PlanArchiveDocPatchProposalResponse,
+    PlanArchiveEmbeddingIndexRequest,
+    PlanArchiveEmbeddingIndexResponse,
     PlanArchiveMetricsQuery,
     PlanArchiveMetricsResponse,
     PlanArchiveRetrievalQuery,
@@ -119,6 +106,7 @@ def _to_retrieval_query(req: PlanArchiveRetrievalQuery) -> RetrievalQuery:
         scope=req.scope,
         path=req.path,
         relation_type=req.relation_type,
+        semantic_cluster_id=req.semantic_cluster_id,
         limit=req.limit,
     )
 
@@ -336,6 +324,32 @@ def index_archive_records(req: PlanArchiveIndexRequest, db: Session = Depends(ge
     if not dry_run:
         db.commit()
     return {"run_id": None, **result}
+
+
+@router.post("/retrieval/embeddings/index", response_model=PlanArchiveEmbeddingIndexResponse)
+def index_archive_embeddings(req: PlanArchiveEmbeddingIndexRequest, db: Session = Depends(get_db)):
+    """Backfill semantic embeddings for archived plan chunks."""
+    try:
+        config = PlanArchiveEmbeddingService.resolve_config(
+            provider=req.provider,
+            model=req.model,
+            dimension=req.dimension,
+            batch_limit=req.limit,
+            timeout_seconds=req.timeout_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    svc = PlanArchiveEmbeddingService(db, config=config)
+    dry_run = not req.apply
+    result = svc.index_embeddings(limit=req.limit, force=req.force, dry_run=dry_run)
+    if not dry_run:
+        db.commit()
+    return {
+        **result,
+        "provider": config.provider,
+        "model": config.model,
+        "dimension": config.dimension,
+    }
 
 
 @router.get("/records", response_model=list[PlanRecordResponse])

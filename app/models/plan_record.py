@@ -108,12 +108,50 @@ class PlanRecordChunk(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     record = relationship("PlanRecord", back_populates="chunks")
+    embedding_records = relationship("PlanRecordChunkEmbedding", back_populates="chunk", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("plan_record_id", "chunk_index", name="uq_plan_record_chunk_index"),
         Index("ix_plan_record_chunks_record", "plan_record_id"),
         Index("ix_plan_record_chunks_section", "section_type"),
         Index("ix_plan_record_chunks_hash", "content_hash"),
+    )
+
+
+class PlanRecordChunkEmbedding(Base):
+    """Semantic embedding for one retrieval chunk and one provider/model config."""
+
+    __tablename__ = "plan_record_chunk_embeddings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chunk_id = Column(Integer, ForeignKey("plan_record_chunks.id", ondelete="CASCADE"), nullable=False)
+    plan_record_id = Column(Integer, ForeignKey("plan_records.id", ondelete="CASCADE"), nullable=False)
+    provider = Column(String(80), nullable=False)
+    model = Column(String(160), nullable=False)
+    dimension = Column(Integer, nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    vector = Column(JSON, nullable=False)
+    status = Column(String(30), nullable=False, default="completed")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    chunk = relationship("PlanRecordChunk", back_populates="embedding_records")
+    record = relationship("PlanRecord")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "chunk_id",
+            "provider",
+            "model",
+            "dimension",
+            "content_hash",
+            name="uq_plan_record_chunk_embedding_config_hash",
+        ),
+        Index("ix_plan_record_chunk_embeddings_chunk", "chunk_id"),
+        Index("ix_plan_record_chunk_embeddings_record", "plan_record_id"),
+        Index("ix_plan_record_chunk_embeddings_config", "provider", "model", "dimension"),
+        Index("ix_plan_record_chunk_embeddings_status", "status"),
     )
 
 

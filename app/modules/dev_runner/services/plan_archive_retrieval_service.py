@@ -11,6 +11,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.plan_record import PlanRecord, PlanRecordChunk, PlanRecordFileRef, PlanRecordRelation
+from app.modules.dev_runner.services.plan_archive_semantic_search_service import PlanArchiveSemanticSearchService
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class RetrievalQuery:
     scope: str | None = None
     path: str | None = None
     relation_type: str | None = None
+    semantic_cluster_id: str | None = None
     limit: int = 20
 
 
@@ -52,6 +54,14 @@ def _snippet(text: str, q: str | None, width: int = 220) -> str:
     return text[start:end]
 
 
+def _looks_like_path_query(q: str | None) -> bool:
+    if not q:
+        return False
+    if "/" in q or "\\" in q:
+        return True
+    return " " not in q and "." in q
+
+
 class PlanArchiveRetrievalService:
     def __init__(self, db: Session):
         self.db = db
@@ -73,11 +83,31 @@ class PlanArchiveRetrievalService:
                 PlanRecordRelation,
                 PlanRecordRelation.source_plan_record_id == PlanRecord.id,
             ).filter(PlanRecordRelation.relation_type == query.relation_type)
+        if query.semantic_cluster_id:
+            base = base.join(
+                PlanRecordRelation,
+                PlanRecordRelation.source_plan_record_id == PlanRecord.id,
+            ).filter(
+                PlanRecordRelation.relation_type == "semantic_similar",
+                PlanRecordRelation.evidence.contains({"cluster_id": query.semantic_cluster_id}),
+            )
 
         records = [record for record in base.limit(max(query.limit * 5, query.limit)).all() if _tags_contain(record.tags, query.tags)]
         record_ids = [record.id for record in records]
         if not record_ids:
             return {"results": [], "total": 0}
+
+        semantic_by_record: dict[int, list[tuple[PlanRecordChunk, float]]] = {rid: [] for rid in record_ids}
+        try:
+            semantic_hits = PlanArchiveSemanticSearchService(self.db).search_chunks(
+                query.q,
+                record_ids=record_ids,
+                limit=max(query.limit * 5, query.limit),
+            )
+            for hit in semantic_hits:
+                semantic_by_record.setdefault(hit.chunk.plan_record_id, []).append((hit.chunk, hit.score))
+        except Exception:
+            semantic_hits = []
 
         chunks_by_record: dict[int, list[PlanRecordChunk]] = {rid: [] for rid in record_ids}
         chunk_query = self.db.query(PlanRecordChunk).filter(PlanRecordChunk.plan_record_id.in_(record_ids))
@@ -93,8 +123,9 @@ class PlanArchiveRetrievalService:
 
         file_refs_by_record: dict[int, list[PlanRecordFileRef]] = {rid: [] for rid in record_ids}
         file_query = self.db.query(PlanRecordFileRef).filter(PlanRecordFileRef.plan_record_id.in_(record_ids))
-        if query.path:
-            normalized_path = query.path.replace("\\", "/")
+        effective_path = query.path or (query.q if _looks_like_path_query(query.q) else None)
+        if effective_path:
+            normalized_path = effective_path.replace("\\", "/")
             file_query = file_query.filter(PlanRecordFileRef.path.ilike(f"%{normalized_path}%"))
         for ref in file_query.order_by(PlanRecordFileRef.plan_record_id, PlanRecordFileRef.path).all():
             file_refs_by_record.setdefault(ref.plan_record_id, []).append(ref)
@@ -111,15 +142,24 @@ class PlanArchiveRetrievalService:
         for record in records:
             chunks = chunks_by_record.get(record.id, [])
             file_refs = file_refs_by_record.get(record.id, [])
+            semantic_chunks = semantic_by_record.get(record.id, [])
             lexical_score = len(chunks) * 10 if query.q else 0
-            file_score = len(file_refs) * 15 if query.path else 0
+            semantic_score = max([score for _, score in semantic_chunks], default=0.0) * 25 if query.q else 0
+            file_score = len(file_refs) * 100 if effective_path else 0
             metadata_score = 10
             relation_score = min(20, relation_counts.get(record.id, 0) * 5)
-            score = metadata_score + lexical_score + file_score + relation_score
-            if query.q and not chunks:
+            score = metadata_score + lexical_score + semantic_score + file_score + relation_score
+            if query.q and not chunks and not semantic_chunks and not file_refs:
                 continue
-            if query.path and not file_refs:
+            if effective_path and not file_refs:
                 continue
+            merged_chunks = chunks[:]
+            existing_chunk_ids = {chunk.id for chunk in merged_chunks}
+            semantic_score_by_chunk = {chunk.id: score for chunk, score in semantic_chunks}
+            for chunk, _score in semantic_chunks:
+                if chunk.id not in existing_chunk_ids:
+                    merged_chunks.append(chunk)
+                    existing_chunk_ids.add(chunk.id)
             results.append(
                 {
                     "plan": record,
@@ -127,6 +167,7 @@ class PlanArchiveRetrievalService:
                     "score_detail": {
                         "metadata": metadata_score,
                         "lexical": lexical_score,
+                        "semantic": semantic_score,
                         "file": file_score,
                         "relation": relation_score,
                     },
@@ -137,9 +178,9 @@ class PlanArchiveRetrievalService:
                             "heading": chunk.heading,
                             "text": chunk.text,
                             "snippet": _snippet(chunk.text, query.q),
-                            "score": 10 if query.q else 0,
+                            "score": max(10 if chunk in chunks and query.q else 0, semantic_score_by_chunk.get(chunk.id, 0) * 25),
                         }
-                        for chunk in chunks[:5]
+                        for chunk in merged_chunks[:5]
                     ],
                     "file_refs": [
                         {

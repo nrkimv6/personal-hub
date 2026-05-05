@@ -314,6 +314,7 @@ class PlanArchiveRetrievalQuery(BaseModel):
     scope: Optional[str] = None
     path: Optional[str] = None
     relation_type: Optional[str] = None
+    semantic_cluster_id: Optional[str] = None
     limit: int = Field(default=20, ge=1, le=100)
 
 
@@ -333,6 +334,28 @@ class PlanArchiveIndexResponse(BaseModel):
     skipped: int = 0
     run_id: Optional[int] = None
     errors: List[str] = []
+
+
+class PlanArchiveEmbeddingIndexRequest(BaseModel):
+    """Archive chunk embedding backfill request."""
+    limit: int = Field(default=50, ge=1, le=500)
+    force: bool = False
+    apply: bool = False
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    dimension: Optional[int] = Field(default=None, ge=1, le=4096)
+    timeout_seconds: Optional[int] = Field(default=None, ge=1, le=3600)
+
+
+class PlanArchiveEmbeddingIndexResponse(BaseModel):
+    dry_run: bool
+    indexed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    errors: List[str] = []
+    provider: str
+    model: str
+    dimension: int
 
 
 class PlanArchiveChunkHit(BaseModel):
@@ -862,6 +885,8 @@ __all__ = [
     'PlanArchiveFileRefHit',
     'PlanArchiveIndexRequest',
     'PlanArchiveIndexResponse',
+    'PlanArchiveEmbeddingIndexRequest',
+    'PlanArchiveEmbeddingIndexResponse',
     'PlanArchiveContextRequest',
     'PlanArchiveMetricsQuery',
     'PlanArchiveMetricsResponse',
