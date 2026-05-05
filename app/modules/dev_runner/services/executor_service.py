@@ -534,9 +534,19 @@ class ExecutorService:
                     )
                 except _ClaimConflictError as _conflict:
                     _ec = _conflict.existing_claim
+                    _stale = (
+                        _ec.lease_expires_at is not None
+                        and _ec.lease_expires_at < datetime.now()
+                    )
                     raise HTTPException(
                         status_code=409,
-                        detail=f"plan already claimed: claim_id={_ec.claim_id} state={_ec.state}",
+                        detail={
+                            "message": f"plan already claimed: claim_id={_ec.claim_id} state={_ec.state}",
+                            "claim_id": _ec.claim_id,
+                            "claim_state": _ec.state,
+                            "stale": _stale,
+                            "lease_expires_at": _ec.lease_expires_at.isoformat() if _ec.lease_expires_at else None,
+                        },
                     )
                 finally:
                     _claim_db.close()
@@ -601,19 +611,43 @@ class ExecutorService:
                         f"[session] attached runner_id={existing_id} session_id not found in Redis, issuing new UUID"
                     )
                     existing_session_id = str(uuid.uuid4())
+                # attached 케이스: 기존 claim 요약 조회
+                _attach_claim_id: Optional[str] = None
+                _attach_claim_state: Optional[str] = None
+                _attach_plan_file = fields.get("plan_file") or request.plan_file
+                if _attach_plan_file:
+                    try:
+                        from app.database import SessionLocal as _ACSLocal
+                        from app.modules.dev_runner.services.plan_execution_claim_service import (
+                            get_claim_for_plan as _get_claim_for_plan,
+                        )
+                        _ac_db = _ACSLocal()
+                        try:
+                            _ac = _get_claim_for_plan(_ac_db, _attach_plan_file)
+                            if _ac:
+                                _attach_claim_id = _ac.claim_id
+                                _attach_claim_state = _ac.state
+                        finally:
+                            _ac_db.close()
+                    except Exception as _ac_err:
+                        logger.debug(f"[claim] attached claim 조회 실패 (무시): {_ac_err}")
                 return RunStatusResponse(
                     running=True,
                     runner_id=existing_id,
                     attached=True,
                     engine=existing_engine,
                     pid=int(existing_pid) if existing_pid else None,
-                    plan_file=fields.get("plan_file") or request.plan_file,
+                    plan_file=_attach_plan_file,
                     start_time=datetime.fromisoformat(existing_start_time_str) if existing_start_time_str else None,
                     current_cycle=0,
                     execution_count=existing_exec_count,
                     listener_alive=True,
                     redis_connected=True,
                     session_id=existing_session_id,
+                    claim_id=_attach_claim_id,
+                    claim_state=_attach_claim_state,
+                    claim_owner_runner_id=existing_id,
+                    claim_message="기존 실행에 연결됨" if _attach_claim_id else None,
                 )
 
             # Redis에서 per-runner 상태 조회
@@ -641,6 +675,8 @@ class ExecutorService:
                 listener_alive=True,
                 redis_connected=True,
                 session_id=session_id,
+                claim_id=_new_claim_id,
+                claim_state="queued" if _new_claim_id else None,
             )
 
         except redis.ConnectionError:

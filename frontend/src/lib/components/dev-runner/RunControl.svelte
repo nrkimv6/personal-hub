@@ -1,6 +1,7 @@
 <script lang="ts">
 import { X } from 'lucide-svelte';
 import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi, devRunnerSettingsApi } from '$lib/api';
+import { ApiError } from '$lib/api/dev-runner';
 import type {
 	DevRunnerRunStatusResponse,
 	DevRunnerPlanFileResponse,
@@ -77,6 +78,14 @@ import { confirm } from '$lib/stores/confirm';
 	let actionError = $state<string | null>(null);
 	let syncMessage = $state<string | null>(null);
 	let forceStopNeeded = $state(false);
+	let attachedMessage = $state<string | null>(null);
+	interface ClaimConflictInfo {
+		claim_id: string;
+		claim_state: string;
+		stale: boolean;
+		lease_expires_at: string | null;
+	}
+	let claimConflict = $state<ClaimConflictInfo | null>(null);
 	let syncMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// 엔진별 fallback 모델 리스트 (engines API 실패/누락 시에만 사용)
@@ -314,6 +323,8 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		activeAction = 'start';
 		actionError = null;
 		forceStopNeeded = false;
+		attachedMessage = null;
+		claimConflict = null;
 		try {
 			const response = await devRunnerRunnerApi.start({
 				plan_file: mode === 'single' ? selectedPlan : null,
@@ -329,8 +340,21 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				trigger: mode === 'all' ? 'user:all' : 'user',
 			});
 			onStatusChange();
+			if (response.attached) {
+				attachedMessage = response.claim_message ?? '기존 실행에 연결됨';
+			}
 			onStart?.(response);
 		} catch (e) {
+			if (e instanceof ApiError && e.status === 409 && e.detail?.claim_id) {
+				claimConflict = {
+					claim_id: e.detail.claim_id as string,
+					claim_state: e.detail.claim_state as string,
+					stale: e.detail.stale as boolean,
+					lease_expires_at: e.detail.lease_expires_at as string | null,
+				};
+				actionError = e.message;
+				return;
+			}
 			const msg = e instanceof Error ? e.message : '시작 실패';
 			if (msg.includes('Already running')) {
 				// 실제 실행 중 → 상태 즉시 새로고침 (중지 버튼이 자동으로 표시됨)
@@ -488,6 +512,37 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 
 				{#if syncMessage}
 					<div class="bg-success-light px-5 py-2 text-xs text-success">{syncMessage}</div>
+				{/if}
+
+				{#if attachedMessage}
+					<div class="bg-blue-50 px-5 py-2 text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+						{attachedMessage}
+					</div>
+				{/if}
+
+				{#if claimConflict}
+					<div class="flex items-center justify-between gap-2 bg-amber-50 px-5 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+						<span>
+							이미 실행 큐/runner가 점유 중
+							({claimConflict.claim_state}{claimConflict.stale ? ' · 만료' : ''})
+						</span>
+						<div class="flex gap-1">
+							<button
+								type="button"
+								class="shrink-0 rounded-md border border-amber-400/60 px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-amber-100 dark:hover:bg-amber-900"
+								onclick={() => { onStart?.({ running: false, listener_alive: false, redis_connected: false, pid: null, plan_file: null, start_time: null, current_cycle: null, exit_code: null, crashed: false, current_plan_name: null, runner_id: claimConflict?.claim_owner_runner_id ?? null, claim_id: claimConflict?.claim_id, claim_state: claimConflict?.claim_state }); }}
+							>
+								기존 실행으로 이동
+							</button>
+							<button
+								type="button"
+								class="shrink-0 rounded-md border border-amber-400/60 px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-amber-100 dark:hover:bg-amber-900"
+								onclick={() => { claimConflict = null; actionError = null; }}
+							>
+								닫기
+							</button>
+						</div>
+					</div>
 				{/if}
 
 				{#if plan && mode !== 'all'}

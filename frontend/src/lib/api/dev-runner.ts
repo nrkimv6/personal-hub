@@ -5,6 +5,21 @@ import { apiGate } from '$lib/stores/apiGate.svelte';
 import { request, API_BASE, getAuthToken, fetchWithTimeout, ApiGateClosedError } from './client';
 
 // ============================================================
+// ApiError — HTTP 에러 detail 객체를 보존하는 커스텀 에러
+// ============================================================
+
+export class ApiError extends Error {
+	status: number;
+	detail?: Record<string, unknown>;
+	constructor(message: string, status: number, detail?: Record<string, unknown>) {
+		super(message);
+		this.name = 'ApiError';
+		this.status = status;
+		this.detail = detail;
+	}
+}
+
+// ============================================================
 // Types
 // ============================================================
 
@@ -43,6 +58,10 @@ export interface RunStatusResponse {
 	branch_exists?: boolean | 'unknown';
 	branch_merged_to_main?: boolean | 'unknown';
 	metadata_checked_at?: string;
+	claim_id?: string | null;
+	claim_state?: string | null;
+	claim_owner_runner_id?: string | null;
+	claim_message?: string | null;
 }
 
 export interface RunnerListItem {
@@ -234,8 +253,9 @@ async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}, 
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({ detail: response.statusText }));
 		const detail = error.detail;
-		const message = typeof detail === 'string' ? detail : detail?.message || '요청 실패';
-		throw new Error(message);
+		const message = typeof detail === 'string' ? detail : (detail?.message || '요청 실패');
+		const err = new ApiError(message, response.status, typeof detail === 'object' ? detail : undefined);
+		throw err;
 	}
 
 	if (response.status === 204) {

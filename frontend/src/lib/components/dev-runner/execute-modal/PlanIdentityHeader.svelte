@@ -7,9 +7,28 @@
 		runningEngine?: string | null;
 		titleId: string;
 		onClose: () => void;
+		claimState?: string | null;
 	}
 
-	let { filename, status = null, runningEngine = null, titleId, onClose }: Props = $props();
+	let { filename, status = null, runningEngine = null, titleId, onClose, claimState = null }: Props = $props();
+
+	function getClaimBadgeClass(state: string | null): string {
+		switch (state) {
+			case 'queued': return 'bg-amber-100 text-amber-700 border-amber-300';
+			case 'active': return 'bg-blue-100 text-blue-700 border-blue-300';
+			case 'stale': return 'bg-red-100 text-red-700 border-red-300';
+			default: return 'bg-muted text-muted-foreground border-border';
+		}
+	}
+
+	function getClaimBadgeLabel(state: string | null): string {
+		switch (state) {
+			case 'queued': return '실행예약';
+			case 'active': return '실행중';
+			case 'stale': return '점유만료';
+			default: return state ?? '';
+		}
+	}
 
 	function truncateFilename(value: string): string {
 		if (value.length <= 40) return value;
@@ -48,6 +67,12 @@
 		{#if status}
 			<span class={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${getStatusClass(status)}`}>
 				{status}
+			</span>
+		{/if}
+
+		{#if claimState}
+			<span class={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${getClaimBadgeClass(claimState)}`}>
+				{getClaimBadgeLabel(claimState)}
 			</span>
 		{/if}
 

@@ -80,6 +80,10 @@ class RunStatusResponse(BaseModel):
     branch_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
     branch_merged_to_main: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
     metadata_checked_at: str = Field("unknown", description="plan-runner snapshot check timestamp or unknown when absent")
+    claim_id: Optional[str] = None
+    claim_state: Optional[str] = None
+    claim_owner_runner_id: Optional[str] = None
+    claim_message: Optional[str] = None
 
 
 class RunnerListItem(BaseModel):

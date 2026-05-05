@@ -18,6 +18,8 @@
 		redisRunning: boolean;
 		listenerRunning: boolean;
 		onRegenerate: () => void | Promise<void>;
+		claimRunnerId?: string | null;
+		claimSessionId?: string | null;
 	}
 
 	let {
@@ -31,7 +33,9 @@
 		worktreeOwner = null,
 		redisRunning,
 		listenerRunning,
-		onRegenerate
+		onRegenerate,
+		claimRunnerId = null,
+		claimSessionId = null,
 	}: Props = $props();
 
 	let expanded = $state(false);
@@ -158,6 +162,20 @@
 					<User class="h-3 w-3 text-muted-foreground" />
 					<span class="text-muted-foreground w-16 shrink-0">Owner</span>
 					<span class="min-w-0 truncate font-mono text-foreground">{normalizedOwner}</span>
+				</div>
+			{/if}
+
+			{#if claimRunnerId}
+				<div class="flex items-center gap-2">
+					<span class="text-muted-foreground w-16 shrink-0">Runner</span>
+					<span class="min-w-0 truncate font-mono text-foreground">{claimRunnerId.slice(0, 8)}</span>
+				</div>
+			{/if}
+
+			{#if claimSessionId}
+				<div class="flex items-center gap-2">
+					<span class="text-muted-foreground w-16 shrink-0">Session</span>
+					<span class="min-w-0 truncate font-mono text-foreground">{claimSessionId.slice(0, 8)}</span>
 				</div>
 			{/if}
 		</div>
