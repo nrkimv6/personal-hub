@@ -20,3 +20,16 @@ test('AI profile settings exposes pool controls', () => {
   assert.match(aiProfilesSource, /pauseProfile/);
   assert.match(aiProfilesSource, /resumeProfile/);
 });
+
+test('AI profile status const stays in a Svelte-allowed child position', () => {
+  assert.match(
+    aiProfilesSource,
+    /\{#each profilesForEngine\(engine\) as p \(p\.idx\)\}\s*\{@const status = statusFor\(engine, p\.name\)\}/,
+    'AiProfilesSettings.svelte status {@const} must be the immediate child of the {#each} block',
+  );
+  assert.doesNotMatch(
+    aiProfilesSource,
+    /<div[^>]*>\s*\{@const status = statusFor\(engine, p\.name\)\}/,
+    'Svelte const tag must be immediate child of each/if/snippet, not a plain element child',
+  );
+});
