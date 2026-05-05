@@ -243,6 +243,33 @@ export interface PlanArchiveInsightPromoteResponse {
 	report: PlanArchiveInsightReportDetail;
 }
 
+export interface PlanArchiveDocPatchProposal {
+	id: number;
+	plan_record_id: number;
+	insight_report_id: number | null;
+	status: 'draft' | 'previewed' | 'applied' | 'rejected' | 'failed';
+	target_path: string;
+	patch_text: string;
+	preview_text: string | null;
+	changed_lines_summary: Array<Record<string, unknown>>;
+	applied_commit: string | null;
+	error_message: string | null;
+	created_at: string;
+	updated_at: string;
+	applied_at: string | null;
+}
+
+export interface PlanArchiveDocPatchPreviewPayload {
+	record_id: number;
+	patch_text: string;
+	insight_report_id?: number | null;
+	target_path?: string | null;
+}
+
+export interface PlanArchiveDocPatchApplyPayload {
+	confirm: boolean;
+}
+
 // ============================================================
 // Internal helper
 // ============================================================
@@ -375,6 +402,23 @@ export const planRecordsApi = {
 		planRecordsRequest<PlanArchiveInsightPromoteResponse>(`/insights/reports/${id}/promote-plan`, {
 			method: 'POST',
 			body: JSON.stringify(payload)
+		}),
+
+	previewDocPatch: (payload: PlanArchiveDocPatchPreviewPayload) =>
+		planRecordsRequest<PlanArchiveDocPatchProposal>('/doc-patches/preview', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	applyDocPatch: (id: number, payload: PlanArchiveDocPatchApplyPayload) =>
+		planRecordsRequest<PlanArchiveDocPatchProposal>(`/doc-patches/${id}/apply`, {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	rejectDocPatch: (id: number) =>
+		planRecordsRequest<PlanArchiveDocPatchProposal>(`/doc-patches/${id}/reject`, {
+			method: 'POST'
 		}),
 
 	/**

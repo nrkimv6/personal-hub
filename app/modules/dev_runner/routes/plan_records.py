@@ -32,6 +32,7 @@ from app.modules.dev_runner.services.plan_archive_insight_service import (
 from app.modules.dev_runner.services.plan_archive_insight_review_service import (
     PlanArchiveInsightReviewService,
 )
+from app.modules.dev_runner.services.plan_archive_doc_patch_service import PlanArchiveDocPatchService
 from app.modules.dev_runner.services.plan_archive_metrics_service import PlanArchiveMetricsService
 from app.modules.dev_runner.services.plan_archive_retrieval_service import (
     PlanArchiveRetrievalService,
@@ -52,6 +53,9 @@ from app.modules.dev_runner.schemas import (
     PlanArchiveInsightReportDetailResponse,
     PlanArchiveInsightReportListResponse,
     PlanArchiveInsightReviewUpdateRequest,
+    PlanArchiveDocPatchApplyRequest,
+    PlanArchiveDocPatchPreviewRequest,
+    PlanArchiveDocPatchProposalResponse,
     PlanArchiveMetricsQuery,
     PlanArchiveMetricsResponse,
     PlanArchiveRetrievalQuery,
@@ -272,6 +276,45 @@ def promote_archive_insight_plan(
         detail = str(exc)
         status_code = 409 if detail == "CANDIDATE_NOT_FOUND" else 400
         raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+@router.post("/doc-patches/preview", response_model=PlanArchiveDocPatchProposalResponse)
+def preview_archive_doc_patch(req: PlanArchiveDocPatchPreviewRequest, db: Session = Depends(get_db)):
+    try:
+        return PlanArchiveDocPatchService(db).preview(
+            record_id=req.record_id,
+            insight_report_id=req.insight_report_id,
+            target_path=req.target_path,
+            patch_text=req.patch_text,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/doc-patches/{proposal_id}/apply", response_model=PlanArchiveDocPatchProposalResponse)
+def apply_archive_doc_patch(
+    proposal_id: int,
+    req: PlanArchiveDocPatchApplyRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return PlanArchiveDocPatchService(db).apply(proposal_id, confirm=req.confirm)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/doc-patches/{proposal_id}/reject", response_model=PlanArchiveDocPatchProposalResponse)
+def reject_archive_doc_patch(proposal_id: int, db: Session = Depends(get_db)):
+    try:
+        return PlanArchiveDocPatchService(db).reject(proposal_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/records/index", response_model=PlanArchiveIndexResponse)

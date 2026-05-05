@@ -499,6 +499,33 @@ class PlanArchiveInsightPromotePlanResponse(BaseModel):
     report: PlanArchiveInsightReportDetailResponse
 
 
+class PlanArchiveDocPatchPreviewRequest(BaseModel):
+    record_id: int
+    patch_text: str = ""
+    insight_report_id: Optional[int] = None
+    target_path: Optional[str] = None
+
+
+class PlanArchiveDocPatchApplyRequest(BaseModel):
+    confirm: bool = False
+
+
+class PlanArchiveDocPatchProposalResponse(BaseModel):
+    id: int
+    plan_record_id: int
+    insight_report_id: Optional[int] = None
+    status: str
+    target_path: str
+    patch_text: str
+    preview_text: Optional[str] = None
+    changed_lines_summary: List[dict] = []
+    applied_commit: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    applied_at: Optional[datetime] = None
+
+
 class PlanArchiveAnalyzeRequest(BaseModel):
     """Manual Plan Archive analyze request."""
     mode: Literal["preview", "apply"] = "preview"
@@ -846,6 +873,9 @@ __all__ = [
     'PlanArchiveInsightReviewUpdateRequest',
     'PlanArchiveInsightPromotePlanRequest',
     'PlanArchiveInsightPromotePlanResponse',
+    'PlanArchiveDocPatchPreviewRequest',
+    'PlanArchiveDocPatchApplyRequest',
+    'PlanArchiveDocPatchProposalResponse',
     'PlanArchiveAnalyzeRequest',
     'PlanArchiveAnalyzeResponse',
     'MemoUpdateRequest',

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import {
 		planRecordsApi,
+		type PlanArchiveDocPatchProposal,
 		type PlanArchiveInsightCandidate,
 		type PlanArchiveInsightReport,
 		type PlanArchiveInsightReportDetail
@@ -18,6 +19,12 @@
 	let groupingFilter = $state('');
 	let reviewNote = $state('');
 	let promoteConfirmIndex: number | null = $state(null);
+	let patchPreview: PlanArchiveDocPatchProposal | null = $state(null);
+	let patchError = $state('');
+	let patchRecordId = $state('');
+	let patchOldText = $state('');
+	let patchNewText = $state('');
+	let patchConfirm = $state(false);
 	const pageSize = 50;
 
 	const reviewStatuses = [
@@ -105,6 +112,49 @@
 			evidencePreview = await planRecordsApi.getInsightEvidence(selected.id, sourceType, sourceId);
 		} catch (e) {
 			evidencePreview = { error: e instanceof Error ? e.message : 'evidence 조회 실패', item };
+		}
+	}
+
+	function openDocPatch(recommendation: string) {
+		const source = selected?.evidence.find((item) => Number(item.record_id ?? 0));
+		patchRecordId = source ? String(source.record_id) : '';
+		patchOldText = recommendation;
+		patchNewText = recommendation;
+		patchPreview = null;
+		patchError = '';
+		patchConfirm = false;
+	}
+
+	async function previewDocPatch() {
+		if (!selected || !patchRecordId) {
+			patchError = 'record id가 필요합니다.';
+			return;
+		}
+		try {
+			patchPreview = await planRecordsApi.previewDocPatch({
+				record_id: Number(patchRecordId),
+				insight_report_id: selected.id,
+				patch_text: JSON.stringify({ replacements: [{ old: patchOldText, new: patchNewText }] })
+			});
+			patchError = '';
+			patchConfirm = false;
+		} catch (e) {
+			patchError = e instanceof Error ? e.message : 'patch preview 실패';
+		}
+	}
+
+	async function applyDocPatch() {
+		if (!patchPreview) return;
+		if (!patchConfirm) {
+			patchConfirm = true;
+			return;
+		}
+		try {
+			patchPreview = await planRecordsApi.applyDocPatch(patchPreview.id, { confirm: true });
+			patchError = '';
+			patchConfirm = false;
+		} catch (e) {
+			patchError = e instanceof Error ? e.message : 'patch apply 실패';
 		}
 	}
 
@@ -226,9 +276,36 @@
 						<h4 class="mb-2 text-sm font-semibold text-foreground">Recommendations</h4>
 						<div class="space-y-2">
 							{#each selected.recommendations as item}
-								<div class="rounded border border-border bg-background px-3 py-2 text-sm">{item}</div>
+								<div class="rounded border border-border bg-background px-3 py-2 text-sm">
+									<div>{item}</div>
+									<button class="mt-2 rounded bg-muted px-2 py-1 text-xs hover:bg-secondary" onclick={() => openDocPatch(item)}>
+										patch proposal
+									</button>
+								</div>
 							{/each}
 						</div>
+					</section>
+
+					<section class="rounded border border-border bg-background p-3">
+						<h4 class="mb-2 text-sm font-semibold text-foreground">Doc patch proposal</h4>
+						<div class="grid gap-2 md:grid-cols-[120px_1fr_1fr_auto]">
+							<input class="rounded border border-border bg-background px-2 py-1 text-xs" placeholder="record id" bind:value={patchRecordId} />
+							<input class="rounded border border-border bg-background px-2 py-1 text-xs" placeholder="old text" bind:value={patchOldText} />
+							<input class="rounded border border-border bg-background px-2 py-1 text-xs" placeholder="new text" bind:value={patchNewText} />
+							<button class="rounded bg-muted px-3 py-1 text-xs hover:bg-secondary" onclick={previewDocPatch}>Preview</button>
+						</div>
+						{#if patchError}
+							<div class="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">{patchError}</div>
+						{/if}
+						{#if patchPreview}
+							<div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+								<span>{patchPreview.status} · {patchPreview.target_path}</span>
+								<button class="rounded bg-primary px-3 py-1 text-primary-foreground hover:bg-primary/90" onclick={applyDocPatch}>
+									{patchConfirm ? 'Confirm apply' : 'Apply'}
+								</button>
+							</div>
+							<pre class="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 text-xs">{patchPreview.preview_text}</pre>
+						{/if}
 					</section>
 
 					<section>
