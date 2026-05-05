@@ -622,10 +622,24 @@ export interface LLMGroupedListParams {
 export interface QuotaProviderStatus {
   paused: boolean;
   until?: string;
+  reason?: string | null;
   remaining_seconds?: number;
   pending_blocked_count: number;
+  timezone?: string;
 }
 export type QuotaStatusMap = Record<string, QuotaProviderStatus>;
+
+export interface LLMExecutionWindow {
+  start: string;
+  end: string;
+  days?: number[];
+}
+
+export interface LLMExecutionWindowsConfig {
+  timezone: string;
+  allowed_windows: LLMExecutionWindow[];
+  quiet_windows: LLMExecutionWindow[];
+}
 
 export interface LLMDefaultConfig {
   provider?: string | null;
@@ -863,6 +877,14 @@ export const llmApi = {
     }),
 
   getQuotaStatus: () => request<QuotaStatusMap>('/llm/quota-status'),
+
+  getExecutionWindows: () => request<LLMExecutionWindowsConfig>('/llm/execution-windows'),
+
+  updateExecutionWindows: (payload: LLMExecutionWindowsConfig) =>
+    request<LLMExecutionWindowsConfig>('/llm/execution-windows', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
 
   getDefaults: () => request<LLMDefaultsResponse>('/llm/defaults'),
 

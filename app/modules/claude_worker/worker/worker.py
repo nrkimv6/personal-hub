@@ -59,6 +59,12 @@ try:
     from app.modules.claude_worker.services.llm_service import LLMService
     logger.debug("llm_service import 완료")
 
+    from app.modules.claude_worker.services.execution_window_service import (
+        LLMExecutionWindowService,
+        max_resume_at,
+    )
+    logger.debug("execution_window_service import 완료")
+
     from app.modules.claude_worker.services.plan_analyze_handler import (
         save_plan_archive_result,
         save_recurrence_check_result, save_recurrence_suggest_result
@@ -1626,6 +1632,23 @@ class LLMWorker:
         try:
             service = LLMService(db)
 
+            window_decision = LLMExecutionWindowService().decide()
+            if not window_decision.allowed:
+                quota_pauses = [
+                    service.get_provider_quota_pause(provider)
+                    for provider in provider_registry.get_quota_providers()
+                ]
+                resume_at = max_resume_at(window_decision.next_allowed_at, *quota_pauses)
+                blocked = service.get_pending_count()
+                if blocked > 0:
+                    logger.info(
+                        "[WINDOW] LLM 요청 %s건 보류 중 (다음 재개 후보: %s)",
+                        blocked,
+                        resume_at,
+                    )
+                self._update_worker_state("paused_by_window", None)
+                return
+
             # pause 중인 provider 조회
             exclude_providers = []
             for provider in provider_registry.get_quota_providers():
@@ -1639,6 +1662,7 @@ class LLMWorker:
             request = service.get_next_request(exclude_providers=exclude_providers)
 
             if request:
+                self._update_worker_state("idle", None)
                 logger.info(
                     f"Pending 요청 발견: id={request.id}, queue={request.queue_name}, "
                     f"caller={request.caller_type}:{request.caller_id}, mode={getattr(request, 'mode', 'single')}"
@@ -1647,6 +1671,10 @@ class LLMWorker:
                     await self._delegate_to_chat_executor(request, service)
                 else:
                     await self._execute_request(request, db, service)
+            elif exclude_providers:
+                self._update_worker_state("paused_by_quota", None)
+            else:
+                self._update_worker_state("idle", None)
 
         except Exception as e:
             if is_connection_error(e):

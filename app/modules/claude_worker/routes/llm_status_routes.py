@@ -3,13 +3,14 @@
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.modules.claude_worker.services.llm_service import LLMService
 from app.modules.claude_worker.services import provider_registry
+from app.modules.claude_worker.services.execution_window_service import LLMExecutionWindowService
 from app.modules.claude_worker.routes.llm_schemas import (
     HistoryStatsResponse,
     LLMStatsResponse,
@@ -55,6 +56,18 @@ def get_caller_stats(db: Session = Depends(get_db)):
 
 class RetryFailedCallersRequest(BaseModel):
     caller_type: Optional[str] = None
+
+
+class ExecutionWindowPayload(BaseModel):
+    start: str
+    end: str
+    days: Optional[list[int]] = None
+
+
+class ExecutionWindowsPayload(BaseModel):
+    timezone: str = "Asia/Seoul"
+    allowed_windows: list[ExecutionWindowPayload] = []
+    quiet_windows: list[ExecutionWindowPayload] = []
 
 
 @router.post("/requests/batch/retry-failed-callers")
@@ -138,13 +151,15 @@ def get_quota_status(db: Session = Depends(get_db)):
     service = LLMService(db)
     result = {}
     for provider in provider_registry.get_quota_providers():
-        paused_until = service.get_provider_quota_pause(provider)
+        detail = service.get_provider_quota_pause_detail(provider)
+        paused_until = detail.get("paused_until")
         blocked = service.get_blocked_pending_count(provider)
         if paused_until:
             remaining = int((paused_until - datetime.now()).total_seconds())
             result[provider] = {
                 "paused": True,
                 "until": paused_until.isoformat(),
+                "reason": detail.get("reason"),
                 "remaining_seconds": max(0, remaining),
                 "pending_blocked_count": blocked,
             }
@@ -153,7 +168,46 @@ def get_quota_status(db: Session = Depends(get_db)):
                 "paused": False,
                 "pending_blocked_count": blocked,
             }
+    window_decision = LLMExecutionWindowService().decide()
+    if not window_decision.allowed:
+        result["__execution_window"] = {
+            "paused": True,
+            "reason": window_decision.reason,
+            "until": (
+                window_decision.next_allowed_at.isoformat()
+                if window_decision.next_allowed_at
+                else None
+            ),
+            "remaining_seconds": (
+                max(0, int((window_decision.next_allowed_at - datetime.now()).total_seconds()))
+                if window_decision.next_allowed_at
+                else None
+            ),
+            "pending_blocked_count": service.get_pending_count(),
+            "timezone": window_decision.timezone,
+        }
+    else:
+        result["__execution_window"] = {
+            "paused": False,
+            "pending_blocked_count": 0,
+            "timezone": window_decision.timezone,
+        }
     return result
+
+
+@router.get("/execution-windows")
+def get_execution_windows():
+    """LLM worker execution window 설정 조회."""
+    return LLMExecutionWindowService().load_config()
+
+
+@router.put("/execution-windows")
+def put_execution_windows(payload: ExecutionWindowsPayload):
+    """LLM worker execution window 설정 저장."""
+    try:
+        return LLMExecutionWindowService().save_config(payload.dict())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/quota-pause/{provider}")

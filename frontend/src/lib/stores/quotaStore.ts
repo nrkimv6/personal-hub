@@ -10,8 +10,10 @@ import { isApiGateClosedError } from '$lib/api/client';
 export interface QuotaProviderStatus {
 	paused: boolean;
 	until?: string;
+	reason?: string | null;
 	remaining_seconds?: number;
 	pending_blocked_count?: number;
+	timezone?: string;
 }
 
 export type QuotaStatusMap = Record<string, QuotaProviderStatus>;
@@ -78,15 +80,16 @@ export function getQuotaWarning(provider: string): string | null {
 	if (!entry || !entry.paused) return null;
 
 	const providerLabel = provider.charAt(0).toUpperCase() + provider.slice(1);
+	const reason = entry.reason ? ` (${entry.reason})` : '';
 
 	if (entry.remaining_seconds != null && entry.remaining_seconds > 0) {
 		const waitStr = formatWaitTime(entry.remaining_seconds);
-		return `${providerLabel} 쿼터 소진 — ${waitStr} 후 재개 예정`;
+		return `${providerLabel} 쿼터 소진${reason} — ${waitStr} 후 재개 예정`;
 	}
 
 	if (entry.until) {
-		return `${providerLabel} 쿼터 소진 — ${entry.until} 이후 재개 예정`;
+		return `${providerLabel} 쿼터 소진${reason} — ${entry.until} 이후 재개 예정`;
 	}
 
-	return `${providerLabel} 쿼터 소진 — 일시 정지 중`;
+	return `${providerLabel} 쿼터 소진${reason} — 일시 정지 중`;
 }

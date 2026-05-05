@@ -30,6 +30,8 @@ def test_llm_routes_aggregate_registers_key_route_groups():
     assert ("GET", "/api/v1/llm/worker/status") in keys
     assert ("POST", "/api/v1/llm/cleanup") in keys
     assert ("GET", "/api/v1/llm/chat/{request_id}/stream") in keys
+    assert ("GET", "/api/v1/llm/execution-windows") in keys
+    assert ("PUT", "/api/v1/llm/execution-windows") in keys
     assert ("GET", "/api/v1/llm/quota") in keys
     assert ("POST", "/api/v1/llm/quota/report") in keys
 

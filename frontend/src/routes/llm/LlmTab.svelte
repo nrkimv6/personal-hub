@@ -249,6 +249,11 @@
 			stats = bootstrapRes.stats;
 			workerStatus = bootstrapRes.worker_status;
 			queueStats = bootstrapRes.queue_stats;
+			try {
+				quotaStatus = await llmApi.getQuotaStatus();
+			} catch {
+				quotaStatus = {};
+			}
 			initialAutoSwitchHandled = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
@@ -676,6 +681,30 @@
 		}
 	}
 
+	function getPendingPauseInfo(request: LLMRequest): { label: string; title: string; tone: 'quota' | 'window' } | null {
+		if (request.status !== 'pending') return null;
+		const windowPause = quotaStatus.__execution_window;
+		if (windowPause?.paused) {
+			const wait = windowPause.remaining_seconds != null ? formatWaitTime(windowPause.remaining_seconds) : null;
+			return {
+				label: '시간창 보류',
+				title: wait ? `다음 실행 가능 시간까지 ${wait}` : '현재 실행 가능 시간창 밖입니다',
+				tone: 'window'
+			};
+		}
+		const provider = request.provider || 'claude';
+		const providerPause = quotaStatus[provider];
+		if (providerPause?.paused) {
+			const wait = providerPause.remaining_seconds != null ? formatWaitTime(providerPause.remaining_seconds) : null;
+			return {
+				label: '쿼터 보류',
+				title: wait ? `${provider} 쿼터 재개까지 ${wait}` : providerPause.reason || `${provider} 쿼터 일시정지`,
+				tone: 'quota'
+			};
+		}
+		return null;
+	}
+
 	async function switchTab(tab: Tab) {
 		// create 탭에서 작성 중인 내용이 있으면 경고
 		if (activeTab === 'create' && tab !== 'create') {
@@ -1070,6 +1099,14 @@
 									<span class="px-2 py-1 text-xs rounded-full {getStatusColor(request.status)}">
 										{getStatusLabel(request.status)}
 									</span>
+									{#if getPendingPauseInfo(request) as pauseInfo}
+										<span
+											class="ml-1 px-2 py-1 text-xs rounded-full {pauseInfo.tone === 'window' ? 'bg-blue-100 text-blue-700' : 'bg-warning-light text-warning-foreground'}"
+											title={pauseInfo.title}
+										>
+											{pauseInfo.label}
+										</span>
+									{/if}
 								</td>
 								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(request.requested_at)}</td>
 								<td class="px-4 py-3" onclick={(e) => e.stopPropagation()}>
@@ -1389,7 +1426,15 @@
 				{#if selectedRequest.status === 'pending'}
 					{@const provider = selectedRequest.provider || 'claude'}
 					{@const ps = quotaStatus[provider]}
-					{#if ps?.paused}
+					{@const windowPause = quotaStatus.__execution_window}
+					{#if windowPause?.paused}
+						<div class="mb-4 p-3 bg-blue-50 rounded-lg flex items-start gap-2">
+							<span class="text-blue-700 text-sm font-medium">시간창 보류</span>
+							<span class="text-blue-700 text-sm ml-auto">
+								{windowPause.remaining_seconds != null ? `${formatWaitTime(windowPause.remaining_seconds)} 후 재개` : '다음 시간창 대기'}
+							</span>
+						</div>
+					{:else if ps?.paused}
 						<div class="mb-4 p-3 bg-warning-light rounded-lg flex items-start gap-2">
 							<span class="text-warning-foreground text-sm font-medium">⏸ {provider === 'gemini' ? 'Gemini' : 'Claude'} 쿼터 소진</span>
 							<span class="text-warning-foreground text-sm ml-auto">{formatWaitTime(countdownSeconds)} 후 재개</span>

@@ -140,6 +140,9 @@ class LLMService:
     def get_provider_quota_pause(self, provider: str) -> Optional["datetime"]:
         return self._quota_svc.get_provider_quota_pause(provider)
 
+    def get_provider_quota_pause_detail(self, provider: str) -> dict:
+        return self._quota_svc.get_provider_quota_pause_detail(provider)
+
     def clear_provider_quota_pause(self, provider: str) -> bool:
         return self._quota_svc.clear_provider_quota_pause(provider)
 

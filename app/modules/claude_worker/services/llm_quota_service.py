@@ -15,6 +15,16 @@ logger = logging.getLogger("claude_worker.llm_quota_service")
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000
 
 
+def _summarize_quota_reason(provider: str, reason: str, paused_until: datetime) -> str:
+    text = (reason or "").strip().replace("\r", " ").replace("\n", " ")
+    if not text:
+        return f"{provider} quota pause until {paused_until.isoformat(timespec='minutes')}"
+    if "rate_limit" in text or "quota" in text.lower() or "capacity" in text.lower():
+        prefix = f"{provider} quota pause until {paused_until.isoformat(timespec='minutes')}"
+        return f"{prefix}: {text[:240]}"
+    return text[:240]
+
+
 class LLMQuotaService:
     """provider quota pause 상태 관리."""
 
@@ -32,12 +42,13 @@ class LLMQuotaService:
             paused_until datetime
         """
         paused_until = datetime.now() + timedelta(milliseconds=retry_after_ms)
+        reason_summary = _summarize_quota_reason(provider, reason, paused_until)
 
         statuses = self._worker_repo.find_all()
         for status in statuses:
             status.quota_paused_provider = provider
             status.quota_paused_until = paused_until
-            status.quota_pause_reason = reason
+            status.quota_pause_reason = reason_summary
 
         self.db.commit()
         return paused_until
@@ -52,6 +63,18 @@ class LLMQuotaService:
             if status.quota_paused_until > datetime.now():
                 return status.quota_paused_until
         return None
+
+    def get_provider_quota_pause_detail(self, provider: str) -> dict:
+        """provider quota pause 상태와 UI 표시용 reason을 함께 반환."""
+        status = self._worker_repo.find_quota_pause(provider)
+        if not status or not status.quota_paused_until:
+            return {"paused_until": None, "reason": None}
+        if status.quota_paused_until <= datetime.now():
+            return {"paused_until": None, "reason": status.quota_pause_reason}
+        return {
+            "paused_until": status.quota_paused_until,
+            "reason": status.quota_pause_reason,
+        }
 
     def clear_provider_quota_pause(self, provider: str) -> bool:
         """provider quota pause 수동 해제."""
