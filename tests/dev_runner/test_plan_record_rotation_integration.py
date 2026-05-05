@@ -159,8 +159,8 @@ class TestRotationRoundtripIntegration:
         record = int_svc.mark_archived(str(fp), str(fp), raw_content=content)
         int_db.commit()
 
-        results_deep = int_svc.list_records(q=unique_kw, deep=True)
+        results_deep = int_svc.list_records(q=unique_kw, deep=True, exclude_temp=False)
         assert any(r.id == record.id for r in results_deep), "deep=True → raw_content 히트 필요"
 
-        results_shallow = int_svc.list_records(q=unique_kw, deep=False)
+        results_shallow = int_svc.list_records(q=unique_kw, deep=False, exclude_temp=False)
         assert not any(r.id == record.id for r in results_shallow), "deep=False → raw_content 미스캔"

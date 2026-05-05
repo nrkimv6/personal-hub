@@ -11,6 +11,7 @@ from app.modules.dev_runner.schedulers.auto_dev_runner_schedule import AutoDevRu
 from app.modules.dev_runner.schedulers.devguide_staleness_schedule import DevguideStalenessScheduler
 from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 from app.modules.dev_runner.schedulers.pytest_run_schedule import PytestRunScheduler
+from app.modules.dev_runner.schedulers.worktree_hygiene_schedule import WorktreeHygieneScheduler
 from app.modules.google_search.schedulers.search_schedule import GoogleSearchScheduler
 from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
 from app.modules.reports.schedulers.report_schedule import ReportScheduler
@@ -40,6 +41,7 @@ def test_handler_registry_contains_all_expected_target_types():
         TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
         TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
         TaskSchedule.TARGET_TYPE_AUTO_DEV_RUNNER,
+        TaskSchedule.TARGET_TYPE_WORKTREE_HYGIENE,
     ]
 
 
@@ -60,6 +62,7 @@ def test_handler_registry_uses_domain_scheduler_classes():
         ArchiveRotationScheduler,
         ScheduleDateExpireScheduler,
         AutoDevRunnerScheduler,
+        WorktreeHygieneScheduler,
     ]
 
 
