@@ -3,6 +3,7 @@
 	import type { DevRunnerPlanFileResponse, DevRunnerRegisteredPathResponse } from '$lib/api';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import { confirm } from '$lib/stores/confirm';
+	import { Eye } from 'lucide-svelte';
 
 	let doneLoadingPath = $state<string | null>(null);
 	let doneMessage = $state<{ path: string; success: boolean; text: string; remaining?: number; total?: number; planStatus?: string } | null>(null);
@@ -126,9 +127,10 @@
 		lastPlanFile?: string | null;
 		batchPlans?: BatchPlanItem[];
 		onPlanModalOpen?: (plan: DevRunnerPlanFileResponse) => void;
+		onPlanPreviewOpen?: (plan: DevRunnerPlanFileResponse) => void;
 	}
 
-	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanModalOpen }: Props = $props();
+	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanModalOpen, onPlanPreviewOpen }: Props = $props();
 
 	function parsePlanFilename(filename: string) {
 		const match = filename.match(/^(\d{4}-\d{2}-\d{2})_(.+)$/);
@@ -197,6 +199,11 @@
 
 	function handlePlanSelect(plan: DevRunnerPlanFileResponse) {
 		onPlanModalOpen?.(plan);
+	}
+
+	function handlePlanPreview(e: Event, plan: DevRunnerPlanFileResponse) {
+		e.stopPropagation();
+		onPlanPreviewOpen?.(plan);
 	}
 
 	async function handleGenerateSummary(e: Event, plan: DevRunnerPlanFileResponse) {
@@ -523,6 +530,17 @@
 							{/if}
 
 							<div class="ml-auto flex shrink-0 items-center gap-1">
+								{#if !isArchive}
+									<button
+										class="shrink-0 p-1 rounded hover:bg-blue-100"
+										onclick={(e) => handlePlanPreview(e, plan)}
+										title="계획서 전문 보기"
+										aria-label="계획서 전문 보기"
+									>
+										<Eye class="w-3.5 h-3.5 text-blue-500" />
+									</button>
+								{/if}
+
 								<!-- Done button: canDone OR lastPlanFile -->
 								{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}
 									<button

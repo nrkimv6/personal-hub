@@ -6,6 +6,7 @@
 	import TaskList from '$lib/components/dev-runner/TaskList.svelte';
 	import RunControl from '$lib/components/dev-runner/RunControl.svelte';
 	import PlanList from '$lib/components/dev-runner/PlanList.svelte';
+	import PlanMarkdownPreview from '$lib/components/dev-runner/PlanMarkdownPreview.svelte';
 	import RunnerInstanceTab from '$lib/components/dev-runner/RunnerInstanceTab.svelte';
 	import CurrentTrackingCard from '$lib/components/dev-runner/CurrentTrackingCard.svelte';
 	import MergeQueuePanel from '$lib/components/dev-runner/MergeQueuePanel.svelte';
@@ -51,6 +52,11 @@
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let taskListRefreshTick = $state(0);
+	let planPreviewOpen = $state(false);
+	let planPreviewPath = $state('');
+	let planPreviewTitle = $state<string | null>(null);
+	let planPreviewContextRunnerId = $state<string | null>(null);
+	let planPreviewContextPlanPath = $state<string | null>(null);
 
 	// Phase 2: Plan 상세 모달
 	let modalPlan = $state<DevRunnerPlanFileResponse | null>(null);
@@ -91,6 +97,7 @@
 		showModal = false;
 		modalPlan = null;
 		modalMode = 'single';
+		closePlanPreview();
 		resetPlanSummaryState();
 	}
 
@@ -166,6 +173,30 @@
 		if (window.innerWidth < 640) {
 			taskHistoryOpen = false;
 		}
+	}
+
+	function openPlanPreview(path: string | null | undefined, title?: string | null) {
+		if (!path) return;
+		planPreviewPath = path;
+		planPreviewTitle = title ?? path.split(/[\\/]/).pop() ?? null;
+		planPreviewContextRunnerId = activeTabId;
+		planPreviewContextPlanPath = path;
+		planPreviewOpen = true;
+		if (window.innerWidth < 640) {
+			taskHistoryOpen = false;
+		}
+	}
+
+	function closePlanPreview() {
+		planPreviewOpen = false;
+		planPreviewPath = '';
+		planPreviewTitle = null;
+		planPreviewContextRunnerId = null;
+		planPreviewContextPlanPath = null;
+	}
+
+	function handlePlanPreviewOpen(plan: DevRunnerPlanFileResponse) {
+		openPlanPreview(plan.path, plan.filename);
 	}
 
 	// Merge 탭 대기 건수 뱃지 (MergeQueuePanel onCountChange 콜백으로 갱신)
@@ -900,6 +931,22 @@
 	let effectivePlanFile = $derived(activeTabRunner?.plan_file ?? lastPlanFile);
 	// TaskList에 표시할 plan path (활성 탭의 plan 또는 사용자가 선택한 plan)
 	let taskListPlanPath = $derived(effectivePlanFile ?? selectedPlanPath ?? null);
+
+	$effect(() => {
+		if (!planPreviewOpen) return;
+		if (planPreviewContextRunnerId !== activeTabId) {
+			closePlanPreview();
+			return;
+		}
+		if (
+			planPreviewContextPlanPath &&
+			taskListPlanPath &&
+			planPreviewContextPlanPath !== taskListPlanPath &&
+			planPreviewPath === planPreviewContextPlanPath
+		) {
+			closePlanPreview();
+		}
+	});
 </script>
 
 <div class="flex flex-col h-full overflow-hidden">
@@ -1034,7 +1081,11 @@
 									</div>
 								{/if}
 								<div class="flex-1 min-h-0 flex flex-col overflow-hidden">
-									<TaskList planPath={taskListPlanPath} refreshTick={taskListRefreshTick} />
+									<TaskList
+										planPath={taskListPlanPath}
+										refreshTick={taskListRefreshTick}
+										onOpenPlanPreview={openPlanPreview}
+									/>
 								</div>
 							</div>
 						{:else if taskHistoryTab === 'plans'}
@@ -1046,6 +1097,7 @@
 									{lastPlanFile}
 									{batchPlans}
 									onPlanModalOpen={handlePlanModalOpen}
+									onPlanPreviewOpen={handlePlanPreviewOpen}
 								/>
 							</div>
 						{:else if taskHistoryTab === 'merge'}
@@ -1064,6 +1116,16 @@
 						{/if}
 					</div>
 				</div>
+
+				{#if planPreviewOpen && planPreviewPath}
+					<div class="hidden lg:flex w-[min(46vw,720px)] min-w-[420px] max-w-[720px] min-h-0 shrink-0 flex-col overflow-hidden">
+						<PlanMarkdownPreview
+							planPath={planPreviewPath}
+							title={planPreviewTitle}
+							onClose={closePlanPreview}
+						/>
+					</div>
+				{/if}
 
 				<!-- 우측 영역: Runner 탭 바 + Runner/Logs/Merge 콘텐츠 -->
 				<div class="flex-1 min-h-0 flex flex-col overflow-hidden bg-card rounded-md border border-border">
@@ -1119,6 +1181,22 @@
 					</div>
 				</div>
 			</div>
+
+			{#if planPreviewOpen && planPreviewPath}
+				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+				<div
+					class="fixed inset-0 z-[70] bg-black/40 lg:hidden"
+					onclick={closePlanPreview}
+					role="presentation"
+				></div>
+				<div class="fixed inset-0 z-[80] flex flex-col bg-card lg:hidden">
+					<PlanMarkdownPreview
+						planPath={planPreviewPath}
+						title={planPreviewTitle}
+						onClose={closePlanPreview}
+					/>
+				</div>
+			{/if}
 		{/if}
 
 	</div>

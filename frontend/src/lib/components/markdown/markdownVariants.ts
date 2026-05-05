@@ -36,6 +36,7 @@ export const variantClasses: Record<MarkdownContentVariant, string> = {
 		'prose-blockquote:my-3 prose-blockquote:border-l-2 prose-blockquote:border-primary/40 prose-blockquote:bg-muted/40 prose-blockquote:px-3 prose-blockquote:py-2 prose-blockquote:text-[12.5px] prose-blockquote:font-normal prose-blockquote:not-italic prose-blockquote:text-muted-foreground',
 		'prose-code:break-words prose-code:text-[12px] prose-code:font-medium prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none',
 		'prose-pre:my-3 prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:bg-muted prose-pre:p-3 prose-pre:text-xs prose-pre:text-foreground',
-		'prose-table:text-xs prose-th:px-2 prose-th:py-1 prose-th:text-foreground prose-td:px-2 prose-td:py-1 prose-td:text-foreground'
+		'prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-table:text-xs prose-th:px-2 prose-th:py-1 prose-th:text-foreground prose-td:px-2 prose-td:py-1 prose-td:text-foreground',
+		'[&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto'
 	].join(' ')
 };

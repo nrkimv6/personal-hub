@@ -6,9 +6,10 @@
 	interface Props {
 		planPath?: string | null;
 		refreshTick?: number;
+		onOpenPlanPreview?: (path: string, title?: string | null) => void;
 	}
 
-	let { planPath = null, refreshTick = 0 }: Props = $props();
+	let { planPath = null, refreshTick = 0, onOpenPlanPreview }: Props = $props();
 
 	let detail = $state<PlanDetailResponse | null>(null);
 	let loading = $state(false);
@@ -62,7 +63,18 @@
 			<!-- Header -->
 			<div class="flex items-center justify-between px-1 shrink-0">
 				<span class="text-[10px] text-muted-foreground font-mono truncate max-w-[200px]">{detail.filename}</span>
-				<span class="text-[10px] font-mono text-muted-foreground">{detail.progress.done}/{detail.progress.total} ({detail.progress.percent}%)</span>
+				<div class="flex shrink-0 items-center gap-1.5">
+					<button
+						type="button"
+						class="h-6 px-2 text-[10px] rounded text-blue-600 hover:bg-blue-50 transition-colors inline-flex items-center gap-1"
+						onclick={() => { if (planPath) onOpenPlanPreview?.(planPath, detail?.filename); }}
+						title="계획서 전문 보기"
+						aria-label="계획서 전문 보기"
+					>
+						전문 보기
+					</button>
+					<span class="text-[10px] font-mono text-muted-foreground">{detail.progress.done}/{detail.progress.total} ({detail.progress.percent}%)</span>
+				</div>
 			</div>
 
 			<!-- Summary card -->
