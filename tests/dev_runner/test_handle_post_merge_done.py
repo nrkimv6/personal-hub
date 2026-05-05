@@ -257,6 +257,8 @@ def test_conflict_resolve_success_triggers_done_flow(cl, tmp_path):
 
     with patch("_dr_merge._launch_conflict_resolver_process", return_value=resolver_success), \
          patch("_dr_merge._handle_post_merge_done", side_effect=mock_handle), \
+         patch("plan_worktree_helpers.get_branch_divergence", return_value=(0, 1)), \
+         patch("_dr_merge._write_pre_merge_snapshot", return_value=str(tmp_path / "snapshot.md")), \
          patch("subprocess.run", return_value=merge_result_conflict), \
          patch("merge_queue.acquire_merge_turn", return_value=True), \
          patch("merge_queue.release_merge_turn"):
@@ -304,6 +306,8 @@ def test_conflict_resolve_unsafe_does_not_trigger_done_flow(cl, tmp_path):
         },
     ), \
          patch("_dr_merge._handle_post_merge_done", side_effect=lambda *args, **kwargs: handled.append(args[0])), \
+         patch("plan_worktree_helpers.get_branch_divergence", return_value=(0, 1)), \
+         patch("_dr_merge._write_pre_merge_snapshot", return_value=str(tmp_path / "snapshot.md")), \
          patch("subprocess.run", return_value=merge_result_conflict), \
          patch("merge_queue.acquire_merge_turn", return_value=True), \
          patch("merge_queue.release_merge_turn"):
