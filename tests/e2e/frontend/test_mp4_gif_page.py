@@ -7,8 +7,8 @@ pytestmark = pytest.mark.e2e
 
 
 def _goto_mp4_gif_tab(page: Page, frontend_url: str) -> None:
-    page.goto(f"{frontend_url}/file-search?tab=mp4-gif")
-    page.wait_for_load_state("networkidle")
+    page.goto(f"{frontend_url}/file-search?tab=mp4-gif", wait_until="domcontentloaded")
+    expect(page.locator("input[type='file']")).to_be_attached(timeout=15000)
 
 
 def _skip_if_frontend_error_title(page: Page) -> None:
@@ -30,11 +30,11 @@ class TestMp4GifPageLoad:
     ):
         """시나리오: /mp4-gif 진입 시 파일 도구 탭으로 리다이렉트된다."""
         _skip_admin_mode_if_public(system_mode)
-        page.goto(f"{frontend_url}/mp4-gif")
-        page.wait_for_load_state("networkidle")
+        page.goto(f"{frontend_url}/mp4-gif", wait_until="domcontentloaded")
         _skip_if_frontend_error_title(page)
 
         expect(page).to_have_url(f"{frontend_url}/file-search?tab=mp4-gif")
+        expect(page.locator("input[type='file']")).to_be_attached(timeout=15000)
 
     def test_page_title_visible(self, page: Page, frontend_url: str, system_mode: str):
         """시나리오: file-search 내부 mp4-gif 탭 진입 시 페이지 제목이 보인다.
