@@ -82,7 +82,10 @@ class TestE2EScenario1:
 
         executor.async_redis.get = mock_get
 
-        with patch.object(executor, "_check_redis_and_listener", new_callable=AsyncMock):
+        mock_claim = MagicMock()
+        mock_claim.claim_id = "test-claim-id"
+        with patch.object(executor, "_check_redis_and_listener", new_callable=AsyncMock), \
+             patch('app.modules.dev_runner.services.plan_execution_claim_service.claim_plan', return_value=mock_claim):
             req = RunRequest(test_source="multi_runner_scenarios", plan_file="plan_a.md", engine="claude")
             result1 = await executor.start_dev_runner(req)
 
@@ -202,7 +205,10 @@ class TestE2EScenario3:
 
         executor.async_redis.get = mock_get
 
-        with patch.object(executor, "_check_redis_and_listener", new_callable=AsyncMock):
+        mock_claim = MagicMock()
+        mock_claim.claim_id = "test-claim-id"
+        with patch.object(executor, "_check_redis_and_listener", new_callable=AsyncMock), \
+             patch('app.modules.dev_runner.services.plan_execution_claim_service.claim_plan', return_value=mock_claim):
             # 첫 번째 실행
             req = RunRequest(test_source="multi_runner_scenarios", plan_file="plan.md", engine="claude")
             result1 = await executor.start_dev_runner(req)
