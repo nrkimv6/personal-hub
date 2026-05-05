@@ -17,6 +17,7 @@
     type WorktreeCleanupResult,
     type WorktreeListResponse,
     type RepoOption,
+    devRunnerPlanApi,
   } from '$lib/api/dev-runner';
   import { confirm } from '$lib/stores/confirm';
   import { toast } from '$lib/stores/toast';
@@ -43,6 +44,7 @@
   let cleanableOnly = $state(false);
   let cleanupBusy = $state(false);
   let cleanupResult: WorktreeCleanupResponse | null = $state(null);
+  let activeClaims: string[] = $state([]);  // plan_path 목록 (active/queued claim)
 
   let expanded: Record<string, boolean> = $state({});
   let commitsByBranch: Record<string, WorktreeCommit[]> = $state({});
@@ -95,9 +97,17 @@
     loading = true;
     error = '';
     try {
-      const nextResponse = await devRunnerWorktreeApi.listV2(selectedRepoId);
+      const [nextResponse, plans] = await Promise.allSettled([
+        devRunnerWorktreeApi.listV2(selectedRepoId),
+        devRunnerPlanApi.list(),
+      ]);
       if (requestId !== loadRequestSeq) return;
-      response = nextResponse;
+      if (nextResponse.status === 'fulfilled') response = nextResponse.value;
+      if (plans.status === 'fulfilled') {
+        activeClaims = plans.value
+          .filter((p) => p.execution_claim_state === 'active' || p.execution_claim_state === 'queued')
+          .map((p) => p.path);
+      }
     } catch (e: unknown) {
       if (requestId !== loadRequestSeq) return;
       error = e instanceof Error ? e.message : '워크트리 목록을 불러오지 못했습니다';
@@ -296,6 +306,25 @@
         toast.warning('정리 가능한 워크트리가 없습니다.');
         return;
       }
+
+      // active claim이 연결된 워크트리가 포함되면 추가 확인
+      const claimedPlanFiles = new Set(
+        response.worktrees
+          .filter((wt) => branches.includes(wt.branch) && wt.plan_file)
+          .map((wt) => wt.plan_file as string)
+      );
+      const hasActiveClaims = claimedPlanFiles.size > 0 && activeClaims.some((path) => claimedPlanFiles.has(path));
+      if (hasActiveClaims) {
+        if (!(await confirm({
+          title: '실행 점유 중인 워크트리 포함',
+          message: '선택한 워크트리 중 현재 실행 점유(claim) 상태인 plan이 포함되어 있습니다.\n정리하면 해당 실행이 비정상 종료될 수 있습니다.\n계속 진행하시겠습니까?',
+          confirmText: '강제 정리',
+          variant: 'danger'
+        }))) {
+          return;
+        }
+      }
+
       if (
         !(await confirm({
           title: '워크트리 정리',

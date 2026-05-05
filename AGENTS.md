@@ -16,6 +16,7 @@
 - 탐색성/상담성 발화(`있을까?`, `가능할까?`, `추천해줘`, `좋겠어`, `현황 확인`)는 구현 승인으로 보지 않는다. 상태 요약·선택지·필요한 승인 문장까지만 답하고, `구현해`/`고쳐`/`적용해` 같은 명시 실행 의도가 있을 때만 구현 흐름으로 진입한다.
 - 사용자가 `/merge-test` 같은 특정 스킬을 명시 호출한 경우, precondition 실패가 아닌 한 해당 스킬의 주행동을 우선 수행한다. 설명/탐색이나 인접 워크플로우(`done`, `reflect`)로 대체하지 않는다.
 - `_build_worktree.ps1`는 setup 전용 helper 예외이며, implement 중 임의 probe 근거로 사용하면 안 된다.
+- **실행점유 확인 (구현 진입 전)**: plan 헤더에 `> 실행점유:` 필드가 있으면 claim_id를 읽고 DB `plan_execution_claims` 테이블에서 해당 claim의 `state`를 확인한다. `queued` 또는 `active` 상태이면서 자신(`runner_id`)이 아닌 다른 runner가 점유한 경우 구현을 즉시 중단하고 `CLAIM_CONFLICT: plan already claimed by {runner_id}` 사유를 보고한다. `released` 또는 `stale` 상태이거나 claim이 없으면 정상 진행한다.
 - 스킬 원본 수정: monitor-page의 `.claude/skills`, `.claude/agents` 직접 수정 금지  
   `D:\work\project\service\wtools\.claude\`에서 수정 후 동기화
 - `.claude/skills/` 또는 `.agents/skills/` 수정 시에는 다른 경로도 함께 갱신해 드리프트를 방지한다.

@@ -77,7 +77,11 @@ async def list_worktrees_v2(
     force: bool = Query(False, description="캐시 무시"),
     db: Session = Depends(get_db),
 ):
-    """전체 워크트리 상태 반환 (v2: plan_only·branch_unresolved·main_dirty 포함)"""
+    """전체 워크트리 상태 반환 (v2: plan_only·branch_unresolved·main_dirty 포함).
+
+    참고: queued claim은 worktree가 생성되기 전의 상태이므로 이 API의 worktree source로 포함하지 않는다.
+    claim은 plan_execution_claims 테이블을 직접 조회하거나 /plans API의 execution_claim_* 필드로 확인한다.
+    """
     try:
         repo_root = _resolve_repo_root(repo_id, db)
         kwargs = {"repo_root": repo_root} if repo_root else {}
