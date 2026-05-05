@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -186,4 +187,4 @@ def test_archive_tab_exposes_health_and_queue_surface(
     expect(page.get_by_text("Plan Archive LLM 요청")).to_be_visible()
     expect(page.get_by_text("archive-record-91")).to_be_visible()
     expect(page.get_by_text("claude / claude-opus-4-6")).to_be_visible()
-    expect(page.get_by_text("claude-work")).to_be_visible()
+    expect(page.get_by_role("cell", name=re.compile(r"claude-work"))).to_be_visible()
