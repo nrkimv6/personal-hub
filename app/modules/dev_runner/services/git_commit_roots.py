@@ -9,6 +9,8 @@ from typing import Callable, Iterable
 def _resolve_git_root(path: Path, default_root: Path | None = None) -> Path | None:
     """Return the git root for a file path, falling back to default_root."""
     cwd = path if path.is_dir() else path.parent
+    while not cwd.exists() and cwd != cwd.parent:
+        cwd = cwd.parent
     if cwd.exists():
         try:
             result = subprocess.run(
@@ -25,6 +27,48 @@ def _resolve_git_root(path: Path, default_root: Path | None = None) -> Path | No
         except Exception:
             pass
     return default_root.resolve() if default_root and default_root.exists() else None
+
+
+def _git_pathspec(path: Path, git_root: Path) -> str | None:
+    try:
+        return str(path.resolve().relative_to(git_root.resolve()))
+    except ValueError:
+        if path.exists():
+            return str(path)
+    return None
+
+
+def _is_tracked(git_root: Path, pathspec: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "-c", "safe.directory=*", "ls-files", "--error-unmatch", "--", pathspec],
+            cwd=str(git_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _stageable_pathspecs(git_root: Path, files: Iterable[Path]) -> list[str]:
+    """Return safe git-add pathspecs for existing files and tracked deletions."""
+    pathspecs: list[str] = []
+    seen: set[str] = set()
+    for file_path in files:
+        path = Path(file_path)
+        pathspec = _git_pathspec(path, git_root)
+        if pathspec is None:
+            continue
+        if not path.exists() and not _is_tracked(git_root, pathspec):
+            continue
+        if pathspec not in seen:
+            pathspecs.append(pathspec)
+            seen.add(pathspec)
+    return pathspecs
 
 
 def group_files_by_git_root(
@@ -77,21 +121,23 @@ async def commit_files_by_git_root(
 
     outputs: list[str] = []
     for git_root, files in groups.items():
-        add_proc = await asyncio.create_subprocess_exec(
-            "git",
-            "-c",
-            "safe.directory=*",
-            "add",
-            "--",
-            *[str(f) for f in files],
-            cwd=str(git_root),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        add_stdout, _ = await add_proc.communicate()
-        if add_proc.returncode != 0:
-            output = decode_output(add_stdout)
-            raise RuntimeError(f"git add failed ({add_proc.returncode}): {output}".strip())
+        pathspecs = _stageable_pathspecs(git_root, files)
+        if pathspecs:
+            add_proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-c",
+                "safe.directory=*",
+                "add",
+                "--",
+                *pathspecs,
+                cwd=str(git_root),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            add_stdout, _ = await add_proc.communicate()
+            if add_proc.returncode != 0:
+                output = decode_output(add_stdout)
+                raise RuntimeError(f"git add failed ({add_proc.returncode}): {output}".strip())
 
         if not _has_staged_changes(git_root):
             outputs.append(f"{git_root}: 커밋할 staged 변경 없음")

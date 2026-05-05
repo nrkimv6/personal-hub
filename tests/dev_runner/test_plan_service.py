@@ -720,7 +720,8 @@ class TestRunDone:
 
         with patch.object(type(svc), "COMMIT_PS1", commit_ps1), \
              patch.object(type(svc), "COMMIT_SH", tmp_path / "missing-commit.sh"), \
-             patch("asyncio.create_subprocess_exec", side_effect=[add_proc, commit_proc]), \
+             patch("app.modules.dev_runner.services.git_commit_roots._has_staged_changes", return_value=True), \
+             patch("app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec", side_effect=[add_proc, commit_proc]), \
              patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(archive, None))), \
              patch.object(svc, "_update_todo_done"), \
              patch.object(svc, "_archive_done_if_needed", return_value=None), \

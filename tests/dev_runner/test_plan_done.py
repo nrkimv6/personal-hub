@@ -535,6 +535,91 @@ class TestRunDone:
         assert "plans commit" in output
 
     @pytest.mark.asyncio
+    async def test_commit_files_by_git_root_skips_deleted_untracked_source_pathspec_T1(self, tmp_path):
+        """T1: fallback archive move에서 사라진 untracked source를 git add pathspec에 넣지 않는다."""
+        from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
+
+        plans_root = tmp_path / "plans"
+        source_path = plans_root / "docs" / "plan" / "2026-05-05-pathspec.md"
+        archive_path = plans_root / "docs" / "archive" / source_path.name
+        source_path.parent.mkdir(parents=True)
+        archive_path.parent.mkdir(parents=True)
+        archive_path.write_text("# archived\n", encoding="utf-8")
+
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"add ok", None))
+        proc.returncode = 0
+
+        with patch(
+            "app.modules.dev_runner.services.git_commit_roots.group_files_by_git_root",
+            return_value={plans_root: [source_path, archive_path]},
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots._is_tracked",
+            return_value=False,
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots._has_staged_changes",
+            return_value=False,
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec",
+            side_effect=[proc],
+        ) as mock_exec:
+            output = await commit_files_by_git_root(
+                files_to_add=[source_path, archive_path],
+                default_root=None,
+                commit_command=["commit-tool", "msg"],
+                decode_output=PlanDoneService._decode_subprocess_output,
+            )
+
+        add_args = [str(arg).replace("\\", "/") for arg in mock_exec.call_args.args]
+        assert str(source_path).replace("\\", "/") not in add_args
+        assert "docs/plan/2026-05-05-pathspec.md" not in add_args
+        assert "docs/archive/2026-05-05-pathspec.md" in add_args
+        assert str(archive_path).replace("\\", "/") not in add_args
+        assert "커밋할 staged 변경 없음" in output
+
+    @pytest.mark.asyncio
+    async def test_commit_files_by_git_root_stages_tracked_deleted_source_relpath_T1(self, tmp_path):
+        """T1: tracked source 삭제는 plans root 기준 상대 pathspec으로 stage한다."""
+        from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
+
+        plans_root = tmp_path / "plans"
+        source_path = plans_root / "docs" / "plan" / "2026-05-05-pathspec.md"
+        archive_path = plans_root / "docs" / "archive" / source_path.name
+        source_path.parent.mkdir(parents=True)
+        archive_path.parent.mkdir(parents=True)
+        archive_path.write_text("# archived\n", encoding="utf-8")
+
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"add ok", None))
+        proc.returncode = 0
+
+        with patch(
+            "app.modules.dev_runner.services.git_commit_roots.group_files_by_git_root",
+            return_value={plans_root: [source_path, archive_path]},
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots._is_tracked",
+            return_value=True,
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots._has_staged_changes",
+            return_value=False,
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec",
+            side_effect=[proc],
+        ) as mock_exec:
+            await commit_files_by_git_root(
+                files_to_add=[source_path, archive_path],
+                default_root=None,
+                commit_command=["commit-tool", "msg"],
+                decode_output=PlanDoneService._decode_subprocess_output,
+            )
+
+        add_args = [str(arg).replace("\\", "/") for arg in mock_exec.call_args.args]
+        assert "docs/plan/2026-05-05-pathspec.md" in add_args
+        assert "docs/archive/2026-05-05-pathspec.md" in add_args
+        assert str(source_path).replace("\\", "/") not in add_args
+        assert str(archive_path).replace("\\", "/") not in add_args
+
+    @pytest.mark.asyncio
     async def test_commit_files_by_git_root_cleans_project_and_plans_repos_T3(self, tmp_path):
         """T3: 실제 git repo 두 개에서 active 삭제와 archive 추가를 각각 commit한다."""
         from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
