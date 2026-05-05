@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import String, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.plan_record import PlanRecord, PlanRecordChunk, PlanRecordFileRef, PlanRecordRelation
@@ -62,6 +62,14 @@ def _looks_like_path_query(q: str | None) -> bool:
     return " " not in q and "." in q
 
 
+def semantic_cluster_evidence_filter(cluster_id: str):
+    evidence_text = PlanRecordRelation.evidence.cast(String)
+    return or_(
+        evidence_text.ilike(f'%"cluster_id": "{cluster_id}"%'),
+        evidence_text.ilike(f'%"cluster_id":"{cluster_id}"%'),
+    )
+
+
 class PlanArchiveRetrievalService:
     def __init__(self, db: Session):
         self.db = db
@@ -89,7 +97,7 @@ class PlanArchiveRetrievalService:
                 PlanRecordRelation.source_plan_record_id == PlanRecord.id,
             ).filter(
                 PlanRecordRelation.relation_type == "semantic_similar",
-                PlanRecordRelation.evidence.contains({"cluster_id": query.semantic_cluster_id}),
+                semantic_cluster_evidence_filter(query.semantic_cluster_id),
             )
 
         records = [record for record in base.limit(max(query.limit * 5, query.limit)).all() if _tags_contain(record.tags, query.tags)]

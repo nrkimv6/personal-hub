@@ -55,3 +55,54 @@ def test_followup_rate_7_14_30_days_right():
     finally:
         db.close()
         engine.dispose()
+
+
+def test_metrics_semantic_cluster_filter_right():
+    db, engine = _make_session()
+    try:
+        first = PlanRecord(
+            filename_hash="hash-c1-a",
+            file_path="docs/archive/2026-01-01-a.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 1),
+            status="archived",
+        )
+        second = PlanRecord(
+            filename_hash="hash-c1-b",
+            file_path="docs/archive/2026-01-02-b.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 2),
+            status="archived",
+        )
+        other = PlanRecord(
+            filename_hash="hash-c2",
+            file_path="docs/archive/2026-01-03-c.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 3),
+            status="archived",
+        )
+        db.add_all([first, second, other])
+        db.flush()
+        db.add_all(
+            [
+                PlanRecordRelation(
+                    source_plan_record_id=first.id,
+                    target_plan_record_id=second.id,
+                    relation_type="semantic_similar",
+                    evidence={"cluster_id": "cluster-1"},
+                ),
+                PlanRecordRelation(
+                    source_plan_record_id=other.id,
+                    target_plan_record_id=first.id,
+                    relation_type="semantic_similar",
+                    evidence={"cluster_id": "cluster-2"},
+                ),
+            ]
+        )
+        db.flush()
+        result = PlanArchiveMetricsService(db).calculate(RetrievalQuery(category="infra", semantic_cluster_id="cluster-1"))
+        assert result["total_plans"] == 1
+        assert result["relation_counts"] == {"semantic_similar": 1}
+    finally:
+        db.close()
+        engine.dispose()

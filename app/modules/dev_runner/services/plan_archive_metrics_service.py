@@ -9,7 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.plan_record import PlanRecord, PlanRecordFileRef, PlanRecordRelation
-from app.modules.dev_runner.services.plan_archive_retrieval_service import RetrievalQuery
+from app.modules.dev_runner.services.plan_archive_retrieval_service import RetrievalQuery, semantic_cluster_evidence_filter
 
 
 class PlanArchiveMetricsService:
@@ -24,6 +24,14 @@ class PlanArchiveMetricsService:
             base = base.filter(PlanRecord.archived_at >= query.date_from)
         if query.date_to:
             base = base.filter(PlanRecord.archived_at <= query.date_to)
+        if query.semantic_cluster_id:
+            base = base.join(
+                PlanRecordRelation,
+                PlanRecordRelation.source_plan_record_id == PlanRecord.id,
+            ).filter(
+                PlanRecordRelation.relation_type == "semantic_similar",
+                semantic_cluster_evidence_filter(query.semantic_cluster_id),
+            )
         records = base.all()
         record_ids = [record.id for record in records]
 
@@ -105,12 +113,22 @@ class PlanArchiveMetricsService:
                 missing_file_candidates.append({"module": module, "count": len(missing), "paths": missing[:10]})
         missing_file_candidates.sort(key=lambda item: item["count"], reverse=True)
 
+        relation_query = self.db.query(
+            PlanRecordRelation.relation_type,
+            func.count(PlanRecordRelation.id),
+        )
+        if record_ids:
+            relation_query = relation_query.filter(PlanRecordRelation.source_plan_record_id.in_(record_ids))
+        else:
+            relation_query = relation_query.filter(False)
+        if query.semantic_cluster_id:
+            relation_query = relation_query.filter(
+                PlanRecordRelation.relation_type == "semantic_similar",
+                semantic_cluster_evidence_filter(query.semantic_cluster_id),
+            )
         relation_counts = {
             relation_type: count
-            for relation_type, count in self.db.query(
-                PlanRecordRelation.relation_type,
-                func.count(PlanRecordRelation.id),
-            ).group_by(PlanRecordRelation.relation_type).all()
+            for relation_type, count in relation_query.group_by(PlanRecordRelation.relation_type).all()
         }
 
         chain_depth_max = self.db.query(func.max(PlanRecord.recurrence_count)).scalar() or 0
