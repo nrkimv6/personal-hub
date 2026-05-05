@@ -125,6 +125,31 @@ def _acquire_with_pure_enqueue(queue_mod, redis_client, runner_id: str, repo_id:
 # ── Phase T1: 단위 TC (RIGHT / BOUNDARY / ERROR) ─────────────────────────────
 
 
+class TestTimeoutResolution:
+    """R/B: CLI timeout resolution contract."""
+
+    def test_resolve_timeout_right_default_uses_24h(self, plan_runner_sys_path, monkeypatch):
+        cli = _import_cli(plan_runner_sys_path)
+
+        monkeypatch.delenv("MERGE_TEST_LOCK_TIMEOUT", raising=False)
+
+        assert cli._resolve_timeout(None) == 86400
+
+    def test_resolve_timeout_order_env_overrides_cli(self, plan_runner_sys_path, monkeypatch):
+        cli = _import_cli(plan_runner_sys_path)
+
+        monkeypatch.setenv("MERGE_TEST_LOCK_TIMEOUT", "42")
+
+        assert cli._resolve_timeout(600) == 42
+
+    def test_resolve_timeout_boundary_cli_overrides_default(self, plan_runner_sys_path, monkeypatch):
+        cli = _import_cli(plan_runner_sys_path)
+
+        monkeypatch.delenv("MERGE_TEST_LOCK_TIMEOUT", raising=False)
+
+        assert cli._resolve_timeout(123) == 123
+
+
 class TestAcquireRight:
     """R(정상): 빈 큐에서 acquire → 즉시 획득."""
 

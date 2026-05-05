@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 MERGE_QUEUE_KEY = "plan-runner:merge-queue"
 MERGE_TURN_KEY_PREFIX = "plan-runner:merge-turn"
 _RUNNER_KEY_PREFIX = "plan-runner:runners"  # PID/status 조회용, merge_lock과 동일
+DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS = 86400
+DEFAULT_MERGE_QUEUE_TTL_SECONDS = 90000
 
 # Lua 스크립트: LRANGE 순회 → 중복 없으면 RPUSH, 있으면 skip (원자적 중복 방지 enqueue)
 # merge_lock._ENQUEUE_LUA 동일 패턴
@@ -175,8 +177,8 @@ def acquire_merge_turn(
     redis_client,
     runner_id: str,
     repo_id: str = None,
-    timeout: int = 600,
-    queue_ttl: int = 1200,
+    timeout: int = DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS,
+    queue_ttl: int = DEFAULT_MERGE_QUEUE_TTL_SECONDS,
 ) -> bool:
     """
     Merge turn을 획득한다 (Redis LIST 큐 + BRPOP 시그널).
@@ -193,8 +195,8 @@ def acquire_merge_turn(
         redis_client: Redis 클라이언트 인스턴스
         runner_id: 현재 runner의 고유 ID (문자열)
         repo_id: _get_repo_id()로 생성한 레포 식별자. None이면 _get_repo_id(Path.cwd()) 자동 호출.
-        timeout: 최대 대기 시간 (초, 기본 600)
-        queue_ttl: merge queue 키 TTL (초, 기본 1200). 테스트 시 짧게 지정 가능.
+        timeout: 최대 대기 시간 (초, 기본 86400)
+        queue_ttl: merge queue 키 TTL (초, 기본 90000). 테스트 시 짧게 지정 가능.
 
     Returns:
         True if turn acquired, False if timed out or queue expired
@@ -301,7 +303,7 @@ def release_merge_turn(redis_client, runner_id: str, repo_id: str = None) -> boo
             turn_key = get_turn_key(next_runner)
             redis_client.lpush(turn_key, "go")
             redis_client.expire(turn_key, 600)
-            redis_client.expire(_queue_key, 1200)  # 대기자 남아있을 때 TTL 갱신
+            redis_client.expire(_queue_key, DEFAULT_MERGE_QUEUE_TTL_SECONDS)  # 대기자 남아있을 때 TTL 갱신
             logger.info(f"[merge-queue] {runner_id} release → {next_runner} signal 전송")
         else:
             logger.info(f"[merge-queue] {runner_id} release 완료 (큐 비어있음)")

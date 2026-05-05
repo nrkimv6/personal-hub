@@ -11,7 +11,7 @@ Exit codes:
   3  redis 연결 실패 (REDIS_UNAVAILABLE)
 
 환경변수:
-  MERGE_TEST_LOCK_TIMEOUT  acquire timeout 초(기본 600). CLI --timeout보다 우선.
+  MERGE_TEST_LOCK_TIMEOUT  acquire timeout 초(기본 86400). CLI --timeout보다 우선.
 """
 
 import argparse
@@ -19,6 +19,8 @@ import os
 import sys
 import time
 from pathlib import Path
+
+DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS = 86400
 
 # merge_queue.py가 같은 디렉토리에 있으므로 경로 삽입
 _HERE = Path(__file__).resolve().parent
@@ -30,7 +32,7 @@ def _get_redis_client():
     """Redis 클라이언트를 반환한다.
 
     연결 실패 시 exit 3 + stderr REDIS_UNAVAILABLE을 출력하고 종료한다.
-    호출자가 exit code 3을 받으면 lock 없이 진행하는 폴백을 적용한다.
+    호출자가 exit code 3을 받으면 lock 없이 merge를 진행하지 않아야 한다.
     """
     try:
         import redis as redis_lib
@@ -67,7 +69,7 @@ def _get_redis_client():
 
 
 def _resolve_timeout(cli_timeout: int | None) -> int:
-    """timeout 우선순위: env MERGE_TEST_LOCK_TIMEOUT > CLI --timeout > 기본 600."""
+    """timeout 우선순위: env MERGE_TEST_LOCK_TIMEOUT > CLI --timeout > 기본 86400."""
     env_val = os.environ.get("MERGE_TEST_LOCK_TIMEOUT")
     if env_val is not None:
         try:
@@ -76,7 +78,7 @@ def _resolve_timeout(cli_timeout: int | None) -> int:
             pass
     if cli_timeout is not None:
         return cli_timeout
-    return 600
+    return DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS
 
 
 def cmd_acquire(runner_id: str, timeout: int) -> None:
@@ -194,7 +196,7 @@ def main() -> None:
         "--timeout",
         type=int,
         default=None,
-        help="최대 대기 시간(초). env MERGE_TEST_LOCK_TIMEOUT > 이 값 > 기본 600",
+        help="최대 대기 시간(초). env MERGE_TEST_LOCK_TIMEOUT > 이 값 > 기본 86400",
     )
 
     # release 서브커맨드

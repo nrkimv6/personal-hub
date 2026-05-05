@@ -30,6 +30,18 @@ from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS = 86400
+
+
+def _get_merge_lock_timeout_seconds() -> int:
+    raw = os.environ.get("MERGE_TEST_LOCK_TIMEOUT")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning("Invalid MERGE_TEST_LOCK_TIMEOUT=%r; using default %s", raw, DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS)
+    return DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS
+
 
 def _decode_redis_value(val) -> str:
     if isinstance(val, bytes):
@@ -1003,14 +1015,15 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             pass
         _pub("merge lock 대기 중...")
 
-        lock_acquired = acquire_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT), timeout=600)
+        lock_timeout = _get_merge_lock_timeout_seconds()
+        lock_acquired = acquire_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT), timeout=lock_timeout)
         if not lock_acquired:
-            _pub("merge lock 획득 실패 (timeout) — merge 중단")
+            _pub(f"merge lock 획득 실패 (timeout={lock_timeout}s) — merge 중단")
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
             except Exception:
                 pass
-            result["message"] = "merge lock 획득 실패 (timeout)"
+            result["message"] = f"merge lock 획득 실패 (timeout={lock_timeout}s)"
             result["merge_status"] = "error"
             return result
 
