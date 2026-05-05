@@ -75,6 +75,89 @@ def _install_llm_routes(page: Page, quota_status: dict) -> None:
     page.route("**/api/v1/**", handle_api)
 
 
+def _install_profile_pool_routes(page: Page, calls: list[str]) -> None:
+    profiles_payload = {
+        "selected": {"claude": "work", "gemini": "default"},
+        "profiles": [
+            {
+                "engine": "claude",
+                "name": "work",
+                "config_dir": None,
+                "extra_env": {},
+                "enabled": True,
+                "priority": 100,
+                "last_quota_pause_until": "2026-05-05T23:00:00",
+                "last_reset_at": None,
+                "last_state": "paused_by_quota",
+                "last_error_summary": "quota",
+            },
+            {
+                "engine": "claude",
+                "name": "personal",
+                "config_dir": None,
+                "extra_env": {},
+                "enabled": True,
+                "priority": 10,
+                "last_quota_pause_until": None,
+                "last_reset_at": "2026-05-05T20:00:00",
+                "last_state": "available",
+                "last_error_summary": None,
+            },
+            {
+                "engine": "gemini",
+                "name": "default",
+                "config_dir": None,
+                "extra_env": {},
+                "enabled": False,
+                "priority": 0,
+                "last_quota_pause_until": None,
+                "last_reset_at": None,
+                "last_state": "disabled",
+                "last_error_summary": None,
+            },
+        ],
+        "supported_engines": ["claude", "gemini"],
+    }
+    status_payload = [
+        {
+            "engine": "claude",
+            "profile_name": "work",
+            "enabled": True,
+            "priority": 100,
+            "state": "paused_by_quota",
+            "paused_until": "2026-05-05T23:00:00",
+            "last_reset_at": None,
+            "last_error_summary": "quota",
+        },
+        {
+            "engine": "claude",
+            "profile_name": "personal",
+            "enabled": True,
+            "priority": 10,
+            "state": "available",
+            "paused_until": None,
+            "last_reset_at": "2026-05-05T20:00:00",
+            "last_error_summary": None,
+        },
+    ]
+
+    def handle_profiles(route):
+        calls.append(f"{route.request.method} {route.request.url}")
+        _json_response(route, profiles_payload)
+
+    def handle_status(route):
+        calls.append(f"{route.request.method} {route.request.url}")
+        _json_response(route, status_payload)
+
+    def handle_pause(route):
+        calls.append(f"{route.request.method} {route.request.url}")
+        _json_response(route, {"ok": True})
+
+    page.route("**/api/v1/llm/profiles/status", handle_status)
+    page.route("**/api/v1/llm/profiles/*/*/pause", handle_pause)
+    page.route("**/api/v1/llm/profiles", handle_profiles)
+
+
 class TestLlmRuntime:
     def test_llm_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str):
         page.goto(f"{frontend_url}/llm")
@@ -163,3 +246,24 @@ class TestSystemSettingsRuntime:
         expect(page.get_by_text("LLMWorker 기본값")).to_be_visible()
         expect(page.get_by_text("요청값 미지정 시 caller별 기본 provider/model을 적용합니다.")).to_be_visible()
         expect(page.get_by_text("plan_requirements_sync")).to_be_visible()
+
+    def test_ai_profile_settings_exposes_capacity_pool_controls(self, page: Page, frontend_url: str):
+        calls: list[str] = []
+        _install_profile_pool_routes(page, calls)
+
+        page.goto(f"{frontend_url}/system?tab=settings")
+        _wait_for_runtime_page(page)
+        page.get_by_text("AI 프로필").click()
+
+        expect(page.get_by_placeholder("프로필 이름 (예: work, personal)").first).to_have_value("work")
+        expect(page.locator('input[title="라우팅 우선순위"]').first).to_have_value("100")
+        expect(page.get_by_text("paused_by_quota")).to_be_visible()
+        expect(page.get_by_role("button", name="재개")).to_be_visible()
+        expect(page.get_by_role("button", name="일시중지").first).to_be_visible()
+        expect(page.get_by_role("button", name="CLI 실행").first).to_be_visible()
+
+        page.get_by_role("button", name="일시중지").first.click()
+        page.wait_for_timeout(100)
+
+        assert any("/api/v1/llm/profiles/status" in call for call in calls)
+        assert any("/api/v1/llm/profiles/claude/personal/pause" in call for call in calls)
