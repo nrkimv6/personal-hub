@@ -243,6 +243,7 @@
   /** collision 블록의 "건너뛰기" 액션: strict에서 충돌 발생 후 사용자가 선택 */
   function handleCollisionSkip() {
     if (!collisionState) return;
+    const collidedName = collisionState.name;
     const { number, skipped } = findNextFreeNumber(currentNumber + step);
     const freeName = buildNameFromNumber(number);
     pushHistory(drafts);
@@ -258,7 +259,7 @@
     currentNumber = number + step;
     collisionState = null;
     if (skipped.length > 0) {
-      toast.info(`건너뜀: ${[collisionState?.name, ...skipped].filter(Boolean).join(', ')} → ${freeName}`);
+      toast.info(`건너뜀: ${[collidedName, ...skipped].filter(Boolean).join(', ')} → ${freeName}`);
     }
   }
 

@@ -27,7 +27,8 @@
 
   const isCompact = $derived(density === 'compact');
   const hasNavigation = $derived(!!navigation);
-  const hasActions = $derived(!!children);
+  const actions = $derived(children);
+  const hasActions = $derived(!!actions);
   // Compact headers may own the primary tab region. Keep title, tabs, and
   // actions in one visual band on desktop; let tabs take the horizontal
   // scroll row on mobile so actions do not overlap navigation.
@@ -89,7 +90,7 @@
 
     {#if hasActions}
       <div class={actionsClass}>
-        {@render children()}
+        {@render actions!()}
       </div>
     {/if}
   </div>

@@ -82,6 +82,7 @@ import { confirm } from '$lib/stores/confirm';
 	interface ClaimConflictInfo {
 		claim_id: string;
 		claim_state: string;
+		claim_owner_runner_id?: string | null;
 		stale: boolean;
 		lease_expires_at: string | null;
 	}
@@ -349,6 +350,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				claimConflict = {
 					claim_id: e.detail.claim_id as string,
 					claim_state: e.detail.claim_state as string,
+					claim_owner_runner_id: e.detail.claim_owner_runner_id as string | null,
 					stale: e.detail.stale as boolean,
 					lease_expires_at: e.detail.lease_expires_at as string | null,
 				};
