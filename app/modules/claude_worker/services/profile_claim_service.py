@@ -53,9 +53,8 @@ class ProfileClaimService:
             .filter(LLMRequestProfileClaim.request_id == request_id)
             .first()
         )
-        if claim and claim.released_at is None:
-            claim.released_at = now
-            claim.stop_reason = stop_reason
+        if claim:
+            self.db.delete(claim)
 
         assignments = (
             self.db.query(LLMProfileAssignment)

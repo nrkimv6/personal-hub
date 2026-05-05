@@ -132,3 +132,8 @@ def test_profile_claim_is_single_flight(db):
 
     assert first is not None
     assert second is None
+
+    service.release(req.id, stop_reason="completed")
+    third = service.claim(req.id, "claude", "personal")
+
+    assert third is not None
