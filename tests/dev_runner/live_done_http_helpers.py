@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +29,42 @@ def _run_git(args: list[str], cwd: Path) -> None:
     )
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stdout}\n{result.stderr}")
+
+
+def _make_writable(path: str) -> None:
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+    except OSError:
+        pass
+
+
+def _rmtree_onerror(func, path, exc_info) -> None:
+    _make_writable(path)
+    func(path)
+
+
+def _rmtree_onexc(func, path, exc) -> None:
+    _make_writable(path)
+    func(path)
+
+
+def _remove_tree_or_raise(path: Path, attempts: int = 5) -> None:
+    last_error: BaseException | None = None
+    for attempt in range(attempts):
+        if not path.exists():
+            return
+        try:
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(path, onexc=_rmtree_onexc)
+            else:
+                shutil.rmtree(path, onerror=_rmtree_onerror)
+        except BaseException as exc:
+            last_error = exc
+        if not path.exists():
+            return
+        time.sleep(0.1 * (attempt + 1))
+    if path.exists():
+        raise RuntimeError(f"isolated live done project cleanup failed: {path}") from last_error
 
 
 @dataclass
@@ -96,4 +136,4 @@ def isolated_live_done_project(prefix: str):
             done_path=done_path,
         )
     finally:
-        shutil.rmtree(project_root, ignore_errors=True)
+        _remove_tree_or_raise(project_root)

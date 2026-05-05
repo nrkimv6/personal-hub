@@ -54,6 +54,15 @@ def tmp_plan_file():
         }
 
 
+def test_isolated_live_done_project_cleanup_removes_nested_git_R():
+    """R: helper가 만든 nested git repo는 context 종료 시 남지 않는다."""
+    with isolated_live_done_project("cleanup-http") as project:
+        project_root = project.root
+        assert (project_root / ".git").exists()
+
+    assert not project_root.exists()
+
+
 @pytest.mark.http_live
 def test_post_done_returns_200_R(tmp_plan_file):
     """R: POST /api/plans/{path}/done → 200 응답"""

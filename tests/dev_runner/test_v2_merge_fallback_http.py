@@ -48,6 +48,15 @@ def tmp_merged_plan():
         }
 
 
+def test_v2_fallback_http_project_cleanup_removes_nested_git_R():
+    """R: v2 fallback helper prefix도 context 종료 시 nested git repo를 남기지 않는다."""
+    with isolated_live_done_project("v2-fallback-http") as project:
+        project_root = project.root
+        assert (project_root / ".git").exists()
+
+    assert not project_root.exists()
+
+
 @pytest.mark.http_live
 def test_v2_merge_fallback_status_endpoint_R():
     """R: GET /status → 응답 200 + runner 상태 필드 포함"""

@@ -40,6 +40,7 @@ data/image_classifier
 /data/slide_scanner/
 /data/llm_quota_state.json
 /data/llm_quota_state.json.lock
+/.tmp/
 
 # 임시 스크립트 scratch 공간 (gitignore — 커밋하지 않음)
 scripts/scratch/
