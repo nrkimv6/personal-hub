@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 import fakeredis
@@ -22,8 +22,11 @@ def mock_executor_redis():
     server = fakeredis.FakeServer()
     fake_sync = fakeredis.FakeRedis(server=server, decode_responses=True)
     fake_async = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
+    mock_claim = MagicMock()
+    mock_claim.claim_id = "test-claim-id"
     with patch.object(executor_service, 'redis_client', fake_sync), \
-         patch.object(executor_service, 'async_redis', fake_async):
+         patch.object(executor_service, 'async_redis', fake_async), \
+         patch('app.modules.dev_runner.services.plan_execution_claim_service.claim_plan', return_value=mock_claim):
         yield {"async": fake_async, "sync": fake_sync}
 
 
