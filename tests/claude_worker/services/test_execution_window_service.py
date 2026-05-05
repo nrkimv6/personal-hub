@@ -79,6 +79,19 @@ def test_invalid_window_payload_rejected(tmp_path):
         )
 
 
+def test_invalid_timezone_rejected(tmp_path):
+    svc = LLMExecutionWindowService(tmp_path / "windows.json")
+
+    with pytest.raises(ValueError):
+        svc.save_config(
+            {
+                "timezone": "No/SuchZone",
+                "allowed_windows": [],
+                "quiet_windows": [],
+            }
+        )
+
+
 def test_overlapping_windows_rejected(tmp_path):
     svc = LLMExecutionWindowService(tmp_path / "windows.json")
 

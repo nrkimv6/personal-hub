@@ -8,7 +8,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
+
+from app.shared.timezones import get_timezone
 
 
 DEFAULT_TIMEZONE = "Asia/Seoul"
@@ -150,7 +151,7 @@ class LLMExecutionWindowService:
             raise ValueError("payload must be an object")
         timezone = str(payload.get("timezone") or DEFAULT_TIMEZONE)
         try:
-            ZoneInfo(timezone)
+            get_timezone(timezone)
         except Exception as exc:
             raise ValueError(f"invalid timezone: {timezone}") from exc
 
@@ -173,7 +174,7 @@ class LLMExecutionWindowService:
     def decide(self, now: datetime | None = None) -> ExecutionWindowDecision:
         config = self.load_config()
         timezone = config["timezone"]
-        tz = ZoneInfo(timezone)
+        tz = get_timezone(timezone)
         current = now or datetime.now(tz)
         if current.tzinfo is not None:
             current = current.astimezone(tz).replace(tzinfo=None)

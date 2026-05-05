@@ -7,13 +7,13 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta
 from typing import Iterable
-from zoneinfo import ZoneInfo
 
 from app.modules.claude_worker.services.executors.base import (
     LLMExecutorBase,
     normalize_json_payload,
 )
 from app.modules.claude_worker.services.profile_env import build_cli_env
+from app.shared.timezones import get_timezone
 
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
 DEFAULT_QUOTA_RESET_TZ = "Asia/Seoul"
@@ -71,14 +71,8 @@ def _extract_session_id(raw: str) -> "str | None":
         return None
 
 
-def _timezone_from_label(label: str | None) -> ZoneInfo:
-    normalized = (label or DEFAULT_QUOTA_RESET_TZ).strip()
-    aliases = {
-        "kst": "Asia/Seoul",
-        "korea standard time": "Asia/Seoul",
-        "asia/seoul": "Asia/Seoul",
-    }
-    return ZoneInfo(aliases.get(normalized.lower(), normalized))
+def _timezone_from_label(label: str | None):
+    return get_timezone(label, default=DEFAULT_QUOTA_RESET_TZ)
 
 
 def _parse_quota_reset_until(text: str, now: datetime | None = None) -> datetime | None:
