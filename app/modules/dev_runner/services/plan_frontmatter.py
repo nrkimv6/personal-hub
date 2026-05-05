@@ -112,6 +112,26 @@ def write_frontmatter_field(plan_path: Path, key: str, value: Optional[str]) -> 
     plan_path.write_text(updated, encoding="utf-8")
 
 
+CLAIM_HEADER_KEY = "실행점유"
+
+
+def read_claim_id(plan_path: Path) -> Optional[str]:
+    """plan 헤더의 `> 실행점유: {claim_id}` 값을 반환. 없으면 None."""
+    fm = read_frontmatter(plan_path)
+    val = fm.get(CLAIM_HEADER_KEY)
+    return val if val else None
+
+
+def write_claim_id(plan_path: Path, claim_id: str) -> None:
+    """`> 실행점유: {claim_id}`를 헤더에 기록/갱신한다."""
+    write_frontmatter_field(plan_path, CLAIM_HEADER_KEY, claim_id)
+
+
+def clear_claim_id(plan_path: Path) -> None:
+    """`> 실행점유:`를 빈 값으로 초기화한다 (released/stale 이후)."""
+    write_frontmatter_field(plan_path, CLAIM_HEADER_KEY, None)
+
+
 def read_auto_run_meta(plan_path: Path) -> dict[str, Optional[str]]:
     """auto_run 관련 frontmatter 필드만 추출."""
     fm = read_frontmatter(plan_path)

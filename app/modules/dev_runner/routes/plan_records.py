@@ -59,14 +59,21 @@ router = APIRouter(prefix="/api/v1/plans", tags=["plan-records"])
 _DEFAULT_PLANS_ARCHIVE_DIR = PROJECT_ROOT / ".worktrees" / "plans" / "docs" / "archive"
 
 
-@router.get("/records/by-path", response_model=PlanRecordResponse)
-def get_record_by_path(file_path: str, db: Session = Depends(get_db)):
-    """file_path로 레코드 get_or_create (메모 편집 시 진입점)"""
+@router.get("/records/by-path")
+def get_record_by_path(file_path: str, include_claim: bool = False, db: Session = Depends(get_db)):
+    """file_path로 레코드 get_or_create (메모 편집 시 진입점).
+
+    include_claim=true 시 응답에 현재 active claim 요약을 포함한다.
+    """
     svc = PlanRecordService(db)
     record = svc.get_or_create(file_path)
     db.commit()
     db.refresh(record)
-    return record
+    result = PlanRecordResponse.model_validate(record)
+    if include_claim:
+        claim_summary = svc.get_active_claim(file_path)
+        return {**result.model_dump(), "execution_claim": claim_summary}
+    return result
 
 
 @router.get("/records/guide-status")

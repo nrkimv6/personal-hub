@@ -751,3 +751,29 @@ class PlanRecordService:
 
         self.db.commit()
         return {"created": created, "updated": updated, "missing": missing}
+
+    def get_active_claim(self, file_path: str) -> Optional[dict]:
+        """plan path로 PlanRecord를 확보한 뒤 active claim 요약을 반환한다.
+
+        claim이 없거나 PlanExecutionClaim 테이블이 아직 없으면 None을 반환한다.
+        """
+        try:
+            from app.models.plan_execution_claim import PlanExecutionClaim
+            from app.modules.dev_runner.services.plan_execution_claim_service import (
+                get_active_claim_for_plan,
+            )
+            claim = get_active_claim_for_plan(self.db, file_path)
+            if not claim:
+                return None
+            return {
+                "claim_id": claim.claim_id,
+                "state": claim.state,
+                "engine": claim.engine,
+                "runner_id": claim.runner_id,
+                "session_id": claim.session_id,
+                "heartbeat_at": claim.heartbeat_at.isoformat() if claim.heartbeat_at else None,
+                "lease_expires_at": claim.lease_expires_at.isoformat() if claim.lease_expires_at else None,
+            }
+        except Exception as e:
+            logger.debug("get_active_claim failed for %s: %s", file_path, e)
+            return None
