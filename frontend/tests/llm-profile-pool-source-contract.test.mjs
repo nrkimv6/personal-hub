@@ -39,6 +39,14 @@ test('schedule profile policy API client is exposed', () => {
   assert.match(apiSource, /\/llm\/schedule-profile-policies/);
 });
 
+test('LLM tab exposes schedule profile policy matrix controls', () => {
+  assert.match(llmTabSource, /profilePolicy/);
+  assert.match(llmTabSource, /listScheduleProfilePolicies/);
+  assert.match(llmTabSource, /updateScheduleProfilePolicies/);
+  assert.match(llmTabSource, /Schedule x Profile 정책/);
+  assert.match(llmTabSource, /schedule_policy_off/);
+});
+
 test('AI profile status const stays in a Svelte-allowed child position', () => {
   assert.match(
     aiProfilesSource,
