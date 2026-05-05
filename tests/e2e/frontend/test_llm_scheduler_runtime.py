@@ -223,6 +223,100 @@ class TestLlmRuntime:
             page.get_by_text("quota-window-e2e").click()
             expect(page.get_by_text(modal_text).first).to_be_visible()
 
+    def test_profile_policy_matrix_save_and_pending_reason_badge(self, page: Page, frontend_url: str):
+        calls: list[str] = []
+        request = {
+            **_llm_bootstrap_payload()["list"]["items"][0],
+            "pending_block_reason": "schedule_policy_off",
+            "error_message": "schedule_policy_off",
+        }
+        profiles_payload = {
+            "selected": {"claude": "work"},
+            "profiles": [
+                {
+                    "engine": "claude",
+                    "name": "work",
+                    "config_dir": None,
+                    "extra_env": {},
+                    "enabled": True,
+                    "priority": 100,
+                },
+                {
+                    "engine": "claude",
+                    "name": "personal",
+                    "config_dir": None,
+                    "extra_env": {},
+                    "enabled": True,
+                    "priority": 10,
+                },
+            ],
+            "supported_engines": ["claude"],
+        }
+        policy_payload = {
+            "policies": [
+                {
+                    "id": 1,
+                    "schedule_id": None,
+                    "target_type": "plan_archive_analyze",
+                    "engine": "claude",
+                    "profile_name": "work",
+                    "enabled": False,
+                    "priority": 0,
+                    "allowed_windows": [],
+                    "quiet_windows": [],
+                    "created_at": "2026-05-05T21:00:00",
+                    "updated_at": "2026-05-05T21:00:00",
+                }
+            ]
+        }
+
+        def handle_api(route):
+            url = route.request.url
+            method = route.request.method
+            calls.append(f"{method} {url}")
+            if "/api/v1/llm/requests" in url:
+                _json_response(route, {"items": [request], "total": 1, "page": 1, "page_size": 20, "pages": 1})
+                return
+            if "/api/v1/llm/stats" in url:
+                _json_response(route, {"total": 1, "pending": 1, "processing": 0, "completed": 0, "failed": 0})
+                return
+            if "/api/v1/llm/worker/status" in url:
+                _json_response(route, {"status": "healthy", "state": "idle", "message": "ready"})
+                return
+            if "/api/v1/llm/quota-status" in url:
+                _json_response(route, {})
+                return
+            if "/api/v1/llm/profiles/status" in url:
+                _json_response(route, [])
+                return
+            if "/api/v1/llm/profiles" in url:
+                _json_response(route, profiles_payload)
+                return
+            if "/api/v1/llm/schedule-profile-policies" in url:
+                _json_response(route, policy_payload)
+                return
+            if "/api/v1/llm/providers" in url:
+                _json_response(route, [{"key": "claude", "display_name": "Claude", "models": []}])
+                return
+            if "/api/v1/system/liveness" in url:
+                _json_response(route, {"status": "ok"})
+                return
+            _json_response(route, {})
+
+        page.route("**/api/v1/**", handle_api)
+
+        page.goto(f"{frontend_url}/llm", wait_until="domcontentloaded")
+
+        expect(page.get_by_text("스케줄/Profile 정책 차단").first).to_be_visible()
+        page.get_by_role("button", name="Profile 정책").click()
+        expect(page.get_by_text("Schedule x Profile 정책")).to_be_visible()
+        expect(page.get_by_text("plan_archive_analyze").first).to_be_visible()
+        page.get_by_role("button", name="정책 추가/갱신").click()
+        page.wait_for_timeout(100)
+
+        assert any("GET" in call and "/api/v1/llm/schedule-profile-policies" in call for call in calls)
+        assert any("PUT" in call and "/api/v1/llm/schedule-profile-policies" in call for call in calls)
+
 
 class TestSchedulerRuntime:
     def test_scheduler_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str):
