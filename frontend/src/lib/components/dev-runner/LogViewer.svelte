@@ -125,7 +125,8 @@
 	const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
 	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
 	const MERGE_TAG_PATTERN = /^\[MERGE\]\[(\w+)\]\s*(.*)/;
-	const PR_PREFIX_PATTERN = /^\[PR:[^\]]+\]\s*/;
+	const WRAPPER_PREFIX_PATTERN = /^\[(PR|PS):[^\]]+\]\s*/;
+	const HEADER_ONLY_TAGS = new Set(['DIAG', 'TRIGGER', 'RUN_META', 'ENV', 'START']);
 
 	let planBasename = $derived(
 		planFile ? (planFile.split(/[\\/]/).pop() ?? planFile) : (currentPlanName ?? null)
@@ -166,7 +167,7 @@
 		const tailText = tail.length > 0 ? `\n${tail.join('\n')}` : '';
 
 		// [PR:name#hash|PID:12345] prefix 제거 후 일반 파싱
-		const strippedHead = head.replace(PR_PREFIX_PATTERN, '');
+		const strippedHead = head.replace(WRAPPER_PREFIX_PATTERN, '');
 		const finalMatch = strippedHead.match(LINE_PATTERN);
 		if (finalMatch) {
 			const message = `${finalMatch[3]}${tailText}`;
@@ -436,7 +437,7 @@
 	}
 
 	function hasLoadedLogContent(): boolean {
-		return lines.some((line) => line.tag !== 'DIAG');
+		return lines.some((line) => !HEADER_ONLY_TAGS.has(line.tag));
 	}
 
 	function recordLogLoadError(stage: string, error: unknown) {
@@ -711,7 +712,7 @@
 				pendingStale = true;
 			}
 			lastLogLoadError = null;
-			if (sourceLines.length > 0) {
+			if (hasLoadedLogContent()) {
 				recentRetryAttempt = 0;
 				clearRecentRetryTimer();
 			}
