@@ -46,11 +46,11 @@
   let skip = 0;
   const limit = 50;
   let hasMore = false;
-  let filterCategory = '';
+  let filterCategory = $state('');
 
   // ── 선택/벌크 ─────────────────────────────────────────────
   let selectedIds = new Set<number>();
-  let bulkCategory = '';
+  let bulkCategory = $state('');
   const CATEGORIES = ['feature', 'bugfix', 'refactor', 'infra', 'docs', 'test', 'misc'];
 
   // ── 정리 모달 ─────────────────────────────────────────────
@@ -89,20 +89,20 @@
   let archiveQueueTotal = 0;
   let archiveQueuePages = 1;
   const archiveQueuePageSize = 50;
-  let archiveQueueStatus = 'pending,processing,failed';
-  let archiveQueueProvider = '';
+  let archiveQueueStatus = $state('pending,processing,failed');
+  let archiveQueueProvider = $state('');
 
   // ── Retrieval MVP 표면 ───────────────────────────────────
-  let retrievalQ = '';
-  let retrievalPath = '';
-  let retrievalCategory = '';
-  let retrievalTags = '';
-  let retrievalIntent = '';
-  let retrievalScope = '';
-  let retrievalDateFrom = '';
-  let retrievalDateTo = '';
-  let retrievalRelationType = '';
-  let retrievalLimit = 10;
+  let retrievalQ = $state('');
+  let retrievalPath = $state('');
+  let retrievalCategory = $state('');
+  let retrievalTags = $state('');
+  let retrievalIntent = $state('');
+  let retrievalScope = $state('');
+  let retrievalDateFrom = $state('');
+  let retrievalDateTo = $state('');
+  let retrievalRelationType = $state('');
+  let retrievalLimit = $state(10);
   let retrievalLoading = false;
   let retrievalError = '';
   let retrievalResults: PlanArchiveRetrievalResult[] = [];
@@ -110,12 +110,21 @@
   let metricsLoading = false;
   let metricsError = '';
   let retrievalMetrics: PlanArchiveMetricsResponse | null = null;
-  let indexLimit = 100;
-  let indexForce = false;
-  let indexSince = '';
+  let indexLimit = $state(100);
+  let indexForce = $state(false);
+  let indexSince = $state('');
   let indexLoading = false;
   let indexError = '';
   let indexResult: PlanArchiveIndexResponse | null = null;
+
+  // ── 수동 분석 preview/apply ───────────────────────────────
+  let analyzeProvider = $state('codex');
+  let analyzeModel = $state('gpt-5.2');
+  let analyzeTimeout = $state(120);
+  let analyzeLoading = false;
+  let analyzeResult: PlanArchiveAnalyzeResponse | null = null;
+  let analyzeError = '';
+  let confirmingApply = false;
 
   async function loadArchiveHealth() {
     archiveHealthLoading = true;
@@ -170,7 +179,10 @@
     if (retrievalScope.trim()) payload.scope = retrievalScope.trim();
     if (retrievalPath.trim()) payload.path = retrievalPath.trim();
     if (retrievalRelationType.trim()) payload.relation_type = retrievalRelationType.trim();
-    if (includeLimit) payload.limit = retrievalLimit;
+    if (includeLimit) {
+      const limitValue = Number(retrievalLimit);
+      payload.limit = Number.isFinite(limitValue) ? limitValue : 10;
+    }
     return payload;
   }
 
@@ -213,7 +225,7 @@
     indexError = '';
     try {
       indexResult = await planRecordsApi.indexArchiveRecords({
-        limit: indexLimit,
+        limit: Number(indexLimit),
         force: indexForce,
         since: indexSince || undefined,
         apply,
@@ -386,7 +398,7 @@
         mode,
         provider: analyzeProvider || undefined,
         model: analyzeModel || undefined,
-        timeout_seconds: analyzeTimeout,
+        timeout_seconds: Number(analyzeTimeout),
       });
       analyzeResult = result;
       if (result.saved) {
