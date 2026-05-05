@@ -164,6 +164,48 @@ class TestListRecords:
         data = resp.json()
         assert any(item["status"] == "구현중" for item in data)
 
+    def test_get_archive_health_http_right_counts(self, client):
+        """Plan Archive health HTTP contract exposes split backlog counts."""
+        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+
+        expected = {
+            "archived_total": 4,
+            "llm_processed": 1,
+            "llm_unprocessed": 3,
+            "real_unprocessed": 2,
+            "temp_pytest_total": 1,
+            "temp_pytest_unprocessed": 1,
+            "pending_or_processing_requests": 1,
+            "failed_requests": 1,
+            "latest_failed_request": {
+                "id": 10,
+                "caller_id": "failed_hash",
+                "status": "failed",
+                "error_message": "quota",
+                "requested_at": "2026-05-05T01:00:00",
+            },
+            "oldest_unprocessed_at": "2026-05-04T01:00:00",
+            "plan_archive_schedule": {
+                "id": 3,
+                "enabled": False,
+                "schedule_value": "02:10",
+                "last_run": None,
+                "last_success": None,
+                "last_failure": "2026-05-05T02:10:00",
+            },
+        }
+
+        with patch.object(PlanRecordService, "get_plan_archive_health", return_value=expected):
+            resp = client.get("/api/v1/plans/records/archive-health")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["real_unprocessed"] == 2
+        assert data["temp_pytest_unprocessed"] == 1
+        assert data["pending_or_processing_requests"] == 1
+        assert data["failed_requests"] == 1
+        assert data["latest_failed_request"]["caller_id"] == "failed_hash"
+
 
 class TestGetRecord:
 

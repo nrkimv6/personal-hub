@@ -497,6 +497,38 @@ class TestRunSchedule:
         assert queue_item.saved_search_id == sample_saved_search.id
         enqueue_mock.assert_awaited_once_with(queue_item, test_db)
 
+    def test_run_plan_archive_schedule_returns_config_snapshot_patch(self, client):
+        """plan_archive_analyze manual run returns queued/skipped stats."""
+        create_resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "plan_archive_analyze",
+            "schedule_type": "cron",
+            "schedule_value": {"time": "02:10"},
+            "target_config": {"max_backfill_per_run": 5},
+        })
+        assert create_resp.status_code == 200
+        schedule_id = create_resp.json()["id"]
+
+        stats = {
+            "queued": 2,
+            "skipped_temp": 1,
+            "skipped_empty": 0,
+            "skipped_active_request": 1,
+            "remaining_real_unprocessed": 3,
+        }
+        with patch(
+            "app.routes.collect.PlanArchiveScheduler._enqueue_unprocessed_plans_in_session",
+            return_value=stats,
+        ) as enqueue_mock:
+            response = client.post(f"{API_PREFIX}/collect/schedules/{schedule_id}/run")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["config_snapshot_patch"] == stats
+        assert "queued 2" in data["message"]
+        enqueue_mock.assert_called_once()
+        assert enqueue_mock.call_args.kwargs["target_config"] == {"max_backfill_per_run": 5}
+
     def test_run_writing_source_schedule_creates_manual_run(self, client, test_db):
         """writing_source_collect 즉시 실행은 manual run을 생성한다."""
         schedule_id = _seed_run_supported_schedule(
