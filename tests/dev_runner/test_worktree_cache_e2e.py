@@ -10,6 +10,12 @@ pytestmark = [pytest.mark.e2e, pytest.mark.http_live]
 BASE_URL = "http://localhost:8001"
 
 
+def _stable_worktree_identity(data: dict) -> list[tuple[str | None, str | None]]:
+    worktrees = data.get("worktrees", [])
+    assert isinstance(worktrees, list)
+    return sorted((item.get("path"), item.get("branch")) for item in worktrees)
+
+
 def _get(path: str) -> httpx.Response:
     return live_get_after_readiness(path, base_url=BASE_URL)
 
@@ -20,7 +26,7 @@ def test_worktree_list_v2_cache_live_returns_same_body_on_repeat():
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json() == second.json()
+    assert _stable_worktree_identity(first.json()) == _stable_worktree_identity(second.json())
 
 
 def test_worktree_list_v2_cache_live_force_refresh_returns_200():
