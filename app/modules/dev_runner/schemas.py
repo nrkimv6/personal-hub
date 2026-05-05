@@ -417,6 +417,67 @@ class PlanArchiveMetricsResponse(BaseModel):
     chain_depth_max: int = 0
 
 
+class PlanArchiveInsightBatchRequest(BaseModel):
+    """Plan Archive metrics insight batch request."""
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+    grouping: str = "category"
+    category: Optional[str] = None
+    path: Optional[str] = None
+    limit: int = Field(default=20, ge=1, le=100)
+    token_budget: int = Field(default=3000, ge=200, le=20000)
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    apply: bool = False
+    force: bool = False
+
+
+class PlanArchiveInsightBatchResponse(BaseModel):
+    dry_run: bool
+    queued: bool = False
+    skipped: bool = False
+    reason: Optional[str] = None
+    report_id: Optional[int] = None
+    llm_request_id: Optional[int] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    metrics_hash: str
+    metrics: dict = {}
+    evidence: List[dict] = []
+    prompt: Optional[str] = None
+    warnings: List[str] = []
+
+
+class PlanArchiveAnalyzeRequest(BaseModel):
+    """Manual Plan Archive analyze request."""
+    mode: Literal["preview", "apply"] = "preview"
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    timeout_seconds: int = Field(120, ge=1, le=3600)
+    include_prompt: bool = False
+    source: Optional[Literal["auto", "raw_content", "file_path"]] = "auto"
+
+
+class PlanArchiveAnalyzeResponse(BaseModel):
+    """Manual Plan Archive analyze response."""
+    success: bool
+    mode: str
+    result: dict = Field(default_factory=dict)
+    raw_response: str = ""
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    record_id: int
+    filename_hash: Optional[str] = None
+    file_path: Optional[str] = None
+    elapsed_ms: int = 0
+    prompt_preview: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    saved: bool = False
+    record_after: Optional[dict] = None
+    save_error: Optional[str] = None
+
+
 class PlanRecordResponse(BaseModel):
     """계획서 레코드 응답"""
     model_config = ConfigDict(from_attributes=True)
@@ -726,6 +787,10 @@ __all__ = [
     'PlanArchiveContextRequest',
     'PlanArchiveMetricsQuery',
     'PlanArchiveMetricsResponse',
+    'PlanArchiveInsightBatchRequest',
+    'PlanArchiveInsightBatchResponse',
+    'PlanArchiveAnalyzeRequest',
+    'PlanArchiveAnalyzeResponse',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',

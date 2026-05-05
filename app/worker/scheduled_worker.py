@@ -23,6 +23,7 @@ from app.models import TaskScheduleRun
 from app.modules.dev_runner.schedulers.archive_rotation_schedule import ArchiveRotationScheduler
 from app.modules.dev_runner.schedulers.auto_dev_runner_schedule import AutoDevRunnerScheduler
 from app.modules.dev_runner.schedulers.devguide_staleness_schedule import DevguideStalenessScheduler
+from app.modules.dev_runner.schedulers.plan_archive_insight_schedule import PlanArchiveInsightBatchScheduler
 from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 from app.modules.dev_runner.schedulers.pytest_run_schedule import PytestRunScheduler
 from app.modules.dev_runner.schedulers.worktree_hygiene_schedule import WorktreeHygieneScheduler
@@ -89,6 +90,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             ReportScheduler(),
             PytestRunScheduler(),
             PlanArchiveScheduler(),
+            PlanArchiveInsightBatchScheduler(),
             DevguideStalenessScheduler(),
             ArchiveRotationScheduler(),
             ScheduleDateExpireScheduler(),

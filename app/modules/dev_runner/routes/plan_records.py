@@ -25,6 +25,10 @@ from app.modules.dev_runner.services.plan_record_service import PlanRecordServic
 from app.modules.dev_runner.services.plan_service import plan_service as _plan_service
 from app.modules.dev_runner.services.plan_archive_context_service import PlanArchiveContextService
 from app.modules.dev_runner.services.plan_archive_index_service import PlanArchiveIndexService
+from app.modules.dev_runner.services.plan_archive_insight_service import (
+    PlanArchiveInsightBatchQuery,
+    PlanArchiveInsightService,
+)
 from app.modules.dev_runner.services.plan_archive_metrics_service import PlanArchiveMetricsService
 from app.modules.dev_runner.services.plan_archive_retrieval_service import (
     PlanArchiveRetrievalService,
@@ -38,6 +42,8 @@ from app.modules.dev_runner.schemas import (
     PlanArchiveContextRequest,
     PlanArchiveIndexRequest,
     PlanArchiveIndexResponse,
+    PlanArchiveInsightBatchRequest,
+    PlanArchiveInsightBatchResponse,
     PlanArchiveMetricsQuery,
     PlanArchiveMetricsResponse,
     PlanArchiveRetrievalQuery,
@@ -156,6 +162,30 @@ def build_archive_context(req: PlanArchiveContextRequest, db: Session = Depends(
 def get_archive_metrics(req: PlanArchiveMetricsQuery, db: Session = Depends(get_db)):
     """Return follow-up and file-ref metrics for archive retrieval."""
     return PlanArchiveMetricsService(db).calculate(_to_retrieval_query(req))
+
+
+@router.post("/insights/batch", response_model=PlanArchiveInsightBatchResponse)
+def queue_archive_insight_batch(req: PlanArchiveInsightBatchRequest, db: Session = Depends(get_db)):
+    """Preview or queue period/group Plan Archive insight generation."""
+    if req.date_from and req.date_to and req.date_from > req.date_to:
+        raise HTTPException(status_code=400, detail="date_from must be before date_to")
+    query = PlanArchiveInsightBatchQuery(
+        date_from=req.date_from,
+        date_to=req.date_to,
+        grouping=req.grouping,
+        category=req.category,
+        path=req.path,
+        limit=req.limit,
+        token_budget=req.token_budget,
+    )
+    return PlanArchiveInsightService(db).preview_or_enqueue(
+        query,
+        apply=req.apply,
+        force=req.force,
+        provider=req.provider,
+        model=req.model,
+        requested_by="api",
+    )
 
 
 @router.post("/records/index", response_model=PlanArchiveIndexResponse)

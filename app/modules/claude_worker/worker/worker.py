@@ -71,6 +71,11 @@ try:
     )
     logger.debug("plan_analyze_handler import 완료")
 
+    from app.modules.claude_worker.services.plan_archive_insight_handler import (
+        save_plan_archive_insight_result,
+    )
+    logger.debug("plan_archive_insight_handler import 완료")
+
     from app.core.database import is_connection_error
     logger.debug("is_connection_error import 완료")
 
@@ -1946,6 +1951,16 @@ class LLMWorker:
                     self._increment_processed()
                     logger.info(f"LLM 실행 완료: id={request.id}")
                     save_success = save_plan_archive_result(db, request, result)
+                elif request.caller_type == "plan_archive_insight_batch":
+                    service.mark_completed(
+                        request.id,
+                        normalized_result,
+                        raw_response,
+                        claude_session_id,
+                    )
+                    self._increment_processed()
+                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    save_success = save_plan_archive_insight_result(db, request, result)
                 elif request.caller_type == "plan_recurrence_check":
                     service.mark_completed(
                         request.id,
@@ -2010,7 +2025,7 @@ class LLMWorker:
                 # JSON 파싱 실패지만 raw_response가 있는 경우
                 if "raw_response" in result and result.get("raw_response"):
                     # writing_generate, writing_refine, report의 경우 raw_response만으로도 성공 처리
-                    if request.caller_type in ["writing_generate", "writing_refine", "report", "test", "pytest_fix"]:
+                    if request.caller_type in ["writing_generate", "writing_refine", "report", "test", "pytest_fix", "plan_archive_insight_batch"]:
                         logger.info(f"JSON 파싱 실패했지만 raw_response 사용: id={request.id}")
 
                         # 빈 result dict로 결과 재구성
@@ -2039,6 +2054,8 @@ class LLMWorker:
                             save_success = save_report_result(db, request, fallback_result)
                         elif request.caller_type == "pytest_fix":
                             save_success = save_pytest_fix_result(db, request, fallback_result)
+                        elif request.caller_type == "plan_archive_insight_batch":
+                            save_success = save_plan_archive_insight_result(db, request, fallback_result)
 
                         if not save_success:
                             logger.error(f"결과 저장 실패 (fallback 경로, 상태 전환: completed -> failed): id={request.id}, caller_type={request.caller_type}")
