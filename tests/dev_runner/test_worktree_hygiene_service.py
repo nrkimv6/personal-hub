@@ -12,6 +12,7 @@ from app.modules.dev_runner.services.worktree_hygiene_service import (
     INTEREST_STALE_CLEANUP_CANDIDATE,
     INTEREST_STALE_LOCKED_REVIEW,
     WorktreeHygieneService,
+    render_tracking_memo,
     render_worktree_hygiene_report,
 )
 
@@ -250,7 +251,7 @@ def test_render_report_R_includes_registered_residue_and_drift_tables(tmp_path: 
     assert "api_gate_live_coverage.patch" in report
 
 
-def test_render_report_R_archive_gap_remains_report_only_without_tracking_section(tmp_path: Path):
+def test_render_tracking_memo_contains_required_sections(tmp_path: Path):
     repo = _init_repo(tmp_path)
     branch = "impl/archive-gap"
     wt = _add_worktree(repo, branch, "archive-gap")
@@ -260,8 +261,10 @@ def test_render_report_R_archive_gap_remains_report_only_without_tracking_sectio
     _write_plan(repo, branch=branch, name="archive-gap.md", status="구현완료", archived=True)
 
     snapshot = WorktreeHygieneService(repo).collect()
-    report = render_worktree_hygiene_report(snapshot)
 
-    assert not hasattr(snapshot, "tracking_candidates")
-    assert "Tracking Candidates" not in report
-    assert "archive_merge_gap" not in report
+    assert snapshot.tracking_candidates
+    memo = render_tracking_memo(snapshot.tracking_candidates[0])
+    assert "risk_type" in memo
+    assert "why_not_auto_merge" in memo
+    assert "recommended_next_action" in memo
+    assert "user_confirmation_required=true" in memo

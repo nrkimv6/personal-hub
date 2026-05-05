@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from app.models import TaskSchedule
+from app.models.plan_record import PlanRecord
+from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
 from app.modules.dev_runner.services.worktree_hygiene_service import (
     REPORT_TYPE_WORKTREE_HYGIENE,
     WorktreeHygieneService,
+    render_tracking_memo,
     render_worktree_hygiene_report,
     snapshot_to_statistics_json,
 )
@@ -78,6 +82,7 @@ class WorktreeHygieneScheduler(ScheduleHandler):
                 format="markdown",
             )
             db.add(report)
+            tracking_count = _upsert_tracking_candidates(db, snapshot.tracking_candidates)
             db.commit()
 
         config_patch = {
@@ -86,6 +91,7 @@ class WorktreeHygieneScheduler(ScheduleHandler):
             "report_only": config["report_only"],
             "auto_delete_residue": config["auto_delete_residue"],
             "statistics": snapshot.statistics,
+            "tracking_candidate_count": tracking_count,
         }
         return HandlerRunOutcome(
             collected_count=snapshot.statistics["registered_count"] + snapshot.statistics["residue_count"],
@@ -109,5 +115,70 @@ def _normalize_config(config: dict) -> dict:
 def _build_summary(statistics: dict) -> str:
     return (
         "registered={registered_count}, residue={residue_count}, "
-        "stale_locked={stale_locked_review_count}, cleanup_candidates={stale_cleanup_candidate_count}"
+        "stale_locked={stale_locked_review_count}, tracking={tracking_candidate_count}"
     ).format(**statistics)
+
+
+def _normalize_path(value: str | None) -> str:
+    return (value or "").replace("\\", "/").lower()
+
+
+def _find_plan_record(db: "Session", plan_path: str) -> PlanRecord | None:
+    target = _normalize_path(plan_path)
+    if not target:
+        return None
+    records = db.query(PlanRecord).all()
+    for record in records:
+        if _normalize_path(record.file_path) == target:
+            return record
+    basename = Path(plan_path).name.lower()
+    for record in records:
+        if Path(record.file_path or "").name.lower() == basename:
+            return record
+    return None
+
+
+def _upsert_tracking_candidates(db: "Session", candidates) -> int:
+    updated = 0
+    for candidate in candidates:
+        key = {
+            "risk_type": candidate.risk_type,
+            "plan_path": candidate.plan_path,
+            "worktree_path": candidate.worktree_path,
+            "head": candidate.head,
+        }
+        title = f"archive 구현완료 plan의 live worktree reconcile: {candidate.plan_title or Path(candidate.plan_path).stem}"
+        memo = render_tracking_memo(candidate)
+        marker = json.dumps(key, ensure_ascii=False, sort_keys=True)
+        existing = (
+            db.query(TrackingItem)
+            .filter(
+                TrackingItem.completed_at.is_(None),
+                TrackingItem.title == title,
+                TrackingItem.description.like(f"%{marker}%"),
+            )
+            .first()
+        )
+        if existing:
+            existing.description = f"{memo}\n\nsnapshot_key: {marker}\nlast_seen_at: {datetime.now().isoformat(timespec='seconds')}"
+            existing.updated_at = datetime.now()
+            item = existing
+        else:
+            item = TrackingItem(
+                title=title,
+                description=f"{memo}\n\nsnapshot_key: {marker}",
+                start_at=datetime.now() + timedelta(days=1),
+            )
+            db.add(item)
+            db.flush()
+        plan_record = _find_plan_record(db, candidate.plan_path)
+        if plan_record is not None:
+            exists = (
+                db.query(TrackingItemPlanLink)
+                .filter_by(tracking_item_id=item.id, plan_record_id=plan_record.id)
+                .first()
+            )
+            if exists is None:
+                db.add(TrackingItemPlanLink(tracking_item_id=item.id, plan_record_id=plan_record.id))
+        updated += 1
+    return updated

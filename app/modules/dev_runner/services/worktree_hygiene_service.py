@@ -117,12 +117,31 @@ class PlansHygieneSnapshot:
 
 
 @dataclass
+class TrackingCandidate:
+    risk_type: str
+    confidence: str
+    plan_path: str
+    plan_title: str | None
+    plan_status: str | None
+    worktree_path: str
+    branch: str | None
+    head: str | None
+    dirty_count: int
+    ahead: int
+    behind: int
+    locked_reason: str | None = None
+    main_includes_branch: bool | None = None
+    archive_evidence: dict[str, bool] = field(default_factory=dict)
+
+
+@dataclass
 class WorktreeHygieneSnapshot:
     repo_root: str
     collected_at: str
     registered_worktrees: list[RegisteredWorktreeSnapshot] = field(default_factory=list)
     residues: list[ResidueSnapshot] = field(default_factory=list)
     plans: PlansHygieneSnapshot = field(default_factory=PlansHygieneSnapshot)
+    tracking_candidates: list[TrackingCandidate] = field(default_factory=list)
     statistics: dict[str, Any] = field(default_factory=dict)
 
 
@@ -547,10 +566,45 @@ def _collect_plans_hygiene(
     return snapshot
 
 
+def _build_tracking_candidates(
+    registered: list[RegisteredWorktreeSnapshot],
+    branch_headers: dict[str, PlanHeader],
+) -> list[TrackingCandidate]:
+    candidates: list[TrackingCandidate] = []
+    for item in registered:
+        header = branch_headers.get(item.branch or "")
+        if not header or not header.archived:
+            continue
+        if header.status != "구현완료":
+            continue
+        if item.main_includes_branch is True:
+            continue
+        candidate = TrackingCandidate(
+            risk_type="archive_merge_gap",
+            confidence="medium" if item.dirty_count == 0 else "high",
+            plan_path=header.path,
+            plan_title=header.title,
+            plan_status=header.status,
+            worktree_path=item.path,
+            branch=item.branch,
+            head=item.head,
+            dirty_count=item.dirty_count,
+            ahead=item.ahead,
+            behind=item.behind,
+            locked_reason=item.locked_reason,
+            main_includes_branch=item.main_includes_branch,
+            archive_evidence=header.archive_evidence,
+        )
+        item.risk_type = candidate.risk_type
+        candidates.append(candidate)
+    return candidates
+
+
 def _build_statistics(snapshot: WorktreeHygieneSnapshot) -> dict[str, Any]:
     stats = {
         "registered_count": len(snapshot.registered_worktrees),
         "residue_count": len(snapshot.residues),
+        "tracking_candidate_count": len(snapshot.tracking_candidates),
         "plans_push_needed": snapshot.plans.push_needed,
         "plans_dirty_docs_count": len(snapshot.plans.docs_changes),
         "plans_untracked_runtime_count": len(snapshot.plans.untracked_runtime),
@@ -620,6 +674,7 @@ class WorktreeHygieneService:
             residues=residues,
             plans=plans,
         )
+        snapshot.tracking_candidates = _build_tracking_candidates(registered, branch_headers)
         snapshot.statistics = _build_statistics(snapshot)
         return snapshot
 
@@ -681,6 +736,7 @@ def render_worktree_hygiene_report(snapshot: WorktreeHygieneSnapshot) -> str:
         f"- collected_at: `{snapshot.collected_at}`",
         f"- registered: {len(snapshot.registered_worktrees)}",
         f"- residue: {len(snapshot.residues)}",
+        f"- tracking candidates: {len(snapshot.tracking_candidates)}",
         "",
         "## 관심 낮음 후보",
         "",
@@ -749,7 +805,58 @@ def render_worktree_hygiene_report(snapshot: WorktreeHygieneSnapshot) -> str:
             f"| `{drift['plan_file']}` | `{drift['branch']}` | `{drift['worktree']}` | {drift['reason']} |"
         )
 
+    lines.extend([
+        "",
+        "## Tracking Candidates",
+        "",
+        "| risk | plan | branch | dirty | ahead | next action |",
+        "|---|---|---|---:|---:|---|",
+    ])
+    if not snapshot.tracking_candidates:
+        lines.append("| - | - | - | 0 | 0 | - |")
+    for item in snapshot.tracking_candidates:
+        lines.append(
+            f"| {item.risk_type} | `{item.plan_path}` | `{item.branch or '-'}` | {item.dirty_count} | {item.ahead} | user_confirmation_required |"
+        )
     return "\n".join(lines) + "\n"
+
+
+def render_tracking_memo(candidate: TrackingCandidate) -> str:
+    evidence = candidate.archive_evidence or {}
+    return "\n".join(
+        [
+            "판단 필요: archive 구현완료 plan의 live worktree",
+            "",
+            f"risk_type: {candidate.risk_type}",
+            f"confidence: {candidate.confidence}",
+            "",
+            "## why_flagged",
+            f"- plan_status: {candidate.plan_status}",
+            f"- worktree_path: `{candidate.worktree_path}`",
+            f"- branch: `{candidate.branch or '-'}`",
+            f"- main_includes_branch: {candidate.main_includes_branch}",
+            "",
+            "## why_not_auto_merge",
+            "- archive 상태는 merge 승인 evidence가 아니며 user_confirmation_required=true",
+            "- dirty/ahead/main 포함 여부를 사람이 확인해야 함",
+            "",
+            "## state",
+            f"| field | value |\n|---|---|\n| plan | `{candidate.plan_path}` |\n| title | {candidate.plan_title or '-'} |\n| head | `{candidate.head or '-'}` |\n| dirty_count | {candidate.dirty_count} |\n| main_ahead | {candidate.ahead} |\n| main_behind | {candidate.behind} |\n| locked_reason | {candidate.locked_reason or '-'} |",
+            "",
+            "## archive_evidence",
+            f"- merge_commit: {bool(evidence.get('merge_commit'))}",
+            f"- cleanup_commit: {bool(evidence.get('cleanup_commit'))}",
+            f"- test_evidence: {bool(evidence.get('test_evidence'))}",
+            "",
+            "## recommended_next_action",
+            "- main 포함됨 -> cleanup",
+            "- main 미포함 + evidence 있음 -> 사용자 확인 후 merge 후보",
+            "- dirty 있음 -> diff 검토",
+            "- 폐기/outdated -> merge 금지",
+            "",
+            "user_confirmation_required=true",
+        ]
+    )
 
 
 def snapshot_to_statistics_json(snapshot: WorktreeHygieneSnapshot) -> str:

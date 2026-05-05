@@ -113,7 +113,7 @@ async def test_schedule_execute_creates_report_and_run_snapshot_counts(session_f
 
 
 @pytest.mark.asyncio
-async def test_archive_gap_schedule_execute_does_not_create_tracking_item(session_factory, tmp_path: Path):
+async def test_archive_gap_schedule_execute_creates_tracking_item(session_factory, tmp_path: Path):
     repo = _init_repo(tmp_path)
     worktree = repo / ".worktrees" / "archive-gap"
     _git(repo, "worktree", "add", str(worktree), "-b", "impl/archive-gap")
@@ -145,5 +145,6 @@ async def test_archive_gap_schedule_execute_does_not_create_tracking_item(sessio
     )
 
     with session_factory() as db:
-        assert db.query(TrackingItem).count() == 0
-        assert db.query(TrackingItemPlanLink).count() == 0
+        item = db.query(TrackingItem).one()
+        assert "archive 구현완료 plan" in item.title
+        assert db.query(TrackingItemPlanLink).count() == 1
