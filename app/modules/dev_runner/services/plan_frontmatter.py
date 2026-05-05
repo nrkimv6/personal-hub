@@ -14,7 +14,7 @@ from typing import Optional
 AUTO_RUN_SCOPES: frozenset[str] = frozenset({"tc", "docs", "safe-fix"})
 
 _BLOCKQUOTE_HEADER_RE = re.compile(
-    r"^>\s*([a-zA-Z_][a-zA-Z0-9_-]*):\s*(.*?)\s*$",
+    r"^>\s*(\w[\w-]*):\s*(.*?)\s*$",
     re.MULTILINE,
 )
 
