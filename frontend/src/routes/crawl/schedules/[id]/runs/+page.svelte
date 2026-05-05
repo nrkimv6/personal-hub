@@ -6,28 +6,28 @@
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import type { CrawlSchedule, CrawlScheduleRun, CrawlRunStats, RunPost } from '$lib/types';
 
-	let schedule: CrawlSchedule | null = null;
-	let runs: CrawlScheduleRun[] = [];
-	let stats: CrawlRunStats | null = null;
-	let loading = true;
-	let error: string | null = null;
+	let schedule = $state<CrawlSchedule | null>(null);
+	let runs = $state<CrawlScheduleRun[]>([]);
+	let stats = $state<CrawlRunStats | null>(null);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
 
 	// 페이지네이션
-	let currentPage = 1;
-	let limit = 20;
-	let total = 0;
+	let currentPage = $state(1);
+	let limit = $state(20);
+	let total = $state(0);
 
 	// 필터
-	let status: string = '';
+	let status = $state('');
 
 	// 포스트 모달
-	let showPostsModal = false;
-	let selectedRun: CrawlScheduleRun | null = null;
-	let runPosts: RunPost[] = [];
-	let loadingPosts = false;
-	let postsPage = 1;
-	let postsLimit = 50;
-	let postsTotal = 0;
+	let showPostsModal = $state(false);
+	let selectedRun = $state<CrawlScheduleRun | null>(null);
+	let runPosts = $state<RunPost[]>([]);
+	let loadingPosts = $state(false);
+	let postsPage = $state(1);
+	let postsLimit = $state(50);
+	let postsTotal = $state(0);
 
 	let scheduleId = $derived.by(() => parseInt($page.params.id ?? '0', 10));
 	let totalPages = $derived.by(() => Math.ceil(total / limit));
@@ -38,6 +38,9 @@
 			schedule = await crawlApi.getSchedule(scheduleId);
 		} catch (e) {
 			console.error('Schedule fetch error:', e);
+			if (!error) {
+				error = e instanceof Error ? e.message : '스케줄 정보 로드 실패';
+			}
 		}
 	}
 

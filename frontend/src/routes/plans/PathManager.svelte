@@ -5,7 +5,7 @@
 
   let { onChanged }: { onChanged: () => void } = $props();
 
-  let paths: RegisteredPathResponse[] = [];
+  let paths = $state<RegisteredPathResponse[]>([]);
   let loading = $state(true);
   let error = $state('');
 

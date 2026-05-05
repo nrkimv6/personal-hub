@@ -36,10 +36,10 @@
 	let expandedCategories = $state(new Set<number>());
 
 	// 모달 관련 (create용 - 인라인 폼으로 대체하지 않고 기존 함수 보존)
-	let showModal = false;
-	let modalMode: 'create' | 'edit' = 'create';
-	let editingCategory: Partial<Category> = {};
-	let selectedParentId: number | null = null;
+	let showModal = $state(false);
+	let modalMode = $state<'create' | 'edit'>('create');
+	let editingCategory = $state<Partial<Category>>({});
+	let selectedParentId = $state<number | null>(null);
 
 	// 새 Svelte 5 상태
 	let selected = $state<Category | null>(null);
