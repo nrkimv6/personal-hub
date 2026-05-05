@@ -32,18 +32,3 @@ CREATE INDEX IF NOT EXISTS ix_plan_archive_insight_reports_grouping
     ON plan_archive_insight_reports(grouping);
 CREATE INDEX IF NOT EXISTS ix_plan_archive_insight_reports_llm_request
     ON plan_archive_insight_reports(llm_request_id);
-
-INSERT OR IGNORE INTO task_schedules
-    (name, display_name, target_type, target_config, schedule_type, schedule_value, enabled, created_at, updated_at)
-VALUES
-    (
-        'plan_archive_insight_weekly',
-        'Plan Archive weekly insight batch',
-        'plan_archive_insight_batch',
-        '{"grouping":"category","days":30,"limit":20,"token_budget":3000}',
-        'cron',
-        '0 4 * * 1',
-        0,
-        CURRENT_TIMESTAMP,
-        CURRENT_TIMESTAMP
-    );
