@@ -27,11 +27,11 @@
   } = $props();
 
   // ── 목록 상태 ──────────────────────────────────────────────
-  let records: PlanRecord[] = [];
-  let loading = true;
-  let selectedRecord: PlanRecord | null = null;
-  let detailTab: 'content' | 'memo' | 'analyze' = 'content';
-  let editingStatusId: number | null = null;
+  let records: PlanRecord[] = $state([]);
+  let loading = $state(true);
+  let selectedRecord: PlanRecord | null = $state(null);
+  let detailTab: 'content' | 'memo' | 'analyze' = $state('content');
+  let editingStatusId: number | null = $state(null);
 
   const EDITABLE_STATUSES = ['초안', '검토대기', '구현중', '보류'];
 
@@ -47,27 +47,27 @@
       error = e instanceof Error ? e.message : '상태 변경 실패';
     }
   }
-  let error = '';
-  let skip = 0;
+  let error = $state('');
+  let skip = $state(0);
   const limit = 50;
-  let hasMore = false;
+  let hasMore = $state(false);
   let filterCategory = $state('');
 
   // ── 선택/벌크 ─────────────────────────────────────────────
-  let selectedIds = new Set<number>();
+  let selectedIds = $state(new Set<number>());
   let bulkCategory = $state('');
   const CATEGORIES = ['feature', 'bugfix', 'refactor', 'infra', 'docs', 'test', 'misc'];
 
   // ── 정리 모달 ─────────────────────────────────────────────
-  let showOrganizeModal = false;
-  let previewLoading = false;
-  let organizeLoading = false;
-  let previewDirs: Array<{ archive_dir: string; items: ArchivePreviewItem[] }> = [];
-  let organizeResult: string = '';
+  let showOrganizeModal = $state(false);
+  let previewLoading = $state(false);
+  let organizeLoading = $state(false);
+  let previewDirs: Array<{ archive_dir: string; items: ArchivePreviewItem[] }> = $state([]);
+  let organizeResult = $state('');
 
   // ── DB 이관 ───────────────────────────────────────────────
-  let importLoading = false;
-  let importResult: ImportArchivedResult | null = null;
+  let importLoading = $state(false);
+  let importResult: ImportArchivedResult | null = $state(null);
 
   async function runImportArchived() {
     importLoading = true;
@@ -85,14 +85,14 @@
   }
 
   // LLM 처리 현황 (서버 health + Plan Archive 요청 목록)
-  let archiveHealth: PlanArchiveHealth | null = null;
-  let archiveHealthLoading = false;
-  let archiveQueueLoading = false;
-  let archiveQueueError = '';
-  let archiveRequests: LLMRequest[] = [];
-  let archiveQueuePage = 1;
-  let archiveQueueTotal = 0;
-  let archiveQueuePages = 1;
+  let archiveHealth: PlanArchiveHealth | null = $state(null);
+  let archiveHealthLoading = $state(false);
+  let archiveQueueLoading = $state(false);
+  let archiveQueueError = $state('');
+  let archiveRequests: LLMRequest[] = $state([]);
+  let archiveQueuePage = $state(1);
+  let archiveQueueTotal = $state(0);
+  let archiveQueuePages = $state(1);
   const archiveQueuePageSize = 50;
   let archiveQueueStatus = $state('pending,processing,failed');
   let archiveQueueProvider = $state('');
@@ -108,28 +108,28 @@
   let retrievalDateTo = $state('');
   let retrievalRelationType = $state('');
   let retrievalLimit = $state(10);
-  let retrievalLoading = false;
-  let retrievalError = '';
-  let retrievalResults: PlanArchiveRetrievalResult[] = [];
-  let retrievalTotal = 0;
-  let metricsLoading = false;
-  let metricsError = '';
-  let retrievalMetrics: PlanArchiveMetricsResponse | null = null;
+  let retrievalLoading = $state(false);
+  let retrievalError = $state('');
+  let retrievalResults: PlanArchiveRetrievalResult[] = $state([]);
+  let retrievalTotal = $state(0);
+  let metricsLoading = $state(false);
+  let metricsError = $state('');
+  let retrievalMetrics: PlanArchiveMetricsResponse | null = $state(null);
   let indexLimit = $state(100);
   let indexForce = $state(false);
   let indexSince = $state('');
-  let indexLoading = false;
-  let indexError = '';
-  let indexResult: PlanArchiveIndexResponse | null = null;
+  let indexLoading = $state(false);
+  let indexError = $state('');
+  let indexResult: PlanArchiveIndexResponse | null = $state(null);
 
   // ── 수동 분석 preview/apply ───────────────────────────────
   let analyzeProvider = $state('codex');
   let analyzeModel = $state('gpt-5.2');
   let analyzeTimeout = $state(120);
-  let analyzeLoading = false;
-  let analyzeResult: PlanArchiveAnalyzeResponse | null = null;
-  let analyzeError = '';
-  let confirmingApply = false;
+  let analyzeLoading = $state(false);
+  let analyzeResult: PlanArchiveAnalyzeResponse | null = $state(null);
+  let analyzeError = $state('');
+  let confirmingApply = $state(false);
 
   async function loadArchiveHealth() {
     archiveHealthLoading = true;
@@ -249,12 +249,12 @@
   }
 
   // ── 중복 감지 ─────────────────────────────────────────────
-  let showDuplicatesModal = false;
-  let dupesLoading = false;
-  let dupeDirs: Array<{ archive_dir: string; duplicates: DuplicateItem[] }> = [];
+  let showDuplicatesModal = $state(false);
+  let dupesLoading = $state(false);
+  let dupeDirs: Array<{ archive_dir: string; duplicates: DuplicateItem[] }> = $state([]);
 
   // ── 토스트 ────────────────────────────────────────────────
-  let toast = '';
+  let toast = $state('');
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
   function showToast(msg: string) {
@@ -425,7 +425,7 @@
   }
 
   // 외부 quick search 포커싱: file_path로 record get_or_create 후 자동 선택
-  let lastFocusPath: string | null = null;
+  let lastFocusPath: string | null = $state(null);
   $effect(() => {
     if (!focusPath || focusPath === lastFocusPath) return;
     lastFocusPath = focusPath;
