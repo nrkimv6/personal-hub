@@ -96,3 +96,25 @@ class ExpoSeedDocument(BaseModel):
     timeSlots: list[dict]
 
     model_config = ConfigDict(extra="allow")
+
+
+class ExpoMapMetaResponse(BaseModel):
+    """배치도 업로드 override 메타데이터 응답."""
+
+    slug: str
+    image_url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    title: str | None = None
+    alt: str | None = None
+    uploaded_at: datetime | None = None
+
+
+class ExpoMapUploadResponse(BaseModel):
+    """배치도 업로드 성공 응답."""
+
+    slug: str
+    image_url: str
+    width: int
+    height: int
+    uploaded_at: datetime
