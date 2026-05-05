@@ -1069,6 +1069,7 @@
 					</thead>
 					<tbody class="divide-y divide-border">
 						{#each requests as request (request.id)}
+							{@const pauseInfo = getPendingPauseInfo(request)}
 							<tr
 								class="hover:bg-muted cursor-pointer"
 								onclick={() => openModal(request)}
@@ -1099,7 +1100,7 @@
 									<span class="px-2 py-1 text-xs rounded-full {getStatusColor(request.status)}">
 										{getStatusLabel(request.status)}
 									</span>
-									{#if getPendingPauseInfo(request) as pauseInfo}
+									{#if pauseInfo}
 										<span
 											class="ml-1 px-2 py-1 text-xs rounded-full {pauseInfo.tone === 'window' ? 'bg-blue-100 text-blue-700' : 'bg-warning-light text-warning-foreground'}"
 											title={pauseInfo.title}
