@@ -7,7 +7,7 @@
 	import { createSelection } from '$lib/utils/selection.svelte';
 	import { toast } from '$lib/stores/toast';
 	import { confirm } from '$lib/stores/confirm';
-	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
+	import { fetchQuotaStatus, fetchProfileQuotaStatus, getQuotaWarning, profileQuotaStatus, summarizeProfileCapacity, type ProfileQuotaStatus } from '$lib/stores/quotaStore';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import { createPagePagination } from '$lib/utils/pagination.svelte';
 
@@ -455,6 +455,11 @@
 		}
 	}
 
+	function getPendingBlockReason(request: LLMRequest, profiles: ProfileQuotaStatus[]): string | null {
+		if (request.status !== 'pending') return null;
+		return summarizeProfileCapacity(request.provider || 'claude', profiles);
+	}
+
 	function switchTab(tab: Tab) {
 		activeTab = tab;
 		if (tab === 'queue' || tab === 'history') {
@@ -470,6 +475,7 @@
 	onMount(() => {
 		fetchData();
 		fetchQuotaStatus();
+		fetchProfileQuotaStatus();
 		llmApi.getProviders()
 			.then(data => { providers = data; providersLoading = false; })
 			.catch(() => { providersError = 'Provider 목록 로드 실패'; providersLoading = false; });
@@ -787,6 +793,11 @@
 									<span class="px-2 py-1 text-xs rounded-full {getStatusColor(request.status)}">
 										{getStatusLabel(request.status)}
 									</span>
+									{#if getPendingBlockReason(request, $profileQuotaStatus)}
+										<div class="mt-1 text-[11px] text-warning-foreground">
+											{getPendingBlockReason(request, $profileQuotaStatus)}
+										</div>
+									{/if}
 								</td>
 								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(request.requested_at)}</td>
 								<td class="px-4 py-3" onclick={(e) => e.stopPropagation()}>

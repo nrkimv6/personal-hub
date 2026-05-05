@@ -4,6 +4,8 @@ import test from 'node:test';
 
 const apiSource = readFileSync(new URL('../src/lib/api/system.ts', import.meta.url), 'utf8');
 const aiProfilesSource = readFileSync(new URL('../src/lib/components/system/AiProfilesSettings.svelte', import.meta.url), 'utf8');
+const quotaStoreSource = readFileSync(new URL('../src/lib/stores/quotaStore.ts', import.meta.url), 'utf8');
+const llmTabSource = readFileSync(new URL('../src/routes/writing/LlmTab.svelte', import.meta.url), 'utf8');
 
 test('profile API exposes pool metadata and status client', () => {
   assert.match(apiSource, /enabled\?: boolean/);
@@ -19,6 +21,15 @@ test('AI profile settings exposes pool controls', () => {
   assert.match(aiProfilesSource, /bind:value=\{drafts\[p\.idx\]\.priority\}/);
   assert.match(aiProfilesSource, /pauseProfile/);
   assert.match(aiProfilesSource, /resumeProfile/);
+});
+
+test('LLM queue exposes profile capacity block reasons', () => {
+  assert.match(quotaStoreSource, /export const profileQuotaStatus = writable<ProfileQuotaStatus\[\]>\(\[\]\)/);
+  assert.match(quotaStoreSource, /fetchProfileQuotaStatus/);
+  assert.match(quotaStoreSource, /summarizeProfileCapacity/);
+  assert.match(llmTabSource, /fetchProfileQuotaStatus\(\)/);
+  assert.match(llmTabSource, /\$profileQuotaStatus/);
+  assert.match(quotaStoreSource, /현재 가능한 profile 없음\(quota: \$\{quota\}, window: \$\{window\}, disabled: \$\{disabled\}, processing: \$\{processing\}\)/);
 });
 
 test('AI profile status const stays in a Svelte-allowed child position', () => {
