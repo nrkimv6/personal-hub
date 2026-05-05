@@ -729,6 +729,30 @@ export interface LLMProfileStatusItem {
   priority: number;
 }
 
+export interface LLMScheduleProfilePolicyWindow {
+  start: string;
+  end: string;
+  days?: number[];
+}
+
+export interface LLMScheduleProfilePolicyItem {
+  id?: number | null;
+  schedule_id?: number | null;
+  target_type?: string | null;
+  engine: string;
+  profile_name: string;
+  enabled: boolean;
+  priority: number;
+  allowed_windows: LLMScheduleProfilePolicyWindow[];
+  quiet_windows: LLMScheduleProfilePolicyWindow[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface LLMScheduleProfilePoliciesResponse {
+  policies: LLMScheduleProfilePolicyItem[];
+}
+
 export interface ProviderInfo {
   key: string;
   display_name: string;
@@ -925,6 +949,15 @@ export const llmApi = {
     }),
 
   getProfileStatus: () => request<LLMProfileStatusItem[]>('/llm/profiles/status'),
+
+  listScheduleProfilePolicies: () =>
+    request<LLMScheduleProfilePoliciesResponse>('/llm/schedule-profile-policies'),
+
+  updateScheduleProfilePolicies: (policies: LLMScheduleProfilePolicyItem[]) =>
+    request<LLMScheduleProfilePoliciesResponse>('/llm/schedule-profile-policies', {
+      method: 'PUT',
+      body: JSON.stringify({ policies })
+    }),
 
   pauseProfile: (engine: string, name: string, retry_after_ms = 60 * 60 * 1000, reason = 'manual profile pause') =>
     request<{ paused_until: string }>(`/llm/profiles/${engine}/${name}/pause`, {

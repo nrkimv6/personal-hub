@@ -32,6 +32,13 @@ test('LLM queue exposes profile capacity block reasons', () => {
   assert.match(quotaStoreSource, /현재 가능한 profile 없음\(quota: \$\{quota\}, window: \$\{window\}, disabled: \$\{disabled\}, processing: \$\{processing\}\)/);
 });
 
+test('schedule profile policy API client is exposed', () => {
+  assert.match(apiSource, /LLMScheduleProfilePolicyItem/);
+  assert.match(apiSource, /listScheduleProfilePolicies/);
+  assert.match(apiSource, /updateScheduleProfilePolicies/);
+  assert.match(apiSource, /\/llm\/schedule-profile-policies/);
+});
+
 test('AI profile status const stays in a Svelte-allowed child position', () => {
   assert.match(
     aiProfilesSource,

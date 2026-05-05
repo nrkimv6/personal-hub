@@ -55,6 +55,15 @@ def test_profile_routes_has_capacity_pool_endpoints():
     )
 
 
+def test_schedule_profile_policy_routes_are_registered():
+    from app.modules.claude_worker.routes.schedule_profile_policy_routes import router
+
+    keys = _route_keys(router)
+
+    assert ("GET", "/schedule-profile-policies") in keys
+    assert ("PUT", "/schedule-profile-policies") in keys
+
+
 def test_llm_routes_has_no_direct_profiles_decorator():
     """llm_routes.py 소스코드에 @router.XXX("/profiles...") 직접 데코레이터가 없음을 확인.
 

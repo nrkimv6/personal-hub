@@ -150,3 +150,29 @@ class LLMProfileAssignment(Base):
     error_summary = Column(Text)
 
     request = relationship("LLMRequest")
+
+
+class LLMScheduleProfilePolicy(Base):
+    """schedule/target_type 단위 LLM profile routing policy."""
+
+    __tablename__ = "llm_schedule_profile_policies"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "engine", "profile_name", name="uq_llm_schedule_profile_policy_schedule"),
+        UniqueConstraint("target_type", "engine", "profile_name", name="uq_llm_schedule_profile_policy_target"),
+        Index("ix_llm_schedule_profile_policy_schedule", "schedule_id"),
+        Index("ix_llm_schedule_profile_policy_target", "target_type"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    schedule_id = Column(Integer, ForeignKey("task_schedules.id", ondelete="CASCADE"), nullable=True)
+    target_type = Column(String(100), nullable=True)
+    engine = Column(String(50), nullable=False)
+    profile_name = Column(String(100), nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    priority = Column(Integer, default=0, nullable=False)
+    allowed_windows = Column(Text, nullable=True)
+    quiet_windows = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    schedule = relationship("TaskSchedule")

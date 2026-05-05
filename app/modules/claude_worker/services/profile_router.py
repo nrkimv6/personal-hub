@@ -13,6 +13,7 @@ from app.modules.claude_worker.services.llm_quota_service import LLMQuotaService
 from app.modules.claude_worker.services.profile_store import LLMProfile, get_selected, list_profiles
 from app.modules.claude_worker.services.repositories import LLMRequestRepository, LLMWorkerRepository
 from app.modules.claude_worker.services.provider_registry import get_provider
+from app.modules.claude_worker.services.schedule_profile_policy_service import ScheduleProfilePolicyService
 
 
 @dataclass
@@ -28,6 +29,7 @@ class LLMProfileRouter:
         self.db = db
         self.quota = LLMQuotaService(LLMRequestRepository(db), LLMWorkerRepository(db), db)
         self.execution_window = LLMExecutionWindowService()
+        self.policy = ScheduleProfilePolicyService(db)
 
     def select_profile(self, engine: str, model: str = "", request=None) -> ProfileRouteDecision:
         provider = get_provider(engine)
@@ -57,9 +59,18 @@ class LLMProfileRouter:
 
         available: list[LLMProfile] = []
         paused_count = 0
+        policy_count = 0
         for profile in enabled:
             if self.quota.get_profile_quota_pause(engine, profile.name):
                 paused_count += 1
+                continue
+            policy_decision = self.policy.decide_for_request(
+                request=request,
+                engine=engine,
+                profile_name=profile.name,
+            )
+            if not policy_decision.allowed:
+                policy_count += 1
                 continue
             available.append(profile)
 
@@ -71,13 +82,14 @@ class LLMProfileRouter:
             next_available = min([t for t in next_times if t is not None], default=None)
             return ProfileRouteDecision(
                 None,
-                "all_paused_by_quota",
+                "schedule_policy_off" if policy_count else "all_paused_by_quota",
                 next_available,
-                {"quota": paused_count},
+                {"quota": paused_count, "policy": policy_count},
             )
 
         available.sort(
             key=lambda p: (
+                -self.policy.policy_priority(request, engine, p.name),
                 -p.priority,
                 p.last_reset_at or datetime.min,
                 p.name,
