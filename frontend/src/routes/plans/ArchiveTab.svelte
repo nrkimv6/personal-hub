@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { planRecordsApi, archiveApi, type PlanRecord, type ImportArchivedResult, type ArchivePreviewItem, type DuplicateItem } from '$lib/api/plan-records';
+  import { llmApi, type LLMRequest } from '$lib/api';
+  import { planRecordsApi, archiveApi, type PlanRecord, type ImportArchivedResult, type ArchivePreviewItem, type DuplicateItem, type PlanArchiveHealth } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
   import MemoEditor from './MemoEditor.svelte';
   import PlanViewer from './PlanViewer.svelte';
@@ -66,18 +67,55 @@
     }
   }
 
-  // LLM 처리 현황 (DB 레코드 통계)
-  let llmStats: { total: number; processed: number; pending: number } | null = null;
+  // LLM 처리 현황 (서버 health + Plan Archive 요청 목록)
+  let archiveHealth: PlanArchiveHealth | null = null;
+  let archiveHealthLoading = false;
+  let archiveQueueLoading = false;
+  let archiveQueueError = '';
+  let archiveRequests: LLMRequest[] = [];
+  let archiveQueuePage = 1;
+  let archiveQueueTotal = 0;
+  let archiveQueuePages = 1;
+  const archiveQueuePageSize = 50;
+  let archiveQueueStatus = 'pending,processing,failed';
+  let archiveQueueProvider = '';
 
-  async function loadLlmStats() {
+  async function loadArchiveHealth() {
+    archiveHealthLoading = true;
     try {
-      const all = await planRecordsApi.list({ status: 'archived', limit: 1000 });
-      const total = all.length;
-      const processed = all.filter(r => r.llm_processed_at != null).length;
-      llmStats = { total, processed, pending: total - processed };
+      archiveHealth = await planRecordsApi.getArchiveHealth();
     } catch (e) {
-      // 통계 로드 실패는 무시
+      archiveHealth = null;
+    } finally {
+      archiveHealthLoading = false;
     }
+  }
+
+  async function loadArchiveQueue(page = archiveQueuePage) {
+    archiveQueueLoading = true;
+    archiveQueueError = '';
+    try {
+      const res = await llmApi.list({
+        caller_type: 'plan_archive_analyze',
+        status: archiveQueueStatus || undefined,
+        page,
+        page_size: archiveQueuePageSize,
+      });
+      archiveRequests = archiveQueueProvider
+        ? res.items.filter((request) => (request.provider || 'claude') === archiveQueueProvider)
+        : res.items;
+      archiveQueuePage = res.page;
+      archiveQueueTotal = archiveQueueProvider ? archiveRequests.length : res.total;
+      archiveQueuePages = archiveQueueProvider ? 1 : res.pages;
+    } catch (e) {
+      archiveQueueError = e instanceof Error ? e.message : 'LLM 요청 목록 로드 실패';
+    } finally {
+      archiveQueueLoading = false;
+    }
+  }
+
+  async function refreshArchiveSurfaces() {
+    await Promise.all([loadArchiveHealth(), loadArchiveQueue(1)]);
   }
 
   // ── 중복 감지 ─────────────────────────────────────────────
@@ -247,9 +285,45 @@
     return new Date(iso).toLocaleDateString('ko-KR');
   }
 
+  function formatDateTime(iso: string | null | undefined) {
+    if (!iso) return '-';
+    return new Date(iso).toLocaleString('ko-KR', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function getStatusClass(status: string) {
+    switch (status) {
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200';
+      case 'processing':
+        return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200';
+      case 'failed':
+        return 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200';
+      case 'completed':
+        return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200';
+      default:
+        return 'bg-muted text-muted-foreground';
+    }
+  }
+
+  function getRequestProfile(request: LLMRequest) {
+    const cliOptions = request.cli_options as Record<string, unknown> | undefined;
+    const profile = cliOptions?.profile ?? cliOptions?.engine_profile ?? cliOptions?.profile_name;
+    return typeof profile === 'string' && profile.trim() ? profile : 'inherit';
+  }
+
+  function getErrorSummary(message: string | null | undefined) {
+    if (!message) return '-';
+    return message.length > 80 ? `${message.slice(0, 80)}...` : message;
+  }
+
   onMount(() => {
     loadRecords();
-    loadLlmStats();
+    refreshArchiveSurfaces();
   });
 </script>
 
@@ -279,11 +353,11 @@
         </select>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
-        {#if llmStats}
+        {#if archiveHealth}
           <span class="text-xs text-muted-foreground">
-            LLM: {llmStats.processed}/{llmStats.total}
-            {#if llmStats.pending > 0}
-              <span class="text-yellow-600 dark:text-yellow-400">(미처리 {llmStats.pending})</span>
+            LLM: {archiveHealth.llm_processed}/{archiveHealth.archived_total}
+            {#if archiveHealth.real_unprocessed > 0}
+              <span class="text-yellow-600 dark:text-yellow-400">(실제 미처리 {archiveHealth.real_unprocessed})</span>
             {/if}
           </span>
         {/if}
@@ -302,9 +376,186 @@
         >정리</button>
         <button
           class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-          onclick={() => loadRecords()}
+          onclick={() => { loadRecords(); refreshArchiveSurfaces(); }}
         >새로고침</button>
       </div>
+    </div>
+
+    <!-- Plan Archive health 패널 -->
+    <div class="mb-3 grid gap-3 rounded border border-border bg-background p-3 text-xs lg:grid-cols-[1.3fr_1fr]">
+      <div>
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <h3 class="font-semibold text-foreground">Plan Archive LLM health</h3>
+          {#if archiveHealthLoading}
+            <span class="text-muted-foreground">갱신 중...</span>
+          {/if}
+        </div>
+        {#if archiveHealth}
+          <div class="grid gap-2 sm:grid-cols-4">
+            <div class="rounded bg-muted px-2 py-2">
+              <div class="text-muted-foreground">Archived</div>
+              <div class="font-semibold text-foreground">{archiveHealth.archived_total}</div>
+            </div>
+            <div class="rounded bg-muted px-2 py-2">
+              <div class="text-muted-foreground">Processed</div>
+              <div class="font-semibold text-foreground">{archiveHealth.llm_processed}</div>
+            </div>
+            <div class="rounded bg-muted px-2 py-2">
+              <div class="text-muted-foreground">Unprocessed</div>
+              <div class="font-semibold text-foreground">{archiveHealth.llm_unprocessed}</div>
+            </div>
+            <div class="rounded bg-muted px-2 py-2">
+              <div class="text-muted-foreground">Real backlog</div>
+              <div class="font-semibold text-foreground">{archiveHealth.real_unprocessed}</div>
+            </div>
+          </div>
+          <div class="mt-3 grid gap-2 md:grid-cols-3">
+            <div class="rounded border border-border p-2">
+              <div class="text-muted-foreground">스케줄</div>
+              <div class="mt-1 font-medium {archiveHealth.plan_archive_schedule?.enabled ? 'text-green-700' : 'text-amber-700'}">
+                {archiveHealth.plan_archive_schedule?.enabled ? '활성' : '비활성'}
+              </div>
+              {#if !archiveHealth.plan_archive_schedule?.enabled && archiveHealth.real_unprocessed > 0}
+                <p class="mt-1 text-amber-700">비활성 때문에 backlog가 쌓일 수 있습니다.</p>
+              {/if}
+            </div>
+            <div class="rounded border border-border p-2">
+              <div class="text-muted-foreground">마지막 실행</div>
+              <div class="mt-1">성공 {formatDateTime(archiveHealth.plan_archive_schedule?.last_success)}</div>
+              <div>실패 {formatDateTime(archiveHealth.plan_archive_schedule?.last_failure)}</div>
+              {#if !archiveHealth.plan_archive_schedule?.last_success && !archiveHealth.plan_archive_schedule?.last_failure}
+                <div class="text-muted-foreground">실행 이력이 없습니다.</div>
+              {/if}
+            </div>
+            <div class="rounded border border-border p-2">
+              <div class="text-muted-foreground">노후/실패</div>
+              <div class="mt-1">Oldest {formatDateTime(archiveHealth.oldest_unprocessed_at)}</div>
+              <div>Failed request {archiveHealth.failed_requests}</div>
+              {#if archiveHealth.latest_failed_request}
+                <div class="mt-1 truncate" title={archiveHealth.latest_failed_request.error_message ?? ''}>
+                  #{archiveHealth.latest_failed_request.id} {formatDateTime(archiveHealth.latest_failed_request.requested_at)}
+                  {getErrorSummary(archiveHealth.latest_failed_request.error_message)}
+                </div>
+              {/if}
+            </div>
+          </div>
+        {:else}
+          <p class="text-muted-foreground">Health API 결과를 불러오지 못했습니다.</p>
+        {/if}
+      </div>
+      <div class="rounded border border-border p-2">
+        <div class="font-semibold text-foreground">큐 신뢰 경계</div>
+        <p class="mt-1 text-muted-foreground">
+          pending_or_processing_requests는 현재 활성 LLMRequest 수입니다. archive 미처리 수나 전체 Plan Archive backlog 수와 다릅니다.
+        </p>
+        {#if archiveHealth}
+          <div class="mt-2 flex flex-wrap gap-2">
+            <span class="rounded bg-muted px-2 py-1">active {archiveHealth.pending_or_processing_requests}</span>
+            <span class="rounded {archiveHealth.failed_requests > 0 ? 'bg-red-100 text-red-700' : 'bg-muted text-muted-foreground'} px-2 py-1">failed {archiveHealth.failed_requests}</span>
+            <span class="rounded bg-muted px-2 py-1">temp excluded {archiveHealth.temp_pytest_unprocessed}/{archiveHealth.temp_pytest_total}</span>
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Plan Archive LLM 요청 목록 -->
+    <div class="mb-3 rounded border border-border bg-background p-3 text-xs">
+      <div class="mb-2 flex items-center justify-between gap-2 flex-wrap">
+        <h3 class="font-semibold text-foreground">Plan Archive LLM 요청</h3>
+        <a class="text-primary hover:text-primary-hover" href="/llm?caller_type=plan_archive_analyze">전체 LLM 큐 보기</a>
+      </div>
+      <div class="mb-2 flex items-center gap-2 flex-wrap">
+        <select
+          class="border border-border rounded px-2 py-1 bg-background text-foreground"
+          bind:value={archiveQueueStatus}
+          onchange={() => loadArchiveQueue(1)}
+        >
+          <option value="pending,processing,failed">대기/처리중/실패</option>
+          <option value="pending">대기</option>
+          <option value="processing">처리중</option>
+          <option value="failed">실패</option>
+          <option value="completed">완료</option>
+        </select>
+        <select
+          class="border border-border rounded px-2 py-1 bg-background text-foreground"
+          bind:value={archiveQueueProvider}
+          onchange={() => loadArchiveQueue(1)}
+        >
+          <option value="">provider 전체</option>
+          <option value="claude">Claude</option>
+          <option value="gemini">Gemini</option>
+        </select>
+        <button
+          class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground"
+          onclick={() => loadArchiveQueue(archiveQueuePage)}
+          disabled={archiveQueueLoading}
+        >{archiveQueueLoading ? '갱신 중...' : '요청 갱신'}</button>
+      </div>
+      {#if archiveQueueError}
+        <p class="text-red-500 mb-2">{archiveQueueError}</p>
+      {:else if archiveRequests.length === 0}
+        <p class="text-muted-foreground">표시할 Plan Archive LLM 요청이 없습니다.</p>
+      {:else}
+        <div class="overflow-auto">
+          <table class="w-full min-w-[780px]">
+            <thead>
+              <tr class="text-left text-muted-foreground border-b border-border">
+                <th class="pb-2 pr-3 font-medium">ID</th>
+                <th class="pb-2 pr-3 font-medium">caller</th>
+                <th class="pb-2 pr-3 font-medium">상태</th>
+                <th class="pb-2 pr-3 font-medium">요청</th>
+                <th class="pb-2 pr-3 font-medium">provider/model</th>
+                <th class="pb-2 pr-3 font-medium">profile</th>
+                <th class="pb-2 font-medium">error/retry</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each archiveRequests as request (request.id)}
+                <tr class="border-b border-border/60">
+                  <td class="py-2 pr-3 font-mono">#{request.id}</td>
+                  <td class="py-2 pr-3">
+                    <div class="font-mono max-w-[12rem] truncate" title={request.caller_id}>{request.caller_id}</div>
+                    <div class="text-muted-foreground">{request.caller_type}</div>
+                  </td>
+                  <td class="py-2 pr-3">
+                    <span class="rounded px-2 py-1 {getStatusClass(request.status)}">{request.status}</span>
+                  </td>
+                  <td class="py-2 pr-3 whitespace-nowrap">{formatDateTime(request.requested_at)}</td>
+                  <td class="py-2 pr-3">{request.provider || 'claude'} / {request.model || 'inherit'}</td>
+                  <td class="py-2 pr-3">
+                    {getRequestProfile(request)}
+                    <div class="text-muted-foreground">policy detail: /llm</div>
+                  </td>
+                  <td class="py-2" title={request.error_message ?? ''}>
+                    <div>{getErrorSummary(request.error_message)}</div>
+                    {#if request.status === 'failed'}
+                      <button
+                        class="mt-1 text-primary hover:text-primary-hover"
+                        onclick={async () => { await llmApi.retry(request.id); await refreshArchiveSurfaces(); }}
+                      >재시도</button>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-2 flex items-center justify-between">
+          <span class="text-muted-foreground">전체 {archiveQueueTotal}개, {archiveQueuePage}/{archiveQueuePages}</span>
+          <div class="flex gap-2">
+            <button
+              class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
+              disabled={archiveQueuePage <= 1 || archiveQueueLoading}
+              onclick={() => loadArchiveQueue(archiveQueuePage - 1)}
+            >이전</button>
+            <button
+              class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
+              disabled={archiveQueuePage >= archiveQueuePages || archiveQueueLoading}
+              onclick={() => loadArchiveQueue(archiveQueuePage + 1)}
+            >다음</button>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <!-- 벌크 액션 바 -->

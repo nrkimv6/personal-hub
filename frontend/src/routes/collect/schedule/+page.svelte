@@ -109,7 +109,7 @@
 	let loadingLegacyRepair = false;
 	let applyingLegacyRepair = false;
 
-	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract', 'pytest_run'];
+	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract', 'pytest_run', 'plan_archive_analyze'];
 
 	const scheduleTypes = [
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: Instagram, color: 'pink' },

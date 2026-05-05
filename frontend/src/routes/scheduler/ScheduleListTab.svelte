@@ -112,7 +112,7 @@
 	let loadingLegacyRepair = $state(false);
 	let applyingLegacyRepair = $state(false);
 
-	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract', 'pytest_run'];
+	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract', 'pytest_run', 'plan_archive_analyze'];
 
 	const scheduleTypes = [
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: Instagram, color: 'pink' },
@@ -593,6 +593,29 @@
 		}
 	}
 
+	function getPlanArchiveCardAlert(schedule: CrawlSchedule): { tone: string; text: string } | null {
+		if (!planArchiveHealth) return null;
+		if (planArchiveHealth.real_unprocessed > 0 && !schedule.enabled) {
+			return {
+				tone: 'bg-amber-100 text-amber-800',
+				text: `미처리 ${planArchiveHealth.real_unprocessed}건, 스케줄 비활성`
+			};
+		}
+		if (planArchiveHealth.failed_requests > 0) {
+			return {
+				tone: 'bg-red-100 text-red-700',
+				text: `실패 ${planArchiveHealth.failed_requests}건`
+			};
+		}
+		if (planArchiveHealth.real_unprocessed > 0) {
+			return {
+				tone: 'bg-blue-100 text-blue-800',
+				text: `미처리 ${planArchiveHealth.real_unprocessed}건`
+			};
+		}
+		return { tone: 'bg-muted text-muted-foreground', text: '대기 없음' };
+	}
+
 	function getTargetTypeBadge(type: string): { class: string; text: string } {
 		switch (type) {
 			case 'instagram_feed':
@@ -836,38 +859,20 @@
 						</div>
 					</div>
 					{#if schedule.target_type === 'plan_archive_analyze'}
-						{@const planArchiveWarning = !!planArchiveHealth && planArchiveHealth.real_unprocessed > 0 && !schedule.enabled}
+						{@const planArchiveAlert = getPlanArchiveCardAlert(schedule)}
 						<div class="mt-3 border-t border-border pt-3">
 							{#if loadingPlanArchiveHealth}
 								<div class="text-xs text-muted-foreground">Plan Archive health 로드 중...</div>
-							{:else if planArchiveHealth}
+							{:else if planArchiveAlert}
 								<div class="flex flex-wrap items-center gap-2 text-xs">
-									<span class="font-medium {planArchiveWarning ? 'text-amber-700' : 'text-foreground'}">
-										{planArchiveWarning ? '미처리 보류' : planArchiveHealth.real_unprocessed === 0 ? '정상 보류' : 'Backfill 대기'}
-									</span>
-									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
-										실제 미처리 {planArchiveHealth.real_unprocessed}
-									</span>
-									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
-										임시 테스트 제외 {planArchiveHealth.temp_pytest_unprocessed}/{planArchiveHealth.temp_pytest_total}
-									</span>
-									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
-										큐 대기/처리중 {planArchiveHealth.pending_or_processing_requests}
-									</span>
-									<span class="rounded {planArchiveHealth.failed_requests > 0 ? 'bg-red-100 text-red-700' : 'bg-muted text-muted-foreground'} px-2 py-1">
-										실패 요청 {planArchiveHealth.failed_requests}
-									</span>
-									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
-										마지막 성공 {formatDateTime(planArchiveHealth.plan_archive_schedule?.last_success ?? null)}
-									</span>
-									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
-										마지막 실패 {formatDateTime(planArchiveHealth.plan_archive_schedule?.last_failure ?? null)}
+									<span class="rounded px-2 py-1 font-medium {planArchiveAlert.tone}">
+										{planArchiveAlert.text}
 									</span>
 									<a
 										href="/plans?tab=archive"
 										class="ml-auto text-primary hover:text-primary-hover"
 									>
-										{planArchiveHealth.real_unprocessed > 0 ? 'archive/guide 확인' : 'archive 보기'}
+										Plan Archive 상세
 									</a>
 								</div>
 							{:else}
