@@ -741,6 +741,45 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         logger.info(f"Previous process ended (exit code: {proc.returncode}), cleaning up")
         _cleanup_process_state(runner_id, redis_client)
 
+    # ── DB claim preflight: queued/active claim이 있으면 충돌 거부 ────────
+    if plan_file_req and plan_file_req not in (PLAN_FILE_ALL, _LEGACY_ALL):
+        try:
+            import sys as _sys_pf
+            _pr_pf = str(Path(__file__).resolve().parent.parent.parent)
+            if _pr_pf not in _sys_pf.path:
+                _sys_pf.path.insert(0, _pr_pf)
+            from app.database import SessionLocal as _PfSession
+            from app.modules.dev_runner.services.plan_execution_claim_service import (
+                get_active_claim_for_plan as _get_active_pf,
+            )
+            _pf_db = _PfSession()
+            try:
+                _existing_claim = _get_active_pf(_pf_db, plan_file_req)
+            finally:
+                _pf_db.close()
+            if _existing_claim and _existing_claim.runner_id and _existing_claim.runner_id != runner_id:
+                logger.info(
+                    f"[start_plan_runner] DB claim 충돌: plan={plan_file_req} "
+                    f"claim_id={_existing_claim.claim_id} state={_existing_claim.state} "
+                    f"claim_runner={_existing_claim.runner_id}"
+                )
+                return {
+                    "success": False,
+                    "reason": "claim_conflict",
+                    "message": (
+                        f"plan이 이미 실행 점유 중입니다 "
+                        f"(claim_id={_existing_claim.claim_id} state={_existing_claim.state})"
+                    ),
+                    "claim_id": _existing_claim.claim_id,
+                    "claim_state": _existing_claim.state,
+                    "runner_id": runner_id,
+                    "action": "run",
+                    "executed_at": datetime.now().isoformat(),
+                }
+        except Exception as _pf_claim_err:
+            logger.debug(f"[start_plan_runner] DB claim preflight 실패 (무시): {_pf_claim_err}")
+    # ────────────────────────────────────────────────────────────────
+
     # plan_file 기준 기존 워커 감지 (재실행 시 attach — runner_id는 달라도 같은 plan 실행 중)
     if plan_file_req and plan_file_req not in (PLAN_FILE_ALL, _LEGACY_ALL):
         from _dr_constants import RESULTS_KEY as _RESULTS_KEY_EARLY
@@ -1115,6 +1154,40 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:started_at", datetime.now().isoformat())
 
         logger.info(f"plan-runner started (PID: {process.pid}, log: {log_file})")
+
+        # ── Claim activate: queued → active ──────────────────────────────
+        if plan_file:
+            try:
+                import sys as _sys_claim
+                _pr_str = str(PROJECT_ROOT)
+                if _pr_str not in _sys_claim.path:
+                    _sys_claim.path.insert(0, _pr_str)
+                from app.database import SessionLocal as _ClaimSession
+                from app.modules.dev_runner.services.plan_execution_claim_service import (
+                    get_active_claim_for_plan as _get_active_claim,
+                    activate_claim as _activate_claim,
+                )
+                _claim_db = _ClaimSession()
+                try:
+                    _claim = _get_active_claim(_claim_db, plan_file)
+                    if _claim and _claim.state == "queued":
+                        _activate_claim(
+                            _claim_db,
+                            _claim.claim_id,
+                            runner_id=runner_id,
+                            pid=process.pid,
+                            branch=branch or f"runner/{runner_id}",
+                            worktree_path=str(worktree_path),
+                        )
+                        logger.info(
+                            f"[claim] activated: claim_id={_claim.claim_id} "
+                            f"runner_id={runner_id} pid={process.pid}"
+                        )
+                finally:
+                    _claim_db.close()
+            except Exception as _claim_err:
+                logger.warning(f"[claim] activate_claim 실패 (무시): {_claim_err}")
+        # ────────────────────────────────────────────────────────────────
 
         return {
             "success": True,

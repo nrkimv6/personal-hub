@@ -593,6 +593,30 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
     _cleanup_runner_ownership_snapshot(runner_id)
 
+    # ── Claim release (active/queued → released) ──────────────────────
+    if plan_file_val:
+        try:
+            if str(PROJECT_ROOT) not in sys.path:
+                sys.path.insert(0, str(PROJECT_ROOT))
+            from app.database import SessionLocal as _ClaimSession
+            from app.modules.dev_runner.services.plan_execution_claim_service import (
+                get_active_claim_for_plan as _get_active_claim,
+                release_claim as _release_claim,
+            )
+            _claim_db = _ClaimSession()
+            try:
+                _claim = _get_active_claim(_claim_db, plan_file_val)
+                if _claim:
+                    _release_claim(_claim_db, _claim.claim_id)
+                    logger.info(
+                        f"[claim] released: claim_id={_claim.claim_id} runner_id={runner_id} reason={reason}"
+                    )
+            finally:
+                _claim_db.close()
+        except Exception as _claim_err:
+            logger.warning(f"[claim] release 실패 (무시, runner_id={runner_id}): {_claim_err}")
+    # ────────────────────────────────────────────────────────────────
+
     logger.info(f"[cleanup] _cleanup_process_state completed: {runner_id} (reason={reason})")
 
     # cleanup complete ??clear flag

@@ -7,7 +7,7 @@ import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from sqlalchemy import text
 
@@ -56,6 +56,23 @@ def _decode_runner_value(value: Any) -> Any:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return value
+
+
+def _release_claim_safe(claim_id: Optional[str]) -> None:
+    """claim을 안전하게 release한다 — 실패 시 warning만 기록."""
+    if not claim_id:
+        return
+    try:
+        from app.database import SessionLocal
+        from app.modules.dev_runner.services.plan_execution_claim_service import release_claim as _rc
+        _db = SessionLocal()
+        try:
+            _rc(_db, claim_id)
+        finally:
+            _db.close()
+    except Exception as _e:
+        from app.config import logger as _logger
+        _logger.warning(f"[claim] release 실패 (무시): claim_id={claim_id} error={_e}")
 
 
 def _coerce_runner_metadata_state(*values: Any) -> bool | str:
@@ -493,6 +510,42 @@ class ExecutorService:
             if ignored_paths:
                 command["ignored_plans"] = ",".join(ignored_paths)
 
+        # ── Claim 생성 (plan_file 지정 시) ──────────────────────────────
+        _new_claim_id: Optional[str] = None
+        if request.plan_file:
+            try:
+                from app.database import SessionLocal as _ClaimSessionLocal
+                from app.modules.dev_runner.services.plan_execution_claim_service import (
+                    claim_plan as _claim_plan,
+                    ClaimConflictError as _ClaimConflictError,
+                )
+                _claim_db = _ClaimSessionLocal()
+                try:
+                    _new_claim = _claim_plan(
+                        _claim_db,
+                        request.plan_file,
+                        engine=resolved_engine,
+                        session_id=session_id,
+                        runner_id=runner_id,
+                    )
+                    _new_claim_id = _new_claim.claim_id
+                    logger.info(
+                        f"[claim] queued claim created: claim_id={_new_claim_id} plan={request.plan_file}"
+                    )
+                except _ClaimConflictError as _conflict:
+                    _ec = _conflict.existing_claim
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"plan already claimed: claim_id={_ec.claim_id} state={_ec.state}",
+                    )
+                finally:
+                    _claim_db.close()
+            except HTTPException:
+                raise
+            except Exception as _claim_err:
+                logger.warning(f"[claim] claim_plan 실패 (무시, 실행 계속): {_claim_err}")
+        # ────────────────────────────────────────────────────────────────
+
         try:
             # session_id를 Redis에 저장 (TTL 24h)
             await self.async_redis.set(
@@ -502,6 +555,7 @@ class ExecutorService:
             result_data = await self._send_command(command)
             if result_data is None:
                 await self._cleanup_runner_state(runner_id, reason="start_timeout")
+                _release_claim_safe(_new_claim_id)
                 raise HTTPException(
                     status_code=504,
                     detail="Command timeout - listener may not be responding"
@@ -509,6 +563,7 @@ class ExecutorService:
 
             if not result_data.get("success"):
                 message = result_data.get("message", "Failed to start")
+                _release_claim_safe(_new_claim_id)
                 if result_data.get("reason") == "reserved_status":
                     raise HTTPException(
                         status_code=409,
@@ -524,8 +579,9 @@ class ExecutorService:
                     detail=message,
                 )
 
-            # 기존 워커에 attach된 경우 → 기존 runner_id로 상태 반환
+            # 기존 워커에 attach된 경우 → 기존 runner_id로 상태 반환 (새 claim이 있으면 정리)
             if result_data.get("status") == "attached":
+                _release_claim_safe(_new_claim_id)
                 existing_id = result_data["runner_id"]
                 fields = await self._get_runner_fields(existing_id, "pid", "plan_file", "start_time", "execution_count", "engine")
                 existing_pid = fields.get("pid")

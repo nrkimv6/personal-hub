@@ -414,6 +414,30 @@ def _handle_running_process_heartbeat(runner_id: str, proc, redis_client: redis.
         )
         pass  # Redis 실패 시 무시 — zombie 체크는 계속 진행
 
+    # ── Claim heartbeat 갱신 ──────────────────────────────────────────
+    try:
+        _plan_file_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        if _plan_file_hb and _plan_file_hb not in ("*", "__all__"):
+            from _dr_constants import PROJECT_ROOT as _PR_HB
+            import sys as _sys_hb
+            if str(_PR_HB) not in _sys_hb.path:
+                _sys_hb.path.insert(0, str(_PR_HB))
+            from app.database import SessionLocal as _HbSession
+            from app.modules.dev_runner.services.plan_execution_claim_service import (
+                get_active_claim_for_plan as _get_active_claim_hb,
+                heartbeat_claim as _heartbeat_claim,
+            )
+            _hb_db = _HbSession()
+            try:
+                _active_claim = _get_active_claim_hb(_hb_db, _plan_file_hb)
+                if _active_claim and _active_claim.state == "active":
+                    _heartbeat_claim(_hb_db, _active_claim.claim_id)
+            finally:
+                _hb_db.close()
+    except Exception as _claim_hb_err:
+        logger.debug(f"[claim] heartbeat 갱신 실패 (무시, runner_id={runner_id}): {_claim_hb_err}")
+    # ────────────────────────────────────────────────────────────────
+
     _handle_zombie_heartbeat(runner_id, proc, redis_client, wf_manager)
     return "checked"
 
