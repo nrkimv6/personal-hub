@@ -81,6 +81,9 @@ def main(manager_cls, argv: list[str] | None = None) -> int:
     if args.action == "restart-frontend":
         ok = mgr.restart_frontend(public=args.public)
         return 0 if ok else 1
+    if args.action == "restart-api":
+        ok = mgr.restart_api(public=args.public)
+        return 0 if ok is not False else 1
 
     action_map[args.action]()
     return 0

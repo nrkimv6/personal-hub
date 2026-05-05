@@ -168,6 +168,8 @@ def test_restart_api_falls_back_to_status_when_runtime_fingerprint_missing(tmp_p
             return _Response(200, b"{}")
         if "runtime-fingerprint" in url:
             raise urllib.error.HTTPError(url, 404, "Not Found", hdrs=None, fp=None)
+        if "system/liveness" in url:
+            raise urllib.error.HTTPError(url, 404, "Not Found", hdrs=None, fp=None)
         if "system/status" in url:
             return _Response(200, b"{}")
         raise AssertionError(f"unexpected url: {url}")
@@ -278,3 +280,137 @@ def test_close_api_gate_port_mapping():
         "http://127.0.0.1:6100/__local/api-gate/close",
         "http://127.0.0.1:6101/__local/api-gate/close",
     ]
+
+
+def test_fetch_json_with_host_fallback_uses_localhost_when_127_fails():
+    calls: list[str] = []
+
+    def fake_urlopen(url, timeout=0, **kwargs):
+        calls.append(url)
+        if "127.0.0.1" in url:
+            raise urllib.error.URLError("loopback refused")
+        return _Response(200, b'{"status":"ok"}')
+
+    with patch.object(api_actions.urllib.request, "urlopen", side_effect=fake_urlopen):
+        result = api_actions._fetch_json_with_host_fallback(8001, "/api/v1/system/liveness")
+
+    assert result.data == {"status": "ok"}
+    assert result.url == "http://localhost:8001/api/v1/system/liveness"
+    assert result.fallback_used is True
+    assert calls == [
+        "http://127.0.0.1:8001/api/v1/system/liveness",
+        "http://localhost:8001/api/v1/system/liveness",
+    ]
+
+
+def test_restart_api_timeout_classifies_slow_app_import_as_non_hard_failure(tmp_path: Path):
+    log_dir = tmp_path / "logs" / "admin"
+    log_dir.mkdir(parents=True)
+    (log_dir / "service_runner_20260504_113328.log").write_text(
+        "\n".join(
+            [
+                "[2026-05-04 11:33:28] Monitor Page Service Starting",
+                "[2026-05-04 11:33:29] Importing app.config...",
+                "[2026-05-04 11:33:30] Importing app.main...",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manager = MagicMock()
+    manager.log_dir = log_dir
+    manager.find_pids_on_port.return_value = []
+    manager.read_pid_file.return_value = None
+    target = api_actions.RestartApiTarget(
+        api_port=8001,
+        app_mode="admin",
+        pid_suffix="_admin",
+        pid_file=tmp_path / ".pids" / "api_admin.pid",
+        service_name="MonitorPage-Admin",
+    )
+    result = api_actions._classify_restart_api_timeout(
+        manager,
+        target,
+        elapsed_seconds=60,
+        last_error="connection refused",
+    )
+
+    assert result.reason == "cold_import_in_progress"
+    assert result.hard_failure is False
+    assert result.evidence and result.evidence.endswith("service_runner_20260504_113328.log")
+
+
+def test_restart_api_timeout_classifies_startup_exception_as_hard_failure(tmp_path: Path):
+    log_dir = tmp_path / "logs" / "admin"
+    log_dir.mkdir(parents=True)
+    (log_dir / "service_runner_20260504_113328.log").write_text(
+        "\n".join(
+            [
+                "[2026-05-04 11:33:28] Monitor Page Service Starting",
+                "[2026-05-04 11:33:31] Service failed: RuntimeError('boom')",
+                "Traceback (most recent call last)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manager = MagicMock()
+    manager.log_dir = log_dir
+    target = api_actions.RestartApiTarget(
+        api_port=8001,
+        app_mode="admin",
+        pid_suffix="_admin",
+        pid_file=tmp_path / ".pids" / "api_admin.pid",
+        service_name="MonitorPage-Admin",
+    )
+
+    result = api_actions._classify_restart_api_timeout(
+        manager,
+        target,
+        elapsed_seconds=60,
+        last_error="connection refused",
+    )
+
+    assert result.reason == "startup_exception"
+    assert result.hard_failure is True
+
+
+def test_restart_api_cli_returns_nonzero_for_hard_restart_failure(monkeypatch):
+    from scripts.services.browser_worker_runtime import cli
+
+    class FakeManager:
+        def start(self) -> bool:
+            return True
+
+        def stop(self) -> bool:
+            return True
+
+        def restart(self) -> bool:
+            return True
+
+        def status(self) -> bool:
+            return True
+
+        def restart_api(self, public: bool = False) -> bool:
+            assert public is True
+            return False
+
+        def redis_status(self) -> bool:
+            return True
+
+        def redis_restart(self) -> bool:
+            return True
+
+        def redis_cleanup(self) -> bool:
+            return True
+
+        def restart_listener(self) -> bool:
+            return True
+
+        def restart_infra(self, target: str) -> bool:
+            return True
+
+        def restart_frontend(self, public: bool = False) -> bool:
+            return True
+
+    monkeypatch.setattr(cli, "assert_repo_root_checkout", lambda: None)
+
+    assert cli.main(FakeManager, ["restart-api", "--public"]) == 1
