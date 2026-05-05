@@ -137,6 +137,10 @@ class PlanFileResponse(BaseModel):
     branch: Optional[str] = None  # > branch: 헤더에서 추출한 impl 브랜치명
     worktree_path: Optional[str] = None  # > worktree: 헤더에서 추출한 워크트리 경로
     worktree_owner: Optional[str] = None  # > worktree-owner: 헤더에서 추출한 소유 plan 경로
+    execution_claim_id: Optional[str] = None
+    execution_claim_state: Optional[str] = None  # queued | active | released | stale
+    execution_claim_runner_id: Optional[str] = None
+    execution_claim_stale: bool = False
 
 
 class RegisteredPathResponse(BaseModel):

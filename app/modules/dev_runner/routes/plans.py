@@ -156,9 +156,41 @@ def _collect_plan_storage_roots_status_sync() -> PlanStorageRootStatusResponse:
 
 
 @router.get("/plans", response_model=List[PlanFileResponse])
-async def get_plans():
-    """plan 목록 조회 (등록된 경로 탐색)"""
-    return await asyncio.to_thread(plan_service.list_plans)
+async def get_plans(db: Session = Depends(get_db)):
+    """plan 목록 조회 (등록된 경로 탐색, active claim 정보 포함)"""
+    plans = await asyncio.to_thread(plan_service.list_plans)
+    try:
+        from app.modules.dev_runner.services.plan_execution_claim_service import get_active_claims_map
+        from datetime import datetime
+        plan_paths = [p.path for p in plans]
+        claims_map = get_active_claims_map(db, plan_paths)
+        now = datetime.now()
+        for plan in plans:
+            claim = claims_map.get(plan.path)
+            if claim:
+                stale = claim.lease_expires_at is not None and claim.lease_expires_at < now
+                plan.execution_claim_id = claim.claim_id
+                plan.execution_claim_state = claim.state
+                plan.execution_claim_runner_id = claim.runner_id
+                plan.execution_claim_stale = stale
+    except Exception as _e:
+        logger.warning(f"[claim] plan 목록 claim enrichment 실패 (무시): {_e}")
+    return plans
+
+
+@router.delete("/plans/{encoded_path}/claim")
+async def release_plan_claim(encoded_path: str, db: Session = Depends(get_db)):
+    """plan의 active/queued claim을 강제 해제 (관리자 액션)"""
+    plan_path = _decode_path(encoded_path)
+    from app.modules.dev_runner.services.plan_execution_claim_service import (
+        get_active_claim_for_plan,
+        release_claim,
+    )
+    claim = get_active_claim_for_plan(db, plan_path)
+    if not claim:
+        raise HTTPException(status_code=404, detail="active claim not found")
+    release_claim(db, claim.claim_id)
+    return {"ok": True, "claim_id": claim.claim_id}
 
 
 @router.get("/plans/ignored", response_model=List[PlanFileResponse])

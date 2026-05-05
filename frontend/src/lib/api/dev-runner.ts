@@ -110,6 +110,10 @@ export interface PlanFileResponse {
 	branch?: string | null;  // > branch: 헤더에서 추출한 impl 브랜치명
 	worktree_path?: string | null;  // > worktree: 헤더에서 추출한 워크트리 경로
 	worktree_owner?: string | null;  // > worktree-owner: 헤더에서 추출한 소유 plan 경로
+	execution_claim_id?: string | null;
+	execution_claim_state?: string | null;  // queued | active | released | stale
+	execution_claim_runner_id?: string | null;
+	execution_claim_stale?: boolean;
 }
 
 export interface RegisteredPathResponse {
@@ -477,7 +481,10 @@ export const devRunnerPlanApi = {
 		}),
 
 	generateSummary: (encodedPath: string) =>
-		devRunnerRequest<{ request_id: number }>(`/plans/${encodedPath}/summary`, { method: 'POST' })
+		devRunnerRequest<{ request_id: number }>(`/plans/${encodedPath}/summary`, { method: 'POST' }),
+
+	releaseClaim: (encodedPath: string) =>
+		devRunnerRequest<{ ok: boolean; claim_id: string }>(`/plans/${encodedPath}/claim`, { method: 'DELETE' })
 };
 
 // ============================================================

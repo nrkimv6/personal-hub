@@ -516,6 +516,12 @@
 							{/if}
 							<span class="shrink-0 font-mono {plan.progress != null && plan.progress.done === plan.progress.total && plan.progress.total > 0 ? 'text-emerald-600' : batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress != null && plan.progress.total > 0 ? `${plan.progress.done}/${plan.progress.total} (${Math.round((plan.progress.done / plan.progress.total) * 100)}%)` : '—'}</span>
 
+							{#if plan.execution_claim_state === 'active'}
+								<span class="shrink-0 px-1 py-0 rounded text-blue-600 bg-blue-100">실행중</span>
+							{:else if plan.execution_claim_state === 'queued'}
+								<span class="shrink-0 px-1 py-0 rounded text-amber-600 bg-amber-100">예약중</span>
+							{/if}
+
 							<div class="ml-auto flex shrink-0 items-center gap-1">
 								<!-- Done button: canDone OR lastPlanFile -->
 								{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}

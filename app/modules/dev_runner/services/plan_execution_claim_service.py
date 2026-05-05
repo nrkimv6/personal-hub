@@ -180,6 +180,25 @@ def get_active_claim_for_plan(db: Session, plan_path: str) -> Optional[PlanExecu
     )
 
 
+def get_active_claims_map(db: Session, plan_paths: list[str]) -> dict[str, PlanExecutionClaim]:
+    """plan_path 목록에 대한 active/queued claim을 dict{plan_path→claim}으로 반환."""
+    if not plan_paths:
+        return {}
+    rows = (
+        db.query(PlanExecutionClaim)
+        .filter(
+            PlanExecutionClaim.plan_path.in_(plan_paths),
+            PlanExecutionClaim.state.in_(["queued", "active"]),
+        )
+        .all()
+    )
+    result: dict[str, PlanExecutionClaim] = {}
+    for row in rows:
+        if row.plan_path not in result or row.claimed_at > result[row.plan_path].claimed_at:
+            result[row.plan_path] = row
+    return result
+
+
 class ClaimConflictError(Exception):
     def __init__(self, message: str, existing_claim: PlanExecutionClaim):
         super().__init__(message)
