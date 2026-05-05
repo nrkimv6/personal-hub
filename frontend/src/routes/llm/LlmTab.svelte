@@ -3,7 +3,7 @@
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMBootstrapResponse, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap, type ProviderInfo } from '$lib/api';
+	import { formatLLMBlockReason, llmApi, type LLMBootstrapResponse, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap, type ProviderInfo, type LLMProfileConfig, type LLMScheduleProfilePolicyItem, type LLMScheduleProfilePolicyWindow } from '$lib/api';
 	import { toast } from '$lib/stores/toast';
 	import { confirm } from '$lib/stores/confirm';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
@@ -50,13 +50,14 @@
 	let selectedIds = $state<number[]>([]);
 	let selectAll = $state(false);
 
-	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능), claude-sessions(세션 뷰어)
-	type Tab = 'queue' | 'history' | 'create' | 'performance' | 'claude-sessions';
+	// 탭: queue(대기열), history(이력), create(수동생성), profilePolicy(정책), performance(성능), claude-sessions(세션 뷰어)
+	type Tab = 'queue' | 'history' | 'create' | 'profilePolicy' | 'performance' | 'claude-sessions';
 	let activeTab = $state<Tab>('queue');
 	const llmTabs = [
 		{ id: 'queue', label: '대기열', shortLabel: '대기' },
 		{ id: 'history', label: '이력', shortLabel: '이력' },
 		{ id: 'create', label: '수동 요청 생성', shortLabel: '생성' },
+		{ id: 'profilePolicy', label: 'Profile 정책', shortLabel: '정책' },
 		{ id: 'performance', label: '성능 분석', shortLabel: '성능' },
 		{ id: 'claude-sessions', label: 'Claude 세션', shortLabel: '세션' }
 	];
@@ -91,8 +92,79 @@
 	let createError = $state<string | null>(null);
 	let createSuccess = $state(false);
 
+	let profilePolicies = $state<LLMScheduleProfilePolicyItem[]>([]);
+	let policyProfiles = $state<LLMProfileConfig[]>([]);
+	let policyLoading = $state(false);
+	let policySaving = $state(false);
+	let policyError = $state<string | null>(null);
+	let policyForm = $state({
+		target_type: 'plan_archive_analyze',
+		engine: 'claude',
+		profile_name: '',
+		enabled: true,
+		priority: 0,
+		allowed_windows_text: '',
+		quiet_windows_text: ''
+	});
+
 	function errorMessage(e: unknown): string {
 		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
+
+	function parsePolicyWindows(value: string): LLMScheduleProfilePolicyWindow[] {
+		const trimmed = value.trim();
+		if (!trimmed) return [];
+		if (trimmed.startsWith('[')) {
+			return JSON.parse(trimmed) as LLMScheduleProfilePolicyWindow[];
+		}
+		return trimmed.split(/\r?\n/)
+			.map(line => line.trim())
+			.filter(Boolean)
+			.map(line => {
+				const [timeRange, daysPart] = line.split(/\s+/);
+				const [start, end] = timeRange.split('-');
+				if (!start || !end) {
+					throw new Error('window 형식은 HH:MM-HH:MM 입니다');
+				}
+				const window: LLMScheduleProfilePolicyWindow = { start, end };
+				if (daysPart) {
+					window.days = daysPart.split(',').map(day => Number(day.trim()));
+				}
+				return window;
+			});
+	}
+
+	function formatPolicyWindows(windows: LLMScheduleProfilePolicyWindow[]): string {
+		if (!windows.length) return '-';
+		return windows.map(window => {
+			const days = window.days?.length ? ` ${window.days.join(',')}` : '';
+			return `${window.start}-${window.end}${days}`;
+		}).join(', ');
+	}
+
+	function formatPolicyScope(policy: LLMScheduleProfilePolicyItem): string {
+		if (policy.schedule_id) return `schedule #${policy.schedule_id}`;
+		return policy.target_type || 'global';
+	}
+
+	function getPolicyBlockReasonLabel(reason: string): string {
+		return formatLLMBlockReason(reason);
+	}
+
+	function profileOptionsForEngine(engine: string): LLMProfileConfig[] {
+		return policyProfiles.filter(profile => profile.engine === engine);
+	}
+
+	function policyEngines(): string[] {
+		const engines = Array.from(new Set(policyProfiles.map(profile => profile.engine)));
+		return engines.length > 0 ? engines : [policyForm.engine];
+	}
+
+	function ensurePolicyFormProfile() {
+		const options = profileOptionsForEngine(policyForm.engine);
+		if (!policyForm.profile_name && options.length > 0) {
+			policyForm.profile_name = options[0].name;
+		}
 	}
 
 	// Provider 목록 (API에서 동적 로드)
@@ -576,6 +648,84 @@
 		}
 	}
 
+	async function fetchPolicyMatrix() {
+		policyLoading = true;
+		policyError = null;
+		try {
+			const [policyRes, profilesRes] = await Promise.all([
+				llmApi.listScheduleProfilePolicies(),
+				llmApi.listProfiles()
+			]);
+			profilePolicies = policyRes.policies;
+			policyProfiles = profilesRes.profiles;
+			if (!policyProfiles.some(profile => profile.engine === policyForm.engine)) {
+				policyForm.engine = profilesRes.supported_engines[0] || policyProfiles[0]?.engine || policyForm.engine;
+				policyForm.profile_name = '';
+			}
+			ensurePolicyFormProfile();
+		} catch (e) {
+			policyError = errorMessage(e);
+		} finally {
+			policyLoading = false;
+		}
+	}
+
+	async function savePolicyMatrix(nextPolicies: LLMScheduleProfilePolicyItem[]) {
+		policySaving = true;
+		policyError = null;
+		try {
+			const saved = await llmApi.updateScheduleProfilePolicies(nextPolicies);
+			profilePolicies = saved.policies;
+			toast.success('Profile 정책 저장 완료');
+		} catch (e) {
+			policyError = errorMessage(e);
+			toast.error('Profile 정책 저장 실패: ' + errorMessage(e));
+		} finally {
+			policySaving = false;
+		}
+	}
+
+	async function addPolicyFromForm() {
+		const targetType = policyForm.target_type.trim();
+		if (!targetType) {
+			policyError = 'target_type을 입력해주세요.';
+			return;
+		}
+		if (!policyForm.profile_name) {
+			policyError = 'profile을 선택해주세요.';
+			return;
+		}
+		try {
+			const policy: LLMScheduleProfilePolicyItem = {
+				target_type: targetType,
+				schedule_id: null,
+				engine: policyForm.engine,
+				profile_name: policyForm.profile_name,
+				enabled: policyForm.enabled,
+				priority: Number(policyForm.priority) || 0,
+				allowed_windows: parsePolicyWindows(policyForm.allowed_windows_text),
+				quiet_windows: parsePolicyWindows(policyForm.quiet_windows_text)
+			};
+			const nextPolicies = [
+				...profilePolicies.filter(existing => !(
+					(existing.schedule_id || null) === null &&
+					(existing.target_type || '') === policy.target_type &&
+					existing.engine === policy.engine &&
+					existing.profile_name === policy.profile_name
+				)),
+				policy
+			];
+			await savePolicyMatrix(nextPolicies);
+		} catch (e) {
+			policyError = errorMessage(e);
+		}
+	}
+
+	async function removePolicy(policy: LLMScheduleProfilePolicyItem) {
+		const nextPolicies = profilePolicies.filter(existing => existing !== policy);
+		await savePolicyMatrix(nextPolicies);
+	}
+
 	async function openModal(request: LLMRequest) {
 		selectedRequest = request;
 		showModal = true;
@@ -683,6 +833,13 @@
 
 	function getPendingPauseInfo(request: LLMRequest): { label: string; title: string; tone: 'quota' | 'window' } | null {
 		if (request.status !== 'pending') return null;
+		if (request.pending_block_reason) {
+			return {
+				label: formatLLMBlockReason(request.pending_block_reason),
+				title: request.pending_block_reason,
+				tone: 'quota'
+			};
+		}
 		const windowPause = quotaStatus.__execution_window;
 		if (windowPause?.paused) {
 			const wait = windowPause.remaining_seconds != null ? formatWaitTime(windowPause.remaining_seconds) : null;
@@ -725,6 +882,9 @@
 		}
 		if (tab === 'create') {
 			void loadCreateMeta();
+		}
+		if (tab === 'profilePolicy') {
+			void fetchPolicyMatrix();
 		}
 		if (tab === 'performance') {
 			void loadPerformanceTabComponent();
@@ -1338,6 +1498,123 @@
 						</button>
 					</div>
 				</div>
+			</div>
+		</div>
+	{:else if activeTab === 'profilePolicy'}
+		<div class="space-y-4">
+			<div class="flex items-center justify-between gap-3">
+				<div>
+					<h3 class="text-base font-semibold text-foreground">Schedule x Profile 정책</h3>
+					<p class="text-sm text-muted-foreground">target_type 별로 허용할 profile과 시간대를 지정합니다.</p>
+				</div>
+				<Button variant="secondary" size="sm" onclick={fetchPolicyMatrix} disabled={policyLoading}>
+					{policyLoading ? '로딩 중...' : '새로고침'}
+				</Button>
+			</div>
+
+			{#if policyError}
+				<div class="rounded-lg border border-error/30 bg-error-light px-4 py-3 text-sm text-error">
+					{policyError}
+				</div>
+			{/if}
+
+			<div class="card p-5">
+				<div class="grid gap-4 md:grid-cols-5">
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">target_type</label>
+						<input type="text" bind:value={policyForm.target_type} class="w-full px-3 py-2 border border-border rounded-lg" />
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">Engine</label>
+						<select bind:value={policyForm.engine} onchange={() => { policyForm.profile_name = ''; ensurePolicyFormProfile(); }} class="w-full px-3 py-2 border border-border rounded-lg">
+							{#each policyEngines() as engine}
+								<option value={engine}>{engine}</option>
+							{/each}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">Profile</label>
+						<select bind:value={policyForm.profile_name} class="w-full px-3 py-2 border border-border rounded-lg">
+							{#each profileOptionsForEngine(policyForm.engine) as profile}
+								<option value={profile.name}>{profile.name}</option>
+							{/each}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">Priority</label>
+						<input type="number" bind:value={policyForm.priority} class="w-full px-3 py-2 border border-border rounded-lg" />
+					</div>
+					<div class="flex items-end">
+						<label class="flex items-center gap-2 text-sm text-foreground">
+							<input type="checkbox" bind:checked={policyForm.enabled} class="h-4 w-4" />
+							사용
+						</label>
+					</div>
+				</div>
+
+				<div class="mt-4 grid gap-4 md:grid-cols-2">
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">허용 window</label>
+						<textarea bind:value={policyForm.allowed_windows_text} rows="3" placeholder="09:00-18:00 1,2,3,4,5" class="w-full px-3 py-2 border border-border rounded-lg resize-none"></textarea>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">차단 window</label>
+						<textarea bind:value={policyForm.quiet_windows_text} rows="3" placeholder="00:00-06:00" class="w-full px-3 py-2 border border-border rounded-lg resize-none"></textarea>
+					</div>
+				</div>
+
+				<div class="mt-4 flex justify-end">
+					<Button variant="primary" size="sm" onclick={addPolicyFromForm} disabled={policySaving || policyLoading}>
+						{policySaving ? '저장 중...' : '정책 추가/갱신'}
+					</Button>
+				</div>
+			</div>
+
+			<div class="card overflow-hidden">
+				<table class="w-full text-sm">
+					<thead class="bg-muted/50 text-muted-foreground">
+						<tr>
+							<th class="px-4 py-3 text-left font-medium">Scope</th>
+							<th class="px-4 py-3 text-left font-medium">Engine/Profile</th>
+							<th class="px-4 py-3 text-left font-medium">상태</th>
+							<th class="px-4 py-3 text-left font-medium">Windows</th>
+							<th class="px-4 py-3 text-right font-medium">작업</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-border">
+						{#if policyLoading}
+							<tr>
+								<td colspan="5" class="px-4 py-6 text-center text-muted-foreground">정책 로딩 중...</td>
+							</tr>
+						{:else if profilePolicies.length === 0}
+							<tr>
+								<td colspan="5" class="px-4 py-6 text-center text-muted-foreground">등록된 정책이 없습니다.</td>
+							</tr>
+						{:else}
+							{#each profilePolicies as policy}
+								<tr>
+									<td class="px-4 py-3 font-medium text-foreground">{formatPolicyScope(policy)}</td>
+									<td class="px-4 py-3 text-muted-foreground">{policy.engine}/{policy.profile_name}</td>
+									<td class="px-4 py-3">
+										<span class="rounded-full px-2 py-1 text-xs {policy.enabled ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}">
+											{policy.enabled ? '사용' : getPolicyBlockReasonLabel('schedule_policy_off')}
+										</span>
+										<span class="ml-2 text-xs text-muted-foreground">P{policy.priority}</span>
+									</td>
+									<td class="px-4 py-3 text-muted-foreground">
+										<div>허용: {formatPolicyWindows(policy.allowed_windows)}</div>
+										<div>차단: {formatPolicyWindows(policy.quiet_windows)}</div>
+									</td>
+									<td class="px-4 py-3 text-right">
+										<Button variant="ghost" size="sm" onclick={() => removePolicy(policy)} disabled={policySaving}>
+											삭제
+										</Button>
+									</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
 			</div>
 		</div>
 	{:else if activeTab === 'performance'}
