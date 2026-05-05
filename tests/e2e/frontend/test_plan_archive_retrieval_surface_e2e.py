@@ -169,7 +169,7 @@ def test_archive_retrieval_surface_renders_search_evidence_and_metrics(
     expect(page.get_by_text("14d follow-up")).to_be_visible()
     expect(page.get_by_text("50%")).to_be_visible()
     expect(page.get_by_text("Top file refs")).to_be_visible()
-    expect(page.get_by_text("frontend/src/routes/plans/ArchiveTab.svelte").first()).to_be_visible()
+    expect(page.get_by_text("frontend/src/routes/plans/ArchiveTab.svelte").first).to_be_visible()
     expect(page.get_by_text("누락 후보 파일군")).to_be_visible()
 
     page.get_by_placeholder("키워드, 파일명, 함수명").fill("evidence")
@@ -197,7 +197,7 @@ def test_archive_index_apply_requires_dry_run_result(
     assert calls["index_apply"] == 0
 
     page.get_by_role("button", name="dry-run").click()
-    expect(page.get_by_text("indexed 9")).to_be_visible()
+    expect(page.get_by_text("indexed 9", exact=True)).to_be_visible()
     expect(apply_button).to_be_enabled()
 
     apply_button.click()
