@@ -196,6 +196,10 @@
 		error?: string | null;
 		display_plan_name?: string | null;
 		execution_count?: number | null;
+		worktree_exists?: boolean | 'unknown';
+		branch_exists?: boolean | 'unknown';
+		branch_merged_to_main?: boolean | 'unknown';
+		metadata_checked_at?: string | null;
 	}
 
 	interface RunnerSource {
@@ -220,6 +224,10 @@
 		visible?: boolean;
 		display_plan_name?: string | null;
 		execution_count?: number | null;
+		worktree_exists?: boolean | 'unknown';
+		branch_exists?: boolean | 'unknown';
+		branch_merged_to_main?: boolean | 'unknown';
+		metadata_checked_at?: string | null;
 	}
 
 	function createRunnerTab(runner: RunnerSource): RunnerTab {
@@ -241,6 +249,10 @@
 			error: runner.error ?? undefined,
 			display_plan_name: runner.display_plan_name ?? null,
 			execution_count: runner.execution_count ?? null,
+			worktree_exists: runner.worktree_exists ?? 'unknown',
+			branch_exists: runner.branch_exists ?? 'unknown',
+			branch_merged_to_main: runner.branch_merged_to_main ?? 'unknown',
+			metadata_checked_at: runner.metadata_checked_at ?? 'unknown',
 		};
 	}
 
@@ -352,6 +364,10 @@
 			exit_reason: runner.exit_reason ?? tab.exit_reason ?? undefined,
 			error: runner.error ?? tab.error ?? undefined,
 			execution_count: runner.execution_count ?? tab.execution_count ?? null,
+			worktree_exists: runner.worktree_exists ?? tab.worktree_exists ?? 'unknown',
+			branch_exists: runner.branch_exists ?? tab.branch_exists ?? 'unknown',
+			branch_merged_to_main: runner.branch_merged_to_main ?? tab.branch_merged_to_main ?? 'unknown',
+			metadata_checked_at: runner.metadata_checked_at ?? tab.metadata_checked_at ?? 'unknown',
 		};
 	}
 
@@ -1057,6 +1073,10 @@
 										error={tab.error}
 										displayPlanName={tab.display_plan_name}
 										executionCount={tab.execution_count}
+										worktreeExists={tab.worktree_exists}
+										branchExists={tab.branch_exists}
+										branchMergedToMain={tab.branch_merged_to_main}
+										metadataCheckedAt={tab.metadata_checked_at}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
 										onRestart={() => handleRestart(tab)}

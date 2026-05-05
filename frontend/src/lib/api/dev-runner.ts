@@ -39,6 +39,10 @@ export interface RunStatusResponse {
 	runner_id: string | null;
 	execution_count?: number | null;
 	attached?: boolean;
+	worktree_exists?: boolean | 'unknown';
+	branch_exists?: boolean | 'unknown';
+	branch_merged_to_main?: boolean | 'unknown';
+	metadata_checked_at?: string;
 }
 
 export interface RunnerListItem {
@@ -60,6 +64,10 @@ export interface RunnerListItem {
 	error?: string | null;
 	execution_count?: number | null;
 	display_plan_name?: string | null;
+	worktree_exists?: boolean | 'unknown';
+	branch_exists?: boolean | 'unknown';
+	branch_merged_to_main?: boolean | 'unknown';
+	metadata_checked_at?: string;
 }
 
 export interface PlanProgressResponse {

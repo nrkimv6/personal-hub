@@ -3,9 +3,11 @@
 import json as _json
 from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime
-from typing import Literal, Optional, List
+from typing import Literal, Optional, List, Union
 
 SUPPORTED_RUN_ENGINES = {"claude", "gemini", "codex", "cc-codex"}
+
+RunnerMetadataState = Union[bool, Literal["unknown"]]
 
 
 # ========== 스키마 ==========
@@ -74,6 +76,10 @@ class RunStatusResponse(BaseModel):
     session_id: Optional[str] = None  # fused 세션 ID (UUID4 형식)
     exit_reason: Optional[str] = None  # 종료 사유 (completed/no_progress/rate_limit/error 등)
     error: Optional[str] = None  # 종료 에러 요약
+    worktree_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    branch_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    branch_merged_to_main: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    metadata_checked_at: str = Field("unknown", description="plan-runner snapshot check timestamp or unknown when absent")
 
 
 class RunnerListItem(BaseModel):
@@ -97,6 +103,10 @@ class RunnerListItem(BaseModel):
     stop_stage: Optional[str] = None  # stopped 세부 단계 (pre_review|post_review|unknown)
     error: Optional[str] = None  # 종료 에러 요약
     display_plan_name: Optional[str] = None  # UI fallback 표시명 (plan_file 소실 시 recent-meta/log/branch에서 복원)
+    worktree_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    branch_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    branch_merged_to_main: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    metadata_checked_at: str = Field("unknown", description="plan-runner snapshot check timestamp or unknown when absent")
 
 
 class PlanProgressResponse(BaseModel):

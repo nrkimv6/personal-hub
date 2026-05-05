@@ -24,6 +24,10 @@
 		branch?: string | null;
 		exit_reason?: string | null;
 		display_plan_name?: string | null;
+		worktree_exists?: boolean | 'unknown';
+		branch_exists?: boolean | 'unknown';
+		branch_merged_to_main?: boolean | 'unknown';
+		metadata_checked_at?: string | null;
 	}
 
 	function resolveFullLabel(runner: RunnerTab): string {
@@ -46,6 +50,14 @@
 		return runner.exit_reason ? `${exitDisplay.statusIcon} (${runner.exit_reason})` : exitDisplay.statusIcon;
 	}
 
+	function resolveStaleLabel(runner: RunnerTab): string | null {
+		if (runner.worktree_exists === false) return '삭제된 worktree';
+		if (runner.branch_exists === false) return 'branch 없음';
+		if (runner.branch_merged_to_main === true) return 'main 반영됨';
+		if (!runner.running && runner.worktree_exists === 'unknown') return '과거 기록';
+		return null;
+	}
+
 	function resolveMetaTitle(runner: RunnerTab, index: number): string {
 		const rows = [
 			`runner: ${runner.id}`,
@@ -55,6 +67,10 @@
 			runner.plan_file ? `file: ${runner.plan_file}` : null,
 			runner.engine ? `engine: ${runner.engine}` : null,
 			runner.branch ? `branch: ${runner.branch}` : null,
+			`worktree_exists: ${runner.worktree_exists ?? 'unknown'}`,
+			`branch_exists: ${runner.branch_exists ?? 'unknown'}`,
+			`branch_merged_to_main: ${runner.branch_merged_to_main ?? 'unknown'}`,
+			`metadata_checked_at: ${runner.metadata_checked_at ?? 'unknown'}`,
 		];
 		return rows.filter(Boolean).join('\n');
 	}
@@ -287,6 +303,13 @@
 					<!-- engine (sm 이상) -->
 					{#if runner.engine}
 						<span class="hidden sm:block text-[10px] text-muted-foreground shrink-0 font-mono">{runner.engine}</span>
+					{/if}
+
+					{@const staleLabel = resolveStaleLabel(runner)}
+					{#if staleLabel}
+						<span class="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground md:inline-flex">
+							{staleLabel}
+						</span>
 					{/if}
 
 					<!-- Stop/Kill/Close 아이콘 버튼 -->

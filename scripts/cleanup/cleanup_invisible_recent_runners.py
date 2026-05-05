@@ -30,6 +30,7 @@ RUNNER_KEY_SUFFIXES = (
     "test_source", "trigger", "exit_reason", "subprocess_heartbeat",
     "pid_create_time", "process_cmdline_hash",
     "reflect_final_path", "accepted_at", "accepted_source", "started_at",
+    "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at",
 )
 
 

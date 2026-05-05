@@ -57,6 +57,7 @@ RUNNER_KEY_SUFFIXES = (
     "accepted_at", "accepted_source", "started_at",
     # profile 관련 키 (신규 4개)
     "profile", "profile_env_key", "profile_config_dir", "profile_extra_env",
+    "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at",
 )
 SESSION_ID_KEY_PREFIX = "plan-runner:session:"  # fused 세션 ID 저장 키 접두사 (runner_id → session_id 매핑)
 

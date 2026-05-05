@@ -113,6 +113,36 @@ class TestBuildStatusPayload:
         assert payload is not None
         assert payload["trigger"] is None
 
+    def test_build_status_payload_includes_stale_metadata_fields(self, event_service, sync_redis):
+        """R: plan-runner snapshot stale metadata를 SSE payload에 포함한다."""
+        runner_id = "metadata01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_exists", "false")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_exists", "true")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_merged_to_main", "true")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:metadata_checked_at", "2026-05-05T21:35:00")
+
+        payload = build_status_payload(event_service._sync, runner_id)
+
+        assert payload is not None
+        assert payload["worktree_exists"] is False
+        assert payload["branch_exists"] is True
+        assert payload["branch_merged_to_main"] is True
+        assert payload["metadata_checked_at"] == "2026-05-05T21:35:00"
+
+    def test_build_status_payload_metadata_defaults_unknown(self, event_service, sync_redis):
+        """B: snapshot stale metadata가 없는 구버전 runner는 unknown으로 보낸다."""
+        runner_id = "metadata02"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+
+        payload = build_status_payload(event_service._sync, runner_id)
+
+        assert payload is not None
+        assert payload["worktree_exists"] == "unknown"
+        assert payload["branch_exists"] == "unknown"
+        assert payload["branch_merged_to_main"] == "unknown"
+        assert payload["metadata_checked_at"] == "unknown"
+
     def test_build_status_payload_includes_visible_field(self, event_service, sync_redis):
         """R: trigger=user면 visible=True, trigger=api면 visible=False."""
         rid_user = "visible-user-01"

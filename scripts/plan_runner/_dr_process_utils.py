@@ -60,6 +60,10 @@ def _build_recent_runner_meta(
         ("log_file_path", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")),
         ("stream_log_path", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")),
         ("exit_reason", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")),
+        ("worktree_exists", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_exists")),
+        ("branch_exists", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_exists")),
+        ("branch_merged_to_main", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_merged_to_main")),
+        ("metadata_checked_at", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:metadata_checked_at")),
     ):
         if value is not None:
             meta[field] = value

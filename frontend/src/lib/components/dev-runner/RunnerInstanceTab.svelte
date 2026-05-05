@@ -30,6 +30,10 @@
 		error?: string | null;
 		displayPlanName?: string | null;
 		executionCount?: number | null;
+		worktreeExists?: boolean | 'unknown';
+		branchExists?: boolean | 'unknown';
+		branchMergedToMain?: boolean | 'unknown';
+		metadataCheckedAt?: string | null;
 		onStop: () => void;
 		onClose: () => void;
 		onRestart?: () => void;
@@ -37,7 +41,7 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, exitReason = null, error = null, displayPlanName = null, executionCount = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, exitReason = null, error = null, displayPlanName = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -229,6 +233,14 @@
 		return 'bg-green-100 text-green-700 border-green-200';
 	}
 
+	function staleBadgeLabel(): string | null {
+		if (worktreeExists === false) return '삭제된 worktree';
+		if (branchExists === false) return 'branch 없음';
+		if (branchMergedToMain === true) return 'main 반영됨';
+		if (!running && worktreeExists === 'unknown') return '과거 실행 기록';
+		return null;
+	}
+
 	let metaTitle = $derived.by(() => {
 		const rows = [
 			displayPlanName ? `plan: ${displayPlanName}` : null,
@@ -237,7 +249,11 @@
 			`runner: ${runnerId}`,
 			engine ? `engine: ${engine}` : null,
 			branch ? `branch: ${branch}` : null,
-			worktreePath ? `worktree: ${worktreePath}` : null
+			worktreePath ? `worktree: ${worktreePath}` : null,
+			`worktree_exists: ${worktreeExists}`,
+			`branch_exists: ${branchExists}`,
+			`branch_merged_to_main: ${branchMergedToMain}`,
+			`metadata_checked_at: ${metadataCheckedAt ?? 'unknown'}`
 		];
 		return rows.filter(Boolean).join('\n');
 	});
@@ -282,6 +298,13 @@
 				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700 animate-pulse">자동 수정 중</span>
 			{:else if mergeStatus === 'resolving'}
 				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
+			{/if}
+
+			{@const staleLabel = staleBadgeLabel()}
+			{#if staleLabel}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground" title={metaTitle}>
+					{staleLabel}
+				</span>
 			{/if}
 
 			{#if elapsed}
@@ -398,7 +421,7 @@
 		</div>
 	{/if}
 
-	{#if !running && branch && worktreePath && !['conflict', 'test_failed', 'error', 'resolving', 'fixing', 'approval_required'].includes(mergeStatus ?? '')}
+	{#if !running && branch && worktreePath && worktreeExists !== false && branchExists !== false && !['conflict', 'test_failed', 'error', 'resolving', 'fixing', 'approval_required'].includes(mergeStatus ?? '')}
 		<div class="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b border-border text-xs">
 			<button
 				class="px-2 py-0.5 rounded border border-purple-300 text-purple-700 hover:bg-purple-100 disabled:opacity-50 transition-colors"
@@ -408,6 +431,16 @@
 			>
 				{directMerging ? '머지 중...' : '직접 머지'}
 			</button>
+		</div>
+	{/if}
+
+	{#if !running && worktreeExists === false}
+		<div class="px-3 py-1.5 text-xs text-muted-foreground bg-muted/50 border-b border-border">
+			삭제된 worktree의 과거 실행 기록입니다. 직접 머지는 새 worktree에서 다시 실행해야 합니다.
+		</div>
+	{:else if !running && branchExists === false}
+		<div class="px-3 py-1.5 text-xs text-muted-foreground bg-muted/50 border-b border-border">
+			branch가 남아 있지 않은 과거 실행 기록입니다.
 		</div>
 	{/if}
 

@@ -34,7 +34,40 @@ STATUS_FIELDS: tuple[str, ...] = (
     "stop_stage",
     "error",
     "execution_count",
+    "worktree_exists",
+    "branch_exists",
+    "branch_merged_to_main",
+    "metadata_checked_at",
 )
+
+
+def _decode_text(value):
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _coerce_metadata_state(value):
+    if isinstance(value, bool):
+        return value
+    text = _decode_text(value)
+    if text is None:
+        return "unknown"
+    normalized = str(text).strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    return "unknown"
+
+
+def _coerce_metadata_checked_at(value) -> str:
+    text = _decode_text(value)
+    if text is None or str(text).strip() == "":
+        return "unknown"
+    return str(text)
 
 
 def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
@@ -44,6 +77,10 @@ def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
         data = dict(zip(STATUS_FIELDS, values))
         data["runner_id"] = runner_id
         data["visible"] = is_visible_runner(data.get("trigger"), runner_id)
+        data["worktree_exists"] = _coerce_metadata_state(data.get("worktree_exists"))
+        data["branch_exists"] = _coerce_metadata_state(data.get("branch_exists"))
+        data["branch_merged_to_main"] = _coerce_metadata_state(data.get("branch_merged_to_main"))
+        data["metadata_checked_at"] = _coerce_metadata_checked_at(data.get("metadata_checked_at"))
         # plan_file이 None(Redis 키 미설정)이면 None 반환 — sentinel fallback 제거
         if not data.get("plan_file"):
             data["plan_file"] = None

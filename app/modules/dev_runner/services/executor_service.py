@@ -7,7 +7,7 @@ import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 from sqlalchemy import text
 
@@ -50,6 +50,40 @@ __all__ = [
     "RECENT_RUNNERS_TTL", "RUNNER_KEY_SUFFIXES",
     "COMMANDS_KEY", "RESULTS_KEY", "COMMAND_TIMEOUT",
 ]
+
+
+def _decode_runner_value(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _coerce_runner_metadata_state(*values: Any) -> bool | str:
+    for value in values:
+        decoded = _decode_runner_value(value)
+        if decoded is None:
+            continue
+        if isinstance(decoded, bool):
+            return decoded
+        normalized = str(decoded).strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no"}:
+            return False
+        if normalized == "unknown" or normalized == "":
+            continue
+    return "unknown"
+
+
+def _coerce_runner_metadata_checked_at(*values: Any) -> str:
+    for value in values:
+        decoded = _decode_runner_value(value)
+        if decoded is None:
+            continue
+        text = str(decoded).strip()
+        if text and text.lower() != "unknown":
+            return text
+    return "unknown"
 
 
 class ExecutorService:
@@ -621,7 +655,8 @@ class ExecutorService:
         """특정 runner 상태 조회 (per-runner Redis 키 기반)"""
         data = await self._get_runner_fields(
             runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count",
-            "exit_reason", "error"
+            "exit_reason", "error",
+            "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at"
         )
         status = data["status"]
         pid_str = data["pid"]
@@ -631,6 +666,10 @@ class ExecutorService:
         execution_count_raw = data["execution_count"]
         exit_reason = data["exit_reason"]
         error = data["error"]
+        worktree_exists = _coerce_runner_metadata_state(data["worktree_exists"])
+        branch_exists = _coerce_runner_metadata_state(data["branch_exists"])
+        branch_merged_to_main = _coerce_runner_metadata_state(data["branch_merged_to_main"])
+        metadata_checked_at = _coerce_runner_metadata_checked_at(data["metadata_checked_at"])
         running = status == "running"
 
         running, pid_str = await self._correct_pid_state(runner_id, status, pid_str, caller="get_runner_status")
@@ -661,6 +700,10 @@ class ExecutorService:
             session_id=session_id,
             exit_reason=exit_reason,
             error=error,
+            worktree_exists=worktree_exists,
+            branch_exists=branch_exists,
+            branch_merged_to_main=branch_merged_to_main,
+            metadata_checked_at=metadata_checked_at,
         )
 
     async def get_all_runners(self) -> list:
@@ -694,7 +737,9 @@ class ExecutorService:
                     d = await self._get_runner_fields(rid, "status", "pid", "plan_file", "engine",
                                                       "start_time", "execution_count", "worktree_path", "merge_status",
                                                       "merge_reason", "merge_message",
-                                                      "branch", "trigger", "exit_reason", "stop_stage", "error")
+                                                      "branch", "trigger", "exit_reason", "stop_stage", "error",
+                                                      "worktree_exists", "branch_exists",
+                                                      "branch_merged_to_main", "metadata_checked_at")
                     status = d["status"]
                     pid_str = d["pid"]
                     plan_file = d["plan_file"]
@@ -721,6 +766,16 @@ class ExecutorService:
                     exit_reason = d["exit_reason"] or recent_meta.get("exit_reason")
                     stop_stage = d["stop_stage"]
                     error = d["error"]
+                    worktree_exists = _coerce_runner_metadata_state(d["worktree_exists"], recent_meta.get("worktree_exists"))
+                    branch_exists = _coerce_runner_metadata_state(d["branch_exists"], recent_meta.get("branch_exists"))
+                    branch_merged_to_main = _coerce_runner_metadata_state(
+                        d["branch_merged_to_main"],
+                        recent_meta.get("branch_merged_to_main"),
+                    )
+                    metadata_checked_at = _coerce_runner_metadata_checked_at(
+                        d["metadata_checked_at"],
+                        recent_meta.get("metadata_checked_at"),
+                    )
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
                     start_time = None
@@ -782,6 +837,10 @@ class ExecutorService:
                         stop_stage=stop_stage,
                         error=error,
                         display_plan_name=display_plan_name,
+                        worktree_exists=worktree_exists,
+                        branch_exists=branch_exists,
+                        branch_merged_to_main=branch_merged_to_main,
+                        metadata_checked_at=metadata_checked_at,
                     ))
                 return result
             finally:
