@@ -8,6 +8,14 @@ from pydantic import BaseModel, Field, validator
 
 from app.modules.claude_worker.services import provider_registry
 
+LLM_PENDING_BLOCK_REASONS = {
+    "all_paused_by_quota",
+    "outside_window",
+    "schedule_policy_off",
+    "profile_claim_conflict",
+    "no_enabled_profile",
+}
+
 class LLMRequestCreate(BaseModel):
     caller_type: str
     caller_id: str
@@ -44,6 +52,7 @@ class LLMRequestResponse(BaseModel):
     processed_at: Optional[datetime] = None
     result: Optional[dict] = None
     error_message: Optional[str] = None
+    pending_block_reason: Optional[str] = None
     retry_count: int = 0
     prompt: Optional[str] = None
     cli_options: Optional[dict] = None
@@ -196,6 +205,11 @@ def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
             processed_at=request.get("processed_at"),
             result=result,
             error_message=request.get("error_message"),
+            pending_block_reason=(
+                request.get("error_message")
+                if request.get("status") == "pending" and request.get("error_message") in LLM_PENDING_BLOCK_REASONS
+                else None
+            ),
             retry_count=request.get("retry_count", 0),
             prompt=request.get("prompt"),
             cli_options=cli_options,
@@ -217,6 +231,11 @@ def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
             processed_at=request.processed_at,
             result=result,
             error_message=request.error_message,
+            pending_block_reason=(
+                request.error_message
+                if request.status == "pending" and request.error_message in LLM_PENDING_BLOCK_REASONS
+                else None
+            ),
             retry_count=request.retry_count,
             prompt=request.prompt,
             cli_options=_parse_json_field(request.cli_options),

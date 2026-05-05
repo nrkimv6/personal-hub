@@ -1800,7 +1800,7 @@ class LLMWorker:
                         decision.next_available_at,
                         decision.blocked_counts,
                     )
-                    service.reset_to_pending(request.id)
+                    service.reset_to_pending(request.id, decision.reason)
                     self._update_worker_state(
                         "paused_by_quota" if "quota" in decision.reason else "idle",
                         None,
@@ -1817,7 +1817,7 @@ class LLMWorker:
                         provider,
                         selected_profile.name,
                     )
-                    service.reset_to_pending(request.id)
+                    service.reset_to_pending(request.id, "profile_claim_conflict")
                     self._update_worker_state("idle", None)
                     return
                 claim_acquired = True

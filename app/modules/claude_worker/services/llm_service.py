@@ -129,8 +129,8 @@ class LLMService:
     def mark_failed(self, request_id: int, error_message: str, raw_response: str = "") -> None:
         return self._queue_svc.mark_failed(request_id, error_message, raw_response)
 
-    def reset_to_pending(self, request_id: int) -> bool:
-        return self._queue_svc.reset_to_pending(request_id)
+    def reset_to_pending(self, request_id: int, reason: str | None = None) -> bool:
+        return self._queue_svc.reset_to_pending(request_id, reason)
 
     # ========== Quota 상태 관리 (→ LLMQuotaService 위임) ==========
 

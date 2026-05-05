@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { llmApi, type LLMRequest } from '$lib/api';
+  import { formatLLMBlockReason, llmApi, type LLMRequest } from '$lib/api';
   import {
     planRecordsApi,
     archiveApi,
@@ -504,6 +504,12 @@
     return message.length > 80 ? `${message.slice(0, 80)}...` : message;
   }
 
+  function getRequestReason(request: LLMRequest) {
+    return request.pending_block_reason
+      ? formatLLMBlockReason(request.pending_block_reason)
+      : getErrorSummary(request.error_message);
+  }
+
   onMount(() => {
     loadRecords();
     refreshArchiveSurfaces();
@@ -715,8 +721,8 @@
                     {getRequestProfile(request)}
                     <div class="text-muted-foreground">policy detail: /llm</div>
                   </td>
-                  <td class="py-2" title={request.error_message ?? ''}>
-                    <div>{getErrorSummary(request.error_message)}</div>
+                  <td class="py-2" title={request.pending_block_reason ? formatLLMBlockReason(request.pending_block_reason) : (request.error_message ?? '')}>
+                    <div>{getRequestReason(request)}</div>
                     {#if request.status === 'failed'}
                       <button
                         class="mt-1 text-primary hover:text-primary-hover"

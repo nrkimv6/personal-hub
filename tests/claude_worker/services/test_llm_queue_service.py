@@ -108,3 +108,20 @@ class TestMarkStateTransitions:
         req = svc.enqueue("ct", "ci5", "prompt")
         result = svc.reset_to_pending(req.id)
         assert result is False
+
+    def test_reset_to_pending_R_from_processing_preserves_block_reason(self, db, svc):
+        """R: router가 processing을 pending으로 되돌릴 때 보류 사유를 보존."""
+        req = svc.enqueue("ct", "ci6", "prompt")
+        svc.mark_processing(req.id)
+
+        result = svc.reset_to_pending(req.id, "schedule_policy_off")
+
+        db.refresh(req)
+        assert result is True
+        assert req.status == "pending"
+        assert req.error_message == "schedule_policy_off"
+
+        from app.modules.claude_worker.routes.llm_schemas import _to_response
+
+        response = _to_response(req)
+        assert response.pending_block_reason == "schedule_policy_off"

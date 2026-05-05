@@ -220,16 +220,16 @@ class LLMQueueService:
             request.retry_count += 1
             self.db.commit()
 
-    def reset_to_pending(self, request_id: int) -> bool:
+    def reset_to_pending(self, request_id: int, reason: str | None = None) -> bool:
         """요청을 pending으로 리셋 (재시도용).
 
         failed 상태인 요청만 pending으로 변경할 수 있습니다.
         completed 상태는 이미 처리 완료되었으므로 리셋 불가.
         """
         request = self._repo.get_by_id(request_id)
-        if request and request.status == "failed":
+        if request and request.status in ("failed", "processing"):
             request.status = "pending"
-            request.error_message = None
+            request.error_message = reason
             request.result = None
             request.raw_response = None
             request.processed_at = None

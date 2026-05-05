@@ -496,10 +496,39 @@ export interface LLMRequest {
   processed_at?: string;
   result?: Record<string, unknown>;
   error_message?: string;
+  pending_block_reason?: LLMBlockReason | null;
   retry_count: number;
   raw_response?: string;
   prompt?: string;
   cli_options?: Record<string, unknown>;
+}
+
+export type LLMBlockReason =
+  | 'all_paused_by_quota'
+  | 'outside_window'
+  | 'paused_by_quota'
+  | 'paused_by_window'
+  | 'paused_by_profile'
+  | 'schedule_policy_off'
+  | 'profile_disabled'
+  | 'no_enabled_profile'
+  | 'profile_claim_conflict';
+
+export const LLM_BLOCK_REASON_LABELS: Record<LLMBlockReason, string> = {
+  all_paused_by_quota: 'quota 대기',
+  outside_window: '실행 시간창 대기',
+  paused_by_quota: 'quota 대기',
+  paused_by_window: '실행 시간창 대기',
+  paused_by_profile: 'profile 대기',
+  schedule_policy_off: '스케줄/Profile 정책 차단',
+  profile_disabled: 'profile 비활성',
+  no_enabled_profile: '사용 가능한 profile 없음',
+  profile_claim_conflict: 'profile claim 충돌',
+};
+
+export function formatLLMBlockReason(reason: string | null | undefined): string {
+  if (!reason) return '-';
+  return LLM_BLOCK_REASON_LABELS[reason as LLMBlockReason] ?? reason;
 }
 
 export interface LLMQueueStats {

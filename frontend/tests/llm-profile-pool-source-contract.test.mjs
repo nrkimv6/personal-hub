@@ -35,6 +35,9 @@ test('LLM queue exposes profile capacity block reasons', () => {
 
 test('schedule profile policy API client is exposed', () => {
   assert.match(apiSource, /LLMScheduleProfilePolicyItem/);
+  assert.match(apiSource, /LLM_BLOCK_REASON_LABELS/);
+  assert.match(apiSource, /formatLLMBlockReason/);
+  assert.match(apiSource, /pending_block_reason\?: LLMBlockReason \| null/);
   assert.match(apiSource, /listScheduleProfilePolicies/);
   assert.match(apiSource, /updateScheduleProfilePolicies/);
   assert.match(apiSource, /\/llm\/schedule-profile-policies/);
@@ -48,6 +51,15 @@ test('LLM tab exposes schedule profile policy matrix controls', () => {
   assert.match(llmTabSource, /updateScheduleProfilePolicies/);
   assert.match(llmTabSource, /Schedule x Profile 정책/);
   assert.match(llmTabSource, /schedule_policy_off/);
+  assert.match(llmTabSource, /pending_block_reason/);
+  assert.match(llmTabSource, /formatLLMBlockReason/);
+});
+
+test('Plan Archive handles LLM block reason vocabulary', () => {
+  const archiveTabSource = readFileSync(new URL('../src/routes/plans/ArchiveTab.svelte', import.meta.url), 'utf8');
+  assert.match(archiveTabSource, /formatLLMBlockReason/);
+  assert.match(archiveTabSource, /pending_block_reason/);
+  assert.match(apiSource, /schedule_policy_off: '스케줄\/Profile 정책 차단'/);
 });
 
 test('AI profile status const stays in a Svelte-allowed child position', () => {

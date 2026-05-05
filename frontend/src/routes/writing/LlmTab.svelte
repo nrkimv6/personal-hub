@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui';
 
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse, type ProviderInfo, type LLMProfileConfig, type LLMScheduleProfilePolicyItem, type LLMScheduleProfilePolicyWindow } from '$lib/api';
+	import { formatLLMBlockReason, llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse, type ProviderInfo, type LLMProfileConfig, type LLMScheduleProfilePolicyItem, type LLMScheduleProfilePolicyWindow } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
 	import { createSelection } from '$lib/utils/selection.svelte';
 	import { toast } from '$lib/stores/toast';
@@ -141,8 +141,7 @@
 	}
 
 	function getPolicyBlockReasonLabel(reason: string): string {
-		if (reason === 'schedule_policy_off') return '스케줄/Profile 정책 차단';
-		return reason;
+		return formatLLMBlockReason(reason);
 	}
 
 	function profileOptionsForEngine(engine: string): LLMProfileConfig[] {
@@ -616,6 +615,7 @@
 
 	function getPendingBlockReason(request: LLMRequest, profiles: ProfileQuotaStatus[]): string | null {
 		if (request.status !== 'pending') return null;
+		if (request.pending_block_reason) return formatLLMBlockReason(request.pending_block_reason);
 		return summarizeProfileCapacity(request.provider || 'claude', profiles);
 	}
 
