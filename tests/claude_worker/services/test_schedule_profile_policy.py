@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -46,6 +47,42 @@ def _save_profiles():
                 },
                 {
                     "engine": "claude",
+                    "name": "personal",
+                    "config_dir": None,
+                    "extra_env": {},
+                    "enabled": True,
+                    "priority": 10,
+                },
+            ],
+        }
+    )
+
+
+def _save_scenario_profiles():
+    from app.modules.claude_worker.services.profile_store import save_profiles
+
+    save_profiles(
+        {
+            "selected": {"claude": "work", "gemini": "personal"},
+            "profiles": [
+                {
+                    "engine": "claude",
+                    "name": "work",
+                    "config_dir": None,
+                    "extra_env": {},
+                    "enabled": True,
+                    "priority": 100,
+                },
+                {
+                    "engine": "claude",
+                    "name": "personal",
+                    "config_dir": None,
+                    "extra_env": {},
+                    "enabled": True,
+                    "priority": 10,
+                },
+                {
+                    "engine": "gemini",
                     "name": "personal",
                     "config_dir": None,
                     "extra_env": {},
@@ -231,3 +268,75 @@ def test_replace_policy_rejects_invalid_window_payload(profile_file, db):
                 }
             ]
         )
+
+
+def test_operating_scenario_routes_plan_archive_to_personal_profiles(profile_file, db):
+    from app.modules.claude_worker.services.profile_router import LLMProfileRouter
+
+    _save_scenario_profiles()
+    db.add_all(
+        [
+            LLMScheduleProfilePolicy(
+                target_type="plan_archive_analyze",
+                engine="claude",
+                profile_name="work",
+                enabled=False,
+                priority=0,
+                allowed_windows="[]",
+                quiet_windows="[]",
+            ),
+            LLMScheduleProfilePolicy(
+                target_type="plan_archive_analyze",
+                engine="claude",
+                profile_name="personal",
+                enabled=True,
+                priority=200,
+                allowed_windows="[]",
+                quiet_windows="[]",
+            ),
+            LLMScheduleProfilePolicy(
+                target_type="plan_archive_analyze",
+                engine="gemini",
+                profile_name="personal",
+                enabled=True,
+                priority=200,
+                allowed_windows="[]",
+                quiet_windows="[]",
+            ),
+        ]
+    )
+    db.commit()
+
+    claude_decision = LLMProfileRouter(db).select_profile("claude", request=_request())
+    gemini_decision = LLMProfileRouter(db).select_profile("gemini", request=_request())
+
+    assert claude_decision.profile is not None
+    assert claude_decision.profile.name == "personal"
+    assert gemini_decision.profile is not None
+    assert gemini_decision.profile.name == "personal"
+
+
+def test_policy_window_block_records_next_available_at(profile_file, db):
+    from app.modules.claude_worker.services.profile_router import LLMProfileRouter
+
+    _save_profiles()
+    next_weekday = (datetime.now().weekday() + 1) % 7
+    for profile_name in ["work", "personal"]:
+        db.add(
+            LLMScheduleProfilePolicy(
+                target_type="plan_archive_analyze",
+                engine="claude",
+                profile_name=profile_name,
+                enabled=True,
+                priority=0,
+                allowed_windows=json.dumps([{"start": "00:00", "end": "23:59", "days": [next_weekday]}]),
+                quiet_windows="[]",
+            )
+        )
+    db.commit()
+
+    decision = LLMProfileRouter(db).select_profile("claude", request=_request())
+
+    assert decision.profile is None
+    assert decision.reason == "schedule_policy_off"
+    assert decision.next_available_at is not None

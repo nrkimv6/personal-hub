@@ -25,6 +25,7 @@ class SchedulePolicyDecision:
     allowed: bool
     reason: str | None = None
     policy: LLMScheduleProfilePolicy | None = None
+    next_available_at: datetime | None = None
 
 
 class ScheduleProfilePolicyService:
@@ -72,8 +73,14 @@ class ScheduleProfilePolicyService:
             return SchedulePolicyDecision(True)
         if not policy.enabled:
             return SchedulePolicyDecision(False, "schedule_policy_off", policy)
-        if not self._windows_allow(policy, now):
-            return SchedulePolicyDecision(False, "schedule_policy_off", policy)
+        current = now or datetime.now()
+        if not self._windows_allow(policy, current):
+            return SchedulePolicyDecision(
+                False,
+                "schedule_policy_off",
+                policy,
+                self._next_allowed_at(policy, current),
+            )
         return SchedulePolicyDecision(True, policy=policy)
 
     def policy_priority(self, request, engine: str, profile_name: str) -> int:
@@ -178,3 +185,14 @@ class ScheduleProfilePolicyService:
         allowed = [_normalize_window(item) for item in allowed_raw]
         quiet = [_normalize_window(item) for item in quiet_raw]
         return _is_allowed_at(current, allowed, quiet)
+
+    @staticmethod
+    def _next_allowed_at(policy: LLMScheduleProfilePolicy, now: datetime) -> datetime | None:
+        return LLMExecutionWindowService().next_allowed_at(
+            now,
+            {
+                "timezone": DEFAULT_TIMEZONE,
+                "allowed_windows": json.loads(policy.allowed_windows or "[]"),
+                "quiet_windows": json.loads(policy.quiet_windows or "[]"),
+            },
+        )

@@ -60,6 +60,7 @@ class LLMProfileRouter:
         available: list[LLMProfile] = []
         paused_count = 0
         policy_count = 0
+        policy_next_times: list[datetime] = []
         for profile in enabled:
             if self.quota.get_profile_quota_pause(engine, profile.name):
                 paused_count += 1
@@ -71,6 +72,8 @@ class LLMProfileRouter:
             )
             if not policy_decision.allowed:
                 policy_count += 1
+                if policy_decision.next_available_at is not None:
+                    policy_next_times.append(policy_decision.next_available_at)
                 continue
             available.append(profile)
 
@@ -78,7 +81,7 @@ class LLMProfileRouter:
             next_times = [
                 self.quota.get_profile_quota_pause(engine, profile.name)
                 for profile in enabled
-            ]
+            ] + policy_next_times
             next_available = min([t for t in next_times if t is not None], default=None)
             return ProfileRouteDecision(
                 None,
