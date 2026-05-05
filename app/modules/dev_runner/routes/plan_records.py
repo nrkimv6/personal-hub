@@ -29,6 +29,9 @@ from app.modules.dev_runner.services.plan_archive_insight_service import (
     PlanArchiveInsightBatchQuery,
     PlanArchiveInsightService,
 )
+from app.modules.dev_runner.services.plan_archive_insight_review_service import (
+    PlanArchiveInsightReviewService,
+)
 from app.modules.dev_runner.services.plan_archive_metrics_service import PlanArchiveMetricsService
 from app.modules.dev_runner.services.plan_archive_retrieval_service import (
     PlanArchiveRetrievalService,
@@ -44,6 +47,11 @@ from app.modules.dev_runner.schemas import (
     PlanArchiveIndexResponse,
     PlanArchiveInsightBatchRequest,
     PlanArchiveInsightBatchResponse,
+    PlanArchiveInsightPromotePlanRequest,
+    PlanArchiveInsightPromotePlanResponse,
+    PlanArchiveInsightReportDetailResponse,
+    PlanArchiveInsightReportListResponse,
+    PlanArchiveInsightReviewUpdateRequest,
     PlanArchiveMetricsQuery,
     PlanArchiveMetricsResponse,
     PlanArchiveRetrievalQuery,
@@ -186,6 +194,84 @@ def queue_archive_insight_batch(req: PlanArchiveInsightBatchRequest, db: Session
         model=req.model,
         requested_by="api",
     )
+
+
+@router.get("/insights/reports", response_model=PlanArchiveInsightReportListResponse)
+def list_archive_insight_reports(
+    status: Optional[str] = None,
+    review_status: Optional[str] = None,
+    grouping: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    return PlanArchiveInsightReviewService(db).list_reports(
+        status=status,
+        review_status=review_status,
+        grouping=grouping,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.get("/insights/reports/{report_id}", response_model=PlanArchiveInsightReportDetailResponse)
+def get_archive_insight_report(report_id: int, db: Session = Depends(get_db)):
+    result = PlanArchiveInsightReviewService(db).get_detail(report_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return result
+
+
+@router.get("/insights/reports/{report_id}/evidence/{source_type}/{source_id}")
+def get_archive_insight_evidence(report_id: int, source_type: str, source_id: int, db: Session = Depends(get_db)):
+    try:
+        result = PlanArchiveInsightReviewService(db).get_evidence_source(report_id, source_type, source_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    return result
+
+
+@router.patch("/insights/reports/{report_id}", response_model=PlanArchiveInsightReportDetailResponse)
+def update_archive_insight_review(
+    report_id: int,
+    req: PlanArchiveInsightReviewUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return PlanArchiveInsightReviewService(db).update_review(
+            report_id,
+            req.review_status,
+            req.review_note,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Report not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/insights/reports/{report_id}/promote-plan", response_model=PlanArchiveInsightPromotePlanResponse)
+def promote_archive_insight_plan(
+    report_id: int,
+    req: PlanArchiveInsightPromotePlanRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return PlanArchiveInsightReviewService(db).promote_plan_candidate(
+            report_id,
+            req.candidate_index,
+            confirm=req.confirm,
+            title=req.title,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Report not found") from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 409 if detail == "CANDIDATE_NOT_FOUND" else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @router.post("/records/index", response_model=PlanArchiveIndexResponse)

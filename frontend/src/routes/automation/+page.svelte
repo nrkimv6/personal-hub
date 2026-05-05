@@ -10,6 +10,7 @@
 	import TrackingTab from './TrackingTab.svelte';
 	import PlanListTab from '../plans/PlanListTab.svelte';
 	import ArchiveTab from '../plans/ArchiveTab.svelte';
+	import InsightReportTab from '../plans/InsightReportTab.svelte';
 	import HistoryTab from '../plans/HistoryTab.svelte';
 	import WorktreeTab from '../plans/WorktreeTab.svelte';
 
@@ -19,7 +20,7 @@
 	let initialRunner = $state('');
 
 	// plans 서브탭
-	type PlansSubTab = 'plans' | 'archive' | 'history' | 'worktrees';
+	type PlansSubTab = 'plans' | 'archive' | 'insights' | 'history' | 'worktrees';
 	let plansSubTab: PlansSubTab = $state('plans');
 	let focusPath = $state<string | null>(null);
 
@@ -35,7 +36,7 @@
 	$effect(() => {
 		const tabParam = $page.url.searchParams.get('tab');
 		const subParam = $page.url.searchParams.get('subtab') as PlansSubTab | null;
-		const hasValidPlansSubtab = !!(subParam && ['plans', 'archive', 'history', 'worktrees'].includes(subParam));
+		const hasValidPlansSubtab = !!(subParam && ['plans', 'archive', 'insights', 'history', 'worktrees'].includes(subParam));
 		if (tabParam === 'git-repos') {
 			mainTab = 'git-repos';
 		} else if (tabParam === 'tracking') {
@@ -63,6 +64,7 @@
 	const plansSubTabs = [
 		{ id: 'plans', label: '계획' },
 		{ id: 'archive', label: '아카이브' },
+		{ id: 'insights', label: '인사이트' },
 		{ id: 'history', label: '이력' },
 		{ id: 'worktrees', label: '워크트리' },
 	];
@@ -250,6 +252,8 @@
 						<PlanListTab {focusPath} onFocusConsumed={() => (focusPath = null)} />
 					{:else if plansSubTab === 'archive'}
 						<ArchiveTab {focusPath} onFocusConsumed={() => (focusPath = null)} />
+					{:else if plansSubTab === 'insights'}
+						<InsightReportTab />
 					{:else if plansSubTab === 'history'}
 						<HistoryTab />
 					{:else if plansSubTab === 'worktrees'}

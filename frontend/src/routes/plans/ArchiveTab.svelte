@@ -582,6 +582,10 @@
           class="px-3 py-1 text-xs rounded bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-900 dark:hover:bg-blue-800 dark:text-blue-200"
           onclick={openOrganizeModal}
         >정리</button>
+        <a
+          class="px-3 py-1 text-xs rounded bg-purple-100 hover:bg-purple-200 text-purple-700 dark:bg-purple-900 dark:hover:bg-purple-800 dark:text-purple-200"
+          href="/automation?tab=plans&subtab=insights"
+        >인사이트</a>
         <button
           class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
           onclick={() => { loadRecords(); refreshArchiveSurfaces(); }}

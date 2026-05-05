@@ -448,6 +448,57 @@ class PlanArchiveInsightBatchResponse(BaseModel):
     warnings: List[str] = []
 
 
+class PlanArchiveInsightReportResponse(BaseModel):
+    id: int
+    range_start: Optional[datetime] = None
+    range_end: Optional[datetime] = None
+    grouping: str
+    metrics_hash: str
+    provider: str
+    model: str
+    status: str
+    review_status: str
+    review_note: Optional[str] = None
+    promoted_plan_path: Optional[str] = None
+    warning: Optional[str] = None
+    error_message: Optional[str] = None
+    llm_request_id: Optional[int] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    summary: Optional[str] = None
+    root_causes: List[str] = []
+    recommendations: List[str] = []
+    suggested_plan_candidates: List[dict] = []
+
+
+class PlanArchiveInsightReportListResponse(BaseModel):
+    items: List[PlanArchiveInsightReportResponse] = []
+    total: int = 0
+
+
+class PlanArchiveInsightReportDetailResponse(PlanArchiveInsightReportResponse):
+    metrics: dict = {}
+    evidence: List[dict] = []
+    insight: dict = {}
+    raw_response: Optional[str] = None
+
+
+class PlanArchiveInsightReviewUpdateRequest(BaseModel):
+    review_status: str
+    review_note: Optional[str] = None
+
+
+class PlanArchiveInsightPromotePlanRequest(BaseModel):
+    candidate_index: int = Field(default=0, ge=0)
+    confirm: bool = False
+    title: Optional[str] = None
+
+
+class PlanArchiveInsightPromotePlanResponse(BaseModel):
+    path: str
+    report: PlanArchiveInsightReportDetailResponse
+
+
 class PlanArchiveAnalyzeRequest(BaseModel):
     """Manual Plan Archive analyze request."""
     mode: Literal["preview", "apply"] = "preview"
@@ -789,6 +840,12 @@ __all__ = [
     'PlanArchiveMetricsResponse',
     'PlanArchiveInsightBatchRequest',
     'PlanArchiveInsightBatchResponse',
+    'PlanArchiveInsightReportResponse',
+    'PlanArchiveInsightReportListResponse',
+    'PlanArchiveInsightReportDetailResponse',
+    'PlanArchiveInsightReviewUpdateRequest',
+    'PlanArchiveInsightPromotePlanRequest',
+    'PlanArchiveInsightPromotePlanResponse',
     'PlanArchiveAnalyzeRequest',
     'PlanArchiveAnalyzeResponse',
     'MemoUpdateRequest',

@@ -158,6 +158,91 @@ export interface PlanArchiveIndexResponse {
 	errors?: string[];
 }
 
+export interface PlanArchiveAnalyzePayload {
+	mode?: 'preview' | 'apply';
+	provider?: string | null;
+	model?: string | null;
+	timeout_seconds?: number;
+	include_prompt?: boolean;
+	source?: 'auto' | 'raw_content' | 'file_path';
+}
+
+export interface PlanArchiveAnalyzeResponse {
+	success: boolean;
+	mode: string;
+	result: Record<string, unknown>;
+	raw_response: string;
+	provider: string | null;
+	model: string | null;
+	record_id: number;
+	filename_hash: string | null;
+	file_path: string | null;
+	elapsed_ms: number;
+	prompt_preview: string | null;
+	warnings: string[];
+	error: string | null;
+	saved: boolean;
+	record_after: Record<string, unknown> | null;
+	save_error: string | null;
+}
+
+export interface PlanArchiveInsightCandidate {
+	title?: string;
+	reason?: string;
+	evidence_ids?: string[];
+}
+
+export interface PlanArchiveInsightReport {
+	id: number;
+	range_start: string | null;
+	range_end: string | null;
+	grouping: string;
+	metrics_hash: string;
+	provider: string;
+	model: string;
+	status: string;
+	review_status: string;
+	review_note: string | null;
+	promoted_plan_path: string | null;
+	warning: string | null;
+	error_message: string | null;
+	llm_request_id: number | null;
+	created_at: string;
+	completed_at: string | null;
+	summary: string | null;
+	root_causes: string[];
+	recommendations: string[];
+	suggested_plan_candidates: PlanArchiveInsightCandidate[];
+}
+
+export interface PlanArchiveInsightReportDetail extends PlanArchiveInsightReport {
+	metrics: Record<string, unknown>;
+	evidence: Array<Record<string, unknown>>;
+	insight: Record<string, unknown>;
+	raw_response: string | null;
+}
+
+export interface PlanArchiveInsightReportListResponse {
+	items: PlanArchiveInsightReport[];
+	total: number;
+}
+
+export interface PlanArchiveInsightReviewUpdatePayload {
+	review_status: 'unreviewed' | 'reviewing' | 'accepted' | 'rejected' | 'promoted';
+	review_note?: string | null;
+}
+
+export interface PlanArchiveInsightPromotePayload {
+	candidate_index: number;
+	confirm: boolean;
+	title?: string | null;
+}
+
+export interface PlanArchiveInsightPromoteResponse {
+	path: string;
+	report: PlanArchiveInsightReportDetail;
+}
+
 // ============================================================
 // Internal helper
 // ============================================================
@@ -241,6 +326,53 @@ export const planRecordsApi = {
 
 	indexArchiveRecords: (payload: PlanArchiveIndexRequest) =>
 		planRecordsRequest<PlanArchiveIndexResponse>('/records/index', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	analyzeRecord: (recordId: number, payload: PlanArchiveAnalyzePayload = {}) =>
+		planRecordsRequest<PlanArchiveAnalyzeResponse>(`/records/${recordId}/analyze`, {
+			method: 'POST',
+			body: JSON.stringify({ mode: 'preview', ...payload })
+		}),
+
+	analyzeDryRun: (recordId: number, payload: Omit<PlanArchiveAnalyzePayload, 'mode'> = {}) =>
+		planRecordsRequest<PlanArchiveAnalyzeResponse>(`/records/${recordId}/analyze-dry-run`, {
+			method: 'POST',
+			body: JSON.stringify({ ...payload, mode: 'preview' })
+		}),
+
+	listInsightReports: (params?: {
+		status?: string;
+		review_status?: string;
+		grouping?: string;
+		skip?: number;
+		limit?: number;
+	}) => {
+		const q = new URLSearchParams();
+		if (params?.status) q.set('status', params.status);
+		if (params?.review_status) q.set('review_status', params.review_status);
+		if (params?.grouping) q.set('grouping', params.grouping);
+		if (params?.skip != null) q.set('skip', String(params.skip));
+		if (params?.limit != null) q.set('limit', String(params.limit));
+		const qs = q.toString();
+		return planRecordsRequest<PlanArchiveInsightReportListResponse>(`/insights/reports${qs ? '?' + qs : ''}`);
+	},
+
+	getInsightReport: (id: number) =>
+		planRecordsRequest<PlanArchiveInsightReportDetail>(`/insights/reports/${id}`),
+
+	getInsightEvidence: (reportId: number, sourceType: 'record' | 'chunk' | 'file_ref', sourceId: number) =>
+		planRecordsRequest<Record<string, unknown>>(`/insights/reports/${reportId}/evidence/${sourceType}/${sourceId}`),
+
+	updateInsightReport: (id: number, payload: PlanArchiveInsightReviewUpdatePayload) =>
+		planRecordsRequest<PlanArchiveInsightReportDetail>(`/insights/reports/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify(payload)
+		}),
+
+	promoteInsightPlan: (id: number, payload: PlanArchiveInsightPromotePayload) =>
+		planRecordsRequest<PlanArchiveInsightPromoteResponse>(`/insights/reports/${id}/promote-plan`, {
 			method: 'POST',
 			body: JSON.stringify(payload)
 		}),
