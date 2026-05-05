@@ -20,7 +20,7 @@
 		SearchRequest,
 		StatusResponse
 	} from '$lib/types/fileSearch';
-	import { Search, Languages, XCircle, Loader2, Inbox, AlertTriangle, ChevronRight } from 'lucide-svelte';
+	import { Search, Languages, XCircle, Loader2, Inbox, AlertTriangle, ChevronRight, FileText } from 'lucide-svelte';
 
 	import SearchForm from './SearchForm.svelte';
 	import SearchHistoryBar from './SearchHistoryBar.svelte';
@@ -33,8 +33,9 @@
 	import ResultList from './ResultList.svelte';
 	import EncodingFixer from '../utils/EncodingFixer.svelte';
 	import Mp4GifTab from './Mp4GifTab.svelte';
+	import ImagePdfTab from './ImagePdfTab.svelte';
 
-	type PageTab = 'search' | 'encoding' | 'mp4-gif';
+	type PageTab = 'search' | 'encoding' | 'mp4-gif' | 'image-pdf';
 	type SearchRecord = {
 		request: SearchRequest;
 		weight: number;
@@ -44,7 +45,8 @@
 	const pageTabs = [
 		{ id: 'search', label: '파일 검색', icon: Search },
 		{ id: 'encoding', label: '인코딩 변환', icon: Languages },
-		{ id: 'mp4-gif', label: 'MP4 → GIF' }
+		{ id: 'mp4-gif', label: 'MP4 → GIF' },
+		{ id: 'image-pdf', label: '이미지 → PDF', icon: FileText }
 	];
 
 	let query = $state('');
@@ -134,6 +136,9 @@
 		}
 		if (pageTab === 'mp4-gif') {
 			return 'MP4 파일을 업로드하고 GIF로 변환합니다.';
+		}
+		if (pageTab === 'image-pdf') {
+			return '여러 이미지 파일을 하나의 PDF로 병합합니다.';
 		}
 		return '로컬 파일 검색, 인코딩 변환, MP4 → GIF 작업을 한곳에서 처리합니다.';
 	});
@@ -587,6 +592,8 @@
 		<EncodingFixer />
 	{:else if pageTab === 'mp4-gif'}
 		<Mp4GifTab />
+	{:else if pageTab === 'image-pdf'}
+		<ImagePdfTab />
 	{:else}
 		<div class="flex h-full min-h-0 flex-col gap-4">
 			<div class="space-y-4">
