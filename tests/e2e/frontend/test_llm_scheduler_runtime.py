@@ -10,10 +10,15 @@ def _assert_no_loading_spinner(page: Page) -> None:
     expect(page.locator(".animate-spin")).to_have_count(0, timeout=15000)
 
 
+def _wait_for_runtime_page(page: Page) -> None:
+    page.wait_for_load_state("domcontentloaded")
+    expect(page.locator("main").first).to_be_visible(timeout=15000)
+
+
 class TestLlmRuntime:
     def test_llm_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str):
         page.goto(f"{frontend_url}/llm")
-        page.wait_for_load_state("networkidle")
+        _wait_for_runtime_page(page)
 
         _assert_no_loading_spinner(page)
         expect(page.locator("main").first).to_be_visible()
@@ -28,7 +33,7 @@ class TestLlmRuntime:
 class TestSchedulerRuntime:
     def test_scheduler_page_finishes_loading_without_spinner(self, page: Page, frontend_url: str):
         page.goto(f"{frontend_url}/scheduler")
-        page.wait_for_load_state("networkidle")
+        _wait_for_runtime_page(page)
 
         _assert_no_loading_spinner(page)
         expect(page.locator("main").first).to_be_visible()
@@ -38,7 +43,7 @@ class TestSchedulerRuntime:
 class TestSystemSettingsRuntime:
     def test_system_settings_exposes_scheduler_contract(self, page: Page, frontend_url: str):
         page.goto(f"{frontend_url}/system?tab=settings")
-        page.wait_for_load_state("networkidle")
+        _wait_for_runtime_page(page)
         page.get_by_text("AI 기본값").click()
 
         _assert_no_loading_spinner(page)
