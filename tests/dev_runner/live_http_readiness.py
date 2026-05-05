@@ -40,8 +40,16 @@ def wait_until_live_api_ready(
 
 
 def live_get_after_readiness(path: str, *, base_url: str = ADMIN_BASE_URL) -> httpx.Response:
-    wait_until_live_api_ready(base_url=base_url)
-    try:
-        return httpx.get(f"{base_url}{path}", timeout=10)
-    except httpx.ConnectError as exc:
-        pytest.fail(f"실서버 미기동 또는 restart settle 미완료 — {base_url} 연결 불가 ({exc})")
+    deadline = time.time() + 45.0
+    url = f"{base_url}{path}"
+    last_error: str | None = None
+
+    while time.time() <= deadline:
+        wait_until_live_api_ready(base_url=base_url)
+        try:
+            return httpx.get(url, timeout=15)
+        except (httpx.ConnectError, httpx.ReadTimeout) as exc:
+            last_error = str(exc)
+            time.sleep(1)
+
+    pytest.fail(f"실서버 미기동 또는 restart settle 미완료 — {url} 응답 실패 ({last_error})")

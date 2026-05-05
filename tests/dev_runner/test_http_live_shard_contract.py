@@ -41,6 +41,12 @@ def test_read_only_worktree_smoke_waits_for_liveness_before_requests():
         assert "return live_get_after_readiness(path, base_url=BASE_URL)" in source
 
 
+def test_live_readiness_helper_retries_connect_and_read_timeout():
+    source = _read("tests/dev_runner/live_http_readiness.py")
+    assert "except (httpx.ConnectError, httpx.ReadTimeout)" in source
+    assert "return httpx.get(url, timeout=15)" in source
+
+
 def test_restart_mutating_connection_leak_waits_for_admin_liveness_after_restart():
     source = _read("tests/dev_runner/test_connection_leak_http.py")
     assert "def wait_until_admin_api_ready" in source
