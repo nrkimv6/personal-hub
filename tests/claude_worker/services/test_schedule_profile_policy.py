@@ -168,3 +168,66 @@ def test_all_profiles_blocked_by_policy_returns_schedule_policy_off(profile_file
     assert decision.profile is None
     assert decision.reason == "schedule_policy_off"
     assert decision.blocked_counts == {"quota": 0, "policy": 2}
+
+
+def test_replace_policy_rejects_unknown_schedule_id(profile_file, db):
+    from app.modules.claude_worker.services.schedule_profile_policy_service import ScheduleProfilePolicyService
+
+    _save_profiles()
+
+    with pytest.raises(ValueError, match="schedule_id not found"):
+        ScheduleProfilePolicyService(db).replace_all(
+            [
+                {
+                    "schedule_id": 9999,
+                    "engine": "claude",
+                    "profile_name": "work",
+                    "enabled": True,
+                    "priority": 0,
+                    "allowed_windows": [],
+                    "quiet_windows": [],
+                }
+            ]
+        )
+
+
+def test_replace_policy_rejects_unknown_profile(profile_file, db):
+    from app.modules.claude_worker.services.schedule_profile_policy_service import ScheduleProfilePolicyService
+
+    _save_profiles()
+
+    with pytest.raises(ValueError, match="profile not found"):
+        ScheduleProfilePolicyService(db).replace_all(
+            [
+                {
+                    "target_type": "plan_archive_analyze",
+                    "engine": "claude",
+                    "profile_name": "missing",
+                    "enabled": True,
+                    "priority": 0,
+                    "allowed_windows": [],
+                    "quiet_windows": [],
+                }
+            ]
+        )
+
+
+def test_replace_policy_rejects_invalid_window_payload(profile_file, db):
+    from app.modules.claude_worker.services.schedule_profile_policy_service import ScheduleProfilePolicyService
+
+    _save_profiles()
+
+    with pytest.raises(ValueError):
+        ScheduleProfilePolicyService(db).replace_all(
+            [
+                {
+                    "target_type": "plan_archive_analyze",
+                    "engine": "claude",
+                    "profile_name": "work",
+                    "enabled": True,
+                    "priority": 0,
+                    "allowed_windows": [{"start": "bad", "end": "18:00"}],
+                    "quiet_windows": [],
+                }
+            ]
+        )
