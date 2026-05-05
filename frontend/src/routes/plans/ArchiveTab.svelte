@@ -18,8 +18,13 @@
   import MemoEditor from './MemoEditor.svelte';
   import PlanViewer from './PlanViewer.svelte';
 
-  export let focusPath: string | null = null;
-  export let onFocusConsumed: (() => void) | null = null;
+  let {
+    focusPath = null,
+    onFocusConsumed = null
+  }: {
+    focusPath?: string | null;
+    onFocusConsumed?: (() => void) | null;
+  } = $props();
 
   // ── 목록 상태 ──────────────────────────────────────────────
   let records: PlanRecord[] = [];
@@ -421,7 +426,8 @@
 
   // 외부 quick search 포커싱: file_path로 record get_or_create 후 자동 선택
   let lastFocusPath: string | null = null;
-  $: if (focusPath && focusPath !== lastFocusPath) {
+  $effect(() => {
+    if (!focusPath || focusPath === lastFocusPath) return;
     lastFocusPath = focusPath;
     void (async () => {
       try {
@@ -437,7 +443,7 @@
         onFocusConsumed?.();
       }
     })();
-  }
+  });
 
   function formatDate(iso: string | null) {
     if (!iso) return '-';
