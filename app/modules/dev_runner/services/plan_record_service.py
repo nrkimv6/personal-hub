@@ -13,9 +13,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.models import TaskSchedule, TaskScheduleRun
 from app.models.plan_record import PlanRecord, PlanEvent
+from app.modules.claude_worker.models.llm_request import LLMRequest
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,29 @@ def _compute_filename_hash(file_path: str) -> str:
     """
     filename = Path(file_path).name
     return hashlib.sha256(filename.encode("utf-8")).hexdigest()
+
+
+def _is_temp_pytest_path(file_path: str) -> bool:
+    """Return True for pytest-created temp plan/archive paths."""
+    normalized = str(file_path or "").replace("\\", "/").lower()
+    return (
+        "/tmp/pytest-" in normalized
+        or "/tmp/pytest-of-" in normalized
+        or "/temp/pytest-" in normalized
+        or "/temp/pytest-of-" in normalized
+    )
+
+
+def _exclude_temp_pytest_records(query):
+    """Apply the same pytest temp path exclusion to SQLAlchemy queries."""
+    return query.filter(
+        ~or_(
+            PlanRecord.file_path.ilike(r"%\Temp\pytest-%"),
+            PlanRecord.file_path.ilike(r"%\Temp\pytest-of-%"),
+            PlanRecord.file_path.ilike("%/tmp/pytest-%"),
+            PlanRecord.file_path.ilike("%/tmp/pytest-of-%"),
+        )
+    )
 
 
 def _add_event(db: Session, record: PlanRecord, event_type: str, detail: Optional[dict] = None):
@@ -289,6 +315,7 @@ class PlanRecordService:
         skip: int = 0,
         limit: int = 50,
         deep: bool = False,
+        exclude_temp: bool = True,
     ) -> List[PlanRecord]:
         """레코드 목록 조회 (페이지네이션 + 필터 + keyword/date_range 검색)
 
@@ -296,6 +323,8 @@ class PlanRecordService:
         """
         from sqlalchemy import or_
         query = self.db.query(PlanRecord)
+        if exclude_temp:
+            query = _exclude_temp_pytest_records(query)
         if project:
             query = query.filter(PlanRecord.project == project)
         if status:
@@ -323,6 +352,106 @@ class PlanRecordService:
         query = query.order_by(PlanRecord.updated_at.desc())
         return query.offset(skip).limit(limit).all()
 
+    def get_plan_archive_health(self, include_temp: bool = False) -> dict:
+        """Return scheduler-facing Plan Archive health without exposing DB details."""
+        archived_query = self.db.query(PlanRecord).filter(PlanRecord.archived_at.isnot(None))
+        all_archived = archived_query.count()
+        llm_processed = archived_query.filter(PlanRecord.llm_processed_at.isnot(None)).count()
+        llm_unprocessed = archived_query.filter(PlanRecord.llm_processed_at.is_(None)).count()
+
+        temp_archived_query = archived_query.filter(
+            or_(
+                PlanRecord.file_path.ilike(r"%\Temp\pytest-%"),
+                PlanRecord.file_path.ilike(r"%\Temp\pytest-of-%"),
+                PlanRecord.file_path.ilike("%/tmp/pytest-%"),
+                PlanRecord.file_path.ilike("%/tmp/pytest-of-%"),
+            )
+        )
+        temp_pytest_total = temp_archived_query.count()
+        temp_pytest_unprocessed = temp_archived_query.filter(
+            PlanRecord.llm_processed_at.is_(None)
+        ).count()
+
+        real_unprocessed_query = archived_query.filter(PlanRecord.llm_processed_at.is_(None))
+        if not include_temp:
+            real_unprocessed_query = _exclude_temp_pytest_records(real_unprocessed_query)
+        real_unprocessed = real_unprocessed_query.count()
+        oldest_unprocessed_at = real_unprocessed_query.with_entities(
+            func.min(PlanRecord.archived_at)
+        ).scalar()
+
+        request_query = self.db.query(LLMRequest).filter(
+            LLMRequest.caller_type == "plan_archive_analyze",
+            LLMRequest.deleted_at.is_(None),
+        )
+        pending_or_processing_requests = request_query.filter(
+            LLMRequest.status.in_(["pending", "processing"])
+        ).count()
+        failed_requests = request_query.filter(LLMRequest.status == "failed").count()
+        latest_failed = (
+            request_query.filter(LLMRequest.status == "failed")
+            .order_by(LLMRequest.requested_at.desc())
+            .first()
+        )
+
+        schedule = (
+            self.db.query(TaskSchedule)
+            .filter(TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE)
+            .order_by(TaskSchedule.id.asc())
+            .first()
+        )
+        latest_completed = None
+        latest_failed_run = None
+        if schedule:
+            latest_completed = (
+                self.db.query(TaskScheduleRun)
+                .filter(
+                    TaskScheduleRun.schedule_id == schedule.id,
+                    TaskScheduleRun.status == TaskScheduleRun.STATUS_COMPLETED,
+                )
+                .order_by(TaskScheduleRun.finished_at.desc())
+                .first()
+            )
+            latest_failed_run = (
+                self.db.query(TaskScheduleRun)
+                .filter(
+                    TaskScheduleRun.schedule_id == schedule.id,
+                    TaskScheduleRun.status == TaskScheduleRun.STATUS_FAILED,
+                )
+                .order_by(TaskScheduleRun.finished_at.desc())
+                .first()
+            )
+
+        return {
+            "archived_total": all_archived,
+            "llm_processed": llm_processed,
+            "llm_unprocessed": llm_unprocessed,
+            "real_unprocessed": real_unprocessed,
+            "temp_pytest_total": temp_pytest_total,
+            "temp_pytest_unprocessed": temp_pytest_unprocessed,
+            "pending_or_processing_requests": pending_or_processing_requests,
+            "failed_requests": failed_requests,
+            "latest_failed_request": {
+                "id": latest_failed.id,
+                "caller_id": latest_failed.caller_id,
+                "requested_at": latest_failed.requested_at.isoformat() if latest_failed.requested_at else None,
+                "error_message": latest_failed.error_message,
+            } if latest_failed else None,
+            "oldest_unprocessed_at": oldest_unprocessed_at.isoformat() if oldest_unprocessed_at else None,
+            "plan_archive_schedule": {
+                "id": schedule.id,
+                "enabled": schedule.enabled,
+                "schedule_value": schedule.schedule_value,
+                "last_run": schedule.last_run_at.isoformat() if schedule.last_run_at else None,
+                "last_success": latest_completed.finished_at.isoformat()
+                if latest_completed and latest_completed.finished_at
+                else None,
+                "last_failure": latest_failed_run.finished_at.isoformat()
+                if latest_failed_run and latest_failed_run.finished_at
+                else None,
+            } if schedule else None,
+        }
+
     def get_guide_status(self, include_history: bool = False) -> List[dict]:
         """가이드별 staleness 정보 반환.
 
@@ -349,8 +478,8 @@ class PlanRecordService:
             logger.warning(f"whitelist load failed: {e}")
             whitelist = set()
 
-        # archived PlanRecord 전체 조회
-        records = self.db.query(PlanRecord).filter(PlanRecord.archived_at.isnot(None)).all()
+        records_query = self.db.query(PlanRecord).filter(PlanRecord.archived_at.isnot(None))
+        records = _exclude_temp_pytest_records(records_query).all()
 
         result: List[dict] = []
         for guide_name, guide_meta in meta.items():
@@ -419,11 +548,7 @@ class PlanRecordService:
         제외 패턴: \\Temp\\pytest- (Windows) 또는 /tmp/pytest- (Linux/Mac)
         """
         q = self.db.query(PlanEvent).join(PlanRecord, PlanEvent.plan_record_id == PlanRecord.id)
-        # pytest 임시 경로 필터 (대소문자 무시)
-        q = q.filter(
-            ~PlanRecord.file_path.ilike(r"%\Temp\pytest-%"),
-            ~PlanRecord.file_path.ilike("%/tmp/pytest-%"),
-        )
+        q = _exclude_temp_pytest_records(q)
         if event_type:
             q = q.filter(PlanEvent.event_type == event_type)
         if date_from:
@@ -516,86 +641,6 @@ class PlanRecordService:
             errors.append(f"commit error: {e}")
 
         return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
-
-    def get_guide_status(self, include_history: bool = False) -> List[dict]:
-        """가이드별 staleness 정보 반환.
-
-        _meta.yaml에서 가이드 목록 + owns_archive_tags 로드 →
-        PlanRecord archived_at IS NOT NULL 전체 조회 →
-        파일명에서 extract_wiki_tags()로 태그 추출 →
-        last_archive_scan 이후 archived_at인 것 → pending_count.
-
-        include_history=True: PlanEvent(event_type="devguide_staleness") 최근 10건 포함.
-
-        Returns:
-            [{guide, last_updated, pending_count, pending_archives: [{file_path, summary, archived_at}]}]
-        """
-        try:
-            from app.shared.wiki_tags import extract_wiki_tags, load_whitelist, load_meta_yaml
-        except ImportError:
-            logger.warning("wiki_tags not available — returning empty guide status")
-            return []
-
-        meta = load_meta_yaml()
-        try:
-            whitelist = load_whitelist()
-        except Exception as e:
-            logger.warning(f"whitelist load failed: {e}")
-            whitelist = set()
-
-        records = self.db.query(PlanRecord).filter(PlanRecord.archived_at.isnot(None)).all()
-
-        result: List[dict] = []
-        for guide_name, guide_meta in meta.items():
-            owns = set(guide_meta.get("owns_archive_tags") or [])
-            last_scan_str = guide_meta.get("last_archive_scan") or ""
-            try:
-                last_scan = datetime.strptime(last_scan_str, "%Y-%m-%d") if last_scan_str else None
-            except ValueError:
-                last_scan = None
-
-            pending_archives: List[dict] = []
-            for rec in records:
-                if not owns:
-                    continue
-                filename = Path(rec.file_path).name
-                tags = set(extract_wiki_tags(filename, whitelist))
-                if not (tags & owns):
-                    continue
-                if last_scan and rec.archived_at and rec.archived_at <= last_scan:
-                    continue
-                pending_archives.append({
-                    "file_path": rec.file_path,
-                    "summary": rec.summary,
-                    "archived_at": rec.archived_at.isoformat() if rec.archived_at else None,
-                })
-
-            item: dict = {
-                "guide": guide_name,
-                "last_updated": last_scan_str,
-                "pending_count": len(pending_archives),
-                "pending_archives": pending_archives,
-            }
-
-            if include_history:
-                history = (
-                    self.db.query(PlanEvent)
-                    .filter(PlanEvent.event_type == "devguide_staleness")
-                    .order_by(PlanEvent.created_at.desc())
-                    .limit(10)
-                    .all()
-                )
-                item["staleness_history"] = [
-                    {
-                        "created_at": e.created_at.isoformat() if e.created_at else None,
-                        "pending_count": (e.detail or {}).get("pending_count"),
-                    }
-                    for e in history
-                ]
-
-            result.append(item)
-
-        return result
 
     def sync_all(self, registered_paths: List[dict]) -> dict:
         """수동 동기화: 등록된 폴더 전체 스캔 → 신규/이동/missing 감지

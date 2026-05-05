@@ -4,6 +4,7 @@
 
 	import { onMount } from 'svelte';
 	import { collectApi, llmApi, type ProviderInfo } from '$lib/api';
+	import { planRecordsApi, type PlanArchiveHealth } from '$lib/api/plan-records';
 	import type { CrawlSchedule, ServiceAccountWithProfile, CrawlScheduleRepairResponse } from '$lib/types';
 	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
 	import {
@@ -31,6 +32,8 @@
 
 	let togglingId = $state<number | null>(null);
 	let runningId = $state<number | null>(null);
+	let planArchiveHealth = $state<PlanArchiveHealth | null>(null);
+	let loadingPlanArchiveHealth = $state(false);
 
 	// Instagram 설정 모달 상태
 	let showInstagramSettingsModal = $state(false);
@@ -487,6 +490,28 @@
 		}
 	}
 
+	async function fetchPlanArchiveHealth() {
+		loadingPlanArchiveHealth = true;
+		try {
+			planArchiveHealth = await planRecordsApi.getArchiveHealth();
+		} catch (e) {
+			planArchiveHealth = null;
+		} finally {
+			loadingPlanArchiveHealth = false;
+		}
+	}
+
+	function formatRunPatch(patch: Record<string, number> | undefined): string {
+		if (!patch) return '';
+		const parts = [
+			`queued ${patch.queued ?? 0}`,
+			`temp ${patch.skipped_temp ?? 0}`,
+			`empty ${patch.skipped_empty ?? 0}`,
+			`active ${patch.skipped_active_request ?? 0}`
+		];
+		return ` (${parts.join(', ')})`;
+	}
+
 	async function toggleSchedule(schedule: CrawlSchedule) {
 		togglingId = schedule.id;
 		successMessage = null;
@@ -496,6 +521,7 @@
 			if (result.success) {
 				successMessage = `${schedule.display_name || schedule.name}: ${result.enabled ? '활성화' : '비활성화'}됨`;
 				await fetchSchedules();
+				if (schedule.target_type === 'plan_archive_analyze') await fetchPlanArchiveHealth();
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : '스케줄 토글 실패';
@@ -511,7 +537,8 @@
 		try {
 			const result = await collectApi.runSchedule(schedule.id);
 			if (result.success) {
-				successMessage = result.message;
+				successMessage = `${result.message}${formatRunPatch(result.config_snapshot_patch)}`;
+				if (schedule.target_type === 'plan_archive_analyze') await fetchPlanArchiveHealth();
 			} else {
 				error = result.message;
 			}
@@ -652,6 +679,7 @@
 
 	onMount(() => {
 		fetchSchedules();
+		fetchPlanArchiveHealth();
 		llmApi.getProviders().then(data => { providers = data; }).catch(() => {});
 	});
 </script>
@@ -807,6 +835,46 @@
 							</button>
 						</div>
 					</div>
+					{#if schedule.target_type === 'plan_archive_analyze'}
+						{@const planArchiveWarning = !!planArchiveHealth && planArchiveHealth.real_unprocessed > 0 && !schedule.enabled}
+						<div class="mt-3 border-t border-border pt-3">
+							{#if loadingPlanArchiveHealth}
+								<div class="text-xs text-muted-foreground">Plan Archive health 로드 중...</div>
+							{:else if planArchiveHealth}
+								<div class="flex flex-wrap items-center gap-2 text-xs">
+									<span class="font-medium {planArchiveWarning ? 'text-amber-700' : 'text-foreground'}">
+										{planArchiveWarning ? '미처리 보류' : planArchiveHealth.real_unprocessed === 0 ? '정상 보류' : 'Backfill 대기'}
+									</span>
+									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
+										실제 미처리 {planArchiveHealth.real_unprocessed}
+									</span>
+									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
+										임시 테스트 제외 {planArchiveHealth.temp_pytest_unprocessed}/{planArchiveHealth.temp_pytest_total}
+									</span>
+									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
+										큐 대기/처리중 {planArchiveHealth.pending_or_processing_requests}
+									</span>
+									<span class="rounded {planArchiveHealth.failed_requests > 0 ? 'bg-red-100 text-red-700' : 'bg-muted text-muted-foreground'} px-2 py-1">
+										실패 요청 {planArchiveHealth.failed_requests}
+									</span>
+									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
+										마지막 성공 {formatDateTime(planArchiveHealth.plan_archive_schedule?.last_success ?? null)}
+									</span>
+									<span class="rounded bg-muted px-2 py-1 text-muted-foreground">
+										마지막 실패 {formatDateTime(planArchiveHealth.plan_archive_schedule?.last_failure ?? null)}
+									</span>
+									<a
+										href="/plans?tab=archive"
+										class="ml-auto text-primary hover:text-primary-hover"
+									>
+										{planArchiveHealth.real_unprocessed > 0 ? 'archive/guide 확인' : 'archive 보기'}
+									</a>
+								</div>
+							{:else}
+								<div class="text-xs text-muted-foreground">Plan Archive health를 불러오지 못했습니다.</div>
+							{/if}
+						</div>
+					{/if}
 				</div>
 			{/each}
 		</div>

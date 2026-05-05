@@ -9,9 +9,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.plan_record import PlanRecord, PlanEvent
+from app.models.task_schedule import TaskSchedule, TaskScheduleRun
+from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.services.plan_record_service import (
     PlanRecordService,
     _compute_filename_hash,
+    _is_temp_pytest_path,
     PLAN_FILE_PATTERN,
     EXCLUDE_FILES,
 )
@@ -21,6 +24,9 @@ def _create_plan_tables(eng):
     """PlanRecord, PlanEvent 테이블만 생성 (전체 Base 사용 불가 — FK 해결 문제)"""
     PlanRecord.__table__.create(bind=eng, checkfirst=True)
     PlanEvent.__table__.create(bind=eng, checkfirst=True)
+    TaskSchedule.__table__.create(bind=eng, checkfirst=True)
+    TaskScheduleRun.__table__.create(bind=eng, checkfirst=True)
+    LLMRequest.__table__.create(bind=eng, checkfirst=True)
 
 
 # ========== Fixtures ==========
@@ -422,10 +428,128 @@ class TestListRecordsAndEvents:
         ids_other = [rec.id for rec in results_other]
         assert r.id not in ids_other
 
+    def test_list_records_excludes_temp_pytest_records_by_default(self, svc, db):
+        """R: archive 목록 기본 조회는 pytest temp PlanRecord를 제외한다."""
+        real = svc.ingest_single(
+            file_path=r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\archive\2026-05-05_real.md",
+            raw_content="# real",
+        )
+        temp = svc.ingest_single(
+            file_path=r"C:\Users\Narang\AppData\Local\Temp\pytest-of-Narang\pytest-42\docs\archive\2026-05-05_temp.md",
+            raw_content="# temp",
+        )
+        db.flush()
+
+        default_records = svc.list_records(status="archived")
+        include_temp_records = svc.list_records(status="archived", exclude_temp=False)
+
+        assert real.id in [record.id for record in default_records]
+        assert temp.id not in [record.id for record in default_records]
+        assert temp.id in [record.id for record in include_temp_records]
+
     def test_list_events_empty(self, svc, db):
         """이벤트 없으면 빈 목록"""
         result = svc.list_events(event_type="nonexistent_type_xyz")
         assert result == []
+
+
+class TestTempPytestPath:
+    def test_is_temp_pytest_path_recognizes_windows_pytest_of(self):
+        path = r"C:\Users\Narang\AppData\Local\Temp\pytest-of-Narang\pytest-42\docs\archive\a.md"
+        assert _is_temp_pytest_path(path) is True
+
+    def test_is_temp_pytest_path_recognizes_linux_tmp(self):
+        assert _is_temp_pytest_path("/tmp/pytest-of-user/pytest-1/docs/archive/a.md") is True
+
+    def test_is_temp_pytest_path_rejects_real_archive(self):
+        path = r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\archive\2026-05-05_real.md"
+        assert _is_temp_pytest_path(path) is False
+
+
+class TestPlanArchiveHealth:
+    def test_get_plan_archive_health_right_counts_real_and_temp_records(self, svc, db):
+        """R: health는 real/temp archive와 active/failed request를 분리 집계한다."""
+        real_processed = svc.ingest_single(
+            file_path="/repo/docs/archive/2026-05-01_real_done.md",
+            raw_content="# done",
+        )
+        real_processed.llm_processed_at = datetime(2026, 5, 2)
+        real_pending = svc.ingest_single(
+            file_path="/repo/docs/archive/2026-05-02_real_pending.md",
+            raw_content="# pending",
+        )
+        temp_pending = svc.ingest_single(
+            file_path=r"C:\Users\Narang\AppData\Local\Temp\pytest-of-Narang\pytest-7\docs\archive\2026-05-03_temp.md",
+            raw_content="# temp",
+        )
+        schedule = TaskSchedule(
+            name="plan_archive_analyze_daily",
+            display_name="Plan Archive LLM 분석",
+            target_type=TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE,
+            schedule_type="cron",
+            schedule_value='{"time":"02:10"}',
+            enabled=False,
+            last_run_at=datetime(2026, 5, 4, 2, 10),
+        )
+        db.add(schedule)
+        db.flush()
+        db.add_all([
+            TaskScheduleRun(
+                schedule_id=schedule.id,
+                status=TaskScheduleRun.STATUS_COMPLETED,
+                finished_at=datetime(2026, 5, 4, 2, 11),
+            ),
+            TaskScheduleRun(
+                schedule_id=schedule.id,
+                status=TaskScheduleRun.STATUS_FAILED,
+                finished_at=datetime(2026, 5, 3, 2, 11),
+            ),
+            LLMRequest(caller_type="plan_archive_analyze", caller_id=real_pending.filename_hash, prompt="p", status="pending"),
+            LLMRequest(caller_type="plan_archive_analyze", caller_id=temp_pending.filename_hash, prompt="p", status="failed", error_message="boom"),
+        ])
+        db.flush()
+
+        health = svc.get_plan_archive_health()
+
+        assert health["archived_total"] == 3
+        assert health["llm_processed"] == 1
+        assert health["llm_unprocessed"] == 2
+        assert health["real_unprocessed"] == 1
+        assert health["temp_pytest_total"] == 1
+        assert health["temp_pytest_unprocessed"] == 1
+        assert health["pending_or_processing_requests"] == 1
+        assert health["failed_requests"] == 1
+        assert health["latest_failed_request"]["error_message"] == "boom"
+        assert health["plan_archive_schedule"]["enabled"] is False
+        assert health["plan_archive_schedule"]["last_success"] == "2026-05-04T02:11:00"
+
+    def test_get_guide_status_excludes_temp_pytest_records(self, svc, db, monkeypatch):
+        """R: guide-status pending archive 후보도 temp PlanRecord를 제외한다."""
+        from app.shared import wiki_tags
+
+        monkeypatch.setattr(wiki_tags, "load_meta_yaml", lambda: {
+            "dev-guide": {
+                "owns_archive_tags": ["plan"],
+                "last_archive_scan": "2026-05-01",
+            }
+        })
+        monkeypatch.setattr(wiki_tags, "load_whitelist", lambda: {"plan"})
+        monkeypatch.setattr(wiki_tags, "extract_wiki_tags", lambda filename, whitelist: ["plan"])
+
+        svc.ingest_single(
+            file_path="/repo/docs/archive/2026-05-02_real-plan.md",
+            raw_content="# real",
+        )
+        svc.ingest_single(
+            file_path=r"C:\Users\Narang\AppData\Local\Temp\pytest-of-Narang\pytest-1\docs\archive\2026-05-03_temp-plan.md",
+            raw_content="# temp",
+        )
+        db.flush()
+
+        status = svc.get_guide_status()
+
+        assert status[0]["pending_count"] == 1
+        assert "real-plan" in status[0]["pending_archives"][0]["file_path"]
 
 
 # ========== Phase 1: title/project 자동 파싱 (items 14~16) ==========
@@ -583,7 +707,7 @@ class TestDbIsolationNoProductionPollution:
 
         assert "test_db_engine" not in request.fixturenames
         assert "test_db_session" not in request.fixturenames
-        assert set(inspect(db.get_bind()).get_table_names()) == {"plan_events", "plan_records"}
+        assert {"plan_events", "plan_records"}.issubset(set(inspect(db.get_bind()).get_table_names()))
 
         pytest_path = str(tmp_path / "pytest-isolation-check" / "2026-03-30_isolation-tc.md")
         svc = PlanRecordService(db)

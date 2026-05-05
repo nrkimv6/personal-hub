@@ -15,6 +15,7 @@ from app.modules.google_search.services.queue_service import enqueue_google_sear
 from app.schemas.collect import CollectedPostList, CollectedPostBase, CrawlHistoryList
 from app.models import TaskSchedule, CrawlRequest
 from app.models.google_search import GoogleSearchQueue, GoogleSavedSearch
+from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 
 router = APIRouter(prefix="/collect", tags=["collect"])
 
@@ -844,6 +845,19 @@ async def trigger_schedule_run(
             "success": True,
             "message": "자동 dev-runner 실행 요청이 예약되었습니다",
             "run_id": run.id,
+        }
+
+    elif schedule.target_type == 'plan_archive_analyze':
+        target_config = schedule.get_target_config() if schedule.target_config else {}
+        stats = PlanArchiveScheduler._enqueue_unprocessed_plans_in_session(db, target_config=target_config)
+        return {
+            "success": True,
+            "message": (
+                f"Plan Archive 분석 요청: queued {stats['queued']}, "
+                f"temp {stats['skipped_temp']} 제외, empty {stats['skipped_empty']} 제외, "
+                f"active {stats['skipped_active_request']} 제외"
+            ),
+            "config_snapshot_patch": stats,
         }
 
     # 지원하지 않는 스케줄 타입

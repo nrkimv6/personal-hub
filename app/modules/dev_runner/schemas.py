@@ -209,6 +209,39 @@ class ImportArchivedResponse(BaseModel):
     errors: List[str]
 
 
+class PlanArchiveScheduleSnapshot(BaseModel):
+    """Plan Archive scheduler snapshot for health UI."""
+    id: int
+    enabled: bool
+    schedule_value: Optional[str] = None
+    last_run: Optional[str] = None
+    last_success: Optional[str] = None
+    last_failure: Optional[str] = None
+
+
+class PlanArchiveFailedRequestResponse(BaseModel):
+    """Latest failed Plan Archive LLM request."""
+    id: int
+    caller_id: str
+    requested_at: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class PlanArchiveHealthResponse(BaseModel):
+    """Plan Archive health summary."""
+    archived_total: int
+    llm_processed: int
+    llm_unprocessed: int
+    real_unprocessed: int
+    temp_pytest_total: int
+    temp_pytest_unprocessed: int
+    pending_or_processing_requests: int
+    failed_requests: int
+    latest_failed_request: Optional[PlanArchiveFailedRequestResponse] = None
+    oldest_unprocessed_at: Optional[str] = None
+    plan_archive_schedule: Optional[PlanArchiveScheduleSnapshot] = None
+
+
 class PlanRecordResponse(BaseModel):
     """계획서 레코드 응답"""
     id: int
@@ -504,6 +537,7 @@ __all__ = [
     'PlanRecordResponse',
     'PlanRecordWithEventsResponse',
     'ImportArchivedResponse',
+    'PlanArchiveHealthResponse',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',

@@ -521,7 +521,12 @@ export const collectApi = {
 
   // 스케줄 즉시 실행
   runSchedule: (scheduleId: number) =>
-    request<{ success: boolean; message: string; request_id?: number }>(`/collect/schedules/${scheduleId}/run`, {
+    request<{
+      success: boolean;
+      message: string;
+      request_id?: number;
+      config_snapshot_patch?: Record<string, number>;
+    }>(`/collect/schedules/${scheduleId}/run`, {
       method: 'POST',
     }),
 

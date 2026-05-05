@@ -25,7 +25,8 @@ from app.modules.dev_runner.services.plan_record_service import PlanRecordServic
 from app.modules.dev_runner.services.plan_service import plan_service as _plan_service
 from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
-    PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse
+    PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse,
+    PlanArchiveHealthResponse,
 )
 
 
@@ -60,6 +61,13 @@ def get_guide_status(include_history: bool = False, db: Session = Depends(get_db
     return svc.get_guide_status(include_history=include_history)
 
 
+@router.get("/records/archive-health", response_model=PlanArchiveHealthResponse)
+def get_archive_health(include_temp: bool = False, db: Session = Depends(get_db)):
+    """Plan Archive scheduler health summary."""
+    svc = PlanRecordService(db)
+    return svc.get_plan_archive_health(include_temp=include_temp)
+
+
 @router.get("/records", response_model=list[PlanRecordResponse])
 def list_records(
     project: Optional[str] = None,
@@ -72,6 +80,7 @@ def list_records(
     skip: int = 0,
     limit: int = 50,
     deep: bool = False,
+    include_temp: bool = False,
     db: Session = Depends(get_db),
 ):
     tags_list = [t.strip() for t in tags.split(",")] if tags else None
@@ -79,7 +88,7 @@ def list_records(
     return svc.list_records(
         project=project, status=status, category=category, tags=tags_list,
         q=q, date_from=date_from, date_to=date_to,
-        skip=skip, limit=limit, deep=deep,
+        skip=skip, limit=limit, deep=deep, exclude_temp=not include_temp,
     )
 
 

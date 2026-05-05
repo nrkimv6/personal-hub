@@ -44,6 +44,32 @@ export interface ImportArchivedResult {
 	errors: string[];
 }
 
+export interface PlanArchiveHealth {
+	archived_total: number;
+	llm_processed: number;
+	llm_unprocessed: number;
+	real_unprocessed: number;
+	temp_pytest_total: number;
+	temp_pytest_unprocessed: number;
+	pending_or_processing_requests: number;
+	failed_requests: number;
+	latest_failed_request: {
+		id: number;
+		caller_id: string;
+		requested_at: string | null;
+		error_message: string | null;
+	} | null;
+	oldest_unprocessed_at: string | null;
+	plan_archive_schedule: {
+		id: number;
+		enabled: boolean;
+		schedule_value: string | null;
+		last_run: string | null;
+		last_success: string | null;
+		last_failure: string | null;
+	} | null;
+}
+
 // ============================================================
 // Internal helper
 // ============================================================
@@ -94,6 +120,7 @@ export const planRecordsApi = {
 		limit?: number;
 		q?: string;
 		deep?: boolean;
+		include_temp?: boolean;
 	}) => {
 		const q = new URLSearchParams();
 		if (params?.project) q.set('project', params.project);
@@ -104,9 +131,13 @@ export const planRecordsApi = {
 		if (params?.limit != null) q.set('limit', String(params.limit));
 		if (params?.q) q.set('q', params.q);
 		if (params?.deep !== undefined) q.set('deep', String(params.deep));
+		if (params?.include_temp !== undefined) q.set('include_temp', String(params.include_temp));
 		const qs = q.toString();
 		return planRecordsRequest<PlanRecord[]>(`/records${qs ? '?' + qs : ''}`);
 	},
+
+	getArchiveHealth: (includeTemp = false) =>
+		planRecordsRequest<PlanArchiveHealth>(`/records/archive-health?include_temp=${includeTemp}`),
 
 	/**
 	 * 레코드 상세 조회 (events 포함)
