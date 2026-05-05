@@ -1,7 +1,7 @@
 """실행 제어 API 테스트 - fakeredis + patch.object 적용"""
 
 import json
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -24,8 +24,11 @@ def mock_executor_redis():
     """executor_service의 async_redis와 redis_client를 fakeredis로 교체"""
     fake_sync = fakeredis.FakeRedis(decode_responses=True)
     fake_async = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    mock_claim = MagicMock()
+    mock_claim.claim_id = "test-claim-id"
     with patch.object(executor_service, 'redis_client', fake_sync), \
-         patch.object(executor_service, 'async_redis', fake_async):
+         patch.object(executor_service, 'async_redis', fake_async), \
+         patch('app.modules.dev_runner.services.plan_execution_claim_service.claim_plan', return_value=mock_claim):
         yield {"async": fake_async, "sync": fake_sync}
 
 
