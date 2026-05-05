@@ -16,7 +16,7 @@ console.log(`frontend merge-test build: mode=${env.MONITOR_FRONTEND_MODE} outDir
 const result = spawnSync(npmCommand, ["run", "build"], {
   stdio: "inherit",
   env,
-  shell: false,
+  shell: process.platform === "win32",
 });
 
 if (result.error) {

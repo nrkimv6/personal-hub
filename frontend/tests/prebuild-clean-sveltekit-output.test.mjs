@@ -11,6 +11,7 @@ import {
 } from "../scripts/prebuild-clean-sveltekit-output.mjs";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const mergeTestBuildScript = readFileSync(new URL("../scripts/run-merge-test-build.mjs", import.meta.url), "utf8");
 
 test("prebuild cleanup targets the active SvelteKit outDir", () => {
   assert.equal(
@@ -64,4 +65,5 @@ test("merge-test cleanup removes only the isolated merge-test output", () => {
 test("package exposes an isolated merge-test build entrypoint", () => {
   assert.equal(packageJson.scripts["build:merge-test"], "node scripts/run-merge-test-build.mjs");
   assert.equal(MERGE_TEST_SVELTEKIT_OUTDIR, ".svelte-kit-merge-test");
+  assert.match(mergeTestBuildScript, /shell:\s*process\.platform === "win32"/);
 });
