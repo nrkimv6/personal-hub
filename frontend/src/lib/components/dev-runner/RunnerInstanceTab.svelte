@@ -300,10 +300,9 @@
 				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
 			{/if}
 
-			{@const staleLabel = staleBadgeLabel()}
-			{#if staleLabel}
+			{#if staleBadgeLabel()}
 				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground" title={metaTitle}>
-					{staleLabel}
+					{staleBadgeLabel()}
 				</span>
 			{/if}
 

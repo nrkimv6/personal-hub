@@ -305,10 +305,9 @@
 						<span class="hidden sm:block text-[10px] text-muted-foreground shrink-0 font-mono">{runner.engine}</span>
 					{/if}
 
-					{@const staleLabel = resolveStaleLabel(runner)}
-					{#if staleLabel}
+					{#if resolveStaleLabel(runner)}
 						<span class="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground md:inline-flex">
-							{staleLabel}
+							{resolveStaleLabel(runner)}
 						</span>
 					{/if}
 
