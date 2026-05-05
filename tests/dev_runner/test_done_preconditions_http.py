@@ -201,3 +201,62 @@ class TestDonePreconditionsHttp:
         assert "archive target resolve failed" in result["message"]
         assert plan_path.exists()
         assert plan_path.read_text(encoding="utf-8") == original
+
+    def test_done_http_returns_owned_docs_residual_reason(self, tmp_path, dev_runner_config_isolation):
+        """POST /plans/{plan}/done — owned docs dirty 잔여 실패 reason을 응답에 노출한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plan_dir / "2026-05-04_fix-owned-docs-residue.md"
+        plan_path.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] A\n", encoding="utf-8")
+
+        with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), \
+             patch("app.modules.dev_runner.routes.plans.plan_service.run_done", new=AsyncMock(return_value={
+                 "success": False,
+                 "message": "residual dirty after done: docs/archive/plan.md",
+                 "reason": "residue_guard",
+                 "remaining_tasks": 0,
+                 "total_tasks": 1,
+                 "plan_status": "구현완료",
+             })) as mock_run_done, \
+             patch("app.modules.dev_runner.routes.plans.plan_service.list_plans", return_value=[]):
+            import asyncio
+            result = asyncio.run(
+                run_plan_done(
+                    base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("="),
+                    x_plan_runner_id="runner-owned-docs",
+                )
+            )
+
+        assert result["success"] is False
+        assert result["reason"] == "residue_guard"
+        assert "residual dirty" in result["message"]
+        assert mock_run_done.await_args.kwargs["runner_id"] == "runner-owned-docs"
+
+    def test_done_http_success_with_unrelated_dirty_contract(self, tmp_path, dev_runner_config_isolation):
+        """POST /plans/{plan}/done — unrelated dirty가 제외된 정상 종료 응답을 유지한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plan_dir / "2026-05-04_fix-unrelated-dirty-ignored.md"
+        plan_path.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] A\n", encoding="utf-8")
+
+        with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), \
+             patch("app.modules.dev_runner.routes.plans.plan_service.run_done", new=AsyncMock(return_value={
+                 "success": True,
+                 "message": "성공",
+                 "output": None,
+                 "remaining_tasks": 0,
+                 "total_tasks": 1,
+                 "plan_status": "구현완료",
+             })) as mock_run_done, \
+             patch("app.modules.dev_runner.routes.plans.plan_service.list_plans", return_value=[]):
+            import asyncio
+            result = asyncio.run(
+                run_plan_done(
+                    base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("="),
+                    x_plan_runner_id="runner-unrelated",
+                )
+            )
+
+        assert result["success"] is True
+        assert result.get("reason") is None
+        assert mock_run_done.await_args.kwargs["runner_id"] == "runner-unrelated"

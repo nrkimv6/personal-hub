@@ -25,12 +25,25 @@ _FAKE_MP4 = b"\x00" * 128
 _MP4_HEADERS = {"Content-Type": "video/mp4"}
 
 
-def _upload(client, data=_FAKE_MP4, filename="test.mp4", fps=10, start_seconds=None, duration_seconds=None):
+def _upload(
+    client,
+    data=_FAKE_MP4,
+    filename="test.mp4",
+    fps=10,
+    width=None,
+    start_seconds=None,
+    duration_seconds=None,
+    overwrite_mode=None,
+):
     form: dict = {"fps": str(fps)}
+    if width is not None:
+        form["width"] = str(width)
     if start_seconds is not None:
         form["start_seconds"] = str(start_seconds)
     if duration_seconds is not None:
         form["duration_seconds"] = str(duration_seconds)
+    if overwrite_mode is not None:
+        form["overwrite_mode"] = overwrite_mode
     return client.post(
         "/api/v1/mp4-gif/tasks",
         files={"file": (filename, io.BytesIO(data), "video/mp4")},
@@ -200,3 +213,57 @@ class TestTrimParamsHttp:
         assert "duration_seconds" in body
         assert abs(body["start_seconds"] - 2.5) < 0.01
         assert abs(body["duration_seconds"] - 5.0) < 0.01
+
+
+class TestOptionParamsHttp:
+    """width/overwrite/fps 옵션 HTTP 계약 검증."""
+
+    def test_create_task_with_preset_options_returns_202(self, client):
+        """Right: preset에 해당하는 fps/width 업로드가 202를 반환한다."""
+        with patch("app.routes.mp4_gif.BackgroundTasks.add_task"):
+            resp = _upload(client, fps=6, width=480)
+        assert resp.status_code == 202
+        assert resp.json().get("task_id")
+
+    def test_create_task_with_custom_options_returns_202(self, client):
+        """Right: custom fps/width/trim/overwrite 업로드가 202를 반환한다."""
+        with patch("app.routes.mp4_gif.BackgroundTasks.add_task"):
+            resp = _upload(
+                client,
+                fps=7,
+                width=360,
+                start_seconds=1.25,
+                duration_seconds=3.5,
+                overwrite_mode="suffix",
+            )
+        assert resp.status_code == 202
+        assert resp.json().get("task_id")
+
+    def test_get_task_status_includes_option_fields(self, client):
+        """Right: 상태 응답 JSON에 fps/width/trim/overwrite가 포함된다."""
+        with patch("app.routes.mp4_gif.BackgroundTasks.add_task"):
+            create_resp = _upload(
+                client,
+                fps=7,
+                width=360,
+                start_seconds=1.25,
+                duration_seconds=3.5,
+                overwrite_mode="suffix",
+            )
+        assert create_resp.status_code == 202
+        task_id = create_resp.json()["task_id"]
+
+        status_resp = client.get(f"/api/v1/mp4-gif/tasks/{task_id}")
+        assert status_resp.status_code == 200
+        body = status_resp.json()
+        assert body["fps"] == 7
+        assert body["width"] == 360
+        assert abs(body["start_seconds"] - 1.25) < 0.01
+        assert abs(body["duration_seconds"] - 3.5) < 0.01
+        assert body["overwrite_mode"] == "suffix"
+        assert body["download_filename"] == "test_gif_fps7_w360.gif"
+
+    def test_create_task_invalid_overwrite_mode_returns_400(self, client):
+        """Error: 허용되지 않은 overwrite_mode는 400을 반환한다."""
+        resp = _upload(client, overwrite_mode="replace_anyway")
+        assert resp.status_code == 400

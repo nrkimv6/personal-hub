@@ -1,5 +1,6 @@
 """MP4 -> GIF 도구 페이지 E2E 테스트."""
 
+import re
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -20,6 +21,79 @@ def _skip_if_frontend_error_title(page: Page) -> None:
 def _skip_admin_mode_if_public(system_mode: str) -> None:
     if system_mode != "admin":
         pytest.skip(f"현재 system mode={system_mode} — admin E2E 스킵")
+
+
+def _mock_mp4_gif_api(page: Page, completed_task: dict | None = None) -> dict:
+    captured: dict = {}
+
+    page.route(
+        "**/api/v1/mp4-gif/health",
+        lambda route: route.fulfill(
+            status=200,
+            json={
+                "ffmpeg_ok": True,
+                "ffmpeg_path": "ffmpeg",
+                "work_root": "test",
+                "work_root_exists": True,
+                "max_upload_mb": 100,
+                "error_message": None,
+            },
+        ),
+    )
+
+    def handle_create(route):
+        body = route.request.post_data_buffer or b""
+        captured["post_data"] = body.decode("latin-1", errors="ignore")
+        route.fulfill(status=202, json={"task_id": "task-options", "status": "queued"})
+
+    page.route("**/api/v1/mp4-gif/tasks", handle_create)
+
+    page.route(
+        "**/api/v1/mp4-gif/tasks/task-options/result**",
+        lambda route: route.fulfill(
+            status=200,
+            body=b"GIF89a" + b"\x00" * 16,
+            headers={"content-type": "image/gif"},
+        ),
+    )
+
+    task = completed_task or {
+        "task_id": "task-options",
+        "status": "completed",
+        "source_name": "sample.mp4",
+        "fps": 7,
+        "width": 360,
+        "start_seconds": 1.25,
+        "duration_seconds": 3.5,
+        "overwrite_mode": "suffix",
+        "download_filename": "sample_gif_fps7_w360.gif",
+        "error_message": None,
+        "created_at": "2026-05-05T15:00:00",
+        "started_at": "2026-05-05T15:00:01",
+        "completed_at": "2026-05-05T15:00:02",
+    }
+
+    page.route("**/api/v1/mp4-gif/tasks/task-options", lambda route: route.fulfill(status=200, json=task))
+    return captured
+
+
+def _select_dummy_mp4(page: Page, tmp_path) -> None:
+    dummy_mp4 = tmp_path / "sample.mp4"
+    dummy_mp4.write_bytes(b"\x00" * 128)
+    page.locator("input[type='file']").set_input_files(str(dummy_mp4))
+
+
+def _set_video_current_time(page: Page, seconds: float) -> None:
+    page.locator("video").evaluate(
+        """(el, seconds) => {
+            Object.defineProperty(el, 'currentTime', {
+                configurable: true,
+                get: () => seconds,
+                set: () => {}
+            });
+        }""",
+        seconds,
+    )
 
 
 class TestMp4GifPageLoad:
@@ -127,6 +201,76 @@ class TestMp4GifPageInteraction:
         """
         _skip_admin_mode_if_public(system_mode)
         pytest.skip("T4: 실서버 변환 완료 시나리오 — /merge-test에서 실행")
+
+    def test_preset_cards_update_fps_and_width(
+        self, page: Page, frontend_url: str, system_mode: str
+    ):
+        """시나리오: preset 카드 클릭 시 fps/width 입력값이 함께 바뀐다."""
+        _skip_admin_mode_if_public(system_mode)
+        _mock_mp4_gif_api(page)
+        _goto_mp4_gif_tab(page, frontend_url)
+        _skip_if_frontend_error_title(page)
+
+        page.get_by_role("button", name="고화질 15fps · 원본").click()
+        page.get_by_role("button", name="고급 옵션").click()
+        expect(page.locator("#fps-input")).to_have_value("15")
+        expect(page.locator("#width-input")).to_have_value("")
+
+        page.get_by_role("button", name="저용량 6fps · 480px").click()
+        expect(page.locator("#fps-input")).to_have_value("6")
+        expect(page.locator("#width-input")).to_have_value("480")
+
+    def test_custom_options_submit_payload_and_completed_card(
+        self, page: Page, frontend_url: str, system_mode: str, tmp_path
+    ):
+        """시나리오: custom 옵션 payload와 완료 카드 옵션/다운로드 표면을 검증한다."""
+        _skip_admin_mode_if_public(system_mode)
+        captured = _mock_mp4_gif_api(page)
+        _goto_mp4_gif_tab(page, frontend_url)
+        _skip_if_frontend_error_title(page)
+        page.evaluate(
+            """() => {
+                window.__mp4GifPayload = null;
+                const originalFetch = window.fetch.bind(window);
+                window.fetch = async (input, init = {}) => {
+                    const url = String(input);
+                    if (url.includes('/mp4-gif/tasks') && init.method === 'POST' && init.body instanceof FormData) {
+                        window.__mp4GifPayload = Array.from(init.body.entries()).map(([key, value]) => [
+                            key,
+                            value instanceof File ? value.name : String(value)
+                        ]);
+                    }
+                    return originalFetch(input, init);
+                };
+            }"""
+        )
+
+        _select_dummy_mp4(page, tmp_path)
+        page.get_by_role("button", name="고급 옵션").click()
+        page.locator("#fps-input").fill("7")
+        page.locator("#width-input").fill("360")
+        page.locator("#overwrite-select").select_option("suffix")
+
+        _set_video_current_time(page, 1.25)
+        page.get_by_role("button", name="시작점 지정").click()
+        _set_video_current_time(page, 4.75)
+        page.get_by_role("button", name="종료점 지정").click()
+
+        page.get_by_role("button", name="변환 시작").click()
+        expect(page.get_by_text("완료")).to_be_visible(timeout=10000)
+        expect(page.get_by_text("fps 7", exact=True)).to_be_visible()
+        expect(page.get_by_text("360px")).to_be_visible()
+        expect(page.get_by_text("· 구간: 1.3s ~ 4.8s", exact=True)).to_be_visible()
+        expect(page.get_by_text("· 옵션 suffix 붙이기", exact=True)).to_be_visible()
+        expect(page.get_by_role("link", name=re.compile("GIF 다운로드"))).to_be_visible()
+
+        payload = dict(page.evaluate("() => window.__mp4GifPayload || []"))
+        assert payload["file"] == "sample.mp4"
+        assert payload["fps"] == "7"
+        assert payload["width"] == "360"
+        assert payload["overwrite_mode"] == "suffix"
+        assert payload["start_seconds"] == "1.250"
+        assert payload["duration_seconds"] == "3.500"
 
 
 class TestMp4GifTrimPreview:
