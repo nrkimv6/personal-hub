@@ -1,7 +1,7 @@
 """Dev Runner Pydantic Schemas"""
 
 import json as _json
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from datetime import date, datetime
 from typing import Literal, Optional, List, Union
 
@@ -419,6 +419,8 @@ class PlanArchiveMetricsResponse(BaseModel):
 
 class PlanRecordResponse(BaseModel):
     """계획서 레코드 응답"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     filename_hash: str
     file_path: str

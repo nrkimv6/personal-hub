@@ -749,3 +749,112 @@ class TestStartDevRunnerClaimIntegration:
             )
 
         mock_cp.assert_not_called()
+
+
+# ========== TestSecondRunClaimScenarios ==========
+# T2 leaf: test_integration.py — 동일 plan 두 번째 실행 시 일관된 409 또는 attach 응답 검증
+
+class TestSecondRunClaimScenarios:
+    """동일 plan_file에 대한 두 번째 실행 요청 시나리오 통합 검증."""
+
+    def _make_fake_claim(self, claim_id="claim-second-001", state="active", runner_id="runner-alive"):
+        from datetime import timedelta
+        claim = MagicMock()
+        claim.claim_id = claim_id
+        claim.state = state
+        claim.runner_id = runner_id
+        claim.lease_expires_at = datetime.now() + timedelta(seconds=300)
+        return claim
+
+    @pytest.mark.asyncio
+    async def test_second_run_same_plan_returns_409_when_active_claim(self, executor, fake_async_redis):
+        """R: 동일 plan_file에 active claim이 있으면 409 + claim 상세 정보를 반환한다"""
+        await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
+        from app.modules.dev_runner.services.plan_execution_claim_service import ClaimConflictError
+
+        existing_claim = self._make_fake_claim()
+        conflict_exc = ClaimConflictError("already claimed", existing_claim)
+        mock_sl = MagicMock()
+        mock_cp = MagicMock(side_effect=conflict_exc)
+
+        with patch("app.database.SessionLocal", mock_sl), \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.claim_plan", mock_cp):
+            with pytest.raises(HTTPException) as exc_info:
+                await executor.start_dev_runner(
+                    RunRequest(test_source="second_run_tc", plan_file="docs/plan/same-plan.md")
+                )
+
+        assert exc_info.value.status_code == 409
+        detail = exc_info.value.detail
+        # claim 상세 정보가 포함돼야 한다
+        assert "claim_id" in detail
+        assert "claim_state" in detail
+        assert detail["claim_id"] == existing_claim.claim_id
+        assert detail["claim_state"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_second_run_same_plan_returns_attached_when_runner_alive(self, executor, fake_async_redis):
+        """R: 동일 plan_file에 살아있는 runner가 있으면 attached=True와 claim 요약을 반환한다"""
+        await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
+
+        existing_runner_id = "runner-alive-001"
+        existing_claim = self._make_fake_claim(claim_id="claim-attach-001", state="active",
+                                               runner_id=existing_runner_id)
+
+        # listener가 attach 응답을 돌려주도록 세팅 (success=True + status="attached" 필수)
+        attach_result = {"success": True, "status": "attached", "runner_id": existing_runner_id}
+        captured = []
+
+        # 기존 runner Redis 상태 세팅
+        from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX
+        await fake_async_redis.set(f"{RUNNER_KEY_PREFIX}:{existing_runner_id}:pid", "99999")
+        await fake_async_redis.set(f"{RUNNER_KEY_PREFIX}:{existing_runner_id}:plan_file", "docs/plan/same-plan.md")
+        await fake_async_redis.set(f"{RUNNER_KEY_PREFIX}:{existing_runner_id}:start_time", datetime.now().isoformat())
+        await fake_async_redis.set(f"{RUNNER_KEY_PREFIX}:{existing_runner_id}:trigger", "user")
+
+        mock_sl = MagicMock()
+        mock_cp = MagicMock(return_value=self._make_fake_claim("new-claim-temp"))
+
+        with patch("app.database.SessionLocal", mock_sl), \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.claim_plan", mock_cp), \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.get_claim_for_plan",
+                   return_value=existing_claim), \
+             patch("app.modules.dev_runner.services.executor_service._release_claim_safe"), \
+             patch.object(executor.async_redis, "lpush",
+                          side_effect=_make_capture_lpush(fake_async_redis, captured, attach_result)):
+            result = await executor.start_dev_runner(
+                RunRequest(test_source="second_run_tc", plan_file="docs/plan/same-plan.md")
+            )
+
+        assert result.attached is True
+        assert result.runner_id == existing_runner_id
+        assert result.claim_id == "claim-attach-001"
+        assert result.claim_state == "active"
+
+    @pytest.mark.asyncio
+    async def test_409_detail_has_complete_structure(self, executor, fake_async_redis):
+        """Co: 409 detail이 claim_id/claim_state/stale/lease_expires_at/message 필드를 모두 포함한다"""
+        await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
+        from app.modules.dev_runner.services.plan_execution_claim_service import ClaimConflictError
+
+        existing_claim = self._make_fake_claim()
+        conflict_exc = ClaimConflictError("already claimed", existing_claim)
+
+        with patch("app.database.SessionLocal", MagicMock()), \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.claim_plan",
+                   MagicMock(side_effect=conflict_exc)):
+            with pytest.raises(HTTPException) as exc_info:
+                await executor.start_dev_runner(
+                    RunRequest(test_source="second_run_tc", plan_file="docs/plan/conflict-plan.md")
+                )
+
+        assert exc_info.value.status_code == 409
+        detail = exc_info.value.detail
+        # 구조화된 detail 필드 전체 확인
+        assert "claim_id" in detail
+        assert "claim_state" in detail
+        assert "stale" in detail
+        assert "lease_expires_at" in detail
+        assert "message" in detail
+        assert detail["claim_id"] == existing_claim.claim_id
+        assert detail["claim_state"] == "active"

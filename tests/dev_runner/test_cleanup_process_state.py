@@ -725,3 +725,151 @@ class TestCleanupUnmergedCommitsGuardIntegration:
         result = has_unmerged(branch, repo)
 
         assert result is False, "독자 커밋 없는 브랜치인데 has_unmerged_commits가 True를 반환"
+
+
+# ──────────────────────────────────────────────
+# Claim release 통합 테스트
+# ──────────────────────────────────────────────
+
+class TestCleanupProcessStateClaimRelease:
+    """_cleanup_process_state() claim release 경로 검증"""
+
+    def _import_process_utils(self):
+        import types
+        if "listener_noise_filter" not in sys.modules:
+            mock_noise = types.ModuleType("listener_noise_filter")
+            mock_noise.NOISE_BLOCK_MARKERS = []
+            mock_noise.is_noise_line = lambda line: False
+            sys.modules["listener_noise_filter"] = mock_noise
+        _, process_utils_mod = bootstrap_plan_runner_modules()
+        return process_utils_mod
+
+    def _common_patches(self):
+        """claim 외 사이드이펙트를 막는 공통 context manager 목록."""
+        return [
+            patch("plan_worktree_helpers.has_unmerged_commits", return_value=False),
+            patch("plan_worktree_helpers.is_plan_in_progress", return_value=False),
+            patch("worktree_manager.WorktreeManager.remove"),
+        ]
+
+    def _make_fake_claim(self, claim_id="claim-test-001"):
+        claim = MagicMock()
+        claim.claim_id = claim_id
+        return claim
+
+    def test_R_claim_released_when_plan_file_present(self):
+        """R: plan_file 키가 있으면 release_claim이 호출돼야 한다"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-claim-rel-001"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test-claim.md")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        fake_claim = self._make_fake_claim()
+        mock_session = MagicMock()
+        mock_session_ctx = MagicMock(return_value=mock_session)
+
+        with patch("app.database.SessionLocal", mock_session_ctx), \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.get_active_claim_for_plan",
+                   return_value=fake_claim) as mock_get, \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.release_claim") as mock_release, \
+             patch("plan_worktree_helpers.has_unmerged_commits", return_value=False), \
+             patch("plan_worktree_helpers.is_plan_in_progress", return_value=False), \
+             patch("worktree_manager.WorktreeManager.remove"):
+            pu._cleanup_process_state(runner_id, r, reason="test_claim_release")
+
+        mock_get.assert_called_once()
+        mock_release.assert_called_once_with(mock_session, fake_claim.claim_id)
+
+    def test_B_no_claim_release_when_plan_file_absent(self):
+        """B: plan_file 키가 없으면 release_claim이 호출되지 않는다"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-claim-rel-002"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        # plan_file 키 없음 (삭제)
+        r.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        with patch("app.modules.dev_runner.services.plan_execution_claim_service.release_claim") as mock_release, \
+             patch("plan_worktree_helpers.has_unmerged_commits", return_value=False), \
+             patch("plan_worktree_helpers.is_plan_in_progress", return_value=False), \
+             patch("worktree_manager.WorktreeManager.remove"):
+            pu._cleanup_process_state(runner_id, r, reason="test_no_plan_file")
+
+        mock_release.assert_not_called()
+
+    def test_B_no_claim_release_when_no_active_claim(self):
+        """B: plan_file 있지만 활성 claim이 없으면 release_claim이 호출되지 않는다"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-claim-rel-003"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/no-claim.md")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        mock_session = MagicMock()
+        mock_session_ctx = MagicMock(return_value=mock_session)
+
+        with patch("app.database.SessionLocal", mock_session_ctx), \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.get_active_claim_for_plan",
+                   return_value=None), \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.release_claim") as mock_release, \
+             patch("plan_worktree_helpers.has_unmerged_commits", return_value=False), \
+             patch("plan_worktree_helpers.is_plan_in_progress", return_value=False), \
+             patch("worktree_manager.WorktreeManager.remove"):
+            pu._cleanup_process_state(runner_id, r, reason="test_no_claim")
+
+        mock_release.assert_not_called()
+
+    def test_E_claim_release_error_is_swallowed(self):
+        """E: release_claim 예외 발생 시 경고만 남기고 cleanup이 정상 완료된다"""
+        pu = self._import_process_utils()
+        r = make_fake_redis()
+        runner_id = "t-claim-rel-004"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+        for suffix in RUNNER_KEY_SUFFIXES:
+            r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", f"val_{suffix}")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/err-claim.md")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        fake_claim = self._make_fake_claim("claim-err-001")
+        mock_session = MagicMock()
+        mock_session_ctx = MagicMock(return_value=mock_session)
+
+        with patch("app.database.SessionLocal", mock_session_ctx), \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.get_active_claim_for_plan",
+                   return_value=fake_claim), \
+             patch("app.modules.dev_runner.services.plan_execution_claim_service.release_claim",
+                   side_effect=RuntimeError("DB unavailable")), \
+             patch("plan_worktree_helpers.has_unmerged_commits", return_value=False), \
+             patch("plan_worktree_helpers.is_plan_in_progress", return_value=False), \
+             patch("worktree_manager.WorktreeManager.remove"):
+            # 예외를 올리지 않고 정상 완료돼야 한다
+            pu._cleanup_process_state(runner_id, r, reason="test_err")
+
+        # status == "stopped"로 설정됐는지 확인 (cleanup 완료 증거)
+        assert r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status") == "stopped"
