@@ -13,7 +13,8 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test:ai-defaults": "node --test tests/system-ai-defaults-state.test.mjs",
 		"test:dedup": "node --test tests/dev-runner-log-dedup.test.mjs",
-		"test:expo-map": "node --experimental-strip-types --test tests/expo-map-transform.test.ts"
+		"test:expo-map": "node --experimental-strip-types --test tests/expo-map-transform.test.ts",
+		"test:expo-author": "node --experimental-strip-types --test tests/expo-author-sequencer.test.ts"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.0",
