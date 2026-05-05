@@ -158,6 +158,7 @@ class ClaudeExecutor(LLMExecutorBase):
         parse_json: bool = True,
         enable_tools: bool = False,
         cli_options: dict = None,
+        profile=None,
     ) -> dict:
         """Claude CLI 실행 (동기).
 
@@ -190,7 +191,7 @@ class ClaudeExecutor(LLMExecutorBase):
                 prompt_file = f.name
 
             # Claude CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
-            env = build_cli_env("claude")
+            env = build_cli_env("claude", profile=profile)
 
             schema_file = None
 

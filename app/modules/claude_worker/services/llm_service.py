@@ -137,14 +137,26 @@ class LLMService:
     def set_provider_quota_pause(self, provider: str, retry_after_ms: int, reason: str = "") -> "datetime":
         return self._quota_svc.set_provider_quota_pause(provider, retry_after_ms, reason)
 
+    def set_profile_quota_pause(self, provider: str, profile_name: str, retry_after_ms: int, reason: str = "") -> "datetime":
+        return self._quota_svc.set_profile_quota_pause(provider, profile_name, retry_after_ms, reason)
+
     def get_provider_quota_pause(self, provider: str) -> Optional["datetime"]:
         return self._quota_svc.get_provider_quota_pause(provider)
+
+    def get_profile_quota_pause(self, provider: str, profile_name: str) -> Optional["datetime"]:
+        return self._quota_svc.get_profile_quota_pause(provider, profile_name)
+
+    def is_paused(self, provider: str, profile_name: Optional[str] = None) -> bool:
+        return self._quota_svc.is_paused(provider, profile_name)
 
     def get_provider_quota_pause_detail(self, provider: str) -> dict:
         return self._quota_svc.get_provider_quota_pause_detail(provider)
 
     def clear_provider_quota_pause(self, provider: str) -> bool:
         return self._quota_svc.clear_provider_quota_pause(provider)
+
+    def clear_profile_quota_pause(self, provider: str, profile_name: str) -> bool:
+        return self._quota_svc.clear_profile_quota_pause(provider, profile_name)
 
     def reset_quota_failed_requests(self, provider: str) -> int:
         return self._quota_svc.reset_quota_failed_requests(provider)
@@ -154,22 +166,22 @@ class LLMService:
 
     # ========== Claude 실행 ==========
 
-    def execute_claude(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False, cli_options: dict = None) -> dict:
+    def execute_claude(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False, cli_options: dict = None, profile=None) -> dict:
         """Claude CLI 실행 (동기). → ClaudeExecutor 위임."""
         from app.modules.claude_worker.services.executors import ExecutionDispatcher
         return ExecutionDispatcher.dispatch(
             "claude", prompt,
             model=model, timeout=timeout, parse_json=parse_json,
-            enable_tools=enable_tools, cli_options=cli_options,
+            enable_tools=enable_tools, cli_options=cli_options, profile=profile,
         )
 
-    def execute_gemini(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False, cli_options: dict = None) -> dict:
+    def execute_gemini(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False, cli_options: dict = None, profile=None) -> dict:
         """Gemini CLI 실행 (동기). → GeminiExecutor 위임."""
         from app.modules.claude_worker.services.executors import ExecutionDispatcher
         return ExecutionDispatcher.dispatch(
             "gemini", prompt,
             model=model, timeout=timeout, parse_json=parse_json,
-            enable_tools=enable_tools, cli_options=cli_options,
+            enable_tools=enable_tools, cli_options=cli_options, profile=profile,
         )
 
     def execute_llm(
@@ -181,13 +193,14 @@ class LLMService:
         parse_json: bool = True,
         enable_tools: bool = False,
         cli_options: dict = None,
+        profile=None,
     ) -> dict:
         """LLM 통합 실행. → ExecutionDispatcher.dispatch 위임."""
         from app.modules.claude_worker.services.executors import ExecutionDispatcher
         return ExecutionDispatcher.dispatch(
             provider, prompt,
             model=model, timeout=timeout, parse_json=parse_json,
-            enable_tools=enable_tools, cli_options=cli_options,
+            enable_tools=enable_tools, cli_options=cli_options, profile=profile,
         )
 
     def execute_codex(self, prompt: str, model: str = "", timeout: int = 120) -> dict:

@@ -8,9 +8,11 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -108,3 +110,43 @@ class LLMWorkerStatus(Base):
 
     def __repr__(self) -> str:
         return f"<LLMWorkerStatus(worker_id={self.worker_id}, state={self.current_state})>"
+
+
+class LLMRequestProfileClaim(Base):
+    """현재 요청을 처리 중인 engine/profile claim."""
+
+    __tablename__ = "llm_request_profile_claims"
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_llm_profile_claim_request"),
+        Index("ix_llm_profile_claim_profile", "engine", "profile_name"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(Integer, ForeignKey("llm_requests.id", ondelete="CASCADE"), nullable=False)
+    engine = Column(String(50), nullable=False)
+    profile_name = Column(String(100), nullable=False)
+    claimed_at = Column(DateTime, default=datetime.now, nullable=False)
+    released_at = Column(DateTime)
+    stop_reason = Column(String(100))
+
+    request = relationship("LLMRequest")
+
+
+class LLMProfileAssignment(Base):
+    """LLM 요청이 어떤 profile에 배정됐는지 추적하는 audit log."""
+
+    __tablename__ = "llm_profile_assignments"
+    __table_args__ = (
+        Index("ix_llm_profile_assignment_profile", "engine", "profile_name", "selected_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(Integer, ForeignKey("llm_requests.id", ondelete="CASCADE"), nullable=False)
+    engine = Column(String(50), nullable=False)
+    profile_name = Column(String(100), nullable=False)
+    selected_at = Column(DateTime, default=datetime.now, nullable=False)
+    released_at = Column(DateTime)
+    stop_reason = Column(String(100))
+    error_summary = Column(Text)
+
+    request = relationship("LLMRequest")

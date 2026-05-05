@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMProfileConfig, type LLMProfilesResponse } from '$lib/api/system';
+	import { llmApi, type LLMProfileConfig, type LLMProfileStatusItem, type LLMProfilesResponse } from '$lib/api/system';
 	import { toast } from '$lib/stores/toast';
 	import { Plus, Trash2, Terminal, Check } from 'lucide-svelte';
 
@@ -9,6 +9,7 @@
 	let launchingKey = $state('');
 	let data = $state<LLMProfilesResponse | null>(null);
 	let drafts = $state<LLMProfileConfig[]>([]);
+	let profileStatuses = $state<LLMProfileStatusItem[]>([]);
 	let selectedDraft = $state<Record<string, string>>({});
 	let workerRestartBanner = $state(false);
 
@@ -18,6 +19,7 @@
 	onMount(async () => {
 		try {
 			data = await llmApi.listProfiles();
+			profileStatuses = await llmApi.getProfileStatus();
 			drafts = data.profiles.map((p) => ({ ...p, extra_env: { ...p.extra_env } }));
 			selectedDraft = { ...data.selected };
 		} catch (e) {
@@ -34,7 +36,9 @@
 				engine,
 				name: '',
 				config_dir: null,
-				extra_env: {}
+				extra_env: {},
+				enabled: true,
+				priority: 0
 			}
 		];
 	}
@@ -58,6 +62,7 @@
 				profiles: drafts
 			});
 			data = updated;
+			profileStatuses = await llmApi.getProfileStatus();
 			drafts = updated.profiles.map((p) => ({ ...p, extra_env: { ...p.extra_env } }));
 			selectedDraft = { ...updated.selected };
 			workerRestartBanner = true;
@@ -93,6 +98,22 @@
 		return drafts.map((p, i) => ({ ...p, idx: i })).filter((p) => p.engine === engine);
 	}
 
+	function statusFor(engine: string, name: string) {
+		return profileStatuses.find((s) => s.engine === engine && s.profile_name === name);
+	}
+
+	async function pauseProfile(engine: string, name: string) {
+		await llmApi.pauseProfile(engine, name);
+		profileStatuses = await llmApi.getProfileStatus();
+		toast.success(`${engine}/${name} 일시중지됨`);
+	}
+
+	async function resumeProfile(engine: string, name: string) {
+		await llmApi.resumeProfile(engine, name);
+		profileStatuses = await llmApi.getProfileStatus();
+		toast.success(`${engine}/${name} 재개됨`);
+	}
+
 	function isConfigDirDisabled(engine: string) {
 		return engine === 'gemini' && GEMINI_CONFIG_DIR_UNSUPPORTED;
 	}
@@ -125,6 +146,7 @@
 					{#each profilesForEngine(engine) as p (p.idx)}
 						<div class="rounded-md border border-border bg-card p-3 space-y-2">
 							<div class="flex items-center gap-3">
+								{@const status = statusFor(engine, p.name)}
 								<!-- 선택 라디오 -->
 								<input
 									type="radio"
@@ -141,6 +163,34 @@
 									placeholder="프로필 이름 (예: work, personal)"
 									class="flex-1 text-sm border border-border rounded px-2 py-1 bg-background"
 								/>
+								<label class="flex items-center gap-1 text-xs text-muted-foreground">
+									<input type="checkbox" bind:checked={drafts[p.idx].enabled} />
+									활성
+								</label>
+								<input
+									type="number"
+									bind:value={drafts[p.idx].priority}
+									class="w-20 text-xs border border-border rounded px-2 py-1 bg-background"
+									title="라우팅 우선순위"
+								/>
+								<span class="text-xs px-2 py-1 rounded bg-muted text-muted-foreground">
+									{status?.state ?? (p.enabled === false ? 'disabled' : 'available')}
+								</span>
+								{#if status?.state === 'paused_by_quota'}
+									<button
+										onclick={() => resumeProfile(engine, p.name)}
+										class="text-xs px-2 py-1 rounded border border-border hover:bg-muted"
+									>
+										재개
+									</button>
+								{:else if p.name}
+									<button
+										onclick={() => pauseProfile(engine, p.name)}
+										class="text-xs px-2 py-1 rounded border border-border hover:bg-muted"
+									>
+										일시중지
+									</button>
+								{/if}
 								<!-- CLI 직접 실행 -->
 								<button
 									onclick={() => launchCli(engine, p.name)}

@@ -26,8 +26,8 @@ def _route_keys(router: APIRouter) -> set[tuple[str, str]]:
     return keys
 
 
-def test_profile_routes_has_five_endpoints():
-    """profile_routes.router에 5개 경로가 직접 등록되어 있음을 확인."""
+def test_profile_routes_has_capacity_pool_endpoints():
+    """profile_routes.router에 profile pool 경로가 직접 등록되어 있음을 확인."""
     from app.modules.claude_worker.routes.profile_routes import router
 
     keys = _route_keys(router)
@@ -42,6 +42,16 @@ def test_profile_routes_has_five_endpoints():
     )
     assert ("POST", "/profiles/{engine}/{name}/launch-cli") in keys, (
         f"POST /profiles/{{engine}}/{{name}}/launch-cli 없음. 등록된 경로: {keys}"
+    )
+    assert ("GET", "/profiles/status") in keys, f"GET /profiles/status 없음. 등록된 경로: {keys}"
+    assert ("GET", "/profiles/{engine}/{name}/assignments") in keys, (
+        f"GET /profiles/{{engine}}/{{name}}/assignments 없음. 등록된 경로: {keys}"
+    )
+    assert ("POST", "/profiles/{engine}/{name}/pause") in keys, (
+        f"POST /profiles/{{engine}}/{{name}}/pause 없음. 등록된 경로: {keys}"
+    )
+    assert ("DELETE", "/profiles/{engine}/{name}/pause") in keys, (
+        f"DELETE /profiles/{{engine}}/{{name}}/pause 없음. 등록된 경로: {keys}"
     )
 
 

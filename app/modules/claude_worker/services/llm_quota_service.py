@@ -53,6 +53,28 @@ class LLMQuotaService:
         self.db.commit()
         return paused_until
 
+    def set_profile_quota_pause(
+        self,
+        provider: str,
+        profile_name: str,
+        retry_after_ms: int,
+        reason: str = "",
+    ) -> "datetime":
+        """profile 단위 quota pause 상태를 JSON profile metadata에 저장."""
+        paused_until = datetime.now() + timedelta(milliseconds=retry_after_ms)
+        reason_summary = _summarize_quota_reason(provider, reason, paused_until)
+        from app.modules.claude_worker.services.profile_store import update_profile_state
+
+        update_profile_state(
+            provider,
+            profile_name,
+            last_quota_pause_until=paused_until,
+            last_reset_at=paused_until,
+            last_state="paused_by_quota",
+            last_error_summary=reason_summary,
+        )
+        return paused_until
+
     def get_provider_quota_pause(self, provider: str) -> Optional["datetime"]:
         """provider quota pause 만료 시각 조회.
 
@@ -63,6 +85,25 @@ class LLMQuotaService:
             if status.quota_paused_until > datetime.now():
                 return status.quota_paused_until
         return None
+
+    def get_profile_quota_pause(self, provider: str, profile_name: str) -> Optional["datetime"]:
+        from app.modules.claude_worker.services.profile_store import get_by_name
+
+        try:
+            profile = get_by_name(provider, profile_name)
+        except ValueError:
+            return None
+        paused_until = profile.last_quota_pause_until
+        if paused_until and paused_until > datetime.now():
+            return paused_until
+        return None
+
+    def is_paused(self, provider: str, profile_name: Optional[str] = None) -> bool:
+        if self.get_provider_quota_pause(provider):
+            return True
+        if profile_name and self.get_profile_quota_pause(provider, profile_name):
+            return True
+        return False
 
     def get_provider_quota_pause_detail(self, provider: str) -> dict:
         """provider quota pause 상태와 UI 표시용 reason을 함께 반환."""
@@ -86,6 +127,23 @@ class LLMQuotaService:
             status.quota_paused_until = None
             status.quota_pause_reason = None
         self.db.commit()
+        return True
+
+    def clear_profile_quota_pause(self, provider: str, profile_name: str) -> bool:
+        from app.modules.claude_worker.services.profile_store import get_by_name, update_profile_state
+
+        try:
+            profile = get_by_name(provider, profile_name)
+        except ValueError:
+            return False
+        update_profile_state(
+            provider,
+            profile.name,
+            last_quota_pause_until=None,
+            last_reset_at=None,
+            last_state="available" if profile.enabled else "disabled",
+            last_error_summary=None,
+        )
         return True
 
     def reset_quota_failed_requests(self, provider: str) -> int:

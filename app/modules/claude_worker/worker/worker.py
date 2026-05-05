@@ -1722,6 +1722,11 @@ class LLMWorker:
         service: LLMService,
     ):
         """LLM 요청 실행."""
+        claim_service = None
+        claim_acquired = False
+        selected_profile = None
+        stop_reason = "failed"
+        error_summary = None
         try:
             # 처리 중으로 변경
             service.mark_processing(request.id)
@@ -1781,6 +1786,48 @@ class LLMWorker:
                 model=getattr(request, "model", None),
             )
 
+            if provider in provider_registry.get_quota_providers():
+                from app.modules.claude_worker.services.profile_claim_service import ProfileClaimService
+                from app.modules.claude_worker.services.profile_router import LLMProfileRouter
+
+                decision = LLMProfileRouter(db).select_profile(provider, model, request)
+                if decision.profile is None:
+                    logger.info(
+                        "[PROFILE-ROUTER] request %s pending 유지: provider=%s reason=%s next=%s blocked=%s",
+                        request.id,
+                        provider,
+                        decision.reason,
+                        decision.next_available_at,
+                        decision.blocked_counts,
+                    )
+                    service.reset_to_pending(request.id)
+                    self._update_worker_state(
+                        "paused_by_quota" if "quota" in decision.reason else "idle",
+                        None,
+                    )
+                    return
+
+                selected_profile = decision.profile
+                claim_service = ProfileClaimService(db)
+                claim = claim_service.claim(request.id, provider, selected_profile.name)
+                if claim is None:
+                    logger.warning(
+                        "[PROFILE-CLAIM] request %s claim 충돌: provider=%s profile=%s",
+                        request.id,
+                        provider,
+                        selected_profile.name,
+                    )
+                    service.reset_to_pending(request.id)
+                    self._update_worker_state("idle", None)
+                    return
+                claim_acquired = True
+                logger.info(
+                    "[PROFILE-ROUTER] request %s → %s/%s",
+                    request.id,
+                    provider,
+                    selected_profile.name,
+                )
+
             # LLM 실행 (비동기 실행을 위해 run_in_executor 사용)
             loop = asyncio.get_event_loop()
             # cli_options에서 parse_json 옵션 읽기 (기본값: True)
@@ -1798,10 +1845,12 @@ class LLMWorker:
                     parse_json=parse_json,
                     enable_tools=enable_tools,
                     cli_options=cli_options,
+                    profile=selected_profile,
                 )
             )
 
             if result["success"]:
+                stop_reason = "completed"
                 normalized_result = result.get("result")
                 raw_response = result.get("raw_response", "")
                 claude_session_id = result.get("claude_session_id")
@@ -1998,9 +2047,14 @@ class LLMWorker:
                         # Quota 에러 감지 및 provider pause 설정
                         quota_retry_ms = result.get("quota_retry_ms")
                         if quota_retry_ms is not None:
-                            paused_until = service.set_provider_quota_pause(
-                                provider, quota_retry_ms, reason=result.get("error", "")
-                            )
+                            if selected_profile is not None:
+                                paused_until = service.set_profile_quota_pause(
+                                    provider, selected_profile.name, quota_retry_ms, reason=result.get("error", "")
+                                )
+                            else:
+                                paused_until = service.set_provider_quota_pause(
+                                    provider, quota_retry_ms, reason=result.get("error", "")
+                                )
                             logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
                             # O-4: registry quota state 자동 갱신
                             try:
@@ -2015,6 +2069,8 @@ class LLMWorker:
 
                         # 다른 타입은 실패 처리 (raw_response 보존)
                         service.mark_failed(request.id, result["error"], result.get("raw_response", ""))
+                        stop_reason = "quota_paused" if quota_retry_ms is not None else "failed"
+                        error_summary = result.get("error")
                         self._increment_error()
                         logger.warning(f"LLM 실행 실패: {result['error']}")
 
@@ -2029,9 +2085,14 @@ class LLMWorker:
                     # Quota 에러 감지 및 provider pause 설정
                     quota_retry_ms = result.get("quota_retry_ms")
                     if quota_retry_ms is not None:
-                        paused_until = service.set_provider_quota_pause(
-                            provider, quota_retry_ms, reason=result.get("error", "")
-                        )
+                        if selected_profile is not None:
+                            paused_until = service.set_profile_quota_pause(
+                                provider, selected_profile.name, quota_retry_ms, reason=result.get("error", "")
+                            )
+                        else:
+                            paused_until = service.set_provider_quota_pause(
+                                provider, quota_retry_ms, reason=result.get("error", "")
+                            )
                         logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
                         # O-4: registry quota state 자동 갱신
                         try:
@@ -2046,6 +2107,8 @@ class LLMWorker:
 
                     # raw_response도 없으면 실패 처리
                     service.mark_failed(request.id, result["error"])
+                    stop_reason = "quota_paused" if quota_retry_ms is not None else "failed"
+                    error_summary = result.get("error")
                     self._increment_error()
                     logger.warning(f"LLM 실행 실패: {result['error']}")
 
@@ -2059,9 +2122,19 @@ class LLMWorker:
 
         except Exception as e:
             service.mark_failed(request.id, str(e))
+            error_summary = str(e)
             self._increment_error()
             logger.error(f"LLM 실행 예외: {e}", exc_info=True)
         finally:
+            if claim_acquired and claim_service is not None:
+                try:
+                    claim_service.release(
+                        request.id,
+                        stop_reason=stop_reason,
+                        error_summary=error_summary,
+                    )
+                except Exception as e:
+                    logger.warning("[PROFILE-CLAIM] release 실패: request=%s error=%s", request.id, e)
             self._update_worker_state("idle")
             # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
             self.continue_event.set()

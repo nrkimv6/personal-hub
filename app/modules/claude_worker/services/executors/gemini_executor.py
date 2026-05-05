@@ -33,6 +33,7 @@ class GeminiExecutor(LLMExecutorBase):
         parse_json: bool = True,
         enable_tools: bool = False,
         cli_options: dict = None,
+        profile=None,
     ) -> dict:
         """Gemini CLI 실행 (동기).
 
@@ -51,7 +52,7 @@ class GeminiExecutor(LLMExecutorBase):
         """
         try:
             # Gemini CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
-            env = build_cli_env("gemini")
+            env = build_cli_env("gemini", profile=profile)
 
             image_path = (cli_options or {}).get("image_path")
             command = _build_gemini_command(model=model, image_path=image_path)

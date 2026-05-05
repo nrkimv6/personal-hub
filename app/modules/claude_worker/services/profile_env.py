@@ -35,7 +35,7 @@ FORBIDDEN_EXTRA_ENV = {
 _CLAUDE_SESSION_VARS = ("CLAUDECODE", "CLAUDE_CODE_SESSION", "CLAUDE_CODE_ENTRYPOINT")
 
 
-def build_cli_env(engine: str, base_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+def build_cli_env(engine: str, base_env: Optional[Dict[str, str]] = None, profile=None) -> Dict[str, str]:
     """subprocess 실행용 env 딕셔너리 조립.
 
     시맨틱:
@@ -69,9 +69,9 @@ def build_cli_env(engine: str, base_env: Optional[Dict[str, str]] = None) -> Dic
             env.pop(var, None)
 
     # selected profile 로드 (import 는 런타임에 — 순환 의존 방지)
-    from app.modules.claude_worker.services.profile_store import get_selected
-
-    profile = get_selected(engine)
+    if profile is None:
+        from app.modules.claude_worker.services.profile_store import get_selected
+        profile = get_selected(engine)
 
     # config_dir 주입
     env_key = ENGINE_ENV_KEYS.get(engine)

@@ -698,6 +698,12 @@ export interface LLMProfileConfig {
   name: string;
   config_dir: string | null;
   extra_env: Record<string, string>;
+  enabled?: boolean;
+  priority?: number;
+  last_quota_pause_until?: string | null;
+  last_reset_at?: string | null;
+  last_state?: string | null;
+  last_error_summary?: string | null;
 }
 
 export interface LLMProfilesResponse {
@@ -709,6 +715,18 @@ export interface LLMProfilesResponse {
 export interface LLMProfilesUpdateRequest {
   selected?: Record<string, string>;
   profiles: LLMProfileConfig[];
+}
+
+export interface LLMProfileStatusItem {
+  engine: string;
+  profile_name: string;
+  state: 'available' | 'paused_by_quota' | 'paused_by_window' | 'disabled' | 'processing';
+  quota_reset_at?: string | null;
+  next_allowed_at?: string | null;
+  blocked_request_count: number;
+  processing_count: number;
+  last_error_summary?: string | null;
+  priority: number;
 }
 
 export interface ProviderInfo {
@@ -904,6 +922,19 @@ export const llmApi = {
     request<LLMProfilesResponse>('/llm/profiles', {
       method: 'PUT',
       body: JSON.stringify(payload)
+    }),
+
+  getProfileStatus: () => request<LLMProfileStatusItem[]>('/llm/profiles/status'),
+
+  pauseProfile: (engine: string, name: string, retry_after_ms = 60 * 60 * 1000, reason = 'manual profile pause') =>
+    request<{ paused_until: string }>(`/llm/profiles/${engine}/${name}/pause`, {
+      method: 'POST',
+      body: JSON.stringify({ retry_after_ms, reason })
+    }),
+
+  resumeProfile: (engine: string, name: string) =>
+    request<{ ok: boolean }>(`/llm/profiles/${engine}/${name}/pause`, {
+      method: 'DELETE'
     }),
 
   selectProfile: (engine: string, name: string) =>
