@@ -23,11 +23,25 @@ from app.core.config import PROJECT_ROOT
 from app.database import get_db
 from app.modules.dev_runner.services.plan_record_service import PlanRecordService
 from app.modules.dev_runner.services.plan_service import plan_service as _plan_service
+from app.modules.dev_runner.services.plan_archive_context_service import PlanArchiveContextService
+from app.modules.dev_runner.services.plan_archive_index_service import PlanArchiveIndexService
+from app.modules.dev_runner.services.plan_archive_metrics_service import PlanArchiveMetricsService
+from app.modules.dev_runner.services.plan_archive_retrieval_service import (
+    PlanArchiveRetrievalService,
+    RetrievalQuery,
+)
 from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
     PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse,
     PlanArchiveAnalyzeRequest, PlanArchiveAnalyzeResponse,
     PlanArchiveHealthResponse,
+    PlanArchiveContextRequest,
+    PlanArchiveIndexRequest,
+    PlanArchiveIndexResponse,
+    PlanArchiveMetricsQuery,
+    PlanArchiveMetricsResponse,
+    PlanArchiveRetrievalQuery,
+    PlanArchiveRetrievalResult,
 )
 
 
@@ -67,6 +81,95 @@ def get_archive_health(include_temp: bool = False, db: Session = Depends(get_db)
     """Plan Archive scheduler health summary."""
     svc = PlanRecordService(db)
     return svc.get_plan_archive_health(include_temp=include_temp)
+
+
+def _to_retrieval_query(req: PlanArchiveRetrievalQuery) -> RetrievalQuery:
+    return RetrievalQuery(
+        q=req.q,
+        date_from=req.date_from,
+        date_to=req.date_to,
+        category=req.category,
+        tags=req.tags,
+        intent=req.intent,
+        scope=req.scope,
+        path=req.path,
+        relation_type=req.relation_type,
+        limit=req.limit,
+    )
+
+
+def _serialize_retrieval_result(result: dict) -> dict:
+    serialized = {"total": result.get("total", 0), "results": []}
+    for hit in result.get("results", []):
+        plan = hit["plan"]
+        serialized["results"].append(
+            {
+                "plan": {
+                    "id": plan.id,
+                    "filename_hash": plan.filename_hash,
+                    "file_path": plan.file_path,
+                    "title": plan.title,
+                    "status": plan.status,
+                    "category": plan.category,
+                    "tags": plan.tags,
+                    "summary": plan.summary,
+                    "intent": plan.intent,
+                    "scope": plan.scope,
+                    "archived_at": plan.archived_at,
+                },
+                "score": hit["score"],
+                "score_detail": hit["score_detail"],
+                "chunks": hit["chunks"],
+                "file_refs": hit["file_refs"],
+            }
+        )
+    return serialized
+
+
+@router.post("/retrieval/search", response_model=PlanArchiveRetrievalResult)
+def search_archive(req: PlanArchiveRetrievalQuery, db: Session = Depends(get_db)):
+    """Search archived plans through metadata, lexical chunks, and file refs."""
+    svc = PlanArchiveRetrievalService(db)
+    return _serialize_retrieval_result(svc.search(_to_retrieval_query(req)))
+
+
+@router.post("/retrieval/context")
+def build_archive_context(req: PlanArchiveContextRequest, db: Session = Depends(get_db)):
+    """Build bounded LLM context from retrieval results."""
+    retrieval = PlanArchiveRetrievalService(db).search(_to_retrieval_query(req))
+    context = PlanArchiveContextService().assemble(
+        retrieval,
+        token_budget=req.token_budget,
+        include_raw=req.include_raw,
+    )
+    return context
+
+
+@router.post("/retrieval/metrics", response_model=PlanArchiveMetricsResponse)
+def get_archive_metrics(req: PlanArchiveMetricsQuery, db: Session = Depends(get_db)):
+    """Return follow-up and file-ref metrics for archive retrieval."""
+    return PlanArchiveMetricsService(db).calculate(_to_retrieval_query(req))
+
+
+@router.post("/records/index", response_model=PlanArchiveIndexResponse)
+def index_archive_records(req: PlanArchiveIndexRequest, db: Session = Depends(get_db)):
+    """Index archived plan records. Default is dry-run; set apply=true to write."""
+    svc = PlanArchiveIndexService(db, PROJECT_ROOT)
+    dry_run = not req.apply
+    if req.record_id:
+        try:
+            svc.index_record(req.record_id, force=req.force, dry_run=dry_run)
+            if not dry_run:
+                db.commit()
+            return {"dry_run": dry_run, "indexed": 1, "failed": 0, "skipped": 0, "run_id": None, "errors": []}
+        except Exception as exc:
+            if not dry_run:
+                db.rollback()
+            return {"dry_run": dry_run, "indexed": 0, "failed": 1, "skipped": 0, "run_id": None, "errors": [str(exc)]}
+    result = svc.index_archived_records(limit=req.limit, force=req.force, since=req.since, dry_run=dry_run)
+    if not dry_run:
+        db.commit()
+    return {"run_id": None, **result}
 
 
 @router.get("/records", response_model=list[PlanRecordResponse])

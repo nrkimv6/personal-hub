@@ -1,7 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { llmApi, type LLMRequest } from '$lib/api';
-  import { planRecordsApi, archiveApi, type PlanArchiveAnalyzeResponse, type PlanRecord, type ImportArchivedResult, type ArchivePreviewItem, type DuplicateItem, type PlanArchiveHealth } from '$lib/api/plan-records';
+  import {
+    planRecordsApi,
+    archiveApi,
+    type PlanRecord,
+    type ImportArchivedResult,
+    type ArchivePreviewItem,
+    type DuplicateItem,
+    type PlanArchiveHealth,
+    type PlanArchiveRetrievalQuery,
+    type PlanArchiveRetrievalResult,
+    type PlanArchiveMetricsResponse,
+    type PlanArchiveIndexResponse
+  } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
   import MemoEditor from './MemoEditor.svelte';
   import PlanViewer from './PlanViewer.svelte';
@@ -80,14 +92,30 @@
   let archiveQueueStatus = 'pending,processing,failed';
   let archiveQueueProvider = '';
 
-  // ── 수동 분석 preview/apply ───────────────────────────────
-  let analyzeProvider = 'codex';
-  let analyzeModel = 'gpt-5.2';
-  let analyzeTimeout = 120;
-  let analyzeLoading = false;
-  let analyzeResult: PlanArchiveAnalyzeResponse | null = null;
-  let analyzeError = '';
-  let confirmingApply = false;
+  // ── Retrieval MVP 표면 ───────────────────────────────────
+  let retrievalQ = '';
+  let retrievalPath = '';
+  let retrievalCategory = '';
+  let retrievalTags = '';
+  let retrievalIntent = '';
+  let retrievalScope = '';
+  let retrievalDateFrom = '';
+  let retrievalDateTo = '';
+  let retrievalRelationType = '';
+  let retrievalLimit = 10;
+  let retrievalLoading = false;
+  let retrievalError = '';
+  let retrievalResults: PlanArchiveRetrievalResult[] = [];
+  let retrievalTotal = 0;
+  let metricsLoading = false;
+  let metricsError = '';
+  let retrievalMetrics: PlanArchiveMetricsResponse | null = null;
+  let indexLimit = 100;
+  let indexForce = false;
+  let indexSince = '';
+  let indexLoading = false;
+  let indexError = '';
+  let indexResult: PlanArchiveIndexResponse | null = null;
 
   async function loadArchiveHealth() {
     archiveHealthLoading = true;
@@ -125,6 +153,82 @@
 
   async function refreshArchiveSurfaces() {
     await Promise.all([loadArchiveHealth(), loadArchiveQueue(1)]);
+  }
+
+  function buildRetrievalFilters(includeLimit = true): PlanArchiveRetrievalQuery {
+    const tags = retrievalTags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    const payload: PlanArchiveRetrievalQuery = {};
+    if (retrievalQ.trim()) payload.q = retrievalQ.trim();
+    if (retrievalDateFrom) payload.date_from = retrievalDateFrom;
+    if (retrievalDateTo) payload.date_to = retrievalDateTo;
+    if (retrievalCategory.trim()) payload.category = retrievalCategory.trim();
+    if (tags.length > 0) payload.tags = tags;
+    if (retrievalIntent.trim()) payload.intent = retrievalIntent.trim();
+    if (retrievalScope.trim()) payload.scope = retrievalScope.trim();
+    if (retrievalPath.trim()) payload.path = retrievalPath.trim();
+    if (retrievalRelationType.trim()) payload.relation_type = retrievalRelationType.trim();
+    if (includeLimit) payload.limit = retrievalLimit;
+    return payload;
+  }
+
+  async function runRetrievalSearch() {
+    retrievalLoading = true;
+    retrievalError = '';
+    try {
+      const res = await planRecordsApi.searchArchiveRetrieval(buildRetrievalFilters());
+      retrievalResults = res.results ?? [];
+      retrievalTotal = res.total ?? retrievalResults.length;
+      void loadRetrievalMetrics();
+    } catch (e) {
+      retrievalResults = [];
+      retrievalTotal = 0;
+      retrievalError = e instanceof Error ? e.message : 'retrieval 검색 실패';
+    } finally {
+      retrievalLoading = false;
+    }
+  }
+
+  async function loadRetrievalMetrics() {
+    metricsLoading = true;
+    metricsError = '';
+    try {
+      retrievalMetrics = await planRecordsApi.getArchiveRetrievalMetrics(buildRetrievalFilters(false));
+    } catch (e) {
+      retrievalMetrics = null;
+      metricsError = e instanceof Error ? e.message : 'retrieval metrics 로드 실패';
+    } finally {
+      metricsLoading = false;
+    }
+  }
+
+  async function runArchiveIndex(apply = false) {
+    if (apply && indexResult?.dry_run !== true) {
+      showToast('dry-run 결과 확인 후 apply를 실행할 수 있습니다.');
+      return;
+    }
+    indexLoading = true;
+    indexError = '';
+    try {
+      indexResult = await planRecordsApi.indexArchiveRecords({
+        limit: indexLimit,
+        force: indexForce,
+        since: indexSince || undefined,
+        apply,
+      });
+      showToast(
+        `${indexResult.dry_run ? 'Index dry-run' : 'Index apply'}: indexed ${indexResult.indexed}, failed ${indexResult.failed}, skipped ${indexResult.skipped}`
+      );
+      if (!indexResult.dry_run) {
+        await loadRetrievalMetrics();
+      }
+    } catch (e) {
+      indexError = e instanceof Error ? e.message : 'archive index 실행 실패';
+    } finally {
+      indexLoading = false;
+    }
   }
 
   // ── 중복 감지 ─────────────────────────────────────────────
@@ -338,6 +442,42 @@
     });
   }
 
+  function formatScore(score: number | undefined) {
+    return typeof score === 'number' && Number.isFinite(score) ? score.toFixed(2) : '-';
+  }
+
+  function formatRate(rate: number | undefined) {
+    const value = typeof rate === 'number' && Number.isFinite(rate) ? rate : 0;
+    return `${(value <= 1 ? value * 100 : value).toFixed(0)}%`;
+  }
+
+  function getPlanValue(plan: PlanArchiveRetrievalResult['plan'], key: string) {
+    if (!plan || typeof plan !== 'object') return undefined;
+    return (plan as Record<string, unknown>)[key];
+  }
+
+  function getResultPlanTitle(result: PlanArchiveRetrievalResult) {
+    const title = getPlanValue(result.plan, 'title');
+    if (typeof title === 'string' && title.trim()) return title;
+    const path = getPlanValue(result.plan, 'file_path');
+    if (typeof path === 'string' && path.trim()) {
+      return path.split(/[\\/]/).pop() ?? path;
+    }
+    const id = getPlanValue(result.plan, 'id');
+    return typeof id === 'number' ? `Plan #${id}` : 'Untitled plan';
+  }
+
+  function getResultPlanPath(result: PlanArchiveRetrievalResult) {
+    const path = getPlanValue(result.plan, 'file_path');
+    return typeof path === 'string' ? path : '';
+  }
+
+  function getScoreDetails(result: PlanArchiveRetrievalResult) {
+    return Object.entries(result.score_detail ?? {})
+      .slice(0, 4)
+      .map(([key, value]) => `${key} ${typeof value === 'number' ? formatScore(value) : String(value)}`);
+  }
+
   function getStatusClass(status: string) {
     switch (status) {
       case 'pending':
@@ -367,6 +507,7 @@
   onMount(() => {
     loadRecords();
     refreshArchiveSurfaces();
+    loadRetrievalMetrics();
   });
 </script>
 
@@ -604,6 +745,295 @@
           </div>
         </div>
       {/if}
+    </div>
+
+    <!-- Plan Archive retrieval MVP -->
+    <div class="mb-3 rounded border border-border bg-background p-3 text-xs">
+      <div class="mb-3 flex items-center justify-between gap-2 flex-wrap">
+        <h3 class="font-semibold text-foreground">Plan Archive retrieval</h3>
+        <div class="flex items-center gap-2">
+          {#if retrievalLoading || metricsLoading}
+            <span class="text-muted-foreground">조회 중...</span>
+          {/if}
+          <button
+            class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
+            onclick={loadRetrievalMetrics}
+            disabled={metricsLoading}
+          >metrics 갱신</button>
+        </div>
+      </div>
+
+      <form
+        class="grid gap-2 lg:grid-cols-[1.2fr_1fr_0.7fr_0.7fr_auto]"
+        onsubmit={(e) => { e.preventDefault(); runRetrievalSearch(); }}
+      >
+        <input
+          class="border border-border rounded px-2 py-1 bg-background text-foreground"
+          placeholder="키워드, 파일명, 함수명"
+          bind:value={retrievalQ}
+        />
+        <input
+          class="border border-border rounded px-2 py-1 bg-background text-foreground font-mono"
+          placeholder="파일 경로 filter"
+          bind:value={retrievalPath}
+        />
+        <input
+          class="border border-border rounded px-2 py-1 bg-background text-foreground"
+          placeholder="category"
+          bind:value={retrievalCategory}
+        />
+        <input
+          class="border border-border rounded px-2 py-1 bg-background text-foreground"
+          placeholder="tags comma"
+          bind:value={retrievalTags}
+        />
+        <button
+          type="submit"
+          class="px-3 py-1 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          disabled={retrievalLoading}
+        >{retrievalLoading ? '검색 중...' : 'retrieval 검색'}</button>
+        <input
+          class="border border-border rounded px-2 py-1 bg-background text-foreground"
+          placeholder="intent"
+          bind:value={retrievalIntent}
+        />
+        <input
+          class="border border-border rounded px-2 py-1 bg-background text-foreground"
+          placeholder="scope"
+          bind:value={retrievalScope}
+        />
+        <input
+          class="border border-border rounded px-2 py-1 bg-background text-foreground"
+          placeholder="relation_type"
+          bind:value={retrievalRelationType}
+        />
+        <div class="grid grid-cols-2 gap-2">
+          <input
+            class="border border-border rounded px-2 py-1 bg-background text-foreground"
+            type="date"
+            aria-label="retrieval date from"
+            bind:value={retrievalDateFrom}
+          />
+          <input
+            class="border border-border rounded px-2 py-1 bg-background text-foreground"
+            type="date"
+            aria-label="retrieval date to"
+            bind:value={retrievalDateTo}
+          />
+        </div>
+        <input
+          class="border border-border rounded px-2 py-1 bg-background text-foreground"
+          type="number"
+          min="1"
+          max="100"
+          aria-label="retrieval result limit"
+          bind:value={retrievalLimit}
+        />
+      </form>
+
+      <div class="mt-3 grid gap-3 xl:grid-cols-[1fr_1fr]">
+        <div class="rounded border border-border p-2">
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <h4 class="font-semibold text-foreground">검색 결과</h4>
+            <span class="text-muted-foreground">total {retrievalTotal}</span>
+          </div>
+          {#if retrievalError}
+            <p class="text-red-500">{retrievalError}</p>
+          {:else if retrievalResults.length === 0}
+            <p class="text-muted-foreground">검색 실행 후 evidence chunk와 source id가 표시됩니다.</p>
+          {:else}
+            <div class="space-y-3">
+              {#each retrievalResults as result, i}
+                <div class="border-b border-border/60 pb-3 last:border-0 last:pb-0">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="font-medium text-foreground truncate" title={getResultPlanTitle(result)}>
+                        {i + 1}. {getResultPlanTitle(result)}
+                      </div>
+                      {#if getResultPlanPath(result)}
+                        <div class="font-mono text-muted-foreground truncate" title={getResultPlanPath(result)}>
+                          {getResultPlanPath(result)}
+                        </div>
+                      {/if}
+                    </div>
+                    <span class="rounded bg-muted px-2 py-1 font-mono text-muted-foreground">score {formatScore(result.score)}</span>
+                  </div>
+                  {#if getScoreDetails(result).length > 0}
+                    <div class="mt-1 flex flex-wrap gap-1 text-muted-foreground">
+                      {#each getScoreDetails(result) as detail}
+                        <span class="rounded bg-muted px-1.5 py-0.5">{detail}</span>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if result.chunks?.length > 0}
+                    <div class="mt-2 space-y-1">
+                      {#each result.chunks.slice(0, 2) as chunk}
+                        <div class="rounded bg-muted px-2 py-1">
+                          <div class="mb-1 flex items-center gap-2 text-muted-foreground">
+                            <span class="font-mono">chunk #{chunk.id}</span>
+                            {#if chunk.section_type}<span>{chunk.section_type}</span>{/if}
+                            {#if chunk.heading}<span class="truncate">{chunk.heading}</span>{/if}
+                            {#if chunk.score != null}<span class="ml-auto font-mono">{formatScore(chunk.score)}</span>{/if}
+                          </div>
+                          <p class="line-clamp-2 text-foreground">{chunk.snippet || chunk.text}</p>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if result.file_refs?.length > 0}
+                    <div class="mt-2 flex flex-wrap gap-1">
+                      {#each result.file_refs.slice(0, 4) as ref}
+                        <span
+                          class="rounded px-1.5 py-0.5 font-mono {ref.source_type === 'git_changed' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'}"
+                          title={ref.commit_sha ? `${ref.path} @ ${ref.commit_sha}` : ref.path}
+                        >#{ref.id} {ref.source_type}: {ref.path}</span>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <div class="grid gap-3">
+          <div class="rounded border border-border p-2">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <h4 class="font-semibold text-foreground">후속 통계</h4>
+              {#if retrievalMetrics}
+                <span class="text-muted-foreground">plans {retrievalMetrics.total_plans ?? 0}</span>
+              {/if}
+            </div>
+            {#if metricsError}
+              <p class="text-red-500">{metricsError}</p>
+            {:else if !retrievalMetrics}
+              <p class="text-muted-foreground">metrics API 결과를 기다리는 중입니다.</p>
+            {:else}
+              <div class="grid gap-2 sm:grid-cols-4">
+                <div class="rounded bg-muted px-2 py-2">
+                  <div class="text-muted-foreground">7d follow-up</div>
+                  <div class="font-semibold text-foreground">{formatRate(retrievalMetrics.followup_rates?.days_7)}</div>
+                </div>
+                <div class="rounded bg-muted px-2 py-2">
+                  <div class="text-muted-foreground">14d follow-up</div>
+                  <div class="font-semibold text-foreground">{formatRate(retrievalMetrics.followup_rates?.days_14)}</div>
+                </div>
+                <div class="rounded bg-muted px-2 py-2">
+                  <div class="text-muted-foreground">30d follow-up</div>
+                  <div class="font-semibold text-foreground">{formatRate(retrievalMetrics.followup_rates?.days_30)}</div>
+                </div>
+                <div class="rounded bg-muted px-2 py-2">
+                  <div class="text-muted-foreground">chain max</div>
+                  <div class="font-semibold text-foreground">{retrievalMetrics.chain_depth_max ?? 0}</div>
+                </div>
+              </div>
+
+              <div class="mt-3 grid gap-3 lg:grid-cols-2">
+                <div>
+                  <div class="mb-1 font-medium text-foreground">Top file refs</div>
+                  {#if (retrievalMetrics.top_file_refs ?? []).length === 0}
+                    <p class="text-muted-foreground">file ref 집계가 없습니다.</p>
+                  {:else}
+                    <div class="space-y-1">
+                      {#each (retrievalMetrics.top_file_refs ?? []).slice(0, 5) as ref}
+                        <div class="rounded bg-muted px-2 py-1">
+                          <div class="font-mono truncate" title={ref.path}>{ref.path}</div>
+                          <div class="text-muted-foreground">total {ref.count} / mentioned {ref.mentioned_count} / changed {ref.changed_count}</div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+                <div>
+                  <div class="mb-1 font-medium text-foreground">누락 후보 파일군</div>
+                  {#if (retrievalMetrics.missing_file_candidates ?? []).length === 0}
+                    <p class="text-muted-foreground">누락 후보가 없습니다.</p>
+                  {:else}
+                    <div class="space-y-1">
+                      {#each (retrievalMetrics.missing_file_candidates ?? []).slice(0, 5) as candidate}
+                        <div class="rounded bg-muted px-2 py-1">
+                          <div class="font-medium">{candidate.module || 'unknown'} <span class="text-muted-foreground">({candidate.count})</span></div>
+                          <div class="font-mono text-muted-foreground truncate" title={(candidate.paths ?? []).join(', ')}>
+                            {(candidate.paths ?? []).slice(0, 3).join(', ')}
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              </div>
+
+              {#if Object.keys(retrievalMetrics.relation_counts ?? {}).length > 0}
+                <div class="mt-3 flex flex-wrap gap-1">
+                  {#each Object.entries(retrievalMetrics.relation_counts ?? {}) as [type, count]}
+                    <span class="rounded bg-muted px-1.5 py-0.5">{type} {count}</span>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
+          </div>
+
+          <div class="rounded border border-border p-2">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <h4 class="font-semibold text-foreground">Archive index</h4>
+              {#if indexResult}
+                <span class="text-muted-foreground">{indexResult.dry_run ? 'dry-run' : 'applied'}</span>
+              {/if}
+            </div>
+            <div class="grid gap-2 sm:grid-cols-[0.8fr_0.8fr_auto_auto]">
+              <input
+                class="border border-border rounded px-2 py-1 bg-background text-foreground"
+                type="number"
+                min="1"
+                aria-label="archive index limit"
+                bind:value={indexLimit}
+              />
+              <input
+                class="border border-border rounded px-2 py-1 bg-background text-foreground"
+                type="date"
+                aria-label="archive index since"
+                bind:value={indexSince}
+              />
+              <label class="flex items-center gap-1 text-muted-foreground">
+                <input type="checkbox" bind:checked={indexForce} />
+                force
+              </label>
+              <div class="flex gap-2">
+                <button
+                  class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
+                  onclick={() => runArchiveIndex(false)}
+                  disabled={indexLoading}
+                >dry-run</button>
+                <button
+                  class="px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                  onclick={() => runArchiveIndex(true)}
+                  disabled={indexLoading || indexResult?.dry_run !== true}
+                >apply index</button>
+              </div>
+            </div>
+            {#if indexError}
+              <p class="mt-2 text-red-500">{indexError}</p>
+            {/if}
+            {#if indexResult}
+              <div class="mt-2 flex flex-wrap gap-2 text-muted-foreground">
+                <span class="rounded bg-muted px-2 py-1">indexed {indexResult.indexed}</span>
+                <span class="rounded bg-muted px-2 py-1">failed {indexResult.failed}</span>
+                <span class="rounded bg-muted px-2 py-1">skipped {indexResult.skipped}</span>
+                {#if indexResult.run_id != null}
+                  <span class="rounded bg-muted px-2 py-1">run #{indexResult.run_id}</span>
+                {/if}
+              </div>
+              {#if (indexResult.errors ?? []).length > 0}
+                <div class="mt-2 text-red-500">
+                  {#each (indexResult.errors ?? []).slice(0, 3) as item}
+                    <div>{item}</div>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 벌크 액션 바 -->

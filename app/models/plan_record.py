@@ -3,7 +3,7 @@
 계획서 메타데이터(메모, 이력)를 DB로 관리
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Index, ForeignKey, Date
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Text, JSON, Index, ForeignKey, Date, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.models.base import Base
 
@@ -44,6 +44,20 @@ class PlanRecord(Base):
 
     events = relationship("PlanEvent", back_populates="record", order_by="PlanEvent.created_at")
     tracking_links = relationship("TrackingItemPlanLink", back_populates="plan_record", lazy="select", cascade="all, delete-orphan")
+    chunks = relationship("PlanRecordChunk", back_populates="record", cascade="all, delete-orphan")
+    file_refs = relationship("PlanRecordFileRef", back_populates="record", cascade="all, delete-orphan")
+    outgoing_relations = relationship(
+        "PlanRecordRelation",
+        foreign_keys="PlanRecordRelation.source_plan_record_id",
+        back_populates="source_record",
+        cascade="all, delete-orphan",
+    )
+    incoming_relations = relationship(
+        "PlanRecordRelation",
+        foreign_keys="PlanRecordRelation.target_plan_record_id",
+        back_populates="target_record",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("ix_plan_records_project", "project"),
@@ -75,3 +89,122 @@ class PlanEvent(Base):
 
     def __repr__(self):
         return f"<PlanEvent(id={self.id}, event_type={self.event_type}, record_id={self.plan_record_id})>"
+
+
+class PlanRecordChunk(Base):
+    """Archived plan evidence chunk for retrieval."""
+
+    __tablename__ = "plan_record_chunks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_record_id = Column(Integer, ForeignKey("plan_records.id", ondelete="CASCADE"), nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    section_type = Column(String(50), nullable=False, default="body")
+    heading = Column(String(500), nullable=True)
+    text = Column(Text, nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    token_estimate = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    record = relationship("PlanRecord", back_populates="chunks")
+
+    __table_args__ = (
+        UniqueConstraint("plan_record_id", "chunk_index", name="uq_plan_record_chunk_index"),
+        Index("ix_plan_record_chunks_record", "plan_record_id"),
+        Index("ix_plan_record_chunks_section", "section_type"),
+        Index("ix_plan_record_chunks_hash", "content_hash"),
+    )
+
+
+class PlanRecordFileRef(Base):
+    """File reference mentioned by a plan or derived from git changes."""
+
+    __tablename__ = "plan_record_file_refs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_record_id = Column(Integer, ForeignKey("plan_records.id", ondelete="CASCADE"), nullable=False)
+    chunk_id = Column(Integer, ForeignKey("plan_record_chunks.id", ondelete="SET NULL"), nullable=True)
+    source_type = Column(String(50), nullable=False)
+    path = Column(String(1000), nullable=False)
+    module = Column(String(200), nullable=True)
+    change_type = Column(String(20), nullable=True)
+    commit_sha = Column(String(64), nullable=True)
+    commit_date = Column(DateTime, nullable=True)
+    lines_added = Column(Integer, nullable=True)
+    lines_deleted = Column(Integer, nullable=True)
+    evidence = Column(Text, nullable=True)
+    exists_at_index = Column(Boolean, nullable=False, default=False)
+    first_seen_at = Column(DateTime, default=datetime.now)
+    last_seen_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    record = relationship("PlanRecord", back_populates="file_refs")
+    chunk = relationship("PlanRecordChunk")
+
+    __table_args__ = (
+        UniqueConstraint("plan_record_id", "source_type", "path", "commit_sha", name="uq_plan_record_file_ref_source"),
+        Index("ix_plan_record_file_refs_record", "plan_record_id"),
+        Index("ix_plan_record_file_refs_path", "path"),
+        Index("ix_plan_record_file_refs_source", "source_type"),
+        Index("ix_plan_record_file_refs_module", "module"),
+    )
+
+
+class PlanRecordRelation(Base):
+    """Derived relation between archived plans."""
+
+    __tablename__ = "plan_record_relations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_plan_record_id = Column(Integer, ForeignKey("plan_records.id", ondelete="CASCADE"), nullable=False)
+    target_plan_record_id = Column(Integer, ForeignKey("plan_records.id", ondelete="CASCADE"), nullable=False)
+    relation_type = Column(String(50), nullable=False)
+    score = Column(Integer, nullable=False, default=0)
+    evidence = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    source_record = relationship("PlanRecord", foreign_keys=[source_plan_record_id], back_populates="outgoing_relations")
+    target_record = relationship("PlanRecord", foreign_keys=[target_plan_record_id], back_populates="incoming_relations")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_plan_record_id",
+            "target_plan_record_id",
+            "relation_type",
+            name="uq_plan_record_relation",
+        ),
+        Index("ix_plan_record_relations_source", "source_plan_record_id"),
+        Index("ix_plan_record_relations_target", "target_plan_record_id"),
+        Index("ix_plan_record_relations_type", "relation_type"),
+    )
+
+
+class PlanRecordSearchRun(Base):
+    """Backfill/index execution audit row."""
+
+    __tablename__ = "plan_record_search_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_record_id = Column(Integer, ForeignKey("plan_records.id", ondelete="SET NULL"), nullable=True)
+    run_type = Column(String(50), nullable=False, default="index")
+    status = Column(String(30), nullable=False, default="pending")
+    dry_run = Column(Boolean, nullable=False, default=True)
+    force = Column(Boolean, nullable=False, default=False)
+    indexed_count = Column(Integer, nullable=False, default=0)
+    skipped_count = Column(Integer, nullable=False, default=0)
+    failed_count = Column(Integer, nullable=False, default=0)
+    detail = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=datetime.now)
+    finished_at = Column(DateTime, nullable=True)
+
+    record = relationship("PlanRecord")
+
+    __table_args__ = (
+        Index("ix_plan_record_search_runs_record", "plan_record_id"),
+        Index("ix_plan_record_search_runs_status", "status"),
+        Index("ix_plan_record_search_runs_started", "started_at"),
+    )

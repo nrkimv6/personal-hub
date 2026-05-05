@@ -76,32 +76,86 @@ export interface PlanArchiveHealth {
 	} | null;
 }
 
-export interface PlanArchiveAnalyzePayload {
-	mode?: 'preview' | 'apply';
-	provider?: string | null;
-	model?: string | null;
-	timeout_seconds?: number;
-	include_prompt?: boolean;
-	source?: 'auto' | 'raw_content' | 'file_path';
+export interface PlanArchiveRetrievalQuery {
+	q?: string;
+	date_from?: string;
+	date_to?: string;
+	category?: string;
+	tags?: string[];
+	intent?: string;
+	scope?: string;
+	path?: string;
+	relation_type?: string;
+	limit?: number;
 }
 
-export interface PlanArchiveAnalyzeResponse {
-	success: boolean;
-	mode: string;
-	result: Record<string, unknown>;
-	raw_response: string;
-	provider: string | null;
-	model: string | null;
-	record_id: number;
-	filename_hash: string | null;
-	file_path: string | null;
-	elapsed_ms: number;
-	prompt_preview: string | null;
-	warnings: string[];
-	error: string | null;
-	saved: boolean;
-	record_after: Record<string, unknown> | null;
-	save_error: string | null;
+export interface PlanArchiveChunkHit {
+	id: number;
+	section_type?: string;
+	heading?: string;
+	text: string;
+	snippet?: string;
+	score?: number;
+}
+
+export interface PlanArchiveFileRefHit {
+	id: number;
+	path: string;
+	source_type: string;
+	module?: string;
+	commit_sha?: string;
+	exists_at_index?: boolean;
+}
+
+export interface PlanArchiveRetrievalResult {
+	plan: PlanRecord | Record<string, unknown>;
+	score: number;
+	score_detail: Record<string, unknown>;
+	chunks: PlanArchiveChunkHit[];
+	file_refs: PlanArchiveFileRefHit[];
+}
+
+export interface PlanArchiveRetrievalResponse {
+	results: PlanArchiveRetrievalResult[];
+	total: number;
+}
+
+export interface PlanArchiveMetricsResponse {
+	total_plans: number;
+	followup_rates: {
+		days_7: number;
+		days_14: number;
+		days_30: number;
+	};
+	top_file_refs: Array<{
+		path: string;
+		count: number;
+		mentioned_count: number;
+		changed_count: number;
+	}>;
+	missing_file_candidates: Array<{
+		module: string;
+		count: number;
+		paths: string[];
+	}>;
+	relation_counts: Record<string, number>;
+	chain_depth_max: number;
+}
+
+export interface PlanArchiveIndexRequest {
+	limit?: number;
+	force?: boolean;
+	since?: string;
+	apply?: boolean;
+}
+
+export interface PlanArchiveIndexResponse {
+	dry_run: boolean;
+	indexed: number;
+	failed: number;
+	skipped: number;
+	run_id?: number | null;
+	errors?: string[];
 }
 
 // ============================================================
@@ -173,16 +227,22 @@ export const planRecordsApi = {
 	getArchiveHealth: (includeTemp = false) =>
 		planRecordsRequest<PlanArchiveHealth>(`/records/archive-health?include_temp=${includeTemp}`),
 
-	analyzeRecord: (recordId: number, payload: PlanArchiveAnalyzePayload = {}) =>
-		planRecordsRequest<PlanArchiveAnalyzeResponse>(`/records/${recordId}/analyze`, {
+	searchArchiveRetrieval: (payload: PlanArchiveRetrievalQuery) =>
+		planRecordsRequest<PlanArchiveRetrievalResponse>('/retrieval/search', {
 			method: 'POST',
-			body: JSON.stringify({ mode: 'preview', ...payload })
+			body: JSON.stringify(payload)
 		}),
 
-	analyzeDryRun: (recordId: number, payload: Omit<PlanArchiveAnalyzePayload, 'mode'> = {}) =>
-		planRecordsRequest<PlanArchiveAnalyzeResponse>(`/records/${recordId}/analyze-dry-run`, {
+	getArchiveRetrievalMetrics: (payload: PlanArchiveRetrievalQuery) =>
+		planRecordsRequest<PlanArchiveMetricsResponse>('/retrieval/metrics', {
 			method: 'POST',
-			body: JSON.stringify({ ...payload, mode: 'preview' })
+			body: JSON.stringify(payload)
+		}),
+
+	indexArchiveRecords: (payload: PlanArchiveIndexRequest) =>
+		planRecordsRequest<PlanArchiveIndexResponse>('/records/index', {
+			method: 'POST',
+			body: JSON.stringify(payload)
 		}),
 
 	/**

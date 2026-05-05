@@ -295,34 +295,118 @@ class PlanArchiveHealthResponse(BaseModel):
     plan_archive_schedule: Optional[PlanArchiveScheduleSnapshot] = None
 
 
-class PlanArchiveAnalyzeRequest(BaseModel):
-    """Manual Plan Archive analyze request."""
-    mode: Literal["preview", "apply"] = "preview"
-    provider: Optional[str] = None
-    model: Optional[str] = None
-    timeout_seconds: int = Field(120, ge=1, le=3600)
-    include_prompt: bool = False
-    source: Optional[Literal["auto", "raw_content", "file_path"]] = "auto"
+class PlanArchiveRetrievalQuery(BaseModel):
+    """Archive retrieval filter + lexical query."""
+    q: Optional[str] = None
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    intent: Optional[str] = None
+    scope: Optional[str] = None
+    path: Optional[str] = None
+    relation_type: Optional[str] = None
+    limit: int = Field(default=20, ge=1, le=100)
 
 
-class PlanArchiveAnalyzeResponse(BaseModel):
-    """Manual Plan Archive analyze response."""
-    success: bool
-    mode: str
-    result: dict = Field(default_factory=dict)
-    raw_response: str = ""
-    provider: Optional[str] = None
-    model: Optional[str] = None
-    record_id: int
-    filename_hash: Optional[str] = None
-    file_path: Optional[str] = None
-    elapsed_ms: int = 0
-    prompt_preview: Optional[str] = None
-    warnings: list[str] = Field(default_factory=list)
-    error: Optional[str] = None
-    saved: bool = False
-    record_after: Optional[dict] = None
-    save_error: Optional[str] = None
+class PlanArchiveIndexRequest(BaseModel):
+    """Archive retrieval index backfill request."""
+    record_id: Optional[int] = None
+    limit: int = Field(default=50, ge=1, le=500)
+    force: bool = False
+    since: Optional[datetime] = None
+    apply: bool = False
+
+
+class PlanArchiveIndexResponse(BaseModel):
+    dry_run: bool
+    indexed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    run_id: Optional[int] = None
+    errors: List[str] = []
+
+
+class PlanArchiveChunkHit(BaseModel):
+    id: int
+    section_type: Optional[str] = None
+    heading: Optional[str] = None
+    text: str
+    snippet: Optional[str] = None
+    score: Optional[float] = None
+
+
+class PlanArchiveFileRefHit(BaseModel):
+    id: int
+    path: str
+    source_type: str
+    module: Optional[str] = None
+    commit_sha: Optional[str] = None
+    exists_at_index: Optional[bool] = None
+
+
+class PlanArchivePlanHit(BaseModel):
+    id: int
+    filename_hash: str
+    file_path: str
+    title: Optional[str] = None
+    status: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[list] = None
+    summary: Optional[str] = None
+    intent: Optional[str] = None
+    scope: Optional[Union[str, list]] = None
+    archived_at: Optional[datetime] = None
+
+
+class PlanArchiveRetrievalHit(BaseModel):
+    plan: PlanArchivePlanHit
+    score: float
+    score_detail: dict
+    chunks: List[PlanArchiveChunkHit] = []
+    file_refs: List[PlanArchiveFileRefHit] = []
+
+
+class PlanArchiveRetrievalResult(BaseModel):
+    results: List[PlanArchiveRetrievalHit] = []
+    total: int = 0
+
+
+class PlanArchiveContextRequest(PlanArchiveRetrievalQuery):
+    token_budget: int = Field(default=3000, ge=200, le=20000)
+    include_raw: bool = False
+
+
+class PlanArchiveMetricsQuery(PlanArchiveRetrievalQuery):
+    pass
+
+
+class PlanArchiveFollowupRates(BaseModel):
+    days_7: float = 0
+    days_14: float = 0
+    days_30: float = 0
+
+
+class PlanArchiveTopFileRef(BaseModel):
+    path: str
+    count: int
+    mentioned_count: int = 0
+    changed_count: int = 0
+
+
+class PlanArchiveMissingFileCandidate(BaseModel):
+    module: str
+    count: int
+    paths: List[str] = []
+
+
+class PlanArchiveMetricsResponse(BaseModel):
+    total_plans: int
+    followup_rates: PlanArchiveFollowupRates
+    top_file_refs: List[PlanArchiveTopFileRef] = []
+    missing_file_candidates: List[PlanArchiveMissingFileCandidate] = []
+    relation_counts: dict = {}
+    chain_depth_max: int = 0
 
 
 class PlanRecordResponse(BaseModel):
@@ -623,8 +707,15 @@ __all__ = [
     'PlanRecordWithEventsResponse',
     'ImportArchivedResponse',
     'PlanArchiveHealthResponse',
-    'PlanArchiveAnalyzeRequest',
-    'PlanArchiveAnalyzeResponse',
+    'PlanArchiveRetrievalQuery',
+    'PlanArchiveRetrievalResult',
+    'PlanArchiveChunkHit',
+    'PlanArchiveFileRefHit',
+    'PlanArchiveIndexRequest',
+    'PlanArchiveIndexResponse',
+    'PlanArchiveContextRequest',
+    'PlanArchiveMetricsQuery',
+    'PlanArchiveMetricsResponse',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',
