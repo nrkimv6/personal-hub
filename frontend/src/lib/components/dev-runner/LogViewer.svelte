@@ -440,6 +440,13 @@
 		return lines.some((line) => !HEADER_ONLY_TAGS.has(line.tag));
 	}
 
+	let emptyLogMessage = $derived.by(() => {
+		if (lastLogLoadError) return '로그를 다시 불러오는 중입니다';
+		if (mode === 'managed' && recentRetryAttempt > 0) return '로그 catch-up 재시도 중입니다';
+		if (mode === 'managed' && (running || apiGate.state === 'open')) return '로그 파일을 찾는 중입니다';
+		return '표시할 로그가 아직 없습니다';
+	});
+
 	function recordLogLoadError(stage: string, error: unknown) {
 		const message = describeError(error);
 		lastLogLoadError = `${stage}: ${message}`;
@@ -1049,7 +1056,7 @@
 		class="flex-1 min-h-0 overflow-y-auto font-mono text-xs p-1.5 bg-gray-950 text-gray-300 dr-scrollbar-thin"
 	>
 		{#if lines.length === 0}
-			<span class="text-gray-600">로그가 없습니다</span>
+			<span class="text-gray-600">{emptyLogMessage}</span>
 		{:else if visibleLines.length === 0}
 			<span class="text-gray-600">{hiddenLogCount}개 로그가 필터로 숨겨졌습니다</span>
 		{:else}

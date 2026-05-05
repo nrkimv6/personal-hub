@@ -26,6 +26,9 @@
 		mergeMessage?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
+		orphanAlive?: boolean;
+		redisMissing?: boolean;
+		logFileFound?: boolean;
 		exitReason?: string | null;
 		error?: string | null;
 		displayPlanName?: string | null;
@@ -41,7 +44,7 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, exitReason = null, error = null, displayPlanName = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -253,6 +256,9 @@
 			`worktree_exists: ${worktreeExists}`,
 			`branch_exists: ${branchExists}`,
 			`branch_merged_to_main: ${branchMergedToMain}`,
+			`orphan_alive: ${orphanAlive}`,
+			`redis_missing: ${redisMissing}`,
+			`log_file_found: ${logFileFound}`,
 			`metadata_checked_at: ${metadataCheckedAt ?? 'unknown'}`
 		];
 		return rows.filter(Boolean).join('\n');
@@ -303,6 +309,16 @@
 			{#if staleBadgeLabel()}
 				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground" title={metaTitle}>
 					{staleBadgeLabel()}
+				</span>
+			{/if}
+
+			{#if orphanAlive}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700" title={metaTitle}>
+					Redis 상태 소실
+				</span>
+			{:else if redisMissing && logFileFound}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-sky-100 text-sky-700" title={metaTitle}>
+					로그 복구
 				</span>
 			{/if}
 
@@ -451,6 +467,16 @@
 		<div class="flex items-center gap-2 px-3 py-2 bg-orange-50 border-b border-orange-200 text-xs">
 			<span class="text-orange-700 font-medium">프로세스 종료 후 워크플로우가 정리되지 않았습니다.</span>
 			<button class="px-2 py-0.5 rounded border border-orange-300 text-orange-700 hover:bg-orange-100 transition-colors" onclick={handleOrphanReset}>리셋</button>
+		</div>
+	{/if}
+
+	{#if orphanAlive}
+		<div class="px-3 py-1.5 text-xs text-orange-700 bg-orange-50 border-b border-orange-200">
+			Redis runner 상태는 소실됐지만 heartbeat와 로그 파일이 남아 있습니다.
+		</div>
+	{:else if redisMissing && logFileFound}
+		<div class="px-3 py-1.5 text-xs text-sky-700 bg-sky-50 border-b border-sky-200">
+			Runner 목록에서는 빠졌지만 기존 로그를 복구했습니다.
 		</div>
 	{/if}
 

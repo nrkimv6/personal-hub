@@ -12,6 +12,7 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
 
 
 class DiagnosticsService:
@@ -112,6 +113,45 @@ class DiagnosticsService:
             steps.append({"step": 6, "name": "pmessage 수신 게이지", "ok": pmsg_ok, "detail": detail})
         except Exception as e:
             steps.append({"step": 6, "name": "pmessage 수신 게이지", "ok": False, "detail": f"조회 실패: {e}"})
+
+        # 7. Redis registry에서 빠졌지만 heartbeat/log evidence가 남은 runner
+        try:
+            active_ids = {
+                item.decode("utf-8", errors="replace") if isinstance(item, bytes) else str(item)
+                for item in (runner_ids or set())
+            }
+            recent_ids = {
+                item.decode("utf-8", errors="replace") if isinstance(item, bytes) else str(item)
+                for item in (self.redis_client.zrange(RECENT_RUNNERS_KEY, 0, -1) or [])
+            }
+            orphan_ids = []
+            for raw_key in self.redis_client.scan_iter(f"{RUNNER_KEY_PREFIX}:*:subprocess_heartbeat"):
+                key = raw_key.decode("utf-8", errors="replace") if isinstance(raw_key, bytes) else str(raw_key)
+                prefix = f"{RUNNER_KEY_PREFIX}:"
+                suffix = ":subprocess_heartbeat"
+                if not key.startswith(prefix) or not key.endswith(suffix):
+                    continue
+                runner_id = key[len(prefix):-len(suffix)]
+                if runner_id in active_ids or runner_id in recent_ids:
+                    continue
+                log_path = self.resolver.find_filesystem_log(runner_id)
+                orphan_ids.append(f"{runner_id}:log_file_found={bool(log_path)}")
+            if orphan_ids:
+                steps.append({
+                    "step": 7,
+                    "name": "orphan runner evidence",
+                    "ok": False,
+                    "detail": "redis_missing " + ", ".join(orphan_ids[:5]),
+                })
+            else:
+                steps.append({
+                    "step": 7,
+                    "name": "orphan runner evidence",
+                    "ok": True,
+                    "detail": "redis_missing 없음",
+                })
+        except Exception as e:
+            steps.append({"step": 7, "name": "orphan runner evidence", "ok": False, "detail": f"조회 실패: {e}"})
 
         return {"steps": steps}
 

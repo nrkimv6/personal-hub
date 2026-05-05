@@ -114,6 +114,22 @@ def _register_completed_runner_state(
         logger.info(f"[cleanup] registered in RECENT: {runner_id}")
 
 
+def _parse_trigger_from_runner_log(log_file_path: str | None) -> str | None:
+    if not log_file_path:
+        return None
+    try:
+        with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for _ in range(15):
+                line = f.readline()
+                if not line:
+                    break
+                if line.startswith("[TRIGGER] "):
+                    return line[len("[TRIGGER] "):].split(" | ", 1)[0].strip() or None
+    except (OSError, IOError):
+        return None
+    return None
+
+
 def _record_worktree_cleanup_monitor_event(
     *,
     event_type: str,
@@ -435,6 +451,11 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file_val = None
         _trigger_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+        if _trigger_val is None:
+            _trigger_val = _parse_trigger_from_runner_log(
+                redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+                or redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
+            )
         merge_requested = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
         test_source_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source")
         branch_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")

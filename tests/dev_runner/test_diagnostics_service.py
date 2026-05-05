@@ -12,6 +12,8 @@ def _make_svc(**overrides) -> DiagnosticsService:
     mock.info = MagicMock(return_value={"connected_clients": 5})
     mock.get = MagicMock(return_value="1")
     mock.smembers = MagicMock(return_value={"runner1"})
+    mock.zrange = MagicMock(return_value=[])
+    mock.scan_iter = MagicMock(return_value=[])
     for k, v in overrides.items():
         setattr(mock, k, v)
     svc.redis_client = mock
@@ -19,7 +21,7 @@ def _make_svc(**overrides) -> DiagnosticsService:
 
 
 def test_run_diagnostics_right_all_ok(tmp_path):
-    """R(Right): 모든 조건 정상 → steps 6개 모두 ok=True."""
+    """R(Right): 모든 조건 정상 → steps 7개 모두 ok=True."""
     from unittest.mock import patch as _patch
     log_file = tmp_path / "test.log"
     log_file.write_text("log content")
@@ -40,7 +42,7 @@ def test_run_diagnostics_right_all_ok(tmp_path):
 
     steps = result["steps"]
 
-    assert len(steps) == 6
+    assert len(steps) == 7
     assert all(s["ok"] for s in steps), [s for s in steps if not s["ok"]]
 
 

@@ -60,6 +60,9 @@ export interface RunnerListItem {
 	trigger?: string | null;
 	visible: boolean;
 	orphan: boolean;
+	orphan_alive?: boolean;
+	redis_missing?: boolean;
+	log_file_found?: boolean;
 	exit_reason?: string | null;
 	error?: string | null;
 	execution_count?: number | null;

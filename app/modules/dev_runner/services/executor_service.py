@@ -241,6 +241,102 @@ class ExecutorService:
             result[f] = await self.async_redis.get(self._runner_key(rid, f))
         return result
 
+    @staticmethod
+    def _parse_runner_id_from_key(raw_key: Any, suffix: str) -> str | None:
+        key = _decode_runner_value(raw_key)
+        if not isinstance(key, str):
+            return None
+        prefix = f"{RUNNER_KEY_PREFIX}:"
+        marker = f":{suffix}"
+        if not key.startswith(prefix) or not key.endswith(marker):
+            return None
+        runner_id = key[len(prefix):-len(marker)]
+        return runner_id or None
+
+    async def _scan_runner_ids_with_suffix(self, suffix: str) -> set[str]:
+        pattern = f"{RUNNER_KEY_PREFIX}:*:{suffix}"
+        result: set[str] = set()
+        try:
+            iterator = self.async_redis.scan_iter(pattern)
+            if hasattr(iterator, "__aiter__"):
+                async for key in iterator:
+                    runner_id = self._parse_runner_id_from_key(key, suffix)
+                    if runner_id:
+                        result.add(runner_id)
+            else:
+                for key in iterator:
+                    runner_id = self._parse_runner_id_from_key(key, suffix)
+                    if runner_id:
+                        result.add(runner_id)
+        except Exception as exc:
+            logger.debug("[dev-runner] runner suffix scan failed suffix=%s: %s", suffix, exc)
+        return result
+
+    @staticmethod
+    def _normalize_runner_id_set(values: Any) -> set[str]:
+        return {str(decoded) for value in (values or []) if (decoded := _decode_runner_value(value))}
+
+    def _filesystem_log_for_runner(self, runner_id: str) -> Path | None:
+        try:
+            return LogFileResolver(config, self.redis_client).find_filesystem_log(runner_id)
+        except Exception as exc:
+            logger.debug("[dev-runner] filesystem log fallback failed runner=%s: %s", runner_id, exc)
+            return None
+
+    @staticmethod
+    def _coerce_datetime(raw: Any) -> datetime | None:
+        value = _decode_runner_value(raw)
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _coerce_int(raw: Any) -> int | None:
+        value = _decode_runner_value(raw)
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _apply_log_meta_fallbacks(
+        self,
+        *,
+        runner_id: str,
+        log_path: Path | None,
+        recent_meta: dict,
+        trigger: str | None,
+        plan_file: str | None,
+        engine: str | None,
+        start_time: datetime | None,
+        execution_count: int | None,
+        display_plan_name: str | None,
+    ) -> tuple[str | None, str | None, str | None, datetime | None, int | None, str | None]:
+        if log_path:
+            log_meta = LogFileResolver.parse_meta_from_log(str(log_path))
+            trigger = trigger or log_meta.get("trigger")
+            plan_file = plan_file or log_meta.get("plan") or log_meta.get("plan_key")
+            start_time = start_time or self._coerce_datetime(log_meta.get("started_at"))
+            execution_count = execution_count if execution_count is not None else self._coerce_int(log_meta.get("execution_count"))
+            display_plan_name = display_plan_name or LogFileResolver.display_plan_name_from_meta(log_meta)
+
+        trigger = trigger or recent_meta.get("trigger")
+        plan_file = plan_file or recent_meta.get("plan_file")
+        engine = engine or recent_meta.get("engine")
+        start_time = start_time or self._coerce_datetime(recent_meta.get("started_at") or recent_meta.get("accepted_at"))
+        execution_count = execution_count if execution_count is not None else self._coerce_int(recent_meta.get("execution_count"))
+        if not display_plan_name:
+            display_plan_name = recent_meta.get("display_plan_name")
+        if not display_plan_name and plan_file:
+            display_plan_name = Path(str(plan_file)).name
+        if not display_plan_name and log_path:
+            display_plan_name = log_path.name
+        return trigger, plan_file, engine, start_time, execution_count, display_plan_name
+
     async def _send_command(self, command: dict, timeout: int = COMMAND_TIMEOUT) -> dict | None:
         """Redis 명령 전송 공통 메서드 — LPUSH + BRPOP + delete + parse 패턴.
 
@@ -723,9 +819,12 @@ class ExecutorService:
             await self.async_redis.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
 
             # ACTIVE_RUNNERS_KEY + RECENT_RUNNERS_KEY 합집합으로 runner 목록 구성
-            active_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
-            recent_ids_with_scores = await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+            active_ids = self._normalize_runner_id_set(await self.async_redis.smembers(ACTIVE_RUNNERS_KEY))
+            recent_ids_with_scores = self._normalize_runner_id_set(await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1))
             all_ids = set(active_ids) | set(recent_ids_with_scores)
+            heartbeat_ids = await self._scan_runner_ids_with_suffix("subprocess_heartbeat")
+            redis_registry_ids = set(all_ids)
+            all_ids |= heartbeat_ids
 
             # orphan 판별을 위한 DB 세션
             from app.database import SessionLocal
@@ -790,11 +889,26 @@ class ExecutorService:
                             execution_count = int(execution_count_raw)
                         except (TypeError, ValueError):
                             execution_count = None
+                    redis_missing = rid not in redis_registry_ids
+                    filesystem_log = self._filesystem_log_for_runner(rid) if redis_missing else None
+                    log_file_found = bool(filesystem_log and filesystem_log.exists())
+                    trigger, plan_file, engine, start_time, execution_count, display_plan_name_from_log = self._apply_log_meta_fallbacks(
+                        runner_id=rid,
+                        log_path=filesystem_log,
+                        recent_meta=recent_meta,
+                        trigger=trigger,
+                        plan_file=plan_file,
+                        engine=engine,
+                        start_time=start_time,
+                        execution_count=execution_count,
+                        display_plan_name=None,
+                    )
                     # PID 기반 양방향 보정: Redis status와 실제 프로세스 상태 불일치 교정
                     running = status == "running"
                     running, pid_str = await self._correct_pid_state(rid, status, pid_str, caller="get_all_runners")
                     if exit_reason == "completed":
                         running = False
+                    orphan_alive = redis_missing and rid in heartbeat_ids
 
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
                     is_orphan = self._fix_orphan_workflows(db, rid, running, status)
@@ -803,7 +917,7 @@ class ExecutorService:
                     # plan_file 소실 시 recent-meta/log header/worktree_path/branch 순으로 fallback 이름 추출
                     display_plan_name: str | None = None
                     if not plan_file:
-                        display_plan_name = recent_meta.get("display_plan_name")
+                        display_plan_name = display_plan_name_from_log or recent_meta.get("display_plan_name")
                         if not display_plan_name:
                             recent_plan = recent_meta.get("plan_file")
                             if recent_plan:
@@ -817,6 +931,8 @@ class ExecutorService:
                             display_plan_name = Path(worktree_path).name
                         elif not display_plan_name and branch:
                             display_plan_name = branch.split("/")[-1] if "/" in branch else branch
+                    elif display_plan_name_from_log:
+                        display_plan_name = display_plan_name_from_log
                     result.append(RunnerListItem(
                         runner_id=rid,
                         running=running,
@@ -833,6 +949,9 @@ class ExecutorService:
                         trigger=trigger,
                         visible=is_user,
                         orphan=is_orphan,
+                        orphan_alive=orphan_alive,
+                        redis_missing=redis_missing,
+                        log_file_found=log_file_found,
                         exit_reason=exit_reason,
                         stop_stage=stop_stage,
                         error=error,

@@ -99,6 +99,9 @@ class RunnerListItem(BaseModel):
     trigger: Optional[str] = None
     visible: bool = False  # 탭 표시 여부 (user/user:all 트리거만 True, 기본 숨김)
     orphan: bool = False  # Workflow DB에 running/merge_pending/merging 이지만 Redis에 없는 runner
+    orphan_alive: bool = False  # active/recent에는 없지만 heartbeat/log evidence가 남은 live runner
+    redis_missing: bool = False  # active/recent registry에서 소실되어 fallback으로 복구된 runner
+    log_file_found: bool = False  # filesystem/recent-meta fallback으로 표시 가능한 로그가 확인됨
     exit_reason: Optional[str] = None  # 종료 사유 (completed/no_progress/rate_limit/error 등)
     stop_stage: Optional[str] = None  # stopped 세부 단계 (pre_review|post_review|unknown)
     error: Optional[str] = None  # 종료 에러 요약

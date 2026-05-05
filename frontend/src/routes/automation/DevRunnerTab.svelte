@@ -192,6 +192,9 @@
 		stop_stage?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
+		orphan_alive?: boolean;
+		redis_missing?: boolean;
+		log_file_found?: boolean;
 		exit_reason?: string | null;
 		error?: string | null;
 		display_plan_name?: string | null;
@@ -219,6 +222,9 @@
 		stop_stage?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
+		orphan_alive?: boolean;
+		redis_missing?: boolean;
+		log_file_found?: boolean;
 		exit_reason?: string | null;
 		error?: string | null;
 		visible?: boolean;
@@ -245,6 +251,9 @@
 			stop_stage: runner.stop_stage ?? null,
 			trigger: runner.trigger ?? null,
 			orphan: runner.orphan ?? false,
+			orphan_alive: runner.orphan_alive ?? false,
+			redis_missing: runner.redis_missing ?? false,
+			log_file_found: runner.log_file_found ?? false,
 			exit_reason: runner.exit_reason ?? undefined,
 			error: runner.error ?? undefined,
 			display_plan_name: runner.display_plan_name ?? null,
@@ -361,6 +370,9 @@
 			merge_status: runner.merge_status ?? tab.merge_status ?? null,
 			stop_stage: runner.stop_stage ?? tab.stop_stage ?? null,
 			orphan: runner.orphan ?? tab.orphan ?? false,
+			orphan_alive: runner.orphan_alive ?? tab.orphan_alive ?? false,
+			redis_missing: runner.redis_missing ?? tab.redis_missing ?? false,
+			log_file_found: runner.log_file_found ?? tab.log_file_found ?? false,
 			exit_reason: runner.exit_reason ?? tab.exit_reason ?? undefined,
 			error: runner.error ?? tab.error ?? undefined,
 			execution_count: runner.execution_count ?? tab.execution_count ?? null,
@@ -378,6 +390,18 @@
 		return runner.trigger === 'user' || runner.trigger === 'user:all';
 	}
 
+	function preserveMissingRunnerTab(tab: RunnerTab): RunnerTab {
+		const next = {
+			...tab,
+			running: false,
+			orphan_alive: tab.orphan_alive ?? false,
+			redis_missing: true,
+			log_file_found: tab.log_file_found ?? false,
+		};
+		catchUpRunnerLogRef(tab.id);
+		return next;
+	}
+
 	function applyRunnersSync(
 		allRunners: RunnerSource[],
 		opts: { selectActive?: boolean } = {}
@@ -393,7 +417,7 @@
 
 		runnerTabs = runnerTabs.map(tab => {
 			const runner = runnerMap.get(tab.id);
-			return runner ? updateRunnerTab(tab, runner) : { ...tab, running: false };
+			return runner ? updateRunnerTab(tab, runner) : preserveMissingRunnerTab(tab);
 		});
 		for (const runner of runners) {
 			if (!runnerTabs.some(t => t.id === runner.runner_id)) {
@@ -1069,6 +1093,9 @@
 										mergeMessage={tab.merge_message}
 										trigger={tab.trigger}
 										orphan={tab.orphan}
+										orphanAlive={tab.orphan_alive}
+										redisMissing={tab.redis_missing}
+										logFileFound={tab.log_file_found}
 										exitReason={tab.exit_reason}
 										error={tab.error}
 										displayPlanName={tab.display_plan_name}

@@ -74,8 +74,8 @@ class LogFileResolver:
             return None
         log_dir = log_dir or self.get_log_dir()
         if log_dir.exists():
-            stream_path = self._latest_existing(log_dir.glob(f"plan-runner-stream-{runner_id}-*.log"))
-            log_path = self._latest_existing(log_dir.glob(f"plan-runner-{runner_id}-*.log"))
+            stream_path = self._best_display_candidate(log_dir.glob(f"plan-runner-stream-{runner_id}-*.log"))
+            log_path = self._best_display_candidate(log_dir.glob(f"plan-runner-{runner_id}-*.log"))
             return self.select_display_log(stream_path, log_path)
         return None
 
@@ -97,10 +97,34 @@ class LogFileResolver:
         return max(existing, key=lambda p: p.stat().st_mtime)
 
     @classmethod
+    def _best_display_candidate(cls, paths) -> Optional[Path]:
+        existing = [p for p in paths if p.exists()]
+        if not existing:
+            return None
+
+        def quality(path: Path) -> tuple[int, float]:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            if cls._has_runner_output(path):
+                return (3, mtime)
+            if not cls._is_empty_or_start_marker_only(path):
+                return (2, mtime)
+            try:
+                if path.stat().st_size > 0:
+                    return (1, mtime)
+            except OSError:
+                pass
+            return (0, mtime)
+
+        return max(existing, key=quality)
+
+    @classmethod
     def select_display_log(cls, stream_path: Optional[Path], log_path: Optional[Path]) -> Optional[Path]:
         """stream/main pair 중 UI와 API에 보여줄 로그를 고른다."""
         if stream_path and log_path:
-            if cls._is_start_marker_only(stream_path) and cls._has_runner_output(log_path):
+            if cls._is_empty_or_start_marker_only(stream_path) and cls._has_runner_output(log_path):
                 return log_path
             return stream_path
         return stream_path or log_path
@@ -134,6 +158,15 @@ class LogFileResolver:
             "marker",
         )
         return all(any(token in line for token in marker_patterns) for line in lines)
+
+    @classmethod
+    def _is_empty_or_start_marker_only(cls, path: Path) -> bool:
+        try:
+            if path.stat().st_size == 0:
+                return True
+        except OSError:
+            return False
+        return cls._is_start_marker_only(path)
 
     @classmethod
     def _has_runner_output(cls, path: Path) -> bool:
