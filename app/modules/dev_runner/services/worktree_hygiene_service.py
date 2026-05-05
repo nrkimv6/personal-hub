@@ -117,31 +117,12 @@ class PlansHygieneSnapshot:
 
 
 @dataclass
-class TrackingCandidate:
-    risk_type: str
-    confidence: str
-    plan_path: str
-    plan_title: str | None
-    plan_status: str | None
-    worktree_path: str
-    branch: str | None
-    head: str | None
-    dirty_count: int
-    ahead: int
-    behind: int
-    locked_reason: str | None = None
-    main_includes_branch: bool | None = None
-    archive_evidence: dict[str, bool] = field(default_factory=dict)
-
-
-@dataclass
 class WorktreeHygieneSnapshot:
     repo_root: str
     collected_at: str
     registered_worktrees: list[RegisteredWorktreeSnapshot] = field(default_factory=list)
     residues: list[ResidueSnapshot] = field(default_factory=list)
     plans: PlansHygieneSnapshot = field(default_factory=PlansHygieneSnapshot)
-    tracking_candidates: list[TrackingCandidate] = field(default_factory=list)
     statistics: dict[str, Any] = field(default_factory=dict)
 
 
@@ -154,7 +135,7 @@ def _run_git(repo_root: Path, *args: str, cwd: Path | None = None) -> tuple[int,
         encoding="utf-8",
         errors="replace",
     )
-    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+    return proc.returncode, proc.stdout.rstrip("\n"), proc.stderr.rstrip("\n")
 
 
 def _safe_int(value: str | None, default: int = 0) -> int:
@@ -177,6 +158,15 @@ def _path_modified_at(path: Path) -> str | None:
         return datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
     except OSError:
         return None
+
+
+def _parse_short_status_path(line: str) -> str:
+    if len(line) <= 2:
+        return line.strip()
+    path = line[3:] if len(line) > 3 and line[2] == " " else line[2:].lstrip()
+    if " -> " in path:
+        return path.split(" -> ", 1)[1]
+    return path
 
 
 def _relative_to_repo(path: Path, repo_root: Path) -> str:
@@ -279,8 +269,9 @@ def _count_dirty(path: Path) -> tuple[int, list[str]]:
         return 0, []
     files: list[str] = []
     for line in stdout.splitlines():
-        if len(line) >= 4:
-            files.append(line[3:])
+        path = _parse_short_status_path(line)
+        if path:
+            files.append(path)
     return len(files), files
 
 
@@ -365,7 +356,7 @@ def _classify_registered(snapshot: RegisteredWorktreeSnapshot, header: PlanHeade
         snapshot.cleanable_reason = "active plan linked"
         return
 
-    old_enough = snapshot.modified_at is not None
+    old_enough = _is_stale_timestamp(snapshot.modified_at, stale_days)
     if snapshot.locked:
         snapshot.interest_level = INTEREST_STALE_LOCKED_REVIEW if old_enough else INTEREST_NEEDS_OWNER_REVIEW
         snapshot.cleanup_recommendation = "review_lock_before_cleanup"
@@ -375,6 +366,16 @@ def _classify_registered(snapshot: RegisteredWorktreeSnapshot, header: PlanHeade
     snapshot.interest_level = INTEREST_STALE_CLEANUP_CANDIDATE
     snapshot.cleanup_recommendation = "registered_worktree_cleanup_candidate"
     snapshot.cleanable_reason = "clean + ahead0 + no active owner"
+
+
+def _is_stale_timestamp(value: str | None, stale_days: int) -> bool:
+    if not value:
+        return False
+    try:
+        modified_at = datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return (datetime.now() - modified_at).days >= stale_days
 
 
 def _iter_residue_files(path: Path) -> tuple[int, int, int]:
@@ -508,7 +509,7 @@ def _collect_plans_hygiene(
     if rc == 0 and stdout:
         snapshot.git_status = stdout.splitlines()
         for line in snapshot.git_status:
-            path = line[3:] if len(line) > 3 else line
+            path = _parse_short_status_path(line)
             normalized = path.replace("\\", "/")
             if normalized.startswith("docs/plan/"):
                 snapshot.docs_changes.append(path)
@@ -546,45 +547,10 @@ def _collect_plans_hygiene(
     return snapshot
 
 
-def _build_tracking_candidates(
-    registered: list[RegisteredWorktreeSnapshot],
-    branch_headers: dict[str, PlanHeader],
-) -> list[TrackingCandidate]:
-    candidates: list[TrackingCandidate] = []
-    for item in registered:
-        header = branch_headers.get(item.branch or "")
-        if not header or not header.archived:
-            continue
-        if header.status != "구현완료":
-            continue
-        if item.main_includes_branch is True:
-            continue
-        candidate = TrackingCandidate(
-            risk_type="archive_merge_gap",
-            confidence="medium" if item.dirty_count == 0 else "high",
-            plan_path=header.path,
-            plan_title=header.title,
-            plan_status=header.status,
-            worktree_path=item.path,
-            branch=item.branch,
-            head=item.head,
-            dirty_count=item.dirty_count,
-            ahead=item.ahead,
-            behind=item.behind,
-            locked_reason=item.locked_reason,
-            main_includes_branch=item.main_includes_branch,
-            archive_evidence=header.archive_evidence,
-        )
-        item.risk_type = candidate.risk_type
-        candidates.append(candidate)
-    return candidates
-
-
 def _build_statistics(snapshot: WorktreeHygieneSnapshot) -> dict[str, Any]:
     stats = {
         "registered_count": len(snapshot.registered_worktrees),
         "residue_count": len(snapshot.residues),
-        "tracking_candidate_count": len(snapshot.tracking_candidates),
         "plans_push_needed": snapshot.plans.push_needed,
         "plans_dirty_docs_count": len(snapshot.plans.docs_changes),
         "plans_untracked_runtime_count": len(snapshot.plans.untracked_runtime),
@@ -654,7 +620,6 @@ class WorktreeHygieneService:
             residues=residues,
             plans=plans,
         )
-        snapshot.tracking_candidates = _build_tracking_candidates(registered, branch_headers)
         snapshot.statistics = _build_statistics(snapshot)
         return snapshot
 
@@ -716,7 +681,6 @@ def render_worktree_hygiene_report(snapshot: WorktreeHygieneSnapshot) -> str:
         f"- collected_at: `{snapshot.collected_at}`",
         f"- registered: {len(snapshot.registered_worktrees)}",
         f"- residue: {len(snapshot.residues)}",
-        f"- tracking candidates: {len(snapshot.tracking_candidates)}",
         "",
         "## 관심 낮음 후보",
         "",
@@ -785,58 +749,7 @@ def render_worktree_hygiene_report(snapshot: WorktreeHygieneSnapshot) -> str:
             f"| `{drift['plan_file']}` | `{drift['branch']}` | `{drift['worktree']}` | {drift['reason']} |"
         )
 
-    lines.extend([
-        "",
-        "## Tracking Candidates",
-        "",
-        "| risk | plan | branch | dirty | ahead | next action |",
-        "|---|---|---|---:|---:|---|",
-    ])
-    if not snapshot.tracking_candidates:
-        lines.append("| - | - | - | 0 | 0 | - |")
-    for item in snapshot.tracking_candidates:
-        lines.append(
-            f"| {item.risk_type} | `{item.plan_path}` | `{item.branch or '-'}` | {item.dirty_count} | {item.ahead} | user_confirmation_required |"
-        )
     return "\n".join(lines) + "\n"
-
-
-def render_tracking_memo(candidate: TrackingCandidate) -> str:
-    evidence = candidate.archive_evidence or {}
-    return "\n".join(
-        [
-            "판단 필요: archive 구현완료 plan의 live worktree",
-            "",
-            f"risk_type: {candidate.risk_type}",
-            f"confidence: {candidate.confidence}",
-            "",
-            "## why_flagged",
-            f"- plan_status: {candidate.plan_status}",
-            f"- worktree_path: `{candidate.worktree_path}`",
-            f"- branch: `{candidate.branch or '-'}`",
-            f"- main_includes_branch: {candidate.main_includes_branch}",
-            "",
-            "## why_not_auto_merge",
-            "- archive 상태는 merge 승인 evidence가 아니며 user_confirmation_required=true",
-            "- dirty/ahead/main 포함 여부를 사람이 확인해야 함",
-            "",
-            "## state",
-            f"| field | value |\n|---|---|\n| plan | `{candidate.plan_path}` |\n| title | {candidate.plan_title or '-'} |\n| head | `{candidate.head or '-'}` |\n| dirty_count | {candidate.dirty_count} |\n| main_ahead | {candidate.ahead} |\n| main_behind | {candidate.behind} |\n| locked_reason | {candidate.locked_reason or '-'} |",
-            "",
-            "## archive_evidence",
-            f"- merge_commit: {bool(evidence.get('merge_commit'))}",
-            f"- cleanup_commit: {bool(evidence.get('cleanup_commit'))}",
-            f"- test_evidence: {bool(evidence.get('test_evidence'))}",
-            "",
-            "## recommended_next_action",
-            "- main 포함됨 -> cleanup",
-            "- main 미포함 + evidence 있음 -> 사용자 확인 후 merge 후보",
-            "- dirty 있음 -> diff 검토",
-            "- 폐기/outdated -> merge 금지",
-            "",
-            "user_confirmation_required=true",
-        ]
-    )
 
 
 def snapshot_to_statistics_json(snapshot: WorktreeHygieneSnapshot) -> str:

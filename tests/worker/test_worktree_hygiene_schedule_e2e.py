@@ -113,7 +113,7 @@ async def test_schedule_execute_creates_report_and_run_snapshot_counts(session_f
 
 
 @pytest.mark.asyncio
-async def test_archive_merge_gap_links_tracking_item_to_plan_record(session_factory, tmp_path: Path):
+async def test_archive_gap_schedule_execute_does_not_create_tracking_item(session_factory, tmp_path: Path):
     repo = _init_repo(tmp_path)
     worktree = repo / ".worktrees" / "archive-gap"
     _git(repo, "worktree", "add", str(worktree), "-b", "impl/archive-gap")
@@ -145,7 +145,5 @@ async def test_archive_merge_gap_links_tracking_item_to_plan_record(session_fact
     )
 
     with session_factory() as db:
-        item = db.query(TrackingItem).one()
-        assert "risk_type" in item.description
-        assert "recommended_next_action" in item.description
-        assert db.query(TrackingItemPlanLink).count() == 1
+        assert db.query(TrackingItem).count() == 0
+        assert db.query(TrackingItemPlanLink).count() == 0

@@ -161,7 +161,7 @@ async def test_execute_R_summary_includes_interest_and_plans_push_counts(session
 
 
 @pytest.mark.asyncio
-async def test_execute_R_archive_merge_gap_creates_tracking_item_with_memo(session_factory, tmp_path: Path):
+async def test_execute_R_report_only_archive_gap_does_not_create_tracking_items(session_factory, tmp_path: Path):
     repo = _init_repo(tmp_path)
     worktree = repo / ".worktrees" / "archive-gap"
     _git(repo, "worktree", "add", str(worktree), "-b", "impl/archive-gap")
@@ -193,14 +193,12 @@ async def test_execute_R_archive_merge_gap_creates_tracking_item_with_memo(sessi
     await scheduler.execute(schedule, claimed, _make_ctx(session_factory))
 
     with session_factory() as db:
-        item = db.query(TrackingItem).one()
-        assert "archive 구현완료 plan" in item.title
-        assert "user_confirmation_required=true" in item.description
-        assert db.query(TrackingItemPlanLink).count() == 1
+        assert db.query(TrackingItem).count() == 0
+        assert db.query(TrackingItemPlanLink).count() == 0
 
 
 @pytest.mark.asyncio
-async def test_execute_B_archive_merge_gap_dedupes_existing_tracking_item(session_factory, tmp_path: Path):
+async def test_execute_B_repeated_archive_gap_report_remains_tracking_side_effect_free(session_factory, tmp_path: Path):
     repo = _init_repo(tmp_path)
     worktree = repo / ".worktrees" / "archive-gap"
     _git(repo, "worktree", "add", str(worktree), "-b", "impl/archive-gap")
@@ -221,7 +219,8 @@ async def test_execute_B_archive_merge_gap_dedupes_existing_tracking_item(sessio
     await scheduler.execute(schedule, claimed, _make_ctx(session_factory))
 
     with session_factory() as db:
-        assert db.query(TrackingItem).count() == 1
+        assert db.query(TrackingItem).count() == 0
+        assert db.query(TrackingItemPlanLink).count() == 0
 
 
 @pytest.mark.asyncio

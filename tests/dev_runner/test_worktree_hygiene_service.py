@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import os
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.modules.dev_runner.services.worktree_hygiene_service import (
@@ -10,7 +12,6 @@ from app.modules.dev_runner.services.worktree_hygiene_service import (
     INTEREST_STALE_CLEANUP_CANDIDATE,
     INTEREST_STALE_LOCKED_REVIEW,
     WorktreeHygieneService,
-    render_tracking_memo,
     render_worktree_hygiene_report,
 )
 
@@ -115,13 +116,28 @@ def test_collect_residue_dirs_E_git_marker_registered_path_excluded(tmp_path: Pa
     assert any(item.kind == "git_marker_unregistered" for item in snapshot.residues)
 
 
-def test_interest_level_R_locked_clean_old_requires_review_not_auto_delete(tmp_path: Path):
+def test_interest_level_R_locked_clean_fresh_requires_owner_review_not_stale(tmp_path: Path):
     repo = _init_repo(tmp_path)
     branch = "impl/locked-clean"
     worktree = _add_worktree(repo, branch, "locked-clean")
     _git(repo, "worktree", "lock", str(worktree), "--reason", "manual owner")
 
     snapshot = WorktreeHygieneService(repo).collect()
+
+    item = _by_branch(snapshot, branch)
+    assert item.interest_level == INTEREST_NEEDS_OWNER_REVIEW
+    assert item.cleanup_recommendation == "review_lock_before_cleanup"
+
+
+def test_interest_level_B_locked_clean_old_requires_review_not_auto_delete(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    branch = "impl/locked-clean-old"
+    worktree = _add_worktree(repo, branch, "locked-clean-old")
+    _git(repo, "worktree", "lock", str(worktree), "--reason", "manual owner")
+    old_timestamp = (datetime.now() - timedelta(days=20)).timestamp()
+    os.utime(worktree, (old_timestamp, old_timestamp))
+
+    snapshot = WorktreeHygieneService(repo).collect(stale_worktree_days=14)
 
     item = _by_branch(snapshot, branch)
     assert item.interest_level == INTEREST_STALE_LOCKED_REVIEW
@@ -194,6 +210,22 @@ def test_collect_plans_hygiene_R_logs_gitignore_warning(tmp_path: Path):
     assert any("logs/" in item for item in snapshot.plans.untracked_runtime)
 
 
+def test_collect_plans_hygiene_R_modified_archive_path_preserves_first_character(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    plans = repo / ".worktrees" / "plans"
+    archive_file = plans / "docs" / "archive" / "touched.md"
+    archive_file.parent.mkdir(parents=True)
+    archive_file.write_text("before\n", encoding="utf-8")
+    _git(plans, "add", "docs/archive/touched.md")
+    _git(plans, "commit", "-m", "seed archive")
+    archive_file.write_text("after\n", encoding="utf-8")
+
+    snapshot = WorktreeHygieneService(repo).collect()
+
+    assert "docs/archive/touched.md" in snapshot.plans.archive_changes
+    assert "ocs/archive/touched.md" not in snapshot.plans.policy_changes
+
+
 def test_collect_plan_header_drift_R_missing_worktree_for_active_header(tmp_path: Path):
     repo = _init_repo(tmp_path)
     _write_plan(repo, branch="impl/missing-header", name="missing-header.md", status="구현중")
@@ -218,7 +250,7 @@ def test_render_report_R_includes_registered_residue_and_drift_tables(tmp_path: 
     assert "api_gate_live_coverage.patch" in report
 
 
-def test_render_tracking_memo_contains_required_sections(tmp_path: Path):
+def test_render_report_R_archive_gap_remains_report_only_without_tracking_section(tmp_path: Path):
     repo = _init_repo(tmp_path)
     branch = "impl/archive-gap"
     wt = _add_worktree(repo, branch, "archive-gap")
@@ -228,10 +260,8 @@ def test_render_tracking_memo_contains_required_sections(tmp_path: Path):
     _write_plan(repo, branch=branch, name="archive-gap.md", status="구현완료", archived=True)
 
     snapshot = WorktreeHygieneService(repo).collect()
+    report = render_worktree_hygiene_report(snapshot)
 
-    assert snapshot.tracking_candidates
-    memo = render_tracking_memo(snapshot.tracking_candidates[0])
-    assert "risk_type" in memo
-    assert "why_not_auto_merge" in memo
-    assert "recommended_next_action" in memo
-    assert "user_confirmation_required=true" in memo
+    assert not hasattr(snapshot, "tracking_candidates")
+    assert "Tracking Candidates" not in report
+    assert "archive_merge_gap" not in report
