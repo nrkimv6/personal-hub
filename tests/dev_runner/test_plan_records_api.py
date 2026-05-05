@@ -213,6 +213,37 @@ class TestListRecords:
         assert data["file_removed"] == 4
         assert data["latest_failed_request"]["caller_id"] == "failed_hash"
 
+    def test_archive_health_right_keeps_temp_counts_separate_after_purge(self, client):
+        """R: purge 이후에도 archive-health temp/real split schema is stable."""
+        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+
+        expected = {
+            "archived_total": 1,
+            "llm_processed": 0,
+            "llm_unprocessed": 1,
+            "real_unprocessed": 1,
+            "temp_pytest_total": 0,
+            "temp_pytest_unprocessed": 0,
+            "pending_or_processing_requests": 0,
+            "failed_requests": 0,
+            "file_retention_due": 0,
+            "file_retention_scheduled": 0,
+            "file_removed": 0,
+            "oldest_file_delete_after": None,
+            "latest_failed_request": None,
+            "oldest_unprocessed_at": "2026-05-04T01:00:00",
+            "plan_archive_schedule": None,
+        }
+
+        with patch.object(PlanRecordService, "get_plan_archive_health", return_value=expected):
+            resp = client.get("/api/v1/plans/records/archive-health")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["real_unprocessed"] == 1
+        assert data["temp_pytest_total"] == 0
+        assert data["temp_pytest_unprocessed"] == 0
+
 
 class TestGetRecord:
 

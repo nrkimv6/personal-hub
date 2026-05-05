@@ -698,6 +698,11 @@ class TestDbIsolationNoProductionPollution:
     이 pure service 테스트의 timeout 회귀 경로가 다시 열린다.
     """
 
+    def test_temp_plan_record_fixture_uses_module_local_sqlite(self, engine):
+        """R: PlanRecordService 테스트 fixture는 module-local SQLite를 사용한다."""
+        assert engine.url.get_backend_name() == "sqlite"
+        assert engine.url.database in (None, ":memory:")
+
     def test_db_isolation_no_production_pollution(self, db, tmp_path, request):
         """테스트 DB에 pytest 경로로 레코드를 생성해도 production DB에는 반영되지 않음
 
