@@ -397,6 +397,7 @@ class PlanRecordService:
             LLMRequest.caller_type == "plan_archive_analyze",
             LLMRequest.deleted_at.is_(None),
         )
+        # /automation archive health와 /llm queue는 모두 llm_requests 상태를 원천으로 본다.
         pending_or_processing_requests = request_query.filter(
             LLMRequest.status.in_(["pending", "processing"])
         ).count()

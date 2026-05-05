@@ -83,6 +83,13 @@ def _seed_archive_health(db):
             requested_at=datetime(2026, 5, 5, 2, 14),
             error_message="quota reset wait",
         ),
+        LLMRequest(
+            caller_type="plan_archive_analyze",
+            caller_id="completed-is-not-active",
+            prompt="p",
+            status="completed",
+            requested_at=datetime(2026, 5, 5, 2, 15),
+        ),
         TaskScheduleRun(
             schedule_id=schedule.id,
             status=TaskScheduleRun.STATUS_COMPLETED,

@@ -25,10 +25,11 @@ async def cleanup_api_stale_resources():
 
         db = SessionLocal()
         try:
-            # LLM 요청 stale processing 정리 (processing 상태로 남은 요청을 failed로)
+            # LLM 요청 stale processing 정리. processing 시작 시각 기준 기본 timeout을 사용해
+            # API 재시작 중 정상 처리 중인 요청을 즉시 failed로 오판하지 않는다.
             from app.modules.claude_worker.services.llm_service import LLMService
             llm_service = LLMService(db)
-            stale_count = llm_service.cleanup_stale_processing(timeout_minutes=0)  # 즉시 정리
+            stale_count = llm_service.cleanup_stale_processing()
             if stale_count > 0:
                 logger.info(f"앱 시작 시 stale LLM processing 요청 정리: {stale_count}개")
 

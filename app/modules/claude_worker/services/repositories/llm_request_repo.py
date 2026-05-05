@@ -148,12 +148,16 @@ class LLMRequestRepository:
         )
 
     def find_stale_processing(self, threshold: datetime) -> List[LLMRequest]:
-        """threshold보다 오래된 processing 요청 조회."""
+        """threshold보다 오래된 processing 요청 조회.
+
+        processing 시작 시각(processed_at)이 있으면 우선 사용하고,
+        legacy row처럼 값이 없으면 requested_at으로 fallback한다.
+        """
         return (
             self.db.query(LLMRequest)
             .filter(
                 LLMRequest.status == "processing",
-                LLMRequest.requested_at < threshold,
+                func.coalesce(LLMRequest.processed_at, LLMRequest.requested_at) < threshold,
                 LLMRequest.deleted_at.is_(None),
             )
             .all()

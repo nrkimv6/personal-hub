@@ -53,6 +53,44 @@ PID_FILE = PID_DIR / "chat_executor_admin.pid"
 _ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 
+def _mark_failed_safely(service, db, request_id: int, error_message: str, raw_response: str = "") -> None:
+    """Rollback-required 세션에서도 chat 요청을 failed로 마감한다."""
+    if db is not None:
+        try:
+            db.rollback()
+        except Exception as rollback_error:
+            logger.warning("chat failed finalizer rollback failed request_id=%s: %s", request_id, rollback_error)
+
+    try:
+        service.mark_failed(request_id, error_message=error_message, raw_response=raw_response)
+        return
+    except Exception as mark_error:
+        logger.error("chat failed finalizer failed request_id=%s: %s", request_id, mark_error, exc_info=True)
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+    fail_db = None
+    try:
+        from app.database import SessionLocal
+        from app.modules.claude_worker.services.llm_service import LLMService
+
+        fail_db = SessionLocal()
+        LLMService(fail_db).mark_failed(request_id, error_message=error_message, raw_response=raw_response)
+    except Exception as fallback_error:
+        logger.critical(
+            "chat failed finalizer fallback failed request_id=%s: %s",
+            request_id,
+            fallback_error,
+            exc_info=True,
+        )
+    finally:
+        if fail_db is not None:
+            fail_db.close()
+
+
 def _is_pid_alive(pid: int) -> bool:
     """PID 생존 확인 (Windows)."""
     try:
@@ -247,7 +285,9 @@ class ChatExecutor:
                 if exit_code == 0:
                     service.mark_completed(request_id, {}, raw_response=last_json or "\n".join(collected[-20:]))
                 else:
-                    service.mark_failed(
+                    _mark_failed_safely(
+                        service,
+                        db,
                         request_id,
                         error_message=f"exit_code={exit_code}",
                         raw_response="\n".join(collected[-20:]),
@@ -265,10 +305,7 @@ class ChatExecutor:
             else:
                 logger.error(f"chat session error request_id={request_id}: {e}", exc_info=True)
             if service:
-                try:
-                    service.mark_failed(request_id, error_message=str(e), raw_response="")
-                except Exception:
-                    pass
+                _mark_failed_safely(service, db, request_id, error_message=str(e), raw_response="")
             try:
                 self.redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{request_id}", "__COMPLETED__")
             except Exception:

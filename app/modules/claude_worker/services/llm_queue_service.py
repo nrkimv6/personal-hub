@@ -169,6 +169,7 @@ class LLMQueueService:
         request = self._repo.get_by_id(request_id)
         if request:
             request.status = "processing"
+            request.processed_at = datetime.now()
             self.db.commit()
 
     def mark_completed(
@@ -217,7 +218,7 @@ class LLMQueueService:
             request.error_message = error_message
             if raw_response:
                 request.raw_response = raw_response
-            request.retry_count += 1
+            request.retry_count = (request.retry_count or 0) + 1
             self.db.commit()
 
     def reset_to_pending(self, request_id: int, reason: str | None = None) -> bool:

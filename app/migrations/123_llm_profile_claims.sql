@@ -1,3 +1,10 @@
+-- SQLite legacy migration for local data/monitor.db.
+--
+-- PostgreSQL production must not execute this SQLite AUTOINCREMENT DDL directly.
+-- The same table/index contract is created dialect-safely from
+-- app.core.database.init_extra_tables(), using SERIAL PRIMARY KEY on PG and
+-- INTEGER PRIMARY KEY AUTOINCREMENT on SQLite.
+
 CREATE TABLE IF NOT EXISTS llm_request_profile_claims (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     request_id INTEGER NOT NULL,

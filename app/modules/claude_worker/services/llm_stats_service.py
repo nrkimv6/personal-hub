@@ -131,7 +131,9 @@ class LLMStatsService:
             count += 1
             logger.info(
                 f"Stale processing 정리: id={request.id}, "
-                f"caller={request.caller_type}:{request.caller_id}"
+                f"caller={request.caller_type}:{request.caller_id}, "
+                f"timeout_minutes={timeout_minutes}, "
+                f"basis_at={request.processed_at or request.requested_at}"
             )
 
         if count > 0:

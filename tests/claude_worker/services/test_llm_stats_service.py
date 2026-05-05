@@ -69,6 +69,31 @@ class TestCleanupStaleProcessing:
         count = svc.cleanup_stale_processing()  # default
         assert count == 1
 
+    def test_cleanup_stale_processing_R_uses_processed_at_when_available(self, db, svc):
+        """R: processing 시작 시각(processed_at)이 있으면 requested_at보다 우선한다."""
+        old_requested_but_recently_started = _req(
+            db,
+            "recent-start",
+            status="processing",
+            requested_at=datetime.now() - timedelta(hours=2),
+            processed_at=datetime.now() - timedelta(minutes=5),
+        )
+        old_started = _req(
+            db,
+            "old-start",
+            status="processing",
+            requested_at=datetime.now() - timedelta(minutes=10),
+            processed_at=datetime.now() - timedelta(minutes=70),
+        )
+
+        count = svc.cleanup_stale_processing(timeout_minutes=65)
+
+        assert count == 1
+        db.refresh(old_requested_but_recently_started)
+        db.refresh(old_started)
+        assert old_requested_but_recently_started.status == "processing"
+        assert old_started.status == "failed"
+
 
 class TestCleanupOldHistory:
     def test_cleanup_old_history_B_boundary_days(self, db, svc):

@@ -59,6 +59,7 @@ class TestMarkStateTransitions:
         svc.mark_processing(req.id)
         db.refresh(req)
         assert req.status == "processing"
+        assert req.processed_at is not None
 
     def test_mark_completed_R_stores_result(self, db, svc):
         """R: mark_completed → result 저장."""
@@ -89,6 +90,18 @@ class TestMarkStateTransitions:
         db.refresh(req)
         assert req.status == "failed"
         assert req.retry_count == initial + 1
+
+    def test_mark_failed_R_handles_null_retry_count(self, db, svc):
+        """R: legacy retry_count NULL row도 failed 전이가 가능하다."""
+        req = svc.enqueue("ct", "ci3-null-retry", "prompt")
+        req.retry_count = None
+        db.commit()
+
+        svc.mark_failed(req.id, "some error")
+
+        db.refresh(req)
+        assert req.status == "failed"
+        assert req.retry_count == 1
 
     def test_mark_failed_E_nonexistent(self, db, svc):
         """E: 없는 request ID → 무시 (예외 없음)."""

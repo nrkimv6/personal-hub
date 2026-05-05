@@ -176,6 +176,31 @@ class TestListRequestsQueueFilter:
         data = response.json()
         assert data["total"] >= 2
 
+    def test_llm_requests_R_processing_failed_status_visible(self, client, test_db_session):
+        """R: /llm/requests는 llm_requests.status 값을 그대로 반환한다."""
+        _seed_llm_request(
+            test_db_session,
+            caller_id="archive-processing",
+            caller_type="plan_archive_analyze",
+            status="processing",
+        )
+        _seed_llm_request(
+            test_db_session,
+            caller_id="archive-failed",
+            caller_type="plan_archive_analyze",
+            status="failed",
+        )
+
+        response = client.get("/api/v1/llm/requests?caller_type=plan_archive_analyze&page_size=100")
+
+        assert response.status_code == 200
+        statuses_by_caller = {
+            item["caller_id"]: item["status"]
+            for item in response.json()["items"]
+        }
+        assert statuses_by_caller["archive-processing"] == "processing"
+        assert statuses_by_caller["archive-failed"] == "failed"
+
 
 class TestCliOptionsPassthrough:
     """cli_options 파라미터 passthrough 및 계획서 작성 시나리오 테스트."""
