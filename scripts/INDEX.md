@@ -134,7 +134,7 @@
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
 | ✅ | `pre-commit-plans-block.ps1` | root branch guard와 plans lineage staged docs guard를 실행하는 pre-commit hook 본체 |
-| ✅ | `root-branch-guard.ps1` | root checkout non-main commit, root main implementation-scope staged commit, root branch drift sentinel을 차단하며, 검증된 mirror sync merge만 좁게 허용 |
+| ✅ | `root-branch-guard.ps1` | root checkout non-main commit, root main implementation-scope staged commit, root branch drift sentinel을 차단하며, mirror surface staged commit은 예외 없이 차단 |
 | ✅ | `post-checkout-root-branch-guard.ps1` | root checkout이 main 밖으로 이동하면 `.git/root-branch-guard.violation` sentinel 생성 |
 | ✅ | `install-post-merge-dirty-check.ps1` | post-merge dirty check hook 설치 |
 

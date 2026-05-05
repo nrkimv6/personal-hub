@@ -64,36 +64,6 @@ function Get-StatusPorcelain {
     return @($raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 
-function Test-MergeHeadExists {
-    $mergeHeadValue = Get-GuardValue -Name "ROOT_GUARD_MERGE_HEAD" -Fallback {
-        $mergeHeadPath = git rev-parse --git-path MERGE_HEAD 2>$null
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($mergeHeadPath)) {
-            return ""
-        }
-        if (Test-Path -LiteralPath $mergeHeadPath) {
-            return "1"
-        }
-        return ""
-    }
-    return -not [string]::IsNullOrWhiteSpace($mergeHeadValue)
-}
-
-function Get-MergeSubject {
-    $raw = Get-GuardValue -Name "ROOT_GUARD_MERGE_SUBJECT" -Fallback {
-        $subject = git log -1 --format=%s MERGE_HEAD 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            return ""
-        }
-        return $subject
-    }
-    return (($raw -join "`n").Trim())
-}
-
-function Get-UnmergedPaths {
-    $raw = Get-GuardValue -Name "ROOT_GUARD_UNMERGED" -Fallback { git diff --name-only --diff-filter=U 2>$null }
-    return @($raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { ConvertTo-RelativeGitPath $_ })
-}
-
 function Test-MirrorSurfacePath {
     param([string]$PathValue)
 
@@ -103,33 +73,6 @@ function Test-MirrorSurfacePath {
         $p -match "^\.claude/" -or
         $p -match "^\.gemini/"
     )
-}
-
-function Test-MirrorSyncMerge {
-    param([string[]]$StagedPaths)
-
-    if (-not (Test-MergeHeadExists)) {
-        return $false
-    }
-
-    $allowedSubjects = @("chore: sync skills and agent files")
-    $subject = Get-MergeSubject
-    if ($subject -notin $allowedSubjects) {
-        return $false
-    }
-
-    $staged = @($StagedPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    if ($staged.Count -eq 0) {
-        return $false
-    }
-
-    $nonMirror = @($staged | Where-Object { -not (Test-MirrorSurfacePath $_) })
-    if ($nonMirror.Count -gt 0) {
-        return $false
-    }
-
-    $unmerged = @(Get-UnmergedPaths)
-    return $unmerged.Count -eq 0
 }
 
 function Test-AllowedRootCommitPath {
@@ -228,9 +171,6 @@ if ($Mode -eq "Commit") {
     $staged = Get-StagedPaths
     $blocked = @($staged | Where-Object { -not (Test-AllowedRootCommitPath $_) })
     if ($blocked.Count -gt 0) {
-        if (Test-MirrorSyncMerge -StagedPaths $staged) {
-            exit 0
-        }
         Write-Error "root_worktree_impl_scope_blocked: root main worktree cannot commit implementation-scope files directly. Use an impl worktree."
         Write-Error "blocked staged files:"
         $blocked | ForEach-Object { Write-Error "  - $_" }

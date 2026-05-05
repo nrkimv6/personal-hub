@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -38,11 +40,16 @@ def _init_repo(tmp_path: Path) -> Path:
     _run(["git", "config", "user.name", "root-worktree-smoke"], repo)
     _run(["git", "config", "user.email", "root-worktree-smoke@example.com"], repo)
 
+    (repo / ".agents" / "skills" / "done").mkdir(parents=True)
     (repo / ".claude" / "skills" / "done").mkdir(parents=True)
+    (repo / ".gemini" / "agents").mkdir(parents=True)
     (repo / "docs" / "DONE.md").parent.mkdir(parents=True)
     (repo / "docs" / "DONE.md").write_text("# DONE\n", encoding="utf-8")
     (repo / "TODO.md").write_text("# TODO\n", encoding="utf-8")
+    (repo / ".agents" / "skills" / "done" / "SKILL.md").write_text("base\n", encoding="utf-8")
     (repo / ".claude" / "skills" / "done" / "SKILL.md").write_text("base\n", encoding="utf-8")
+    for name in ("ideation.md", "next.md", "plan-list.md", "plan.md"):
+        (repo / ".gemini" / "agents" / name).write_text(f"{name}\n", encoding="utf-8")
 
     _copy_hook_scripts(Path(__file__).resolve().parents[2], repo)
 
@@ -132,7 +139,7 @@ def test_root_worktree_blocks_sync_merge_with_non_mirror_stage(tmp_path):
     assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
 
 
-def test_root_worktree_allows_sync_merge_with_mirror_only_stage(tmp_path):
+def test_root_worktree_blocks_sync_merge_with_mirror_only_stage(tmp_path):
     repo = _init_repo(tmp_path)
     target = repo / ".claude" / "skills" / "done" / "SKILL.md"
     target.write_text("mirror sync change\n", encoding="utf-8")
@@ -148,7 +155,59 @@ def test_root_worktree_allows_sync_merge_with_mirror_only_stage(tmp_path):
         },
     )
 
-    assert result.returncode == 0
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
+@pytest.mark.parametrize(
+    ("path", "operation"),
+    [
+        (".agents/skills/done/SKILL.md", "modify"),
+        (".claude/skills/done/SKILL.md", "delete"),
+        (".gemini/agents/plan.md", "modify"),
+        (".gemini/agents/new.md", "add"),
+    ],
+)
+def test_root_worktree_blocks_mirror_add_modify_delete_on_main(tmp_path, path, operation):
+    repo = _init_repo(tmp_path)
+    target = repo / path
+    if operation == "delete":
+        _run(["git", "rm", path], repo)
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"{operation} mirror path\n", encoding="utf-8")
+        _run(["git", "add", path], repo)
+
+    result = _run_hook(repo)
+
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
+def test_root_worktree_blocks_incident_gemini_agent_files(tmp_path):
+    repo = _init_repo(tmp_path)
+    for path in (
+        ".gemini/agents/ideation.md",
+        ".gemini/agents/next.md",
+        ".gemini/agents/plan-list.md",
+        ".gemini/agents/plan.md",
+    ):
+        target = repo / path
+        target.write_text("incident mirror change\n", encoding="utf-8")
+        _run(["git", "add", path], repo)
+
+    result = _run_hook(
+        repo,
+        {
+            "ROOT_GUARD_DRY_RUN": "1",
+            "ROOT_GUARD_MERGE_HEAD": "1",
+            "ROOT_GUARD_MERGE_SUBJECT": "chore: sync skills and agent files",
+            "ROOT_GUARD_UNMERGED": "",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_blocks_sync_merge_with_unmerged_mirror_stage(tmp_path):
