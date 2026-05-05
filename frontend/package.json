@@ -7,6 +7,7 @@
 		"dev": "vite dev",
 		"prebuild": "node scripts/prebuild-clean-sveltekit-output.mjs",
 		"build": "vite build",
+		"build:merge-test": "node scripts/run-merge-test-build.mjs",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

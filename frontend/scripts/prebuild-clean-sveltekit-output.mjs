@@ -2,7 +2,10 @@ import { rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+export const MERGE_TEST_SVELTEKIT_OUTDIR = ".svelte-kit-merge-test";
+
 export function resolveSvelteKitOutDir(env = process.env) {
+  if (env.MONITOR_MERGE_TEST_SVELTEKIT_OUTDIR) return env.MONITOR_MERGE_TEST_SVELTEKIT_OUTDIR;
   if (env.MONITOR_SVELTEKIT_OUTDIR) return env.MONITOR_SVELTEKIT_OUTDIR;
   if (env.MONITOR_FRONTEND_MODE === "public") return ".svelte-kit-public";
   if (env.MONITOR_FRONTEND_MODE === "admin") return ".svelte-kit-admin";
