@@ -44,6 +44,72 @@ from _dr_runner_predicates import (
 logger = logging.getLogger(__name__)
 
 
+def _build_recent_runner_meta(
+    redis_client: redis.Redis,
+    runner_id: str,
+    *,
+    trigger,
+    plan_file,
+) -> dict:
+    meta = {}
+    for field, value in (
+        ("trigger", trigger),
+        ("plan_file", plan_file),
+        ("engine", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine")),
+        ("execution_count", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:execution_count")),
+        ("log_file_path", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")),
+        ("stream_log_path", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")),
+        ("exit_reason", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")),
+    ):
+        if value is not None:
+            meta[field] = value
+    if plan_file:
+        meta["display_plan_name"] = Path(str(plan_file)).name
+    for field in ("accepted_at", "started_at"):
+        value = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{field}")
+        if value is not None:
+            meta[field] = value
+    return meta
+
+
+def _register_completed_runner_state(
+    redis_client: redis.Redis,
+    runner_id: str,
+    *,
+    trigger,
+    plan_file,
+) -> None:
+    from _dr_constants import RECENT_RUNNERS_KEY
+
+    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+    persist_suffixes = frozenset({"plan_file", "branch", "trigger"})
+    for suffix in RUNNER_KEY_SUFFIXES:
+        if suffix in persist_suffixes:
+            continue
+        redis_client.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", RECENT_RUNNERS_TTL)
+    redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
+
+    meta = _build_recent_runner_meta(
+        redis_client,
+        runner_id,
+        trigger=trigger,
+        plan_file=plan_file,
+    )
+    if meta:
+        import json as _json
+
+        redis_client.setex(
+            f"plan-runner:recent-meta:{runner_id}",
+            RECENT_META_TTL,
+            _json.dumps(meta, ensure_ascii=False),
+        )
+        logger.debug(f"[cleanup] saved recent-meta (runner_id={runner_id})")
+
+    if trigger in ("user", "user:all"):
+        redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
+        logger.info(f"[cleanup] registered in RECENT: {runner_id}")
+
+
 def _record_worktree_cleanup_monitor_event(
     *,
     event_type: str,
@@ -387,42 +453,12 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
     # 1) register stopped runner in RECENT_RUNNERS
     try:
-        from _dr_constants import RECENT_RUNNERS_KEY
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
-        _PERSIST_SUFFIXES_LOCAL = frozenset({"plan_file", "branch", "trigger"})
-        for suffix in RUNNER_KEY_SUFFIXES:
-            if suffix in _PERSIST_SUFFIXES_LOCAL:
-                continue
-            key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
-            redis_client.expire(key, RECENT_RUNNERS_TTL)
-        redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
-
-        # recent-meta preservation
-        try:
-            import json as _json
-            _meta = {}
-            if _trigger_val is not None:
-                _meta["trigger"] = _trigger_val
-            for _field in ("accepted_at", "started_at"):
-                _val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{_field}")
-                if _val is not None:
-                    _meta[_field] = _val
-            if _meta:
-                redis_client.setex(
-                    f"plan-runner:recent-meta:{runner_id}",
-                    RECENT_META_TTL,
-                    _json.dumps(_meta, ensure_ascii=False),
-                )
-                logger.debug(f"[cleanup] saved recent-meta (runner_id={runner_id})")
-        except Exception as _rmeta_err:
-            logger.warning(f"[cleanup] recent-meta save failed (ignoring, runner_id={runner_id}): {_rmeta_err}")
-
-        if _trigger_val in ("user", "user:all"):
-            redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
-            logger.info(f"[cleanup] registered in RECENT: {runner_id}")
-        else:
-            # Invisible runner: keys will be cleaned up AFTER worktree cleanup
-            pass
+        _register_completed_runner_state(
+            redis_client,
+            runner_id,
+            trigger=_trigger_val,
+            plan_file=plan_file_val,
+        )
     except Exception as e:
         logger.warning(f"[cleanup] RECENT registration failed (runner_id={runner_id}): {e}")
 

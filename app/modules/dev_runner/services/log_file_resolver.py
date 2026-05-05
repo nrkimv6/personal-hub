@@ -174,6 +174,20 @@ class LogFileResolver:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _basename_from_plan_value(value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        if value in {"__ALL_PLANS__", "ALL"}:
+            return "전체 실행"
+        name = Path(value).name
+        return name or value
+
+    @classmethod
+    def display_plan_name_from_meta(cls, meta: dict) -> Optional[str]:
+        """[TRIGGER] plan= 또는 [RUN_META] plan_key=에서 UI fallback 표시명을 만든다."""
+        return cls._basename_from_plan_value(meta.get("plan")) or cls._basename_from_plan_value(meta.get("plan_key"))
+
+    @staticmethod
     def parse_meta_from_log(log_file_path: str, scan_lines: int = 15) -> dict:
         """로그 파일 선두 N줄에서 [TRIGGER]/[RUN_META] 메타데이터 파싱.
 

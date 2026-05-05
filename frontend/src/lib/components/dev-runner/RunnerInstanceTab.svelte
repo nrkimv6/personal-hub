@@ -243,7 +243,15 @@
 	});
 
 	let exitDisplay = $derived(getExitReasonDisplay(exitReason));
-	let statusIcon = $derived(running ? '실행중' : exitDisplay.statusIcon);
+	function resolveHeaderStatus(runningValue: boolean, exitReasonValue: string | null, mergeStatusValue: string | null): string {
+		if (runningValue) return '실행중';
+		if (mergeStatusValue === 'merged') return '머지됨';
+		if (mergeStatusValue === 'test_failed') return '테스트 실패';
+		if (mergeStatusValue === 'conflict') return '충돌';
+		return getExitReasonDisplay(exitReasonValue).statusIcon;
+	}
+
+	let statusIcon = $derived(resolveHeaderStatus(running, exitReason, mergeStatus));
 </script>
 
 <div class="flex flex-col h-full">

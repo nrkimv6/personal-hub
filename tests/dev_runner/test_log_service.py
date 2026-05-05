@@ -104,6 +104,36 @@ class TestFindCurrentLog:
         result = svc._find_current_log("test-runner")
         assert result == stream_file
 
+
+class TestLogFileResolverDisplayPlanName:
+    """log header 기반 display_plan_name fallback 계약."""
+
+    def test_display_plan_name_from_trigger_plan(self, tmp_path):
+        from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
+
+        log_file = tmp_path / "runner.log"
+        log_file.write_text(
+            "[TRIGGER] user | plan=docs/plan/2026-05-05_fix-dev-runner.md\n",
+            encoding="utf-8",
+        )
+
+        meta = LogFileResolver.parse_meta_from_log(str(log_file))
+
+        assert LogFileResolver.display_plan_name_from_meta(meta) == "2026-05-05_fix-dev-runner.md"
+
+    def test_display_plan_name_from_run_meta_plan_key(self, tmp_path):
+        from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
+
+        log_file = tmp_path / "runner.log"
+        log_file.write_text(
+            "[RUN_META] started_at=2026-05-05T16:00:00 | execution_count=2 | plan_key=docs/plan/runtime-plan.md\n",
+            encoding="utf-8",
+        )
+
+        meta = LogFileResolver.parse_meta_from_log(str(log_file))
+
+        assert LogFileResolver.display_plan_name_from_meta(meta) == "runtime-plan.md"
+
     def test_find_current_log_boundary_empty_stream_no_logfile(self, tmp_path):
         """B: stream_log_path 200B 이하 + log_file_path 없음 → stream_file 반환 (200B 기준 제거)"""
         svc = _make_log_service()

@@ -25,6 +25,25 @@ BASE_URL = "/api/v1/dev-runner"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 
 
+def test_recent_meta_source_contract_preserves_display_fields():
+    """cleanup recent-meta는 UI 복원에 필요한 표시명/종료 필드를 보존한다."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "scripts/plan_runner/_dr_process_utils.py").read_text(encoding="utf-8")
+
+    for expected in (
+        '"plan_file"',
+        '"display_plan_name"',
+        '"engine"',
+        '"execution_count"',
+        '"log_file_path"',
+        '"stream_log_path"',
+        '"exit_reason"',
+    ):
+        assert expected in source
+
+
 def _build_test_client() -> TestClient:
     from app.main import app
     return TestClient(app)

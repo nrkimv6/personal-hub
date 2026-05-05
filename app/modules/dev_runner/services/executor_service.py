@@ -28,6 +28,7 @@ from app.modules.claude_worker.services.profile_env import ENGINE_ENV_KEYS
 from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_history_path
 from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.services.visibility import is_visible_runner
+from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
 from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
 from app.modules.dev_runner.services.state import get_state
 from app.modules.dev_runner.services.redis_connection import (
@@ -706,17 +707,18 @@ class ExecutorService:
                     merge_message = d["merge_message"]
                     branch = d["branch"]
                     trigger = d["trigger"]
+                    recent_meta: dict = {}
+                    try:
+                        recent_meta_raw = await self.async_redis.get(f"plan-runner:recent-meta:{rid}")
+                        if recent_meta_raw:
+                            recent_meta_text = recent_meta_raw.decode("utf-8") if isinstance(recent_meta_raw, bytes) else recent_meta_raw
+                            recent_meta = json.loads(recent_meta_text)
+                    except Exception:
+                        recent_meta = {}
                     # trigger 미존재 시 recent-meta fallback (cleanup 후 타이밍 이슈 방어)
                     if trigger is None:
-                        try:
-                            _recent_meta_raw = await self.async_redis.get(f"plan-runner:recent-meta:{rid}")
-                            if _recent_meta_raw:
-                                import json as _json
-                                _recent_meta = _json.loads(_recent_meta_raw)
-                                trigger = _recent_meta.get("trigger")
-                        except Exception:
-                            pass
-                    exit_reason = d["exit_reason"]
+                        trigger = recent_meta.get("trigger")
+                    exit_reason = d["exit_reason"] or recent_meta.get("exit_reason")
                     stop_stage = d["stop_stage"]
                     error = d["error"]
                     if branch is None and worktree_path:
@@ -736,17 +738,29 @@ class ExecutorService:
                     # PID 기반 양방향 보정: Redis status와 실제 프로세스 상태 불일치 교정
                     running = status == "running"
                     running, pid_str = await self._correct_pid_state(rid, status, pid_str, caller="get_all_runners")
+                    if exit_reason == "completed":
+                        running = False
 
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
                     is_orphan = self._fix_orphan_workflows(db, rid, running, status)
                     # visibility.py 단일 함수로 판별 (화이트리스트 + 이중 방어)
                     is_user = is_visible_runner(trigger, rid)
-                    # plan_file 소실 시 worktree_path/branch에서 fallback 이름 추출
+                    # plan_file 소실 시 recent-meta/log header/worktree_path/branch 순으로 fallback 이름 추출
                     display_plan_name: str | None = None
                     if not plan_file:
-                        if worktree_path:
+                        display_plan_name = recent_meta.get("display_plan_name")
+                        if not display_plan_name:
+                            recent_plan = recent_meta.get("plan_file")
+                            if recent_plan:
+                                display_plan_name = Path(str(recent_plan)).name
+                        if not display_plan_name:
+                            recent_log = recent_meta.get("stream_log_path") or recent_meta.get("log_file_path")
+                            if recent_log:
+                                log_meta = LogFileResolver.parse_meta_from_log(str(recent_log))
+                                display_plan_name = LogFileResolver.display_plan_name_from_meta(log_meta)
+                        if not display_plan_name and worktree_path:
                             display_plan_name = Path(worktree_path).name
-                        elif branch:
+                        elif not display_plan_name and branch:
                             display_plan_name = branch.split("/")[-1] if "/" in branch else branch
                     result.append(RunnerListItem(
                         runner_id=rid,

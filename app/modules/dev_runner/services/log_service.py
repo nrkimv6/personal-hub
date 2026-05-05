@@ -509,6 +509,18 @@ class LogService:
         """[shim] → LogFileResolver.parse_trigger_from_log()"""
         return LogFileResolver.parse_trigger_from_log(log_file_path)
 
+    def _load_recent_meta(self, runner_id: str) -> dict:
+        try:
+            import json
+
+            raw = self.redis_client.get(f"plan-runner:recent-meta:{runner_id}")
+            if not raw:
+                return {}
+            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+            return json.loads(text)
+        except Exception:
+            return {}
+
     def get_run_history(self, limit: int = 20, offset: int = 0, visible_only: bool = False) -> RunHistoryResponse:
         """실행 이력 조회: Redis active_runners + 로그 파일 스캔 병합, start_time DESC 정렬"""
         runs: dict[str, RunHistoryItem] = {}
@@ -531,6 +543,11 @@ class LogService:
                 worktree_path = self.redis_client.get(f"{prefix}:worktree_path")
                 merge_status = self.redis_client.get(f"{prefix}:merge_status")
                 trigger = self.redis_client.get(f"{prefix}:trigger")
+                recent_meta = self._load_recent_meta(runner_id)
+                if plan_file is None:
+                    plan_file = recent_meta.get("plan_file")
+                if engine is None:
+                    engine = recent_meta.get("engine") or "claude"
 
                 start_time = None
                 if start_time_str:
@@ -550,6 +567,8 @@ class LogService:
                 branch = f"runner/{runner_id}" if worktree_path else None
                 if trigger is None and log_file_path:
                     trigger = self._parse_trigger_from_log(log_file_path)
+                if trigger is None:
+                    trigger = recent_meta.get("trigger")
                 if visible_only and not is_visible_runner(trigger, runner_id):
                     continue
                 # execution_count: Redis에서 우선 조회
@@ -652,10 +671,14 @@ class LogService:
                 start_time = datetime.fromtimestamp(mtime)
 
                 file_meta = self._parse_meta_from_log(str(path))
+                recent_meta = self._load_recent_meta(runner_id)
                 file_trigger = file_meta.get("trigger")
-                file_plan = file_meta.get("plan")
+                file_plan = file_meta.get("plan") or recent_meta.get("plan_file")
                 file_started_at = file_meta.get("started_at")
-                file_execution_count = file_meta.get("execution_count")
+                file_execution_count = file_meta.get("execution_count") or recent_meta.get("execution_count")
+                file_engine = recent_meta.get("engine")
+                if file_trigger is None:
+                    file_trigger = recent_meta.get("trigger")
                 if visible_only and not is_visible_runner(file_trigger, runner_id):
                     continue
                 # RUN_META.started_at 우선, 없으면 mtime fallback
@@ -667,7 +690,7 @@ class LogService:
                 runs[runner_id] = RunHistoryItem(
                     runner_id=runner_id,
                     plan_file=file_plan,  # 로그에서 파싱된 plan 경로 (Redis 소실 시 fallback)
-                    engine=None,
+                    engine=file_engine,
                     status="completed",
                     pid=None,
                     start_time=start_time,

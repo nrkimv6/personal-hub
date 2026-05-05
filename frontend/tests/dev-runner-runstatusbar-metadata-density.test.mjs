@@ -27,16 +27,18 @@ test("RunStatusBar runner rows keep branch out of visible row text", () => {
   assert.doesNotMatch(runnerRows, />\s*\{runner\.branch\}\s*<\/span>/);
 });
 
-test("RunStatusBar runner rows use short visible labels instead of plan basenames", () => {
+test("RunStatusBar runner rows use plan basenames with Runner N only as fallback", () => {
   assert.match(runStatusBar, /function resolveFullLabel\(runner: RunnerTab\): string/);
-  assert.match(runStatusBar, /function resolveVisibleLabel\(index: number\): string/);
-  assert.match(runnerRows, /\{resolveVisibleLabel\(index\)\}/);
-  assert.doesNotMatch(runnerRows, /\{resolveFullLabel\(runner\)\}/);
-  assert.doesNotMatch(runnerRows, /\{resolveLabel\(runner\)\}/);
+  assert.match(runStatusBar, /function resolveRunnerLabel\(runner: RunnerTab, index: number\): string/);
+  assert.match(runStatusBar, /return `Runner \$\{index \+ 1\}`/);
+  assert.match(runnerRows, /\{resolveRunnerLabel\(runner, index\)\}/);
+  assert.doesNotMatch(runStatusBar, /function resolveVisibleLabel\(index: number\): string/);
   assert.doesNotMatch(runnerRows, /runner\.plan_file\.split\(/);
 });
 
 test("RunStatusBar preserves hidden diagnostics through tooltip and selected Run meta", () => {
+  assert.match(runStatusBar, /`runner: \$\{runner\.id\}`/);
+  assert.match(runStatusBar, /`index: Runner \$\{index \+ 1\}`/);
   assert.match(runStatusBar, /runner\.plan_file \? `file: \$\{runner\.plan_file\}` : null/);
   assert.match(runStatusBar, /runner\.engine \? `engine: \$\{runner\.engine\}` : null/);
   assert.match(runStatusBar, /runner\.branch \? `branch: \$\{runner\.branch\}` : null/);

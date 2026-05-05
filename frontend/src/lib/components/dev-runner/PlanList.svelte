@@ -179,6 +179,7 @@
 	}
 
 	let showIgnored = $state(false);
+	let editingPlans = $state(false);
 	let ignoredPlans = $state<DevRunnerPlanFileResponse[]>([]);
 	let ignoredLoading = $state(false);
 	let showAddForm = $state(false);
@@ -357,6 +358,15 @@
 				{/if}
 			</button>
 			<button
+				class="h-6 px-2 text-[10px] rounded transition-colors inline-flex items-center gap-1 {editingPlans ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'}"
+				onclick={() => editingPlans = !editingPlans}
+				title={editingPlans ? '편집 모드 끄기' : '편집 모드'}
+				aria-pressed={editingPlans}
+			>
+				<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+				편집
+			</button>
+			<button
 				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors inline-flex items-center gap-1"
 				onclick={() => { showAddForm = !showAddForm; if (showAddForm) loadRegisteredPaths(); }}
 			>
@@ -469,107 +479,109 @@
 						role="button"
 						tabindex={isArchive ? -1 : 0}
 						title={isArchive ? `아카이브됨: ${plan.path}` : plan.path}
-						class="group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
+						class="group flex min-h-[4rem] flex-col gap-1 rounded-md px-2.5 py-2 text-left transition-colors w-full
 							{isArchive ? '' : 'cursor-pointer'}
 							{getPlanItemBg(plan, isRunning, isLastRun, batchStatus)}"
 					>
-						<!-- Running indicator dot -->
-						{#if isRunning}
-							<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"></span>
-						{:else if plan.path_type === 'folder'}
-							<svg class="w-3.5 h-3.5 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-						{:else}
-							<svg class="w-3.5 h-3.5 shrink-0 {isArchive ? 'text-gray-300' : isLastRun ? 'text-gray-300' : 'text-gray-400'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-						{/if}
-
-						<!-- filename (name + date below) -->
-						<div class="flex flex-col flex-1 min-w-0">
-							<span class="text-xs font-medium truncate {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">
+						<div class="flex w-full min-w-0 items-center gap-2">
+							<!-- Running indicator dot -->
+							{#if isRunning}
+								<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"></span>
+							{:else if plan.path_type === 'folder'}
+								<svg class="w-3.5 h-3.5 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+							{:else}
+								<svg class="w-3.5 h-3.5 shrink-0 {isArchive ? 'text-gray-300' : isLastRun ? 'text-gray-300' : 'text-gray-400'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+							{/if}
+							<span class="min-w-0 flex-1 truncate text-xs font-medium {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">
 								{parsedFilename.name}
 							</span>
-							{#if parsedFilename.date}
-								<span class="text-[9px] text-gray-400 font-mono">{formatDate(parsedFilename.date)}</span>
-							{/if}
 						</div>
 
-						{#if isArchive}
-							<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-200 text-gray-400">아카이브</span>
-						{:else if plan.status === '구현완료'}
-							<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 text-[10px] font-mono uppercase whitespace-nowrap rounded {statusBadge('구현완료')}">구현완료</span>
-						{:else if showIgnored && plan.status === '보류'}
-							<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 text-[10px] font-mono uppercase whitespace-nowrap rounded {statusBadge('보류')}">보류</span>
-						{/if}
+						<div class="flex w-full min-w-0 items-center gap-1.5 pl-5 text-[10px] text-gray-400">
+							{#if parsedFilename.date}
+								<span class="shrink-0 font-mono">{formatDate(parsedFilename.date)}</span>
+							{/if}
+							{#if isArchive}
+								<span class="shrink-0 font-mono px-1.5 py-0.5 rounded bg-gray-200 text-gray-400">아카이브</span>
+							{:else if plan.status === '구현완료'}
+								<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 font-mono uppercase whitespace-nowrap rounded {statusBadge('구현완료')}">구현완료</span>
+							{:else if showIgnored && plan.status === '보류'}
+								<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 font-mono uppercase whitespace-nowrap rounded {statusBadge('보류')}">보류</span>
+							{/if}
 
-						{#if batchStatus === 'running'}
-							<span class="text-[10px] px-1 py-0 rounded text-cyan-600 bg-cyan-100">실행중</span>
-						{:else if batchStatus === 'done'}
-							<span class="text-[10px] text-gray-400">완료</span>
-						{/if}
-						<span class="text-[10px] font-mono shrink-0 {plan.progress != null && plan.progress.done === plan.progress.total && plan.progress.total > 0 ? 'text-emerald-600' : batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress != null && plan.progress.total > 0 ? `${plan.progress.done}/${plan.progress.total}` : '—'}</span>
+							{#if batchStatus === 'running'}
+								<span class="shrink-0 px-1 py-0 rounded text-cyan-600 bg-cyan-100">실행중</span>
+							{:else if batchStatus === 'done'}
+								<span class="shrink-0 text-gray-400">완료</span>
+							{/if}
+							<span class="shrink-0 font-mono {plan.progress != null && plan.progress.done === plan.progress.total && plan.progress.total > 0 ? 'text-emerald-600' : batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress != null && plan.progress.total > 0 ? `${plan.progress.done}/${plan.progress.total} (${Math.round((plan.progress.done / plan.progress.total) * 100)}%)` : '—'}</span>
 
-						<!-- Done button: canDone OR lastPlanFile -->
-						{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-								onclick={(e) => handleDone(e, plan)}
-								disabled={doneLoadingPath === plan.path}
-								title="완료 처리 (아카이브, TODO→DONE, 커밋)"
-							>
-								{#if doneLoadingPath === plan.path}
-									<svg class="w-3.5 h-3.5 animate-spin text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
-								{:else}
-									<svg class="w-3.5 h-3.5 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+							<div class="ml-auto flex shrink-0 items-center gap-1">
+								<!-- Done button: canDone OR lastPlanFile -->
+								{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}
+									<button
+										class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50"
+										onclick={(e) => handleDone(e, plan)}
+										disabled={doneLoadingPath === plan.path}
+										title="완료 처리 (아카이브, TODO→DONE, 커밋)"
+									>
+										{#if doneLoadingPath === plan.path}
+											<svg class="w-3.5 h-3.5 animate-spin text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
+										{:else}
+											<svg class="w-3.5 h-3.5 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+										{/if}
+									</button>
 								{/if}
-							</button>
-						{/if}
 
-						<!-- Hold button (활성 목록에서만, 무시 목록 아닐 때) -->
-						{#if !showIgnored && !isRunning && plan.status !== '보류'}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-yellow-100 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-								onclick={(e) => handleHold(e, plan)}
-								title="보류"
-							>
-								<svg class="w-3 h-3 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-							</button>
-						{/if}
+								{#if editingPlans}
+									{#if !showIgnored && !isRunning && plan.status !== '보류'}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-yellow-100"
+											onclick={(e) => handleHold(e, plan)}
+											title="보류"
+										>
+											<svg class="w-3 h-3 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+										</button>
+									{/if}
 
-						<!-- Unhold button (무시 목록에서 보류 상태일 때) -->
-						{#if showIgnored && plan.status === '보류'}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-blue-100 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-								onclick={(e) => handleUnhold(e, plan)}
-								title="보류 해제"
-							>
-								<svg class="w-3 h-3 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-							</button>
-						{/if}
+									{#if showIgnored && plan.status === '보류'}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-blue-100"
+											onclick={(e) => handleUnhold(e, plan)}
+											title="보류 해제"
+										>
+											<svg class="w-3 h-3 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+										</button>
+									{/if}
 
-						{#if showIgnored}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-gray-200"
-								onclick={(e) => handleUnignore(e, plan.path)}
-								title="무시 해제"
-							>
-								<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-							</button>
-						{:else}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-gray-200"
-								onclick={(e) => handleIgnore(e, plan.path)}
-								title="무시"
-							>
-								<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-							</button>
-						{/if}
+									{#if showIgnored}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-gray-200"
+											onclick={(e) => handleUnignore(e, plan.path)}
+											title="무시 해제"
+										>
+											<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+										</button>
+									{:else}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-gray-200"
+											onclick={(e) => handleIgnore(e, plan.path)}
+											title="무시"
+										>
+											<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+										</button>
+									{/if}
 
-						{#if plan.path_type !== null}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-gray-200 text-[10px] text-red-400 hover:text-red-600"
-								onclick={(e) => handleRemovePath(e, plan.path)}
-								title="등록 해제"
-							>×</button>
-						{/if}
+									{#if plan.path_type !== null}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-gray-200 text-[10px] text-red-400 hover:text-red-600"
+											onclick={(e) => handleRemovePath(e, plan.path)}
+											title="등록 해제"
+										>×</button>
+									{/if}
+								{/if}
+							</div>
+						</div>
 					</div>
 
 					{/each}

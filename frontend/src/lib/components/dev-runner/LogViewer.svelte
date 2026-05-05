@@ -72,12 +72,19 @@
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
 	const PREVIEW_LINE_LIMIT = 3;
+	const PREVIEW_CHAR_LIMIT = 600;
 	const MAX_RENDER_CHARS = 8 * 1024;
 	const PREVIEW_TOGGLE_STORAGE_KEY = 'devRunnerPreviewCollapse';
+	const TAG_FILTER_STORAGE_KEY = 'devRunnerHiddenLogTags';
+	const FILTERABLE_TAGS = ['ERROR', 'STDERR'];
 	const RECENT_RETRY_BASE_DELAY_MS = 600;
 	const MAX_RECENT_RETRY_ATTEMPTS = 4;
 	let previewCollapsedEnabled = $state(true);
+	let hiddenTags = $state<Set<string>>(new Set());
+	let visibleLines = $derived(lines.filter((line) => !hiddenTags.has(line.tag)));
+	let hiddenLogCount = $derived(lines.length - visibleLines.length);
 	let lineSequence = 0;
+	let loadedRecentLogIdentity = $state<string | null>(null);
 	let recentRetryTimer: ReturnType<typeof setTimeout> | null = null;
 	let recentRetryAttempt = 0;
 
@@ -239,7 +246,11 @@
 	function getPreviewLines(message: string, maxLines: number = PREVIEW_LINE_LIMIT): string {
 		const renderable = getRenderableText(message);
 		const parts = renderable.split('\n');
-		return parts.slice(0, maxLines).join('\n');
+		const linePreview = parts.slice(0, maxLines).join('\n');
+		if (parts.length <= maxLines && linePreview.length > PREVIEW_CHAR_LIMIT) {
+			return `${linePreview.slice(0, PREVIEW_CHAR_LIMIT)}…`;
+		}
+		return linePreview;
 	}
 
 	function getHiddenLineCount(message: string, maxLines: number = PREVIEW_LINE_LIMIT): number {
@@ -250,7 +261,7 @@
 
 	function getHiddenCharCount(message: string): number {
 		const normalized = normalizeLogText(message);
-		return Math.max(0, normalized.length - MAX_RENDER_CHARS);
+		return Math.max(0, normalized.length - PREVIEW_CHAR_LIMIT);
 	}
 
 	function shouldCollapseMessage(message: string): boolean {
@@ -289,6 +300,26 @@
 
 	function isExpanded(lineId: string): boolean {
 		return expandedLongLines.has(lineId);
+	}
+
+	function isTagHidden(tag: string): boolean {
+		return hiddenTags.has(tag);
+	}
+
+	function persistHiddenTags(next: Set<string>) {
+		try {
+			window.localStorage.setItem(TAG_FILTER_STORAGE_KEY, JSON.stringify([...next]));
+		} catch {
+			// localStorage unavailable in some environments
+		}
+	}
+
+	function toggleTagHidden(tag: string) {
+		const next = new Set(hiddenTags);
+		if (next.has(tag)) next.delete(tag);
+		else next.add(tag);
+		hiddenTags = next;
+		persistHiddenTags(next);
 	}
 
 	function handleExpandKeydown(event: KeyboardEvent, lineId: string) {
@@ -597,6 +628,19 @@
 
 	let fromLine = 0;
 
+	function extractLogIdentity(parsed: ParsedLine[]): string | null {
+		for (const line of parsed) {
+			if (line.tag !== 'START') continue;
+			const match = line.message.match(/\blog_path=([^\s]+)/);
+			if (match) return match[1];
+		}
+		return null;
+	}
+
+	function buildSessionSeparator(identity: string): ParsedLine {
+		return parseLine(`${SEPARATOR_PATTERN} new log session: ${identity} ${SEPARATOR_PATTERN}`, false);
+	}
+
 	async function loadRecent() {
 		try {
 			const res = await devRunnerLogApi.recent(runnerId, 500);
@@ -631,7 +675,23 @@
 				}
 			}
 
-			lines = parsed;
+			const nextIdentity = extractLogIdentity(parsed);
+			const shouldAppendSession =
+				lines.length > 0 &&
+				nextIdentity !== null &&
+				loadedRecentLogIdentity !== null &&
+				nextIdentity !== loadedRecentLogIdentity;
+
+			if (shouldAppendSession) {
+				const staleExisting = lines.map((line) => ({ ...line, isStale: true }));
+				const currentParsed = parsed.map((line) => ({ ...line, isStale: false }));
+				lines = [...staleExisting, buildSessionSeparator(nextIdentity), ...currentParsed].slice(-MAX_LINES);
+			} else {
+				lines = parsed;
+			}
+			if (nextIdentity !== null) {
+				loadedRecentLogIdentity = nextIdentity;
+			}
 			expandedLongLines = new Set();
 
 			// running 중 500줄 꽉 찼으면 더 오래된 로그가 있음 → loadFull로 전체 재로드
@@ -678,6 +738,13 @@
 			const stored = window.localStorage.getItem(PREVIEW_TOGGLE_STORAGE_KEY);
 			if (stored === 'off') {
 				previewCollapsedEnabled = false;
+			}
+			const storedTags = window.localStorage.getItem(TAG_FILTER_STORAGE_KEY);
+			if (storedTags) {
+				const parsedTags = JSON.parse(storedTags);
+				if (Array.isArray(parsedTags)) {
+					hiddenTags = new Set(parsedTags.filter((tag): tag is string => FILTERABLE_TAGS.includes(tag)));
+				}
 			}
 		} catch {
 			// localStorage unavailable in some environments
@@ -853,6 +920,24 @@
 					></div>
 				{/if}
 			</div>
+			<div class="hidden items-center gap-1 sm:flex">
+				{#each FILTERABLE_TAGS as tag}
+					<button
+						type="button"
+						class="rounded border px-1.5 py-0.5 text-[9px] font-mono transition-colors {isTagHidden(tag) ? 'border-gray-700 bg-gray-800 text-gray-500' : 'border-red-500/40 bg-red-500/10 text-red-300'}"
+						title={isTagHidden(tag) ? `${tag} 로그 보이기` : `${tag} 로그 숨기기`}
+						aria-pressed={!isTagHidden(tag)}
+						onclick={() => toggleTagHidden(tag)}
+					>
+						{tag}
+					</button>
+				{/each}
+				{#if hiddenLogCount > 0}
+					<span class="rounded bg-gray-800 px-1.5 py-0.5 text-[9px] font-mono text-gray-400" title="필터로 숨겨진 로그 수">
+						hidden {hiddenLogCount}
+					</span>
+				{/if}
+			</div>
 		</div>
 		<div class="flex items-center gap-1">
 			{#if connected !== 'connected' || !redisAvailable}
@@ -964,8 +1049,10 @@
 	>
 		{#if lines.length === 0}
 			<span class="text-gray-600">로그가 없습니다</span>
+		{:else if visibleLines.length === 0}
+			<span class="text-gray-600">{hiddenLogCount}개 로그가 필터로 숨겨졌습니다</span>
 		{:else}
-			{#each lines as line, i}
+			{#each visibleLines as line, i}
 				{#if line.tag === 'NOISE'}
 					<div class="dr-log-line dr-log-line-noise flex items-center py-0 leading-5 {line.isStale ? 'opacity-30' : ''}">
 						{#if expandedNoiseIndices.includes(i)}
@@ -1123,7 +1210,10 @@
 					{@const style = getTagStyle(line.tag)}
 					{@const lineExpanded = isExpanded(line.id)}
 					{@const lineCollapsed = shouldCollapseMessage(line.message)}
-					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : line.tag === 'FAILURE' ? 'bg-red-950/70 border-l-2 border-red-500 -mx-3 px-3 rounded' : line.tag === 'HOLD' ? 'bg-yellow-950/40 border-l-2 border-yellow-500 -mx-3 px-3 rounded' : ''}">
+					<div
+						class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : line.tag === 'FAILURE' ? 'bg-red-950/70 border-l-2 border-red-500 -mx-3 px-3 rounded' : line.tag === 'HOLD' ? 'bg-yellow-950/40 border-l-2 border-yellow-500 -mx-3 px-3 rounded' : ''}"
+						title={line.tag === 'DONE' ? 'LLM call done; runner completion is reported by the completed event' : undefined}
+					>
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>

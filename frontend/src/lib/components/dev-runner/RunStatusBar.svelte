@@ -34,14 +34,24 @@
 		return runner.display_plan_name ?? '(알 수 없음)';
 	}
 
-	function resolveVisibleLabel(index: number): string {
+	function resolveRunnerLabel(runner: RunnerTab, index: number): string {
+		const fullLabel = resolveFullLabel(runner);
+		if (fullLabel && fullLabel !== '(알 수 없음)') return fullLabel;
 		return `Runner ${index + 1}`;
+	}
+
+	function resolveRunnerStateTitle(runner: RunnerTab): string {
+		if (runner.running) return 'running';
+		const exitDisplay = getExitReasonDisplay(runner.exit_reason);
+		return runner.exit_reason ? `${exitDisplay.statusIcon} (${runner.exit_reason})` : exitDisplay.statusIcon;
 	}
 
 	function resolveMetaTitle(runner: RunnerTab, index: number): string {
 		const rows = [
-			`runner: ${resolveVisibleLabel(index)}`,
-			`plan: ${resolveFullLabel(runner)}`,
+			`runner: ${runner.id}`,
+			`index: Runner ${index + 1}`,
+			`label: ${resolveRunnerLabel(runner, index)}`,
+			`state: ${resolveRunnerStateTitle(runner)}`,
 			runner.plan_file ? `file: ${runner.plan_file}` : null,
 			runner.engine ? `engine: ${runner.engine}` : null,
 			runner.branch ? `branch: ${runner.branch}` : null,
@@ -99,7 +109,7 @@
 	let stoppedCount = $derived(runners.length - runningCount);
 	let activeRunner = $derived(runners.find(r => r.id === activeRunnerId) ?? null);
 	let activeRunnerIndex = $derived(activeRunner ? runners.findIndex(r => r.id === activeRunner.id) : -1);
-	let activeRunnerLabel = $derived(activeRunner && activeRunnerIndex >= 0 ? `Selected ${resolveVisibleLabel(activeRunnerIndex)}` : null);
+	let activeRunnerLabel = $derived(activeRunner && activeRunnerIndex >= 0 ? `Selected ${resolveRunnerLabel(activeRunner, activeRunnerIndex)}` : null);
 	let activeRunnerMetaTitle = $derived(activeRunner && activeRunnerIndex >= 0 ? resolveMetaTitle(activeRunner, activeRunnerIndex) : '');
 	let summaryText = $derived(
 		`${sseConnected ? 'Online' : 'Offline'} · ${runningCount}/${runners.length} active${anyRunning && elapsed ? ` · ${elapsed}` : ''}`
@@ -263,15 +273,15 @@
 			>
 					<!-- 상태 dot -->
 					{#if runner.running}
-						<div class="pulse-dot bg-status-running shrink-0"></div>
+						<div class="pulse-dot bg-status-running shrink-0" title="running"></div>
 					{:else}
 						{@const exitDisplay = getExitReasonDisplay(runner.exit_reason)}
-						<div class="w-1.5 h-1.5 rounded-full {exitDisplay.dotClass} shrink-0"></div>
+						<div class="w-1.5 h-1.5 rounded-full {exitDisplay.dotClass} shrink-0" title={resolveRunnerStateTitle(runner)}></div>
 					{/if}
 
-					<!-- 짧은 선택 라벨. 상세 plan/branch는 title 및 선택된 Run meta에서 확인한다. -->
-					<span class="min-w-0 max-w-[6rem] shrink-0 truncate font-mono text-[11px] text-foreground sm:max-w-[7rem]">
-						{resolveVisibleLabel(index)}
+					<!-- 계획서 파일명 중심 라벨. runner id/index/branch는 title에 보조 노출한다. -->
+					<span class="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+						{resolveRunnerLabel(runner, index)}
 					</span>
 
 					<!-- engine (sm 이상) -->
