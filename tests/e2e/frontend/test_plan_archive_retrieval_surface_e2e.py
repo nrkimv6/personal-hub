@@ -21,6 +21,12 @@ def _install_archive_routes(page: Page) -> dict[str, int]:
 
     def handle_api(route):
         url = route.request.url
+        if "/api/v1/dev-runner/plans/paths" in url:
+            _json_response(route, [])
+            return
+        if "/api/v1/auth/me" in url:
+            _json_response(route, {"username": "pytest", "is_admin": True})
+            return
         if "/api/v1/system/mode" in url:
             _json_response(route, {"mode": "admin"})
             return
