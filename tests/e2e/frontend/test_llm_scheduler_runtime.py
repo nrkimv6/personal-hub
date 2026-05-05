@@ -274,6 +274,11 @@ class TestLlmRuntime:
             url = route.request.url
             method = route.request.method
             calls.append(f"{method} {url}")
+            if "/api/v1/llm/bootstrap" in url:
+                payload = _llm_bootstrap_payload()
+                payload["list"] = {"items": [request], "total": 1, "page": 1, "page_size": 20, "pages": 1}
+                _json_response(route, payload)
+                return
             if "/api/v1/llm/requests" in url:
                 _json_response(route, {"items": [request], "total": 1, "page": 1, "page_size": 20, "pages": 1})
                 return
