@@ -100,6 +100,39 @@ export interface RegisteredPathResponse {
 	path_type: string; // "plan" | "archive"
 }
 
+export interface PlanStorageRootChangeItem {
+	status: string;
+	path: string;
+}
+
+export interface PlanStorageRootStatusItem {
+	project: string;
+	repo_root: string;
+	worktree_path: string;
+	branch: string | null;
+	upstream: string | null;
+	exists: boolean;
+	status: 'clean' | 'dirty' | 'sync_needed' | 'missing' | 'unknown' | string;
+	dirty_count: number;
+	docs_changes_count: number;
+	archive_changes_count: number;
+	policy_changes_count: number;
+	ahead: number;
+	behind: number;
+	push_needed: boolean;
+	checked_at: string;
+	representative_changes: PlanStorageRootChangeItem[];
+	error: string | null;
+}
+
+export interface PlanStorageRootStatusResponse {
+	checked_at: string;
+	roots: PlanStorageRootStatusItem[];
+	total: number;
+	dirty_count: number;
+	push_needed_count: number;
+}
+
 export interface LogResponse {
 	lines: string[];
 	total_lines: number;
@@ -377,6 +410,9 @@ export const devRunnerPlanApi = {
 
 	listPaths: () =>
 		devRunnerRequest<RegisteredPathResponse[]>('/plans/paths'),
+
+	storageRootsStatus: () =>
+		devRunnerRequest<PlanStorageRootStatusResponse>('/plans/storage-roots/status'),
 
 	items: (encodedPath: string) =>
 		devRunnerRequest<PlanDetailResponse>(`/plans/${encodedPath}/items`),

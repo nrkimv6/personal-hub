@@ -104,6 +104,8 @@ class ResidueSnapshot:
 @dataclass
 class PlansHygieneSnapshot:
     exists: bool = False
+    branch: str | None = None
+    upstream: str | None = None
     git_status: list[str] = field(default_factory=list)
     docs_changes: list[str] = field(default_factory=list)
     archive_changes: list[str] = field(default_factory=list)
@@ -545,6 +547,10 @@ def _collect_plans_hygiene(
 
     rc, branch, _stderr = _run_git(repo_root, "rev-parse", "--abbrev-ref", "HEAD", cwd=plans_path)
     if rc == 0 and branch:
+        snapshot.branch = branch
+        rc_upstream, upstream, _stderr = _run_git(plans_path, "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")
+        if rc_upstream == 0 and upstream:
+            snapshot.upstream = upstream
         ahead, behind = _upstream_ahead_behind(plans_path, branch)
         snapshot.upstream_ahead = ahead or 0
         snapshot.upstream_behind = behind or 0

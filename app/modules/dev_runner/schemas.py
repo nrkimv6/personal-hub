@@ -143,6 +143,42 @@ class RegisteredPathResponse(BaseModel):
     path_type: str = "plan"  # "plan" | "archive"
 
 
+class PlanStorageRootChangeItem(BaseModel):
+    """plans storage root 변경 파일 요약."""
+    status: str
+    path: str
+
+
+class PlanStorageRootStatusItem(BaseModel):
+    """Plans 탭 상단에 노출할 root별 compact status."""
+    project: str
+    repo_root: str
+    worktree_path: str
+    branch: Optional[str] = None
+    upstream: Optional[str] = None
+    exists: bool
+    status: str
+    dirty_count: int = 0
+    docs_changes_count: int = 0
+    archive_changes_count: int = 0
+    policy_changes_count: int = 0
+    ahead: int = 0
+    behind: int = 0
+    push_needed: bool = False
+    checked_at: str
+    representative_changes: List[PlanStorageRootChangeItem] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+class PlanStorageRootStatusResponse(BaseModel):
+    """등록된 plan storage root들의 상태 요약."""
+    checked_at: str
+    roots: List[PlanStorageRootStatusItem]
+    total: int
+    dirty_count: int = 0
+    push_needed_count: int = 0
+
+
 class PlanItemResponse(BaseModel):
     """plan 항목 (체크박스 1개)"""
     level: int  # 0=상위(번호), 1=하위(대시)

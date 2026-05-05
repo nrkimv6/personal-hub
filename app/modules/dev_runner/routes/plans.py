@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -11,11 +12,26 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse, DoneResponse, BatchDoneResponse, VerifyResult
+from app.modules.dev_runner.schemas import (
+    BatchDoneResponse,
+    DoneResponse,
+    PlanDetailResponse,
+    PlanFileResponse,
+    PlanProgressResponse,
+    PlanStorageRootChangeItem,
+    PlanStorageRootStatusItem,
+    PlanStorageRootStatusResponse,
+    RegisteredPathResponse,
+    VerifyResult,
+)
 from app.modules.dev_runner.services.plan_service import plan_service
 from app.modules.dev_runner.services import archive_service
 from app.modules.dev_runner.services.plan_record_service import PlanRecordService
-from app.modules.dev_runner.services.plan_path_helpers import iter_repo_plan_path_candidates
+from app.modules.dev_runner.services.plan_path_helpers import (
+    collect_plan_storage_root_candidates,
+    iter_repo_plan_path_candidates,
+)
+from app.modules.dev_runner.services.worktree_hygiene_service import WorktreeHygieneService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +42,117 @@ def _decode_path(encoded: str) -> str:
     """URL-safe base64 디코딩 (패딩 자동 복원)"""
     padded = encoded + '=' * ((4 - len(encoded) % 4) % 4)
     return base64.urlsafe_b64decode(padded).decode("utf-8")
+
+
+def _parse_short_status_line(line: str) -> PlanStorageRootChangeItem:
+    status = line[:2].strip() or "?"
+    path = line[3:] if len(line) > 3 and line[2] == " " else line[2:].lstrip()
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    return PlanStorageRootChangeItem(status=status, path=path)
+
+
+def _status_from_counts(*, exists: bool, dirty_count: int, ahead: int, behind: int, push_needed: bool) -> str:
+    if not exists:
+        return "missing"
+    if dirty_count > 0:
+        return "dirty"
+    if push_needed or ahead > 0 or behind > 0:
+        return "sync_needed"
+    return "clean"
+
+
+def _unknown_storage_root_item(project: str, repo_root: Path, worktree_path: Path, error: Exception) -> PlanStorageRootStatusItem:
+    checked_at = datetime.now().isoformat(timespec="seconds")
+    return PlanStorageRootStatusItem(
+        project=project,
+        repo_root=str(repo_root),
+        worktree_path=str(worktree_path),
+        exists=worktree_path.exists(),
+        status="unknown",
+        checked_at=checked_at,
+        error=str(error),
+    )
+
+
+def _collect_plan_storage_roots_status_sync() -> PlanStorageRootStatusResponse:
+    checked_at = datetime.now().isoformat(timespec="seconds")
+    registered_paths = plan_service.list_registered_paths()
+    candidates = collect_plan_storage_root_candidates(registered_paths)
+    roots: list[PlanStorageRootStatusItem] = []
+
+    for candidate in candidates:
+        if not candidate.worktree_path.exists():
+            roots.append(
+                PlanStorageRootStatusItem(
+                    project=candidate.project,
+                    repo_root=str(candidate.repo_root),
+                    worktree_path=str(candidate.worktree_path),
+                    exists=False,
+                    status="missing",
+                    checked_at=checked_at,
+                )
+            )
+            continue
+
+        try:
+            snapshot = WorktreeHygieneService(candidate.repo_root).collect()
+            plans = snapshot.plans
+            dirty_count = len(plans.git_status)
+            ahead = plans.upstream_ahead
+            behind = plans.upstream_behind
+            status = (
+                _status_from_counts(
+                    exists=plans.exists,
+                    dirty_count=dirty_count,
+                    ahead=ahead,
+                    behind=behind,
+                    push_needed=plans.push_needed,
+                )
+                if plans.branch
+                else "unknown"
+            )
+            roots.append(
+                PlanStorageRootStatusItem(
+                    project=candidate.project,
+                    repo_root=str(candidate.repo_root),
+                    worktree_path=str(candidate.worktree_path),
+                    branch=plans.branch,
+                    upstream=plans.upstream,
+                    exists=plans.exists,
+                    status=status,
+                    dirty_count=dirty_count,
+                    docs_changes_count=len(plans.docs_changes),
+                    archive_changes_count=len(plans.archive_changes),
+                    policy_changes_count=len(plans.policy_changes),
+                    ahead=ahead,
+                    behind=behind,
+                    push_needed=plans.push_needed,
+                    checked_at=snapshot.collected_at or checked_at,
+                    representative_changes=[
+                        _parse_short_status_line(line)
+                        for line in plans.git_status[:8]
+                    ],
+                )
+            )
+        except Exception as exc:
+            logger.warning("plans storage root status failed: %s", candidate.worktree_path, exc_info=True)
+            roots.append(
+                _unknown_storage_root_item(
+                    candidate.project,
+                    candidate.repo_root,
+                    candidate.worktree_path,
+                    exc,
+                )
+            )
+
+    return PlanStorageRootStatusResponse(
+        checked_at=checked_at,
+        roots=roots,
+        total=len(roots),
+        dirty_count=sum(1 for item in roots if item.dirty_count > 0),
+        push_needed_count=sum(1 for item in roots if item.push_needed),
+    )
 
 
 @router.get("/plans", response_model=List[PlanFileResponse])
@@ -44,6 +171,12 @@ async def get_ignored_plans():
 async def get_paths():
     """등록된 경로 목록 조회 (타입 + plan_count 포함)"""
     return plan_service.list_registered_paths()
+
+
+@router.get("/plans/storage-roots/status", response_model=PlanStorageRootStatusResponse)
+async def get_plan_storage_roots_status():
+    """등록된 plan storage root별 dirty/ahead/behind compact 상태 조회."""
+    return await asyncio.to_thread(_collect_plan_storage_roots_status_sync)
 
 
 @router.get("/plans/{encoded_path}", response_model=PlanProgressResponse)

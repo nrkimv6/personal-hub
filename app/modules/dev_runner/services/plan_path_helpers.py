@@ -7,12 +7,23 @@ plan_service / plan_scanner / plan_path_registry → plan_path_helpers (역방�
 
 import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from app.modules.dev_runner.config import config
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PlanStorageRootCandidate:
+    """등록된 plan/archive 경로에서 유도한 plans lineage worktree 후보."""
+
+    project: str
+    repo_root: Path
+    worktree_path: Path
+    registered_paths: list[str] = field(default_factory=list)
 
 
 def _dedupe_paths(paths: List[Path]) -> List[Path]:
@@ -85,6 +96,51 @@ def iter_repo_plan_path_candidates(repo_root: Path) -> List[Tuple[Path, str]]:
         (repo_root / "docs" / "plan", "plan"),
         (repo_root / "docs" / "archive", "archive"),
     ]
+
+
+def _read_registered_path(item: Any) -> str | None:
+    if isinstance(item, dict):
+        value = item.get("path")
+    else:
+        value = getattr(item, "path", None)
+    return value if isinstance(value, str) and value else None
+
+
+def _project_label_from_repo_root(repo_root: Path) -> str:
+    name = repo_root.name.strip()
+    return name or str(repo_root)
+
+
+def collect_plan_storage_root_candidates(registered_paths: List[Any]) -> list[PlanStorageRootCandidate]:
+    """등록된 plan/archive 경로에서 repo별 `.worktrees/plans` 후보를 중복 없이 반환한다."""
+    candidates: list[PlanStorageRootCandidate] = []
+    by_root: dict[str, PlanStorageRootCandidate] = {}
+
+    for item in registered_paths:
+        raw_path = _read_registered_path(item)
+        if not raw_path:
+            continue
+        repo_root_str = extract_repo_root_from_plan_path(raw_path)
+        if not repo_root_str:
+            continue
+        repo_root = Path(repo_root_str)
+        try:
+            key = str(repo_root.resolve()).lower()
+        except Exception:
+            key = str(repo_root).lower()
+        candidate = by_root.get(key)
+        if candidate is None:
+            candidate = PlanStorageRootCandidate(
+                project=_project_label_from_repo_root(repo_root),
+                repo_root=repo_root,
+                worktree_path=repo_root / ".worktrees" / "plans",
+            )
+            by_root[key] = candidate
+            candidates.append(candidate)
+        if raw_path not in candidate.registered_paths:
+            candidate.registered_paths.append(raw_path)
+
+    return candidates
 
 
 def backfill_dual_paths(entries: List[dict]) -> tuple:
