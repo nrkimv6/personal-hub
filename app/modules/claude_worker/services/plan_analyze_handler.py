@@ -6,7 +6,7 @@ plan_records 테이블에 저장한다.
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 
@@ -76,8 +76,13 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
             except Exception:
                 pass
 
-        record.llm_processed_at = datetime.now()
-        record.updated_at = datetime.now()
+        now = datetime.now()
+        record.llm_processed_at = now
+        if record.raw_content:
+            record.file_delete_after = now + timedelta(days=7)
+        else:
+            record.file_delete_after = None
+        record.updated_at = now
         db.commit()
         logger.info(f"save_plan_archive_result: updated record id={record.id} category={category}")
 

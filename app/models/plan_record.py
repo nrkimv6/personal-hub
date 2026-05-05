@@ -37,7 +37,8 @@ class PlanRecord(Base):
     llm_processed_at = Column(DateTime)                          # LLM 분석 완료 시각
     claude_session_id = Column(String(36), nullable=True)         # dev-runner 발급 UUID (CLI --session-id와 동일)
     raw_content = Column(Text, nullable=True)                     # archive 파일 본문 전체 (DB-first 진실원본)
-    file_removed_at = Column(DateTime, nullable=True)             # 로테이션으로 파일 제거된 시각
+    file_delete_after = Column(DateTime, nullable=True)           # LLM 분석 성공 후 archive 파일 삭제 예정 시각
+    file_removed_at = Column(DateTime, nullable=True)             # archive 파일이 실제 working copy에서 제거된 시각
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 

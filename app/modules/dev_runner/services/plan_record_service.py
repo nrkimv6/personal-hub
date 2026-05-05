@@ -9,7 +9,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -21,6 +21,7 @@ from app.models.plan_record import PlanRecord, PlanEvent
 from app.modules.claude_worker.models.llm_request import LLMRequest
 
 logger = logging.getLogger(__name__)
+ARCHIVE_FILE_RETENTION_DAYS = 7
 
 # plan 파일 패턴 필터 — YYYY-MM-DD 로 시작하는 .md 파일만 허용
 PLAN_FILE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}[_-].*\.md$")
@@ -79,6 +80,13 @@ def _add_event(db: Session, record: PlanRecord, event_type: str, detail: Optiona
         detail=detail,
     )
     db.add(event)
+
+
+def _schedule_file_delete_after(record: PlanRecord, base_time: Optional[datetime] = None) -> None:
+    """Set file_delete_after when DB raw_content is available after LLM processing."""
+    if record.raw_content and record.llm_processed_at:
+        anchor = base_time or record.llm_processed_at
+        record.file_delete_after = anchor + timedelta(days=ARCHIVE_FILE_RETENTION_DAYS)
 
 
 class PlanRecordService:
@@ -167,6 +175,8 @@ class PlanRecordService:
         record.updated_at = datetime.now()
         if raw_content:
             record.raw_content = raw_content
+            record.file_removed_at = None
+            _schedule_file_delete_after(record, datetime.now())
         _add_event(self.db, record, "archived", {"archive_path": new_path})
         return record
 
@@ -225,6 +235,7 @@ class PlanRecordService:
         restore_path.parent.mkdir(parents=True, exist_ok=True)
         restore_path.write_text(record.raw_content, encoding="utf-8")
         record.file_removed_at = None
+        _schedule_file_delete_after(record, datetime.now())
         record.updated_at = datetime.now()
         _add_event(self.db, record, "restored", {"path": str(restore_path)})
         return record
@@ -260,6 +271,7 @@ class PlanRecordService:
                 record.project = project
             if raw_content:
                 record.raw_content = raw_content
+                _schedule_file_delete_after(record, now)
             if title:
                 record.title = title
             if status:
@@ -291,6 +303,7 @@ class PlanRecordService:
                 archived_at=datetime.now(),
                 raw_content=raw_content,
             )
+            _schedule_file_delete_after(record)
             self.db.add(record)
             self.db.flush()
             _add_event(self.db, record, "ingested", {"source": "ingest_single", "created": True})
@@ -393,6 +406,26 @@ class PlanRecordService:
             .order_by(LLMRequest.requested_at.desc())
             .first()
         )
+        now = datetime.now()
+        retention_base = archived_query.filter(
+            PlanRecord.llm_processed_at.isnot(None),
+            PlanRecord.raw_content.isnot(None),
+        )
+        file_retention_due = retention_base.filter(
+            PlanRecord.file_removed_at.is_(None),
+            PlanRecord.file_delete_after.isnot(None),
+            PlanRecord.file_delete_after <= now,
+        ).count()
+        file_retention_scheduled = retention_base.filter(
+            PlanRecord.file_removed_at.is_(None),
+            PlanRecord.file_delete_after.isnot(None),
+            PlanRecord.file_delete_after > now,
+        ).count()
+        file_removed = archived_query.filter(PlanRecord.file_removed_at.isnot(None)).count()
+        oldest_file_delete_after = retention_base.filter(
+            PlanRecord.file_removed_at.is_(None),
+            PlanRecord.file_delete_after.isnot(None),
+        ).with_entities(func.min(PlanRecord.file_delete_after)).scalar()
 
         schedule = (
             self.db.query(TaskSchedule)
@@ -431,6 +464,10 @@ class PlanRecordService:
             "temp_pytest_unprocessed": temp_pytest_unprocessed,
             "pending_or_processing_requests": pending_or_processing_requests,
             "failed_requests": failed_requests,
+            "file_retention_due": file_retention_due,
+            "file_retention_scheduled": file_retention_scheduled,
+            "file_removed": file_removed,
+            "oldest_file_delete_after": oldest_file_delete_after.isoformat() if oldest_file_delete_after else None,
             "latest_failed_request": {
                 "id": latest_failed.id,
                 "caller_id": latest_failed.caller_id,

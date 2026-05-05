@@ -51,17 +51,19 @@ class ArchiveRotationScheduler(ScheduleHandler):
 
     async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, self._rotate_archives)
-        rotated = result.get("rotated", 0)
+        config = schedule.get_target_config()
+        max_files_per_run = int(config.get("max_files_per_run") or 30)
+        result = await loop.run_in_executor(None, self._rotate_archives, max_files_per_run)
+        removed = result.get("removed", result.get("rotated", 0))
         return HandlerRunOutcome(
-            collected_count=rotated,
-            saved_count=rotated,
+            collected_count=result.get("due", removed),
+            saved_count=removed,
             stop_reason="completed",
             config_snapshot_patch=result,
         )
 
     @staticmethod
-    def _rotate_archives() -> dict:
+    def _rotate_archives(max_files_per_run: int = 30) -> dict:
         from scripts.services.rotate_archive_files import rotate
 
-        return rotate(apply=True)
+        return rotate(apply=True, max_files_per_run=max_files_per_run)

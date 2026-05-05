@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { llmApi, type LLMRequest } from '$lib/api';
-  import { planRecordsApi, archiveApi, type PlanRecord, type ImportArchivedResult, type ArchivePreviewItem, type DuplicateItem, type PlanArchiveHealth } from '$lib/api/plan-records';
+  import { planRecordsApi, archiveApi, type PlanArchiveAnalyzeResponse, type PlanRecord, type ImportArchivedResult, type ArchivePreviewItem, type DuplicateItem, type PlanArchiveHealth } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
   import MemoEditor from './MemoEditor.svelte';
   import PlanViewer from './PlanViewer.svelte';
@@ -13,7 +13,7 @@
   let records: PlanRecord[] = [];
   let loading = true;
   let selectedRecord: PlanRecord | null = null;
-  let detailTab: 'content' | 'memo' = 'content';
+  let detailTab: 'content' | 'memo' | 'analyze' = 'content';
   let editingStatusId: number | null = null;
 
   const EDITABLE_STATUSES = ['초안', '검토대기', '구현중', '보류'];
@@ -79,6 +79,15 @@
   const archiveQueuePageSize = 50;
   let archiveQueueStatus = 'pending,processing,failed';
   let archiveQueueProvider = '';
+
+  // ── 수동 분석 preview/apply ───────────────────────────────
+  let analyzeProvider = 'codex';
+  let analyzeModel = 'gpt-5.2';
+  let analyzeTimeout = 120;
+  let analyzeLoading = false;
+  let analyzeResult: PlanArchiveAnalyzeResponse | null = null;
+  let analyzeError = '';
+  let confirmingApply = false;
 
   async function loadArchiveHealth() {
     archiveHealthLoading = true;
@@ -258,6 +267,40 @@
   function selectRecord(record: PlanRecord) {
     selectedRecord = selectedRecord?.id === record.id ? null : record;
     detailTab = 'content';
+    analyzeResult = null;
+    analyzeError = '';
+    confirmingApply = false;
+  }
+
+  async function runManualAnalyze(mode: 'preview' | 'apply') {
+    if (!selectedRecord) return;
+    analyzeLoading = true;
+    analyzeError = '';
+    confirmingApply = false;
+    try {
+      const result = await planRecordsApi.analyzeRecord(selectedRecord.id, {
+        mode,
+        provider: analyzeProvider || undefined,
+        model: analyzeModel || undefined,
+        timeout_seconds: analyzeTimeout,
+      });
+      analyzeResult = result;
+      if (result.saved) {
+        await loadRecords();
+        selectedRecord = records.find((record) => record.id === result.record_id) ?? selectedRecord;
+      }
+      showToast(result.saved ? 'DB 저장 완료' : result.success ? '분석 완료' : (result.error || '분석 실패'));
+    } catch (e) {
+      analyzeError = e instanceof Error ? e.message : '분석 요청 실패';
+    } finally {
+      analyzeLoading = false;
+    }
+  }
+
+  async function copyAnalyzeResult() {
+    if (!analyzeResult) return;
+    await navigator.clipboard.writeText(JSON.stringify(analyzeResult.result, null, 2));
+    showToast('분석 결과를 복사했습니다.');
   }
 
   // 외부 quick search 포커싱: file_path로 record get_or_create 후 자동 선택
@@ -453,7 +496,11 @@
             <span class="rounded bg-muted px-2 py-1">active {archiveHealth.pending_or_processing_requests}</span>
             <span class="rounded {archiveHealth.failed_requests > 0 ? 'bg-red-100 text-red-700' : 'bg-muted text-muted-foreground'} px-2 py-1">failed {archiveHealth.failed_requests}</span>
             <span class="rounded bg-muted px-2 py-1">temp excluded {archiveHealth.temp_pytest_unprocessed}/{archiveHealth.temp_pytest_total}</span>
+            <span class="rounded {archiveHealth.file_retention_due > 0 ? 'bg-amber-100 text-amber-700' : 'bg-muted text-muted-foreground'} px-2 py-1">delete due {archiveHealth.file_retention_due}</span>
+            <span class="rounded bg-muted px-2 py-1">scheduled {archiveHealth.file_retention_scheduled}</span>
+            <span class="rounded bg-muted px-2 py-1">removed {archiveHealth.file_removed}</span>
           </div>
+          <div class="mt-2 text-muted-foreground">oldest delete {formatDateTime(archiveHealth.oldest_file_delete_after)}</div>
         {/if}
       </div>
     </div>
@@ -484,6 +531,7 @@
           <option value="">provider 전체</option>
           <option value="claude">Claude</option>
           <option value="gemini">Gemini</option>
+          <option value="codex">Codex</option>
         </select>
         <button
           class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground"
@@ -635,6 +683,11 @@
                   {#if record.llm_processed_at}
                     <span class="inline-block ml-1 px-1 py-0.5 text-xs rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200" title="LLM 분석 완료">LLM</span>
                   {/if}
+                  {#if record.file_removed_at}
+                    <span class="inline-block ml-1 px-1 py-0.5 text-xs rounded bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200" title="archive 파일 제거됨">파일 제거됨</span>
+                  {:else if record.file_delete_after}
+                    <span class="inline-block ml-1 px-1 py-0.5 text-xs rounded bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200" title={`삭제 예정: ${formatDateTime(record.file_delete_after)}`}>삭제 예정</span>
+                  {/if}
                 </td>
                 <td class="py-2 pr-4 text-muted-foreground text-xs whitespace-nowrap">
                   {formatDate(record.archived_at)}
@@ -718,12 +771,104 @@
           class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'memo' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
           onclick={() => { detailTab = 'memo'; }}
         >메모</button>
+        <button
+          class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'analyze' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+          onclick={() => { detailTab = 'analyze'; }}
+        >분석</button>
       </div>
       <div class="flex-1 overflow-auto">
         {#if detailTab === 'content'}
-          <PlanViewer filePath={selectedRecord.file_path} />
-        {:else}
+          <PlanViewer filePath={selectedRecord.file_path} recordId={selectedRecord.id} />
+        {:else if detailTab === 'memo'}
           <MemoEditor filePath={selectedRecord.file_path} />
+        {:else}
+          <div class="space-y-3 text-xs">
+            <div class="rounded border border-border p-3">
+              <div class="grid gap-2">
+                <label class="grid gap-1">
+                  <span class="text-muted-foreground">provider</span>
+                  <select class="rounded border border-border bg-background px-2 py-1" bind:value={analyzeProvider}>
+                    <option value="codex">codex</option>
+                    <option value="claude">claude</option>
+                    <option value="gemini">gemini</option>
+                  </select>
+                </label>
+                <label class="grid gap-1">
+                  <span class="text-muted-foreground">model</span>
+                  <input class="rounded border border-border bg-background px-2 py-1" bind:value={analyzeModel} />
+                </label>
+                <label class="grid gap-1">
+                  <span class="text-muted-foreground">timeout</span>
+                  <input class="rounded border border-border bg-background px-2 py-1" type="number" min="1" max="3600" bind:value={analyzeTimeout} />
+                </label>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button
+                  class="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50"
+                  disabled={analyzeLoading}
+                  onclick={() => runManualAnalyze('preview')}
+                >{analyzeLoading ? '실행 중...' : 'Preview'}</button>
+                <button
+                  class="rounded bg-muted px-3 py-1 text-muted-foreground hover:bg-secondary disabled:opacity-50"
+                  disabled={analyzeLoading || !analyzeResult?.success}
+                  onclick={() => { confirmingApply = true; }}
+                >DB 저장</button>
+              </div>
+              <p class="mt-2 text-muted-foreground">Preview는 DB 저장 없음. Apply만 category/tags/summary를 저장합니다.</p>
+            </div>
+
+            {#if confirmingApply}
+              <div class="rounded border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+                <p>현재 preview 결과를 DB에 저장합니다.</p>
+                <div class="mt-2 flex gap-2">
+                  <button class="rounded bg-amber-600 px-3 py-1 text-white" onclick={() => runManualAnalyze('apply')}>확인</button>
+                  <button class="rounded bg-background px-3 py-1 text-muted-foreground" onclick={() => { confirmingApply = false; }}>취소</button>
+                </div>
+              </div>
+            {/if}
+
+            {#if analyzeError}
+              <p class="rounded border border-red-300 bg-red-50 p-2 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{analyzeError}</p>
+            {/if}
+
+            {#if analyzeResult}
+              <div class="rounded border border-border p-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <span class="font-semibold">{analyzeResult.success ? '성공' : '실패'}</span>
+                    <span class="text-muted-foreground"> · {analyzeResult.provider}/{analyzeResult.model} · {analyzeResult.elapsed_ms}ms</span>
+                  </div>
+                  <button class="rounded bg-muted px-2 py-1 text-muted-foreground hover:bg-secondary" onclick={copyAnalyzeResult}>복사</button>
+                </div>
+                {#if analyzeResult.error}
+                  <p class="mb-2 text-red-600 dark:text-red-300">{analyzeResult.error}</p>
+                {/if}
+                {#if analyzeResult.warnings.length > 0}
+                  <div class="mb-2 text-amber-700 dark:text-amber-300">{analyzeResult.warnings.join(', ')}</div>
+                {/if}
+                <div class="grid gap-2">
+                  <div class="rounded bg-muted p-2">
+                    <div class="text-muted-foreground">category</div>
+                    <div class="font-medium">{String(analyzeResult.result.category ?? '-')}</div>
+                  </div>
+                  <div class="rounded bg-muted p-2">
+                    <div class="text-muted-foreground">tags</div>
+                    <div>{Array.isArray(analyzeResult.result.tags) ? analyzeResult.result.tags.join(', ') : String(analyzeResult.result.tags ?? '-')}</div>
+                  </div>
+                  <div class="rounded bg-muted p-2">
+                    <div class="text-muted-foreground">summary</div>
+                    <div>{String(analyzeResult.result.summary ?? '-')}</div>
+                  </div>
+                  <div class="rounded bg-muted p-2">
+                    <div class="text-muted-foreground">intent / scope</div>
+                    <div>{String(analyzeResult.result.intent ?? '-')}</div>
+                    <div class="mt-1 text-muted-foreground">{Array.isArray(analyzeResult.result.scope) ? analyzeResult.result.scope.join(', ') : String(analyzeResult.result.scope ?? '-')}</div>
+                  </div>
+                </div>
+                <pre class="mt-3 max-h-56 overflow-auto rounded bg-muted p-2 text-[11px]">{JSON.stringify(analyzeResult.result, null, 2)}</pre>
+              </div>
+            {/if}
+          </div>
         {/if}
       </div>
     </div>

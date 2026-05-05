@@ -223,83 +223,50 @@ class TestIngestSingle:
 class TestRotationTrigger:
     """rotate_archive_files.py 핵심 로직 단위 테스트 (subprocess 미사용)"""
 
-    def _make_old_archived_record(self, db, fp: str, days_old: int = 91) -> PlanRecord:
+    def _make_due_archived_record(self, db, fp: str, days_due: int = 1) -> PlanRecord:
         """로테이션 대상 레코드 생성 헬퍼"""
+        processed_at = datetime.now() - timedelta(days=8)
         record = PlanRecord(
             filename_hash=_compute_filename_hash(fp),
             file_path=fp,
             status="archived",
-            archived_at=datetime.now() - timedelta(days=days_old),
+            archived_at=datetime.now() - timedelta(days=10),
+            llm_processed_at=processed_at,
+            file_delete_after=datetime.now() - timedelta(days=days_due),
             raw_content="# Archive content",
         )
         db.add(record)
         db.flush()
         return record
 
-    def test_rotation_30_accumulation_trigger_right(self, db):
-        """R: 미로테이션 30건 (90일+ old) → 정확히 30건 로테이션 대상"""
-        from scripts.services.rotate_archive_files import get_rotation_targets, ROTATE_THRESHOLD
-        # monkeypatch DB로 대체 (기존 DB 사용하면 오염됨)
-        # 직접 쿼리로 검증
-        before = db.query(PlanRecord).filter(
-            PlanRecord.file_removed_at.is_(None),
-            PlanRecord.archived_at < datetime.now() - timedelta(days=90),
-            PlanRecord.raw_content.isnot(None),
-        ).count()
+    def test_rotation_targets_use_file_delete_after_right(self, db):
+        """R: due file_delete_after records are rotation targets."""
+        from scripts.services.rotate_archive_files import get_rotation_targets
+        record = self._make_due_archived_record(db, "/archive/2026-01-20-rot-right.md")
 
-        # 30건 추가
-        for i in range(30):
-            self._make_old_archived_record(db, f"/archive/2026-01-20-rot-right-{i}.md")
+        targets = get_rotation_targets(db)
 
-        after = db.query(PlanRecord).filter(
-            PlanRecord.file_removed_at.is_(None),
-            PlanRecord.archived_at < datetime.now() - timedelta(days=90),
-            PlanRecord.raw_content.isnot(None),
-        ).count()
+        assert any(target.id == record.id for target in targets)
 
-        added = after - before
-        assert added == 30
-        # 30 이상이므로 (before + 30) >= 30 → 트리거 대상
-        assert after >= ROTATE_THRESHOLD
-
-    def test_rotation_boundary_29_no_rotation(self, db):
-        """B: 29건 → 트리거 미발생 (30의 배수 없음)"""
-        from scripts.services.rotate_archive_files import ROTATE_THRESHOLD
-        # 29건에 대한 로테이션 개수 계산
-        n = (29 // ROTATE_THRESHOLD) * ROTATE_THRESHOLD
-        assert n == 0, "29건이면 로테이션 0건"
-
-    def test_rotation_boundary_60_rotates_30(self, db):
-        """B: 60건 → 30건 로테이션 (30 배수 roll)"""
-        from scripts.services.rotate_archive_files import ROTATE_THRESHOLD
-        n = (60 // ROTATE_THRESHOLD) * ROTATE_THRESHOLD
-        assert n == 60
-
-        # 61건이면?
-        n2 = (61 // ROTATE_THRESHOLD) * ROTATE_THRESHOLD
-        assert n2 == 60, "61건이면 60건 로테이션 (30의 배수)"
-
-    def test_rotation_skips_recent_90_days(self, db):
-        """B: 최근 90일 레코드는 대상 제외"""
+    def test_rotation_skips_future_file_delete_after(self, db):
+        """B: future file_delete_after records are not due."""
         fp = "/archive/2026-01-21-recent.md"
         record = PlanRecord(
             filename_hash=_compute_filename_hash(fp),
             file_path=fp,
             status="archived",
-            archived_at=datetime.now() - timedelta(days=10),  # 최근 10일
+            archived_at=datetime.now() - timedelta(days=10),
+            llm_processed_at=datetime.now() - timedelta(days=1),
+            file_delete_after=datetime.now() + timedelta(days=6),
             raw_content="# Recent content",
         )
         db.add(record)
         db.flush()
 
-        targets = db.query(PlanRecord).filter(
-            PlanRecord.file_removed_at.is_(None),
-            PlanRecord.archived_at < datetime.now() - timedelta(days=90),
-            PlanRecord.raw_content.isnot(None),
-            PlanRecord.id == record.id,
-        ).all()
+        from scripts.services.rotate_archive_files import get_rotation_targets
+        targets = get_rotation_targets(db)
 
-        assert len(targets) == 0, "최근 90일 레코드는 로테이션 대상 아님"
+        assert not any(target.id == record.id for target in targets)
 
     def test_rotation_skips_if_no_raw_content(self, db):
         """E: raw_content IS NULL인 레코드는 대상 제외 (안전장치)"""
@@ -308,17 +275,15 @@ class TestRotationTrigger:
             filename_hash=_compute_filename_hash(fp),
             file_path=fp,
             status="archived",
-            archived_at=datetime.now() - timedelta(days=91),
+            archived_at=datetime.now() - timedelta(days=10),
+            llm_processed_at=datetime.now() - timedelta(days=8),
+            file_delete_after=datetime.now() - timedelta(days=1),
             raw_content=None,  # raw_content 없음
         )
         db.add(record)
         db.flush()
 
-        targets = db.query(PlanRecord).filter(
-            PlanRecord.file_removed_at.is_(None),
-            PlanRecord.archived_at < datetime.now() - timedelta(days=90),
-            PlanRecord.raw_content.isnot(None),
-            PlanRecord.id == record.id,
-        ).all()
+        from scripts.services.rotate_archive_files import get_rotation_targets
+        targets = get_rotation_targets(db)
 
-        assert len(targets) == 0, "raw_content 없는 레코드는 로테이션 대상 아님"
+        assert not any(target.id == record.id for target in targets), "raw_content 없는 레코드는 로테이션 대상 아님"

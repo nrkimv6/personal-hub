@@ -3,7 +3,7 @@
 대상 소스: app/modules/dev_runner/services/plan_record_service.py
 """
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -265,6 +265,7 @@ class TestIngestSingle:
         archive_path = "/workspace/docs/archive/2026-05-03_archive-path-update.md"
         record = svc.get_or_create(plan_path, title="Old Title", project="old-project")
         record.file_removed_at = datetime.now()
+        record.llm_processed_at = datetime.now() - timedelta(days=1)
         db.flush()
 
         updated = svc.ingest_single(
@@ -284,6 +285,8 @@ class TestIngestSingle:
         assert updated.title == "New Title"
         assert updated.archived_at is not None
         assert updated.file_removed_at is None
+        assert updated.file_delete_after is not None
+        assert updated.file_delete_after > datetime.now()
 
         count = db.query(PlanRecord).filter(
             PlanRecord.filename_hash == _compute_filename_hash(plan_path)

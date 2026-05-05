@@ -32,6 +32,8 @@ export interface PlanRecord {
 	chain_root_hash: string | null;
 	recurrence_suggestion: string | null;
 	llm_processed_at: string | null;
+	file_delete_after: string | null;
+	file_removed_at: string | null;
 	created_at: string;
 	updated_at: string;
 	events?: PlanEvent[];
@@ -53,6 +55,10 @@ export interface PlanArchiveHealth {
 	temp_pytest_unprocessed: number;
 	pending_or_processing_requests: number;
 	failed_requests: number;
+	file_retention_due: number;
+	file_retention_scheduled: number;
+	file_removed: number;
+	oldest_file_delete_after: string | null;
 	latest_failed_request: {
 		id: number;
 		caller_id: string;
@@ -68,6 +74,34 @@ export interface PlanArchiveHealth {
 		last_success: string | null;
 		last_failure: string | null;
 	} | null;
+}
+
+export interface PlanArchiveAnalyzePayload {
+	mode?: 'preview' | 'apply';
+	provider?: string | null;
+	model?: string | null;
+	timeout_seconds?: number;
+	include_prompt?: boolean;
+	source?: 'auto' | 'raw_content' | 'file_path';
+}
+
+export interface PlanArchiveAnalyzeResponse {
+	success: boolean;
+	mode: string;
+	result: Record<string, unknown>;
+	raw_response: string;
+	provider: string | null;
+	model: string | null;
+	record_id: number;
+	filename_hash: string | null;
+	file_path: string | null;
+	elapsed_ms: number;
+	prompt_preview: string | null;
+	warnings: string[];
+	error: string | null;
+	saved: boolean;
+	record_after: Record<string, unknown> | null;
+	save_error: string | null;
 }
 
 // ============================================================
@@ -139,10 +173,25 @@ export const planRecordsApi = {
 	getArchiveHealth: (includeTemp = false) =>
 		planRecordsRequest<PlanArchiveHealth>(`/records/archive-health?include_temp=${includeTemp}`),
 
+	analyzeRecord: (recordId: number, payload: PlanArchiveAnalyzePayload = {}) =>
+		planRecordsRequest<PlanArchiveAnalyzeResponse>(`/records/${recordId}/analyze`, {
+			method: 'POST',
+			body: JSON.stringify({ mode: 'preview', ...payload })
+		}),
+
+	analyzeDryRun: (recordId: number, payload: Omit<PlanArchiveAnalyzePayload, 'mode'> = {}) =>
+		planRecordsRequest<PlanArchiveAnalyzeResponse>(`/records/${recordId}/analyze-dry-run`, {
+			method: 'POST',
+			body: JSON.stringify({ ...payload, mode: 'preview' })
+		}),
+
 	/**
 	 * 레코드 상세 조회 (events 포함)
 	 */
 	get: (id: number) => planRecordsRequest<PlanRecord>(`/records/${id}`),
+
+	getContent: (id: number) =>
+		planRecordsRequest<{ id: number; raw_content: string | null }>(`/records/${id}/content`),
 
 	/**
 	 * file_path로 레코드 get_or_create

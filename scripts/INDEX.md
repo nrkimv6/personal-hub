@@ -123,6 +123,7 @@
 | ✅ | `worktree_manager.py` | worktree 수명 관리 |
 | ✅ | `conflict_resolver.py` | merge 충돌 자동 해결 |
 | ✅ | `queue_archived_plans.py` | 아카이브된 plan 큐잉 유틸 |
+| ✅ | `plan-archive-analyze.ps1` | Plan Archive 단건 수동 분석 preview/apply API 호출 래퍼 |
 
 ---
 
@@ -160,6 +161,7 @@
 | ✅ | `create_archive_tables.py` | archive 전용 테이블 생성 |
 | ✅ | `archive_batch_move.py` | 대량 archive 이관 배치 |
 | ✅ | `archive_index_backfill.py` | archive 인덱스 backfill |
+| ✅ | `backfill_plan_record_file_delete_after.py` | LLM 처리 완료 archive record의 파일 삭제 예정 시각 백필 |
 | ✅ | `verify_crawl_migration.py` | 크롤 데이터 마이그레이션 검증 |
 | ✅ | `fix_pg_sequences.py` | PG serial sequence 동기화 (2026-04-11 plan 결과) |
 | ✅ | `import_urls_bulk.py` | URL 대량 import |

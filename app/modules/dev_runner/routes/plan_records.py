@@ -26,6 +26,7 @@ from app.modules.dev_runner.services.plan_service import plan_service as _plan_s
 from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
     PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse,
+    PlanArchiveAnalyzeRequest, PlanArchiveAnalyzeResponse,
     PlanArchiveHealthResponse,
 )
 
@@ -127,6 +128,42 @@ def get_record_content(record_id: int, db: Session = Depends(get_db)):
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return {"id": record.id, "raw_content": record.raw_content}
+
+
+@router.post("/records/{record_id}/analyze", response_model=PlanArchiveAnalyzeResponse)
+def analyze_record(record_id: int, req: PlanArchiveAnalyzeRequest, db: Session = Depends(get_db)):
+    """Manual analyze for one archive record.
+
+    preview는 DB 저장 없음, apply는 저장 있음. 두 모드 모두 LLMRequest를 생성하지 않는다.
+    """
+    from app.modules.dev_runner.services.plan_archive_manual_analyze_service import (
+        PlanArchiveManualAnalyzeService,
+    )
+
+    svc = PlanArchiveManualAnalyzeService(db)
+    result = svc.analyze(
+        record_id,
+        mode=req.mode,
+        provider=req.provider,
+        model=req.model,
+        timeout_seconds=req.timeout_seconds,
+        include_prompt=req.include_prompt,
+        source=req.source,
+    )
+    if result.get("error") == "RECORD_NOT_FOUND":
+        raise HTTPException(status_code=404, detail="Record not found")
+    if result.get("error") == "EMPTY_PLAN_CONTENT":
+        raise HTTPException(status_code=422, detail="Archive content is empty")
+    return result
+
+
+@router.post("/records/{record_id}/analyze-dry-run", response_model=PlanArchiveAnalyzeResponse)
+def analyze_record_dry_run(record_id: int, req: PlanArchiveAnalyzeRequest, db: Session = Depends(get_db)):
+    """Preview-only alias. mode=apply is intentionally rejected here."""
+    if req.mode != "preview":
+        raise HTTPException(status_code=400, detail="analyze-dry-run only supports preview mode")
+    req.mode = "preview"
+    return analyze_record(record_id, req, db)
 
 
 @router.post("/records/{record_id}/restore")

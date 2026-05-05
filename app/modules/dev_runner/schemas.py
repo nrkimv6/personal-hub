@@ -250,9 +250,43 @@ class PlanArchiveHealthResponse(BaseModel):
     temp_pytest_unprocessed: int
     pending_or_processing_requests: int
     failed_requests: int
+    file_retention_due: int = 0
+    file_retention_scheduled: int = 0
+    file_removed: int = 0
+    oldest_file_delete_after: Optional[str] = None
     latest_failed_request: Optional[PlanArchiveFailedRequestResponse] = None
     oldest_unprocessed_at: Optional[str] = None
     plan_archive_schedule: Optional[PlanArchiveScheduleSnapshot] = None
+
+
+class PlanArchiveAnalyzeRequest(BaseModel):
+    """Manual Plan Archive analyze request."""
+    mode: Literal["preview", "apply"] = "preview"
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    timeout_seconds: int = Field(120, ge=1, le=3600)
+    include_prompt: bool = False
+    source: Optional[Literal["auto", "raw_content", "file_path"]] = "auto"
+
+
+class PlanArchiveAnalyzeResponse(BaseModel):
+    """Manual Plan Archive analyze response."""
+    success: bool
+    mode: str
+    result: dict = Field(default_factory=dict)
+    raw_response: str = ""
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    record_id: int
+    filename_hash: Optional[str] = None
+    file_path: Optional[str] = None
+    elapsed_ms: int = 0
+    prompt_preview: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    saved: bool = False
+    record_after: Optional[dict] = None
+    save_error: Optional[str] = None
 
 
 class PlanRecordResponse(BaseModel):
@@ -279,6 +313,8 @@ class PlanRecordResponse(BaseModel):
     plan_date: Optional[date] = None
     applied_at: Optional[datetime] = None
     llm_processed_at: Optional[datetime] = None
+    file_delete_after: Optional[datetime] = None
+    file_removed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -551,6 +587,8 @@ __all__ = [
     'PlanRecordWithEventsResponse',
     'ImportArchivedResponse',
     'PlanArchiveHealthResponse',
+    'PlanArchiveAnalyzeRequest',
+    'PlanArchiveAnalyzeResponse',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',

@@ -177,6 +177,10 @@ class TestListRecords:
             "temp_pytest_unprocessed": 1,
             "pending_or_processing_requests": 1,
             "failed_requests": 1,
+            "file_retention_due": 2,
+            "file_retention_scheduled": 3,
+            "file_removed": 4,
+            "oldest_file_delete_after": "2026-05-12T01:00:00",
             "latest_failed_request": {
                 "id": 10,
                 "caller_id": "failed_hash",
@@ -204,6 +208,9 @@ class TestListRecords:
         assert data["temp_pytest_unprocessed"] == 1
         assert data["pending_or_processing_requests"] == 1
         assert data["failed_requests"] == 1
+        assert data["file_retention_due"] == 2
+        assert data["file_retention_scheduled"] == 3
+        assert data["file_removed"] == 4
         assert data["latest_failed_request"]["caller_id"] == "failed_hash"
 
 
@@ -226,6 +233,71 @@ class TestGetRecord:
         """존재하지 않는 id → 404"""
         resp = client.get("/api/v1/plans/records/99999")
         assert resp.status_code == 404
+
+    def test_analyze_record_preview_success(self, client):
+        """R: manual analyze preview endpoint returns service response."""
+        expected = {
+            "success": True,
+            "mode": "preview",
+            "result": {"category": "infra"},
+            "raw_response": '{"category":"infra"}',
+            "provider": "codex",
+            "model": "gpt-5.2",
+            "record_id": 1,
+            "filename_hash": "hash",
+            "file_path": "/archive/file.md",
+            "elapsed_ms": 10,
+            "prompt_preview": None,
+            "warnings": [],
+            "saved": False,
+            "record_after": None,
+            "save_error": None,
+        }
+        with patch(
+            "app.modules.dev_runner.services.plan_archive_manual_analyze_service.PlanArchiveManualAnalyzeService.analyze",
+            return_value=expected,
+        ):
+            resp = client.post("/api/v1/plans/records/1/analyze", json={"mode": "preview"})
+
+        assert resp.status_code == 200
+        assert resp.json()["result"]["category"] == "infra"
+        assert resp.json()["saved"] is False
+
+    def test_analyze_record_apply_success(self, client):
+        """R: manual analyze apply endpoint returns saved record snapshot."""
+        expected = {
+            "success": True,
+            "mode": "apply",
+            "result": {"category": "infra"},
+            "raw_response": '{"category":"infra"}',
+            "provider": "codex",
+            "model": "gpt-5.2",
+            "record_id": 1,
+            "filename_hash": "hash",
+            "file_path": "/archive/file.md",
+            "elapsed_ms": 10,
+            "prompt_preview": None,
+            "warnings": [],
+            "saved": True,
+            "record_after": {"category": "infra", "summary": "manual apply"},
+            "save_error": None,
+        }
+        with patch(
+            "app.modules.dev_runner.services.plan_archive_manual_analyze_service.PlanArchiveManualAnalyzeService.analyze",
+            return_value=expected,
+        ) as mock_analyze:
+            resp = client.post("/api/v1/plans/records/1/analyze", json={"mode": "apply"})
+
+        assert resp.status_code == 200
+        assert resp.json()["saved"] is True
+        assert resp.json()["record_after"]["summary"] == "manual apply"
+        assert mock_analyze.call_args.kwargs["mode"] == "apply"
+
+    def test_analyze_dry_run_rejects_apply(self, client):
+        """E: analyze-dry-run alias remains preview-only."""
+        resp = client.post("/api/v1/plans/records/1/analyze-dry-run", json={"mode": "apply"})
+
+        assert resp.status_code == 400
 
 
 class TestMemoUpdate:

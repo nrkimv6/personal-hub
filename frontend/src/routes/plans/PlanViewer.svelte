@@ -29,7 +29,17 @@
 			const res = await devRunnerPlanApi.content(encoded);
 			content = res.content;
 		} catch (e: any) {
-			error = e?.message ?? '내용을 불러오지 못했습니다.';
+			if (recordId) {
+				try {
+					const res = await planRecordsApi.getContent(recordId);
+					content = res.raw_content ?? '';
+					error = content ? '' : 'DB raw_content가 비어 있습니다.';
+				} catch (fallbackError: any) {
+					error = fallbackError?.message ?? e?.message ?? '내용을 불러오지 못했습니다.';
+				}
+			} else {
+				error = e?.message ?? '내용을 불러오지 못했습니다.';
+			}
 		} finally {
 			loading = false;
 		}

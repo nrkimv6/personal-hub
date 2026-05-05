@@ -64,6 +64,8 @@ def test_save_plan_archive_result_right(db, sample_record):
     """R: mock LLM 결과 → plan_records UPDATE 검증"""
     mock_request = MagicMock()
     mock_request.caller_id = "testhash001"
+    sample_record.raw_content = "# Stored archive content"
+    db.flush()
 
     result = {
         "success": True,
@@ -83,6 +85,8 @@ def test_save_plan_archive_result_right(db, sample_record):
     assert sample_record.tags == ["feat", "bugfix"]
     assert sample_record.summary == "Instagram 크롤링 기능 개선"
     assert sample_record.llm_processed_at is not None
+    assert sample_record.file_delete_after is not None
+    assert (sample_record.file_delete_after - sample_record.llm_processed_at).days == 7
 
 
 def test_save_plan_archive_result_error_no_record(db):
@@ -113,6 +117,34 @@ def test_build_plan_analyze_prompt_right():
     assert "naver-booking" in prompt
     assert "instagram" in prompt
     assert "2026-01-01_test-plan.md" in prompt
+
+
+def test_plan_archive_analyze_codex_provider_dispatch_returns_raw_and_parsed():
+    """R: plan_archive_analyze에서 쓰는 codex provider dispatch가 raw/parsed를 반환한다."""
+    from app.modules.claude_worker.services.llm_service import LLMService
+
+    service = LLMService(db=MagicMock())
+
+    def capture_run(command, **_kwargs):
+        output_path = command[command.index("--output-last-message") + 1]
+        Path(output_path).write_text('{"category": "infra", "tags": ["plan"]}', encoding="utf-8")
+        return MagicMock(returncode=0, stdout="stdout warning", stderr="")
+
+    with patch("shutil.which", return_value="codex"), patch(
+        "app.modules.claude_worker.services.executors.codex_executor.build_cli_env",
+        return_value={},
+    ), patch("subprocess.run", side_effect=capture_run):
+        result = service.execute_llm(
+            build_plan_analyze_prompt("# plan", "2026-05-05_plan.md", ["infra"]),
+            provider="codex",
+            model="gpt-5.2",
+            parse_json=True,
+            cli_options={"parse_json": True},
+        )
+
+    assert result["success"] is True
+    assert result["raw_response"] == '{"category": "infra", "tags": ["plan"]}'
+    assert result["parsed"] == {"category": "infra", "tags": ["plan"]}
 
 
 # ── PlanArchiveListener ──────────────────────────────────────
