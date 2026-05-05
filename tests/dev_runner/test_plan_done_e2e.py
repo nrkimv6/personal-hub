@@ -191,8 +191,10 @@ async def test_batch_done_ignores_unrelated_snapshot_json_B(svc, tmp_path, dev_r
     ownership_dir.mkdir(parents=True, exist_ok=True)
     plan_path = make_completed_plan(plan_dir, "2026-04-21-batch-done-snapshot.md")
 
-    (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
-    done_md = tmp_path / "docs" / "DONE.md"
+    plans_todo = tmp_path / ".worktrees" / "plans" / "TODO.md"
+    plans_todo.parent.mkdir(parents=True, exist_ok=True)
+    plans_todo.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+    done_md = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
     done_md.parent.mkdir(parents=True, exist_ok=True)
     done_md.write_text("# DONE\n", encoding="utf-8")
     (ownership_dir / "other-runner.json").write_text(
@@ -201,7 +203,7 @@ async def test_batch_done_ignores_unrelated_snapshot_json_B(svc, tmp_path, dev_r
                 "runner_id": "other-runner",
                 "captured_at": "2026-04-21T10:00:00",
                 "project_root": str(tmp_path),
-                "dirty_files": ["TODO.md"],
+                "dirty_files": [".worktrees/plans/TODO.md"],
                 "owned_files": [],
                 "clean_at_start_files": [],
             },
@@ -236,8 +238,10 @@ async def test_run_done_strict_snapshot_failure_keeps_plan_unmoved_E(svc, tmp_pa
     plan_path = make_completed_plan(plan_dir, "2026-04-21-strict-fail.md")
     original = plan_path.read_text(encoding="utf-8")
 
-    (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
-    done_md = tmp_path / "docs" / "DONE.md"
+    plans_todo = tmp_path / ".worktrees" / "plans" / "TODO.md"
+    plans_todo.parent.mkdir(parents=True, exist_ok=True)
+    plans_todo.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+    done_md = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
     done_md.parent.mkdir(parents=True, exist_ok=True)
     done_md.write_text("# DONE\n", encoding="utf-8")
     (ownership_dir / "strict-runner.json").write_text(

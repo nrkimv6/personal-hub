@@ -8,6 +8,7 @@ plan_service / plan_scanner / plan_path_registry → plan_path_helpers (역방�
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -24,6 +25,39 @@ class PlanStorageRootCandidate:
     repo_root: Path
     worktree_path: Path
     registered_paths: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PlansLedgerPaths:
+    """Task ledger files owned by the plans lineage worktree."""
+
+    plans_root: Path
+    todo_path: Path
+    done_path: Path
+    history_dir: Path
+    done_history_path: Path
+
+
+def resolve_plans_ledger_paths(project_root: Path, today: date | None = None) -> PlansLedgerPaths:
+    """Return canonical TODO/DONE ledger paths for a project.
+
+    Plan files and task ledgers share the same orphan plans lineage:
+    `{project}/.worktrees/plans`. Root `TODO.md` and `docs/DONE.md` are legacy
+    surfaces and must not be mutated by done/runtime automation.
+    """
+    resolved_project = Path(project_root).resolve()
+    effective_date = today or date.today()
+    plans_root = resolved_project / ".worktrees" / "plans"
+    done_dir = plans_root / "docs"
+    history_dir = done_dir / "history"
+    week = f"{effective_date.year}-W{effective_date.isocalendar()[1]:02d}"
+    return PlansLedgerPaths(
+        plans_root=plans_root,
+        todo_path=plans_root / "TODO.md",
+        done_path=done_dir / "DONE.md",
+        history_dir=history_dir,
+        done_history_path=history_dir / f"DONE-{week}.md",
+    )
 
 
 def _dedupe_paths(paths: List[Path]) -> List[Path]:

@@ -78,10 +78,12 @@ class TestDonePreconditionsHttp:
             *상태: 구현완료 | 진행률: 3/3 (100%)*
         """), encoding="utf-8")
 
-        # TODO.md, DONE.md 생성
-        todo_md = tmp_path / "TODO.md"
+        # plans TODO/DONE ledger 생성
+        todo_md = tmp_path / ".worktrees" / "plans" / "TODO.md"
+        todo_md.parent.mkdir(parents=True, exist_ok=True)
         todo_md.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
-        done_md = tmp_path / "docs" / "DONE.md"
+        done_md = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
+        done_md.parent.mkdir(parents=True, exist_ok=True)
         done_md.write_text("# DONE\n", encoding="utf-8")
 
         with patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")), \

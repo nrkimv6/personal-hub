@@ -304,10 +304,11 @@ class TestArchivePlan:
 # ========== _update_todo_done ==========
 
 class TestUpdateTodoDone:
-    """RIGHT: TODO.md 제거 + DONE.md 추가"""
+    """RIGHT: plans ledger TODO.md 제거 + plans ledger DONE.md 추가"""
 
     def test_todo_item_removed(self, tmp_path):
-        todo_path = tmp_path / "TODO.md"
+        todo_path = tmp_path / ".worktrees" / "plans" / "TODO.md"
+        todo_path.parent.mkdir(parents=True)
         todo_path.write_text(
             "# TODO\n\n- [ ] 내 플랜 제목 (from: plan/xxx)\n- [ ] 다른 항목\n",
             encoding="utf-8"
@@ -320,23 +321,23 @@ class TestUpdateTodoDone:
         assert "다른 항목" in content
 
     def test_done_entry_added(self, tmp_path, today):
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir()
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True)
 
         PlanService._update_todo_done(tmp_path, "테스트 플랜")
 
-        done_path = tmp_path / "docs" / "DONE.md"
+        done_path = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
         assert done_path.exists()
         content = done_path.read_text(encoding="utf-8")
         assert f"- [x] {today}: 테스트 플랜" in content
 
     def test_done_md_created_if_not_exists(self, tmp_path):
         PlanService._update_todo_done(tmp_path, "새 플랜")
-        done_path = tmp_path / "docs" / "DONE.md"
+        done_path = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
         assert done_path.exists()
 
     def test_done_entry_prepended(self, tmp_path, today):
-        done_path = tmp_path / "docs" / "DONE.md"
+        done_path = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
         done_path.parent.mkdir(parents=True)
         done_path.write_text("# DONE (최근 20개)\n\n- [x] 2026-01-01: 이전 항목\n", encoding="utf-8")
 
@@ -347,6 +348,18 @@ class TestUpdateTodoDone:
         new_idx = next(i for i, l in enumerate(lines) if "새 플랜" in l)
         old_idx = next(i for i, l in enumerate(lines) if "이전 항목" in l)
         assert new_idx < old_idx
+
+    def test_root_legacy_ledgers_not_created_or_modified(self, tmp_path):
+        root_todo = tmp_path / "TODO.md"
+        root_done = tmp_path / "docs" / "DONE.md"
+        root_done.parent.mkdir(parents=True)
+        root_todo.write_text("# TODO\n\n- [ ] legacy\n", encoding="utf-8")
+        root_done.write_text("# DONE\n\n- [x] legacy\n", encoding="utf-8")
+
+        PlanService._update_todo_done(tmp_path, "새 플랜")
+
+        assert root_todo.read_text(encoding="utf-8") == "# TODO\n\n- [ ] legacy\n"
+        assert root_done.read_text(encoding="utf-8") == "# DONE\n\n- [x] legacy\n"
 
 
 # ========== _archive_done_if_needed ==========
@@ -697,7 +710,7 @@ class TestRunDone:
         with patch.object(svc, "_git_commit", new=AsyncMock(return_value="")):
             await svc.run_done(str(plan_file))
 
-        done_path = project_dir / "docs" / "DONE.md"
+        done_path = project_dir / ".worktrees" / "plans" / "docs" / "DONE.md"
         assert done_path.exists()
         content = done_path.read_text(encoding="utf-8")
         assert "테스트 플랜" in content

@@ -802,7 +802,7 @@ class TestRunDone:
                     "runner_id": "runner-2",
                     "captured_at": "2026-04-14T16:54:00",
                     "project_root": str(tmp_path),
-                    "dirty_files": [f"docs/history/{history_name}"],
+                    "dirty_files": [f".worktrees/plans/docs/history/{history_name}"],
                     "owned_files": [],
                     "clean_at_start_files": [],
                 },
@@ -826,11 +826,11 @@ class TestRunDone:
         """R: snapshot owned_files 바깥의 auto-done 대상은 차단된다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-14_owned-only.md"
@@ -871,11 +871,11 @@ class TestRunDone:
         """B: runner_id=None 수동 done 경로는 snapshot 존재와 무관하게 ownership guard를 타지 않는다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-14_manual-done.md"
@@ -910,12 +910,12 @@ class TestRunDone:
         """R: auto path는 snapshot 밖 stray dirty가 있으면 residue_guard로 차단된다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
         (tmp_path / ".git").write_text("gitdir: mock\n", encoding="utf-8")
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-21_residue-guard.md"
@@ -950,12 +950,12 @@ class TestRunDone:
         """B: current dirty가 비어 있으면 residue_guard 없이 기존 완료 경로를 유지한다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
         (tmp_path / ".git").write_text("gitdir: mock\n", encoding="utf-8")
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-21_residue-clean.md"
@@ -991,12 +991,12 @@ class TestRunDone:
         """E: snapshot 부재 시 residue_guard가 strict fail 한다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
         (tmp_path / ".git").write_text("gitdir: mock\n", encoding="utf-8")
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-21_residue-missing-snapshot.md"
@@ -1016,8 +1016,8 @@ class TestRunDone:
         """R: DONE.md가 5개를 넘으면 history archive도 commit 대상에 포함된다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         done_path = docs_dir / "DONE.md"
         done_path.write_text(
             "# DONE\n\n"
@@ -1046,7 +1046,7 @@ class TestRunDone:
 
         assert result["success"] is True
         today = date.today()
-        expected_history = tmp_path / "docs" / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md"
+        expected_history = tmp_path / ".worktrees" / "plans" / "docs" / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md"
         assert expected_history.exists()
         commit_files = mock_commit.await_args.args[1]
         assert expected_history in commit_files

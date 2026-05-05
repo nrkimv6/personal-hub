@@ -79,10 +79,10 @@ function Test-AllowedRootCommitPath {
     param([string]$PathValue)
 
     $p = ConvertTo-RelativeGitPath $PathValue
-    if ($p -in @("TODO.md", "MANUAL_TASKS.md", "CHANGELOG.md")) {
+    if ($p -in @("MANUAL_TASKS.md", "CHANGELOG.md")) {
         return $true
     }
-    if ($p -match "^docs/(DONE\.md|history/|archive/|plan/)") {
+    if ($p -match "^docs/(archive/|plan/)") {
         return $true
     }
     return $false

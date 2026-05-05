@@ -115,8 +115,11 @@ def isolated_live_done_project(prefix: str):
     plans_dir.mkdir(parents=True, exist_ok=True)
     archive_dir.mkdir(parents=True, exist_ok=True)
 
-    todo_path = project_root / "TODO.md"
-    done_path = docs_dir / "DONE.md"
+    plans_root = project_root / ".worktrees" / "plans"
+    plans_docs_dir = plans_root / "docs"
+    plans_docs_dir.mkdir(parents=True, exist_ok=True)
+    todo_path = plans_root / "TODO.md"
+    done_path = plans_docs_dir / "DONE.md"
     todo_path.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
     done_path.write_text("# DONE (최근 20개)\n\n", encoding="utf-8")
     (project_root / "README.md").write_text("temp live done http test project\n", encoding="utf-8")
@@ -124,7 +127,7 @@ def isolated_live_done_project(prefix: str):
     _run_git(["init"], project_root)
     _run_git(["config", "user.name", "Codex Test"], project_root)
     _run_git(["config", "user.email", "codex-test@example.com"], project_root)
-    _run_git(["add", "README.md", "TODO.md", "docs/DONE.md"], project_root)
+    _run_git(["add", "README.md", ".worktrees/plans/TODO.md", ".worktrees/plans/docs/DONE.md"], project_root)
     _run_git(["commit", "-m", "test: seed isolated live done project"], project_root)
 
     try:

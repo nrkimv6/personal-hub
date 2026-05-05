@@ -21,6 +21,7 @@ from app.modules.dev_runner.services.plan_path_helpers import (
     backfill_dual_paths,
     canonicalize_wtools_legacy_common_path,
     dedupe_prefer_worktree,
+    resolve_plans_ledger_paths,
 )
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle, resolve_archive_target_or_raise
@@ -1011,11 +1012,12 @@ class PlanService:
 
     @classmethod
     def _update_todo_done(cls, project_dir: Path, plan_title: str, plan_path: Path | None = None) -> None:
-        """TODO.md에서 해당 plan 항목 제거, DONE.md 상단에 추가"""
+        """plans ledger TODO에서 해당 plan 항목 제거, plans DONE 상단에 추가"""
         today = date.today().isoformat()
+        ledger_paths = resolve_plans_ledger_paths(project_dir)
 
         # TODO.md: completed plan에 해당하는 체크박스 줄만 제거
-        todo_path = project_dir / "TODO.md"
+        todo_path = ledger_paths.todo_path
         if todo_path.exists():
             lines = todo_path.read_text(encoding="utf-8").splitlines(keepends=True)
             filtered = [
@@ -1026,7 +1028,7 @@ class PlanService:
                 todo_path.write_text("".join(filtered), encoding="utf-8")
 
         # DONE.md 상단에 추가
-        done_path = project_dir / "docs" / "DONE.md"
+        done_path = ledger_paths.done_path
         done_path.parent.mkdir(parents=True, exist_ok=True)
         new_entry = f"- [x] {today}: {plan_title}\n"
 
@@ -1331,13 +1333,11 @@ class PlanService:
                 if todo_archive_path:
                     ownership_targets.append(todo_archive_path)
             if project_dir:
-                done_path = project_dir / "docs" / "DONE.md"
-                today = date.today()
-                done_history_path = done_path.parent / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md"
+                ledger_paths = resolve_plans_ledger_paths(project_dir)
                 ownership_targets.extend([
-                    project_dir / "TODO.md",
-                    done_path,
-                    done_history_path,
+                    ledger_paths.todo_path,
+                    ledger_paths.done_path,
+                    ledger_paths.done_history_path,
                 ])
                 if has_manual:
                     ownership_targets.append(project_dir / "MANUAL_TASKS.md")
@@ -1371,7 +1371,8 @@ class PlanService:
             # 4. TODO.md / DONE.md 업데이트
             if project_dir:
                 self._update_todo_done(project_dir, title, path)
-                done_path = project_dir / "docs" / "DONE.md"
+                ledger_paths = resolve_plans_ledger_paths(project_dir)
+                done_path = ledger_paths.done_path
                 done_history_path = self._archive_done_if_needed(done_path)
 
             # 5. git commit
@@ -1381,7 +1382,7 @@ class PlanService:
                 files_to_commit.append(todo_archive_path)
             if project_dir:
                 files_to_commit += [
-                    project_dir / "TODO.md",
+                    ledger_paths.todo_path,
                     done_path,
                 ]
                 if done_history_path:

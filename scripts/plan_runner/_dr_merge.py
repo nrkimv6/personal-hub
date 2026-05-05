@@ -91,6 +91,7 @@ def _resolve_snapshot_project_root(payload: dict) -> Path:
 
 def _collect_post_merge_owned_paths(plan_file: str, project_root: Path) -> list[Path]:
     from app.modules.dev_runner.services.archive_service import resolve_archive_target_or_raise
+    from app.modules.dev_runner.services.plan_path_helpers import resolve_plans_ledger_paths
 
     plan_path = Path(plan_file)
     today = datetime.now().date()
@@ -108,12 +109,12 @@ def _collect_post_merge_owned_paths(plan_file: str, project_root: Path) -> list[
     if archive_path is not None:
         candidates.append(archive_path.parent / todo_path.name)
 
-    done_path = project_root / "docs" / "DONE.md"
+    ledger_paths = resolve_plans_ledger_paths(project_root, today=today)
     candidates.extend(
         [
-            project_root / "TODO.md",
-            done_path,
-            done_path.parent / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md",
+            ledger_paths.todo_path,
+            ledger_paths.done_path,
+            ledger_paths.done_history_path,
             project_root / "MANUAL_TASKS.md",
         ]
     )

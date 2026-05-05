@@ -29,9 +29,11 @@
 |------|------|
 | 활성 plan 경로 | `.worktrees/plans/docs/plan/` |
 | archive 경로 | `.worktrees/plans/docs/archive/` |
+| TODO ledger | `.worktrees/plans/TODO.md` |
+| DONE ledger | `.worktrees/plans/docs/DONE.md` |
 | 브랜치 | `plans` (orphan — main과 공통 조상 없음) |
 
-**활성 안내**: 계획서와 아카이브는 `.worktrees/plans`가 단일 진실원입니다. main에서 `docs/plan/` 또는 `docs/archive/`를 커밋하려 하면 pre-commit hook이 차단합니다.
+**활성 안내**: 계획서, 아카이브, TODO/DONE ledger는 `.worktrees/plans`가 단일 진실원입니다. main에서 `docs/plan/` 또는 `docs/archive/`를 커밋하려 하면 pre-commit hook이 차단하고, root `TODO.md`/`docs/DONE.md` ledger 커밋은 root guard가 차단합니다.
 
 ### 세션 시작 시 ensure 명령
 

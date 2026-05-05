@@ -340,7 +340,7 @@ def test_all_done_ownership_guard_sets_specific_error_E(cl, tmp_path):
 
 
 def test_all_done_pre_dirty_todo_ownership_guard_restarts_E(cl, tmp_path):
-    """E: pre-dirty TODO.md로 인한 ownership_guard 실패도 restart_after_merge를 예약한다."""
+    """E: pre-dirty plans TODO.md로 인한 ownership_guard 실패도 restart_after_merge를 예약한다."""
     r = _make_redis()
     runner_id = "intg09-pre-dirty-todo"
     prefix = cl.RUNNER_KEY_PREFIX
@@ -351,13 +351,13 @@ def test_all_done_pre_dirty_todo_ownership_guard_restarts_E(cl, tmp_path):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
-        "success": False,
-        "reason": "ownership_guard",
-        "message": (
-            "runner ownership guard blocked auto-done: pre-dirty file(s) detected "
-            f"for runner {runner_id}: {tmp_path / 'TODO.md'}"
-        ),
-    }
+            "success": False,
+            "reason": "ownership_guard",
+            "message": (
+                "runner ownership guard blocked auto-done: pre-dirty file(s) detected "
+                f"for runner {runner_id}: {tmp_path / '.worktrees' / 'plans' / 'TODO.md'}"
+            ),
+        }
 
     with patch("requests.post", return_value=mock_resp):
         result = _run_merge(cl, runner_id, r)

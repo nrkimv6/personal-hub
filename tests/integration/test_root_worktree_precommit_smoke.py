@@ -282,13 +282,28 @@ def test_root_worktree_blocks_unresolved_merge_with_impl_scope_stage(tmp_path):
     assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
 
 
-def test_root_worktree_allows_task_ledger_stage(tmp_path):
+def test_root_worktree_blocks_task_ledger_stage(tmp_path):
     repo = _init_repo(tmp_path)
     target = repo / "TODO.md"
     target.write_text("# TODO\n\n- [ ] ledger\n", encoding="utf-8")
     _run(["git", "add", "TODO.md"], repo)
 
     result = _run_hook(repo)
+
+    assert result.returncode != 0
+    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
+def test_plans_worktree_allows_task_ledger_stage(tmp_path):
+    repo = _init_repo(tmp_path)
+    plans = repo / ".worktrees" / "plans"
+    _run(["git", "worktree", "add", str(plans), "-b", "plans"], repo)
+
+    target = plans / "TODO.md"
+    target.write_text("# TODO\n\n- [ ] ledger\n", encoding="utf-8")
+    _run(["git", "add", "TODO.md"], plans)
+
+    result = _run_hook(plans)
 
     assert result.returncode == 0
 

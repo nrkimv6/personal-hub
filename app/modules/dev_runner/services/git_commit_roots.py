@@ -108,8 +108,9 @@ async def commit_files_by_git_root(
 ) -> str:
     """Stage and commit files in the git root that owns each file.
 
-    Plans live in `.worktrees/plans` while TODO/DONE live in the project root.
-    Running one `git add` from the project root cannot reliably stage both.
+    Plan documents and TODO/DONE ledgers can live in `.worktrees/plans`
+    while implementation files live in the project root. Running one
+    `git add` from the project root cannot reliably stage both.
     """
     all_files = [Path(f) for f in files_to_add]
     if not all_files:

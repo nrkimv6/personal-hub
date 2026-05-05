@@ -101,7 +101,7 @@
 				class="inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium border border-border text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
 				onclick={onSync}
 				disabled={actionLoading}
-				title="Plan 파일과 TODO.md를 SQLite 큐에 동기화합니다"
+				title="Plan 파일과 plans ledger를 SQLite 큐에 동기화합니다"
 			>
 				<RefreshCw class="h-3.5 w-3.5" />
 				{isActive('sync') ? '동기화 중...' : '동기화'}

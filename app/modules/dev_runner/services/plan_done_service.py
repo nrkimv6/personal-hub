@@ -15,6 +15,7 @@ from app.modules.dev_runner.services.archive_service import archive_plan_bundle
 from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.log_service import publish_log, log_service
+from app.modules.dev_runner.services.plan_path_helpers import resolve_plans_ledger_paths
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 
 logger = logging.getLogger(__name__)
@@ -179,11 +180,12 @@ class PlanDoneService:
 
     @classmethod
     def _update_todo_done(cls, project_dir: Path, plan_title: str, plan_path: Path | None = None) -> None:
-        """TODO.md\uc5d0\uc11c \ud574\ub2f9 plan \ud56d\ubaa9 \uc81c\uac70, DONE.md \uc0c1\ub2e8\uc5d0 \ucd94\uac00"""
+        """plans ledger TODO에서 해당 plan 항목 제거, plans DONE 상단에 추가"""
         today = date.today().isoformat()
+        ledger_paths = resolve_plans_ledger_paths(project_dir)
 
-        # TODO.md: completed plan\uc5d0 \ud574\ub2f9\ud558\ub294 \uccb4\ud06c\ubc15\uc2a4 \uc904\ub9cc \uc81c\uac70
-        todo_path = project_dir / "TODO.md"
+        # TODO.md: completed plan에 해당하는 체크박스 줄만 제거
+        todo_path = ledger_paths.todo_path
         if todo_path.exists():
             lines = todo_path.read_text(encoding="utf-8").splitlines(keepends=True)
             filtered = [
@@ -193,8 +195,8 @@ class PlanDoneService:
             if len(filtered) < len(lines):
                 todo_path.write_text("".join(filtered), encoding="utf-8")
 
-        # DONE.md \uc0c1\ub2e8\uc5d0 \ucd94\uac00
-        done_path = project_dir / "docs" / "DONE.md"
+        # DONE.md 상단에 추가
+        done_path = ledger_paths.done_path
         done_path.parent.mkdir(parents=True, exist_ok=True)
         new_entry = f"- [x] {today}: {plan_title}\n"
 
@@ -210,17 +212,17 @@ class PlanDoneService:
             done_path.write_text(f"# DONE (\uc5ec\uae30\uc11c 20\uac1c)\n\n{new_entry}", encoding="utf-8")
 
     @staticmethod
-    def _archive_done_if_needed(done_path: Path) -> None:
+    def _archive_done_if_needed(done_path: Path) -> Optional[Path]:
         """DONE.md \ud56d\ubaa9 5\uac1c \ucd08\uacfc \uc2dc \uc6d4\ubcc4 \uc544\uce74\uc774\ube0c"""
         if not done_path.exists():
-            return
+            return None
 
         content = done_path.read_text(encoding="utf-8")
         lines = content.splitlines(keepends=True)
         item_lines = [l for l in lines if re.match(r'^-\s*\[', l)]
 
         if len(item_lines) <= 5:
-            return
+            return None
 
         keep = item_lines[:5]
         overflow = item_lines[5:]
@@ -246,6 +248,7 @@ class PlanDoneService:
         header_match = re.match(r'(#[^\n]+\n\n?)', content)
         header = header_match.group(1) if header_match else "# DONE (\uc5ec\uae30\uc11c 20\uac1c)\n\n"
         done_path.write_text(header + "".join(keep), encoding="utf-8")
+        return archive_path
 
     async def _git_commit(
         self, project_dir: Optional[Path], files_to_add: List[Path], commit_msg: str
@@ -335,8 +338,8 @@ class PlanDoneService:
             # 4. TODO.md / DONE.md \uc5c5\ub370\uc774\ud2b8
             if project_dir:
                 self._update_todo_done(project_dir, title, path)
-                done_path = project_dir / "docs" / "DONE.md"
-                self._archive_done_if_needed(done_path)
+                done_path = resolve_plans_ledger_paths(project_dir).done_path
+                done_history_path = self._archive_done_if_needed(done_path)
 
             # 5. git commit
             files_to_commit: List[Path] = [path, archive_path]
@@ -344,10 +347,13 @@ class PlanDoneService:
                 files_to_commit.append(path.parent / todo_archive_path.name)
                 files_to_commit.append(todo_archive_path)
             if project_dir:
+                ledger_paths = resolve_plans_ledger_paths(project_dir)
                 files_to_commit += [
-                    project_dir / "TODO.md",
-                    project_dir / "docs" / "DONE.md",
+                    ledger_paths.todo_path,
+                    ledger_paths.done_path,
                 ]
+                if done_history_path:
+                    files_to_commit.append(done_history_path)
                 if has_manual:
                     files_to_commit.append(project_dir / "MANUAL_TASKS.md")
             commit_output = await self._git_commit(
