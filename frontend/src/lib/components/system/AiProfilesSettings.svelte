@@ -144,9 +144,9 @@
 
 				<div class="space-y-2">
 					{#each profilesForEngine(engine) as p (p.idx)}
+						{@const status = statusFor(engine, p.name)}
 						<div class="rounded-md border border-border bg-card p-3 space-y-2">
 							<div class="flex items-center gap-3">
-								{@const status = statusFor(engine, p.name)}
 								<!-- 선택 라디오 -->
 								<input
 									type="radio"
