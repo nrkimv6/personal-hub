@@ -8,6 +8,7 @@ from typing import Any, Literal, Optional, List, Union
 SUPPORTED_RUN_ENGINES = {"claude", "gemini", "codex", "cc-codex"}
 
 RunnerMetadataState = Union[bool, Literal["unknown"]]
+RunnerDisplaySeverity = Literal["info", "warn", "error", "approval", "success", "muted"]
 
 
 # ========== 스키마 ==========
@@ -84,6 +85,11 @@ class RunStatusResponse(BaseModel):
     claim_state: Optional[str] = None
     claim_owner_runner_id: Optional[str] = None
     claim_message: Optional[str] = None
+    display_state: str = "stopped"
+    display_label: str = "중지됨"
+    display_severity: RunnerDisplaySeverity = "muted"
+    display_secondary: Optional[str] = None
+    hide_stale_branch_badge: bool = False
 
 
 class RunnerListItem(BaseModel):
@@ -116,6 +122,11 @@ class RunnerListItem(BaseModel):
     branch_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
     branch_merged_to_main: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
     metadata_checked_at: str = Field("unknown", description="plan-runner snapshot check timestamp or unknown when absent")
+    display_state: str = "stopped"
+    display_label: str = "중지됨"
+    display_severity: RunnerDisplaySeverity = "muted"
+    display_secondary: Optional[str] = None
+    hide_stale_branch_badge: bool = False
 
 
 class PlanProgressResponse(BaseModel):

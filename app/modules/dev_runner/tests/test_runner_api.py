@@ -725,7 +725,7 @@ class TestListRunners:
         await fake_async.set(f"{prefix}:branch_exists", "false")
         await fake_async.set(f"{prefix}:worktree_exists", "true")
 
-        with patch("app.modules.dev_runner.services.executor_service.check_branch_exists", return_value=True):
+        with patch("app.modules.dev_runner.services.runner_git_metadata.check_branch_exists", return_value=True):
             response = await client.get("/api/v1/dev-runner/runners")
 
         assert response.status_code == 200
@@ -733,6 +733,8 @@ class TestListRunners:
         assert data[0]["runner_id"] == rid
         assert data[0]["branch_exists"] is True
         assert await fake_async.get(f"{prefix}:branch_exists") == "true"
+        assert data[0]["display_state"] == "approval_required"
+        assert data[0]["hide_stale_branch_badge"] is True
 
     async def test_list_runners_preserves_completed_merge_error_with_post_merge_tasks(self, client, mock_executor_redis, tmp_path):
         """T5-R: completed lifecycle과 merge error/post-merge 잔여는 HTTP 응답에서 함께 보존된다."""
@@ -767,6 +769,8 @@ class TestListRunners:
         assert data[0]["merge_status"] == "error"
         assert data[0]["merge_reason"] == "stale_merge_blocked"
         assert data[0]["remaining_post_merge_tasks"] == 1
+        assert data[0]["display_state"] == "merge_error"
+        assert data[0]["display_label"] == "머지 오류"
 
 
 class TestMergeApprovalPayload:

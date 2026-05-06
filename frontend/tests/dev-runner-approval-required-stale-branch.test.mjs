@@ -12,19 +12,20 @@ function readSource(path) {
 test("approval_required runner hides stale branch badges in detail and status bar", () => {
     const instance = readSource("src/lib/components/dev-runner/RunnerInstanceTab.svelte");
     const statusBar = readSource("src/lib/components/dev-runner/RunStatusBar.svelte");
+    const devRunnerTab = readSource("src/routes/automation/DevRunnerTab.svelte");
 
-    const instanceGuard = instance.indexOf("if (mergeStatus === 'approval_required') return null;");
-    const instanceBranchLabel = instance.indexOf("if (branchExists === false) return 'branch 없음';");
-    const statusGuard = statusBar.indexOf("if (runner.merge_status === 'approval_required') return null;");
-    const statusBranchLabel = statusBar.indexOf("if (runner.branch_exists === false) return 'branch 없음';");
+    const instanceGuard = instance.indexOf("if (hideStaleBranchBadge) return null;");
+    const instanceBackendLabel = instance.indexOf("return displaySecondary;");
+    const statusGuard = statusBar.indexOf("if (runner.hide_stale_branch_badge) return null;");
+    const statusBackendLabel = statusBar.indexOf("return runner.display_secondary ?? null;");
 
     assert.ok(instanceGuard >= 0);
-    assert.ok(instanceBranchLabel >= 0);
-    assert.ok(instanceGuard < instanceBranchLabel);
+    assert.ok(instanceBackendLabel >= 0);
+    assert.ok(instanceGuard < instanceBackendLabel);
     assert.ok(statusGuard >= 0);
-    assert.ok(statusBranchLabel >= 0);
-    assert.ok(statusGuard < statusBranchLabel);
-    assert.match(instance, /mergeStatus !== 'approval_required' && branchExists === false/);
+    assert.ok(statusBackendLabel >= 0);
+    assert.ok(statusGuard < statusBackendLabel);
+    assert.match(devRunnerTab, /hideStaleBranchBadge=\{tab\.hide_stale_branch_badge\}/);
 });
 
 test("service lock approval button sends one-shot approve_service_lock retry payload", () => {
