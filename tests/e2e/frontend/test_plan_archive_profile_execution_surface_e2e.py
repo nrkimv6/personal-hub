@@ -85,6 +85,9 @@ def _install_archive_execution_routes(page: Page) -> dict[str, int]:
                 },
             )
             return
+        if "/api/v1/llm/providers" in url:
+            _json_response(route, [{"key": "claude", "display_name": "Claude", "default_model": "claude-opus-4-5", "models": ["claude-opus-4-5"]}])
+            return
         if "/api/v1/llm/schedule-profile-policies" in url:
             _json_response(
                 route,
@@ -103,6 +106,34 @@ def _install_archive_execution_routes(page: Page) -> dict[str, int]:
                     ]
                 },
             )
+            return
+        if "/api/v1/plans/records/archive-schedule-dashboard" in url:
+            _json_response(
+                route,
+                {
+                    "schedule": {
+                        "id": 1,
+                        "enabled": True,
+                        "next_run_at": "2026-05-06T03:00:00",
+                        "last_run_at": "2026-05-06T02:00:00",
+                    },
+                    "health": {},
+                    "retrieval_readiness": {"ready": True, "missing_tables": []},
+                    "queue_summary": {
+                        "pending": 1,
+                        "processing": 0,
+                        "failed": 1,
+                        "completed_24h": 2,
+                        "recent_failures_by_category": {"quota": 1},
+                    },
+                    "recent_requests": [],
+                    "recent_schedule_runs": [],
+                    "recent_execution_attempts": [],
+                },
+            )
+            return
+        if "/api/v1/plans/records/archive-candidates" in url and "/queue" not in url and "/preview" not in url:
+            _json_response(route, {"candidates": []})
             return
         if "/api/v1/plans/records/archive-executions/run" in url:
             calls["run"] += 1
@@ -222,19 +253,18 @@ def test_archive_profile_execution_controls_and_capacity_state(
     _skip_admin_mode_if_public(system_mode)
     calls = _install_archive_execution_routes(page)
 
-    page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
+    page.goto(f"{frontend_url}/scheduler/plan-archive", wait_until="domcontentloaded")
 
-    expect(page.get_by_text("Archive execution control")).to_be_visible()
-    expect(page.get_by_text("claude/work").first).to_be_visible()
-    expect(page.locator("label").filter(has_text="claude/work").locator('input[type="checkbox"]')).to_be_checked()
-    expect(page.get_by_role("button", name="Run backlog")).to_be_enabled()
-    expect(page.get_by_text("blocked").first).to_be_visible()
-    expect(page.get_by_text("next").first).to_be_visible()
+    expect(page.get_by_text("Archive Schedule 현황")).to_be_visible()
+    expect(page.get_by_text("분석 Target:")).to_be_visible()
+    expect(page.get_by_text("claude/work/claude-opus-4-5").first).to_be_visible()
+    expect(page.get_by_role("button", name="Backlog 실행")).to_be_enabled()
+    expect(page.get_by_text("quota 1")).to_be_visible()
 
     page.get_by_role("button", name="Sync").click()
     expect(page.get_by_text("sync updated 1", exact=True)).to_be_visible()
     assert calls["sync"] == 1
 
-    page.get_by_role("button", name="Run backlog").click()
+    page.get_by_role("button", name="Backlog 실행").click()
     expect(page.get_by_text("queued 1", exact=True)).to_be_visible()
     assert calls["run"] == 1

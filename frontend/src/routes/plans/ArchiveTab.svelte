@@ -10,6 +10,7 @@
     type ArchivePreviewItem,
     type DuplicateItem,
     type PlanArchiveExecutionAttempt,
+    type PlanArchiveHealth,
     type SyncResult,
     type PlanRecordRelation
   } from '$lib/api/plan-records';
@@ -76,6 +77,8 @@
   let importResult: ImportArchivedResult | null = $state(null);
   let syncLoading = $state(false);
   let syncResult: SyncResult | null = $state(null);
+  let archiveHealth: PlanArchiveHealth | null = $state(null);
+  let archiveHealthError = $state('');
 
   // ── 분석 요청 ─────────────────────────────────────────────
   let providers: ProviderInfo[] = $state([]);
@@ -123,6 +126,16 @@
       showToast(e instanceof Error ? e.message : 'Sync 실패');
     } finally {
       syncLoading = false;
+    }
+  }
+
+  async function loadArchiveHealth() {
+    archiveHealthError = '';
+    try {
+      archiveHealth = await planRecordsApi.getArchiveHealth();
+    } catch (e) {
+      archiveHealth = null;
+      archiveHealthError = e instanceof Error ? e.message : 'Archive health 로드 실패';
     }
   }
 
@@ -404,6 +417,7 @@
   onMount(() => {
     loadRecords();
     loadProviders();
+    loadArchiveHealth();
   });
 </script>
 
@@ -478,6 +492,19 @@
       onImport={runImportArchived}
       onSync={runSync}
     />
+
+    {#if archiveHealth?.execution_db_readiness && !archiveHealth.execution_db_readiness.ok}
+      <div class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+        <div class="font-medium">Plan Archive execution readiness missing</div>
+        <div class="mt-1 text-red-700 dark:text-red-300">
+          누락 테이블: {archiveHealth.execution_db_readiness.missing_tables.join(', ') || 'unknown'}
+        </div>
+      </div>
+    {:else if archiveHealthError}
+      <div class="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+        {archiveHealthError}
+      </div>
+    {/if}
 
     <!-- schedule 운영 이전 링크 -->
     <div class="mb-3 flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-xs">
