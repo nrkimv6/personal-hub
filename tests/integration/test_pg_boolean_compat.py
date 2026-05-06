@@ -132,6 +132,15 @@ class TestPgBooleanCompatSourceCheck:
                 violations.extend(matches)
         assert not violations, f"schedule_service.py boolean=integer 패턴: {violations}"
 
+    def test_naver_monitor_worker_no_undefined_schedule_service_global(self):
+        """재현 TC: 워커에 schedule_service.get_all_with_context 미정의 전역 참조가 남아 있지 않음"""
+        from app.worker.naver_monitor_worker import NaverMonitorWorker
+
+        source = inspect.getsource(NaverMonitorWorker)
+
+        assert "schedule_service.get_all_with_context" not in source
+        assert source.count("async def _check_schedule") == 1
+
     def test_snapshot_writer_no_integer_boolean_literals(self):
         """재현 TC: snapshot_writer.py에 integer boolean 리터럴이 남아 있지 않은지 확인"""
         from app.shared.process import snapshot_writer

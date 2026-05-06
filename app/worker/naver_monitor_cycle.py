@@ -96,7 +96,7 @@ class NaverMonitorCycleRunner:
         from app.modules.naver_booking.services.anonymous_monitor import get_anonymous_monitor
         anon = get_anonymous_monitor()
         availability = await anon.check_availability(
-            business_type_id=int(schedule_meta.get("business_type_id") or 13),
+            business_type_id=int(schedule_meta["business_type_id"]),
             business_id=schedule_meta["naver_business_id"],
             biz_item_id=schedule_meta["naver_biz_item_id"],
             target_date=schedule_meta["date"],
