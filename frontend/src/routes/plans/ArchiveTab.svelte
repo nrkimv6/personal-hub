@@ -623,6 +623,17 @@
           </div>
           <div class="mt-3 grid gap-2 md:grid-cols-3">
             <div class="rounded border border-border p-2">
+              <div class="text-muted-foreground">Retrieval DB</div>
+              <div class="mt-1 font-medium {archiveHealth.retrieval_db_readiness.ok ? 'text-green-700' : 'text-red-700'}">
+                {archiveHealth.retrieval_db_readiness.ok ? 'ready' : 'missing tables'}
+              </div>
+              {#if !archiveHealth.retrieval_db_readiness.ok}
+                <div class="mt-1 break-words text-red-700">
+                  {archiveHealth.retrieval_db_readiness.missing_tables.join(', ')}
+                </div>
+              {/if}
+            </div>
+            <div class="rounded border border-border p-2">
               <div class="text-muted-foreground">스케줄</div>
               <div class="mt-1 font-medium {archiveHealth.plan_archive_schedule?.enabled ? 'text-green-700' : 'text-amber-700'}">
                 {archiveHealth.plan_archive_schedule?.enabled ? '활성' : '비활성'}

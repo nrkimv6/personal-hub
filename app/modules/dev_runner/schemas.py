@@ -284,6 +284,13 @@ class PlanArchiveFailedRequestResponse(BaseModel):
     error_message: Optional[str] = None
 
 
+class PlanArchiveDbReadinessResponse(BaseModel):
+    """Plan Archive retrieval DB readiness summary."""
+    ok: bool
+    required_tables: List[str] = []
+    missing_tables: List[str] = []
+
+
 class PlanArchiveHealthResponse(BaseModel):
     """Plan Archive health summary."""
     archived_total: int
@@ -301,6 +308,7 @@ class PlanArchiveHealthResponse(BaseModel):
     latest_failed_request: Optional[PlanArchiveFailedRequestResponse] = None
     oldest_unprocessed_at: Optional[str] = None
     plan_archive_schedule: Optional[PlanArchiveScheduleSnapshot] = None
+    retrieval_db_readiness: PlanArchiveDbReadinessResponse
 
 
 class PlanArchiveRetrievalQuery(BaseModel):
@@ -881,6 +889,7 @@ __all__ = [
     'PlanRecordWithEventsResponse',
     'ImportArchivedResponse',
     'PlanArchiveHealthResponse',
+    'PlanArchiveDbReadinessResponse',
     'PlanArchiveRetrievalQuery',
     'PlanArchiveRetrievalResult',
     'PlanArchiveChunkHit',

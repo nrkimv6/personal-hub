@@ -74,6 +74,11 @@ export interface PlanArchiveHealth {
 		last_success: string | null;
 		last_failure: string | null;
 	} | null;
+	retrieval_db_readiness: {
+		ok: boolean;
+		required_tables: string[];
+		missing_tables: string[];
+	};
 }
 
 export interface PlanArchiveRetrievalQuery {

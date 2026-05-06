@@ -7,7 +7,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.models.plan_record import PlanRecord, PlanEvent
+from app.models.plan_record import (
+    PlanRecord,
+    PlanEvent,
+    PlanRecordChunk,
+    PlanRecordFileRef,
+    PlanRecordRelation,
+    PlanRecordSearchRun,
+)
 from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.routes.plan_records import get_archive_health, get_guide_status
@@ -121,6 +128,25 @@ def test_get_archive_health_route_right_counts(db):
     assert health["plan_archive_schedule"]["enabled"] is False
     assert health["plan_archive_schedule"]["last_run"] == datetime(2026, 5, 5, 2, 10).isoformat()
     assert health["plan_archive_schedule"]["last_success"] == datetime(2026, 5, 4, 2, 12).isoformat()
+    assert health["retrieval_db_readiness"]["ok"] is False
+    assert "plan_record_file_refs" in health["retrieval_db_readiness"]["missing_tables"]
+
+
+def test_get_archive_health_route_right_readiness_ok(db):
+    """T3: route-level health reports retrieval DB readiness when tables exist."""
+    for table in [
+        PlanRecordChunk.__table__,
+        PlanRecordFileRef.__table__,
+        PlanRecordRelation.__table__,
+        PlanRecordSearchRun.__table__,
+    ]:
+        table.create(bind=db.get_bind(), checkfirst=True)
+    _seed_archive_health(db)
+
+    health = get_archive_health(db=db)
+
+    assert health["retrieval_db_readiness"]["ok"] is True
+    assert health["retrieval_db_readiness"]["missing_tables"] == []
 
 
 def test_get_guide_status_route_excludes_temp_archive(db, monkeypatch):

@@ -197,6 +197,16 @@ class TestListRecords:
                 "last_success": None,
                 "last_failure": "2026-05-05T02:10:00",
             },
+            "retrieval_db_readiness": {
+                "ok": True,
+                "required_tables": [
+                    "plan_record_chunks",
+                    "plan_record_file_refs",
+                    "plan_record_relations",
+                    "plan_record_search_runs",
+                ],
+                "missing_tables": [],
+            },
         }
 
         with patch.object(PlanRecordService, "get_plan_archive_health", return_value=expected):
@@ -212,6 +222,7 @@ class TestListRecords:
         assert data["file_retention_scheduled"] == 3
         assert data["file_removed"] == 4
         assert data["latest_failed_request"]["caller_id"] == "failed_hash"
+        assert data["retrieval_db_readiness"]["ok"] is True
 
     def test_archive_health_right_keeps_temp_counts_separate_after_purge(self, client):
         """R: purge 이후에도 archive-health temp/real split schema is stable."""
@@ -233,6 +244,16 @@ class TestListRecords:
             "latest_failed_request": None,
             "oldest_unprocessed_at": "2026-05-04T01:00:00",
             "plan_archive_schedule": None,
+            "retrieval_db_readiness": {
+                "ok": False,
+                "required_tables": [
+                    "plan_record_chunks",
+                    "plan_record_file_refs",
+                    "plan_record_relations",
+                    "plan_record_search_runs",
+                ],
+                "missing_tables": ["plan_record_file_refs"],
+            },
         }
 
         with patch.object(PlanRecordService, "get_plan_archive_health", return_value=expected):
@@ -243,6 +264,16 @@ class TestListRecords:
         assert data["real_unprocessed"] == 1
         assert data["temp_pytest_total"] == 0
         assert data["temp_pytest_unprocessed"] == 0
+        assert data["retrieval_db_readiness"]["missing_tables"] == ["plan_record_file_refs"]
+
+    def test_retrieval_search_http_error_missing_readiness(self, client):
+        """E: retrieval search returns structured 503 when DB tables are missing."""
+        resp = client.post("/api/v1/plans/retrieval/search", json={"q": "anything"})
+
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert detail["retrieval_db_readiness"]["ok"] is False
+        assert "plan_record_file_refs" in detail["retrieval_db_readiness"]["missing_tables"]
 
 
 class TestGetRecord:

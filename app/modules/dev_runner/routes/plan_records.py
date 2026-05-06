@@ -33,6 +33,9 @@ from app.modules.dev_runner.services.plan_archive_retrieval_service import (
     PlanArchiveRetrievalService,
     RetrievalQuery,
 )
+from app.modules.dev_runner.services.plan_archive_retrieval_readiness import (
+    get_plan_archive_retrieval_readiness,
+)
 from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
     PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse,
@@ -139,9 +142,23 @@ def _serialize_retrieval_result(result: dict) -> dict:
     return serialized
 
 
+def _ensure_retrieval_db_ready(db: Session) -> None:
+    readiness = get_plan_archive_retrieval_readiness(db)
+    if readiness["ok"]:
+        return
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "message": "Plan Archive retrieval DB is not ready",
+            "retrieval_db_readiness": readiness,
+        },
+    )
+
+
 @router.post("/retrieval/search", response_model=PlanArchiveRetrievalResult)
 def search_archive(req: PlanArchiveRetrievalQuery, db: Session = Depends(get_db)):
     """Search archived plans through metadata, lexical chunks, and file refs."""
+    _ensure_retrieval_db_ready(db)
     svc = PlanArchiveRetrievalService(db)
     return _serialize_retrieval_result(svc.search(_to_retrieval_query(req)))
 
@@ -149,6 +166,7 @@ def search_archive(req: PlanArchiveRetrievalQuery, db: Session = Depends(get_db)
 @router.post("/retrieval/context")
 def build_archive_context(req: PlanArchiveContextRequest, db: Session = Depends(get_db)):
     """Build bounded LLM context from retrieval results."""
+    _ensure_retrieval_db_ready(db)
     retrieval = PlanArchiveRetrievalService(db).search(_to_retrieval_query(req))
     context = PlanArchiveContextService().assemble(
         retrieval,
@@ -161,6 +179,7 @@ def build_archive_context(req: PlanArchiveContextRequest, db: Session = Depends(
 @router.post("/retrieval/metrics", response_model=PlanArchiveMetricsResponse)
 def get_archive_metrics(req: PlanArchiveMetricsQuery, db: Session = Depends(get_db)):
     """Return follow-up and file-ref metrics for archive retrieval."""
+    _ensure_retrieval_db_ready(db)
     return PlanArchiveMetricsService(db).calculate(_to_retrieval_query(req))
 
 
