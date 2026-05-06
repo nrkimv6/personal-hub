@@ -11,6 +11,7 @@ from app.models import TaskSchedule
 from app.models.plan_record import PlanRecord
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services.plan_analyze_handler import build_plan_analyze_prompt
 from app.modules.claude_worker.services.plan_archive_prompt_policy import (
     DEFAULT_CATEGORIES,
     PromptPolicyContext,
