@@ -84,6 +84,7 @@ def _fetch_json(url: str, timeout: int = 3) -> dict[str, object] | None:
 
 READINESS_PROBE_HOSTS = ("127.0.0.1", "localhost")
 READINESS_TIMEOUT_SECONDS = 60
+PUBLIC_READINESS_TIMEOUT_SECONDS = 180
 READINESS_POLL_SECONDS = 5
 RESTART_WINDOW_ANCHOR = "Monitor Page Service Starting"
 STARTUP_FAILURE_MARKERS = ("Service failed:", "Traceback (most recent call last)")
@@ -700,12 +701,14 @@ def restart_api(manager, public: bool = False) -> bool:
                 killed = manager._nssm_restart_elevated(target.service_name)
 
     if killed:
-        cprint("Waiting for NSSM to restart API (up to 60s)...")
+        readiness_timeout = PUBLIC_READINESS_TIMEOUT_SECONDS if public else READINESS_TIMEOUT_SECONDS
+        cprint(f"Waiting for NSSM to restart API (up to {readiness_timeout}s)...")
         readiness = _wait_for_restart_api_readiness(
             manager,
             target,
             expected_fingerprint=expected_fingerprint,
             expected_source_fingerprint=expected_source_fingerprint,
+            timeout_seconds=readiness_timeout,
         )
         if readiness.healthy:
             if readiness.reason == "runtime_fingerprint_matched":
