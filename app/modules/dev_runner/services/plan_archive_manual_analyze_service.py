@@ -177,6 +177,8 @@ class PlanArchiveManualAnalyzeService:
             "saved": False,
             "record_after": None,
             "save_error": None,
+            "save_outcome_status": None,
+            "save_outcome_reason": None,
         }
         if not executor_result.get("success"):
             response["error"] = executor_result.get("error") or "EXECUTOR_FAILED"
@@ -197,13 +199,18 @@ class PlanArchiveManualAnalyzeService:
             except Exception as exc:
                 response["saved"] = False
                 response["save_error"] = str(exc)
+                response["save_outcome_status"] = "error"
+                response["save_outcome_reason"] = str(exc)
                 return response
             response["saved"] = bool(save_ok)
             if save_ok:
+                response["save_outcome_status"] = "saved"
                 self.db.refresh(record)
                 response["record_after"] = _record_snapshot(record)
             else:
                 response["save_error"] = "SAVE_PLAN_ARCHIVE_RESULT_FAILED"
+                response["save_outcome_status"] = "failed"
+                response["save_outcome_reason"] = "SAVE_PLAN_ARCHIVE_RESULT_FAILED"
 
         return response
 

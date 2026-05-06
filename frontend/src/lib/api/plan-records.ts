@@ -350,6 +350,8 @@ export interface PlanArchiveAnalyzeResponse {
 	saved: boolean;
 	record_after: Record<string, unknown> | null;
 	save_error: string | null;
+	save_outcome_status?: string | null;
+	save_outcome_reason?: string | null;
 }
 
 export interface PlanArchiveInsightCandidate {
