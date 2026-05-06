@@ -6,6 +6,8 @@ import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from scripts.services import service_run
 from scripts.services import frontend_mode
 
@@ -181,6 +183,30 @@ def test_service_runner_frontend_runtime_env_separates_admin_and_public_modes():
     assert public_env["MONITOR_FRONTEND_MODE"] == "public"
     assert public_env["MONITOR_SVELTEKIT_OUTDIR"] == ".svelte-kit-public"
     assert "VITE_API_PORT" not in public_env
+
+
+def test_service_runner_api_import_preflight_requires_lifespan_before_frontend():
+    runner = object.__new__(service_run.ServiceRunner)
+    runner.log = MagicMock()
+
+    def fake_find_spec(module_name: str):
+        if module_name == "app.lifespan":
+            return None
+        return object()
+
+    with patch("scripts.services.service_run.importlib.util.find_spec", side_effect=fake_find_spec):
+        with pytest.raises(RuntimeError, match="missing modules: app\\.lifespan"):
+            runner._preflight_api_import_contract()
+
+
+def test_service_runner_api_import_preflight_logs_success():
+    runner = object.__new__(service_run.ServiceRunner)
+    runner.log = MagicMock()
+
+    with patch("scripts.services.service_run.importlib.util.find_spec", return_value=object()):
+        runner._preflight_api_import_contract()
+
+    assert any("API import preflight passed" in str(call.args[0]) for call in runner.log.info.call_args_list)
 
 
 def test_public_service_runner_cleanup_uses_public_pid_files_only(tmp_path):

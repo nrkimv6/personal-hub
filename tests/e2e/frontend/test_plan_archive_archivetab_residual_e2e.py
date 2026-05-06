@@ -1,7 +1,8 @@
-"""T4 E2E: ArchiveTab 잔류 surface 검증.
+"""[T3: mock-based UI test] ArchiveTab residual surface.
 
 ArchiveTab에 redirect banner/placeholder, 잔류 컴포넌트(Retrieval/Detail/Sync)가
 존재하고, 운영 surface(candidate/execution queue)가 제거됐는지 smoke로 검증한다.
+The source-contract tests in this file are static/T3 checks, not live T4 evidence.
 """
 import json
 from pathlib import Path
@@ -10,7 +11,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 
-pytestmark = pytest.mark.e2e
+pytestmark = [pytest.mark.e2e, pytest.mark.integration]
 
 ADMIN_URL = "http://localhost:6101"
 
@@ -20,6 +21,7 @@ def _json_response(route, payload):
 
 
 def _install_archive_tab_routes(page: Page) -> None:
+    # T3 mock contract: this file keeps ArchiveTab residual checks isolated from live services.
     def handle(route):
         url = route.request.url
         if "/api/v1/auth/me" in url:
@@ -51,11 +53,15 @@ def _install_archive_tab_routes(page: Page) -> None:
     page.route("**/*", handle)
 
 
+def _wait_for_body_text(page: Page) -> str:
+    expect(page.locator("body")).to_be_visible()
+    page.wait_for_function("document.body && document.body.innerText.trim().length > 0", timeout=5000)
+    return page.inner_text("body")
+
+
 def test_archivetab_source_contract_no_forbidden_imports():
     """ArchiveTab.svelte에 금지된 운영 surface 참조가 없고 잔류 컴포넌트 import가 존재한다."""
-    svelte_path = Path(
-        r"D:\work\project\tools\monitor-page\frontend\src\routes\plans\ArchiveTab.svelte"
-    )
+    svelte_path = Path(__file__).resolve().parents[3] / "frontend/src/routes/plans/ArchiveTab.svelte"
     assert svelte_path.exists(), f"ArchiveTab.svelte not found at {svelte_path}"
     source = svelte_path.read_text(encoding="utf-8")
 
@@ -77,7 +83,7 @@ def test_archivetab_placeholder_text_visible(page: Page) -> None:
     _install_archive_tab_routes(page)
     page.goto(f"{ADMIN_URL}/automation?tab=plans&subtab=archive")
     page.wait_for_timeout(800)
-    body_text = page.inner_text("body")
+    body_text = _wait_for_body_text(page)
     assert (
         "archive 파일" in body_text
         or "schedule 운영" in body_text
@@ -90,7 +96,7 @@ def test_archivetab_redirect_banner_on_runner_query(page: Page) -> None:
     _install_archive_tab_routes(page)
     page.goto(f"{ADMIN_URL}/automation?tab=plans&subtab=archive&runner=plan-archive-schedule")
     page.wait_for_timeout(800)
-    body_text = page.inner_text("body")
+    body_text = _wait_for_body_text(page)
     assert (
         "plan-archive" in body_text.lower()
         or "scheduler" in body_text.lower()
@@ -110,8 +116,6 @@ def test_archivetab_no_auto_redirect(page: Page) -> None:
 
 def test_archivetab_residual_components_source_present():
     """ArchiveRetrievalPanel, ArchiveRecordDetailPanel, ArchiveSyncPanel 파일이 존재한다."""
-    base = Path(
-        r"D:\work\project\tools\monitor-page\frontend\src\routes\plans\archive-tab"
-    )
+    base = Path(__file__).resolve().parents[3] / "frontend/src/routes/plans/archive-tab"
     for name in ("ArchiveRetrievalPanel.svelte", "ArchiveRecordDetailPanel.svelte", "ArchiveSyncPanel.svelte"):
         assert (base / name).exists(), f"Residual component file missing: {name}"

@@ -208,6 +208,17 @@ class TestListRecords:
                 ],
                 "missing_tables": [],
             },
+            "execution_db_readiness": {
+                "ok": True,
+                "required_tables": [
+                    "plan_archive_execution_jobs",
+                    "plan_archive_execution_attempts",
+                    "llm_request_profile_claims",
+                    "llm_profile_assignments",
+                    "llm_schedule_profile_policies",
+                ],
+                "missing_tables": [],
+            },
         }
 
         with patch.object(PlanRecordService, "get_plan_archive_health", return_value=expected):
@@ -224,6 +235,7 @@ class TestListRecords:
         assert data["file_removed"] == 4
         assert data["latest_failed_request"]["caller_id"] == "failed_hash"
         assert data["retrieval_db_readiness"]["ok"] is True
+        assert data["execution_db_readiness"]["ok"] is True
 
     def test_archive_health_right_keeps_temp_counts_separate_after_purge(self, client):
         """R: purge 이후에도 archive-health temp/real split schema is stable."""
@@ -256,6 +268,17 @@ class TestListRecords:
                 ],
                 "missing_tables": ["plan_record_file_refs"],
             },
+            "execution_db_readiness": {
+                "ok": False,
+                "required_tables": [
+                    "plan_archive_execution_jobs",
+                    "plan_archive_execution_attempts",
+                    "llm_request_profile_claims",
+                    "llm_profile_assignments",
+                    "llm_schedule_profile_policies",
+                ],
+                "missing_tables": ["llm_schedule_profile_policies"],
+            },
         }
 
         with patch.object(PlanRecordService, "get_plan_archive_health", return_value=expected):
@@ -267,6 +290,7 @@ class TestListRecords:
         assert data["temp_pytest_total"] == 0
         assert data["temp_pytest_unprocessed"] == 0
         assert data["retrieval_db_readiness"]["missing_tables"] == ["plan_record_file_refs"]
+        assert data["execution_db_readiness"]["missing_tables"] == ["llm_schedule_profile_policies"]
 
     def test_retrieval_search_http_error_missing_readiness(self, client):
         """E: retrieval search returns structured 503 when DB tables are missing."""

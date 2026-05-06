@@ -299,7 +299,7 @@ class PlanArchiveFailedRequestResponse(BaseModel):
 
 
 class PlanArchiveDbReadinessResponse(BaseModel):
-    """Plan Archive retrieval DB readiness summary."""
+    """Plan Archive DB readiness summary."""
     ok: bool
     required_tables: List[str] = []
     missing_tables: List[str] = []
@@ -323,6 +323,7 @@ class PlanArchiveHealthResponse(BaseModel):
     oldest_unprocessed_at: Optional[str] = None
     plan_archive_schedule: Optional[PlanArchiveScheduleSnapshot] = None
     retrieval_db_readiness: PlanArchiveDbReadinessResponse
+    execution_db_readiness: PlanArchiveDbReadinessResponse
 
 
 class PlanArchiveRetrievalQuery(BaseModel):
