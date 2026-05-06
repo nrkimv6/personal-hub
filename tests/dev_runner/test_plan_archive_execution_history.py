@@ -2,6 +2,7 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -55,8 +56,6 @@ def test_history_contains_failed_and_completed_attempt_statuses(db):
 
 
 # ===== applied_request_id field tests =====
-
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="module")
@@ -177,3 +176,36 @@ class TestAppliedRequestIdField:
         assert resp.status_code == 200
         # event2.id > event1.id 이므로 200이 반환돼야 함
         assert resp.json()["applied_request_id"] == 200
+
+
+def test_history_preserves_readiness_failure_reason(db):
+    record = PlanRecord(
+        filename_hash="hash-readiness",
+        file_path="/archive/readiness.md",
+        raw_content="# readiness",
+        archived_at=datetime(2026, 5, 6),
+    )
+    db.add(record)
+    db.commit()
+    fake_llm = MagicMock()
+    fake_llm.resolve_provider_model.return_value = ("claude", "sonnet")
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
+        return_value=fake_llm,
+    ):
+        result = PlanArchiveExecutionService(db).enqueue_records(
+            [record],
+            trigger_source="manual:plan_archive_analyze",
+        )
+        db.commit()
+
+    request_id = result["request_ids"][0]
+    PlanArchiveExecutionService(db).mark_request_blocked(
+        request_id,
+        "profile_readiness_table_missing",
+    )
+
+    item = PlanArchiveExecutionService(db).history(limit=10)[0]
+    assert item["status"] == "blocked"
+    assert item["error_message"] == "profile_readiness_table_missing"
+    assert item["latest_attempt"]["error_message"] == "profile_readiness_table_missing"
