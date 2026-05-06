@@ -255,6 +255,35 @@ def test_restart_api_success_output_includes_service_log_window_T3(tmp_path: Pat
     assert any("service_log_window=" in message for message in printed)
 
 
+def test_restart_api_public_uses_extended_readiness_timeout(tmp_path: Path):
+    manager = MagicMock()
+    manager.pid_dir = tmp_path / ".pids"
+    manager._check_wmi_health.return_value = True
+    expected_snapshot = build_runtime_fingerprint_snapshot(app_mode="public")
+    readiness = api_actions.RestartApiReadinessResult(
+        healthy=True,
+        reason="runtime_fingerprint_matched",
+        elapsed_seconds=75,
+    )
+
+    def fake_urlopen(request, timeout=0, **kwargs):
+        url = getattr(request, "full_url", request)
+        if "__local/api-gate/close" in url:
+            raise urllib.error.URLError("public frontend gate unavailable")
+        if "self-restart" in url:
+            return _Response(200, b"{}")
+        raise AssertionError(f"unexpected url: {url}")
+
+    with patch.object(api_actions.urllib.request, "urlopen", side_effect=fake_urlopen), patch.object(
+        api_actions,
+        "build_runtime_fingerprint_snapshot",
+        return_value=expected_snapshot,
+    ), patch.object(api_actions, "_wait_for_restart_api_readiness", return_value=readiness) as mock_wait:
+        assert api_actions.restart_api(manager, public=True) is True
+
+    assert mock_wait.call_args.kwargs["timeout_seconds"] == api_actions.PUBLIC_READINESS_TIMEOUT_SECONDS
+
+
 def test_restart_api_falls_back_to_status_when_runtime_fingerprint_missing(tmp_path: Path):
     manager = MagicMock()
     manager.api_port = 8001
