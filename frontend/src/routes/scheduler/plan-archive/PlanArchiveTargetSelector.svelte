@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { ChevronDown, X, CheckCheck, XCircle } from 'lucide-svelte';
 	import { llmApi, type LLMProfileConfig, type ProviderInfo } from '$lib/api';
-	import { loadSavedTargets, saveTargets, type SelectedTarget } from './planArchiveOperationsState.js';
+	import {
+		loadSavedTargets,
+		saveTargets,
+		targetKey,
+		targetLabel,
+		type SelectedTarget,
+	} from './planArchiveOperationsState.js';
 
 	interface Props {
 		selectedTargets?: SelectedTarget[];
@@ -19,6 +26,7 @@
 	let targets = $state<SelectedTarget[]>(FALLBACK_TARGETS);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
+	let open = $state(false);
 
 	onMount(() => {
 		const saved = loadSavedTargets();
@@ -39,7 +47,7 @@
 			const nextTargets = buildTargets(providers, profiles.profiles);
 			if (nextTargets.length > 0) {
 				targets = nextTargets;
-				const selectableKeys = new Set(nextTargets.map(targetKey));
+				const selectableKeys = new Set(nextTargets.map((t) => targetKey(t)));
 				const nextSelected = selectedTargets.filter((t) => selectableKeys.has(targetKey(t)));
 				if (nextSelected.length !== selectedTargets.length) {
 					selectedTargets = nextSelected;
@@ -56,14 +64,14 @@
 
 	function buildTargets(providers: ProviderInfo[], profiles: LLMProfileConfig[]): SelectedTarget[] {
 		const providerByKey = new Map(providers.map((p) => [p.key, p]));
-		const enabledProfiles = profiles
+		const enabledProfiles = (profiles || [])
 			.filter((p) => p.enabled !== false)
 			.sort((a, b) =>
 				a.engine.localeCompare(b.engine) ||
 				(a.priority ?? 0) - (b.priority ?? 0) ||
 				a.name.localeCompare(b.name)
 			);
-		const profileTargets = enabledProfiles.map((profile) => {
+		const profileTargets: SelectedTarget[] = enabledProfiles.map((profile) => {
 			const provider = providerByKey.get(profile.engine);
 			const model = provider?.default_model || provider?.models?.[0] || '';
 			return {
@@ -72,21 +80,30 @@
 				profile_key: `${profile.engine}:${profile.name}`,
 				engine: profile.engine,
 				profile_name: profile.name,
-				label: `${profile.engine}/${profile.name}/${model || 'default'}`
+				label: `${profile.engine}/${profile.name}/${model || 'default'}`,
+				kind: 'profile'
 			};
 		});
-		const profiledEngines = new Set(profileTargets.map((t) => t.provider));
-		const profilelessTargets = providers
-			.filter((provider) => !profiledEngines.has(provider.key))
-			.map((provider) => ({
-				provider: provider.key,
-				model: provider.default_model || provider.models?.[0] || '',
-				profile_key: null,
-				engine: null,
-				profile_name: null,
-				label: `${provider.key}/${provider.default_model || provider.models?.[0] || 'default'}`
-			}));
-		return [...profileTargets, ...profilelessTargets];
+		const engineTargets: SelectedTarget[] = (providers || []).map((provider) => ({
+			provider: provider.key,
+			model: provider.default_model || provider.models?.[0] || '',
+			profile_key: null,
+			engine: null,
+			profile_name: null,
+			label: `${provider.key}/${provider.default_model || provider.models?.[0] || 'default'}`,
+			kind: 'engine'
+		}));
+		const all = [...profileTargets, ...engineTargets];
+		// De-dupe by normalized key (profile_key/engine+profile/provider+model).
+		const seen = new Set<string>();
+		const out: SelectedTarget[] = [];
+		for (const t of all) {
+			const k = targetKey(t);
+			if (seen.has(k)) continue;
+			seen.add(k);
+			out.push(t);
+		}
+		return out;
 	}
 
 	function isSelected(t: SelectedTarget): boolean {
@@ -105,38 +122,124 @@
 		onchange?.(next);
 	}
 
-	function targetLabel(t: SelectedTarget): string {
-		if (t.label) return t.label;
-		if (t.profile_name) return `${t.provider}/${t.profile_name}/${t.model || 'default'}`;
-		return `${t.provider}/${t.model || 'default'}`;
+	function removeTarget(t: SelectedTarget) {
+		selectedTargets = selectedTargets.filter((s) => targetKey(s) !== targetKey(t));
+		saveTargets(selectedTargets);
+		onchange?.(selectedTargets);
 	}
 
-	function targetKey(t: SelectedTarget): string {
-		return t.profile_key || `${t.provider}:${t.model}:profileless`;
+	function selectAll() {
+		selectedTargets = [...targets];
+		saveTargets(selectedTargets);
+		onchange?.(selectedTargets);
+	}
+
+	function clearAll() {
+		selectedTargets = [];
+		saveTargets([]);
+		onchange?.([]);
+	}
+
+	function groupKeys(): string[] {
+		const keys = new Set<string>();
+		for (const t of targets) keys.add(t.provider);
+		return Array.from(keys).sort();
+	}
+
+	function groupTargets(provider: string): SelectedTarget[] {
+		const group = targets.filter((t) => t.provider === provider);
+		// engine first, then profiles by name/model
+		return group.sort((a, b) => {
+			const ak = a.kind === 'engine' ? 0 : 1;
+			const bk = b.kind === 'engine' ? 0 : 1;
+			if (ak !== bk) return ak - bk;
+			return targetLabel(a).localeCompare(targetLabel(b));
+		});
 	}
 </script>
 
-<div class="flex flex-wrap items-center gap-2">
-	<span class="text-xs font-medium text-muted-foreground">분석 Target:</span>
-	{#if loading}
-		<span class="text-xs text-muted-foreground">profile 로드중...</span>
+<div class="flex flex-col gap-2">
+	<div class="flex flex-wrap items-center gap-2">
+		<span class="text-xs font-medium text-muted-foreground">분석 Target:</span>
+		<button
+			type="button"
+			class="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+			aria-expanded={open}
+			onclick={() => { open = !open; }}
+		>
+			<span>{selectedTargets.length}개 선택됨</span>
+			<ChevronDown class="h-3 w-3 {open ? 'rotate-180' : ''}" />
+		</button>
+		{#if loading}
+			<span class="text-xs text-muted-foreground">profile 로드중...</span>
+		{/if}
+		{#if error}
+			<span class="text-xs text-destructive" title={error}>profile 목록 로드 실패</span>
+		{/if}
+		{#if selectedTargets.length === 0}
+			<span class="text-xs text-yellow-600">target을 1개 이상 선택하세요</span>
+		{/if}
+		<div class="ml-auto flex items-center gap-1">
+			<button
+				type="button"
+				class="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+				onclick={selectAll}
+				disabled={targets.length === 0}
+				title="전체 선택"
+			>
+				<CheckCheck class="h-3 w-3" />전체
+			</button>
+			<button
+				type="button"
+				class="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+				onclick={clearAll}
+				disabled={selectedTargets.length === 0}
+				title="전체 해제"
+			>
+				<XCircle class="h-3 w-3" />해제
+			</button>
+		</div>
+	</div>
+
+	{#if selectedTargets.length > 0}
+		<div class="flex flex-wrap gap-1">
+			{#each selectedTargets as t}
+				<button
+					type="button"
+					class="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs hover:bg-muted"
+					title={targetLabel(t)}
+					onclick={() => removeTarget(t)}
+				>
+					<span class="max-w-[320px] truncate">{targetLabel(t)}</span>
+					<X class="h-3 w-3 opacity-60" />
+				</button>
+			{/each}
+		</div>
 	{/if}
-	{#each targets as t}
-		{@const checked = isSelected(t)}
-		<label class="inline-flex cursor-pointer items-center gap-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted {checked ? 'border-primary bg-primary/10' : ''}">
-			<input
-				type="checkbox"
-				class="accent-primary"
-				{checked}
-				onchange={() => toggle(t)}
-			/>
-			{targetLabel(t)}
-		</label>
-	{/each}
-	{#if error}
-		<span class="text-xs text-destructive" title={error}>profile 목록 로드 실패</span>
-	{/if}
-	{#if selectedTargets.length === 0}
-		<span class="text-xs text-yellow-600">target을 1개 이상 선택하세요</span>
+
+	{#if open}
+		<div class="rounded border border-border p-2">
+			<div class="grid grid-cols-1 gap-2 lg:grid-cols-2">
+				{#each groupKeys() as k}
+					<div class="rounded border border-border/60 p-2">
+						<div class="mb-1 text-xs font-medium text-muted-foreground">{k}</div>
+						<div class="flex flex-wrap gap-1">
+							{#each groupTargets(k) as t}
+								{@const checked = isSelected(t)}
+								<button
+									type="button"
+									class="rounded border px-2 py-1 text-xs hover:bg-muted {checked ? 'border-primary bg-primary/10' : 'border-border'}"
+									aria-pressed={checked}
+									title={targetLabel(t)}
+									onclick={() => toggle(t)}
+								>
+									{targetLabel(t)}
+								</button>
+							{/each}
+						</div>
+					</div>
+				{/each}
+			</div>
+		</div>
 	{/if}
 </div>

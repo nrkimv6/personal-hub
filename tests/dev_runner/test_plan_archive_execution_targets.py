@@ -69,7 +69,7 @@ def test_targets_to_snapshot_from_targets():
     result = _targets_to_snapshot(targets)
     assert len(result) == 2
     assert result[0]["provider"] == "codex"
-    assert result[0]["dedupe_key"] == "profileless"
+    assert result[0]["dedupe_key"] == "profileless:codex:gpt-5.5"
     assert result[1]["dedupe_key"] == "profile:claude:work"
 
 
@@ -106,13 +106,14 @@ def test_run_archive_executions_R_queues_codex_gpt55_without_profile(db):
         result = PlanArchiveExecutionService(db).enqueue_record(
             rec,
             trigger_source="test",
-            selected_targets=[{"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless"}],
+            selected_targets=[{"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless:codex:gpt-5.5"}],
         )
     assert result["status_key"] == "queued"
     req = db.query(LLMRequest).filter_by(id=result["request_ids"][0]).first()
     assert req is not None
     assert req.provider == "codex"
     assert req.model == "gpt-5.5"
+    assert req.dedupe_key == "profileless:codex:gpt-5.5"
     # cli_options에 candidate_profiles 없음 (profile-less)
     cli = json.loads(req.cli_options or "{}")
     assert not cli.get("candidate_profiles")
@@ -125,7 +126,7 @@ def test_run_archive_executions_R_creates_N_requests_for_N_targets_per_record(db
     db.commit()
     targets = [
         {"provider": "claude", "model": "sonnet", "engine": "claude", "profile_name": "work", "dedupe_key": "profile:claude:work"},
-        {"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless"},
+        {"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless:codex:gpt-5.5"},
     ]
     fake = _fake_llm()
     with patch(
@@ -161,7 +162,7 @@ def test_candidate_queue_and_bulk_run_use_same_selected_targets_contract(db):
     rec2 = _record(db, filename_hash="h2")
     db.commit()
 
-    targets_raw = [{"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless"}]
+    targets_raw = [{"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless:codex:gpt-5.5"}]
     fake = _fake_llm()
     with patch(
         "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
@@ -180,7 +181,7 @@ def test_candidate_queue_and_bulk_run_use_same_selected_targets_contract(db):
     for req in reqs:
         assert req.provider == "codex"
         assert req.model == "gpt-5.5"
-        assert req.dedupe_key == "profileless"
+        assert req.dedupe_key == "profileless:codex:gpt-5.5"
 
 
 # ── T3: applied_request_id ordering guard (line 145) ─────────────────────────
@@ -284,7 +285,7 @@ def test_worker_fanout_N_requests_only_newest_applied_to_record(db):
 
     targets = [
         {"provider": "claude", "model": "sonnet", "dedupe_key": "profile:claude:default"},
-        {"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless"},
+        {"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless:codex:gpt-5.5"},
         {"provider": "gemini", "model": "flash", "dedupe_key": "profile:gemini:default"},
     ]
     fake = _fake_llm()

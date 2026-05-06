@@ -18,6 +18,13 @@
 	let statusFilter = $state('pending,processing,failed');
 	let categoryFilter = $state('');
 
+	function targetText(r: ArchiveLLMRequestRow): string {
+		if (r.target_label) return r.target_label;
+		const model = r.model || 'default';
+		if (r.engine && r.profile_name) return `${r.engine}/${r.profile_name}/${model}`;
+		return `${r.provider}/${model}`;
+	}
+
 	async function load() {
 		loading = true;
 		error = null;
@@ -108,7 +115,7 @@
 					<tr class="border-b border-border text-left text-muted-foreground">
 						<th class="px-2 py-1.5">ID</th>
 						<th class="px-2 py-1.5">상태</th>
-						<th class="px-2 py-1.5">provider/model</th>
+						<th class="px-2 py-1.5">target</th>
 						<th class="px-2 py-1.5">category</th>
 						<th class="px-2 py-1.5">record</th>
 						<th class="px-2 py-1.5">요청시각</th>
@@ -128,7 +135,7 @@
 									'bg-muted text-muted-foreground'
 								}">{r.status}</span>
 							</td>
-							<td class="px-2 py-1">{r.provider}/{r.model}</td>
+							<td class="px-2 py-1" title={targetText(r)}>{targetText(r)}</td>
 							<td class="px-2 py-1">
 								{#if r.failure_category}
 									<span class="rounded bg-red-100 px-1 text-red-700">{r.failure_category}</span>

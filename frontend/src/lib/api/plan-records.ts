@@ -63,6 +63,16 @@ export interface PlanArchiveSelectedProfile {
 	profile_name: string;
 }
 
+export interface PlanArchiveExecutionTarget {
+	provider: string;
+	model: string;
+	profile_key?: string | null;
+	engine?: string | null;
+	profile_name?: string | null;
+	label?: string | null;
+	kind?: 'profile' | 'engine';
+}
+
 export interface PlanArchiveExecutionAttempt {
 	id?: number;
 	record_id?: number;
@@ -82,6 +92,7 @@ export interface PlanArchiveExecutionAttempt {
 export interface PlanArchiveExecutionRunPayload {
 	record_ids?: number[];
 	selected_profiles?: PlanArchiveSelectedProfile[];
+	selected_targets?: PlanArchiveExecutionTarget[];
 }
 
 export interface PlanArchiveExecutionRunResponse {
@@ -880,6 +891,10 @@ export interface ArchiveLLMRequestRow {
 	status: string;
 	provider: string;
 	model: string;
+	profile_key?: string | null;
+	engine?: string | null;
+	profile_name?: string | null;
+	target_label?: string | null;
 	record_id: string | null;
 	candidate_key: string | null;
 	source_schedule_run_id: number | null;
@@ -992,7 +1007,7 @@ export interface ArchiveSchedulePauseResumeResponse {
 export interface ArchiveCandidatesQueuePayload {
 	candidate_keys?: string[];
 	record_ids?: number[];
-	selected_targets?: Array<{ provider: string; model: string; profile_key?: string | null }>;
+	selected_targets?: PlanArchiveExecutionTarget[];
 }
 
 export interface ArchiveCandidatesQueueResponse {

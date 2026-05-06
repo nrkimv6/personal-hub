@@ -158,21 +158,101 @@ def _install_plan_archive_routes(page: Page, *, schedule=Ellipsis, on_resume=Non
             ]
             _json_response(route, {"candidates": candidates, "total": len(candidates)})
             return
-        if "/api/v1/plans/archive-execution-targets" in url:
+        if "/api/v1/llm/providers" in url:
+            _json_response(
+                route,
+                [
+                    {
+                        "key": "claude",
+                        "display_name": "Claude",
+                        "default_model": "claude-opus-4-6",
+                        "models": ["claude-opus-4-6"],
+                        "supports_chat": True,
+                        "supports_quota_pause": False,
+                        "enabled": True,
+                        "executor_key": "claude",
+                    },
+                    {
+                        "key": "gemini",
+                        "display_name": "Gemini",
+                        "default_model": "gemini-3.1-pro",
+                        "models": ["gemini-3.1-pro"],
+                        "supports_chat": True,
+                        "supports_quota_pause": False,
+                        "enabled": True,
+                        "executor_key": "gemini",
+                    },
+                    {
+                        "key": "codex",
+                        "display_name": "Codex",
+                        "default_model": "gpt-5.5",
+                        "models": ["gpt-5.5"],
+                        "supports_chat": True,
+                        "supports_quota_pause": False,
+                        "enabled": True,
+                        "executor_key": "codex",
+                    },
+                    {
+                        "key": "cc-codex",
+                        "display_name": "CC Codex",
+                        "default_model": "gpt-5.3-codex",
+                        "models": ["gpt-5.3-codex"],
+                        "supports_chat": True,
+                        "supports_quota_pause": False,
+                        "enabled": True,
+                        "executor_key": "codex",
+                    },
+                ],
+            )
+            return
+        if "/api/v1/llm/profiles" in url and "/status" not in url:
             _json_response(
                 route,
                 {
-                    "targets": [
-                        {
-                            "id": 1,
-                            "name": "monitor-page",
-                            "enabled": True,
-                            "priority": 1,
-                            "provider": "codex",
-                            "model": "gpt-5.5",
-                        }
+                    "selected": {},
+                    "profiles": [
+                        {"engine": "claude", "name": "personal", "config_dir": None, "extra_env": {}, "enabled": True, "priority": 1},
+                        {"engine": "claude", "name": "work", "config_dir": None, "extra_env": {}, "enabled": True, "priority": 2},
+                        {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}, "enabled": True, "priority": 1},
                     ],
-                    "total": 1,
+                    "supported_engines": ["claude", "gemini", "codex", "cc-codex"],
+                },
+            )
+            return
+        if "/api/v1/plans/records/archive-schedule-dashboard" in url:
+            _json_response(
+                route,
+                {
+                    "schedule": {
+                        "id": 1,
+                        "enabled": True,
+                        "cron_expr": "0 2 * * *",
+                        "next_run_at": "2026-05-07T02:00:00",
+                        "max_per_run": 10,
+                        "provider": "codex",
+                        "model": "gpt-5.5",
+                    },
+                    "health": {
+                        "archived_total": 30,
+                        "llm_processed": 25,
+                        "llm_unprocessed": 5,
+                        "real_unprocessed": 3,
+                        "temp_pytest_total": 0,
+                        "temp_pytest_unprocessed": 0,
+                        "pending_or_processing_requests": 2,
+                        "failed_requests": 0,
+                    },
+                    "retrieval_readiness": {"ok": True, "required_tables": [], "missing_tables": []},
+                    "queue_summary": {
+                        "pending": 2,
+                        "processing": 0,
+                        "failed": 0,
+                        "completed_24h": 0,
+                        "recent_failures_by_category": {},
+                    },
+                    "recent_requests": [],
+                    "recent_schedule_runs": [],
+                    "recent_execution_attempts": [],
                 },
             )
             return
