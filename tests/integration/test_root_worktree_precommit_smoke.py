@@ -76,9 +76,10 @@ def _run_hook(repo_cwd: Path, env: dict[str, str] | None = None) -> subprocess.C
 
 def test_root_worktree_blocks_impl_scope_stage(tmp_path):
     repo = _init_repo(tmp_path)
-    target = repo / ".claude" / "skills" / "done" / "SKILL.md"
+    target = repo / "app" / "worker.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("root impl change\n", encoding="utf-8")
-    _run(["git", "add", ".claude/skills/done/SKILL.md"], repo)
+    _run(["git", "add", "app/worker.py"], repo)
 
     result = _run_hook(repo)
 
@@ -95,7 +96,7 @@ def test_root_worktree_blocks_mirror_stage_without_merge_head(tmp_path):
     result = _run_hook(repo)
 
     assert result.returncode != 0
-    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_blocks_sync_merge_subject_mismatch(tmp_path):
@@ -115,7 +116,7 @@ def test_root_worktree_blocks_sync_merge_subject_mismatch(tmp_path):
     )
 
     assert result.returncode != 0
-    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_blocks_sync_merge_with_non_mirror_stage(tmp_path):
@@ -156,7 +157,7 @@ def test_root_worktree_blocks_sync_merge_with_mirror_only_stage(tmp_path):
     )
 
     assert result.returncode != 0
-    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
 
 
 @pytest.mark.parametrize(
@@ -181,7 +182,7 @@ def test_root_worktree_blocks_mirror_add_modify_delete_on_main(tmp_path, path, o
     result = _run_hook(repo)
 
     assert result.returncode != 0
-    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_blocks_incident_gemini_agent_files(tmp_path):
@@ -207,7 +208,7 @@ def test_root_worktree_blocks_incident_gemini_agent_files(tmp_path):
     )
 
     assert result.returncode != 0
-    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_blocks_sync_merge_with_unmerged_mirror_stage(tmp_path):
@@ -227,7 +228,7 @@ def test_root_worktree_blocks_sync_merge_with_unmerged_mirror_stage(tmp_path):
     )
 
     assert result.returncode != 0
-    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_blocks_commit_ready_merge_subject_mismatch(tmp_path):
@@ -251,7 +252,7 @@ def test_root_worktree_blocks_commit_ready_merge_subject_mismatch(tmp_path):
     result = _run_hook(repo)
 
     assert result.returncode != 0
-    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_blocks_unresolved_merge_with_impl_scope_stage(tmp_path):
@@ -279,7 +280,7 @@ def test_root_worktree_blocks_unresolved_merge_with_impl_scope_stage(tmp_path):
     result = _run_hook(repo)
 
     assert result.returncode != 0
-    assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_blocks_task_ledger_stage(tmp_path):
@@ -321,7 +322,7 @@ def test_root_worktree_blocks_plan_docs_stage(tmp_path):
     assert "disallowed_worktree" in (result.stdout + result.stderr)
 
 
-def test_linked_worktree_allows_impl_scope_stage(tmp_path):
+def test_linked_worktree_blocks_mirror_scope_stage(tmp_path):
     repo = _init_repo(tmp_path)
     worktree = repo / ".worktrees" / "impl-root-fence"
     _run(["git", "worktree", "add", str(worktree), "-b", "impl/root-fence"], repo)
@@ -332,7 +333,53 @@ def test_linked_worktree_allows_impl_scope_stage(tmp_path):
 
     result = _run_hook(worktree)
 
+    assert result.returncode != 0
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
+
+
+def test_linked_worktree_allows_product_scope_stage(tmp_path):
+    repo = _init_repo(tmp_path)
+    worktree = repo / ".worktrees" / "impl-product"
+    _run(["git", "worktree", "add", str(worktree), "-b", "impl/product"], repo)
+
+    target = worktree / "app" / "worker.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("linked product dirty\n", encoding="utf-8")
+    _run(["git", "add", "app/worker.py"], worktree)
+
+    result = _run_hook(worktree)
+
     assert result.returncode == 0
+
+
+def test_codex_workflow_mirror_edit_blocked_in_worktree(tmp_path):
+    repo = _init_repo(tmp_path)
+    worktree = repo / ".worktrees" / "codex-mirror-edit"
+    _run(["git", "worktree", "add", str(worktree), "-b", "codex/mirror-edit"], repo)
+
+    target = worktree / ".agents" / "skills" / "done" / "SKILL.md"
+    target.write_text("codex mirror edit\n", encoding="utf-8")
+    _run(["git", "add", ".agents/skills/done/SKILL.md"], worktree)
+
+    result = _run_hook(worktree)
+
+    assert result.returncode != 0
+    assert "mirror_surface_direct_edit_blocked" in (result.stdout + result.stderr)
+
+
+def test_github_actions_block_mirror_direct_edits_yaml_parses():
+    yaml = pytest.importorskip("yaml")
+    workflow = (
+        Path(__file__).resolve().parents[2]
+        / ".github"
+        / "workflows"
+        / "block-mirror-direct-edits.yml"
+    )
+
+    loaded = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+
+    assert loaded["name"] == "Block mirror direct edits"
+    assert "block-mirror-direct-edits" in loaded["jobs"]
 
 
 def test_root_non_main_blocks_any_commit(tmp_path):

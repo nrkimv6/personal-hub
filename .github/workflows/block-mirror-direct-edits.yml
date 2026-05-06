@@ -1,0 +1,51 @@
+name: Block mirror direct edits
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  block-mirror-direct-edits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject non-sync mirror edits
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          base_ref="origin/${{ github.base_ref }}"
+
+          mirror_paths="$(git diff --name-only "$base_ref"...HEAD | grep -E '^(\.agents/|\.agent/|\.claude/|\.gemini/)' || true)"
+          if [[ -z "$mirror_paths" ]]; then
+            echo "No mirror surface changes detected."
+            exit 0
+          fi
+
+          echo "Mirror surface changes detected:"
+          echo "$mirror_paths"
+
+          failed=0
+          while IFS= read -r commit_sha; do
+            author="$(git show -s --format='%an' "$commit_sha")"
+            subject="$(git show -s --format='%s' "$commit_sha")"
+            if [[ "$author" != "github-actions[bot]" || "$subject" != "chore: sync skills and agent files" ]]; then
+              echo "::error::Mirror surface changes must come only from the wtools sync workflow."
+              echo "::error::Blocked commit $commit_sha author='$author' subject='$subject'"
+              failed=1
+            fi
+          done < <(git rev-list "$base_ref"..HEAD)
+
+          if [[ "$failed" -ne 0 ]]; then
+            echo "Edit the wtools source, rerun the sync workflow, then receive the generated remote commit with git pull --ff-only."
+            exit 1
+          fi
+
+          echo "Mirror surface changes are from the sync workflow."
