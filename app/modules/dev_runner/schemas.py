@@ -682,6 +682,8 @@ class PlanArchiveAnalyzeResponse(BaseModel):
     saved: bool = False
     record_after: Optional[dict] = None
     save_error: Optional[str] = None
+    save_outcome_status: Optional[str] = None
+    save_outcome_reason: Optional[str] = None
 
 
 class PlanArchiveSelectedProfile(BaseModel):

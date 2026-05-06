@@ -166,6 +166,8 @@ def test_apply_success_saves_record_without_creating_request(test_db_session):
     test_db_session.refresh(record)
     assert result["success"] is True
     assert result["saved"] is True
+    assert result["save_outcome_status"] == "saved"
+    assert result["save_outcome_reason"] is None
     assert result["record_after"]["category"] == "infra"
     assert record.category == "infra"
     assert record.llm_processed_at is not None
@@ -219,7 +221,42 @@ def test_apply_save_exception_returns_save_error(test_db_session):
 
     assert result["success"] is True
     assert result["saved"] is False
+    assert result["save_outcome_status"] == "error"
+    assert result["save_outcome_reason"] == "save failed"
     assert "save failed" in result["save_error"]
+
+
+def test_apply_save_false_preserves_bool_wrapper_contract_with_outcome_metadata(test_db_session):
+    """B: save_plan_archive_result bool wrapper가 False를 반환해도 apply 응답은 reason을 보존한다."""
+    record = _add_record(test_db_session, raw_content="# Manual\ncontent")
+
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.LLMService.resolve_provider_model",
+        return_value=("codex", "gpt-5.2"),
+    ), patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.LLMService.execute_llm",
+        return_value={
+            "success": True,
+            "parsed": {
+                "category": "infra",
+                "tags": ["feat"],
+                "summary": "manual apply",
+                "superseded_by": None,
+            },
+            "raw_response": '{"category":"infra"}',
+        },
+    ), patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.save_plan_archive_result",
+        return_value=False,
+    ) as mock_save:
+        result = PlanArchiveManualAnalyzeService(test_db_session).analyze(record.id, mode="apply")
+
+    assert result["success"] is True
+    assert result["saved"] is False
+    assert result["save_error"] == "SAVE_PLAN_ARCHIVE_RESULT_FAILED"
+    assert result["save_outcome_status"] == "failed"
+    assert result["save_outcome_reason"] == "SAVE_PLAN_ARCHIVE_RESULT_FAILED"
+    mock_save.assert_called_once()
 
 
 def test_analyze_passes_resolved_provider_model_to_policy_builder(test_db_session):
