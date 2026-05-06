@@ -297,6 +297,19 @@
     }
   }
 
+  function openSelectedExecutionHistory() {
+    const record = selectedRecord;
+    if (!record) return;
+    detailTab = 'history';
+    void loadSelectedExecutionHistory(record.id);
+  }
+
+  function refreshSelectedExecutionHistory() {
+    const record = selectedRecord;
+    if (!record) return;
+    void loadSelectedExecutionHistory(record.id);
+  }
+
   function buildRetrievalFilters(includeLimit = true): PlanArchiveRetrievalQuery {
     const tags = retrievalTags
       .split(',')
@@ -1587,7 +1600,7 @@
         >분석</button>
         <button
           class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'history' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-          onclick={() => { detailTab = 'history'; void loadSelectedExecutionHistory(selectedRecord.id); }}
+          onclick={openSelectedExecutionHistory}
         >실행</button>
       </div>
       <div class="flex-1 overflow-auto">
@@ -1722,7 +1735,7 @@
                 </div>
                 <button
                   class="rounded bg-muted px-2 py-1 text-muted-foreground hover:bg-secondary disabled:opacity-50"
-                  onclick={() => loadSelectedExecutionHistory(selectedRecord.id)}
+                  onclick={refreshSelectedExecutionHistory}
                   disabled={selectedExecutionHistoryLoading}
                 >갱신</button>
               </div>
