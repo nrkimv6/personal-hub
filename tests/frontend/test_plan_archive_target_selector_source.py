@@ -7,6 +7,7 @@ STATE = ROOT / "frontend/src/routes/scheduler/plan-archive/planArchiveOperations
 DETAIL = ROOT / "frontend/src/routes/scheduler/plan-archive/PlanArchiveRequestDetailModal.svelte"
 QUEUE = ROOT / "frontend/src/routes/scheduler/plan-archive/PlanArchiveQueueTable.svelte"
 HISTORY = ROOT / "frontend/src/routes/scheduler/plan-archive/PlanArchiveHistoryTable.svelte"
+CANDIDATE_TABLE = ROOT / "frontend/src/routes/scheduler/plan-archive/PlanArchiveCandidateTable.svelte"
 API = ROOT / "frontend/src/lib/api/plan-records.ts"
 
 
@@ -89,3 +90,13 @@ def test_plan_archive_queue_detail_history_show_requested_effective_actual_targe
     assert "effectiveTargetLabel(a)" in history
     assert "actualTargetLabel(a)" in history
     assert "stale_skipped" in history
+
+
+def test_plan_archive_candidate_table_queues_same_selected_targets_for_all_actions():
+    source = CANDIDATE_TABLE.read_text(encoding="utf-8")
+
+    assert "async function queueSelected()" in source
+    assert "candidate_keys: Array.from(selectedKeys)" in source
+    assert "candidate_keys: [key]" in source
+    assert source.count("selected_targets: selectedTargets") == 3
+    assert source.count("selectedTargets.length === 0") >= 3
