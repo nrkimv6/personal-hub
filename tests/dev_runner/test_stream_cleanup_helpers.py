@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-# scripts 폴더를 sys.path에 추가
-_SCRIPTS = Path(__file__).parent.parent.parent / "scripts"
+# plan_runner scripts 폴더를 sys.path에 추가
+_SCRIPTS = Path(__file__).parent.parent.parent / "scripts" / "plan_runner"
 sys.path.insert(0, str(_SCRIPTS))
 
 from _dr_stream_cleanup import (
@@ -195,3 +195,112 @@ class TestDetermineMergeRequestedNonzeroExitUsesHelper:
         mock_hwc.assert_called_once()
         mock_subproc.assert_not_called()
         assert result is False
+
+
+def _redis_getter(values: dict[str, object]):
+    def _get(key):
+        return values.get(key)
+    return _get
+
+
+def test_has_worktree_commits_falls_back_to_plan_header_branch(tmp_path):
+    runner_id = "runner-plan-header"
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "> 상태: 구현중\n"
+        "> branch: impl/post-merge-only\n"
+        "> worktree: .worktrees/impl-post-merge-only\n\n"
+        "## TODO\n- [ ] task\n",
+        encoding="utf-8",
+    )
+    redis_client = MagicMock()
+    redis_client.get.side_effect = _redis_getter({
+        f"plan-runner:runners:{runner_id}:branch": None,
+        f"plan-runner:runners:{runner_id}:worktree_path": None,
+        f"plan-runner:runners:{runner_id}:plan_file": str(plan),
+    })
+    proc = MagicMock(returncode=0, stdout="abc123 fix\n")
+
+    with patch("subprocess.run", return_value=proc):
+        assert _has_worktree_commits(runner_id, redis_client) is True
+
+    redis_client.set.assert_any_call(f"plan-runner:runners:{runner_id}:branch", "impl/post-merge-only")
+    redis_client.set.assert_any_call(f"plan-runner:runners:{runner_id}:worktree_path", ".worktrees/impl-post-merge-only")
+
+
+def test_has_worktree_commits_falls_back_to_worktree_head(tmp_path):
+    runner_id = "runner-worktree-head"
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    redis_client = MagicMock()
+    redis_client.get.side_effect = _redis_getter({
+        f"plan-runner:runners:{runner_id}:branch": None,
+        f"plan-runner:runners:{runner_id}:worktree_path": str(worktree),
+        f"plan-runner:runners:{runner_id}:plan_file": None,
+        f"plan-runner:recent-meta:{runner_id}": None,
+    })
+    rev_parse = MagicMock(returncode=0, stdout="impl/from-head\n")
+    log = MagicMock(returncode=0, stdout="abc123 fix\n")
+
+    with patch("subprocess.run", side_effect=[rev_parse, log]):
+        assert _has_worktree_commits(runner_id, redis_client) is True
+
+    redis_client.set.assert_any_call(f"plan-runner:runners:{runner_id}:branch", "impl/from-head")
+    redis_client.set.assert_any_call(f"plan-runner:runners:{runner_id}:worktree_path", str(worktree))
+
+
+def test_has_worktree_commits_no_evidence_returns_false_with_log():
+    runner_id = "runner-no-evidence"
+    redis_client = MagicMock()
+    redis_client.get.side_effect = _redis_getter({
+        f"plan-runner:runners:{runner_id}:branch": None,
+        f"plan-runner:runners:{runner_id}:worktree_path": None,
+        f"plan-runner:runners:{runner_id}:plan_file": None,
+        f"plan-runner:recent-meta:{runner_id}": None,
+    })
+
+    with patch("_dr_stream_cleanup._pub_and_log") as pub:
+        assert _has_worktree_commits(runner_id, redis_client) is False
+
+    assert any("MERGE-EVIDENCE-MISSING" in call.args[1] for call in pub.call_args_list)
+
+
+def test_determine_merge_requested_reads_suffix_key_only():
+    runner_id = "runner-suffix-only"
+    ctx = _make_ctx(runner_id=runner_id, exit_code=0, completed_for_flow=True)
+    ctx.redis_client.get.side_effect = _redis_getter({
+        f"plan-runner:runners:{runner_id}:merge_requested": None,
+        f"plan-runner:runner:{runner_id}": {"merge_requested": "true"},
+    })
+
+    with patch("_dr_stream_cleanup._has_worktree_commits", return_value=False):
+        assert _determine_merge_requested(ctx) is False
+
+    requested_keys = [call.args[0] for call in ctx.redis_client.get.call_args_list]
+    assert f"plan-runner:runners:{runner_id}:merge_requested" in requested_keys
+    assert f"plan-runner:runner:{runner_id}" not in requested_keys
+
+
+def test_completed_post_merge_only_without_merge_requested_updates_merge_pending(tmp_path):
+    runner_id = "runner-post-merge-only"
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "> 상태: 구현중\n\n"
+        "### Phase T4: E2E\n\n"
+        "- [ ] run e2e\n",
+        encoding="utf-8",
+    )
+    wf_manager = MagicMock()
+    wf_manager.get_by_runner_id.return_value = {"id": 77}
+    ctx = _make_ctx(runner_id=runner_id, exit_code=0, completed_for_flow=True, wf_manager=wf_manager)
+    ctx.redis_client.get.side_effect = _redis_getter({
+        f"plan-runner:runners:{runner_id}:plan_file": str(plan),
+    })
+
+    with patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_stream_cleanup._do_inline_merge") as merge, \
+         patch("_dr_stream_cleanup._cleanup_process_state"):
+        _update_workflow_and_execute_cleanup(ctx, merge_requested=False)
+
+    wf_manager.update_status.assert_called_once_with(77, "merge_pending")
+    merge.assert_called_once_with(runner_id, ctx.redis_client)

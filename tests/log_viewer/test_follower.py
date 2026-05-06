@@ -546,7 +546,7 @@ class TestStaticSourceWatcher:
         assert watcher._last_refresh == -float("inf")
 
         tailer = MultiTailer()
-        log_file = tmp_path / "tst_20260407_000000.log"
+        log_file = tmp_path / f"tst_{time.strftime('%Y%m%d')}_000000.log"
         log_file.write_text("hello\n", encoding="utf-8")
 
         # 첫 호출 즉시 실행 확인 — 10초 기다릴 필요 없음

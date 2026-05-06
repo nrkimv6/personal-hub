@@ -5,6 +5,7 @@
 
   let {
     redisStatus,
+    dbStatus,
     devRunnerStatus,
     allStartups,
     actionLoading,
@@ -19,6 +20,18 @@
     removeStartup,
     restartCommandListener
   }: InfrastructureSectionProps = $props();
+
+  const dbVariant = (state: string | undefined): 'success' | 'warning' | 'error' => {
+    if (state === 'open') return 'error';
+    if (state === 'half_open') return 'warning';
+    return 'success';
+  };
+
+  const dbLabel = (state: string | undefined) => {
+    if (state === 'open') return 'DB 장애';
+    if (state === 'half_open') return '복구 확인 중';
+    return '정상';
+  };
 </script>
 
 <div class="bg-card rounded-lg border border-border shadow-card p-4">
@@ -52,6 +65,33 @@
           <span>Uptime: {formatUptime(redisStatus.uptime_seconds)}</span>
           <span>Mem: {redisStatus.used_memory_mb ?? '-'}MB</span>
           <span>Clients: {redisStatus.connected_clients ?? '-'}</span>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  {#if dbStatus}
+    <div class="mb-3 pb-3 border-b border-border">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <StatusDot
+            variant={dbVariant(dbStatus.state)}
+            size="md"
+            pulse={dbStatus.state === 'closed'}
+          />
+          <span class="font-medium text-sm">Database</span>
+          <StatusBadge variant={dbVariant(dbStatus.state)} size="sm">
+            {dbLabel(dbStatus.state)}
+          </StatusBadge>
+        </div>
+      </div>
+      <div class="flex gap-3 text-[10px] text-muted-foreground px-1">
+        <span>State: {dbStatus.state}</span>
+        <span>Failures: {dbStatus.fail_count}</span>
+      </div>
+      {#if dbStatus.last_failure_iso}
+        <div class="text-[10px] text-muted-foreground px-1">
+          Last failure: {formatCollectedAt(dbStatus.last_failure_iso)}
         </div>
       {/if}
     </div>

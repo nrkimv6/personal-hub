@@ -2,6 +2,8 @@
 	import { devRunnerPlanApi } from '$lib/api';
 	import type { DevRunnerPlanFileResponse, DevRunnerRegisteredPathResponse } from '$lib/api';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
+	import { confirm } from '$lib/stores/confirm';
+	import { Eye } from 'lucide-svelte';
 
 	let doneLoadingPath = $state<string | null>(null);
 	let doneMessage = $state<{ path: string; success: boolean; text: string; remaining?: number; total?: number; planStatus?: string } | null>(null);
@@ -10,7 +12,11 @@
 
 	async function handleDone(e: Event, plan: DevRunnerPlanFileResponse) {
 		e.stopPropagation();
-		if (!confirm('완료 처리를 실행하시겠습니까?\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.')) return;
+		if (!await confirm({
+			title: '완료 처리',
+			message: '완료 처리를 실행하시겠습니까?\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.',
+			confirmText: '실행'
+		})) return;
 		doneLoadingPath = plan.path;
 		doneMessage = null;
 		try {
@@ -36,7 +42,12 @@
 
 	async function handleBatchDone() {
 		// 백엔드가 무시 목록(구현완료 등) 포함 전체 대상 처리
-		if (!confirm('완료 가능한 plan을 일괄 완료 처리하시겠습니까?\n(구현완료 상태 포함)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.')) return;
+		if (!await confirm({
+			title: '완료 일괄 처리',
+			message: '완료 가능한 plan을 일괄 완료 처리하시겠습니까?\n(구현완료 상태 포함)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.',
+			confirmText: '일괄 처리',
+			variant: 'danger'
+		})) return;
 		batchDoneLoading = true;
 		doneMessage = null;
 		try {
@@ -56,7 +67,12 @@
 	}
 
 	async function handleBatchVerifyDone() {
-		if (!confirm('코드베이스 검증 기반으로 완료 가능한 plan을 일괄 처리하시겠습니까?\n(파일 존재 여부 + 체크박스 기반 판정)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.')) return;
+		if (!await confirm({
+			title: '검증 기반 완료 처리',
+			message: '코드베이스 검증 기반으로 완료 가능한 plan을 일괄 처리하시겠습니까?\n(파일 존재 여부 + 체크박스 기반 판정)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.',
+			confirmText: '일괄 처리',
+			variant: 'danger'
+		})) return;
 		batchVerifyDoneLoading = true;
 		doneMessage = null;
 		try {
@@ -111,9 +127,10 @@
 		lastPlanFile?: string | null;
 		batchPlans?: BatchPlanItem[];
 		onPlanModalOpen?: (plan: DevRunnerPlanFileResponse) => void;
+		onPlanPreviewOpen?: (plan: DevRunnerPlanFileResponse) => void;
 	}
 
-	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanModalOpen }: Props = $props();
+	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanModalOpen, onPlanPreviewOpen }: Props = $props();
 
 	function parsePlanFilename(filename: string) {
 		const match = filename.match(/^(\d{4}-\d{2}-\d{2})_(.+)$/);
@@ -134,17 +151,17 @@
 	}
 
 	function getPlanItemBg(plan: DevRunnerPlanFileResponse, isRunning: boolean, isLastRun: boolean, batchStatus: string | null) {
-		if (isArchivePlan(plan)) return 'bg-gray-100 opacity-50 cursor-not-allowed';
+		if (isArchivePlan(plan)) return 'bg-muted opacity-50 cursor-not-allowed';
 		if (batchStatus === 'running') return 'border border-cyan-300 bg-cyan-50';
 		if (isRunning) return 'border border-green-300 bg-green-50';
-		if (batchStatus === 'done' || isLastRun) return 'bg-gray-50 opacity-60';
+		if (batchStatus === 'done' || isLastRun) return 'bg-muted opacity-60';
 
 		const status = plan.status;
 		if (status === '구현중') return 'bg-blue-50/50 hover:bg-blue-100/50';
-		if (status === '완료' || status === '배포완료') return 'bg-gray-700 text-white hover:bg-gray-800';
-		if (['구현완료', '수정 완료', '수정완료'].includes(status)) return 'bg-gray-200 opacity-60 hover:opacity-100';
+		if (status === '완료' || status === '배포완료') return 'bg-foreground text-background hover:bg-foreground/90';
+		if (['구현완료', '수정 완료', '수정완료'].includes(status)) return 'bg-muted opacity-60 hover:opacity-100';
 
-		return 'bg-white hover:bg-gray-50';
+		return 'bg-card hover:bg-muted';
 	}
 
 	// batch plan name → status 매핑
@@ -164,10 +181,12 @@
 	}
 
 	let showIgnored = $state(false);
+	let editingPlans = $state(false);
 	let ignoredPlans = $state<DevRunnerPlanFileResponse[]>([]);
 	let ignoredLoading = $state(false);
 	let showAddForm = $state(false);
 	let newPath = $state('');
+	let newPathType = $state<'plan' | 'archive'>('plan');
 	let addError = $state<string | null>(null);
 	let addLoading = $state(false);
 
@@ -180,6 +199,11 @@
 
 	function handlePlanSelect(plan: DevRunnerPlanFileResponse) {
 		onPlanModalOpen?.(plan);
+	}
+
+	function handlePlanPreview(e: Event, plan: DevRunnerPlanFileResponse) {
+		e.stopPropagation();
+		onPlanPreviewOpen?.(plan);
 	}
 
 	async function handleGenerateSummary(e: Event, plan: DevRunnerPlanFileResponse) {
@@ -229,7 +253,7 @@
 		addLoading = true;
 		addError = null;
 		try {
-			await devRunnerPlanApi.addPath(newPath.trim());
+			await devRunnerPlanApi.addPath(newPath.trim(), newPathType);
 			newPath = '';
 			onPlansChange?.();
 			await loadRegisteredPaths();
@@ -279,10 +303,10 @@
 			'구현중': 'bg-blue-100 text-blue-700 border border-blue-200',
 			'구현완료': 'bg-green-100 text-green-700 border border-green-200',
 			'검토완료': 'bg-purple-100 text-purple-700 border border-purple-200',
-			'초안': 'bg-gray-100 text-gray-600',
+			'초안': 'bg-muted text-muted-foreground',
 			'보류': 'bg-yellow-100 text-yellow-700 border border-yellow-200'
 		};
-		return map[status] || 'bg-gray-100 text-gray-600';
+		return map[status] || 'bg-muted text-muted-foreground';
 	}
 
 	let displayPlans = $derived.by(() => {
@@ -341,6 +365,15 @@
 				{/if}
 			</button>
 			<button
+				class="h-6 px-2 text-[10px] rounded transition-colors inline-flex items-center gap-1 {editingPlans ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'}"
+				onclick={() => editingPlans = !editingPlans}
+				title={editingPlans ? '편집 모드 끄기' : '편집 모드'}
+				aria-pressed={editingPlans}
+			>
+				<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+				편집
+			</button>
+			<button
 				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors inline-flex items-center gap-1"
 				onclick={() => { showAddForm = !showAddForm; if (showAddForm) loadRegisteredPaths(); }}
 			>
@@ -362,6 +395,13 @@
 				placeholder="Plan 파일 또는 폴더 경로 (예: D:\work\project\...)"
 			/>
 			<div class="flex gap-2">
+				<select
+					bind:value={newPathType}
+					class="text-xs px-2 py-1 border border-border rounded bg-background text-foreground focus:outline-none"
+				>
+					<option value="plan">plan</option>
+					<option value="archive">archive</option>
+				</select>
 				<button
 					class="text-xs px-3 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
 					onclick={handleAddPath}
@@ -370,7 +410,7 @@
 					{addLoading ? '추가 중...' : '추가'}
 				</button>
 				<button
-					class="text-xs px-3 py-1 rounded bg-gray-200 text-gray-600 hover:bg-gray-300"
+					class="text-xs px-3 py-1 rounded bg-muted text-muted-foreground hover:bg-secondary"
 					onclick={() => { showAddForm = false; addError = null; }}
 				>
 					취소
@@ -391,7 +431,7 @@
 						{:else}
 							<svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
 						{/if}
-						<span class="truncate flex-1 text-gray-600" title={ep.path}>{ep.path}</span>
+						<span class="truncate flex-1 text-muted-foreground" title={ep.path}>{ep.path}</span>
 						<span class="shrink-0 text-gray-400 font-mono">{ep.plan_count}개</span>
 						<button
 							class="shrink-0 text-red-400 hover:text-red-600 px-1"
@@ -446,111 +486,126 @@
 						role="button"
 						tabindex={isArchive ? -1 : 0}
 						title={isArchive ? `아카이브됨: ${plan.path}` : plan.path}
-						class="group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
+						class="group flex min-h-[4rem] flex-col gap-1 rounded-md px-2.5 py-2 text-left transition-colors w-full
 							{isArchive ? '' : 'cursor-pointer'}
 							{getPlanItemBg(plan, isRunning, isLastRun, batchStatus)}"
 					>
-						<!-- Running indicator dot -->
-						{#if isRunning}
-							<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"></span>
-						{:else if plan.path_type === 'folder'}
-							<svg class="w-3.5 h-3.5 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-						{:else}
-							<svg class="w-3.5 h-3.5 shrink-0 {isArchive ? 'text-gray-300' : isLastRun ? 'text-gray-300' : 'text-gray-400'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-						{/if}
-
-						<!-- filename (name + date below) -->
-						<div class="flex flex-col flex-1 min-w-0">
-							<span class="text-xs font-medium truncate {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">
+						<div class="flex w-full min-w-0 items-center gap-2">
+							<!-- Running indicator dot -->
+							{#if isRunning}
+								<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"></span>
+							{:else if plan.path_type === 'folder'}
+								<svg class="w-3.5 h-3.5 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+							{:else}
+								<svg class="w-3.5 h-3.5 shrink-0 {isArchive ? 'text-gray-300' : isLastRun ? 'text-gray-300' : 'text-gray-400'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+							{/if}
+							<span class="min-w-0 flex-1 truncate text-xs font-medium {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">
 								{parsedFilename.name}
 							</span>
-							{#if parsedFilename.date}
-								<span class="text-[9px] text-gray-400 font-mono">{formatDate(parsedFilename.date)}</span>
-							{/if}
 						</div>
 
-						{#if isArchive}
-							<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-200 text-gray-400">아카이브</span>
-						{:else if plan.status === '구현완료'}
-							<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 text-[10px] font-mono uppercase whitespace-nowrap rounded {statusBadge('구현완료')}">구현완료</span>
-						{:else if showIgnored && plan.status === '보류'}
-							<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 text-[10px] font-mono uppercase whitespace-nowrap rounded {statusBadge('보류')}">보류</span>
-						{/if}
+						<div class="flex w-full min-w-0 items-center gap-1.5 pl-5 text-[10px] text-gray-400">
+							{#if parsedFilename.date}
+								<span class="shrink-0 font-mono">{formatDate(parsedFilename.date)}</span>
+							{/if}
+							{#if isArchive}
+								<span class="shrink-0 font-mono px-1.5 py-0.5 rounded bg-gray-200 text-gray-400">아카이브</span>
+							{:else if plan.status === '구현완료'}
+								<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 font-mono uppercase whitespace-nowrap rounded {statusBadge('구현완료')}">구현완료</span>
+							{:else if showIgnored && plan.status === '보류'}
+								<span class="shrink-0 inline-flex items-center justify-center px-2 py-0.5 font-mono uppercase whitespace-nowrap rounded {statusBadge('보류')}">보류</span>
+							{/if}
 
-						{#if plan.branch}
-							<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-100 text-purple-700 shrink-0" title={plan.worktree_owner ?? plan.branch}>{plan.branch}</span>
-						{/if}
+							{#if batchStatus === 'running'}
+								<span class="shrink-0 px-1 py-0 rounded text-cyan-600 bg-cyan-100">실행중</span>
+							{:else if batchStatus === 'done'}
+								<span class="shrink-0 text-gray-400">완료</span>
+							{/if}
+							<span class="shrink-0 font-mono {plan.progress != null && plan.progress.done === plan.progress.total && plan.progress.total > 0 ? 'text-emerald-600' : batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress != null && plan.progress.total > 0 ? `${plan.progress.done}/${plan.progress.total} (${Math.round((plan.progress.done / plan.progress.total) * 100)}%)` : '—'}</span>
 
-						{#if batchStatus === 'running'}
-							<span class="text-[10px] px-1 py-0 rounded text-cyan-600 bg-cyan-100">실행중</span>
-						{:else if batchStatus === 'done'}
-							<span class="text-[10px] text-gray-400">완료</span>
-						{/if}
-						<span class="text-[10px] font-mono shrink-0 {plan.progress != null && plan.progress.done === plan.progress.total && plan.progress.total > 0 ? 'text-emerald-600' : batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress != null && plan.progress.total > 0 ? `${plan.progress.done}/${plan.progress.total}` : '—'}</span>
+							{#if plan.execution_claim_state === 'active'}
+								<span class="shrink-0 px-1 py-0 rounded text-blue-600 bg-blue-100">실행중</span>
+							{:else if plan.execution_claim_state === 'queued'}
+								<span class="shrink-0 px-1 py-0 rounded text-amber-600 bg-amber-100">예약중</span>
+							{/if}
 
-						<!-- Done button: canDone OR lastPlanFile -->
-						{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-								onclick={(e) => handleDone(e, plan)}
-								disabled={doneLoadingPath === plan.path}
-								title="완료 처리 (아카이브, TODO→DONE, 커밋)"
-							>
-								{#if doneLoadingPath === plan.path}
-									<svg class="w-3.5 h-3.5 animate-spin text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
-								{:else}
-									<svg class="w-3.5 h-3.5 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+							<div class="ml-auto flex shrink-0 items-center gap-1">
+								{#if !isArchive}
+									<button
+										class="shrink-0 p-1 rounded hover:bg-blue-100"
+										onclick={(e) => handlePlanPreview(e, plan)}
+										title="계획서 전문 보기"
+										aria-label="계획서 전문 보기"
+									>
+										<Eye class="w-3.5 h-3.5 text-blue-500" />
+									</button>
 								{/if}
-							</button>
-						{/if}
 
-						<!-- Hold button (활성 목록에서만, 무시 목록 아닐 때) -->
-						{#if !showIgnored && !isRunning && plan.status !== '보류'}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-yellow-100 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-								onclick={(e) => handleHold(e, plan)}
-								title="보류"
-							>
-								<svg class="w-3 h-3 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-							</button>
-						{/if}
+								<!-- Done button: canDone OR lastPlanFile -->
+								{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}
+									<button
+										class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50"
+										onclick={(e) => handleDone(e, plan)}
+										disabled={doneLoadingPath === plan.path}
+										title="완료 처리 (아카이브, TODO→DONE, 커밋)"
+									>
+										{#if doneLoadingPath === plan.path}
+											<svg class="w-3.5 h-3.5 animate-spin text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
+										{:else}
+											<svg class="w-3.5 h-3.5 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+										{/if}
+									</button>
+								{/if}
 
-						<!-- Unhold button (무시 목록에서 보류 상태일 때) -->
-						{#if showIgnored && plan.status === '보류'}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-blue-100 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity"
-								onclick={(e) => handleUnhold(e, plan)}
-								title="보류 해제"
-							>
-								<svg class="w-3 h-3 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-							</button>
-						{/if}
+								{#if editingPlans}
+									{#if !showIgnored && !isRunning && plan.status !== '보류'}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-yellow-100"
+											onclick={(e) => handleHold(e, plan)}
+											title="보류"
+										>
+											<svg class="w-3 h-3 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+										</button>
+									{/if}
 
-						{#if showIgnored}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-gray-200"
-								onclick={(e) => handleUnignore(e, plan.path)}
-								title="무시 해제"
-							>
-								<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-							</button>
-						{:else}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-gray-200"
-								onclick={(e) => handleIgnore(e, plan.path)}
-								title="무시"
-							>
-								<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-							</button>
-						{/if}
+									{#if showIgnored && plan.status === '보류'}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-blue-100"
+											onclick={(e) => handleUnhold(e, plan)}
+											title="보류 해제"
+										>
+											<svg class="w-3 h-3 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+										</button>
+									{/if}
 
-						{#if plan.path_type !== null}
-							<button
-								class="shrink-0 p-1 rounded hover:bg-gray-200 text-[10px] text-red-400 hover:text-red-600"
-								onclick={(e) => handleRemovePath(e, plan.path)}
-								title="등록 해제"
-							>×</button>
-						{/if}
+									{#if showIgnored}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-gray-200"
+											onclick={(e) => handleUnignore(e, plan.path)}
+											title="무시 해제"
+										>
+											<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+										</button>
+									{:else}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-gray-200"
+											onclick={(e) => handleIgnore(e, plan.path)}
+											title="무시"
+										>
+											<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+										</button>
+									{/if}
+
+									{#if plan.path_type !== null}
+										<button
+											class="shrink-0 p-1 rounded hover:bg-gray-200 text-[10px] text-red-400 hover:text-red-600"
+											onclick={(e) => handleRemovePath(e, plan.path)}
+											title="등록 해제"
+										>×</button>
+									{/if}
+								{/if}
+							</div>
+						</div>
 					</div>
 
 					{/each}

@@ -141,3 +141,63 @@ class TestListRegisteredPaths:
         matching = [p for p in paths if "counted_folder" in p.path]
         assert len(matching) == 1
         assert matching[0].plan_count == 2
+
+
+class TestJsonStorageAtomicWrite:
+
+    def test_plan_service_registered_paths_write_failure_keeps_file(
+        self, tmp_path, dev_runner_config_isolation, monkeypatch
+    ):
+        """registered_paths 저장 실패 시 기존 JSON을 유지한다."""
+        import app.modules.dev_runner.services.plan_service as plan_service_module
+        from app.modules.dev_runner.services.plan_service import PlanService
+
+        cfg = dev_runner_config_isolation
+        reg_file = tmp_path / "registered_paths.json"
+        ign_file = tmp_path / "ignored_plans.json"
+        before = [{"path": str(tmp_path / "existing"), "type": "plan"}]
+        reg_file.write_text(json.dumps(before), encoding="utf-8")
+        ign_file.write_text("[]", encoding="utf-8")
+        cfg.REGISTERED_PATHS_FILE = reg_file
+        cfg.IGNORED_PLANS_FILE = ign_file
+
+        svc = PlanService()
+        svc._registered_paths.append({"path": str(tmp_path / "new"), "type": "plan"})
+
+        def fail_write(path, payload):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(plan_service_module, "write_json_atomic", fail_write)
+
+        with pytest.raises(OSError):
+            svc._save_registered_paths()
+
+        assert json.loads(reg_file.read_text(encoding="utf-8")) == before
+
+    def test_plan_path_registry_ignored_plans_write_failure_keeps_file(
+        self, tmp_path, dev_runner_config_isolation, monkeypatch
+    ):
+        """ignored_plans 저장 실패 시 기존 JSON을 유지한다."""
+        import app.modules.dev_runner.services.plan_path_registry as registry_module
+
+        cfg = dev_runner_config_isolation
+        reg_file = tmp_path / "registered_paths.json"
+        ign_file = tmp_path / "ignored_plans.json"
+        before = [str(tmp_path / "old.md")]
+        reg_file.write_text("[]", encoding="utf-8")
+        ign_file.write_text(json.dumps(before), encoding="utf-8")
+        cfg.REGISTERED_PATHS_FILE = reg_file
+        cfg.IGNORED_PLANS_FILE = ign_file
+
+        registry = registry_module.PlanPathRegistry()
+        registry._ignored_plans.append(str(tmp_path / "new.md"))
+
+        def fail_write(path, payload):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(registry_module, "write_json_atomic", fail_write)
+
+        with pytest.raises(OSError):
+            registry._save_ignored_plans()
+
+        assert json.loads(ign_file.read_text(encoding="utf-8")) == before

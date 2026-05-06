@@ -4,7 +4,7 @@ executor_service.start_dev_runner() — session_id 발급/저장 TC (Phase T1 it
 import json
 import uuid
 from datetime import datetime
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 import fakeredis
@@ -17,8 +17,11 @@ from app.modules.dev_runner.services.executor_service import executor_service
 def mock_executor_redis():
     fake_sync = fakeredis.FakeRedis(decode_responses=True)
     fake_async = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    mock_claim = MagicMock()
+    mock_claim.claim_id = "test-claim-id"
     with patch.object(executor_service, 'redis_client', fake_sync), \
-         patch.object(executor_service, 'async_redis', fake_async):
+         patch.object(executor_service, 'async_redis', fake_async), \
+         patch('app.modules.dev_runner.services.plan_execution_claim_service.claim_plan', return_value=mock_claim):
         yield {"async": fake_async, "sync": fake_sync}
 
 

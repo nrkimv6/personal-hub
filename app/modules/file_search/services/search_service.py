@@ -7,31 +7,73 @@ both 모드: file_path 기준 중복 제거 — content 매칭 파일은 matches
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.models.file_search_request import FileSearchRequest
 from app.modules.file_search.schemas import (
     BrowseResponse,
     ContentMatch,
     DirectoryItem,
     FileMatch,
+    FilePreviewResponse,
+    FrequentSearchComboItem,
+    SearchHistoryItem,
     SearchRequest,
     SearchResponse,
+    SearchSuggestionItem,
     StatusResponse,
 )
 from app.modules.file_search.services.everything import EverythingService
 from app.modules.file_search.services.presets import PRESETS
 from app.modules.file_search.services.ripgrep import RipgrepService
+from app.shared.process.session import is_session_0
 
 logger = logging.getLogger("file_search.search_service")
 
 _everything = EverythingService()
 _ripgrep = RipgrepService()
+
+PREVIEW_TEXT_EXTENSIONS = {
+    ".md",
+    ".txt",
+    ".text",
+    ".py",
+    ".ps1",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".svelte",
+    ".json",
+    ".yml",
+    ".yaml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".sql",
+    ".css",
+    ".html",
+    ".xml",
+    ".csv",
+    ".log",
+}
+
+MAX_PREVIEW_BYTES = 256 * 1024
+KNOWN_SEARCH_ORIGINS = {"file-search", "plan-quick"}
+
+
+class FilePreviewError(Exception):
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
 
 
 class SearchService:
@@ -66,12 +108,354 @@ class SearchService:
             truncated=truncated,
         )
 
+    @staticmethod
+    def _safe_json_loads(raw: Optional[str]) -> Optional[dict]:
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _normalize_query(query: str) -> str:
+        # Normalize for suggestions: ignore case and collapse whitespace.
+        return " ".join(query.lower().split())
+
+    @staticmethod
+    def _normalize_combo_values(values: Any, *, casefold: bool = False) -> tuple[str, ...]:
+        if not isinstance(values, list):
+            return ()
+        normalized: list[str] = []
+        for value in values:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            normalized.append(text.lower() if casefold else text)
+        return tuple(sorted(set(normalized)))
+
+    def _normalize_combo_key(self, request: SearchRequest) -> tuple:
+        return (
+            self._normalize_query(request.query),
+            request.mode,
+            bool(request.regex),
+            bool(request.case_sensitive),
+            (request.preset or "").strip().lower(),
+            self._normalize_combo_values(request.paths, casefold=True),
+            self._normalize_combo_values(request.extensions, casefold=True),
+            self._normalize_combo_values(request.excludes, casefold=True),
+        )
+
+    @staticmethod
+    def _summarize_paths(paths: list[str]) -> list[str]:
+        tokens: list[str] = []
+        for path in paths[:2]:
+            raw = str(path).strip()
+            if not raw:
+                continue
+            label = os.path.basename(raw.rstrip("\\/")) or raw
+            tokens.append(label)
+        extra = len(paths) - len(tokens)
+        if extra > 0:
+            tokens.append(f"+경로 {extra}")
+        return tokens
+
+    @staticmethod
+    def _build_summary_tokens(request: SearchRequest) -> list[str]:
+        mode_labels = {
+            "filename": "파일명",
+            "content": "내용",
+            "both": "둘다",
+        }
+        tokens: list[str] = [mode_labels.get(request.mode, request.mode)]
+
+        if request.preset:
+            tokens.append(f"프리셋:{request.preset}")
+
+        if request.regex:
+            tokens.append("정규식")
+        if request.case_sensitive:
+            tokens.append("대소문자")
+
+        tokens.extend(SearchService._summarize_paths(list(request.paths)))
+
+        if request.extensions:
+            tokens.extend([f".{ext.lstrip('.')}" for ext in list(request.extensions)[:2]])
+            if len(request.extensions) > 2:
+                tokens.append(f"+확장자 {len(request.extensions) - 2}")
+
+        if request.excludes:
+            first_exclude = str(request.excludes[0]).strip()
+            if first_exclude:
+                tokens.append(f"제외:{first_exclude}")
+            if len(request.excludes) > 1:
+                tokens.append(f"+제외 {len(request.excludes) - 1}")
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for token in tokens:
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            deduped.append(token)
+        return deduped
+
+    @staticmethod
+    def _normalize_history_origin(req_data: dict[str, Any]) -> str:
+        origin = str(req_data.get("origin") or "file-search").strip()
+        if origin not in KNOWN_SEARCH_ORIGINS:
+            return "file-search"
+        return origin
+
+    def _parse_history_request(self, req_data: Optional[dict[str, Any]]) -> Optional[SearchRequest]:
+        if not req_data:
+            return None
+
+        normalized = dict(req_data)
+        normalized["origin"] = self._normalize_history_origin(normalized)
+        try:
+            return SearchRequest(**normalized)
+        except Exception:
+            return None
+
+    def _iter_completed_origin_rows(
+        self,
+        db: Session,
+        *,
+        origin: str,
+        target_matches: int,
+        chunk_size: int = 250,
+        max_scanned_rows: Optional[int] = None,
+    ) -> List[tuple[FileSearchRequest, SearchRequest]]:
+        if target_matches <= 0:
+            return []
+
+        if max_scanned_rows is None:
+            max_scanned_rows = max(chunk_size, target_matches * 5)
+        max_scanned_rows = max(chunk_size, max_scanned_rows)
+
+        matched_rows: List[tuple[FileSearchRequest, SearchRequest]] = []
+        offset = 0
+        scanned_rows = 0
+
+        while scanned_rows < max_scanned_rows and len(matched_rows) < target_matches:
+            rows_to_fetch = min(chunk_size, max_scanned_rows - scanned_rows)
+            rows = (
+                db.query(FileSearchRequest)
+                .filter(FileSearchRequest.status == FileSearchRequest.STATUS_COMPLETED)
+                .order_by(FileSearchRequest.created_at.desc(), FileSearchRequest.id.desc())
+                .offset(offset)
+                .limit(rows_to_fetch)
+                .all()
+            )
+            if not rows:
+                break
+
+            offset += len(rows)
+            scanned_rows += len(rows)
+
+            for row in rows:
+                request = self._parse_history_request(self._safe_json_loads(row.request_json))
+                if not request:
+                    continue
+                if origin and request.origin != origin:
+                    continue
+
+                matched_rows.append((row, request))
+                if len(matched_rows) >= target_matches:
+                    break
+
+        return matched_rows
+
+    def get_history(self, db: Session, limit: int = 20, origin: str = "file-search") -> List[SearchHistoryItem]:
+        """최근 검색 이력 (저장된 스냅샷 기반).
+
+        - v1: request_json/result_json 파싱 기반, 별도 마이그레이션 없음
+        - completed만 반환 (UI에서 스냅샷 복원용)
+        """
+        rows = self._iter_completed_origin_rows(
+            db,
+            origin=origin,
+            target_matches=limit,
+            chunk_size=100,
+            max_scanned_rows=max(5000, limit * 50),
+        )
+
+        items: List[SearchHistoryItem] = []
+        for row, request in rows:
+            query = request.query.strip()
+            if not query:
+                continue
+
+            result_data = self._safe_json_loads(row.result_json) if row.result_json else None
+            total_count = 0
+            sample_files: List[str] = []
+            if result_data:
+                try:
+                    total_count = int(result_data.get("total_count") or 0)
+                except (TypeError, ValueError):
+                    total_count = 0
+
+                raw_results = result_data.get("results") or []
+                if isinstance(raw_results, list):
+                    for r in raw_results[:10]:
+                        if not isinstance(r, dict):
+                            continue
+                        name = r.get("file_name")
+                        if not name:
+                            fp = r.get("file_path") or ""
+                            name = os.path.basename(fp) if fp else ""
+                        if name:
+                            sample_files.append(str(name))
+
+            # Deduplicate while preserving order.
+            dedup: List[str] = []
+            seen = set()
+            for name in sample_files:
+                if name in seen:
+                    continue
+                seen.add(name)
+                dedup.append(name)
+            sample_files = dedup[:5]
+
+            search_time_ms = 0
+            try:
+                search_time_ms = int(row.search_time_ms or 0)
+            except (TypeError, ValueError):
+                search_time_ms = 0
+            if search_time_ms == 0 and result_data:
+                try:
+                    search_time_ms = int(result_data.get("search_time_ms") or 0)
+                except (TypeError, ValueError):
+                    search_time_ms = 0
+
+            items.append(
+                SearchHistoryItem(
+                    search_id=row.search_id,
+                    request=request,
+                    query=query,
+                    mode=request.mode,
+                    created_at=row.created_at,
+                    total_count=total_count,
+                    search_time_ms=search_time_ms,
+                    sample_files=sample_files,
+                    origin=request.origin,
+                )
+            )
+
+        return items
+
+    def get_suggestions(self, db: Session, limit: int = 10, origin: str = "file-search") -> List[SearchSuggestionItem]:
+        """검색어 추천 (최근 completed 이력 기반)."""
+        rows = self._iter_completed_origin_rows(
+            db,
+            origin=origin,
+            target_matches=2000,
+            chunk_size=250,
+            max_scanned_rows=10000,
+        )
+
+        buckets: dict[str, dict] = {}
+        for row, request in rows:
+            query_raw = request.query.strip()
+            if not query_raw:
+                continue
+
+            norm = self._normalize_query(query_raw)
+            if not norm:
+                continue
+
+            bucket = buckets.get(norm)
+            if not bucket:
+                buckets[norm] = {
+                    "query": query_raw,
+                    "count": 1,
+                    "last_used_at": row.created_at or "",
+                }
+                continue
+
+            bucket["count"] += 1
+            created_at = row.created_at or ""
+            if created_at and created_at >= bucket["last_used_at"]:
+                bucket["last_used_at"] = created_at
+                bucket["query"] = query_raw
+
+        suggestions = [
+            SearchSuggestionItem(
+                query=v["query"],
+                count=int(v["count"]),
+                last_used_at=v["last_used_at"],
+            )
+            for v in buckets.values()
+        ]
+        suggestions.sort(key=lambda s: (s.count, s.last_used_at), reverse=True)
+        return suggestions[:limit]
+
+    def get_frequent_combos(
+        self, db: Session, limit: int = 10, origin: str = "file-search"
+    ) -> List[FrequentSearchComboItem]:
+        """검색 폼 조합 추천 (최근 completed 이력 기반)."""
+        rows = self._iter_completed_origin_rows(
+            db,
+            origin=origin,
+            target_matches=2000,
+            chunk_size=250,
+            max_scanned_rows=10000,
+        )
+
+        buckets: dict[tuple, dict[str, Any]] = {}
+        for row, request in rows:
+            if not request.query.strip():
+                continue
+
+            key = self._normalize_combo_key(request)
+            if not key[0]:
+                continue
+
+            bucket = buckets.get(key)
+            if not bucket:
+                buckets[key] = {
+                    "request": request,
+                    "label": request.query.strip(),
+                    "count": 1,
+                    "last_used_at": row.created_at or "",
+                    "summary_tokens": self._build_summary_tokens(request),
+                }
+                continue
+
+            bucket["count"] += 1
+            created_at = row.created_at or ""
+            if created_at and created_at >= bucket["last_used_at"]:
+                bucket["request"] = request
+                bucket["label"] = request.query.strip()
+                bucket["last_used_at"] = created_at
+                bucket["summary_tokens"] = self._build_summary_tokens(request)
+
+        items = [
+            FrequentSearchComboItem(
+                request=value["request"],
+                label=value["label"],
+                count=int(value["count"]),
+                last_used_at=value["last_used_at"],
+                summary_tokens=value["summary_tokens"],
+            )
+            for value in buckets.values()
+        ]
+        items.sort(key=lambda item: (item.count, item.last_used_at), reverse=True)
+        return items[:limit]
+
     # ------------------------------------------------------------------
     # 파일 열기
     # ------------------------------------------------------------------
 
     def open_file(self, file_path: str, line_number: Optional[int] = None) -> None:
         """파일을 VSCode 또는 기본 프로그램으로 열기."""
+        if is_session_0():
+            raise RuntimeError("Session 0에서는 파일 열기를 직접 실행할 수 없습니다. Redis file_search:open 큐를 사용하세요.")
+
         try:
             if line_number:
                 subprocess.Popen(["code", "--goto", f"{file_path}:{line_number}"])
@@ -135,6 +519,60 @@ class SearchService:
             logger.debug(f"디렉토리 탐색 실패: {path} — {exc}")
 
         return BrowseResponse(current=path, parent=parent, directories=directories)
+
+    # ------------------------------------------------------------------
+    # Preview
+    # ------------------------------------------------------------------
+
+    def get_file_preview(self, file_path: str) -> FilePreviewResponse:
+        """텍스트 파일 미리보기 내용을 반환한다.
+
+        NOTE: Session 0에서도 파일 읽기는 가능하므로, preview는 Redis queue를 타지 않는 direct read로 유지한다.
+        """
+        if not os.path.exists(file_path):
+            raise FilePreviewError(status_code=404, detail=f"파일을 찾을 수 없습니다: {file_path}")
+        if not os.path.isfile(file_path):
+            raise FilePreviewError(status_code=404, detail=f"디렉토리는 미리보기할 수 없습니다: {file_path}")
+
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext not in PREVIEW_TEXT_EXTENSIONS:
+            raise FilePreviewError(status_code=415, detail=f"지원하지 않는 확장자입니다: {ext or '(none)'}")
+
+        try:
+            size_bytes = int(os.path.getsize(file_path))
+        except OSError:
+            raise FilePreviewError(status_code=404, detail=f"파일 크기를 확인할 수 없습니다: {file_path}")
+
+        if size_bytes > MAX_PREVIEW_BYTES:
+            raise FilePreviewError(status_code=413, detail=f"미리보기 크기 제한(256KB)을 초과했습니다: {size_bytes} bytes")
+
+        with open(file_path, "rb") as f:
+            raw = f.read(MAX_PREVIEW_BYTES + 1)
+
+        if len(raw) > MAX_PREVIEW_BYTES:
+            raise FilePreviewError(status_code=413, detail=f"미리보기 크기 제한(256KB)을 초과했습니다: {len(raw)} bytes")
+        if b"\x00" in raw:
+            raise FilePreviewError(status_code=415, detail=f"미리보기 불가 (binary 파일): {file_path}")
+
+        content, encoding = self._decode_preview_text(raw, file_path)
+
+        return FilePreviewResponse(
+            file_path=file_path,
+            file_name=os.path.basename(file_path),
+            extension=ext.lstrip("."),
+            size_bytes=size_bytes,
+            encoding=encoding,
+            content=content,
+        )
+
+    @staticmethod
+    def _decode_preview_text(raw: bytes, file_path: str) -> tuple[str, str]:
+        for encoding in ("utf-8-sig", "utf-8", "cp949"):
+            try:
+                return raw.decode(encoding), encoding
+            except UnicodeDecodeError:
+                continue
+        raise FilePreviewError(status_code=415, detail=f"미리보기 불가 (지원하지 않는 인코딩): {file_path}")
 
     # ------------------------------------------------------------------
     # Internal helpers

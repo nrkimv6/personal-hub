@@ -182,3 +182,65 @@ def test_claude_executor_keeps_schema_file_arg_with_profile_env(isolate_profiles
 
     schema_index = captured["args"].index("--json-schema")
     assert captured["args"][schema_index + 1].startswith("@")
+
+
+def test_gemini_executor_uses_direct_stdin_with_profile_env(isolate_profiles):
+    """GeminiExecutor도 profile 선택 상태에서 argv + UTF-8 stdin 경로를 유지한다."""
+    ps.save_profiles({
+        "selected": {"claude": "default", "gemini": "work"},
+        "profiles": [
+            {"engine": "claude", "name": "default", "config_dir": None, "extra_env": {}},
+            {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}},
+            {"engine": "gemini", "name": "work", "config_dir": str(isolate_profiles / ".gemini-work"), "extra_env": {}},
+        ],
+    })
+
+    captured = {}
+
+    def capture_run(*args, **kwargs):
+        captured["args"] = args[0]
+        captured["kwargs"] = kwargs
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = '{"ok": true}'
+        m.stderr = ""
+        return m
+
+    with patch("subprocess.run", side_effect=capture_run):
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        executor = GeminiExecutor()
+        executor.execute("한글 prompt", parse_json=False)
+
+    assert captured["args"] == ["gemini"]
+    assert captured["kwargs"]["input"] == "한글 prompt"
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    assert captured["kwargs"]["shell"] is False
+    assert "GEMINI_CONFIG_DIR" not in captured["kwargs"]["env"]
+
+
+def test_gemini_executor_keeps_image_path_arg_with_profile_env(isolate_profiles):
+    """profile env 경유에서도 Gemini image_path argv가 유지된다."""
+    captured = {}
+
+    def capture_run(*args, **kwargs):
+        captured["args"] = args[0]
+        captured["kwargs"] = kwargs
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = '{"ok": true}'
+        m.stderr = ""
+        return m
+
+    with patch("subprocess.run", side_effect=capture_run):
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        executor = GeminiExecutor()
+        executor.execute(
+            "prompt",
+            parse_json=False,
+            cli_options={"image_path": "C:/tmp/profile-image.png"},
+        )
+
+    assert captured["args"] == ["gemini", "@C:/tmp/profile-image.png"]
+    assert captured["kwargs"]["input"] == "prompt"

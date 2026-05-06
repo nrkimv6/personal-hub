@@ -59,6 +59,7 @@ class TestMarkStateTransitions:
         svc.mark_processing(req.id)
         db.refresh(req)
         assert req.status == "processing"
+        assert req.processed_at is not None
 
     def test_mark_completed_R_stores_result(self, db, svc):
         """R: mark_completed → result 저장."""
@@ -90,6 +91,18 @@ class TestMarkStateTransitions:
         assert req.status == "failed"
         assert req.retry_count == initial + 1
 
+    def test_mark_failed_R_handles_null_retry_count(self, db, svc):
+        """R: legacy retry_count NULL row도 failed 전이가 가능하다."""
+        req = svc.enqueue("ct", "ci3-null-retry", "prompt")
+        req.retry_count = None
+        db.commit()
+
+        svc.mark_failed(req.id, "some error")
+
+        db.refresh(req)
+        assert req.status == "failed"
+        assert req.retry_count == 1
+
     def test_mark_failed_E_nonexistent(self, db, svc):
         """E: 없는 request ID → 무시 (예외 없음)."""
         svc.mark_failed(99999, "error")  # should not raise
@@ -108,3 +121,20 @@ class TestMarkStateTransitions:
         req = svc.enqueue("ct", "ci5", "prompt")
         result = svc.reset_to_pending(req.id)
         assert result is False
+
+    def test_reset_to_pending_R_from_processing_preserves_block_reason(self, db, svc):
+        """R: router가 processing을 pending으로 되돌릴 때 보류 사유를 보존."""
+        req = svc.enqueue("ct", "ci6", "prompt")
+        svc.mark_processing(req.id)
+
+        result = svc.reset_to_pending(req.id, "schedule_policy_off")
+
+        db.refresh(req)
+        assert result is True
+        assert req.status == "pending"
+        assert req.error_message == "schedule_policy_off"
+
+        from app.modules.claude_worker.routes.llm_schemas import _to_response
+
+        response = _to_response(req)
+        assert response.pending_block_reason == "schedule_policy_off"

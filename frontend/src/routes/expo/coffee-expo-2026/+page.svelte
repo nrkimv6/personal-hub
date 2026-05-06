@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page as pageStore } from '$app/stores';
   import PageHeader from '$lib/components/layout/PageHeader.svelte';
-  import type { ExpoBooth, ExpoMapDocument } from '$lib/types';
+  import type { ExpoBooth, ExpoMapDocument, ExpoMapMeta } from '$lib/types';
+  import { expoApi } from '$lib/api';
   import BoothDetailPanel from '../components/BoothDetailPanel.svelte';
   import ExpoFilterBar from '../components/ExpoFilterBar.svelte';
   import ExpoMapCanvas from '../components/ExpoMapCanvas.svelte';
@@ -10,6 +12,21 @@
 
   const expo = expoData as ExpoMapDocument;
   // [slug] 승격 시 이동 대상: expo-data import, route 경로, author/preview 링크 참조부.
+
+  /** admin 업로드 override 메타데이터. null이면 static fallback 사용 */
+  let mapOverride = $state<ExpoMapMeta | null>(null);
+
+  /** 실제 렌더에 사용할 map (override가 있으면 imageSrc/width/height 치환) */
+  const effectiveMap = $derived<ExpoMapDocument['map']>(
+    mapOverride?.image_url
+      ? {
+          ...expo.map,
+          imageSrc: mapOverride.image_url,
+          width: mapOverride.width ?? expo.map.width,
+          height: mapOverride.height ?? expo.map.height,
+        }
+      : expo.map
+  );
 
   let imageFailed = $state(false);
   let liveMessage = $state('');
@@ -147,6 +164,17 @@
     lastUrlKey = nextKey;
     applyUrlState();
   });
+
+  onMount(() => {
+    // admin upload override가 있으면 static imageSrc를 runtime으로 교체
+    expoApi.getMapMeta(expo.slug).then((meta) => {
+      if (meta?.image_url) {
+        mapOverride = meta;
+      }
+    }).catch(() => {
+      // 조회 실패 시 무시하고 static fallback 유지
+    });
+  });
 </script>
 
 <svelte:head>
@@ -216,7 +244,7 @@
           </section>
         {:else}
           <ExpoMapCanvas
-            map={expo.map}
+            map={effectiveMap}
             booths={expo.booths}
             matchedBoothIds={matchedBoothIds}
             selectedBoothId={selectedBoothId}

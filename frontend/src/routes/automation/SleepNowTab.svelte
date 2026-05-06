@@ -354,7 +354,7 @@
 
 <div>
 	<div class="mb-6 flex items-center justify-between">
-		<h1 class="text-2xl font-bold text-foreground">Sleep Now</h1>
+		<h2 class="text-xl font-semibold text-foreground">Sleep Now</h2>
 		<button
 			onclick={fetchData}
 			class="px-4 py-2 text-sm bg-muted hover:bg-secondary rounded-lg transition-colors"
@@ -379,7 +379,7 @@
 		<!-- Status Card -->
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
 			<!-- Current Status -->
-			<div class="bg-white rounded-lg shadow p-6">
+			<div class="bg-card border border-border rounded-lg shadow-sm p-6">
 				<h2 class="text-lg font-semibold text-foreground mb-4">현재 상태</h2>
 				{#if status}
 					<div class="space-y-3">
@@ -395,7 +395,7 @@
 								{#if status.is_active}
 									<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
 								{:else}
-									<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
+									<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
 								{/if}
 							</div>
 						</div>
@@ -427,7 +427,7 @@
 			</div>
 
 			<!-- Schedule -->
-			<div class="bg-white rounded-lg shadow p-6">
+			<div class="bg-card border border-border rounded-lg shadow-sm p-6">
 				<h2 class="text-lg font-semibold text-foreground mb-4">스케줄</h2>
 				{#if schedule}
 					<div class="space-y-3">
@@ -454,7 +454,7 @@
 			</div>
 
 			<!-- Weekly Stats -->
-			<div class="bg-white rounded-lg shadow p-6">
+			<div class="bg-card border border-border rounded-lg shadow-sm p-6">
 				<h2 class="text-lg font-semibold text-foreground mb-4">주간 통계</h2>
 				{#if stats.length > 0}
 					<div class="space-y-2">
@@ -478,7 +478,7 @@
 		</div>
 
 		<!-- Emergency Unlock -->
-		<div class="bg-white rounded-lg shadow p-6 mb-6">
+		<div class="bg-card border border-border rounded-lg shadow-sm p-6 mb-6">
 			<h2 class="text-lg font-semibold text-foreground mb-4">긴급 해제</h2>
 			<p class="text-sm text-muted-foreground mb-4">
 				긴급한 경우 아래 비밀번호를 입력하여 1시간 유예를 받을 수 있습니다. 비밀번호는 16자 이상이어야
@@ -541,7 +541,7 @@
 		</div>
 
 		<!-- Recent Logs -->
-		<div class="bg-white rounded-lg shadow p-6">
+		<div class="bg-card border border-border rounded-lg shadow-sm p-6">
 			<h2 class="text-lg font-semibold text-foreground mb-4">최근 로그</h2>
 			{#if logs.length > 0}
 				<div class="overflow-x-auto">
@@ -588,7 +588,7 @@
 		<!-- Settings Tab -->
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 			<!-- Schedule Settings -->
-			<div class="bg-white rounded-lg shadow p-6">
+			<div class="bg-card border border-border rounded-lg shadow-sm p-6">
 				<h2 class="text-lg font-semibold text-foreground mb-4">스케줄 설정</h2>
 				<p class="text-sm text-muted-foreground mb-4">
 					경고 시간과 차단 시간을 변경할 수 있습니다. 변경 후에는 서비스 재시작이 필요합니다.
@@ -677,7 +677,7 @@
 			</div>
 
 			<!-- Password Change -->
-			<div class="bg-white rounded-lg shadow p-6">
+			<div class="bg-card border border-border rounded-lg shadow-sm p-6">
 				<h2 class="text-lg font-semibold text-foreground mb-4">비밀번호 변경</h2>
 				<p class="text-sm text-muted-foreground mb-4">
 					긴급 해제 및 설정 변경에 사용되는 비밀번호를 변경합니다.

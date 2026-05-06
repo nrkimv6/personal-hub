@@ -17,24 +17,15 @@ from app.shared.notification.kakao_queue import (
     KakaoNotificationQueue,
     get_kakao_backlog_alert_key,
 )
+from app.shared.process.session import is_session_0 as _detect_session_0
 from app.modules.naver_booking.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
 from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_naver_page_info
 from app.utils.parsers import extract_date_from_url
 from app.core.database import SessionLocal, get_db
 
 def _is_session_0() -> bool:
-    """Windows Session 0 (NSSM 서비스) 환경인지 감지합니다.
-    Session 0에서는 네트워크/UI 접근이 제한되어 Telegram/Desktop 알림이 hang합니다."""
-    try:
-        import ctypes
-        session_id = ctypes.c_ulong()
-        ctypes.windll.kernel32.ProcessIdToSessionId(
-            ctypes.windll.kernel32.GetCurrentProcessId(),
-            ctypes.byref(session_id)
-        )
-        return session_id.value == 0
-    except Exception:
-        return False
+    """Windows Session 0 (NSSM 서비스) 환경인지 감지합니다."""
+    return _detect_session_0()
 
 _IN_SESSION_0 = _is_session_0()
 
@@ -457,12 +448,11 @@ class NotificationService:
         try:
             import redis.asyncio as aioredis
             from app.shared.redis.queue import DESKTOP_NOTIFICATION_QUEUE
-            from app.core.config import settings as _settings
 
-            queue_name = f"{_settings.REDIS_QUEUE_PREFIX}:{DESKTOP_NOTIFICATION_QUEUE}"
+            queue_name = f"{settings.REDIS_QUEUE_PREFIX}:{DESKTOP_NOTIFICATION_QUEUE}"
             payload = json.dumps({"message": message})
 
-            client = aioredis.Redis(host=_settings.REDIS_HOST, port=_settings.REDIS_PORT, decode_responses=True)
+            client = aioredis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, decode_responses=True)
             try:
                 await client.lpush(queue_name, payload)
                 logger.info(f"Desktop 알림 Redis 릴레이 성공: {queue_name}")
@@ -549,7 +539,7 @@ class NotificationService:
                 int(re.search(r':(\d+)', x).group(1))   # 분으로 정렬
             ))
             return ", ".join(sorted_times)
-        except:
+        except (AttributeError, TypeError, ValueError):
             # 정렬에 실패하면 원래 순서 유지
             return ", ".join(times)
             
@@ -587,7 +577,7 @@ class NotificationService:
                     formatted_stocks.append(stock)
                     
             return "\n".join(formatted_stocks)
-        except:
+        except (AttributeError, TypeError, ValueError):
             # 정렬에 실패하면 원래 순서로 리턴
             return "\n".join(stocks)
 

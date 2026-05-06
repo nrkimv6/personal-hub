@@ -6,6 +6,8 @@ _sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
 del _sys_inject, _Path_inject
 
 import logging
+import os
+import re
 import sys
 import subprocess
 import threading
@@ -20,7 +22,7 @@ from _dr_constants import (
     RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, PLAN_FILE_ALL, _LEGACY_ALL,
     LOG_CHANNEL_PREFIX, MERGE_ACTIVE_STATUSES, WORKTREE_BASE_DIR,
     RECENT_RUNNERS_TTL, RUNNER_KEY_SUFFIXES, PROJECT_ROOT, RECENT_META_TTL,
-    OWNERSHIP_SNAPSHOT_DIR,
+    OWNERSHIP_SNAPSHOT_DIR, SUBPROCESS_HEARTBEAT_TTL,
 )
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_state import (
@@ -36,9 +38,96 @@ from _dr_runner_predicates import (
     _is_pid_alive,
     _parse_start_elapsed_seconds,
     _is_recent_runner_without_hb,
+    _runner_identity_matches,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _build_recent_runner_meta(
+    redis_client: redis.Redis,
+    runner_id: str,
+    *,
+    trigger,
+    plan_file,
+) -> dict:
+    meta = {}
+    for field, value in (
+        ("trigger", trigger),
+        ("plan_file", plan_file),
+        ("engine", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine")),
+        ("execution_count", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:execution_count")),
+        ("log_file_path", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")),
+        ("stream_log_path", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")),
+        ("exit_reason", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason")),
+        ("worktree_exists", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_exists")),
+        ("branch_exists", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_exists")),
+        ("branch_merged_to_main", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_merged_to_main")),
+        ("metadata_checked_at", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:metadata_checked_at")),
+    ):
+        if value is not None:
+            meta[field] = value
+    if plan_file:
+        meta["display_plan_name"] = Path(str(plan_file)).name
+    for field in ("accepted_at", "started_at"):
+        value = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{field}")
+        if value is not None:
+            meta[field] = value
+    return meta
+
+
+def _register_completed_runner_state(
+    redis_client: redis.Redis,
+    runner_id: str,
+    *,
+    trigger,
+    plan_file,
+) -> None:
+    from _dr_constants import RECENT_RUNNERS_KEY
+
+    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+    persist_suffixes = frozenset({"plan_file", "branch", "trigger"})
+    for suffix in RUNNER_KEY_SUFFIXES:
+        if suffix in persist_suffixes:
+            continue
+        redis_client.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", RECENT_RUNNERS_TTL)
+    redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
+
+    meta = _build_recent_runner_meta(
+        redis_client,
+        runner_id,
+        trigger=trigger,
+        plan_file=plan_file,
+    )
+    if meta:
+        import json as _json
+
+        redis_client.setex(
+            f"plan-runner:recent-meta:{runner_id}",
+            RECENT_META_TTL,
+            _json.dumps(meta, ensure_ascii=False),
+        )
+        logger.debug(f"[cleanup] saved recent-meta (runner_id={runner_id})")
+
+    if trigger in ("user", "user:all"):
+        redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
+        logger.info(f"[cleanup] registered in RECENT: {runner_id}")
+
+
+def _parse_trigger_from_runner_log(log_file_path: str | None) -> str | None:
+    if not log_file_path:
+        return None
+    try:
+        with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for _ in range(15):
+                line = f.readline()
+                if not line:
+                    break
+                if line.startswith("[TRIGGER] "):
+                    return line[len("[TRIGGER] "):].split(" | ", 1)[0].strip() or None
+    except (OSError, IOError):
+        return None
+    return None
 
 
 def _record_worktree_cleanup_monitor_event(
@@ -48,6 +137,7 @@ def _record_worktree_cleanup_monitor_event(
     runner_id: str | None = None,
     test_source: str | None = None,
     worktree_path: str | None = None,
+    repo_root: Path | str | None = None,
 ) -> None:
     try:
         if str(PROJECT_ROOT) not in sys.path:
@@ -61,6 +151,7 @@ def _record_worktree_cleanup_monitor_event(
             runner_id=runner_id,
             test_source=test_source,
             worktree_path=worktree_path,
+            repo_root=repo_root,
         )
     except Exception as exc:
         logger.debug("[cleanup] worktree residue monitor record skipped: %s", exc)
@@ -145,6 +236,7 @@ def _force_cleanup_test_runner_worktree(runner_id: str, redis_client: redis.Redi
         runner_id=runner_id,
         test_source=str(test_source),
         worktree_path=str(worktree_path),
+        repo_root=repo_root,
     )
 
     return True
@@ -235,7 +327,6 @@ def _evict_stale_dead_process(max_age: int = 300) -> None:
 
 def get_plan_git_root(plan_file: str) -> Path:
     """Dynamically detect git root of a plan file."""
-    import subprocess
     try:
         plan_path = Path(plan_file)
         cwd = str(plan_path.parent) if plan_path.parent.is_dir() else str(plan_path.parent.parent)
@@ -249,6 +340,45 @@ def get_plan_git_root(plan_file: str) -> Path:
     except Exception as e:
         logger.warning(f"get_plan_git_root: git rev-parse failed (plan={plan_file}): {e}")
     logger.warning(f"get_plan_git_root: fallback to PROJECT_ROOT (plan={plan_file})")
+    return PROJECT_ROOT
+
+
+def get_target_project_root(plan_file: str) -> Path:
+    """plan file의 target project root를 반환 (plans storage root와 분리).
+
+    우선순위:
+    1. env PLAN_RUNNER_PROJECT_ROOT
+    2. git rev-parse --show-toplevel + .worktrees 감지 시 .worktrees 직전 반환
+    3. fallback: PROJECT_ROOT
+    """
+    env_root = os.environ.get("PLAN_RUNNER_PROJECT_ROOT")
+    if env_root:
+        return Path(env_root).resolve()
+
+    try:
+        plan_path = Path(plan_file)
+        cwd = str(plan_path.parent) if plan_path.parent.is_dir() else str(plan_path.parent.parent)
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=cwd, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            git_root = Path(result.stdout.strip())
+            parts = list(git_root.parts)
+            if ".worktrees" in parts:
+                i = parts.index(".worktrees")
+                candidate = Path(*parts[:i])
+                if (candidate / ".git").exists():
+                    logger.debug(
+                        f"get_target_project_root: .worktrees 감지 → {git_root} → {candidate}"
+                    )
+                    return candidate
+            return git_root
+    except Exception as e:
+        logger.warning(f"get_target_project_root: git rev-parse failed (plan={plan_file}): {e}")
+
+    logger.warning(f"get_target_project_root: fallback to PROJECT_ROOT (plan={plan_file})")
     return PROJECT_ROOT
 
 
@@ -276,7 +406,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     if reason and reason.startswith(("reconnect_", "heartbeat_")):
         try:
             merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-            if merge_status in MERGE_ACTIVE_STATUSES:
+            if merge_status in MERGE_ACTIVE_STATUSES or merge_status == "approval_required":
                 logger.warning(
                     f"[cleanup] denying cleanup for runner {runner_id} (merge in progress) "
                     f"(reason={reason}, merge_status={merge_status})"
@@ -321,6 +451,11 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file_val = None
         _trigger_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+        if _trigger_val is None:
+            _trigger_val = _parse_trigger_from_runner_log(
+                redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+                or redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
+            )
         merge_requested = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
         test_source_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source")
         branch_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
@@ -343,42 +478,12 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
     # 1) register stopped runner in RECENT_RUNNERS
     try:
-        from _dr_constants import RECENT_RUNNERS_KEY
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
-        _PERSIST_SUFFIXES_LOCAL = frozenset({"plan_file", "branch", "trigger"})
-        for suffix in RUNNER_KEY_SUFFIXES:
-            if suffix in _PERSIST_SUFFIXES_LOCAL:
-                continue
-            key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
-            redis_client.expire(key, RECENT_RUNNERS_TTL)
-        redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
-
-        # recent-meta preservation
-        try:
-            import json as _json
-            _meta = {}
-            if _trigger_val is not None:
-                _meta["trigger"] = _trigger_val
-            for _field in ("accepted_at", "started_at"):
-                _val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{_field}")
-                if _val is not None:
-                    _meta[_field] = _val
-            if _meta:
-                redis_client.setex(
-                    f"plan-runner:recent-meta:{runner_id}",
-                    RECENT_META_TTL,
-                    _json.dumps(_meta, ensure_ascii=False),
-                )
-                logger.debug(f"[cleanup] saved recent-meta (runner_id={runner_id})")
-        except Exception as _rmeta_err:
-            logger.warning(f"[cleanup] recent-meta save failed (ignoring, runner_id={runner_id}): {_rmeta_err}")
-
-        if _trigger_val in ("user", "user:all"):
-            redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
-            logger.info(f"[cleanup] registered in RECENT: {runner_id}")
-        else:
-            # Invisible runner: keys will be cleaned up AFTER worktree cleanup
-            pass
+        _register_completed_runner_state(
+            redis_client,
+            runner_id,
+            trigger=_trigger_val,
+            plan_file=plan_file_val,
+        )
     except Exception as e:
         logger.warning(f"[cleanup] RECENT registration failed (runner_id={runner_id}): {e}")
 
@@ -398,7 +503,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         from plan_worktree_helpers import is_plan_in_progress as _is_plan_in_progress
         from plan_worktree_helpers import has_unmerged_commits as _has_unmerged_commits
 
-        _cleanup_worktree_base = (get_plan_git_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
+        _cleanup_worktree_base = (get_target_project_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
 
         if force_test_cleanup:
             _force_cleanup_test_runner_worktree(runner_id, redis_client)
@@ -412,11 +517,15 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
             # unmerged commits protection
             if not _preserve_worktree:
-                _branch = (
-                    f"plan/{Path(plan_file_val).stem}" if plan_file_val
-                    else f"runner/{runner_id}"
-                )
-                if _has_unmerged_commits(_branch, get_plan_git_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
+                if plan_file_val:
+                    _branch = branch_val or (
+                        f"plan/{Path(plan_file_val).stem}"
+                        if not runner_id.startswith("t-")
+                        else f"runner/{runner_id}"
+                    )
+                else:
+                    _branch = f"runner/{runner_id}"
+                if _has_unmerged_commits(_branch, get_target_project_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
                     _preserve_worktree = True
                     logger.warning(
                         f"[cleanup] preserving worktree (unmerged commits exist): runner={runner_id}, branch={_branch}"
@@ -429,14 +538,34 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                 logger.warning(f"[_cleanup_process_state] merge_requested=1 -> preserving worktree (runner={runner_id})")
                 redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
 
-            if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
+            # approval_required(service_lock) 보호: worktree를 제거하지 않고 사용자 승인 후 retry를 대기한다.
+            if merge_status == "approval_required":
+                _preserve_worktree = True
+                logger.warning(
+                    f"[_cleanup_process_state] merge_status=approval_required -> preserving worktree (runner={runner_id})"
+                )
+                redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+
+            if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued", "approval_required"):
                 try:
-                    WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+                    WorktreeManager.remove(
+                        runner_id,
+                        _cleanup_worktree_base,
+                        plan_file=plan_file_val or None,
+                        branch=branch_val or None,
+                        use_runner_identity=runner_id.startswith("t-"),
+                    )
                 except Exception as wt_e:
                     logger.warning(f"worktree removal failed (runner_id: {runner_id}): {wt_e}")
             elif not _preserve_worktree and merge_status in ("merging", "testing"):
                 try:
-                    WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
+                    WorktreeManager.remove(
+                        runner_id,
+                        _cleanup_worktree_base,
+                        plan_file=plan_file_val or None,
+                        branch=branch_val or None,
+                        use_runner_identity=runner_id.startswith("t-"),
+                    )
                     logger.info(f"cleaning up stale intermediate worktree: {runner_id} (merge_status={merge_status})")
                 except Exception as wt_e:
                     logger.warning(f"stale worktree cleanup failed (runner_id: {runner_id}): {wt_e}")
@@ -463,6 +592,30 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         logger.warning(f"[cleanup] workflow DB update failed (ignoring): {e}")
 
     _cleanup_runner_ownership_snapshot(runner_id)
+
+    # ── Claim release (active/queued → released) ──────────────────────
+    if plan_file_val:
+        try:
+            if str(PROJECT_ROOT) not in sys.path:
+                sys.path.insert(0, str(PROJECT_ROOT))
+            from app.database import SessionLocal as _ClaimSession
+            from app.modules.dev_runner.services.plan_execution_claim_service import (
+                get_active_claim_for_plan as _get_active_claim,
+                release_claim as _release_claim,
+            )
+            _claim_db = _ClaimSession()
+            try:
+                _claim = _get_active_claim(_claim_db, plan_file_val)
+                if _claim:
+                    _release_claim(_claim_db, _claim.claim_id)
+                    logger.info(
+                        f"[claim] released: claim_id={_claim.claim_id} runner_id={runner_id} reason={reason}"
+                    )
+            finally:
+                _claim_db.close()
+        except Exception as _claim_err:
+            logger.warning(f"[claim] release 실패 (무시, runner_id={runner_id}): {_claim_err}")
+    # ────────────────────────────────────────────────────────────────
 
     logger.info(f"[cleanup] _cleanup_process_state completed: {runner_id} (reason={reason})")
 
@@ -654,6 +807,9 @@ def _process_runner_entry(
             _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
         except Exception:
             _mr, _ms = None, None
+        if _ms == "approval_required":
+            logger.warning(f"[reconnect] {label} {runner_id} no PID but approval_required -> skip cleanup")
+            return
         if _mr or _ms in MERGE_ACTIVE_STATUSES:
             logger.warning(
                 f"[reconnect] {label} {runner_id} no PID but merge pending "
@@ -684,27 +840,53 @@ def _process_runner_entry(
         return
 
     if _is_pid_alive(pid):
-        _is_zombie = False
-        try:
-            subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
-            if subprocess_hb is None:
-                _legacy, _elapsed = _is_recent_runner_without_hb(redis_client, runner_id)
-                if not _legacy:
-                    _is_zombie = True
-        except Exception:
-            pass
-        if _is_zombie:
+        identity_ok, identity_reason = _runner_identity_matches(redis_client, runner_id, pid)
+        if not identity_ok:
             try:
                 from _dr_merge import _pub_and_log as _pal
-                _pal(runner_id, f"{label} {runner_id} PID {pid} alive but no subprocess_heartbeat -> zombie cleanup", redis_client, "ZOMBIE")
+                _pal(
+                    runner_id,
+                    f"{label} {runner_id} PID {pid} alive but identity check failed "
+                    f"({identity_reason}) -> cleanup",
+                    redis_client,
+                    "RECONNECT",
+                )
             except Exception:
                 pass
-            logger.warning(f"[reconnect] zombie {label} {runner_id} PID={pid} no subprocess_heartbeat -> cleanup")
-            _cleanup_process_state(runner_id, redis_client, reason="reconnect_zombie")
-        else:
-            if is_orphan:
-                logger.info(f"[reconnect] {label} {runner_id} PID {pid} alive -> re-attached")
-            _attach_to_running_process(runner_id, pid, redis_client)
+            logger.warning(
+                "[reconnect] %s %s PID=%s alive but identity check failed (%s) -> cleanup",
+                label,
+                runner_id,
+                pid,
+                identity_reason,
+            )
+            _cleanup_process_state(runner_id, redis_client, reason=f"reconnect_{identity_reason}")
+            return
+
+        try:
+            redis_client.set(
+                f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat",
+                str(time.time()),
+                ex=SUBPROCESS_HEARTBEAT_TTL,
+            )
+        except Exception as hb_err:
+            logger.warning(
+                "[reconnect] %s %s PID=%s identity=%s but heartbeat republish failed: %s",
+                label,
+                runner_id,
+                pid,
+                identity_reason,
+                hb_err,
+            )
+        if is_orphan:
+            logger.info(
+                "[reconnect] %s %s PID %s alive identity=%s -> re-attached",
+                label,
+                runner_id,
+                pid,
+                identity_reason,
+            )
+        _attach_to_running_process(runner_id, pid, redis_client)
     else:
         try:
             _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
@@ -712,6 +894,9 @@ def _process_runner_entry(
         except Exception:
             _mr, _ms = None, None
 
+        if _ms == "approval_required":
+            logger.warning(f"[reconnect] {label} {runner_id} PID {pid} dead but approval_required -> skip cleanup")
+            return
         if _mr or _ms in MERGE_ACTIVE_STATUSES:
             logger.warning(
                 f"[reconnect] {label} {runner_id} PID {pid} dead but merge pending "
@@ -785,7 +970,7 @@ def _detect_orphan_workflows(redis_client: redis.Redis) -> int:
                     _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
                 except Exception:
                     _mr, _ms = None, None
-                if _mr or _ms in MERGE_ACTIVE_STATUSES:
+                if _ms == "approval_required" or _mr or _ms in MERGE_ACTIVE_STATUSES:
                     continue
                 _wf_manager.update_status(
                     wf["id"], "failed",
@@ -894,7 +1079,7 @@ def _cleanup_orphan_plans(redis_client: redis.Redis) -> int:
 
                 try:
                     if not has_unmerged_commits(branch, PROJECT_ROOT):
-                        _orphan_base = get_plan_git_root(str(plan_file)) / ".worktrees"
+                        _orphan_base = get_target_project_root(str(plan_file)) / ".worktrees"
                         WorktreeManager.remove("", _orphan_base, plan_file=str(plan_file))
                         _remove_plan_header_fields(str(plan_file))
                         logger.info(f"[orphan-plan] {plan_file.name}: worktree/branch 정리 완료 (branch={branch})")

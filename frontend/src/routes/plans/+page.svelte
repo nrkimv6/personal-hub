@@ -8,7 +8,7 @@
     const tabParam = $page.url.searchParams.get('tab');
     const url = new URL('/automation', window.location.origin);
     url.searchParams.set('tab', 'plans');
-    if (tabParam && ['archive', 'history'].includes(tabParam)) {
+    if (tabParam && ['archive', 'insights', 'history'].includes(tabParam)) {
       url.searchParams.set('subtab', tabParam);
     }
     goto(url.toString(), { replaceState: true });

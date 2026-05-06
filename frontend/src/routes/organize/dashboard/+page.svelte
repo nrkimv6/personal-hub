@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { Play, Square, RefreshCw, HardDrive, Music, Archive, FileText, Terminal, Gamepad2, Folder, Video, Image, Zap } from 'lucide-svelte';
+	import { isApiGateClosedError } from '$lib/api/client';
 
 	// 상태
 	let stats = $state<any>(null);
@@ -62,7 +63,7 @@
 				isPipelineRunning = pipelineStatus?.is_running ?? false;
 			}
 		} catch (e) {
-			error = '데이터 로드 실패';
+			error = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '데이터 로드 실패';
 		} finally {
 			isLoading = false;
 		}
@@ -73,19 +74,27 @@
 			.split('\n')
 			.map((s: string) => s.trim())
 			.filter(Boolean);
-		const res = await fetch('/api/fc/pipeline/start', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ root_folders: rootFolders.length > 0 ? rootFolders : null })
-		});
-		const data = await res.json();
-		if (data.status === 'started' || data.status === 'already_running') {
-			isPipelineRunning = true;
+		try {
+			const res = await fetch('/api/fc/pipeline/start', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ root_folders: rootFolders.length > 0 ? rootFolders : null })
+			});
+			const data = await res.json();
+			if (data.status === 'started' || data.status === 'already_running') {
+				isPipelineRunning = true;
+			}
+		} catch (e) {
+			error = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '파이프라인 시작 실패';
 		}
 	}
 
 	async function stopPipeline() {
-		await fetch('/api/fc/pipeline/stop', { method: 'POST' });
+		try {
+			await fetch('/api/fc/pipeline/stop', { method: 'POST' });
+		} catch (e) {
+			error = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '파이프라인 중지 실패';
+		}
 	}
 
 	async function startScan() {
@@ -94,19 +103,27 @@
 			.map((s: string) => s.trim())
 			.filter(Boolean);
 
-		const res = await fetch('/api/fc/scan/start', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ root_folders: rootFolders.length > 0 ? rootFolders : null })
-		});
-		const data = await res.json();
-		if (data.status === 'started' || data.status === 'already_running') {
-			isScanRunning = true;
+		try {
+			const res = await fetch('/api/fc/scan/start', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ root_folders: rootFolders.length > 0 ? rootFolders : null })
+			});
+			const data = await res.json();
+			if (data.status === 'started' || data.status === 'already_running') {
+				isScanRunning = true;
+			}
+		} catch (e) {
+			error = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '스캔 시작 실패';
 		}
 	}
 
 	async function stopScan() {
-		await fetch('/api/fc/scan/stop', { method: 'POST' });
+		try {
+			await fetch('/api/fc/scan/stop', { method: 'POST' });
+		} catch (e) {
+			error = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '스캔 중지 실패';
+		}
 	}
 
 	function formatSize(bytes: number): string {
@@ -132,7 +149,7 @@
 
 <div class="space-y-6">
 	<!-- 헤더 -->
-	<PageHeader title="파일 정리기 대시보드" subtitle="PC 파일을 스캔하고 자동 분류합니다">
+	<PageHeader title="파일 정리기 대시보드">
 		<button
 			onclick={fetchStats}
 			class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent"

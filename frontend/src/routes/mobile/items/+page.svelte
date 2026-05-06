@@ -118,7 +118,7 @@
 
 <div class="container mx-auto p-4">
 	<div class="mb-6">
-		<h1 class="text-2xl font-bold">수집 아이템 목록</h1>
+		<h2 class="text-xl font-semibold">수집 아이템 목록</h2>
 		<p class="text-gray-600 mt-1">
 			모든 대상에서 수집된 아이템을 조회합니다.
 		</p>

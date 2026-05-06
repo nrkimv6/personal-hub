@@ -9,6 +9,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.modules.system.services.worker_service import WorkerService as SystemService
 
@@ -66,6 +67,12 @@ FAKE_PROJECTS_WITH_CHAT = {
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+@pytest.fixture
+def client():
+    from app.main import app
+    return TestClient(app)
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +185,76 @@ def test_stop_watchdogs_Ca_excludes_infra_tier():
         )
 
 
+def test_get_workers_http_exposes_unified_monitoring_summary(client):
+    """T5: GET /api/v1/system/services/workers → unified_worker에 pending/stuck summary 노출"""
+    summary = {
+        "queued": 2,
+        "running": 1,
+        "pending": 12,
+        "stuck_pending": 4,
+        "hint": "pending 12건 중 4건이 next_run_time/last_check_time 없이 대기 중",
+    }
+
+    with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", FAKE_PROJECTS_WITH_CHAT), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._read_pid_status",
+             new=AsyncMock(return_value={"pid": 101, "running": True}),
+         ), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._get_naver_monitoring_summary",
+             return_value=summary,
+         ):
+        resp = client.get("/api/v1/system/services/workers")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    unified = next((entry for entry in data if entry["name"] == "unified_worker"), None)
+    assert unified is not None, f"unified_worker 없음: {data}"
+    assert unified["monitoring_summary"] == summary
+
+
+def test_get_workers_http_keeps_other_workers_without_monitoring_summary(client):
+    """T5: monitoring summary는 unified_worker에만 붙고 다른 worker 계약은 유지"""
+    with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", FAKE_PROJECTS_WITH_CHAT), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._read_pid_status",
+             new=AsyncMock(return_value={"pid": 202, "running": False}),
+         ), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._get_naver_monitoring_summary",
+             return_value={"queued": 0, "running": 0, "pending": 0, "stuck_pending": 0, "hint": None},
+         ):
+        resp = client.get("/api/v1/system/services/workers")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    chat_executor = next((entry for entry in data if entry["name"] == "chat_executor"), None)
+    assert chat_executor is not None, f"chat_executor 없음: {data}"
+    assert "monitoring_summary" not in chat_executor
+
+
+def test_get_workers_http_includes_refactored_watchdog_targets(client):
+    """T5: GET /api/v1/system/services/workers → claude/chat_executor/unified_worker 항목 계약 유지"""
+    with patch("app.modules.system.services.worker_service.MANAGED_PROJECTS", FAKE_PROJECTS_WITH_CHAT), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._read_pid_status",
+             new=AsyncMock(return_value={"pid": 303, "running": True}),
+         ), \
+         patch(
+             "app.modules.system.services.worker_service.WorkerService._get_naver_monitoring_summary",
+             return_value={"queued": 0, "running": 0, "pending": 0, "stuck_pending": 0, "hint": None},
+         ):
+        resp = client.get("/api/v1/system/services/workers")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    by_name = {entry["name"]: entry for entry in data}
+
+    for required in ("claude_worker", "chat_executor", "unified_worker"):
+        assert required in by_name, f"{required} 없음: {list(by_name)}"
+        assert "watchdog" in by_name[required], f"{required} watchdog 필드 없음"
+
+
 # ---------------------------------------------------------------------------
 # Phase T5 HTTP 통합 테스트 — /merge-test에서 실행
 # ---------------------------------------------------------------------------
@@ -207,3 +284,27 @@ def test_T5_post_restart_chat_executor_returns_200():
     assert resp.status_code == 200
     data = resp.json()
     assert "success" in data
+
+
+@pytest.mark.skip(reason="T5: HTTP 통합테스트 — /merge-test에서 main 머지 후 실행")
+def test_system_workers_naver_unified_worker_running():
+    """
+    T5[http_live]: GET /api/v1/system/services/workers → unified_worker (NaverMonitorWorker 포함) 실행 확인.
+
+    NaverMonitorWorker는 unified_worker 프로세스 내부에서 실행됨.
+    unified_worker가 응답 목록에 있으면 NaverMonitorWorker 실행 루프도 동작 중.
+    워커 미등록 시 실행 루프가 동작하지 않는 근본 증상 재발 방지.
+    """
+    import httpx
+    resp = httpx.get(
+        "http://localhost:8001/api/v1/system/services/workers",
+        timeout=5,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list), f"응답이 리스트여야 함: {data}"
+    names = [w.get("name", "") for w in data]
+    assert "unified_worker" in names, (
+        f"unified_worker가 /api/v1/system/services/workers 응답에 없음 — "
+        f"NaverMonitorWorker 실행 루프 미동작 가능성. 워커 목록: {names}"
+    )

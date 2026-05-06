@@ -1,0 +1,154 @@
+from datetime import datetime, timedelta
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.models.plan_record import PlanRecord, PlanRecordFileRef, PlanRecordRelation
+from app.modules.dev_runner.services.plan_archive_metrics_service import PlanArchiveMetricsService
+from app.modules.dev_runner.services.plan_archive_retrieval_service import RetrievalQuery
+
+
+def _make_session():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    for table in (
+        PlanRecord.__table__,
+        PlanRecordFileRef.__table__,
+        PlanRecordRelation.__table__,
+    ):
+        table.create(bind=engine, checkfirst=True)
+    return sessionmaker(bind=engine)(), engine
+
+
+def test_followup_rate_7_14_30_days_right():
+    db, engine = _make_session()
+    try:
+        first = PlanRecord(
+            filename_hash="hash-m1",
+            file_path="docs/archive/2026-01-01-a.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 1),
+            status="archived",
+            recurrence_count=1,
+        )
+        second = PlanRecord(
+            filename_hash="hash-m2",
+            file_path="docs/archive/2026-01-05-b.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 5),
+            status="archived",
+            recurrence_count=2,
+        )
+        db.add_all([first, second])
+        db.flush()
+        db.add_all(
+            [
+                PlanRecordFileRef(plan_record_id=first.id, source_type="git_changed", path="app/a.py", module="app"),
+                PlanRecordFileRef(plan_record_id=second.id, source_type="git_changed", path="app/b.py", module="app"),
+                PlanRecordRelation(source_plan_record_id=first.id, target_plan_record_id=second.id, relation_type="follow_up"),
+            ]
+        )
+        db.flush()
+        result = PlanArchiveMetricsService(db).calculate(RetrievalQuery(category="infra"))
+        assert result["followup_rates"]["days_7"] > 0
+        assert result["chain_depth_max"] == 2
+        assert result["relation_counts"]["follow_up"] == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_metrics_semantic_cluster_filter_right():
+    db, engine = _make_session()
+    try:
+        first = PlanRecord(
+            filename_hash="hash-c1-a",
+            file_path="docs/archive/2026-01-01-a.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 1),
+            status="archived",
+        )
+        second = PlanRecord(
+            filename_hash="hash-c1-b",
+            file_path="docs/archive/2026-01-02-b.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 2),
+            status="archived",
+        )
+        other = PlanRecord(
+            filename_hash="hash-c2",
+            file_path="docs/archive/2026-01-03-c.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 3),
+            status="archived",
+        )
+        db.add_all([first, second, other])
+        db.flush()
+        db.add_all(
+            [
+                PlanRecordRelation(
+                    source_plan_record_id=first.id,
+                    target_plan_record_id=second.id,
+                    relation_type="semantic_similar",
+                    evidence={"cluster_id": "cluster-1"},
+                ),
+                PlanRecordRelation(
+                    source_plan_record_id=other.id,
+                    target_plan_record_id=first.id,
+                    relation_type="semantic_similar",
+                    evidence={"cluster_id": "cluster-2"},
+                ),
+            ]
+        )
+        db.flush()
+        result = PlanArchiveMetricsService(db).calculate(RetrievalQuery(category="infra", semantic_cluster_id="cluster-1"))
+        assert result["total_plans"] == 1
+        assert result["relation_counts"] == {"semantic_similar": 1}
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_cross_repo_metrics_right_counts_repo_filter_and_missing_sync():
+    db, engine = _make_session()
+    try:
+        record = PlanRecord(
+            filename_hash="hash-xrepo",
+            file_path="docs/archive/2026-01-01-xrepo.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 1),
+            status="archived",
+        )
+        db.add(record)
+        db.flush()
+        db.add_all(
+            [
+                PlanRecordFileRef(
+                    plan_record_id=record.id,
+                    source_type="mentioned_in_plan",
+                    repo_key="monitor-page",
+                    path="app/a.py",
+                    module="app",
+                ),
+                PlanRecordFileRef(
+                    plan_record_id=record.id,
+                    source_type="git_changed",
+                    repo_key="wtools",
+                    path="common/skills/demo/SKILL.md",
+                    module="common/skills",
+                ),
+            ]
+        )
+        db.flush()
+
+        all_result = PlanArchiveMetricsService(db).calculate(RetrievalQuery(category="infra"))
+        assert all_result["repo_counts"] == {"monitor-page": 1, "wtools": 1}
+        assert all_result["cross_repo_plan_count"] == 1
+        assert all_result["multi_repo_plan_count"] == 1
+        assert all_result["downstream_sync_missing_candidates"][0]["repo_key"] == "wtools"
+
+        wtools_result = PlanArchiveMetricsService(db).calculate(RetrievalQuery(category="infra", repo_key="wtools"))
+        assert wtools_result["repo_counts"] == {"wtools": 1}
+        assert wtools_result["top_file_refs"][0]["repo_key"] == "wtools"
+    finally:
+        db.close()
+        engine.dispose()

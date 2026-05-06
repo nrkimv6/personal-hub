@@ -52,6 +52,7 @@ class TestRegisterRoutersAddsRoutes:
             "/api/v1/expo/{slug}/collection-status",
             "/api/v1/expo/{slug}/published-status",
             "/api/v1/expo/{slug}/exports/record",
+            "/api/v1/tracking/items",
         }
 
         missing = expected - paths

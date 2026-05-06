@@ -26,6 +26,15 @@ DEFAULT_SOURCE_FILES: tuple[str, ...] = (
     "app/modules/dev_runner/services/event_payload.py",
 )
 
+WORKER_SOURCE_FILES: tuple[str, ...] = (
+    "app/worker/main.py",
+    "app/worker/scheduled_worker.py",
+    "app/worker/schedule_handler_base.py",
+    "app/modules/instagram/services/scheduler.py",
+    "app/modules/instagram/schedulers/feed_schedule.py",
+    "app/modules/instagram/services/crawl_service.py",
+)
+
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -120,6 +129,25 @@ def get_runtime_fingerprint_snapshot(
         project_root=project_root,
         app_mode=app_mode,
         source_files=source_files,
+        pid=pid,
+        cwd=cwd,
+        python_executable=python_executable,
+    )
+
+
+def get_worker_runtime_fingerprint_snapshot(
+    *,
+    project_root: str | Path | None = None,
+    app_mode: str | None = None,
+    pid: int | None = None,
+    cwd: str | Path | None = None,
+    python_executable: str | Path | None = None,
+) -> dict[str, object]:
+    """Return a fresh worker-focused snapshot including scheduler source files."""
+    return build_runtime_fingerprint_snapshot(
+        project_root=project_root,
+        app_mode=app_mode,
+        source_files=WORKER_SOURCE_FILES,
         pid=pid,
         cwd=cwd,
         python_executable=python_executable,

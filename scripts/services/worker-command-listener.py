@@ -11,7 +11,8 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
     - 결과를 worker:command_results에 반환
 
 사용법:
-    python scripts/worker-command-listener.py
+    python scripts/services/worker-command-listener.py
+    python scripts/services/worker-command-listener.py --check-imports  # import 확인 후 즉시 종료
 
 아키텍처:
     API (Session 0) → Redis LPUSH worker:commands → [이 리스너 (Session 1)] → browser-workers.ps1
@@ -26,7 +27,16 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# sys.path bootstrap — app import 이전에 PROJECT_ROOT를 경로에 추가
+# 직접 실행 시 sys.path[0]은 스크립트 디렉토리(scripts/services/)이므로 app/ 패키지를 찾지 못함
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/services/ → scripts/ → project root
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import redis
+
+from app.shared.process.subprocess_text import with_text_subprocess_defaults
 
 # 설정
 REDIS_HOST = "localhost"
@@ -36,6 +46,7 @@ RESULTS_KEY = "worker:command_results"
 DESKTOP_NOTIFICATION_KEY = "monitor:notification:desktop"  # Session 0 → Session 1 Desktop 알림 릴레이
 LAUNCH_CLI_KEY = "worker:launch-cli"  # Session 0 → Session 1 CLI 콘솔 실행 릴레이
 LAUNCH_CLI_RESULTS_KEY = "worker:launch-cli:results"  # launch-cli 결과 큐
+OPEN_APP_KEY = "worker:open-app"  # Session 0 → Session 1 generic GUI open 릴레이
 BRPOP_TIMEOUT = 30  # 초 (0 = 무한 대기, 양수 = 타임아웃 후 루프 재시작)
 
 # Podman 자동 복구 설정
@@ -45,8 +56,6 @@ PODMAN_RECOVERY_COOLDOWN = 600  # 초 (10분) — 쿨다운 내 재시도 방지
 # 마지막 Podman 복구 시도 시각 (Unix timestamp, 0 = 미시도)
 _last_podman_recovery_time: float = 0.0
 
-SCRIPT_DIR = Path(__file__).parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/services/ → scripts/ → project root
 BROWSER_WORKERS_SCRIPT = SCRIPT_DIR / "browser-workers.ps1"
 
 # 로깅 설정
@@ -90,10 +99,12 @@ def execute_worker_action(action: str) -> dict:
                 "-File", str(BROWSER_WORKERS_SCRIPT),
                 "-Action", action,
             ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            cwd=str(PROJECT_ROOT),
+            **with_text_subprocess_defaults(
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(PROJECT_ROOT),
+            ),
         )
 
         output = result.stdout.strip()
@@ -215,6 +226,49 @@ def execute_launch_cli(payload: dict) -> dict:
         }
 
 
+def execute_open_app(payload: dict) -> dict:
+    """Session 1에서 GUI 앱 열기 요청을 실행합니다."""
+    app_name = str(payload.get("app_name") or "").strip().lower()
+    args = payload.get("args") or []
+
+    if app_name not in {"explorer", "code", "default"}:
+        return {"success": False, "status": "error", "message": f"unsupported app: {app_name}"}
+    if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
+        return {"success": False, "status": "error", "message": "args must be a list of strings"}
+
+    path_args = [arg for arg in args if arg and not arg.startswith("/") and not arg.startswith("-")]
+    for raw_path in path_args:
+        path_to_check = raw_path
+        if app_name == "code" and ":" in raw_path:
+            maybe_path, maybe_line = raw_path.rsplit(":", 1)
+            if maybe_line.isdigit():
+                path_to_check = maybe_path
+
+        path = Path(path_to_check)
+        if not path.is_absolute():
+            return {"success": False, "status": "error", "message": f"path must be absolute: {raw_path}"}
+        if not path.exists():
+            return {"success": False, "status": "error", "message": f"path not found: {raw_path}"}
+
+    try:
+        if app_name == "default":
+            command = ["cmd", "/c", "start", "", *args]
+        else:
+            command = [app_name, *args]
+
+        subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        logger.info(f"open-app 실행 완료: app={app_name}, args={args}")
+        return {"success": True, "status": "opened", "app_name": app_name, "args": args}
+    except Exception as e:
+        logger.error(f"open-app 실행 실패: {e}")
+        return {"success": False, "status": "error", "message": str(e), "app_name": app_name}
+
+
 def attempt_podman_recovery() -> bool:
     """Podman Machine SSH 터널 재수립 + Redis 컨테이너 복구.
 
@@ -275,6 +329,7 @@ def main():
     logger.info(f"결과 키: {RESULTS_KEY}")
     logger.info(f"Desktop 알림 키: {DESKTOP_NOTIFICATION_KEY}")
     logger.info(f"Launch CLI 키: {LAUNCH_CLI_KEY}")
+    logger.info(f"Open App 키: {OPEN_APP_KEY}")
     logger.info(f"스크립트: {BROWSER_WORKERS_SCRIPT}")
     logger.info("=" * 50)
 
@@ -295,9 +350,9 @@ def main():
             reconnect_delay = 1  # 연결 성공 시 리셋
             consecutive_failures = 0  # 연결 복구 시 리셋
 
-            # BRPOP 루프 (블로킹 대기) — worker:commands + notification:desktop + launch-cli 동시 대기
+            # BRPOP 루프 (블로킹 대기) — worker:commands + notification:desktop + launch-cli + open-app 동시 대기
             while True:
-                result = r.brpop([COMMANDS_KEY, DESKTOP_NOTIFICATION_KEY, LAUNCH_CLI_KEY], timeout=BRPOP_TIMEOUT)
+                result = r.brpop([COMMANDS_KEY, DESKTOP_NOTIFICATION_KEY, LAUNCH_CLI_KEY, OPEN_APP_KEY], timeout=BRPOP_TIMEOUT)
 
                 if result is None:
                     # timeout 경과 — 루프 계속 (연결 유지 확인)
@@ -330,6 +385,16 @@ def main():
                         r.expire(LAUNCH_CLI_RESULTS_KEY, 30)
                     except json.JSONDecodeError:
                         logger.warning(f"잘못된 launch-cli 페이로드: {raw_data}")
+                    continue
+
+                # open-app 처리 (Session 1 GUI 릴레이)
+                if queue_key == OPEN_APP_KEY:
+                    try:
+                        payload = json.loads(raw_data)
+                        logger.info(f"open-app 수신: app={payload.get('app_name')}, args={payload.get('args')}")
+                        execute_open_app(payload)
+                    except json.JSONDecodeError:
+                        logger.warning(f"잘못된 open-app 페이로드: {raw_data}")
                     continue
 
                 # 워커 명령 처리 (기존 로직)
@@ -396,4 +461,7 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--check-imports" in sys.argv:
+        print("import check ok")
+        sys.exit(0)
     main()

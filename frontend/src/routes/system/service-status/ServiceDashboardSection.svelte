@@ -13,7 +13,13 @@
   import WorkersSection from './WorkersSection.svelte';
   import TasksSection from './TasksSection.svelte';
   import InfrastructureSection from './InfrastructureSection.svelte';
-  import type { ConfirmAction, RestartStep, WorkerStatusVariant } from './types';
+  import type {
+    ConfirmAction,
+    DbCircuitStatus,
+    RestartStep,
+    ServiceDashboardActions,
+    WorkerStatusVariant
+  } from './types';
 
   interface Props {
     status: ServiceDashboardStatus;
@@ -30,6 +36,7 @@
     workerTierProcs: WorkerProcess[];
     infraTierProcs: WorkerProcess[];
     redisStatus: RedisStatus | null;
+    dbStatus: DbCircuitStatus | null;
     devRunnerStatus: RunStatusResponse | null;
     selfRestartState: 'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed';
     selfRestartMessage: string;
@@ -55,22 +62,7 @@
     refreshStatus: () => void | Promise<void>;
     selfRestartApi: (port: number, label: string) => Promise<void>;
     resetSelfRestartState: () => void;
-    stopService: (name: string) => Promise<void>;
-    startService: (name: string) => Promise<void>;
-    restartWorkers: () => Promise<void>;
-    stopWatchdogs: () => Promise<void>;
-    startWatchdogs: () => Promise<void>;
-    restartSingleWorker: (name: string) => Promise<void>;
-    restartInfra: (name: string) => Promise<void>;
-    runTask: (folder: string, name: string) => Promise<void>;
-    removeTask: (folder: string, name: string) => Promise<void>;
-    restartRedis: () => Promise<void>;
-    restartDevRunner: () => Promise<void>;
-    stopDevRunner: () => Promise<void>;
-    resetDevRunner: () => Promise<void>;
-    startDevRunner: () => Promise<void>;
-    removeStartup: (name: string) => Promise<void>;
-    restartCommandListener: () => Promise<void>;
+    actions: ServiceDashboardActions;
   }
 
   let {
@@ -88,6 +80,7 @@
     workerTierProcs,
     infraTierProcs,
     redisStatus,
+    dbStatus,
     devRunnerStatus,
     selfRestartState,
     selfRestartMessage,
@@ -107,22 +100,7 @@
     refreshStatus,
     selfRestartApi,
     resetSelfRestartState,
-    stopService,
-    startService,
-    restartWorkers,
-    stopWatchdogs,
-    startWatchdogs,
-    restartSingleWorker,
-    restartInfra,
-    runTask,
-    removeTask,
-    restartRedis,
-    restartDevRunner,
-    stopDevRunner,
-    resetDevRunner,
-    startDevRunner,
-    removeStartup,
-    restartCommandListener
+    actions
   }: Props = $props();
 </script>
 
@@ -154,8 +132,8 @@
     {showConfirm}
     {selfRestartApi}
     {resetSelfRestartState}
-    {stopService}
-    {startService}
+    stopService={actions.stopService}
+    startService={actions.startService}
   />
 
   <WorkersSection
@@ -168,11 +146,11 @@
     {workerStatusText}
     {workerStatusTextClass}
     {showConfirm}
-    {restartWorkers}
-    {stopWatchdogs}
-    {startWatchdogs}
-    {restartSingleWorker}
-    {restartInfra}
+    restartWorkers={actions.restartWorkers}
+    stopWatchdogs={actions.stopWatchdogs}
+    startWatchdogs={actions.startWatchdogs}
+    restartSingleWorker={actions.restartSingleWorker}
+    restartInfra={actions.restartInfra}
   />
 </div>
 
@@ -184,24 +162,25 @@
     {formatDateTime}
     {taskVariant}
     {showConfirm}
-    {runTask}
-    {removeTask}
+    runTask={actions.runTask}
+    removeTask={actions.removeTask}
   />
 
   <InfrastructureSection
     {redisStatus}
+    {dbStatus}
     {devRunnerStatus}
     {allStartups}
     {actionLoading}
     {formatUptime}
     {formatCollectedAt}
     {showConfirm}
-    {restartRedis}
-    {restartDevRunner}
-    {stopDevRunner}
-    {resetDevRunner}
-    {startDevRunner}
-    {removeStartup}
-    {restartCommandListener}
+    restartRedis={actions.restartRedis}
+    restartDevRunner={actions.restartDevRunner}
+    stopDevRunner={actions.stopDevRunner}
+    resetDevRunner={actions.resetDevRunner}
+    startDevRunner={actions.startDevRunner}
+    removeStartup={actions.removeStartup}
+    restartCommandListener={actions.restartCommandListener}
   />
 </div>

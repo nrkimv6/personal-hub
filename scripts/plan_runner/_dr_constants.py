@@ -43,12 +43,16 @@ ADMIN_API_PORT = int(os.environ.get("ADMIN_API_PORT", "8001"))
 # per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
-    "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
+    "engine", "fix_engine", "worktree_path", "branch",
+    "merge_status", "merge_requested", "merge_reason", "merge_message",
+    "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
+    "service_lock_approved",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
-    "subprocess_heartbeat", "reflect_final_path",
+    "subprocess_heartbeat", "pid_create_time", "process_cmdline_hash", "reflect_final_path",
     "accepted_at", "accepted_source", "started_at",  # 관측 메타 키 (Phase 1)
     # profile 관련 키 (신규 4개) — redis_connection.py의 RUNNER_KEY_SUFFIXES와 동기화 필수
     "profile", "profile_env_key", "profile_config_dir", "profile_extra_env",
+    "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at",
 )
 def _read_zombie_grace_seconds(default: int = 240) -> int:
     """좀비 감지 유예 시간(env override) 파싱."""
@@ -73,7 +77,31 @@ MERGE_ACTIVE_STATUSES = ("pre_merge", "queued", "merging", "pending_merge", "res
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/plan_runner/ → scripts/ → project root
-WORKTREE_BASE_DIR = PROJECT_ROOT / ".worktrees"
+
+
+def _resolve_worktree_root() -> Path:
+    """PROJECT_ROOT 기반으로 nested .worktrees escape한 root 반환."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "-C", str(PROJECT_ROOT), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, encoding="utf-8", timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            git_root = Path(result.stdout.strip())
+            parts = list(git_root.parts)
+            if ".worktrees" in parts:
+                i = parts.index(".worktrees")
+                candidate = Path(*parts[:i])
+                if (candidate / ".git").exists():
+                    return candidate
+            return git_root
+    except Exception:
+        pass
+    return PROJECT_ROOT
+
+
+WORKTREE_BASE_DIR = _resolve_worktree_root() / ".worktrees"
 OWNERSHIP_SNAPSHOT_DIR = PROJECT_ROOT / "logs" / "dev_runner" / "ownership"
 WTOOLS_BASE_DIR = Path("D:/work/project/service/wtools")
 PLAN_RUNNER_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/plan-runner"

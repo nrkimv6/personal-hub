@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 
 import pytest
 import requests
+from tests.helpers.restart_frontend_validation import restart_frontend_failure_context
 
 # 프로젝트 루트 추가
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -421,7 +422,10 @@ class TestMemoryPressureHistoryApi:
 
 
 def test_http_system_mode_survives_restart_frontend_admin():
-    """restart-frontend(admin) 전/후 system mode API가 200 유지되는지 검증."""
+    """[MUTATING] restart-frontend(admin) 전/후 system mode API가 200 유지되는지 검증.
+
+    Run sequentially; concurrent restart validation can trip the frontend lock.
+    """
     base = "http://localhost:8001"
 
     try:
@@ -441,8 +445,7 @@ def test_http_system_mode_survives_restart_frontend_admin():
         encoding="utf-8",
         errors="replace",
     )
-    # 포트 권한/충돌 환경에서는 1이 나올 수 있으므로 API 생존성 검증을 우선한다.
-    assert result.returncode in (0, 1)
+    assert result.returncode == 0, restart_frontend_failure_context(result)
 
     # 재시작 직후 잠깐의 공백 허용
     for _ in range(10):

@@ -51,6 +51,9 @@ class TestSetGetClearQuotaPause:
         result = svc.get_provider_quota_pause("gemini")
         assert result is not None
         assert result > datetime.now()
+        detail = svc.get_provider_quota_pause_detail("gemini")
+        assert detail["paused_until"] == result
+        assert "quota pause until" in detail["reason"]
 
         # clear
         cleared = svc.clear_provider_quota_pause("gemini")

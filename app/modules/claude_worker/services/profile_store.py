@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +21,38 @@ DEFAULT_LLM_PROFILES_FILE = PROJECT_ROOT / "data" / "llm_profiles.json"
 LLM_PROFILES_FILE = DEFAULT_LLM_PROFILES_FILE
 
 SUPPORTED_ENGINES = {"claude", "gemini"}
+SECRET_EXTRA_ENV_RE = re.compile(r"(^|_)(API_KEY|TOKEN)$")
+SECRET_EXTRA_ENV_KEYS = {"ANTHROPIC_API_KEY", "GOOGLE_API_KEY"}
+PROFILE_STATES = {
+    "available",
+    "paused_by_quota",
+    "paused_by_window",
+    "disabled",
+    "processing",
+}
+
+
+def _parse_dt(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+        except ValueError:
+            return None
+    return None
+
+
+def _dt_to_str(value: Optional[datetime]) -> Optional[str]:
+    return value.isoformat() if isinstance(value, datetime) else None
+
+
+def _is_secret_extra_env_key(key: str) -> bool:
+    upper = key.upper()
+    return upper in SECRET_EXTRA_ENV_KEYS or SECRET_EXTRA_ENV_RE.search(upper) is not None
 
 
 @dataclass
@@ -27,6 +61,13 @@ class LLMProfile:
     name: str
     config_dir: Optional[str]
     extra_env: Dict[str, str] = field(default_factory=dict)
+    enabled: bool = True
+    priority: int = 0
+    capacity: int = 1
+    last_quota_pause_until: Optional[datetime] = None
+    last_reset_at: Optional[datetime] = None
+    last_state: Optional[str] = None
+    last_error_summary: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -34,15 +75,32 @@ class LLMProfile:
             "name": self.name,
             "config_dir": self.config_dir,
             "extra_env": self.extra_env,
+            "enabled": self.enabled,
+            "priority": self.priority,
+            "capacity": self.capacity,
+            "last_quota_pause_until": _dt_to_str(self.last_quota_pause_until),
+            "last_reset_at": _dt_to_str(self.last_reset_at),
+            "last_state": self.last_state,
+            "last_error_summary": self.last_error_summary,
         }
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "LLMProfile":
+        state = d.get("last_state")
+        if state is not None and state not in PROFILE_STATES:
+            state = None
         return LLMProfile(
             engine=str(d.get("engine", "")),
             name=str(d.get("name", "")),
             config_dir=d.get("config_dir"),
             extra_env=dict(d.get("extra_env") or {}),
+            enabled=bool(d.get("enabled", True)),
+            priority=int(d.get("priority") or 0),
+            capacity=max(1, int(d.get("capacity") or 1)),
+            last_quota_pause_until=_parse_dt(d.get("last_quota_pause_until")),
+            last_reset_at=_parse_dt(d.get("last_reset_at")),
+            last_state=state,
+            last_error_summary=d.get("last_error_summary"),
         )
 
 
@@ -50,8 +108,8 @@ def _default_profiles_payload() -> Dict[str, Any]:
     return {
         "selected": {"claude": "default", "gemini": "default"},
         "profiles": [
-            {"engine": "claude", "name": "default", "config_dir": None, "extra_env": {}},
-            {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}},
+            LLMProfile(engine="claude", name="default", config_dir=None).to_dict(),
+            LLMProfile(engine="gemini", name="default", config_dir=None).to_dict(),
         ],
     }
 
@@ -122,6 +180,19 @@ def _sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         if key in seen:
             raise ValueError(f"duplicate profile name {name!r} for engine {engine!r}")
         seen.add(key)
+        item = dict(item)
+        extra_env = dict(item.get("extra_env") or {})
+        removed = [k for k in extra_env if _is_secret_extra_env_key(k)]
+        for key_name in removed:
+            extra_env.pop(key_name, None)
+        if removed:
+            logger.warning(
+                "[profile-store] secret-like extra_env keys removed for %s/%s: %s",
+                engine,
+                name,
+                sorted(removed),
+            )
+        item["extra_env"] = extra_env
         profiles.append(LLMProfile.from_dict(item))
 
     # selected 검증: 없으면 default
@@ -182,14 +253,50 @@ def get_by_name(engine: str, name: str) -> LLMProfile:
     raise ValueError(f"profile {name!r} not found for engine {engine!r}")
 
 
+def list_profiles(engine: Optional[str] = None) -> List[LLMProfile]:
+    payload = load_profiles()
+    profiles = [LLMProfile.from_dict(item) for item in payload.get("profiles", [])]
+    if engine is not None:
+        profiles = [p for p in profiles if p.engine == engine]
+    return profiles
+
+
+def update_profile_state(
+    engine: str,
+    name: str,
+    *,
+    last_quota_pause_until: Optional[datetime] = None,
+    last_reset_at: Optional[datetime] = None,
+    last_state: Optional[str] = None,
+    last_error_summary: Optional[str] = None,
+) -> Dict[str, Any]:
+    payload = load_profiles()
+    found = False
+    for item in payload.get("profiles", []):
+        if item.get("engine") == engine and item.get("name") == name:
+            found = True
+            item["last_quota_pause_until"] = _dt_to_str(last_quota_pause_until)
+            item["last_reset_at"] = _dt_to_str(last_reset_at)
+            item["last_state"] = last_state
+            item["last_error_summary"] = last_error_summary
+            break
+    if not found:
+        raise ValueError(f"profile {name!r} not found for engine {engine!r}")
+    return save_profiles(payload)
+
+
 def select(engine: str, name: str) -> Dict[str, Any]:
     """engine 의 현재 선택 profile 변경 후 저장."""
     if engine not in SUPPORTED_ENGINES:
         raise ValueError(f"unsupported engine: {engine!r}")
     payload = load_profiles()
-    names = [p["name"] for p in payload["profiles"] if p.get("engine") == engine]
+    names = [
+        p["name"]
+        for p in payload["profiles"]
+        if p.get("engine") == engine and p.get("enabled", True)
+    ]
     if name not in names:
-        raise ValueError(f"profile {name!r} not found for engine {engine!r}")
+        raise ValueError(f"profile {name!r} not found or disabled for engine {engine!r}")
     payload["selected"][engine] = name
     return save_profiles(payload)
 

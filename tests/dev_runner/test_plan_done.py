@@ -13,6 +13,7 @@
 
 import asyncio
 import json
+import subprocess
 import pytest
 from datetime import date
 from pathlib import Path
@@ -28,8 +29,8 @@ from app.models.plan_record import PlanRecord, PlanEvent
 # ========== Fixtures ==========
 
 @pytest.fixture
-def svc(dev_runner_config_isolation, test_db_session):
-    """PlanService 인스턴스 — test_db_session으로 SessionLocal 글로벌 패치 활성화"""
+def svc(dev_runner_config_isolation):
+    """PlanService 인스턴스 — archive-only tests must not bootstrap the full test DB."""
     return PlanService()
 
 
@@ -161,7 +162,10 @@ class TestArchivePlan:
     """RIGHT: 아카이브 이동 + 원본 삭제"""
 
     @pytest.mark.asyncio
-    async def test_archive_file_created(self, tmp_path, today, svc):
+    async def test_archive_file_created(self, tmp_path, today, svc, request):
+        assert "test_db_engine" not in request.fixturenames
+        assert "test_db_session" not in request.fixturenames
+
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "2026-01-01-test.md"
@@ -300,10 +304,11 @@ class TestArchivePlan:
 # ========== _update_todo_done ==========
 
 class TestUpdateTodoDone:
-    """RIGHT: TODO.md 제거 + DONE.md 추가"""
+    """RIGHT: plans ledger TODO.md 제거 + plans ledger DONE.md 추가"""
 
     def test_todo_item_removed(self, tmp_path):
-        todo_path = tmp_path / "TODO.md"
+        todo_path = tmp_path / ".worktrees" / "plans" / "TODO.md"
+        todo_path.parent.mkdir(parents=True)
         todo_path.write_text(
             "# TODO\n\n- [ ] 내 플랜 제목 (from: plan/xxx)\n- [ ] 다른 항목\n",
             encoding="utf-8"
@@ -316,23 +321,23 @@ class TestUpdateTodoDone:
         assert "다른 항목" in content
 
     def test_done_entry_added(self, tmp_path, today):
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir()
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True)
 
         PlanService._update_todo_done(tmp_path, "테스트 플랜")
 
-        done_path = tmp_path / "docs" / "DONE.md"
+        done_path = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
         assert done_path.exists()
         content = done_path.read_text(encoding="utf-8")
         assert f"- [x] {today}: 테스트 플랜" in content
 
     def test_done_md_created_if_not_exists(self, tmp_path):
         PlanService._update_todo_done(tmp_path, "새 플랜")
-        done_path = tmp_path / "docs" / "DONE.md"
+        done_path = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
         assert done_path.exists()
 
     def test_done_entry_prepended(self, tmp_path, today):
-        done_path = tmp_path / "docs" / "DONE.md"
+        done_path = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
         done_path.parent.mkdir(parents=True)
         done_path.write_text("# DONE (최근 20개)\n\n- [x] 2026-01-01: 이전 항목\n", encoding="utf-8")
 
@@ -343,6 +348,18 @@ class TestUpdateTodoDone:
         new_idx = next(i for i, l in enumerate(lines) if "새 플랜" in l)
         old_idx = next(i for i, l in enumerate(lines) if "이전 항목" in l)
         assert new_idx < old_idx
+
+    def test_root_legacy_ledgers_not_created_or_modified(self, tmp_path):
+        root_todo = tmp_path / "TODO.md"
+        root_done = tmp_path / "docs" / "DONE.md"
+        root_done.parent.mkdir(parents=True)
+        root_todo.write_text("# TODO\n\n- [ ] legacy\n", encoding="utf-8")
+        root_done.write_text("# DONE\n\n- [x] legacy\n", encoding="utf-8")
+
+        PlanService._update_todo_done(tmp_path, "새 플랜")
+
+        assert root_todo.read_text(encoding="utf-8") == "# TODO\n\n- [ ] legacy\n"
+        assert root_done.read_text(encoding="utf-8") == "# DONE\n\n- [x] legacy\n"
 
 
 # ========== _archive_done_if_needed ==========
@@ -431,6 +448,256 @@ class TestRunDone:
         assert len(archives) == 1
 
     @pytest.mark.asyncio
+    async def test_run_done_commit_nonzero_returns_failure_E(self, tmp_path):
+        """E: PlanDoneService도 commit script non-zero를 success=False로 반환한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        archive_dir = tmp_path / "docs" / "archive"
+        plan_dir.mkdir(parents=True)
+        archive_dir.mkdir(parents=True)
+        plan_file = plan_dir / "2026-04-03-commit-fail.md"
+        archive_file = archive_dir / plan_file.name
+        plan_file.write_text(
+            "# commit fail\n\n"
+            "> 상태: 구현완료\n"
+            "> 진행률: 1/1 (100%)\n\n"
+            "- [x] done\n",
+            encoding="utf-8",
+        )
+        archive_file.write_text("# archived\n", encoding="utf-8")
+        commit_ps1 = tmp_path / "commit.ps1"
+        commit_ps1.write_text("throw 'fail'\n", encoding="utf-8")
+
+        scanner = MagicMock()
+        scanner.get_plan_progress.return_value = MagicMock(total=1, done=1)
+        scanner.get_plan_status.return_value = "구현완료"
+        scanner._extract_pending_checkboxes.return_value = []
+        scanner._find_todo_file.return_value = None
+        done_svc = PlanDoneService(scanner=scanner, registry=MagicMock())
+
+        add_proc = AsyncMock()
+        add_proc.communicate = AsyncMock(return_value=(b"add ok", None))
+        add_proc.returncode = 0
+        commit_proc = AsyncMock()
+        commit_proc.communicate = AsyncMock(return_value=(b"commit failed hard", None))
+        commit_proc.returncode = 17
+
+        def _run_side_effect(args, cwd=None, **kwargs):
+            if "rev-parse" in args:
+                return MagicMock(returncode=0, stdout=str(tmp_path), stderr="")
+            if "diff" in args:
+                return MagicMock(returncode=1, stdout="", stderr="")
+            raise AssertionError(f"unexpected subprocess.run args={args}")
+
+        with patch.object(type(done_svc), "COMMIT_PS1", commit_ps1), \
+             patch.object(type(done_svc), "COMMIT_SH", tmp_path / "missing-commit.sh"), \
+             patch("app.modules.dev_runner.services.git_commit_roots.subprocess.run", side_effect=_run_side_effect), \
+             patch("app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec", side_effect=[add_proc, commit_proc]), \
+             patch.object(done_svc, "_archive_plan", new=AsyncMock(return_value=(archive_file, None))), \
+             patch.object(done_svc, "_update_todo_done"), \
+             patch.object(done_svc, "_archive_done_if_needed"):
+            result = await done_svc.run_done(str(plan_file))
+
+        assert result["success"] is False
+        assert "commit script failed (17)" in result["message"]
+        assert "commit failed hard" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_git_commit_routes_mixed_project_and_plans_roots_R(self, tmp_path):
+        """R: TODO/DONE은 project root, archive plan은 plans worktree root에서 각각 commit한다."""
+        project_root = tmp_path / "monitor-page"
+        plans_root = project_root / ".worktrees" / "plans"
+        project_root.mkdir()
+        (plans_root / "docs" / "archive").mkdir(parents=True)
+        project_file = project_root / "TODO.md"
+        archive_file = plans_root / "docs" / "archive" / "2026-05-03-test.md"
+        project_file.write_text("# TODO\n", encoding="utf-8")
+        archive_file.write_text("# Plan\n", encoding="utf-8")
+
+        scanner = MagicMock()
+        done_svc = PlanDoneService(scanner=scanner, registry=MagicMock())
+
+        def _run_side_effect(args, cwd=None, **kwargs):
+            if "rev-parse" in args:
+                root = plans_root if str(cwd).startswith(str(plans_root)) else project_root
+                return MagicMock(returncode=0, stdout=str(root), stderr="")
+            if "diff" in args:
+                return MagicMock(returncode=1, stdout="", stderr="")
+            raise AssertionError(f"unexpected subprocess.run args={args}")
+
+        def _proc(stdout: bytes = b"ok", returncode: int = 0):
+            proc = AsyncMock()
+            proc.communicate = AsyncMock(return_value=(stdout, None))
+            proc.returncode = returncode
+            return proc
+
+        with patch.object(type(done_svc), "_resolve_commit_command", return_value=["commit-tool", "msg"]), \
+             patch("app.modules.dev_runner.services.git_commit_roots.subprocess.run", side_effect=_run_side_effect), \
+             patch(
+                 "app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec",
+                 side_effect=[_proc(), _proc(b"root commit"), _proc(), _proc(b"plans commit")],
+             ) as mock_exec:
+            output = await done_svc._git_commit(
+                project_root,
+                [project_file, archive_file],
+                "docs: mixed roots",
+            )
+
+        cwd_sequence = [Path(call.kwargs["cwd"]) for call in mock_exec.call_args_list]
+        assert cwd_sequence == [project_root, project_root, plans_root, plans_root]
+        assert "root commit" in output
+        assert "plans commit" in output
+
+    @pytest.mark.asyncio
+    async def test_commit_files_by_git_root_skips_deleted_untracked_source_pathspec_T1(self, tmp_path):
+        """T1: fallback archive move에서 사라진 untracked source를 git add pathspec에 넣지 않는다."""
+        from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
+
+        plans_root = tmp_path / "plans"
+        source_path = plans_root / "docs" / "plan" / "2026-05-05-pathspec.md"
+        archive_path = plans_root / "docs" / "archive" / source_path.name
+        source_path.parent.mkdir(parents=True)
+        archive_path.parent.mkdir(parents=True)
+        archive_path.write_text("# archived\n", encoding="utf-8")
+
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"add ok", None))
+        proc.returncode = 0
+
+        with patch(
+            "app.modules.dev_runner.services.git_commit_roots.group_files_by_git_root",
+            return_value={plans_root: [source_path, archive_path]},
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots._is_tracked",
+            return_value=False,
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots._has_staged_changes",
+            return_value=False,
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec",
+            side_effect=[proc],
+        ) as mock_exec:
+            output = await commit_files_by_git_root(
+                files_to_add=[source_path, archive_path],
+                default_root=None,
+                commit_command=["commit-tool", "msg"],
+                decode_output=PlanDoneService._decode_subprocess_output,
+            )
+
+        add_args = [str(arg).replace("\\", "/") for arg in mock_exec.call_args.args]
+        assert str(source_path).replace("\\", "/") not in add_args
+        assert "docs/plan/2026-05-05-pathspec.md" not in add_args
+        assert "docs/archive/2026-05-05-pathspec.md" in add_args
+        assert str(archive_path).replace("\\", "/") not in add_args
+        assert "커밋할 staged 변경 없음" in output
+
+    @pytest.mark.asyncio
+    async def test_commit_files_by_git_root_stages_tracked_deleted_source_relpath_T1(self, tmp_path):
+        """T1: tracked source 삭제는 plans root 기준 상대 pathspec으로 stage한다."""
+        from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
+
+        plans_root = tmp_path / "plans"
+        source_path = plans_root / "docs" / "plan" / "2026-05-05-pathspec.md"
+        archive_path = plans_root / "docs" / "archive" / source_path.name
+        source_path.parent.mkdir(parents=True)
+        archive_path.parent.mkdir(parents=True)
+        archive_path.write_text("# archived\n", encoding="utf-8")
+
+        proc = AsyncMock()
+        proc.communicate = AsyncMock(return_value=(b"add ok", None))
+        proc.returncode = 0
+
+        with patch(
+            "app.modules.dev_runner.services.git_commit_roots.group_files_by_git_root",
+            return_value={plans_root: [source_path, archive_path]},
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots._is_tracked",
+            return_value=True,
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots._has_staged_changes",
+            return_value=False,
+        ), patch(
+            "app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec",
+            side_effect=[proc],
+        ) as mock_exec:
+            await commit_files_by_git_root(
+                files_to_add=[source_path, archive_path],
+                default_root=None,
+                commit_command=["commit-tool", "msg"],
+                decode_output=PlanDoneService._decode_subprocess_output,
+            )
+
+        add_args = [str(arg).replace("\\", "/") for arg in mock_exec.call_args.args]
+        assert "docs/plan/2026-05-05-pathspec.md" in add_args
+        assert "docs/archive/2026-05-05-pathspec.md" in add_args
+        assert str(source_path).replace("\\", "/") not in add_args
+        assert str(archive_path).replace("\\", "/") not in add_args
+
+    @pytest.mark.asyncio
+    async def test_commit_files_by_git_root_cleans_project_and_plans_repos_T3(self, tmp_path):
+        """T3: 실제 git repo 두 개에서 active 삭제와 archive 추가를 각각 commit한다."""
+        from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
+
+        project_root = tmp_path / "monitor-page"
+        plans_root = project_root / ".worktrees" / "plans"
+        project_root.mkdir(parents=True)
+        (plans_root / "docs" / "plan").mkdir(parents=True)
+        (plans_root / "docs" / "archive").mkdir(parents=True)
+
+        for repo in (project_root, plans_root):
+            subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+        todo_path = project_root / "TODO.md"
+        plan_path = plans_root / "docs" / "plan" / "2026-05-03-test.md"
+        archive_path = plans_root / "docs" / "archive" / plan_path.name
+        todo_path.write_text("# TODO\n\n- [ ] item\n", encoding="utf-8")
+        (project_root / ".gitignore").write_text(".worktrees/\n", encoding="utf-8")
+        plan_path.write_text("# Plan\n\n> 상태: 구현완료\n", encoding="utf-8")
+
+        commit_cmd = [
+            "git",
+            "-c",
+            "user.name=Test User",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "test commit",
+        ]
+        subprocess.run(["git", "add", "TODO.md", ".gitignore"], cwd=project_root, check=True, capture_output=True, text=True)
+        subprocess.run(commit_cmd, cwd=project_root, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "add", "."], cwd=plans_root, check=True, capture_output=True, text=True)
+        subprocess.run(commit_cmd, cwd=plans_root, check=True, capture_output=True, text=True)
+
+        todo_path.write_text("# TODO\n\n- [x] item\n", encoding="utf-8")
+        archive_path.write_text(plan_path.read_text(encoding="utf-8"), encoding="utf-8")
+        plan_path.unlink()
+
+        output = await commit_files_by_git_root(
+            files_to_add=[todo_path, plan_path, archive_path],
+            default_root=project_root,
+            commit_command=commit_cmd,
+            decode_output=PlanDoneService._decode_subprocess_output,
+        )
+
+        root_status = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        plans_status = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=plans_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert output
+        assert root_status == ""
+        assert plans_status == ""
+
+    @pytest.mark.asyncio
     async def test_run_done_file_not_found(self, svc):
         result = await svc.run_done("/nonexistent/path/plan.md")
         assert result["success"] is False
@@ -443,7 +710,7 @@ class TestRunDone:
         with patch.object(svc, "_git_commit", new=AsyncMock(return_value="")):
             await svc.run_done(str(plan_file))
 
-        done_path = project_dir / "docs" / "DONE.md"
+        done_path = project_dir / ".worktrees" / "plans" / "docs" / "DONE.md"
         assert done_path.exists()
         content = done_path.read_text(encoding="utf-8")
         assert "테스트 플랜" in content
@@ -472,8 +739,54 @@ class TestRunDone:
 
         assert result["success"] is False
         assert "archive target resolve failed" in result["message"]
-        assert plan_file.exists()
-        assert plan_file.read_text(encoding="utf-8") == original
+
+
+# ─────────────────────────────────────────────────────────────
+# TC: _resolve_project_dir — plans worktree 경로 처리
+# ─────────────────────────────────────────────────────────────
+
+class TestResolvePlansDoneProjectDir:
+    """PlanDoneService._resolve_project_dir plans worktree 경로 처리 검증"""
+
+    def test_resolve_project_dir_skips_plans_worktree_returns_project_root(self, tmp_path):
+        """R: .worktrees/plans/docs/plan/xxx.md 입력 시 .worktrees/plans가 아닌
+        target project root 반환.
+        """
+        project_root = tmp_path / "my-project"
+        project_root.mkdir()
+        plans_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        plan_file = plans_dir / "2026-04-24_fix-test.md"
+        plan_file.write_text("# Test\n")
+
+        result = PlanDoneService._resolve_project_dir(str(plan_file))
+
+        assert result is not None, "_resolve_project_dir()가 None을 반환하면 안 됨"
+        assert result == project_root, (
+            f".worktrees/plans 경로 입력 시 project_root({project_root})를 반환해야 함, "
+            f"실제: {result}"
+        )
+        # .worktrees/plans가 반환되면 안 됨
+        plans_root = project_root / ".worktrees" / "plans"
+        assert result != plans_root, (
+            f"_resolve_project_dir()가 .worktrees/plans를 반환하면 안 됨: {result}"
+        )
+
+    def test_resolve_project_dir_normal_path_unchanged(self, tmp_path):
+        """R: 일반 docs/plan 경로 → 기존대로 project root 반환 (회귀 방어)."""
+        project_root = tmp_path / "normal-project"
+        docs_plan = project_root / "docs" / "plan"
+        docs_plan.mkdir(parents=True)
+        plan_file = docs_plan / "2026-04-24_test.md"
+        plan_file.write_text("# Test\n")
+
+        result = PlanDoneService._resolve_project_dir(str(plan_file))
+
+        assert result is not None
+        assert result == project_root, (
+            f"일반 docs/plan 경로에서 project_root({project_root}) 반환해야 함, "
+            f"실제: {result}"
+        )
 
     @pytest.mark.asyncio
     async def test_run_done_ownership_guard_returns_failure_E(self, tmp_path, svc):

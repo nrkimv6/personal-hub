@@ -187,7 +187,7 @@
 </svelte:head>
 
 <div class="p-4 max-w-lg mx-auto space-y-4">
-	<PageHeader title="공유 받은 URL" subtitle="공유된 URL을 크롤링하고 수집합니다" />
+	<PageHeader title="공유 받은 URL" />
 
 	{#if shareCompleted}
 		<!-- 공유 완료 (창 닫기 실패 시) -->

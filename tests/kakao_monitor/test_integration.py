@@ -183,3 +183,60 @@ def test_worker_uses_polling_interval_normalization():
         assert worker._normalize_interval(0) == 1.0
         assert worker._normalize_interval(0.5) == 1.0
         assert worker._normalize_interval(7) == 7.0
+
+
+# ---------------------------------------------------------------------------
+# T1-kakao-01: _monitor_chat() connection error → _log_worker_error 1회 + re-raise 없음
+# ---------------------------------------------------------------------------
+
+WIN32_MOCKS = {
+    "psutil": MagicMock(), "win32gui": MagicMock(), "win32con": MagicMock(),
+    "win32clipboard": MagicMock(), "pyautogui": MagicMock(),
+    "paddleocr": MagicMock(), "imagehash": MagicMock(), "win32ui": MagicMock(),
+    "app.worker.crawl_worker_base": MagicMock(),
+    "app.worker.scheduled_worker": MagicMock(),
+    "app.worker.ondemand_worker": MagicMock(),
+}
+
+
+def _make_kakao_worker():
+    """win32 의존성 없이 KakaoMonitorWorker 생성."""
+    with patch.dict("sys.modules", WIN32_MOCKS):
+        from app.worker.kakao_monitor_worker import KakaoMonitorWorker
+        return KakaoMonitorWorker()
+
+
+@pytest.mark.asyncio
+async def test_monitor_chat_connection_error_logs_without_traceback_integration():
+    """T1: _monitor_chat() — _load_active_state()가 connection error 던질 때 _log_worker_error 1회 + raise 없음."""
+    try:
+        import psycopg2
+    except ImportError:
+        pytest.skip("psycopg2 없음")
+
+    worker = _make_kakao_worker()
+    worker._log_worker_error = MagicMock()
+
+    conn_err = psycopg2.OperationalError("connection refused to server")
+    worker._load_active_state = MagicMock(side_effect=conn_err)
+
+    # _monitor_chat이 raise하지 않고 정상 return해야 함
+    await worker._monitor_chat()
+
+    worker._log_worker_error.assert_called_once_with("monitor_chat", conn_err)
+
+
+@pytest.mark.asyncio
+async def test_monitor_chat_non_connection_error_still_raises_error():
+    """T1: _monitor_chat() — non-connection error는 기존처럼 raise 유지 (_safe_execute로 전파)."""
+    worker = _make_kakao_worker()
+    worker._log_worker_error = MagicMock()
+
+    non_conn_err = RuntimeError("ocr capture failed")
+    worker._load_active_state = MagicMock(side_effect=non_conn_err)
+
+    with pytest.raises(RuntimeError, match="ocr capture failed"):
+        await worker._monitor_chat()
+
+    # connection error가 아니므로 _log_worker_error 호출 없음
+    worker._log_worker_error.assert_not_called()

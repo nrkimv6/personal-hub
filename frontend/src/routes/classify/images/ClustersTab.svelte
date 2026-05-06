@@ -4,6 +4,7 @@
 	import { Clock, Calendar, RotateCcw, Tag, Eye, CheckCircle2, FileImage, X, Play } from 'lucide-svelte';
 	import { type Category } from '../lib/categoryUtils';
 	import CategoryPickerModal from '../components/CategoryPicker.svelte';
+	import { confirm } from '$lib/stores/confirm';
 	import { toast } from '$lib/stores/toast';
 
 	interface Cluster {
@@ -50,9 +51,16 @@
 	});
 
 	async function runClustering(mode: 'all' | 'new') {
-		if (!confirm(mode === 'all'
-			? '기존 클러스터를 삭제하고 전체 재클러스터링합니다. 진행하시겠습니까?'
-			: '미분류 파일만 클러스터링합니다. 진행하시겠습니까?'))
+		if (
+			!(await confirm({
+				title: mode === 'all' ? '전체 재클러스터링' : '미분류 클러스터링',
+				message: mode === 'all'
+					? '기존 클러스터를 삭제하고 전체 재클러스터링합니다. 진행하시겠습니까?'
+					: '미분류 파일만 클러스터링합니다. 진행하시겠습니까?',
+				confirmText: '진행',
+				variant: mode === 'all' ? 'danger' : 'warning'
+			}))
+		)
 			return;
 
 		try {

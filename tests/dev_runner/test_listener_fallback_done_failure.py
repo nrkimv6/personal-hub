@@ -1,24 +1,15 @@
 """listener heartbeat fallback done 실패 전파 단위 테스트."""
 
-import importlib.util
 from unittest.mock import MagicMock, patch
 
-from tests.dev_runner._path_helpers import get_listener_script_path, skip_if_missing
-
-
-def _load_listener_module():
-    script_path = get_listener_script_path()
-    skip_if_missing(script_path, "Listener script")
-    spec = importlib.util.spec_from_file_location("dev_runner_listener_fallback", str(script_path))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from tests.dev_runner.conftest import attach_default_redis_behaviors
+from tests.dev_runner._path_helpers import load_listener_module
 
 
 def test_propagate_fallback_done_failure_sets_error_and_workflow_R():
     """R: done 실패 결과가 merge_status/error_message로 전파된다."""
-    mod = _load_listener_module()
-    redis_client = MagicMock()
+    mod = load_listener_module("dev_runner_listener_fallback")
+    redis_client = attach_default_redis_behaviors(MagicMock())
     wf_manager = MagicMock()
     wf_manager.get_by_runner_id.return_value = {"id": 101, "status": "running"}
 
@@ -41,8 +32,8 @@ def test_propagate_fallback_done_failure_sets_error_and_workflow_R():
 
 def test_propagate_fallback_done_failure_noop_on_success_B():
     """B: done 성공 결과면 부수효과가 없어야 한다."""
-    mod = _load_listener_module()
-    redis_client = MagicMock()
+    mod = load_listener_module("dev_runner_listener_fallback")
+    redis_client = attach_default_redis_behaviors(MagicMock())
     wf_manager = MagicMock()
 
     with patch.object(mod, "_pub_and_log") as mock_pub:
@@ -61,8 +52,8 @@ def test_propagate_fallback_done_failure_noop_on_success_B():
 
 def test_propagate_fallback_done_failure_noop_on_nondict_B():
     """B: dict가 아닌 결과값이면 안전하게 무시한다."""
-    mod = _load_listener_module()
-    redis_client = MagicMock()
+    mod = load_listener_module("dev_runner_listener_fallback")
+    redis_client = attach_default_redis_behaviors(MagicMock())
     wf_manager = MagicMock()
 
     with patch.object(mod, "_pub_and_log") as mock_pub:
@@ -81,8 +72,8 @@ def test_propagate_fallback_done_failure_noop_on_nondict_B():
 
 def test_execute_heartbeat_done_fallback_hang_failure_updates_workflow_R():
     """R: hang fallback에서 done 실패 시 merge_status/workflow/log가 함께 갱신된다."""
-    mod = _load_listener_module()
-    redis_client = MagicMock()
+    mod = load_listener_module("dev_runner_listener_fallback")
+    redis_client = attach_default_redis_behaviors(MagicMock())
     wf_manager = MagicMock()
     wf_manager.get_by_runner_id.return_value = {"id": 201, "status": "running"}
 
@@ -110,8 +101,8 @@ def test_execute_heartbeat_done_fallback_hang_failure_updates_workflow_R():
 
 def test_execute_heartbeat_done_fallback_dead_failure_updates_workflow_R():
     """R: dead fallback에서 done 실패 시 merge_status/workflow/log가 함께 갱신된다."""
-    mod = _load_listener_module()
-    redis_client = MagicMock()
+    mod = load_listener_module("dev_runner_listener_fallback")
+    redis_client = attach_default_redis_behaviors(MagicMock())
     wf_manager = MagicMock()
     wf_manager.get_by_runner_id.return_value = {"id": 202, "status": "running"}
 
@@ -139,8 +130,8 @@ def test_execute_heartbeat_done_fallback_dead_failure_updates_workflow_R():
 
 def test_propagate_fallback_done_failure_keeps_residue_blocked_reason_R():
     """R: residue_guard fallback 실패는 residue_blocked 상태로 유지한다."""
-    mod = _load_listener_module()
-    redis_client = MagicMock()
+    mod = load_listener_module("dev_runner_listener_fallback")
+    redis_client = attach_default_redis_behaviors(MagicMock())
     wf_manager = MagicMock()
     wf_manager.get_by_runner_id.return_value = {"id": 301, "status": "running"}
 

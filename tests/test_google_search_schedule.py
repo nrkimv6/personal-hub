@@ -13,7 +13,7 @@ Google 검색 스케줄 테스트.
 import json
 import uuid
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, AsyncMock, patch, call
 
 import pytest
 from sqlalchemy import create_engine
@@ -28,6 +28,8 @@ from app.models.google_search import (
     GoogleSearchHistory,
     GoogleSavedSearch,
 )
+from app.modules.instagram.models.schemas import TimeWindow
+from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.main import app
 from app.database import get_db
 
@@ -114,6 +116,18 @@ class TestTaskScheduleConstants:
 
 class TestGoogleScheduleResults:
     """Google 검색 스케줄 결과 테스트."""
+
+    def test_exact_slot_time_window_is_not_randomized(self):
+        """Google 검색도 공유 due checker의 exact slot 의미를 따른다."""
+        scheduler = InstagramScheduler(
+            daily_runs=1,
+            time_windows=[TimeWindow(start="09:00", end="09:00")],
+            seed_prefix="google_search_schedule",
+        )
+
+        run_time = scheduler.generate_daily_schedule(datetime(2026, 5, 3).date())
+
+        assert run_time == [datetime(2026, 5, 3, 9, 0)]
 
     def test_schedule_creation_with_google_search_type(self, db_session, sample_saved_search):
         """Google 검색 타입으로 스케줄 생성."""
@@ -499,77 +513,10 @@ class TestGoogleScheduleAPI:
 # Worker Tests (Mocked)
 # ============================================================
 
-class TestScheduledCrawlWorkerGoogleSearch:
-    """ScheduledCrawlWorker Google 검색 핸들러 테스트."""
-
-    @pytest.mark.asyncio
-    async def test_wait_for_search_completion_success(self, db_session):
-        """검색 완료 대기 성공."""
-        from app.worker.scheduled_worker import ScheduledCrawlWorker
-
-        search_id = str(uuid.uuid4())
-
-        # 큐 아이템 생성 (완료 상태)
-        queue = GoogleSearchQueue(
-            search_id=search_id,
-            query="test",
-            status="completed",
-        )
-        db_session.add(queue)
-
-        # 히스토리 생성
-        history = GoogleSearchHistory(
-            search_id=search_id,
-            query="test",
-            status="completed",
-            total_results=15,
-        )
-        db_session.add(history)
-        db_session.commit()
-
-        worker = ScheduledCrawlWorker()
-
-        # _wait_for_search_completion 메서드를 직접 테스트
-        with patch.object(worker, '_wait_for_search_completion') as mock_wait:
-            mock_wait.return_value = {
-                "status": "completed",
-                "total_results": 15,
-                "error_message": None
-            }
-
-            result = await mock_wait(search_id)
-
-            assert result["status"] == "completed"
-            assert result["total_results"] == 15
-
-    @pytest.mark.asyncio
-    async def test_wait_for_search_completion_failed(self):
-        """검색 완료 대기 실패."""
-        from app.worker.scheduled_worker import ScheduledCrawlWorker
-
-        worker = ScheduledCrawlWorker()
-
-        with patch.object(worker, '_wait_for_search_completion') as mock_wait:
-            mock_wait.return_value = {
-                "status": "failed",
-                "total_results": 0,
-                "error_message": "CAPTCHA 감지됨"
-            }
-
-            result = await mock_wait("test-id")
-
-            assert result["status"] == "failed"
-            assert "CAPTCHA" in result["error_message"]
-
-
-class TestExecuteGoogleSearch:
-    """_execute_google_search 단위 테스트 (schedule_id 오타 버그 회귀).
-
-    SessionLocal을 mock으로 대체하여 SQLite UUID 호환 문제를 우회.
-    """
+class TestGoogleSearchSchedulerExecute:
+    """GoogleSearchScheduler 실행 계약 테스트."""
 
     def _make_mock_db(self, saved_search=None):
-        """mock DB 세션 생성 헬퍼."""
         mock_db = Mock()
         mock_query = Mock()
         mock_db.query.return_value = mock_query
@@ -577,102 +524,89 @@ class TestExecuteGoogleSearch:
         mock_query.first.return_value = saved_search
         return mock_db
 
+    def _make_spec(self, schedule_id=99, saved_search_id=1):
+        from app.worker.schedule_handler_base import ScheduleExecutionSpec
+
+        return ScheduleExecutionSpec(
+            schedule_id=schedule_id,
+            target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            name=f"google_schedule_{schedule_id}",
+            target_config={"saved_search_id": saved_search_id},
+            schedule_value=None,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_CRON,
+            display_name=f"Google Schedule {schedule_id}",
+        )
+
+    def _make_ctx(self, mock_db, update_worker_state):
+        from app.worker.schedule_handler_base import WorkerContext
+
+        return WorkerContext(
+            worker_name="test_worker",
+            browser_manager=None,
+            db_factory=lambda: mock_db,
+            update_worker_state=update_worker_state,
+        )
+
     @pytest.mark.asyncio
-    async def test_execute_google_search_right_creates_queue(self):
-        """R(정상): 정상 실행 시 GoogleSearchQueue에 올바른 schedule_id가 저장되는지 검증."""
-        from app.worker.scheduled_worker import ScheduledCrawlWorker
+    async def test_execute_creates_queue_and_returns_search_queued_outcome(self):
+        """정상 실행 시 큐 insert + search_queued outcome을 반환한다."""
+        from app.models.task_schedule import TaskScheduleRun
+        from app.modules.google_search.schedulers.search_schedule import GoogleSearchScheduler
+        from app.worker.schedule_handler_base import ClaimedRun
 
-        worker = ScheduledCrawlWorker()
-        mock_service = Mock()
-
-        # saved_search mock
+        scheduler = GoogleSearchScheduler()
         mock_saved_search = Mock()
         mock_saved_search.name = "테스트 검색"
         mock_saved_search.query = "Python"
         mock_saved_search.date_filter = "1w"
         mock_saved_search.max_pages = 2
         mock_saved_search.service_account_id = None
+        mock_saved_search.search_params = None
 
         mock_db = self._make_mock_db(saved_search=mock_saved_search)
         added_items = []
-        mock_db.add.side_effect = lambda x: added_items.append(x)
+        mock_db.add.side_effect = lambda item: added_items.append(item)
         mock_db.refresh = Mock()
+        update_worker_state = Mock()
         enqueue_mock = AsyncMock(return_value=GoogleSearchQueue.STATUS_QUEUED)
 
-        with patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db):
-            with patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service):
-                with patch("app.worker.scheduled_worker.enqueue_google_search", enqueue_mock):
-                    with patch.object(worker, "_update_worker_state"):
-                        await worker._execute_google_search(
-                            schedule_id=99,
-                            run_id=1,
-                            saved_search_id=1,
-                        )
+        with patch(
+            "app.modules.google_search.schedulers.search_schedule.enqueue_google_search",
+            enqueue_mock,
+        ):
+            outcome = await scheduler.execute(
+                self._make_spec(),
+                ClaimedRun(run_id=1, schedule_id=99, task_name="google_schedule_99_run_1"),
+                self._make_ctx(mock_db, update_worker_state),
+            )
 
-        # 추가된 GoogleSearchQueue의 schedule_id가 99인지 확인
         assert len(added_items) == 1
         queue_item = added_items[0]
         assert isinstance(queue_item, GoogleSearchQueue)
         assert queue_item.schedule_id == 99
         assert queue_item.status == GoogleSearchQueue.STATUS_QUEUED
+        assert outcome.stop_reason == TaskScheduleRun.STOP_REASON_SEARCH_QUEUED
+        assert "search_id" in outcome.config_snapshot_patch
         enqueue_mock.assert_awaited_once_with(queue_item, mock_db)
-        mock_service.complete_run.assert_called_once()
-        mock_service.update_schedule_after_run.assert_called_once_with(99)
+        update_worker_state.assert_has_calls(
+            [call("searching", "테스트 검색"), call("idle")]
+        )
 
     @pytest.mark.asyncio
-    async def test_execute_google_search_boundary_missing_saved_search(self):
-        """B(경계): saved_search가 없는 경우 fail_run 호출 확인."""
-        from app.worker.scheduled_worker import ScheduledCrawlWorker
+    async def test_execute_raises_when_saved_search_missing(self):
+        """저장된 검색이 없으면 handler가 실패를 전파한다."""
+        from app.modules.google_search.schedulers.search_schedule import GoogleSearchScheduler
+        from app.worker.schedule_handler_base import ClaimedRun
 
-        worker = ScheduledCrawlWorker()
-        mock_service = Mock()
-        mock_db = self._make_mock_db(saved_search=None)  # 검색 없음
+        scheduler = GoogleSearchScheduler()
+        mock_db = self._make_mock_db(saved_search=None)
 
-        with patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db):
-            with patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service):
-                with patch.object(worker, "_update_worker_state"):
-                    await worker._execute_google_search(
-                        schedule_id=1,
-                        run_id=10,
-                        saved_search_id=99999,
-                    )
-
-        mock_service.fail_run.assert_called_once_with(10, "저장된 검색을 찾을 수 없습니다")
-        mock_db.add.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_execute_google_search_error_db_commit_fail(self):
-        """E(에러): DB commit 실패 시 fail_run 호출 확인."""
-        from app.worker.scheduled_worker import ScheduledCrawlWorker
-
-        worker = ScheduledCrawlWorker()
-        mock_service = Mock()
-
-        mock_saved_search = Mock()
-        mock_saved_search.name = "검색"
-        mock_saved_search.query = "test"
-        mock_saved_search.date_filter = None
-        mock_saved_search.max_pages = 1
-        mock_saved_search.service_account_id = None
-
-        mock_db = self._make_mock_db(saved_search=mock_saved_search)
-        mock_db.commit.side_effect = Exception("DB 연결 오류")
-        enqueue_mock = AsyncMock()
-
-        with patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db):
-            with patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service):
-                with patch("app.worker.scheduled_worker.enqueue_google_search", enqueue_mock):
-                    with patch.object(worker, "_update_worker_state"):
-                        await worker._execute_google_search(
-                            schedule_id=1,
-                            run_id=5,
-                            saved_search_id=1,
-                        )
-
-        mock_service.fail_run.assert_called_once()
-        run_id_called = mock_service.fail_run.call_args[0][0]
-        assert run_id_called == 5
-        enqueue_mock.assert_not_awaited()
+        with pytest.raises(RuntimeError, match="저장된 검색"):
+            await scheduler.execute(
+                self._make_spec(schedule_id=1, saved_search_id=99999),
+                ClaimedRun(run_id=10, schedule_id=1, task_name="google_schedule_1_run_10"),
+                self._make_ctx(mock_db, Mock()),
+            )
 
 
 if __name__ == "__main__":

@@ -4,10 +4,16 @@
   import { goto } from '$app/navigation';
   import { proxyApi } from '$lib/api';
   import type { ProxyDetail, ProxyCheckHistory } from '$lib/types';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
 
   let proxy: ProxyDetail | null = null;
   let loading = true;
   let error: string | null = null;
+
+  function errorMessage(e: unknown, fallback: string): string {
+    return e instanceof Error ? e.message : fallback;
+  }
 
   $: proxyId = parseInt($page.params.id || '0');
 
@@ -33,18 +39,24 @@
       await proxyApi.updateStatus(proxy.id, newStatus);
       await loadData();
     } catch (e) {
-      alert(e instanceof Error ? e.message : '상태 변경에 실패했습니다.');
+      toast.error(errorMessage(e, '상태 변경에 실패했습니다.'));
     }
   }
 
   async function handleDelete() {
     if (!proxy) return;
-    if (!confirm(`정말 ${proxy.host}:${proxy.port} 프록시를 삭제하시겠습니까?`)) return;
+    const confirmed = await confirm({
+      title: '프록시 삭제',
+      message: `정말 ${proxy.host}:${proxy.port} 프록시를 삭제하시겠습니까?`,
+      confirmText: '삭제',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await proxyApi.delete(proxy.id);
       goto('/proxy/list');
     } catch (e) {
-      alert(e instanceof Error ? e.message : '삭제에 실패했습니다.');
+      toast.error(errorMessage(e, '삭제에 실패했습니다.'));
     }
   }
 

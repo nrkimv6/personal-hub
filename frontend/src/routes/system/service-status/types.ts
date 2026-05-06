@@ -16,6 +16,12 @@ export type WorkerStatusVariant = 'success' | 'warning' | 'error';
 export type SelfRestartState = 'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed';
 export type RestartStepKey = 'requested' | 'waiting' | 'checking' | 'done';
 
+export interface DbCircuitStatus {
+  state: 'closed' | 'open' | 'half_open' | string;
+  fail_count: number;
+  last_failure_iso: string | null;
+}
+
 export interface WorkerStatusInfo {
   text: string;
   variant: WorkerStatusVariant;
@@ -27,6 +33,29 @@ export interface RestartStep {
 }
 
 export type ConfirmAction = () => void | Promise<void>;
+
+export interface ServiceDashboardActions {
+  stopService: (name: string) => Promise<void>;
+  startService: (name: string) => Promise<void>;
+  restartWorkers: () => Promise<void>;
+  stopWatchdogs: () => Promise<void>;
+  startWatchdogs: () => Promise<void>;
+  restartSingleWorker: (name: string) => Promise<void>;
+  restartInfra: (name: string) => Promise<void>;
+  runTask: (folder: string, name: string) => Promise<void>;
+  removeTask: (folder: string, name: string) => Promise<void>;
+  restartRedis: () => Promise<void>;
+  restartDevRunner: () => Promise<void>;
+  stopDevRunner: () => Promise<void>;
+  resetDevRunner: () => Promise<void>;
+  startDevRunner: () => Promise<void>;
+  removeStartup: (name: string) => Promise<void>;
+  restartCommandListener: () => Promise<void>;
+}
+
+export interface ProcessWatchActions {
+  requestKillProcess: (item: ProcessWatchItem) => void | Promise<void>;
+}
 
 export interface OverviewSectionProps {
   status: ServiceDashboardStatus;
@@ -107,6 +136,7 @@ export interface TasksSectionProps {
 
 export interface InfrastructureSectionProps {
   redisStatus: RedisStatus | null;
+  dbStatus: DbCircuitStatus | null;
   devRunnerStatus: RunStatusResponse | null;
   allStartups: StartupProgram[];
   actionLoading: string | null;
@@ -137,7 +167,7 @@ export interface ProcessWatchSectionProps {
   processLoading: boolean;
   toggleProcessPolling: () => void;
   fetchProcessWatch: () => Promise<void>;
-  handleKillProcess: (item: ProcessWatchItem) => Promise<void>;
+  requestKillProcess: (item: ProcessWatchItem) => void | Promise<void>;
   getProcessDeltaRate: (proc: ProcessWatchItem) => number | null;
   formatProcessDelta: (rate: number | null) => string;
   processDeltaTextClass: (rate: number | null) => string;

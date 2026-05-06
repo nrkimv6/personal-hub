@@ -736,7 +736,7 @@ async def run_classification(
                         rep_row = copy_db.execute(text("""
                             SELECT ai_category_id, ai_confidence, ai_reasoning, ai_model
                             FROM file_classifications WHERE id = :rep_id AND ai_category_id IS NOT NULL
-                        """), {"rep_id": rep_id}).fetchone()
+                        """), {"rep_id": rep_id}).mappings().first()
 
                         if rep_row:
                             copy_db.execute(text("""
@@ -747,9 +747,11 @@ async def run_classification(
                                     classified_at = datetime('now')
                                 WHERE id = :file_id
                             """), {
-                                "file_id": f.id, "cat_id": rep_row[0],
-                                "conf": rep_row[1], "reason": f"[그룹 복사] {rep_row[2] or ''}",
-                                "model": rep_row[3],
+                                "file_id": f.id,
+                                "cat_id": rep_row["ai_category_id"],
+                                "conf": rep_row["ai_confidence"],
+                                "reason": f"[그룹 복사] {rep_row['ai_reasoning'] or ''}",
+                                "model": rep_row["ai_model"],
                             })
                             copied += 1
                             classification_status["processed"] += 1
@@ -772,7 +774,7 @@ async def run_classification(
                         rep_row = clip_copy_db.execute(text("""
                             SELECT ai_category_id, ai_confidence, ai_reasoning, ai_model
                             FROM file_classifications WHERE id = :rep_id AND ai_category_id IS NOT NULL
-                        """), {"rep_id": rep_id}).fetchone()
+                        """), {"rep_id": rep_id}).mappings().first()
 
                         if rep_row:
                             for member_id in members[1:]:
@@ -784,9 +786,11 @@ async def run_classification(
                                         classified_at = datetime('now')
                                     WHERE id = :file_id
                                 """), {
-                                    "file_id": member_id, "cat_id": rep_row[0],
-                                    "conf": rep_row[1], "reason": f"[CLIP 유사 복사] {rep_row[2] or ''}",
-                                    "model": rep_row[3],
+                                    "file_id": member_id,
+                                    "cat_id": rep_row["ai_category_id"],
+                                    "conf": rep_row["ai_confidence"],
+                                    "reason": f"[CLIP 유사 복사] {rep_row['ai_reasoning'] or ''}",
+                                    "model": rep_row["ai_model"],
                                 })
                                 clip_copied += 1
                                 classification_status["processed"] += 1

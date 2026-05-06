@@ -53,6 +53,7 @@ class TestRestartAfterMergeTriggerIntegration:
              patch("_dr_stream_cleanup._cleanup_process_state", side_effect=lambda *a, **k: cleanup_order.append("cleanup")), \
              patch("_dr_stream_cleanup._cleanup_runner_ownership_snapshot", side_effect=lambda rid: cleanup_order.append(f"snapshot:{rid}")), \
              patch("_dr_plan_runner._pub_and_log"):
+            mock_merge.return_value = {"post_merge_done": {"status": "restart_scheduled"}}
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, shared_redis)
 
@@ -92,10 +93,11 @@ class TestRestartAfterMergeTriggerIntegration:
         shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
         # trigger 키 미설정 (소실 시나리오)
 
-        with patch("_dr_stream_cleanup._execute_merge_with_lock"), \
+        with patch("_dr_stream_cleanup._execute_merge_with_lock") as mock_merge, \
              patch("_dr_stream_cleanup._cleanup_process_state") as mock_cleanup, \
              patch("_dr_stream_cleanup._cleanup_runner_ownership_snapshot") as mock_snapshot_cleanup, \
              patch("_dr_plan_runner._pub_and_log"):
+            mock_merge.return_value = {"post_merge_done": {"status": "restart_scheduled"}}
             from _dr_plan_runner import _do_inline_merge
             _do_inline_merge(runner_id, shared_redis)
 

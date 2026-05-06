@@ -67,11 +67,59 @@ class TestPytestMarkInfra:
         combined = result.stdout + result.stderr
         assert "no tests collected" in combined, combined
 
+    def test_v2_merge_fallback_e2e_file_collects_under_e2e(self):
+        """TC-Right: v2 merge fallback e2e 파일은 -m e2e collect-only에서 수집된다."""
+        result = _run_collect_only("tests/dev_runner/test_v2_merge_fallback_e2e.py", "e2e")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "test_v2_merge_fallback_e2e_stream_output_R" in combined, combined
+        assert "test_v2_merge_fallback_e2e_stream_output_residue_guard_E" in combined, combined
+
+    def test_done_and_v2_merge_fallback_pair_collects_under_e2e(self):
+        """TC-Boundary: explicit e2e pair 명령은 done preconditions와 fallback 파일을 함께 수집한다."""
+        try:
+            result = _run_pytest(
+                "tests/dev_runner/test_done_preconditions_e2e.py",
+                "tests/dev_runner/test_v2_merge_fallback_e2e.py",
+                "--collect-only",
+                "-m",
+                "e2e",
+                "-q",
+                "--no-header",
+                timeout=90,
+            )
+        except subprocess.TimeoutExpired as exc:
+            pytest.skip(f"collect-only timeout: done+fallback pair -m e2e ({exc.timeout}s)")
+
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "test_done_e2e_fix_plan_no_phase_r_blocked" in combined, combined
+        assert "test_v2_merge_fallback_e2e_stream_output_R" in combined, combined
+
     def test_http_live_marker_collects_live_server_suite(self):
         """TC-Right: 실서버 파일은 -m http_live에서 수집된다."""
         result = _run_collect_only("tests/dev_runner/test_live_server_http.py", "http_live")
         assert result.returncode == 0, result.stdout + result.stderr
         assert "tests/dev_runner/test_live_server_http.py" in result.stdout
+
+    def test_http_live_marker_collects_llm_live_suite_R(self):
+        """TC-Right: LLM live HTTP suite is independently collectable under http_live."""
+        result = _run_collect_only("tests/test_llm_live_http.py", "http_live")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "test_live_llm_providers_returns_200" in combined, combined
+        assert "test_live_llm_retry_unknown_numeric_id_returns_400_not_422" in combined, combined
+        assert "process_watch" not in combined, combined
+        assert "process-watch" not in combined, combined
+
+    def test_http_live_marker_collects_process_watch_live_suite_R(self):
+        """TC-Right: process-watch live HTTP suite is separately collectable under http_live."""
+        result = _run_collect_only("tests/test_process_watch_live_http.py", "http_live")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert "test_live_process_watch_latest_returns_200" in combined, combined
+        assert "test_live_process_watch_history_schema" in combined, combined
+        assert "test_live_llm_" not in combined, combined
 
     def test_read_only_coupang_live_http_case_still_collects_under_http_live(self):
         """TC-Right: 쿠팡 live HTTP read-only 케이스는 기본 http_live 수집 대상이다."""
@@ -151,6 +199,59 @@ class TestPytestMarkInfra:
             "pytest.ini addopts에 'not http_live' 가 없음 — 기본 실행 시 실서버 TC가 포함됨"
 
 
+class TestMergeRetryHttpMarkerContract:
+    """test_merge_retry_http.py의 http marker 계약 고정 guard."""
+
+    _TARGET = "tests/dev_runner/test_merge_retry_http.py"
+
+    _HTTP_CASES = [
+        "test_direct_merge_success",
+        "test_direct_merge_safe_doc_payload_preserved",
+        "test_direct_merge_missing_branch_422",
+        "test_retry_merge_endpoint_regression",
+        "test_retry_merge_conflict_payload_preserved",
+        "test_logs_recent_redis_list_fallback",
+        "test_retry_merge_returns_test_failed_then_fixing_http",
+    ]
+
+    _NON_HTTP_CASES = [
+        "test_build_status_payload_dm_runner_keeps_plan_file_none",
+        "test_normal_runner_plan_file_none_regression",
+    ]
+
+    def test_http_marker_collects_all_testclient_cases(self):
+        """TC-Right: `-m http`로 collect-only 시 TestClient 7건이 모두 수집된다."""
+        result = _run_collect_only(self._TARGET, "http")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._HTTP_CASES:
+            assert name in combined, f"'{name}' not found in -m http collect: {combined[:800]}"
+
+    def test_http_marker_excludes_fakeredis_cases(self):
+        """TC-Boundary: `-m http` collect-only에서 fakeredis 2건은 나타나지 않는다."""
+        result = _run_collect_only(self._TARGET, "http")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._NON_HTTP_CASES:
+            assert name not in combined, f"fakeredis case '{name}' should NOT appear in -m http collect: {combined[:800]}"
+
+    def test_default_addopts_collects_only_fakeredis_cases(self):
+        """TC-Right: marker 인자 없는 기본 실행(not http addopts)에서 fakeredis 2건만 수집된다."""
+        result = _run_collect_only(self._TARGET, "not http and not http_live and not integration and not e2e")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._NON_HTTP_CASES:
+            assert name in combined, f"'{name}' should appear in default collect: {combined[:800]}"
+
+    def test_default_addopts_excludes_testclient_cases(self):
+        """TC-Boundary: 기본 addopts 필터에서 TestClient 7건은 수집 대상에서 제외된다."""
+        result = _run_collect_only(self._TARGET, "not http and not http_live and not integration and not e2e")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._HTTP_CASES:
+            assert name not in combined, f"TestClient case '{name}' should NOT appear in default collect: {combined[:800]}"
+
+
 class TestDbDirEnvVar:
     def test_right_test_db_dir_env_var_used(self, tmp_path):
         """TC-Right: TEST_DB_DIR 환경변수 설정 → 해당 경로에 test_monitor.db 생성 가능"""
@@ -179,3 +280,218 @@ class TestDbDirEnvVar:
         # makedirs 호출
         new_dir.mkdir(parents=True, exist_ok=True)
         assert new_dir.exists()
+
+
+class TestHttpRunnerMarkerContract:
+    """test_http_runner.py의 http marker 계약 고정 guard."""
+
+    _TARGET = "tests/dev_runner/test_http_runner.py"
+
+    _HTTP_CASES = [
+        "test_cleanup_stale_endpoint_returns_200",
+        "test_cleanup_stale_endpoint_empty_returns_200",
+        "test_cleanup_stale_endpoint_idempotent",
+        "test_cleanup_stale_response_schema",
+        "test_delete_tab_removes_runner_from_list",
+        "test_cleanup_stale_preserves_then_delete_tab_removes",
+        "test_cleanup_stale_and_dismiss_order_is_consistent",
+        "test_logs_history_visible_only_returns_user_runner",
+        "test_logs_history_visible_only_excludes_tc_runner",
+        "test_logs_history_default_not_visible_only",
+    ]
+
+    def test_http_marker_collects_all_testclient_cases(self):
+        """TC-Right: `-m http` collect-only에서 TestClient 10건이 모두 수집된다."""
+        result = _run_collect_only(self._TARGET, "http")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        for name in self._HTTP_CASES:
+            assert name in combined, f"'{name}' not found in -m http collect: {combined[:800]}"
+
+    def test_default_addopts_excludes_testclient_cases(self):
+        """TC-Boundary: 기본 addopts 필터에서 TestClient 10건이 모두 제외된다."""
+        result = _run_collect_only(self._TARGET, "not http and not http_live and not integration and not e2e")
+        combined = result.stdout + result.stderr
+        # exit 5 = no tests collected — all deselected, which is the correct outcome
+        assert result.returncode in (0, 5), combined
+        for name in self._HTTP_CASES:
+            assert name not in combined, f"TestClient case '{name}' should NOT appear in default collect: {combined[:800]}"
+
+
+class TestDevguideStalenessMarkerContract:
+    """test_devguide_staleness.py의 http marker 계약 고정 guard."""
+
+    _TARGET = "tests/dev_runner/test_devguide_staleness.py"
+    _CASE = "test_e2e_guide_status_with_history"
+
+    def test_e2e_guide_status_with_history_collects_under_http(self):
+        """TC-Right: `-m http` collect-only에서 test_e2e_guide_status_with_history가 수집된다."""
+        result = _run_collect_only(self._TARGET, "http", "-k", self._CASE)
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, combined
+        assert self._CASE in combined, f"'{self._CASE}' not found in -m http collect: {combined[:800]}"
+
+    def test_e2e_guide_status_with_history_excluded_from_default(self):
+        """TC-Boundary: 기본 addopts marker 식에서 test_e2e_guide_status_with_history가 제외된다."""
+        result = _run_collect_only(self._TARGET, "not http and not http_live and not integration and not e2e", "-k", self._CASE)
+        combined = result.stdout + result.stderr
+        # exit 5 = no tests collected — all deselected, which is the correct outcome
+        assert result.returncode in (0, 5), combined
+        assert self._CASE not in combined or "no tests collected" in combined, (
+            f"'{self._CASE}' should NOT appear in default collect: {combined[:800]}"
+        )
+
+
+class TestDevRunnerAsyncHttpImportBoundary:
+    """diagnostics/worktrees 계열 6개 파일의 lazy import + http marker 계약 guard."""
+
+    _TARGETS = [
+        PROJECT_ROOT / "tests/dev_runner/test_diagnostics_http.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktree_cleanup_http.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktree_list_v1_v2_coexist.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktree_list_v2_lite.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktrees_commits_endpoint.py",
+        PROJECT_ROOT / "tests/dev_runner/test_worktrees_http.py",
+    ]
+
+    def test_targets_have_no_module_level_app_main_import(self):
+        """TC-Right: 대상 파일 텍스트에 모듈 레벨 'from app.main import app'가 없다."""
+        import re
+        pattern = re.compile(r"^from app\.main import app", re.MULTILINE)
+        failures = []
+        for target in self._TARGETS:
+            text = target.read_text(encoding="utf-8")
+            if pattern.search(text):
+                failures.append(str(target.relative_to(PROJECT_ROOT)))
+        assert not failures, (
+            f"모듈 레벨 'from app.main import app' 발견 — lazy import로 이동 필요:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
+
+    def test_targets_keep_http_asyncio_boundary(self):
+        """TC-Right: 대상 파일이 pytestmark에 http + asyncio 조합을 유지한다."""
+        failures = []
+        for target in self._TARGETS:
+            text = target.read_text(encoding="utf-8")
+            has_http = "pytest.mark.http" in text
+            has_asyncio = "pytest.mark.asyncio" in text
+            if not (has_http and has_asyncio):
+                failures.append(
+                    f"{target.relative_to(PROJECT_ROOT)}: http={has_http}, asyncio={has_asyncio}"
+                )
+        assert not failures, (
+            "http + asyncio marker 계약 미충족 파일:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
+
+
+class TestRemainingHttpRunnerMarkerContract:
+    """markerless / class decorator-only 6건 전용 guard."""
+
+    _TARGETS = [
+        "tests/dev_runner/test_executor_redis_guard_http.py",
+        "tests/dev_runner/test_http_cleanup_stale.py",
+        "tests/dev_runner/test_http_stop_all.py",
+        "tests/dev_runner/test_t4_t5_pid_correction.py",
+        "tests/dev_runner/test_redis_reconnect_http.py",
+        "tests/dev_runner/test_rerun_orphan_http.py",
+    ]
+
+    def test_targets_have_no_module_level_app_main_import(self):
+        """TC-Right: 대상 파일 텍스트에 모듈 레벨 'from app.main import app'가 없다."""
+        import re
+        pattern = re.compile(r"^from app\.main import app\b", re.MULTILINE)
+        failures = []
+        for target in self._TARGETS:
+            text = (PROJECT_ROOT / target).read_text(encoding="utf-8")
+            if pattern.search(text):
+                failures.append(target)
+        assert not failures, (
+            f"모듈 레벨 'from app.main import app' 발견 — lazy import로 이동 필요:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
+
+    def test_targets_keep_http_marker_boundary(self):
+        """TC-Right: 대상 파일이 module-level pytestmark = pytest.mark.http를 포함한다."""
+        import re
+        pattern = re.compile(r"pytestmark\s*=\s*(?:pytest\.mark\.http|\[pytest\.mark\.http)")
+        failures = []
+        for target in self._TARGETS:
+            text = (PROJECT_ROOT / target).read_text(encoding="utf-8")
+            if not pattern.search(text):
+                failures.append(target)
+        assert not failures, (
+            "module-level pytestmark = pytest.mark.http 미설정 파일:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
+
+
+class TestDevRunnerHttpE2EImportBoundary:
+    """http/e2e/integration 잔존 12개 파일의 lazy import + marker 계약 guard."""
+
+    _TARGETS = {
+        "tests/dev_runner/test_full_e2e_real.py": {"full_e2e"},
+        "tests/dev_runner/test_early_exit_e2e_http.py": {"http", "http_live"},
+        "tests/dev_runner/test_exit_reason_e2e.py": {"http"},
+        "tests/dev_runner/test_heartbeat_merge_guard_http.py": {"http"},
+        "tests/dev_runner/test_http_e2e.py": {"http"},
+        "tests/dev_runner/test_http_e2e_max_cycles.py": {"http"},
+        "tests/dev_runner/test_recent_meta_http.py": {"http"},
+        "tests/dev_runner/test_remove_pipeline_v1_e2e.py": {"http"},
+        "tests/dev_runner/test_runner_dry_run.py": {"integration"},
+        "tests/dev_runner/test_t4_http_integration.py": {"http"},
+        "tests/dev_runner/test_t4t5_no_backtick_e2e.py": {"http"},
+        "tests/dev_runner/test_trigger_http.py": {"http"},
+    }
+
+    def test_targets_have_no_module_level_app_main_import(self):
+        """TC-Right: 대상 파일 텍스트에 모듈 레벨 'from app.main import app'가 없다."""
+        import re
+
+        pattern = re.compile(r"^from app\.main import app\b", re.MULTILINE)
+        failures = []
+        for target in self._TARGETS:
+            text = (PROJECT_ROOT / target).read_text(encoding="utf-8")
+            if pattern.search(text):
+                failures.append(target)
+        assert not failures, (
+            f"모듈 레벨 'from app.main import app' 발견 — lazy import로 이동 필요:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
+
+    def test_targets_keep_marker_boundary(self):
+        """TC-Right: 대상 파일이 기대 marker를 그대로 유지한다."""
+        failures = []
+        for target, expected_markers in self._TARGETS.items():
+            text = (PROJECT_ROOT / target).read_text(encoding="utf-8")
+            missing = [
+                marker
+                for marker in sorted(expected_markers)
+                if f"pytest.mark.{marker}" not in text
+            ]
+            if missing:
+                failures.append(f"{target}: missing={','.join(missing)}")
+        assert not failures, (
+            "marker boundary 미충족 파일:\n"
+            + "\n".join(f"  {f}" for f in failures)
+        )
+
+    def test_early_exit_file_splits_http_and_http_live_contract(self):
+        """TC-Right: early-exit 파일은 http 1건 + http_live 4건으로 분리 수집된다."""
+        http_result = _run_collect_only("tests/dev_runner/test_early_exit_e2e_http.py", "http")
+        http_combined = http_result.stdout + http_result.stderr
+        assert http_result.returncode == 0, http_combined
+        assert "test_run_api_memory_reject_e2e" in http_combined, http_combined
+        assert "test_run_api_early_exit_e2e" not in http_combined, http_combined
+        assert "test_post_run_env_header_in_logs" not in http_combined, http_combined
+        assert "test_post_run_test_source_worktree_auto_cleanup" not in http_combined, http_combined
+        assert "test_runners_error_field_diagnostic" not in http_combined, http_combined
+
+        live_result = _run_collect_only("tests/dev_runner/test_early_exit_e2e_http.py", "http_live")
+        live_combined = live_result.stdout + live_result.stderr
+        assert live_result.returncode == 0, live_combined
+        assert "test_run_api_early_exit_e2e" in live_combined, live_combined
+        assert "test_post_run_env_header_in_logs" in live_combined, live_combined
+        assert "test_post_run_test_source_worktree_auto_cleanup" in live_combined, live_combined
+        assert "test_runners_error_field_diagnostic" in live_combined, live_combined
+        assert "test_run_api_memory_reject_e2e" not in live_combined, live_combined

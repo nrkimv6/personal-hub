@@ -9,6 +9,7 @@
 	import { toast } from '$lib/stores/toast';
 	import MonitoringList from './MonitoringList.svelte';
 	import NewMonitorTypeSelector from './NewMonitorTypeSelector.svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	// ─── 상태 ────────────────────────────────────────────────────
 
@@ -117,19 +118,17 @@
 	<title>통합 모니터링</title>
 </svelte:head>
 
-<main class="mx-auto max-w-6xl space-y-4 p-4">
-	<!-- 헤더 -->
-	<div class="flex items-center justify-between">
-		<h1 class="text-xl font-semibold">통합 모니터링</h1>
-		<button
-			type="button"
-			class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-			onclick={() => (showTypeSelector = true)}
-		>
-			+ 새 모니터링 추가
-		</button>
-	</div>
+<PageHeader title="통합 모니터링" density="compact">
+	<button
+		type="button"
+		class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+		onclick={() => (showTypeSelector = true)}
+	>
+		+ 새 모니터링 추가
+	</button>
+</PageHeader>
 
+<main class="mx-auto max-w-6xl space-y-4 p-4">
 	<!-- 에러 배너 -->
 	{#if errors.length > 0}
 		<div class="rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
@@ -138,7 +137,7 @@
 		</div>
 	{/if}
 
-	<!-- 타입 필터 -->
+	<!-- 툴바: 타입 필터 + 상태 필터 -->
 	<div class="flex flex-wrap gap-2">
 		<button
 			type="button"
@@ -161,8 +160,6 @@
 			</button>
 		{/each}
 	</div>
-
-	<!-- 상태 필터 -->
 	<div class="flex flex-wrap gap-2">
 		<button
 			type="button"

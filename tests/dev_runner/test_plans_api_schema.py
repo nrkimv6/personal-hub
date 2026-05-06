@@ -70,6 +70,23 @@ class TestAddPathWithTypeField:
         assert svc.add_path(str(folder)) is True
         assert svc.add_path(str(folder), path_type="archive") is False  # 중복
 
+    def test_add_path_canonicalizes_wtools_legacy_common_root(self, svc, tmp_path, dev_runner_config_isolation):
+        """legacy wtools common/docs/plan 추가 요청은 canonical plans worktree root로 저장된다."""
+        cfg = dev_runner_config_isolation
+        cfg.WTOOLS_BASE_DIR = tmp_path / "wtools"
+        legacy_common = cfg.WTOOLS_BASE_DIR / "common" / "docs" / "plan"
+        canonical_worktree = cfg.WTOOLS_BASE_DIR / ".worktrees" / "plans" / "docs" / "plan"
+        legacy_common.mkdir(parents=True)
+        canonical_worktree.mkdir(parents=True)
+        cfg.ALLOWED_PATHS = [str(tmp_path)]
+
+        result = svc.add_path(str(legacy_common), path_type="plan")
+
+        assert result is True
+        matching = [e for e in svc._registered_paths if e["path"] == str(canonical_worktree.resolve())]
+        assert len(matching) == 1
+        assert all(e["path"] != str(legacy_common.resolve()) for e in svc._registered_paths)
+
 
 class TestRemovePathObjectArray:
 

@@ -1,4 +1,8 @@
-"""Redis 연결 누수 HTTP 통합 테스트 — TestClient 기반 SSE + diagnostics 검증."""
+"""Redis 연결 누수 HTTP 통합 테스트 — TestClient 기반 SSE + diagnostics 검증.
+
+[MUTATING] restart-frontend tests in this file restart live frontend services.
+Run them sequentially; concurrent restart validation can trip the frontend lock.
+"""
 import time
 import sys
 import subprocess
@@ -8,15 +12,18 @@ import pytest
 import redis
 import requests
 
+from tests.helpers.restart_frontend_validation import restart_frontend_failure_context
+
 
 ADMIN_BASE = "http://localhost:8001"
+PUBLIC_FRONTEND_BASE = "http://127.0.0.2:6100"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BROWSER_WORKERS_SCRIPT = PROJECT_ROOT / "scripts" / "services" / "browser_workers.py"
 
 
 def _is_http_env_available() -> bool:
     try:
-        requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=1)
+        requests.get(f"{ADMIN_BASE}/api/v1/system/liveness", timeout=1)
     except Exception:
         return False
     try:
@@ -28,10 +35,61 @@ def _is_http_env_available() -> bool:
     return True
 
 
-pytestmark = pytest.mark.skipif(
-    not _is_http_env_available(),
-    reason="admin api 또는 Redis가 실행 중이 아닙니다.",
-)
+pytestmark = [
+    pytest.mark.http_live,
+    pytest.mark.skipif(
+        not _is_http_env_available(),
+        reason="admin api 또는 Redis가 실행 중이 아닙니다.",
+    ),
+]
+
+
+def _run_restart_frontend(*extra_args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(BROWSER_WORKERS_SCRIPT), "restart-frontend", *extra_args],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def _is_frontend_service_lock_failure(result: subprocess.CompletedProcess[str]) -> bool:
+    output = "\n".join([result.stdout or "", result.stderr or ""])
+    return result.returncode != 0 and (
+        "AccessDenied" in output
+        or "Listener cleanup may require elevation" in output
+        or "Listener PID remained unchanged" in output
+    )
+
+
+def _wait_until_http_ok(url: str, *, timeout_seconds: float = 45.0, label: str) -> None:
+    deadline = time.time() + max(timeout_seconds, 1.0)
+    last_error: str | None = None
+    while time.time() <= deadline:
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                return
+            last_error = f"unexpected status: {response.status_code}"
+        except Exception as exc:
+            last_error = str(exc)
+        time.sleep(1)
+    pytest.fail(f"{label} did not recover: {url} ({last_error})")
+
+
+def wait_until_public_preview_ready(timeout_seconds: float = 30.0) -> None:
+    _wait_until_http_ok(PUBLIC_FRONTEND_BASE, timeout_seconds=timeout_seconds, label="public preview")
+
+
+def wait_until_admin_api_ready(timeout_seconds: float = 45.0) -> None:
+    _wait_until_http_ok(
+        f"{ADMIN_BASE}/api/v1/system/liveness",
+        timeout_seconds=timeout_seconds,
+        label="admin API liveness",
+    )
 
 
 def _assert_no_redis_connection_leak(
@@ -145,31 +203,41 @@ def test_redis_cleanup_dry_run_http():
     assert "좀비" in output or "Zombie" in output or "redis-cleanup" in output.lower() or "Cleanup" in output
 
 
+@pytest.mark.timeout(240)
 def test_http_frontend_restart_frontend_admin_keeps_api_alive():
     """restart-frontend(admin) 이후 /dev-runner/runners가 200 유지되는지 검증."""
     before = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=5)
     assert before.status_code == 200
 
-    result = subprocess.run(
-        [sys.executable, str(BROWSER_WORKERS_SCRIPT), "restart-frontend"],
-        cwd=str(PROJECT_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=180,
-        encoding="utf-8",
-        errors="replace",
+    result = _run_restart_frontend()
+    if _is_frontend_service_lock_failure(result):
+        pytest.skip(restart_frontend_failure_context(result))
+    assert result.returncode == 0, restart_frontend_failure_context(result)
+    wait_until_admin_api_ready(timeout_seconds=60.0)
+    _wait_until_http_ok(
+        f"{ADMIN_BASE}/api/v1/dev-runner/runners",
+        timeout_seconds=60.0,
+        label="admin runners endpoint",
     )
-    assert result.returncode in (0, 1)
 
-    for _ in range(10):
-        try:
-            after = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=5)
-            if after.status_code == 200:
-                return
-        except Exception:
-            pass
-        time.sleep(1)
-    pytest.fail("/api/v1/dev-runner/runners did not recover after restart-frontend")
+
+@pytest.mark.timeout(240)
+def test_http_frontend_restart_frontend_public_keeps_api_alive():
+    """restart-frontend(--public) 이후 public preview와 admin API가 함께 회복되어야 한다."""
+    before = requests.get(f"{ADMIN_BASE}/api/v1/dev-runner/runners", timeout=5)
+    assert before.status_code == 200
+
+    result = _run_restart_frontend("--public")
+    if _is_frontend_service_lock_failure(result):
+        pytest.skip(restart_frontend_failure_context(result))
+    assert result.returncode == 0, restart_frontend_failure_context(result)
+    wait_until_public_preview_ready(timeout_seconds=60.0)
+    wait_until_admin_api_ready(timeout_seconds=60.0)
+    _wait_until_http_ok(
+        f"{ADMIN_BASE}/api/v1/dev-runner/runners",
+        timeout_seconds=60.0,
+        label="admin runners endpoint after public restart",
+    )
 
 
 def test_http_frontend_restart_frontend_public_invalid_mode_returns_error():
@@ -184,4 +252,4 @@ def test_http_frontend_restart_frontend_public_invalid_mode_returns_error():
         errors="replace",
     )
     assert result.returncode != 0
-    assert "--public can only be used with restart-frontend" in (result.stderr or "")
+    assert "--public can only be used with restart-api or restart-frontend" in (result.stderr or "")

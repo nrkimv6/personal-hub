@@ -16,7 +16,7 @@
 
 <div class="space-y-4">
   <!-- 헤더 -->
-  <PageHeader title="대시보드" subtitle="파이프라인 상태와 AI 분류를 관리합니다" />
+  <PageHeader title="대시보드" />
 
   <!-- 서브탭 -->
   <TabNav tabs={subTabs} bind:activeTab variant="secondary" queryParam="tab" />

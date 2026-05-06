@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMBootstrapResponse, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap, type ProviderInfo } from '$lib/api';
+	import { formatLLMBlockReason, llmApi, type LLMBootstrapResponse, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap, type ProviderInfo, type LLMProfileConfig, type LLMScheduleProfilePolicyItem, type LLMScheduleProfilePolicyWindow } from '$lib/api';
 	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 
 	// 상태
@@ -48,9 +50,17 @@
 	let selectedIds = $state<number[]>([]);
 	let selectAll = $state(false);
 
-	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능), claude-sessions(세션 뷰어)
-	type Tab = 'queue' | 'history' | 'create' | 'performance' | 'claude-sessions';
+	// 탭: queue(대기열), history(이력), create(수동생성), profilePolicy(정책), performance(성능), claude-sessions(세션 뷰어)
+	type Tab = 'queue' | 'history' | 'create' | 'profilePolicy' | 'performance' | 'claude-sessions';
 	let activeTab = $state<Tab>('queue');
+	const llmTabs = [
+		{ id: 'queue', label: '대기열', shortLabel: '대기' },
+		{ id: 'history', label: '이력', shortLabel: '이력' },
+		{ id: 'create', label: '수동 요청 생성', shortLabel: '생성' },
+		{ id: 'profilePolicy', label: 'Profile 정책', shortLabel: '정책' },
+		{ id: 'performance', label: '성능 분석', shortLabel: '성능' },
+		{ id: 'claude-sessions', label: 'Claude 세션', shortLabel: '세션' }
+	];
 
 	// 모달
 	let selectedRequest = $state<LLMRequest | null>(null);
@@ -81,6 +91,81 @@
 	let createLoading = $state(false);
 	let createError = $state<string | null>(null);
 	let createSuccess = $state(false);
+
+	let profilePolicies = $state<LLMScheduleProfilePolicyItem[]>([]);
+	let policyProfiles = $state<LLMProfileConfig[]>([]);
+	let policyLoading = $state(false);
+	let policySaving = $state(false);
+	let policyError = $state<string | null>(null);
+	let policyForm = $state({
+		target_type: 'plan_archive_analyze',
+		engine: 'claude',
+		profile_name: '',
+		enabled: true,
+		priority: 0,
+		allowed_windows_text: '',
+		quiet_windows_text: ''
+	});
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
+
+	function parsePolicyWindows(value: string): LLMScheduleProfilePolicyWindow[] {
+		const trimmed = value.trim();
+		if (!trimmed) return [];
+		if (trimmed.startsWith('[')) {
+			return JSON.parse(trimmed) as LLMScheduleProfilePolicyWindow[];
+		}
+		return trimmed.split(/\r?\n/)
+			.map(line => line.trim())
+			.filter(Boolean)
+			.map(line => {
+				const [timeRange, daysPart] = line.split(/\s+/);
+				const [start, end] = timeRange.split('-');
+				if (!start || !end) {
+					throw new Error('window 형식은 HH:MM-HH:MM 입니다');
+				}
+				const window: LLMScheduleProfilePolicyWindow = { start, end };
+				if (daysPart) {
+					window.days = daysPart.split(',').map(day => Number(day.trim()));
+				}
+				return window;
+			});
+	}
+
+	function formatPolicyWindows(windows: LLMScheduleProfilePolicyWindow[]): string {
+		if (!windows.length) return '-';
+		return windows.map(window => {
+			const days = window.days?.length ? ` ${window.days.join(',')}` : '';
+			return `${window.start}-${window.end}${days}`;
+		}).join(', ');
+	}
+
+	function formatPolicyScope(policy: LLMScheduleProfilePolicyItem): string {
+		if (policy.schedule_id) return `schedule #${policy.schedule_id}`;
+		return policy.target_type || 'global';
+	}
+
+	function getPolicyBlockReasonLabel(reason: string): string {
+		return formatLLMBlockReason(reason);
+	}
+
+	function profileOptionsForEngine(engine: string): LLMProfileConfig[] {
+		return policyProfiles.filter(profile => profile.engine === engine);
+	}
+
+	function policyEngines(): string[] {
+		const engines = Array.from(new Set(policyProfiles.map(profile => profile.engine)));
+		return engines.length > 0 ? engines : [policyForm.engine];
+	}
+
+	function ensurePolicyFormProfile() {
+		const options = profileOptionsForEngine(policyForm.engine);
+		if (!policyForm.profile_name && options.length > 0) {
+			policyForm.profile_name = options[0].name;
+		}
+	}
 
 	// Provider 목록 (API에서 동적 로드)
 	let providers = $state<ProviderInfo[]>([]);
@@ -236,6 +321,11 @@
 			stats = bootstrapRes.stats;
 			workerStatus = bootstrapRes.worker_status;
 			queueStats = bootstrapRes.queue_stats;
+			try {
+				quotaStatus = await llmApi.getQuotaStatus();
+			} catch {
+				quotaStatus = {};
+			}
 			initialAutoSwitchHandled = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
@@ -281,13 +371,13 @@
 	}
 
 	async function retryAllFailedWithoutSuccess() {
-		if (!confirm(`성공한 적 없는 모든 caller의 실패 요청을 재시도하시겠습니까?`)) return;
+		if (!await confirm({ title: '일괄 재시도', message: '성공한 적 없는 모든 caller의 실패 요청을 재시도하시겠습니까?', confirmText: '재시도' })) return;
 		try {
 			const result = await llmApi.retryFailedCallersWithoutSuccess(filterCallerType || undefined);
-			alert(`재시도 완료: ${result.retried}개 요청 (${result.callers}개 caller)`);
+			toast.success(`재시도 완료: ${result.retried}개 요청 (${result.callers}개 caller)`);
 			await fetchGroupedData();
 		} catch (e) {
-			alert('재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재시도 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -325,20 +415,20 @@
 		}
 
 		if (failedRequestIds.length === 0) {
-			alert('선택된 그룹에 재시도할 실패 요청이 없습니다.');
+			toast.warning('선택된 그룹에 재시도할 실패 요청이 없습니다.');
 			return;
 		}
 
-		if (!confirm(`선택된 ${selectedGroups.length}개 그룹의 ${failedRequestIds.length}개 실패 요청을 재시도하시겠습니까?`)) return;
+		if (!await confirm({ title: '선택 그룹 재시도', message: `선택된 ${selectedGroups.length}개 그룹의 ${failedRequestIds.length}개 실패 요청을 재시도하시겠습니까?`, confirmText: '재시도' })) return;
 
 		try {
 			const result = await llmApi.batchRetry(failedRequestIds);
-			alert(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
+			toast.success(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
 			selectedGroupKeys = [];
 			groupSelectAll = false;
 			await fetchGroupedData();
 		} catch (e) {
-			alert('일괄 재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 재시도 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -433,7 +523,7 @@
 			await llmApi.cancel(id);
 			await fetchData();
 		} catch (e) {
-			alert('취소 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('취소 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -450,17 +540,17 @@
 			await llmApi.retry(id);
 			await fetchData();
 		} catch (e) {
-			alert('재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재시도 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function deleteRequest(id: number) {
-		if (!confirm('이 요청을 삭제하시겠습니까?')) return;
+		if (!await confirm({ title: '요청 삭제', message: '이 요청을 삭제하시겠습니까?', confirmText: '삭제', variant: 'danger' })) return;
 		try {
 			await llmApi.delete(id);
 			await fetchData();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -468,37 +558,37 @@
 		if (selectedIds.length === 0) return;
 		try {
 			const result = await llmApi.batchRetry(selectedIds);
-			alert(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
+			toast.success(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
 			selectedIds = [];
 			selectAll = false;
 			await fetchData();
 		} catch (e) {
-			alert('일괄 재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 재시도 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function batchDelete() {
 		if (selectedIds.length === 0) return;
-		if (!confirm(`선택한 ${selectedIds.length}개 요청을 삭제하시겠습니까?`)) return;
+		if (!await confirm({ title: '일괄 삭제', message: `선택한 ${selectedIds.length}개 요청을 삭제하시겠습니까?`, confirmText: '삭제', variant: 'danger' })) return;
 		try {
 			const result = await llmApi.batchDelete(selectedIds);
-			alert(`삭제 완료: ${result.deleted}개`);
+			toast.success(`삭제 완료: ${result.deleted}개`);
 			selectedIds = [];
 			selectAll = false;
 			await fetchData();
 		} catch (e) {
-			alert('일괄 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 삭제 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function runCleanup() {
-		if (!confirm('Stale 요청 정리 및 오래된 이력 삭제를 실행하시겠습니까?')) return;
+		if (!await confirm({ title: '요청 정리', message: 'Stale 요청 정리 및 오래된 이력 삭제를 실행하시겠습니까?', confirmText: '정리', variant: 'danger' })) return;
 		try {
 			const result = await llmApi.cleanup();
-			alert(`정리 완료: stale ${result.stale_processing}개, 이력 ${result.old_history}개 삭제`);
+			toast.success(`정리 완료: stale ${result.stale_processing}개, 이력 ${result.old_history}개 삭제`);
 			await fetchData();
 		} catch (e) {
-			alert('정리 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('정리 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -556,6 +646,84 @@
 		} finally {
 			createLoading = false;
 		}
+	}
+
+	async function fetchPolicyMatrix() {
+		policyLoading = true;
+		policyError = null;
+		try {
+			const [policyRes, profilesRes] = await Promise.all([
+				llmApi.listScheduleProfilePolicies(),
+				llmApi.listProfiles()
+			]);
+			profilePolicies = policyRes.policies;
+			policyProfiles = profilesRes.profiles;
+			if (!policyProfiles.some(profile => profile.engine === policyForm.engine)) {
+				policyForm.engine = profilesRes.supported_engines[0] || policyProfiles[0]?.engine || policyForm.engine;
+				policyForm.profile_name = '';
+			}
+			ensurePolicyFormProfile();
+		} catch (e) {
+			policyError = errorMessage(e);
+		} finally {
+			policyLoading = false;
+		}
+	}
+
+	async function savePolicyMatrix(nextPolicies: LLMScheduleProfilePolicyItem[]) {
+		policySaving = true;
+		policyError = null;
+		try {
+			const saved = await llmApi.updateScheduleProfilePolicies(nextPolicies);
+			profilePolicies = saved.policies;
+			toast.success('Profile 정책 저장 완료');
+		} catch (e) {
+			policyError = errorMessage(e);
+			toast.error('Profile 정책 저장 실패: ' + errorMessage(e));
+		} finally {
+			policySaving = false;
+		}
+	}
+
+	async function addPolicyFromForm() {
+		const targetType = policyForm.target_type.trim();
+		if (!targetType) {
+			policyError = 'target_type을 입력해주세요.';
+			return;
+		}
+		if (!policyForm.profile_name) {
+			policyError = 'profile을 선택해주세요.';
+			return;
+		}
+		try {
+			const policy: LLMScheduleProfilePolicyItem = {
+				target_type: targetType,
+				schedule_id: null,
+				engine: policyForm.engine,
+				profile_name: policyForm.profile_name,
+				enabled: policyForm.enabled,
+				priority: Number(policyForm.priority) || 0,
+				allowed_windows: parsePolicyWindows(policyForm.allowed_windows_text),
+				quiet_windows: parsePolicyWindows(policyForm.quiet_windows_text)
+			};
+			const nextPolicies = [
+				...profilePolicies.filter(existing => !(
+					(existing.schedule_id || null) === null &&
+					(existing.target_type || '') === policy.target_type &&
+					existing.engine === policy.engine &&
+					existing.profile_name === policy.profile_name
+				)),
+				policy
+			];
+			await savePolicyMatrix(nextPolicies);
+		} catch (e) {
+			policyError = errorMessage(e);
+		}
+	}
+
+	async function removePolicy(policy: LLMScheduleProfilePolicyItem) {
+		const nextPolicies = profilePolicies.filter(existing => existing !== policy);
+		await savePolicyMatrix(nextPolicies);
 	}
 
 	async function openModal(request: LLMRequest) {
@@ -663,11 +831,42 @@
 		}
 	}
 
-	function switchTab(tab: Tab) {
+	function getPendingPauseInfo(request: LLMRequest): { label: string; title: string; tone: 'quota' | 'window' } | null {
+		if (request.status !== 'pending') return null;
+		if (request.pending_block_reason) {
+			return {
+				label: formatLLMBlockReason(request.pending_block_reason),
+				title: request.pending_block_reason,
+				tone: 'quota'
+			};
+		}
+		const windowPause = quotaStatus.__execution_window;
+		if (windowPause?.paused) {
+			const wait = windowPause.remaining_seconds != null ? formatWaitTime(windowPause.remaining_seconds) : null;
+			return {
+				label: '시간창 보류',
+				title: wait ? `다음 실행 가능 시간까지 ${wait}` : '현재 실행 가능 시간창 밖입니다',
+				tone: 'window'
+			};
+		}
+		const provider = request.provider || 'claude';
+		const providerPause = quotaStatus[provider];
+		if (providerPause?.paused) {
+			const wait = providerPause.remaining_seconds != null ? formatWaitTime(providerPause.remaining_seconds) : null;
+			return {
+				label: '쿼터 보류',
+				title: wait ? `${provider} 쿼터 재개까지 ${wait}` : providerPause.reason || `${provider} 쿼터 일시정지`,
+				tone: 'quota'
+			};
+		}
+		return null;
+	}
+
+	async function switchTab(tab: Tab) {
 		// create 탭에서 작성 중인 내용이 있으면 경고
 		if (activeTab === 'create' && tab !== 'create') {
 			const hasContent = createForm.prompt.trim() || createForm.userInput.trim();
-			if (hasContent && !confirm('작성 중인 내용이 있습니다. 탭을 전환하시겠습니까?')) {
+			if (hasContent && !await confirm({ title: '탭 전환', message: '작성 중인 내용이 있습니다. 탭을 전환하시겠습니까?', confirmText: '전환' })) {
 				return;
 			}
 		}
@@ -684,6 +883,9 @@
 		if (tab === 'create') {
 			void loadCreateMeta();
 		}
+		if (tab === 'profilePolicy') {
+			void fetchPolicyMatrix();
+		}
 		if (tab === 'performance') {
 			void loadPerformanceTabComponent();
 		}
@@ -697,10 +899,8 @@
 	});
 </script>
 
-<div>
-	<!-- 헤더 -->
-	<div class="mb-6 flex justify-between items-center">
-		<h2 class="text-lg font-bold text-foreground">LLM 요청 관리</h2>
+<div class="space-y-4">
+	<div class="flex flex-wrap justify-end gap-2">
 		<div class="flex gap-2">
 			<Button variant="secondary" size="sm" onclick={runCleanup} title="Stale 정리 및 오래된 이력 삭제">
 				정리
@@ -770,41 +970,13 @@
 		</div>
 	{/if}
 
-	<!-- 탭 -->
-	<div class="mb-4 border-b border-border">
-		<nav class="flex gap-4">
-			<button
-				onclick={() => switchTab('queue')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				대기열 (pending/processing)
-			</button>
-			<button
-				onclick={() => switchTab('history')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				이력 (completed/failed)
-			</button>
-			<button
-				onclick={() => switchTab('create')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				수동 요청 생성
-			</button>
-			<button
-				onclick={() => switchTab('performance')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				성능 분석
-			</button>
-			<button
-				onclick={() => switchTab('claude-sessions')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'claude-sessions' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				Claude 세션
-			</button>
-		</nav>
-	</div>
+	<TabNav
+		tabs={llmTabs}
+		bind:activeTab
+		variant="primary"
+		size="compact"
+		onTabChange={(tabId) => switchTab(tabId as Tab)}
+	/>
 
 	{#if activeTab === 'queue' || activeTab === 'history'}
 		<!-- 필터 -->
@@ -1057,6 +1229,7 @@
 					</thead>
 					<tbody class="divide-y divide-border">
 						{#each requests as request (request.id)}
+							{@const pauseInfo = getPendingPauseInfo(request)}
 							<tr
 								class="hover:bg-muted cursor-pointer"
 								onclick={() => openModal(request)}
@@ -1087,6 +1260,14 @@
 									<span class="px-2 py-1 text-xs rounded-full {getStatusColor(request.status)}">
 										{getStatusLabel(request.status)}
 									</span>
+									{#if pauseInfo}
+										<span
+											class="ml-1 px-2 py-1 text-xs rounded-full {pauseInfo.tone === 'window' ? 'bg-blue-100 text-blue-700' : 'bg-warning-light text-warning-foreground'}"
+											title={pauseInfo.title}
+										>
+											{pauseInfo.label}
+										</span>
+									{/if}
 								</td>
 								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(request.requested_at)}</td>
 								<td class="px-4 py-3" onclick={(e) => e.stopPropagation()}>
@@ -1319,6 +1500,123 @@
 				</div>
 			</div>
 		</div>
+	{:else if activeTab === 'profilePolicy'}
+		<div class="space-y-4">
+			<div class="flex items-center justify-between gap-3">
+				<div>
+					<h3 class="text-base font-semibold text-foreground">Schedule x Profile 정책</h3>
+					<p class="text-sm text-muted-foreground">target_type 별로 허용할 profile과 시간대를 지정합니다.</p>
+				</div>
+				<Button variant="secondary" size="sm" onclick={fetchPolicyMatrix} disabled={policyLoading}>
+					{policyLoading ? '로딩 중...' : '새로고침'}
+				</Button>
+			</div>
+
+			{#if policyError}
+				<div class="rounded-lg border border-error/30 bg-error-light px-4 py-3 text-sm text-error">
+					{policyError}
+				</div>
+			{/if}
+
+			<div class="card p-5">
+				<div class="grid gap-4 md:grid-cols-5">
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">target_type</label>
+						<input type="text" bind:value={policyForm.target_type} class="w-full px-3 py-2 border border-border rounded-lg" />
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">Engine</label>
+						<select bind:value={policyForm.engine} onchange={() => { policyForm.profile_name = ''; ensurePolicyFormProfile(); }} class="w-full px-3 py-2 border border-border rounded-lg">
+							{#each policyEngines() as engine}
+								<option value={engine}>{engine}</option>
+							{/each}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">Profile</label>
+						<select bind:value={policyForm.profile_name} class="w-full px-3 py-2 border border-border rounded-lg">
+							{#each profileOptionsForEngine(policyForm.engine) as profile}
+								<option value={profile.name}>{profile.name}</option>
+							{/each}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">Priority</label>
+						<input type="number" bind:value={policyForm.priority} class="w-full px-3 py-2 border border-border rounded-lg" />
+					</div>
+					<div class="flex items-end">
+						<label class="flex items-center gap-2 text-sm text-foreground">
+							<input type="checkbox" bind:checked={policyForm.enabled} class="h-4 w-4" />
+							사용
+						</label>
+					</div>
+				</div>
+
+				<div class="mt-4 grid gap-4 md:grid-cols-2">
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">허용 window</label>
+						<textarea bind:value={policyForm.allowed_windows_text} rows="3" placeholder="09:00-18:00 1,2,3,4,5" class="w-full px-3 py-2 border border-border rounded-lg resize-none"></textarea>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">차단 window</label>
+						<textarea bind:value={policyForm.quiet_windows_text} rows="3" placeholder="00:00-06:00" class="w-full px-3 py-2 border border-border rounded-lg resize-none"></textarea>
+					</div>
+				</div>
+
+				<div class="mt-4 flex justify-end">
+					<Button variant="primary" size="sm" onclick={addPolicyFromForm} disabled={policySaving || policyLoading}>
+						{policySaving ? '저장 중...' : '정책 추가/갱신'}
+					</Button>
+				</div>
+			</div>
+
+			<div class="card overflow-hidden">
+				<table class="w-full text-sm">
+					<thead class="bg-muted/50 text-muted-foreground">
+						<tr>
+							<th class="px-4 py-3 text-left font-medium">Scope</th>
+							<th class="px-4 py-3 text-left font-medium">Engine/Profile</th>
+							<th class="px-4 py-3 text-left font-medium">상태</th>
+							<th class="px-4 py-3 text-left font-medium">Windows</th>
+							<th class="px-4 py-3 text-right font-medium">작업</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-border">
+						{#if policyLoading}
+							<tr>
+								<td colspan="5" class="px-4 py-6 text-center text-muted-foreground">정책 로딩 중...</td>
+							</tr>
+						{:else if profilePolicies.length === 0}
+							<tr>
+								<td colspan="5" class="px-4 py-6 text-center text-muted-foreground">등록된 정책이 없습니다.</td>
+							</tr>
+						{:else}
+							{#each profilePolicies as policy}
+								<tr>
+									<td class="px-4 py-3 font-medium text-foreground">{formatPolicyScope(policy)}</td>
+									<td class="px-4 py-3 text-muted-foreground">{policy.engine}/{policy.profile_name}</td>
+									<td class="px-4 py-3">
+										<span class="rounded-full px-2 py-1 text-xs {policy.enabled ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}">
+											{policy.enabled ? '사용' : getPolicyBlockReasonLabel('schedule_policy_off')}
+										</span>
+										<span class="ml-2 text-xs text-muted-foreground">P{policy.priority}</span>
+									</td>
+									<td class="px-4 py-3 text-muted-foreground">
+										<div>허용: {formatPolicyWindows(policy.allowed_windows)}</div>
+										<div>차단: {formatPolicyWindows(policy.quiet_windows)}</div>
+									</td>
+									<td class="px-4 py-3 text-right">
+										<Button variant="ghost" size="sm" onclick={() => removePolicy(policy)} disabled={policySaving}>
+											삭제
+										</Button>
+									</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+			</div>
+		</div>
 	{:else if activeTab === 'performance'}
 		{#if performanceTabComponent}
 			<svelte:component this={performanceTabComponent} />
@@ -1406,7 +1704,15 @@
 				{#if selectedRequest.status === 'pending'}
 					{@const provider = selectedRequest.provider || 'claude'}
 					{@const ps = quotaStatus[provider]}
-					{#if ps?.paused}
+					{@const windowPause = quotaStatus.__execution_window}
+					{#if windowPause?.paused}
+						<div class="mb-4 p-3 bg-blue-50 rounded-lg flex items-start gap-2">
+							<span class="text-blue-700 text-sm font-medium">시간창 보류</span>
+							<span class="text-blue-700 text-sm ml-auto">
+								{windowPause.remaining_seconds != null ? `${formatWaitTime(windowPause.remaining_seconds)} 후 재개` : '다음 시간창 대기'}
+							</span>
+						</div>
+					{:else if ps?.paused}
 						<div class="mb-4 p-3 bg-warning-light rounded-lg flex items-start gap-2">
 							<span class="text-warning-foreground text-sm font-medium">⏸ {provider === 'gemini' ? 'Gemini' : 'Claude'} 쿼터 소진</span>
 							<span class="text-warning-foreground text-sm ml-auto">{formatWaitTime(countdownSeconds)} 후 재개</span>

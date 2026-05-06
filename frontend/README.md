@@ -13,3 +13,5 @@ expo admin UI는 browser local draft와 export 흐름만 담당합니다. publis
 - API client 진입점: `src/lib/api/`
 - 공통 타입 SoT: `src/lib/types.ts`
 - expo 운영 계약 문서: `../docs/dev-guide/expo-data-flow.md`
+- 레이아웃 규약 SoT: `../docs/dev-guide/frontend-layout-guide.md`
+- 프론트엔드 문서 인덱스: `./docs/INDEX.md`

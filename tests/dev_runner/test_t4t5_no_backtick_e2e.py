@@ -13,13 +13,17 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
-from app.main import app
 from app.modules.dev_runner.schemas import RunStatusResponse
 from app.modules.dev_runner.services.executor_service import executor_service
 
 pytestmark = pytest.mark.http
 
 BASE_URL = "/api/v1/dev-runner"
+
+
+def _build_test_client() -> TestClient:
+    from app.main import app
+    return TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +34,7 @@ def _plan_runner_redis_db_guard(monkeypatch):
 
 @pytest.fixture
 def api_client():
-    return TestClient(app, raise_server_exceptions=False)
+    return _build_test_client()
 
 
 # ============================================================

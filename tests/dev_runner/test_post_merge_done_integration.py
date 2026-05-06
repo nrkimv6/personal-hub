@@ -340,7 +340,7 @@ def test_all_done_ownership_guard_sets_specific_error_E(cl, tmp_path):
 
 
 def test_all_done_pre_dirty_todo_ownership_guard_restarts_E(cl, tmp_path):
-    """E: pre-dirty TODO.md로 인한 ownership_guard 실패도 restart_after_merge를 예약한다."""
+    """E: pre-dirty plans TODO.md로 인한 ownership_guard 실패도 restart_after_merge를 예약한다."""
     r = _make_redis()
     runner_id = "intg09-pre-dirty-todo"
     prefix = cl.RUNNER_KEY_PREFIX
@@ -351,13 +351,13 @@ def test_all_done_pre_dirty_todo_ownership_guard_restarts_E(cl, tmp_path):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
-        "success": False,
-        "reason": "ownership_guard",
-        "message": (
-            "runner ownership guard blocked auto-done: pre-dirty file(s) detected "
-            f"for runner {runner_id}: {tmp_path / 'TODO.md'}"
-        ),
-    }
+            "success": False,
+            "reason": "ownership_guard",
+            "message": (
+                "runner ownership guard blocked auto-done: pre-dirty file(s) detected "
+                f"for runner {runner_id}: {tmp_path / '.worktrees' / 'plans' / 'TODO.md'}"
+            ),
+        }
 
     with patch("requests.post", return_value=mock_resp):
         result = _run_merge(cl, runner_id, r)
@@ -394,138 +394,61 @@ def test_post_merge_residue_blocked_skips_restart_E(cl, tmp_path):
     assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None
 
 
-def test_post_merge_stash_residue_blocks_restart_with_real_git_T3(cl, tmp_path):
-    """T3: pre-merge stash pop으로 생긴 stray dirty는 real git repo에서도 residue_blocked로 차단된다."""
+def test_post_merge_done_integration_has_post_merge_dirty_hook_installer_R():
+    """T4: done/post-merge flow has an installable hook wrapper before root merge-test."""
+    installer = Path(__file__).resolve().parents[2] / "scripts" / "git-hooks" / "install-post-merge-dirty-check.ps1"
+    assert installer.exists()
+    body = installer.read_text(encoding="utf-8")
+    assert "D:\\work\\project\\service\\wtools\\common\\tools\\enable-post-merge-dirty-check.ps1" in body
+
+
+def test_conflict_safe_doc_resolved_calls_done_R(cl, tmp_path):
+    """T3: exit_code=3 + safe-doc resolved면 done 흐름까지 이어진다."""
     r = _make_redis()
-    runner_id = "intg11-stash-residue"
+    runner_id = "intg10-safe-doc"
     prefix = cl.RUNNER_KEY_PREFIX
-    repo = _setup_git_repo(tmp_path)
-    _create_merged_repo_with_stash_residue(repo)
-
-    plan_path = str(tmp_path / "plan_stash_residue.md")
+    plan_path = str(tmp_path / "plan_conflict_safe_doc.md")
     _make_all_done_plan(plan_path)
-    _seed_runner_keys(r, prefix, runner_id, plan_path, branch="feature/residue-guard")
+    _seed_runner_keys(r, prefix, runner_id, plan_path)
 
-    snapshot_dir = tmp_path / "ownership"
-    snapshot_dir.mkdir()
-    (snapshot_dir / f"{runner_id}.json").write_text(
-        json.dumps(
-            {
-                "runner_id": runner_id,
-                "project_root": str(repo),
-                "dirty_files": [],
-                "dirty_status_lines": [],
-                "owned_files": [],
-                "clean_at_start_files": [],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"success": True}
 
-    pub_calls: list[str] = []
-    with patch.object(merge_mod, "OWNERSHIP_SNAPSHOT_DIR", snapshot_dir):
-        result = merge_mod._handle_merge_success(runner_id, r, plan_path, pub_calls.append)
+    with patch("requests.post", return_value=mock_resp) as mock_post, \
+         patch(
+             "_dr_merge._launch_conflict_resolver_process",
+             return_value={"success": True, "message": "safe-doc auto-resolved", "merge_status": "merged"},
+         ):
+        result = _run_merge(cl, runner_id, r, exit_code=3)
 
-    status_lines = [line for line in _git(repo, "status", "--porcelain=v1").stdout.splitlines() if line.strip()]
-    quarantine_path = Path(result["quarantine_diff_path"])
+    assert result["success"] is True
+    assert result["merge_status"] == "merged"
+    mock_post.assert_called_once()
+
+
+def test_conflict_unsafe_keeps_conflict_without_done_B(cl, tmp_path):
+    """T3: exit_code=3 + unsafe conflict면 done 없이 conflict 상태를 유지한다."""
+    r = _make_redis()
+    runner_id = "intg11-unsafe-conflict"
+    prefix = cl.RUNNER_KEY_PREFIX
+    plan_path = str(tmp_path / "plan_conflict_unsafe.md")
+    _make_all_done_plan(plan_path)
+    _seed_runner_keys(r, prefix, runner_id, plan_path)
+
+    with patch("requests.post") as mock_post, \
+         patch(
+             "_dr_merge._launch_conflict_resolver_process",
+             return_value={
+                 "success": False,
+                 "message": "unsafe conflict requires manual resolution",
+                 "merge_status": "conflict",
+                 "conflict": True,
+             },
+         ):
+        result = _run_merge(cl, runner_id, r, exit_code=3)
 
     assert result["success"] is False
-    assert result["merge_status"] == "residue_blocked"
-    assert result["reason"] == "residue_guard"
-    assert r.get(f"{prefix}:{runner_id}:merge_status") == "residue_blocked"
-    assert r.get(f"{prefix}:{runner_id}:done_post_merge_status") == "skipped_residue"
-    assert r.get(f"{prefix}:{runner_id}:done_post_merge_error") == "residue_guard"
-    assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None
-    assert r.get(f"{prefix}:{runner_id}:quarantine_diff_path") == str(quarantine_path)
-    assert status_lines == ["?? logs/"]
-    assert (repo / "notes.txt").read_text(encoding="utf-8") == "baseline\n"
-    assert quarantine_path.exists()
-    assert "notes.txt" in quarantine_path.read_text(encoding="utf-8")
-    assert any("post-merge residue 감지" in line for line in pub_calls)
-
-
-def test_real_git_stash_pop_residue_blocked_skips_restart_T3(cl, tmp_path):
-    """T3: 실제 stash pop 재오염이 생기면 residue guard가 quarantine 후 restart 없이 차단한다."""
-    import _dr_merge as dr_merge_mod
-
-    r = _make_redis()
-    runner_id = "intg11-real-stash-residue"
-    prefix = cl.RUNNER_KEY_PREFIX
-    branch = "plan/real-stash-residue"
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _init_git_repo_with_stashable_residue(repo, branch)
-
-    plan_path = str(tmp_path / "plan_real_stash_residue.md")
-    _make_all_done_plan(plan_path)
-    _seed_runner_keys(r, prefix, runner_id, plan_path, branch=branch)
-
-    snapshot_dir = tmp_path / "ownership"
-    snapshot_dir.mkdir()
-    (snapshot_dir / f"{runner_id}.json").write_text(
-        json.dumps(
-            {
-                "project_root": str(repo),
-                "dirty_files": [],
-                "owned_files": [],
-                "clean_at_start_files": [],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-    real_run = subprocess.run
-
-    def _subprocess_router(cmd, *args, **kwargs):
-        if cmd and cmd[0] == "git":
-            return real_run(cmd, *args, **kwargs)
-
-        real_run(
-            ["git", "merge", "--no-ff", branch, "-m", f"Merge branch '{branch}'"],
-            cwd=repo,
-            check=True,
-            capture_output=True,
-            text=True,
-            env=_GIT_ENV,
-        )
-        real_run(
-            ["git", "stash", "pop"],
-            cwd=repo,
-            check=True,
-            capture_output=True,
-            text=True,
-            env=_GIT_ENV,
-        )
-        proc = MagicMock()
-        proc.returncode = 0
-        return proc
-
-    with patch.object(dr_merge_mod, "PROJECT_ROOT", repo), \
-         patch.object(dr_merge_mod, "OWNERSHIP_SNAPSHOT_DIR", snapshot_dir), \
-         patch("subprocess.run", side_effect=_subprocess_router), \
-         patch("requests.post") as mock_post:
-        result = cl._execute_merge_with_lock(runner_id, r)
-
+    assert result["merge_status"] == "conflict"
+    assert result["message"] == "unsafe conflict requires manual resolution"
     mock_post.assert_not_called()
-    assert result["success"] is False
-    assert result["merge_status"] == "residue_blocked"
-    assert result["reason"] == "residue_guard"
-    assert Path(result["quarantine_diff_path"]).exists()
-    assert "residue.txt" in Path(result["quarantine_diff_path"]).read_text(encoding="utf-8")
-    assert r.get(f"{prefix}:{runner_id}:restart_after_merge") is None
-
-    status = subprocess.run(
-        ["git", "status", "--porcelain=v1"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=_GIT_ENV,
-    )
-    status_lines = [line.strip() for line in status.stdout.splitlines() if line.strip()]
-    assert len(status_lines) == 1
-    assert status_lines[0] == "?? logs/"

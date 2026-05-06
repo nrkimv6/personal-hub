@@ -14,6 +14,7 @@ logger = logging.getLogger("claude_worker.profile_env")
 ENGINE_ENV_KEYS: Dict[str, Optional[str]] = {
     "claude": "CLAUDE_CONFIG_DIR",
     "gemini": None,
+    "codex": None,
 }
 
 # extra_env 에 덮어쓰기를 허용하지 않는 시스템 핵심 키
@@ -35,7 +36,7 @@ FORBIDDEN_EXTRA_ENV = {
 _CLAUDE_SESSION_VARS = ("CLAUDECODE", "CLAUDE_CODE_SESSION", "CLAUDE_CODE_ENTRYPOINT")
 
 
-def build_cli_env(engine: str, base_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+def build_cli_env(engine: str, base_env: Optional[Dict[str, str]] = None, profile=None) -> Dict[str, str]:
     """subprocess 실행용 env 딕셔너리 조립.
 
     시맨틱:
@@ -71,19 +72,24 @@ def build_cli_env(engine: str, base_env: Optional[Dict[str, str]] = None) -> Dic
     # selected profile 로드 (import 는 런타임에 — 순환 의존 방지)
     from app.modules.claude_worker.services.profile_store import get_selected
 
-    profile = get_selected(engine)
+    try:
+        profile = get_selected(engine)
+    except ValueError:
+        if engine != "codex":
+            raise
+        profile = None
 
     # config_dir 주입
     env_key = ENGINE_ENV_KEYS.get(engine)
-    if env_key and profile.config_dir:
+    if env_key and profile and profile.config_dir:
         env[env_key] = profile.config_dir
         logger.debug(f"[profile-env] {env_key}={profile.config_dir!r} ({engine}/{profile.name})")
-    elif env_key and not profile.config_dir:
+    elif env_key and (not profile or not profile.config_dir):
         # null config_dir → 기존 env 에서 해당 키 제거 (혹여 기존 값 있으면 오염 방지)
         env.pop(env_key, None)
 
     # extra_env merge
-    for k, v in (profile.extra_env or {}).items():
+    for k, v in ((profile.extra_env if profile else None) or {}).items():
         if k in FORBIDDEN_EXTRA_ENV:
             raise ValueError(
                 f"forbidden env key in extra_env: {k!r}. "

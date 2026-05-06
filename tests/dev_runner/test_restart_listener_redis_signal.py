@@ -46,6 +46,10 @@ class TestExecutorServiceRestartListener:
         from app.modules.dev_runner.services.executor_service import ExecutorService
         svc = ExecutorService.__new__(ExecutorService)
         svc.redis_client = MagicMock()
+        svc.redis_client.brpop.return_value = (
+            b"result_key",
+            json.dumps({"success": True, "message": "graceful-exit acknowledged"}).encode(),
+        )
         return svc
 
     def test_restart_listener_sends_redis_graceful_exit(self, executor):
@@ -102,11 +106,15 @@ class TestExecutorServiceRestartListener:
 
         with patch("time.sleep"), patch("time.time") as mock_time:
             # 시간이 빠르게 deadline을 넘도록 설정
-            mock_time.side_effect = [0, 5.1, 5.2]  # deadline 5 초과
+            mock_time.side_effect = [0, 5.1, 5.2, 20.3]  # 1단계/2단계 deadline 모두 초과
             result = executor.restart_listener()
 
         assert result["success"] is False
-        assert "restarting" in result["message"].lower() or "타임아웃" in result["message"]
+        assert (
+            "restarting" in result["message"].lower()
+            or "타임아웃" in result["message"]
+            or "heartbeat not recovered" in result["message"].lower()
+        )
 
     def test_restart_listener_timeout_stuck_restarting(self, executor):
         """E: heartbeat가 'restarting'에서 정상값으로 복구되지 않으면 success: False"""

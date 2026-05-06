@@ -48,6 +48,38 @@ class TestLifespanSkipInTesting:
         mock_scc.assert_not_called()
 
 
+class TestCleanupApiStaleResources:
+
+    @pytest.mark.asyncio
+    async def test_cleanup_api_stale_resources_uses_default_llm_timeout(self):
+        """startup cleanup은 timeout_minutes=0으로 정상 processing 요청을 즉시 실패시키지 않는다."""
+        import app.lifespan as lifespan_module
+
+        calls = []
+
+        class Db:
+            def commit(self):
+                pass
+
+            def close(self):
+                pass
+
+        class Service:
+            def __init__(self, db):
+                pass
+
+            def cleanup_stale_processing(self, timeout_minutes=None):
+                calls.append(timeout_minutes)
+                return 0
+
+        with patch("app.database.SessionLocal", return_value=Db()), \
+             patch("app.modules.claude_worker.services.llm_service.LLMService", Service), \
+             patch.object(lifespan_module.Path, "exists", return_value=False):
+            await lifespan_module.cleanup_api_stale_resources()
+
+        assert calls == [None]
+
+
 class TestClientNoPoolExhaustion:
 
     def test_repeated_client_creation_no_pool_error(self, caplog):

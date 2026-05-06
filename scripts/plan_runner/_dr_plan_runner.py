@@ -29,7 +29,8 @@ from _dr_state import (
 from _dr_subprocess import _ANSI_ESCAPE, _make_plan_runner_env
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_log_framing import MultilineFrameBuffer
-from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, _DummyProcess
+from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, get_target_project_root, _DummyProcess
+from _dr_runner_predicates import _get_process_identity, _hash_process_cmdline
 from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
 from _dr_merge import _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 from _dr_stream_cleanup import (
@@ -78,6 +79,63 @@ def _register_canonical_alias() -> None:
 
 
 _register_canonical_alias()
+
+
+def _kill_process_tree(pid: int, timeout: int = 5) -> None:
+    """Terminate child processes for a runner PID before killing the runner itself."""
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+    except psutil.NoSuchProcess:
+        logger.debug("process tree cleanup skipped; PID %s no longer exists", pid)
+        return
+    except (psutil.AccessDenied, psutil.ZombieProcess) as exc:
+        logger.debug("process tree cleanup skipped for PID %s: %s", pid, exc)
+        return
+
+    for child in children:
+        try:
+            child.terminate()
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            logger.debug("child terminate skipped for PID %s: %s", getattr(child, "pid", None), exc)
+
+    if not children:
+        return
+
+    try:
+        _gone, alive = psutil.wait_procs(children, timeout=timeout)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as exc:
+        logger.debug("process tree wait skipped for PID %s: %s", pid, exc)
+        alive = []
+
+    for child in alive:
+        try:
+            child.kill()
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            logger.debug("child kill skipped for PID %s: %s", getattr(child, "pid", None), exc)
+
+    if alive:
+        try:
+            psutil.wait_procs(alive, timeout=timeout)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            logger.debug("process tree kill wait skipped for PID %s: %s", pid, exc)
+
+
+# Lifecycle control lives in `_dr_runner_control` so tests can patch that module
+# and observe behavior through the facade imports.
+from _dr_runner_control import (  # noqa: E402
+    start_plan_runner,
+    stop_plan_runner,
+    get_status,
+    force_stop_plan_runner,
+    force_kill_plan_runner,
+    _do_start_plan_runner,
+    _launch_plan_runner_process,
+)
 
 def _ownership_snapshot_dir(project_root: Path = PROJECT_ROOT) -> Path:
     return project_root / "logs" / "dev_runner" / "ownership"
@@ -161,6 +219,16 @@ def _stream_output(
     - 억제된 줄이 있으면 정상 라인 직전에 요약 1줄 publish
     - rate-limiter: 동일 라인 0.5초 내 10회 이상 반복 시 burst 억제
     """
+    # 테스트는 `_dr_stream_output.*`를 patch하므로, 구현은 항상 분리 모듈로 위임한다.
+    from _dr_stream_output import _stream_output as _impl
+
+    return _impl(
+        process,
+        log_handle,
+        redis_client,
+        runner_id,
+        stderr_handle=stderr_handle,
+    )
     import time
     logger.info(f"[_stream_output] 시작 runner_id={runner_id!r}")
     _running_log_files = get_running_log_files()
@@ -333,6 +401,12 @@ def _stream_output(
         logger.error(f"Output streaming error: {e}")
     finally:
         logger.info(f"[_stream_output] 종료: ok={publish_ok} fail={publish_fail} lines={_line_count} runner_id={runner_id!r}")
+        # stdout 마커 종료 — extract-plan-log.ps1이 범위를 추출하는 기준점
+        try:
+            log_handle.write(f"[plan:{runner_id} end]\n")
+            log_handle.flush()
+        except Exception:
+            pass
         try:
             log_handle.flush()
             log_handle.close()
@@ -433,7 +507,12 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     """plan-runner CLI 실행 (백그라운드 스레드에서 호출 — worktree 생성 포함)"""
     from worktree_manager import WorktreeManager, WorktreeError, ensure_main_branch
     from workflow_manager import WorkflowManager
-    from _dr_plan_paths import classify_plan_stage, read_plan_status, resolve_plan_target
+    from _dr_plan_paths import (
+        classify_plan_stage,
+        is_reserved_plan_status,
+        read_plan_status,
+        resolve_plan_target,
+    )
     from plan_worktree_helpers import (
         is_plan_archived,
         is_worktree_active,
@@ -453,9 +532,8 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "error")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
             logger.error(f"[_do_start_plan_runner] 실패 상태 기록 (runner_id: {runner_id}): {message}")
-            try:
-                redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", f"[ERROR] {message}")
-            except Exception as pub_err:
+            if not _publish_with_retry(redis_client, f"{LOG_CHANNEL_PREFIX}:{runner_id}", f"[ERROR] {message}"):
+                pub_err = "publish retry failed"
                 logger.warning(f"[_set_error_status] publish 실패 (무시): {pub_err}")
             # Workflow 실패 상태 업데이트
             if _wf_manager and _wf_id:
@@ -481,6 +559,9 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
                 _path_resolution.target_kind,
                 _plan_stage,
             )
+            if is_reserved_plan_status(_status):
+                _set_error_status(f"예약대기 plan은 실행할 수 없습니다: {plan_file}")
+                return
         except Exception as _path_err:
             logger.debug(f"[_do_start_plan_runner] plan rule 해석 실패 (무시): {_path_err}")
         if is_plan_archived(plan_file):
@@ -488,7 +569,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             return
 
     # plan 파일의 git root 결정 (wtools 등 외부 레포 지원)
-    plan_project_root = get_plan_git_root(plan_file) if plan_file else _PR
+    plan_project_root = get_target_project_root(plan_file) if plan_file else _PR
     plan_worktree_base = plan_project_root / ".worktrees"
     if plan_project_root != _PR:
         logger.info(f"외부 레포 plan 감지: project_root={plan_project_root}")
@@ -503,17 +584,31 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
                     worktree_path = Path(existing_wt_abs)
                     branch = existing_branch
                     _reused_worktree = True
+                    try:
+                        worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")
+                    except ValueError:
+                        worktree_rel = str(worktree_path)
+                    if not _write_plan_worktree_info(plan_file, branch, worktree_rel, owner=plan_file):
+                        _set_error_status(f"plan worktree header 기록 실패: {plan_file}")
+                        return
                     logger.info(f"기존 워크트리 재사용: {worktree_path} (branch: {branch})")
             else:
                     # 경로 없음 또는 worktree 검증 실패 → plan 헤더에서 필드 제거 후 신규 생성
                     _remove_plan_header_fields(plan_file)
                     logger.info(f"워크트리 없음 또는 검증 실패, 신규 생성: plan={plan_file}")
         if not _reused_worktree:
-            worktree_path, branch = WorktreeManager.create(runner_id, plan_worktree_base, plan_file=plan_file)
+            worktree_path, branch = WorktreeManager.create(
+                runner_id,
+                plan_worktree_base,
+                plan_file=plan_file,
+                use_runner_identity=bool(command.get("test_source")),
+            )
             # Phase 4: plan 헤더에 branch/worktree 기록 (수동 /implement와 동일 패턴)
             if plan_file:
                 worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")
-                _write_plan_worktree_info(plan_file, branch, worktree_rel)
+                if not _write_plan_worktree_info(plan_file, branch, worktree_rel, owner=plan_file):
+                    _set_error_status(f"plan worktree header 기록 실패: {plan_file}")
+                    return
     except WorktreeError as e:
         logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
         _set_error_status(f"worktree 생성 실패: {e}")
@@ -537,7 +632,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     engine = command.get("engine")
     fix_engine = command.get("fix_engine")
     is_parallel = command.get("parallel", False)
-    if not plan_file and not is_parallel:
+    if not plan_file and not is_parallel and not command.get("dry_run"):
         _set_error_status("plan_file required (use parallel mode for batch execution)")
         return
 
@@ -599,6 +694,27 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     if not runner_id:
         return {"success": False, "message": "runner_id required"}
 
+    plan_file_req = command.get("plan_file")
+    if plan_file_req and plan_file_req not in (PLAN_FILE_ALL, _LEGACY_ALL):
+        try:
+            from _dr_plan_paths import is_reserved_plan_status, read_plan_status
+
+            plan_status = read_plan_status(plan_file_req)
+            if is_reserved_plan_status(plan_status):
+                message = f"예약대기 plan은 실행할 수 없습니다: {plan_file_req}"
+                logger.info("[start_plan_runner] reserved plan blocked before accepted: %s", plan_file_req)
+                return {
+                    "success": False,
+                    "reason": "reserved_status",
+                    "status": plan_status,
+                    "message": message,
+                    "runner_id": runner_id,
+                    "action": "run",
+                    "executed_at": datetime.now().isoformat(),
+                }
+        except Exception as status_err:
+            logger.warning("[start_plan_runner] reserved status preflight failed: %s", status_err)
+
     # 동일 runner_id로 이미 실행 중이면 에러 (stale 프로세스 자동 정리 포함)
     redis_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
     redis_pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
@@ -625,8 +741,46 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         logger.info(f"Previous process ended (exit code: {proc.returncode}), cleaning up")
         _cleanup_process_state(runner_id, redis_client)
 
+    # ── DB claim preflight: queued/active claim이 있으면 충돌 거부 ────────
+    if plan_file_req and plan_file_req not in (PLAN_FILE_ALL, _LEGACY_ALL):
+        try:
+            import sys as _sys_pf
+            _pr_pf = str(Path(__file__).resolve().parent.parent.parent)
+            if _pr_pf not in _sys_pf.path:
+                _sys_pf.path.insert(0, _pr_pf)
+            from app.database import SessionLocal as _PfSession
+            from app.modules.dev_runner.services.plan_execution_claim_service import (
+                get_active_claim_for_plan as _get_active_pf,
+            )
+            _pf_db = _PfSession()
+            try:
+                _existing_claim = _get_active_pf(_pf_db, plan_file_req)
+            finally:
+                _pf_db.close()
+            if _existing_claim and _existing_claim.runner_id and _existing_claim.runner_id != runner_id:
+                logger.info(
+                    f"[start_plan_runner] DB claim 충돌: plan={plan_file_req} "
+                    f"claim_id={_existing_claim.claim_id} state={_existing_claim.state} "
+                    f"claim_runner={_existing_claim.runner_id}"
+                )
+                return {
+                    "success": False,
+                    "reason": "claim_conflict",
+                    "message": (
+                        f"plan이 이미 실행 점유 중입니다 "
+                        f"(claim_id={_existing_claim.claim_id} state={_existing_claim.state})"
+                    ),
+                    "claim_id": _existing_claim.claim_id,
+                    "claim_state": _existing_claim.state,
+                    "runner_id": runner_id,
+                    "action": "run",
+                    "executed_at": datetime.now().isoformat(),
+                }
+        except Exception as _pf_claim_err:
+            logger.debug(f"[start_plan_runner] DB claim preflight 실패 (무시): {_pf_claim_err}")
+    # ────────────────────────────────────────────────────────────────
+
     # plan_file 기준 기존 워커 감지 (재실행 시 attach — runner_id는 달라도 같은 plan 실행 중)
-    plan_file_req = command.get("plan_file")
     if plan_file_req and plan_file_req not in (PLAN_FILE_ALL, _LEGACY_ALL):
         from _dr_constants import RESULTS_KEY as _RESULTS_KEY_EARLY
         _command_id_early = command.get("command_id", "")
@@ -838,10 +992,7 @@ def _launch_plan_runner_process(
         log_handle.flush()
         # ────────────────────────────────────────────────────────────────
 
-        try:
-            redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", run_meta_line)
-        except Exception:
-            pass
+        _publish_with_retry(redis_client, f"{LOG_CHANNEL_PREFIX}:{runner_id}", run_meta_line)
 
         import os
         import re as _re
@@ -877,10 +1028,7 @@ def _launch_plan_runner_process(
                     log_handle.flush()
                 except Exception:
                     pass
-                try:
-                    redis_client.publish(_log_ch_pre, f"[REJECT] {_reject_msg}")
-                except Exception:
-                    pass
+                _publish_with_retry(redis_client, _log_ch_pre, f"[REJECT] {_reject_msg}")
                 try:
                     log_handle.close()
                 except Exception:
@@ -908,10 +1056,7 @@ def _launch_plan_runner_process(
                 log_handle.flush()
             except Exception:
                 pass
-            try:
-                redis_client.publish(_log_ch_pre, _warn_msg)
-            except Exception:
-                pass
+            _publish_with_retry(redis_client, _log_ch_pre, _warn_msg)
 
         process = subprocess.Popen(
             cmd,
@@ -927,6 +1072,13 @@ def _launch_plan_runner_process(
         _running_processes[runner_id] = process
         _running_log_files[runner_id] = log_file
 
+        # stdout 마커 — extract-plan-log.ps1이 범위를 추출하는 기준점
+        try:
+            log_handle.write(f"[plan:{runner_id} start]\n")
+            log_handle.flush()
+        except Exception:
+            pass
+
         # 별도 스레드에서 stdout 을 파일 + Redis publish (stderr는 별도 파이프로 분리)
         thread = threading.Thread(
             target=_stream_output,
@@ -941,6 +1093,23 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path", str(log_file))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", process.pid)
+        try:
+            identity = _get_process_identity(process.pid, fallback_cmdline=cmd)
+            if identity is None:
+                identity = {
+                    "pid_create_time": "",
+                    "process_cmdline_hash": _hash_process_cmdline(cmd),
+                }
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid_create_time", identity["pid_create_time"])
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:process_cmdline_hash", identity["process_cmdline_hash"])
+        except Exception as identity_err:
+            logger.warning(
+                "_launch_plan_runner_process: process identity 저장 실패 "
+                "(runner_id=%s, pid=%s, reason=%s)",
+                runner_id,
+                process.pid,
+                identity_err,
+            )
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file or PLAN_FILE_ALL)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch or f"runner/{runner_id}")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", started_at_text)
@@ -954,9 +1123,16 @@ def _launch_plan_runner_process(
             # Problem A 디버깅: SET 직후 GET 확인 — 불일치 시 Redis 경로/연결 의심
             _hb_check = redis_client.get(_hb_key)
             if _hb_check is None:
+                try:
+                    _hb_ttl = redis_client.ttl(_hb_key)
+                    _hb_exists = redis_client.exists(_hb_key)
+                    _hb_db = getattr(getattr(redis_client, "connection_pool", None), "connection_kwargs", {}).get("db", "unknown")
+                except Exception:
+                    _hb_ttl, _hb_exists, _hb_db = "unknown", "unknown", "unknown"
                 logger.error(
                     f"_launch_plan_runner_process: 초기 heartbeat SET 직후 GET=None — "
-                    f"Redis 경로 불일치 의심 (runner_id={runner_id}, key={_hb_key})"
+                    f"Redis 경로 불일치 의심 "
+                    f"(runner_id={runner_id}, key={_hb_key}, db={_hb_db}, ttl={_hb_ttl}, exists={_hb_exists})"
                 )
         except Exception:
             logger.warning(f"_launch_plan_runner_process: 초기 heartbeat 저장 실패 (runner_id={runner_id})")
@@ -978,6 +1154,40 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:started_at", datetime.now().isoformat())
 
         logger.info(f"plan-runner started (PID: {process.pid}, log: {log_file})")
+
+        # ── Claim activate: queued → active ──────────────────────────────
+        if plan_file:
+            try:
+                import sys as _sys_claim
+                _pr_str = str(PROJECT_ROOT)
+                if _pr_str not in _sys_claim.path:
+                    _sys_claim.path.insert(0, _pr_str)
+                from app.database import SessionLocal as _ClaimSession
+                from app.modules.dev_runner.services.plan_execution_claim_service import (
+                    get_active_claim_for_plan as _get_active_claim,
+                    activate_claim as _activate_claim,
+                )
+                _claim_db = _ClaimSession()
+                try:
+                    _claim = _get_active_claim(_claim_db, plan_file)
+                    if _claim and _claim.state == "queued":
+                        _activate_claim(
+                            _claim_db,
+                            _claim.claim_id,
+                            runner_id=runner_id,
+                            pid=process.pid,
+                            branch=branch or f"runner/{runner_id}",
+                            worktree_path=str(worktree_path),
+                        )
+                        logger.info(
+                            f"[claim] activated: claim_id={_claim.claim_id} "
+                            f"runner_id={runner_id} pid={process.pid}"
+                        )
+                finally:
+                    _claim_db.close()
+            except Exception as _claim_err:
+                logger.warning(f"[claim] activate_claim 실패 (무시): {_claim_err}")
+        # ────────────────────────────────────────────────────────────────
 
         return {
             "success": True,
@@ -1005,6 +1215,7 @@ def stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
         logger.info(f"Stopping plan-runner (runner_id: {runner_id}, PID: {proc.pid})...")
 
         # Windows: terminate() 호출
+        _kill_process_tree(proc.pid)
         proc.terminate()
 
         # 5초 대기
@@ -1012,6 +1223,7 @@ def stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             # 강제 종료
+            _kill_process_tree(proc.pid)
             proc.kill()
             proc.wait()
 
@@ -1076,6 +1288,7 @@ def force_stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
         pid = proc.pid if proc else None
         if proc:
             try:
+                _kill_process_tree(proc.pid)
                 proc.kill()
                 proc.wait(timeout=5)
             except Exception:
@@ -1089,6 +1302,7 @@ def force_stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
             if proc:
                 pids.append(proc.pid)
                 try:
+                    _kill_process_tree(proc.pid)
                     proc.kill()
                     proc.wait(timeout=5)
                 except Exception:
@@ -1114,6 +1328,7 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
     if proc and hasattr(proc, "kill") and not isinstance(proc, _DummyProcess):
         pid = proc.pid
         try:
+            _kill_process_tree(proc.pid)
             proc.kill()
             proc.wait(timeout=5)
         except Exception:
@@ -1123,6 +1338,7 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
         if pid_str:
             try:
                 pid = int(pid_str)
+                _kill_process_tree(pid)
                 import ctypes
                 PROCESS_TERMINATE = 0x0001
                 handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)

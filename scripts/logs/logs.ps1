@@ -1,9 +1,9 @@
-﻿# Monitor Page - Log Viewer Script
+# Monitor Page - Log Viewer Script
 # View logs for API server, worker, and frontend in real-time
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("all", "api", "worker", "frontend", "list", "watchdog", "devrunner")]
+    [ValidateSet("all", "api", "worker", "frontend", "list", "watchdog", "devrunner", "dev-runner")]
     [string]$Target = "all",
 
     [Parameter()]
@@ -59,6 +59,7 @@ Targets:
     worker    Show Worker logs only
     frontend  Show Frontend logs only
     devrunner Show Dev-Runner listener logs only
+    dev-runner Alias for devrunner
     list      List available log files
 
 Options:
@@ -425,10 +426,31 @@ function Find-MatchingPlanRunnerStreamLog {
     return $null
 }
 
+$script:PlanRunnerStreamMissWarningKeys = @{}
+
+function Write-PlanRunnerStreamMissWarning {
+    param(
+        [string]$Key,
+        [string]$PlanLogFileName,
+        [string]$RunnerId = ""
+    )
+    if (-not $Key) { $Key = "PS:unknown" }
+    if ($script:PlanRunnerStreamMissWarningKeys.ContainsKey($Key)) { return }
+    $script:PlanRunnerStreamMissWarningKeys[$Key] = $true
+
+    $runnerHint = if ($RunnerId) { " runner=$RunnerId" } else { "" }
+    $fileHint = if ($PlanLogFileName) { " planLog=$PlanLogFileName" } else { "" }
+    Write-Host "[$Key] [WARN] matching plan-runner stream log not found.$runnerHint$fileHint" -ForegroundColor Yellow
+}
+
 if ($planRunnerLogFile) {
     $planRunnerStreamLogFile = Find-MatchingPlanRunnerStreamLog `
         -LogDir $planRunnerLogDir `
         -PlanLogFileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+    if (-not $planRunnerStreamLogFile) {
+        $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+        Write-PlanRunnerStreamMissWarning -Key "PS:$prFileId" -PlanLogFileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+    }
 }
 
 # Redis에서 활성 plan-runner 목록 조회
@@ -592,6 +614,11 @@ function Show-TodayPlanRunnerLogs {
             -RunnerId $runnerHint
         if ($streamPath) {
             Show-LogContent -FilePath $streamPath -Label "PS:$prFileId" -Color DarkGray -TailLines ([Math]::Min($TailLines, 20))
+        } else {
+            Write-PlanRunnerStreamMissWarning `
+                -Key "PS:$prFileId" `
+                -PlanLogFileName $lf.Name `
+                -RunnerId $runnerHint
         }
     }
 }
@@ -657,503 +684,6 @@ function Show-LogContent {
         } else {
             Write-Host "(no content)" -ForegroundColor Gray
         }
-    }
-}
-
-# [DEPRECATED 2026-03-31] Follow 모드 Python 위임으로 미사용. 추후 삭제 예정.
-# Real-time log tail function (single file)
-function Start-LogTail {
-    param(
-        [string]$FilePath,
-        [string]$Prefix
-    )
-
-    if (-not $FilePath -or -not (Test-Path $FilePath)) {
-        Write-Host "[!] Log file not found: $Prefix" -ForegroundColor Red
-        return
-    }
-
-    Write-Host "`n========================================" -ForegroundColor Cyan
-    Write-Host "  Real-time Log: $Prefix" -ForegroundColor Cyan
-    Write-Host "  File: $(Split-Path $FilePath -Leaf)" -ForegroundColor Cyan
-    Write-Host "  Exit: Ctrl+C" -ForegroundColor Yellow
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host ""
-
-    # Use PowerShell Get-Content -Wait
-    Get-Content $FilePath -Wait -Tail 10 -Encoding UTF8 | ForEach-Object {
-        $line = $_
-        # -Cleanup 필터: cleanup/정리 관련 라인만 표시
-        if ($Cleanup -and $line -notmatch '\[cleanup\]|heartbeat.*cleanup|stale.*runner|force_cleanup|_cleanup_process') {
-            return
-        }
-        $lineColor = "White"
-        if ($line -match "ERROR|CRITICAL") {
-            $lineColor = "Red"
-        } elseif ($line -match "WARNING") {
-            $lineColor = "Yellow"
-        } elseif ($line -match "INFO") {
-            $lineColor = "Green"
-        } elseif ($line -match "DEBUG") {
-            $lineColor = "Gray"
-        }
-        Write-Host $line -ForegroundColor $lineColor
-    }
-}
-
-# [DEPRECATED 2026-03-31] Follow 모드 Python 위임으로 미사용. 추후 삭제 예정.
-# Real-time combined log tail (using FileSystemWatcher instead of Start-Job for UTF-8 support)
-function Start-CombinedLogTail {
-    param(
-        [string]$ApiLog,
-        [string]$WorkerLog,
-        [string]$FrontendLog,
-        [string]$ClaudeWorkerLog,
-        [string]$VideoDownloadLog,
-        [string]$CrawlWorkerLog,
-        [string]$ServiceRunnerLog,
-        [string]$WatchdogLog,
-        [string]$ClaudeWatchdogLog,
-        [string]$VideoDownloadWatchdogLog,
-        [string]$CrawlWatchdogLog,
-        [string]$CommandListenerWatchdogLog,
-        [string]$ApiWatchdogLog,
-        [string]$StartupApiWatchdogLog,
-        [string]$StartupBrowserWorkersLog,
-        [string]$DevRunnerLog,
-        [string]$CloudflaredLog
-    )
-
-    Write-Host "`n========================================" -ForegroundColor Cyan
-    Write-Host "  Real-time Combined Log" -ForegroundColor Cyan
-    Write-Host "  Exit: Ctrl+C" -ForegroundColor Yellow
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host ""
-
-    # Log source configuration: Name -> (FilePath, Color, InitialTailLines)
-    $logConfig = [ordered]@{
-        "SERVICE"     = @{ Path = $ServiceRunnerLog;  Color = "DarkCyan";    Tail = 3 }
-        "TUNNEL"      = @{ Path = $CloudflaredLog;    Color = "DarkGray";    Tail = 3 }
-        "API"         = @{ Path = $ApiLog;            Color = "Cyan";        Tail = 5 }
-        "WORKER"      = @{ Path = $WorkerLog;         Color = "Magenta";     Tail = 5 }
-        "LLM"         = @{ Path = $ClaudeWorkerLog;   Color = "Blue";        Tail = 3 }
-        "VIDEO-DL"    = @{ Path = $VideoDownloadLog;  Color = "DarkGreen";   Tail = 5 }
-        "CRAWL"       = @{ Path = $CrawlWorkerLog;    Color = "DarkBlue";    Tail = 5 }
-        "FRONTEND"    = @{ Path = $FrontendLog;       Color = "Green";       Tail = 3 }
-        "WATCHDOG"    = @{ Path = $WatchdogLog;       Color = "DarkYellow";  Tail = 2 }
-        "CLAUDE-WD"   = @{ Path = $ClaudeWatchdogLog; Color = "DarkYellow";  Tail = 2 }
-        "VIDEO-DL-WD" = @{ Path = $VideoDownloadWatchdogLog; Color = "DarkYellow"; Tail = 2 }
-        "CRAWL-WD"    = @{ Path = $CrawlWatchdogLog;  Color = "DarkYellow";  Tail = 2 }
-        "CMD-WD"      = @{ Path = $CommandListenerWatchdogLog; Color = "DarkYellow"; Tail = 2 }
-        "API-WD"      = @{ Path = $ApiWatchdogLog;          Color = "DarkYellow"; Tail = 3 }
-        "STARTUP-API-WD" = @{ Path = $StartupApiWatchdogLog; Color = "DarkYellow"; Tail = 3 }
-        "STARTUP-WORKERS" = @{ Path = $StartupBrowserWorkersLog; Color = "DarkYellow"; Tail = 3 }
-        "CMD-LISTENER" = @{ Path = $workerCommandListenerLogFile; Color = "DarkCyan"; Tail = 5 }
-        "DEV-RUNNER"  = @{ Path = $DevRunnerLog;           Color = "DarkCyan";    Tail = 10 }
-        "MERGE-ORCH"  = @{ Path = $mergeOrchestratorLogFile; Color = "Cyan";       Tail = 10 }
-    }
-
-    # Plan-runner 소스 동적 추가 (Redis 활성 runner 기반)
-    if ($useRedis) {
-        $activeRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
-        if ($activeRunners.Count -gt 0) {
-            foreach ($runner in $activeRunners) {
-                $pidSuffix = if ($runner.PID) { "|PID:$($runner.PID)" } else { "" }
-                $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
-                $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
-                $psPath = $runner.StreamPath
-                if (-not $psPath -and $runner.LogPath) {
-                    $psPath = Find-MatchingPlanRunnerStreamLog `
-                        -LogDir $planRunnerLogDir `
-                        -PlanLogFileName ([System.IO.Path]::GetFileName($runner.LogPath)) `
-                        -RunnerId $runner.RunnerId
-                }
-                $logConfig[$prKey] = @{ Path = $runner.LogPath; Color = "White";    Tail = 10 }
-                if ($psPath) {
-                    $logConfig[$psKey] = @{ Path = $psPath; Color = "DarkGray"; Tail = 5 }
-                }
-            }
-        } else {
-            # 활성 runner 없음 — 폴백: 최신 파일 1개 (파일명 타임스탬프 식별자 사용)
-            $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
-            $logConfig["PR:$prFileId"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
-            if ($planRunnerStreamLogFile) {
-                $logConfig["PS:$prFileId"] = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5 }
-            }
-        }
-    } else {
-        # Redis 없음 — 폴백: 최신 파일 1개 (파일명 타임스탬프 식별자 사용)
-        $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
-        $logConfig["PR:$prFileId"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
-        if ($planRunnerStreamLogFile) {
-            $logConfig["PS:$prFileId"] = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5 }
-        }
-    }
-
-    # Sources that only show errors/warnings (suppress verbose output)
-    $errorOnlySources = @("FRONTEND")
-
-    # Track file positions
-    $filePositions = @{}
-    $logFiles = @{}
-    $logColors = @{}
-
-    foreach ($source in $logConfig.Keys) {
-        $config = $logConfig[$source]
-        $filePath = $config.Path
-
-        if ($filePath -and (Test-Path $filePath)) {
-            $logFiles[$source] = $filePath
-            $logColors[$source] = $config.Color
-
-            $fileItem = Get-Item $filePath
-            $lastWrite = $fileItem.LastWriteTime.Date
-            if ($lastWrite -eq (Get-Date).Date) {
-                # 오늘 수정된 파일: 초기 tail 표시
-                $filePositions[$source] = $fileItem.Length
-                $initLines = Get-Content $filePath -Tail $config.Tail -Encoding UTF8 -ErrorAction SilentlyContinue
-                foreach ($line in $initLines) {
-                    # Error-only sources: skip non-error lines
-                    if ($errorOnlySources -contains $source) {
-                        if ($line -notmatch "ERROR|CRITICAL|Exception|WARN|error|fail|ERR_|TypeError|ReferenceError|SyntaxError") { continue }
-                    }
-                    Write-Host "[$source] $line" -ForegroundColor $config.Color
-                }
-            } else {
-                # 오래된 파일: 초기 표시 스킵, 파일 끝으로 이동
-                Write-Host "[$source] (waiting for new logs...)" -ForegroundColor DarkGray
-                $filePositions[$source] = $fileItem.Length
-            }
-        }
-    }
-
-    if ($logFiles.Count -eq 0) {
-        Write-Host "[!] No log files to follow." -ForegroundColor Red
-        return
-    }
-
-    Write-Host "`n--- Following $($logFiles.Count) log sources... ---`n" -ForegroundColor DarkGray
-
-    # Track current log file names for detecting new files
-    $logFileNames = @{}
-    foreach ($source in $logFiles.Keys) {
-        $logFileNames[$source] = Split-Path $logFiles[$source] -Leaf
-    }
-
-    # Define timestamped log patterns for auto-refresh (multiple patterns per source)
-    # 레거시 패턴: stdout_api_*(NSSM→service로 전환), stdout_worker_*(구형 watchdog, dev/에만 존재),
-    #             stdout_video_download_worker_*, stdout_crawl_* (Python 앱 자체 로깅으로 전환됨)
-    # 활성 패턴: stdout_unified_worker_*(unified-worker-watchdog.ps1이 stdout 캡처)
-    $timestampedLogPatterns = @{
-        "API"         = @("stdout_api_*.log", "api_*.log")  # stdout_api_*: 레거시
-        "WORKER"      = @("worker_*.log", "unified_worker_*.log")
-        "LLM"         = @("llm_worker_*.log")
-        "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")  # stdout_video_download_worker_*: 레거시
-        "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")  # stdout_crawl_*: 레거시
-        "FRONTEND"    = @("frontend_2*.log")
-        "SERVICE"     = @("service_runner_*.log")
-        "WATCHDOG"    = @("watchdog_*.log", "unified_watchdog_*.log")
-        "CLAUDE-WD"   = @("claude_watchdog_*.log")
-        "VIDEO-DL-WD" = @("video_download_watchdog_*.log")
-        "CRAWL-WD"    = @("crawl_watchdog_*.log")
-        "CMD-WD"      = @("command_listener_watchdog_*.log")
-        "API-WD"      = @("api_watchdog_*.log")
-        "STARTUP-API-WD" = @("startup_api_watchdog_*.log")
-        "STARTUP-WORKERS" = @("startup_browser_workers_*.log")
-        "CMD-LISTENER" = @("worker_command_listener_*.log")
-        "DEV-RUNNER"  = @("dev_runner_command_listener*.log")
-        "MERGE-ORCH"  = @("merge-orchestrator_*.log")
-        "TUNNEL"      = @("cloudflared_err_*.log", "cloudflared_err-*.log", "cloudflared_*.log")
-    }
-
-    # Admin 전용 소스 — Production에서 제외 (Worker 로그는 logs/ 또는 logs/admin/에 기록됨)
-    $devOnlySources = @("WORKER", "LLM", "VIDEO-DL", "CRAWL",
-                         "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "CMD-WD", "API-WD",
-                         "WATCHDOG", "CMD-LISTENER", "DEV-RUNNER", "MERGE-ORCH", "PLAN-RUNNER", "PR-STREAM")
-    if (-not $Admin) {
-        foreach ($source in $devOnlySources) {
-            $logConfig.Remove($source)
-            $timestampedLogPatterns.Remove($source)
-            $logFiles.Remove($source)
-            $logColors.Remove($source)
-            $filePositions.Remove($source)
-        }
-        # PR:xxx / PS:xxx 형태 동적 plan-runner key 제거 (Admin 아닐 때)
-        $prKeys = @($logConfig.Keys | Where-Object { $_ -like "PR:*" -or $_ -like "PS:*" })
-        foreach ($key in $prKeys) {
-            $logConfig.Remove($key)
-            $logFiles.Remove($key)
-            $logColors.Remove($key)
-            $filePositions.Remove($key)
-        }
-    }
-
-    # Helper to find latest log from multiple patterns
-    # Admin 모드일 때 base logs/ 디렉토리도 탐색 (API 앱의 LOG_DIR가 logs/ 고정)
-    function Get-LatestLogFromPatterns {
-        param([string[]]$Patterns, [switch]$IncludeEmpty)
-        $searchDirs = @($LogDir)
-        if ($Admin) {
-            $baseLogDir = Join-Path $ProjectRoot "logs"
-            if ($baseLogDir -ne $LogDir) { $searchDirs += $baseLogDir }
-        }
-        $allCandidates = @()
-        foreach ($dir in $searchDirs) {
-            foreach ($pattern in $Patterns) {
-                $found = Get-ChildItem -Path $dir -Filter $pattern -ErrorAction SilentlyContinue
-                if ($found) { $allCandidates += $found }
-            }
-        }
-        # LastWriteTime 기준 최신 파일
-        # $IncludeEmpty=true: 파일명 기준 새 파일 감지용 (0바이트도 포함)
-        # $IncludeEmpty=false(기본): 초기 파일 선택용 — 0바이트 우선 제외
-        if (-not $IncludeEmpty) {
-            $nonEmpty = $allCandidates | Where-Object { $_.Length -gt 0 }
-            if ($nonEmpty) {
-                return $nonEmpty | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            }
-        }
-        return $allCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    }
-
-    # Plan-runner 로그 전용 패턴 (폴백 전용 — Redis 미연결 시)
-    $planRunnerLogPatterns = @{
-        "PLAN-RUNNER" = @{ Dir = $planRunnerLogDir; Filter = "plan-runner-*.log"; Exclude = "stream" }
-        "PR-STREAM" = @{ Dir = $planRunnerLogDir; Filter = "plan-runner-stream-*.log"; Exclude = $null }
-    }
-
-    # Redis runner 재조회 타이머
-    $lastRunnerRefresh = [DateTime]::MinValue
-    $runnerRefreshInterval = 10  # 초
-
-    # 종료 runner grace period 추적 (키 → 감지 시각)
-    $staleDetectedAt = @{}
-
-    # [진단] PR:/PS: 키 최초 출력 여부 (1회성)
-    $diagPrinted = $false
-
-    try {
-        while ($true) {
-            # Plan-runner 로그 자동 감지
-            if ($useRedis) {
-                # Redis 기반: 10초마다 active_runners 재조회
-                $now = [DateTime]::Now
-                if (($now - $lastRunnerRefresh).TotalSeconds -ge $runnerRefreshInterval) {
-                    $lastRunnerRefresh = $now
-                    $currentRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
-                    # [진단] runner 조회 결과 출력
-                    Write-Host "[DIAG] runners=$($currentRunners.Count)" -ForegroundColor DarkGray
-                    foreach ($r in $currentRunners) {
-                        Write-Host "[DIAG]   rid=$($r.RunnerId) logPath=$($r.LogPath) streamPath=$($r.StreamPath)" -ForegroundColor DarkGray
-                    }
-                    # 폴백 키(#없는 PR:/PS:) → Redis 키로 전환 시 정리
-                    $fallbackKeys = @($logFiles.Keys | Where-Object { ($_ -like "PR:*" -or $_ -like "PS:*") -and $_ -notlike "*#*" })
-                    foreach ($fk in $fallbackKeys) {
-                        $logFiles.Remove($fk)
-                        $logColors.Remove($fk)
-                        $filePositions.Remove($fk)
-                        $logFileNames.Remove($fk)
-                    }
-
-                    # 현재 활성 runner 키 수집 (종료된 runner 정리용)
-                    $activeKeys = @{}
-                    foreach ($runner in $currentRunners) {
-                        $pidSuffix = if ($runner.PID) { "|PID:$($runner.PID)" } else { "" }
-                        $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
-                        $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
-                        $activeKeys[$prKey] = $true
-                        $activeKeys[$psKey] = $true
-
-                        if (-not $logConfig.Contains($prKey)) {
-                            # 새 runner 감지
-                            Write-Host "[$prKey] === New runner detected: $($runner.RunnerId) ===" -ForegroundColor Green
-                            $logConfig[$prKey] = @{ Path = $runner.LogPath;    Color = "White";    Tail = 10 }
-                            $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
-                            if ($runner.LogPath) {
-                                # LogPath가 유효한 경우에만 $logFiles에 등록 (null이면 다음 refresh에서 재시도)
-                                $logFiles[$prKey]      = $runner.LogPath
-                                $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
-                                $logColors[$prKey]     = "White"
-                                $filePositions[$prKey] = 0
-                            } else {
-                                Write-Host "[$prKey] === LogPath null — 다음 refresh에서 재시도 ===" -ForegroundColor DarkGray
-                            }
-                        } elseif ((-not $logFiles[$prKey] -or ($logFiles[$prKey] -and -not (Test-Path $logFiles[$prKey]))) -and $runner.LogPath) {
-                            # null 경로 또는 파일 미존재 → 유효 경로로 복구 (race condition 대응)
-                            Write-Host "[$prKey] === Log path resolved: $([System.IO.Path]::GetFileName($runner.LogPath)) ===" -ForegroundColor Green
-                            $logConfig[$prKey].Path = $runner.LogPath
-                            $logFiles[$prKey]      = $runner.LogPath
-                            $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
-                            $filePositions[$prKey] = 0
-                        }
-                        # StreamPath 지연 등록: 초기에 null이었거나 파일 미존재였지만 이후 설정된 경우
-                        if ($runner.StreamPath -and (-not $logFiles.ContainsKey($psKey) -or ($logFiles.ContainsKey($psKey) -and $logFiles[$psKey] -and -not (Test-Path $logFiles[$psKey])))) {
-                            Write-Host "[$psKey] === Stream log detected: $([System.IO.Path]::GetFileName($runner.StreamPath)) ===" -ForegroundColor Green
-                            $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
-                            $logFiles[$psKey]      = $runner.StreamPath
-                            $logFileNames[$psKey]  = [System.IO.Path]::GetFileName($runner.StreamPath)
-                            $logColors[$psKey]     = "DarkGray"
-                            $filePositions[$psKey] = 0
-                        }
-                    }
-                    # 종료된 runner 정리 (30초 grace period — 마지막 버퍼 flush 대기)
-                    $staleKeys = @($logFiles.Keys | Where-Object { ($_ -like "PR:*#*" -or $_ -like "PS:*#*") -and -not $activeKeys.ContainsKey($_) })
-                    foreach ($sk in $staleKeys) {
-                        if (-not $staleDetectedAt.ContainsKey($sk)) {
-                            $staleDetectedAt[$sk] = [DateTime]::Now
-                        }
-                    }
-                    # grace period 만료된 키만 실제 삭제
-                    $expiredKeys = @($staleDetectedAt.Keys | Where-Object {
-                        ([DateTime]::Now - $staleDetectedAt[$_]).TotalSeconds -ge 30
-                    })
-                    foreach ($ek in $expiredKeys) {
-                        $logFiles.Remove($ek)
-                        $logColors.Remove($ek)
-                        $filePositions.Remove($ek)
-                        $logFileNames.Remove($ek)
-                        $logConfig.Remove($ek)
-                        $staleDetectedAt.Remove($ek)
-                    }
-                    # 다시 active가 된 키는 stale 추적에서 제거
-                    $revivedKeys = @($staleDetectedAt.Keys | Where-Object { $activeKeys.ContainsKey($_) })
-                    foreach ($rk in $revivedKeys) {
-                        $staleDetectedAt.Remove($rk)
-                    }
-                }
-            } else {
-                # 폴백: 최신 파일 1개 추적 — 파일명 타임스탬프 기반 key 사용
-                $cfg = $planRunnerLogPatterns["PLAN-RUNNER"]
-                if (Test-Path $cfg.Dir) {
-                    $candidates = Get-ChildItem -Path $cfg.Dir -Filter $cfg.Filter -ErrorAction SilentlyContinue
-                    if ($cfg.Exclude) { $candidates = $candidates | Where-Object { $_.Name -notmatch $cfg.Exclude } }
-                    $latest = $candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                    if ($latest) {
-                        $newFileId = Get-PlanRunnerFileId -FileName $latest.Name
-                        $newPrKey  = "PR:$newFileId"
-                        $newPsKey  = "PS:$newFileId"
-                        # 현재 추적 중인 PR: key 탐색
-                        $currentPrKey = (@($logFiles.Keys) | Where-Object { $_ -like "PR:*" -and $_ -notlike "PR:*#*" } | Select-Object -First 1)
-                        if ($currentPrKey -ne $newPrKey) {
-                            $oldId = if ($currentPrKey) { $currentPrKey } else { "(없음)" }
-                            Write-Host "[$newPrKey] === Switched: $oldId → $newPrKey ($($latest.Name)) ===" -ForegroundColor Yellow
-                            # 이전 key 제거
-                            if ($currentPrKey) {
-                                $oldPsKey = $currentPrKey -replace '^PR:', 'PS:'
-                                $logFiles.Remove($currentPrKey)
-                                $logFiles.Remove($oldPsKey)
-                                $logFileNames.Remove($currentPrKey)
-                                $logFileNames.Remove($oldPsKey)
-                                $logColors.Remove($currentPrKey)
-                                $logColors.Remove($oldPsKey)
-                                $filePositions.Remove($currentPrKey)
-                                $filePositions.Remove($oldPsKey)
-                            }
-                            # 새 key 추가
-                            $logFiles[$newPrKey]      = $latest.FullName
-                            $logFileNames[$newPrKey]  = $latest.Name
-                            $logColors[$newPrKey]     = "White"
-                            $filePositions[$newPrKey] = 0
-                            # stream 파일도 탐색
-                            $cfgS = $planRunnerLogPatterns["PR-STREAM"]
-                            $runnerHint = if ($newFileId -match '^[0-9a-f]{8}$') { $newFileId } else { "" }
-                            $matchedStreamPath = Find-MatchingPlanRunnerStreamLog `
-                                -LogDir $cfgS.Dir `
-                                -PlanLogFileName $latest.Name `
-                                -RunnerId $runnerHint
-                            if ($matchedStreamPath) {
-                                $logFiles[$newPsKey]      = $matchedStreamPath
-                                $logFileNames[$newPsKey]  = [System.IO.Path]::GetFileName($matchedStreamPath)
-                                $logColors[$newPsKey]     = "DarkGray"
-                                $filePositions[$newPsKey] = 0
-                            }
-                        }
-                    }
-                }
-            }
-
-            # Check for new log files (service restart detection)
-            # 파일명 비교(새 파일 감지)는 0바이트 포함 전체 후보 중 최신으로 — 새 세션 파일이 처음엔 0바이트여도 전환 감지 필요
-            foreach ($source in @($timestampedLogPatterns.Keys)) {
-                $patterns = $timestampedLogPatterns[$source]
-                $latestLog = Get-LatestLogFromPatterns $patterns -IncludeEmpty
-
-                if ($latestLog) {
-                    $currentName = $logFileNames[$source]
-                    if ($latestLog.Name -ne $currentName) {
-                        # New log file detected
-                        Write-Host "[$source] === Switched to new log: $($latestLog.Name) ===" -ForegroundColor Yellow
-                        $logFiles[$source] = $latestLog.FullName
-                        $logFileNames[$source] = $latestLog.Name
-                        $filePositions[$source] = 0
-                    }
-                } elseif (-not $logFiles.ContainsKey($source)) {
-                    # Log file appeared for the first time
-                    if ($latestLog) {
-                        Write-Host "[$source] === New log detected: $($latestLog.Name) ===" -ForegroundColor Green
-                        $logFiles[$source] = $latestLog.FullName
-                        $logFileNames[$source] = $latestLog.Name
-                        # Null-safe color assignment
-                        $color = $logConfig[$source].Color
-                        $logColors[$source] = if ($null -ne $color) { $color } else { "White" }
-                        $filePositions[$source] = 0
-                    }
-                }
-            }
-
-            # [진단] PR:/PS: 키 최초 출력 — 어떤 키가 등록됐는지 확인
-            if (-not $diagPrinted) {
-                $prPsKeys = @($logFiles.Keys | Where-Object { $_ -like "PR:*" -or $_ -like "PS:*" })
-                if ($prPsKeys.Count -gt 0) {
-                    Write-Host "[DIAG] 등록된 PR:/PS: 키 목록:" -ForegroundColor DarkGray
-                    foreach ($k in $prPsKeys) {
-                        Write-Host "[DIAG]   $k → $($logFiles[$k])" -ForegroundColor DarkGray
-                    }
-                    $diagPrinted = $true
-                }
-            }
-
-            foreach ($source in @($logFiles.Keys)) {
-                $filePath = $logFiles[$source]
-                $item = Get-Item $filePath -ErrorAction SilentlyContinue
-                if (-not $item) { continue }
-
-                $currentSize = $item.Length
-
-                if ($currentSize -gt $filePositions[$source]) {
-                    # Read new content using StreamReader for proper UTF-8
-                    $stream = [System.IO.FileStream]::new($filePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-                    $stream.Seek($filePositions[$source], [System.IO.SeekOrigin]::Begin) | Out-Null
-                    $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
-
-                    while ($null -ne ($line = $reader.ReadLine())) {
-                        # Error-only sources: skip non-error lines
-                        if ($errorOnlySources -contains $source) {
-                            if ($line -notmatch "ERROR|CRITICAL|Exception|WARN|error|fail|ERR_|TypeError|ReferenceError|SyntaxError") { continue }
-                        }
-
-                        # Get base color for this source (null-safe)
-                        $sourceColor = if ($null -ne $logColors[$source]) { $logColors[$source] } else { "White" }
-
-                        # Override color for errors/warnings
-                        if ($line -match "ERROR|CRITICAL|Exception") {
-                            $sourceColor = "Red"
-                        } elseif ($line -match "WARNING|WARN") {
-                            $sourceColor = "Yellow"
-                        }
-
-                        Write-Host "[$source] $line" -ForegroundColor $sourceColor
-                    }
-
-                    $filePositions[$source] = $stream.Position
-                    $reader.Close()
-                    $stream.Close()
-                }
-            }
-            Start-Sleep -Milliseconds 200
-        }
-    } catch {
-        Write-Host "Error: $_" -ForegroundColor Red
     }
 }
 

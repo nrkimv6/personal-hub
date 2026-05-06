@@ -16,29 +16,18 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
 아키텍처:
     API (Session 0) -> Redis LPUSH -> [이 리스너 (Session 1)] -> plan-runner CLI
 """
-
-import sys as _sys_inject
-from pathlib import Path as _Path_inject
-_sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
-del _sys_inject, _Path_inject
-
 import argparse
 import json
 import logging
 import os
-import msvcrt
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
-from unittest.mock import Mock as _Mock
 
 import psutil
 import redis
-import _dr_subprocess as _dr_subprocess_mod
-import _dr_plan_runner as _dr_plan_runner_mod
-import worktree_manager as _worktree_manager_mod
 
 # scripts/ 디렉토리 sys.path 등록
 _SCRIPTS_DIR = Path(__file__).parent
@@ -52,7 +41,7 @@ from _dr_constants import (
     HEARTBEAT_KEY, HEARTBEAT_INTERVAL, HEARTBEAT_TTL, MERGE_ACTIVE_STATUSES,
     ZOMBIE_GRACE_SECONDS, SUBPROCESS_HEARTBEAT_TTL,
     SCRIPT_DIR, PROJECT_ROOT, WORKTREE_BASE_DIR, WTOOLS_BASE_DIR,
-    PLAN_RUNNER_MODULE_PATH, PLAN_RUNNER_PYTHON, LOG_DIR, OWNERSHIP_SNAPSHOT_DIR,
+    PLAN_RUNNER_MODULE_PATH, PLAN_RUNNER_PYTHON, LOG_DIR,
     LOG_CHANNEL_PREFIX,
     get_redis_db, set_redis_db, get_admin_api_base,
 )
@@ -69,23 +58,21 @@ from _dr_process_utils import (
     _is_recent_runner_without_hb,
 )
 from _dr_subprocess import (
-    _run_subprocess_streaming as _run_subprocess_streaming_impl,
-    _get_fix_engine,
-    _make_plan_runner_env,
-    _launch_conflict_resolver_process as _launch_conflict_resolver_process_impl,
-    _launch_auto_fix_process as _launch_auto_fix_process_impl,
-    _launch_auto_impl_post_merge_process as _launch_auto_impl_post_merge_process_impl,
-    _launch_general_merge_resolver_process as _launch_general_merge_resolver_process_impl,
+    _run_subprocess_streaming, _get_fix_engine, _make_plan_runner_env,
+    _launch_conflict_resolver_process, _launch_auto_fix_process,
+    _launch_auto_impl_post_merge_process, _launch_general_merge_resolver_process,
 )
 from _dr_merge import (
     _execute_merge_with_lock, _handle_post_merge_done, _call_done_api, _pub_and_log,
     detect_merged_but_not_done,
 )
-from _dr_plan_runner import (
-    _do_inline_merge, _stream_output, _do_start_plan_runner as _do_start_plan_runner_impl,
-    start_plan_runner, _launch_plan_runner_process,
+from _dr_stream_cleanup import _do_inline_merge
+from _dr_stream_output import _stream_output
+from _dr_runner_control import (
+    _do_start_plan_runner, start_plan_runner, _launch_plan_runner_process,
     stop_plan_runner, get_status, force_stop_plan_runner, force_kill_plan_runner,
 )
+from _dr_plan_runner import _kill_process_tree
 from _dr_commands import (
     _do_retry_merge, retry_merge, _do_direct_merge, direct_merge,
     _do_resolve_conflict, resolve_conflict, _do_cleanup_worktree, cleanup_worktree,
@@ -93,7 +80,7 @@ from _dr_commands import (
 )
 
 from workflow_manager import WorkflowManager
-from worktree_manager import WorktreeManager, WorktreeError
+from worktree_manager import WorktreeManager
 
 # 로깅 설정
 log_dir = PROJECT_ROOT / "logs" / "admin"
@@ -109,159 +96,6 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
-_wf_manager = get_wf_manager()
-
-
-def _sync_wf_manager() -> None:
-    """listener 모듈 전역과 _dr_state 전역을 맞춘다."""
-    set_wf_manager(_wf_manager)
-
-
-def _run_subprocess_streaming(*args, **kwargs):
-    return _run_subprocess_streaming_impl(*args, **kwargs)
-
-
-def _with_subprocess_streaming_passthrough(fn, *args, **kwargs):
-    old = getattr(_dr_subprocess_mod, "_run_subprocess_streaming", None)
-    try:
-        _dr_subprocess_mod._run_subprocess_streaming = _run_subprocess_streaming
-        return fn(*args, **kwargs)
-    finally:
-        if old is not None:
-            _dr_subprocess_mod._run_subprocess_streaming = old
-
-
-def _launch_conflict_resolver_process(*args, **kwargs):
-    return _with_subprocess_streaming_passthrough(_launch_conflict_resolver_process_impl, *args, **kwargs)
-
-
-def _launch_auto_fix_process(*args, **kwargs):
-    return _with_subprocess_streaming_passthrough(_launch_auto_fix_process_impl, *args, **kwargs)
-
-
-def _launch_auto_impl_post_merge_process(*args, **kwargs):
-    return _with_subprocess_streaming_passthrough(_launch_auto_impl_post_merge_process_impl, *args, **kwargs)
-
-
-def _launch_general_merge_resolver_process(*args, **kwargs):
-    return _with_subprocess_streaming_passthrough(_launch_general_merge_resolver_process_impl, *args, **kwargs)
-
-
-def _do_start_plan_runner(command, redis_client):
-    """테스트/호환용 래퍼: listener 전역 wf_manager를 _dr_state에 반영 후 위임."""
-    _sync_wf_manager()
-    if isinstance(WorktreeManager, _Mock):
-        runner_id = command.get("runner_id")
-        plan_file = command.get("plan_file")
-        engine = command.get("engine") or "claude"
-        is_parallel = command.get("parallel", False)
-        _wf_id = None
-        wf_manager = get_wf_manager()
-
-        def _set_error_status(message: str):
-            if runner_id:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "error")
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
-
-        try:
-            worktree_path, branch = WorktreeManager.create(runner_id, PROJECT_ROOT / ".worktrees", plan_file=plan_file)
-        except WorktreeError as e:
-            _set_error_status(f"worktree 생성 실패: {e}")
-            return
-
-        if wf_manager and runner_id:
-            slug = (
-                WorkflowManager._slug_from_plan_file(plan_file)
-                if plan_file
-                else WorkflowManager._slug_from_runner_id(runner_id)
-            )
-            if wf_manager.get_by_slug(slug):
-                slug = f"{slug}-{runner_id[:4]}"
-            _wf_id = wf_manager.create(slug, plan_file)
-
-        if not plan_file and not is_parallel:
-            _set_error_status("plan_file required (use parallel mode for batch execution)")
-            return
-
-        if wf_manager and _wf_id:
-            wf_manager.update_status(
-                _wf_id,
-                "running",
-                runner_id=runner_id,
-                branch=branch,
-                worktree_path=str(worktree_path),
-                engine=engine,
-            )
-
-        return _launch_plan_runner_process(
-            runner_id,
-            command,
-            redis_client,
-            None,
-            plan_file=plan_file,
-            branch=branch,
-            worktree_path=Path(worktree_path),
-            engine=engine,
-        )
-
-    old_worktree_manager_mod = getattr(_worktree_manager_mod, "WorktreeManager", None)
-    old_worktree_manager = getattr(_dr_plan_runner_mod, "WorktreeManager", None)
-    old_launch = getattr(_dr_plan_runner_mod, "_launch_plan_runner_process", None)
-    try:
-        _worktree_manager_mod.WorktreeManager = WorktreeManager
-        _dr_plan_runner_mod.WorktreeManager = WorktreeManager
-        _dr_plan_runner_mod._launch_plan_runner_process = _launch_plan_runner_process
-        return _do_start_plan_runner_impl(command, redis_client)
-    finally:
-        if old_worktree_manager_mod is not None:
-            _worktree_manager_mod.WorktreeManager = old_worktree_manager_mod
-        if old_worktree_manager is not None:
-            _dr_plan_runner_mod.WorktreeManager = old_worktree_manager
-        if old_launch is not None:
-            _dr_plan_runner_mod._launch_plan_runner_process = old_launch
-
-
-def _poll_merge_results(redis_client, wf_manager, logger_obj=None):
-    """merge 결과 큐를 소모하고 workflow 상태를 갱신한다."""
-    _logger = logger_obj or logger
-    if not wf_manager:
-        return
-    while True:
-        try:
-            raw = redis_client.lpop("plan-runner:merge-results")
-        except Exception:
-            break
-        if raw is None:
-            break
-        try:
-            result = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            _logger.warning("JSON 파싱 실패: %r", raw)
-            continue
-        runner_id = result.get("runner_id")
-        if not runner_id:
-            continue
-        try:
-            wf = wf_manager.get_by_runner_id(runner_id)
-            if not wf or wf.get("status") != "merge_pending":
-                continue
-            if result.get("success"):
-                wf_manager.update_status(wf["id"], "merged")
-            else:
-                error_message = str(result.get("message", "merge failed"))[:500]
-                reason = result.get("reason")
-                quarantine_diff_path = result.get("quarantine_diff_path")
-                if reason and reason not in error_message:
-                    error_message = f"{error_message} ({reason})"[:500]
-                if quarantine_diff_path and quarantine_diff_path not in error_message:
-                    error_message = f"{error_message} [{quarantine_diff_path}]"[:500]
-                wf_manager.update_status(
-                    wf["id"],
-                    "failed",
-                    error_message=error_message,
-                )
-        except Exception:
-            break
 
 
 def _safe_state_dict(name: str, value) -> dict:
@@ -316,9 +150,9 @@ def _propagate_fallback_done_failure(
         return
 
     reason = str(done_result.get("reason") or done_result.get("status") or "done_post_merge_failed")
+    merge_status = "residue_blocked" if reason == "residue_guard" else "error"
     _pub_and_log(runner_id, f"{context} fallback done 실패 전파: {reason}", redis_client, "MERGE-FALLBACK")
     try:
-        merge_status = "residue_blocked" if reason == "residue_guard" else "error"
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", merge_status)
     except Exception:
         pass
@@ -376,27 +210,6 @@ _zombie_first_seen = get_zombie_first_seen()
 # main() BRPOP 루프에서 이 플래그를 확인하고 루프를 탈출하여 프로세스를 종료
 # watchdog(dev-runner-listener-watchdog.ps1)가 Session 1에서 재시작을 담당
 _graceful_exit_requested: bool = False
-_LOCK_FILE_PATH = PROJECT_ROOT / "pids" / "dev_runner_command_listener.lock"
-_lock_fd = None
-
-
-def _acquire_lock() -> bool:
-    """단일 listener 실행을 위한 lock file 획득."""
-    global _lock_fd
-
-    _LOCK_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if _lock_fd is not None:
-        return True
-
-    fd = open(_LOCK_FILE_PATH, "a+", encoding="utf-8")
-    try:
-        msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
-    except OSError:
-        fd.close()
-        return False
-
-    _lock_fd = fd
-    return True
 
 
 def _handle_graceful_exit(redis_client: redis.Redis) -> Dict:
@@ -485,7 +298,14 @@ def _handle_zombie_heartbeat(runner_id: str, proc, redis_client: redis.Redis, wf
 
     try:
         subprocess_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_heartbeat")
-    except Exception:
+    except Exception as hb_read_err:
+        logger.warning(
+            "heartbeat: steady-state zombie check skipped for runner %s PID=%s "
+            "reason=redis_failure error=%s; reconnect uses process identity instead",
+            runner_id,
+            getattr(proc, "pid", "unknown"),
+            hb_read_err,
+        )
         return False
 
     if subprocess_hb is not None:
@@ -504,6 +324,12 @@ def _handle_zombie_heartbeat(runner_id: str, proc, redis_client: redis.Redis, wf
 
     if runner_id not in _zombie_first_seen:
         _zombie_first_seen[runner_id] = time.time()
+        logger.warning(
+            "heartbeat: steady-state missing subprocess_heartbeat first_seen "
+            "runner=%s PID=%s reason=key_missing; reconnect uses process identity instead",
+            runner_id,
+            getattr(proc, "pid", "unknown"),
+        )
 
     zombie_elapsed = time.time() - _zombie_first_seen[runner_id]
     if zombie_elapsed < ZOMBIE_GRACE_SECONDS:
@@ -525,6 +351,7 @@ def _handle_zombie_heartbeat(runner_id: str, proc, redis_client: redis.Redis, wf
         f"heartbeat_elapsed={zombie_elapsed:.0f}s → force-kill"
     )
     try:
+        _kill_process_tree(proc.pid)
         proc.kill()
         proc.wait(timeout=5)
     except Exception:
@@ -577,43 +404,47 @@ def _handle_running_process_heartbeat(runner_id: str, proc, redis_client: redis.
             str(time.time()),
             ex=SUBPROCESS_HEARTBEAT_TTL,
         )
-    except Exception:
+    except Exception as hb_set_err:
+        logger.warning(
+            "heartbeat: subprocess_heartbeat renew failed runner=%s PID=%s "
+            "reason=redis_failure error=%s",
+            runner_id,
+            getattr(proc, "pid", "unknown"),
+            hb_set_err,
+        )
         pass  # Redis 실패 시 무시 — zombie 체크는 계속 진행
+
+    # ── Claim heartbeat 갱신 ──────────────────────────────────────────
+    try:
+        _plan_file_hb = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        if _plan_file_hb and _plan_file_hb not in ("*", "__all__"):
+            from _dr_constants import PROJECT_ROOT as _PR_HB
+            import sys as _sys_hb
+            if str(_PR_HB) not in _sys_hb.path:
+                _sys_hb.path.insert(0, str(_PR_HB))
+            from app.database import SessionLocal as _HbSession
+            from app.modules.dev_runner.services.plan_execution_claim_service import (
+                get_active_claim_for_plan as _get_active_claim_hb,
+                heartbeat_claim as _heartbeat_claim,
+            )
+            _hb_db = _HbSession()
+            try:
+                _active_claim = _get_active_claim_hb(_hb_db, _plan_file_hb)
+                if _active_claim and _active_claim.state == "active":
+                    _heartbeat_claim(_hb_db, _active_claim.claim_id)
+            finally:
+                _hb_db.close()
+    except Exception as _claim_hb_err:
+        logger.debug(f"[claim] heartbeat 갱신 실패 (무시, runner_id={runner_id}): {_claim_hb_err}")
+    # ────────────────────────────────────────────────────────────────
 
     _handle_zombie_heartbeat(runner_id, proc, redis_client, wf_manager)
     return "checked"
 
 
-def _cleanup_stale_ownership_snapshots(redis_client: redis.Redis) -> int:
-    """inactive runner snapshot만 정리해 snapshot 파일을 단일 truth로 유지한다."""
-    if not OWNERSHIP_SNAPSHOT_DIR.exists():
-        return 0
-
-    removed = 0
-    for snapshot_path in OWNERSHIP_SNAPSHOT_DIR.glob("*.json"):
-        runner_id = snapshot_path.stem
-        try:
-            is_active = bool(redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id))
-        except Exception as exc:
-            logger.warning("[ownership] stale snapshot active check 실패: runner=%s error=%s", runner_id, exc)
-            break
-        if is_active:
-            continue
-        try:
-            snapshot_path.unlink()
-            removed += 1
-        except FileNotFoundError:
-            continue
-        except Exception as exc:
-            logger.warning("[ownership] stale snapshot cleanup 실패: path=%s error=%s", snapshot_path, exc)
-    return removed
-
-
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
-    global _wf_manager
-    set_wf_manager(WorkflowManager())
-    _wf_manager = get_wf_manager()
+    set_wf_manager(WorkflowManager(PROJECT_ROOT / "data" / "monitor.db"))
     logger.info("=" * 50)
     logger.info("Dev Runner Command Listener 시작")
     logger.info(f"Redis: {REDIS_HOST}:{REDIS_PORT}")
@@ -648,9 +479,6 @@ def main():
             _reconnect_surviving_runners(r)
             # listener 시작/재시작 시 생존 MergeOrchestrator 재연결
             _reconnect_surviving_merge_orchestrator(r)
-            removed_snapshot_count = _cleanup_stale_ownership_snapshots(r)
-            if removed_snapshot_count:
-                logger.warning("[ownership] stale snapshot %s개 정리", removed_snapshot_count)
 
             # 고아 탐지/정리 작업은 백그라운드 스레드에서 실행 — BRPOP 루프 진입 지연 방지
             # (archive 포함 plan 파일이 수백~수천 개로 증가하면 수십 초 블로킹 가능)

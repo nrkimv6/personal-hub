@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -11,10 +12,26 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse, DoneResponse, BatchDoneResponse, VerifyResult
+from app.modules.dev_runner.schemas import (
+    BatchDoneResponse,
+    DoneResponse,
+    PlanDetailResponse,
+    PlanFileResponse,
+    PlanProgressResponse,
+    PlanStorageRootChangeItem,
+    PlanStorageRootStatusItem,
+    PlanStorageRootStatusResponse,
+    RegisteredPathResponse,
+    VerifyResult,
+)
 from app.modules.dev_runner.services.plan_service import plan_service
 from app.modules.dev_runner.services import archive_service
 from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+from app.modules.dev_runner.services.plan_path_helpers import (
+    collect_plan_storage_root_candidates,
+    iter_repo_plan_path_candidates,
+)
+from app.modules.dev_runner.services.worktree_hygiene_service import WorktreeHygieneService
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +44,153 @@ def _decode_path(encoded: str) -> str:
     return base64.urlsafe_b64decode(padded).decode("utf-8")
 
 
+def _parse_short_status_line(line: str) -> PlanStorageRootChangeItem:
+    status = line[:2].strip() or "?"
+    path = line[3:] if len(line) > 3 and line[2] == " " else line[2:].lstrip()
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    return PlanStorageRootChangeItem(status=status, path=path)
+
+
+def _status_from_counts(*, exists: bool, dirty_count: int, ahead: int, behind: int, push_needed: bool) -> str:
+    if not exists:
+        return "missing"
+    if dirty_count > 0:
+        return "dirty"
+    if push_needed or ahead > 0 or behind > 0:
+        return "sync_needed"
+    return "clean"
+
+
+def _unknown_storage_root_item(project: str, repo_root: Path, worktree_path: Path, error: Exception) -> PlanStorageRootStatusItem:
+    checked_at = datetime.now().isoformat(timespec="seconds")
+    return PlanStorageRootStatusItem(
+        project=project,
+        repo_root=str(repo_root),
+        worktree_path=str(worktree_path),
+        exists=worktree_path.exists(),
+        status="unknown",
+        checked_at=checked_at,
+        error=str(error),
+    )
+
+
+def _collect_plan_storage_roots_status_sync() -> PlanStorageRootStatusResponse:
+    checked_at = datetime.now().isoformat(timespec="seconds")
+    registered_paths = plan_service.list_registered_paths()
+    candidates = collect_plan_storage_root_candidates(registered_paths)
+    roots: list[PlanStorageRootStatusItem] = []
+
+    for candidate in candidates:
+        if not candidate.worktree_path.exists():
+            roots.append(
+                PlanStorageRootStatusItem(
+                    project=candidate.project,
+                    repo_root=str(candidate.repo_root),
+                    worktree_path=str(candidate.worktree_path),
+                    exists=False,
+                    status="missing",
+                    checked_at=checked_at,
+                )
+            )
+            continue
+
+        try:
+            snapshot = WorktreeHygieneService(candidate.repo_root).collect()
+            plans = snapshot.plans
+            dirty_count = len(plans.git_status)
+            ahead = plans.upstream_ahead
+            behind = plans.upstream_behind
+            status = (
+                _status_from_counts(
+                    exists=plans.exists,
+                    dirty_count=dirty_count,
+                    ahead=ahead,
+                    behind=behind,
+                    push_needed=plans.push_needed,
+                )
+                if plans.branch
+                else "unknown"
+            )
+            roots.append(
+                PlanStorageRootStatusItem(
+                    project=candidate.project,
+                    repo_root=str(candidate.repo_root),
+                    worktree_path=str(candidate.worktree_path),
+                    branch=plans.branch,
+                    upstream=plans.upstream,
+                    exists=plans.exists,
+                    status=status,
+                    dirty_count=dirty_count,
+                    docs_changes_count=len(plans.docs_changes),
+                    archive_changes_count=len(plans.archive_changes),
+                    policy_changes_count=len(plans.policy_changes),
+                    ahead=ahead,
+                    behind=behind,
+                    push_needed=plans.push_needed,
+                    checked_at=snapshot.collected_at or checked_at,
+                    representative_changes=[
+                        _parse_short_status_line(line)
+                        for line in plans.git_status[:8]
+                    ],
+                )
+            )
+        except Exception as exc:
+            logger.warning("plans storage root status failed: %s", candidate.worktree_path, exc_info=True)
+            roots.append(
+                _unknown_storage_root_item(
+                    candidate.project,
+                    candidate.repo_root,
+                    candidate.worktree_path,
+                    exc,
+                )
+            )
+
+    return PlanStorageRootStatusResponse(
+        checked_at=checked_at,
+        roots=roots,
+        total=len(roots),
+        dirty_count=sum(1 for item in roots if item.dirty_count > 0),
+        push_needed_count=sum(1 for item in roots if item.push_needed),
+    )
+
+
 @router.get("/plans", response_model=List[PlanFileResponse])
-async def get_plans():
-    """plan 목록 조회 (등록된 경로 탐색)"""
-    return await asyncio.to_thread(plan_service.list_plans)
+async def get_plans(db: Session = Depends(get_db)):
+    """plan 목록 조회 (등록된 경로 탐색, active claim 정보 포함)"""
+    plans = await asyncio.to_thread(plan_service.list_plans)
+    try:
+        from app.modules.dev_runner.services.plan_execution_claim_service import get_active_claims_map
+        from datetime import datetime
+        plan_paths = [p.path for p in plans]
+        claims_map = get_active_claims_map(db, plan_paths)
+        now = datetime.now()
+        for plan in plans:
+            claim = claims_map.get(plan.path)
+            if claim:
+                stale = claim.lease_expires_at is not None and claim.lease_expires_at < now
+                plan.execution_claim_id = claim.claim_id
+                plan.execution_claim_state = claim.state
+                plan.execution_claim_runner_id = claim.runner_id
+                plan.execution_claim_stale = stale
+    except Exception as _e:
+        logger.warning(f"[claim] plan 목록 claim enrichment 실패 (무시): {_e}")
+    return plans
+
+
+@router.delete("/plans/{encoded_path}/claim")
+async def release_plan_claim(encoded_path: str, db: Session = Depends(get_db)):
+    """plan의 active/queued claim을 강제 해제 (관리자 액션)"""
+    plan_path = _decode_path(encoded_path)
+    from app.modules.dev_runner.services.plan_execution_claim_service import (
+        get_active_claim_for_plan,
+        release_claim,
+    )
+    claim = get_active_claim_for_plan(db, plan_path)
+    if not claim:
+        raise HTTPException(status_code=404, detail="active claim not found")
+    release_claim(db, claim.claim_id)
+    return {"ok": True, "claim_id": claim.claim_id}
 
 
 @router.get("/plans/ignored", response_model=List[PlanFileResponse])
@@ -43,6 +203,12 @@ async def get_ignored_plans():
 async def get_paths():
     """등록된 경로 목록 조회 (타입 + plan_count 포함)"""
     return plan_service.list_registered_paths()
+
+
+@router.get("/plans/storage-roots/status", response_model=PlanStorageRootStatusResponse)
+async def get_plan_storage_roots_status():
+    """등록된 plan storage root별 dirty/ahead/behind compact 상태 조회."""
+    return await asyncio.to_thread(_collect_plan_storage_roots_status_sync)
 
 
 @router.get("/plans/{encoded_path}", response_model=PlanProgressResponse)
@@ -152,24 +318,9 @@ class AddProjectRequest(BaseModel):
     path: str
 
 
-def _project_registration_candidates(root: Path, subdir: str) -> list[Path]:
-    """프로젝트 등록 시 plans worktree 우선 후보를 반환한다."""
-    candidates: list[Path] = []
-
-    plans_root = root / ".worktrees" / "plans"
-    if plans_root.exists():
-        candidates.append(plans_root / "docs" / subdir)
-
-    legacy_path = root / "docs" / subdir
-    if legacy_path not in candidates:
-        candidates.append(legacy_path)
-
-    return candidates
-
-
 @router.post("/plans/paths/project")
 async def add_project(request: AddProjectRequest):
-    """프로젝트 루트 경로 등록 — plans worktree 우선, legacy는 fallback"""
+    """프로젝트 루트 경로 등록 — docs/* + .worktrees/plans/docs/* 4축 전부 등록"""
     if not plan_service.validate_path(request.path):
         raise HTTPException(status_code=403, detail="Path not allowed")
 
@@ -180,18 +331,19 @@ async def add_project(request: AddProjectRequest):
     added = []
     skipped = []
 
-    for subdir, path_type in [("plan", "plan"), ("archive", "archive")]:
-        candidates = _project_registration_candidates(root, subdir)
-        selected = next((candidate for candidate in candidates if candidate.exists()), None)
-        if selected is None:
-            skipped.append(f"{candidates[0]} ({path_type}, not found)")
+    for candidate_path, path_type in iter_repo_plan_path_candidates(root):
+        if not candidate_path.exists():
+            skipped.append(f"{candidate_path} ({path_type}, not found)")
             continue
-        if plan_service.add_path(str(selected), path_type=path_type):
-            added.append(f"{selected} ({path_type})")
+        if plan_service.add_path(str(candidate_path), path_type=path_type):
+            added.append(f"{candidate_path} ({path_type})")
         else:
-            skipped.append(f"{selected} ({path_type}, already registered)")
+            skipped.append(f"{candidate_path} ({path_type}, already registered)")
 
-    return {"added": added, "skipped": skipped}
+    worktree_count = sum(1 for a in added if ".worktrees" in a)
+    docs_count = len(added) - worktree_count
+    message = f"등록 완료 — added {len(added)}개 (worktree {worktree_count}개, docs {docs_count}개), skipped {len(skipped)}개"
+    return {"added": added, "skipped": skipped, "message": message}
 
 
 @router.delete("/plans/paths")

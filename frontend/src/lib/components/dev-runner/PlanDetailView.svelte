@@ -15,10 +15,10 @@
 			'구현중': 'bg-blue-100 text-blue-700 border border-blue-200',
 			'구현완료': 'bg-green-100 text-green-700 border border-green-200',
 			'검토완료': 'bg-purple-100 text-purple-700 border border-purple-200',
-			'초안': 'bg-gray-100 text-gray-600',
+			'초안': 'bg-muted text-muted-foreground',
 			'보류': 'bg-yellow-100 text-yellow-700 border border-yellow-200'
 		};
-		return map[s] || 'bg-gray-100 text-gray-600';
+		return map[s] || 'bg-muted text-muted-foreground';
 	}
 
 	function handleBackdropClick(e: MouseEvent) {
@@ -49,7 +49,7 @@
 	<!-- Modal panel -->
 	<div
 		class="
-			relative bg-white flex flex-col
+			relative bg-card text-card-foreground flex flex-col
 			w-full h-full
 			sm:w-full sm:max-w-lg sm:h-auto sm:max-h-[85dvh]
 			sm:rounded-xl sm:shadow-xl sm:my-8
@@ -57,7 +57,7 @@
 	>
 		<!-- 고정 헤더 -->
 		<div
-			class="shrink-0 px-4 pt-4 pb-3 border-b"
+			class="shrink-0 px-4 pt-4 pb-3 border-b border-border"
 			style="padding-top: max(1rem, env(safe-area-inset-top))"
 		>
 			<div class="flex items-center gap-2 mb-2">
@@ -68,7 +68,7 @@
 					{status}
 				</span>
 				<button
-					class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+					class="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
 					onclick={onClose}
 					aria-label="닫기"
 				>
@@ -80,24 +80,24 @@
 
 			<!-- 진행률 바 -->
 			<div class="flex items-center gap-2">
-				<div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+				<div class="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
 					<div
 						class="h-full rounded-full transition-all {detail.progress.percent >= 100 ? 'bg-green-500' : 'bg-blue-500'}"
 						style="width: {detail.progress.percent}%"
 					></div>
 				</div>
-				<span class="text-[11px] text-gray-500 font-mono shrink-0">
+				<span class="text-[11px] text-muted-foreground font-mono shrink-0">
 					{detail.progress.done}/{detail.progress.total}
-					<span class="text-gray-400">({detail.progress.percent}%)</span>
+					<span class="text-muted-foreground/70">({detail.progress.percent}%)</span>
 				</span>
 			</div>
 		</div>
 
 		<!-- 요약 -->
 		{#if detail.summary}
-			<div class="shrink-0 bg-blue-50 border-b border-blue-100 px-4 py-2.5">
+			<div class="shrink-0 bg-blue-50 border-b border-blue-100 px-4 py-2.5 dark:bg-blue-950/40 dark:border-blue-900/60">
 				<p class="text-[10px] font-medium text-blue-600 mb-1">요약</p>
-				<p class="text-[11px] text-gray-600 leading-relaxed whitespace-pre-wrap">{detail.summary}</p>
+				<p class="text-[11px] text-blue-900 dark:text-blue-100 leading-relaxed whitespace-pre-wrap">{detail.summary}</p>
 			</div>
 		{/if}
 
@@ -109,10 +109,10 @@
 			{#each detail.phases as phase, i}
 				<!-- Phase 섹션 헤더 -->
 				<div class="px-4 pt-4 pb-1 flex items-center justify-between">
-					<span class="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+					<span class="text-xs font-semibold text-foreground uppercase tracking-wide">
 						{phase.name}
 					</span>
-					<span class="text-[10px] font-mono text-gray-400 shrink-0">
+					<span class="text-[10px] font-mono text-muted-foreground shrink-0">
 						{phase.done_count}/{phase.total_count}
 					</span>
 				</div>
@@ -126,11 +126,11 @@
 									<polyline points="20 6 9 17 4 12" />
 								</svg>
 							{:else}
-								<svg class="w-3.5 h-3.5 shrink-0 text-gray-300 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<svg class="w-3.5 h-3.5 shrink-0 text-muted-foreground/40 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
 								</svg>
 							{/if}
-							<span class="text-xs leading-snug {item.checked ? 'line-through text-gray-400' : 'text-gray-800'}">
+							<span class="text-xs leading-snug {item.checked ? 'line-through text-muted-foreground' : 'text-foreground'}">
 								{item.text}
 							</span>
 						</div>
@@ -142,11 +142,11 @@
 										<polyline points="20 6 9 17 4 12" />
 									</svg>
 								{:else}
-									<svg class="w-3 h-3 shrink-0 text-gray-300 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<svg class="w-3 h-3 shrink-0 text-muted-foreground/40 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 										<rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
 									</svg>
 								{/if}
-								<span class="text-xs leading-snug {child.checked ? 'line-through text-gray-400' : 'text-gray-600'}">
+								<span class="text-xs leading-snug {child.checked ? 'line-through text-muted-foreground' : 'text-muted-foreground'}">
 									{child.text}
 								</span>
 							</div>
@@ -155,7 +155,7 @@
 				</div>
 
 				{#if i < detail.phases.length - 1}
-					<div class="mx-4 border-t border-gray-100"></div>
+					<div class="mx-4 border-t border-border"></div>
 				{/if}
 			{/each}
 		</div>

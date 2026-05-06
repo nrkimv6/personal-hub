@@ -54,7 +54,7 @@ async def test_get_all_worktrees_real_repo_basic(tmp_path: Path):
         "2026-04-07T08:00:00+0900",
     )
 
-    plan_dir = repo / "docs" / "plan"
+    plan_dir = repo / ".worktrees" / "plans" / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     (plan_dir / "2026-04-07_impl-foo.md").write_text("> branch: impl/foo\n", encoding="utf-8")
 
@@ -65,7 +65,7 @@ async def test_get_all_worktrees_real_repo_basic(tmp_path: Path):
     assert worktree.branch == "impl/foo"
     assert worktree.ahead == 1
     assert worktree.behind == 0
-    assert worktree.plan_file.replace("\\", "/") == "docs/plan/2026-04-07_impl-foo.md"
+    assert worktree.plan_file.replace("\\", "/") == ".worktrees/plans/docs/plan/2026-04-07_impl-foo.md"
     assert len(worktree.commits) == 1
 
 

@@ -15,7 +15,10 @@ from scripts.services.frontend_mode import (
     build_frontend_env,
     ensure_frontend_runtime_tsconfigs,
     describe_frontend_runtime,
+    get_frontend_outdir,
+    write_frontend_build_log,
 )
+from scripts.services.service_utils import classify_frontend_failure, describe_listener, format_listener_metadata
 from scripts.services.browser_worker_runtime.runtime import GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint
 
 
@@ -70,17 +73,31 @@ def _release_frontend_restart_lock(manager, lock_fd: int | None) -> None:
     _manager().remove_pid_file(manager.frontend_restart_lock)
 
 
-def _cleanup_frontend_runtime(manager, frontend_port: int, pid_file: Path) -> None:
+def _cleanup_frontend_runtime(manager, frontend_port: int, pid_file: Path) -> list[int]:
     mgr = _manager()
+    terminated_pids: list[int] = []
+
+    def _record_kill(pid: int, message: str) -> None:
+        if pid <= 0:
+            return
+        cprint(message)
+        if not mgr.kill_pid(pid):
+            _emit_listener_diagnostics(
+                frontend_port,
+                f"Failed to terminate PID {pid} while clearing port {frontend_port}",
+                RED,
+            )
+            return
+        if pid not in terminated_pids:
+            terminated_pids.append(pid)
+
     pid = mgr.read_pid_file(pid_file)
     if pid and mgr.is_process_alive(pid):
-        cprint(f"Stopping frontend process (PID: {pid})...")
-        mgr.kill_pid(pid)
+        _record_kill(pid, f"Stopping frontend process (PID: {pid})...")
     mgr.remove_pid_file(pid_file)
 
     for pid_on_port in mgr.find_pids_on_port(frontend_port):
-        cprint(f"Killing process on port {frontend_port} (PID: {pid_on_port})...")
-        mgr.kill_pid(pid_on_port)
+        _record_kill(pid_on_port, f"Killing process on port {frontend_port} (PID: {pid_on_port})...")
 
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
@@ -90,10 +107,51 @@ def _cleanup_frontend_runtime(manager, frontend_port: int, pid_file: Path) -> No
             has_target_port = f"--port {frontend_port}" in cmdline
             has_frontend_server = "vite" in cmdline or "preview" in cmdline
             if has_target_port and has_frontend_server:
-                cprint(f"Killing orphan frontend process (PID: {proc.pid})...")
-                mgr.kill_pid(proc.pid)
+                _record_kill(proc.pid, f"Killing orphan frontend process (PID: {proc.pid})...")
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
+
+    return terminated_pids
+
+
+def _wait_for_terminated_pids(pids: object, timeout_seconds: float = 15.0) -> bool:
+    mgr = _manager()
+    if isinstance(pids, int):
+        tracked_pids = [pids] if pids > 0 else []
+    elif isinstance(pids, (list, tuple, set)):
+        tracked_pids = [int(pid) for pid in pids if isinstance(pid, int) and pid > 0]
+    else:
+        tracked_pids = []
+
+    if not tracked_pids:
+        return True
+
+    deadline = time.time() + max(timeout_seconds, 1.0)
+    remaining = tracked_pids
+    while time.time() <= deadline:
+        remaining = [pid for pid in tracked_pids if mgr.is_process_alive(pid)]
+        if not remaining:
+            return True
+        time.sleep(0.5)
+
+    cprint(
+        f"Timed out waiting for old frontend processes to exit: {', '.join(str(pid) for pid in remaining)}",
+        YELLOW,
+    )
+    return False
+
+
+def _reset_frontend_runtime_types(manager, public: bool) -> None:
+    runtime_outdir = manager.frontend_dir / get_frontend_outdir(public)
+    runtime_types_dir = runtime_outdir / "types"
+    if not runtime_types_dir.exists():
+        return
+
+    try:
+        shutil.rmtree(runtime_types_dir, ignore_errors=False)
+        cprint(f"Cleared stale frontend runtime types: {runtime_types_dir}", YELLOW)
+    except Exception as exc:
+        cprint(f"Could not clear stale frontend runtime types ({runtime_types_dir}): {exc}", YELLOW)
 
 
 def _frontend_runtime_env(manager, public: bool) -> dict[str, str]:
@@ -116,12 +174,23 @@ def _prepare_frontend_env(manager, api_port: int, public: bool) -> None:
         cprint("Cleaned up stale build directory")
 
 
-def _run_frontend_build_if_needed(manager, public: bool, frontend_env: dict[str, str] | None = None) -> bool:
+def _run_frontend_build_if_needed(
+    manager,
+    public: bool,
+    frontend_env: dict[str, str] | None = None,
+    *,
+    timestamp: str | None = None,
+    log_dir: Path | None = None,
+) -> bool:
     if not public:
         return True
 
     if frontend_env is None:
         frontend_env = _frontend_runtime_env(manager, public)
+    if timestamp is None:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+    if log_dir is None:
+        _, _, _, _, log_dir = _frontend_mode(manager, public)
 
     ensure_frontend_runtime_tsconfigs(manager.frontend_dir)
     cprint("Building frontend for PUBLIC PREVIEW...", YELLOW)
@@ -137,15 +206,41 @@ def _run_frontend_build_if_needed(manager, public: bool, frontend_env: dict[str,
         cprint("Frontend build completed", GREEN)
         return True
 
-    err_msg = (build_result.stderr or build_result.stdout or "").strip()
-    short_err = err_msg[-500:] if err_msg else "(no output)"
-    cprint(f"Frontend build failed (rc={build_result.returncode}): {short_err}", RED)
+    build_log_path = write_frontend_build_log(
+        log_dir,
+        timestamp,
+        public=True,
+        returncode=build_result.returncode,
+        stdout=build_result.stdout or "",
+        stderr=build_result.stderr or "",
+    )
+    failure_class = classify_frontend_failure(build_result.stdout, build_result.stderr)
+    listener_metadata = describe_listener(_frontend_mode(manager, public)[2])
+    rendered_listener = format_listener_metadata(listener_metadata)
+    cprint(
+        "Frontend build failed "
+        f"(rc={build_result.returncode}, class={failure_class}, log={build_log_path}, listener={rendered_listener})",
+        RED,
+    )
+    if failure_class == "build_lock_permission":
+        cprint(
+            "Build lock/permission detected; check Session 0 service ownership or elevate before retrying PUBLIC PREVIEW.",
+            YELLOW,
+        )
 
     if not (manager.frontend_dir / "build").exists():
-        cprint("No previous build artifact found - cannot run PUBLIC PREVIEW", RED)
+        cprint(
+            "No previous build artifact found - cannot run PUBLIC PREVIEW "
+            f"(class={failure_class}, build_log={build_log_path})",
+            RED,
+        )
         return False
 
-    cprint("Using previous build artifact for fallback preview", YELLOW)
+    cprint(
+        "Using previous build artifact for fallback preview "
+        f"(class={failure_class}, build_log={build_log_path})",
+        YELLOW,
+    )
     return True
 
 
@@ -164,6 +259,17 @@ def _has_port_collision_error(manager, stderr_log_path: Path, frontend_port: int
     return f"Port {frontend_port} is already in use" in tail
 
 
+def _emit_listener_diagnostics(frontend_port: int, reason: str, color: str = YELLOW) -> None:
+    listener_metadata = describe_listener(frontend_port)
+    cprint(f"{reason} ({format_listener_metadata(listener_metadata)})", color)
+    if listener_metadata.get("pid") is not None:
+        cprint(
+            "Listener cleanup may require elevation or another session owns the port. "
+            "Access denied / EPERM class failures should be treated as permission or service-lock issues.",
+            YELLOW,
+        )
+
+
 def _wait_for_frontend_listener(frontend_port: int, launcher_pid: int, timeout_seconds: float = 15.0) -> int | None:
     mgr = _manager()
     deadline = time.time() + max(timeout_seconds, 1.0)
@@ -179,6 +285,27 @@ def _wait_for_frontend_listener(frontend_port: int, launcher_pid: int, timeout_s
         time.sleep(0.5)
 
     return None
+
+
+def _wait_for_frontend_http_ready(url: str, launcher_pid: int, timeout_seconds: float = 15.0) -> tuple[bool, str | None]:
+    mgr = _manager()
+    deadline = time.time() + max(timeout_seconds, 1.0)
+    last_error: str | None = None
+
+    while time.time() <= deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                if resp.status == 200:
+                    return True, None
+                last_error = f"unexpected status: {resp.status}"
+        except Exception as exc:
+            last_error = str(exc)
+            if launcher_pid and not mgr.is_process_alive(launcher_pid):
+                break
+
+        time.sleep(0.5)
+
+    return False, last_error
 
 
 def restart_frontend(manager, public: bool = False) -> bool:
@@ -205,11 +332,19 @@ def restart_frontend(manager, public: bool = False) -> bool:
         cprint(f"Pre-restart listener PID on :{frontend_port} = {old_listener_pid}", YELLOW)
 
     try:
-        manager._cleanup_frontend_runtime(frontend_port, pid_file)
+        terminated_pids = manager._cleanup_frontend_runtime(frontend_port, pid_file)
+        if not _wait_for_terminated_pids(terminated_pids):
+            _emit_listener_diagnostics(frontend_port, f"Old frontend listener still present after cleanup on :{frontend_port}")
+        _reset_frontend_runtime_types(manager, public)
         time.sleep(2)
         manager._prepare_frontend_env(api_port=api_port, public=public)
 
-        if not manager._run_frontend_build_if_needed(public=public, frontend_env=frontend_env):
+        if not manager._run_frontend_build_if_needed(
+            public=public,
+            frontend_env=frontend_env,
+            timestamp=timestamp,
+            log_dir=log_dir,
+        ):
             return False
 
         start_cmd = (
@@ -246,30 +381,35 @@ def restart_frontend(manager, public: bool = False) -> bool:
                 )
 
         if manager._has_port_collision_error(stderr_log_path, frontend_port):
-            cprint(
+            _emit_listener_diagnostics(
+                frontend_port,
                 f"Port collision detected in {stderr_log_path.name}: Port {frontend_port} is already in use",
                 RED,
             )
             return False
 
+        url = f"http://localhost:{frontend_port}"
+        healthy, last_error = _wait_for_frontend_http_ready(url, proc.pid)
+        if healthy:
+            if old_listener_pid is not None and new_listener_pid == old_listener_pid:
+                cprint(
+                    f"Listener PID unchanged after restart (PID: {new_listener_pid}) but frontend is healthy",
+                    YELLOW,
+                )
+            cprint(
+                f"Frontend healthy (mode={mode_label}, listener_pid={new_listener_pid}, url={url})",
+                GREEN,
+            )
+            return True
+
         if old_listener_pid is not None and new_listener_pid == old_listener_pid:
             cprint(f"Listener PID unchanged after restart (PID: {new_listener_pid})", RED)
-            return False
-
-        url = f"http://localhost:{frontend_port}"
-        try:
-            with urllib.request.urlopen(url, timeout=5) as resp:
-                if resp.status == 200:
-                    cprint(
-                        f"Frontend healthy (mode={mode_label}, listener_pid={new_listener_pid}, url={url})",
-                        GREEN,
-                    )
-                    return True
-        except Exception as e:
-            cprint(f"Frontend not responding yet (may still be starting): {e}", YELLOW)
-            return False
-
-        cprint("Frontend health check returned unexpected status", YELLOW)
+            _emit_listener_diagnostics(frontend_port, "Listener PID remained unchanged and frontend health did not recover", RED)
+        elif last_error:
+            cprint(f"Frontend not responding yet (may still be starting): {last_error}", YELLOW)
+        else:
+            cprint("Frontend not responding yet (may still be starting)", YELLOW)
+        _emit_listener_diagnostics(frontend_port, "Frontend restart failed health gate", RED)
         return False
     finally:
         manager._release_frontend_restart_lock(lock_fd)

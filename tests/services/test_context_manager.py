@@ -741,6 +741,202 @@ class TestConcurrency:
 
 
 # ============================================================
+# 팝업 핸들러 테스트 (Phase 1: 원인 B 수정 검증)
+# ============================================================
+
+class TestPopupHandlerRegistration:
+    """팝업 차단 핸들러 등록 테스트"""
+
+    def _make_manager(self):
+        from app.shared.browser.context_manager import ContextManager
+        return ContextManager()
+
+    def test_tab_pool_popup_handler_registered_R(self):
+        """[Right] context.on('page') 첫 호출 시 1회만 등록, 재호출 시 중복 등록 없음"""
+        manager = self._make_manager()
+        mock_context = MagicMock()
+        mock_context.pages = []
+
+        manager._register_popup_handler(service_account_id=1, context=mock_context)
+        manager._register_popup_handler(service_account_id=1, context=mock_context)
+
+        assert mock_context.on.call_count == 1
+        assert 1 in manager._popup_handler_registered
+
+    def test_tab_pool_popup_handler_skips_registered_tab_Co(self):
+        """[Conformance] pool 등록 탭(_tab_id 속성 있음)은 close() 호출 안 함"""
+        manager = self._make_manager()
+        mock_context = MagicMock()
+        mock_context.pages = []
+
+        captured_handler = None
+
+        def _capture_on(event, handler):
+            nonlocal captured_handler
+            captured_handler = handler
+
+        mock_context.on.side_effect = _capture_on
+        manager._register_popup_handler(service_account_id=1, context=mock_context)
+
+        assert captured_handler is not None
+
+        mock_page = MagicMock()
+        mock_page._tab_id = "1_1234"
+
+        captured_handler(mock_page)
+
+        mock_page.close.assert_not_called()
+
+    def test_tab_pool_popup_handler_closes_orphan_R(self):
+        """[Right] _tab_id 없는 팝업 페이지에 대해 close task가 생성됨"""
+        import asyncio
+        manager = self._make_manager()
+        mock_context = MagicMock()
+        mock_context.pages = []
+
+        captured_handler = None
+
+        def _capture_on(event, handler):
+            nonlocal captured_handler
+            captured_handler = handler
+
+        mock_context.on.side_effect = _capture_on
+        manager._register_popup_handler(service_account_id=1, context=mock_context)
+
+        assert captured_handler is not None
+
+        close_called = []
+        mock_page = MagicMock(spec=[])
+        mock_page.close = AsyncMock(side_effect=lambda: close_called.append(True))
+
+        async def run():
+            captured_handler(mock_page)
+            await asyncio.sleep(0.05)
+
+        asyncio.get_event_loop().run_until_complete(run())
+        assert len(close_called) == 1
+
+    def test_tab_pool_popup_handler_cleans_preexisting_orphan_E(self):
+        """[Existence] 핸들러 등록 이전의 about:blank 고아 탭을 즉시 close task 생성"""
+        import asyncio
+        manager = self._make_manager()
+
+        close_called = []
+        mock_page = MagicMock(spec=[])
+        mock_page.url = "about:blank"
+        mock_page.close = AsyncMock(side_effect=lambda: close_called.append(True))
+
+        mock_context = MagicMock()
+        mock_context.pages = [mock_page]
+        mock_context.on = MagicMock()
+
+        async def run():
+            manager._register_popup_handler(service_account_id=2, context=mock_context)
+            await asyncio.sleep(0.05)
+
+        asyncio.get_event_loop().run_until_complete(run())
+        assert len(close_called) == 1
+
+    def test_mixed_orphan_and_managed_tab_only_orphan_closed_E(self):
+        """[Existence] _tab_id 있는 managed tab과 about:blank orphan이 섞여 있을 때 orphan만 닫힌다 (Phase T1 item 8)."""
+        import asyncio
+        manager = self._make_manager()
+
+        closed = []
+
+        orphan = MagicMock(spec=[])
+        orphan.url = "about:blank"
+        orphan.is_closed = MagicMock(return_value=False)
+        orphan.close = AsyncMock(side_effect=lambda: closed.append("orphan"))
+        # _tab_id 없음 — direct context.new_page() 경로
+
+        managed = MagicMock(spec=[])
+        managed.url = "about:blank"
+        managed.is_closed = MagicMock(return_value=False)
+        managed.close = AsyncMock(side_effect=lambda: closed.append("managed"))
+        managed._tab_id = "__pending__"  # tab_pool_manager 설정 마커
+
+        mock_context = MagicMock()
+        mock_context.pages = [orphan, managed]
+        mock_context.on = MagicMock()
+
+        async def run():
+            manager._register_popup_handler(service_account_id=3, context=mock_context)
+            await asyncio.sleep(0.1)
+
+        asyncio.get_event_loop().run_until_complete(run())
+        assert "orphan" in closed
+        assert "managed" not in closed
+
+    def test_popup_handler_discard_on_close_context(self):
+        """close_context 호출 시 _popup_handler_registered에서 제거됨"""
+        import asyncio
+        manager = self._make_manager()
+        manager._popup_handler_registered.add(5)
+        manager.browser_contexts[5] = AsyncMock()
+
+        asyncio.get_event_loop().run_until_complete(manager.close_context(5))
+        assert 5 not in manager._popup_handler_registered
+
+
+# ============================================================
+# _create_browser_context_visible popup handler 등록 테스트 (결함 2A)
+# ============================================================
+
+class TestCreateBrowserContextVisiblePopupHandler:
+    """_create_browser_context_visible()가 재사용/신규 양쪽에서 popup handler를 등록하는지 검증."""
+
+    @pytest.fixture
+    def manager(self):
+        from app.shared.browser.context_manager import ContextManager
+        return ContextManager()
+
+    @pytest.mark.asyncio
+    async def test_create_browser_context_visible_registers_popup_handler_on_reuse_E(self, manager):
+        """E(Existence): 재사용 경로에서 _register_popup_handler 1회 호출 검증."""
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_page.url = "https://naver.com"
+        mock_context.pages = [mock_page]
+        manager.browser_contexts[1] = mock_context
+
+        manager._register_popup_handler = MagicMock()
+
+        result = await manager._create_browser_context_visible(1)
+
+        assert result is mock_context
+        manager._register_popup_handler.assert_called_once_with(1, mock_context)
+
+    @pytest.mark.asyncio
+    async def test_create_browser_context_visible_registers_popup_handler_on_new_E(self, manager):
+        """E(Existence): 신규 생성 경로에서 _register_popup_handler 1회 호출 검증."""
+        mock_context = MagicMock()
+        mock_account = MagicMock()
+        mock_account.profile.profile_path = "/tmp/nonexistent_profile_test_abc"
+        mock_account.profile.profile_dir = "test_dir"
+        mock_db = MagicMock()
+
+        manager._register_popup_handler = MagicMock()
+
+        with (
+            patch("app.core.database.SessionLocal", return_value=mock_db),
+            patch("app.shared.service_account.service_account_service") as mock_svc,
+        ):
+            mock_svc.get_by_id.return_value = mock_account
+            mock_svc.update_last_used = MagicMock()
+
+            mock_playwright = MagicMock()
+            mock_playwright.chromium.launch_persistent_context = AsyncMock(return_value=mock_context)
+            manager.playwright_instance = mock_playwright
+
+            with patch.object(manager, "_bypass_automation_detection", new=AsyncMock()):
+                result = await manager._create_browser_context_visible(1)
+
+        assert result is mock_context
+        manager._register_popup_handler.assert_called_once_with(1, mock_context)
+
+
+# ============================================================
 # 실행
 # ============================================================
 

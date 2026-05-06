@@ -9,6 +9,14 @@ from typing import Callable, List, Optional
 from app.core.config import PROJECT_ROOT
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.schemas import RegisteredPathResponse
+from app.modules.dev_runner.services.plan_path_helpers import (
+    load_wtools_project_roots,
+    iter_repo_plan_path_candidates,
+    extract_repo_root_from_plan_path,
+    backfill_dual_paths,
+    canonicalize_wtools_legacy_common_path,
+)
+from app.shared.io import write_json_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -93,52 +101,64 @@ class PlanPathRegistry:
                     logger.info(f"[마이그레이션] 문자열→객체 배열 변환 완료 ({len(migrated)}개)")
                 normalized, normalized_changed = self._normalize_registered_paths(data)
                 if normalized_changed or changed:
-                    reg_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+                    write_json_atomic(reg_path, normalized)
             except Exception:
                 pass
             return
 
-        paths: List[str] = []
+        entries: List[dict] = []
+        existing_keys: set[tuple[str, str]] = set()
+
+        def _add_entry(
+            path: Path,
+            path_type: str,
+            *,
+            require_exists: bool = True,
+            raw_path: str | None = None,
+        ) -> None:
+            if require_exists and not path.exists():
+                return
+            resolved = raw_path if raw_path is not None else str(path.resolve())
+            key = (resolved, path_type)
+            if key not in existing_keys:
+                entries.append({"path": resolved, "type": path_type})
+                existing_keys.add(key)
 
         # 기존 external_plans.json에서 가져오기
         ext_path = config.EXTERNAL_PLANS_FILE
         if ext_path.exists():
             try:
-                paths = json.loads(ext_path.read_text(encoding="utf-8"))
-                logger.info(f"[마이그레이션] external_plans.json에서 {len(paths)}개 경로 로드")
+                raw = json.loads(ext_path.read_text(encoding="utf-8"))
+                for p in raw:
+                    if isinstance(p, str):
+                        _add_entry(Path(p), "plan", require_exists=False, raw_path=p)
+                logger.info(f"[마이그레이션] external_plans.json에서 로드")
             except Exception:
-                paths = []
+                pass
 
-        # WTOOLS_BASE_DIR 시드: 존재하는 프로젝트 plan 폴더를 자동 등록
-        existing = set(paths)
-        base = config.WTOOLS_BASE_DIR
-        if base.exists():
-            # common/docs/plan
-            common_dir = base / config.PLAN_DIR
-            if common_dir.exists():
-                resolved = str(common_dir.resolve())
-                if resolved not in existing:
-                    paths.append(resolved)
-                    existing.add(resolved)
+        # .claude/projects.json 기반 시드 (우선)
+        project_roots = load_wtools_project_roots()
+        if project_roots:
+            for root in project_roots:
+                for candidate_path, path_type in iter_repo_plan_path_candidates(root):
+                    _add_entry(candidate_path, path_type)
+            logger.info(f"[마이그레이션] projects.json 시드 완료 — {len(project_roots)}개 repo")
+        else:
+            # fallback: WTOOLS_BASE_DIR + PROJECT_DIRS (projects.json 없는 환경)
+            base = config.WTOOLS_BASE_DIR
+            if base.exists():
+                for candidate_path, path_type in iter_repo_plan_path_candidates(base):
+                    _add_entry(candidate_path, path_type)
+                for project in config.PROJECT_DIRS:
+                    project_root = base / project
+                    for candidate_path, path_type in iter_repo_plan_path_candidates(project_root):
+                        _add_entry(candidate_path, path_type)
+                logger.info(f"[마이그레이션] WTOOLS fallback 시드 완료")
 
-            # 각 프로젝트의 docs/plan
-            for project in config.PROJECT_DIRS:
-                project_dir = base / project / "docs" / "plan"
-                if project_dir.exists():
-                    resolved = str(project_dir.resolve())
-                    if resolved not in existing:
-                        paths.append(resolved)
-                        existing.add(resolved)
-
-            logger.info(f"[마이그레이션] WTOOLS 시드 완료 — 총 {len(paths)}개 경로")
-
-        # 객체 배열로 저장
-        if paths:
-            entries = [{"path": p, "type": "plan"} for p in paths]
-            entries, _ = self._normalize_registered_paths(entries)
-            reg_path.parent.mkdir(parents=True, exist_ok=True)
-            reg_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(entries)}개)")
+        if entries:
+            normalized, _ = self._normalize_registered_paths(entries)
+            write_json_atomic(reg_path, normalized)
+            logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(normalized)}개)")
 
     def _load_registered_paths(self):
         """등록된 경로 목록 로드 (JSON 파일) — 객체 배열 {"path", "type"}"""
@@ -147,19 +167,23 @@ class PlanPathRegistry:
             try:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
                 normalized, changed = self._normalize_registered_paths(loaded)
-                self._registered_paths = normalized
-                if changed:
-                    path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+                backfilled, backfill_changed = self._backfill_dual_paths(normalized)
+                self._registered_paths = backfilled
+                if changed or backfill_changed:
+                    write_json_atomic(path, backfilled)
             except Exception:
                 self._registered_paths = []
+
+    def _backfill_dual_paths(self, entries: List[dict]) -> tuple[List[dict], bool]:
+        """기존 등록 목록에서 docs <-> worktree 상호 보완 경로를 backfill한다."""
+        return backfill_dual_paths(entries)
 
     def _save_registered_paths(self):
         """등록된 경로 목록 저장 — 객체 배열 {"path", "type"}"""
         path = config.REGISTERED_PATHS_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
         normalized, _ = self._normalize_registered_paths(self._registered_paths)
         self._registered_paths = normalized
-        path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(path, normalized)
 
     def _get_registered_path_strs(self) -> List[str]:
         """등록 경로를 문자열 목록으로 반환 (내부 탐색용)"""
@@ -168,7 +192,10 @@ class PlanPathRegistry:
     @staticmethod
     def _resolve_path_str(path_str: str) -> str:
         try:
-            return str(Path(path_str).resolve())
+            path = Path(path_str)
+            if path_str.startswith("/") and not path.exists():
+                return path_str
+            return str(path.resolve())
         except Exception:
             return path_str
 
@@ -202,6 +229,14 @@ class PlanPathRegistry:
                     changed = True
                 item["path"] = path_value
                 item["type"] = expected_type
+            else:
+                canonical = canonicalize_wtools_legacy_common_path(resolved, item["type"])
+                if canonical is not None:
+                    path_value, expected_type = canonical
+                    if item["type"] != expected_type or item["path"] != path_value:
+                        changed = True
+                    item["path"] = path_value
+                    item["type"] = expected_type
 
             dedupe_key = (item["path"], item["type"])
             if dedupe_key in seen:
@@ -224,8 +259,7 @@ class PlanPathRegistry:
     def _save_ignored_plans(self):
         """수동 무시 plan 목록 저장"""
         path = config.IGNORED_PLANS_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self._ignored_plans, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(path, self._ignored_plans)
 
     # ========== 무시 목록 관리 ==========
 

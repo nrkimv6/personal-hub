@@ -21,6 +21,8 @@ from plan_worktree_helpers import (
     is_worktree_active,
     is_plan_archived,
     has_unmerged_commits,
+    get_branch_divergence,
+    classify_merge_risk,
     resolve_active_plan_file,
 )
 
@@ -154,6 +156,31 @@ def test_resolve_active_plan_file_keeps_current_physical_path_R(tmp_path):
     assert resolved == current.resolve()
 
 
+def test_resolve_active_plan_file_archive_path_does_not_recreate_active_B(tmp_path):
+    """B: archive path 입력으로 active plan 후보를 새로 만들지 않는다."""
+    archive = tmp_path / ".worktrees" / "plans" / "docs" / "archive" / "2026-01-03_test.md"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_text("# archived\n", encoding="utf-8")
+
+    resolved = resolve_active_plan_file(str(archive), project_root=tmp_path)
+    assert resolved == archive.resolve()
+    assert not (tmp_path / ".worktrees" / "plans" / "docs" / "plan" / archive.name).exists()
+
+
+def test_resolve_active_plan_file_prefers_current_physical_path_for_logical_relative_input_R(tmp_path):
+    """R: logical 상대경로 입력이어도 current physical path(.worktrees/plans)를 우선한다"""
+    legacy = tmp_path / "docs" / "plan" / "2026-01-04_test.md"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("# legacy relative\n", encoding="utf-8")
+
+    current = tmp_path / ".worktrees" / "plans" / "docs" / "plan" / "2026-01-04_test.md"
+    current.parent.mkdir(parents=True, exist_ok=True)
+    current.write_text("# current physical\n", encoding="utf-8")
+
+    resolved = resolve_active_plan_file("docs/plan/2026-01-04_test.md", project_root=tmp_path)
+    assert resolved == current.resolve()
+
+
 # ---------------------------------------------------------------------------
 # has_unmerged_commits
 # ---------------------------------------------------------------------------
@@ -189,3 +216,105 @@ def test_has_unmerged_commits_exception_E(tmp_path):
 
         result = has_unmerged_commits("impl/test-branch", tmp_path)
         assert result is True
+
+
+def test_get_branch_divergence_returns_counts_R(tmp_path):
+    """R: git rev-list --left-right --count 출력 → (behind, ahead)."""
+    with patch("plan_worktree_helpers.subprocess") as mock_sp:
+        mock_result = MagicMock()
+        mock_result.stdout = "121\t3\n"
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_sp.run.return_value = mock_result
+
+        assert get_branch_divergence("impl/test-branch", tmp_path) == (121, 3)
+        mock_sp.run.assert_called_once()
+        assert "main...impl/test-branch" in mock_sp.run.call_args.args[0]
+
+
+def test_get_branch_divergence_failure_E(tmp_path):
+    """E: git 실패는 안전하지 않은 상태로 반환해 caller가 BLOCK 처리하게 한다."""
+    with patch("plan_worktree_helpers.subprocess") as mock_sp:
+        mock_result = MagicMock()
+        mock_result.stdout = ""
+        mock_result.stderr = "unknown revision"
+        mock_result.returncode = 128
+        mock_sp.run.return_value = mock_result
+
+        assert get_branch_divergence("missing", tmp_path) == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("behind", "ahead", "expected"),
+    [
+        (0, 0, "PASS"),
+        (500, 0, "PASS"),
+        (120, 1, "PASS"),
+        (121, 1, "WARN"),
+        (300, 1, "WARN"),
+        (301, 1, "BLOCK"),
+        (None, None, "BLOCK"),
+    ],
+)
+def test_classify_merge_risk_RBE(behind, ahead, expected):
+    assert classify_merge_risk(behind, ahead) == expected
+
+
+# ---------------------------------------------------------------------------
+# is_worktree_active — project_root=None 추론 분기
+# (plans-root 경로 및 일반 경로 fallback 검증)
+# ---------------------------------------------------------------------------
+
+def _write_plan_with_worktree_header(plan_path: Path, branch: str, worktree: str) -> None:
+    plan_path.write_text(
+        f"# Test Plan\n\n> branch: {branch}\n> worktree: {worktree}\n",
+        encoding="utf-8",
+    )
+
+
+def test_is_worktree_active_plans_worktree_path_uses_correct_root(tmp_path):
+    """R: plans-root 경로(project_root=None)에서 .git 있는 monitor-page root 계산.
+
+    수정 전: p.parent.parent.parent = .worktrees/plans → worktree 경로 오산출 → False
+    수정 후: .worktrees 직전 경로(.git 존재) → 올바른 project_root → True
+    """
+    project_root = tmp_path / "monitor-page"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+
+    impl_wt = project_root / ".worktrees" / "impl-test"
+    impl_wt.mkdir(parents=True)
+    (impl_wt / ".git").write_text("gitdir: ../../.git/worktrees/impl-test", encoding="utf-8")
+
+    plans_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+    plans_dir.mkdir(parents=True)
+    plan_file = plans_dir / "2026-01-01_test.md"
+    _write_plan_with_worktree_header(plan_file, "impl/test", ".worktrees/impl-test")
+
+    active, branch, wt_abs = is_worktree_active(str(plan_file))
+    assert active is True, (
+        f"plans-root 경로 입력 시 is_worktree_active=True 여야 함. "
+        f"project_root가 .worktrees/plans로 오산출되면 False. wt_abs={wt_abs}"
+    )
+    assert branch == "impl/test"
+    assert wt_abs is not None and "impl-test" in wt_abs
+
+
+def test_is_worktree_active_regular_path_fallback_B(tmp_path):
+    """B: .worktrees 없는 일반 docs/plan 경로에서 parent.parent.parent fallback 동작 유지."""
+    project_root = tmp_path / "monitor-page"
+    docs_plan = project_root / "docs" / "plan"
+    docs_plan.mkdir(parents=True)
+
+    impl_wt = project_root / ".worktrees" / "impl-test"
+    impl_wt.mkdir(parents=True)
+    (impl_wt / ".git").write_text("gitdir: ../../.git/worktrees/impl-test", encoding="utf-8")
+
+    plan_file = docs_plan / "2026-01-01_test.md"
+    _write_plan_with_worktree_header(plan_file, "impl/test", ".worktrees/impl-test")
+
+    active, branch, wt_abs = is_worktree_active(str(plan_file))
+    assert active is True, (
+        f"일반 docs/plan 경로에서 fallback이 monitor-page를 root로 잡아야 함. wt_abs={wt_abs}"
+    )
+    assert branch == "impl/test"

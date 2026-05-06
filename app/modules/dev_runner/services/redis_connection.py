@@ -47,13 +47,17 @@ COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생
 # scripts/dev-runner-command-listener.py도 동일 상수를 별도 정의하여 참조
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
-    "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
+    "engine", "fix_engine", "worktree_path", "branch",
+    "merge_status", "merge_requested", "merge_reason", "merge_message",
+    "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
+    "service_lock_approved",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "test_source", "trigger",
-    "exit_reason", "subprocess_heartbeat", "reflect_final_path",
+    "exit_reason", "subprocess_heartbeat", "pid_create_time", "process_cmdline_hash", "reflect_final_path",
     # 관측 메타 키 (기존 누락 3개 — _dr_constants.py와 동기화)
     "accepted_at", "accepted_source", "started_at",
     # profile 관련 키 (신규 4개)
     "profile", "profile_env_key", "profile_config_dir", "profile_extra_env",
+    "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at",
 )
 SESSION_ID_KEY_PREFIX = "plan-runner:session:"  # fused 세션 ID 저장 키 접두사 (runner_id → session_id 매핑)
 

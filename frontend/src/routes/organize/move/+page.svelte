@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import { isApiGateClosedError } from '$lib/api/client';
 
 	let previews = $state<any[]>([]);
 	let moveStatus = $state<any>(null);
@@ -9,8 +10,12 @@
 	let message = $state('');
 
 	async function fetchStatus() {
-		const res = await fetch('/api/fc/move/status');
-		if (res.ok) moveStatus = await res.json();
+		try {
+			const res = await fetch('/api/fc/move/status');
+			if (res.ok) moveStatus = await res.json();
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '이동 상태 조회 실패';
+		}
 	}
 
 	async function loadPreview() {
@@ -25,6 +30,8 @@
 				const data = await res.json();
 				previews = data.items || [];
 			}
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '미리보기 로드 실패';
 		} finally {
 			isLoading = false;
 		}
@@ -42,25 +49,33 @@
 	}
 
 	async function executeMove(ids?: number[]) {
-		const res = await fetch('/api/fc/move/execute', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ file_ids: ids || null })
-		});
-		if (res.ok) {
-			const data = await res.json();
-			message = `${data.moved}개 이동 완료, 오류: ${data.errors}개`;
-			await loadPreview();
-			await fetchStatus();
+		try {
+			const res = await fetch('/api/fc/move/execute', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ file_ids: ids || null })
+			});
+			if (res.ok) {
+				const data = await res.json();
+				message = `${data.moved}개 이동 완료, 오류: ${data.errors}개`;
+				await loadPreview();
+				await fetchStatus();
+			}
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '파일 이동 실패';
 		}
 	}
 
 	async function undoMove(file_id: number) {
-		const res = await fetch(`/api/fc/move/undo/${file_id}`, { method: 'POST' });
-		if (res.ok) {
-			message = '되돌리기 완료';
-			await loadPreview();
-			await fetchStatus();
+		try {
+			const res = await fetch(`/api/fc/move/undo/${file_id}`, { method: 'POST' });
+			if (res.ok) {
+				message = '되돌리기 완료';
+				await loadPreview();
+				await fetchStatus();
+			}
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '되돌리기 실패';
 		}
 	}
 
@@ -71,7 +86,7 @@
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="파일 이동" subtitle="분류된 파일을 지정 경로로 이동합니다">
+	<PageHeader title="파일 이동">
 		{#if moveStatus}
 			<span class="text-sm text-muted-foreground">
 				이동됨: {moveStatus.moved}개 | 대기: {moveStatus.pending_move}개

@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("TESTING", "1")
 
+pytestmark = pytest.mark.http
+
 
 @pytest.fixture
 def app_with_router():
@@ -25,6 +27,8 @@ def app_with_router():
     mock_db = MagicMock()
     mock_db.execute.return_value.fetchone.return_value = None
     mock_db.execute.return_value.fetchall.return_value = []
+    mock_db.execute.return_value.mappings.return_value.first.return_value = None
+    mock_db.execute.return_value.mappings.return_value.all.return_value = []
     app.dependency_overrides[get_db] = lambda: mock_db
 
     app.include_router(router, prefix="/api/v1")

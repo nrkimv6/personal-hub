@@ -12,6 +12,8 @@ from typing import Callable, Optional, List, Tuple, Any
 from dataclasses import dataclass
 from datetime import datetime
 
+from app.core.database import is_connection_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -226,7 +228,10 @@ class AsyncDBWriter:
                     await self._execute_batch(batch)
                 raise
             except Exception as e:
-                logger.error(f"[{self.name}] 처리 루프 오류: {e}", exc_info=True)
+                if is_connection_error(e):
+                    logger.warning(f"[{self.name}] PG 연결 오류 (처리 루프): {e}")
+                else:
+                    logger.error(f"[{self.name}] 처리 루프 오류: {e}", exc_info=True)
                 await asyncio.sleep(1)  # 오류 시 잠시 대기
 
     async def _execute_batch(self, batch: List[DBOperation]):
@@ -244,7 +249,10 @@ class AsyncDBWriter:
         try:
             await asyncio.to_thread(self._sync_execute_batch, batch)
         except Exception as e:
-            logger.error(f"[{self.name}] 배치 실행 오류: {e}", exc_info=True)
+            if is_connection_error(e):
+                logger.warning(f"[{self.name}] PG 연결 오류 (배치 실행): {e}")
+            else:
+                logger.error(f"[{self.name}] 배치 실행 오류: {e}", exc_info=True)
 
     def _sync_execute_batch(self, batch: List[DBOperation]):
         """
@@ -259,10 +267,15 @@ class AsyncDBWriter:
                 self._total_operations += 1
             except Exception as e:
                 self._failed_operations += 1
-                logger.error(
-                    f"[{self.name}] DB 작업 실패: {op.operation.__name__} - {e}",
-                    exc_info=True
-                )
+                if is_connection_error(e):
+                    logger.warning(
+                        f"[{self.name}] PG 연결 오류 (DB 작업): {op.operation.__name__} - {e}"
+                    )
+                else:
+                    logger.error(
+                        f"[{self.name}] DB 작업 실패: {op.operation.__name__} - {e}",
+                        exc_info=True
+                    )
 
     async def _flush_remaining(self):
         """남은 모든 작업 처리"""

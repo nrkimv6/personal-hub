@@ -24,7 +24,7 @@ from app.models.google_search import (
 pytestmark = pytest.mark.e2e
 
 BASE_URL = "http://localhost:8001"
-HEALTH_URL = f"{BASE_URL}/api/v1/dev-runner/runners"
+HEALTH_URL = f"{BASE_URL}/api/v1/system/liveness"
 RECOVER_URL = f"{BASE_URL}/api/v1/google/admin/recover-pending"
 ACTIVE_STATUSES = {
     GoogleSearchQueue.STATUS_QUEUED,
@@ -74,6 +74,18 @@ def _insert_pending_request(query_prefix: str) -> str:
         return search_id
     finally:
         db.close()
+
+
+def _get_status_payload(search_id: str) -> dict | None:
+    """GET /api/v1/google/search/{search_id}/status 응답 반환. 404면 None."""
+    try:
+        response = httpx.get(f"{BASE_URL}/api/v1/google/search/{search_id}/status", timeout=10)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+    except httpx.ConnectError:
+        return None
 
 
 def _get_queue_status(search_id: str) -> str | None:
@@ -157,6 +169,42 @@ class TestGoogleRecoverE2E:
         finally:
             for search_id in search_ids:
                 _cleanup_search_artifacts(search_id)
+
+    def test_live_recovered_request_status_payload_hides_target_closed_error(self):
+        """T4: recover 후 status payload에 TargetClosedError가 재노출되지 않는다.
+
+        수정 전: GoogleSearchWorker가 context.new_page()로 열었다가 popup guard에 의해
+                 탭이 닫혀 error_message에 'Target page, context or browser has been closed'가 기록됨.
+        수정 후: execute_with_tab() 경로로 managed tab을 사용하므로 해당 에러가 발생하지 않음.
+
+        Pass 기준: terminal 상태가 된 row의 error_message에
+                   'Target page, context or browser has been closed'가 없는 것.
+        """
+        _assert_server_up()
+        search_id = _insert_pending_request("__merge_test_target_closed_guard__")
+
+        try:
+            response = httpx.post(RECOVER_URL, timeout=20)
+            assert response.status_code == 200, response.text
+
+            # terminal 상태(completed 또는 failed)까지 대기 — captcha, network 에러는 허용
+            _poll_status(
+                search_id,
+                timeout_seconds=60,
+                allowed_statuses={
+                    GoogleSearchQueue.STATUS_COMPLETED,
+                    GoogleSearchQueue.STATUS_FAILED,
+                },
+            )
+
+            payload = _get_status_payload(search_id)
+            assert payload is not None, f"status endpoint returned None for {search_id}"
+            error_msg = payload.get("error_message") or ""
+            assert "Target page, context or browser has been closed" not in error_msg, (
+                f"TargetClosedError가 status payload에 노출됨: {error_msg!r}"
+            )
+        finally:
+            _cleanup_search_artifacts(search_id)
 
     def test_live_recovered_request_becomes_actionable_for_running_worker(self):
         """T4: recovered item이 pending을 벗어나 running worker가 집을 수 있는 상태(queued 이상)가 된다."""

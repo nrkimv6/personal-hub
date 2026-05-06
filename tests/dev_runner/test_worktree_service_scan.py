@@ -13,16 +13,18 @@ def test_scan_plan_files_right_branch_mapping(tmp_path: Path):
     legacy_dir.mkdir(parents=True)
 
     (plans_dir / "plan-a.md").write_text("> branch: impl/a\n", encoding="utf-8")
-    (legacy_dir / "plan-b.md").write_text("> branch: impl/b\n", encoding="utf-8")
-    (legacy_dir / "plan-c.md").write_text("# no branch header\n", encoding="utf-8")
+    (plans_dir / "plan-b.md").write_text("> branch: impl/b\n", encoding="utf-8")
+    (plans_dir / "plan-c.md").write_text("# no branch header\n", encoding="utf-8")
+    (legacy_dir / "legacy-ignored.md").write_text("> branch: impl/legacy\n", encoding="utf-8")
 
     branch_map, unresolved = svc.scan_plan_files(repo_root=tmp_path)
 
     assert branch_map["impl/a"][0].replace("\\", "/") == ".worktrees/plans/docs/plan/plan-a.md"
-    assert branch_map["impl/b"][0].replace("\\", "/") == "docs/plan/plan-b.md"
+    assert branch_map["impl/b"][0].replace("\\", "/") == ".worktrees/plans/docs/plan/plan-b.md"
+    assert "impl/legacy" not in branch_map
     assert unresolved == [
         {
-            "plan_file": str(Path("docs/plan/plan-c.md")),
+            "plan_file": str(Path(".worktrees/plans/docs/plan/plan-c.md")),
             "reason": "missing > branch header",
             "plan_mtime": unresolved[0]["plan_mtime"],
         }
@@ -45,7 +47,7 @@ def test_scan_plan_files_boundary_prefers_plans_worktree_for_same_branch(tmp_pat
 
 
 def test_scan_plan_files_error_unreadable_file_skipped(tmp_path: Path):
-    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     good_file = plan_dir / "good.md"
     bad_file = plan_dir / "bad.md"
@@ -62,7 +64,7 @@ def test_scan_plan_files_error_unreadable_file_skipped(tmp_path: Path):
     with patch("builtins.open", side_effect=fake_open):
         branch_map, unresolved = svc.scan_plan_files(repo_root=tmp_path)
 
-    assert branch_map == {"impl/good": (str(Path("docs/plan/good.md")), branch_map["impl/good"][1])}
+    assert branch_map == {"impl/good": (str(Path(".worktrees/plans/docs/plan/good.md")), branch_map["impl/good"][1])}
     assert unresolved == []
 
 

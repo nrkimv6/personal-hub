@@ -20,11 +20,15 @@ from _dr_plan_paths import is_archive_or_history_path
 
 logger = logging.getLogger(__name__)
 
+STALE_MERGE_WARN_BEHIND = 120
+STALE_MERGE_BLOCK_BEHIND = 300
+
 
 def _extract_plan_filename_tail(plan_file: str) -> Optional[Path]:
     """plan 경로 문자열에서 docs/plan 이하 상대 경로를 추출한다.
 
-    common/docs/plan은 project plans 워크트리로 매핑하면 안 되므로 제외한다.
+    common/docs/plan은 active source가 아니라 legacy compatibility 경로이므로
+    project plans 워크트리 매핑 후보에서 제외한다.
     """
     normalized = plan_file.replace("\\", "/").strip()
     lower = normalized.lower()
@@ -100,10 +104,14 @@ def is_worktree_active(plan_file: str, project_root: "Path | None" = None) -> tu
         return False, None, None
 
     if project_root is None:
-        # plan_file 경로에서 .worktrees 이전까지를 project_root로 추론
         p = Path(plan_file).resolve()
-        # docs/plan/*.md → 상위 2단계
-        project_root = p.parent.parent.parent
+        parts = list(p.parts)
+        if ".worktrees" in parts:
+            i = parts.index(".worktrees")
+            candidate = Path(*parts[:i])
+            project_root = candidate if (candidate / ".git").exists() else p.parent.parent.parent
+        else:
+            project_root = p.parent.parent.parent
 
     worktree_abs = (Path(project_root) / worktree_rel).resolve()
     if not worktree_abs.is_dir():
@@ -137,6 +145,65 @@ def has_unmerged_commits(branch: str, cwd: "Path | None" = None) -> bool:
     except Exception as e:
         logger.warning(f"[has_unmerged_commits] 확인 실패 (보수적으로 True 반환): {e}")
         return True  # 확인 불가 → 안전하게 True
+
+
+def get_branch_divergence(branch: str, cwd: "Path | None" = None, base: str = "main") -> tuple[Optional[int], Optional[int]]:
+    """base...branch 발산도를 계산한다.
+
+    Returns:
+        (behind, ahead)
+        - behind: base에는 있고 branch에는 없는 커밋 수
+        - ahead: branch에는 있고 base에는 없는 커밋 수
+        - 실패 시 (None, None). 호출자는 이를 안전하지 않은 상태로 처리해야 한다.
+    """
+    if not branch or not str(branch).strip():
+        return (None, None)
+    try:
+        result = subprocess.run(
+            ["git", "rev-list", "--left-right", "--count", f"{base}...{branch}"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(cwd) if cwd else None,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip() if isinstance(result.stderr, str) else ""
+            logger.warning(
+                "[get_branch_divergence] git rev-list 실패 (branch=%s, base=%s, rc=%s): %s",
+                branch,
+                base,
+                result.returncode,
+                stderr,
+            )
+            return (None, None)
+
+        stdout = result.stdout if isinstance(result.stdout, str) else ""
+        parts = stdout.strip().split()
+        if len(parts) != 2:
+            logger.warning(
+                "[get_branch_divergence] 출력 파싱 실패 (branch=%s, base=%s, stdout=%r)",
+                branch,
+                base,
+                stdout.strip(),
+            )
+            return (None, None)
+        return (int(parts[0]), int(parts[1]))
+    except Exception as e:
+        logger.warning(f"[get_branch_divergence] 확인 실패 (보수적으로 BLOCK 대상): {e}")
+        return (None, None)
+
+
+def classify_merge_risk(behind: Optional[int], ahead: Optional[int]) -> str:
+    """브랜치 발산도를 PASS/WARN/BLOCK으로 분류한다."""
+    if behind is None or ahead is None:
+        return "BLOCK"
+    if ahead <= 0 or behind <= STALE_MERGE_WARN_BEHIND:
+        return "PASS"
+    if behind <= STALE_MERGE_BLOCK_BEHIND:
+        return "WARN"
+    return "BLOCK"
 
 
 def is_plan_in_progress(plan_file: str) -> bool:
@@ -177,33 +244,39 @@ def parse_plan_worktree_info(plan_file: str) -> tuple:
     return branch, worktree_rel
 
 
-def write_plan_worktree_info(plan_file: str, branch: str, worktree_rel: str):
-    """plan 파일 헤더에 branch/worktree 기록 (이미 있으면 교체, 없으면 상태 줄 다음에 삽입)"""
+def write_plan_worktree_info(plan_file: str, branch: str, worktree_rel: str, owner: str | None = None):
+    """plan 파일 헤더에 branch/worktree/worktree-owner를 기록한다."""
     try:
         with open(plan_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
+        owner_value = str(Path(owner).resolve()) if owner else str(Path(plan_file).resolve())
         branch_line = f"> branch: {branch}\n"
         worktree_line = f"> worktree: {worktree_rel}\n"
+        owner_line = f"> worktree-owner: {owner_value}\n"
 
         # 이미 존재하면 교체
         new_lines = []
         replaced_branch = False
         replaced_worktree = False
+        replaced_owner = False
         for line in lines:
             if re.match(r"^>\s*branch:", line):
                 new_lines.append(branch_line)
                 replaced_branch = True
+            elif re.match(r"^>\s*worktree-owner:", line):
+                new_lines.append(owner_line)
+                replaced_owner = True
             elif re.match(r"^>\s*worktree:", line):
                 new_lines.append(worktree_line)
                 replaced_worktree = True
             else:
                 new_lines.append(line)
 
-        if replaced_branch and replaced_worktree:
+        if replaced_branch and replaced_worktree and replaced_owner:
             with open(plan_file, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
-            return
+            return True
 
         # 없으면 상태 줄 다음에 삽입 (없으면 첫 번째 # 제목 다음)
         insert_idx = None
@@ -224,12 +297,16 @@ def write_plan_worktree_info(plan_file: str, branch: str, worktree_rel: str):
             inserts.append(branch_line)
         if not replaced_worktree:
             inserts.append(worktree_line)
+        if not replaced_owner:
+            inserts.append(owner_line)
         new_lines = new_lines[:insert_idx] + inserts + new_lines[insert_idx:]
 
         with open(plan_file, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
+        return True
     except Exception as e:
         logger.warning(f"[write_plan_worktree_info] 기록 실패 (무시): {e}")
+        return False
 
 
 def get_plan_completion(plan_file: str | None) -> tuple[int, int]:
@@ -289,13 +366,17 @@ def has_phase_r(content: str) -> bool:
 
 
 def has_undefended_paths(content: str) -> bool:
-    """Phase R 내 '미방어' 경로 잔존 여부"""
-    m = re.search(r"### Phase R.*?(?=\n### |\Z)", content, re.DOTALL)
-    if not m:
-        return False
-    section = m.group(0)
-    section_no_code = re.sub(r"```.*?```", "", section, flags=re.DOTALL)
-    return "미방어" in section_no_code
+    """Phase R 내 실제 '미방어' 경로 잔존 여부.
+
+    _plan_header_utils 공통 구현으로 위임해 code block 제외와 완료형 문구 제외
+    규칙을 validate_done_preconditions()와 동일하게 유지한다.
+    """
+    import sys as _sys
+    _project_root = str(Path(__file__).resolve().parent.parent.parent)
+    if _project_root not in _sys.path:
+        _sys.path.insert(0, _project_root)
+    from app.modules.dev_runner.services._plan_header_utils import has_undefended_paths as _utils_has_undefended
+    return _utils_has_undefended(content)
 
 
 def validate_done_preconditions(file_path: str, content: str) -> list:
@@ -305,7 +386,7 @@ def validate_done_preconditions(file_path: str, content: str) -> list:
     이 함수는 하위 호환성 유지용으로 존재한다.
     """
     import sys as _sys
-    _project_root = str(Path(__file__).resolve().parent.parent)
+    _project_root = str(Path(__file__).resolve().parent.parent.parent)
     if _project_root not in _sys.path:
         _sys.path.insert(0, _project_root)
     from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions as _utils_validate
@@ -313,11 +394,11 @@ def validate_done_preconditions(file_path: str, content: str) -> list:
 
 
 def remove_plan_header_fields(plan_file: str):
-    """plan 파일에서 '> branch:' / '> worktree:' 줄 제거"""
+    """plan 파일에서 '> branch:' / '> worktree:' / '> worktree-owner:' 줄 제거"""
     try:
         with open(plan_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
-        new_lines = [l for l in lines if not re.match(r"^>\s*(branch|worktree):", l)]
+        new_lines = [l for l in lines if not re.match(r"^>\s*(branch|worktree-owner|worktree):", l)]
         with open(plan_file, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
     except Exception as e:

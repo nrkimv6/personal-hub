@@ -256,34 +256,6 @@ def test_guide_status_no_records(db):
 
 # ========== Phase T1: backfill script functions ==========
 
-def test_backfill_guide_status_mode_right(tmp_path):
-    """R(정상): extract_guide_summary 동작 확인"""
-    from scripts.migrations.archive_index_backfill import extract_guide_summary
-    guide_file = tmp_path / "test-guide.md"
-    guide_file.write_text("# Test Guide\n\nThis is the first paragraph of the guide.\n", encoding="utf-8")
-    result = extract_guide_summary(guide_file)
-    assert result == "This is the first paragraph of the guide."
-
-
-def test_extract_guide_summary_right(tmp_path):
-    """R(정상): H1 이후 첫 단락 80자 추출"""
-    from scripts.migrations.archive_index_backfill import extract_guide_summary
-    content = "# My Guide\n\n> blockquote skip\n\nActual paragraph content here.\n"
-    guide_file = tmp_path / "guide.md"
-    guide_file.write_text(content, encoding="utf-8")
-    result = extract_guide_summary(guide_file)
-    assert result == "Actual paragraph content here."
-
-
-def test_extract_guide_summary_boundary_empty(tmp_path):
-    """B(경계): H1만 있고 본문 없는 파일 → 빈 문자열"""
-    from scripts.migrations.archive_index_backfill import extract_guide_summary
-    guide_file = tmp_path / "empty-guide.md"
-    guide_file.write_text("# Only Heading\n\n> Only blockquote\n", encoding="utf-8")
-    result = extract_guide_summary(guide_file)
-    assert result == ""
-
-
 def test_backfill_auto_blocks_db_right(db, tmp_path):
     """R(정상): backfill_guide_blocks_db() → AUTO 블록에 PlanRecord.summary 포함"""
     from scripts.migrations.archive_index_backfill import backfill_guide_blocks_db
@@ -395,41 +367,6 @@ def test_guide_status_with_real_meta_yaml(db):
         assert "guide" in item
         assert "pending_count" in item
         assert isinstance(item["pending_count"], int)
-
-
-def test_backfill_guide_status_real_files(db):
-    """T3: 실제 docs/archive/ + docs/dev-guide/_meta.yaml + DB → guide-status INDEX.md 마커 블록 생성 검증"""
-    import tempfile
-    from pathlib import Path
-    from scripts.migrations.archive_index_backfill import backfill_guide_blocks_db, render_guide_status_index
-    from app.modules.dev_runner.services.plan_record_service import PlanRecordService
-
-    # 실제 meta.yaml 파싱
-    try:
-        from app.shared.wiki_tags import load_meta_yaml
-        meta = load_meta_yaml()
-    except Exception as e:
-        pytest.skip(f"meta.yaml load failed: {e}")
-
-    if not meta:
-        pytest.skip("meta.yaml is empty")
-
-    # DB에서 실제 guide_status 조회 (빈 DB여도 list 반환)
-    svc = PlanRecordService(db)
-    statuses = svc.get_guide_status()
-    assert isinstance(statuses, list)
-
-    # render_guide_status_index로 테이블 내용 생성 (마커 없이 테이블만 반환)
-    rendered = render_guide_status_index(statuses)
-    assert isinstance(rendered, str)
-    # 테이블 헤더행 포함 확인
-    assert "| guide |" in rendered
-    assert "last_updated" in rendered
-    assert "pending" in rendered
-    # 가이드 수 만큼 행이 생성되었는지 확인 (헤더 2행 + 가이드 행)
-    lines = [l for l in rendered.splitlines() if l.strip().startswith("|")]
-    # 헤더행(1) + 구분행(1) + 가이드 행(N개)
-    assert len(lines) >= 2
 
 
 def test_extract_wiki_tags_integration():

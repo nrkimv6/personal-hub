@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { Play, RefreshCw, Square } from 'lucide-svelte';
 
+	type RunAction = 'start' | 'sync' | 'reset' | 'fullReset' | 'stop' | 'forceStop';
+
 	interface Props {
 		status: { redis_connected: boolean; listener_alive: boolean } | null;
 		anyRunning: boolean;
-		actionLoading: boolean;
+		activeAction: RunAction | null;
 		mode: 'single' | 'all';
 		selectedPlan: string;
 		selectedPlanArchived: boolean;
@@ -18,7 +20,7 @@
 	let {
 		status,
 		anyRunning,
-		actionLoading,
+		activeAction,
 		mode,
 		selectedPlan,
 		selectedPlanArchived,
@@ -29,6 +31,9 @@
 		onStart
 	}: Props = $props();
 
+	let actionLoading = $derived(activeAction !== null);
+	const isActive = (action: RunAction) => activeAction === action;
+
 	let startDisabled = $derived(
 		actionLoading ||
 			(mode === 'single' && (!selectedPlan || selectedPlanArchived)) ||
@@ -36,7 +41,7 @@
 			!status?.listener_alive
 	);
 
-	let startLabel = $derived(actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행' : '시작');
+	let startLabel = $derived(isActive('start') ? '시작 중...' : mode === 'all' ? '전체 실행' : '시작');
 	let startTitle = $derived(
 		!status?.redis_connected
 			? 'Redis 미연결'
@@ -63,7 +68,7 @@
 					disabled={actionLoading}
 				>
 					<Square class="h-3.5 w-3.5" />
-					{actionLoading ? '중지 중...' : '중지'}
+					{isActive('stop') ? '중지 중...' : '중지'}
 				</button>
 			{/if}
 
@@ -75,7 +80,7 @@
 					disabled={actionLoading}
 					title="RUNNING 상태를 강제로 초기화하고 미완료 작업을 PENDING으로 복구합니다."
 				>
-					{actionLoading ? '초기화 중...' : '초기화'}
+					{isActive('reset') ? '초기화 중...' : '초기화'}
 				</button>
 
 				<button
@@ -85,7 +90,7 @@
 					disabled={actionLoading}
 					title="모든 작업 기록을 삭제하고 완전히 초기화합니다."
 				>
-					{actionLoading ? '삭제 중...' : '전체 리셋'}
+					{isActive('fullReset') ? '삭제 중...' : '전체 리셋'}
 				</button>
 			{/if}
 		</div>
@@ -96,10 +101,10 @@
 				class="inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium border border-border text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
 				onclick={onSync}
 				disabled={actionLoading}
-				title="Plan 파일과 TODO.md를 SQLite 큐에 동기화합니다"
+				title="Plan 파일과 plans ledger를 SQLite 큐에 동기화합니다"
 			>
 				<RefreshCw class="h-3.5 w-3.5" />
-				{actionLoading ? '동기화 중...' : '동기화'}
+				{isActive('sync') ? '동기화 중...' : '동기화'}
 			</button>
 
 			<button

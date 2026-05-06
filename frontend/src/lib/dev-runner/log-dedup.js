@@ -1,3 +1,15 @@
+const WRAPPER_PREFIX_RE = /^\[(PR|PS):[^\]]+\]\s*/;
+
+/**
+ * [PR:...] / [PS:...] wrapper prefix를 제거한 라인 반환.
+ * dedup fingerprint 계산에 사용해 같은 본문의 다른 wrapper prefix 라인을 동일 취급한다.
+ * @param {string} line
+ * @returns {string}
+ */
+export function stripWrapperPrefix(line) {
+	return line.replace(WRAPPER_PREFIX_RE, '');
+}
+
 /**
  * FNV-1a(32bit) 기반 라인 fingerprint.
  * runner_id를 포함해 runner 간 동일 라인 충돌을 분리한다.
@@ -27,7 +39,7 @@ export function lineFingerprint(runnerId, line) {
  * @returns {boolean}
  */
 export function shouldSkipInjectedLine(fingerprintMap, runnerId, line, limit = 160) {
-	const normalized = line.trimEnd();
+	const normalized = stripWrapperPrefix(line.trimEnd());
 	if (!normalized) return true;
 	const fp = lineFingerprint(runnerId, normalized);
 	const recent = fingerprintMap.get(runnerId) ?? [];

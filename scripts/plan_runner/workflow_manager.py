@@ -328,7 +328,7 @@ class WorkflowManager:
             return 0
 
         try:
-            worktrees = WorktreeManager.list_worktrees()
+            worktrees = WorktreeManager.list_worktrees(cwd=str(Path(worktree_base_dir).parent))
         except Exception as e:
             logger.warning("[WorkflowManager.sync_from_worktrees] list_worktrees 실패: %s", e)
             return 0

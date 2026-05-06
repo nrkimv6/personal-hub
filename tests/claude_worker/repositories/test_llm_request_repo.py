@@ -1,5 +1,6 @@
 """LLMRequestRepository TC (Task 26)."""
 from datetime import datetime, timedelta
+import json
 
 import pytest
 from sqlalchemy import create_engine
@@ -82,6 +83,30 @@ class TestFindNextPendingInQueue:
         result = repo.find_next_pending_in_queue("utility", ["gemini"])
         assert result is not None
         assert result.caller_id == "b2"
+
+    def test_find_next_pending_allows_plan_archive_candidate_provider(self, db, repo):
+        """Plan Archive auto-profile request remains dequeueable when another candidate provider is open."""
+        req = _req(
+            db,
+            caller_type="plan_archive_analyze",
+            caller_id="archive",
+            status="pending",
+            queue_name="utility",
+            provider="gemini",
+            cli_options=json.dumps(
+                {
+                    "candidate_profiles": [
+                        {"engine": "gemini", "profile_name": "busy"},
+                        {"engine": "claude", "profile_name": "open"},
+                    ]
+                }
+            ),
+        )
+
+        result = repo.find_next_pending_in_queue("utility", ["gemini"])
+
+        assert result is not None
+        assert result.id == req.id
 
 
 class TestListWithFilters:

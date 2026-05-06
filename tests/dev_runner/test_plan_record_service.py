@@ -3,14 +3,18 @@
 대상 소스: app/modules/dev_runner/services/plan_record_service.py
 """
 import pytest
+from datetime import datetime, timedelta
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.plan_record import PlanRecord, PlanEvent
+from app.models.task_schedule import TaskSchedule, TaskScheduleRun
+from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.services.plan_record_service import (
     PlanRecordService,
     _compute_filename_hash,
+    _is_temp_pytest_path,
     PLAN_FILE_PATTERN,
     EXCLUDE_FILES,
 )
@@ -20,6 +24,9 @@ def _create_plan_tables(eng):
     """PlanRecord, PlanEvent 테이블만 생성 (전체 Base 사용 불가 — FK 해결 문제)"""
     PlanRecord.__table__.create(bind=eng, checkfirst=True)
     PlanEvent.__table__.create(bind=eng, checkfirst=True)
+    TaskSchedule.__table__.create(bind=eng, checkfirst=True)
+    TaskScheduleRun.__table__.create(bind=eng, checkfirst=True)
+    LLMRequest.__table__.create(bind=eng, checkfirst=True)
 
 
 # ========== Fixtures ==========
@@ -248,6 +255,91 @@ class TestMarkArchived:
         assert result.archived_at is not None
 
 
+# ========== ingest_single ==========
+
+class TestIngestSingle:
+
+    def test_ingest_single_updates_existing_record_archive_path(self, svc, db):
+        """기존 active record를 archive path ingest로 갱신한다."""
+        plan_path = "/workspace/docs/plan/2026-05-03_archive-path-update.md"
+        archive_path = "/workspace/docs/archive/2026-05-03_archive-path-update.md"
+        record = svc.get_or_create(plan_path, title="Old Title", project="old-project")
+        record.file_removed_at = datetime.now()
+        record.llm_processed_at = datetime.now() - timedelta(days=1)
+        db.flush()
+
+        updated = svc.ingest_single(
+            file_path=archive_path,
+            project="new-project",
+            raw_content="# New Title\n\nnew body",
+            title="New Title",
+            status="archived",
+        )
+        db.flush()
+
+        assert updated.id == record.id
+        assert updated.file_path == archive_path
+        assert updated.raw_content == "# New Title\n\nnew body"
+        assert updated.status == "archived"
+        assert updated.project == "new-project"
+        assert updated.title == "New Title"
+        assert updated.archived_at is not None
+        assert updated.file_removed_at is None
+        assert updated.file_delete_after is not None
+        assert updated.file_delete_after > datetime.now()
+
+        count = db.query(PlanRecord).filter(
+            PlanRecord.filename_hash == _compute_filename_hash(plan_path)
+        ).count()
+        assert count == 1
+
+    def test_ingest_single_records_path_changed_event(self, svc, db):
+        """archive ingest path 이동은 path_changed와 ingested detail에 남긴다."""
+        plan_path = "/workspace/docs/plan/2026-05-03_path-event.md"
+        archive_path = "/workspace/docs/archive/2026-05-03_path-event.md"
+        record = svc.get_or_create(plan_path)
+        db.flush()
+
+        updated = svc.ingest_single(file_path=archive_path, raw_content="# Archived")
+        db.flush()
+
+        path_events = db.query(PlanEvent).filter_by(
+            plan_record_id=updated.id,
+            event_type="path_changed",
+        ).all()
+        assert len(path_events) == 1
+        assert path_events[0].detail == {
+            "from": plan_path,
+            "to": archive_path,
+            "source": "ingest_single",
+        }
+
+        ingested = db.query(PlanEvent).filter_by(
+            plan_record_id=record.id,
+            event_type="ingested",
+        ).order_by(PlanEvent.id.desc()).first()
+        assert ingested is not None
+        assert ingested.detail["updated"] is True
+        assert ingested.detail["old_path"] == plan_path
+        assert ingested.detail["new_path"] == archive_path
+
+    def test_ingest_single_same_path_does_not_duplicate_path_changed_event(self, svc, db):
+        """같은 path 재ingest는 path_changed 이벤트를 추가하지 않는다."""
+        archive_path = "/workspace/docs/archive/2026-05-03_same-path.md"
+
+        first = svc.ingest_single(file_path=archive_path, raw_content="first")
+        db.flush()
+        second = svc.ingest_single(file_path=archive_path, raw_content="second")
+        db.flush()
+
+        assert first.id == second.id
+        events = db.query(PlanEvent).filter_by(
+            plan_record_id=second.id,
+            event_type="path_changed",
+        ).all()
+        assert events == []
+
+
 # ========== sync_all ==========
 
 class TestSyncAll:
@@ -339,10 +431,128 @@ class TestListRecordsAndEvents:
         ids_other = [rec.id for rec in results_other]
         assert r.id not in ids_other
 
+    def test_list_records_excludes_temp_pytest_records_by_default(self, svc, db):
+        """R: archive 목록 기본 조회는 pytest temp PlanRecord를 제외한다."""
+        real = svc.ingest_single(
+            file_path=r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\archive\2026-05-05_real.md",
+            raw_content="# real",
+        )
+        temp = svc.ingest_single(
+            file_path=r"C:\Users\Narang\AppData\Local\Temp\pytest-of-Narang\pytest-42\docs\archive\2026-05-05_temp.md",
+            raw_content="# temp",
+        )
+        db.flush()
+
+        default_records = svc.list_records(status="archived")
+        include_temp_records = svc.list_records(status="archived", exclude_temp=False)
+
+        assert real.id in [record.id for record in default_records]
+        assert temp.id not in [record.id for record in default_records]
+        assert temp.id in [record.id for record in include_temp_records]
+
     def test_list_events_empty(self, svc, db):
         """이벤트 없으면 빈 목록"""
         result = svc.list_events(event_type="nonexistent_type_xyz")
         assert result == []
+
+
+class TestTempPytestPath:
+    def test_is_temp_pytest_path_recognizes_windows_pytest_of(self):
+        path = r"C:\Users\Narang\AppData\Local\Temp\pytest-of-Narang\pytest-42\docs\archive\a.md"
+        assert _is_temp_pytest_path(path) is True
+
+    def test_is_temp_pytest_path_recognizes_linux_tmp(self):
+        assert _is_temp_pytest_path("/tmp/pytest-of-user/pytest-1/docs/archive/a.md") is True
+
+    def test_is_temp_pytest_path_rejects_real_archive(self):
+        path = r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\archive\2026-05-05_real.md"
+        assert _is_temp_pytest_path(path) is False
+
+
+class TestPlanArchiveHealth:
+    def test_get_plan_archive_health_right_counts_real_and_temp_records(self, svc, db):
+        """R: health는 real/temp archive와 active/failed request를 분리 집계한다."""
+        real_processed = svc.ingest_single(
+            file_path="/repo/docs/archive/2026-05-01_real_done.md",
+            raw_content="# done",
+        )
+        real_processed.llm_processed_at = datetime(2026, 5, 2)
+        real_pending = svc.ingest_single(
+            file_path="/repo/docs/archive/2026-05-02_real_pending.md",
+            raw_content="# pending",
+        )
+        temp_pending = svc.ingest_single(
+            file_path=r"C:\Users\Narang\AppData\Local\Temp\pytest-of-Narang\pytest-7\docs\archive\2026-05-03_temp.md",
+            raw_content="# temp",
+        )
+        schedule = TaskSchedule(
+            name="plan_archive_analyze_daily",
+            display_name="Plan Archive LLM 분석",
+            target_type=TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE,
+            schedule_type="cron",
+            schedule_value='{"time":"02:10"}',
+            enabled=False,
+            last_run_at=datetime(2026, 5, 4, 2, 10),
+        )
+        db.add(schedule)
+        db.flush()
+        db.add_all([
+            TaskScheduleRun(
+                schedule_id=schedule.id,
+                status=TaskScheduleRun.STATUS_COMPLETED,
+                finished_at=datetime(2026, 5, 4, 2, 11),
+            ),
+            TaskScheduleRun(
+                schedule_id=schedule.id,
+                status=TaskScheduleRun.STATUS_FAILED,
+                finished_at=datetime(2026, 5, 3, 2, 11),
+            ),
+            LLMRequest(caller_type="plan_archive_analyze", caller_id=real_pending.filename_hash, prompt="p", status="pending"),
+            LLMRequest(caller_type="plan_archive_analyze", caller_id=temp_pending.filename_hash, prompt="p", status="failed", error_message="boom"),
+        ])
+        db.flush()
+
+        health = svc.get_plan_archive_health()
+
+        assert health["archived_total"] == 3
+        assert health["llm_processed"] == 1
+        assert health["llm_unprocessed"] == 2
+        assert health["real_unprocessed"] == 1
+        assert health["temp_pytest_total"] == 1
+        assert health["temp_pytest_unprocessed"] == 1
+        assert health["pending_or_processing_requests"] == 1
+        assert health["failed_requests"] == 1
+        assert health["latest_failed_request"]["error_message"] == "boom"
+        assert health["plan_archive_schedule"]["enabled"] is False
+        assert health["plan_archive_schedule"]["last_success"] == "2026-05-04T02:11:00"
+
+    def test_get_guide_status_excludes_temp_pytest_records(self, svc, db, monkeypatch):
+        """R: guide-status pending archive 후보도 temp PlanRecord를 제외한다."""
+        from app.shared import wiki_tags
+
+        monkeypatch.setattr(wiki_tags, "load_meta_yaml", lambda: {
+            "dev-guide": {
+                "owns_archive_tags": ["plan"],
+                "last_archive_scan": "2026-05-01",
+            }
+        })
+        monkeypatch.setattr(wiki_tags, "load_whitelist", lambda: {"plan"})
+        monkeypatch.setattr(wiki_tags, "extract_wiki_tags", lambda filename, whitelist: ["plan"])
+
+        svc.ingest_single(
+            file_path="/repo/docs/archive/2026-05-02_real-plan.md",
+            raw_content="# real",
+        )
+        svc.ingest_single(
+            file_path=r"C:\Users\Narang\AppData\Local\Temp\pytest-of-Narang\pytest-1\docs\archive\2026-05-03_temp-plan.md",
+            raw_content="# temp",
+        )
+        db.flush()
+
+        status = svc.get_guide_status()
+
+        assert status[0]["pending_count"] == 1
+        assert "real-plan" in status[0]["pending_archives"][0]["file_path"]
 
 
 # ========== Phase 1: title/project 자동 파싱 (items 14~16) ==========
@@ -483,27 +693,36 @@ class TestSyncAllPlanFileFilter:
 class TestDbIsolationNoProductionPollution:
     """TC 24: 테스트 실행 후 production DB에 pytest 경로 레코드가 없음을 검증 (ERROR 범주)
 
-    conftest.py의 test_db_session이 app.database.SessionLocal을 패치하므로,
-    plan_service 내부 SessionLocal() 호출도 테스트 DB로 라우팅된다.
-    이 TC는 그 패치가 실제로 효과가 있음을 직접 확인한다.
+    이 파일의 module-local SQLite fixture만 사용해 PlanRecordService를 검증한다.
+    공유 test_db_session/test_db_engine fixture를 타면 전체 metadata/bootstrap이 실행되어
+    이 pure service 테스트의 timeout 회귀 경로가 다시 열린다.
     """
 
-    def test_db_isolation_no_production_pollution(self, test_db_session, tmp_path):
+    def test_temp_plan_record_fixture_uses_module_local_sqlite(self, engine):
+        """R: PlanRecordService 테스트 fixture는 module-local SQLite를 사용한다."""
+        assert engine.url.get_backend_name() == "sqlite"
+        assert engine.url.database in (None, ":memory:")
+
+    def test_db_isolation_no_production_pollution(self, db, tmp_path, request):
         """테스트 DB에 pytest 경로로 레코드를 생성해도 production DB에는 반영되지 않음
 
         검증 흐름:
-        1. test_db_session(패치된 SessionLocal)으로 pytest 경로 레코드 생성
+        1. module-local SQLite DB로 pytest 경로 레코드 생성
         2. production DB(data/monitor.db)를 직접 열어 해당 경로가 없음 확인
         """
         import sqlite3
-        import os
+        from sqlalchemy import inspect
+
+        assert "test_db_engine" not in request.fixturenames
+        assert "test_db_session" not in request.fixturenames
+        assert {"plan_events", "plan_records"}.issubset(set(inspect(db.get_bind()).get_table_names()))
 
         pytest_path = str(tmp_path / "pytest-isolation-check" / "2026-03-30_isolation-tc.md")
-        svc = PlanRecordService(test_db_session)
+        svc = PlanRecordService(db)
         record = svc.get_or_create(pytest_path)
-        test_db_session.flush()
+        db.flush()
 
-        assert record is not None, "test_db_session에 레코드가 생성되어야 함"
+        assert record is not None, "module-local DB에 레코드가 생성되어야 함"
 
         # production DB 경로 결정 (존재하지 않을 경우 스킵)
         prod_db_path = Path(__file__).parent.parent.parent / "data" / "monitor.db"
@@ -527,7 +746,7 @@ class TestDbIsolationNoProductionPollution:
 
         assert count == 0, (
             f"Production DB에 pytest 경로 레코드가 {count}건 발견됨. "
-            "conftest.py의 SessionLocal 패치가 정상 작동하지 않을 수 있음."
+            "PlanRecordService 테스트가 production DB를 직접 오염시켰을 수 있음."
         )
 
 

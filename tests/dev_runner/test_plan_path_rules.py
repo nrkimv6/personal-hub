@@ -12,6 +12,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from _dr_plan_paths import (
     PathRuleError,
     classify_plan_stage,
+    is_reserved_plan_status,
     resolve_plan_target,
 )
 
@@ -71,8 +72,14 @@ def test_resolve_outside_docs_plan_raises_E(tmp_path):
 
 def test_classify_plan_stage_R():
     assert classify_plan_stage("검토대기") == "pre_review"
+    assert classify_plan_stage("예약대기") == "pre_review"
     assert classify_plan_stage("검토완료") == "post_review"
     assert classify_plan_stage("구현중") == "post_review"
+
+
+def test_is_reserved_plan_status_R():
+    assert is_reserved_plan_status("예약대기") is True
+    assert is_reserved_plan_status("검토대기") is False
 
 
 def test_classify_plan_stage_unknown_B():

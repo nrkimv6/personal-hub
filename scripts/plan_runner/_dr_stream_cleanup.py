@@ -7,6 +7,7 @@ del _sys_inject, _Path_inject
 
 import json
 import logging
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -443,35 +444,194 @@ def _process_error_details(
             )
 
 
+def _decode_redis_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _project_root() -> Path:
+    from _dr_constants import PROJECT_ROOT as root
+    return Path(root)
+
+
+def _resolve_plan_path(plan_file: str | None) -> Path | None:
+    if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
+        return None
+    path = Path(plan_file)
+    if not path.is_absolute():
+        path = _project_root() / path
+    return path
+
+
+def _read_runner_plan_file(runner_id: str, redis_client) -> str:
+    plan_file = _decode_redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")).strip()
+    if plan_file:
+        return plan_file
+    try:
+        recent_raw = redis_client.get(f"plan-runner:recent-meta:{runner_id}")
+        recent_text = _decode_redis_text(recent_raw)
+        if recent_text:
+            recent = json.loads(recent_text)
+            return str(recent.get("plan_file") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _read_plan_header_evidence(plan_file: str | None) -> tuple[str, str]:
+    plan_path = _resolve_plan_path(plan_file)
+    if not plan_path or not plan_path.exists():
+        return "", ""
+    try:
+        branch = ""
+        worktree = ""
+        for line in plan_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("> branch:"):
+                branch = line.split(":", 1)[1].strip()
+            elif line.startswith("> worktree:"):
+                worktree = line.split(":", 1)[1].strip()
+            if branch and worktree:
+                break
+        return branch, worktree
+    except Exception as exc:
+        logger.debug(f"[_has_worktree_commits] plan header 읽기 실패: {exc}")
+        return "", ""
+
+
+def _resolve_worktree_path(worktree_path: str | None) -> Path | None:
+    if not worktree_path:
+        return None
+    path = Path(worktree_path)
+    if not path.is_absolute():
+        path = _project_root() / path
+    return path
+
+
+def _git_log_has_commits(refspec: str, cwd: Path) -> tuple[bool, int]:
+    log_proc = subprocess.run(
+        ["git", "log", refspec, "--oneline"],
+        capture_output=True, text=True, cwd=str(cwd), timeout=15,
+    )
+    commit_count = len([line for line in log_proc.stdout.splitlines() if line.strip()])
+    return commit_count > 0, commit_count
+
+
+def _get_worktree_head_branch(worktree_path: Path) -> str:
+    proc = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, cwd=str(worktree_path), timeout=15,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _is_post_merge_phase_header(header: str) -> bool:
+    normalized = header.strip().lower()
+    return bool(re.search(r"\b(?:phase\s+)?(?:t4|t5|z)\b", normalized))
+
+
+def _remaining_leaf_summary(plan_file: str | None) -> dict[str, int]:
+    summary = {"impl": 0, "post_merge": 0, "total": 0}
+    plan_path = _resolve_plan_path(plan_file)
+    if not plan_path or not plan_path.exists():
+        return summary
+    current_phase = ""
+    checkbox_re = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(?:[-*]\s+)?\[\s\]")
+    phase_re = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
+    try:
+        for line in plan_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            phase_match = phase_re.match(line)
+            if phase_match:
+                current_phase = phase_match.group(1)
+                continue
+            if not checkbox_re.match(line):
+                continue
+            key = "post_merge" if _is_post_merge_phase_header(current_phase) else "impl"
+            summary[key] += 1
+            summary["total"] += 1
+    except Exception as exc:
+        logger.debug(f"[_remaining_leaf_summary] plan 읽기 실패: {exc}")
+    return summary
+
+
+def _completed_residual_state(runner_id: str, redis_client) -> tuple[str, dict[str, int], str]:
+    plan_file = _read_runner_plan_file(runner_id, redis_client)
+    summary = _remaining_leaf_summary(plan_file)
+    if summary["total"] == 0:
+        return "none", summary, plan_file
+    if summary["impl"] == 0 and summary["post_merge"] > 0:
+        return "post_merge_only", summary, plan_file
+    return "impl_remaining", summary, plan_file
+
+
+def _publish_merge_evidence_missing(runner_id: str, redis_client, plan_file: str, branch_key: str, worktree_path: str) -> None:
+    msg = (
+        "MERGE-EVIDENCE-MISSING "
+        f"runner_id={runner_id}, plan_file={plan_file or '(none)'}, "
+        f"branch_key={branch_key or '(none)'}, worktree_path={worktree_path or '(none)'}"
+    )
+    try:
+        _pub_and_log(runner_id, msg, redis_client, "CLEANUP")
+    except Exception:
+        logger.warning(msg)
+
+
 def _has_worktree_commits(runner_id: str, redis_client) -> bool:
     """워크트리 브랜치에 main 대비 커밋이 있으면 True를 반환한다.
 
-    - branch Redis 키가 없으면 False 반환 (orphan/legacy runner)
+    - branch Redis 키가 없으면 plan header/worktree HEAD 순으로 fallback한다.
     - git log 실행 실패 시 False 반환 (안전 기본값 — merge 스킵)
     """
     try:
-        branch = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+        branch = _decode_redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")).strip()
+        worktree_path = _decode_redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")).strip()
+        plan_file = _read_runner_plan_file(runner_id, redis_client)
+        evidence_source = "redis" if branch else ""
+        if not branch:
+            header_branch, header_worktree = _read_plan_header_evidence(plan_file)
+            if header_branch:
+                branch = header_branch
+                evidence_source = "plan_header"
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch)
+                except Exception:
+                    pass
+            if not worktree_path and header_worktree:
+                worktree_path = header_worktree
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", worktree_path)
+                except Exception:
+                    pass
+        if branch:
+            has_commits, commit_count = _git_log_has_commits(f"main..{branch}", _project_root())
+            logger.info(
+                f"[_has_worktree_commits] evidence_source={evidence_source or 'redis'} "
+                f"(runner_id={runner_id}, branch={branch}, commits={commit_count}) → {has_commits}"
+            )
+            return has_commits
+
+        resolved_worktree = _resolve_worktree_path(worktree_path)
+        if resolved_worktree and resolved_worktree.exists():
+            head_branch = _get_worktree_head_branch(resolved_worktree)
+            if head_branch:
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", head_branch)
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(resolved_worktree))
+                except Exception:
+                    pass
+                has_commits, commit_count = _git_log_has_commits("main..HEAD", resolved_worktree)
+                logger.info(
+                    f"[_has_worktree_commits] evidence_source=worktree_head "
+                    f"(runner_id={runner_id}, branch={head_branch}, worktree={resolved_worktree}, commits={commit_count}) → {has_commits}"
+                )
+                return has_commits
+
+        _publish_merge_evidence_missing(runner_id, redis_client, plan_file, branch, worktree_path)
         if not branch:
             logger.info(
-                f"[_has_worktree_commits] branch 키 없음 (runner_id={runner_id}) → False"
-            )
-            return False
-        from _dr_constants import PROJECT_ROOT as _PR
-        log_proc = subprocess.run(
-            ["git", "log", f"main..{branch}", "--oneline"],
-            capture_output=True, text=True, cwd=str(_PR), timeout=15,
-        )
-        commit_count = len([line for line in log_proc.stdout.splitlines() if line.strip()])
-        if commit_count > 0:
-            logger.info(
-                f"[_has_worktree_commits] 워크트리 커밋 {commit_count}개 존재 "
-                f"(runner_id={runner_id}, branch={branch}) → True"
-            )
-            return True
-        else:
-            logger.info(
-                f"[_has_worktree_commits] 워크트리 커밋 없음 "
-                f"(runner_id={runner_id}, branch={branch}) → False"
+                f"[_has_worktree_commits] branch/worktree evidence 없음 (runner_id={runner_id}) → False"
             )
             return False
     except Exception as e:
@@ -589,13 +749,37 @@ def _update_workflow_and_execute_cleanup(
                         ctx.wf_manager.update_status(wf["id"], "merge_pending")
                     else:
                         if ctx.completed_for_flow:
-                            _pub_and_log(
-                                ctx.runner_id,
-                                f"[_stream_output] merge_requested 플래그 없음 + exit_reason={ctx.exit_reason}, stop_stage={ctx.stop_stage} → completed 처리",
-                                ctx.redis_client,
-                                "CLEANUP",
+                            residual_state, residual_summary, residual_plan = _completed_residual_state(
+                                ctx.runner_id, ctx.redis_client
                             )
-                            ctx.wf_manager.update_status(wf["id"], "completed")
+                            if residual_state == "post_merge_only":
+                                merge_requested = True
+                                _pub_and_log(
+                                    ctx.runner_id,
+                                    "[_stream_output] completed 직전 post-merge-only 잔여 감지 "
+                                    f"(plan={residual_plan}, remaining_post_merge={residual_summary['post_merge']}) → merge_pending",
+                                    ctx.redis_client,
+                                    "CLEANUP",
+                                )
+                                ctx.wf_manager.update_status(wf["id"], "merge_pending")
+                            elif residual_state == "impl_remaining":
+                                message = (
+                                    "completed_with_remaining_tasks: "
+                                    f"plan={residual_plan}, remaining_impl={residual_summary['impl']}, "
+                                    f"remaining_post_merge={residual_summary['post_merge']}"
+                                )
+                                _pub_and_log(ctx.runner_id, f"[_stream_output] {message}", ctx.redis_client, "CLEANUP")
+                                ctx.wf_manager.update_status(
+                                    wf["id"], "failed", error_message=message
+                                )
+                            else:
+                                _pub_and_log(
+                                    ctx.runner_id,
+                                    f"[_stream_output] merge_requested 플래그 없음 + exit_reason={ctx.exit_reason}, stop_stage={ctx.stop_stage} → completed 처리",
+                                    ctx.redis_client,
+                                    "CLEANUP",
+                                )
+                                ctx.wf_manager.update_status(wf["id"], "completed")
                         else:
                             _pub_and_log(
                                 ctx.runner_id,

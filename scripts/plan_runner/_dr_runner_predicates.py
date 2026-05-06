@@ -9,11 +9,14 @@ _sys_inject.path.insert(0, str(_Path_inject(__file__).resolve().parent))
 del _sys_inject, _Path_inject
 
 
+import hashlib
+import json
 import logging
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Iterable, Optional
 
+import psutil
 import redis
 
 from _dr_constants import RUNNER_KEY_PREFIX, PLAN_FILE_ALL, _LEGACY_ALL
@@ -21,6 +24,86 @@ from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_runtime_utils import _normalize_exit_reason
 
 logger = logging.getLogger(__name__)
+
+
+def _hash_process_cmdline(cmdline: Iterable[object] | None) -> str:
+    """Return a stable hash for a process command line."""
+    normalized = [str(part) for part in (cmdline or [])]
+    payload = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _get_process_identity(pid: int, fallback_cmdline: Iterable[object] | None = None) -> dict | None:
+    """Return OS process identity fields used to defend against PID reuse."""
+    try:
+        proc = psutil.Process(pid)
+        create_time = proc.create_time()
+        try:
+            cmdline = proc.cmdline()
+        except (psutil.AccessDenied, psutil.ZombieProcess) as exc:
+            if fallback_cmdline is None:
+                logger.debug("[process-identity] cmdline unavailable for pid=%s: %s", pid, exc)
+                return None
+            cmdline = fallback_cmdline
+        return {
+            "pid_create_time": create_time,
+            "process_cmdline_hash": _hash_process_cmdline(cmdline),
+        }
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as exc:
+        logger.debug("[process-identity] unavailable for pid=%s: %s", pid, exc)
+        return None
+    except Exception as exc:
+        logger.debug("[process-identity] failed for pid=%s: %s", pid, exc)
+        return None
+
+
+def _runner_identity_matches(
+    redis_client: redis.Redis,
+    runner_id: str,
+    pid: int,
+    *,
+    startup_grace_seconds: int = 600,
+) -> tuple[bool, str]:
+    """Check whether the alive PID is still the runner process we launched."""
+    try:
+        expected_create_time = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid_create_time")
+        expected_cmdline_hash = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:process_cmdline_hash")
+    except Exception as exc:
+        logger.warning("[process-identity] redis lookup failed runner=%s pid=%s: %s", runner_id, pid, exc)
+        return False, "identity_lookup_failed"
+
+    if not expected_create_time or not expected_cmdline_hash:
+        is_recent_legacy, start_elapsed = _is_recent_runner_without_hb(
+            redis_client,
+            runner_id,
+            startup_grace_seconds=startup_grace_seconds,
+        )
+        if is_recent_legacy:
+            return True, "legacy_grace"
+        elapsed_text = "unknown" if start_elapsed is None else f"{start_elapsed:.0f}s"
+        logger.warning(
+            "[process-identity] missing metadata runner=%s pid=%s start_elapsed=%s",
+            runner_id,
+            pid,
+            elapsed_text,
+        )
+        return False, "identity_missing"
+
+    actual = _get_process_identity(pid)
+    if actual is None:
+        return False, "process_unavailable"
+
+    try:
+        expected_create = float(expected_create_time)
+        actual_create = float(actual["pid_create_time"])
+    except (TypeError, ValueError):
+        return False, "pid_create_time_invalid"
+
+    if abs(actual_create - expected_create) > 0.01:
+        return False, "pid_create_time_mismatch"
+    if str(actual["process_cmdline_hash"]) != str(expected_cmdline_hash):
+        return False, "process_cmdline_mismatch"
+    return True, "identity_match"
 
 
 def _is_user_visible_trigger(trigger: Optional[str], runner_id: str = "") -> bool:

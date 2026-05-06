@@ -1,6 +1,6 @@
 """Instagram module Pydantic schemas."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -154,15 +154,15 @@ class ScheduleConfigSchema(BaseModel):
 class ScheduleConfigUpdateSchema(BaseModel):
     """스케줄 설정 업데이트."""
     enabled: Optional[bool] = None
-    daily_runs: Optional[int] = None
+    daily_runs: Optional[int] = Field(default=None, ge=1, le=24)
     time_windows: Optional[List[TimeWindow]] = None
-    max_posts: Optional[int] = None
-    scroll_count: Optional[int] = None
+    max_posts: Optional[int] = Field(default=None, ge=1)
+    scroll_count: Optional[int] = Field(default=None, ge=1)
     # 고급 설정
-    min_interval_hours: Optional[int] = None
-    duplicate_stop_count: Optional[int] = None
-    max_retries: Optional[int] = None
-    retry_interval_minutes: Optional[int] = None
+    min_interval_hours: Optional[int] = Field(default=None, ge=0, le=24)
+    duplicate_stop_count: Optional[int] = Field(default=None, ge=1)
+    max_retries: Optional[int] = Field(default=None, ge=0)
+    retry_interval_minutes: Optional[int] = Field(default=None, ge=1)
     # 계정 지정 (2025-12-21 추가)
     service_account_id: Optional[int] = None
 

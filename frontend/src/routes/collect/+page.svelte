@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
-	import PageHeader from '$lib/components/layout/PageHeader.svelte';
-	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
 	import CollectTab from './CollectTab.svelte';
 	import VideoDownloadsTab from './VideoDownloadsTab.svelte';
 
@@ -29,14 +27,16 @@
 	<title>수집 관리 | Monitor Page</title>
 </svelte:head>
 
-<div class="space-y-4">
-	<PageHeader title="수집 관리" subtitle="포스트 수집과 비디오 다운로드를 관리합니다" />
-
-	<TabNav tabs={mainTabs} bind:activeTab={mainTab} variant="primary" queryParam="tab" />
-
+<TabbedPageLayout
+	secondaryTabs={mainTabs}
+	bind:activeSecondaryTab={mainTab}
+	secondaryQueryParam="tab"
+	containerClass="space-y-3"
+	contentClass="min-w-0"
+>
 	{#if mainTab === 'posts'}
 		<CollectTab />
 	{:else if mainTab === 'videos'}
 		<VideoDownloadsTab />
 	{/if}
-</div>
+</TabbedPageLayout>

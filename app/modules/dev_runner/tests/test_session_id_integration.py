@@ -39,10 +39,14 @@ def patch_redis(fake_async, fake_sync):
 
 @pytest.fixture(autouse=True)
 def patch_check_cleanup():
+    from unittest.mock import MagicMock
     async def _noop():
         pass
+    mock_claim = MagicMock()
+    mock_claim.claim_id = "test-claim-id"
     with patch.object(executor_service, "_check_redis_and_listener", side_effect=_noop), \
-         patch.object(executor_service, "cleanup_stale_runners", side_effect=_noop):
+         patch.object(executor_service, "cleanup_stale_runners", side_effect=_noop), \
+         patch('app.modules.dev_runner.services.plan_execution_claim_service.claim_plan', return_value=mock_claim):
         yield
 
 

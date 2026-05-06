@@ -13,6 +13,8 @@ TC:
 import pytest
 from fastapi.testclient import TestClient
 
+pytestmark = pytest.mark.http
+
 
 @pytest.fixture(scope="module")
 def client(test_db_engine):

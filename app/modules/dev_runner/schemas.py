@@ -1,11 +1,13 @@
 """Dev Runner Pydantic Schemas"""
 
 import json as _json
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from datetime import date, datetime
-from typing import Literal, Optional, List
+from typing import Literal, Optional, List, Union
 
 SUPPORTED_RUN_ENGINES = {"claude", "gemini", "codex", "cc-codex"}
+
+RunnerMetadataState = Union[bool, Literal["unknown"]]
 
 
 # ========== 스키마 ==========
@@ -24,7 +26,7 @@ class RunRequest(BaseModel):
     projects: Optional[str] = Field(None, description="프로젝트 목록 (쉼표 구분)")
     worktree: bool = Field(True, description="worktree 모드 (격리 실행 + 머지 큐)")
     test_source: Optional[str] = Field(None, description="테스트 출처 (pytest TC 추적용)")
-    trigger: Optional[str] = Field(None, description="트리거 소스 (user, user:all, tc:{name}, api)")
+    trigger: Optional[str] = Field(None, description="트리거 소스 (user, user:all, tc:{name}, api, scheduler:{handler_name})")
     session_id: Optional[str] = Field(None, description="fused 세션 ID (UUID). 미지정 시 자동 발급.")
     fused_session: bool = Field(False, description="fused 세션 모드 활성화: 동일 session_id로 단계 간 CLI 세션 연속 유지")
     profile: Optional[str] = Field(None, description="AI 프로필 이름 (엔진별, claude/gemini만 지원)")
@@ -72,6 +74,16 @@ class RunStatusResponse(BaseModel):
     runner_id: Optional[str] = None
     attached: bool = False  # True = 기존 워커에 연결됨 (새 워커 생성 안 함)
     session_id: Optional[str] = None  # fused 세션 ID (UUID4 형식)
+    exit_reason: Optional[str] = None  # 종료 사유 (completed/no_progress/rate_limit/error 등)
+    error: Optional[str] = None  # 종료 에러 요약
+    worktree_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    branch_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    branch_merged_to_main: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    metadata_checked_at: str = Field("unknown", description="plan-runner snapshot check timestamp or unknown when absent")
+    claim_id: Optional[str] = None
+    claim_state: Optional[str] = None
+    claim_owner_runner_id: Optional[str] = None
+    claim_message: Optional[str] = None
 
 
 class RunnerListItem(BaseModel):
@@ -86,13 +98,24 @@ class RunnerListItem(BaseModel):
     worktree_path: Optional[str] = None
     branch: Optional[str] = None
     merge_status: Optional[str] = None
+    merge_reason: Optional[str] = None
+    merge_message: Optional[str] = None
     trigger: Optional[str] = None
     visible: bool = False  # 탭 표시 여부 (user/user:all 트리거만 True, 기본 숨김)
     orphan: bool = False  # Workflow DB에 running/merge_pending/merging 이지만 Redis에 없는 runner
+    orphan_alive: bool = False  # active/recent에는 없지만 heartbeat/log evidence가 남은 live runner
+    redis_missing: bool = False  # active/recent registry에서 소실되어 fallback으로 복구된 runner
+    log_file_found: bool = False  # filesystem/recent-meta fallback으로 표시 가능한 로그가 확인됨
     exit_reason: Optional[str] = None  # 종료 사유 (completed/no_progress/rate_limit/error 등)
     stop_stage: Optional[str] = None  # stopped 세부 단계 (pre_review|post_review|unknown)
     error: Optional[str] = None  # 종료 에러 요약
-    display_plan_name: Optional[str] = None  # plan_file 소실 시 표시용 fallback 이름
+    display_plan_name: Optional[str] = None  # UI fallback 표시명 (plan_file 소실 시 recent-meta/log/branch에서 복원)
+    remaining_post_merge_tasks: Optional[int] = None  # completed 오분류 진단: T4/T5/Phase Z 잔여 수
+    merge_evidence_missing: Optional[bool] = None  # completed 오분류 진단: branch/worktree evidence 없음
+    worktree_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    branch_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    branch_merged_to_main: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
+    metadata_checked_at: str = Field("unknown", description="plan-runner snapshot check timestamp or unknown when absent")
 
 
 class PlanProgressResponse(BaseModel):
@@ -116,6 +139,10 @@ class PlanFileResponse(BaseModel):
     branch: Optional[str] = None  # > branch: 헤더에서 추출한 impl 브랜치명
     worktree_path: Optional[str] = None  # > worktree: 헤더에서 추출한 워크트리 경로
     worktree_owner: Optional[str] = None  # > worktree-owner: 헤더에서 추출한 소유 plan 경로
+    execution_claim_id: Optional[str] = None
+    execution_claim_state: Optional[str] = None  # queued | active | released | stale
+    execution_claim_runner_id: Optional[str] = None
+    execution_claim_stale: bool = False
 
 
 class RegisteredPathResponse(BaseModel):
@@ -124,6 +151,42 @@ class RegisteredPathResponse(BaseModel):
     type: str  # "file" | "folder"
     plan_count: int
     path_type: str = "plan"  # "plan" | "archive"
+
+
+class PlanStorageRootChangeItem(BaseModel):
+    """plans storage root 변경 파일 요약."""
+    status: str
+    path: str
+
+
+class PlanStorageRootStatusItem(BaseModel):
+    """Plans 탭 상단에 노출할 root별 compact status."""
+    project: str
+    repo_root: str
+    worktree_path: str
+    branch: Optional[str] = None
+    upstream: Optional[str] = None
+    exists: bool
+    status: str
+    dirty_count: int = 0
+    docs_changes_count: int = 0
+    archive_changes_count: int = 0
+    policy_changes_count: int = 0
+    ahead: int = 0
+    behind: int = 0
+    push_needed: bool = False
+    checked_at: str
+    representative_changes: List[PlanStorageRootChangeItem] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+class PlanStorageRootStatusResponse(BaseModel):
+    """등록된 plan storage root들의 상태 요약."""
+    checked_at: str
+    roots: List[PlanStorageRootStatusItem]
+    total: int
+    dirty_count: int = 0
+    push_needed_count: int = 0
 
 
 class PlanItemResponse(BaseModel):
@@ -205,8 +268,433 @@ class ImportArchivedResponse(BaseModel):
     errors: List[str]
 
 
+class PlanArchiveScheduleSnapshot(BaseModel):
+    """Plan Archive scheduler snapshot for health UI."""
+    id: int
+    enabled: bool
+    schedule_value: Optional[str] = None
+    last_run: Optional[str] = None
+    last_success: Optional[str] = None
+    last_failure: Optional[str] = None
+
+
+class PlanArchiveFailedRequestResponse(BaseModel):
+    """Latest failed Plan Archive LLM request."""
+    id: int
+    caller_id: str
+    requested_at: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class PlanArchiveDbReadinessResponse(BaseModel):
+    """Plan Archive retrieval DB readiness summary."""
+    ok: bool
+    required_tables: List[str] = []
+    missing_tables: List[str] = []
+
+
+class PlanArchiveHealthResponse(BaseModel):
+    """Plan Archive health summary."""
+    archived_total: int
+    llm_processed: int
+    llm_unprocessed: int
+    real_unprocessed: int
+    temp_pytest_total: int
+    temp_pytest_unprocessed: int
+    pending_or_processing_requests: int
+    failed_requests: int
+    file_retention_due: int = 0
+    file_retention_scheduled: int = 0
+    file_removed: int = 0
+    oldest_file_delete_after: Optional[str] = None
+    latest_failed_request: Optional[PlanArchiveFailedRequestResponse] = None
+    oldest_unprocessed_at: Optional[str] = None
+    plan_archive_schedule: Optional[PlanArchiveScheduleSnapshot] = None
+    retrieval_db_readiness: PlanArchiveDbReadinessResponse
+
+
+class PlanArchiveRetrievalQuery(BaseModel):
+    """Archive retrieval filter + lexical query."""
+    q: Optional[str] = None
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    intent: Optional[str] = None
+    scope: Optional[str] = None
+    path: Optional[str] = None
+    repo_key: Optional[str] = None
+    relation_type: Optional[str] = None
+    semantic_cluster_id: Optional[str] = None
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class PlanArchiveIndexRequest(BaseModel):
+    """Archive retrieval index backfill request."""
+    record_id: Optional[int] = None
+    limit: int = Field(default=50, ge=1, le=500)
+    force: bool = False
+    since: Optional[datetime] = None
+    apply: bool = False
+
+
+class PlanArchiveIndexResponse(BaseModel):
+    dry_run: bool
+    indexed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    run_id: Optional[int] = None
+    errors: List[str] = []
+
+
+class PlanArchiveCrossRepoIndexRequest(BaseModel):
+    record_id: int
+    max_commits: int = Field(default=30, ge=1, le=200)
+    apply: bool = False
+
+
+class PlanArchiveCrossRepoIndexResponse(BaseModel):
+    dry_run: bool
+    record_id: int
+    repos: int = 0
+    indexed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    errors: List[str] = []
+
+
+class PlanArchiveEmbeddingIndexRequest(BaseModel):
+    """Archive chunk embedding backfill request."""
+    limit: int = Field(default=50, ge=1, le=500)
+    force: bool = False
+    apply: bool = False
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    dimension: Optional[int] = Field(default=None, ge=1, le=4096)
+    timeout_seconds: Optional[int] = Field(default=None, ge=1, le=3600)
+
+
+class PlanArchiveEmbeddingIndexResponse(BaseModel):
+    dry_run: bool
+    indexed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    errors: List[str] = []
+    provider: str
+    model: str
+    dimension: int
+
+
+class PlanArchiveChunkHit(BaseModel):
+    id: int
+    section_type: Optional[str] = None
+    heading: Optional[str] = None
+    text: str
+    snippet: Optional[str] = None
+    score: Optional[float] = None
+
+
+class PlanArchiveFileRefHit(BaseModel):
+    id: int
+    path: str
+    source_type: str
+    repo_key: str = "monitor-page"
+    module: Optional[str] = None
+    commit_sha: Optional[str] = None
+    exists_at_index: Optional[bool] = None
+
+
+class PlanArchivePlanHit(BaseModel):
+    id: int
+    filename_hash: str
+    file_path: str
+    title: Optional[str] = None
+    status: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[list] = None
+    summary: Optional[str] = None
+    intent: Optional[str] = None
+    scope: Optional[Union[str, list]] = None
+    archived_at: Optional[datetime] = None
+
+
+class PlanArchiveRetrievalHit(BaseModel):
+    plan: PlanArchivePlanHit
+    score: float
+    score_detail: dict
+    chunks: List[PlanArchiveChunkHit] = []
+    file_refs: List[PlanArchiveFileRefHit] = []
+
+
+class PlanArchiveRetrievalResult(BaseModel):
+    results: List[PlanArchiveRetrievalHit] = []
+    total: int = 0
+
+
+class PlanArchiveContextRequest(PlanArchiveRetrievalQuery):
+    token_budget: int = Field(default=3000, ge=200, le=20000)
+    include_raw: bool = False
+
+
+class PlanArchiveMetricsQuery(PlanArchiveRetrievalQuery):
+    pass
+
+
+class PlanArchiveFollowupRates(BaseModel):
+    days_7: float = 0
+    days_14: float = 0
+    days_30: float = 0
+
+
+class PlanArchiveTopFileRef(BaseModel):
+    path: str
+    count: int
+    mentioned_count: int = 0
+    changed_count: int = 0
+    repo_key: Optional[str] = None
+
+
+class PlanArchiveMissingFileCandidate(BaseModel):
+    module: str
+    count: int
+    paths: List[str] = []
+
+
+class PlanArchiveDownstreamSyncMissingCandidate(BaseModel):
+    repo_key: str
+    path: str
+    count: int = 0
+
+
+class PlanArchiveMetricsResponse(BaseModel):
+    total_plans: int
+    followup_rates: PlanArchiveFollowupRates
+    top_file_refs: List[PlanArchiveTopFileRef] = []
+    missing_file_candidates: List[PlanArchiveMissingFileCandidate] = []
+    relation_counts: dict = {}
+    chain_depth_max: int = 0
+    repo_counts: dict = {}
+    cross_repo_plan_count: int = 0
+    multi_repo_plan_count: int = 0
+    downstream_sync_missing_candidates: List[PlanArchiveDownstreamSyncMissingCandidate] = []
+
+
+class PlanArchiveInsightBatchRequest(BaseModel):
+    """Plan Archive metrics insight batch request."""
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+    grouping: str = "category"
+    category: Optional[str] = None
+    path: Optional[str] = None
+    limit: int = Field(default=20, ge=1, le=100)
+    token_budget: int = Field(default=3000, ge=200, le=20000)
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    apply: bool = False
+    force: bool = False
+
+
+class PlanArchiveInsightBatchResponse(BaseModel):
+    dry_run: bool
+    queued: bool = False
+    skipped: bool = False
+    reason: Optional[str] = None
+    report_id: Optional[int] = None
+    llm_request_id: Optional[int] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    metrics_hash: str
+    metrics: dict = {}
+    evidence: List[dict] = []
+    prompt: Optional[str] = None
+    warnings: List[str] = []
+
+
+class PlanArchiveInsightReportResponse(BaseModel):
+    id: int
+    range_start: Optional[datetime] = None
+    range_end: Optional[datetime] = None
+    grouping: str
+    metrics_hash: str
+    provider: str
+    model: str
+    status: str
+    review_status: str
+    review_note: Optional[str] = None
+    promoted_plan_path: Optional[str] = None
+    warning: Optional[str] = None
+    error_message: Optional[str] = None
+    llm_request_id: Optional[int] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    summary: Optional[str] = None
+    root_causes: List[str] = []
+    recommendations: List[str] = []
+    suggested_plan_candidates: List[dict] = []
+
+
+class PlanArchiveInsightReportListResponse(BaseModel):
+    items: List[PlanArchiveInsightReportResponse] = []
+    total: int = 0
+
+
+class PlanArchiveInsightReportDetailResponse(PlanArchiveInsightReportResponse):
+    metrics: dict = {}
+    evidence: List[dict] = []
+    insight: dict = {}
+    raw_response: Optional[str] = None
+
+
+class PlanArchiveInsightReviewUpdateRequest(BaseModel):
+    review_status: str
+    review_note: Optional[str] = None
+
+
+class PlanArchiveInsightPromotePlanRequest(BaseModel):
+    candidate_index: int = Field(default=0, ge=0)
+    confirm: bool = False
+    title: Optional[str] = None
+
+
+class PlanArchiveInsightPromotePlanResponse(BaseModel):
+    path: str
+    report: PlanArchiveInsightReportDetailResponse
+
+
+class PlanArchiveDocPatchPreviewRequest(BaseModel):
+    record_id: int
+    patch_text: str = ""
+    insight_report_id: Optional[int] = None
+    target_path: Optional[str] = None
+
+
+class PlanArchiveDocPatchApplyRequest(BaseModel):
+    confirm: bool = False
+
+
+class PlanArchiveDocPatchProposalResponse(BaseModel):
+    id: int
+    plan_record_id: int
+    insight_report_id: Optional[int] = None
+    status: str
+    target_path: str
+    patch_text: str
+    preview_text: Optional[str] = None
+    changed_lines_summary: List[dict] = []
+    applied_commit: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    applied_at: Optional[datetime] = None
+
+
+class PlanArchiveAnalyzeRequest(BaseModel):
+    """Manual Plan Archive analyze request."""
+    mode: Literal["preview", "apply"] = "preview"
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    timeout_seconds: int = Field(120, ge=1, le=3600)
+    include_prompt: bool = False
+    source: Optional[Literal["auto", "raw_content", "file_path"]] = "auto"
+
+
+class PlanArchiveAnalyzeResponse(BaseModel):
+    """Manual Plan Archive analyze response."""
+    success: bool
+    mode: str
+    result: dict = Field(default_factory=dict)
+    raw_response: str = ""
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    record_id: int
+    filename_hash: Optional[str] = None
+    file_path: Optional[str] = None
+    elapsed_ms: int = 0
+    prompt_preview: Optional[str] = None
+    prompt_policy_id: Optional[str] = None
+    prompt_policy_version: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    saved: bool = False
+    record_after: Optional[dict] = None
+    save_error: Optional[str] = None
+
+
+class PlanArchiveSelectedProfile(BaseModel):
+    engine: str
+    profile_name: str
+
+
+class PlanArchiveExecutionRunRequest(BaseModel):
+    record_ids: List[int] = Field(default_factory=list)
+    selected_profiles: List[PlanArchiveSelectedProfile] = Field(default_factory=list)
+
+
+class PlanArchiveExecutionRunResponse(BaseModel):
+    queued: int = 0
+    skipped_empty: int = 0
+    skipped_active_request: int = 0
+    skipped_active_job: int = 0
+    skipped_temp: int = 0
+    profile_count: int = 0
+    job_ids: List[int] = Field(default_factory=list)
+    request_ids: List[int] = Field(default_factory=list)
+
+
+class PlanArchiveExecutionAttemptResponse(BaseModel):
+    id: Optional[int] = None
+    llm_request_id: Optional[int] = None
+    status: Optional[str] = None
+    engine: Optional[str] = None
+    profile_name: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    retryable: bool = False
+    error_message: Optional[str] = None
+    requested_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class PlanArchiveExecutionHistoryItem(BaseModel):
+    id: int
+    plan_record_id: int
+    plan_title: Optional[str] = None
+    file_path: Optional[str] = None
+    trigger_source: str
+    status: str
+    selected_profiles: List[dict] = Field(default_factory=list)
+    profile_count: int = 0
+    latest_request_id: Optional[int] = None
+    next_available_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    queued_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    latest_attempt: Optional[PlanArchiveExecutionAttemptResponse] = None
+
+
+class PlanArchiveExecutionHistoryResponse(BaseModel):
+    items: List[dict] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 50
+    record_id: Optional[int] = None
+
+
+class PlanArchiveExecutionSyncResponse(BaseModel):
+    updated: int = 0
+    checked: int = 0
+    created: int = 0
+    record_updated: int = 0
+    missing: int = 0
+    errors: List[str] = Field(default_factory=list)
+
+
 class PlanRecordResponse(BaseModel):
     """계획서 레코드 응답"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     filename_hash: str
     file_path: str
@@ -229,6 +717,12 @@ class PlanRecordResponse(BaseModel):
     plan_date: Optional[date] = None
     applied_at: Optional[datetime] = None
     llm_processed_at: Optional[datetime] = None
+    file_delete_after: Optional[datetime] = None
+    file_removed_at: Optional[datetime] = None
+    archive_state: Optional[str] = None
+    execution_state: Optional[str] = None
+    latest_attempt: Optional[PlanArchiveExecutionAttemptResponse] = None
+    next_available_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -341,6 +835,8 @@ class MergeHistoryItem(BaseModel):
     test_passed: Optional[bool] = None
     fix_attempts: int = 0
     message: str = ""
+    reason: Optional[str] = None
+    quarantine_diff_path: Optional[str] = None
 
 
 class DevRunnerSettingsResponse(BaseModel):
@@ -402,6 +898,7 @@ class DirectMergeRequest(BaseModel):
     branch: str = Field(..., description="머지할 브랜치명 (필수)")
     worktree_path: Optional[str] = Field(default=None, description="워크트리 경로 (없으면 branch로 추론)")
     plan_file: Optional[str] = Field(default=None, description="Plan 파일 경로 (없으면 전체 실행)")
+    approve_service_lock: bool = Field(default=False, description="service_lock 경고를 확인했음을 표시 (1회 override)")
 
 
 class RetryMergeRequest(BaseModel):
@@ -409,6 +906,7 @@ class RetryMergeRequest(BaseModel):
     worktree_path: Optional[str] = Field(default=None, description="워크트리 경로")
     plan_file: Optional[str] = Field(default=None, description="Plan 파일 경로")
     branch: Optional[str] = Field(default=None, description="브랜치명")
+    approve_service_lock: bool = Field(default=False, description="service_lock 경고를 확인했음을 표시 (1회 override)")
 
 
 class CommitDiffStat(BaseModel):
@@ -496,6 +994,34 @@ __all__ = [
     'PlanRecordResponse',
     'PlanRecordWithEventsResponse',
     'ImportArchivedResponse',
+    'PlanArchiveHealthResponse',
+    'PlanArchiveDbReadinessResponse',
+    'PlanArchiveRetrievalQuery',
+    'PlanArchiveRetrievalResult',
+    'PlanArchiveChunkHit',
+    'PlanArchiveFileRefHit',
+    'PlanArchiveIndexRequest',
+    'PlanArchiveIndexResponse',
+    'PlanArchiveCrossRepoIndexRequest',
+    'PlanArchiveCrossRepoIndexResponse',
+    'PlanArchiveEmbeddingIndexRequest',
+    'PlanArchiveEmbeddingIndexResponse',
+    'PlanArchiveContextRequest',
+    'PlanArchiveMetricsQuery',
+    'PlanArchiveMetricsResponse',
+    'PlanArchiveInsightBatchRequest',
+    'PlanArchiveInsightBatchResponse',
+    'PlanArchiveInsightReportResponse',
+    'PlanArchiveInsightReportListResponse',
+    'PlanArchiveInsightReportDetailResponse',
+    'PlanArchiveInsightReviewUpdateRequest',
+    'PlanArchiveInsightPromotePlanRequest',
+    'PlanArchiveInsightPromotePlanResponse',
+    'PlanArchiveDocPatchPreviewRequest',
+    'PlanArchiveDocPatchApplyRequest',
+    'PlanArchiveDocPatchProposalResponse',
+    'PlanArchiveAnalyzeRequest',
+    'PlanArchiveAnalyzeResponse',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',

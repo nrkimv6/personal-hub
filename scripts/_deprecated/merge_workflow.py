@@ -13,6 +13,7 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
+GIT_CMD = ["git", "-c", "safe.directory=*"]
 
 
 @dataclass
@@ -85,9 +86,9 @@ class MergeWorkflow:
         try:
             # 1. 변경사항 커밋
             self._publish_log(runner_id, "COMMIT", "변경사항 커밋 중...")
-            subprocess.run(["git", "add", "-A"], cwd=str(worktree_path), capture_output=True)
+            subprocess.run(GIT_CMD + ["add", "-A"], cwd=str(worktree_path), capture_output=True)
             commit_result = subprocess.run(
-                ["git", "commit", "-m", f"feat: runner/{runner_id} 구현 완료"],
+                GIT_CMD + ["commit", "-m", f"feat: runner/{runner_id} 구현 완료"],
                 cwd=str(worktree_path), capture_output=True
             )
             self._publish_log(runner_id, "COMMIT", f"commit rc={commit_result.returncode}")
@@ -102,7 +103,7 @@ class MergeWorkflow:
 
             try:
                 log_result = subprocess.run(
-                    ["git", "log", f"main..{branch_str}", "--oneline"],
+                    GIT_CMD + ["log", f"main..{branch_str}", "--oneline"],
                     capture_output=True, text=True, cwd=str(self.project_root)
                 )
                 log_output = log_result.stdout.strip()
@@ -110,7 +111,7 @@ class MergeWorkflow:
 
                 if commit_count == 0:
                     diff_result = subprocess.run(
-                        ["git", "diff", f"main..{branch_str}"],
+                        GIT_CMD + ["diff", f"main..{branch_str}"],
                         capture_output=True, text=True, cwd=str(self.project_root)
                     )
                     if not diff_result.stdout.strip():
@@ -162,7 +163,7 @@ class MergeWorkflow:
             commit_hash = ""
             try:
                 result = subprocess.run(
-                    ["git", "log", "-1", "--format=%H"],
+                    GIT_CMD + ["log", "-1", "--format=%H"],
                     capture_output=True, text=True, cwd=str(self.project_root)
                 )
                 commit_hash = result.stdout.strip()

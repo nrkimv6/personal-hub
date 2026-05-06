@@ -4,6 +4,7 @@
 	import type { DevRunnerRunStatusResponse } from '$lib/api';
 	import LogViewer from './LogViewer.svelte';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
+	import { confirm } from '$lib/stores/confirm';
 
 	interface LogViewerRef {
 		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
@@ -21,12 +22,23 @@
 		worktreePath?: string | null;
 		branch?: string | null;
 		mergeStatus?: string | null;
+		mergeReason?: string | null;
+		mergeMessage?: string | null;
 		trigger?: string | null;
 		orphan?: boolean;
+		orphanAlive?: boolean;
+		redisMissing?: boolean;
+		logFileFound?: boolean;
 		exitReason?: string | null;
 		error?: string | null;
 		displayPlanName?: string | null;
+		remainingPostMergeTasks?: number | null;
+		mergeEvidenceMissing?: boolean | null;
 		executionCount?: number | null;
+		worktreeExists?: boolean | 'unknown';
+		branchExists?: boolean | 'unknown';
+		branchMergedToMain?: boolean | 'unknown';
+		metadataCheckedAt?: string | null;
 		onStop: () => void;
 		onClose: () => void;
 		onRestart?: () => void;
@@ -34,7 +46,7 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, trigger = null, orphan = false, exitReason = null, error = null, displayPlanName = null, executionCount = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -91,6 +103,7 @@
 		}, 1000);
 		if (logViewer && logRef) {
 			logRef({ injectLine: logViewer.injectLine, injectCompleted: logViewer.injectCompleted, injectMergeCompleted: logViewer.injectMergeCompleted, catchUp: logViewer.catchUp });
+			void logViewer.catchUp?.();
 		}
 	});
 
@@ -99,7 +112,7 @@
 	});
 
 	async function handleStop() {
-		if (!confirm('이 runner를 중지하시겠습니까?')) return;
+		if (!await confirm({ title: 'Runner 중지', message: '이 runner를 중지하시겠습니까?', confirmText: '중지' })) return;
 		stopping = true;
 		stopError = null;
 		try {
@@ -113,7 +126,12 @@
 	}
 
 	async function handleKill() {
-		if (!confirm(`runner ${runnerId}를 강제 종료합니까? 진행 중인 작업이 유실됩니다.`)) return;
+		if (!await confirm({
+			title: 'Runner 강제 종료',
+			message: `runner ${runnerId}를 강제 종료합니까? 진행 중인 작업이 유실됩니다.`,
+			confirmText: '강제 종료',
+			variant: 'danger'
+		})) return;
 		killing = true;
 		stopError = null;
 		try {
@@ -130,9 +148,30 @@
 		retryingMerge = true;
 		mergeError = null;
 		try {
-			await devRunnerRunnerApi.retryMerge(runnerId);
+			await devRunnerRunnerApi.retryMerge(runnerId, {
+				worktree_path: worktreePath ?? null,
+				plan_file: planFile ?? null,
+				branch: branch ?? null,
+			});
 		} catch (e) {
 			mergeError = e instanceof Error ? e.message : '머지 재시도 실패';
+		} finally {
+			retryingMerge = false;
+		}
+	}
+
+	async function handleApproveServiceLockAndRetryMerge() {
+		retryingMerge = true;
+		mergeError = null;
+		try {
+			await devRunnerRunnerApi.retryMerge(runnerId, {
+				worktree_path: worktreePath ?? null,
+				plan_file: planFile ?? null,
+				branch: branch ?? null,
+				approve_service_lock: true,
+			});
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : '승인 후 머지 재시도 실패';
 		} finally {
 			retryingMerge = false;
 		}
@@ -164,7 +203,12 @@
 	}
 
 	async function handleCleanupWorktree() {
-		if (!confirm('worktree를 정리하시겠습니까? 미저장 변경사항이 삭제됩니다.')) return;
+		if (!await confirm({
+			title: 'Worktree 정리',
+			message: 'worktree를 정리하시겠습니까? 미저장 변경사항이 삭제됩니다.',
+			confirmText: '정리',
+			variant: 'danger'
+		})) return;
 		try {
 			await devRunnerRunnerApi.cleanupWorktree(runnerId);
 		} catch (e) {
@@ -175,68 +219,127 @@
 	const isAllPlans = (f: string | null | undefined) =>
 		f === '__ALL_PLANS__' || f === 'ALL';
 
-	let planBasename = $derived(
-		!planFile
-			? (displayPlanName ?? '(알 수 없음)')
-			: isAllPlans(planFile)
-				? '전체 실행'
-				: planFile.split(/[\\/]/).pop() ?? planFile
+	const ENGINE_LABELS: Record<string, string> = {
+		claude: 'CLD',
+		gemini: 'GEM',
+		codex: 'COD',
+		'cc-codex': 'CCX'
+	};
+
+	function getEngineLabel(value: string | null): string {
+		if (!value) return '';
+		return ENGINE_LABELS[value] ?? value.slice(0, 3).toUpperCase();
+	}
+
+	function getEngineClass(value: string | null): string {
+		if (value === 'gemini') return 'bg-orange-100 text-orange-700 border-orange-200';
+		if (value === 'codex') return 'bg-slate-100 text-slate-700 border-slate-300';
+		if (value === 'cc-codex') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+		return 'bg-green-100 text-green-700 border-green-200';
+	}
+
+	function staleBadgeLabel(): string | null {
+		if (worktreeExists === false) return '삭제된 worktree';
+		if (branchExists === false) return 'branch 없음';
+		if (branchMergedToMain === true) return 'main 반영됨';
+		if (!running && worktreeExists === 'unknown') return '과거 실행 기록';
+		return null;
+	}
+
+	let needsPostMergeFollowup = $derived(
+		!running && (remainingPostMergeTasks ?? 0) > 0 && (exitReason === 'completed' || mergeEvidenceMissing === true)
 	);
 
+	let metaTitle = $derived.by(() => {
+		const rows = [
+			displayPlanName ? `plan: ${displayPlanName}` : null,
+			planFile && !isAllPlans(planFile) ? `file: ${planFile}` : null,
+			executionCount != null ? `run: ${executionCount}` : null,
+			`runner: ${runnerId}`,
+			engine ? `engine: ${engine}` : null,
+			branch ? `branch: ${branch}` : null,
+			worktreePath ? `worktree: ${worktreePath}` : null,
+			`worktree_exists: ${worktreeExists}`,
+			`branch_exists: ${branchExists}`,
+			`branch_merged_to_main: ${branchMergedToMain}`,
+			`orphan_alive: ${orphanAlive}`,
+			`redis_missing: ${redisMissing}`,
+			`log_file_found: ${logFileFound}`,
+			`remaining_post_merge_tasks: ${remainingPostMergeTasks ?? 0}`,
+			`merge_evidence_missing: ${mergeEvidenceMissing ?? false}`,
+			`metadata_checked_at: ${metadataCheckedAt ?? 'unknown'}`
+		];
+		return rows.filter(Boolean).join('\n');
+	});
+
 	let exitDisplay = $derived(getExitReasonDisplay(exitReason));
-	let statusIcon = $derived(running ? '실행중' : exitDisplay.statusIcon);
+	function resolveHeaderStatus(runningValue: boolean, exitReasonValue: string | null, mergeStatusValue: string | null): string {
+		if (runningValue) return '실행중';
+		if (mergeStatusValue === 'merged') return '머지됨';
+		if (mergeStatusValue === 'test_failed') return '테스트 실패';
+		if (mergeStatusValue === 'conflict') return '충돌';
+		return getExitReasonDisplay(exitReasonValue).statusIcon;
+	}
+
+	let statusIcon = $derived(resolveHeaderStatus(running, exitReason, mergeStatus));
 </script>
 
 <div class="flex flex-col h-full">
 	<!-- 헤더 바 -->
-	<div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-xs shrink-0">
-		<span class="text-base leading-none">{statusIcon}</span>
+	<div class="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b border-border text-xs shrink-0" title={metaTitle}>
+		<div class="flex min-w-0 flex-1 items-center gap-2">
+			<span class="shrink-0 text-xs font-medium text-foreground">{statusIcon}</span>
 
-		<span class="font-mono font-medium text-gray-700 truncate max-w-[160px]" title={isAllPlans(planFile) ? '전체 실행' : planFile!}>
-			{planBasename}
-		</span>
+			{#if engine}
+				<span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase {getEngineClass(engine)}" title={engine}>
+					{getEngineLabel(engine)}
+				</span>
+			{/if}
 
-		{#if engine}
-			<span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase {engine === 'gemini' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}">
-				{engine}
-			</span>
-		{/if}
+			{#if mergeStatus === 'merged'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700">머지됨</span>
+			{:else if mergeStatus === 'merge_pending'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 대기</span>
+			{:else if mergeStatus === 'merging' || mergeStatus === 'testing'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 중</span>
+			{:else if mergeStatus === 'conflict'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">충돌</span>
+			{:else if mergeStatus === 'test_failed'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700">테스트 실패</span>
+			{:else if mergeStatus === 'error'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">머지 오류</span>
+			{:else if mergeStatus === 'fixing'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700 animate-pulse">자동 수정 중</span>
+			{:else if mergeStatus === 'resolving'}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
+			{/if}
 
-		{#if executionCount != null}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-indigo-100 text-indigo-700">
-				{executionCount}번째 실행
-			</span>
-		{/if}
+			{#if staleBadgeLabel()}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground" title={metaTitle}>
+					{staleBadgeLabel()}
+				</span>
+			{/if}
 
-		<span class="text-gray-400 font-mono text-[10px]">{runnerId}</span>
+			{#if needsPostMergeFollowup}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800" title={metaTitle}>
+					후처리 필요
+				</span>
+			{/if}
 
-		{#if branch}
-			<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-100 text-purple-700" title={worktreePath ?? branch}>
-				{branch}
-			</span>
-		{/if}
+			{#if orphanAlive}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700" title={metaTitle}>
+					Redis 상태 소실
+				</span>
+			{:else if redisMissing && logFileFound}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-sky-100 text-sky-700" title={metaTitle}>
+					로그 복구
+				</span>
+			{/if}
 
-		{#if mergeStatus === 'merged'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700">머지됨</span>
-		{:else if mergeStatus === 'merge_pending'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 대기</span>
-		{:else if mergeStatus === 'merging' || mergeStatus === 'testing'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 중</span>
-		{:else if mergeStatus === 'conflict'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">충돌</span>
-		{:else if mergeStatus === 'test_failed'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700">테스트 실패</span>
-		{:else if mergeStatus === 'error'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">머지 오류</span>
-		{:else if mergeStatus === 'fixing'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700 animate-pulse">자동 수정 중</span>
-		{:else if mergeStatus === 'resolving'}
-			<span class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
-		{/if}
-
-		{#if elapsed}
-			<span class="text-gray-400 text-[10px] ml-auto shrink-0">{elapsed}</span>
-		{/if}
+			{#if elapsed}
+				<span class="ml-auto shrink-0 text-[10px] text-muted-foreground">{elapsed}</span>
+			{/if}
+		</div>
 
 		{#if running}
 			<button
@@ -252,7 +355,7 @@
 				disabled={stopping || killing}
 				title="강제 종료 (SIGKILL) — 진행 중인 작업이 유실됩니다"
 			>
-				{killing ? '종료 중...' : '강제 종료'}
+				{killing ? '종료 중...' : '강제'}
 			</button>
 		{:else if exitReason && !['completed', 'stopped', 'archived'].includes(exitReason) && onRestart}
 			<button
@@ -263,9 +366,7 @@
 				재실행
 			</button>
 		{/if}
-
 	</div>
-
 	{#if stopError}
 		<div class="px-3 py-1 text-xs text-red-600 bg-red-50 border-b border-red-100">{stopError}</div>
 	{/if}
@@ -273,6 +374,12 @@
 	{#if !running && error}
 		<div class="px-3 py-1.5 text-xs text-red-700 bg-red-50 border-b border-red-100 truncate" title={error}>
 			{error}
+		</div>
+	{/if}
+
+	{#if needsPostMergeFollowup}
+		<div class="px-3 py-1.5 text-xs text-amber-800 bg-amber-50 border-b border-amber-200">
+			후처리 필요: T4/T5 잔여 {remainingPostMergeTasks ?? 0}개가 남아 있습니다.
 		</div>
 	{/if}
 
@@ -291,6 +398,31 @@
 				<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
 			</svg>
 			<span class="text-yellow-700 font-medium">테스트 실패 자동 수정 중...</span>
+		</div>
+	{:else if mergeStatus === 'approval_required'}
+		<div class="flex flex-col gap-1.5 px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-xs">
+			<div class="flex items-center gap-2">
+				<span class="text-yellow-800 font-medium">service_lock 경고 확인이 필요합니다.</span>
+				<button
+					class="px-2 py-0.5 rounded border border-yellow-300 text-yellow-900 hover:bg-yellow-100 disabled:opacity-50 transition-colors"
+					onclick={handleApproveServiceLockAndRetryMerge}
+					disabled={retryingMerge}
+					title="경고 확인 후 같은 runner/worktree로 머지를 다시 진행합니다 (1회 override)"
+				>
+					{retryingMerge ? '승인 중...' : '경고 확인 후 머지'}
+				</button>
+				<button
+					class="px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors"
+					onclick={handleCleanupWorktree}
+				>
+					Worktree 정리
+				</button>
+			</div>
+			{#if mergeReason || mergeMessage}
+				<div class="text-[11px] text-yellow-900/80 truncate" title={mergeMessage ?? mergeReason ?? ''}>
+					{mergeMessage ?? mergeReason}
+				</div>
+			{/if}
 		</div>
 	{:else if ['conflict', 'test_failed', 'error'].includes(mergeStatus ?? '')}
 		<div class="flex items-center gap-2 px-3 py-2 bg-red-50 border-b border-red-200 text-xs">
@@ -316,7 +448,7 @@
 				{retryingMerge ? '재시도 중...' : '머지 재시도'}
 			</button>
 			<button
-				class="px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+				class="px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors"
 				onclick={handleCleanupWorktree}
 			>
 				Worktree 정리
@@ -324,8 +456,8 @@
 		</div>
 	{/if}
 
-	{#if !running && branch && worktreePath && !['conflict', 'test_failed', 'error', 'resolving', 'fixing'].includes(mergeStatus ?? '')}
-		<div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-xs">
+	{#if !running && branch && worktreePath && worktreeExists !== false && branchExists !== false && !['conflict', 'test_failed', 'error', 'resolving', 'fixing', 'approval_required'].includes(mergeStatus ?? '')}
+		<div class="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b border-border text-xs">
 			<button
 				class="px-2 py-0.5 rounded border border-purple-300 text-purple-700 hover:bg-purple-100 disabled:opacity-50 transition-colors"
 				onclick={handleDirectMerge}
@@ -334,6 +466,16 @@
 			>
 				{directMerging ? '머지 중...' : '직접 머지'}
 			</button>
+		</div>
+	{/if}
+
+	{#if !running && worktreeExists === false}
+		<div class="px-3 py-1.5 text-xs text-muted-foreground bg-muted/50 border-b border-border">
+			삭제된 worktree의 과거 실행 기록입니다. 직접 머지는 새 worktree에서 다시 실행해야 합니다.
+		</div>
+	{:else if !running && branchExists === false}
+		<div class="px-3 py-1.5 text-xs text-muted-foreground bg-muted/50 border-b border-border">
+			branch가 남아 있지 않은 과거 실행 기록입니다.
 		</div>
 	{/if}
 
@@ -348,8 +490,18 @@
 		</div>
 	{/if}
 
+	{#if orphanAlive}
+		<div class="px-3 py-1.5 text-xs text-orange-700 bg-orange-50 border-b border-orange-200">
+			Redis runner 상태는 소실됐지만 heartbeat와 로그 파일이 남아 있습니다.
+		</div>
+	{:else if redisMissing && logFileFound}
+		<div class="px-3 py-1.5 text-xs text-sky-700 bg-sky-50 border-b border-sky-200">
+			Runner 목록에서는 빠졌지만 기존 로그를 복구했습니다.
+		</div>
+	{/if}
+
 	<!-- 로그 뷰어 -->
 	<div class="flex-1 min-h-0">
-		<LogViewer bind:this={logViewer} {runnerId} planFile={planFile ?? undefined} {running} {mergeStatus} {trigger} {engine} {worktreePath} {branch} mode="managed" {onBatchPlansChange} />
+		<LogViewer bind:this={logViewer} {runnerId} planFile={planFile ?? undefined} {running} {mergeStatus} {trigger} {engine} {worktreePath} {branch} {executionCount} mode="managed" {onBatchPlansChange} />
 	</div>
 </div>

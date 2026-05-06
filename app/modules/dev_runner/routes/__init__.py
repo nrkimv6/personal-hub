@@ -15,6 +15,7 @@ from .events import router as events_router
 from .settings import router as settings_router
 from .workflows import router as workflows_router
 from .worktrees import router as worktrees_router
+from .daily_reports import router as daily_reports_router
 
 router.include_router(tasks_router)
 router.include_router(runner_router)
@@ -25,5 +26,6 @@ router.include_router(events_router)
 router.include_router(settings_router, prefix="/settings")
 router.include_router(workflows_router, prefix="/workflows")
 router.include_router(worktrees_router, prefix="/worktrees")
+router.include_router(daily_reports_router)
 
 __all__ = ['router']

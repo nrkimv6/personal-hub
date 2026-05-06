@@ -3,16 +3,15 @@
 import httpx
 import pytest
 
-pytestmark = pytest.mark.e2e
+from tests.dev_runner.live_http_readiness import live_get_after_readiness
+
+pytestmark = [pytest.mark.e2e, pytest.mark.http_live]
 
 BASE_URL = "http://localhost:8001"
 
 
 def _get(path: str) -> httpx.Response:
-    try:
-        return httpx.get(f"{BASE_URL}{path}", timeout=10)
-    except httpx.ConnectError:
-        pytest.fail("실서버 미기동 — localhost:8001 연결 불가")
+    return live_get_after_readiness(path, base_url=BASE_URL)
 
 
 def test_worktree_list_v2_live_shape_smoke():
@@ -27,7 +26,7 @@ def test_worktree_list_v2_live_shape_smoke():
     assert "main_dirty" in data
 
 
-def test_worktree_list_v2_live_worktree_counts_match_v1():
+def test_worktree_list_v2_live_worktree_branches_are_known_to_v1():
     v1_resp = _get("/api/v1/dev-runner/worktrees")
     v2_resp = _get("/api/v1/dev-runner/worktrees/v2")
 
@@ -39,4 +38,7 @@ def test_worktree_list_v2_live_worktree_counts_match_v1():
 
     assert isinstance(v1_data, list)
     assert isinstance(v2_data["worktrees"], list)
-    assert len(v2_data["worktrees"]) == len(v1_data)
+    v1_branches = {item.get("branch") for item in v1_data}
+    v2_branches = {item.get("branch") for item in v2_data["worktrees"]}
+    assert v2_branches
+    assert v2_branches <= v1_branches

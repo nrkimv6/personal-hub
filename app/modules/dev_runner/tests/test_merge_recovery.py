@@ -64,7 +64,7 @@ def _should_block_cleanup(runner_id, redis_client, reason):
     """보호 가드: reconnect_/heartbeat_ reason + MERGE_ACTIVE_STATUSES → True (차단)"""
     if reason and reason.startswith(("reconnect_", "heartbeat_")):
         merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-        if merge_status in MERGE_ACTIVE_STATUSES:
+        if merge_status in MERGE_ACTIVE_STATUSES or merge_status == "approval_required":
             return True
     return False
 
@@ -178,6 +178,16 @@ class TestCleanupProcessStateMergeGuard:
         blocked = _should_block_cleanup("abc", redis_client, "reconnect_orphan")
 
         assert blocked is False
+
+    def test_rejects_approval_required_on_reconnect(self):
+        """R(Right): merge_status="approval_required" + reconnect_* reason → cleanup 거부"""
+        redis_client, _ = _make_redis({
+            f"{RUNNER_KEY_PREFIX}:abc:merge_status": "approval_required",
+        })
+
+        blocked = _should_block_cleanup("abc", redis_client, "reconnect_orphan")
+
+        assert blocked is True
 
 
 # ── TestReconnectNeedsRecovery ────────────────────────────────────────────────

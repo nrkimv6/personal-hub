@@ -4,12 +4,17 @@
 	import { onMount } from 'svelte';
 	import { schedulerApi } from '$lib/api';
 	import type { ScheduledTask, TaskLog } from '$lib/types';
+	import { toast } from '$lib/stores/toast';
 
 	let tasks = $state<ScheduledTask[]>([]);
 	let logs = $state<TaskLog[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let actionLoading = $state<Record<string, boolean>>({});
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
 
 	// 작업명 한글 매핑
 	const taskLabels: Record<string, { name: string; description: string }> = {
@@ -48,10 +53,10 @@
 		actionLoading[taskName] = true;
 		try {
 			await schedulerApi.runTask(taskName);
-			alert(`${taskLabels[taskName]?.name || taskName} 작업을 실행했습니다.`);
+			toast.success(`${taskLabels[taskName]?.name || taskName} 작업을 실행했습니다.`);
 			await fetchData();
 		} catch (e) {
-			alert(`실행 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+			toast.error(`실행 실패: ${errorMessage(e)}`);
 		} finally {
 			actionLoading[taskName] = false;
 		}
@@ -63,7 +68,7 @@
 			await schedulerApi.updateTask(task.name, !task.enabled);
 			await fetchData();
 		} catch (e) {
-			alert(`상태 변경 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+			toast.error(`상태 변경 실패: ${errorMessage(e)}`);
 		} finally {
 			actionLoading[task.name] = false;
 		}

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import redis
 import shutil
@@ -13,12 +14,23 @@ from pathlib import Path
 from typing import List, Optional
 
 from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services.plan_path_helpers import (
+    load_wtools_project_roots,
+    iter_repo_plan_path_candidates,
+    extract_repo_root_from_plan_path,
+    backfill_dual_paths,
+    canonicalize_wtools_legacy_common_path,
+    dedupe_prefer_worktree,
+    resolve_plans_ledger_paths,
+)
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle, resolve_archive_target_or_raise
+from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
 from app.modules.dev_runner.services.log_service import SYSTEM_LOG_CHANNEL, REDIS_HOST, REDIS_PORT
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 from app.core.config import PROJECT_ROOT
+from app.shared.io import write_json_atomic
 from app.modules.dev_runner.schemas import (
     PlanFileResponse, PlanProgressResponse,
     PlanDetailResponse, PlanPhaseResponse, PlanItemResponse,
@@ -126,52 +138,64 @@ class PlanService:
                     logger.info(f"[마이그레이션] 문자열→객체 배열 변환 완료 ({len(migrated)}개)")
                 normalized, normalized_changed = self._normalize_registered_paths(data)
                 if normalized_changed or changed:
-                    reg_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+                    write_json_atomic(reg_path, normalized)
             except Exception:
                 pass
             return
 
-        paths: List[str] = []
+        entries: List[dict] = []
+        existing_keys: set[tuple[str, str]] = set()
+
+        def _add_entry(
+            path: Path,
+            path_type: str,
+            *,
+            require_exists: bool = True,
+            raw_path: str | None = None,
+        ) -> None:
+            if require_exists and not path.exists():
+                return
+            resolved = raw_path if raw_path is not None else str(path.resolve())
+            key = (resolved, path_type)
+            if key not in existing_keys:
+                entries.append({"path": resolved, "type": path_type})
+                existing_keys.add(key)
 
         # 기존 external_plans.json에서 가져오기
         ext_path = config.EXTERNAL_PLANS_FILE
         if ext_path.exists():
             try:
-                paths = json.loads(ext_path.read_text(encoding="utf-8"))
-                logger.info(f"[마이그레이션] external_plans.json에서 {len(paths)}개 경로 로드")
+                raw = json.loads(ext_path.read_text(encoding="utf-8"))
+                for p in raw:
+                    if isinstance(p, str):
+                        _add_entry(Path(p), "plan", require_exists=False, raw_path=p)
+                logger.info(f"[마이그레이션] external_plans.json에서 로드")
             except Exception:
-                paths = []
+                pass
 
-        # WTOOLS_BASE_DIR 시드: 존재하는 프로젝트 plan 폴더를 자동 등록
-        existing = set(paths)
-        base = config.WTOOLS_BASE_DIR
-        if base.exists():
-            # common/docs/plan
-            common_dir = base / config.PLAN_DIR
-            if common_dir.exists():
-                resolved = str(common_dir.resolve())
-                if resolved not in existing:
-                    paths.append(resolved)
-                    existing.add(resolved)
+        # .claude/projects.json 기반 시드 (우선)
+        project_roots = load_wtools_project_roots()
+        if project_roots:
+            for root in project_roots:
+                for candidate_path, path_type in iter_repo_plan_path_candidates(root):
+                    _add_entry(candidate_path, path_type)
+            logger.info(f"[마이그레이션] projects.json 시드 완료 — {len(project_roots)}개 repo")
+        else:
+            # fallback: WTOOLS_BASE_DIR + PROJECT_DIRS (projects.json 없는 환경)
+            base = config.WTOOLS_BASE_DIR
+            if base.exists():
+                for candidate_path, path_type in iter_repo_plan_path_candidates(base):
+                    _add_entry(candidate_path, path_type)
+                for project in config.PROJECT_DIRS:
+                    project_root = base / project
+                    for candidate_path, path_type in iter_repo_plan_path_candidates(project_root):
+                        _add_entry(candidate_path, path_type)
+                logger.info(f"[마이그레이션] WTOOLS fallback 시드 완료")
 
-            # 각 프로젝트의 docs/plan
-            for project in config.PROJECT_DIRS:
-                project_dir = base / project / "docs" / "plan"
-                if project_dir.exists():
-                    resolved = str(project_dir.resolve())
-                    if resolved not in existing:
-                        paths.append(resolved)
-                        existing.add(resolved)
-
-            logger.info(f"[마이그레이션] WTOOLS 시드 완료 — 총 {len(paths)}개 경로")
-
-        # 객체 배열로 저장
-        if paths:
-            entries = [{"path": p, "type": "plan"} for p in paths]
-            entries, _ = self._normalize_registered_paths(entries)
-            reg_path.parent.mkdir(parents=True, exist_ok=True)
-            reg_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(entries)}개)")
+        if entries:
+            normalized, _ = self._normalize_registered_paths(entries)
+            write_json_atomic(reg_path, normalized)
+            logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(normalized)}개)")
 
     def _load_registered_paths(self):
         """등록된 경로 목록 로드 (JSON 파일) — 객체 배열 {"path", "type"}"""
@@ -180,19 +204,26 @@ class PlanService:
             try:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
                 normalized, changed = self._normalize_registered_paths(loaded)
-                self._registered_paths = normalized
-                if changed:
-                    path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+                backfilled, backfill_changed = self._backfill_dual_paths(normalized)
+                self._registered_paths = backfilled
+                if changed or backfill_changed:
+                    write_json_atomic(path, backfilled)
             except Exception:
                 self._registered_paths = []
+
+    def _backfill_dual_paths(self, entries: List[dict]) -> tuple[List[dict], bool]:
+        """기존 등록 목록에서 docs <-> worktree 상호 보완 경로를 backfill한다.
+
+        docs/plan 만 등록되어 있고 .worktrees/plans/docs/plan 이 실재하면 추가 (vice versa).
+        """
+        return backfill_dual_paths(entries)
 
     def _save_registered_paths(self):
         """등록된 경로 목록 저장 — 객체 배열 {"path", "type"}"""
         path = config.REGISTERED_PATHS_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
         normalized, _ = self._normalize_registered_paths(self._registered_paths)
         self._registered_paths = normalized
-        path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(path, normalized)
 
     def _get_registered_path_strs(self) -> List[str]:
         """등록 경로를 문자열 목록으로 반환 (내부 탐색용)"""
@@ -201,7 +232,10 @@ class PlanService:
     @staticmethod
     def _resolve_path_str(path_str: str) -> str:
         try:
-            return str(Path(path_str).resolve())
+            path = Path(path_str)
+            if path_str.startswith("/") and not path.exists():
+                return path_str
+            return str(path.resolve())
         except Exception:
             return path_str
 
@@ -235,6 +269,14 @@ class PlanService:
                     changed = True
                 item["path"] = path_value
                 item["type"] = expected_type
+            else:
+                canonical = canonicalize_wtools_legacy_common_path(resolved, item["type"])
+                if canonical is not None:
+                    path_value, expected_type = canonical
+                    if item["type"] != expected_type or item["path"] != path_value:
+                        changed = True
+                    item["path"] = path_value
+                    item["type"] = expected_type
 
             dedupe_key = (item["path"], item["type"])
             if dedupe_key in seen:
@@ -257,8 +299,7 @@ class PlanService:
     def _save_ignored_plans(self):
         """수동 무시 plan 목록 저장"""
         path = config.IGNORED_PLANS_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self._ignored_plans, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(path, self._ignored_plans)
 
     # ========== 경로 관리 ==========
 
@@ -318,9 +359,13 @@ class PlanService:
         self._plans_cache_time = 0
 
     def _scan_all_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
-        """실제 파일시스템 스캔 (캐시 미스 시 호출)"""
+        """실제 파일시스템 스캔 (캐시 미스 시 호출).
+
+        같은 (repo_root, filename) 조합이 docs와 .worktrees/plans/docs 양쪽에 있으면
+        worktree 경로를 우선 노출하고 docs 경로는 제거한다.
+        """
         seen: set[str] = set()
-        results: List[PlanFileResponse] = []
+        raw_results: List[PlanFileResponse] = []
 
         for entry in self._registered_paths:
             is_archive = entry.get("type") == "archive"
@@ -333,7 +378,7 @@ class PlanService:
                 continue
             if p.is_dir():
                 self._scan_plan_dir(
-                    p, seen, results, include_ignored,
+                    p, seen, raw_results, include_ignored,
                     path_type="folder",
                     recursive=is_archive,
                 )
@@ -351,7 +396,7 @@ class PlanService:
                         except Exception:
                             summary = None
                             created_at = _extract_created_at('', p)
-                        results.append(
+                        raw_results.append(
                             PlanFileResponse(
                                 path=str(p),
                                 filename=p.name,
@@ -365,8 +410,14 @@ class PlanService:
                             )
                         )
 
+        results = self._dedupe_prefer_worktree(raw_results)
         results.sort(key=lambda x: x.created_at or x.filename, reverse=True)
         return results
+
+    @staticmethod
+    def _dedupe_prefer_worktree(results: List[PlanFileResponse]) -> List[PlanFileResponse]:
+        """같은 (repo_root, filename)이면 worktree 경로를 남기고 docs 경로를 제거한다."""
+        return dedupe_prefer_worktree(results)
 
     def list_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
         """
@@ -402,6 +453,11 @@ class PlanService:
         - .../폴더명 → 폴더명
         """
         parts = path.parts
+        # .worktrees 포함 시 .worktrees 직전 디렉토리명 반환 (plans 오분류 차단)
+        if ".worktrees" in parts:
+            wt_idx = list(parts).index(".worktrees")
+            if wt_idx > 0:
+                return parts[wt_idx - 1]
         for i, part in enumerate(parts):
             if part == "docs" and i + 1 < len(parts) and parts[i + 1] == "plan":
                 # docs/plan 직전 디렉토리 = 프로젝트명
@@ -808,6 +864,7 @@ class PlanService:
 
     # ========== done 처리 (Python 네이티브) ==========
 
+    COMMIT_PS1 = Path("D:/work/project/tools/common/commit.ps1")
     COMMIT_SH = Path("D:/work/project/tools/common/commit.sh")
 
     @staticmethod
@@ -892,8 +949,9 @@ class PlanService:
         parts = p.parts
         for i, part in enumerate(parts):
             if part == "plan" and i > 0 and parts[i - 1] == "docs":
-                # parts[0..i-2] = project root
-                project_root = Path(*parts[:i - 1])
+                # .worktrees 포함 시 .worktrees 직전 경로를 project root로 사용
+                j = parts.index(".worktrees") if ".worktrees" in parts[:i - 1] else None
+                project_root = Path(*parts[:j]) if j is not None else Path(*parts[:i - 1])
                 if project_root.exists():
                     return project_root
         # fallback: 파일 기준 상위 3단계
@@ -922,23 +980,55 @@ class PlanService:
             raise ValueError(str(path_err)) from path_err
 
     @staticmethod
-    def _update_todo_done(project_dir: Path, plan_title: str) -> None:
-        """TODO.md에서 plan_title 관련 항목 제거, DONE.md 상단에 추가"""
-        today = date.today().isoformat()
+    def _todo_line_matches_plan(line: str, plan_title: str, plan_path: Path | None = None) -> bool:
+        """Return True only for the TODO checkbox item for this completed plan."""
+        checkbox_match = re.match(r'^\s*[-*]\s*\[[ xX→]\]\s*(.+?)\s*$', line)
+        if not checkbox_match:
+            return False
 
-        # TODO.md: plan_title을 포함하는 체크박스 줄 제거
-        todo_path = project_dir / "TODO.md"
+        body = checkbox_match.group(1).strip()
+        normalized_body = body.replace("\\", "/")
+
+        if plan_path is not None:
+            plan_path_text = str(plan_path).replace("\\", "/")
+            path_tokens = {
+                plan_path_text,
+                plan_path.as_posix(),
+                plan_path.name,
+            }
+            if any(token and token in normalized_body for token in path_tokens):
+                return True
+            stem_pattern = rf'(?<![A-Za-z0-9_-]){re.escape(plan_path.stem)}(?![A-Za-z0-9_-])'
+            if re.search(stem_pattern, normalized_body):
+                return True
+
+        title_patterns = [
+            rf'^{re.escape(plan_title)}$',
+            rf'^{re.escape(plan_title)}\s+\(',
+            rf'^{re.escape(plan_title)}\s+\[',
+            rf'^\*\*{re.escape(plan_title)}\*\*(?:\s|$)',
+        ]
+        return any(re.search(pattern, body) for pattern in title_patterns)
+
+    @classmethod
+    def _update_todo_done(cls, project_dir: Path, plan_title: str, plan_path: Path | None = None) -> None:
+        """plans ledger TODO에서 해당 plan 항목 제거, plans DONE 상단에 추가"""
+        today = date.today().isoformat()
+        ledger_paths = resolve_plans_ledger_paths(project_dir)
+
+        # TODO.md: completed plan에 해당하는 체크박스 줄만 제거
+        todo_path = ledger_paths.todo_path
         if todo_path.exists():
             lines = todo_path.read_text(encoding="utf-8").splitlines(keepends=True)
             filtered = [
                 l for l in lines
-                if not (plan_title in l and re.search(r'\[[ x→]\]', l))
+                if not cls._todo_line_matches_plan(l, plan_title, plan_path)
             ]
             if len(filtered) < len(lines):
                 todo_path.write_text("".join(filtered), encoding="utf-8")
 
         # DONE.md 상단에 추가
-        done_path = project_dir / "docs" / "DONE.md"
+        done_path = ledger_paths.done_path
         done_path.parent.mkdir(parents=True, exist_ok=True)
         new_entry = f"- [x] {today}: {plan_title}\n"
 
@@ -1151,42 +1241,57 @@ class PlanService:
         commit_msg: str,
         runner_id: Optional[str] = None,
     ) -> str:
-        """git add + commit.sh 호출"""
-        if not self.COMMIT_SH.exists():
-            return f"commit.sh not found: {self.COMMIT_SH}"
+        """git add + commit script 호출.
+
+        Windows에서는 commit.ps1을 우선 사용하고, 각 subprocess의 non-zero
+        종료 코드는 run_done 실패로 전파한다.
+        """
+        commit_command = self._resolve_commit_command(commit_msg)
 
         ownership_error = self._validate_runner_ownership(project_dir, files_to_add, runner_id)
         if ownership_error:
             return ownership_error
 
-        # 존재하는 파일(신규/수정) + 삭제된 파일(git mv로 이미 staged된 경우도 포함)을 모두 add
-        # git add는 삭제된 파일 경로도 처리 가능 (staging에 반영)
-        existing_files = [str(f) for f in files_to_add if f.exists()]
-        deleted_files = [str(f) for f in files_to_add if not f.exists()]
-        all_files = existing_files + deleted_files
-        if not all_files:
-            return "커밋할 파일 없음"
-
-        cwd = str(project_dir) if project_dir and project_dir.exists() else None
-
-        # git add (존재하는 파일 먼저, 삭제된 파일은 별도 처리)
-        add_proc = await asyncio.create_subprocess_exec(
-            "git", "-c", "safe.directory=*", "add", *all_files,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        return await commit_files_by_git_root(
+            files_to_add=files_to_add,
+            default_root=project_dir,
+            commit_command=commit_command,
+            decode_output=self._decode_subprocess_output,
         )
-        await add_proc.communicate()
 
-        # commit.sh
-        commit_proc = await asyncio.create_subprocess_exec(
-            "bash", str(self.COMMIT_SH), commit_msg,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await asyncio.wait_for(commit_proc.communicate(), timeout=60)
-        return stdout.decode("utf-8", errors="replace") if stdout else ""
+    @classmethod
+    def _resolve_commit_command(cls, commit_msg: str) -> list[str]:
+        if os.name == "nt" and cls.COMMIT_PS1.exists():
+            return [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(cls.COMMIT_PS1),
+                commit_msg,
+            ]
+        if cls.COMMIT_SH.exists():
+            return ["bash", str(cls.COMMIT_SH), commit_msg]
+        if cls.COMMIT_PS1.exists():
+            return [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(cls.COMMIT_PS1),
+                commit_msg,
+            ]
+        raise FileNotFoundError(f"commit script not found: {cls.COMMIT_PS1} or {cls.COMMIT_SH}")
+
+    @staticmethod
+    def _decode_subprocess_output(output) -> str:
+        if not output:
+            return ""
+        if isinstance(output, bytes):
+            return output.decode("utf-8", errors="replace")
+        return str(output)
 
     async def run_done(self, plan_path: str, runner_id: Optional[str] = None) -> dict:
         """Python 네이티브 plan 완료 처리 (아카이브, TODO→DONE, git commit)"""
@@ -1228,13 +1333,11 @@ class PlanService:
                 if todo_archive_path:
                     ownership_targets.append(todo_archive_path)
             if project_dir:
-                done_path = project_dir / "docs" / "DONE.md"
-                today = date.today()
-                done_history_path = done_path.parent / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md"
+                ledger_paths = resolve_plans_ledger_paths(project_dir)
                 ownership_targets.extend([
-                    project_dir / "TODO.md",
-                    done_path,
-                    done_history_path,
+                    ledger_paths.todo_path,
+                    ledger_paths.done_path,
+                    ledger_paths.done_history_path,
                 ])
                 if has_manual:
                     ownership_targets.append(project_dir / "MANUAL_TASKS.md")
@@ -1267,17 +1370,19 @@ class PlanService:
 
             # 4. TODO.md / DONE.md 업데이트
             if project_dir:
-                self._update_todo_done(project_dir, title)
-                done_path = project_dir / "docs" / "DONE.md"
+                self._update_todo_done(project_dir, title, path)
+                ledger_paths = resolve_plans_ledger_paths(project_dir)
+                done_path = ledger_paths.done_path
                 done_history_path = self._archive_done_if_needed(done_path)
 
             # 5. git commit
-            files_to_commit: List[Path] = [archive_path]
+            files_to_commit: List[Path] = [path, archive_path]
             if todo_archive_path:
+                files_to_commit.append(path.parent / todo_archive_path.name)
                 files_to_commit.append(todo_archive_path)
             if project_dir:
                 files_to_commit += [
-                    project_dir / "TODO.md",
+                    ledger_paths.todo_path,
                     done_path,
                 ]
                 if done_history_path:
@@ -1511,9 +1616,15 @@ class PlanService:
         # 이전 상태 스냅샷 (활성 plan만 — archive는 sync 대상 아님)
         old_plans = {p.path: p for p in self.list_plans()}
         old_keys = set(old_plans.keys())
+        previous_registered_paths = list(self._registered_paths)
 
         # 디스크에서 다시 스캔 (캐시 무효화)
         self._load_registered_paths()
+        if not self._registered_paths and previous_registered_paths and old_plans:
+            # TestClient and long-running API sessions may hold a warm in-memory
+            # registry while a temporary/empty config path is patched in later.
+            # Preserve the active registry instead of reporting a false zero sync.
+            self._registered_paths = previous_registered_paths
         self.invalidate_plans_cache()
         new_plans_list = self.list_plans()
         new_plans = {p.path: p for p in new_plans_list}
@@ -1619,9 +1730,13 @@ class PlanService:
 
         - 파일 상단 20줄에서 `> 상태: ...` 라인을 찾아 교체
         - 라인이 없으면 첫 번째 `#` 제목 다음 줄에 삽입
-        - 허용 상태: 초안, 검토대기, 검토완료, 구현중, 구현완료, 보류
+        - 허용 상태: plan lifecycle 표준 상태 및 예약대기
         """
-        ALLOWED_STATUSES = ["초안", "검토대기", "검토완료", "구현중", "테스트중", "머지대기", "구현완료", "보류"]
+        ALLOWED_STATUSES = [
+            "초안", "검토대기", "예약대기", "검토완료", "구현중",
+            "검증중", "수정필요", "테스트중", "머지대기",
+            "통합테스트중", "구현완료", "완료", "보류",
+        ]
         if new_status not in ALLOWED_STATUSES:
             raise ValueError(
                 f"허용되지 않은 상태: '{new_status}'. 허용 목록: {ALLOWED_STATUSES}"

@@ -14,6 +14,7 @@
 		FolderOpen,
 		FolderSymlink
 	} from 'lucide-svelte';
+	import { confirm } from '$lib/stores/confirm';
 	import { toast } from '$lib/stores/toast';
 
 	// === 타입 정의 ===
@@ -35,10 +36,10 @@
 	let expandedCategories = $state(new Set<number>());
 
 	// 모달 관련 (create용 - 인라인 폼으로 대체하지 않고 기존 함수 보존)
-	let showModal = false;
-	let modalMode: 'create' | 'edit' = 'create';
-	let editingCategory: Partial<Category> = {};
-	let selectedParentId: number | null = null;
+	let showModal = $state(false);
+	let modalMode = $state<'create' | 'edit'>('create');
+	let editingCategory = $state<Partial<Category>>({});
+	let selectedParentId = $state<number | null>(null);
 
 	// 새 Svelte 5 상태
 	let selected = $state<Category | null>(null);
@@ -144,11 +145,14 @@
 
 	async function deleteCategory(categoryId: number, force: boolean = false) {
 		if (
-			!confirm(
-				force
+			!(await confirm({
+				title: force ? '카테고리 강제 삭제' : '카테고리 삭제',
+				message: force
 					? '하위 카테고리와 매핑된 파일도 모두 삭제됩니다. 계속하시겠습니까?'
-					: '이 카테고리를 삭제하시겠습니까?'
-			)
+					: '이 카테고리를 삭제하시겠습니까?',
+				confirmText: force ? '강제 삭제' : '삭제',
+				variant: 'danger'
+			}))
 		) {
 			return;
 		}
@@ -161,7 +165,14 @@
 			if (!res.ok) {
 				const error = await res.json();
 				if (error.detail && error.detail.includes('하위 카테고리')) {
-					if (confirm(error.detail + '\n\n강제 삭제하시겠습니까?')) {
+					if (
+						await confirm({
+							title: '카테고리 강제 삭제',
+							message: error.detail + '\n\n강제 삭제하시겠습니까?',
+							confirmText: '강제 삭제',
+							variant: 'danger'
+						})
+					) {
 						await deleteCategory(categoryId, true);
 					}
 					return;
@@ -365,7 +376,14 @@
 	}
 
 	async function deleteFolderRule(categoryId: number, ruleId: number) {
-		if (!confirm('이 폴더 규칙을 삭제하시겠습니까?')) return;
+		if (
+			!(await confirm({
+				title: '폴더 규칙 삭제',
+				message: '이 폴더 규칙을 삭제하시겠습니까?',
+				confirmText: '삭제',
+				variant: 'danger'
+			}))
+		) return;
 		try {
 			const res = await fetchWithTimeout(`/api/ic/categories/${categoryId}/folder-rules/${ruleId}`, { method: 'DELETE' });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -390,7 +408,7 @@
 </svelte:head>
 
 <!-- 헤더 -->
-<PageHeader title="카테고리" subtitle="멀티레벨 카테고리 트리를 생성하고 편집합니다.">
+<PageHeader title="카테고리">
 	{#snippet children()}
 		<FolderTree class="size-5 text-primary" />
 	{/snippet}

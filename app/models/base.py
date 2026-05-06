@@ -1,10 +1,8 @@
 """
 SQLAlchemy Base 및 공통 Enum 정의
 """
-from sqlalchemy.ext.declarative import declarative_base
 import enum
-
-Base = declarative_base()
+from app.core.database import Base
 
 
 class ServiceType(str, enum.Enum):

@@ -4,12 +4,16 @@
 import { request } from './client';
 import type {
 	BrowseResponse,
+	FilePreviewResponse,
+	FrequentSearchComboItem,
 	IgnorePattern,
 	Preset,
 	SearchAcceptedResponse,
+	SearchHistoryItem,
 	SearchPollResponse,
 	SearchRequest,
 	SearchResponse,
+	SearchSuggestionItem,
 	StatusResponse
 } from '$lib/types/fileSearch';
 
@@ -38,6 +42,18 @@ export async function pollSearchResult(searchId: string): Promise<SearchPollResp
 	return request<SearchPollResponse>(`${BASE}/search/${searchId}`);
 }
 
+export async function getHistory(limit = 20): Promise<SearchHistoryItem[]> {
+	return request<SearchHistoryItem[]>(`${BASE}/history?limit=${limit}`);
+}
+
+export async function getSuggestions(limit = 10): Promise<SearchSuggestionItem[]> {
+	return request<SearchSuggestionItem[]>(`${BASE}/suggestions?limit=${limit}`);
+}
+
+export async function getFrequentCombos(limit = 10): Promise<FrequentSearchComboItem[]> {
+	return request<FrequentSearchComboItem[]>(`${BASE}/frequent-combos?limit=${limit}`);
+}
+
 export async function getPresets(): Promise<Preset[]> {
 	return request<Preset[]>(`${BASE}/presets`);
 }
@@ -56,6 +72,11 @@ export async function getStatus(): Promise<StatusResponse> {
 export async function browseDirectory(path: string): Promise<BrowseResponse> {
 	const encoded = encodeURIComponent(path);
 	return request<BrowseResponse>(`${BASE}/browse?path=${encoded}`);
+}
+
+export async function getFilePreview(path: string): Promise<FilePreviewResponse> {
+	const encoded = encodeURIComponent(path);
+	return request<FilePreviewResponse>(`${BASE}/preview?path=${encoded}`);
 }
 
 // ── 무시 패턴 CRUD ────────────────────────────────────────────────────

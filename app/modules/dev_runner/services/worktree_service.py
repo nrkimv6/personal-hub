@@ -29,6 +29,10 @@ TEST_BRANCH_PATTERNS = (
     re.compile(r"^plan/test_"),
     re.compile(r"^plan/t-test"),
 )
+LEGACY_TEST_BRANCH_PATTERNS = (
+    re.compile(r"^plan/test_"),
+    re.compile(r"^plan/t-test"),
+)
 _cleanup_lock = asyncio.Lock()
 _COMMIT_SENTINEL = "__WT_COMMIT__"
 PlanScanMap = dict[str, tuple[str, str]]
@@ -117,6 +121,10 @@ def _iter_active_plan_dirs(repo_root: Path) -> list[Path]:
 
 def is_test_branch(branch: str) -> bool:
     return any(pattern.match(branch) for pattern in TEST_BRANCH_PATTERNS)
+
+
+def is_legacy_test_branch(branch: str) -> bool:
+    return any(pattern.match(branch) for pattern in LEGACY_TEST_BRANCH_PATTERNS)
 
 
 def compute_cleanable(
@@ -209,7 +217,7 @@ async def _run_git(*args: str, repo_root: Path = _REPO_ROOT) -> str:
 
 
 async def list_worktrees(repo_root: Path = _REPO_ROOT) -> list[dict]:
-    """git worktree list --porcelain 파싱 → 브랜치명 == main 제외, detached HEAD 제외"""
+    """git worktree list --porcelain 파싱 → main, detached HEAD, prunable 제외"""
     output = await _run_git("worktree", "list", "--porcelain", repo_root=repo_root)
     if not output:
         return []
@@ -240,7 +248,7 @@ async def list_worktrees(repo_root: Path = _REPO_ROOT) -> list[dict]:
 
 
 def _maybe_append(block: dict, result: list) -> None:
-    """detached HEAD, prunable, branch == main 제외"""
+    """prunable/detached/main 제외, non-prunable normal/locked entry는 유지한다."""
     if block.get("detached"):
         return
     if block.get("prunable"):
@@ -566,6 +574,7 @@ async def _collect_worktree_state(
     repo_root: Path,
     worktree_builder,
 ) -> tuple[list[WorktreeInfoLite], list[PlanOnlyBranch], list[BranchUnresolvedPlan], MainDirtyStatus]:
+    # list_worktrees() returns active-only entries: no main, detached HEAD, or prunable registrations.
     raw_worktrees = await list_worktrees(repo_root=repo_root)
     ahead_behind_map, plan_index = await asyncio.gather(
         get_ahead_behind_map([wt["branch"] for wt in raw_worktrees], repo_root=repo_root),

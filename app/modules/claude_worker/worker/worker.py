@@ -59,11 +59,25 @@ try:
     from app.modules.claude_worker.services.llm_service import LLMService
     logger.debug("llm_service import 완료")
 
+    from app.modules.claude_worker.services.execution_window_service import (
+        LLMExecutionWindowService,
+        max_resume_at,
+    )
+    logger.debug("execution_window_service import 완료")
+
     from app.modules.claude_worker.services.plan_analyze_handler import (
         save_plan_archive_result,
         save_recurrence_check_result, save_recurrence_suggest_result
     )
     logger.debug("plan_analyze_handler import 완료")
+
+    from app.modules.claude_worker.services.plan_archive_insight_handler import (
+        save_plan_archive_insight_result,
+    )
+    logger.debug("plan_archive_insight_handler import 완료")
+
+    from app.core.database import is_connection_error
+    logger.debug("is_connection_error import 완료")
 
     logger.info("모든 모듈 import 완료")
 
@@ -379,7 +393,10 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save Instagram result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save Instagram result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -483,7 +500,10 @@ def save_universal_crawl_result(db, page_id: int, llm_result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save universal crawl result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save universal crawl result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -663,7 +683,10 @@ def save_writing_refine_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save writing refine result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save writing refine result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -779,7 +802,10 @@ def save_writing_generate_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save writing_generate result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save writing_generate result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -948,7 +974,10 @@ def save_writing_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save writing result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save writing result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -980,7 +1009,10 @@ def mark_writing_failed(db, request, error_message: str) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to mark writing failed: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to mark writing failed: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -1045,7 +1077,10 @@ def save_event_import_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save event_import result: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"Failed to save event_import result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -1118,7 +1153,10 @@ def save_topic_extract_result(db, caller_id: str, llm_result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"topic_extract 결과 저장 실패: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"topic_extract 결과 저장 실패: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -1276,7 +1314,10 @@ def save_pytest_fix_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"pytest_fix: save_pytest_fix_result 오류: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"pytest_fix: save_pytest_fix_result 오류: {e}", exc_info=True)
         return False
 
 
@@ -1372,7 +1413,10 @@ def save_report_result(db, request, result: dict) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"report 결과 저장 실패: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("PG connection error: %s", e)
+        else:
+            logger.error(f"report 결과 저장 실패: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -1580,7 +1624,10 @@ class LLMWorker:
                             count = service.reset_quota_failed_requests(provider)
                             logger.info(f"[QUOTA] {provider} 쿼터 재개. {count}건 요청 pending 전환")
         except Exception as e:
-            logger.error(f"quota resume 체크 오류: {e}", exc_info=True)
+            if is_connection_error(e):
+                logger.warning("PG connection error: %s", e)
+            else:
+                logger.error(f"quota resume 체크 오류: {e}", exc_info=True)
         finally:
             db.close()
 
@@ -1589,6 +1636,23 @@ class LLMWorker:
         db = SessionLocal()
         try:
             service = LLMService(db)
+
+            window_decision = LLMExecutionWindowService().decide()
+            if not window_decision.allowed:
+                quota_pauses = [
+                    service.get_provider_quota_pause(provider)
+                    for provider in provider_registry.get_quota_providers()
+                ]
+                resume_at = max_resume_at(window_decision.next_allowed_at, *quota_pauses)
+                blocked = service.get_pending_count()
+                if blocked > 0:
+                    logger.info(
+                        "[WINDOW] LLM 요청 %s건 보류 중 (다음 재개 후보: %s)",
+                        blocked,
+                        resume_at,
+                    )
+                self._update_worker_state("paused_by_window", None)
+                return
 
             # pause 중인 provider 조회
             exclude_providers = []
@@ -1603,6 +1667,7 @@ class LLMWorker:
             request = service.get_next_request(exclude_providers=exclude_providers)
 
             if request:
+                self._update_worker_state("idle", None)
                 logger.info(
                     f"Pending 요청 발견: id={request.id}, queue={request.queue_name}, "
                     f"caller={request.caller_type}:{request.caller_id}, mode={getattr(request, 'mode', 'single')}"
@@ -1611,9 +1676,16 @@ class LLMWorker:
                     await self._delegate_to_chat_executor(request, service)
                 else:
                     await self._execute_request(request, db, service)
+            elif exclude_providers:
+                self._update_worker_state("paused_by_quota", None)
+            else:
+                self._update_worker_state("idle", None)
 
         except Exception as e:
-            logger.error(f"Pending 요청 처리 오류: {e}", exc_info=True)
+            if is_connection_error(e):
+                logger.warning("PG connection error: %s", e)
+            else:
+                logger.error(f"Pending 요청 처리 오류: {e}", exc_info=True)
         finally:
             db.close()
 
@@ -1621,32 +1693,94 @@ class LLMWorker:
         """Chat 요청을 Chat Executor에 위임 (Redis LPUSH)."""
         from app.shared.redis.client import RedisClient
 
-        service.mark_processing(request.id)
-        self._update_worker_state("processing", request.id)
+        request_id = int(request.id)
+        try:
+            service.mark_processing(request_id)
+            self._update_worker_state("processing", request_id)
 
-        chat_session_id = f"llm-chat:stream:{request.id}"
-        service.update_chat_session(request.id, chat_session_id)
+            chat_session_id = f"llm-chat:stream:{request_id}"
+            service.update_chat_session(request_id, chat_session_id)
 
-        command = {
-            "action": "execute",
-            "request_id": request.id,
-            "prompt": request.prompt,
-            "provider": request.provider,
-            "model": request.model,
-            "cli_options": json.loads(request.cli_options) if request.cli_options else {},
-            "chat_session_id": chat_session_id,
-            "timestamp": datetime.now().isoformat(),
-        }
+            command = {
+                "action": "execute",
+                "request_id": request_id,
+                "prompt": request.prompt,
+                "provider": request.provider,
+                "model": request.model,
+                "cli_options": json.loads(request.cli_options) if request.cli_options else {},
+                "chat_session_id": chat_session_id,
+                "timestamp": datetime.now().isoformat(),
+            }
 
-        redis_client = await RedisClient.get_client()
-        if redis_client:
-            await redis_client.lpush("llm-chat:commands", json.dumps(command, ensure_ascii=False))
-            logger.info(f"Chat 요청 위임: id={request.id} → llm-chat:commands")
-        else:
-            logger.error(f"Redis 연결 없음. chat 요청 위임 실패: id={request.id}")
-            service.mark_failed(request.id, error_message="Redis 연결 없음 — chat 위임 실패")
+            redis_client = await RedisClient.get_client()
+            if redis_client:
+                await redis_client.lpush("llm-chat:commands", json.dumps(command, ensure_ascii=False))
+                logger.info(f"Chat 요청 위임: id={request_id} → llm-chat:commands")
+            else:
+                logger.error(f"Redis 연결 없음. chat 요청 위임 실패: id={request_id}")
+                self._mark_request_failed_safely(
+                    service,
+                    service.db,
+                    request_id,
+                    "Redis 연결 없음 — chat 위임 실패",
+                )
+        except Exception as e:
+            self._mark_request_failed_safely(service, service.db, request_id, str(e))
+            logger.error("Chat 요청 위임 예외: id=%s error=%s", request_id, e, exc_info=True)
+        finally:
+            self._update_worker_state("idle", None)
 
-        self._update_worker_state("idle", None)
+    def _mark_request_failed_safely(
+        self,
+        service: LLMService,
+        db,
+        request_id: int,
+        error_message: str,
+        raw_response: str = "",
+    ) -> None:
+        """Rollback-required 세션에서도 요청을 failed로 마감한다."""
+        message = str(error_message)
+
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception as rollback_error:
+                logger.warning(
+                    "LLM 실패 finalizer rollback 실패: request_id=%s error=%s",
+                    request_id,
+                    rollback_error,
+                )
+
+        try:
+            service.mark_failed(request_id, message, raw_response)
+            return
+        except Exception as mark_error:
+            logger.error(
+                "LLM 실패 상태 전이 실패: request_id=%s error=%s",
+                request_id,
+                mark_error,
+                exc_info=True,
+            )
+            if db is not None:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+
+        fail_db = None
+        try:
+            fail_db = SessionLocal()
+            LLMService(fail_db).mark_failed(request_id, message, raw_response)
+        except Exception as fallback_error:
+            logger.critical(
+                "LLM 실패 상태 전이 최종 fallback 실패: request_id=%s error=%s",
+                request_id,
+                fallback_error,
+                exc_info=True,
+            )
+        finally:
+            if fail_db is not None:
+                fail_db.close()
 
     async def _execute_request(
         self,
@@ -1655,43 +1789,52 @@ class LLMWorker:
         service: LLMService,
     ):
         """LLM 요청 실행."""
+        request_id = int(request.id)
+        caller_type = request.caller_type
+        caller_id = request.caller_id
+        queue_name = request.queue_name
+        claim_service = None
+        claim_acquired = False
+        selected_profile = None
+        stop_reason = "failed"
+        error_summary = None
         try:
             # 처리 중으로 변경
-            service.mark_processing(request.id)
-            self._update_worker_state("processing", request.id)
+            service.mark_processing(request_id)
+            self._update_worker_state("processing", request_id)
 
             # caller_id 사전 검증 (Phase 2)
-            if request.caller_type in ["instagram", "universal_crawl"]:
+            if caller_type in ["instagram", "universal_crawl"]:
                 try:
-                    caller_id_int = int(request.caller_id)
-                    if request.caller_type == "instagram":
+                    caller_id_int = int(caller_id)
+                    if caller_type == "instagram":
                         from app.models import InstagramPost
                         post = db.query(InstagramPost).filter(InstagramPost.id == caller_id_int).first()
                         if not post:
-                            logger.warning(f"사전 검증 실패: Instagram post {caller_id_int} 없음 (id={request.id})")
-                            service.mark_failed(request.id, f"Instagram post not found: {caller_id_int}")
+                            logger.warning(f"사전 검증 실패: Instagram post {caller_id_int} 없음 (id={request_id})")
+                            self._mark_request_failed_safely(service, db, request_id, f"Instagram post not found: {caller_id_int}")
                             self._update_worker_state("idle", None)
                             return
                         if not post.caption:
-                            logger.warning(f"사전 검증 실패: Instagram post {caller_id_int} 캡션 없음 (id={request.id})")
-                            service.mark_failed(request.id, f"Instagram post has no caption: {caller_id_int}")
+                            logger.warning(f"사전 검증 실패: Instagram post {caller_id_int} 캡션 없음 (id={request_id})")
+                            self._mark_request_failed_safely(service, db, request_id, f"Instagram post has no caption: {caller_id_int}")
                             self._update_worker_state("idle", None)
                             return
-                    elif request.caller_type == "universal_crawl":
+                    elif caller_type == "universal_crawl":
                         from app.models.universal_crawl import CrawledPage
                         page = db.query(CrawledPage).filter(CrawledPage.id == caller_id_int).first()
                         if not page:
-                            logger.warning(f"사전 검증 실패: CrawledPage {caller_id_int} 없음 (id={request.id})")
-                            service.mark_failed(request.id, f"CrawledPage not found: {caller_id_int}")
+                            logger.warning(f"사전 검증 실패: CrawledPage {caller_id_int} 없음 (id={request_id})")
+                            self._mark_request_failed_safely(service, db, request_id, f"CrawledPage not found: {caller_id_int}")
                             self._update_worker_state("idle", None)
                             return
                 except ValueError:
-                    logger.warning(f"사전 검증 실패: 유효하지 않은 caller_id '{request.caller_id}' (id={request.id})")
-                    service.mark_failed(request.id, f"Invalid caller_id (non-numeric): {request.caller_id}")
+                    logger.warning(f"사전 검증 실패: 유효하지 않은 caller_id '{caller_id}' (id={request_id})")
+                    self._mark_request_failed_safely(service, db, request_id, f"Invalid caller_id (non-numeric): {caller_id}")
                     self._update_worker_state("idle", None)
                     return
 
-            logger.info(f"LLM 실행 시작: id={request.id}, queue={request.queue_name}, caller_type={request.caller_type}")
+            logger.info(f"LLM 실행 시작: id={request_id}, queue={queue_name}, caller_type={caller_type}")
 
             # cli_options 파싱 (JSON 문자열 → dict)
             cli_options = None
@@ -1699,20 +1842,128 @@ class LLMWorker:
                 try:
                     cli_options = json.loads(request.cli_options)
                 except (json.JSONDecodeError, TypeError):
-                    logger.warning(f"cli_options 파싱 실패: id={request.id}")
+                    logger.warning(f"cli_options 파싱 실패: id={request_id}")
 
             # caller_type에 따라 도구 활성화 결정
             # - instagram, universal_crawl: Read 도구로 이미지 분석 가능
             # - image_classify: cli_options에서 allowed_tools 지정
             # - writing 관련: 도구 사용 금지 (도구 사용 시 글 작성 대신 프롬프트 분석만 함)
-            enable_tools = request.caller_type in ["instagram", "universal_crawl"]
+            enable_tools = caller_type in ["instagram", "universal_crawl"]
 
             # provider/model 해석 (요청값 > caller 기본값 > global 기본값 > 최종 claude/"")
             provider, model = service.resolve_provider_model(
-                caller_type=request.caller_type,
+                caller_type=caller_type,
                 provider=getattr(request, "provider", None),
                 model=getattr(request, "model", None),
             )
+
+            if provider in provider_registry.get_quota_providers():
+                from app.modules.claude_worker.services.profile_claim_service import ProfileClaimService
+                from app.modules.claude_worker.services.profile_router import LLMProfileRouter
+
+                router = LLMProfileRouter(db)
+                route_providers = [provider]
+                if caller_type == "plan_archive_analyze" and isinstance(cli_options, dict):
+                    raw_candidates = cli_options.get("candidate_profiles")
+                    if isinstance(raw_candidates, list):
+                        candidate_engines = [
+                            str(item.get("engine") or "").strip()
+                            for item in raw_candidates
+                            if isinstance(item, dict)
+                        ]
+                        route_providers = [
+                            engine
+                            for engine in dict.fromkeys(candidate_engines)
+                            if engine in provider_registry.get_quota_providers()
+                        ] or route_providers
+
+                decision = None
+                for route_provider in route_providers:
+                    candidate_decision = router.select_profile(route_provider, model, request)
+                    if candidate_decision.profile is not None:
+                        provider = route_provider
+                        decision = candidate_decision
+                        break
+                    decision = candidate_decision
+                if decision.profile is None:
+                    logger.info(
+                        "[PROFILE-ROUTER] request %s pending 유지: provider=%s reason=%s next=%s blocked=%s",
+                        request_id,
+                        provider,
+                        decision.reason,
+                        decision.next_available_at,
+                        decision.blocked_counts,
+                    )
+                    service.reset_to_pending(request_id, decision.reason)
+                    if caller_type == "plan_archive_analyze":
+                        try:
+                            from app.modules.dev_runner.services.plan_archive_execution_service import (
+                                PlanArchiveExecutionService,
+                            )
+
+                            PlanArchiveExecutionService(db).mark_request_blocked(
+                                request_id,
+                                decision.reason,
+                                next_available_at=decision.next_available_at,
+                            )
+                        except Exception as exc:
+                            logger.warning("[PLAN-ARCHIVE-EXEC] blocked sync 실패: request=%s error=%s", request_id, exc)
+                    self._update_worker_state(
+                        "paused_by_quota" if "quota" in decision.reason else "idle",
+                        None,
+                    )
+                    return
+
+                selected_profile = decision.profile
+                claim_service = ProfileClaimService(db)
+                claim = claim_service.claim(
+                    request_id,
+                    provider,
+                    selected_profile.name,
+                    capacity=selected_profile.capacity,
+                )
+                if claim is None:
+                    logger.warning(
+                        "[PROFILE-CLAIM] request %s claim 충돌: provider=%s profile=%s",
+                        request_id,
+                        provider,
+                        selected_profile.name,
+                    )
+                    service.reset_to_pending(request_id, "profile_claim_conflict")
+                    if caller_type == "plan_archive_analyze":
+                        try:
+                            from app.modules.dev_runner.services.plan_archive_execution_service import (
+                                PlanArchiveExecutionService,
+                            )
+
+                            PlanArchiveExecutionService(db).mark_request_blocked(
+                                request_id,
+                                "profile_claim_conflict",
+                            )
+                        except Exception as exc:
+                            logger.warning("[PLAN-ARCHIVE-EXEC] claim conflict sync 실패: request=%s error=%s", request_id, exc)
+                    self._update_worker_state("idle", None)
+                    return
+                claim_acquired = True
+                if caller_type == "plan_archive_analyze":
+                    try:
+                        from app.modules.dev_runner.services.plan_archive_execution_service import (
+                            PlanArchiveExecutionService,
+                        )
+
+                        PlanArchiveExecutionService(db).mark_request_profile(
+                            request_id,
+                            provider,
+                            selected_profile.name,
+                        )
+                    except Exception as exc:
+                        logger.warning("[PLAN-ARCHIVE-EXEC] profile sync 실패: request=%s error=%s", request_id, exc)
+                logger.info(
+                    "[PROFILE-ROUTER] request %s → %s/%s",
+                    request_id,
+                    provider,
+                    selected_profile.name,
+                )
 
             # LLM 실행 (비동기 실행을 위해 run_in_executor 사용)
             loop = asyncio.get_event_loop()
@@ -1731,10 +1982,12 @@ class LLMWorker:
                     parse_json=parse_json,
                     enable_tools=enable_tools,
                     cli_options=cli_options,
+                    profile=selected_profile,
                 )
             )
 
             if result["success"]:
+                stop_reason = "completed"
                 normalized_result = result.get("result")
                 raw_response = result.get("raw_response", "")
                 claude_session_id = result.get("claude_session_id")
@@ -1742,135 +1995,135 @@ class LLMWorker:
                 # caller_type별 결과 저장
                 save_success = True
                 failure_reason = None
-                if request.caller_type == "instagram":
+                if caller_type == "instagram":
                     if instagram_payload_has_mojibake(normalized_result, raw_response):
                         failure_reason = "encoding_mojibake"
                         save_success = False
                         logger.error(
                             "Instagram mojibake 감지: request_id=%s caller_id=%s session_id=%s payload=%s raw=%s",
-                            request.id,
-                            request.caller_id,
+                            request_id,
+                            caller_id,
                             claude_session_id,
                             _truncate_for_log(normalized_result),
                             _truncate_for_log(raw_response),
                         )
                     else:
-                        save_success = save_instagram_result(db, int(request.caller_id), normalized_result)
-                elif request.caller_type == "universal_crawl":
-                    save_success = save_universal_crawl_result(db, int(request.caller_id), normalized_result)
-                elif request.caller_type == "topic_extract":
+                        save_success = save_instagram_result(db, int(caller_id), normalized_result)
+                elif caller_type == "universal_crawl":
+                    save_success = save_universal_crawl_result(db, int(caller_id), normalized_result)
+                elif caller_type == "topic_extract":
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
-                    save_success = save_topic_extract_result(db, request.caller_id, normalized_result)
-                elif request.caller_type == "writing":
+                    logger.info(f"LLM 실행 완료: id={request_id}")
+                    save_success = save_topic_extract_result(db, caller_id, normalized_result)
+                elif caller_type == "writing":
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    logger.info(f"LLM 실행 완료: id={request_id}")
                     save_success = save_writing_result(db, request, result)
-                elif request.caller_type == "writing_generate":
+                elif caller_type == "writing_generate":
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    logger.info(f"LLM 실행 완료: id={request_id}")
                     save_success = save_writing_generate_result(db, request, result)
-                elif request.caller_type == "writing_refine":
+                elif caller_type == "writing_refine":
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    logger.info(f"LLM 실행 완료: id={request_id}")
                     save_success = save_writing_refine_result(db, request, result)
-                elif request.caller_type == "event_import":
+                elif caller_type == "event_import":
                     save_success = save_event_import_result(db, request, result)
-                elif request.caller_type == "report":
+                elif caller_type == "report":
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    logger.info(f"LLM 실행 완료: id={request_id}")
                     save_success = save_report_result(db, request, result)
-                elif request.caller_type == "pytest_fix":
+                elif caller_type == "pytest_fix":
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    logger.info(f"LLM 실행 완료: id={request_id}")
                     save_success = save_pytest_fix_result(db, request, result)
-                elif request.caller_type == "plan_archive_analyze":
+                elif caller_type == "plan_archive_analyze":
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    logger.info(f"LLM 실행 완료: id={request_id}")
                     save_success = save_plan_archive_result(db, request, result)
-                elif request.caller_type == "plan_recurrence_check":
+                elif caller_type == "plan_recurrence_check":
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    logger.info(f"LLM 실행 완료: id={request_id}")
                     save_success = save_recurrence_check_result(db, request, result)
-                elif request.caller_type == "plan_recurrence_suggest":
+                elif caller_type == "plan_recurrence_suggest":
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    logger.info(f"LLM 실행 완료: id={request_id}")
                     save_success = save_recurrence_suggest_result(db, request, result)
                 else:
                     service.mark_completed(
-                        request.id,
+                        request_id,
                         normalized_result,
                         raw_response,
                         claude_session_id,
                     )
                     self._increment_processed()
-                    logger.info(f"LLM 실행 완료: id={request.id}")
+                    logger.info(f"LLM 실행 완료: id={request_id}")
 
-                if request.caller_type in {"instagram", "universal_crawl", "event_import"}:
+                if caller_type in {"instagram", "universal_crawl", "event_import"}:
                     if save_success:
                         service.prepare_completed(
-                            request.id,
+                            request_id,
                             normalized_result,
                             raw_response,
                             claude_session_id,
                         )
                         db.commit()
                         self._increment_processed()
-                        logger.info(f"LLM 실행 완료: id={request.id}")
+                        logger.info(f"LLM 실행 완료: id={request_id}")
                     else:
                         db.rollback()
 
@@ -1879,23 +2132,25 @@ class LLMWorker:
                     response_summary = _truncate_for_log(raw_response)
                     logger.error(
                         "결과 저장 실패: id=%s, caller_type=%s, session_id=%s, payload=%s, raw=%s",
-                        request.id,
-                        request.caller_type,
+                        request_id,
+                        caller_type,
                         claude_session_id,
                         payload_summary,
                         response_summary,
                     )
-                    service.mark_failed(
-                        request.id,
-                        failure_reason or f"Save result failed for {request.caller_type}",
+                    self._mark_request_failed_safely(
+                        service,
+                        db,
+                        request_id,
+                        failure_reason or f"Save result failed for {caller_type}",
                         raw_response,
                     )
             else:
                 # JSON 파싱 실패지만 raw_response가 있는 경우
                 if "raw_response" in result and result.get("raw_response"):
                     # writing_generate, writing_refine, report의 경우 raw_response만으로도 성공 처리
-                    if request.caller_type in ["writing_generate", "writing_refine", "report", "test", "pytest_fix"]:
-                        logger.info(f"JSON 파싱 실패했지만 raw_response 사용: id={request.id}")
+                    if caller_type in ["writing_generate", "writing_refine", "report", "test", "pytest_fix"]:
+                        logger.info(f"JSON 파싱 실패했지만 raw_response 사용: id={request_id}")
 
                         # 빈 result dict로 결과 재구성
                         fallback_result = {
@@ -1905,35 +2160,47 @@ class LLMWorker:
                         }
 
                         service.mark_completed(
-                            request.id,
+                            request_id,
                             {},  # 빈 결과
                             result.get("raw_response", ""),
                             result.get("claude_session_id"),
                         )
                         self._increment_processed()
-                        logger.info(f"LLM 실행 완료 (JSON 없음, raw_response 사용): id={request.id}")
+                        logger.info(f"LLM 실행 완료 (JSON 없음, raw_response 사용): id={request_id}")
 
                         # caller_type별 결과 저장
                         save_success = True
-                        if request.caller_type == "writing_generate":
+                        if caller_type == "writing_generate":
                             save_success = save_writing_generate_result(db, request, fallback_result)
-                        elif request.caller_type == "writing_refine":
+                        elif caller_type == "writing_refine":
                             save_success = save_writing_refine_result(db, request, fallback_result)
-                        elif request.caller_type == "report":
+                        elif caller_type == "report":
                             save_success = save_report_result(db, request, fallback_result)
-                        elif request.caller_type == "pytest_fix":
+                        elif caller_type == "pytest_fix":
                             save_success = save_pytest_fix_result(db, request, fallback_result)
+                        elif request.caller_type == "plan_archive_insight_batch":
+                            save_success = save_plan_archive_insight_result(db, request, fallback_result)
 
                         if not save_success:
-                            logger.error(f"결과 저장 실패 (fallback 경로, 상태 전환: completed -> failed): id={request.id}, caller_type={request.caller_type}")
-                            service.mark_failed(request.id, f"Save result failed for {request.caller_type} (fallback)")
+                            logger.error(f"결과 저장 실패 (fallback 경로, 상태 전환: completed -> failed): id={request_id}, caller_type={caller_type}")
+                            self._mark_request_failed_safely(
+                                service,
+                                db,
+                                request_id,
+                                f"Save result failed for {caller_type} (fallback)",
+                            )
                     else:
                         # Quota 에러 감지 및 provider pause 설정
                         quota_retry_ms = result.get("quota_retry_ms")
                         if quota_retry_ms is not None:
-                            paused_until = service.set_provider_quota_pause(
-                                provider, quota_retry_ms, reason=result.get("error", "")
-                            )
+                            if selected_profile is not None:
+                                paused_until = service.set_profile_quota_pause(
+                                    provider, selected_profile.name, quota_retry_ms, reason=result.get("error", "")
+                                )
+                            else:
+                                paused_until = service.set_provider_quota_pause(
+                                    provider, quota_retry_ms, reason=result.get("error", "")
+                                )
                             logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
                             # O-4: registry quota state 자동 갱신
                             try:
@@ -1947,24 +2214,37 @@ class LLMWorker:
                                 logger.warning(f"[auto_quota_detect] registry 갱신 실패: {_e}")
 
                         # 다른 타입은 실패 처리 (raw_response 보존)
-                        service.mark_failed(request.id, result["error"], result.get("raw_response", ""))
+                        self._mark_request_failed_safely(
+                            service,
+                            db,
+                            request_id,
+                            result["error"],
+                            result.get("raw_response", ""),
+                        )
+                        stop_reason = "quota_paused" if quota_retry_ms is not None else "failed"
+                        error_summary = result.get("error")
                         self._increment_error()
                         logger.warning(f"LLM 실행 실패: {result['error']}")
 
                         # caller_type별 실패 표시
-                        if request.caller_type == "instagram":
-                            mark_instagram_failed(db, int(request.caller_id), result["error"])
-                        elif request.caller_type == "universal_crawl":
-                            mark_universal_crawl_failed(db, int(request.caller_id), result["error"])
-                        elif request.caller_type == "writing":
+                        if caller_type == "instagram":
+                            mark_instagram_failed(db, int(caller_id), result["error"])
+                        elif caller_type == "universal_crawl":
+                            mark_universal_crawl_failed(db, int(caller_id), result["error"])
+                        elif caller_type == "writing":
                             mark_writing_failed(db, request, result["error"])
                 else:
                     # Quota 에러 감지 및 provider pause 설정
                     quota_retry_ms = result.get("quota_retry_ms")
                     if quota_retry_ms is not None:
-                        paused_until = service.set_provider_quota_pause(
-                            provider, quota_retry_ms, reason=result.get("error", "")
-                        )
+                        if selected_profile is not None:
+                            paused_until = service.set_profile_quota_pause(
+                                provider, selected_profile.name, quota_retry_ms, reason=result.get("error", "")
+                            )
+                        else:
+                            paused_until = service.set_provider_quota_pause(
+                                provider, quota_retry_ms, reason=result.get("error", "")
+                            )
                         logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
                         # O-4: registry quota state 자동 갱신
                         try:
@@ -1978,23 +2258,44 @@ class LLMWorker:
                             logger.warning(f"[auto_quota_detect] registry 갱신 실패: {_e}")
 
                     # raw_response도 없으면 실패 처리
-                    service.mark_failed(request.id, result["error"])
+                    self._mark_request_failed_safely(service, db, request_id, result["error"])
+                    stop_reason = "quota_paused" if quota_retry_ms is not None else "failed"
+                    error_summary = result.get("error")
                     self._increment_error()
                     logger.warning(f"LLM 실행 실패: {result['error']}")
 
                     # caller_type별 실패 표시
-                    if request.caller_type == "instagram":
-                        mark_instagram_failed(db, int(request.caller_id), result["error"])
-                    elif request.caller_type == "universal_crawl":
-                        mark_universal_crawl_failed(db, int(request.caller_id), result["error"])
-                    elif request.caller_type == "writing":
+                    if caller_type == "instagram":
+                        mark_instagram_failed(db, int(caller_id), result["error"])
+                    elif caller_type == "universal_crawl":
+                        mark_universal_crawl_failed(db, int(caller_id), result["error"])
+                    elif caller_type == "writing":
                         mark_writing_failed(db, request, result["error"])
 
         except Exception as e:
-            service.mark_failed(request.id, str(e))
+            self._mark_request_failed_safely(service, db, request_id, str(e))
+            error_summary = str(e)
             self._increment_error()
             logger.error(f"LLM 실행 예외: {e}", exc_info=True)
         finally:
+            if claim_acquired and claim_service is not None:
+                try:
+                    claim_service.release(
+                        request_id,
+                        stop_reason=stop_reason,
+                        error_summary=error_summary,
+                    )
+                except Exception as e:
+                    logger.warning("[PROFILE-CLAIM] release 실패: request=%s error=%s", request_id, e)
+            if caller_type == "plan_archive_analyze":
+                try:
+                    from app.modules.dev_runner.services.plan_archive_execution_service import (
+                        PlanArchiveExecutionService,
+                    )
+
+                    PlanArchiveExecutionService(db).sync_attempt_for_request_id(request_id)
+                except Exception as e:
+                    logger.warning("[PLAN-ARCHIVE-EXEC] final sync 실패: request=%s error=%s", request_id, e)
             self._update_worker_state("idle")
             # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
             self.continue_event.set()

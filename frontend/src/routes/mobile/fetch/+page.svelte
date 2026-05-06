@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from "svelte";
   import { fetchWithTimeout } from '$lib/api/client';
+	import { toast } from '$lib/stores/toast';
 
 	let url = $state("");
 	let waitForSelector = $state("");
@@ -58,14 +59,14 @@
 	function copyHtml() {
 		if (result?.html) {
 			navigator.clipboard.writeText(result.html);
-			alert("HTML이 클립보드에 복사되었습니다.");
+			toast.success("HTML이 클립보드에 복사되었습니다.");
 		}
 	}
 </script>
 
 <div class="container mx-auto p-4 max-w-6xl">
 	<div class="mb-6">
-		<h1 class="text-2xl font-bold">모바일 HTML 수집 도구</h1>
+		<h2 class="text-xl font-semibold">모바일 HTML 수집 도구</h2>
 		<p class="text-gray-600 mt-1">
 			모바일 서버를 통해 페이지의 렌더링된 HTML을 수집합니다.
 		</p>

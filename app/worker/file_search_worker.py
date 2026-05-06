@@ -12,7 +12,7 @@ API(Session 0)에서 Redis 큐에 적재된 파일 검색 요청을 처리합니
     - Redis 큐(file_search:requests)에서 검색 요청 수신
     - ripgrep / Everything 실행 → 결과를 DB에 저장
     - Redis 큐(file_search:open)에서 파일 열기 요청 처리
-    - 도구 상태 체크: 워커 시작 시 1회 + 검색 요청 시 온디맨드 (30초 경과 시)
+    - 도구 상태 체크: 워커 시작 시 1회 (DB 캐시 시드용). API GET /status는 직접 체크.
     - Redis 미연결 시 DB 폴링 fallback (5초 간격)
     - 시작 시 stale 요청(10분 이상 pending/processing) → failed 처리
 
@@ -56,7 +56,7 @@ class FileSearchWorker(BaseWorker):
         redis_queue: 검색 요청 큐
         open_queue: 파일 열기 요청 큐 (fire-and-forget)
         _redis_initialized: Redis 초기화 완료 여부
-        _last_status_check: 마지막 상태 체크 타임스탬프
+        _last_status_check: _initialize 시드 체크 타임스탬프 (호환용)
         _last_db_poll: 마지막 DB 폴링 타임스탬프 (fallback 모드)
     """
 
@@ -209,20 +209,12 @@ class FileSearchWorker(BaseWorker):
         DB status를 processing으로 변경 → SearchService.search() 실행 →
         결과를 result_json에 저장 → status=completed 또는 failed.
 
-        도구 상태가 30초 이상 지났으면 체크 후 갱신.
-
         Args:
             req: FileSearchRequest DB 모델 인스턴스
             db: DB 세션
         """
         from app.modules.file_search.schemas import SearchRequest
         from app.modules.file_search.services.search_service import SearchService
-
-        # 온디맨드 도구 상태 체크 (마지막 체크로부터 STATUS_CHECK_INTERVAL 경과 시)
-        now = time.time()
-        if now - self._last_status_check >= STATUS_CHECK_INTERVAL:
-            await self._safe_execute("check_tool_status", self._check_tool_status)
-            self._last_status_check = time.time()
 
         logger.info(f"[{self.name}] 검색 시작: search_id={req.search_id}")
 
@@ -291,7 +283,8 @@ class FileSearchWorker(BaseWorker):
     async def _check_tool_status(self):
         """Everything/ripgrep 상태 체크 → file_search_status 테이블 UPSERT.
 
-        30초 간격으로 호출. API의 GET /status는 이 캐시를 조회.
+        워커 시작 시 1회만 호출 (DB 캐시 시드용). API GET /status는 직접 체크하며,
+        ripgrep 즉석 체크 실패 시에만 이 캐시를 폴백으로 사용한다.
         """
         from app.modules.file_search.services.everything import EverythingService
         from app.modules.file_search.services.ripgrep import RipgrepService

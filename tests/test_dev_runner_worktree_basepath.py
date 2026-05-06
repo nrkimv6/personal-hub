@@ -256,3 +256,143 @@ class TestWorktreeCreationIntegration:
             f"wtools plan의 worktree base는 monitor-page가 아니어야 함"
         assert worktree_base == wtools_repo / ".worktrees", \
             f"wtools plan의 worktree base는 wtools_repo/.worktrees이어야 함"
+
+
+# ─────────────────────────────────────────────────────────────
+# T1: get_target_project_root() 단위 테스트
+# ─────────────────────────────────────────────────────────────
+
+class TestGetTargetProjectRoot:
+    """get_target_project_root() 단위 테스트 — plans root와 target project root 분리"""
+
+    def _import_fn(self):
+        """get_target_project_root를 _dr_process_utils에서 import."""
+        pr_dir = _SCRIPTS_DIR / "plan_runner"
+        if str(pr_dir) not in sys.path:
+            sys.path.insert(0, str(pr_dir))
+        from _dr_process_utils import get_target_project_root
+        return get_target_project_root
+
+    def test_get_target_project_root_plans_worktree_path(self, tmp_path):
+        """R: .worktrees/plans/docs/plan/xxx.md 입력 시 target project root 반환
+        (.worktrees/plans가 아님을 검증).
+        """
+        # tmp_path 구조: project-root/.worktrees/plans/docs/plan/
+        project_root = tmp_path / "my-project"
+        project_root.mkdir()
+        # .git 디렉토리 생성 (project root 판정용)
+        (project_root / ".git").mkdir()
+        plans_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        plan_file = plans_dir / "2026-04-24_fix-test.md"
+        plan_file.write_text("# Test Plan\n> 상태: 구현중\n")
+
+        get_fn = self._import_fn()
+
+        # git rev-parse가 .worktrees/plans를 반환하도록 mock
+        plans_git_root = project_root / ".worktrees" / "plans"
+        with patch("subprocess.run") as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = str(plans_git_root) + "\n"
+            mock_run.return_value = mock_result
+
+            result = get_fn(str(plan_file))
+
+        # .worktrees/plans가 아니라 project_root를 반환해야 함
+        assert result.resolve() == project_root.resolve(), (
+            f".worktrees/plans 경로 입력 시 get_target_project_root()는 "
+            f"project_root({project_root})를 반환해야 함, 실제: {result}"
+        )
+        assert ".worktrees" not in result.parts or result == project_root, (
+            f"반환 경로에 .worktrees가 포함되면 안 됨: {result}"
+        )
+
+    def test_get_target_project_root_env_override(self, tmp_path):
+        """R: PLAN_RUNNER_PROJECT_ROOT 환경변수 설정 시 우선 반환."""
+        project_root = tmp_path / "env-project"
+        project_root.mkdir()
+
+        get_fn = self._import_fn()
+
+        with patch.dict("os.environ", {"PLAN_RUNNER_PROJECT_ROOT": str(project_root)}):
+            result = get_fn("/some/plan/path/plan.md")
+
+        assert result == project_root.resolve(), (
+            f"PLAN_RUNNER_PROJECT_ROOT 설정 시 해당 경로 반환해야 함, 실제: {result}"
+        )
+
+    def test_get_target_project_root_regular_path(self, tmp_path):
+        """R: 일반 경로(non-.worktrees) → git root 그대로 반환."""
+        project_root = tmp_path / "normal-project"
+        project_root.mkdir()
+        plan_dir = project_root / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "test.md"
+        plan_file.write_text("# Test")
+
+        get_fn = self._import_fn()
+
+        with patch("subprocess.run") as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = str(project_root) + "\n"
+            mock_run.return_value = mock_result
+
+            result = get_fn(str(plan_file))
+
+        assert result == project_root, (
+            f"일반 경로에서 git root 그대로 반환해야 함, 실제: {result}"
+        )
+
+
+# ─────────────────────────────────────────────────────────────
+# Phase 3: _resolve_worktree_root() 단위 테스트
+# ─────────────────────────────────────────────────────────────
+
+class TestResolveWorktreeRoot:
+    """_dr_constants._resolve_worktree_root() 단위 테스트 — Phase 3 검증."""
+
+    def _get_resolve_fn(self):
+        pr_dir = _SCRIPTS_DIR / "plan_runner"
+        if str(pr_dir) not in sys.path:
+            sys.path.insert(0, str(pr_dir))
+        import _dr_constants
+        return _dr_constants._resolve_worktree_root
+
+    def test_resolve_worktree_root_in_plans_worktree_R(self, tmp_path):
+        """R: git rev-parse가 <repo>/.worktrees/plans 반환 시 <repo>를 반환."""
+        project_root = tmp_path / "my-project"
+        project_root.mkdir()
+        (project_root / ".git").mkdir()  # candidate/.git 존재 조건
+
+        plans_wt = project_root / ".worktrees" / "plans"
+        plans_wt.mkdir(parents=True)
+
+        resolve_fn = self._get_resolve_fn()
+
+        with patch("subprocess.run") as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = str(plans_wt) + "\n"
+            mock_run.return_value = mock_result
+
+            result = resolve_fn()
+
+        assert result.resolve() == project_root.resolve(), (
+            f"_resolve_worktree_root()은 project_root를 반환해야 함, 실제: {result}"
+        )
+
+    def test_resolve_worktree_root_fallback_on_git_failure_E(self):
+        """E: git 명령 실패 시 PROJECT_ROOT fallback 반환."""
+        resolve_fn = self._get_resolve_fn()
+
+        with patch("subprocess.run") as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 128
+            mock_result.stdout = ""
+            mock_run.return_value = mock_result
+
+            result = resolve_fn()
+
+        assert isinstance(result, Path), "결과는 Path 타입이어야 함"

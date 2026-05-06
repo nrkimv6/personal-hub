@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from app.shared.process.registry import ProcessRegistry
+from app.shared.process.subprocess_text import with_text_subprocess_defaults
 
 # scripts/services/service_utils.py의 kill_pid를 동적으로 임포트
 def kill_pid(pid: int, timeout: int = 5) -> bool:
@@ -42,7 +43,7 @@ async def tracked_popen(
     Returns:
         subprocess.Popen 객체
     """
-    proc = subprocess.Popen(cmd, **kwargs)
+    proc = subprocess.Popen(cmd, **with_text_subprocess_defaults(**kwargs))
     try:
         exe = str(cmd[0]) if cmd else ""
         name = Path(exe).stem if exe else "unknown"
@@ -90,7 +91,7 @@ def tracked_popen_sync(
     Returns:
         subprocess.Popen 객체
     """
-    proc = subprocess.Popen(cmd, **kwargs)
+    proc = subprocess.Popen(cmd, **with_text_subprocess_defaults(**kwargs))
     try:
         exe = str(cmd[0]) if cmd else ""
         name = Path(exe).stem if exe else "unknown"

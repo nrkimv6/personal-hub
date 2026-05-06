@@ -21,12 +21,17 @@ class VideoDownloadService:
             url: 비디오 URL
 
         Returns:
-            다운로드 타입 (youtube, youtube_stream, vimeo)
+            다운로드 타입 (youtube, youtube_stream, vimeo, instagram)
         """
         url_lower = url.lower()
 
         if 'vimeo.com' in url_lower or 'player.vimeo.com' in url_lower:
             return VideoDownload.TYPE_VIMEO
+        elif (
+            ('instagram.com' in url_lower or 'instagr.am' in url_lower)
+            and ('/reel/' in url_lower or '/reels/' in url_lower or '/p/' in url_lower)
+        ):
+            return VideoDownload.TYPE_INSTAGRAM
         elif 'youtube.com' in url_lower or 'youtu.be' in url_lower:
             # 라이브 스트림 감지 (live 키워드가 있으면)
             if '/live/' in url_lower or 'live' in url_lower:

@@ -42,7 +42,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "plan_runner"))
 
 # 테스트 DB 경로 (TEST_DB_DIR 환경변수로 워크트리 격리 지원)
 TEST_DB_DIR = Path(os.environ.get("TEST_DB_DIR", str(PROJECT_ROOT / "data")))
-TEST_DB_PATH = TEST_DB_DIR / "test_monitor.db"
+_DEFAULT_TEST_DB_NAME = f"test_monitor_{os.getpid()}.db"
+TEST_DB_PATH = Path(os.environ.get("TEST_DB_PATH", str(TEST_DB_DIR / _DEFAULT_TEST_DB_NAME)))
 MIGRATIONS_DIR = PROJECT_ROOT / "app" / "migrations"
 
 
@@ -292,6 +293,7 @@ def test_db_engine():
     기본값은 SQLite 테스트 DB (기존 동작 유지).
     """
     from app.database import Base
+    from app.models.bootstrap import load_all_models
 
     _url = os.environ.get("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
     _is_test_sqlite = _url.startswith("sqlite")
@@ -320,10 +322,13 @@ def test_db_engine():
         # PostgreSQL: check_same_thread/PRAGMA 불필요
         engine = create_engine(_url, pool_pre_ping=True)
 
-    # 1. SQLAlchemy 모델로 기본 테이블 생성
+    # 1. SQLAlchemy 모델을 공통 Base metadata에 등록
+    load_all_models()
+
+    # 2. SQLAlchemy 모델로 기본 테이블 생성
     Base.metadata.create_all(bind=engine)
 
-    # 2. 마이그레이션 적용 (SQLite 전용 — PG는 Base.metadata.create_all로 충분)
+    # 3. 마이그레이션 적용 (SQLite 전용 — PG는 Base.metadata.create_all로 충분)
     if _is_test_sqlite:
         apply_migrations(TEST_DB_PATH)
         from sqlalchemy import inspect as sa_inspect, text as sa_text

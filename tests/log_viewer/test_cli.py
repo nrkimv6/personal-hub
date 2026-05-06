@@ -157,6 +157,58 @@ class TestMainCleanupArgv:
         assert "[cleanup] event" in output
         assert "normal line" not in output
 
+    def test_main_devrunner_alias_static_right(self, tmp_path: Path, monkeypatch):
+        """R: main(["devrunner"])도 DEV-RUNNER 소스로 정규화된다."""
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "dev_runner_command_listener-20260504.log").write_text(
+            "[cleanup] alias event\nnormal line\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr("app.log_viewer.cli._LOGS_DIR", log_dir)
+        monkeypatch.setattr("app.log_viewer.cli._LOGS_ADMIN_DIR", log_dir)
+
+        captured = StringIO()
+        err = StringIO()
+        with patch("app.log_viewer.cli._print_line", side_effect=lambda t: captured.write(t + "\n")), \
+             patch.object(sys, "stderr", err):
+            main(["devrunner", "--admin", "--cleanup"])
+
+        output = captured.getvalue()
+        assert "[cleanup] alias event" in output
+        assert "알 수 없는 소스" not in err.getvalue()
+
+    def test_main_dev_runner_alias_follow_dispatch_right(self):
+        """R: follow 모드에서도 dev-runner alias가 단일 DEV-RUNNER source로 dispatch된다."""
+        with patch("app.log_viewer.cli.follow_source") as follow_source:
+            main(["dev-runner", "--follow", "--admin"])
+
+        follow_source.assert_called_once_with("DEV-RUNNER", True, cleanup=False)
+
+    def test_main_unknown_target_errors_only_for_unregistered_target(self, capsys):
+        """B: 진짜 미등록 target만 unknown source 에러를 출력한다."""
+        main(["not-a-real-source"])
+        captured = capsys.readouterr()
+        assert "알 수 없는 소스" in captured.err
+
+    def test_main_devrunner_single_target_does_not_mix_plan_runner_fallback(self):
+        """R: devrunner 단일 타겟은 DEV-RUNNER만 조회하고 plan-runner fallback을 섞지 않는다."""
+        with patch("app.log_viewer.cli.show_source") as show_source, \
+             patch("app.log_viewer.cli.show_plan_runners") as show_plan_runners:
+            main(["devrunner", "--admin"])
+
+        show_source.assert_called_once_with("DEV-RUNNER", True, None, cleanup=False)
+        show_plan_runners.assert_not_called()
+
+    def test_logs_ps1_validate_set_accepts_dev_runner_alias(self):
+        """R: PowerShell wrapper도 dev-runner alias를 ValidateSet에서 차단하지 않는다."""
+        script = Path(__file__).resolve().parents[2] / "scripts" / "logs" / "logs.ps1"
+        text = script.read_text(encoding="utf-8")
+
+        assert '"devrunner"' in text
+        assert '"dev-runner"' in text
+
 
 class TestWorkerSourceSelection:
     def test_show_source_worker_prefers_structured_worker_log_over_stdout_capture(self, tmp_path: Path, monkeypatch):

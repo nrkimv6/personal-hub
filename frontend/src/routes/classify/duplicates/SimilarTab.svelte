@@ -5,6 +5,7 @@
 	import { getErrorMessage } from '$lib/utils/error';
 	import { loadCategoryMap as loadCategoryMapUtil } from '../lib/categoryUtils';
 	import { Search, RefreshCw, Tag, ArrowRight, Cpu, AlertTriangle, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
+	import { confirm } from '$lib/stores/confirm';
 	import { toast } from '$lib/stores/toast';
 
 	interface SimilarSuggestion {
@@ -214,7 +215,14 @@
 			return;
 		}
 
-		if (!confirm(`선택한 ${fileIds.length}개 파일을 "${group.category_path}"로 분류하시겠습니까?`)) {
+		if (
+			!(await confirm({
+				title: '파일 분류 적용',
+				message: `선택한 ${fileIds.length}개 파일을 "${group.category_path}"로 분류하시겠습니까?`,
+				confirmText: '적용',
+				variant: 'warning'
+			}))
+		) {
 			return;
 		}
 

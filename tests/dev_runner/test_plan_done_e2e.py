@@ -191,8 +191,10 @@ async def test_batch_done_ignores_unrelated_snapshot_json_B(svc, tmp_path, dev_r
     ownership_dir.mkdir(parents=True, exist_ok=True)
     plan_path = make_completed_plan(plan_dir, "2026-04-21-batch-done-snapshot.md")
 
-    (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
-    done_md = tmp_path / "docs" / "DONE.md"
+    plans_todo = tmp_path / ".worktrees" / "plans" / "TODO.md"
+    plans_todo.parent.mkdir(parents=True, exist_ok=True)
+    plans_todo.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+    done_md = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
     done_md.parent.mkdir(parents=True, exist_ok=True)
     done_md.write_text("# DONE\n", encoding="utf-8")
     (ownership_dir / "other-runner.json").write_text(
@@ -201,7 +203,7 @@ async def test_batch_done_ignores_unrelated_snapshot_json_B(svc, tmp_path, dev_r
                 "runner_id": "other-runner",
                 "captured_at": "2026-04-21T10:00:00",
                 "project_root": str(tmp_path),
-                "dirty_files": ["TODO.md"],
+                "dirty_files": [".worktrees/plans/TODO.md"],
                 "owned_files": [],
                 "clean_at_start_files": [],
             },
@@ -236,8 +238,10 @@ async def test_run_done_strict_snapshot_failure_keeps_plan_unmoved_E(svc, tmp_pa
     plan_path = make_completed_plan(plan_dir, "2026-04-21-strict-fail.md")
     original = plan_path.read_text(encoding="utf-8")
 
-    (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
-    done_md = tmp_path / "docs" / "DONE.md"
+    plans_todo = tmp_path / ".worktrees" / "plans" / "TODO.md"
+    plans_todo.parent.mkdir(parents=True, exist_ok=True)
+    plans_todo.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+    done_md = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
     done_md.parent.mkdir(parents=True, exist_ok=True)
     done_md.write_text("# DONE\n", encoding="utf-8")
     (ownership_dir / "strict-runner.json").write_text(
@@ -263,3 +267,45 @@ async def test_run_done_strict_snapshot_failure_keeps_plan_unmoved_E(svc, tmp_pa
     assert plan_path.exists()
     assert plan_path.read_text(encoding="utf-8") == original
     assert not (archive_dir / plan_path.name).exists()
+
+
+# =============================================================================
+# T5: plans-root plan run_done 회귀 TC
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_run_done_plans_root_plan_finds_correct_project_dir(tmp_path, svc):
+    '''T5/R: .worktrees/plans/docs/plan/xxx.md 경로의 plan이
+    preedit_gate_failed 없이 target project DONE을 정상 참조하는 회귀.
+
+    _resolve_project_dir()가 .worktrees/plans를 target project root로 오인하지 않고
+    실제 project root(tmp_path)를 반환해야 한다.
+    '''
+    project_root = tmp_path
+    plans_dir = project_root / '.worktrees' / 'plans' / 'docs' / 'plan'
+    plans_dir.mkdir(parents=True)
+
+    plan_file = plans_dir / '2026-04-24_fix-plans-root-e2e.md'
+    plan_file.write_text(
+        '# Fix plans root e2e\n\n'
+        '> 상태: 구현완료\n'
+        '> 진행률: 1/1 (100%)\n\n'
+        '- [x] 항목 A\n\n'
+        '*상태: 구현완료 | 진행률: 1/1 (100%)*\n',
+        encoding='utf-8',
+    )
+
+    # run_done이 _resolve_project_dir를 호출할 때 .worktrees/plans가 아닌
+    # project_root를 사용해야 archive 경로가 올바르게 설정됨
+    from app.modules.dev_runner.services.plan_done_service import PlanDoneService
+    resolved = PlanDoneService._resolve_project_dir(str(plan_file))
+
+    # plans root가 아닌 project root 반환 검증
+    assert resolved is not None, '_resolve_project_dir()가 None 반환하면 안 됨'
+    plans_root = project_root / '.worktrees' / 'plans'
+    assert resolved != plans_root, (
+        f'_resolve_project_dir()가 plans root를 반환하면 안 됨 (run_done 회귀): {resolved}'
+    )
+    assert resolved == project_root, (
+        f'_resolve_project_dir()는 project_root({project_root})를 반환해야 함, 실제: {resolved}'
+    )

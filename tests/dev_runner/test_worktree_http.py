@@ -3,6 +3,7 @@ import json
 import pytest
 import fakeredis
 import fakeredis.aioredis
+from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -116,14 +117,18 @@ class TestWorktreeHTTP:
             "app.modules.dev_runner.services.executor_service.ExecutorService._check_redis_and_listener",
             new_callable=AsyncMock
         ):
-            with patch("app.modules.dev_runner.services.executor_service.config") as mock_cfg:
-                mock_cfg.MAX_CONCURRENT_RUNNERS = 3
+            mocked_settings = SimpleNamespace(
+                max_concurrent_runners=3,
+                default_engine="claude",
+                default_fix_engine="claude",
+            )
 
-                async def fake_scard(key):
-                    return 3
+            async def fake_scard(key):
+                return 3
 
-                with patch.object(type(fake_async), "scard", side_effect=fake_scard):
-                    response = client.post("/api/v1/dev-runner/run", json={"test_source": "tc_worktree_http_5_over_limit"})
+            with patch.object(type(fake_async), "scard", side_effect=fake_scard), \
+                 patch("app.modules.dev_runner.services.executor_service.settings_service.get", return_value=mocked_settings):
+                response = client.post("/api/v1/dev-runner/run", json={"test_source": "tc_worktree_http_5_over_limit"})
 
         assert response.status_code == 429
         detail = response.json().get("detail", "")

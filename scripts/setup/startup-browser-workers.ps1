@@ -4,6 +4,8 @@
 #
 # browser_workers.py를 호출하여 watchdog 6개를 시작하고 검증합니다.
 # Note: 브라우저 워커는 사용자 세션에서 실행되어야 합니다.
+#
+# startup probe는 liveness 전용 엔드포인트 사용 — /status는 운영 대시보드용. 2026-04-22 plan 참조
 
 param(
     [int]$Delay = 20  # 서비스 시작 대기 시간 (초)
@@ -14,7 +16,7 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $LogFile = Join-Path $ProjectRoot "logs\admin\startup_browser_workers_$timestamp.log"
 $browserWorkersScript = Join-Path (Split-Path -Parent $ScriptDir) "services\browser_workers.py"
-$apiUrl = "http://localhost:8001/api/v1/system/status"
+$apiUrl = "http://localhost:8001/api/v1/system/liveness"
 $apiServiceName = "MonitorPage-Admin"
 $initialApiWaitSeconds = 600
 $finalApiWaitSeconds = 300
@@ -172,13 +174,23 @@ function Write-WatchdogStatusSummary {
     }
 }
 
+$script:lastProbeStatus = "none"
+
 function Test-ApiServerReady {
     param([string]$ApiUrl)
 
     try {
-        $response = Invoke-WebRequest -Uri $ApiUrl -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
-        return ($response.StatusCode -eq 200)
+        $response = Invoke-WebRequest -Uri $ApiUrl -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
+        if ($response.StatusCode -eq 200) {
+            $script:lastProbeStatus = "200 OK"
+            return $true
+        } else {
+            $script:lastProbeStatus = "ERROR: liveness probe returned $($response.StatusCode)"
+            Write-Log $script:lastProbeStatus
+            return $false
+        }
     } catch {
+        $script:lastProbeStatus = "EXCEPTION: $($_.Exception.Message)"
         return $false
     }
 }
@@ -214,7 +226,7 @@ function Wait-ForApiServerPhase {
         $totalElapsed = $ElapsedSeconds + $phaseElapsed
 
         if ($totalElapsed % 30 -eq 0) {
-            Write-Log "Still waiting for API server... ($totalElapsed seconds elapsed)"
+            Write-Log "Still waiting for API server... ($totalElapsed seconds elapsed, last result: $script:lastProbeStatus)"
         }
 
         if ($totalElapsed % 60 -eq 0) {

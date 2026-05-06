@@ -4,14 +4,18 @@ Phase T5: FastAPI TestClient로 trigger 필드 포함 API 동작 검증
 """
 import pytest
 from fastapi.testclient import TestClient
-from app.main import app
 
 pytestmark = pytest.mark.http
 
 
+def _build_test_client() -> TestClient:
+    from app.main import app
+    return TestClient(app)
+
+
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(app)
+    return _build_test_client()
 
 
 def test_http_post_run_with_trigger(client):

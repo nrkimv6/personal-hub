@@ -106,34 +106,53 @@ def _create_schedule(db, saved_search_id: int):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_execute_google_search_pushes_to_real_redis_and_preserves_schedule_id(
+async def test_google_search_scheduler_pushes_to_real_redis_and_preserves_schedule_id(
     session_factory,
     real_async_redis,
 ):
-    from app.worker.scheduled_worker import ScheduledCrawlWorker
+    from app.modules.google_search.schedulers.search_schedule import GoogleSearchScheduler
+    from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec, WorkerContext
 
     with session_factory() as seed_db:
         saved_search = _create_saved_search(seed_db)
         schedule = _create_schedule(seed_db, saved_search.id)
         saved_search_id = saved_search.id
         schedule_id = schedule.id
+        schedule_name = schedule.name
+        schedule_value = schedule.schedule_value
+        schedule_type = schedule.schedule_type
+        schedule_display_name = schedule.display_name or schedule.name
 
-    worker = ScheduledCrawlWorker()
+    scheduler = GoogleSearchScheduler()
     queue = RedisQueue(real_async_redis, GOOGLE_SEARCH_QUEUE)
-    mock_schedule_service = Mock()
+    ctx = WorkerContext(
+        worker_name="test_worker",
+        browser_manager=None,
+        db_factory=session_factory,
+        update_worker_state=Mock(),
+    )
 
-    with patch("app.worker.scheduled_worker.SessionLocal", session_factory):
-        with patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_schedule_service):
-            with patch(
-                "app.modules.google_search.services.queue_service.RedisClient.get_client",
-                AsyncMock(return_value=real_async_redis),
-            ):
-                    with patch.object(worker, "_update_worker_state"):
-                        await worker._execute_google_search(
-                            schedule_id=schedule_id,
-                            run_id=101,
-                            saved_search_id=saved_search_id,
-                        )
+    with patch(
+        "app.modules.google_search.services.queue_service.RedisClient.get_client",
+        AsyncMock(return_value=real_async_redis),
+    ):
+        outcome = await scheduler.execute(
+            ScheduleExecutionSpec(
+                schedule_id=schedule_id,
+                target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+                name=schedule_name,
+                target_config={"saved_search_id": saved_search_id},
+                schedule_value=schedule_value,
+                schedule_type=schedule_type,
+                display_name=schedule_display_name,
+            ),
+            ClaimedRun(
+                run_id=101,
+                schedule_id=schedule_id,
+                task_name=f"google_schedule_{schedule_id}_run_101",
+            ),
+            ctx,
+        )
 
     with session_factory() as verify_db:
         queue_item = (
@@ -151,14 +170,8 @@ async def test_execute_google_search_pushes_to_real_redis_and_preserves_schedule
     assert payload["id"] == queue_item.id
     assert payload["schedule_id"] == schedule_id
     assert payload["saved_search_id"] == saved_search_id
-
-    mock_schedule_service.complete_run.assert_called_once_with(
-        101,
-        collected_count=0,
-        saved_count=0,
-        stop_reason="search_queued",
-    )
-    mock_schedule_service.update_schedule_after_run.assert_called_once_with(schedule_id)
+    assert outcome.stop_reason == "search_queued"
+    assert "search_id" in outcome.config_snapshot_patch
 
 
 @pytest.mark.asyncio

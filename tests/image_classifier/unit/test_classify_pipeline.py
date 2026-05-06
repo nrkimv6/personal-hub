@@ -47,6 +47,31 @@ def db_with_files(db_with_categories, tmp_path):
     return db_with_categories
 
 
+def _fetch_representative_row(db, rep_id):
+    return db.execute(text("""
+        SELECT ai_category_id, ai_confidence, ai_reasoning, ai_model
+        FROM file_classifications
+        WHERE id = :rep_id AND ai_category_id IS NOT NULL
+    """), {"rep_id": rep_id}).mappings().first()
+
+
+def _apply_representative_copy(db, *, file_id, rep_row, reason_prefix):
+    db.execute(text("""
+        UPDATE file_classifications
+        SET ai_category_id = :cat_id, ai_confidence = :conf,
+            ai_reasoning = :reason, ai_model = :model,
+            final_category_id = :cat_id, status = 'ai_classified',
+            classified_at = datetime('now')
+        WHERE id = :file_id
+    """), {
+        "file_id": file_id,
+        "cat_id": rep_row["ai_category_id"],
+        "conf": rep_row["ai_confidence"],
+        "reason": f"{reason_prefix} {rep_row['ai_reasoning'] or ''}".rstrip(),
+        "model": rep_row["ai_model"],
+    })
+
+
 # ================================================
 # Bug #4: pHash 그룹 복사 IndexError 방어
 # ================================================
@@ -90,24 +115,23 @@ class TestPHashGroupCopy:
                 continue
             rep_id = reps[0]
 
-            rep_row = db_with_files.execute(text("""
-                SELECT ai_category_id, ai_confidence, ai_reasoning, ai_model
-                FROM file_classifications WHERE id = :rep_id AND ai_category_id IS NOT NULL
-            """), {"rep_id": rep_id}).fetchone()
+            rep_row = _fetch_representative_row(db_with_files, rep_id)
+            if rep_row:
+                # SELECT key 순서와 무관한 이름 접근 계약을 고정한다.
+                rep_row = {
+                    "ai_model": rep_row["ai_model"],
+                    "ai_reasoning": rep_row["ai_reasoning"],
+                    "ai_confidence": rep_row["ai_confidence"],
+                    "ai_category_id": rep_row["ai_category_id"],
+                }
 
             if rep_row:
-                db_with_files.execute(text("""
-                    UPDATE file_classifications
-                    SET ai_category_id = :cat_id, ai_confidence = :conf,
-                        ai_reasoning = :reason, ai_model = :model,
-                        final_category_id = :cat_id, status = 'ai_classified',
-                        classified_at = datetime('now')
-                    WHERE id = :file_id
-                """), {
-                    "file_id": f.id, "cat_id": rep_row[0],
-                    "conf": rep_row[1], "reason": f"[그룹 복사] {rep_row[2] or ''}",
-                    "model": rep_row[3],
-                })
+                _apply_representative_copy(
+                    db_with_files,
+                    file_id=f.id,
+                    rep_row=rep_row,
+                    reason_prefix="[그룹 복사]",
+                )
                 copied += 1
 
         db_with_files.commit()
@@ -117,10 +141,14 @@ class TestPHashGroupCopy:
         # 2번, 3번 파일이 ai_classified 상태인지 확인
         for fid in [2, 3]:
             row = db_with_files.execute(text(
-                "SELECT status, ai_category_id FROM file_classifications WHERE id = :id"
+                "SELECT status, ai_category_id, ai_confidence, ai_reasoning, ai_model "
+                "FROM file_classifications WHERE id = :id"
             ), {"id": fid}).fetchone()
             assert row[0] == "ai_classified"
             assert row[1] == 1
+            assert row[2] == pytest.approx(0.9)
+            assert row[3] == "[그룹 복사] 여행 사진"
+            assert row[4] == "claude_cli"
 
     def test_error_phash_group_no_representative(self):
         """TC-3-2 Error: 그룹에 대표 파일 없음 → IndexError 없이 continue (Bug #4 핵심)."""
@@ -169,6 +197,81 @@ class TestPHashGroupCopy:
             copied += 1
 
         assert copied == 0, "복사 대상이 없어야 함"
+
+
+class TestClipGroupCopy:
+    """CLIP 대표 결과 복사 시 이름 기반 접근 계약 검증."""
+
+    def test_right_clip_group_copy_normal(self, db_with_files):
+        """TC-3-4 Right: CLIP 대표 파일 결과를 멤버에 정확히 복사."""
+        db_with_files.execute(text("""
+            UPDATE file_classifications
+            SET ai_category_id = 2,
+                ai_confidence = 0.77,
+                ai_reasoning = '실내 사진',
+                ai_model = 'gemini_cli',
+                final_category_id = 2,
+                status = 'ai_classified',
+                classified_at = datetime('now')
+            WHERE id = 4
+        """))
+        db_with_files.commit()
+
+        clip_group_map = {300: [4, 5]}
+        clip_copied = 0
+
+        for _, members in clip_group_map.items():
+            rep_row = _fetch_representative_row(db_with_files, members[0])
+            if rep_row:
+                _apply_representative_copy(
+                    db_with_files,
+                    file_id=members[1],
+                    rep_row=rep_row,
+                    reason_prefix="[CLIP 유사 복사]",
+                )
+                clip_copied += 1
+
+        db_with_files.commit()
+
+        row = db_with_files.execute(text("""
+            SELECT ai_category_id, ai_confidence, ai_reasoning, ai_model, status
+            FROM file_classifications
+            WHERE id = 5
+        """)).fetchone()
+
+        assert clip_copied == 1
+        assert row[0] == 2
+        assert row[1] == pytest.approx(0.77)
+        assert row[2] == "[CLIP 유사 복사] 실내 사진"
+        assert row[3] == "gemini_cli"
+        assert row[4] == "ai_classified"
+
+    def test_error_clip_group_copy_skips_when_representative_missing(self, db_with_files):
+        """TC-3-5 Error: 대표 결과가 없으면 CLIP 복사를 건너뛴다."""
+        clip_group_map = {301: [6, 7]}
+        clip_copied = 0
+
+        for _, members in clip_group_map.items():
+            rep_row = _fetch_representative_row(db_with_files, members[0])
+            if rep_row:
+                _apply_representative_copy(
+                    db_with_files,
+                    file_id=members[1],
+                    rep_row=rep_row,
+                    reason_prefix="[CLIP 유사 복사]",
+                )
+                clip_copied += 1
+
+        row = db_with_files.execute(text("""
+            SELECT ai_category_id, ai_reasoning, status
+            FROM file_classifications
+            WHERE id = 7
+        """)).fetchone()
+
+        assert clip_copied == 0
+        assert row[0] is None
+        assert row[1] is None
+        assert row[2] == "pending"
 
 
 # ================================================

@@ -53,9 +53,12 @@ class TaskSchedule(Base):
     TARGET_TYPE_REPORT = "report"  # LLM 보고서 생성
     TARGET_TYPE_PYTEST_RUN = "pytest_run"  # pytest 자동 실행
     TARGET_TYPE_PLAN_ARCHIVE_ANALYZE = "plan_archive_analyze"  # plan LLM 분석
-    TARGET_TYPE_PLAN_REQUIREMENTS_SYNC = "plan_requirements_sync"  # 요구사항 문서 생성 — deprecated — Plan 2 전환 후 제거
+    TARGET_TYPE_PLAN_ARCHIVE_INSIGHT_BATCH = "plan_archive_insight_batch"  # archive metrics insight report
     TARGET_TYPE_DEVGUIDE_STALENESS = "devguide_staleness"  # dev-guide staleness 감지
-    TARGET_TYPE_ARCHIVE_ROTATION = "archive_rotation"      # archive 파일 로테이션 (30건 트리거)
+    TARGET_TYPE_ARCHIVE_ROTATION = "archive_rotation"      # archive 파일 retention
+    TARGET_TYPE_SCHEDULE_DATE_EXPIRE = "schedule_date_expire"  # 과거 날짜 모니터링 스케줄 매일 disable
+    TARGET_TYPE_AUTO_DEV_RUNNER = "auto_dev_runner"  # 야간 자동 plan 진행 + 일일 보고서
+    TARGET_TYPE_WORKTREE_HYGIENE = "worktree_hygiene"  # worktree/residue hygiene deterministic report
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"

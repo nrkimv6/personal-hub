@@ -1,6 +1,7 @@
 """로그 파일 탐색·메타데이터 파싱 서비스 (LogService에서 분리)"""
 
 import hashlib
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -42,25 +43,22 @@ class LogFileResolver:
     # ------------------------------------------------------------------
 
     def find_current_log(self, runner_id: str) -> Optional[Path]:
-        """특정 runner의 stream 로그 파일 (Redis에서 조회)
+        """특정 runner의 표시용 로그 파일을 찾는다.
 
-        stream_log_path 존재 시 즉시 반환. 없거나 파일 미존재 시 log_file_path로 fallback.
+        stream 로그에 START marker만 있고 본로그에 실제 runner 출력이 있으면 본로그를
+        선택한다. stream 파일에 실제 출력이 있으면 기존 stream 우선 계약을 유지한다.
         """
         try:
             stream_path_str = self._redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
             log_path_str = self._redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
 
-            # stream_log_path 존재 시 즉시 반환 (크기 무관)
-            if stream_path_str:
-                stream_path = Path(stream_path_str)
-                if stream_path.exists():
-                    return stream_path
+            stream_path = self._existing_path(stream_path_str)
+            log_path = self._existing_path(log_path_str)
 
-            # fallback: 실제 로그가 기록된 log_file_path
-            if log_path_str:
-                log_path = Path(log_path_str)
-                if log_path.exists():
-                    return log_path
+            if stream_path and log_path:
+                return self.select_display_log(stream_path, log_path)
+
+            return stream_path or log_path
         except redis.ConnectionError:
             pass
 
@@ -68,16 +66,121 @@ class LogFileResolver:
         # lg- 접두사는 레거시 파일용으로 Phase 2에서 별도 처리
         if runner_id.startswith("lg-"):
             return None
-        log_dir = self.get_log_dir()
+        return self.find_filesystem_log(runner_id)
+
+    def find_filesystem_log(self, runner_id: str, log_dir: Optional[Path] = None) -> Optional[Path]:
+        """Redis 상태가 없을 때 runner id 기반 stream/main 로그 pair를 파일시스템에서 찾는다."""
+        if runner_id.startswith("lg-"):
+            return None
+        log_dir = log_dir or self.get_log_dir()
         if log_dir.exists():
-            for pattern in [
-                f"plan-runner-stream-{runner_id}-*.log",
-                f"plan-runner-{runner_id}-*.log",
-            ]:
-                matches = list(log_dir.glob(pattern))
-                if matches:
-                    return max(matches, key=lambda p: p.stat().st_mtime)
+            stream_path = self._best_display_candidate(log_dir.glob(f"plan-runner-stream-{runner_id}-*.log"))
+            log_path = self._best_display_candidate(log_dir.glob(f"plan-runner-{runner_id}-*.log"))
+            return self.select_display_log(stream_path, log_path)
         return None
+
+    @staticmethod
+    def _existing_path(raw_path) -> Optional[Path]:
+        if not raw_path:
+            return None
+        try:
+            path = Path(os.fsdecode(raw_path))
+        except (TypeError, ValueError, OSError):
+            return None
+        return path if path.exists() else None
+
+    @staticmethod
+    def _latest_existing(paths) -> Optional[Path]:
+        existing = [p for p in paths if p.exists()]
+        if not existing:
+            return None
+        return max(existing, key=lambda p: p.stat().st_mtime)
+
+    @classmethod
+    def _best_display_candidate(cls, paths) -> Optional[Path]:
+        existing = [p for p in paths if p.exists()]
+        if not existing:
+            return None
+
+        def quality(path: Path) -> tuple[int, float]:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            if cls._has_runner_output(path):
+                return (3, mtime)
+            if not cls._is_empty_or_start_marker_only(path):
+                return (2, mtime)
+            try:
+                if path.stat().st_size > 0:
+                    return (1, mtime)
+            except OSError:
+                pass
+            return (0, mtime)
+
+        return max(existing, key=quality)
+
+    @classmethod
+    def select_display_log(cls, stream_path: Optional[Path], log_path: Optional[Path]) -> Optional[Path]:
+        """stream/main pair 중 UI와 API에 보여줄 로그를 고른다."""
+        if stream_path and log_path:
+            if cls._is_empty_or_start_marker_only(stream_path) and cls._has_runner_output(log_path):
+                return log_path
+            return stream_path
+        return stream_path or log_path
+
+    @staticmethod
+    def _read_sample_lines(path: Path, max_lines: int = 20) -> list[str]:
+        lines: list[str] = []
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as f:
+                for _ in range(max_lines):
+                    line = f.readline()
+                    if not line:
+                        break
+                    stripped = line.strip()
+                    if stripped:
+                        lines.append(stripped)
+        except (OSError, IOError):
+            return []
+        return lines
+
+    @classmethod
+    def _is_start_marker_only(cls, path: Path) -> bool:
+        lines = cls._read_sample_lines(path, max_lines=5)
+        if not lines:
+            return False
+        if len(lines) > 3:
+            return False
+        marker_patterns = (
+            "START",
+            "log_path=",
+            "marker",
+        )
+        return all(any(token in line for token in marker_patterns) for line in lines)
+
+    @classmethod
+    def _is_empty_or_start_marker_only(cls, path: Path) -> bool:
+        try:
+            if path.stat().st_size == 0:
+                return True
+        except OSError:
+            return False
+        return cls._is_start_marker_only(path)
+
+    @classmethod
+    def _has_runner_output(cls, path: Path) -> bool:
+        lines = cls._read_sample_lines(path, max_lines=80)
+        real_markers = (
+            "[TRIGGER]",
+            "[RUN_META]",
+            "[PLAN-RUNNER",
+            "[ERROR]",
+            "[WARN]",
+            "[INFO]",
+            "WRITE_SCOPE_REROUTE_REQUIRED",
+        )
+        return any(any(marker in line for marker in real_markers) for line in lines)
 
     def resolve_legacy_log(self, runner_id: str) -> Optional[Path]:
         """lg- 접두사 pseudo runner_id로 레거시 파일 탐색.
@@ -102,6 +205,20 @@ class LogFileResolver:
     # ------------------------------------------------------------------
     # 메타데이터 파싱
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _basename_from_plan_value(value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        if value in {"__ALL_PLANS__", "ALL"}:
+            return "전체 실행"
+        name = Path(value).name
+        return name or value
+
+    @classmethod
+    def display_plan_name_from_meta(cls, meta: dict) -> Optional[str]:
+        """[TRIGGER] plan= 또는 [RUN_META] plan_key=에서 UI fallback 표시명을 만든다."""
+        return cls._basename_from_plan_value(meta.get("plan")) or cls._basename_from_plan_value(meta.get("plan_key"))
 
     @staticmethod
     def parse_meta_from_log(log_file_path: str, scan_lines: int = 15) -> dict:

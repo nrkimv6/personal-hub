@@ -2,14 +2,18 @@
 import pytest
 from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
-from app.main import app
 
 pytestmark = pytest.mark.http
 
 
+def _build_test_client() -> TestClient:
+    from app.main import app
+    return TestClient(app)
+
+
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(app)
+    return _build_test_client()
 
 
 class TestMergeQueueEndpoint:

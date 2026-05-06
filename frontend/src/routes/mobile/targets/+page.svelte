@@ -3,10 +3,16 @@
 	import { goto } from "$app/navigation";
 	import { fetchWithTimeout } from '$lib/api/client';
 	import type { MobileTarget } from '$lib/types/mobile';
+	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 
 	let targets: MobileTarget[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
+
+	function errorMessage(err: unknown): string {
+		return err instanceof Error ? err.message : '알 수 없는 오류';
+	}
 
 	async function loadTargets() {
 		try {
@@ -22,7 +28,13 @@
 	}
 
 	async function deleteTarget(id: number) {
-		if (!confirm("정말 삭제하시겠습니까?")) return;
+		const confirmed = await confirm({
+			title: '크롤링 대상 삭제',
+			message: '정말 삭제하시겠습니까?',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 
 		try {
 			const response = await fetchWithTimeout(`/api/v1/mobile/targets/${id}`, {
@@ -31,12 +43,17 @@
 			if (!response.ok) throw new Error("삭제 실패");
 			await loadTargets();
 		} catch (err) {
-			alert((err as Error).message);
+			toast.error(errorMessage(err));
 		}
 	}
 
 	async function executeTarget(id: number) {
-		if (!confirm("즉시 크롤링을 실행하시겠습니까?")) return;
+		const confirmed = await confirm({
+			title: '즉시 크롤링 실행',
+			message: '즉시 크롤링을 실행하시겠습니까?',
+			confirmText: '실행'
+		});
+		if (!confirmed) return;
 
 		try {
 			const response = await fetchWithTimeout(
@@ -49,7 +66,7 @@
 			const result = await response.json();
 
 			if (result.success) {
-				alert(
+				toast.success(
 					`크롤링 완료!\n` +
 						`수집: ${result.collected_count}건\n` +
 						`신규: ${result.new_count}건\n` +
@@ -58,10 +75,10 @@
 				);
 				await loadTargets();
 			} else {
-				alert(`실행 실패: ${result.error}`);
+				toast.error(`실행 실패: ${result.error}`);
 			}
 		} catch (err) {
-			alert((err as Error).message);
+			toast.error(errorMessage(err));
 		}
 	}
 
@@ -72,7 +89,7 @@
 
 <div class="container mx-auto p-4">
 	<div class="flex flex-wrap justify-between items-center mb-6 gap-2">
-		<h1 class="text-2xl font-bold">모바일 크롤링 대상</h1>
+		<h2 class="text-xl font-semibold">모바일 크롤링 대상</h2>
 		<button
 			class="btn btn-primary"
 			onclick={() => goto("/mobile/targets/new")}

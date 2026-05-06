@@ -2,8 +2,7 @@
 	import { onMount } from 'svelte';
 	import { devRunnerPlanApi } from '$lib/api/dev-runner';
 	import { planRecordsApi, type PlanRecord } from '$lib/api/plan-records';
-	import { renderMarkdown } from '../notes/utils/markdown';
-	import 'highlight.js/styles/github.css';
+	import MarkdownContent from '$lib/components/markdown/MarkdownContent.svelte';
 
 	interface Props {
 		filePath: string;
@@ -12,7 +11,7 @@
 
 	let { filePath, recordId }: Props = $props();
 
-	let html = $state('');
+	let content = $state('');
 	let loading = $state(false);
 	let error = $state('');
 
@@ -24,13 +23,23 @@
 		if (!path) return;
 		loading = true;
 		error = '';
-		html = '';
+		content = '';
 		try {
 			const encoded = btoa(unescape(encodeURIComponent(path)));
 			const res = await devRunnerPlanApi.content(encoded);
-			html = renderMarkdown(res.content);
+			content = res.content;
 		} catch (e: any) {
-			error = e?.message ?? '내용을 불러오지 못했습니다.';
+			if (recordId) {
+				try {
+					const res = await planRecordsApi.getContent(recordId);
+					content = res.raw_content ?? '';
+					error = content ? '' : 'DB raw_content가 비어 있습니다.';
+				} catch (fallbackError: any) {
+					error = fallbackError?.message ?? e?.message ?? '내용을 불러오지 못했습니다.';
+				}
+			} else {
+				error = e?.message ?? '내용을 불러오지 못했습니다.';
+			}
 		} finally {
 			loading = false;
 		}
@@ -94,40 +103,42 @@
 		{error}
 	</div>
 {:else}
-	<!-- 반복 체인 섹션 (2개 이상일 때만 표시) -->
-	{#if chainRecords.length >= 2}
-		<div class="mb-3 p-3 bg-orange-50 border border-orange-200 rounded text-sm">
-			<div class="font-semibold text-orange-700 mb-1">🔁 반복 이력 ({chainRecords.length}회)</div>
-			<div class="flex flex-wrap gap-1 text-xs text-orange-600">
-				{#each chainRecords as r, i}
-					<span>
-						{i + 1}회 {formatDate(r.archived_at ?? r.created_at)}
-						{#if i < chainRecords.length - 1}<span class="text-orange-400">→</span>{:else}<span class="text-orange-400 font-semibold">(현재)</span>{/if}
-					</span>
-				{/each}
+	<div class="min-h-full px-4 py-3">
+		<!-- 반복 체인 섹션 (2개 이상일 때만 표시) -->
+		{#if chainRecords.length >= 2}
+			<div class="mb-3 p-3 bg-orange-50 border border-orange-200 rounded text-xs">
+				<div class="font-semibold text-orange-700 mb-1">🔁 반복 이력 ({chainRecords.length}회)</div>
+				<div class="flex flex-wrap gap-1 text-orange-600">
+					{#each chainRecords as r, i}
+						<span>
+							{i + 1}회 {formatDate(r.archived_at ?? r.created_at)}
+							{#if i < chainRecords.length - 1}<span class="text-orange-400">→</span>{:else}<span class="text-orange-400 font-semibold">(현재)</span>{/if}
+						</span>
+					{/each}
+				</div>
 			</div>
-		</div>
-	{/if}
+		{/if}
 
-	<!-- 마크다운 내용 -->
-	<div class="prose prose-sm overflow-auto max-h-[60vh] px-1">{@html html}</div>
+		<!-- 마크다운 내용 -->
+		<MarkdownContent content={content} variant="plan" />
 
-	<!-- AI 제안 카드 -->
-	{#if suggestion}
-		<div class="mt-3 border-l-4 border-orange-400 bg-orange-50 p-3 text-sm">
-			<div class="font-semibold text-orange-700 mb-1">🤖 반복 수정 AI 분석</div>
-			<div class="mb-1">
-				<span class="font-medium text-orange-600">근본 원인:</span>
-				<span class="text-gray-700"> {suggestion.root_cause}</span>
+		<!-- AI 제안 카드 -->
+		{#if suggestion}
+			<div class="mt-3 border-l-4 border-orange-400 bg-orange-50 p-3 text-xs">
+				<div class="font-semibold text-orange-700 mb-1">🤖 반복 수정 AI 분석</div>
+				<div class="mb-1">
+					<span class="font-medium text-orange-600">근본 원인:</span>
+					<span class="text-gray-700"> {suggestion.root_cause}</span>
+				</div>
+				<div class="mb-1">
+					<span class="font-medium text-orange-600">패턴:</span>
+					<span class="text-gray-700"> {suggestion.pattern}</span>
+				</div>
+				<div>
+					<span class="font-medium text-orange-600">개선 제안:</span>
+					<span class="text-gray-700"> {suggestion.suggestion}</span>
+				</div>
 			</div>
-			<div class="mb-1">
-				<span class="font-medium text-orange-600">패턴:</span>
-				<span class="text-gray-700"> {suggestion.pattern}</span>
-			</div>
-			<div>
-				<span class="font-medium text-orange-600">개선 제안:</span>
-				<span class="text-gray-700"> {suggestion.suggestion}</span>
-			</div>
-		</div>
-	{/if}
+		{/if}
+	</div>
 {/if}

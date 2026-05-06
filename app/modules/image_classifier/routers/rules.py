@@ -50,19 +50,19 @@ async def get_rules(db: Session = Depends(get_db)) -> list[RuleResponse]:
         FROM classification_rules r
         LEFT JOIN categories c ON r.category_id = c.id
         ORDER BY r.priority DESC, r.id ASC
-    """)).fetchall()
+    """)).mappings().all()
 
     return [
         RuleResponse(
-            id=row[0],
-            rule_type=row[1],
-            category_id=row[2],
-            rule_content=row[3],
-            priority=row[4],
-            is_active=bool(row[5]),
-            source=row[6],
-            hit_count=row[7] or 0,
-            category_name=row[8] if len(row) > 8 else None
+            id=row["id"],
+            rule_type=row["rule_type"],
+            category_id=row["category_id"],
+            rule_content=row["rule_content"],
+            priority=row["priority"],
+            is_active=bool(row["is_active"]),
+            source=row["source"],
+            hit_count=row["hit_count"] or 0,
+            category_name=row["category_name"]
         )
         for row in result
     ]

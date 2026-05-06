@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import TabNav from '$lib/components/layout/TabNav.svelte';
   import { toast } from '$lib/stores/toast';
 
@@ -285,12 +286,10 @@
 </svelte:head>
 
 <div class="space-y-4 p-4 md:p-6">
-  <header>
-    <h1 class="text-xl font-semibold">발표 사진 원근 보정 스캐너</h1>
-    <p class="mt-1 text-sm text-muted-foreground">
-      에디터/갤러리 워크플로우와 모바일 승인 큐를 하나의 페이지에서 연결해 처리합니다.
-    </p>
-  </header>
+  <PageHeader
+    title="발표 사진 원근 보정 스캐너"
+    subtitle="에디터, 갤러리, 모바일 승인 큐를 같은 상단 규약으로 연결해 처리합니다."
+  />
 
   <TabNav tabs={tabs} bind:activeTab queryParam="tab" variant="primary" replaceState={false} />
 

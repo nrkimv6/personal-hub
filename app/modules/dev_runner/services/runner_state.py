@@ -228,16 +228,24 @@ class RunnerState:
             status = await self.async_redis.get(self._runner_key(rid, "status"))
             if status == "stopped":
                 trigger = await self.async_redis.get(self._runner_key(rid, "trigger"))
+                if not is_visible_runner(trigger, rid):
+                    for key_suffix in RUNNER_KEY_SUFFIXES:
+                        await self.async_redis.delete(self._runner_key(rid, key_suffix))
+                    await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
+                    await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
+                    cleaned_recent += 1
+                    continue
                 plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))
                 reason = "file_lost"  # 湲곕낯媛? ?뚯씪 ?놁쓬
                 if plan_file:
                     try:
-                        if Path(plan_file).exists():
+                        source_path = Path(plan_file)
+                        if source_path.exists():
                             preserved_recent += 1
                             continue
                         target = resolve_plan_target(plan_file, purpose="archive")
                         if Path(target.target).exists():
-                            reason = "archived"
+                            reason = "history_archived" if target.target_kind == "history" else "archived"
                     except PathRuleError:
                         pass
 
@@ -249,18 +257,8 @@ class RunnerState:
                     preserved_recent += 1
                     continue
 
-                if is_visible_runner(trigger, rid):
-                    # user/user:all trigger: dismiss ?꾧퉴吏 cleanup-stale濡???젣?섏? ?딅뒗??
-                    preserved_recent += 1
-                    continue
-                # TTL 珥덇낵 + archived/file_lost recent 留??뺣━
-                if reason == "file_lost":
-                    bugs += 1
-                    logger.warning(f"[dev-runner] cleanup: runner {rid} plan ?뚯씪 ?뚯떎 (file_lost)")
-                for key_suffix in RUNNER_KEY_SUFFIXES:
-                    await self.async_redis.delete(self._runner_key(rid, key_suffix))
-                await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
-                cleaned_recent += 1
+                # user/user:all trigger: dismiss ?꾧퉴吏 cleanup-stale濡???젣?섏? ?딅뒗??
+                preserved_recent += 1
                 continue
 
             plan_file = await self.async_redis.get(self._runner_key(rid, "plan_file"))

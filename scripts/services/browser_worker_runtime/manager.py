@@ -1,11 +1,13 @@
 """Browser Workers runtime manager.
 
 Usage:
+  Service commands must be run from the root checkout, not .worktrees/*.
   python scripts/services/browser_workers.py start
   python scripts/services/browser_workers.py stop
   python scripts/services/browser_workers.py restart
   python scripts/services/browser_workers.py status
   python scripts/services/browser_workers.py restart-api
+  python scripts/services/browser_workers.py restart-api --public
   python scripts/services/browser_workers.py restart-frontend
   python scripts/services/browser_workers.py restart-frontend --public
 """
@@ -32,6 +34,7 @@ from scripts.services.browser_worker_runtime.runtime import (
     RESET,
     YELLOW,
     cprint,
+    assert_repo_root_checkout,
     _kill_by_cmdline,
 )
 from scripts.services.browser_worker_runtime.frontend_actions import (
@@ -83,6 +86,7 @@ from scripts.services.service_utils import (
 
 class BrowserWorkerManager:
     def __init__(self):
+        assert_repo_root_checkout()
         self.pid_dir = PROJECT_ROOT / ".pids"
         self.log_dir = PROJECT_ROOT / "logs" / "admin"
         self.scripts_dir = PROJECT_ROOT / "scripts"
@@ -139,7 +143,7 @@ class BrowserWorkerManager:
             {
                 "name": "Kakao Notification Watchdog",
                 "pid_file": f"kakao_notification_watchdog{self.pid_suffix}.pid",
-                "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
+                "cmd": [_ps_alias("monitorpage-wdog-kakao.exe"), "-ExecutionPolicy", "Bypass", "-File",
                         str(self.watchdogs_dir / "kakao-notification-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
                 "role": "listener",
@@ -201,8 +205,8 @@ class BrowserWorkerManager:
     def _nssm_restart_elevated(self, service_name: str) -> bool:
         return _nssm_restart_elevated_impl(self, service_name)
 
-    def restart_api(self):
-        return restart_api_impl(self)
+    def restart_api(self, public: bool = False):
+        return restart_api_impl(self, public=public)
 
     # ── restart-frontend ─────────────────────────────────────────
     def _frontend_mode(self, public: bool) -> tuple[str, int, int, Path, Path]:
@@ -223,8 +227,21 @@ class BrowserWorkerManager:
     def _frontend_runtime_env(self, public: bool) -> dict[str, str]:
         return _frontend_runtime_env_impl(self, public)
 
-    def _run_frontend_build_if_needed(self, public: bool, frontend_env: dict[str, str] | None = None) -> bool:
-        return _run_frontend_build_if_needed_impl(self, public, frontend_env=frontend_env)
+    def _run_frontend_build_if_needed(
+        self,
+        public: bool,
+        frontend_env: dict[str, str] | None = None,
+        *,
+        timestamp: str | None = None,
+        log_dir: Path | None = None,
+    ) -> bool:
+        return _run_frontend_build_if_needed_impl(
+            self,
+            public,
+            frontend_env=frontend_env,
+            timestamp=timestamp,
+            log_dir=log_dir,
+        )
 
     def _has_port_collision_error(self, stderr_log_path: Path, frontend_port: int) -> bool:
         return _has_port_collision_error_impl(self, stderr_log_path, frontend_port)
@@ -279,12 +296,12 @@ def main():
     parser.add_argument(
         "--public",
         action="store_true",
-        help="Use PUBLIC PREVIEW mode for restart-frontend (port 6100, build+preview)",
+        help="Use public mode for restart-api (port 8000) or restart-frontend (port 6100, build+preview)",
     )
     args = parser.parse_args()
 
-    if args.public and args.action != "restart-frontend":
-        parser.error("--public can only be used with restart-frontend")
+    if args.public and args.action not in {"restart-api", "restart-frontend"}:
+        parser.error("--public can only be used with restart-api or restart-frontend")
     if args.action == "restart-infra" and not args.target:
         parser.error("restart-infra requires target argument")
 
@@ -294,7 +311,7 @@ def main():
         "stop": mgr.stop,
         "restart": mgr.restart,
         "status": mgr.status,
-        "restart-api": mgr.restart_api,
+        "restart-api": lambda: mgr.restart_api(public=args.public),
         "redis-status": mgr.redis_status,
         "redis-restart": mgr.redis_restart,
         "redis-cleanup": mgr.redis_cleanup,
@@ -304,6 +321,9 @@ def main():
     if args.action == "restart-frontend":
         ok = mgr.restart_frontend(public=args.public)
         raise SystemExit(0 if ok else 1)
+    if args.action == "restart-api":
+        ok = mgr.restart_api(public=args.public)
+        raise SystemExit(0 if ok is not False else 1)
     action_map[args.action]()
 
 

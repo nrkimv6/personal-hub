@@ -4,6 +4,8 @@
   import { goto } from '$app/navigation';
   import { gitReposApi } from '$lib/api/gitRepos';
   import { llmApi, type ProviderInfo } from '$lib/api';
+  import { apiGate } from '$lib/stores/apiGate.svelte';
+  import { confirm } from '$lib/stores/confirm';
   import type { GitRepo, GitStatus, GitLogEntry, OperationLog, AutoCleanupResult } from '$lib/types/gitRepos';
   import {
     ArrowLeft,
@@ -23,6 +25,7 @@
     FileEdit
   } from 'lucide-svelte';
   import TabNav from '$lib/components/layout/TabNav.svelte';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
   // URL params
   const repoId = $derived(Number($page.params.id));
@@ -257,7 +260,14 @@
   }
 
   async function handleAutoCleanup() {
-    if (!confirm('미커밋 파일을 자동 분류·커밋하시겠습니까?\n(tmp_* 패턴 파일은 archive로 이동됩니다)')) return;
+    if (
+      !(await confirm({
+        title: '자동 정리 실행',
+        message: '미커밋 파일을 자동 분류·커밋하시겠습니까?\n(tmp_* 패턴 파일은 archive로 이동됩니다)',
+        confirmText: '실행',
+        variant: 'warning'
+      }))
+    ) return;
     
     working = true;
     cleanupRequestId = null;
@@ -268,6 +278,12 @@
     try {
       const res = await gitReposApi.autoCleanup(repoId, { provider: llmProvider });
       cleanupRequestId = res.request_id;
+
+      if (apiGate.state !== 'open') {
+        showToast('API 서버 재시작 중입니다', 'error');
+        working = false;
+        return;
+      }
       
       const eventSource = new EventSource(`/api/v1/llm/chat/${cleanupRequestId}/stream`);
       
@@ -324,30 +340,34 @@
   function formatDate(str: string) {
     return new Date(str).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
+
+  const pageTitle = $derived.by(() => {
+    const currentRepo = repo;
+    return currentRepo
+      ? currentRepo.alias || currentRepo.path.split(/[/\\]/).pop() || 'Git 저장소'
+      : 'Git 저장소';
+  });
+  const pageSubtitle = $derived.by(() => repo?.path ?? '저장소 상태, 변경사항, 작업 이력을 관리합니다.');
 </script>
 
-<div class="p-6 max-w-5xl mx-auto">
-  <!-- 뒤로가기 + 헤더 -->
-  <div class="flex items-center gap-3 mb-6">
-    <button
-      class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center gap-1"
-      onclick={() => goto('/git-repos')}
-    >
-      <ArrowLeft size={16} /> 목록
-    </button>
-    {#if repo}
-      {@const r = repo}
-      <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100">
-        {r.alias || r.path.split(/[/\\]/).pop()}
-      </h1>
-      <span class="text-sm text-gray-400 dark:text-gray-500 truncate">{r.path}</span>
-      {#if r.last_branch}
-        <span class="ml-auto font-mono text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-gray-600 dark:text-gray-300 flex items-center gap-1">
-          <GitBranch size={12} /> {r.last_branch}
-        </span>
-      {/if}
-    {/if}
-  </div>
+{#snippet headerActions()}
+  <button
+    class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center gap-1"
+    onclick={() => goto('/git-repos')}
+  >
+    <ArrowLeft size={16} /> 목록
+  </button>
+  {#if repo?.last_branch}
+    <span class="font-mono text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-gray-600 dark:text-gray-300 flex items-center gap-1">
+      <GitBranch size={12} /> {repo.last_branch}
+    </span>
+  {/if}
+{/snippet}
+
+<div class="max-w-5xl mx-auto space-y-4 p-4 md:p-6">
+  <PageHeader title={pageTitle} subtitle={pageSubtitle} density="compact">
+    {@render headerActions()}
+  </PageHeader>
 
   {#if loading}
     <div class="text-center py-16 text-gray-400">
@@ -358,8 +378,10 @@
     <div class="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400">{error}</div>
     {:else if repo}
       {@const r = repo}
-      <!-- 상단 액션 버튼 -->
-    <div class="flex gap-2 mb-5">
+    <TabNav tabs={repoTabs} bind:activeTab variant="primary" />
+
+    <!-- 상단 액션 버튼 -->
+    <div class="flex flex-wrap gap-2">
       <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1" onclick={handleFetch} disabled={working}>
         <RefreshCw size={14} /> 페치
       </button>
@@ -425,9 +447,6 @@
         {/if}
       </div>
     {/if}
-
-    <!-- 탭 -->
-    <TabNav tabs={repoTabs} bind:activeTab variant="primary" />
 
     <!-- 탭 내용 -->
     {#if activeTab === 'changes'}

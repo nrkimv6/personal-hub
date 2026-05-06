@@ -10,6 +10,7 @@ import redis.asyncio as aioredis
 from fastapi import HTTPException
 from app.modules.dev_runner.services.executor_service import ExecutorService
 from app.modules.dev_runner.schemas import RunRequest
+from tests.dev_runner.conftest_e2e import copy_fixture_plan_to_tmp
 
 # Constants
 REDIS_HOST = "localhost"
@@ -142,16 +143,17 @@ async def executor_service():
 @pytest.mark.e2e
 @pytest.mark.asyncio
 @pytest.mark.parametrize("engine", ["gemini", "codex"])
-async def test_e2e_full_lifecycle(dev_runner_listener, executor_service, engine):
+async def test_e2e_full_lifecycle(dev_runner_listener, executor_service, engine, tmp_path):
     """E2E Test: API -> Redis -> Listener -> plan-runner CLI -> success response"""
     if not E2E_PLAN_FILE.exists():
         pytest.skip(f"E2E fixture plan not found: {E2E_PLAN_FILE}")
+    plan_file = copy_fixture_plan_to_tmp(tmp_path, "test_plan_e2e_mock.md")
 
     # Create request with dry_run to execute quickly without LLM calls
     req = RunRequest(
         engine=engine,
         dry_run=True,
-        plan_file=str(E2E_PLAN_FILE),
+        plan_file=str(plan_file),
         test_source="test_e2e",
     )
     

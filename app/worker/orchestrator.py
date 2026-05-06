@@ -24,12 +24,13 @@ import time
 from collections import defaultdict
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Awaitable, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from app.shared.browser.browser_manager import BrowserManager
 from app.shared.worker.base_worker import BaseWorker
 from app.shared.worker.exceptions import WorkerCriticalError
 from app.shared.redis import RedisClient
+from app.shared.process.memory_pressure import get_recommended_action, read_memory_pressure_state
 from app.shared.process.orphan_detector import OrphanDetector
 from app.shared.process.registry import ProcessRegistry
 
@@ -70,6 +71,10 @@ class WorkerOrchestrator:
     MAX_RESTARTS = 5
     RESTART_WINDOW = 300  # 5분
     SHUTDOWN_TIMEOUT = 30
+    MEMORY_PRESSURE_REFRESH_INTERVAL = 5.0
+    MEMORY_PRESSURE_WARNING_THROTTLE_SECONDS = 1.0
+    MEMORY_PRESSURE_BLOCK_SLEEP_SECONDS = 5.0
+    _MEMORY_PRESSURE_BLOCK_ACTIONS = {"pause_new_work", "pause_workers"}
 
     def __init__(self):
         """WorkerOrchestrator 초기화."""
@@ -84,6 +89,13 @@ class WorkerOrchestrator:
 
         self._initialized = False
         self._orphan_task: Optional[asyncio.Task] = None
+        self._memory_pressure_task: Optional[asyncio.Task] = None
+        self._memory_pressure_state: dict[str, object] = {
+            "level": "normal",
+            "recommended_action": "resume",
+        }
+        self._memory_pressure_action = "resume"
+        self._memory_pressure_original_iterations: dict[str, Callable[[], Awaitable[object]]] = {}
 
     async def initialize(self):
         """브라우저 매니저, Redis 및 워커 초기화.
@@ -156,10 +168,16 @@ class WorkerOrchestrator:
 
         # 워커별 태스크 생성 (supervision 포함)
         for name, worker in self.workers.items():
+            self._install_memory_pressure_guard(name, worker)
             self.tasks[name] = asyncio.create_task(
                 self._run_worker_with_supervision(name, worker),
                 name=f"worker_{name}"
             )
+
+        self._memory_pressure_task = asyncio.create_task(
+            self._monitor_memory_pressure(),
+            name="memory_pressure_backpressure",
+        )
 
         # OrphanDetector 태스크 시작
         from app.core.config import settings
@@ -336,9 +354,10 @@ class WorkerOrchestrator:
         Args:
             name: 실패한 워커 이름
         """
-        # TODO: 텔레그램 또는 데스크톱 알림
+        # Permanent worker failures are surfaced through logs; notification fan-out
+        # is handled outside the core supervisor.
         logger.warning(
-            f"[Orchestrator] 워커 {name} 영구 실패 알림 (TODO: 구현 필요)"
+            f"[Orchestrator] 워커 {name} 영구 실패 알림"
         )
 
     async def _cleanup_orphan_test_worktrees(self, branches: list[str]) -> object:
@@ -364,6 +383,14 @@ class WorkerOrchestrator:
             self._orphan_task.cancel()
             try:
                 await self._orphan_task
+            except asyncio.CancelledError:
+                pass
+
+        # Memory pressure backpressure 태스크 취소
+        if self._memory_pressure_task and not self._memory_pressure_task.done():
+            self._memory_pressure_task.cancel()
+            try:
+                await self._memory_pressure_task
             except asyncio.CancelledError:
                 pass
 
@@ -423,7 +450,102 @@ class WorkerOrchestrator:
                 if self.browser_manager else None
             ),
             "redis_connected": RedisClient.is_connected(),
+            "memory_pressure": {
+                "level": self._memory_pressure_state.get("level", "normal"),
+                "recommended_action": self._memory_pressure_action,
+                "available_mb": self._memory_pressure_state.get("available_mb"),
+                "updated_at": self._memory_pressure_state.get("updated_at"),
+            },
         }
+
+    async def _monitor_memory_pressure(self) -> None:
+        """Redis state를 주기적으로 읽어 워커 backpressure 상태에 반영한다."""
+        while not self.shutdown_event.is_set():
+            await self._refresh_memory_pressure_state()
+            try:
+                await asyncio.wait_for(
+                    self.shutdown_event.wait(),
+                    timeout=self.MEMORY_PRESSURE_REFRESH_INTERVAL,
+                )
+            except asyncio.TimeoutError:
+                pass
+
+    async def _refresh_memory_pressure_state(self) -> None:
+        """memory pressure state 조회 실패 시 fail-open으로 동작한다."""
+        try:
+            state = await read_memory_pressure_state()
+        except Exception as exc:
+            logger.warning("[Orchestrator] memory pressure state 조회 실패: %s", exc)
+            self._apply_memory_pressure_state(None)
+            return
+
+        self._apply_memory_pressure_state(state)
+
+    def _apply_memory_pressure_state(self, state: dict[str, object] | None) -> None:
+        """조회한 pressure state를 내부 scheduling 정책으로 변환한다."""
+        if not state:
+            state = {"level": "normal", "recommended_action": "resume"}
+
+        level = str(state.get("level") or "normal").strip().lower()
+        action = str(state.get("recommended_action") or get_recommended_action(level)).strip().lower()
+        if action not in {"resume", "observe", "throttle", *self._MEMORY_PRESSURE_BLOCK_ACTIONS}:
+            action = get_recommended_action(level)
+
+        previous_action = self._memory_pressure_action
+        self._memory_pressure_state = dict(state)
+        self._memory_pressure_state["level"] = level
+        self._memory_pressure_action = action
+
+        if action != previous_action:
+            logger.warning(
+                "[Orchestrator] memory pressure backpressure 변경: %s -> %s (level=%s)",
+                previous_action,
+                action,
+                level,
+            )
+
+    def _install_memory_pressure_guard(self, name: str, worker: BaseWorker) -> None:
+        """워커 main loop iteration 앞에 generic backpressure guard를 설치한다."""
+        if name in self._memory_pressure_original_iterations:
+            return
+
+        original_iteration = worker._main_loop_iteration
+        self._memory_pressure_original_iterations[name] = original_iteration
+
+        async def guarded_iteration() -> object | None:
+            action = self._memory_pressure_action
+            level = str(self._memory_pressure_state.get("level") or "normal")
+
+            if action == "throttle":
+                logger.warning(
+                    "[Orchestrator] 워커 %s scheduling throttle 적용 (memory_level=%s)",
+                    name,
+                    level,
+                )
+                await self._wait_for_backpressure(self.MEMORY_PRESSURE_WARNING_THROTTLE_SECONDS)
+                if self.shutdown_event.is_set():
+                    return None
+                return await original_iteration()
+
+            if action in self._MEMORY_PRESSURE_BLOCK_ACTIONS:
+                logger.warning(
+                    "[Orchestrator] 워커 %s 신규 작업 보류 (memory_level=%s action=%s)",
+                    name,
+                    level,
+                    action,
+                )
+                await self._wait_for_backpressure(self.MEMORY_PRESSURE_BLOCK_SLEEP_SECONDS)
+                return None
+
+            return await original_iteration()
+
+        worker._main_loop_iteration = guarded_iteration  # type: ignore[method-assign]
+
+    async def _wait_for_backpressure(self, timeout: float) -> None:
+        try:
+            await asyncio.wait_for(self.shutdown_event.wait(), timeout=max(0.0, timeout))
+        except asyncio.TimeoutError:
+            pass
 
     async def __aenter__(self):
         """비동기 컨텍스트 매니저 진입."""

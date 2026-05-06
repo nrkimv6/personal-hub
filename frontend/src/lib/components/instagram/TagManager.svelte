@@ -3,6 +3,8 @@
 	import { collectApi } from '$lib/api';
 	import type { InstagramTag, InstagramKeyword } from '$lib/types';
 	import { Button } from '$lib/components/ui';
+	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 
 	let tags: InstagramTag[] = [];
 	let loading = true;
@@ -27,6 +29,10 @@
 
 	// 재분류
 	let reclassifying = false;
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
 
 	async function fetchTags() {
 		loading = true;
@@ -69,12 +75,18 @@
 			newTagColor = '#3B82F6';
 			await fetchTags();
 		} catch (e) {
-			alert('태그 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('태그 생성 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function deleteTag(tagId: number) {
-		if (!confirm('이 태그를 삭제하시겠습니까? 관련 키워드와 분류도 모두 삭제됩니다.')) return;
+		const confirmed = await confirm({
+			title: '태그 삭제',
+			message: '이 태그를 삭제하시겠습니까? 관련 키워드와 분류도 모두 삭제됩니다.',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 		try {
 			await collectApi.tags.deleteTag(tagId);
 			if (selectedTag?.id === tagId) {
@@ -83,7 +95,7 @@
 			}
 			await fetchTags();
 		} catch (e) {
-			alert('태그 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('태그 삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -100,19 +112,25 @@
 			newKeywordCaseSensitive = false;
 			keywords = await collectApi.tags.getKeywords(selectedTag.id, true);
 		} catch (e) {
-			alert('키워드 추가 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('키워드 추가 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function deleteKeyword(keywordId: number) {
-		if (!confirm('이 키워드를 삭제하시겠습니까?')) return;
+		const confirmed = await confirm({
+			title: '키워드 삭제',
+			message: '이 키워드를 삭제하시겠습니까?',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 		try {
 			await collectApi.tags.deleteKeyword(keywordId);
 			if (selectedTag) {
 				keywords = await collectApi.tags.getKeywords(selectedTag.id, true);
 			}
 		} catch (e) {
-			alert('키워드 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('키워드 삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -123,18 +141,24 @@
 				keywords = await collectApi.tags.getKeywords(selectedTag.id, true);
 			}
 		} catch (e) {
-			alert('키워드 상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('키워드 상태 변경 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function reclassifyAll() {
-		if (!confirm('전체 게시물을 재분류하시겠습니까? 기존 분류가 초기화됩니다.')) return;
+		const confirmed = await confirm({
+			title: '전체 게시물 재분류',
+			message: '전체 게시물을 재분류하시겠습니까? 기존 분류가 초기화됩니다.',
+			confirmText: '재분류',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 		reclassifying = true;
 		try {
 			const result = await collectApi.tags.reclassifyAll();
-			alert(`재분류 완료: ${result.classified}/${result.total}개 게시물 분류됨`);
+			toast.success(`재분류 완료: ${result.classified}/${result.total}개 게시물 분류됨`);
 		} catch (e) {
-			alert('재분류 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재분류 실패: ' + errorMessage(e));
 		} finally {
 			reclassifying = false;
 		}

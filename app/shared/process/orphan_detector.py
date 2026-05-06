@@ -19,6 +19,18 @@ from app.shared.process.worktree_residue_monitor import WorktreeResidueMonitor
 if TYPE_CHECKING:
     pass
 
+_SAFE_NAMES: frozenset[str] = frozenset({"nssm", "redis-server", "redis", "uvicorn"})
+_SAFE_CMDLINE_PATTERNS: tuple[str, ...] = (
+    "service_run.py",
+    "app.worker.main",
+    "claude_worker",
+    "command-listener",
+    "watchdog",
+    "dev-runner-command",
+)
+_PYTHON_NAMES: frozenset[str] = frozenset({"python.exe", "python", "python3.exe", "python3"})
+
+
 # kill_pid 동적 임포트 (scripts/services/service_utils.py)
 def kill_pid(pid: int, timeout: int = 5) -> bool:
     """scripts.service_utils.kill_pid 위임 래퍼."""
@@ -100,6 +112,25 @@ class OrphanDetector:
                         ppid,
                     )
 
+        unregistered = await self._scan_unregistered()
+        for entry in unregistered:
+            try:
+                pid = int(entry["pid"])
+                ppid = int(entry["ppid"])
+            except (KeyError, ValueError, TypeError):
+                continue
+
+            orphans.append(entry)
+            if pid not in self._orphan_first_seen:
+                self._orphan_first_seen[pid] = time.time()
+                logger.warning(
+                    "미등록 고아 프로세스 감지: pid=%s name=%s cmdline=%s (ppid=%s 사망)",
+                    pid,
+                    entry.get("name"),
+                    entry.get("cmdline_short"),
+                    ppid,
+                )
+
         return orphans
 
     def _is_monitor_page_process(self, pid: int) -> bool:
@@ -108,6 +139,133 @@ class OrphanDetector:
             return psutil.Process(pid).name().startswith("monitorpage-")
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return False
+
+    @staticmethod
+    def _is_safe_process(proc: psutil.Process) -> bool:
+        """자동 정리에서 제외해야 하는 서비스/운영 프로세스인지 확인한다."""
+        try:
+            name = (proc.name() or "").lower()
+            if name in _SAFE_NAMES:
+                return True
+            if name.startswith("monitorpage-"):
+                return True
+
+            cmdline = " ".join(proc.cmdline() or []).lower()
+            return any(pattern.lower() in cmdline for pattern in _SAFE_CMDLINE_PATTERNS)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return True
+
+    async def _scan_unregistered(self) -> list[dict]:
+        """Registry 밖 pytest/python 고아 프로세스를 찾는다."""
+        all_procs = await self.registry.get_all()
+        registered_pids: set[int] = set()
+        for raw_pid in all_procs.keys():
+            try:
+                registered_pids.add(int(raw_pid))
+            except (TypeError, ValueError):
+                continue
+
+        found: list[dict] = []
+        try:
+            processes = psutil.process_iter(["pid", "name", "ppid"])
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return found
+
+        for proc in processes:
+            try:
+                info = proc.info
+                pid = int(info["pid"])
+                name = str(info.get("name") or "")
+                ppid = int(info.get("ppid") or 0)
+                if not name or name.lower() not in _PYTHON_NAMES:
+                    continue
+                if pid in registered_pids:
+                    continue
+
+                cmdline = " ".join(proc.cmdline() or [])
+                cmdline_lower = cmdline.lower()
+                if "-m pytest" not in cmdline_lower and "pytest" not in cmdline_lower:
+                    continue
+                if self._is_safe_process(proc):
+                    continue
+                if ppid > 0 and psutil.pid_exists(ppid):
+                    continue
+
+                try:
+                    memory_mb = round(proc.memory_info().rss / (1024 * 1024), 1)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    memory_mb = 0.0
+
+                found.append(
+                    {
+                        "pid": pid,
+                        "ppid": ppid,
+                        "name": name,
+                        "role": "unregistered_orphan",
+                        "cmdline_short": cmdline[:120],
+                        "memory_mb": memory_mb,
+                    }
+                )
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError, TypeError, ValueError):
+                continue
+
+        return found
+
+    def _collect_chain(self, pid: int) -> list[int]:
+        """미등록 pytest 체인을 자손 → 본체 → cmd/sh 부모 순서로 수집한다."""
+        chain: list[int] = []
+        try:
+            target = psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            return []
+        except (psutil.AccessDenied, psutil.ZombieProcess):
+            return [pid]
+
+        try:
+            children = target.children(recursive=True)
+            chain.extend(child.pid for child in reversed(children) if not self._is_safe_process(child))
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+
+        if not self._is_safe_process(target):
+            chain.append(pid)
+
+        try:
+            parent = target.parent()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return chain
+
+        if parent is None:
+            return chain
+
+        try:
+            parent_name = (parent.name() or "").lower()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return chain
+
+        if parent_name != "cmd.exe" or self._is_safe_process(parent):
+            return chain
+
+        chain.append(parent.pid)
+
+        try:
+            grandparent = parent.parent()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return chain
+
+        if grandparent is None:
+            return chain
+
+        try:
+            gp_name = (grandparent.name() or "").lower()
+            gp_cmdline = " ".join(grandparent.cmdline() or []).lower()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return chain
+
+        if gp_name == "sh.exe" and "pyenv" in gp_cmdline and not self._is_safe_process(grandparent):
+            chain.append(grandparent.pid)
+
+        return chain
 
     def _iter_git_worktrees(self) -> list[dict]:
         """git worktree list --porcelain 결과를 파싱한다."""
@@ -213,9 +371,6 @@ class OrphanDetector:
         Returns:
             실제로 정리된 프로세스 정보 리스트
         """
-        # 순환 import 방지를 위해 지연 임포트
-        from scripts.services.service_utils import kill_pid  # type: ignore
-
         cleaned: list[dict] = []
         now = time.time()
 
@@ -248,6 +403,21 @@ class OrphanDetector:
 
             # 정리
             name = entry.get("name", "unknown")
+            if role == "unregistered_orphan":
+                chain = self._collect_chain(pid)
+                logger.info("미등록 고아 프로세스 체인 종료: pid=%s name=%s chain=%s", pid, name, chain)
+                for chain_pid in chain:
+                    kill_pid(chain_pid)
+                self._orphan_first_seen.pop(pid, None)
+                cleaned.append(entry)
+
+                try:
+                    from app.shared.process.snapshot_writer import SnapshotWriter
+                    SnapshotWriter(self.registry).record_orphan_action(pid, name, "chain_terminated")
+                except Exception as exc:
+                    logger.debug("record_orphan_action 실패: %s", exc)
+                continue
+
             logger.info("고아 프로세스 종료: pid=%s name=%s", pid, name)
             kill_pid(pid)
             await self.registry.unregister(pid)
@@ -334,6 +504,7 @@ class OrphanDetector:
                             event_type="orphan_cleanup",
                             branches=stale_test_branches,
                             source="orphan_detector",
+                            repo_root=self.repo_root,
                         )
                         logger.info(
                             "[orphan-worktree] cleaned %d stale test worktrees: %s",
@@ -343,6 +514,7 @@ class OrphanDetector:
                     WorktreeResidueMonitor.record_scan(
                         self._list_test_worktree_branches(),
                         source="orphan_detector",
+                        repo_root=self.repo_root,
                     )
                     next_scan_at = time.monotonic() + scan_interval
 

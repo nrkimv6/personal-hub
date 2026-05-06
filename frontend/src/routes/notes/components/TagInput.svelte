@@ -3,6 +3,7 @@
   import type { TagDef } from '$lib/api/notes';
   import { Plus, X } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
+  import { toast } from '$lib/stores/toast';
 
   interface Props {
     selectedTagIds: number[];
@@ -20,6 +21,10 @@
   // 새 태그 inline 생성 폼
   let showCreateForm = $state(false);
   let newTagColor = $state('#6b7280');
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   let filteredTags = $derived(
     allTags.filter(
@@ -52,8 +57,8 @@
       showDropdown = false;
       showCreateForm = false;
       newTagColor = '#6b7280';
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       creating = false;
     }

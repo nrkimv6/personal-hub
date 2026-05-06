@@ -6,6 +6,11 @@ Phase 4 TC:
   - test_full_failure_flow: E — planned→running→merge_pending→merging→failed
   - test_merge_workflow_e2e_success: R — MergeWorkflow + WorkflowManager 연동 → merged
   - test_merge_workflow_e2e_conflict: E — MergeWorkflow + WorkflowManager 연동 → failed(conflict)
+
+State-leak regression (Phase T1/T3):
+  - test_worktree_manager_module_identity_stable: broad selection에서 worktree_manager module
+    identity 오염이 없는지 검증. test_worktree_manager.py가 del sys.modules["worktree_manager"]를
+    실행해도 wm 참조가 merge_workflow 내 late-import와 동일한 class를 공유해야 한다.
 """
 import pytest
 import sqlite3
@@ -167,3 +172,29 @@ def test_merge_workflow_e2e_conflict(wfm, fake_redis, tmp_path):
     assert wf["status"] == "failed"
     assert "충돌" in wf["error_message"]
     assert wf["finished_at"] is not None
+
+
+def test_worktree_manager_module_identity_stable():
+    """R: sys.modules["worktree_manager"] identity가 안정적이어야 한다.
+
+    broad selection 실행 시 test_worktree_manager.py가 del sys.modules["worktree_manager"]를
+    실행하면 merge_workflow.py 내 `from worktree_manager import WorktreeManager`(late import)가
+    tests/test_workflow_e2e.py의 wm.WorktreeManager와 다른 class를 가져와
+    patch.object가 무력화된다. conftest restore_worktree_manager_module fixture가
+    이를 방어함을 확인한다.
+    """
+    import sys
+    import worktree_manager as _wm_direct
+
+    # 1) wm(이 파일 상단 import)과 sys.modules의 module이 동일해야 한다
+    assert wm is sys.modules.get("worktree_manager"), (
+        "sys.modules['worktree_manager'] identity drift: "
+        "broad selection 중 del sys.modules['worktree_manager']가 복원되지 않았을 수 있습니다."
+    )
+
+    # 2) WorktreeManager class 동일성 보장
+    from worktree_manager import WorktreeManager as _WM_late
+    assert wm.WorktreeManager is _WM_late, (
+        "wm.WorktreeManager != late import WorktreeManager: "
+        "patch.object(wm.WorktreeManager, ...) 가 merge_workflow.py 내 late-import에 반영되지 않습니다."
+    )

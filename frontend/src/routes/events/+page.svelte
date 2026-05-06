@@ -1,8 +1,6 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
 	import { Button } from '$lib/components/ui';
-	import PageHeader from '$lib/components/layout/PageHeader.svelte';
-	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
 
 	/**
 	 * 이벤트/팝업 관리 페이지
@@ -14,10 +12,12 @@
 	import { goto } from '$app/navigation';
 	import { eventApi, popupApi, uncategorizedApi, collectApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate, ExpoMapDocument, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
-	import { isAdmin, isAuthLoading, isLoggedIn } from '$lib/stores/auth';
+	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
 	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 	import { localParticipation } from '$lib/stores/localParticipation';
+	import { getExpoRouteContract } from '$lib/utils/publicRouteMode';
 	import { Link } from 'lucide-svelte';
 
 	// 컴포넌트 import
@@ -73,6 +73,10 @@
 	let sortOrder = $state('asc');
 	let unknownPeriodFilter = $state('include');  // exclude/include/only
 	let showFilters = $state(false);
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
 
 	// =========================================================
 	// URL 파라미터 동기화 헬퍼
@@ -147,21 +151,16 @@
 	// 탭/필터 관련 함수
 	// =========================================================
 
-	function isLocalAdminOrigin() {
-		if (!browser) {
-			return false;
-		}
-
-		const isLocalhost = window.location.hostname === 'localhost' ||
-			window.location.hostname === '127.0.0.1' ||
-			window.location.hostname === '::1';
-
-		return isLocalhost && window.location.port === '6101';
-	}
+	const canOpenExpoAdminWorkspace = $derived.by(() =>
+		getExpoRouteContract({
+			isAdmin: $isAdmin,
+			url: $pageStore.url
+		}).canOpenExpoAdminWorkspace
+	);
 
 	// 탭 전환 탭 목록 (TabNav용)
 	const eventTabs = $derived.by(() => {
-		if (!$isAdmin && !isLocalAdminOrigin()) {
+		if (!canOpenExpoAdminWorkspace) {
 			return [...baseEventTabs];
 		}
 
@@ -174,7 +173,7 @@
 	const isExpoTab = $derived(activeTab === ADMIN_EXPO_TAB);
 
 	function getAvailableTabs(): TabMode[] {
-		return (($isAdmin || isLocalAdminOrigin())
+		return (canOpenExpoAdminWorkspace
 			? [...baseEventTabs.map((tab) => tab.id), ADMIN_EXPO_TAB]
 			: [...baseEventTabs.map((tab) => tab.id)]) as TabMode[];
 	}
@@ -245,38 +244,6 @@
 			}
 		}
 	});
-
-	function switchTab(tab: TabMode, updateUrl: boolean = true) {
-		activeTab = tab;
-		currentPage = 1;
-
-		// URL 업데이트 (히스토리에 추가)
-		if (updateUrl) {
-			goto(`?tab=${tab}`, { replaceState: false, keepFocus: true, noScroll: true });
-		}
-
-		if (tab === ADMIN_EXPO_TAB) {
-			filterEventStatus = null;
-		} else if (isAnonymous) {
-			// 운영모드: 온라인은 내일까지, 오프라인은 진행중
-			if (tab === 'online') {
-				filterEventStatus = 'ending_tomorrow';
-			} else if (tab === 'offline') {
-				filterEventStatus = 'ongoing';
-			} else {
-				filterEventStatus = null;
-			}
-		} else if (tab === 'online') {
-			filterEventStatus = 'ongoing_or_upcoming';
-		} else if (tab === 'offline') {
-			filterEventStatus = 'ongoing';
-		} else if (tab === 'popup') {
-			filterEventStatus = 'ongoing_or_upcoming';
-		} else if (tab === 'uncategorized') {
-			filterEventStatus = null;
-		}
-		fetchEvents();
-	}
 
 	function handleStatusFilterChange(status: string | null) {
 		filterEventStatus = status;
@@ -499,13 +466,19 @@
 
 	async function handleDeleteEvent() {
 		if (!viewingEvent) return;
-		if (!confirm('이 이벤트를 삭제하시겠습니까?')) return;
+		const confirmed = await confirm({
+			title: '이벤트 삭제',
+			message: '이 이벤트를 삭제하시겠습니까?',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 		try {
 			await eventApi.delete(viewingEvent.id);
 			closeFeedViewer();
 			await fetchEvents();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -661,10 +634,10 @@
 	async function handleRecrawl(postId: number): Promise<void> {
 		try {
 			await collectApi.recrawlPost(postId);
-			alert('재크롤링 요청이 등록되었습니다.');
+			toast.success('재크롤링 요청이 등록되었습니다.');
 		} catch (e) {
 			console.error('재크롤링 요청 실패:', e);
-			alert('재크롤링 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재크롤링 요청 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -676,20 +649,26 @@
 			}
 		} catch (e) {
 			console.error('태그 저장 실패:', e);
-			alert('태그 저장 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('태그 저장 실패: ' + errorMessage(e));
 			throw e;
 		}
 	}
 
 	async function handleDeletePost(postId: number): Promise<void> {
-		if (!confirm('이 게시물을 삭제하시겠습니까?')) return;
+		const confirmed = await confirm({
+			title: '게시물 삭제',
+			message: '이 게시물을 삭제하시겠습니까?',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 		try {
 			await collectApi.deletePost(postId);
 			closeFeedViewer();
 			await fetchEvents();
 		} catch (e) {
 			console.error('삭제 실패:', e);
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -701,10 +680,10 @@
 		}
 		try {
 			await collectApi.requestLlmAnalysisSingle(postId);
-			alert('AI 분석 요청이 등록되었습니다.');
+			toast.success('AI 분석 요청이 등록되었습니다.');
 		} catch (e) {
 			console.error('AI 분석 요청 실패:', e);
-			alert('AI 분석 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('AI 분석 요청 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -715,11 +694,11 @@
 	async function handleReclassify(post: UncategorizedPost, target: 'event' | 'popup') {
 		try {
 			await uncategorizedApi.reclassify(post.id, { target, title: post.title || undefined });
-			alert(`${target === 'event' ? '이벤트' : '팝업'}로 재분류되었습니다.`);
+			toast.success(`${target === 'event' ? '이벤트' : '팝업'}로 재분류되었습니다.`);
 			await fetchEvents();
 		} catch (e) {
 			console.error('재분류 실패:', e);
-			alert('재분류 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재분류 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -827,73 +806,72 @@
 	<title>이벤트 · 팝업 관리</title>
 </svelte:head>
 
-<div class="p-4 md:p-6">
-	<!-- 헤더 -->
-	<PageHeader title="이벤트 관리" subtitle={isExpoTab ? 'System Control Tower · source data 운영 콘솔' : '이벤트와 팝업을 관리합니다'}>
-		{#if $isAdmin && !isExpoTab}
-			<div class="flex gap-2">
-				<Button variant="primary" size="sm" onclick={openCreateModal}> + 새 이벤트 </Button>
-				<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
-					<Link size={16} /> URL 가져오기
-				</button>
-			</div>
-		{/if}
-	</PageHeader>
-	<!-- 필터 요약 + 모바일 필터 토글 -->
-	{#if !isExpoTab}
-	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-end sm:items-center gap-3">
-		<div class="flex items-center gap-2">
-			{#if isAnonymous}
-				<!-- 익명 사용자: 필터 비활성화, 고정 배지만 표시 -->
-				{#if activeTab === 'online'}
-					<span class="px-2 py-1 text-xs font-medium bg-warning-light text-warning rounded-full">
-						내일까지
-					</span>
-				{:else if activeTab === 'offline'}
-					<span class="px-2 py-1 text-xs font-medium bg-success-light text-success rounded-full">
-						진행중
-					</span>
-				{:else}
-					<span class="px-2 py-1 text-xs font-medium bg-muted text-muted-foreground rounded-full">
-						전체
-					</span>
-				{/if}
-			{:else}
-				<!-- 모바일 필터 토글 버튼 (로그인 사용자만) -->
-				<button
-					onclick={() => (showFilters = !showFilters)}
-					class="md:hidden btn btn-secondary btn-sm flex items-center gap-1"
-				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
-						/>
-					</svg>
-					필터
-					{#if activeFilterCount > 0}
-						<span class="px-1.5 py-0.5 text-xs bg-primary text-white rounded-full"
-							>{activeFilterCount}</span
-						>
-					{/if}
-				</button>
-			{/if}
-
-			<span class="text-sm text-muted-foreground">총 {total}건</span>
-			{#if unknownPeriodFilter === 'only'}
-				<span class="hidden sm:inline text-sm text-warning">(기간미정만)</span>
-			{:else if unknownPeriodFilter === 'exclude'}
-				<span class="hidden sm:inline text-sm text-muted-foreground">(기간미정 제외)</span>
-			{/if}
+{#snippet headerActions()}
+	{#if $isAdmin && !isExpoTab}
+		<div class="flex gap-2">
+			<Button variant="primary" size="sm" onclick={openCreateModal}> + 새 이벤트 </Button>
+			<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
+				<Link size={16} /> URL 가져오기
+			</button>
 		</div>
-	</div>
 	{/if}
+{/snippet}
 
-	<!-- 탭 -->
-	<TabNav tabs={eventTabs} bind:activeTab variant="primary" queryParam="tab" replaceState={false} />
+{#snippet filterToolbar()}
+	{#if !isExpoTab}
+		<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+			<div class="flex flex-wrap items-center gap-2">
+				{#if isAnonymous}
+					{#if activeTab === 'online'}
+						<span class="rounded-full bg-warning-light px-2 py-1 text-xs font-medium text-warning">내일까지</span>
+					{:else if activeTab === 'offline'}
+						<span class="rounded-full bg-success-light px-2 py-1 text-xs font-medium text-success">진행중</span>
+					{:else}
+						<span class="rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">전체</span>
+					{/if}
+				{:else}
+					<button
+						onclick={() => (showFilters = !showFilters)}
+						class="btn btn-secondary btn-sm flex items-center gap-1 md:hidden"
+					>
+						<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+							/>
+						</svg>
+						필터
+						{#if activeFilterCount > 0}
+							<span class="rounded-full bg-primary px-1.5 py-0.5 text-xs text-white">{activeFilterCount}</span>
+						{/if}
+					</button>
+				{/if}
 
+				<span class="text-sm text-muted-foreground">총 {total}건</span>
+				{#if unknownPeriodFilter === 'only'}
+					<span class="hidden text-sm text-warning sm:inline">(기간미정만)</span>
+				{:else if unknownPeriodFilter === 'exclude'}
+					<span class="hidden text-sm text-muted-foreground sm:inline">(기간미정 제외)</span>
+				{/if}
+			</div>
+		</div>
+	{/if}
+{/snippet}
+
+<TabbedPageLayout
+	title="이벤트 관리"
+	subtitle={isExpoTab ? 'System Control Tower · source data 운영 콘솔' : '이벤트와 팝업을 관리합니다'}
+	actions={headerActions}
+	toolbar={filterToolbar}
+	primaryTabs={eventTabs}
+	bind:activePrimaryTab={activeTab}
+	primaryQueryParam="tab"
+	primaryReplaceState={false}
+	density="compact"
+	containerClass="space-y-3 p-4 md:p-6"
+>
 	<!-- 필터 패널 (로그인 사용자만) -->
 	{#if !isAnonymous && !isExpoTab}
 		<EventFilterPanel
@@ -1066,7 +1044,7 @@
 			</div>
 		</div>
 		{/if}
-</div>
+</TabbedPageLayout>
 
 <!-- 이벤트 생성/수정 모달 (관리자 전용) -->
 {#if $isAdmin}

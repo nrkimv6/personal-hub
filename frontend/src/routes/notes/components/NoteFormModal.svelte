@@ -7,8 +7,9 @@
   import MenuPicker from './MenuPicker.svelte';
   import { flattenNavEntries, navGroups, isNavGroup } from '$lib/navigation';
   import { isCodeLike, detectLanguage } from '../utils/codeDetect';
-  import { renderMarkdown } from '../utils/markdown';
+  import MarkdownContent from '$lib/components/markdown/MarkdownContent.svelte';
   import { extractNoteLinkAtCursor } from '../utils/noteLink';
+  import { confirm } from '$lib/stores/confirm';
 
   interface Props {
     mode: 'create' | 'edit';
@@ -73,7 +74,6 @@
   let autocompleteSelectedIdx = $state(-1);
   let _acDebounce: ReturnType<typeof setTimeout> | null = null;
 
-  let previewHtml = $derived(renderMarkdown(content));
 
   async function loadTags() {
     allTags = await notesApi.listTags().catch(() => []);
@@ -313,16 +313,21 @@
     return { label: item.label };
   }
 
-  onMount(() => {
-    loadTags();
-    // draft 복원 (create 모드만)
+  async function restoreDraft() {
     if (mode === 'create') {
       const raw = sessionStorage.getItem(draftKey);
       if (raw) {
         try {
           const draft = JSON.parse(raw) as { title: string; content: string };
           if (draft.title || draft.content) {
-            if (confirm('임시 저장된 내용을 복원하시겠습니까?')) {
+            if (
+              await confirm({
+                title: '임시 저장 복원',
+                message: '임시 저장된 내용을 복원하시겠습니까?',
+                confirmText: '복원',
+                variant: 'warning'
+              })
+            ) {
               title = draft.title ?? '';
               content = draft.content ?? '';
             } else {
@@ -334,6 +339,11 @@
         }
       }
     }
+  }
+
+  onMount(() => {
+    loadTags();
+    void restoreDraft();
   });
 </script>
 
@@ -425,12 +435,12 @@
             {/if}
           </div>
           {#if showPreview}
-            <div
-              class="prose prose-sm dark:prose-invert overflow-y-auto border border-border rounded-lg p-3 max-h-[40vh] bg-background text-foreground"
+            <MarkdownContent
+              content={content}
+              variant="default"
+              class="overflow-y-auto border border-border rounded-lg p-3 max-h-[40vh] bg-background"
               style="min-height: 240px"
-            >
-              {@html previewHtml}
-            </div>
+            />
           {/if}
         </div>
       </div>

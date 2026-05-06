@@ -168,10 +168,10 @@ class TestGetWorktreeCommits:
 
 class TestFindPlanFile:
     def test_right_matches_branch(self, tmp_path, monkeypatch):
-        """docs/plan/ 아래 mock 파일에서 > branch: 헤더 매칭 → 경로 반환"""
+        """.worktrees/plans/docs/plan 아래 mock 파일에서 > branch: 헤더 매칭 → 경로 반환"""
         import app.modules.dev_runner.services.worktree_service as svc
 
-        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "2026-04-07_my-plan.md"
         plan_file.write_text(
@@ -191,7 +191,7 @@ class TestFindPlanFile:
         """일치하는 파일 없음 → (None, None) 반환"""
         import app.modules.dev_runner.services.worktree_service as svc
 
-        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         (plan_dir / "other.md").write_text(
             "> branch: impl/other\n", encoding="utf-8"
@@ -371,6 +371,8 @@ class TestWorktreeListHttp:
         }
         assert len(v2_data["worktrees"]) == len(v1_data) == 1
         assert v2_data["worktrees"][0]["branch"] == v1_data[0]["branch"]
+        assert "prunable" not in v1_data[0]
+        assert "prunable" not in v2_data["worktrees"][0]
         assert "commits" in v1_data[0]
         assert "commit_count" in v2_data["worktrees"][0]
         assert "commits" not in v2_data["worktrees"][0]
@@ -390,7 +392,7 @@ class TestWorktreeListHttp:
         item = resp.json()["worktrees"][0]
         assert item["plan_mtime"] is not None
         assert item["plan_mtime"][4] == "-"
-        assert item["plan_file"].replace("\\", "/").startswith("docs/plan/")
+        assert item["plan_file"].replace("\\", "/").startswith(".worktrees/plans/docs/plan/")
         assert item["created_at"] is not None
 
     @pytest.mark.http
@@ -447,7 +449,7 @@ class TestWorktreeListHttp:
                     behind=0,
                     locked=False,
                     commit_count=1,
-                    plan_file="docs/plan/cache.md",
+                    plan_file=".worktrees/plans/docs/plan/cache.md",
                     plan_mtime="2026-04-21T09:00:00",
                     is_test=False,
                     plan_file_archived=False,
@@ -491,7 +493,7 @@ class TestWorktreeListHttp:
                             behind=0,
                             locked=False,
                             commit_count=1,
-                            plan_file="docs/plan/first.md",
+                            plan_file=".worktrees/plans/docs/plan/first.md",
                             plan_mtime="2026-04-21T09:00:00",
                             is_test=False,
                             plan_file_archived=False,
@@ -512,7 +514,7 @@ class TestWorktreeListHttp:
                             behind=0,
                             locked=False,
                             commit_count=2,
-                            plan_file="docs/plan/forced.md",
+                            plan_file=".worktrees/plans/docs/plan/forced.md",
                             plan_mtime="2026-04-21T10:00:00",
                             is_test=False,
                             plan_file_archived=False,

@@ -16,7 +16,6 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from pathlib import Path
-from app.main import app
 
 import os
 import signal
@@ -24,9 +23,9 @@ import redis
 
 import redis.asyncio as aioredis
 from tests.dev_runner.conftest_e2e import (
+    isolated_plan_file,
     isolated_redis_db15,
     listener_process,
-    TEST_PLAN_FILE,
     LISTENER_SCRIPT,
     PYTHON_EXE,
     REDIS_TEST_DB,
@@ -42,6 +41,11 @@ COMMANDS_KEY = "plan-runner:commands"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 
 BASE_URL = "/api/v1/dev-runner"
+
+
+def _build_test_client() -> TestClient:
+    from app.main import app
+    return TestClient(app)
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +75,7 @@ class TestRemovePipelineT5:
     @pytest.fixture(autouse=True)
     def stop_runners_after_test(self, isolated_redis_db15, listener_process):
         """각 테스트 후 생성된 runner 정리 (다음 테스트 간섭 방지)"""
-        client = TestClient(app)
+        client = _build_test_client()
         yield
         try:
             active = isolated_redis_db15.smembers("plan-runner:active-runners")
@@ -83,12 +87,12 @@ class TestRemovePipelineT5:
         except Exception:
             pass
 
-    def test_T5_start_run_without_pipeline_R(self, isolated_redis_db15, listener_process):
+    def test_T5_start_run_without_pipeline_R(self, isolated_redis_db15, listener_process, isolated_plan_file):
         """R(정상): pipeline 필드 없이 POST /run → 200 또는 runner_id 포함 응답"""
-        client = TestClient(app)
+        client = _build_test_client()
         payload = {
             "engine": "claude",
-            "plan_file": TEST_PLAN_FILE,
+            "plan_file": isolated_plan_file,
             "dry_run": True,
             "trigger": "tc:test_T5_start_run_without_pipeline_R",
             "test_source": "test_remove_pipeline_v1_e2e",
@@ -100,12 +104,12 @@ class TestRemovePipelineT5:
         data = response.json()
         assert "runner_id" in data, f"runner_id 없음: {data}"
 
-    def test_T5_start_run_with_pipeline_field_ignored_B(self, isolated_redis_db15, listener_process):
+    def test_T5_start_run_with_pipeline_field_ignored_B(self, isolated_redis_db15, listener_process, isolated_plan_file):
         """B(경계): pipeline 필드 포함 payload → 422 아님 (미지 필드 무시), 200 응답"""
-        client = TestClient(app)
+        client = _build_test_client()
         payload = {
             "engine": "claude",
-            "plan_file": TEST_PLAN_FILE,
+            "plan_file": isolated_plan_file,
             "dry_run": True,
             "pipeline": "v2",  # 제거된 필드 — Pydantic이 무시해야 함
             "trigger": "tc:test_T5_start_run_with_pipeline_field_ignored_B",
@@ -124,7 +128,7 @@ class TestRemovePipelineT5:
 
     def test_T5_run_schema_has_no_pipeline_field_E(self, isolated_redis_db15, listener_process):
         """E(에러): /run 엔드포인트 OpenAPI 스키마에 pipeline 필드 없음"""
-        client = TestClient(app)
+        client = _build_test_client()
         response = client.get("/openapi.json")
         assert response.status_code == 200
         schema = response.json()
@@ -194,7 +198,7 @@ def listener_process_e2e(redis_client_e2e):
 
 
 @pytest.mark.e2e
-def test_T4_run_trigger_without_pipeline_E2E(redis_client_e2e, listener_process_e2e):
+def test_T4_run_trigger_without_pipeline_E2E(redis_client_e2e, listener_process_e2e, isolated_plan_file):
     """T4 R(정상): pipeline 필드 없는 커맨드 → listener가 subprocess 생성 확인"""
     runner_id = f"e2e-nopipe-{uuid.uuid4().hex[:4]}"
     command_id = uuid.uuid4().hex[:8]
@@ -205,7 +209,7 @@ def test_T4_run_trigger_without_pipeline_E2E(redis_client_e2e, listener_process_
         "command_id": command_id,
         "source": "test",
         "trigger": "tc:test_T4_run_trigger_without_pipeline_E2E",
-        "plan_file": TEST_PLAN_FILE,
+        "plan_file": isolated_plan_file,
         "dry_run": True,
         "engine": "claude",
         # pipeline 필드 없음
@@ -223,7 +227,7 @@ def test_T4_run_trigger_without_pipeline_E2E(redis_client_e2e, listener_process_
 
 
 @pytest.mark.e2e
-def test_T4_run_trigger_with_legacy_pipeline_E2E(redis_client_e2e, listener_process_e2e):
+def test_T4_run_trigger_with_legacy_pipeline_E2E(redis_client_e2e, listener_process_e2e, isolated_plan_file):
     """T4 B(경계): pipeline 레거시 필드 포함 커맨드 → listener가 무시하고 subprocess 생성 확인"""
     runner_id = f"e2e-legacypipe-{uuid.uuid4().hex[:4]}"
     command_id = uuid.uuid4().hex[:8]
@@ -234,7 +238,7 @@ def test_T4_run_trigger_with_legacy_pipeline_E2E(redis_client_e2e, listener_proc
         "command_id": command_id,
         "source": "test",
         "trigger": "tc:test_T4_run_trigger_with_legacy_pipeline_E2E",
-        "plan_file": TEST_PLAN_FILE,
+        "plan_file": isolated_plan_file,
         "dry_run": True,
         "engine": "claude",
         "pipeline": "v2",  # 레거시 필드 — 무시되어야 함

@@ -130,7 +130,7 @@ def test_cleanup_pattern_ssot(tmp_path: Path):
 
     # logs.ps1의 cleanup 하드코딩이 deprecated 함수 내에만 잔존하는지 확인
     # (Follow 블록에서는 하드코딩 제거됨)
-    ps1_path = Path(__file__).resolve().parent.parent.parent / "scripts" / "logs.ps1"
+    ps1_path = Path(__file__).resolve().parent.parent.parent / "scripts" / "logs" / "logs.ps1"
     ps1_content = ps1_path.read_text(encoding="utf-8")
 
     # Follow 블록 (if ($Follow)) 내에 cleanup 하드코딩이 없어야 함

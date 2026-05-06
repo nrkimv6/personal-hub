@@ -13,6 +13,7 @@ import subprocess
 import time
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -35,6 +36,79 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 TEST_DB_DIR = Path(os.environ.get("TEST_DB_DIR", str(PROJECT_ROOT / "data")))
 TEST_DB_PATH = TEST_DB_DIR / "test_integration_monitor.db"
 TEST_SERVER_PORT = int(os.environ.get("TEST_SERVER_PORT", "18001"))
+
+
+@dataclass(frozen=True)
+class IntegrationCleanupFailure:
+    method: str
+    path: str
+    error: str
+
+
+class IntegrationResourceCleanup:
+    """Best-effort API cleanup for resources created by HTTP integration tests."""
+
+    def __init__(self, base_url: str, http_client=None, timeout: float = 5.0):
+        self.base_url = base_url.rstrip("/")
+        self.http_client = http_client or requests
+        self.timeout = timeout
+        self._business_ids: list[int] = []
+        self._item_ids: list[int] = []
+
+    def add_business(self, business_id: int | str | None) -> None:
+        parsed_id = self._parse_id(business_id)
+        if parsed_id is not None and parsed_id not in self._business_ids:
+            self._business_ids.append(parsed_id)
+
+    def add_item(self, item_id: int | str | None) -> None:
+        parsed_id = self._parse_id(item_id)
+        if parsed_id is not None and parsed_id not in self._item_ids:
+            self._item_ids.append(parsed_id)
+
+    def add_import_result(self, payload: dict) -> None:
+        self.add_item(payload.get("item_id"))
+        self.add_business(payload.get("business_id"))
+
+    def cleanup(self) -> list[IntegrationCleanupFailure]:
+        failures: list[IntegrationCleanupFailure] = []
+        for item_id in reversed(self._item_ids):
+            failures.extend(self._delete(f"/api/v1/items/{item_id}"))
+        for business_id in reversed(self._business_ids):
+            failures.extend(self._delete(f"/api/v1/businesses/{business_id}"))
+        return failures
+
+    def _delete(self, path: str) -> list[IntegrationCleanupFailure]:
+        try:
+            response = self.http_client.delete(
+                f"{self.base_url}{path}",
+                timeout=self.timeout,
+            )
+            if response.status_code in (204, 404):
+                return []
+            return [
+                IntegrationCleanupFailure(
+                    method="DELETE",
+                    path=path,
+                    error=f"status_code={response.status_code}",
+                )
+            ]
+        except Exception as exc:
+            return [
+                IntegrationCleanupFailure(
+                    method="DELETE",
+                    path=path,
+                    error=str(exc),
+                )
+            ]
+
+    @staticmethod
+    def _parse_id(value: int | str | None) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
 
 def _replace_database_name(db_url: str, database_name: str) -> str:
@@ -208,3 +282,14 @@ def integration_server():
 
     if TEST_DB_PATH.exists():
         os.remove(TEST_DB_PATH)
+
+
+@pytest.fixture
+def integration_cleanup(integration_server):
+    cleanup = IntegrationResourceCleanup(integration_server)
+    yield cleanup
+    failures = cleanup.cleanup()
+    assert not failures, "integration cleanup failed:\n" + "\n".join(
+        f"{failure.method} {failure.path}: {failure.error}"
+        for failure in failures
+    )

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import { isApiGateClosedError } from '$lib/api/client';
 
 	let settings = $state<any>(null);
 	let message = $state('');
@@ -8,18 +9,26 @@
 	let newExcludeFolder = $state('');
 
 	async function fetchSettings() {
-		const res = await fetch('/api/fc/settings');
-		if (res.ok) settings = await res.json();
+		try {
+			const res = await fetch('/api/fc/settings');
+			if (res.ok) settings = await res.json();
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '설정 로드 실패';
+		}
 	}
 
 	async function saveSettings() {
-		const res = await fetch('/api/fc/settings', {
-			method: 'PUT',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(settings)
-		});
-		if (res.ok) {
-			message = '설정 저장됨';
+		try {
+			const res = await fetch('/api/fc/settings', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(settings)
+			});
+			if (res.ok) {
+				message = '설정 저장됨';
+			}
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '설정 저장 실패';
 		}
 	}
 
@@ -47,7 +56,7 @@
 </script>
 
 <div class="space-y-6">
-	<PageHeader title="설정" subtitle="파일 정리기 설정을 관리합니다" />
+	<PageHeader title="설정" />
 
 	{#if message}
 		<div class="rounded-md bg-green-500/10 px-3 py-2 text-sm text-green-600">{message}</div>

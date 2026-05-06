@@ -79,7 +79,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 os.chdir(PROJECT_ROOT)
 
 from scripts.services.service_utils import (
+    classify_frontend_failure,
+    describe_listener,
     find_pids_on_port,
+    format_listener_metadata,
     get_session_id,
     is_port_listening,
     is_process_alive,
@@ -93,6 +96,7 @@ from scripts.services.frontend_mode import (
     build_frontend_env,
     ensure_frontend_runtime_tsconfigs,
     describe_frontend_runtime,
+    write_frontend_build_log,
 )
 
 import psutil
@@ -242,7 +246,13 @@ class ServiceRunner:
                 time.sleep(0.5)
             remaining = find_pids_on_port(port)
             if remaining:
-                self.log.warning(f"  Port {port} still in use (PIDs: {remaining})")
+                listener_metadata = describe_listener(port)
+                self.log.warning(
+                    "  Port %s still in use (PIDs: %s, listener=%s)",
+                    port,
+                    remaining,
+                    format_listener_metadata(listener_metadata),
+                )
 
     # ── Frontend 시작 ────────────────────────────────────────────
     def start_frontend(self) -> subprocess.Popen | None:
@@ -354,13 +364,37 @@ class ServiceRunner:
                 env=frontend_env,
             )
             if build_result.returncode != 0:
-                err_msg = (build_result.stderr or "")[-500:] or "(no stderr output)"
-                self.log.error(f"Frontend build failed (rc={build_result.returncode}): {err_msg}")
+                failure_class = classify_frontend_failure(build_result.stdout, build_result.stderr)
+                listener_metadata = describe_listener(self.frontend_port)
+                build_log_path = write_frontend_build_log(
+                    self.log_dir,
+                    timestamp,
+                    public=True,
+                    returncode=build_result.returncode,
+                    stdout=build_result.stdout or "",
+                    stderr=build_result.stderr or "",
+                )
+                self.log.error(
+                    "Frontend build failed (rc=%s, class=%s, log=%s, listener=%s)",
+                    build_result.returncode,
+                    failure_class,
+                    build_log_path,
+                    format_listener_metadata(listener_metadata),
+                )
+                if failure_class == "build_lock_permission":
+                    self.log.warning(
+                        "Build lock/permission detected - check Session 0 service ownership or elevate before retry."
+                    )
                 # graceful degradation: 이전 빌드가 있으면 그것으로 preview, 없으면 API-only
                 if not (frontend_dir / "build").exists():
-                    self.log.warning("No previous build found - Frontend unavailable, API-only mode")
+                    self.log.warning(
+                        "No previous build found - Frontend unavailable, API-only mode "
+                        f"(class={failure_class}, build_log={build_log_path})"
+                    )
                     return None
-                self.log.warning("Using previous build for preview")
+                self.log.warning(
+                    f"Using previous build for preview (class={failure_class}, build_log={build_log_path})"
+                )
             else:
                 self.log.info("Frontend build completed")
 

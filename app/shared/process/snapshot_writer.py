@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _WATCH_EVENTS_LOG = _PROJECT_ROOT / "logs" / "process_watch_events.jsonl"
 _KILL_AUDIT_LOG = _PROJECT_ROOT / "logs" / "process_watch_kill_audit.jsonl"
+PRE_FATAL_KILL_ACTION = "pre_fatal_kill"
 
 
 class SnapshotWriter:

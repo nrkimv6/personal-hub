@@ -1,6 +1,6 @@
 """비디오 다운로드 API 라우트.
 
-YouTube/Vimeo 등 비디오 다운로드 요청 관리 API를 제공합니다.
+YouTube/Vimeo/Instagram Reel 다운로드 요청 관리 API를 제공합니다.
 """
 
 import logging
@@ -35,8 +35,8 @@ async def create_download_request(
     """
     비디오 다운로드 요청 생성
 
-    - url: 비디오 URL (YouTube/Vimeo)
-    - download_type: 다운로드 타입 (youtube/youtube_stream/vimeo), 미지정 시 자동 감지
+    - url: 비디오 URL (YouTube/Vimeo/Instagram Reel)
+    - download_type: 다운로드 타입 (youtube/youtube_stream/vimeo/instagram), 미지정 시 자동 감지
     - quality: 화질 설정 (기본: best)
     - embedding_url: Vimeo 임베딩 URL (도메인 제한 우회용)
     - output_filename: 사용자 지정 파일명
@@ -128,7 +128,7 @@ async def create_batch_download_request(
 @router.get("", response_model=VideoDownloadList)
 async def list_download_requests(
     status: Optional[str] = Query(None, description="상태 필터 (pending/processing/completed/failed/cancelled)"),
-    download_type: Optional[str] = Query(None, description="다운로드 타입 필터 (youtube/youtube_stream/vimeo)"),
+    download_type: Optional[str] = Query(None, description="다운로드 타입 필터 (youtube/youtube_stream/vimeo/instagram)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),

@@ -92,6 +92,12 @@ foreach ($port in $portsToClean) {
             }
         }
     }
+    $remainingConn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+    if ($remainingConn) {
+        $remainingPids = $remainingConn | Select-Object -ExpandProperty OwningProcess -Unique
+        Write-Host "    [!] Port ${port} still has listeners after cleanup: $($remainingPids -join ', ')" -ForegroundColor Yellow
+        Write-Host "        Access denied / another session owner is likely. Treat this as a permission or service-lock hint." -ForegroundColor Yellow
+    }
 }
 
 # Clean up browser profiles before starting (Dev mode only)

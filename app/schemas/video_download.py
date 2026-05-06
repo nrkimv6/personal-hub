@@ -7,7 +7,7 @@ from typing import Optional, Literal
 
 
 # 다운로드 타입 정의
-DownloadType = Literal["youtube", "youtube_stream", "vimeo"]
+DownloadType = Literal["youtube", "youtube_stream", "vimeo", "instagram"]
 
 # 상태 정의
 DownloadStatus = Literal["pending", "picked", "processing", "completed", "failed", "cancelled"]

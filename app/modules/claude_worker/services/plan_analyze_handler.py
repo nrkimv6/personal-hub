@@ -6,14 +6,20 @@ plan_records 테이블에 저장한다.
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 
 from sqlalchemy.orm import Session
 
+from app.core.database import is_connection_error
 from app.models.plan_record import PlanRecord
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services.plan_archive_prompt_policy import (
+    DEFAULT_CATEGORIES,
+    PromptPolicyContext,
+    build_plan_archive_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,14 +81,15 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
             except Exception:
                 pass
 
-        record.llm_processed_at = datetime.now()
-        record.updated_at = datetime.now()
+        now = datetime.now()
+        record.llm_processed_at = now
+        if record.raw_content:
+            record.file_delete_after = now + timedelta(days=7)
+        else:
+            record.file_delete_after = None
+        record.updated_at = now
         db.commit()
         logger.info(f"save_plan_archive_result: updated record id={record.id} category={category}")
-
-        # requirements_sync 트리거 판단
-        if category:
-            _maybe_queue_requirements_sync(db, category)
 
         # dev-guide staleness 자동 감지
         _maybe_flag_guide_staleness(db, record.file_path)
@@ -93,7 +100,10 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         
         return True
     except Exception as e:
-        logger.error(f"save_plan_archive_result error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("save_plan_archive_result connection error: %s", e)
+        else:
+            logger.error(f"save_plan_archive_result error: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -123,7 +133,10 @@ def build_devguide_staleness_report(db: Session) -> list:
             if s.get("pending_count", 0) > 0
         ]
     except Exception as e:
-        logger.error(f"build_devguide_staleness_report error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("build_devguide_staleness_report connection error: %s", e)
+        else:
+            logger.error(f"build_devguide_staleness_report error: {e}", exc_info=True)
         return []
 
 
@@ -146,49 +159,11 @@ def save_devguide_staleness_result(db: Session, report: list) -> bool:
         logger.info(f"save_devguide_staleness_result: saved event with {len(report)} guides")
         return True
     except Exception as e:
-        logger.error(f"save_devguide_staleness_result error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("save_devguide_staleness_result connection error: %s", e)
+        else:
+            logger.error(f"save_devguide_staleness_result error: {e}", exc_info=True)
         db.rollback()
-        return False
-
-
-def save_requirements_sync_result(db: Session, request, result: dict) -> bool:
-    """plan_requirements_sync caller_type 결과 저장
-
-    LLM 결과에서 요구사항 텍스트 추출 →
-    docs/requirements/{category}.md 파일 생성/갱신
-
-    Args:
-        db: SQLAlchemy Session
-        request: LLMRequest 인스턴스
-        result: {"success": bool, "result": dict, "raw_response": str}
-    """
-    try:
-        llm_result = result.get("result") or {}
-        if isinstance(llm_result, str):
-            try:
-                llm_result = json.loads(llm_result)
-            except Exception:
-                llm_result = {}
-
-        category = llm_result.get("category") or request.caller_id
-        requirements_text = llm_result.get("requirements") or result.get("raw_response", "")
-
-        if not requirements_text:
-            logger.warning(f"save_requirements_sync_result: empty requirements for category={category}")
-            return False
-
-        # docs/requirements/ 디렉토리 생성
-        from pathlib import Path
-        base_dir = Path(__file__).parent.parent.parent.parent.parent  # monitor-page root
-        req_dir = base_dir / "docs" / "requirements"
-        req_dir.mkdir(parents=True, exist_ok=True)
-
-        req_file = req_dir / f"{category}.md"
-        req_file.write_text(requirements_text, encoding="utf-8")
-        logger.info(f"save_requirements_sync_result: written {req_file}")
-        return True
-    except Exception as e:
-        logger.error(f"save_requirements_sync_result error: {e}", exc_info=True)
         return False
 
 
@@ -197,7 +172,9 @@ def build_plan_analyze_prompt(
     filename: str,
     existing_categories: Optional[List[str]] = None
 ) -> str:
-    """plan archive 분석 프롬프트 생성
+    """plan archive 분석 프롬프트 생성.
+
+    Legacy wrapper for callers that do not yet pass provider/model context.
 
     Args:
         file_content: plan 파일 내용
@@ -207,152 +184,15 @@ def build_plan_analyze_prompt(
     Returns:
         LLM에 전달할 프롬프트 문자열
     """
-    if existing_categories is None:
-        existing_categories = [
-            "naver-booking", "instagram", "google-search", "activity",
-            "claude-worker", "video", "infra", "writing", "common"
-        ]
-
-    categories_str = ", ".join(existing_categories)
-
-    prompt = f"""다음은 개발 프로젝트의 plan 파일입니다. 파일명: {filename}
-
-아래 내용을 분석하여 JSON 형식으로 결과를 반환해주세요.
-
-**파일 내용:**
-{file_content[:3000]}
-
-**출력 JSON 스키마:**
-{{
-  "category": "모듈 카테고리 (다음 중 하나: {categories_str}, 또는 적절한 새 카테고리)",
-  "tags": ["feat", "fix", "refactor", "chore", "docs", "test"] 중 해당하는 것들,
-  "summary": "이 plan의 핵심 내용을 2-3문장으로 요약",
-  "superseded_by": "이 plan을 대체하는 더 최신 plan 파일명 (없으면 null)",
-  "intent": "이 plan이 해결하려는 핵심 문제 (1-2문장)",
-  "trigger": "bug_recurrence|new_feature|refactor|ux_improvement|infra|unknown 중 하나",
-  "scope": ["영향받는 모듈/파일/기능을 배열로 추출, 예: \"naver-booking\", \"plan_service.py\""]
-}}
-
-JSON만 출력하세요. 다른 설명은 불필요합니다."""
+    ctx = PromptPolicyContext(
+        caller_type="plan_archive_analyze",
+        provider="claude",
+        model="",
+        filename=filename,
+        existing_categories=existing_categories or DEFAULT_CATEGORIES,
+    )
+    prompt, _policy_id, _policy_version = build_plan_archive_prompt(ctx, file_content)
     return prompt
-
-
-def build_requirements_sync_prompt(category: str, plan_summaries: List[dict]) -> str:
-    """요구사항 문서 생성 프롬프트
-
-    Args:
-        category: 카테고리명
-        plan_summaries: [{"filename": str, "summary": str, "tags": list, "date": str}, ...]
-
-    Returns:
-        LLM에 전달할 프롬프트 문자열
-    """
-    summaries_text = "\n".join([
-        f"- [{s.get('date', '')}] {s.get('filename', '')}: {s.get('summary', '')}"
-        for s in plan_summaries
-    ])
-
-    prompt = f"""다음은 '{category}' 모듈의 개발 히스토리입니다.
-
-{summaries_text}
-
-위 히스토리를 바탕으로 이 모듈의 **기능 요구사항 문서**를 Markdown 형식으로 작성해주세요.
-
-**출력 JSON 스키마:**
-{{
-  "category": "{category}",
-  "requirements": "# {category} 요구사항\\n\\n## 주요 기능\\n...\\n## 이력\\n..."
-}}
-
-JSON만 출력하세요."""
-    return prompt
-
-
-def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
-    """category별 processed 5개+ 조건 충족 시 plan_requirements_sync LLM 큐 등록.
-
-    Args:
-        db: SQLAlchemy Session
-        category: 카테고리명
-
-    Returns:
-        True if LLMRequest가 새로 등록됨, False otherwise
-    """
-    try:
-        from app.modules.claude_worker.models.llm_request import LLMRequest
-        from sqlalchemy import and_
-
-        # processed 개수 확인
-        processed_count = db.query(PlanRecord).filter(
-            and_(
-                PlanRecord.category == category,
-                PlanRecord.llm_processed_at.isnot(None),
-            )
-        ).count()
-
-        if processed_count < 5:
-            return False
-
-        # 24시간 내 중복 요청 확인
-        cutoff = datetime.now()
-        from datetime import timedelta
-        cutoff = cutoff - timedelta(hours=24)
-        existing = db.query(LLMRequest).filter(
-            and_(
-                LLMRequest.caller_type == "plan_requirements_sync",
-                LLMRequest.caller_id == category,
-                LLMRequest.requested_at > cutoff,
-            )
-        ).first()
-
-        if existing:
-            return False
-
-        # summaries 최신 50개
-        records = db.query(PlanRecord).filter(
-            and_(
-                PlanRecord.category == category,
-                PlanRecord.llm_processed_at.isnot(None),
-                PlanRecord.summary.isnot(None),
-            )
-        ).order_by(PlanRecord.llm_processed_at.desc()).limit(50).all()
-
-        plan_summaries = [
-            {
-                "filename": Path(r.file_path).name if r.file_path else "",
-                "summary": r.summary or "",
-                "tags": r.tags or [],
-                "date": r.archived_at.strftime("%Y-%m-%d") if r.archived_at else (
-                    r.llm_processed_at.strftime("%Y-%m-%d") if r.llm_processed_at else ""
-                ),
-            }
-            for r in records
-        ]
-
-        prompt = build_requirements_sync_prompt(category, plan_summaries)
-        llm_service = LLMService(db)
-        provider, model = llm_service.resolve_provider_model(
-            caller_type="plan_requirements_sync",
-            provider=None,
-            model=None,
-        )
-        llm_req = LLMRequest(
-            caller_type="plan_requirements_sync",
-            caller_id=category,
-            prompt=prompt,
-            queue_name="utility",
-            requested_by="scheduler",
-            provider=provider,
-            model=model,
-        )
-        db.add(llm_req)
-        db.commit()
-        logger.info(f"_maybe_queue_requirements_sync: queued for category={category}")
-        return True
-    except Exception as e:
-        logger.error(f"_maybe_queue_requirements_sync error: {e}", exc_info=True)
-        return False
-
 
 def _maybe_flag_guide_staleness(db: Session, file_path: str) -> bool:
     """archive 분석 완료 후 관련 가이드의 staleness 자동 감지.
@@ -419,7 +259,10 @@ def _maybe_flag_guide_staleness(db: Session, file_path: str) -> bool:
                 created = True
         return created
     except Exception as e:
-        logger.error(f"_maybe_flag_guide_staleness error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("_maybe_flag_guide_staleness connection error: %s", e)
+        else:
+            logger.error(f"_maybe_flag_guide_staleness error: {e}", exc_info=True)
         return False
 
 
@@ -467,7 +310,10 @@ def _get_scope_overlap_candidates(db: Session, record: PlanRecord) -> list:
         overlapping.sort(key=sort_key)
         return overlapping[:20]
     except Exception as e:
-        logger.error(f"_get_scope_overlap_candidates error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("_get_scope_overlap_candidates connection error: %s", e)
+        else:
+            logger.error(f"_get_scope_overlap_candidates error: {e}", exc_info=True)
         return []
 
 
@@ -518,7 +364,10 @@ def detect_recurrence(db: Session, record: PlanRecord) -> bool:
         logger.info(f"detect_recurrence: LLM 큐 등록 hash={record.filename_hash[:8]}")
         return True
     except Exception as e:
-        logger.error(f"detect_recurrence error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("detect_recurrence connection error: %s", e)
+        else:
+            logger.error(f"detect_recurrence error: {e}", exc_info=True)
         return False
 
 
@@ -624,7 +473,10 @@ def save_recurrence_check_result(db: Session, request, result: dict) -> bool:
         
         return True
     except Exception as e:
-        logger.error(f"save_recurrence_check_result error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("save_recurrence_check_result connection error: %s", e)
+        else:
+            logger.error(f"save_recurrence_check_result error: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -698,7 +550,10 @@ def maybe_queue_recurrence_suggest(db: Session, record: PlanRecord) -> bool:
         logger.info(f"maybe_queue_recurrence_suggest: LLM 큐 등록 root={chain_root[:8]}")
         return True
     except Exception as e:
-        logger.error(f"maybe_queue_recurrence_suggest error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("maybe_queue_recurrence_suggest connection error: %s", e)
+        else:
+            logger.error(f"maybe_queue_recurrence_suggest error: {e}", exc_info=True)
         return False
 
 
@@ -779,6 +634,9 @@ def save_recurrence_suggest_result(db: Session, request, result: dict) -> bool:
         logger.info(f"save_recurrence_suggest_result: saved for record id={latest_record.id}")
         return True
     except Exception as e:
-        logger.error(f"save_recurrence_suggest_result error: {e}", exc_info=True)
+        if is_connection_error(e):
+            logger.warning("save_recurrence_suggest_result connection error: %s", e)
+        else:
+            logger.error(f"save_recurrence_suggest_result error: {e}", exc_info=True)
         db.rollback()
         return False

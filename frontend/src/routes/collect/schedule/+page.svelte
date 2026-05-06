@@ -6,16 +6,17 @@
 	import { collectApi, llmApi, type ProviderInfo } from '$lib/api';
 	import type { CrawlSchedule, ServiceAccountWithProfile, CrawlScheduleRepairResponse } from '$lib/types';
 	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
-	import { 
-		Instagram, 
-		Search, 
-		Pencil, 
-		FlaskConical, 
-		FolderArchive, 
-		ClipboardList, 
-		ArrowLeft, 
-		X, 
-		ChevronDown, 
+	import {
+		Instagram,
+		Search,
+		Pencil,
+		FlaskConical,
+		FolderArchive,
+		ClipboardList,
+		Moon,
+		ArrowLeft,
+		X,
+		ChevronDown,
 		ChevronRight,
 		Clock,
 		BarChart3,
@@ -23,91 +24,92 @@
 		Plus
 	} from 'lucide-svelte';
 
-	let schedules: CrawlSchedule[] = [];
-	let loading = true;
-	let error: string | null = null;
-	let successMessage: string | null = null;
+	let schedules = $state<CrawlSchedule[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+	let successMessage = $state<string | null>(null);
 
-	let togglingId: number | null = null;
-	let runningId: number | null = null;
+	let togglingId = $state<number | null>(null);
+	let runningId = $state<number | null>(null);
 
 	// Instagram 설정 모달 상태
-	let showInstagramSettingsModal = false;
-	let instagramSettingsSchedule: CrawlSchedule | null = null;
+	let showInstagramSettingsModal = $state(false);
+	let instagramSettingsSchedule = $state<CrawlSchedule | null>(null);
 	let settingsRef: InstagramCrawlSettings | null = null;
 
 	// 추가 모달 상태
-	let showAddModal = false;
-	let addStep = 1; // 1: 타입 선택, 2: 대상 선택, 3: 시간 설정
-	let creating = false;
+	let showAddModal = $state(false);
+	let addStep = $state(1); // 1: 타입 선택, 2: 대상 선택, 3: 시간 설정
+	let creating = $state(false);
 
 	// 선택값
-	let selectedType = ''; // 'instagram_feed' | 'google_search' | 'writing_task'
-	let selectedTarget: { id: number; name: string } | null = null;
-	let scheduleTimes: string[] = ['09:00', '12:00', '18:00'];
+	let selectedType = $state(''); // 'instagram_feed' | 'google_search' | 'writing_task'
+	let selectedTarget = $state<{ id: number; name: string } | null>(null);
+	let scheduleTimes = $state<string[]>(['09:00', '12:00', '18:00']);
 
 	// pytest_run 설정
-	let pytestTestPath = 'tests/';
-	let pytestExtraArgs = '';
-	let pytestAutoFixPlan = true;
-	let pytestLlmUseSystemDefaults = true;
+	let pytestTestPath = $state('tests/');
+	let pytestExtraArgs = $state('');
+	let pytestAutoFixPlan = $state(true);
+	let pytestLlmUseSystemDefaults = $state(true);
 	let providers = $state<ProviderInfo[]>([]);
-	let pytestLlmProvider = 'claude';
-	let pytestLlmModel = '';
-	let pytestCronTime = '02:00';
+	let pytestLlmProvider = $state('claude');
+	let pytestLlmModel = $state('');
+	let pytestCronTime = $state('02:00');
 
-	// plan_archive_analyze / devguide_staleness cron 시간
-	let planArchiveCronTime = '02:10';
-	let devguideStaleCronTime = '03:30';
+	// plan_archive_analyze / devguide_staleness / auto_dev_runner cron 시간
+	let planArchiveCronTime = $state('02:10');
+	let devguideStaleCronTime = $state('03:30');
+	let autoDevRunnerCronTime = $state('02:00');
 
 	// 수정 모달 cron 시간 (pytest / plan 타입 공용)
-	let editCronTime = '02:00';
+	let editCronTime = $state('02:00');
 
 	// Google 검색 새 검색어 입력 폼
-	let newSearchQuery = '';
-	let newSearchName = '';
-	let newSearchDateFilter = '';
-	let newSearchMaxPages = 1;
-	let newSearchLr = '';
-	let newSearchCr = '';
-	let newSearchSitesearch = '';
-	let showAdvancedOptions = false;
+	let newSearchQuery = $state('');
+	let newSearchName = $state('');
+	let newSearchDateFilter = $state('');
+	let newSearchMaxPages = $state(1);
+	let newSearchLr = $state('');
+	let newSearchCr = $state('');
+	let newSearchSitesearch = $state('');
+	let showAdvancedOptions = $state(false);
 
 	// 대상 목록
-	let serviceAccounts: ServiceAccountWithProfile[] = [];
-	let loadingTargets = false;
+	let serviceAccounts = $state<ServiceAccountWithProfile[]>([]);
+	let loadingTargets = $state(false);
 
 	// 삭제 모달 상태
-	let showDeleteModal = false;
-	let deleteTarget: CrawlSchedule | null = null;
-	let deleting = false;
+	let showDeleteModal = $state(false);
+	let deleteTarget = $state<CrawlSchedule | null>(null);
+	let deleting = $state(false);
 
 	// 수정 모달 상태
-	let showEditModal = false;
-	let editSchedule: CrawlSchedule | null = null;
-	let editLoading = false;
-	let editSaving = false;
-	let editDisplayName = '';
-	let editTimes: string[] = [];
+	let showEditModal = $state(false);
+	let editSchedule = $state<CrawlSchedule | null>(null);
+	let editLoading = $state(false);
+	let editSaving = $state(false);
+	let editDisplayName = $state('');
+	let editTimes = $state<string[]>([]);
 	// Google 검색 수정 전용
-	let editGoogleQuery = '';
-	let editGoogleName = '';
-	let editGoogleDateFilter = '';
-	let editGoogleMaxPages = 1;
-	let editGoogleLr = '';
-	let editGoogleCr = '';
-	let editGoogleSitesearch = '';
-	let editShowAdvanced = false;
+	let editGoogleQuery = $state('');
+	let editGoogleName = $state('');
+	let editGoogleDateFilter = $state('');
+	let editGoogleMaxPages = $state(1);
+	let editGoogleLr = $state('');
+	let editGoogleCr = $state('');
+	let editGoogleSitesearch = $state('');
+	let editShowAdvanced = $state(false);
 	// LLM 설정 (instagram_feed, writing_task, topic_extract 전용)
-	let editLlmUseSystemDefaults = true;
-	let editLlmProvider = 'claude';
-	let editLlmModel = '';
-	let showLegacyRepairModal = false;
-	let legacyRepairPreview: CrawlScheduleRepairResponse | null = null;
-	let loadingLegacyRepair = false;
-	let applyingLegacyRepair = false;
+	let editLlmUseSystemDefaults = $state(true);
+	let editLlmProvider = $state('claude');
+	let editLlmModel = $state('');
+	let showLegacyRepairModal = $state(false);
+	let legacyRepairPreview = $state<CrawlScheduleRepairResponse | null>(null);
+	let loadingLegacyRepair = $state(false);
+	let applyingLegacyRepair = $state(false);
 
-	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract', 'pytest_run'];
+	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract', 'pytest_run', 'plan_archive_analyze'];
 
 	const scheduleTypes = [
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: Instagram, color: 'pink' },
@@ -115,7 +117,8 @@
 		{ value: 'writing_task', label: '글쓰기 태스크', icon: Pencil, color: 'purple' },
 		{ value: 'pytest_run', label: 'pytest 자동 실행', icon: FlaskConical, color: 'green' },
 		{ value: 'plan_archive_analyze', label: 'Plan Archive LLM 분석', icon: FolderArchive, color: 'blue' },
-		{ value: 'devguide_staleness', label: 'Dev-Guide 갱신 점검', icon: ClipboardList, color: 'indigo' }
+		{ value: 'devguide_staleness', label: 'Dev-Guide 갱신 점검', icon: ClipboardList, color: 'indigo' },
+		{ value: 'auto_dev_runner', label: '야간 자동 plan 실행', icon: Moon, color: 'purple' }
 	];
 
 	const dateFilterOptions = [
@@ -198,7 +201,7 @@
 			return;
 		}
 
-		if (type === 'plan_archive_analyze' || type === 'devguide_staleness') {
+		if (type === 'plan_archive_analyze' || type === 'devguide_staleness' || type === 'auto_dev_runner') {
 			// cron 시간만 입력 (step 2)
 			addStep = 2;
 			return;
@@ -252,11 +255,12 @@
 		error = null;
 
 		try {
-			const isCronType = selectedType === 'pytest_run' || selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness';
+			const isCronType = selectedType === 'pytest_run' || selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness' || selectedType === 'auto_dev_runner';
 		const cronTime =
 			selectedType === 'pytest_run' ? pytestCronTime :
 			selectedType === 'plan_archive_analyze' ? planArchiveCronTime :
-			selectedType === 'devguide_staleness' ? devguideStaleCronTime : '';
+			selectedType === 'devguide_staleness' ? devguideStaleCronTime :
+			selectedType === 'auto_dev_runner' ? autoDevRunnerCronTime : '';
 
 		const data: {
 				target_type: string;
@@ -333,8 +337,8 @@
 
 			editDisplayName = detail.display_name || '';
 
-			// cron 타입 (pytest_run, plan_archive_analyze, devguide_staleness) cron 시간 복원
-			const isCronSchedule = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness'].includes(schedule.target_type);
+			// cron 타입 (pytest_run, plan_archive_analyze, devguide_staleness, auto_dev_runner) cron 시간 복원
+			const isCronSchedule = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness', 'auto_dev_runner'].includes(schedule.target_type);
 			if (isCronSchedule && detail.schedule_value?.time) {
 				editCronTime = detail.schedule_value.time as string;
 			} else {
@@ -416,7 +420,7 @@
 			}
 
 			// 시간 설정 (cron 타입 vs time_window 타입)
-			const isEditCronType = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness'].includes(editSchedule.target_type);
+			const isEditCronType = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness', 'auto_dev_runner'].includes(editSchedule.target_type);
 			updateData.schedule_value = isEditCronType
 				? { time: editCronTime }
 				: {
@@ -578,6 +582,8 @@
 				return { class: 'bg-blue-100 text-blue-800', text: 'Plan분석' };
 			case 'devguide_staleness':
 				return { class: 'bg-indigo-100 text-indigo-800', text: 'Dev-Guide점검' };
+			case 'auto_dev_runner':
+				return { class: 'bg-purple-100 text-purple-800', text: '야간자동실행' };
 			default:
 				return { class: 'bg-muted text-foreground', text: type };
 		}
@@ -652,7 +658,7 @@
 
 <div>
 	<!-- 헤더 -->
-	<PageHeader title="스케줄 설정" subtitle="수집 스케줄을 관리합니다">
+	<PageHeader title="스케줄 설정">
 		<Button variant="secondary" onclick={previewLegacyRepair} disabled={loadingLegacyRepair}>
 			{loadingLegacyRepair ? '복구 조회 중...' : 'legacy 복구'}
 		</Button>
@@ -1059,8 +1065,8 @@
 								</button>
 							</div>
 						</div>
-					{:else if selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness'}
-				<!-- plan archive / requirements sync: cron 시간만 입력 -->
+					{:else if selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness' || selectedType === 'auto_dev_runner'}
+				<!-- plan archive / devguide_staleness / auto_dev_runner: cron 시간만 입력 -->
 				<p class="text-muted-foreground mb-4">매일 실행할 시각을 설정하세요</p>
 				<div class="space-y-4">
 					<div>
@@ -1072,11 +1078,18 @@
 								bind:value={planArchiveCronTime}
 								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
-						{:else}
+						{:else if selectedType === 'devguide_staleness'}
 							<input
 								id="plan-cron-time"
 								type="time"
 								bind:value={devguideStaleCronTime}
+								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							/>
+						{:else}
+							<input
+								id="plan-cron-time"
+								type="time"
+								bind:value={autoDevRunnerCronTime}
 								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
 						{/if}
@@ -1487,7 +1500,7 @@
 						<!-- 실행 시간 설정 -->
 						<div class="border-t border-border pt-4">
 							<h3 class="font-medium text-foreground mb-3">실행 시간</h3>
-							{#if editSchedule && ['pytest_run', 'plan_archive_analyze', 'devguide_staleness'].includes(editSchedule.target_type)}
+							{#if editSchedule && ['pytest_run', 'plan_archive_analyze', 'devguide_staleness', 'auto_dev_runner'].includes(editSchedule.target_type)}
 								<div>
 									<input
 										type="time"

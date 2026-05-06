@@ -161,3 +161,114 @@ def test_worker_recovers_when_pg_restored_e2e():
     assert worker.iterations_called > 0, (
         "CLOSED 복구 후 _main_loop_iteration 미호출 — backoff guard가 잘못 유지됨"
     )
+
+
+# ── T4 사이클 TC: scheduled writing + kakao PG 오류 반복 생존 검증 ──────────────
+
+try:
+    import psycopg2 as _psycopg2
+    _HAS_PSYCOPG2 = True
+except ImportError:
+    _HAS_PSYCOPG2 = False
+
+import logging
+from unittest.mock import AsyncMock, MagicMock, patch
+
+_CYCLE_SKIP = pytest.mark.skipif(not _HAS_PSYCOPG2, reason="psycopg2 없음")
+
+WIN32_MOCKS_CYCLE = {
+    "psutil": MagicMock(),
+    "win32gui": MagicMock(),
+    "win32con": MagicMock(),
+    "win32clipboard": MagicMock(),
+    "pyautogui": MagicMock(),
+    "paddleocr": MagicMock(),
+    "imagehash": MagicMock(),
+    "win32ui": MagicMock(),
+    "app.worker.crawl_worker_base": MagicMock(),
+    "app.worker.scheduled_worker": MagicMock(),
+    "app.worker.ondemand_worker": MagicMock(),
+}
+
+
+@_CYCLE_SKIP
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_scheduled_writing_3_consecutive_pg_errors_no_flood_cycle(caplog):
+    """T4: scheduled writing path — 3회 연속 connection error 후 circuit OPEN 진입해도
+    traceback flood 없고 WARNING rate-limit(30초 1건)이 작동한다."""
+    from app.worker.scheduled_worker import ScheduledCrawlWorker
+    from app.modules.writing.schedulers.writing_task_schedule import WritingTaskScheduler
+
+    worker = ScheduledCrawlWorker(browser_manager=MagicMock(is_initialized=False))
+    worker._error_log_rate = {}  # rate-limit 초기화
+
+    handler = WritingTaskScheduler()
+    conn_err = _psycopg2.OperationalError("connection refused to server")
+    mock_svc = MagicMock()
+    mock_claimed = MagicMock()
+    mock_claimed.run.id = 10
+    mock_claimed.config_snapshot_patch = {}
+
+    with caplog.at_level(logging.DEBUG):
+        for _ in range(3):
+            with (
+                patch.object(handler, "execute", new=AsyncMock(side_effect=conn_err)),
+                patch("app.worker.scheduled_worker.SessionLocal", return_value=MagicMock()),
+                patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_svc),
+            ):
+                await worker._run_handler(handler, MagicMock(), mock_claimed)
+
+    # traceback ERROR 0건
+    error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(error_records) == 0, \
+        f"traceback ERROR 발생: {[r.getMessage() for r in error_records]}"
+
+    # WARNING 1건 (30초 rate-limit — 3회 연속이어도 1건)
+    conn_warnings = [
+        r for r in caplog.records
+        if r.levelno == logging.WARNING and "DB 연결 오류" in r.getMessage()
+    ]
+    assert len(conn_warnings) == 1, \
+        f"rate-limit 미작동: WARNING {len(conn_warnings)}건 (1건 기대)"
+
+    # fail_run 3회 (각 error마다 orphan 방지 epilogue)
+    assert mock_svc.fail_run.call_count == 3, \
+        f"fail_run {mock_svc.fail_run.call_count}회 (3회 기대)"
+
+
+@_CYCLE_SKIP
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_kakao_worker_repeated_pg_errors_rate_limited_survives_cycle(caplog):
+    """T4: KakaoMonitorWorker — connection error 5회 반복 시 WARNING rate-limit(30초 1건),
+    루프가 죽지 않고 _safe_execute traceback WARNING 0건."""
+    with patch.dict("sys.modules", WIN32_MOCKS_CYCLE):
+        from app.worker.kakao_monitor_worker import KakaoMonitorWorker
+        worker = KakaoMonitorWorker()
+
+    worker._error_log_rate = {}  # rate-limit 초기화
+
+    conn_err = _psycopg2.OperationalError("connection refused to server")
+    worker._load_active_state = MagicMock(side_effect=conn_err)
+
+    with caplog.at_level(logging.DEBUG):
+        for _ in range(5):
+            # 예외 없이 정상 완료되어야 함 (connection error는 _monitor_chat 내부에서 흡수)
+            await worker._main_loop_iteration()
+
+    # _safe_execute 실패 로그 0건
+    safe_execute_failures = [
+        r for r in caplog.records
+        if r.exc_info and "실패" in r.getMessage()
+    ]
+    assert len(safe_execute_failures) == 0, \
+        f"_safe_execute 실패 로그 발생: {[r.getMessage() for r in safe_execute_failures]}"
+
+    # WARNING rate-limit: 5회 연속이어도 30초 이내라 1건만
+    conn_warnings = [
+        r for r in caplog.records
+        if r.levelno == logging.WARNING and "DB 연결 오류" in r.getMessage()
+    ]
+    assert len(conn_warnings) == 1, \
+        f"rate-limit 미작동: WARNING {len(conn_warnings)}건 (1건 기대)"

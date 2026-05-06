@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 KAKAO_BACKLOG_ALERT_KEY = "notification:kakao:backlog-alert"
 KAKAO_DEDUP_KEY_PREFIX = "notification:kakao:dedup"
+KAKAO_DEAD_LETTER_QUEUE = "notification:kakao:dead-letter"
 
 
 def get_kakao_queue_name() -> str:
@@ -32,6 +33,21 @@ def get_kakao_backlog_alert_key() -> str:
     """카카오 backlog 경고용 cooldown 키를 반환합니다."""
     prefix = getattr(settings, "REDIS_QUEUE_PREFIX", "monitor")
     return f"{prefix}:{KAKAO_BACKLOG_ALERT_KEY}"
+
+
+def get_kakao_dead_letter_queue_name() -> str:
+    """Redis에 실제 저장되는 카카오 dead-letter 큐 이름을 반환합니다."""
+    prefix = getattr(settings, "REDIS_QUEUE_PREFIX", "monitor")
+    return f"{prefix}:{KAKAO_DEAD_LETTER_QUEUE}"
+
+
+def normalize_kakao_metadata(metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Kakao payload metadata 기본 계약을 채웁니다."""
+    normalized = dict(metadata or {})
+    normalized.setdefault("retry_count", 0)
+    normalized.setdefault("last_error", None)
+    normalized.setdefault("guard_required", True)
+    return normalized
 
 
 def build_kakao_payload(
@@ -54,7 +70,7 @@ def build_kakao_payload(
         "source": source,
         "created_at": now.isoformat(timespec="seconds"),
         "expires_at": expires_at.isoformat(timespec="seconds"),
-        "metadata": metadata or {},
+        "metadata": normalize_kakao_metadata(metadata),
     }
     return payload
 
@@ -92,6 +108,7 @@ class KakaoNotificationQueue:
         self.client = client
         self.room_name = room_name or getattr(settings, "MEGABEAUTY_KAKAO_ALERT_ROOM_NAME", "소나무봇")
         self._queue = RedisQueue(client, KAKAO_NOTIFICATION_QUEUE)
+        self._dead_letter_queue = RedisQueue(client, KAKAO_DEAD_LETTER_QUEUE)
 
     @property
     def queue_name(self) -> str:
@@ -180,6 +197,33 @@ class KakaoNotificationQueue:
     async def peek(self, count: int = 10) -> list[dict[str, Any]]:
         """큐 앞부분을 확인합니다."""
         return await self._queue.peek(count=count)
+
+    async def requeue(self, payload: dict[str, Any], *, last_error: str) -> bool:
+        """retryable 실패 payload를 retry metadata와 함께 원본 큐에 다시 넣습니다."""
+        updated = dict(payload)
+        metadata = normalize_kakao_metadata(updated.get("metadata"))
+        metadata["retry_count"] = int(metadata.get("retry_count") or 0) + 1
+        metadata["last_error"] = last_error
+        metadata["last_retry_at"] = datetime.now().isoformat(timespec="seconds")
+        updated["metadata"] = metadata
+        return await self._queue.push(updated)
+
+    async def dead_letter(self, payload: dict[str, Any], *, last_error: str) -> bool:
+        """비복구/재시도 초과 payload를 dead-letter 큐에 보존합니다."""
+        updated = dict(payload or {})
+        metadata = normalize_kakao_metadata(updated.get("metadata"))
+        metadata["last_error"] = last_error
+        metadata["dead_lettered_at"] = datetime.now().isoformat(timespec="seconds")
+        updated["metadata"] = metadata
+        return await self._dead_letter_queue.push(updated)
+
+    async def dead_letter_length(self) -> int:
+        """dead-letter 큐 길이를 반환합니다."""
+        return await self._dead_letter_queue.length()
+
+    async def dead_letter_peek(self, count: int = 10) -> list[dict[str, Any]]:
+        """dead-letter 큐 앞부분을 확인합니다."""
+        return await self._dead_letter_queue.peek(count=count)
 
     async def _safe_length(self) -> int:
         try:

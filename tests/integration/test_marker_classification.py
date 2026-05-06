@@ -24,6 +24,8 @@ def _run_collect(args: list[str], timeout: int = 30) -> subprocess.CompletedProc
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)},
     )

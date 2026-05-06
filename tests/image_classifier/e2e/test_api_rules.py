@@ -189,3 +189,45 @@ def test_rule_priority_ordering(client, test_db):
     assert rules[0]["rule_content"] == "high"
     assert rules[1]["rule_content"] == "mid"
     assert rules[2]["rule_content"] == "low"
+
+
+def test_get_rules_includes_source_hit_count_and_category_name(client, seeded_rules, test_db):
+    test_db.execute(text(
+        "UPDATE classification_rules SET hit_count = 7 WHERE id = 1"
+    ))
+    test_db.commit()
+
+    response = client.get("/api/ic/rules")
+
+    assert response.status_code == 200
+    rules = response.json()
+
+    rule = next(item for item in rules if item["id"] == 1)
+    assert rule["source"] == "user"
+    assert rule["hit_count"] == 7
+    assert rule["category_name"] == "shopping/receipt"
+
+
+def test_get_rules_category_name_fallback_is_preserved(client, test_db):
+    test_db.execute(text("""
+        INSERT INTO categories (id, name, full_path) VALUES (1, 'Travel', 'photos/travel')
+    """))
+    test_db.commit()
+    test_db.execute(text("PRAGMA foreign_keys=OFF"))
+    test_db.execute(text("""
+        INSERT INTO classification_rules (id, rule_type, category_id, rule_content, priority, is_active, source, hit_count)
+        VALUES (10, 'keyword', 99, 'fallback', 50, 1, 'learned', 5)
+    """))
+    test_db.commit()
+    test_db.execute(text("PRAGMA foreign_keys=ON"))
+    test_db.commit()
+
+    response = client.get("/api/ic/rules")
+
+    assert response.status_code == 200
+    rules = response.json()
+
+    rule = next(item for item in rules if item["id"] == 10)
+    assert rule["source"] == "learned"
+    assert rule["hit_count"] == 5
+    assert rule["category_name"] == "99"

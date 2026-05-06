@@ -262,14 +262,15 @@ class TestSendTelegram:
     async def test_error_send_telegram_no_token(self):
         """토큰 없이 텔레그램 전송 시도"""
         with patch('app.shared.notification.notification_service.get_db') as mock_get_db, \
-             patch('app.shared.notification.notification_service.settings') as mock_settings:
+             patch('app.shared.notification.notification_service.settings') as mock_settings, \
+             patch('aiohttp.ClientSession') as mock_session_class:
 
             mock_db = MagicMock()
             mock_db.execute.return_value.fetchone.return_value = (1, 1, '[]')
             mock_get_db.return_value = iter([mock_db])
 
-            mock_settings.TELEGRAM_BOT_TOKEN = None
-            mock_settings.TELEGRAM_CHAT_ID = None
+            mock_settings.TELEGRAM_BOT_TOKEN = ""
+            mock_settings.TELEGRAM_CHAT_ID = ""
             mock_settings.ENABLE_DESKTOP_NOTIFICATION = True
             mock_settings.RECENT_MESSAGES_MAX = 100
 
@@ -278,6 +279,30 @@ class TestSendTelegram:
 
             result = await service._send_telegram("테스트 메시지")
             assert result is None  # 토큰 없으면 None 반환
+            mock_session_class.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_error_public_send_telegram_no_token_skips_network(self):
+        """공개 send_telegram도 빈 설정이면 네트워크 호출 없이 skip"""
+        with patch('app.shared.notification.notification_service.get_db') as mock_get_db, \
+             patch('app.shared.notification.notification_service.settings') as mock_settings, \
+             patch('aiohttp.ClientSession') as mock_session_class:
+
+            mock_db = MagicMock()
+            mock_db.execute.return_value.fetchone.return_value = (1, 1, '[]')
+            mock_get_db.return_value = iter([mock_db])
+
+            mock_settings.TELEGRAM_BOT_TOKEN = ""
+            mock_settings.TELEGRAM_CHAT_ID = ""
+            mock_settings.ENABLE_DESKTOP_NOTIFICATION = True
+            mock_settings.RECENT_MESSAGES_MAX = 100
+
+            from app.shared.notification.notification_service import NotificationService
+            service = NotificationService()
+
+            result = await service.send_telegram("테스트 메시지")
+            assert result is None
+            mock_session_class.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_error_send_telegram_api_failure(self, notification_service):

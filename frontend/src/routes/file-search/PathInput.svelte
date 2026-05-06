@@ -53,7 +53,7 @@
 	}
 </script>
 
-<div class="flex items-center gap-2">
+<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
 	<input
 		bind:value={path}
 		type="text"
@@ -62,24 +62,24 @@
 			   outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20"
 		oninput={() => onchange(path)}
 	/>
-	<button
-		onclick={openBrowser}
-		class="rounded-lg border border-border bg-background px-3 py-2 text-sm
-			   transition-colors hover:bg-muted"
-		title="폴더 브라우저 열기"
-	>
-		<Folder size={18} />
-	</button>
-	{#if path}
+	<div class="flex items-center gap-2 sm:shrink-0">
 		<button
-			onclick={() => { path = ''; onchange(''); }}
-			class="rounded-lg border border-border bg-background px-2 py-2 text-xs
-				   text-muted-foreground transition-colors hover:text-destructive"
-			title="경로 지우기"
+			onclick={openBrowser}
+			class="inline-flex items-center justify-center rounded-lg border border-border bg-background px-3 py-2 text-sm transition-colors hover:bg-muted"
+			title="폴더 브라우저 열기"
 		>
-			<X size={16} />
+			<Folder size={18} />
 		</button>
-	{/if}
+		{#if path}
+			<button
+				onclick={() => { path = ''; onchange(''); }}
+				class="inline-flex items-center justify-center rounded-lg border border-border bg-background px-2 py-2 text-xs text-muted-foreground transition-colors hover:text-destructive"
+				title="경로 지우기"
+			>
+				<X size={16} />
+			</button>
+		{/if}
+	</div>
 </div>
 
 <!-- 폴더 브라우저 모달 -->

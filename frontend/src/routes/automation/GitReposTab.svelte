@@ -5,6 +5,7 @@
   import type { GitRepo } from '$lib/types/gitRepos';
   import AddRepoModal from './AddRepoModal.svelte';
   import { createSelection } from '$lib/utils/selection.svelte';
+  import { confirm } from '$lib/stores/confirm';
 
   let repos: GitRepo[] = $state([]);
   let loading = $state(true);
@@ -78,7 +79,13 @@
   }
 
   async function handleDelete(id: number) {
-    if (!confirm('등록을 해제하시겠습니까?')) return;
+    const confirmed = await confirm({
+      title: '레포지토리 등록 해제',
+      message: '등록을 해제하시겠습니까?',
+      confirmText: '해제',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await gitReposApi.deleteRepo(id);
       repos = repos.filter((r) => r.id !== id);
@@ -115,7 +122,12 @@
 
   async function handleBatchPush() {
     if (selection.count === 0) return;
-    if (!confirm(`선택한 ${selection.count}개 레포지토리를 푸시하시겠습니까?`)) return;
+    const confirmed = await confirm({
+      title: '레포지토리 일괄 푸시',
+      message: `선택한 ${selection.count}개 레포지토리를 푸시하시겠습니까?`,
+      confirmText: '푸시'
+    });
+    if (!confirmed) return;
     batchWorking = true;
     try {
       const result = await gitReposApi.batchPush(selection.toArray());
@@ -148,7 +160,7 @@
 <div class="p-6 max-w-7xl mx-auto">
   <!-- 헤더 -->
   <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">Git 레포지토리 관리</h1>
+    <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100">Git 레포지토리 관리</h2>
     <div class="flex gap-2">
       <button
         class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-200 disabled:opacity-50"

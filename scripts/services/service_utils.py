@@ -13,6 +13,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import psutil
 
@@ -89,6 +90,107 @@ def pick_listener_pid(port: int, prefer_name: str = "node.exe") -> int | None:
 
     candidates.sort(key=lambda item: (item[1], item[2], item[3]), reverse=True)
     return candidates[0][0]
+
+
+def describe_listener(port: int) -> dict[str, str | int | None]:
+    """지정 포트 리스너의 메타데이터를 구조화해 반환한다."""
+    listener_pid = pick_listener_pid(port)
+    metadata: dict[str, str | int | None] = {
+        "port": port,
+        "pid": listener_pid,
+        "name": None,
+        "owner": None,
+        "owner_error": None,
+        "cmdline": None,
+        "exe": None,
+    }
+    if listener_pid is None:
+        return metadata
+
+    try:
+        proc = psutil.Process(listener_pid)
+        metadata["name"] = proc.name()
+        try:
+            metadata["owner"] = proc.username()
+        except Exception as exc:
+            metadata["owner_error"] = f"{type(exc).__name__}: {exc}"
+
+        try:
+            cmdline = " ".join(proc.cmdline() or [])
+            metadata["cmdline"] = cmdline or None
+        except Exception:
+            pass
+
+        try:
+            metadata["exe"] = proc.exe() or None
+        except Exception:
+            pass
+    except (psutil.NoSuchProcess, psutil.ZombieProcess) as exc:
+        metadata["owner_error"] = f"{type(exc).__name__}: {exc}"
+
+    return metadata
+
+
+def format_listener_metadata(
+    metadata: dict[str, str | int | None],
+    *,
+    include_port: bool = True,
+    max_cmdline_chars: int = 200,
+) -> str:
+    """listener 메타데이터를 짧은 한 줄로 렌더링한다."""
+    pieces: list[str] = []
+    field_order = ["port", "pid", "name", "owner", "owner_error", "exe", "cmdline"] if include_port else [
+        "pid",
+        "name",
+        "owner",
+        "owner_error",
+        "exe",
+        "cmdline",
+    ]
+    for key in field_order:
+        value = metadata.get(key)
+        if value in (None, ""):
+            continue
+        rendered = str(value)
+        if key == "cmdline" and len(rendered) > max_cmdline_chars:
+            rendered = f"{rendered[:max_cmdline_chars]}..."
+        pieces.append(f"{key}={rendered}")
+    return ", ".join(pieces) if pieces else "no-listener-metadata"
+
+
+def classify_frontend_failure(*parts: Any) -> str:
+    """frontend build/restart 출력으로 failure class를 정규화한다."""
+    text = "\n".join(str(part or "") for part in parts).lower()
+    if any(
+        token in text
+        for token in (
+            "access denied",
+            "access is denied",
+            "permission denied",
+            "eperm",
+            "eacces",
+            "file is being used by another process",
+            "resource busy",
+            "another process",
+            "operation not permitted",
+        )
+    ):
+        return "build_lock_permission"
+    if any(
+        token in text
+        for token in (
+            "cannot find module",
+            "missing script",
+            "not recognized as an internal or external command",
+            "vite.cmd",
+            "node_modules missing",
+            "vite binary missing",
+        )
+    ):
+        return "dependency_failure"
+    if any(token in text for token in ("port ", "already in use", "eaddrinuse")):
+        return "listener_port_collision"
+    return "other"
 
 
 # ── 프로세스 유틸 ───────────────────────────────────────────────

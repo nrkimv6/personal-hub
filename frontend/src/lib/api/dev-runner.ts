@@ -1,7 +1,23 @@
 /**
  * Dev Runner API - dev-runner 모니터링 및 제어
  */
-import { request, API_BASE, getAuthToken, fetchWithTimeout } from './client';
+import { apiGate } from '$lib/stores/apiGate.svelte';
+import { request, API_BASE, getAuthToken, fetchWithTimeout, ApiGateClosedError } from './client';
+
+// ============================================================
+// ApiError — HTTP 에러 detail 객체를 보존하는 커스텀 에러
+// ============================================================
+
+export class ApiError extends Error {
+	status: number;
+	detail?: Record<string, unknown>;
+	constructor(message: string, status: number, detail?: Record<string, unknown>) {
+		super(message);
+		this.name = 'ApiError';
+		this.status = status;
+		this.detail = detail;
+	}
+}
 
 // ============================================================
 // Types
@@ -38,6 +54,14 @@ export interface RunStatusResponse {
 	runner_id: string | null;
 	execution_count?: number | null;
 	attached?: boolean;
+	worktree_exists?: boolean | 'unknown';
+	branch_exists?: boolean | 'unknown';
+	branch_merged_to_main?: boolean | 'unknown';
+	metadata_checked_at?: string;
+	claim_id?: string | null;
+	claim_state?: string | null;
+	claim_owner_runner_id?: string | null;
+	claim_message?: string | null;
 }
 
 export interface RunnerListItem {
@@ -50,13 +74,24 @@ export interface RunnerListItem {
 	worktree_path: string | null;
 	branch: string | null;
 	merge_status: string | null;
+	merge_reason?: string | null;
+	merge_message?: string | null;
 	trigger?: string | null;
 	visible: boolean;
 	orphan: boolean;
+	orphan_alive?: boolean;
+	redis_missing?: boolean;
+	log_file_found?: boolean;
 	exit_reason?: string | null;
 	error?: string | null;
 	execution_count?: number | null;
 	display_plan_name?: string | null;
+	remaining_post_merge_tasks?: number | null;
+	merge_evidence_missing?: boolean | null;
+	worktree_exists?: boolean | 'unknown';
+	branch_exists?: boolean | 'unknown';
+	branch_merged_to_main?: boolean | 'unknown';
+	metadata_checked_at?: string;
 }
 
 export interface PlanProgressResponse {
@@ -77,6 +112,10 @@ export interface PlanFileResponse {
 	branch?: string | null;  // > branch: 헤더에서 추출한 impl 브랜치명
 	worktree_path?: string | null;  // > worktree: 헤더에서 추출한 워크트리 경로
 	worktree_owner?: string | null;  // > worktree-owner: 헤더에서 추출한 소유 plan 경로
+	execution_claim_id?: string | null;
+	execution_claim_state?: string | null;  // queued | active | released | stale
+	execution_claim_runner_id?: string | null;
+	execution_claim_stale?: boolean;
 }
 
 export interface RegisteredPathResponse {
@@ -84,6 +123,39 @@ export interface RegisteredPathResponse {
 	type: 'file' | 'folder';
 	plan_count: number;
 	path_type: string; // "plan" | "archive"
+}
+
+export interface PlanStorageRootChangeItem {
+	status: string;
+	path: string;
+}
+
+export interface PlanStorageRootStatusItem {
+	project: string;
+	repo_root: string;
+	worktree_path: string;
+	branch: string | null;
+	upstream: string | null;
+	exists: boolean;
+	status: 'clean' | 'dirty' | 'sync_needed' | 'missing' | 'unknown' | string;
+	dirty_count: number;
+	docs_changes_count: number;
+	archive_changes_count: number;
+	policy_changes_count: number;
+	ahead: number;
+	behind: number;
+	push_needed: boolean;
+	checked_at: string;
+	representative_changes: PlanStorageRootChangeItem[];
+	error: string | null;
+}
+
+export interface PlanStorageRootStatusResponse {
+	checked_at: string;
+	roots: PlanStorageRootStatusItem[];
+	total: number;
+	dirty_count: number;
+	push_needed_count: number;
 }
 
 export interface LogResponse {
@@ -170,6 +242,11 @@ const DEV_RUNNER_BASE = '/api/v1/dev-runner';
 async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}, timeout?: number): Promise<T> {
 	const url = `${DEV_RUNNER_BASE}${endpoint}`;
 
+	// dev-runner uses fetchWithTimeout directly, so apply the same gate policy here.
+	if (apiGate.state !== 'open') {
+		throw new ApiGateClosedError();
+	}
+
 	const token = getAuthToken();
 	const headers: HeadersInit = {
 		'Content-Type': 'application/json',
@@ -182,8 +259,9 @@ async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}, 
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({ detail: response.statusText }));
 		const detail = error.detail;
-		const message = typeof detail === 'string' ? detail : detail?.message || '요청 실패';
-		throw new Error(message);
+		const message = typeof detail === 'string' ? detail : (detail?.message || '요청 실패');
+		const err = new ApiError(message, response.status, typeof detail === 'object' ? detail : undefined);
+		throw err;
 	}
 
 	if (response.status === 204) {
@@ -256,10 +334,17 @@ export const devRunnerRunnerApi = {
 			{ method: 'POST' }
 		),
 
-	retryMerge: (runnerId: string) =>
+	retryMerge: (
+		runnerId: string,
+		payload?: { worktree_path?: string | null; plan_file?: string | null; branch?: string | null; approve_service_lock?: boolean }
+	) =>
 		devRunnerRequest<{ success: boolean; message: string; conflict?: boolean }>(
 			`/runners/${runnerId}/retry-merge`,
-			{ method: 'POST' }
+			{
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload ?? {}),
+			}
 		),
 
 	resolveConflict: (runnerId: string) =>
@@ -274,13 +359,18 @@ export const devRunnerRunnerApi = {
 			{ method: 'DELETE' }
 		),
 
-	directMerge: (branch: string, worktreePath?: string, planFile?: string) =>
+	directMerge: (branch: string, worktreePath?: string, planFile?: string, approveServiceLock?: boolean) =>
 		devRunnerRequest<{ success: boolean; message: string; runner_id?: string }>(
 			'/merge/direct',
 			{
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ branch, worktree_path: worktreePath ?? null, plan_file: planFile ?? null }),
+				body: JSON.stringify({
+					branch,
+					worktree_path: worktreePath ?? null,
+					plan_file: planFile ?? null,
+					approve_service_lock: Boolean(approveServiceLock),
+				}),
 			}
 		),
 
@@ -332,10 +422,10 @@ export const devRunnerPlanApi = {
 
 	sync: () => devRunnerRequest<{ synced: number; added: number; removed: number; updated: number }>('/plans/sync', { method: 'POST' }),
 
-	addPath: (path: string) =>
+	addPath: (path: string, pathType: 'plan' | 'archive' = 'plan') =>
 		devRunnerRequest<{ success: boolean; path: string; type: 'file' | 'folder' }>('/plans/paths', {
 			method: 'POST',
-			body: JSON.stringify({ path })
+			body: JSON.stringify({ path, path_type: pathType })
 		}),
 
 	removePath: (path: string) =>
@@ -346,6 +436,9 @@ export const devRunnerPlanApi = {
 
 	listPaths: () =>
 		devRunnerRequest<RegisteredPathResponse[]>('/plans/paths'),
+
+	storageRootsStatus: () =>
+		devRunnerRequest<PlanStorageRootStatusResponse>('/plans/storage-roots/status'),
 
 	items: (encodedPath: string) =>
 		devRunnerRequest<PlanDetailResponse>(`/plans/${encodedPath}/items`),
@@ -390,7 +483,10 @@ export const devRunnerPlanApi = {
 		}),
 
 	generateSummary: (encodedPath: string) =>
-		devRunnerRequest<{ request_id: number }>(`/plans/${encodedPath}/summary`, { method: 'POST' })
+		devRunnerRequest<{ request_id: number }>(`/plans/${encodedPath}/summary`, { method: 'POST' }),
+
+	releaseClaim: (encodedPath: string) =>
+		devRunnerRequest<{ ok: boolean; claim_id: string }>(`/plans/${encodedPath}/claim`, { method: 'DELETE' })
 };
 
 // ============================================================
@@ -443,10 +539,16 @@ export const devRunnerLogApi = {
 		devRunnerRequest<{ steps: DiagStep[] }>('/logs/diagnostics'),
 
 	connectStream: (runnerId: string, sinceLine: number = 0): EventSource => {
+		if (apiGate.state !== 'open') {
+			throw new ApiGateClosedError();
+		}
 		return new EventSource(`${DEV_RUNNER_BASE}/logs/stream?runner_id=${runnerId}&since_line=${sinceLine}`);
 	},
 
 	connectMergeStream: (runnerId: string): EventSource => {
+		if (apiGate.state !== 'open') {
+			throw new ApiGateClosedError();
+		}
 		return new EventSource(`${DEV_RUNNER_BASE}/merge-log/stream?runner_id=${runnerId}`);
 	},
 
@@ -502,6 +604,8 @@ export interface MergeStatusResponse {
 	test_passed: boolean | null;
 	fix_attempts: number;
 	message: string;
+	reason?: string | null;
+	quarantine_diff_path?: string | null;
 }
 
 export interface MergeHistoryItem {
@@ -516,6 +620,8 @@ export interface MergeHistoryItem {
 	test_passed: boolean | null;
 	fix_attempts: number;
 	message: string;
+	reason?: string | null;
+	quarantine_diff_path?: string | null;
 }
 
 export const devRunnerMergeApi = {
@@ -531,8 +637,15 @@ export const devRunnerMergeApi = {
 	status: (runnerId: string): Promise<MergeStatusResponse> =>
 		devRunnerRequest<MergeStatusResponse>(`/merge/${runnerId}`),
 
-	retry: (runnerId: string): Promise<unknown> =>
-		devRunnerRequest(`/merge/${runnerId}/retry`, { method: 'POST' }),
+	retry: (
+		runnerId: string,
+		payload?: { worktree_path?: string | null; plan_file?: string | null; branch?: string | null; approve_service_lock?: boolean }
+	): Promise<unknown> =>
+		devRunnerRequest(`/merge/${runnerId}/retry`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload ?? {}),
+		}),
 
 	revert: (runnerId: string): Promise<unknown> =>
 		devRunnerRequest(`/merge/${runnerId}/revert`, { method: 'POST' }),
@@ -732,4 +845,41 @@ export const devRunnerWorkflowApi = {
 
 	resetAllOrphans: (): Promise<{ reset_count: number }> =>
 		devRunnerRequest<{ reset_count: number }>('/workflows/reset-all-orphans', { method: 'POST' }),
+};
+
+// ─── Daily Reports ─────────────────────────────────────────────────────────
+
+export interface DailyReportSummary {
+	date: string;
+	generated_at?: string;
+	summary: { total: number; completed: number; failed: number; skipped: number };
+	html_available: boolean;
+}
+
+export interface DailyReportRun {
+	plan_id: string;
+	scope: string;
+	status: string;
+	merged: boolean;
+	changed_files: string[];
+	tc_results: Record<string, unknown>;
+	suspicions: string[];
+	log_path: string;
+	started_at: string;
+	ended_at: string;
+}
+
+export interface DailyReport {
+	date: string;
+	generated_at: string;
+	summary: DailyReportSummary['summary'];
+	runs: DailyReportRun[];
+}
+
+export const dailyReportApi = {
+	list: (): Promise<DailyReportSummary[]> =>
+		devRunnerRequest<DailyReportSummary[]>('/daily-reports'),
+
+	get: (reportDate: string): Promise<DailyReport> =>
+		devRunnerRequest<DailyReport>(`/daily-reports/${reportDate}`),
 };

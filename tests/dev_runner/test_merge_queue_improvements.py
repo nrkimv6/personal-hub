@@ -265,12 +265,14 @@ class TestDoRetryMergeRedisKeyReissue:
         Path(wt).mkdir()
         command = {"worktree_path": wt, "plan_file": "docs/plan/test_todo.md", "branch": "plan/test"}
 
-        from merge_workflow import WorkflowResult
-        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
+        with patch("plan_runner.core.stages.pre_merge_gate", return_value=(True, "ok")), \
+             patch("plan_runner.core.stages.auto_commit_stage", return_value=False), \
+             patch("_dr_commands._execute_merge_with_lock", return_value={"success": True, "merge_status": "merged"}), \
              patch("merge_queue.acquire_merge_turn", return_value=True), \
              patch("merge_queue.release_merge_turn", return_value=None), \
-             patch.object(_mod, "_cleanup_process_state", return_value=None):
-            mock_wf_cls.return_value.run.return_value = WorkflowResult(merged=True, tests_passed=True, conflict=False, message="ok")
+             patch("_dr_commands._cleanup_process_state", return_value=None), \
+             patch("_dr_commands._refresh_runner_ownership_snapshot", return_value=None), \
+             patch("_dr_commands._log_memory_stage", return_value=None):
             _do_retry_merge("runner1", mock_redis, "cmd1", command=command)
 
         set_calls = [str(c) for c in mock_redis.set.call_args_list]
@@ -286,12 +288,14 @@ class TestDoRetryMergeRedisKeyReissue:
 
         command = {"worktree_path": str(tmp_path / "other_wt"), "branch": "plan/other"}
 
-        from merge_workflow import WorkflowResult
-        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
+        with patch("plan_runner.core.stages.pre_merge_gate", return_value=(True, "ok")), \
+             patch("plan_runner.core.stages.auto_commit_stage", return_value=False), \
+             patch("_dr_commands._execute_merge_with_lock", return_value={"success": True, "merge_status": "merged"}), \
              patch("merge_queue.acquire_merge_turn", return_value=True), \
              patch("merge_queue.release_merge_turn", return_value=None), \
-             patch.object(_mod, "_cleanup_process_state", return_value=None):
-            mock_wf_cls.return_value.run.return_value = WorkflowResult(merged=True, tests_passed=True, conflict=False, message="ok")
+             patch("_dr_commands._cleanup_process_state", return_value=None), \
+             patch("_dr_commands._refresh_runner_ownership_snapshot", return_value=None), \
+             patch("_dr_commands._log_memory_stage", return_value=None):
             _do_retry_merge("runner1", mock_redis, "cmd1", command=command)
 
         # worktree_path 재발급 없어야 함

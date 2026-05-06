@@ -8,9 +8,11 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -108,3 +110,69 @@ class LLMWorkerStatus(Base):
 
     def __repr__(self) -> str:
         return f"<LLMWorkerStatus(worker_id={self.worker_id}, state={self.current_state})>"
+
+
+class LLMRequestProfileClaim(Base):
+    """현재 요청을 처리 중인 engine/profile claim."""
+
+    __tablename__ = "llm_request_profile_claims"
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_llm_profile_claim_request"),
+        Index("ix_llm_profile_claim_profile", "engine", "profile_name"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(Integer, ForeignKey("llm_requests.id", ondelete="CASCADE"), nullable=False)
+    engine = Column(String(50), nullable=False)
+    profile_name = Column(String(100), nullable=False)
+    claimed_at = Column(DateTime, default=datetime.now, nullable=False)
+    released_at = Column(DateTime)
+    stop_reason = Column(String(100))
+
+    request = relationship("LLMRequest")
+
+
+class LLMProfileAssignment(Base):
+    """LLM 요청이 어떤 profile에 배정됐는지 추적하는 audit log."""
+
+    __tablename__ = "llm_profile_assignments"
+    __table_args__ = (
+        Index("ix_llm_profile_assignment_profile", "engine", "profile_name", "selected_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(Integer, ForeignKey("llm_requests.id", ondelete="CASCADE"), nullable=False)
+    engine = Column(String(50), nullable=False)
+    profile_name = Column(String(100), nullable=False)
+    selected_at = Column(DateTime, default=datetime.now, nullable=False)
+    released_at = Column(DateTime)
+    stop_reason = Column(String(100))
+    error_summary = Column(Text)
+
+    request = relationship("LLMRequest")
+
+
+class LLMScheduleProfilePolicy(Base):
+    """schedule/target_type 단위 LLM profile routing policy."""
+
+    __tablename__ = "llm_schedule_profile_policies"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "engine", "profile_name", name="uq_llm_schedule_profile_policy_schedule"),
+        UniqueConstraint("target_type", "engine", "profile_name", name="uq_llm_schedule_profile_policy_target"),
+        Index("ix_llm_schedule_profile_policy_schedule", "schedule_id"),
+        Index("ix_llm_schedule_profile_policy_target", "target_type"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    schedule_id = Column(Integer, ForeignKey("task_schedules.id", ondelete="CASCADE"), nullable=True)
+    target_type = Column(String(100), nullable=True)
+    engine = Column(String(50), nullable=False)
+    profile_name = Column(String(100), nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    priority = Column(Integer, default=0, nullable=False)
+    allowed_windows = Column(Text, nullable=True)
+    quiet_windows = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    schedule = relationship("TaskSchedule")

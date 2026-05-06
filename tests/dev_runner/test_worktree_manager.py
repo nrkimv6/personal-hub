@@ -3,15 +3,13 @@ import subprocess
 import pytest
 from pathlib import Path
 
-# add scripts/plan_runner to sys.path
+# add scripts/plan_runner to sys.path (tests/conftest.py already adds this, kept for standalone run safety)
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "plan_runner"))
 
-import sys
-if "worktree_manager" in sys.modules: del sys.modules["worktree_manager"]
 import worktree_manager
-print(f"DEBUG TEST: worktree_manager file={worktree_manager.__file__}")
 from worktree_manager import WorktreeManager, WorktreeError, MergeResult, ensure_main_branch
+from tests.dev_runner.conftest_e2e import copy_fixture_plan_to_tmp
 
 
 @pytest.fixture
@@ -109,6 +107,16 @@ class TestWorktreeManagerCreate:
         runner_ids = [w.get("runner_id") for w in worktrees]
         assert "listtest" in runner_ids
 
+    def test_create_passes_correct_cwd_to_list_worktrees_R(self, worktrees_dir):
+        """R: create()는 branch 재사용 조회를 repo root cwd로 고정한다."""
+        from unittest.mock import patch
+        base_dir, repo = worktrees_dir
+
+        with patch.object(WorktreeManager, "list_worktrees", return_value=[]) as mock_list:
+            WorktreeManager.create("cwd-pass", base_dir)
+
+        assert mock_list.call_args.kwargs["cwd"] == str(repo)
+
     def test_correct_conformance_path_pattern(self, worktrees_dir):
         """TC-CORRECT-Conformance: return path follows {base_dir}/{runner_id} pattern"""
         base_dir, repo = worktrees_dir
@@ -125,6 +133,40 @@ class TestWorktreeManagerCreate:
             capture_output=True, text=True, cwd=str(repo)
         )
         assert "runner/brtest" in result.stdout
+
+    def test_test_source_runner_uses_runner_identity_with_plan_file(self, worktrees_dir, tmp_path):
+        """R: test_source runner keeps runner/* identity even when plan_file exists."""
+        base_dir, repo = worktrees_dir
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path))
+        path, branch = WorktreeManager.create(
+            "t-static-plan-1234",
+            base_dir,
+            plan_file=plan_file,
+            use_runner_identity=True,
+        )
+
+        assert path == base_dir / "t-static-plan-1234"
+        assert branch == "runner/t-static-plan-1234"
+        assert "runner/t-static-plan-1234" in subprocess.run(
+            ["git", "branch", "--list", "runner/t-static-plan-1234"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+        ).stdout
+
+    def test_t_prefixed_runner_uses_runner_identity_with_plan_file(self, worktrees_dir, tmp_path):
+        """B: t-* runner_id is enough to avoid plan/{stem} fallback."""
+        base_dir, _repo = worktrees_dir
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path))
+
+        path, branch = WorktreeManager.create(
+            "t-inferred-1234",
+            base_dir,
+            plan_file=plan_file,
+        )
+
+        assert path == base_dir / "t-inferred-1234"
+        assert branch == "runner/t-inferred-1234"
 
     def test_create_E_already_exists_with_unmerged_commits_reuses_branch(self, worktrees_dir):
         """E: worktree add fail (already exists) + dir missing + unmerged commits -> reuse branch"""
@@ -235,6 +277,32 @@ class TestWorktreeManagerRemove:
         result = WorktreeManager.remove("fallback01", base_dir, branch=None)
         assert result is True
         assert not wt_path.exists()
+
+    def test_remove_t_prefixed_plan_file_uses_runner_identity(self, worktrees_dir, tmp_path):
+        """R: cleanup for t-* plan-backed runners removes .worktrees/{runner_id}."""
+        base_dir, repo = worktrees_dir
+        runner_id = "t-remove-plan-1234"
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path))
+        path, branch = WorktreeManager.create(
+            runner_id,
+            base_dir,
+            plan_file=plan_file,
+        )
+
+        result = WorktreeManager.remove(
+            runner_id,
+            base_dir,
+            plan_file=plan_file,
+        )
+
+        assert result is True
+        assert not path.exists()
+        assert branch not in subprocess.run(
+            ["git", "branch", "--list", branch],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+        ).stdout
 
 
 # ── merge_to_main() ───────────────────────────────────────────────────────────
@@ -369,6 +437,20 @@ class TestWorktreeManagerList:
             assert "path" in wt
             assert "branch" in wt
             assert "runner_id" in wt
+
+    def test_list_worktrees_uses_explicit_cwd_R(self, worktrees_dir):
+        """R: list_worktrees(cwd=...)는 _run_git에 같은 cwd를 전달한다."""
+        from unittest.mock import patch, MagicMock
+        base_dir, repo = worktrees_dir
+
+        fake_result = MagicMock(
+            stdout=f"worktree {repo}\nbranch refs/heads/main\n",
+            returncode=0,
+        )
+        with patch("worktree_manager._run_git", return_value=fake_result) as mock_run_git:
+            WorktreeManager.list_worktrees(cwd=str(repo))
+
+        assert mock_run_git.call_args.kwargs["cwd"] == str(repo)
 
 
 # ── TestMergeToMainStash: Phase 2 stash-pop verification ────────────────────────
@@ -593,6 +675,151 @@ class TestEnsureMainBranch:
 
 
 # ── Helper: list_worktrees() ─────────────────────────────────
+
+# ── Phase 1: branch 재사용 TCs (mock 기반) ────────────────────────────────────
+
+class TestWorktreeManagerBranchReuse:
+    """Phase 1: create()가 같은 branch 기존 worktree를 위치 무관 재사용."""
+
+    def test_create_reuses_existing_worktree_at_any_path_R(self, worktrees_dir):
+        """R: 같은 branch가 nested 경로에 등록된 경우 그 경로 그대로 재사용."""
+        from unittest.mock import patch
+        base_dir, repo = worktrees_dir
+        nested_path = repo / ".worktrees" / "plans" / ".worktrees" / "nested-slug"
+        nested_path.mkdir(parents=True)
+
+        fake_worktrees = [
+            {"path": str(nested_path), "branch": "runner/nested-slug",
+             "runner_id": "nested-slug", "plan_slug": None}
+        ]
+        with patch.object(WorktreeManager, "list_worktrees", return_value=fake_worktrees), \
+             patch.object(WorktreeManager, "validate", return_value=True), \
+             patch.object(WorktreeManager, "_apply_sparse_checkout"):
+            result_path, result_branch = WorktreeManager.create("nested-slug", base_dir)
+
+        assert result_path == nested_path, f"반환 경로는 nested 경로여야 함: {nested_path}"
+        assert result_branch == "runner/nested-slug"
+
+    def test_create_falls_back_when_existing_worktree_invalid_E(self, worktrees_dir):
+        """E: validate() 실패 시 기존 stale_markers fallback → 정상 경로에 신규 생성."""
+        from unittest.mock import patch
+        base_dir, repo = worktrees_dir
+        fake_worktrees = [
+            {"path": "/nonexistent/path/.worktrees/fallback-slug", "branch": "runner/fallback-slug",
+             "runner_id": "fallback-slug", "plan_slug": None}
+        ]
+        # 첫 호출(Phase 1 체크)은 False, 두 번째 호출(create 말미 검증)은 True
+        with patch.object(WorktreeManager, "list_worktrees", return_value=fake_worktrees), \
+             patch.object(WorktreeManager, "validate", side_effect=[False, True]):
+            result_path, result_branch = WorktreeManager.create("fallback-slug", base_dir)
+
+        assert result_path == base_dir / "fallback-slug", "fallback은 정상 경로에 생성되어야 함"
+        assert result_branch == "runner/fallback-slug"
+
+    def test_create_creates_new_when_no_existing_worktree_R(self, worktrees_dir):
+        """R: list_worktrees()가 빈 리스트일 때 정상 신규 add 흐름 (회귀 방지)."""
+        from unittest.mock import patch
+        base_dir, repo = worktrees_dir
+        with patch.object(WorktreeManager, "list_worktrees", return_value=[]):
+            result_path, result_branch = WorktreeManager.create("newflow-slug", base_dir)
+
+        assert result_path == base_dir / "newflow-slug"
+        assert result_branch == "runner/newflow-slug"
+        assert result_path.is_dir()
+
+
+# ── Phase 2: nested base_dir guard TCs ───────────────────────────────────────
+
+class TestWorktreeManagerNestedGuard:
+    """Phase 2: nested .worktrees base_dir는 create()에서 거부, remove()는 False 반환."""
+
+    def test_create_rejects_nested_base_dir_E(self, tmp_git_repo):
+        """E: base_dir에 .worktrees가 2회 등장하면 WorktreeError 발생."""
+        nested_base = tmp_git_repo / ".worktrees" / "inner" / ".worktrees"
+        with pytest.raises(WorktreeError, match="nested .worktrees"):
+            WorktreeManager.create("test-nested", nested_base)
+
+    def test_create_accepts_normal_base_dir_R(self, worktrees_dir):
+        """R: 정상 1단계 base_dir은 가드를 통과하고 worktree 생성됨 (회귀 방지)."""
+        base_dir, repo = worktrees_dir
+        result_path, _ = WorktreeManager.create("guard-pass", base_dir)
+        assert result_path.is_dir()
+
+    def test_remove_with_nested_base_dir_returns_false_E(self, tmp_git_repo):
+        """E: remove() nested base_dir → raise 대신 False 반환 (멱등성)."""
+        nested_base = tmp_git_repo / ".worktrees" / "inner" / ".worktrees"
+        result = WorktreeManager.remove("test-nested", nested_base)
+        assert result is False
+
+
+# ── Phase T3: 실물 git 기반 재현 TC ──────────────────────────────────────────
+
+class TestWorktreeManagerT3Real:
+    """T3: 실물 git 환경에서 사고 시나리오 직접 재현."""
+
+    def test_real_git_create_reuses_nested_worktree_T3(self, tmp_git_repo):
+        """T3: nested 위치에 실물 worktree 등록 후 create()가 그 경로 재사용."""
+        from unittest.mock import patch
+        base_dir = tmp_git_repo / ".worktrees"
+        base_dir.mkdir(exist_ok=True)
+        inner = tmp_git_repo / ".worktrees" / "inner" / ".worktrees"
+        inner.mkdir(parents=True)
+        nested_wt = inner / "real-slug"
+        r = subprocess.run(
+            ["git", "worktree", "add", str(nested_wt), "-b", "runner/real-slug"],
+            capture_output=True, cwd=str(tmp_git_repo)
+        )
+        assert r.returncode == 0, f"nested worktree 생성 실패: {r.stderr}"
+
+        fake_worktrees = [
+            {"path": str(nested_wt), "branch": "runner/real-slug",
+             "runner_id": "real-slug", "plan_slug": None}
+        ]
+        # list_worktrees mock (cwd 없이 호출되므로 실물 repo 목록 대신 fake 사용)
+        # validate()는 mock 없이 실물 git 검증
+        with patch.object(WorktreeManager, "list_worktrees", return_value=fake_worktrees):
+            result_path, result_branch = WorktreeManager.create("real-slug", base_dir)
+
+        assert result_path.resolve() == nested_wt.resolve(), (
+            f"nested worktree 경로 재사용 실패: expected={nested_wt}, actual={result_path}"
+        )
+        assert result_branch == "runner/real-slug"
+        assert not (base_dir / "real-slug").is_dir(), "정상 base_dir에는 worktree가 없어야 함"
+
+    def test_real_git_create_in_nested_base_dir_raises_T3(self, tmp_git_repo):
+        """T3: base_dir 자체가 nested일 때 WorktreeError (Phase 2, mock 없이)."""
+        nested_base = tmp_git_repo / ".worktrees" / "inner" / ".worktrees"
+        with pytest.raises(WorktreeError, match="nested .worktrees"):
+            WorktreeManager.create("real-nested-guard", nested_base)
+
+    def test_list_worktrees_different_repo_isolation_T3(self, tmp_path):
+        """T3: explicit cwd로 다른 repo worktree 목록이 섞이지 않는다."""
+        repo_a = tmp_path / "repo_a"
+        repo_b = tmp_path / "repo_b"
+
+        for repo in (repo_a, repo_b):
+            subprocess.run(["git", "init", "-b", "main", str(repo)], capture_output=True)
+            subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(repo))
+            subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(repo))
+            subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(repo))
+            (repo / "README.md").write_text(repo.name)
+            subprocess.run(["git", "add", "."], capture_output=True, cwd=str(repo))
+            subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(repo))
+            (repo / ".worktrees").mkdir(exist_ok=True)
+
+        WorktreeManager.create("repo-a-only", repo_a / ".worktrees")
+        WorktreeManager.create("repo-b-only", repo_b / ".worktrees")
+
+        worktrees_a = WorktreeManager.list_worktrees(cwd=str(repo_a))
+        worktrees_b = WorktreeManager.list_worktrees(cwd=str(repo_b))
+
+        runner_ids_a = {w.get("runner_id") for w in worktrees_a if w.get("runner_id")}
+        runner_ids_b = {w.get("runner_id") for w in worktrees_b if w.get("runner_id")}
+        assert "repo-a-only" in runner_ids_a
+        assert "repo-b-only" not in runner_ids_a
+        assert "repo-b-only" in runner_ids_b
+        assert "repo-a-only" not in runner_ids_b
+
 
 def _list_worktrees_in_repo(repo: Path) -> list:
     """direct subprocess execution of git worktree list"""

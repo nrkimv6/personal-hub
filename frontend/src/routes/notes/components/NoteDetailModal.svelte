@@ -6,8 +6,11 @@
   import { linkifyText } from '../utils/url';
   import { notesApi } from '$lib/api/notes';
   import { llmApi } from '$lib/api/system';
+  import { variantClasses } from '$lib/components/markdown/markdownVariants';
   import { ArrowLeft, Copy, Archive, Pencil, Pin, Star, ChevronDown, ChevronUp, Check, X } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
 
   interface Props {
     note: Note;
@@ -29,6 +32,10 @@
   let showHistory = $state(false);
   let archiving = $state(false);
   let starring = $state(false);
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   async function handleStar() {
     starring = true;
@@ -61,8 +68,8 @@
       await notesApi.archive(note.id);
       onRefresh();
       onClose();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       archiving = false;
     }
@@ -112,15 +119,19 @@
         history = [];
         showHistory = false;
       } else {
-        const ok = confirm(`"${title}" 제목의 메모가 없습니다. 새로 만드시겠습니까?`);
+        const ok = await confirm({
+          title: '메모 생성',
+          message: `"${title}" 제목의 메모가 없습니다. 새로 만드시겠습니까?`,
+          confirmText: '생성'
+        });
         if (ok) {
           const created = await notesApi.create({ title });
           onRefresh();
           note = created;
         }
       }
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   }
 
@@ -219,7 +230,7 @@
       {/if}
       <div
         bind:this={contentEl}
-        class="prose-notes"
+        class={variantClasses.default}
       >
         <!-- eslint-disable-next-line svelte/no-at-html-tags -->
         {@html renderedHtml}

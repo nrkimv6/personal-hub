@@ -5,6 +5,7 @@
 	import { createOffsetPagination } from '$lib/utils/pagination.svelte';
 	import { loadCategoryMap, getCategoryName, type Category } from '../lib/categoryUtils';
 	import CategoryPickerModal from '../components/CategoryPicker.svelte';
+	import { confirm } from '$lib/stores/confirm';
 	import {
 		CheckCircle2,
 		RefreshCw,
@@ -150,7 +151,14 @@
 
 	async function deleteSelected() {
 		if (selection.count === 0) return;
-		if (!confirm(`?�택??${selection.count}�??��?지�???��?�시겠습?�까?`)) return;
+		if (
+			!(await confirm({
+				title: '이미지 삭제',
+				message: `선택한 ${selection.count}개 이미지를 삭제하시겠습니까?`,
+				confirmText: '삭제',
+				variant: 'danger'
+			}))
+		) return;
 		try {
 			const res = await fetchWithTimeout('/api/ic/files/bulk-delete', {
 				method: 'POST',

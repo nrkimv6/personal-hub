@@ -211,18 +211,6 @@ def migrate():
                     stats["skipped"] += 1
                     continue
 
-                # 중복 체크
-                target_cursor.execute(
-                    "SELECT id FROM monitor_schedules WHERE biz_item_id = ? AND date = ?",
-                    (item_pk, schedule_date)
-                )
-                existing = target_cursor.fetchone()
-
-                if existing:
-                    print(f"  [SKIP] 일정 이미 존재: {schedule_date}")
-                    stats["skipped"] += 1
-                    continue
-
                 target_cursor.execute("""
                     INSERT INTO monitor_schedules
                     (biz_item_id, date, times, is_enabled, is_active, run_status, last_error, error_count, interval, custom_interval, booking_count, last_booking_time, created_at, updated_at)

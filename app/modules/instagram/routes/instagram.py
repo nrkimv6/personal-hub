@@ -903,18 +903,21 @@ async def update_schedule_config(
     """스케줄 설정 업데이트."""
     service = CrawlService(db)
 
-    config = service.update_schedule_config(
-        enabled=update.enabled,
-        daily_runs=update.daily_runs,
-        time_windows=update.time_windows,
-        max_posts=update.max_posts,
-        scroll_count=update.scroll_count,
-        min_interval_hours=update.min_interval_hours,
-        duplicate_stop_count=update.duplicate_stop_count,
-        max_retries=update.max_retries,
-        retry_interval_minutes=update.retry_interval_minutes,
-        service_account_id=update.service_account_id,
-    )
+    try:
+        config = service.update_schedule_config(
+            enabled=update.enabled,
+            daily_runs=update.daily_runs,
+            time_windows=update.time_windows,
+            max_posts=update.max_posts,
+            scroll_count=update.scroll_count,
+            min_interval_hours=update.min_interval_hours,
+            duplicate_stop_count=update.duplicate_stop_count,
+            max_retries=update.max_retries,
+            retry_interval_minutes=update.retry_interval_minutes,
+            service_account_id=update.service_account_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return _config_to_schema(config)
 

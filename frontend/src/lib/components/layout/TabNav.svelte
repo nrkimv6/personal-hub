@@ -1,29 +1,14 @@
 <script lang="ts">
-  /**
-   * 통합 TabNav 컴포넌트
-   * - variant='primary': 언더라인 탭(기존 PrimaryTabNav)
-   *   - 활성: border-primary, text-primary
-   *   - 비활성: text-muted-foreground + hover:text-primary
-   * - variant='secondary': 캡슐형 배경 탭(기존 SecondaryTabNav)
-   *   - 활성: bg-card, text-primary, shadow-sm
-   *   - 비활성: text-muted-foreground, hover:text-primary
-   * - variant='underline': compact한 간단 언더라인
-   * - 기본 래퍼: variant='primary'|'underline' -> border-b mb-4 + nav
-   *   variant='secondary' -> bg-muted rounded-lg p-1 mb-4 inline-flex
-   * - queryParam: URL 쿼리파라미터 동기화 (예: 'tab' → ?tab=gallery)
-   * - urlBased: URL pathname 기반 활성 탭 판단
-   * - replaceState: goto() 호출 시 히스토리 교체 여부 (기본 true)
-   * - size: 'default' | 'compact' — compact일 때 py-2 px-3 text-sm 적용
-   */
-  import { page } from '$app/stores';
   import { goto } from '$app/navigation';
-  import type { Component } from 'svelte';
+  import { page } from '$app/stores';
+  import type { Component, ComponentType } from 'svelte';
 
-  type Tab = {
+  export type TabItem = {
     id: string;
     label: string;
+    shortLabel?: string;
     href?: string;
-    icon?: string | Component;
+    icon?: string | Component | ComponentType;
     count?: number;
     color?: string;
     countVariant?: 'default' | 'error' | 'warning';
@@ -31,13 +16,16 @@
   };
 
   interface Props {
-    tabs: Tab[];
+    tabs: TabItem[];
     activeTab?: string;
     variant?: 'primary' | 'secondary' | 'underline';
+    level?: 'primary' | 'secondary';
     urlBased?: boolean;
     queryParam?: string;
     replaceState?: boolean;
-    size?: 'default' | 'compact';
+    size?: 'default' | 'compact' | 'header';
+    sticky?: boolean;
+    overflow?: 'scroll' | 'wrap';
     onTabChange?: (tabId: string) => void;
   }
 
@@ -45,40 +33,45 @@
     tabs,
     activeTab = $bindable(),
     variant = 'primary',
+    level = 'primary',
     urlBased = false,
     queryParam,
     replaceState = true,
     size = 'default',
+    sticky = false,
+    overflow = 'scroll',
     onTabChange,
   }: Props = $props();
 
-  // queryParam 모드: URL searchParams → activeTab 양방향 동기화
   $effect(() => {
-    if (queryParam) {
-      const paramValue = $page.url.searchParams.get(queryParam);
-      activeTab = paramValue || tabs[0]?.id;
-    }
+    if (!queryParam) return;
+    const paramValue = $page.url.searchParams.get(queryParam);
+    activeTab = paramValue || tabs[0]?.id;
   });
 
   const primaryStyles = {
     active: 'border-primary text-primary',
-    inactive: 'border-transparent text-muted-foreground hover:text-primary hover:border-muted',
+    inactive: 'border-transparent text-muted-foreground hover:border-muted hover:text-foreground',
+  };
+
+  const headerStyles = {
+    active: 'bg-primary/15 text-primary',
+    inactive: 'text-muted-foreground hover:bg-accent hover:text-foreground',
   };
 
   const secondaryStyles = {
-    active: 'bg-card text-primary shadow-sm',
-    inactive: 'text-muted-foreground hover:text-primary',
+    active: 'bg-card text-foreground shadow-sm',
+    inactive: 'text-muted-foreground hover:bg-background/70 hover:text-foreground',
   };
 
   const underlineStyles = {
     active: 'border-primary text-primary',
-    inactive: 'border-transparent text-muted-foreground hover:text-primary',
+    inactive: 'border-transparent text-muted-foreground hover:text-foreground',
   };
 
-  function getStyles(active: boolean, tab: Tab) {
-    // color prop이 있고 활성 상태면 동적 스타일 반환
-    if (active && tab.color && variant !== 'secondary') {
-      return `border-b-2 text-[${tab.color}] border-[${tab.color}]`;
+  function getStyles(active: boolean) {
+    if (size === 'header' && variant === 'primary') {
+      return active ? headerStyles.active : headerStyles.inactive;
     }
     if (variant === 'secondary') {
       return active ? secondaryStyles.active : secondaryStyles.inactive;
@@ -89,20 +82,29 @@
     return active ? primaryStyles.active : primaryStyles.inactive;
   }
 
-  function getCountStyles(tab: Tab): string {
+  function getCountStyles(tab: TabItem): string {
+    if (size === 'header') {
+      if (tab.countVariant === 'error') {
+        return 'ml-1 rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive';
+      }
+      if (tab.countVariant === 'warning') {
+        return 'ml-1 rounded-full bg-yellow-500/10 px-1.5 py-0.5 text-[10px] text-yellow-600';
+      }
+      return 'ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground';
+    }
     if (tab.countVariant === 'error') {
-      return 'ml-1 text-xs bg-destructive/10 text-destructive px-1.5 py-0.5 rounded-full';
+      return 'ml-1 text-[11px] bg-destructive/10 text-destructive px-1.5 py-0.5 rounded-full';
     }
     if (tab.countVariant === 'warning') {
-      return 'ml-1 text-xs bg-yellow-500/10 text-yellow-600 px-1.5 py-0.5 rounded-full';
+      return 'ml-1 text-[11px] bg-yellow-500/10 text-yellow-600 px-1.5 py-0.5 rounded-full';
     }
     if (variant === 'secondary') {
-      return 'ml-1 text-xs bg-secondary px-1.5 py-0.5 rounded-full';
+      return 'ml-1 text-[11px] bg-secondary px-1.5 py-0.5 rounded-full';
     }
-    return 'ml-1 text-xs bg-muted px-1.5 py-0.5 rounded-full';
+    return 'ml-1 text-[11px] bg-muted px-1.5 py-0.5 rounded-full';
   }
 
-  function isTabActive(tab: Tab): boolean {
+  function isTabActive(tab: TabItem): boolean {
     if (queryParam) {
       const paramValue = $page.url.searchParams.get(queryParam);
       return (paramValue || tabs[0]?.id) === tab.id;
@@ -116,7 +118,7 @@
     return activeTab === tab.id;
   }
 
-  function handleTabClick(tab: Tab) {
+  function handleTabClick(tab: TabItem) {
     if (queryParam) {
       const nextUrl = new URL($page.url);
       nextUrl.searchParams.set(queryParam, tab.id);
@@ -128,62 +130,100 @@
     onTabChange?.(tab.id);
   }
 
-  // size별 탭 패딩/폰트 클래스
-  const sizeClass = size === 'compact' ? 'py-2 px-3 text-sm' : 'py-3 px-5 text-base';
+  const sizeClass = $derived(
+    size === 'header'
+      ? 'min-h-8 px-2.5 py-1.5 text-xs'
+      : variant === 'secondary'
+      ? size === 'compact'
+        ? 'min-h-9 px-3 py-1.5 text-sm'
+        : 'min-h-10 px-4 py-2 text-sm'
+      : size === 'compact'
+        ? 'min-h-10 px-3 py-2 text-sm'
+        : 'min-h-[2.75rem] px-3.5 py-2.5 text-sm sm:text-[15px]'
+  );
+  const outerClass = $derived(
+    [
+      sticky ? 'sticky top-0 z-20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80' : '',
+      size === 'header' && variant === 'primary'
+        ? ''
+        : variant === 'secondary'
+          ? 'rounded-lg border border-border/70 bg-muted/60 p-1'
+          : variant === 'underline'
+            ? 'border-b border-border/70'
+            : 'border-b border-border',
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
+  const navClass = $derived(
+    overflow === 'wrap'
+      ? 'flex flex-wrap gap-1'
+      : 'inline-flex min-w-max gap-1 whitespace-nowrap'
+  );
+  const scrollClass = $derived(
+    overflow === 'scroll'
+      ? `overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${size === 'header' ? '' : 'pb-1'}`.trim()
+      : ''
+  );
+
+  const tabShapeClass = $derived(
+    size === 'header' && variant === 'primary'
+      ? 'rounded-md'
+      : variant === 'secondary'
+        ? 'rounded-md'
+        : 'rounded-t-md border-b-2'
+  );
+  const iconSize = $derived(size === 'header' ? 14 : 16);
+
+  function renderLabel(tab: TabItem) {
+    return tab.shortLabel ?? tab.label;
+  }
 </script>
 
-{#if variant === 'secondary'}
-  <div class="bg-muted rounded-lg p-1 mb-4 inline-flex">
-    {#each tabs as tab}
-      {#if urlBased && tab.href}
-        <a
-          href={tab.href}
-          data-sveltekit-preload-data
-          class="py-1.5 px-3 rounded-md text-sm font-medium transition-colors {getStyles(isTabActive(tab), tab)}"
-        >
-          {#if tab.icon}<span class="mr-1">{#if typeof tab.icon === 'string'}{tab.icon}{:else}<svelte:component this={tab.icon} size={16} />{/if}</span>{/if}
-          {tab.label}
-          {#if tab.count !== undefined}
-            <span class={getCountStyles(tab)}>{tab.count}</span>
-          {/if}
-        </a>
-      {:else}
-        <button
-          onclick={() => handleTabClick(tab)}
-          class="py-1.5 px-3 rounded-md text-sm font-medium transition-colors {getStyles(isTabActive(tab), tab)}"
-        >
-          {#if tab.icon}<span class="mr-1">{#if typeof tab.icon === 'string'}{tab.icon}{:else}<svelte:component this={tab.icon} size={16} />{/if}</span>{/if}
-          {tab.label}
-          {#if tab.count !== undefined}
-            <span class={getCountStyles(tab)}>{tab.count}</span>
-          {/if}
-        </button>
-      {/if}
-    {/each}
-  </div>
-{:else}
-  <div class="border-b border-border mb-4">
-    <nav class="flex space-x-1" aria-label="Tabs">
-      {#each tabs as tab}
+<div class={outerClass} data-level={level}>
+  <div class={scrollClass}>
+    <nav class={navClass} aria-label="Tabs">
+      {#each tabs as tab (tab.id)}
+        {@const active = isTabActive(tab)}
+        {@const tabClass = `${sizeClass} ${tabShapeClass} inline-flex items-center gap-1.5 font-medium transition-colors ${getStyles(active)}`}
         {#if urlBased && tab.href}
-          <a
-            href={tab.href}
-            data-sveltekit-preload-data
-            class="{sizeClass} border-b-2 font-medium transition-colors {getStyles(isTabActive(tab), tab)}"
-          >
-            {#if tab.icon}<span class="mr-2">{#if typeof tab.icon === 'string'}{tab.icon}{:else}<svelte:component this={tab.icon} size={16} />{/if}</span>{/if}
-            {tab.label}
+          <a href={tab.href} data-sveltekit-preload-data class={tabClass} aria-current={active ? 'page' : undefined}>
+            {#if tab.icon}
+              <span class="shrink-0">
+                {#if typeof tab.icon === 'string'}
+                  {tab.icon}
+                {:else}
+                  <svelte:component this={tab.icon} size={iconSize} />
+                {/if}
+              </span>
+            {/if}
+            {#if tab.shortLabel}
+              <span class="sm:hidden">{renderLabel(tab)}</span>
+              <span class="hidden sm:inline">{tab.label}</span>
+            {:else}
+              <span>{tab.label}</span>
+            {/if}
             {#if tab.count !== undefined}
               <span class={getCountStyles(tab)}>{tab.count}</span>
             {/if}
           </a>
         {:else}
-          <button
-            onclick={() => handleTabClick(tab)}
-            class="{sizeClass} border-b-2 font-medium transition-colors {getStyles(isTabActive(tab), tab)}"
-          >
-            {#if tab.icon}<span class="mr-2">{#if typeof tab.icon === 'string'}{tab.icon}{:else}<svelte:component this={tab.icon} size={16} />{/if}</span>{/if}
-            {tab.label}
+          <button onclick={() => handleTabClick(tab)} class={tabClass} aria-pressed={active}>
+            {#if tab.icon}
+              <span class="shrink-0">
+                {#if typeof tab.icon === 'string'}
+                  {tab.icon}
+                {:else}
+                  <svelte:component this={tab.icon} size={iconSize} />
+                {/if}
+              </span>
+            {/if}
+            {#if tab.shortLabel}
+              <span class="sm:hidden">{renderLabel(tab)}</span>
+              <span class="hidden sm:inline">{tab.label}</span>
+            {:else}
+              <span>{tab.label}</span>
+            {/if}
             {#if tab.count !== undefined}
               <span class={getCountStyles(tab)}>{tab.count}</span>
             {/if}
@@ -192,4 +232,4 @@
       {/each}
     </nav>
   </div>
-{/if}
+</div>

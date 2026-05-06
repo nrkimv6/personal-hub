@@ -21,7 +21,6 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime
 
 from fastapi.testclient import TestClient
-from app.main import app
 from app.modules.dev_runner.schemas import RunnerListItem
 
 import fakeredis
@@ -37,11 +36,16 @@ RUNNER_KEY_PREFIX = "plan-runner:runners"
 MERGE_ACTIVE_STATUSES = ("pre_merge", "queued", "merging", "pending_merge", "resolving", "testing", "fixing")
 
 
+def _build_test_client() -> TestClient:
+    from app.main import app
+    return TestClient(app, raise_server_exceptions=True)
+
+
 # ========== 픽스처 ==========
 
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(app, raise_server_exceptions=True)
+    return _build_test_client()
 
 
 @pytest.fixture(autouse=True)

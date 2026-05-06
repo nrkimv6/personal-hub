@@ -36,8 +36,12 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 
 def _get_callback_url(request: Request) -> str:
-    """OAuth 콜백 URL 생성"""
-    # API_BASE_URL이 설정되어 있으면 사용 (Cloudflare Tunnel 등 외부 접속용)
+    """OAuth redirect_uri single source를 반환한다.
+
+    Admin login도 Google callback 자체는 public API 도메인에서만 받고,
+    callback 완료 후 landing URL만 admin/public으로 나눈다.
+    """
+    # API_BASE_URL이 설정되어 있으면 OAuth redirect_uri single source로 사용한다.
     if settings.API_BASE_URL:
         return f"{settings.API_BASE_URL.rstrip('/')}/auth/callback"
     # 그렇지 않으면 요청 기반으로 생성 (로컬 개발용)
@@ -63,6 +67,7 @@ async def auth_login(request: Request):
     # Google OAuth URL 생성
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
+        # 로그인 시작 host와 관계없이 redirect_uri는 _get_callback_url()만 사용한다.
         "redirect_uri": _get_callback_url(request),
         "response_type": "code",
         "scope": "openid email profile",
@@ -164,8 +169,7 @@ async def auth_callback(
     # JWT 토큰 생성
     jwt_token = create_access_token(email=email, is_admin=is_admin)
 
-    # 프론트엔드로 리디렉트 (토큰을 쿼리 파라미터로 전달)
-    # 관리자인 경우 dev 환경으로 리다이렉트
+    # callback host는 public API single source를 유지하고, callback 완료 후 landing만 분기한다.
     if is_admin:
         redirect_url = f"https://dev-monitor.woory.day/auth/callback?token={jwt_token}"
     else:

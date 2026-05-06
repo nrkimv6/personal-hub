@@ -6,6 +6,8 @@
   import { onMount } from 'svelte';
   import { scheduleApi, bookingApi, itemApi } from '$lib/api';
   import type { ScheduleWithContext, MonitorScheduleUpdate } from '$lib/types';
+  import { toast } from '$lib/stores/toast';
+  import { confirm } from '$lib/stores/confirm';
 
   let schedules: ScheduleWithContext[] = [];
   let loading = true;
@@ -26,6 +28,10 @@
     time_range: '',
     result: null as { filtered_slots: string[]; original_count: number; filtered_count: number } | null
   };
+
+  function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : '알 수 없는 오류';
+  }
 
   async function fetchSchedules() {
     loading = true;
@@ -100,7 +106,7 @@
       editingSchedule = null;
       await fetchSchedules();
     } catch (e) {
-      alert('수정 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('수정 실패: ' + errorMessage(e));
     }
   }
 
@@ -111,7 +117,7 @@
       });
       await fetchSchedules();
     } catch (e) {
-      alert('변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('변경 실패: ' + errorMessage(e));
     }
   }
 
@@ -124,17 +130,23 @@
       }
       await fetchSchedules();
     } catch (e) {
-      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('상태 변경 실패: ' + errorMessage(e));
     }
   }
 
   async function handleResetBookingCount(schedule: ScheduleWithContext) {
-    if (!confirm('예약 횟수를 초기화하시겠습니까?')) return;
+    const confirmed = await confirm({
+      title: '예약 횟수 초기화',
+      message: '예약 횟수를 초기화하시겠습니까?',
+      confirmText: '초기화',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       await bookingApi.resetBySchedule(schedule.id);
       await fetchSchedules();
     } catch (e) {
-      alert('초기화 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('초기화 실패: ' + errorMessage(e));
     }
   }
 
@@ -143,7 +155,7 @@
       const slots = filterTest.slots.split('\n').filter(s => s.trim());
       filterTest.result = await bookingApi.filterSlots(slots, filterTest.time_range);
     } catch (e) {
-      alert('필터링 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+      toast.error('필터링 실패: ' + errorMessage(e));
     }
   }
 
@@ -151,7 +163,7 @@
 </script>
 
 <div class="p-6">
-  <PageHeader title="예약 관리" subtitle="자동 예약 스케줄을 관리합니다">
+  <PageHeader title="예약 관리">
     <Button variant="secondary" size="sm" onclick={fetchSchedules}>
       새로고침
     </Button>

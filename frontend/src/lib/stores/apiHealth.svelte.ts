@@ -7,10 +7,19 @@
  * - 복귀 시 'api:reconnected' 이벤트 발행
  */
 
+import { apiGate } from './apiGate.svelte';
+
 const API_BASE = '/api/v1';
 
 type ApiHealthState = 'connected' | 'disconnected' | 'reconnecting' | 'dead';
 
+/**
+ * Tracks API reachability and death diagnostics.
+ *
+ * The `dead` state is only for the global unavailable overlay and diagnostics.
+ * Request blocking belongs to apiGate so restart policy and health detection do
+ * not compete for ownership.
+ */
 function createApiHealthStore() {
 	let state = $state<ApiHealthState>('connected');
 	let disconnectedAt = $state<number | null>(null);
@@ -21,6 +30,7 @@ function createApiHealthStore() {
 
 	function startReconnectPolling() {
 		if (pollTimer !== null) return; // 중복 시작 방지
+		if (apiGate.state !== 'open') return;
 		state = 'reconnecting';
 		pollTimer = setInterval(async () => {
 			try {

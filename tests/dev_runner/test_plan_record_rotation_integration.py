@@ -11,12 +11,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.plan_record import PlanRecord, PlanEvent
-from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+from app.models.task_schedule import TaskSchedule, TaskScheduleRun
+from app.modules.claude_worker.models.llm_request import LLMRequest
+from app.modules.dev_runner.services.plan_record_service import PlanRecordService, _compute_filename_hash
 
 
 def _create_plan_tables(eng):
     PlanRecord.__table__.create(bind=eng, checkfirst=True)
     PlanEvent.__table__.create(bind=eng, checkfirst=True)
+    LLMRequest.__table__.create(bind=eng, checkfirst=True)
+    TaskSchedule.__table__.create(bind=eng, checkfirst=True)
+    TaskScheduleRun.__table__.create(bind=eng, checkfirst=True)
 
 
 @pytest.fixture(scope="module")
@@ -112,6 +117,43 @@ class TestRotationRoundtripIntegration:
         assert fetched.raw_content == content
         assert fetched.project == "test-project"
 
+    def test_ingest_single_updates_plan_to_archive_path_integration(self, int_svc, int_db, tmp_path):
+        """통합: 같은 filename hash의 plan record를 archive ingest가 갱신한다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        archive_dir = tmp_path / "docs" / "archive"
+        plan_dir.mkdir(parents=True)
+        archive_dir.mkdir(parents=True)
+
+        filename = "2026-05-03_archive-path-integration.md"
+        plan_path = plan_dir / filename
+        archive_path = archive_dir / filename
+        plan_path.write_text("# Active Plan\n\nold body", encoding="utf-8")
+        archive_path.write_text("# Archived Plan\n\nnew body", encoding="utf-8")
+
+        active = int_svc.get_or_create(str(plan_path), title="Active Plan", project="monitor-page")
+        int_db.flush()
+
+        assert _compute_filename_hash(str(plan_path)) == _compute_filename_hash(str(archive_path))
+
+        updated = int_svc.ingest_single(
+            file_path=str(archive_path),
+            project="monitor-page",
+            raw_content=archive_path.read_text(encoding="utf-8"),
+            title="Archived Plan",
+            status="archived",
+        )
+        int_db.commit()
+
+        assert updated.id == active.id
+        assert updated.file_path == str(archive_path)
+        assert updated.raw_content == "# Archived Plan\n\nnew body"
+        assert updated.archived_at is not None
+
+        count = int_db.query(PlanRecord).filter_by(
+            filename_hash=_compute_filename_hash(str(plan_path))
+        ).count()
+        assert count == 1
+
     def test_deep_search_integration(self, int_svc, int_db, tmp_path):
         """통합: deep=True 검색 → raw_content 키워드 매칭"""
         unique_kw = "DEEP_SEARCH_INTEGRATION_KW_XYZ_T3"
@@ -122,8 +164,25 @@ class TestRotationRoundtripIntegration:
         record = int_svc.mark_archived(str(fp), str(fp), raw_content=content)
         int_db.commit()
 
-        results_deep = int_svc.list_records(q=unique_kw, deep=True)
+        results_deep = int_svc.list_records(q=unique_kw, deep=True, exclude_temp=False)
         assert any(r.id == record.id for r in results_deep), "deep=True → raw_content 히트 필요"
 
-        results_shallow = int_svc.list_records(q=unique_kw, deep=False)
+        results_shallow = int_svc.list_records(q=unique_kw, deep=False, exclude_temp=False)
         assert not any(r.id == record.id for r in results_shallow), "deep=False → raw_content 미스캔"
+
+    def test_archive_health_reports_readiness_without_blocking_rotation_counts(self, int_svc, int_db, tmp_path):
+        """T3: retrieval readiness warning coexists with archive rotation health counts."""
+        fp = tmp_path / "2026-05-06-health-rotation.md"
+        content = "# Rotation Health\n\ncontent"
+        fp.write_text(content, encoding="utf-8")
+
+        record = int_svc.mark_archived(str(fp), str(fp), raw_content=content)
+        record.llm_processed_at = datetime.now() - timedelta(days=8)
+        record.file_delete_after = datetime.now() - timedelta(days=1)
+        int_db.commit()
+
+        health = int_svc.get_plan_archive_health()
+
+        assert health["file_retention_due"] >= 1
+        assert health["retrieval_db_readiness"]["ok"] is False
+        assert "plan_record_file_refs" in health["retrieval_db_readiness"]["missing_tables"]

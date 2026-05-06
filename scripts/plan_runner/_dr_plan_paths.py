@@ -2,7 +2,7 @@
 
 목표:
 - docs/plan → docs/archive 규칙 단일화
-- common/docs/plan → common/docs/archive 규칙 단일화
+- common/docs/plan → common/docs/archive legacy compatibility 규칙 유지
 - _auto* 계열 plan은 docs/history로 이동
 - 검토완료 이전(pre_review) / 이후(post_review) 단계 분류 공통화
 """
@@ -39,6 +39,10 @@ _PRE_REVIEW_STATUSES = {
     "초안",
     "검토대기",
     "검증중",
+}
+
+_RESERVED_STATUSES = {
+    "예약대기",
 }
 
 _POST_REVIEW_STATUSES = {
@@ -106,7 +110,7 @@ def resolve_plan_target(plan_file: str | Path, purpose: str = "archive") -> Path
     """plan 파일의 규칙 기반 target 경로를 계산한다.
 
     규칙:
-    - common/docs/plan/*.md -> common/docs/archive/*.md
+    - common/docs/plan/*.md -> common/docs/archive/*.md (legacy compatibility only)
     - */docs/plan/*.md -> */docs/archive/*.md
     - *_auto*.md -> */docs/history/*.md
     - 이미 docs/archive 또는 docs/history 경로면 그대로 반환
@@ -178,9 +182,15 @@ def classify_plan_stage(status: str) -> PlanStage:
     normalized = (status or "").strip()
     if not normalized:
         return "unknown"
+    if normalized in _RESERVED_STATUSES:
+        return "pre_review"
     if normalized in _PRE_REVIEW_STATUSES:
         return "pre_review"
     if normalized in _POST_REVIEW_STATUSES:
         return "post_review"
     return "unknown"
+
+
+def is_reserved_plan_status(status: str) -> bool:
+    return (status or "").strip() in _RESERVED_STATUSES
 

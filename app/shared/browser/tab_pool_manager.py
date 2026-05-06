@@ -44,10 +44,13 @@ class TabPoolManager:
         # 탭 관리 설정
         self.TAB_ROTATION_THRESHOLD = settings.TAB_ROTATION_THRESHOLD
         self.CACHE_CLEANUP_INTERVAL = settings.CACHE_CLEANUP_INTERVAL
-        self.TAB_REQUEST_TIMEOUT = settings.TAB_REQUEST_TIMEOUT
+        self.TAB_REQUEST_TIMEOUT = settings.TAB_REQUEST_TIMEOUT  # inner polling gate (BrowserManager outer ≈ +5s)
         self.TAB_WAIT_RETRY_INTERVAL = settings.TAB_WAIT_RETRY_INTERVAL
-        self.TOTAL_MAX_TABS = settings.TOTAL_MAX_TABS
+        self.TOTAL_MAX_TABS = settings.TOTAL_MAX_TABS  # 시간 분할 재사용 전제 — 풀 크기 확대로 우회 금지
         self.MAX_USES_PER_TAB = settings.MAX_USES_PER_TAB
+
+        # H2: context.new_page() hang 차단 타임아웃 (30s — outer BrowserManager gate 60s의 절반)
+        self.NEW_PAGE_TIMEOUT = 30.0
 
         # 전체 현재 활성 탭 수 추적
         self.total_active_tabs = 0
@@ -55,12 +58,56 @@ class TabPoolManager:
         # 계정별 브라우저 복구 진행 중 플래그 (race condition 방지)
         self._recovery_in_progress: Dict[int, bool] = {}
 
-    async def get_tab(self, target_id: int, service_account_id: Optional[int] = None) -> Page:
+    def _count_budgeted_pages(self, context: BrowserContext) -> int:
+        """visible sentinel(visible_*) 탭을 제외한 예산 소비 탭 수를 반환한다.
+
+        pool 탭과 orphan 탭은 그대로 카운트해 혼합 포화(pool+orphan)를 가리지 않는다.
+        secondary gate(`get_tab()`)의 starvation 판단 전용 — cleanup overflow 조건에는 사용하지 않는다.
+        """
+        count = 0
+        for p in context.pages:
+            if p.is_closed():
+                continue
+            tab_id = getattr(p, '_tab_id', None)
+            if isinstance(tab_id, str) and tab_id.startswith('visible_'):
+                continue
+            count += 1
+        return count
+
+    def _is_stale_login_check(self, page: Page) -> bool:
+        """login_check 마커가 있고 30초 이상 경과한 탭이면 True 반환.
+
+        형식: login_check_{type}_{sid}_{unix_ts}
+        파싱 실패 또는 prefix 불일치 시 False(안전 기본값).
+        """
+        tab_id = getattr(page, '_tab_id', None)
+        if not isinstance(tab_id, str):
+            return False
+        if not tab_id.startswith('login_check_'):
+            return False
+        parts = tab_id.split('_')
+        # login_check_{type}_{sid}_{ts} → 최소 4개 세그먼트
+        if len(parts) < 4:
+            return False
+        try:
+            ts = int(parts[-1])
+            return time.time() - ts > 30
+        except (ValueError, IndexError):
+            return False
+
+    async def get_tab(
+        self,
+        target_id: int,
+        service_account_id: Optional[int] = None,
+        inner_timeout: Optional[float] = None,
+    ) -> Page:
         """계정별 탭 풀에서 사용 가능한 탭을 가져오거나 새로 생성합니다.
 
         Args:
             target_id: 모니터링 대상 (스케줄) ID
             service_account_id: 계정 ID (None이면 기본 계정 사용)
+            inner_timeout: 내부 폴링 타임아웃 (초). BrowserManager가 outer-5s로 계산해 전달.
+                None이면 TAB_REQUEST_TIMEOUT 사용. H5 inner/outer budget 분리를 위한 파라미터.
 
         Returns:
             Page: 해당 계정의 브라우저 컨텍스트에서 생성된 탭
@@ -129,7 +176,19 @@ class TabPoolManager:
         # 탭 획득 시도 시작
         start_time = time.time()
         wait_count = 0
-        max_wait_time = self.TAB_REQUEST_TIMEOUT
+        # H5: inner_timeout으로 BrowserManager outer gate보다 5초 먼저 TimeoutError surface
+        max_wait_time = inner_timeout if inner_timeout is not None else self.TAB_REQUEST_TIMEOUT
+
+        # Phase 1 진입 로그: pool snapshot으로 starvation 진단 가능
+        _entry_status = self.get_status()
+        _entry_budgeted = self._count_budgeted_pages(context)
+        logger.info(
+            f"[TAB-POOL] get_tab 진입: target={target_id}, account={service_account_id}, "
+            f"total={_entry_status['total_active_tabs']}/{self.TOTAL_MAX_TABS}, "
+            f"budgeted={_entry_budgeted}/{self.TOTAL_MAX_TABS}, "
+            f"in_use={_entry_status['in_use_count']}, waiters={_entry_status['waiter_count']}, "
+            f"inner_timeout={max_wait_time:.0f}s"
+        )
 
         # 전체 탭 수 계산 (모든 계정의 탭 합계)
         total_tabs = sum(len(pool) for pool in self.tab_pools.values())
@@ -169,62 +228,103 @@ class TabPoolManager:
             # 새 탭 생성 가능 여부 확인 (전체 최대 탭 수 기준)
             total_tabs = sum(len(pool) for pool in self.tab_pools.values())
             if total_tabs < self.TOTAL_MAX_TABS:
-                # 해당 계정의 컨텍스트에서 새 탭 생성
+                # secondary gate: visible sentinel(visible_*) 제외 예산 탭 수 체크
+                # visible sentinel은 사용자 가시 창이므로 워커 예산에서 제외
+                # pool 탭/orphan은 계속 카운트해 혼합 포화를 가리지 않음
+                actual_pages = self._count_budgeted_pages(context)
+                if actual_pages >= self.TOTAL_MAX_TABS:
+                    await self._cleanup_orphan_tabs()
+                    actual_pages = self._count_budgeted_pages(context)
+                    if actual_pages >= self.TOTAL_MAX_TABS:
+                        logger.warning(
+                            f"[TAB-POOL] 실제 탭 초과({actual_pages}/{self.TOTAL_MAX_TABS}), 재시도 대기 "
+                            f"(service_account_id={service_account_id})"
+                        )
+                        await asyncio.sleep(self.TAB_WAIT_RETRY_INTERVAL)
+                        continue
+
+                # Phase 1: 새 탭 생성 직전 snapshot — new_page hang 원인 진단
+                _pre_create_status = self.get_status()
+                _pre_create_budgeted = self._count_budgeted_pages(context)
+                logger.info(
+                    f"[TAB-POOL] new_page 생성 결정: account={service_account_id}, "
+                    f"pool_total={_pre_create_status['total_active_tabs']}, "
+                    f"budgeted={_pre_create_budgeted}/{self.TOTAL_MAX_TABS}, "
+                    f"in_use={_pre_create_status['in_use_count']}, "
+                    f"waiters={_pre_create_status['waiter_count']}, "
+                    f"account_pools={_pre_create_status['account_pool_sizes']}"
+                )
+
+                # new_page()~풀 등록 사이에서 CancelledError가 와도 미등록 탭이 남지 않도록 보호
+                new_tab = None
                 try:
-                    tab = await context.new_page()
-                except Exception as e:
-                    logger.warning(f"탭 생성 실패, 브라우저 컨텍스트 재생성 시도 (service_account_id={service_account_id}): {e}")
-                    # 브라우저 컨텍스트 재생성
-                    await self.handle_browser_closed_error(service_account_id, recreate=True)
-                    context = await self.context_manager.get_or_create_context(service_account_id)
-                    # 탭 풀 재초기화
-                    if service_account_id not in self.tab_pools:
-                        self.tab_pools[service_account_id] = {}
-                        await self.register_initial_tabs(service_account_id, context)
-                    # 재시도
-                    tab = await context.new_page()
-                    logger.info(f"브라우저 복구 후 탭 생성 성공 (service_account_id={service_account_id})")
+                    context, new_tab = await self._create_page_with_timeout(context, service_account_id)
+                    # helper 반환 직후 stale 참조 재바인딩 (recreate 시 self.tab_pools[id]가 교체됨)
+                    account_tab_pool = self.tab_pools[service_account_id]
+                    total_tabs = sum(len(pool) for pool in self.tab_pools.values())
 
-                # 자동화 감지 방지 설정
-                await tab.set_extra_http_headers({
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
-                })
+                    # 자동화 감지 방지 설정
+                    await new_tab.set_extra_http_headers({
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+                    })
 
-                # 고유 탭 ID 생성 (계정 ID 포함)
-                tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
-                while tab_id in account_tab_pool or tab_id in self.tab_pool:
+                    # 고유 탭 ID 생성 (계정 ID 포함)
                     tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
+                    while tab_id in account_tab_pool or tab_id in self.tab_pool:
+                        tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
 
-                account_tab_pool[tab_id] = tab
-                self.tab_pool[tab_id] = tab  # 하위 호환성
-                self.tab_last_used[tab_id] = time.time()
-                self.tab_in_use[tab_id] = True  # ★ 새 탭도 즉시 잠금
-                self.tab_use_count[tab_id] = 0
-                self.tab_account[tab_id] = service_account_id
-                self.total_active_tabs = total_tabs + 1
+                    account_tab_pool[tab_id] = new_tab
+                    self.tab_pool[tab_id] = new_tab  # 하위 호환성
+                    self.tab_last_used[tab_id] = time.time()
+                    self.tab_in_use[tab_id] = True  # ★ 새 탭도 즉시 잠금
+                    self.tab_use_count[tab_id] = 0
+                    self.tab_account[tab_id] = service_account_id
+                    self.total_active_tabs = total_tabs + 1
 
-                tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
-                logger.info(f"🔒 새 탭 생성: {tab_id} → 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS}, 전체 탭: {total_tabs + 1})")
-                break
+                    tab = new_tab
+                    new_tab = None  # 등록 성공 → finally의 close 방지
+
+                    tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
+                    logger.info(f"🔒 새 탭 생성: {tab_id} → 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS}, 전체 탭: {total_tabs + 1})")
+                    break
+
+                finally:
+                    # 등록 전 cancel/error로 new_tab이 아직 None이 아니면 미등록 탭 정리
+                    if new_tab is not None:
+                        try:
+                            await asyncio.shield(new_tab.close())
+                            logger.warning(f"[TAB-POOL] 미등록 탭 정리: cancel/error 발생 (service_account_id={service_account_id})")
+                        except Exception as close_err:
+                            logger.debug(f"[TAB-POOL] 미등록 탭 close 실패 (무시): {close_err}")
             else:
                 # 모든 탭이 사용 중, 대기
                 wait_count += 1
                 if wait_count == 1:
-                    logger.info(f"대상 {target_id}의 탭 요청 {request_id} 대기 중 (계정 {service_account_id}, 전체 탭: {total_tabs}/{self.TOTAL_MAX_TABS}, 모두 사용 중)")
+                    # Phase 1: 첫 wait-loop 진입 시 full snapshot — starvation 진단
+                    _wait_status = self.get_status()
+                    logger.info(
+                        f"[TAB-POOL] 대기 시작: target={target_id}, account={service_account_id}, "
+                        f"waiter_count={_wait_status['waiter_count']}, "
+                        f"dead={_wait_status['dead_waiter_count']}, "
+                        f"total_tabs={_wait_status['total_active_tabs']}/{self.TOTAL_MAX_TABS}, "
+                        f"in_use={_wait_status['in_use_count']}, "
+                        f"elapsed={time.time() - start_time:.1f}s"
+                    )
 
-                # 대기 이벤트 생성
+                # 대기 이벤트 생성 — try/finally로 CancelledError 포함 모든 종료 경로에서 정리
                 wait_event = asyncio.Event()
                 self.tab_waiters[request_id] = wait_event
-
                 try:
                     await asyncio.wait_for(wait_event.wait(), timeout=self.TAB_WAIT_RETRY_INTERVAL)
                     logger.info(f"대상 {target_id}의 탭 요청 {request_id} 신호 수신")
                     continue
                 except asyncio.TimeoutError:
-                    self.tab_waiters.pop(request_id, None)
                     await asyncio.sleep(0.5)
                     continue
+                finally:
+                    # release_tab이 이미 pop했으면 no-op; CancelledError 시에도 dead waiter 방지
+                    self.tab_waiters.pop(request_id, None)
 
         # 탭 메타데이터 설정 (tab_in_use는 이미 루프 안에서 True로 설정됨)
         self.tab_current_target[tab_id] = target_id
@@ -240,33 +340,60 @@ class TabPoolManager:
         return tab
 
     async def release_tab(self, tab: Page):
-        """탭 사용을 완료하고 풀로 반환합니다."""
+        """탭 사용을 완료하고 풀로 반환합니다.
+
+        H1 수정: tab_in_use=False는 finally로 보장 — _wake_waiters 예외와 무관하게 해제.
+        _wake_waiters는 별도 try/except로 분리해 실패해도 재사용 경로를 막지 않는다.
+        """
+        # tab_id를 최상단에서 추출 — _tab_id 없거나 pending marker면 DEBUG no-op
+        tab_id = getattr(tab, '_tab_id', None)
+        if tab_id is None:
+            logger.debug("[TAB-POOL] release_tab: _tab_id 없음, 무시")
+            return
+        if tab_id == "__pending__":
+            logger.debug("[TAB-POOL] release_tab: pending 마커 탭 무시 (등록 전 cancel 경로)")
+            return
+
+        target_id = getattr(tab, '_target_id', None)
+
+        if tab_id not in self.tab_in_use:
+            logger.debug(f"[TAB-POOL] release_tab: {tab_id} tab_in_use에 없음, 무시")
+            return
+
+        # 이미 반환된 탭 중복 체크
+        if not self.tab_in_use[tab_id]:
+            logger.debug(f"탭 {tab_id} 이미 반환됨 (중복 호출 무시)")
+            return
+
+        # in_use=False는 finally에서 보장 — 예외와 무관하게 반드시 해제
         try:
-            if hasattr(tab, '_tab_id'):
-                tab_id = tab._tab_id
-                target_id = getattr(tab, '_target_id', None)
-
-                if tab_id in self.tab_in_use:
-                    # 이미 반환된 탭인지 확인 (중복 반환 방지)
-                    if not self.tab_in_use[tab_id]:
-                        logger.debug(f"탭 {tab_id} 이미 반환됨 (중복 호출 무시)")
-                        return
-
-                    self.tab_in_use[tab_id] = False
-                    self.tab_last_used[tab_id] = time.time()
-                    self.tab_current_target.pop(tab_id, None)
-                    tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
-                    logger.info(f"🔓 탭 반환: {tab_id} ← 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS})")
-
-                    # 대기 중인 요청에 신호 전송
-                    if self.tab_waiters:
-                        for waiter_id, event in list(self.tab_waiters.items()):
-                            event.set()
-                            self.tab_waiters.pop(waiter_id, None)
-                            logger.debug(f"대기 중인 요청 {waiter_id}에 탭 사용 가능 신호 전송")
-                            break  # 한 번에 하나만 깨움
+            try:
+                self.tab_last_used[tab_id] = time.time()
+                self.tab_current_target.pop(tab_id, None)
+                tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
+                logger.info(f"🔓 탭 반환: {tab_id} ← 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS})")
+            finally:
+                self.tab_in_use[tab_id] = False  # 예외와 무관하게 보장
         except Exception as e:
-            logger.warning(f"탭 반환 중 오류 발생: {str(e)}")
+            logger.warning(f"[TAB-POOL] release error tab_id={tab_id}: {str(e)}")
+
+        # _wake_waiters는 in_use 해제 이후 별도 try — 실패해도 in_use=False는 이미 완료
+        if self.tab_waiters:
+            try:
+                woken, dead_cleaned = self._wake_waiters(strategy="one")
+                if dead_cleaned > 0:
+                    logger.info(
+                        f"[TAB-POOL] dead waiter {dead_cleaned}건 정리, "
+                        f"live {woken}건 깨움, 잔여 {len(self.tab_waiters)}건"
+                    )
+                elif woken > 0:
+                    logger.debug(f"[TAB-POOL] waiter 깨움, 잔여 {len(self.tab_waiters)}건")
+            except Exception as e:
+                status = self.get_status()
+                logger.warning(
+                    f"[TAB-POOL] release error _wake_waiters tab_id={tab_id}: {e}, "
+                    f"status={status}"
+                )
 
     async def cleanup_old_tabs(self, force_cleanup: bool = False):
         """오래된 탭을 정리합니다 (계정별 탭 풀 지원)."""
@@ -343,6 +470,10 @@ class TabPoolManager:
         특히 about:blank 상태로 방치된 탭들을 정리합니다.
         """
         orphan_count = 0
+        skipped_pool = 0
+        skipped_sentinel = 0
+        skipped_login_check = 0
+        skipped_other = 0
         try:
             # 모든 브라우저 컨텍스트의 페이지 확인
             for service_account_id, context in list(self.context_manager.browser_contexts.items()):
@@ -361,22 +492,76 @@ class TabPoolManager:
                 for page in pages:
                     # 이미 탭 풀에 등록된 페이지는 건너뜀
                     if page in registered_pages:
+                        skipped_pool += 1
+                        logger.debug(
+                            f"[TAB-POOL] cleanup skip: reason=pool, "
+                            f"url={getattr(page, 'url', '?')}, "
+                            f"tab_id={getattr(page, '_tab_id', None)}, sid={service_account_id}"
+                        )
                         continue
 
-                    # _tab_id가 있으면 탭 풀에서 관리되는 것
-                    if hasattr(page, '_tab_id') and page._tab_id in self.tab_pool:
-                        continue
+                    # _tab_id가 있으면 풀 관리 탭이거나 visible sentinel 탭 — 정리 대상 아님
+                    if hasattr(page, '_tab_id'):
+                        tab_id = page._tab_id
+                        # pool 등록 탭 또는 visible sentinel(사용자 가시 창) — session_manager가 수명 관리
+                        if tab_id in self.tab_pool or (isinstance(tab_id, str) and tab_id.startswith('visible_')):
+                            reason = "sentinel" if isinstance(tab_id, str) and tab_id.startswith('visible_') else "pool"
+                            if reason == "sentinel":
+                                skipped_sentinel += 1
+                            else:
+                                skipped_pool += 1
+                            logger.debug(
+                                f"[TAB-POOL] cleanup skip: reason={reason}, "
+                                f"url={getattr(page, 'url', '?')}, "
+                                f"tab_id={tab_id}, sid={service_account_id}"
+                            )
+                            continue
+
+                        # login_check 마커: stale이면 정리, 근래 생성이면 보존
+                        if isinstance(tab_id, str) and tab_id.startswith('login_check_'):
+                            if self._is_stale_login_check(page):
+                                try:
+                                    await page.close()
+                                    orphan_count += 1
+                                    logger.info(
+                                        f"[TAB-POOL] stale login_check closed: "
+                                        f"sid={service_account_id}, tab_id={tab_id}"
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"[TAB-POOL] login_check close 실패 (무시): {e}")
+                            else:
+                                skipped_login_check += 1
+                                logger.debug(
+                                    f"[TAB-POOL] cleanup skip: reason=login_check_recent, "
+                                    f"url={getattr(page, 'url', '?')}, "
+                                    f"tab_id={tab_id}, sid={service_account_id}"
+                                )
+                            continue
 
                     # 탭 풀에 등록되지 않은 페이지 (고아 탭)
                     try:
                         page_url = page.url
-                        # about:blank나 빈 페이지는 닫기
-                        # 또는 최대 탭 수를 초과한 경우에도 닫기
-                        total_tabs = sum(len(pool) for pool in self.tab_pools.values())
-                        if page_url == "about:blank" or total_tabs > self.TOTAL_MAX_TABS:
+                        actual_pages_before = len([p for p in context.pages if not p.is_closed()])
+                        if (page_url == "about:blank"
+                                or page_url.startswith("chrome-error://")
+                                or actual_pages_before >= self.TOTAL_MAX_TABS):
                             await page.close()
                             orphan_count += 1
+                            actual_pages_after = len([p for p in context.pages if not p.is_closed()])
+                            logger.info(
+                                f"[TAB-POOL] exact-limit orphan cleaned: "
+                                f"sid={service_account_id}, url={page_url}, "
+                                f"actual_before={actual_pages_before}, actual_after={actual_pages_after}, "
+                                f"registered={len(registered_pages)}"
+                            )
                             logger.info(f"고아 탭 정리: service_account_id={service_account_id}, url={page_url}")
+                        else:
+                            skipped_other += 1
+                            logger.debug(
+                                f"[TAB-POOL] cleanup skip: reason=other, "
+                                f"url={page_url}, tab_id={getattr(page, '_tab_id', None)}, "
+                                f"sid={service_account_id}"
+                            )
                     except Exception as e:
                         logger.debug(f"고아 탭 정리 중 오류 (무시): {e}")
 
@@ -386,10 +571,21 @@ class TabPoolManager:
         except Exception as e:
             logger.warning(f"고아 탭 정리 중 오류: {e}")
 
+        # cleanup 호출마다 summary 출력 — skip=0이어도 재발 진단에 필요
+        logger.info(
+            f"[TAB-POOL] cleanup summary: closed={orphan_count}, "
+            f"skipped_pool={skipped_pool}, skipped_sentinel={skipped_sentinel}, "
+            f"skipped_login_check={skipped_login_check}, skipped_other={skipped_other}"
+        )
+
         return orphan_count
 
     async def periodic_cleanup(self) -> int:
-        """주기적 고아/오래된 탭 정리를 단일 cleanup 경로로 실행한다."""
+        """주기적 고아 탭 정리 — cleanup_old_tabs 단일 경유로 중복 없이 실행.
+
+        Returns:
+            int: 닫힌 탭 수
+        """
         return await self.cleanup_old_tabs()
 
     def get_status(self) -> dict:
@@ -568,6 +764,46 @@ class TabPoolManager:
                 # 복구 진행 중 플래그 해제
                 self._recovery_in_progress[service_account_id] = False
 
+    async def _create_page_with_timeout(
+        self,
+        context: BrowserContext,
+        service_account_id: int,
+    ) -> tuple[BrowserContext, Page]:
+        """context.new_page()를 NEW_PAGE_TIMEOUT으로 감싸고, hang/recoverable error 시
+        handle_browser_closed_error + get_or_create_context를 거쳐 fresh context로 재시도한다.
+
+        반환 전 page._tab_id = "__pending__"을 즉시 설정한다 (popup guard 계약 유지).
+        """
+        try:
+            page = await asyncio.wait_for(
+                context.new_page(),
+                timeout=self.NEW_PAGE_TIMEOUT,
+            )
+            page._tab_id = "__pending__"
+            return context, page
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"[TAB-POOL] new_page hang 감지 ({self.NEW_PAGE_TIMEOUT:.0f}s), "
+                f"recreate 시도 (service_account_id={service_account_id})"
+            )
+        except Exception as e:
+            logger.warning(
+                f"탭 생성 실패, 브라우저 컨텍스트 재생성 시도 (service_account_id={service_account_id}): {e}"
+            )
+
+        await self.handle_browser_closed_error(service_account_id, recreate=True)
+        context = await self.context_manager.get_or_create_context(service_account_id)
+        if service_account_id not in self.tab_pools:
+            self.tab_pools[service_account_id] = {}
+            await self.register_initial_tabs(service_account_id, context)
+        page = await asyncio.wait_for(
+            context.new_page(),
+            timeout=self.NEW_PAGE_TIMEOUT,
+        )
+        page._tab_id = "__pending__"
+        logger.info(f"브라우저 복구 후 탭 생성 성공 (service_account_id={service_account_id})")
+        return context, page
+
     async def close_all_tabs(self) -> int:
         """
         모든 탭을 강제로 닫습니다.
@@ -618,13 +854,66 @@ class TabPoolManager:
         # 전체 활성 탭 수 업데이트
         self.total_active_tabs = 0
 
-        # 대기 중인 요청들에게 신호 전송 (탭이 해제됨)
-        for waiter_id, event in list(self.tab_waiters.items()):
-            event.set()
-            self.tab_waiters.pop(waiter_id, None)
+        # 대기 중인 요청들에게 신호 전송 (탭이 해제됨, dead waiter 함께 정리)
+        woken, dead_cleaned = self._wake_waiters(strategy="all")
+        if dead_cleaned > 0:
+            logger.info(f"[TAB-POOL] close_all_tabs: dead waiter {dead_cleaned}건 정리")
 
         logger.info(f"[TAB-POOL] 모든 탭 닫기 완료: {closed_count}개 탭 정리됨")
         return closed_count
+
+    def _wake_waiters(self, strategy: str = "one") -> tuple:
+        """dead waiter를 건너뛰고 live waiter에게 탭 가용 신호를 전송한다.
+
+        strategy="one": live waiter 1건만 깨움 (release_tab용)
+        strategy="all": 모든 live waiter 깨움 (close_all_tabs용)
+
+        Returns:
+            (woken_count, dead_cleaned_count)
+        """
+        woken = 0
+        dead_cleaned = 0
+        for waiter_id, event in list(self.tab_waiters.items()):
+            if event.is_set():
+                # 이미 set된 waiter는 dead (cancel된 코루틴의 잔재)
+                self.tab_waiters.pop(waiter_id, None)
+                dead_cleaned += 1
+                continue
+            event.set()
+            self.tab_waiters.pop(waiter_id, None)
+            woken += 1
+            if strategy == "one":
+                break
+        return woken, dead_cleaned
+
+    def get_status(self) -> dict:
+        """탭 풀 상태 진단 정보 반환.
+
+        Returns:
+            dict: total_active_tabs, budgeted_pages, in_use_count, waiter_count, dead_waiter_count, account_pool_sizes
+        """
+        total_active = sum(len(pool) for pool in self.tab_pools.values())
+        in_use_count = sum(1 for v in self.tab_in_use.values() if v)
+        dead_waiter_count = sum(1 for e in self.tab_waiters.values() if e.is_set())
+        account_pool_sizes = {
+            account_id: len(pool)
+            for account_id, pool in self.tab_pools.items()
+        }
+        # budgeted_pages: account별 visible sentinel 제외 예산 탭 수
+        budgeted_pages = {}
+        for account_id, ctx in list(self.context_manager.browser_contexts.items()):
+            try:
+                budgeted_pages[account_id] = self._count_budgeted_pages(ctx)
+            except Exception:
+                pass
+        return {
+            "total_active_tabs": total_active,
+            "budgeted_pages": budgeted_pages,
+            "in_use_count": in_use_count,
+            "waiter_count": len(self.tab_waiters),
+            "dead_waiter_count": dead_waiter_count,
+            "account_pool_sizes": account_pool_sizes,
+        }
 
     def get_pool_size(self, service_account_id: Optional[int] = None) -> int:
         """
@@ -686,8 +975,8 @@ class TabPoolManager:
                         logger.warning(f"[TAB-WARMUP] 최대 탭 수 도달 ({total_tabs}/{self.TOTAL_MAX_TABS})")
                         break
 
-                    # 새 탭 생성
-                    page = await context.new_page()
+                    # 새 탭 생성 (helper로 hang/recreate 계약 공유)
+                    context, page = await self._create_page_with_timeout(context, target_account_id)
 
                     # 자동화 감지 방지 설정
                     await page.set_extra_http_headers({

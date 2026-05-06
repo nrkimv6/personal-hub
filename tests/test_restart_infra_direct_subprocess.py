@@ -8,6 +8,7 @@ browser_workers.py facade 또는 Redis graceful-exit 경로를 올바르게 사�
 
 import asyncio
 import itertools
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,13 @@ def _sp_fail(stderr="실패"):
     return MagicMock(returncode=1, stdout="", stderr=stderr)
 
 
+def _listener_ack(message="graceful-exit acknowledged"):
+    return (
+        b"result_key",
+        json.dumps({"success": True, "message": message}).encode(),
+    )
+
+
 # ─── worker_service.restart_infra ────────────────────────────────────────────
 
 class TestRestartInfraDirectSubprocess:
@@ -49,7 +57,7 @@ class TestRestartInfraDirectSubprocess:
         mock_restart.assert_called_once()
 
     def test_restart_infra_api_watchdog_uses_subprocess_R(self):
-        """R(정상): restart_infra("api_watchdog") → subprocess.run에 browser_workers.py, restart-infra, api_watchdog 포함"""
+        """R(정상): restart_infra("api_watchdog") → browser_workers.py + UTF-8 text 계약 사용"""
         from app.modules.system.services.worker_service import WorkerService
 
         with patch("app.modules.system.services.worker_service.subprocess.run",
@@ -59,9 +67,13 @@ class TestRestartInfraDirectSubprocess:
 
         assert result["success"] is True
         args = mock_run.call_args[0][0]
+        kwargs = mock_run.call_args.kwargs
         assert "browser_workers.py" in args[1]
         assert "restart-infra" in args
         assert "api_watchdog" in args
+        assert kwargs["text"] is True
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
 
     def test_restart_infra_subprocess_failure_returns_error_E(self):
         """E(에러): subprocess returncode=1 시 success=False + stderr 포함"""
@@ -121,6 +133,7 @@ class TestRestartListenerSubprocess:
 
         svc = ExecutorService()
         mock_r = MagicMock()
+        mock_r.brpop.return_value = _listener_ack()
         mock_r.get.side_effect = [None, b"restarting", b"2026-02-25T10:00:00"]
         svc.redis_client = mock_r
 
@@ -168,6 +181,7 @@ class TestRestartInfraIntegrationDirect:
 
         svc = ExecutorService()
         mock_r = MagicMock()
+        mock_r.brpop.return_value = _listener_ack()
         mock_r.get.side_effect = [None, b"restarting", b"2026-02-25T10:00:00"]
         svc.redis_client = mock_r
 
@@ -223,36 +237,27 @@ class TestRestartListenerHttpDirect:
         return TestClient(app)
 
     def test_e2e_dev_runner_restart_listener(self, client):
-        """T5: POST /api/v1/dev-runner/restart-listener → subprocess mock + heartbeat → 200 + success"""
-        mock_r = MagicMock()
-        mock_r.ping.return_value = True
-        mock_r.get.side_effect = lambda key: (
-            "2026-02-25T10:00:00" if key == "plan-runner:listener:heartbeat" else None
-        )
-
-        with patch("app.modules.dev_runner.services.executor_service.executor_service.redis_client", mock_r), \
-             patch("app.modules.dev_runner.services.executor_service.subprocess.run",
-                   return_value=_sp_ok()), \
-             patch("app.modules.dev_runner.services.executor_service.time.sleep"):
+        """T5: POST /api/v1/dev-runner/restart-listener → restart_listener patch → 200 + success"""
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.restart_listener",
+            return_value={"success": True, "message": "listener restarted"},
+        ) as mock_restart:
             resp = client.post("/api/v1/dev-runner/restart-listener")
 
-        assert resp.status_code in (200, 500, 503)
-        if resp.status_code == 200:
-            data = resp.json()
-            assert data["success"] is True
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        mock_restart.assert_called_once()
 
     def test_e2e_dev_runner_restart_listener_failure(self, client):
-        """T5: POST /api/v1/dev-runner/restart-listener → subprocess 실패 → 200 + success: False"""
-        mock_r = MagicMock()
-        mock_r.ping.return_value = True
-        mock_r.get.return_value = None
-
-        with patch("app.modules.dev_runner.services.executor_service.executor_service.redis_client", mock_r), \
-             patch("app.modules.dev_runner.services.executor_service.subprocess.run",
-                   return_value=_sp_fail("browser_workers 실패")):
+        """T5: POST /api/v1/dev-runner/restart-listener → restart_listener failure → 200 + success: False"""
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.restart_listener",
+            return_value={"success": False, "message": "listener graceful-exit failed"},
+        ) as mock_restart:
             resp = client.post("/api/v1/dev-runner/restart-listener")
 
-        assert resp.status_code in (200, 500, 503)
-        if resp.status_code == 200:
-            data = resp.json()
-            assert data["success"] is False
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        mock_restart.assert_called_once()

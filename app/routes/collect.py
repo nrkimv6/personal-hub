@@ -15,8 +15,15 @@ from app.modules.google_search.services.queue_service import enqueue_google_sear
 from app.schemas.collect import CollectedPostList, CollectedPostBase, CrawlHistoryList
 from app.models import TaskSchedule, CrawlRequest
 from app.models.google_search import GoogleSearchQueue, GoogleSavedSearch
+from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 
 router = APIRouter(prefix="/collect", tags=["collect"])
+
+# 사용자 CRUD 표면에서 숨기는 내부 시스템 스케줄 타입
+_INTERNAL_SCHEDULE_TYPES = {
+    TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
+    TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+}
 
 
 @router.get("/posts", response_model=CollectedPostList)
@@ -209,6 +216,7 @@ async def get_schedules(
     return [
         ScheduleResponse(**_schedule_response_kwargs(s, audit_by_id.get(s.id)))
         for s in schedules
+        if s.target_type not in _INTERNAL_SCHEDULE_TYPES
     ]
 
 
@@ -354,6 +362,17 @@ async def create_schedule(
         if not data.display_name:
             data.display_name = "Dev-Guide 갱신 점검"
 
+    elif data.target_type == "auto_dev_runner":
+        schedule_name = "auto_dev_runner_nightly"
+        existing = schedule_service.get_schedule_by_name(schedule_name)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="이미 야간 자동 dev-runner 스케줄이 존재합니다"
+            )
+        if not data.display_name:
+            data.display_name = "야간 자동 plan 실행 (02:00)"
+
     else:
         raise HTTPException(
             status_code=400,
@@ -404,6 +423,8 @@ async def get_schedule_detail(
     """스케줄 상세 조회 (수정 모달용)."""
     schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    if schedule.target_type in _INTERNAL_SCHEDULE_TYPES:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     schedule_service = TaskScheduleService(db)
@@ -458,6 +479,8 @@ async def update_schedule(
     """
     schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    if schedule.target_type in _INTERNAL_SCHEDULE_TYPES:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     schedule_service = TaskScheduleService(db)
@@ -544,9 +567,12 @@ async def toggle_schedule(
 ):
     """스케줄 활성화/비활성화."""
     service = TaskScheduleService(db)
-    schedule = service.toggle_schedule(schedule_id, enabled)
-    if not schedule:
+    existing = service.get_schedule_by_id(schedule_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Schedule not found")
+    if existing.target_type in _INTERNAL_SCHEDULE_TYPES:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    schedule = service.toggle_schedule(schedule_id, enabled)
     return {"success": True, "enabled": schedule.enabled}
 
 
@@ -567,6 +593,8 @@ async def delete_schedule(
     # 스케줄 존재 확인
     schedule = service.get_schedule_by_id(schedule_id)
     if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    if schedule.target_type in _INTERNAL_SCHEDULE_TYPES:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     # 실행 이력 수 확인 (삭제 전 정보 제공)
@@ -731,6 +759,21 @@ async def trigger_schedule_run(
             "run_id": run.id,
         }
 
+    # Topic Extract 스케줄의 경우
+    elif schedule.target_type == 'topic_extract':
+        schedule_service = TaskScheduleService(db)
+        run = schedule_service.start_run(
+            schedule_id=schedule.id,
+            worker_id="manual",
+            config_snapshot={"source": "manual"}
+        )
+
+        return {
+            "success": True,
+            "message": "소재 추출 태스크가 예약되었습니다",
+            "run_id": run.id,
+        }
+
     # Report 스케줄의 경우
     elif schedule.target_type == 'report':
         from datetime import timedelta
@@ -789,6 +832,33 @@ async def trigger_schedule_run(
                 status_code=500,
                 detail=f"보고서 생성 요청 실패: {str(e)}"
             )
+
+    # auto_dev_runner: manual run을 생성하면 워커가 claim_pending_manual_run으로 소비
+    elif schedule.target_type == 'auto_dev_runner':
+        schedule_service = TaskScheduleService(db)
+        run = schedule_service.start_run(
+            schedule_id=schedule.id,
+            worker_id="manual",
+            config_snapshot={"source": "manual"}
+        )
+        return {
+            "success": True,
+            "message": "자동 dev-runner 실행 요청이 예약되었습니다",
+            "run_id": run.id,
+        }
+
+    elif schedule.target_type == 'plan_archive_analyze':
+        target_config = schedule.get_target_config() if schedule.target_config else {}
+        stats = PlanArchiveScheduler._enqueue_unprocessed_plans_in_session(db, target_config=target_config)
+        return {
+            "success": True,
+            "message": (
+                f"Plan Archive 분석 요청: queued {stats['queued']}, "
+                f"temp {stats['skipped_temp']} 제외, empty {stats['skipped_empty']} 제외, "
+                f"active {stats['skipped_active_request']} 제외"
+            ),
+            "config_snapshot_patch": stats,
+        }
 
     # 지원하지 않는 스케줄 타입
     else:

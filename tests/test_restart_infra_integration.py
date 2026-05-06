@@ -66,19 +66,25 @@ class TestRestartInfraIntegration:
             infra_names.append("command_listener")
 
         for name in infra_names:
-            with patch("app.modules.system.services.worker_service.subprocess.run",
-                       return_value=_sp_ok()) as mock_run:
+            with patch(
+                "app.modules.system.services.worker_service.executor_service.restart_listener",
+                return_value={"success": True, "message": "listener restarted"},
+            ) as mock_restart, patch(
+                "app.modules.system.services.worker_service.subprocess.run",
+                return_value=_sp_ok(),
+            ) as mock_run:
                 svc = SystemService()
                 result = asyncio.run(svc.restart_infra(name))
 
             assert result["success"] is True, f"{name}: {result['message']}"
 
-            args = mock_run.call_args[0][0]
-            assert "browser_workers.py" in args[1]
             if name == "command_listener":
-                assert "restart-listener" in args
-                assert "command_listener" not in args
+                mock_restart.assert_called_once()
+                mock_run.assert_not_called()
             else:
+                mock_restart.assert_not_called()
+                args = mock_run.call_args[0][0]
+                assert "browser_workers.py" in args[1]
                 assert "restart-infra" in args
                 assert name in args
 

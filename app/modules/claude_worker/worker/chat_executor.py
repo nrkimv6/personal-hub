@@ -27,7 +27,10 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import psutil
 import redis
+
+from app.core.database import is_connection_error
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
 LOG_DIR = PROJECT_ROOT / "logs" / "admin"
@@ -50,6 +53,44 @@ PID_FILE = PID_DIR / "chat_executor_admin.pid"
 _ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 
+def _mark_failed_safely(service, db, request_id: int, error_message: str, raw_response: str = "") -> None:
+    """Rollback-required 세션에서도 chat 요청을 failed로 마감한다."""
+    if db is not None:
+        try:
+            db.rollback()
+        except Exception as rollback_error:
+            logger.warning("chat failed finalizer rollback failed request_id=%s: %s", request_id, rollback_error)
+
+    try:
+        service.mark_failed(request_id, error_message=error_message, raw_response=raw_response)
+        return
+    except Exception as mark_error:
+        logger.error("chat failed finalizer failed request_id=%s: %s", request_id, mark_error, exc_info=True)
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+    fail_db = None
+    try:
+        from app.database import SessionLocal
+        from app.modules.claude_worker.services.llm_service import LLMService
+
+        fail_db = SessionLocal()
+        LLMService(fail_db).mark_failed(request_id, error_message=error_message, raw_response=raw_response)
+    except Exception as fallback_error:
+        logger.critical(
+            "chat failed finalizer fallback failed request_id=%s: %s",
+            request_id,
+            fallback_error,
+            exc_info=True,
+        )
+    finally:
+        if fail_db is not None:
+            fail_db.close()
+
+
 def _is_pid_alive(pid: int) -> bool:
     """PID 생존 확인 (Windows)."""
     try:
@@ -62,6 +103,15 @@ def _is_pid_alive(pid: int) -> bool:
         kernel32.CloseHandle(handle)
         return exit_code.value == 259  # STILL_ACTIVE
     except Exception:
+        return False
+
+
+def _is_chat_executor_pid(pid: int) -> bool:
+    """PID의 cmdline에 chat_executor 토큰이 있는지 확인 (PID 재활용 위양성 방지)."""
+    try:
+        cmdline = " ".join(psutil.Process(pid).cmdline())
+        return "claude_worker.worker.chat_executor" in cmdline or "monitorpage-chat" in cmdline
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return False
 
 
@@ -142,12 +192,26 @@ class ChatExecutor:
         if PID_FILE.exists():
             try:
                 pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+                if pid == os.getpid():
+                    # Windows PID 재활용으로 자기 자신을 이전 인스턴스로 오인하는 케이스
+                    logger.info(f"PID file contains own PID ({pid}), removing stale file.")
+                    PID_FILE.unlink(missing_ok=True)
+                    return
                 if _is_pid_alive(pid):
-                    logger.warning(f"Already running (PID={pid}). Exiting.")
-                    sys.exit(1)
+                    if not _is_chat_executor_pid(pid):
+                        # 동일 PID를 다른 프로세스가 점유 (PID 재활용) → stale 처리
+                        logger.info(
+                            f"PID {pid} alive but not chat_executor (unrelated process), treating as stale."
+                        )
+                        PID_FILE.unlink(missing_ok=True)
+                    else:
+                        logger.warning(f"Already running (PID={pid}). Exiting.")
+                        sys.exit(1)
                 else:
                     logger.info(f"Stale PID file removed: {pid}")
                     PID_FILE.unlink(missing_ok=True)
+            except ValueError:
+                PID_FILE.unlink(missing_ok=True)
             except Exception:
                 PID_FILE.unlink(missing_ok=True)
 
@@ -221,7 +285,9 @@ class ChatExecutor:
                 if exit_code == 0:
                     service.mark_completed(request_id, {}, raw_response=last_json or "\n".join(collected[-20:]))
                 else:
-                    service.mark_failed(
+                    _mark_failed_safely(
+                        service,
+                        db,
                         request_id,
                         error_message=f"exit_code={exit_code}",
                         raw_response="\n".join(collected[-20:]),
@@ -234,12 +300,12 @@ class ChatExecutor:
                 pass
 
         except Exception as e:
-            logger.error(f"chat session error request_id={request_id}: {e}", exc_info=True)
+            if is_connection_error(e):
+                logger.warning("chat session connection error request_id=%s: %s", request_id, e)
+            else:
+                logger.error(f"chat session error request_id={request_id}: {e}", exc_info=True)
             if service:
-                try:
-                    service.mark_failed(request_id, error_message=str(e), raw_response="")
-                except Exception:
-                    pass
+                _mark_failed_safely(service, db, request_id, error_message=str(e), raw_response="")
             try:
                 self.redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{request_id}", "__COMPLETED__")
             except Exception:

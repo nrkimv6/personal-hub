@@ -27,6 +27,7 @@ import type {
   UnifiedDashboard,
   VideoDownload,
   VideoDownloadCreate,
+  VideoDownloadCreateResponse,
   VideoDownloadList,
   VideoDownloadStats,
   VideoDownloadBatchCreate,
@@ -86,6 +87,21 @@ export const systemApi = {
     const res = await fetch(url, { method: 'POST' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json() as Promise<{ status: string; pid: number; delay: number; message: string }>;
+  },
+
+  closeApiGate: async (apiPort: number, reason: string): Promise<void> => {
+    try {
+      const res = await fetch('/__local/api-gate/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_port: apiPort, reason })
+      });
+      if (!res.ok) {
+        console.warn(`[api-gate] close failed: HTTP ${res.status}`);
+      }
+    } catch (error) {
+      console.warn('[api-gate] close failed, restart continues', error);
+    }
   }
 };
 
@@ -480,10 +496,39 @@ export interface LLMRequest {
   processed_at?: string;
   result?: Record<string, unknown>;
   error_message?: string;
+  pending_block_reason?: LLMBlockReason | null;
   retry_count: number;
   raw_response?: string;
   prompt?: string;
   cli_options?: Record<string, unknown>;
+}
+
+export type LLMBlockReason =
+  | 'all_paused_by_quota'
+  | 'outside_window'
+  | 'paused_by_quota'
+  | 'paused_by_window'
+  | 'paused_by_profile'
+  | 'schedule_policy_off'
+  | 'profile_disabled'
+  | 'no_enabled_profile'
+  | 'profile_claim_conflict';
+
+export const LLM_BLOCK_REASON_LABELS: Record<LLMBlockReason, string> = {
+  all_paused_by_quota: 'quota 대기',
+  outside_window: '실행 시간창 대기',
+  paused_by_quota: 'quota 대기',
+  paused_by_window: '실행 시간창 대기',
+  paused_by_profile: 'profile 대기',
+  schedule_policy_off: '스케줄/Profile 정책 차단',
+  profile_disabled: 'profile 비활성',
+  no_enabled_profile: '사용 가능한 profile 없음',
+  profile_claim_conflict: 'profile claim 충돌',
+};
+
+export function formatLLMBlockReason(reason: string | null | undefined): string {
+  if (!reason) return '-';
+  return LLM_BLOCK_REASON_LABELS[reason as LLMBlockReason] ?? reason;
 }
 
 export interface LLMQueueStats {
@@ -606,10 +651,24 @@ export interface LLMGroupedListParams {
 export interface QuotaProviderStatus {
   paused: boolean;
   until?: string;
+  reason?: string | null;
   remaining_seconds?: number;
   pending_blocked_count: number;
+  timezone?: string;
 }
 export type QuotaStatusMap = Record<string, QuotaProviderStatus>;
+
+export interface LLMExecutionWindow {
+  start: string;
+  end: string;
+  days?: number[];
+}
+
+export interface LLMExecutionWindowsConfig {
+  timezone: string;
+  allowed_windows: LLMExecutionWindow[];
+  quiet_windows: LLMExecutionWindow[];
+}
 
 export interface LLMDefaultConfig {
   provider?: string | null;
@@ -668,6 +727,13 @@ export interface LLMProfileConfig {
   name: string;
   config_dir: string | null;
   extra_env: Record<string, string>;
+  enabled?: boolean;
+  priority?: number;
+  capacity?: number;
+  last_quota_pause_until?: string | null;
+  last_reset_at?: string | null;
+  last_state?: string | null;
+  last_error_summary?: string | null;
 }
 
 export interface LLMProfilesResponse {
@@ -679,6 +745,43 @@ export interface LLMProfilesResponse {
 export interface LLMProfilesUpdateRequest {
   selected?: Record<string, string>;
   profiles: LLMProfileConfig[];
+}
+
+export interface LLMProfileStatusItem {
+  engine: string;
+  profile_name: string;
+  state: 'available' | 'paused_by_quota' | 'paused_by_window' | 'disabled' | 'processing';
+  quota_reset_at?: string | null;
+  next_allowed_at?: string | null;
+  blocked_request_count: number;
+  processing_count: number;
+  capacity?: number;
+  last_error_summary?: string | null;
+  priority: number;
+}
+
+export interface LLMScheduleProfilePolicyWindow {
+  start: string;
+  end: string;
+  days?: number[];
+}
+
+export interface LLMScheduleProfilePolicyItem {
+  id?: number | null;
+  schedule_id?: number | null;
+  target_type?: string | null;
+  engine: string;
+  profile_name: string;
+  enabled: boolean;
+  priority: number;
+  allowed_windows: LLMScheduleProfilePolicyWindow[];
+  quiet_windows: LLMScheduleProfilePolicyWindow[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface LLMScheduleProfilePoliciesResponse {
+  policies: LLMScheduleProfilePolicyItem[];
 }
 
 export interface ProviderInfo {
@@ -848,6 +951,14 @@ export const llmApi = {
 
   getQuotaStatus: () => request<QuotaStatusMap>('/llm/quota-status'),
 
+  getExecutionWindows: () => request<LLMExecutionWindowsConfig>('/llm/execution-windows'),
+
+  updateExecutionWindows: (payload: LLMExecutionWindowsConfig) =>
+    request<LLMExecutionWindowsConfig>('/llm/execution-windows', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
   getDefaults: () => request<LLMDefaultsResponse>('/llm/defaults'),
 
   getSchedulerRuntimeSummary: (recentLimit: number = 50) =>
@@ -868,6 +979,28 @@ export const llmApi = {
       body: JSON.stringify(payload)
     }),
 
+  getProfileStatus: () => request<LLMProfileStatusItem[]>('/llm/profiles/status'),
+
+  listScheduleProfilePolicies: () =>
+    request<LLMScheduleProfilePoliciesResponse>('/llm/schedule-profile-policies'),
+
+  updateScheduleProfilePolicies: (policies: LLMScheduleProfilePolicyItem[]) =>
+    request<LLMScheduleProfilePoliciesResponse>('/llm/schedule-profile-policies', {
+      method: 'PUT',
+      body: JSON.stringify({ policies })
+    }),
+
+  pauseProfile: (engine: string, name: string, retry_after_ms = 60 * 60 * 1000, reason = 'manual profile pause') =>
+    request<{ paused_until: string }>(`/llm/profiles/${engine}/${name}/pause`, {
+      method: 'POST',
+      body: JSON.stringify({ retry_after_ms, reason })
+    }),
+
+  resumeProfile: (engine: string, name: string) =>
+    request<{ ok: boolean }>(`/llm/profiles/${engine}/${name}/pause`, {
+      method: 'DELETE'
+    }),
+
   selectProfile: (engine: string, name: string) =>
     request<LLMProfilesResponse>(`/llm/profiles/${engine}/select`, {
       method: 'POST',
@@ -884,6 +1017,16 @@ export const llmApi = {
       `/llm/profiles/${engine}/${name}/launch-cli`,
       { method: 'POST' }
     ),
+};
+
+export const scheduleProfilePolicyApi = {
+  list: () => request<LLMScheduleProfilePoliciesResponse>('/llm/schedule-profile-policies'),
+
+  update: (policies: LLMScheduleProfilePolicyItem[]) =>
+    request<LLMScheduleProfilePoliciesResponse>('/llm/schedule-profile-policies', {
+      method: 'PUT',
+      body: JSON.stringify({ policies })
+    })
 };
 
 // ============================================================
@@ -1142,13 +1285,13 @@ export const videoDownloadApi = {
     status?: string;
     download_type?: string;
     page?: number;
-    limit?: number;
+    page_size?: number;
   }) => {
     const searchParams = new URLSearchParams();
     if (params?.status) searchParams.set('status', params.status);
     if (params?.download_type) searchParams.set('download_type', params.download_type);
     if (params?.page) searchParams.set('page', params.page.toString());
-    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.page_size) searchParams.set('page_size', params.page_size.toString());
     const query = searchParams.toString();
     return requestVideoDownload<VideoDownloadList>(`${query ? `?${query}` : ''}`);
   },
@@ -1159,7 +1302,7 @@ export const videoDownloadApi = {
 
   // 다운로드 요청 생성
   create: (data: VideoDownloadCreate) =>
-    requestVideoDownload<VideoDownload>('', {
+    requestVideoDownload<VideoDownloadCreateResponse>('', {
       method: 'POST',
       body: JSON.stringify(data)
     }),
@@ -1204,6 +1347,10 @@ export interface NssmService {
   status: string;
   start_type: string;
   display_name: string;
+  frontend_health?: string;
+  frontend_port?: number;
+  frontend_pid?: number | null;
+  degraded_reason?: string | null;
 }
 
 export interface StartupProgram {

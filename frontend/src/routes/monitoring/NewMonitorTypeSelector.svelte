@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { MONITOR_TYPE_META } from '$lib/types/monitoring';
 	import type { MonitorType } from '$lib/types/monitoring';
+	import { iconMap, type IconName } from '$lib/iconMap';
 	import { goto } from '$app/navigation';
 
 	interface Props {
@@ -32,12 +33,14 @@
 			<h2 class="mb-4 text-base font-semibold">모니터링 유형 선택</h2>
 			<ul class="flex flex-col gap-2">
 				{#each types as [type, meta]}
+					{@const TypeIcon = iconMap[meta.icon as IconName]}
 					<li>
 						<button
 							type="button"
 							class="flex w-full items-center gap-3 rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-muted/50"
 							onclick={() => handleSelect(meta.createHref)}
 						>
+							<svelte:component this={TypeIcon} size={18} class={meta.color} />
 							<span class="text-sm font-medium {meta.color}">{meta.label}</span>
 							<span class="ml-auto text-xs text-muted-foreground">→</span>
 						</button>

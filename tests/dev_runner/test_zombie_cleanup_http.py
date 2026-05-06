@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 import time
 import uuid
@@ -21,7 +20,7 @@ from app.database import get_db
 from app.modules.dev_runner.routes.runner import router as runner_router
 from app.modules.dev_runner.routes.workflows import router as workflows_router
 from app.modules.dev_runner.services.executor_service import executor_service
-from tests.dev_runner._path_helpers import get_listener_script_path, skip_if_missing
+from tests.dev_runner._path_helpers import load_listener_module
 
 pytestmark = pytest.mark.http
 
@@ -29,24 +28,8 @@ BASE_URL = "/api/v1/dev-runner"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 
-_listener_mod = None
-
-
 def _runner_key(runner_id: str, suffix: str) -> str:
     return f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
-
-
-def _load_listener_module():
-    global _listener_mod
-    if _listener_mod is not None:
-        return _listener_mod
-    script_path = get_listener_script_path()
-    skip_if_missing(script_path, "Listener script")
-    spec = importlib.util.spec_from_file_location("dev_runner_command_listener_zombie_http", str(script_path))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    _listener_mod = mod
-    return mod
 
 
 def _seed_running_runner(redis_client, runner_id: str, pid: int) -> None:
@@ -60,7 +43,7 @@ def _seed_running_runner(redis_client, runner_id: str, pid: int) -> None:
 
 @pytest.fixture(autouse=True)
 def reset_listener_state():
-    listener_mod = _load_listener_module()
+    load_listener_module("dev_runner_command_listener_zombie_http")
     state_mod = sys.modules["_dr_state"]
     state_mod.set_wf_manager(None)
     state_mod.get_running_processes().clear()
@@ -117,7 +100,7 @@ def fake_services(test_db_engine):
 
 def test_zombie_cleanup_reflected_in_runner_status_api(client, fake_services):
     """zombie cleanup 후 GET /runners 응답에서 해당 runner가 제거된다."""
-    listener_mod = _load_listener_module()
+    listener_mod = load_listener_module("dev_runner_command_listener_zombie_http")
     state_mod = sys.modules["_dr_state"]
     fake_sync = fake_services["sync"]
 
@@ -143,7 +126,7 @@ def test_zombie_cleanup_reflected_in_runner_status_api(client, fake_services):
 
 def test_zombie_cleanup_workflow_status_api(client, fake_services, test_db_engine):
     """zombie cleanup 후 workflow API가 failed + zombie 에러 메시지를 반환한다."""
-    listener_mod = _load_listener_module()
+    listener_mod = load_listener_module("dev_runner_command_listener_zombie_http")
     state_mod = sys.modules["_dr_state"]
     fake_sync = fake_services["sync"]
 

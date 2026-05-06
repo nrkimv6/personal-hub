@@ -54,6 +54,17 @@ logger = AsyncLoggerManager.setup_worker_logger(
 )
 logger.info(f"통합 워커 로거 초기화 완료 - 로그 파일: {logger.log_file}")
 
+from app.core.runtime_fingerprint import get_worker_runtime_fingerprint_snapshot
+
+_worker_runtime_snapshot = get_worker_runtime_fingerprint_snapshot()
+logger.info(
+    "Worker runtime fingerprint: runtime=%s source=%s started_at=%s files=%s",
+    _worker_runtime_snapshot["runtime_fingerprint"],
+    _worker_runtime_snapshot["source_fingerprint"],
+    _worker_runtime_snapshot.get("captured_at"),
+    ",".join(str(item["path"]) for item in _worker_runtime_snapshot["source_files"]),
+)
+
 # 모듈 import
 try:
     logger.info("모듈 import 시작...")

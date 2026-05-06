@@ -621,14 +621,12 @@ class ProxyManager:
             return 3
 
         else:
-            # 4단계 이상: DB에 느림 표시 (향후 구현)
-            # 현재는 세션 블랙리스트 유지
+            # 4단계 이상: DB 세션 없는 런타임 경로이므로 세션 블랙리스트 유지
             error_msg = f"slow:{response_time:.1f}s (누적 {count}회, DB 기록 대상)"
             state.session_blacklist[matched_proxy] = error_msg
             logger.warning(
                 f"프록시 느림 (4/4): {matched_proxy} - {response_time:.2f}s → DB 기록 대상"
             )
-            # TODO: DB에 느림 상태 기록 (proxy_db_service.update_status 또는 tags 추가)
             return 4
 
     def init_slow_count_from_db(

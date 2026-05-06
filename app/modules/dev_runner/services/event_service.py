@@ -339,6 +339,12 @@ class EventService:
                                 is_merge = channel.startswith("plan-runner:merge-log:")
                                 if _is_merge_completed_payload(data):
                                     status, reason = _parse_merge_completed_payload(data)
+                                    logger.debug(
+                                        "[events-log-route] channel=%s runner_id=%s kind=merge_completed status=%s",
+                                        channel,
+                                        runner_id,
+                                        status,
+                                    )
                                     yield sse_format(
                                         "merge_log_completed",
                                         {"runner_id": runner_id, "status": status, "reason": reason},
@@ -356,11 +362,22 @@ class EventService:
                                     if error:
                                         payload["error"] = error
                                     self._log_tailer.mark_runner_completed(runner_id)
+                                    logger.debug(
+                                        "[events-log-route] channel=%s runner_id=%s kind=log_completed status=%s",
+                                        channel,
+                                        runner_id,
+                                        status,
+                                    )
                                     yield sse_format(
                                         "log_completed",
                                         payload,
                                     )
                                 elif is_merge:
+                                    logger.debug(
+                                        "[events-log-route] channel=%s runner_id=%s kind=merge_line",
+                                        channel,
+                                        runner_id,
+                                    )
                                     yield sse_format(
                                         "merge_log",
                                         {"runner_id": runner_id, "line": _build_log_line_payload(data)},
@@ -372,6 +389,11 @@ class EventService:
                                             dedup_skip_counts.get(runner_id, 0) + 1
                                         )
                                         continue
+                                    logger.debug(
+                                        "[events-log-route] channel=%s runner_id=%s kind=log_line",
+                                        channel,
+                                        runner_id,
+                                    )
                                     yield sse_format(
                                         "log",
                                         {"runner_id": runner_id, "line": _build_log_line_payload(data)},

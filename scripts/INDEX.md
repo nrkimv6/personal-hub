@@ -4,7 +4,7 @@
 > 작성: 2026-04-11 (Phase 1 — 이동 없음, 문서화만)
 > 관련 plan: [2026-04-11_scripts-reorganization.md](../.worktrees/plans/docs/plan/2026-04-11_scripts-reorganization.md)
 >
-> 현재 `scripts/` 루트에는 148개 파일이 플랫하게 쌓여 있고, 하위 디렉토리 4개(`archive/`, `_deprecated/`, `dumptruck_templates/`, `__pycache__/`)가 존재합니다. 본 plan의 Phase 2~5에 걸쳐 아래 13개 카테고리 폴더로 단계적으로 이동합니다.
+> 현재 `scripts/` 루트에는 148개 파일이 플랫하게 쌓여 있고, 하위 디렉토리 4개(`archive/`, `_deprecated/`, `dumptruck_templates/`, `__pycache__/`)가 존재합니다. 본 plan의 Phase 2~5에 걸쳐 아래 14개 카테고리 폴더로 단계적으로 이동합니다.
 
 ## 목차
 
@@ -12,6 +12,7 @@
 - [services/](#services)
 - [watchdogs/](#watchdogs)
 - [plan_runner/](#plan_runner)
+- [git-hooks/](#git-hooks)
 - [migrations/](#migrations)
 - [diagnostics/](#diagnostics)
 - [session_tools/](#session_tools)
@@ -20,6 +21,7 @@
 - [probes/](#probes)
 - [logs/](#logs)
 - [fixes/](#fixes)
+- [tracking/](#tracking)
 - [dumptruck/](#dumptruck)
 - [setup/](#setup)
 - [git-hooks/](#git-hooks)
@@ -122,6 +124,21 @@
 | ✅ | `worktree_manager.py` | worktree 수명 관리 |
 | ✅ | `conflict_resolver.py` | merge 충돌 자동 해결 |
 | ✅ | `queue_archived_plans.py` | 아카이브된 plan 큐잉 유틸 |
+| ✅ | `plan-archive-analyze.ps1` | Plan Archive 단건 수동 분석 preview/apply API 호출 래퍼 |
+
+---
+
+## git-hooks/
+
+> 현재 위치: `scripts/git-hooks/` ✅
+> 위험도: **🔴 고** — root checkout, plans lineage, post-merge dirty guard를 차단하는 Git hook/commit wrapper 연동 경로
+
+| 상태 | 파일 | 설명 |
+|:-:|---|---|
+| ✅ | `pre-commit-plans-block.ps1` | root branch guard와 plans lineage staged docs guard를 실행하는 pre-commit hook 본체 |
+| ✅ | `root-branch-guard.ps1` | root checkout non-main commit, root main implementation-scope staged commit, root branch drift sentinel을 차단하며, mirror surface staged commit은 예외 없이 차단 |
+| ✅ | `post-checkout-root-branch-guard.ps1` | root checkout이 main 밖으로 이동하면 `.git/root-branch-guard.violation` sentinel 생성 |
+| ✅ | `install-post-merge-dirty-check.ps1` | post-merge dirty check hook 설치 |
 
 ---
 
@@ -145,9 +162,11 @@
 | ✅ | `create_archive_tables.py` | archive 전용 테이블 생성 |
 | ✅ | `archive_batch_move.py` | 대량 archive 이관 배치 |
 | ✅ | `archive_index_backfill.py` | archive 인덱스 backfill |
+| ✅ | `backfill_plan_record_file_delete_after.py` | LLM 처리 완료 archive record의 파일 삭제 예정 시각 백필 |
 | ✅ | `verify_crawl_migration.py` | 크롤 데이터 마이그레이션 검증 |
 | ✅ | `fix_pg_sequences.py` | PG serial sequence 동기화 (2026-04-11 plan 결과) |
 | ✅ | `import_urls_bulk.py` | URL 대량 import |
+| ✅ | `seed_auto_dev_runner_schedule.py` | auto_dev_runner 스케줄 레코드 insert-if-missing seed (cron 0 2 * * *) |
 
 ---
 
@@ -168,6 +187,7 @@
 | ✅ | `_check_visible.py` | visible 상태 검증 |
 | ✅ | `analyze_duplicates.py` | DB 중복 분석 |
 | ✅ | `analyze-dump.ps1` | 메모리 덤프 분석 |
+| ✅ | `analyze-bsod.ps1` | BSOD 이벤트 로그 상관분석 |
 | ✅ | `check_profile_config.py` | 브라우저 프로필 설정 검증 |
 | ✅ | `check_requests.py` | 요청 로그 검사 |
 | ✅ | `check_schedules.py` | 스케줄 상태 점검 |
@@ -206,9 +226,9 @@
 
 ## cleanup/
 
-> 현재 위치: `scripts/cleanup/` (`kill-orphan-procs.ps1` 제외)
+> 현재 위치: `scripts/cleanup/`
 > 위험도: **🟡 중** — 수동 실행 + 일부 daily_maintenance 연동
-> 제외: `kill-orphan-procs.ps1` — `.claude/skills/implement/SKILL.md`, `.claude/skills/done/SKILL.md`, `.claude/agents/auto-impl.md`, `.claude/agents/auto-done.md`에서 절대경로 `scripts/kill-orphan-procs.ps1` 참조. monitor-page에서 `.claude/*` 직접 수정 금지 규칙에 따라 wtools 스킬 업데이트 선행 필요. 현재 `scripts/` 루트 유지. (추가: `scripts/port-utils.ps1` 포함, 포트 정리 유틸)
+> 참고: 고아 pytest 프로세스 정리는 Python `OrphanDetector`가 담당한다. 별도 PowerShell 정리 스크립트는 유지하지 않는다.
 
 | 상태 | 파일 | 설명 |
 |:-:|---|---|
@@ -220,7 +240,6 @@
 | ✅ | `clear_death_log.py` | death log 초기화 |
 | ✅ | `kill_all.ps1` | 전체 프로세스 강제 종료 (start/stop 이후 정리용) |
 | ✅ | `port-utils.ps1` | 좀비 포트 탐지/정리 공용 모듈 |
-| ⏳ | `kill-orphan-procs.ps1` | 고아 pytest 프로세스 정리 (`/implement` 선제 정리) — wtools 스킬 경로 수정 후 이관 |
 
 ---
 
@@ -281,6 +300,7 @@
 | ✅ | `split-cloudflared-log.ps1` | cloudflared 로그 분할 |
 | ✅ | `setup-log-cleanup-task.ps1` | 로그 정리 작업 등록 (Task Scheduler) |
 | ✅ | `cleanup-logs.ps1` | 로그 정리 스크립트 |
+| ✅ | `extract-plan-log.ps1` | runner_id 마커([plan:id start/end]) 기반으로 로그 구간 추출 → logs/plan-runs/<id>.log |
 | ⏳ | `listener_noise_filter.py` | listener 로그 노이즈 필터 |
 | ⏳ | `Send-TelegramAlert.ps1` | 텔레그램 알림 전송 (운영 알림) |
 
@@ -316,6 +336,20 @@
 | ✅ | `extract_keywords.py` | 키워드 추출 일회성 유틸 |
 | ✅ | `frontend_placeholder.py` | 프론트엔드 placeholder 서버 — service_run.py 참조, _todo-6에서 fixes/로 이관 완료 |
 | ✅ | `disable_duplicate_events.py` | 중복 이벤트 비활성화 일회성 수정 |
+
+---
+
+## tracking/
+
+> 현재 위치: `scripts/tracking/` ✅
+> 위험도: 🟡 중 — Tracking item 등록/수정의 표준 진입점. `CLAUDE.md`가 직접 API 호출 대신 이 wrapper 사용을 요구한다.
+
+| 상태 | 파일 | 설명 |
+|:-:|---|---|
+| ✅ | `add-tracking-item.ps1` | `python -m app.cli.tracking_add` PowerShell thin wrapper. GNU long option 그대로 forward |
+| ✅ | `add-tracking-item.sh` | Git Bash/WSL thin wrapper. Python CLI에 인자 그대로 forward |
+| ✅ | `update-tracking-item.ps1` | `python -m app.cli.tracking_update` PowerShell thin wrapper. GNU long option 그대로 forward |
+| ✅ | `update-tracking-item.sh` | Git Bash/WSL thin wrapper. Python CLI에 인자 그대로 forward |
 
 ---
 
@@ -356,6 +390,7 @@
 | ✅ | `claude-session-manager.ps1` | Claude Code 세션 관리 헬퍼 |
 | ✅ | `auto-update.ps1` | 자동 업데이트 훅 |
 | ✅ | `Send-TelegramAlert.ps1` | 텔레그램 알림 함수 (watchdog crash-loop 감지 등에서 dot-source) |
+| ⏳ | `register-daily-report-popup.ps1` | Windows 작업 스케줄러에 매일 08:00 일일 보고서 팝업 등록 (Phase D 구현 예정) |
 
 ---
 
@@ -403,6 +438,8 @@
 |---|---|
 | `README_브라우저_프로필.md` | 브라우저 프로필 사용 가이드 — 루트 유지 (문서) |
 | `INDEX.md` | 본 파일 — scripts/ 인덱스 |
+| `archive-search.ps1` | LLM/사람용 archive 검색 단일 진입점. `--q keyword` DB API 조회, `--offline` 시 파일 grep. 호출 예: `.\scripts\archive-search.ps1 --q watchdog --limit 5` |
+| `archive_search.py` | `archive-search.ps1`의 Python 구현체. argparse: `--q`, `--tags`, `--date-from`, `--date-to`, `--content`(deep), `--offline`, `--format`(text\|json), `--limit` |
 
 ### 이관 보류 (wtools 선행 필요)
 
@@ -412,7 +449,6 @@
 |:-:|---|---|
 | ⏳ | `dumptruck_run.ps1` | → `scripts/dumptruck/` 예정 |
 | ⏳ | `dumptruck_builder.py` | → `scripts/dumptruck/` 예정 |
-| ⏳ | `kill-orphan-procs.ps1` | → `scripts/cleanup/` 예정 (wtools kill-orphan 스킬 참조) |
 
 ---
 
@@ -439,6 +475,7 @@
 | `session_*.py` (`.claude/projects/*.jsonl` 파싱) | `session_tools/` | `session_dump.py` |
 | `_fix_*`, `fix-*`, `fix_*` (일회성) | `fixes/` | `_fix_plan_header.py` |
 | `dumptruck_*` | `dumptruck/` | `dumptruck_run.ps1` |
+| `add-tracking-*`, `tracking-*` | `tracking/` | `add-tracking-item.ps1` |
 | `setup-*`, `startup-*`, `daily_*`, `auto-update*`, `_build_*`, `_setup_*` | `setup/` | `setup-exe-aliases.ps1` |
 | 서비스 런타임 (`start/stop/run/service*/browser_workers`) | `services/` | `browser_workers.py` |
 | 로그 도구 (`logs*`, `*-log*.ps1`, `*noise_filter*`) | `logs/` | `logs.ps1` |

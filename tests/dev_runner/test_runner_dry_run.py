@@ -14,16 +14,15 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.main import app
 from app.modules.dev_runner.config import DevRunnerConfig
 from tests.dev_runner.conftest_e2e import (
     e2e_redis_cleanup,
     e2e_worktree_cleanup,
     listener_process,
     isolated_redis_db15,
-    TEST_PLAN_FILE,
-    TEST_PLAN_FILE_A,
-    TEST_PLAN_FILE_B,
+    isolated_plan_file,
+    isolated_plan_file_a,
+    isolated_plan_file_b,
 )
 
 pytestmark = pytest.mark.integration
@@ -31,6 +30,11 @@ pytestmark = pytest.mark.integration
 BASE_URL = "http://test/api/v1/dev-runner"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 _config = DevRunnerConfig()
+
+
+def _build_app():
+    from app.main import app
+    return app
 
 
 @pytest.fixture
@@ -79,7 +83,7 @@ async def reset_executor_async_redis():
 
 
 async def _make_client():
-    transport = httpx.ASGITransport(app=app)
+    transport = httpx.ASGITransport(app=_build_app())
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
 
@@ -104,7 +108,7 @@ def _wait_for_redis_key(isolated_redis_db15, key: str, timeout: int = 30) -> str
     return None
 
 
-async def _post_dry_run(client: httpx.AsyncClient, plan_file: str = TEST_PLAN_FILE) -> str:
+async def _post_dry_run(client: httpx.AsyncClient, plan_file: str) -> str:
     """dry_run POST 실행 → runner_id 반환."""
     resp = await client.post(
         "/api/v1/dev-runner/run",
@@ -124,12 +128,12 @@ async def _post_dry_run(client: httpx.AsyncClient, plan_file: str = TEST_PLAN_FI
 class TestRunnerDryRun:
     """Level 2: dry_run으로 Runner 기동/종료 파이프라인 검증"""
 
-    async def test_dry_run_lifecycle(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup):
+    async def test_dry_run_lifecycle(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup, isolated_plan_file):
         """POST /run (dry_run) → running=True → stop → running=False"""
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
-            runner_id = await _post_dry_run(client)
+            runner_id = await _post_dry_run(client, isolated_plan_file)
 
             assert _wait_for_runner_status(isolated_redis_db15, runner_id, "running", timeout=30), (
                 f"runner {runner_id}가 30초 내 running 상태가 되지 않음"
@@ -150,12 +154,12 @@ class TestRunnerDryRun:
             time.sleep(0.5)
         assert stopped, f"runner {runner_id}가 10초 내 stopped 상태가 되지 않음"
 
-    async def test_dry_run_redis_keys(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup):
+    async def test_dry_run_redis_keys(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup, isolated_plan_file):
         """dry_run 실행 후 per-runner Redis 키 (status/pid/plan_file/start_time) 세팅 확인"""
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
-            runner_id = await _post_dry_run(client)
+            runner_id = await _post_dry_run(client, isolated_plan_file)
 
             assert _wait_for_runner_status(isolated_redis_db15, runner_id, "running", timeout=30), (
                 f"runner {runner_id}가 30초 내 running 상태가 되지 않음"
@@ -172,12 +176,12 @@ class TestRunnerDryRun:
             # 검증 후 정리
             await client.post("/api/v1/dev-runner/stop", json={"runner_id": runner_id})
 
-    async def test_dry_run_log_file_created(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup):
+    async def test_dry_run_log_file_created(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup, isolated_plan_file):
         """dry_run 실행 후 stream_log_path 파일 생성 확인"""
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
-            runner_id = await _post_dry_run(client)
+            runner_id = await _post_dry_run(client, isolated_plan_file)
 
             assert _wait_for_runner_status(isolated_redis_db15, runner_id, "running", timeout=40), (
                 f"runner {runner_id}가 40초 내 running 상태가 되지 않음"
@@ -194,16 +198,16 @@ class TestRunnerDryRun:
             # 검증 후 정리
             await client.post("/api/v1/dev-runner/stop", json={"runner_id": runner_id})
 
-    async def test_concurrent_dry_run(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup, cleanup_test_branches):
+    async def test_concurrent_dry_run(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup, cleanup_test_branches, isolated_plan_file_a, isolated_plan_file_b):
         """2개 동시 dry_run 실행 → 각각 독립 runner_id + 상태
 
         서로 다른 plan_file 사용 — 동일 plan_file이면 WorktreeManager 브랜치명 충돌 발생
         """
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
-            runner_id_1 = await _post_dry_run(client, plan_file=TEST_PLAN_FILE_A)
-            runner_id_2 = await _post_dry_run(client, plan_file=TEST_PLAN_FILE_B)
+            runner_id_1 = await _post_dry_run(client, plan_file=isolated_plan_file_a)
+            runner_id_2 = await _post_dry_run(client, plan_file=isolated_plan_file_b)
 
             assert runner_id_1 != runner_id_2, "동시 실행 시 runner_id가 동일하면 안 됨"
 
@@ -223,7 +227,7 @@ class TestRunnerDryRun:
             for rid in (runner_id_1, runner_id_2):
                 await client.post("/api/v1/dev-runner/stop", json={"runner_id": rid})
 
-    async def test_accepted_started_ordering(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup):
+    async def test_accepted_started_ordering(self, listener_process, isolated_redis_db15, e2e_redis_cleanup, e2e_worktree_cleanup, isolated_plan_file):
         """accepted_at <= started_at 순서 보장 TC
 
         accepted_at: start_plan_runner()에서 lpush 직후 저장 (listener 처리 시점)
@@ -232,9 +236,9 @@ class TestRunnerDryRun:
         """
         from datetime import datetime
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=_build_app()), base_url="http://test"
         ) as client:
-            runner_id = await _post_dry_run(client)
+            runner_id = await _post_dry_run(client, isolated_plan_file)
 
             # started_at까지 관측될 때까지 대기 (프로세스 spawn 후 저장)
             started_at_str = _wait_for_redis_key(

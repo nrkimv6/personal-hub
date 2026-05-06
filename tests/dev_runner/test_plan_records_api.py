@@ -8,6 +8,48 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 
+pytestmark = pytest.mark.http
+
+
+@pytest.fixture(scope="module")
+def test_db_engine(tmp_path_factory):
+    """Plan records API 전용 SQLite 엔진.
+
+    이 모듈은 plan_records/plan_events만 직접 검증하므로, 세션 범위 전체 모델
+    create_all을 타지 않게 해서 전역 테스트 DB 부트스트랩 timeout을 피한다.
+    """
+    from sqlalchemy import create_engine, event
+    from app.models.base import Base
+    from app.models.plan_record import PlanEvent, PlanRecord
+    from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
+
+    db_path = tmp_path_factory.mktemp("plan_records_api_db") / "test.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            PlanRecord.__table__,
+            PlanEvent.__table__,
+            TrackingItem.__table__,
+            TrackingItemPlanLink.__table__,
+        ],
+    )
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
 @pytest.fixture(scope="module")
 def client(test_db_engine):
     """TestClient (module scope) + test_db_engine 오버라이드
@@ -41,6 +83,38 @@ def _make_record(session, path, **kwargs):
     r = svc.get_or_create(path, **kwargs)
     session.flush()
     return r
+
+
+class TestPlanRecordsApiDbBootstrap:
+    """Plan records API 전용 DB fixture 계약."""
+
+    def test_plan_records_bootstrap_right_creates_required_tables(self, test_db_engine):
+        from sqlalchemy import inspect
+
+        tables = set(inspect(test_db_engine).get_table_names())
+
+        assert "plan_records" in tables
+        assert "plan_events" in tables
+        assert "tracking_items" in tables
+        assert "tracking_item_plan_links" in tables
+
+    def test_plan_records_bootstrap_right_supports_event_fk(self, test_db_session):
+        from app.models.plan_record import PlanEvent, PlanRecord
+
+        record = PlanRecord(
+            filename_hash="bootstrap_contract_001",
+            file_path="/plan/2026-05-03-bootstrap-contract.md",
+            title="Bootstrap Contract",
+        )
+        test_db_session.add(record)
+        test_db_session.flush()
+
+        event = PlanEvent(plan_record_id=record.id, event_type="created")
+        test_db_session.add(event)
+        test_db_session.commit()
+
+        saved = test_db_session.query(PlanEvent).filter_by(id=event.id).one()
+        assert saved.record.id == record.id
 
 
 # ========== /api/v1/plans/records ==========
@@ -90,6 +164,119 @@ class TestListRecords:
         data = resp.json()
         assert any(item["status"] == "구현중" for item in data)
 
+    def test_get_archive_health_http_right_counts(self, client):
+        """Plan Archive health HTTP contract exposes split backlog counts."""
+        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+
+        expected = {
+            "archived_total": 4,
+            "llm_processed": 1,
+            "llm_unprocessed": 3,
+            "real_unprocessed": 2,
+            "temp_pytest_total": 1,
+            "temp_pytest_unprocessed": 1,
+            "pending_or_processing_requests": 1,
+            "failed_requests": 1,
+            "file_retention_due": 2,
+            "file_retention_scheduled": 3,
+            "file_removed": 4,
+            "oldest_file_delete_after": "2026-05-12T01:00:00",
+            "latest_failed_request": {
+                "id": 10,
+                "caller_id": "failed_hash",
+                "status": "failed",
+                "error_message": "quota",
+                "requested_at": "2026-05-05T01:00:00",
+            },
+            "oldest_unprocessed_at": "2026-05-04T01:00:00",
+            "plan_archive_schedule": {
+                "id": 3,
+                "enabled": False,
+                "schedule_value": "02:10",
+                "last_run": None,
+                "last_success": None,
+                "last_failure": "2026-05-05T02:10:00",
+            },
+            "retrieval_db_readiness": {
+                "ok": True,
+                "required_tables": [
+                    "plan_record_chunks",
+                    "plan_record_file_refs",
+                    "plan_record_repo_refs",
+                    "plan_record_relations",
+                    "plan_record_search_runs",
+                ],
+                "missing_tables": [],
+            },
+        }
+
+        with patch.object(PlanRecordService, "get_plan_archive_health", return_value=expected):
+            resp = client.get("/api/v1/plans/records/archive-health")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["real_unprocessed"] == 2
+        assert data["temp_pytest_unprocessed"] == 1
+        assert data["pending_or_processing_requests"] == 1
+        assert data["failed_requests"] == 1
+        assert data["file_retention_due"] == 2
+        assert data["file_retention_scheduled"] == 3
+        assert data["file_removed"] == 4
+        assert data["latest_failed_request"]["caller_id"] == "failed_hash"
+        assert data["retrieval_db_readiness"]["ok"] is True
+
+    def test_archive_health_right_keeps_temp_counts_separate_after_purge(self, client):
+        """R: purge 이후에도 archive-health temp/real split schema is stable."""
+        from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+
+        expected = {
+            "archived_total": 1,
+            "llm_processed": 0,
+            "llm_unprocessed": 1,
+            "real_unprocessed": 1,
+            "temp_pytest_total": 0,
+            "temp_pytest_unprocessed": 0,
+            "pending_or_processing_requests": 0,
+            "failed_requests": 0,
+            "file_retention_due": 0,
+            "file_retention_scheduled": 0,
+            "file_removed": 0,
+            "oldest_file_delete_after": None,
+            "latest_failed_request": None,
+            "oldest_unprocessed_at": "2026-05-04T01:00:00",
+            "plan_archive_schedule": None,
+            "retrieval_db_readiness": {
+                "ok": False,
+                "required_tables": [
+                    "plan_record_chunks",
+                    "plan_record_file_refs",
+                    "plan_record_repo_refs",
+                    "plan_record_relations",
+                    "plan_record_search_runs",
+                ],
+                "missing_tables": ["plan_record_file_refs"],
+            },
+        }
+
+        with patch.object(PlanRecordService, "get_plan_archive_health", return_value=expected):
+            resp = client.get("/api/v1/plans/records/archive-health")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["real_unprocessed"] == 1
+        assert data["temp_pytest_total"] == 0
+        assert data["temp_pytest_unprocessed"] == 0
+        assert data["retrieval_db_readiness"]["missing_tables"] == ["plan_record_file_refs"]
+
+    def test_retrieval_search_http_error_missing_readiness(self, client):
+        """E: retrieval search returns structured 503 when DB tables are missing."""
+        resp = client.post("/api/v1/plans/retrieval/search", json={"q": "anything"})
+
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert detail["retrieval_db_readiness"]["ok"] is False
+        assert "plan_record_file_refs" in detail["retrieval_db_readiness"]["missing_tables"]
+
 
 class TestGetRecord:
 
@@ -110,6 +297,71 @@ class TestGetRecord:
         """존재하지 않는 id → 404"""
         resp = client.get("/api/v1/plans/records/99999")
         assert resp.status_code == 404
+
+    def test_analyze_record_preview_success(self, client):
+        """R: manual analyze preview endpoint returns service response."""
+        expected = {
+            "success": True,
+            "mode": "preview",
+            "result": {"category": "infra"},
+            "raw_response": '{"category":"infra"}',
+            "provider": "codex",
+            "model": "gpt-5.2",
+            "record_id": 1,
+            "filename_hash": "hash",
+            "file_path": "/archive/file.md",
+            "elapsed_ms": 10,
+            "prompt_preview": None,
+            "warnings": [],
+            "saved": False,
+            "record_after": None,
+            "save_error": None,
+        }
+        with patch(
+            "app.modules.dev_runner.services.plan_archive_manual_analyze_service.PlanArchiveManualAnalyzeService.analyze",
+            return_value=expected,
+        ):
+            resp = client.post("/api/v1/plans/records/1/analyze", json={"mode": "preview"})
+
+        assert resp.status_code == 200
+        assert resp.json()["result"]["category"] == "infra"
+        assert resp.json()["saved"] is False
+
+    def test_analyze_record_apply_success(self, client):
+        """R: manual analyze apply endpoint returns saved record snapshot."""
+        expected = {
+            "success": True,
+            "mode": "apply",
+            "result": {"category": "infra"},
+            "raw_response": '{"category":"infra"}',
+            "provider": "codex",
+            "model": "gpt-5.2",
+            "record_id": 1,
+            "filename_hash": "hash",
+            "file_path": "/archive/file.md",
+            "elapsed_ms": 10,
+            "prompt_preview": None,
+            "warnings": [],
+            "saved": True,
+            "record_after": {"category": "infra", "summary": "manual apply"},
+            "save_error": None,
+        }
+        with patch(
+            "app.modules.dev_runner.services.plan_archive_manual_analyze_service.PlanArchiveManualAnalyzeService.analyze",
+            return_value=expected,
+        ) as mock_analyze:
+            resp = client.post("/api/v1/plans/records/1/analyze", json={"mode": "apply"})
+
+        assert resp.status_code == 200
+        assert resp.json()["saved"] is True
+        assert resp.json()["record_after"]["summary"] == "manual apply"
+        assert mock_analyze.call_args.kwargs["mode"] == "apply"
+
+    def test_analyze_dry_run_rejects_apply(self, client):
+        """E: analyze-dry-run alias remains preview-only."""
+        resp = client.post("/api/v1/plans/records/1/analyze-dry-run", json={"mode": "apply"})
+
+        assert resp.status_code == 400
 
 
 class TestMemoUpdate:
@@ -232,6 +484,54 @@ class TestGetRecordByPath:
         data = resp.json()
         assert data["file_path"] == "/plan/2026-03-15-by-path.md"
         assert data["id"] is not None
+
+
+# ========== /api/v1/plans/records/ingest ==========
+
+class TestIngestSingleRecord:
+
+    def test_ingest_single_updates_existing_record_archive_path_http(self, client, test_db_session):
+        """POST /records/ingest updates existing filename-hash record to archive path."""
+        from app.models.plan_record import PlanRecord
+        from app.modules.dev_runner.services.plan_record_service import _compute_filename_hash
+
+        plan_path = "/workspace/docs/plan/2026-05-03_http-archive-path.md"
+        archive_path = "/workspace/docs/archive/2026-05-03_http-archive-path.md"
+        filename_hash = _compute_filename_hash(plan_path)
+        test_db_session.query(PlanRecord).filter_by(filename_hash=filename_hash).delete(synchronize_session=False)
+        test_db_session.commit()
+
+        record = PlanRecord(
+            filename_hash=filename_hash,
+            file_path=plan_path,
+            title="Old HTTP Plan",
+            project="monitor-page",
+            status="planned",
+            raw_content="# Old HTTP Plan",
+        )
+        test_db_session.add(record)
+        test_db_session.commit()
+
+        resp = client.post(
+            "/api/v1/plans/records/ingest",
+            json={
+                "file_path": archive_path,
+                "project": "monitor-page",
+                "raw_content": "# Archived HTTP Plan\n\nnew body",
+                "title": "Archived HTTP Plan",
+                "status": "archived",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == record.id
+        assert data["filename_hash"] == filename_hash
+        assert data["file_path"] == archive_path
+        assert data["file_path"] != plan_path
+
+        content_resp = client.get(f"/api/v1/plans/records/{record.id}/content")
+        assert content_resp.status_code == 200
+        assert content_resp.json()["raw_content"] == "# Archived HTTP Plan\n\nnew body"
 
 
 # ========== Phase T4: import-archived + category/tags 필터 ==========
@@ -417,3 +717,65 @@ class TestGetOrCreateDefaultStatus:
         svc = PlanRecordService(test_db_session)
         record = svc.get_or_create(path)
         assert record.status == "in_progress", "기존 레코드 status는 변경되지 않아야 함"
+
+
+# ─────────────────────────────────────────────────────────
+# T3: include_claim 하위 호환성
+# ─────────────────────────────────────────────────────────
+
+class TestGetRecordByPathIncludeClaim:
+    """/api/v1/plans/records/by-path include_claim 파라미터 하위 호환성 검증."""
+
+    def test_R_base_response_without_include_claim(self, client, test_db_session):
+        """R: include_claim 없이 기본 응답 → execution_claim 필드 없음"""
+        path = "docs/plan/no-claim-base.md"
+        resp = client.get(f"/api/v1/plans/records/by-path?file_path={path}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "file_path" in data
+        assert "execution_claim" not in data, (
+            "기본 응답(include_claim 미설정)에 execution_claim이 포함됨 — 하위 호환성 위반"
+        )
+
+    def test_R_include_claim_false_is_same_as_base(self, client, test_db_session):
+        """R: include_claim=false 명시 → execution_claim 필드 없음"""
+        path = "docs/plan/no-claim-false.md"
+        resp = client.get(f"/api/v1/plans/records/by-path?file_path={path}&include_claim=false")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "execution_claim" not in data
+
+    def test_R_include_claim_true_adds_execution_claim_field(self, client, test_db_session):
+        """R: include_claim=true → execution_claim 필드 포함 (claim 없으면 null)"""
+        path = "docs/plan/no-claim-true.md"
+        resp = client.get(f"/api/v1/plans/records/by-path?file_path={path}&include_claim=true")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "execution_claim" in data, (
+            "include_claim=true인데 execution_claim 필드가 없음"
+        )
+
+    def test_B_include_claim_true_no_active_claim_returns_null(self, client, test_db_session):
+        """B: include_claim=true이고 active claim 없으면 execution_claim=null"""
+        path = "docs/plan/no-active-claim.md"
+        with patch(
+            "app.modules.dev_runner.services.plan_record_service.PlanRecordService.get_active_claim",
+            return_value=None,
+        ):
+            resp = client.get(
+                f"/api/v1/plans/records/by-path?file_path={path}&include_claim=true"
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["execution_claim"] is None
+
+    def test_Co_base_response_fields_intact_with_include_claim(self, client, test_db_session):
+        """Co: include_claim=true 시 기존 응답 필드(file_path, memo 등)가 유지된다"""
+        path = "docs/plan/co-intact.md"
+        resp = client.get(f"/api/v1/plans/records/by-path?file_path={path}&include_claim=true")
+        assert resp.status_code == 200
+        data = resp.json()
+        # PlanRecordResponse 기본 필드 확인
+        assert "file_path" in data
+        assert "id" in data
+        assert "execution_claim" in data

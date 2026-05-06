@@ -30,6 +30,11 @@ from app.modules.dev_runner.services.plan_record_service import (
 )
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services.plan_archive_prompt_policy import (
+    DEFAULT_CATEGORIES,
+    PromptPolicyContext,
+    build_plan_archive_prompt,
+)
 from app.modules.dev_runner.services.log_service import REDIS_HOST, REDIS_PORT
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 
@@ -225,13 +230,30 @@ class PlanArchiveListener(BaseWorker):
             # plan_date: git 첫 커밋 날짜
             if record.plan_date is None:
                 record.plan_date = get_git_first_commit_date(filename)
-            # applied_at: > 반영일: 헤더 파싱
-            if record.applied_at is None:
+
+            # DB-first: raw_content 우선, 없으면 파일 읽기 fallback
+            file_content = record.raw_content or ""
+            if not file_content:
                 try:
-                    content = Path(filename).read_text(encoding="utf-8", errors="replace")
-                    record.applied_at = parse_applied_at(content)
-                except Exception:
-                    pass
+                    file_content = Path(filename).read_text(encoding="utf-8", errors="replace")
+                    if file_content:
+                        record.raw_content = file_content
+                except Exception as e:
+                    logger.error(
+                        f"[{self.name}] plan 파일 읽기 실패: {filename} ({e})"
+                    )
+
+            # applied_at: 이미 로드된 file_content로 파싱
+            if record.applied_at is None and file_content:
+                record.applied_at = parse_applied_at(file_content)
+
+            # 빈 내용 skip 가드: LLMRequest 생성 억제
+            if not file_content:
+                logger.error(
+                    f"[{self.name}] 빈 내용 — LLMRequest 생성 스킵: {filename}"
+                )
+                db.commit()
+                return
 
             # filename_hash로 중복 LLMRequest 체크
             filename_hash = _compute_filename_hash(filename)
@@ -253,13 +275,18 @@ class PlanArchiveListener(BaseWorker):
                 db.commit()
                 return
 
-            # 3. LLMRequest INSERT
-            prompt = self._build_prompt(filename)
+            # LLMRequest INSERT
             llm_service = LLMService(db)
             provider, model = llm_service.resolve_provider_model(
                 caller_type="plan_archive_analyze",
                 provider=None,
                 model=None,
+            )
+            prompt, policy_id, policy_version = self._build_prompt_with_policy(
+                filename,
+                file_content=file_content,
+                provider=provider,
+                model=model,
             )
             req = LLMRequest(
                 caller_type="plan_archive_analyze",
@@ -276,32 +303,85 @@ class PlanArchiveListener(BaseWorker):
             db.commit()
             logger.info(
                 f"[{self.name}] LLMRequest 등록 완료 "
-                f"(id={req.id}, file={filename})"
+                f"(id={req.id}, file={filename}, policy_id={policy_id}, "
+                f"policy_version={policy_version})"
             )
 
-    def _build_prompt(self, filename: str) -> str:
+    def _build_prompt(
+        self,
+        filename: str,
+        file_content: str = "",
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> str:
         """LLM 분석 프롬프트 생성.
 
         Args:
             filename: archive 파일 경로
+            file_content: 이미 로드된 파일 내용 (없으면 파일에서 읽기)
+            provider: provider-aware policy를 적용할 때 전달
+            model: model-aware policy를 적용할 때 전달
 
         Returns:
             str: LLM 프롬프트
         """
+        if provider is not None or model is not None:
+            prompt, _policy_id, _policy_version = self._build_prompt_with_policy(
+                filename,
+                file_content=file_content,
+                provider=provider or "claude",
+                model=model or "",
+            )
+            return prompt
+
         from pathlib import Path
-        try:
-            path = Path(filename)
-            content = path.read_text(encoding="utf-8", errors="replace")
-            filename_only = path.name
-        except Exception as e:
-            content = ""
-            filename_only = filename
-            logger.warning(f"[{self.name}] plan 파일 읽기 실패: {filename} ({e})")
+        if file_content:
+            filename_only = Path(filename).name
+        else:
+            try:
+                path = Path(filename)
+                file_content = path.read_text(encoding="utf-8", errors="replace")
+                filename_only = path.name
+            except Exception as e:
+                file_content = ""
+                filename_only = Path(filename).name
+                logger.error(f"[{self.name}] plan 파일 읽기 실패: {filename} ({e})")
 
         from app.modules.claude_worker.services.plan_analyze_handler import (
             build_plan_analyze_prompt,
         )
-        return build_plan_analyze_prompt(file_content=content, filename=filename_only)
+        return build_plan_analyze_prompt(file_content=file_content, filename=filename_only)
+
+    def _build_prompt_with_policy(
+        self,
+        filename: str,
+        file_content: str = "",
+        provider: str = "claude",
+        model: str = "",
+    ) -> tuple[str, str, str]:
+        """LLM 분석 프롬프트와 policy metadata를 생성."""
+        if file_content:
+            filename_only = Path(filename).name
+        else:
+            try:
+                path = Path(filename)
+                file_content = path.read_text(encoding="utf-8", errors="replace")
+                filename_only = path.name
+            except Exception as e:
+                file_content = ""
+                filename_only = Path(filename).name
+                logger.error(f"[{self.name}] plan 파일 읽기 실패: {filename} ({e})")
+
+        return build_plan_archive_prompt(
+            PromptPolicyContext(
+                caller_type="plan_archive_analyze",
+                provider=provider,
+                model=model,
+                filename=filename_only,
+                existing_categories=DEFAULT_CATEGORIES,
+            ),
+            file_content,
+        )
 
     async def _cleanup(self):
         """종료 시 Redis 연결 해제."""

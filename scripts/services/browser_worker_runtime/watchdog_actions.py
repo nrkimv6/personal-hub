@@ -7,6 +7,7 @@ import os
 import subprocess
 import time
 from datetime import datetime
+from pathlib import Path
 
 from scripts.services.browser_worker_runtime.runtime import CYAN, GRAY, GREEN, PROJECT_ROOT, RED, RESET, YELLOW, cprint, _kill_by_cmdline
 
@@ -15,6 +16,25 @@ def _manager():
     from scripts.services.browser_worker_runtime import manager as manager_mod
 
     return manager_mod
+
+
+def _detect_kakao_residual_sentinel(log_dir: Path) -> list[Path]:
+    """Detect stale Kakao watchdog sentinels left by non-graceful exits."""
+    log_dir = Path(log_dir)
+    anomaly_log = log_dir.parent / "kakao_watchdog_anomaly.log"
+    detected_at = datetime.now().isoformat(timespec="seconds")
+    residuals = sorted(log_dir.glob("kakao_watchdog_alive_*.flag"))
+    for sentinel in residuals:
+        try:
+            last_alive = datetime.fromtimestamp(sentinel.stat().st_mtime).isoformat(timespec="seconds")
+            sentinel.unlink(missing_ok=True)
+        except Exception as exc:
+            last_alive = f"unreadable:{exc}"
+        anomaly_log.parent.mkdir(parents=True, exist_ok=True)
+        with anomaly_log.open("a", encoding="utf-8") as fp:
+            fp.write(f"{detected_at}\t{last_alive}\t{sentinel.name}\n")
+        cprint(f"Previous Kakao watchdog last alive at: {last_alive}", YELLOW)
+    return residuals
 
 
 def start(manager):
@@ -42,6 +62,9 @@ def start(manager):
         if str(manager.python_exe) in " ".join(w["cmd"]) and not manager.python_exe.exists():
             cprint(f"{w['name']}: Python venv not found, skipping", RED)
             continue
+
+        if w["name"] == "Kakao Notification Watchdog":
+            _detect_kakao_residual_sentinel(manager.log_dir)
 
         cprint(f"Starting {w['name']}...")
         env = {**os.environ, **w["env"]}

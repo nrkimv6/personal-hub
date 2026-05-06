@@ -12,7 +12,7 @@ class DevRunnerConfig(BaseSettings):
     WTOOLS_BASE_DIR: Path = Path(r"D:\work\project\service\wtools")
 
     # plan 문서 디렉토리
-    PLAN_DIR: Path = Path("common/docs/plan")
+    PLAN_DIR: Path = Path(".worktrees/plans/docs/plan")
 
     # 로그 디렉토리
     LOG_DIR: Path = Path("common/logs")
@@ -49,9 +49,6 @@ class DevRunnerConfig(BaseSettings):
 
     # 동시 실행 가능한 최대 runner 수
     MAX_CONCURRENT_RUNNERS: int = 3
-
-    # worktree 기본 디렉토리
-    WORKTREE_BASE_DIR: Path = Path(r"D:\work\project\tools\monitor-page\.worktrees")
 
     class Config:
         env_prefix = "DEV_RUNNER_"

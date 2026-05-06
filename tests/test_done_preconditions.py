@@ -117,6 +117,26 @@ class TestHasUndefendedPaths:
         )
         assert has_undefended_paths(content) is False
 
+    def test_has_undefended_paths_ignores_zero_count_phrase_B(self):
+        """'미방어 0건' 완료 요약은 잔존 경로로 보지 않는다."""
+        content = (
+            "### Phase R: 재발 경로 분석\n\n"
+            "| 경로 | 방어여부 |\n"
+            "| done precondition | 방어됨 |\n\n"
+            "- 미방어 0건\n"
+            "\n### 다른 섹션\n"
+        )
+        assert has_undefended_paths(content) is False
+
+    def test_has_undefended_paths_ignores_no_unprotected_path_phrase_B(self):
+        """'미방어 경로 없음' 완료 문구는 잔존 경로로 보지 않는다."""
+        content = (
+            "### Phase R: 재발 경로 분석\n\n"
+            "검토 결과: 미방어 경로 없음\n"
+            "\n### 다른 섹션\n"
+        )
+        assert has_undefended_paths(content) is False
+
 
 # ---------------------------------------------------------------------------
 # validate_done_preconditions
@@ -161,6 +181,21 @@ class TestValidateDonePreconditions:
             "# fix: 뭔가\n\n> 상태: 구현중\n\n"
             "### Phase R: 재발 경로 분석\n\n"
             "| 경로 | 방어여부 |\n| path1 | 방어됨 |\n"
+            "\n### 다른\n"
+        )
+        errors = validate_done_preconditions(
+            "docs/plan/2026-03-31_fix-something.md", content
+        )
+        assert errors == []
+
+    def test_validate_done_preconditions_allows_zero_unprotected_phrase_R(self):
+        """fix plan + Phase R + '미방어 0건' 완료 문구 → 빈 리스트"""
+        content = (
+            "# fix: 뭔가\n\n> 상태: 구현완료\n\n"
+            "### Phase R: 재발 경로 분석\n\n"
+            "| 경로 | 방어 상태 |\n"
+            "| done precondition | 방어됨 |\n\n"
+            "최종 결과: 미방어 0건\n"
             "\n### 다른\n"
         )
         errors = validate_done_preconditions(
@@ -267,7 +302,7 @@ class TestHandlePostMergeDoneFixNoPhaseR:
 
         # get_plan_completion mock (100%)
         with patch("plan_worktree_helpers.get_plan_completion", return_value=(5, 5)), \
-             patch("_dr_merge._call_done_api", return_value=True):
+             patch("_dr_merge._call_done_api", return_value={"success": True}):
             _handle_post_merge_done(str(plan_file), "runner-test", pub_fn, mock_redis)
 
         # 상태가 구현완료로 변경되지 않아야 함
@@ -276,6 +311,32 @@ class TestHandlePostMergeDoneFixNoPhaseR:
         assert "머지대기" in result
         # 로그에 사전 검증 실패 메시지
         assert any("Phase R" in log for log in logs)
+
+    def test_fix_plan_phase_r_zero_unprotected_allows_transition_T3(self, tmp_path):
+        """Phase R에 '미방어 0건'이 있어도 구현완료 전이를 차단하지 않는다."""
+        from _dr_merge import _handle_post_merge_done
+
+        plan_file = tmp_path / "2026-03-31_fix-something.md"
+        plan_file.write_text(
+            "# fix: 뭔가\n\n> 상태: 머지대기\n> 진행률: 1/1 (100%)\n\n"
+            "### Phase R: 재발 경로 분석\n\n"
+            "| 경로 | 방어 상태 |\n"
+            "| done precondition | 방어됨 |\n\n"
+            "최종 결과: 미방어 0건\n\n"
+            "- [x] 뭔가\n\n*상태: 머지대기 | 진행률: 1/1 (100%)*\n",
+            encoding="utf-8",
+        )
+
+        logs = []
+        mock_redis = Mock()
+
+        with patch("plan_worktree_helpers.get_plan_completion", return_value=(1, 1)), \
+             patch("_dr_merge._call_done_api", return_value={"success": True}):
+            _handle_post_merge_done(str(plan_file), "runner-test", logs.append, mock_redis)
+
+        result = plan_file.read_text(encoding="utf-8")
+        assert "> 상태: 구현완료" in result
+        assert not any("미방어 경로 잔존" in log for log in logs)
 
 
 class TestArchivePathParity:

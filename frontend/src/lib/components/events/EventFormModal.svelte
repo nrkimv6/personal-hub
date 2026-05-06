@@ -6,6 +6,7 @@
 	import { prizesToText, textToPrizes } from '$lib/utils/eventUtils';
 	import { Button } from '$lib/components/ui';
 	import { eventApi } from '$lib/api/system';
+	import { toast } from '$lib/stores/toast';
 
 	interface Props {
 		show: boolean;
@@ -38,6 +39,10 @@
 	let duplicateWarning = $state<{ url: string; eventId: number; title: string } | null>(null);
 	let isCheckingDuplicate = $state(false);
 	let duplicateCheckTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
 
 	// URL 중복 체크 (debounced)
 	async function checkDuplicateUrl(url: string, index: number) {
@@ -186,7 +191,7 @@
 	async function handleSave() {
 		const title = eventForm.title ?? '';
 		if (!title.trim()) {
-			alert('제목을 입력해주세요.');
+			toast.warning('제목을 입력해주세요.');
 			return;
 		}
 		isSaving = true;
@@ -215,7 +220,7 @@
 			await onSave(formData, !!editingEvent);
 			onClose();
 		} catch (e) {
-			alert('저장 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('저장 실패: ' + errorMessage(e));
 		} finally {
 			isSaving = false;
 		}

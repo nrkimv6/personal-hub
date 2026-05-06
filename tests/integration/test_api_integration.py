@@ -11,6 +11,7 @@ API Integration Tests
 """
 
 import pytest
+import time
 
 # requests는 optional dependency
 try:
@@ -44,19 +45,22 @@ class TestBusinessAPI:
         data = response.json()
         assert isinstance(data, list)
 
-    def test_create_and_get_business(self, integration_server):
+    def test_create_and_get_business(self, integration_server, integration_cleanup):
         """업체 생성 및 조회"""
+        unique_business_id = f"tc-{time.time_ns()}"
+
         # 생성
         create_response = requests.post(
             f"{integration_server}/api/v1/businesses",
             json={
+                "business_id": unique_business_id,
                 "name": "테스트 업체",
-                "url": "https://booking.naver.com/booking/13/bizes/1234567"
+                "service_type": "naver",
             }
         )
 
-        # 생성 성공 또는 이미 존재
-        assert create_response.status_code in [200, 201, 409]
+        assert create_response.status_code == 201
+        integration_cleanup.add_business(create_response.json().get("id"))
 
         # 목록 조회
         list_response = requests.get(f"{integration_server}/api/v1/businesses")
@@ -91,6 +95,7 @@ class TestBusinessUrlImportAPI:
         "https://booking.naver.com/booking/12/bizes/1630978/items/7575050"
         "?startDateTime=2026-04-25T00%3A00%3A00%2B09%3A00"
     )
+    # Fixed live fixture data: these TC intentionally do not register cleanup.
 
     def test_import_url_right_url_only_autofills_names(self, integration_server):
         """R: item_name 없이 URL만으로 200 + business_id/item_id 반환"""
@@ -128,9 +133,12 @@ class TestBusinessUrlImportAPI:
         assert data.get("business") is not None
         assert data["business"].get("name")
 
-    def test_import_url_right_with_manual_item_name_preserved(self, integration_server):
+    def test_import_url_right_with_manual_item_name_preserved(
+        self,
+        integration_server,
+        integration_cleanup,
+    ):
         """R 회귀: item_name 직접 지정 시 해당 값 그대로 저장 (신규 생성 케이스만 검증)"""
-        import time
         ts = int(time.time())
         unique_name = f"TC_아이템_{ts}"
         # 타임스탬프 기반 ID → 기존 DB에 존재할 가능성 없음 (신규 생성 강제)
@@ -147,6 +155,7 @@ class TestBusinessUrlImportAPI:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
+        integration_cleanup.add_import_result(data)
         assert data["biz_item"]["name"] == unique_name
 
     def test_import_url_error_invalid_url_format(self, integration_server):

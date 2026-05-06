@@ -10,11 +10,21 @@ API 서버와 분리되어 독립적으로 실행됩니다.
 """
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
-from app.worker.scheduled_worker import ScheduledCrawlWorker
-from app.worker.ondemand_worker import OnDemandCrawlWorker
 
 __all__ = [
     'CrawlWorkerBase',
     'ScheduledCrawlWorker',
     'OnDemandCrawlWorker',
 ]
+
+
+def __getattr__(name):
+    if name == "ScheduledCrawlWorker":
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        return ScheduledCrawlWorker
+    if name == "OnDemandCrawlWorker":
+        from app.worker.ondemand_worker import OnDemandCrawlWorker
+
+        return OnDemandCrawlWorker
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

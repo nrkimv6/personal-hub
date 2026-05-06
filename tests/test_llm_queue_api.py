@@ -176,6 +176,31 @@ class TestListRequestsQueueFilter:
         data = response.json()
         assert data["total"] >= 2
 
+    def test_llm_requests_R_processing_failed_status_visible(self, client, test_db_session):
+        """R: /llm/requests는 llm_requests.status 값을 그대로 반환한다."""
+        _seed_llm_request(
+            test_db_session,
+            caller_id="archive-processing",
+            caller_type="plan_archive_analyze",
+            status="processing",
+        )
+        _seed_llm_request(
+            test_db_session,
+            caller_id="archive-failed",
+            caller_type="plan_archive_analyze",
+            status="failed",
+        )
+
+        response = client.get("/api/v1/llm/requests?caller_type=plan_archive_analyze&page_size=100")
+
+        assert response.status_code == 200
+        statuses_by_caller = {
+            item["caller_id"]: item["status"]
+            for item in response.json()["items"]
+        }
+        assert statuses_by_caller["archive-processing"] == "processing"
+        assert statuses_by_caller["archive-failed"] == "failed"
+
 
 class TestCliOptionsPassthrough:
     """cli_options 파라미터 passthrough 및 계획서 작성 시나리오 테스트."""
@@ -240,6 +265,28 @@ class TestCliOptionsPassthrough:
         stored = _json.loads(req.cli_options)
         assert stored["cwd"] == "D:/work/project/service/wtools"
         assert req.prompt.startswith("/plan")
+
+    def test_create_gemini_request_preserves_image_path_cli_options(self, client, test_db_session):
+        """gemini 요청 생성 시 provider/model/image_path가 그대로 저장된다."""
+        response = client.post("/api/v1/llm/requests", json={
+            "caller_type": "image_classifier",
+            "caller_id": "gemini-create-1",
+            "prompt": "classify this",
+            "provider": "gemini",
+            "model": "gemini-2.0-flash",
+            "cli_options": {"image_path": "D:/images/sample.png"},
+        })
+        assert response.status_code in (200, 201)
+        data = response.json()
+        assert data["provider"] == "gemini"
+        assert data["model"] == "gemini-2.0-flash"
+        assert data["cli_options"]["image_path"] == "D:/images/sample.png"
+
+        req = test_db_session.query(LLMRequest).filter_by(caller_id="gemini-create-1").first()
+        assert req is not None
+        assert req.provider == "gemini"
+        assert req.model == "gemini-2.0-flash"
+        assert req.cli_options is not None
 
 
 class TestQueueStats:
@@ -624,6 +671,51 @@ class TestBatchRetryRoutes:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["detail"] == "Cannot retry this request"
+
+
+class TestGeminiQueueHttp:
+    def test_list_requests_R_keeps_gemini_provider_model_and_cli_options(self, client):
+        client.post("/api/v1/llm/requests", json={
+            "caller_type": "image_classifier",
+            "caller_id": "gemini-list-1",
+            "prompt": "describe image",
+            "provider": "gemini",
+            "model": "gemini-2.5-pro",
+            "cli_options": {"image_path": "D:/images/list.png"},
+        })
+
+        response = client.get("/api/v1/llm/requests?caller_type=image_classifier")
+        assert response.status_code == 200
+        items = response.json()["items"]
+        target = next(item for item in items if item["caller_id"] == "gemini-list-1")
+        assert target["provider"] == "gemini"
+        assert target["model"] == "gemini-2.5-pro"
+        assert target["cli_options"]["image_path"] == "D:/images/list.png"
+
+    def test_get_request_detail_R_exposes_failed_gemini_error_and_raw_response(self, client, test_db_session):
+        request = LLMRequest(
+            caller_type="image_classifier",
+            caller_id="gemini-detail-1",
+            prompt="failed prompt",
+            status="failed",
+            provider="gemini",
+            model="gemini-2.5-pro",
+            error_message="Gemini CLI error: malformed",
+            raw_response="raw malformed output",
+            cli_options='{"image_path":"D:/images/detail.png"}',
+        )
+        test_db_session.add(request)
+        test_db_session.commit()
+        test_db_session.refresh(request)
+
+        response = client.get(f"/api/v1/llm/requests/{request.id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["provider"] == "gemini"
+        assert body["model"] == "gemini-2.5-pro"
+        assert body["error_message"] == "Gemini CLI error: malformed"
+        assert body["raw_response"] == "raw malformed output"
+        assert body["cli_options"]["image_path"] == "D:/images/detail.png"
 
 
 # ─── Phase 4: LLM defaults API + Instagram caller 우선순위 계약 ─────────────

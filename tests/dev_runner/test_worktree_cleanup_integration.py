@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import importlib
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,11 @@ def _add_worktree(repo: Path, branch: str, folder_name: str) -> Path:
 def _import_process_utils():
     bootstrap_plan_runner_modules()
     return sys.modules["_dr_process_utils"]
+
+
+def _import_worktree_manager():
+    bootstrap_plan_runner_modules()
+    return importlib.import_module("worktree_manager").WorktreeManager
 
 
 @pytest.mark.asyncio
@@ -202,3 +208,24 @@ def test_integration_sessionfinish_removes_real_test_runner(tmp_path: Path):
     assert branch not in _git(repo, "worktree", "list", "--porcelain").stdout
     assert not worktree.exists()
     assert branch not in _git(repo, "branch", "--list", branch).stdout
+
+
+def test_integration_test_source_plan_file_uses_runner_worktree_identity(tmp_path: Path):
+    repo = _init_repo(tmp_path)
+    plan_file = repo / "tests" / "dev_runner" / "fixtures" / "test_minimal_plan.md"
+    plan_file.parent.mkdir(parents=True, exist_ok=True)
+    plan_file.write_text("# test\n\n## TODO\n- [ ] item\n", encoding="utf-8")
+
+    WorktreeManager = _import_worktree_manager()
+    path, branch = WorktreeManager.create(
+        "t-minimal-1234",
+        repo / ".worktrees",
+        plan_file=str(plan_file),
+        use_runner_identity=True,
+    )
+
+    listed = _git(repo, "worktree", "list", "--porcelain").stdout
+    assert path == repo / ".worktrees" / "t-minimal-1234"
+    assert branch == "runner/t-minimal-1234"
+    assert "runner/t-minimal-1234" in listed
+    assert "plan/test_minimal_plan" not in listed

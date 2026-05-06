@@ -1,8 +1,9 @@
 """Executor + _parse_json_response TC (Task 25)."""
 import json
 import subprocess
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 @pytest.fixture
@@ -74,6 +75,92 @@ class TestClaudeExecutor:
         with patch("shutil.which", return_value="/usr/bin/gemini"):
             result = executor.execute("prompt")
         assert result["success"] is False
+
+    @patch("subprocess.run")
+    def test_gemini_executor_R_uses_direct_utf8_stdin_without_shell(self, mock_run):
+        """R: Gemini는 shell pipe 대신 argv + UTF-8 stdin을 사용한다."""
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        mock_run.return_value = MagicMock(returncode=0, stdout='{"ok": true}', stderr="")
+        executor = GeminiExecutor()
+        executor.execute(
+            "한글 prompt",
+            model="gemini-2.5-pro",
+            cli_options={"image_path": "C:/tmp/image.png"},
+            parse_json=False,
+        )
+
+        mock_run.assert_called_once()
+        args, kwargs = mock_run.call_args
+        assert args[0] == ["gemini", "--model", "gemini-2.5-pro", "@C:/tmp/image.png"]
+        assert kwargs["input"] == "한글 prompt"
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
+        assert kwargs["shell"] is False
+
+    @patch("subprocess.run")
+    def test_gemini_executor_R_preserves_image_path_arg(self, mock_run):
+        """R: image_path는 argv 마지막 @경로 인수로 유지된다."""
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        mock_run.return_value = MagicMock(returncode=0, stdout='{"ok": true}', stderr="")
+        executor = GeminiExecutor()
+        executor.execute("prompt", cli_options={"image_path": "D:/img/sample.png"}, parse_json=False)
+
+        args, _ = mock_run.call_args
+        assert args[0] == ["gemini", "@D:/img/sample.png"]
+
+    @patch("subprocess.run")
+    def test_gemini_executor_E_never_uses_type_pipe(self, mock_run):
+        """E: Windows shell pipe 문자열은 더 이상 생성되지 않는다."""
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        mock_run.return_value = MagicMock(returncode=0, stdout='{"ok": true}', stderr="")
+        executor = GeminiExecutor()
+        executor.execute("prompt", parse_json=False)
+
+        args, _ = mock_run.call_args
+        command = args[0]
+        assert isinstance(command, list)
+        assert all("type " not in part for part in command)
+
+    @patch("subprocess.run")
+    def test_gemini_executor_B_parse_json_false_returns_raw_response(self, mock_run):
+        """B: parse_json=False이면 raw_response를 그대로 반환한다."""
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="plain text", stderr="")
+        executor = GeminiExecutor()
+        result = executor.execute("prompt", parse_json=False)
+
+        assert result == {"success": True, "result": None, "raw_response": "plain text"}
+
+    @patch("subprocess.run")
+    def test_gemini_executor_E_quota_failure_keeps_retry_ms(self, mock_run):
+        """E: quota stderr는 quota_retry_ms를 유지한다."""
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="TerminalQuotaError\nretryDelayMs: 22751416",
+        )
+        executor = GeminiExecutor()
+        result = executor.execute("prompt")
+
+        assert result["success"] is False
+        assert result["quota_retry_ms"] == 22751416
+
+    @patch("subprocess.run", side_effect=FileNotFoundError)
+    def test_gemini_executor_E_cli_not_found_message(self, mock_run):
+        """E: Gemini CLI 미설치 시 안내 메시지를 유지한다."""
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        executor = GeminiExecutor()
+        result = executor.execute("prompt")
+
+        assert result["success"] is False
+        assert "Gemini CLI not found" in result["error"]
 
 
 class TestParseJsonResponse:

@@ -13,7 +13,6 @@
 """
 import ctypes
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -24,7 +23,6 @@ import pytest
 import redis as redis_lib
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.modules.dev_runner.config import DevRunnerConfig
 from app.modules.dev_runner.services.executor_service import RUNNER_KEY_SUFFIXES, ACTIVE_RUNNERS_KEY
 from tests.dev_runner.conftest_e2e import (
@@ -33,13 +31,18 @@ from tests.dev_runner.conftest_e2e import (
     isolated_redis_db15,
     RUNNER_KEY_PREFIX,
     _cleanup_test_worktrees,
+    copy_fixture_plan_to_tmp,
 )
 
 pytestmark = pytest.mark.full_e2e
 
 BASE_URL = "/api/v1/dev-runner"
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _config = DevRunnerConfig()
+
+
+def _build_app():
+    from app.main import app
+    return app
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -157,15 +160,21 @@ def http_client():
     RuntimeError: Event loop is closed 발생.
     scope="class"로 동일 TestClient 인스턴스를 클래스 내 모든 테스트가 공유.
     """
-    with TestClient(app) as client:
+    with TestClient(_build_app()) as client:
         yield client
 
 
-def _post_run(http_client, plan_file: str, max_cycles: int = 1, tracker=None) -> str:
+def _post_run(
+    http_client,
+    plan_file: str,
+    max_cycles: int = 1,
+    tracker=None,
+    test_source: str = "full_e2e",
+) -> str:
     """POST /run → runner_id 반환. tracker 리스트 지정 시 runner_id 자동 등록."""
     resp = http_client.post(
         f"{BASE_URL}/run",
-        json={"plan_file": plan_file, "max_cycles": max_cycles},
+        json={"plan_file": plan_file, "max_cycles": max_cycles, "test_source": test_source},
     )
     assert resp.status_code == 200, f"POST /run 실패: {resp.status_code} {resp.text}"
     runner_id = resp.json().get("runner_id")
@@ -211,15 +220,21 @@ class TestFullE2E:
             real_redis_db0.zrem("plan-runner:recent_runners", rid)
         _cleanup_test_worktrees()  # ← 추가: worktree/branch 잔류 보장 제거
 
-    def test_single_plan_1cycle(self, http_client, listener_process, isolated_redis_db15, e2e_redis_cleanup):
+    def test_single_plan_1cycle(self, http_client, listener_process, isolated_redis_db15, e2e_redis_cleanup, tmp_path):
         """단일 plan 파일로 1 cycle 실행 → 완료까지 대기
 
         검증:
         - running=True → cycle 진행 → running=False
         - 로그 파일에 내용이 기록됨 (size > 0)
         """
-        plan_file = str(FIXTURES_DIR / "test_minimal_plan.md")
-        runner_id = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan.md"))
+        runner_id = _post_run(
+            http_client,
+            plan_file,
+            max_cycles=1,
+            tracker=self._started_runners,
+            test_source="full_e2e_single_plan",
+        )
 
         assert _wait_until_not_running(isolated_redis_db15, runner_id, timeout=600), (
             f"runner {runner_id}가 10분 내 완료되지 않음"
@@ -229,15 +244,21 @@ class TestFullE2E:
         if log_path and Path(log_path).exists():
             assert Path(log_path).stat().st_size > 0, "로그 파일이 비어 있음"
 
-    def test_single_plan_with_merge(self, http_client, listener_process, isolated_redis_db15, e2e_redis_cleanup):
+    def test_single_plan_with_merge(self, http_client, listener_process, isolated_redis_db15, e2e_redis_cleanup, tmp_path):
         """1 cycle 실행 후 merge queue 진입 → 상태 확인
 
         검증:
         - worktree_path 키로 worktree 디렉토리 생성 확인 (생성 시)
         - 완료 후 merge_status 또는 None 확인 (merge 성공/실패)
         """
-        plan_file = str(FIXTURES_DIR / "test_minimal_plan.md")
-        runner_id = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan.md"))
+        runner_id = _post_run(
+            http_client,
+            plan_file,
+            max_cycles=1,
+            tracker=self._started_runners,
+            test_source="full_e2e_single_plan_merge",
+        )
 
         assert _wait_until_not_running(isolated_redis_db15, runner_id, timeout=600), (
             f"runner {runner_id}가 10분 내 완료되지 않음"
@@ -265,17 +286,21 @@ class TestFullE2E:
         log_paths_set이 비어있으면 "공유 없음"으로 간주하여 통과.
         (핵심 검증: runner_id 차별성. 로그 파일 고유성은 실서버 E2E에서 확인)
         """
-        # branch/worktree 필드 없는 임시 플랜 파일 사용
-        # (plan-runner가 merge 시도하지 않도록, 이전 테스트 실행이 필드를 추가해도 영향 없음)
-        src_content = (FIXTURES_DIR / "test_minimal_plan.md").read_text(encoding="utf-8")
-        src_content = re.sub(r"^> branch:.*\n", "", src_content, flags=re.MULTILINE)
-        src_content = re.sub(r"^> worktree:.*\n", "", src_content, flags=re.MULTILINE)
-        plan_tmp = tmp_path / "test_batch_plan.md"
-        plan_tmp.write_text(src_content, encoding="utf-8")
-
-        plan_file = str(plan_tmp)
-        runner_id_1 = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
-        runner_id_2 = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
+        plan_file = str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan.md"))
+        runner_id_1 = _post_run(
+            http_client,
+            plan_file,
+            max_cycles=1,
+            tracker=self._started_runners,
+            test_source="full_e2e_batch_one",
+        )
+        runner_id_2 = _post_run(
+            http_client,
+            plan_file,
+            max_cycles=1,
+            tracker=self._started_runners,
+            test_source="full_e2e_batch_two",
+        )
 
         assert runner_id_1 != runner_id_2, "2개 실행 시 runner_id가 동일하면 안 됨"
 

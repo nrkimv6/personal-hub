@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { monitoringEventApi, businessApi } from '$lib/api';
 	import type { MonitoringEvent, MonitoringEventStats, Business } from '$lib/types';
+	import { toast } from '$lib/stores/toast';
 
 	let monitoringEvents: MonitoringEvent[] = [];
 	let monitoringStats: MonitoringEventStats | null = null;
@@ -181,7 +182,7 @@
 		if (!response) return;
 		try {
 			await navigator.clipboard.writeText(formatJson(response));
-			alert('GraphQL 응답이 클립보드에 복사되었습니다.');
+			toast.success('GraphQL 응답이 클립보드에 복사되었습니다.');
 		} catch (e) {
 			console.error('클립보드 복사 실패:', e);
 		}

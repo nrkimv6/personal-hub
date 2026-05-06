@@ -51,6 +51,8 @@ def client():
 class TestGetRunners:
     """GET /runners — 활성 runner 목록"""
 
+    pytestmark = pytest.mark.http
+
     def test_get_runners_returns_list(self, client):
         """Redis mock → 200 + list 형식 응답"""
         mock_items = [
@@ -62,6 +64,10 @@ class TestGetRunners:
                 start_time=datetime.now(),
                 execution_count=2,
                 pid=1234,
+                worktree_exists=False,
+                branch_exists=True,
+                branch_merged_to_main=True,
+                metadata_checked_at="2026-05-05T21:32:00",
             )
         ]
         with patch.object(executor_service, "get_all_runners", return_value=mock_items):
@@ -74,6 +80,30 @@ class TestGetRunners:
         assert data[0]["runner_id"] == "t-apimulti-abc1"
         assert data[0]["running"] is True
         assert data[0]["execution_count"] == 2
+        assert data[0]["worktree_exists"] is False
+        assert data[0]["branch_exists"] is True
+        assert data[0]["branch_merged_to_main"] is True
+        assert data[0]["metadata_checked_at"] == "2026-05-05T21:32:00"
+
+    def test_get_runners_defaults_missing_metadata_to_unknown(self, client):
+        """구버전 runner payload에 snapshot 필드가 없어도 unknown 계약을 유지한다."""
+        mock_items = [
+            {
+                "runner_id": "t-apimulti-old1",
+                "running": False,
+                "plan_file": "old.md",
+                "visible": True,
+            }
+        ]
+        with patch.object(executor_service, "get_all_runners", return_value=mock_items):
+            resp = client.get(f"{BASE_URL}/runners")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data[0]["worktree_exists"] == "unknown"
+        assert data[0]["branch_exists"] == "unknown"
+        assert data[0]["branch_merged_to_main"] == "unknown"
+        assert data[0]["metadata_checked_at"] == "unknown"
 
     def test_get_runners_redis_unavailable_returns_empty_list(self, client):
         """Redis 미연결 → 200 빈 list (예외 미전파)"""
@@ -86,6 +116,8 @@ class TestGetRunners:
 
 class TestStopRunner:
     """POST /runners/{runner_id}/stop"""
+
+    pytestmark = pytest.mark.http
 
     def test_stop_existing_runner(self, client):
         """존재하는 runner → 200"""
@@ -108,6 +140,8 @@ class TestStopRunner:
 
 class TestPostRun:
     """POST /run — runner_id 필드 존재 확인"""
+
+    pytestmark = pytest.mark.http
 
     def test_run_response_contains_runner_id(self, client):
         """POST /run 성공 응답 JSON에 runner_id 필드 존재 + 8자 hex"""
@@ -145,6 +179,8 @@ class TestPostRun:
 
 class TestGetRecentLogs:
     """GET /logs/recent?runner_id=...&lines=N"""
+
+    pytestmark = pytest.mark.http
 
     def test_get_recent_logs_with_runner_id(self, client):
         """runner_id 있으면 200 + LogResponse 스키마"""

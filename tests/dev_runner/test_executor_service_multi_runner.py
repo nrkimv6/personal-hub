@@ -136,6 +136,10 @@ class TestGetAllRunners:
                 f"{RUNNER_KEY_PREFIX}:abc12345:plan_file": "test.md",
                 f"{RUNNER_KEY_PREFIX}:abc12345:engine": "claude",
                 f"{RUNNER_KEY_PREFIX}:abc12345:start_time": datetime.now().isoformat(),
+                f"{RUNNER_KEY_PREFIX}:abc12345:worktree_exists": "false",
+                f"{RUNNER_KEY_PREFIX}:abc12345:branch_exists": "true",
+                f"{RUNNER_KEY_PREFIX}:abc12345:branch_merged_to_main": "true",
+                f"{RUNNER_KEY_PREFIX}:abc12345:metadata_checked_at": "2026-05-05T21:30:00",
             }
             return mapping.get(key)
 
@@ -147,6 +151,10 @@ class TestGetAllRunners:
         assert result[0].runner_id == "abc12345"
         assert result[0].running is True
         assert result[0].plan_file == "test.md"
+        assert result[0].worktree_exists is False
+        assert result[0].branch_exists is True
+        assert result[0].branch_merged_to_main is True
+        assert result[0].metadata_checked_at == "2026-05-05T21:30:00"
 
 
 class TestStopDevRunner:
@@ -194,6 +202,10 @@ class TestGetRunnerStatus:
                 f"{RUNNER_KEY_PREFIX}:abc12345:plan_file": "my_plan.md",
                 f"{RUNNER_KEY_PREFIX}:abc12345:engine": "gemini",
                 f"{RUNNER_KEY_PREFIX}:abc12345:start_time": start_time,
+                f"{RUNNER_KEY_PREFIX}:abc12345:worktree_exists": "false",
+                f"{RUNNER_KEY_PREFIX}:abc12345:branch_exists": "false",
+                f"{RUNNER_KEY_PREFIX}:abc12345:branch_merged_to_main": "true",
+                f"{RUNNER_KEY_PREFIX}:abc12345:metadata_checked_at": "2026-05-05T21:31:00",
             }
             return mapping.get(key)
 
@@ -207,6 +219,34 @@ class TestGetRunnerStatus:
         assert result.pid == 5678
         assert result.plan_file == "my_plan.md"
         assert result.engine == "gemini"
+        assert result.worktree_exists is False
+        assert result.branch_exists is False
+        assert result.branch_merged_to_main is True
+        assert result.metadata_checked_at == "2026-05-05T21:31:00"
+
+    @pytest.mark.asyncio
+    async def test_status_metadata_absent_defaults_unknown(self, executor):
+        """snapshot 필드가 없는 구버전 runner는 unknown fallback으로 응답한다."""
+        start_time = datetime.now().isoformat()
+
+        async def get_side_effect(key):
+            mapping = {
+                f"{RUNNER_KEY_PREFIX}:abc12346:status": "stopped",
+                f"{RUNNER_KEY_PREFIX}:abc12346:plan_file": "old_plan.md",
+                f"{RUNNER_KEY_PREFIX}:abc12346:engine": "claude",
+                f"{RUNNER_KEY_PREFIX}:abc12346:start_time": start_time,
+            }
+            return mapping.get(key)
+
+        executor.async_redis.get = get_side_effect
+
+        result = await executor.get_runner_status("abc12346")
+
+        assert result.running is False
+        assert result.worktree_exists == "unknown"
+        assert result.branch_exists == "unknown"
+        assert result.branch_merged_to_main == "unknown"
+        assert result.metadata_checked_at == "unknown"
 
     @pytest.mark.asyncio
     async def test_redis_connection_error_returns_not_running(self):

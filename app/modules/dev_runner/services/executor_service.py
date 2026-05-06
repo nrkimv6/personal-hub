@@ -7,7 +7,7 @@ import traceback
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, Optional
 
 from sqlalchemy import text
 
@@ -28,6 +28,7 @@ from app.modules.claude_worker.services.profile_env import ENGINE_ENV_KEYS
 from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_history_path
 from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.services.visibility import is_visible_runner
+from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
 from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
 from app.modules.dev_runner.services.state import get_state
 from app.modules.dev_runner.services.redis_connection import (
@@ -49,6 +50,94 @@ __all__ = [
     "RECENT_RUNNERS_TTL", "RUNNER_KEY_SUFFIXES",
     "COMMANDS_KEY", "RESULTS_KEY", "COMMAND_TIMEOUT",
 ]
+
+
+def _decode_runner_value(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _release_claim_safe(claim_id: Optional[str]) -> None:
+    """claim을 안전하게 release한다 — 실패 시 warning만 기록."""
+    if not claim_id:
+        return
+    try:
+        from app.database import SessionLocal
+        from app.modules.dev_runner.services.plan_execution_claim_service import release_claim as _rc
+        _db = SessionLocal()
+        try:
+            _rc(_db, claim_id)
+        finally:
+            _db.close()
+    except Exception as _e:
+        from app.config import logger as _logger
+        _logger.warning(f"[claim] release 실패 (무시): claim_id={claim_id} error={_e}")
+
+
+def _coerce_runner_metadata_state(*values: Any) -> bool | str:
+    for value in values:
+        decoded = _decode_runner_value(value)
+        if decoded is None:
+            continue
+        if isinstance(decoded, bool):
+            return decoded
+        normalized = str(decoded).strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no"}:
+            return False
+        if normalized == "unknown" or normalized == "":
+            continue
+    return "unknown"
+
+
+def _coerce_runner_metadata_checked_at(*values: Any) -> str:
+    for value in values:
+        decoded = _decode_runner_value(value)
+        if decoded is None:
+            continue
+        text = str(decoded).strip()
+        if text and text.lower() != "unknown":
+            return text
+    return "unknown"
+
+
+def _resolve_runner_plan_path(plan_file: str | None) -> Path | None:
+    if not plan_file or plan_file in ("__ALL_PLANS__", "ALL"):
+        return None
+    path = Path(str(plan_file))
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+def _is_post_merge_phase_header(header: str) -> bool:
+    return bool(re.search(r"\b(?:phase\s+)?(?:t4|t5|z)\b", header.strip(), re.IGNORECASE))
+
+
+def _remaining_leaf_summary_for_plan(plan_file: str | None) -> dict[str, int]:
+    summary = {"impl": 0, "post_merge": 0, "total": 0}
+    plan_path = _resolve_runner_plan_path(plan_file)
+    if not plan_path or not plan_path.exists():
+        return summary
+    current_phase = ""
+    checkbox_re = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(?:[-*]\s+)?\[\s\]")
+    phase_re = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
+    try:
+        for line in plan_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            phase_match = phase_re.match(line)
+            if phase_match:
+                current_phase = phase_match.group(1)
+                continue
+            if not checkbox_re.match(line):
+                continue
+            key = "post_merge" if _is_post_merge_phase_header(current_phase) else "impl"
+            summary[key] += 1
+            summary["total"] += 1
+    except Exception as exc:
+        logger.debug(f"[dev-runner] remaining leaf summary 실패: plan={plan_file}, error={exc}")
+    return summary
 
 
 class ExecutorService:
@@ -206,6 +295,102 @@ class ExecutorService:
             result[f] = await self.async_redis.get(self._runner_key(rid, f))
         return result
 
+    @staticmethod
+    def _parse_runner_id_from_key(raw_key: Any, suffix: str) -> str | None:
+        key = _decode_runner_value(raw_key)
+        if not isinstance(key, str):
+            return None
+        prefix = f"{RUNNER_KEY_PREFIX}:"
+        marker = f":{suffix}"
+        if not key.startswith(prefix) or not key.endswith(marker):
+            return None
+        runner_id = key[len(prefix):-len(marker)]
+        return runner_id or None
+
+    async def _scan_runner_ids_with_suffix(self, suffix: str) -> set[str]:
+        pattern = f"{RUNNER_KEY_PREFIX}:*:{suffix}"
+        result: set[str] = set()
+        try:
+            iterator = self.async_redis.scan_iter(pattern)
+            if hasattr(iterator, "__aiter__"):
+                async for key in iterator:
+                    runner_id = self._parse_runner_id_from_key(key, suffix)
+                    if runner_id:
+                        result.add(runner_id)
+            else:
+                for key in iterator:
+                    runner_id = self._parse_runner_id_from_key(key, suffix)
+                    if runner_id:
+                        result.add(runner_id)
+        except Exception as exc:
+            logger.debug("[dev-runner] runner suffix scan failed suffix=%s: %s", suffix, exc)
+        return result
+
+    @staticmethod
+    def _normalize_runner_id_set(values: Any) -> set[str]:
+        return {str(decoded) for value in (values or []) if (decoded := _decode_runner_value(value))}
+
+    def _filesystem_log_for_runner(self, runner_id: str) -> Path | None:
+        try:
+            return LogFileResolver(config, self.redis_client).find_filesystem_log(runner_id)
+        except Exception as exc:
+            logger.debug("[dev-runner] filesystem log fallback failed runner=%s: %s", runner_id, exc)
+            return None
+
+    @staticmethod
+    def _coerce_datetime(raw: Any) -> datetime | None:
+        value = _decode_runner_value(raw)
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _coerce_int(raw: Any) -> int | None:
+        value = _decode_runner_value(raw)
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _apply_log_meta_fallbacks(
+        self,
+        *,
+        runner_id: str,
+        log_path: Path | None,
+        recent_meta: dict,
+        trigger: str | None,
+        plan_file: str | None,
+        engine: str | None,
+        start_time: datetime | None,
+        execution_count: int | None,
+        display_plan_name: str | None,
+    ) -> tuple[str | None, str | None, str | None, datetime | None, int | None, str | None]:
+        if log_path:
+            log_meta = LogFileResolver.parse_meta_from_log(str(log_path))
+            trigger = trigger or log_meta.get("trigger")
+            plan_file = plan_file or log_meta.get("plan") or log_meta.get("plan_key")
+            start_time = start_time or self._coerce_datetime(log_meta.get("started_at"))
+            execution_count = execution_count if execution_count is not None else self._coerce_int(log_meta.get("execution_count"))
+            display_plan_name = display_plan_name or LogFileResolver.display_plan_name_from_meta(log_meta)
+
+        trigger = trigger or recent_meta.get("trigger")
+        plan_file = plan_file or recent_meta.get("plan_file")
+        engine = engine or recent_meta.get("engine")
+        start_time = start_time or self._coerce_datetime(recent_meta.get("started_at") or recent_meta.get("accepted_at"))
+        execution_count = execution_count if execution_count is not None else self._coerce_int(recent_meta.get("execution_count"))
+        if not display_plan_name:
+            display_plan_name = recent_meta.get("display_plan_name")
+        if not display_plan_name and plan_file:
+            display_plan_name = Path(str(plan_file)).name
+        if not display_plan_name and log_path:
+            display_plan_name = log_path.name
+        return trigger, plan_file, engine, start_time, execution_count, display_plan_name
+
     async def _send_command(self, command: dict, timeout: int = COMMAND_TIMEOUT) -> dict | None:
         """Redis 명령 전송 공통 메서드 — LPUSH + BRPOP + delete + parse 패턴.
 
@@ -362,6 +547,52 @@ class ExecutorService:
             if ignored_paths:
                 command["ignored_plans"] = ",".join(ignored_paths)
 
+        # ── Claim 생성 (plan_file 지정 시) ──────────────────────────────
+        _new_claim_id: Optional[str] = None
+        if request.plan_file:
+            try:
+                from app.database import SessionLocal as _ClaimSessionLocal
+                from app.modules.dev_runner.services.plan_execution_claim_service import (
+                    claim_plan as _claim_plan,
+                    ClaimConflictError as _ClaimConflictError,
+                )
+                _claim_db = _ClaimSessionLocal()
+                try:
+                    _new_claim = _claim_plan(
+                        _claim_db,
+                        request.plan_file,
+                        engine=resolved_engine,
+                        session_id=session_id,
+                        runner_id=runner_id,
+                    )
+                    _new_claim_id = _new_claim.claim_id
+                    logger.info(
+                        f"[claim] queued claim created: claim_id={_new_claim_id} plan={request.plan_file}"
+                    )
+                except _ClaimConflictError as _conflict:
+                    _ec = _conflict.existing_claim
+                    _stale = (
+                        _ec.lease_expires_at is not None
+                        and _ec.lease_expires_at < datetime.now()
+                    )
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "message": f"plan already claimed: claim_id={_ec.claim_id} state={_ec.state}",
+                            "claim_id": _ec.claim_id,
+                            "claim_state": _ec.state,
+                            "stale": _stale,
+                            "lease_expires_at": _ec.lease_expires_at.isoformat() if _ec.lease_expires_at else None,
+                        },
+                    )
+                finally:
+                    _claim_db.close()
+            except HTTPException:
+                raise
+            except Exception as _claim_err:
+                logger.warning(f"[claim] claim_plan 실패 (무시, 실행 계속): {_claim_err}")
+        # ────────────────────────────────────────────────────────────────
+
         try:
             # session_id를 Redis에 저장 (TTL 24h)
             await self.async_redis.set(
@@ -371,6 +602,7 @@ class ExecutorService:
             result_data = await self._send_command(command)
             if result_data is None:
                 await self._cleanup_runner_state(runner_id, reason="start_timeout")
+                _release_claim_safe(_new_claim_id)
                 raise HTTPException(
                     status_code=504,
                     detail="Command timeout - listener may not be responding"
@@ -378,6 +610,12 @@ class ExecutorService:
 
             if not result_data.get("success"):
                 message = result_data.get("message", "Failed to start")
+                _release_claim_safe(_new_claim_id)
+                if result_data.get("reason") == "reserved_status":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=message,
+                    )
                 if self._is_codex_preflight_failure(resolved_engine, resolved_fix_engine, message):
                     raise HTTPException(
                         status_code=422,
@@ -388,8 +626,9 @@ class ExecutorService:
                     detail=message,
                 )
 
-            # 기존 워커에 attach된 경우 → 기존 runner_id로 상태 반환
+            # 기존 워커에 attach된 경우 → 기존 runner_id로 상태 반환 (새 claim이 있으면 정리)
             if result_data.get("status") == "attached":
+                _release_claim_safe(_new_claim_id)
                 existing_id = result_data["runner_id"]
                 fields = await self._get_runner_fields(existing_id, "pid", "plan_file", "start_time", "execution_count", "engine")
                 existing_pid = fields.get("pid")
@@ -409,19 +648,43 @@ class ExecutorService:
                         f"[session] attached runner_id={existing_id} session_id not found in Redis, issuing new UUID"
                     )
                     existing_session_id = str(uuid.uuid4())
+                # attached 케이스: 기존 claim 요약 조회
+                _attach_claim_id: Optional[str] = None
+                _attach_claim_state: Optional[str] = None
+                _attach_plan_file = fields.get("plan_file") or request.plan_file
+                if _attach_plan_file:
+                    try:
+                        from app.database import SessionLocal as _ACSLocal
+                        from app.modules.dev_runner.services.plan_execution_claim_service import (
+                            get_claim_for_plan as _get_claim_for_plan,
+                        )
+                        _ac_db = _ACSLocal()
+                        try:
+                            _ac = _get_claim_for_plan(_ac_db, _attach_plan_file)
+                            if _ac:
+                                _attach_claim_id = _ac.claim_id
+                                _attach_claim_state = _ac.state
+                        finally:
+                            _ac_db.close()
+                    except Exception as _ac_err:
+                        logger.debug(f"[claim] attached claim 조회 실패 (무시): {_ac_err}")
                 return RunStatusResponse(
                     running=True,
                     runner_id=existing_id,
                     attached=True,
                     engine=existing_engine,
                     pid=int(existing_pid) if existing_pid else None,
-                    plan_file=fields.get("plan_file") or request.plan_file,
+                    plan_file=_attach_plan_file,
                     start_time=datetime.fromisoformat(existing_start_time_str) if existing_start_time_str else None,
                     current_cycle=0,
                     execution_count=existing_exec_count,
                     listener_alive=True,
                     redis_connected=True,
                     session_id=existing_session_id,
+                    claim_id=_attach_claim_id,
+                    claim_state=_attach_claim_state,
+                    claim_owner_runner_id=existing_id,
+                    claim_message="기존 실행에 연결됨" if _attach_claim_id else None,
                 )
 
             # Redis에서 per-runner 상태 조회
@@ -449,6 +712,8 @@ class ExecutorService:
                 listener_alive=True,
                 redis_connected=True,
                 session_id=session_id,
+                claim_id=_new_claim_id,
+                claim_state="queued" if _new_claim_id else None,
             )
 
         except redis.ConnectionError:
@@ -614,7 +879,9 @@ class ExecutorService:
     async def get_runner_status(self, runner_id: str) -> RunStatusResponse:
         """특정 runner 상태 조회 (per-runner Redis 키 기반)"""
         data = await self._get_runner_fields(
-            runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count"
+            runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count",
+            "exit_reason", "error",
+            "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at"
         )
         status = data["status"]
         pid_str = data["pid"]
@@ -622,6 +889,12 @@ class ExecutorService:
         start_time_str = data["start_time"]
         engine = data["engine"] or "claude"
         execution_count_raw = data["execution_count"]
+        exit_reason = data["exit_reason"]
+        error = data["error"]
+        worktree_exists = _coerce_runner_metadata_state(data["worktree_exists"])
+        branch_exists = _coerce_runner_metadata_state(data["branch_exists"])
+        branch_merged_to_main = _coerce_runner_metadata_state(data["branch_merged_to_main"])
+        metadata_checked_at = _coerce_runner_metadata_checked_at(data["metadata_checked_at"])
         running = status == "running"
 
         running, pid_str = await self._correct_pid_state(runner_id, status, pid_str, caller="get_runner_status")
@@ -650,6 +923,12 @@ class ExecutorService:
             listener_alive=True,
             redis_connected=True,
             session_id=session_id,
+            exit_reason=exit_reason,
+            error=error,
+            worktree_exists=worktree_exists,
+            branch_exists=branch_exists,
+            branch_merged_to_main=branch_merged_to_main,
+            metadata_checked_at=metadata_checked_at,
         )
 
     async def get_all_runners(self) -> list:
@@ -669,9 +948,12 @@ class ExecutorService:
             await self.async_redis.zremrangebyrank(RECENT_RUNNERS_KEY, 0, -(MAX_RECENT_RUNNERS + 1))
 
             # ACTIVE_RUNNERS_KEY + RECENT_RUNNERS_KEY 합집합으로 runner 목록 구성
-            active_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
-            recent_ids_with_scores = await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+            active_ids = self._normalize_runner_id_set(await self.async_redis.smembers(ACTIVE_RUNNERS_KEY))
+            recent_ids_with_scores = self._normalize_runner_id_set(await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1))
             all_ids = set(active_ids) | set(recent_ids_with_scores)
+            heartbeat_ids = await self._scan_runner_ids_with_suffix("subprocess_heartbeat")
+            redis_registry_ids = set(all_ids)
+            all_ids |= heartbeat_ids
 
             # orphan 판별을 위한 DB 세션
             from app.database import SessionLocal
@@ -682,7 +964,10 @@ class ExecutorService:
                 for rid in all_ids:
                     d = await self._get_runner_fields(rid, "status", "pid", "plan_file", "engine",
                                                       "start_time", "execution_count", "worktree_path", "merge_status",
-                                                      "branch", "trigger", "exit_reason", "stop_stage", "error")
+                                                      "merge_reason", "merge_message",
+                                                      "branch", "trigger", "exit_reason", "stop_stage", "error",
+                                                      "worktree_exists", "branch_exists",
+                                                      "branch_merged_to_main", "metadata_checked_at")
                     status = d["status"]
                     pid_str = d["pid"]
                     plan_file = d["plan_file"]
@@ -691,21 +976,34 @@ class ExecutorService:
                     execution_count_raw = d["execution_count"]
                     worktree_path = d["worktree_path"]
                     merge_status = d["merge_status"]
+                    merge_reason = d["merge_reason"]
+                    merge_message = d["merge_message"]
                     branch = d["branch"]
                     trigger = d["trigger"]
+                    recent_meta: dict = {}
+                    try:
+                        recent_meta_raw = await self.async_redis.get(f"plan-runner:recent-meta:{rid}")
+                        if recent_meta_raw:
+                            recent_meta_text = recent_meta_raw.decode("utf-8") if isinstance(recent_meta_raw, bytes) else recent_meta_raw
+                            recent_meta = json.loads(recent_meta_text)
+                    except Exception:
+                        recent_meta = {}
                     # trigger 미존재 시 recent-meta fallback (cleanup 후 타이밍 이슈 방어)
                     if trigger is None:
-                        try:
-                            _recent_meta_raw = await self.async_redis.get(f"plan-runner:recent-meta:{rid}")
-                            if _recent_meta_raw:
-                                import json as _json
-                                _recent_meta = _json.loads(_recent_meta_raw)
-                                trigger = _recent_meta.get("trigger")
-                        except Exception:
-                            pass
-                    exit_reason = d["exit_reason"]
+                        trigger = recent_meta.get("trigger")
+                    exit_reason = d["exit_reason"] or recent_meta.get("exit_reason")
                     stop_stage = d["stop_stage"]
                     error = d["error"]
+                    worktree_exists = _coerce_runner_metadata_state(d["worktree_exists"], recent_meta.get("worktree_exists"))
+                    branch_exists = _coerce_runner_metadata_state(d["branch_exists"], recent_meta.get("branch_exists"))
+                    branch_merged_to_main = _coerce_runner_metadata_state(
+                        d["branch_merged_to_main"],
+                        recent_meta.get("branch_merged_to_main"),
+                    )
+                    metadata_checked_at = _coerce_runner_metadata_checked_at(
+                        d["metadata_checked_at"],
+                        recent_meta.get("metadata_checked_at"),
+                    )
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
                     start_time = None
@@ -720,21 +1018,61 @@ class ExecutorService:
                             execution_count = int(execution_count_raw)
                         except (TypeError, ValueError):
                             execution_count = None
+                    redis_missing = rid not in redis_registry_ids
+                    filesystem_log = self._filesystem_log_for_runner(rid) if redis_missing else None
+                    log_file_found = bool(filesystem_log and filesystem_log.exists())
+                    trigger, plan_file, engine, start_time, execution_count, display_plan_name_from_log = self._apply_log_meta_fallbacks(
+                        runner_id=rid,
+                        log_path=filesystem_log,
+                        recent_meta=recent_meta,
+                        trigger=trigger,
+                        plan_file=plan_file,
+                        engine=engine,
+                        start_time=start_time,
+                        execution_count=execution_count,
+                        display_plan_name=None,
+                    )
                     # PID 기반 양방향 보정: Redis status와 실제 프로세스 상태 불일치 교정
                     running = status == "running"
                     running, pid_str = await self._correct_pid_state(rid, status, pid_str, caller="get_all_runners")
+                    if exit_reason == "completed":
+                        running = False
+                    orphan_alive = redis_missing and rid in heartbeat_ids
 
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
                     is_orphan = self._fix_orphan_workflows(db, rid, running, status)
                     # visibility.py 단일 함수로 판별 (화이트리스트 + 이중 방어)
                     is_user = is_visible_runner(trigger, rid)
-                    # plan_file 소실 시 worktree_path/branch에서 fallback 이름 추출
+                    # plan_file 소실 시 recent-meta/log header/worktree_path/branch 순으로 fallback 이름 추출
                     display_plan_name: str | None = None
                     if not plan_file:
-                        if worktree_path:
+                        display_plan_name = display_plan_name_from_log or recent_meta.get("display_plan_name")
+                        if not display_plan_name:
+                            recent_plan = recent_meta.get("plan_file")
+                            if recent_plan:
+                                display_plan_name = Path(str(recent_plan)).name
+                        if not display_plan_name:
+                            recent_log = recent_meta.get("stream_log_path") or recent_meta.get("log_file_path")
+                            if recent_log:
+                                log_meta = LogFileResolver.parse_meta_from_log(str(recent_log))
+                                display_plan_name = LogFileResolver.display_plan_name_from_meta(log_meta)
+                        if not display_plan_name and worktree_path:
                             display_plan_name = Path(worktree_path).name
-                        elif branch:
+                        elif not display_plan_name and branch:
                             display_plan_name = branch.split("/")[-1] if "/" in branch else branch
+                    elif display_plan_name_from_log:
+                        display_plan_name = display_plan_name_from_log
+                    diagnostic_plan_file = plan_file or recent_meta.get("plan_file")
+                    remaining_summary = _remaining_leaf_summary_for_plan(diagnostic_plan_file)
+                    remaining_post_merge_tasks = remaining_summary["post_merge"]
+                    merge_evidence_missing = bool(
+                        exit_reason == "completed"
+                        and remaining_summary["impl"] == 0
+                        and remaining_post_merge_tasks > 0
+                        and not branch
+                        and not worktree_path
+                        and merge_status not in {"merge_pending", "queued", "merging", "merged"}
+                    )
                     result.append(RunnerListItem(
                         runner_id=rid,
                         running=running,
@@ -746,13 +1084,24 @@ class ExecutorService:
                         worktree_path=worktree_path,
                         branch=branch,
                         merge_status=merge_status,
+                        merge_reason=merge_reason,
+                        merge_message=merge_message,
                         trigger=trigger,
                         visible=is_user,
                         orphan=is_orphan,
+                        orphan_alive=orphan_alive,
+                        redis_missing=redis_missing,
+                        log_file_found=log_file_found,
                         exit_reason=exit_reason,
                         stop_stage=stop_stage,
                         error=error,
                         display_plan_name=display_plan_name,
+                        remaining_post_merge_tasks=remaining_post_merge_tasks,
+                        merge_evidence_missing=merge_evidence_missing,
+                        worktree_exists=worktree_exists,
+                        branch_exists=branch_exists,
+                        branch_merged_to_main=branch_merged_to_main,
+                        metadata_checked_at=metadata_checked_at,
                     ))
                 return result
             finally:
@@ -844,10 +1193,18 @@ class ExecutorService:
             return {"success": False, "message": "Command timeout"}
         return result_data
 
-    async def send_direct_merge_command(self, branch: str, worktree_path: str | None, plan_file: str | None) -> dict:
+    async def send_direct_merge_command(
+        self,
+        branch: str,
+        worktree_path: str | None,
+        plan_file: str | None,
+        approve_service_lock: bool = False,
+    ) -> dict:
         """[deprecated shim] → self.merge.send_direct_merge_command()"""
         self._sync_merge()
-        return await self.merge.send_direct_merge_command(branch, worktree_path, plan_file)
+        return await self.merge.send_direct_merge_command(
+            branch, worktree_path, plan_file, approve_service_lock=approve_service_lock
+        )
 
     async def stop_all_runners(self) -> dict:
         """모든 active runner 일괄 중지 - asyncio.gather 병렬 호출"""

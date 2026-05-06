@@ -159,6 +159,42 @@ def test_plan_file(tmp_path):
     return plan
 
 
+def copy_fixture_plan_to_tmp(
+    tmp_path: Path,
+    fixture_name: str = "test_minimal_plan.md",
+    *,
+    strip_merge_fields: bool = True,
+) -> Path:
+    """Copy a shared fixture plan into a per-test path before runner execution."""
+    src = FIXTURES_DIR / fixture_name
+    content = src.read_text(encoding="utf-8")
+    if strip_merge_fields:
+        content = re.sub(r"^> branch:.*\n", "", content, flags=re.MULTILINE)
+        content = re.sub(r"^> worktree:.*\n", "", content, flags=re.MULTILINE)
+        content = re.sub(r"^> worktree-owner:.*\n", "", content, flags=re.MULTILINE)
+    plan = tmp_path / fixture_name
+    plan.write_text(content, encoding="utf-8")
+    return plan
+
+
+@pytest.fixture
+def isolated_plan_file(tmp_path):
+    """Per-test copy of test_minimal_plan.md for mutable runner input."""
+    return str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan.md"))
+
+
+@pytest.fixture
+def isolated_plan_file_a(tmp_path):
+    """Per-test copy of test_minimal_plan_a.md for mutable runner input."""
+    return str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan_a.md"))
+
+
+@pytest.fixture
+def isolated_plan_file_b(tmp_path):
+    """Per-test copy of test_minimal_plan_b.md for mutable runner input."""
+    return str(copy_fixture_plan_to_tmp(tmp_path, "test_minimal_plan_b.md"))
+
+
 def _cleanup_test_worktrees() -> None:
     """테스트 고정 plan 파일의 worktree/branch 잔여물 제거 (멱등)"""
     worktree_list = subprocess.run(
@@ -167,14 +203,20 @@ def _cleanup_test_worktrees() -> None:
     )
     current_path = None
     current_branch = None
+    current_prunable = False
     seen_branches: set[str] = set()
+    needs_prune = False
     for line in worktree_list.stdout.splitlines() + [""]:
         if line.startswith("worktree "):
             current_path = line[9:]
             current_branch = None
+            current_prunable = False
             continue
         if line.startswith("branch "):
             current_branch = line[7:].replace("refs/heads/", "")
+            continue
+        if line.startswith("prunable"):
+            current_prunable = True
             continue
         if line == "" and current_path:
             if current_branch and any(fnmatch.fnmatch(current_branch, pattern) for pattern in TEST_BRANCH_PATTERNS):
@@ -183,10 +225,19 @@ def _cleanup_test_worktrees() -> None:
                     ["git", "worktree", "remove", current_path, "--force"],
                     capture_output=True, cwd=str(PROJECT_ROOT), timeout=15,
                 )
-                if res.returncode != 0 and b"not a working tree" not in res.stderr:
+                if current_prunable or b"not a working tree" in res.stderr or b"not a worktree" in res.stderr:
+                    needs_prune = True
+                if res.returncode != 0 and b"not a working tree" not in res.stderr and b"not a worktree" not in res.stderr:
                     print(f"[cleanup] git worktree remove failed for {current_branch}: {res.stderr.decode('utf-8', errors='ignore').strip()}")
             current_path = None
             current_branch = None
+            current_prunable = False
+
+    if needs_prune:
+        subprocess.run(
+            ["git", "worktree", "prune"],
+            capture_output=True, cwd=str(PROJECT_ROOT), timeout=15,
+        )
 
     branch_list = subprocess.run(
         ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/runner", "refs/heads/plan"],
@@ -207,7 +258,12 @@ def _cleanup_test_worktrees() -> None:
             ["git", "worktree", "remove", str(WORKTREE_BASE / stem), "--force"],
             capture_output=True, cwd=str(PROJECT_ROOT),
         )
-        if res1.returncode != 0 and b"not a worktree" not in res1.stderr:
+        if b"not a worktree" in res1.stderr or b"not a working tree" in res1.stderr:
+            subprocess.run(
+                ["git", "worktree", "prune"],
+                capture_output=True, cwd=str(PROJECT_ROOT), timeout=15,
+            )
+        if res1.returncode != 0 and b"not a worktree" not in res1.stderr and b"not a working tree" not in res1.stderr:
             print(f"[cleanup] git worktree remove failed for {stem}: {res1.stderr.decode('utf-8', errors='ignore').strip()}")
 
         res2 = subprocess.run(
@@ -216,17 +272,6 @@ def _cleanup_test_worktrees() -> None:
         )
         if res2.returncode != 0 and b"not found" not in res2.stderr:
             print(f"[cleanup] git branch remove failed for {stem}: {res2.stderr.decode('utf-8', errors='ignore').strip()}")
-
-        # fixture 파일에 남은 header 필드(> branch:, > worktree:)도 정리
-        fixture_path = FIXTURES_DIR / f"{stem}.md"
-        if fixture_path.exists():
-            try:
-                lines = fixture_path.read_text(encoding="utf-8").splitlines(keepends=True)
-                cleaned = [ln for ln in lines if not re.match(r"^>\s*(branch|worktree|worktree-owner):", ln)]
-                if cleaned != lines:
-                    fixture_path.write_text("".join(cleaned), encoding="utf-8")
-            except Exception as e:
-                print(f"[cleanup] fixture header cleanup failed for {stem}: {e}")
 
 
 _PRESERVE_KEYS = {
@@ -289,17 +334,25 @@ def e2e_worktree_cleanup():
         for path, info in after.items()
         if info.get("prunable") and not before.get(path, {}).get("prunable")
     }
+    needs_prune = bool(prunable_paths)
     for path in new_paths | prunable_paths:
         branch = after.get(path, {}).get("branch")
-        subprocess.run(
+        res = subprocess.run(
             ["git", "worktree", "remove", "--force", path],
             capture_output=True, cwd=str(PROJECT_ROOT), timeout=10,
         )
+        if res.returncode != 0 and (b"not a working tree" in res.stderr or b"not a worktree" in res.stderr):
+            needs_prune = True
         if branch and branch in (after_branches - before_branches):
             subprocess.run(
                 ["git", "branch", "-D", branch],
                 capture_output=True, cwd=str(PROJECT_ROOT), timeout=10,
             )
+    if needs_prune:
+        subprocess.run(
+            ["git", "worktree", "prune"],
+            capture_output=True, cwd=str(PROJECT_ROOT), timeout=15,
+        )
 
 
 @pytest.fixture(scope="class")

@@ -29,6 +29,7 @@ for f in Path({str(TESTS_ROOT)!r}).rglob("*.py"):
 print("\\n".join(matches))
 """],
         capture_output=True, text=True, timeout=30,
+        encoding="utf-8", errors="replace",
     )
     lines = [l for l in result.stdout.splitlines() if l.strip()]
     return lines

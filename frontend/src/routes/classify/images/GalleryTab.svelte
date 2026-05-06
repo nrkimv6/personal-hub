@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
+  import { confirm } from '$lib/stores/confirm';
   import { toast } from '$lib/stores/toast';
   import { createSelection } from '$lib/utils/selection.svelte';
   import { createOffsetPagination } from '$lib/utils/pagination.svelte';
@@ -345,7 +346,14 @@
   async function deleteSelected() {
     if (selection.count === 0) return;
     const fileIds = selection.toArray();
-    if (!confirm(`선택한 ${fileIds.length}개 이미지를 삭제하시겠습니까?`)) return;
+    if (
+      !(await confirm({
+        title: '이미지 삭제',
+        message: `선택한 ${fileIds.length}개 이미지를 삭제하시겠습니까?`,
+        confirmText: '삭제',
+        variant: 'danger'
+      }))
+    ) return;
     try {
       const res = await fetchWithTimeout('/api/ic/files/bulk-delete', {
         method: 'POST',

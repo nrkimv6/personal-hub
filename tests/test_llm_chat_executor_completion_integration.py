@@ -13,12 +13,14 @@ fix: plan 필수 — 근본 원인(mark_completed positional result 누락 → T
 """
 
 import io
+import logging
 import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import psycopg2
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -228,3 +230,124 @@ def test_run_chat_session_T3_exception_sets_failed_with_error_message(SessionFac
     assert result["error_message"] and "claude binary not found" in result["error_message"], (
         f"error_message={result['error_message']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# T3-4: mark_completed PG 오류 — warning-only + Redis publish 유지
+# ---------------------------------------------------------------------------
+
+
+def test_run_chat_session_pg_connection_error_from_mark_completed_no_traceback(
+    SessionFactory, caplog
+):
+    """
+    T3(B): real LLMService + SQLite, mark_completed 시점 commit에서
+    psycopg2.OperationalError 주입 → warning-only, Redis publish 유지 검증.
+    """
+    request_id = _enqueue_and_get_id(SessionFactory, "t3-pg-mark-completed")
+
+    # Real db session — commit PG error injection (2번째 commit부터)
+    db_real = SessionFactory()
+    original_commit = db_real.commit
+    call_count = [0]
+
+    def pg_on_second_commit():
+        call_count[0] += 1
+        if call_count[0] >= 2:
+            raise psycopg2.OperationalError("could not connect to server")
+        return original_commit()
+
+    db_real.commit = pg_on_second_commit
+    svc = LLMService(db_real)
+
+    executor = ChatExecutor.__new__(ChatExecutor)
+    executor.redis_url = "redis://localhost:6379/0"
+    executor._stop_event = MagicMock()
+    executor._busy = False
+    executor.redis_client = MagicMock()
+    executor._get_db_service = MagicMock(return_value=(db_real, svc))
+
+    fake_proc = _fake_proc(['{"success":true}'], returncode=0)
+
+    with patch("subprocess.Popen", return_value=fake_proc), \
+         patch(
+             "app.modules.claude_worker.services.profile_env.build_cli_env",
+             return_value=os.environ.copy(),
+         ), \
+         caplog.at_level(logging.DEBUG):
+        executor._run_chat_session(
+            request_id=request_id,
+            prompt="hello",
+            provider="claude",
+            model="",
+            cli_options={},
+            chat_session_id="sess-t3-pg-mc",
+        )
+
+    pg_warnings = [r for r in caplog.records
+                   if r.levelno == logging.WARNING and "connection error" in r.message]
+    assert len(pg_warnings) >= 1, "PG connection error warning 없음"
+
+    error_with_tb = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_tb) == 0, f"traceback 로그 {len(error_with_tb)}건 발생"
+
+    executor.redis_client.publish.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# T3-5: stream_log_path DB 저장 PG 오류 — warning-only + Redis + cleanup 유지
+# ---------------------------------------------------------------------------
+
+
+def test_run_chat_session_pg_connection_error_from_stream_log_update_no_traceback(
+    SessionFactory, caplog, tmp_path
+):
+    """
+    T3(B): real LLMService + SQLite, stream_log_path 저장 commit에서
+    psycopg2.OperationalError 주입 → warning-only + Redis publish + 임시 파일 정리 검증.
+    """
+    request_id = _enqueue_and_get_id(SessionFactory, "t3-pg-stream-log")
+
+    # Real db session — 첫 번째 commit부터 PG error
+    db_real = SessionFactory()
+    original_commit = db_real.commit
+
+    def pg_on_first_commit():
+        raise psycopg2.OperationalError("could not connect to server")
+
+    db_real.commit = pg_on_first_commit
+    svc = LLMService(db_real)
+
+    executor = ChatExecutor.__new__(ChatExecutor)
+    executor.redis_url = "redis://localhost:6379/0"
+    executor._stop_event = MagicMock()
+    executor._busy = False
+    executor.redis_client = MagicMock()
+    executor._get_db_service = MagicMock(return_value=(db_real, svc))
+
+    fake_proc = _fake_proc(['{"success":true}'], returncode=0)
+
+    with patch("subprocess.Popen", return_value=fake_proc), \
+         patch(
+             "app.modules.claude_worker.services.profile_env.build_cli_env",
+             return_value=os.environ.copy(),
+         ), \
+         caplog.at_level(logging.DEBUG):
+        executor._run_chat_session(
+            request_id=request_id,
+            prompt="hello",
+            provider="claude",
+            model="",
+            cli_options={},
+            chat_session_id="sess-t3-pg-sl",
+        )
+
+    pg_warnings = [r for r in caplog.records
+                   if r.levelno == logging.WARNING and "connection error" in r.message]
+    assert len(pg_warnings) >= 1, "PG connection error warning 없음"
+
+    error_with_tb = [r for r in caplog.records if r.levelno == logging.ERROR and r.exc_info]
+    assert len(error_with_tb) == 0, f"traceback 로그 {len(error_with_tb)}건 발생"
+
+    # Redis __COMPLETED__ publish 유지 검증
+    executor.redis_client.publish.assert_called()

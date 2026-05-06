@@ -92,9 +92,7 @@ CREATE TABLE IF NOT EXISTS monitor_schedules (
 
     -- 메타
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    UNIQUE(biz_item_id, date)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_monitor_schedules_biz_item_id ON monitor_schedules(biz_item_id);

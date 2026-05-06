@@ -4,18 +4,20 @@
 
 	import { onMount } from 'svelte';
 	import { collectApi, llmApi, type ProviderInfo } from '$lib/api';
+	import { planRecordsApi, type PlanArchiveHealth } from '$lib/api/plan-records';
 	import type { CrawlSchedule, ServiceAccountWithProfile, CrawlScheduleRepairResponse } from '$lib/types';
 	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
-	import { 
-		Instagram, 
-		Search, 
-		Pencil, 
-		FlaskConical, 
-		FolderArchive, 
-		ClipboardList, 
-		ArrowLeft, 
-		X, 
-		ChevronDown, 
+	import {
+		Instagram,
+		Search,
+		Pencil,
+		FlaskConical,
+		FolderArchive,
+		ClipboardList,
+		Moon,
+		ArrowLeft,
+		X,
+		ChevronDown,
 		ChevronRight,
 		Clock,
 		BarChart3,
@@ -30,6 +32,8 @@
 
 	let togglingId = $state<number | null>(null);
 	let runningId = $state<number | null>(null);
+	let planArchiveHealth = $state<PlanArchiveHealth | null>(null);
+	let loadingPlanArchiveHealth = $state(false);
 
 	// Instagram 설정 모달 상태
 	let showInstagramSettingsModal = $state(false);
@@ -56,9 +60,10 @@
 	let pytestLlmModel = $state('');
 	let pytestCronTime = $state('02:00');
 
-	// plan_archive_analyze / devguide_staleness cron 시간
+	// plan_archive_analyze / devguide_staleness / auto_dev_runner cron 시간
 	let planArchiveCronTime = $state('02:10');
 	let devguideStaleCronTime = $state('03:30');
+	let autoDevRunnerCronTime = $state('02:00');
 
 	// 수정 모달 cron 시간 (pytest / plan 타입 공용)
 	let editCronTime = $state('02:00');
@@ -107,7 +112,7 @@
 	let loadingLegacyRepair = $state(false);
 	let applyingLegacyRepair = $state(false);
 
-	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract', 'pytest_run'];
+	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract', 'pytest_run', 'plan_archive_analyze'];
 
 	const scheduleTypes = [
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: Instagram, color: 'pink' },
@@ -115,7 +120,8 @@
 		{ value: 'writing_task', label: '글쓰기 태스크', icon: Pencil, color: 'purple' },
 		{ value: 'pytest_run', label: 'pytest 자동 실행', icon: FlaskConical, color: 'green' },
 		{ value: 'plan_archive_analyze', label: 'Plan Archive LLM 분석', icon: FolderArchive, color: 'blue' },
-		{ value: 'devguide_staleness', label: 'Dev-Guide 갱신 점검', icon: ClipboardList, color: 'indigo' }
+		{ value: 'devguide_staleness', label: 'Dev-Guide 갱신 점검', icon: ClipboardList, color: 'indigo' },
+		{ value: 'auto_dev_runner', label: '야간 자동 plan 실행', icon: Moon, color: 'purple' }
 	];
 
 	const dateFilterOptions = [
@@ -198,7 +204,7 @@
 			return;
 		}
 
-		if (type === 'plan_archive_analyze' || type === 'devguide_staleness') {
+		if (type === 'plan_archive_analyze' || type === 'devguide_staleness' || type === 'auto_dev_runner') {
 			// cron 시간만 입력 (step 2)
 			addStep = 2;
 			return;
@@ -252,11 +258,12 @@
 		error = null;
 
 		try {
-			const isCronType = selectedType === 'pytest_run' || selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness';
+			const isCronType = selectedType === 'pytest_run' || selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness' || selectedType === 'auto_dev_runner';
 		const cronTime =
 			selectedType === 'pytest_run' ? pytestCronTime :
 			selectedType === 'plan_archive_analyze' ? planArchiveCronTime :
-			selectedType === 'devguide_staleness' ? devguideStaleCronTime : '';
+			selectedType === 'devguide_staleness' ? devguideStaleCronTime :
+			selectedType === 'auto_dev_runner' ? autoDevRunnerCronTime : '';
 
 		const data: {
 				target_type: string;
@@ -333,8 +340,8 @@
 
 			editDisplayName = detail.display_name || '';
 
-			// cron 타입 (pytest_run, plan_archive_analyze, devguide_staleness) cron 시간 복원
-			const isCronSchedule = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness'].includes(schedule.target_type);
+			// cron 타입 (pytest_run, plan_archive_analyze, devguide_staleness, auto_dev_runner) cron 시간 복원
+			const isCronSchedule = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness', 'auto_dev_runner'].includes(schedule.target_type);
 			if (isCronSchedule && detail.schedule_value?.time) {
 				editCronTime = detail.schedule_value.time as string;
 			} else {
@@ -416,7 +423,7 @@
 			}
 
 			// 시간 설정 (cron 타입 vs time_window 타입)
-			const isEditCronType = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness'].includes(editSchedule.target_type);
+			const isEditCronType = ['pytest_run', 'plan_archive_analyze', 'devguide_staleness', 'auto_dev_runner'].includes(editSchedule.target_type);
 			updateData.schedule_value = isEditCronType
 				? { time: editCronTime }
 				: {
@@ -483,6 +490,28 @@
 		}
 	}
 
+	async function fetchPlanArchiveHealth() {
+		loadingPlanArchiveHealth = true;
+		try {
+			planArchiveHealth = await planRecordsApi.getArchiveHealth();
+		} catch (e) {
+			planArchiveHealth = null;
+		} finally {
+			loadingPlanArchiveHealth = false;
+		}
+	}
+
+	function formatRunPatch(patch: Record<string, number> | undefined): string {
+		if (!patch) return '';
+		const parts = [
+			`queued ${patch.queued ?? 0}`,
+			`temp ${patch.skipped_temp ?? 0}`,
+			`empty ${patch.skipped_empty ?? 0}`,
+			`active ${patch.skipped_active_request ?? 0}`
+		];
+		return ` (${parts.join(', ')})`;
+	}
+
 	async function toggleSchedule(schedule: CrawlSchedule) {
 		togglingId = schedule.id;
 		successMessage = null;
@@ -492,6 +521,7 @@
 			if (result.success) {
 				successMessage = `${schedule.display_name || schedule.name}: ${result.enabled ? '활성화' : '비활성화'}됨`;
 				await fetchSchedules();
+				if (schedule.target_type === 'plan_archive_analyze') await fetchPlanArchiveHealth();
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : '스케줄 토글 실패';
@@ -507,7 +537,8 @@
 		try {
 			const result = await collectApi.runSchedule(schedule.id);
 			if (result.success) {
-				successMessage = result.message;
+				successMessage = `${result.message}${formatRunPatch(result.config_snapshot_patch)}`;
+				if (schedule.target_type === 'plan_archive_analyze') await fetchPlanArchiveHealth();
 			} else {
 				error = result.message;
 			}
@@ -562,6 +593,29 @@
 		}
 	}
 
+	function getPlanArchiveCardAlert(schedule: CrawlSchedule): { tone: string; text: string } | null {
+		if (!planArchiveHealth) return null;
+		if (planArchiveHealth.real_unprocessed > 0 && !schedule.enabled) {
+			return {
+				tone: 'bg-amber-100 text-amber-800',
+				text: `미처리 ${planArchiveHealth.real_unprocessed}건, 스케줄 비활성`
+			};
+		}
+		if (planArchiveHealth.failed_requests > 0) {
+			return {
+				tone: 'bg-red-100 text-red-700',
+				text: `실패 ${planArchiveHealth.failed_requests}건`
+			};
+		}
+		if (planArchiveHealth.real_unprocessed > 0) {
+			return {
+				tone: 'bg-blue-100 text-blue-800',
+				text: `미처리 ${planArchiveHealth.real_unprocessed}건`
+			};
+		}
+		return { tone: 'bg-muted text-muted-foreground', text: '대기 없음' };
+	}
+
 	function getTargetTypeBadge(type: string): { class: string; text: string } {
 		switch (type) {
 			case 'instagram_feed':
@@ -578,6 +632,8 @@
 				return { class: 'bg-blue-100 text-blue-800', text: 'Plan분석' };
 			case 'devguide_staleness':
 				return { class: 'bg-indigo-100 text-indigo-800', text: 'Dev-Guide점검' };
+			case 'auto_dev_runner':
+				return { class: 'bg-purple-100 text-purple-800', text: '야간자동실행' };
 			default:
 				return { class: 'bg-muted text-foreground', text: type };
 		}
@@ -646,13 +702,14 @@
 
 	onMount(() => {
 		fetchSchedules();
+		fetchPlanArchiveHealth();
 		llmApi.getProviders().then(data => { providers = data; }).catch(() => {});
 	});
 </script>
 
 <div>
 	<!-- 헤더 -->
-	<PageHeader title="스케줄 설정" subtitle="수집 스케줄을 관리합니다">
+	<PageHeader title="스케줄 설정">
 		<Button variant="secondary" onclick={previewLegacyRepair} disabled={loadingLegacyRepair}>
 			{loadingLegacyRepair ? '복구 조회 중...' : 'legacy 복구'}
 		</Button>
@@ -801,6 +858,28 @@
 							</button>
 						</div>
 					</div>
+					{#if schedule.target_type === 'plan_archive_analyze'}
+						{@const planArchiveAlert = getPlanArchiveCardAlert(schedule)}
+						<div class="mt-3 border-t border-border pt-3">
+							{#if loadingPlanArchiveHealth}
+								<div class="text-xs text-muted-foreground">Plan Archive health 로드 중...</div>
+							{:else if planArchiveAlert}
+								<div class="flex flex-wrap items-center gap-2 text-xs">
+									<span class="rounded px-2 py-1 font-medium {planArchiveAlert.tone}">
+										{planArchiveAlert.text}
+									</span>
+									<a
+										href="/plans?tab=archive"
+										class="ml-auto text-primary hover:text-primary-hover"
+									>
+										Plan Archive 상세
+									</a>
+								</div>
+							{:else}
+								<div class="text-xs text-muted-foreground">Plan Archive health를 불러오지 못했습니다.</div>
+							{/if}
+						</div>
+					{/if}
 				</div>
 			{/each}
 		</div>
@@ -1059,8 +1138,8 @@
 								</button>
 							</div>
 						</div>
-					{:else if selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness'}
-				<!-- plan archive / requirements sync: cron 시간만 입력 -->
+					{:else if selectedType === 'plan_archive_analyze' || selectedType === 'devguide_staleness' || selectedType === 'auto_dev_runner'}
+				<!-- plan archive / devguide_staleness / auto_dev_runner: cron 시간만 입력 -->
 				<p class="text-muted-foreground mb-4">매일 실행할 시각을 설정하세요</p>
 				<div class="space-y-4">
 					<div>
@@ -1072,11 +1151,18 @@
 								bind:value={planArchiveCronTime}
 								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
-						{:else}
+						{:else if selectedType === 'devguide_staleness'}
 							<input
 								id="plan-cron-time"
 								type="time"
 								bind:value={devguideStaleCronTime}
+								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							/>
+						{:else}
+							<input
+								id="plan-cron-time"
+								type="time"
+								bind:value={autoDevRunnerCronTime}
 								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
 						{/if}
@@ -1487,7 +1573,7 @@
 						<!-- 실행 시간 설정 -->
 						<div class="border-t border-border pt-4">
 							<h3 class="font-medium text-foreground mb-3">실행 시간</h3>
-							{#if editSchedule && ['pytest_run', 'plan_archive_analyze', 'devguide_staleness'].includes(editSchedule.target_type)}
+							{#if editSchedule && ['pytest_run', 'plan_archive_analyze', 'devguide_staleness', 'auto_dev_runner'].includes(editSchedule.target_type)}
 								<div>
 									<input
 										type="time"

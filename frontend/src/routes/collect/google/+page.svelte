@@ -5,6 +5,7 @@
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
+	import { confirm } from '$lib/stores/confirm';
 	import {
 		Search,
 		ClipboardList,
@@ -383,7 +384,14 @@
 
 	async function deleteSavedSearch(saved: SavedSearch, event: Event) {
 		event.stopPropagation();
-		if (!confirm(`"${saved.name}" 검색 조건을 삭제하시겠습니까?`)) return;
+		if (
+			!(await confirm({
+				title: '검색 조건 삭제',
+				message: `"${saved.name}" 검색 조건을 삭제하시겠습니까?`,
+				confirmText: '삭제',
+				variant: 'danger'
+			}))
+		) return;
 
 		try {
 			await apiRequest(`/saved/${saved.id}`, { method: 'DELETE' });
@@ -549,7 +557,14 @@
 
 	async function deleteSchedule() {
 		if (!editingSchedule) return;
-		if (!confirm('스케줄을 삭제하시겠습니까?')) return;
+		if (
+			!(await confirm({
+				title: '스케줄 삭제',
+				message: '스케줄을 삭제하시겠습니까?',
+				confirmText: '삭제',
+				variant: 'danger'
+			}))
+		) return;
 
 		try {
 			await apiRequest(`/schedule/${editingSchedule.id}`, { method: 'DELETE' });
@@ -660,9 +675,9 @@
 </svelte:head>
 
 <div class="p-4 lg:p-6 space-y-4">
-	<PageHeader title="구글 검색" subtitle="Google 검색 결과를 수집하고 관리합니다" />
+	<PageHeader title="구글 검색" />
 
-	<TabNav tabs={googleMainTabs} bind:activeTab={mainTab} variant="primary" queryParam="tab" />
+	<TabNav tabs={googleMainTabs} bind:activeTab={mainTab} variant="secondary" queryParam="tab" />
 
 	{#if mainTab === 'results'}
 		<GoogleResultsTab />

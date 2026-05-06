@@ -37,6 +37,7 @@ sys.modules.setdefault("listener_noise_filter", _mock_noise)
 import _dr_plan_runner as plan_runner_mod  # noqa: E402
 import _dr_merge as dr_merge_mod  # noqa: E402
 import _dr_stream_cleanup as stream_cleanup_mod  # noqa: E402
+import _dr_stream_output as stream_output_mod  # noqa: E402
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 _GIT_ENV = {
@@ -94,7 +95,7 @@ def _make_wf_manager(runner_id="test-runner"):
 
 
 def _make_subprocess_router(repo_dir: str, post_merge_returncode: int = 0):
-    """git log는 실제 실행, plan-runner post-merge는 mock 반환하는 subprocess.run side_effect.
+    """git 명령은 실제 실행, plan-runner post-merge는 mock 반환하는 subprocess.run side_effect.
 
     패치 전 실제 subprocess.run 참조를 캡처하여 무한 재귀를 방지한다.
     """
@@ -102,8 +103,8 @@ def _make_subprocess_router(repo_dir: str, post_merge_returncode: int = 0):
     _real_run = _sp.run  # 패치 전에 실제 함수 참조 저장
 
     def _router(cmd, *args, **kwargs):
-        if cmd and len(cmd) >= 2 and cmd[0] == "git" and "log" in cmd:
-            # _has_worktree_commits의 git log → 실제 git 실행 (repo_dir cwd 강제)
+        if cmd and len(cmd) >= 1 and cmd[0] == "git":
+            # git divergence/log checks → 실제 git 실행 (repo_dir cwd 강제)
             return _real_run(cmd, *args, **{**kwargs, "cwd": repo_dir})
         else:
             # plan-runner post-merge subprocess → mock 반환
@@ -115,6 +116,35 @@ def _make_subprocess_router(repo_dir: str, post_merge_returncode: int = 0):
 
 
 class TestAutoMergeE2E:
+    def test_determine_merge_requested_cleanup_flag_none_commits_T4(
+        self, real_git_repo_with_feature_branch, fr
+    ):
+        """T4 R: cleanup helper 직접 경로 — flag 없음 + 완료 + 커밋 있음 → merge 요청."""
+        repo_dir, branch = real_git_repo_with_feature_branch
+        runner_id = "t4-dmr-flag-none-001"
+
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch)
+        assert fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested") is None
+
+        ctx = stream_cleanup_mod._StreamCleanupCtx(
+            runner_id=runner_id,
+            redis_client=fr,
+            log_channel="plan-runner:log",
+            exit_code=0,
+            exit_reason="completed",
+            completed_for_flow=True,
+        )
+
+        with patch.object(stream_cleanup_mod, "_pub_and_log") as mock_pub_and_log, \
+             patch("_dr_constants.PROJECT_ROOT", Path(repo_dir)):
+            result = stream_cleanup_mod._determine_merge_requested(ctx)
+
+        assert result is True
+        assert mock_pub_and_log.call_count >= 2
+        published_messages = [call.args[1] for call in mock_pub_and_log.call_args_list]
+        assert any("merge_requested 플래그 없음" in msg for msg in published_messages)
+        assert any("merge 분기 판정" in msg for msg in published_messages)
+
     def test_auto_merge_on_completed_merge_status_transitions(
         self, real_git_repo_with_feature_branch, fr
     ):
@@ -145,15 +175,15 @@ class TestAutoMergeE2E:
 
         import merge_queue as mq
 
-        with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
-             patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+        with patch.object(stream_output_mod, "get_wf_manager", return_value=wf_mgr), \
+             patch.object(stream_output_mod, "get_running_log_files", return_value={}), \
              patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
              patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
              patch("_dr_constants.PROJECT_ROOT", Path(repo_dir)), \
              patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
              patch("subprocess.run", side_effect=_make_subprocess_router(repo_dir)):
-            plan_runner_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
+            stream_output_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
 
         assert "queued" in merge_status_seq, (
             f"merge_status=queued 전이 누락. 실제 전이: {merge_status_seq}"
@@ -182,13 +212,13 @@ class TestAutoMergeE2E:
         empty_git_proc.stdout = ""
         empty_git_proc.returncode = 0
 
-        with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
-             patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+        with patch.object(stream_output_mod, "get_wf_manager", return_value=wf_mgr), \
+             patch.object(stream_output_mod, "get_running_log_files", return_value={}), \
              patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
              patch.object(stream_cleanup_mod, "_do_inline_merge") as mock_merge, \
              patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
              patch("subprocess.run", return_value=empty_git_proc):
-            plan_runner_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
+            stream_output_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
 
         mock_merge.assert_not_called(), "워크트리 커밋 없음 → merge 호출 금지"
         mock_cleanup.assert_called_once_with(runner_id, fr)
@@ -217,15 +247,15 @@ class TestAutoMergeE2E:
 
         import merge_queue as mq
 
-        with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
-             patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+        with patch.object(stream_output_mod, "get_wf_manager", return_value=wf_mgr), \
+             patch.object(stream_output_mod, "get_running_log_files", return_value={}), \
              patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
              patch.object(stream_cleanup_mod, "_cleanup_process_state"), \
              patch("_dr_constants.PROJECT_ROOT", Path(repo_dir)), \
              patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
              patch("subprocess.run", side_effect=_make_subprocess_router(repo_dir)):
-            plan_runner_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
+            stream_output_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
 
         statuses = [v for _, v in order]
         assert statuses, "merge_status 전이 없음"
@@ -252,8 +282,8 @@ class TestAutoMergeE2E:
 
         import merge_queue as mq
 
-        with patch.object(plan_runner_mod, "get_wf_manager", return_value=wf_mgr), \
-             patch.object(plan_runner_mod, "get_running_log_files", return_value={}), \
+        with patch.object(stream_output_mod, "get_wf_manager", return_value=wf_mgr), \
+             patch.object(stream_output_mod, "get_running_log_files", return_value={}), \
              patch.object(stream_cleanup_mod, "detect_merged_but_not_done", return_value=None), \
              patch.object(
                  stream_cleanup_mod,
@@ -265,7 +295,30 @@ class TestAutoMergeE2E:
              patch.object(mq, "acquire_merge_turn", return_value=True), \
              patch.object(mq, "release_merge_turn"), \
              patch("subprocess.run", side_effect=_make_subprocess_router(repo_dir)):
-            plan_runner_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
+            stream_output_mod._stream_output(proc, log_handle, fr, runner_id=runner_id)
 
         mock_cleanup.assert_called_once_with(runner_id, fr)
         assert fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge") is None
+
+    def test_inline_merge_path_uses_default_lock_timeout_T4(self, fr, monkeypatch):
+        """T4: _do_inline_merge → _execute_merge_with_lock 경로가 24h lock timeout을 전달한다."""
+        runner_id = "t4-inline-merge-timeout-default"
+        captured = {}
+
+        def _fake_acquire(_redis_client, _runner_id, **kwargs):
+            captured.update(kwargs)
+            return False
+
+        monkeypatch.delenv("MERGE_TEST_LOCK_TIMEOUT", raising=False)
+
+        import merge_queue as mq
+
+        with patch.object(mq, "acquire_merge_turn", side_effect=_fake_acquire), \
+             patch.object(mq, "release_merge_turn") as mock_release, \
+             patch.object(stream_cleanup_mod, "_cleanup_process_state") as mock_cleanup, \
+             patch.object(stream_cleanup_mod, "_pub_and_log"):
+            stream_cleanup_mod._do_inline_merge(runner_id, fr)
+
+        assert captured["timeout"] == 86400
+        mock_release.assert_not_called()
+        mock_cleanup.assert_called_once_with(runner_id, fr)

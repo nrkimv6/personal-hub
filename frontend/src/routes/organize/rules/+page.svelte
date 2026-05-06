@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import { isApiGateClosedError } from '$lib/api/client';
+	import { confirm } from '$lib/stores/confirm';
 
 	let rules = $state<any[]>([]);
 	let categories = $state<any[]>([]);
@@ -27,24 +29,30 @@
 		try {
 			const res = await fetch('/api/fc/rules');
 			if (res.ok) rules = await res.json();
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '규칙 로드 실패';
 		} finally {
 			isLoading = false;
 		}
 	}
 
 	async function fetchCategories() {
-		const res = await fetch('/api/fc/categories');
-		if (res.ok) {
-			const tree = await res.json();
-			const flat: any[] = [];
-			function flatten(nodes: any[], depth = 0) {
-				for (const node of nodes) {
-					flat.push({ ...node, depth });
-					if (node.children?.length) flatten(node.children, depth + 1);
+		try {
+			const res = await fetch('/api/fc/categories');
+			if (res.ok) {
+				const tree = await res.json();
+				const flat: any[] = [];
+				function flatten(nodes: any[], depth = 0) {
+					for (const node of nodes) {
+						flat.push({ ...node, depth });
+						if (node.children?.length) flatten(node.children, depth + 1);
+					}
 				}
+				flatten(tree);
+				categories = flat;
 			}
-			flatten(tree);
-			categories = flat;
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '카테고리 로드 실패';
 		}
 	}
 
@@ -56,32 +64,51 @@
 			message = 'rule_content가 유효한 JSON이 아닙니다';
 			return;
 		}
-		const res = await fetch('/api/fc/rules', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				rule_type: newRule.rule_type,
-				category_id: newRule.category_id,
-				rule_content: content,
-				priority: newRule.priority
-			})
-		});
-		if (res.ok) {
-			message = '규칙 생성됨';
-			newRule = { rule_type: 'extension', category_id: null, rule_content: '{"value": ""}', priority: 0 };
-			await fetchRules();
+		try {
+			const res = await fetch('/api/fc/rules', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					rule_type: newRule.rule_type,
+					category_id: newRule.category_id,
+					rule_content: content,
+					priority: newRule.priority
+				})
+			});
+			if (res.ok) {
+				message = '규칙 생성됨';
+				newRule = { rule_type: 'extension', category_id: null, rule_content: '{"value": ""}', priority: 0 };
+				await fetchRules();
+			}
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '규칙 생성 실패';
 		}
 	}
 
 	async function toggleRule(rule: any) {
-		await fetch(`/api/fc/rules/${rule.id}/toggle`, { method: 'PUT' });
-		await fetchRules();
+		try {
+			await fetch(`/api/fc/rules/${rule.id}/toggle`, { method: 'PUT' });
+			await fetchRules();
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '규칙 토글 실패';
+		}
 	}
 
 	async function deleteRule(id: number) {
-		if (!confirm('삭제하시겠습니까?')) return;
-		await fetch(`/api/fc/rules/${id}`, { method: 'DELETE' });
-		await fetchRules();
+		if (
+			!(await confirm({
+				title: '규칙 삭제',
+				message: '삭제하시겠습니까?',
+				confirmText: '삭제',
+				variant: 'danger'
+			}))
+		) return;
+		try {
+			await fetch(`/api/fc/rules/${id}`, { method: 'DELETE' });
+			await fetchRules();
+		} catch (e) {
+			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '규칙 삭제 실패';
+		}
 	}
 
 	onMount(() => {
@@ -91,7 +118,7 @@
 </script>
 
 <div class="space-y-6">
-	<PageHeader title="규칙 관리" subtitle="파일 분류 규칙을 관리합니다" />
+	<PageHeader title="규칙 관리" />
 
 	{#if message}
 		<div class="rounded-md bg-blue-500/10 px-3 py-2 text-sm text-blue-600">{message}</div>

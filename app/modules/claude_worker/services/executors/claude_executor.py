@@ -2,8 +2,10 @@
 
 import json
 import os
+import re
 import subprocess
 import tempfile
+from datetime import datetime, timedelta
 from typing import Iterable
 
 from app.modules.claude_worker.services.executors.base import (
@@ -11,8 +13,17 @@ from app.modules.claude_worker.services.executors.base import (
     normalize_json_payload,
 )
 from app.modules.claude_worker.services.profile_env import build_cli_env
+from app.shared.timezones import get_timezone
 
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
+DEFAULT_QUOTA_RESET_TZ = "Asia/Seoul"
+QUOTA_RESET_PATTERN = re.compile(
+    r"\b(?:resets?|reset)\s+(?:at\s+)?"
+    r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*"
+    r"(?P<ampm>a\.?m\.?|p\.?m\.?)"
+    r"(?:\s*\((?P<tz>[^)]+)\))?",
+    re.IGNORECASE,
+)
 
 
 def _normalize_allowed_tools(allowed_tools) -> list[str]:
@@ -60,14 +71,50 @@ def _extract_session_id(raw: str) -> "str | None":
         return None
 
 
-def _parse_quota_retry_ms(text: str):
+def _timezone_from_label(label: str | None):
+    return get_timezone(label, default=DEFAULT_QUOTA_RESET_TZ)
+
+
+def _parse_quota_reset_until(text: str, now: datetime | None = None) -> datetime | None:
+    """Claude quota reset wall-clock 안내를 다음 KST datetime으로 변환한다."""
+    if not text:
+        return None
+
+    match = QUOTA_RESET_PATTERN.search(text)
+    if not match:
+        return None
+
+    tz = _timezone_from_label(match.group("tz"))
+    current = now or datetime.now(tz)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=tz)
+    else:
+        current = current.astimezone(tz)
+
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute") or "0")
+    ampm = match.group("ampm").lower().replace(".", "")
+
+    if not 1 <= hour <= 12 or not 0 <= minute <= 59:
+        return None
+    if ampm == "pm" and hour != 12:
+        hour += 12
+    elif ampm == "am" and hour == 12:
+        hour = 0
+
+    candidate = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= current:
+        candidate += timedelta(days=1)
+    return candidate.replace(tzinfo=None)
+
+
+def _parse_quota_retry_ms(text: str, now: datetime | None = None):
     """stderr/stdout에서 quota 재시도 대기 시간(ms) 파싱.
 
     1순위: retryDelayMs: 숫자 정규식 파싱
     2순위: reset after Xh Ym Zs 텍스트 파싱
     미감지: None 반환
     """
-    import re
     if not text:
         return None
 
@@ -81,6 +128,17 @@ def _parse_quota_retry_ms(text: str):
     if m:
         h, mn, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
         return (h * 3600 + mn * 60 + s) * 1000
+
+    # 3순위: "resets 5:20pm (Asia/Seoul)" wall-clock 파싱
+    reset_until = _parse_quota_reset_until(text, now=now)
+    if reset_until:
+        reset_match = QUOTA_RESET_PATTERN.search(text)
+        tz = _timezone_from_label(reset_match.group("tz") if reset_match else None)
+        current = now or datetime.now(tz)
+        if current.tzinfo is not None:
+            current = current.astimezone(tz).replace(tzinfo=None)
+        delta_ms = int((reset_until - current).total_seconds() * 1000)
+        return max(1000, delta_ms)
 
     return None
 
@@ -100,6 +158,7 @@ class ClaudeExecutor(LLMExecutorBase):
         parse_json: bool = True,
         enable_tools: bool = False,
         cli_options: dict = None,
+        profile=None,
     ) -> dict:
         """Claude CLI 실행 (동기).
 
@@ -132,7 +191,7 @@ class ClaudeExecutor(LLMExecutorBase):
                 prompt_file = f.name
 
             # Claude CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
-            env = build_cli_env("claude")
+            env = build_cli_env("claude", profile=profile)
 
             schema_file = None
 

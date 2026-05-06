@@ -152,15 +152,15 @@ async def test_desktop_relay_integration():
     try:
         svc = _make_service()
 
-        # _relay_desktop_via_redis 내부에서 `from app.core.config import settings as _settings`로
-        # 임포트하므로, app.core.config.settings를 직접 패치해야 실제 Redis 큐 이름이 일치한다.
+        # _relay_desktop_via_redis는 notification_service의 module-level settings를
+        # 사용하므로, 같은 patch surface로 실제 Redis 큐 이름을 고정한다.
         with (
             patch("app.shared.notification.notification_service._IN_SESSION_0", True),
-            patch("app.core.config.settings") as mock_core_settings,
+            patch("app.shared.notification.notification_service.settings") as mock_service_settings,
         ):
-            mock_core_settings.REDIS_HOST = "localhost"
-            mock_core_settings.REDIS_PORT = 6379
-            mock_core_settings.REDIS_QUEUE_PREFIX = TEST_QUEUE_PREFIX
+            mock_service_settings.REDIS_HOST = "localhost"
+            mock_service_settings.REDIS_PORT = 6379
+            mock_service_settings.REDIS_QUEUE_PREFIX = TEST_QUEUE_PREFIX
 
             result = await svc._send_desktop(test_message)
 

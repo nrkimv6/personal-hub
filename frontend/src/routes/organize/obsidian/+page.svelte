@@ -1,10 +1,17 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import { isApiGateClosedError } from '$lib/api/client';
 
 	// 탭
 	type TabId = 'explore' | 'classify' | 'extract';
 	let activeTab = $state<TabId>('explore');
+	const obsidianTabs = [
+		{ id: 'explore', label: '탐색' },
+		{ id: 'classify', label: '분류' },
+		{ id: 'extract', label: '추출' }
+	];
 
 	// === 탐색 탭 ===
 	let vaultPath = $state('');
@@ -64,8 +71,14 @@
 		}[];
 	}>({ total: 0, items: [] });
 	let extractTab = $state<'todos' | 'urls' | 'code'>('todos');
+	const extractTabs = [
+		{ id: 'todos', label: 'TODO' },
+		{ id: 'urls', label: 'URL' },
+		{ id: 'code', label: '코드' }
+	];
 
 	let pollInterval: ReturnType<typeof setInterval> | null = null;
+	let apiMessage = $state<string | null>(null);
 
 	onMount(() => {
 		loadStats();
@@ -77,7 +90,7 @@
 	});
 
 	async function loadStats() {
-		const res = await fetch('/api/fc/obsidian/stats');
+		const res = await apiFetch('/api/fc/obsidian/stats');
 		if (res.ok) stats = await res.json();
 	}
 
@@ -88,13 +101,13 @@
 		});
 		if (notesSearch) params.set('search', notesSearch);
 		if (noteTypeFilter) params.set('note_type', noteTypeFilter);
-		const res = await fetch(`/api/fc/obsidian/notes?${params}`);
+		const res = await apiFetch(`/api/fc/obsidian/notes?${params}`);
 		if (res.ok) notes = await res.json();
 	}
 
 	async function startScan() {
 		const body = vaultPath ? `?vault_path=${encodeURIComponent(vaultPath)}` : '';
-		await fetch(`/api/fc/obsidian/scan/start${body}`, { method: 'POST' });
+		await apiFetch(`/api/fc/obsidian/scan/start${body}`, { method: 'POST' });
 		scanState = { status: 'running', total: 0, processed: 0, current: '' };
 		startPoll();
 	}
@@ -102,7 +115,7 @@
 	function startPoll() {
 		if (pollInterval) clearInterval(pollInterval);
 		pollInterval = setInterval(async () => {
-			const res = await fetch('/api/fc/obsidian/scan/status');
+			const res = await apiFetch('/api/fc/obsidian/scan/status');
 			if (res.ok) {
 				scanState = await res.json();
 				if (scanState.status !== 'running') {
@@ -116,16 +129,16 @@
 	}
 
 	async function loadClassifyNotes() {
-		const res = await fetch('/api/fc/obsidian/notes?limit=200');
+		const res = await apiFetch('/api/fc/obsidian/notes?limit=200');
 		if (res.ok) classifyNotes = await res.json();
 	}
 
 	async function startClassify() {
-		await fetch(`/api/fc/obsidian/classify/start?use_llm=${useLlm}`, { method: 'POST' });
+		await apiFetch(`/api/fc/obsidian/classify/start?use_llm=${useLlm}`, { method: 'POST' });
 		classifyState = { status: 'running', total: 0, processed: 0 };
 		if (pollInterval) clearInterval(pollInterval);
 		pollInterval = setInterval(async () => {
-			const res = await fetch('/api/fc/obsidian/classify/status');
+			const res = await apiFetch('/api/fc/obsidian/classify/status');
 			if (res.ok) {
 				classifyState = await res.json();
 				if (classifyState.status !== 'running') {
@@ -139,7 +152,7 @@
 
 	async function approveSelected() {
 		if (!selectedNoteIds.length) return;
-		await fetch('/api/fc/obsidian/classify/approve', {
+		await apiFetch('/api/fc/obsidian/classify/approve', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ note_ids: selectedNoteIds, note_type: approveType })
@@ -165,11 +178,11 @@
 	}
 
 	async function startExtract() {
-		await fetch('/api/fc/obsidian/extract/start', { method: 'POST' });
+		await apiFetch('/api/fc/obsidian/extract/start', { method: 'POST' });
 		extractState = { status: 'running', total: 0, processed: 0 };
 		if (pollInterval) clearInterval(pollInterval);
 		pollInterval = setInterval(async () => {
-			const res = await fetch('/api/fc/obsidian/extract/status');
+			const res = await apiFetch('/api/fc/obsidian/extract/status');
 			if (res.ok) {
 				extractState = await res.json();
 				if (extractState.status !== 'running') {
@@ -182,12 +195,12 @@
 	}
 
 	async function loadExtractResults() {
-		const res = await fetch('/api/fc/obsidian/extract/results?limit=100');
+		const res = await apiFetch('/api/fc/obsidian/extract/results?limit=100');
 		if (res.ok) extractResults = await res.json();
 	}
 
 	async function exportJson() {
-		const res = await fetch('/api/fc/obsidian/extract/export');
+		const res = await apiFetch('/api/fc/obsidian/extract/export');
 		if (res.ok) {
 			const data = await res.json();
 			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -205,24 +218,23 @@
 		if (tab === 'classify') loadClassifyNotes();
 		if (tab === 'extract') loadExtractResults();
 	}
+
+	async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+		try {
+			const response = await fetch(input, init);
+			apiMessage = null;
+			return response;
+		} catch (e) {
+			apiMessage = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '요청 실패';
+			throw e;
+		}
+	}
 </script>
 
 <div class="space-y-4">
-	<PageHeader title="옵시디언 분석기" subtitle="옵시디언 파일을 탐색하고 분류합니다" />
+	<PageHeader title="옵시디언 분석기" />
 
-	<!-- 탭 -->
-	<div class="flex gap-1 rounded-lg border border-border bg-card p-1">
-		{#each [{ id: 'explore', label: '탐색' }, { id: 'classify', label: '분류' }, { id: 'extract', label: '추출' }] as tab}
-			<button
-				class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-all {activeTab === tab.id
-					? 'bg-primary text-primary-foreground'
-					: 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-				onclick={() => onTabChange(tab.id as TabId)}
-			>
-				{tab.label}
-			</button>
-		{/each}
-	</div>
+	<TabNav tabs={obsidianTabs} bind:activeTab variant="secondary" onTabChange={(tabId) => onTabChange(tabId as TabId)} />
 
 	<!-- 탐색 탭 -->
 	{#if activeTab === 'explore'}
@@ -483,19 +495,7 @@
 			</div>
 
 			{#if extractResults.total > 0}
-				<!-- 추출 결과 탭 -->
-				<div class="flex gap-1 rounded-lg border border-border bg-card p-1">
-					{#each [{ id: 'todos', label: 'TODO' }, { id: 'urls', label: 'URL' }, { id: 'code', label: '코드' }] as t}
-						<button
-							class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-all {extractTab === t.id
-								? 'bg-primary text-primary-foreground'
-								: 'text-muted-foreground hover:bg-accent'}"
-							onclick={() => (extractTab = t.id as typeof extractTab)}
-						>
-							{t.label}
-						</button>
-					{/each}
-				</div>
+				<TabNav tabs={extractTabs} bind:activeTab={extractTab} variant="secondary" />
 
 				<div class="space-y-3">
 					{#each extractResults.items as item}

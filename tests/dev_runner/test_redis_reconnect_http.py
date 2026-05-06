@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
-from app.main import app
+pytestmark = pytest.mark.http
 
 
 def _parse_sse_events(content: str) -> list[dict]:
@@ -64,6 +64,7 @@ class TestLogStreamConnectedEvent:
         """GET /logs/stream → 첫 이벤트가 event: connected / data: ok"""
         patch_log, _ = _mock_log_service_for_connected()
         with patch_log:
+            from app.main import app
             with TestClient(app, raise_server_exceptions=False) as client:
                 response = client.get(
                     "/api/v1/dev-runner/logs/stream",
@@ -83,6 +84,7 @@ class TestLogStreamConnectedEvent:
         """GET /merge-log/stream → 첫 이벤트가 event: connected / data: ok"""
         _, patch_merge = _mock_log_service_for_connected()
         with patch_merge:
+            from app.main import app
             with TestClient(app, raise_server_exceptions=False) as client:
                 response = client.get(
                     "/api/v1/dev-runner/merge-log/stream",

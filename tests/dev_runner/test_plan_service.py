@@ -698,6 +698,42 @@ class TestRunDone:
         mock_sync.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_run_done_commit_nonzero_returns_failure_E(self, svc, tmp_path):
+        """E: commit script non-zero는 run_done success=False로 전파된다."""
+        plan_dir = tmp_path / "docs" / "plan"
+        archive_dir = tmp_path / "docs" / "archive"
+        plan_dir.mkdir(parents=True)
+        archive_dir.mkdir(parents=True)
+        plan = plan_dir / "2026-04-03-commit-fail.md"
+        archive = archive_dir / plan.name
+        plan.write_text("> 상태: 구현완료\n> 진행률: 1/1 (100%)\n\n- [x] task\n", encoding="utf-8")
+        archive.write_text("# archived\n", encoding="utf-8")
+        commit_ps1 = tmp_path / "commit.ps1"
+        commit_ps1.write_text("throw 'fail'\n", encoding="utf-8")
+
+        add_proc = AsyncMock()
+        add_proc.communicate = AsyncMock(return_value=(b"add ok", None))
+        add_proc.returncode = 0
+        commit_proc = AsyncMock()
+        commit_proc.communicate = AsyncMock(return_value=(b"commit failed hard", None))
+        commit_proc.returncode = 17
+
+        with patch.object(type(svc), "COMMIT_PS1", commit_ps1), \
+             patch.object(type(svc), "COMMIT_SH", tmp_path / "missing-commit.sh"), \
+             patch("app.modules.dev_runner.services.git_commit_roots._has_staged_changes", return_value=True), \
+             patch("app.modules.dev_runner.services.git_commit_roots.asyncio.create_subprocess_exec", side_effect=[add_proc, commit_proc]), \
+             patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(archive, None))), \
+             patch.object(svc, "_update_todo_done"), \
+             patch.object(svc, "_archive_done_if_needed", return_value=None), \
+             patch.object(svc, "_resolve_project_dir", return_value=tmp_path), \
+             patch.object(svc, "sync_plans"):
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is False
+        assert "commit script failed (17)" in result["message"]
+        assert "commit failed hard" in result["message"]
+
+    @pytest.mark.asyncio
     async def test_failure_returns_false(self, svc, tmp_plan_dir):
         """Inverse: _archive_plan 예외 → success=False"""
         plan = tmp_plan_dir / "fail_test.md"
@@ -766,7 +802,7 @@ class TestRunDone:
                     "runner_id": "runner-2",
                     "captured_at": "2026-04-14T16:54:00",
                     "project_root": str(tmp_path),
-                    "dirty_files": [f"docs/history/{history_name}"],
+                    "dirty_files": [f".worktrees/plans/docs/history/{history_name}"],
                     "owned_files": [],
                     "clean_at_start_files": [],
                 },
@@ -790,11 +826,11 @@ class TestRunDone:
         """R: snapshot owned_files 바깥의 auto-done 대상은 차단된다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-14_owned-only.md"
@@ -835,11 +871,11 @@ class TestRunDone:
         """B: runner_id=None 수동 done 경로는 snapshot 존재와 무관하게 ownership guard를 타지 않는다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-14_manual-done.md"
@@ -874,12 +910,12 @@ class TestRunDone:
         """R: auto path는 snapshot 밖 stray dirty가 있으면 residue_guard로 차단된다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
         (tmp_path / ".git").write_text("gitdir: mock\n", encoding="utf-8")
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-21_residue-guard.md"
@@ -914,12 +950,12 @@ class TestRunDone:
         """B: current dirty가 비어 있으면 residue_guard 없이 기존 완료 경로를 유지한다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
         (tmp_path / ".git").write_text("gitdir: mock\n", encoding="utf-8")
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-21_residue-clean.md"
@@ -955,12 +991,12 @@ class TestRunDone:
         """E: snapshot 부재 시 residue_guard가 strict fail 한다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
         ownership_dir.mkdir(parents=True, exist_ok=True)
         (tmp_path / ".git").write_text("gitdir: mock\n", encoding="utf-8")
-        (tmp_path / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
+        (tmp_path / ".worktrees" / "plans" / "TODO.md").write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
         (docs_dir / "DONE.md").write_text("# DONE\n", encoding="utf-8")
 
         plan = plan_dir / "2026-04-21_residue-missing-snapshot.md"
@@ -980,8 +1016,8 @@ class TestRunDone:
         """R: DONE.md가 5개를 넘으면 history archive도 commit 대상에 포함된다."""
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
-        docs_dir = tmp_path / "docs"
-        docs_dir.mkdir(exist_ok=True)
+        docs_dir = tmp_path / ".worktrees" / "plans" / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
         done_path = docs_dir / "DONE.md"
         done_path.write_text(
             "# DONE\n\n"
@@ -1010,7 +1046,7 @@ class TestRunDone:
 
         assert result["success"] is True
         today = date.today()
-        expected_history = tmp_path / "docs" / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md"
+        expected_history = tmp_path / ".worktrees" / "plans" / "docs" / "history" / f"DONE-{today.year}-W{today.isocalendar()[1]:02d}.md"
         assert expected_history.exists()
         commit_files = mock_commit.await_args.args[1]
         assert expected_history in commit_files
@@ -1457,3 +1493,52 @@ class TestCanDone:
         progress = PlanProgressResponse(done=0, total=0, percent=0)
         plan = self._make_plan(str(f), progress=progress)
         assert svc._can_done(plan) is True
+
+
+# -------------------------------------------------------------
+# TC: _resolve_source -- plans worktree 경로 오분류 방지
+# -------------------------------------------------------------
+
+class TestResolveSourcePlansWorktree:
+    '''PlanService._resolve_source plans worktree 경로 처리 검증'''
+
+    @pytest.fixture
+    def svc(self, dev_runner_config_isolation):
+        from app.modules.dev_runner.services.plan_service import PlanService
+        return PlanService()
+
+    def test_resolve_source_plans_worktree_returns_project_name_not_plans(self, tmp_path, svc):
+        '''R: .../monitor-page/.worktrees/plans/docs/plan -> monitor-page 반환 (plans 오분류 차단).'''
+        plans_dir = tmp_path / 'monitor-page' / '.worktrees' / 'plans' / 'docs' / 'plan'
+        plans_dir.mkdir(parents=True)
+
+        result = svc._resolve_source(plans_dir)
+
+        assert result == 'monitor-page', (
+            f'plans worktree 경로에서 _resolve_source()는 monitor-page를 반환해야 함, 실제: {result!r}'
+        )
+        assert result != 'plans', (
+            f'_resolve_source()가 plans를 반환하면 안 됨 (오분류): {result!r}'
+        )
+
+    def test_resolve_source_normal_docs_plan(self, tmp_path, svc):
+        '''R: .../my-project/docs/plan -> my-project 반환 (기존 동작 회귀 방어).'''
+        docs_plan = tmp_path / 'my-project' / 'docs' / 'plan'
+        docs_plan.mkdir(parents=True)
+
+        result = svc._resolve_source(docs_plan)
+
+        assert result == 'my-project', (
+            f'일반 docs/plan 경로에서 my-project 반환해야 함, 실제: {result!r}'
+        )
+
+    def test_resolve_source_common_docs_plan(self, tmp_path, svc):
+        '''R: .../common/docs/plan -> common 반환 (기존 동작 회귀 방어).'''
+        docs_plan = tmp_path / 'common' / 'docs' / 'plan'
+        docs_plan.mkdir(parents=True)
+
+        result = svc._resolve_source(docs_plan)
+
+        assert result == 'common', (
+            f'common/docs/plan 경로에서 common 반환해야 함, 실제: {result!r}'
+        )

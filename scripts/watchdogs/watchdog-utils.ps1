@@ -206,3 +206,200 @@ function Confirm-ProcessPid {
     Write-Log "cmdline 재탐색 실패 — 원래 PID $ProcessId 유지" "WARN"
     return $ProcessId
 }
+
+function Get-WatchdogPaths {
+    param([string]$ProjectRoot)
+
+    $isAdmin = $env:APP_MODE -eq "admin"
+    $logDir = if ($isAdmin) { Join-Path $ProjectRoot "logs\admin" } else { Join-Path $ProjectRoot "logs" }
+    $pidDir = Join-Path $ProjectRoot ".pids"
+    $pidSuffix = if ($isAdmin) { "_admin" } else { "" }
+
+    if (-not (Test-Path $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
+    if (-not (Test-Path $pidDir)) {
+        New-Item -ItemType Directory -Path $pidDir -Force | Out-Null
+    }
+
+    return @{
+        LogDir = $logDir
+        PidDir = $pidDir
+        PidSuffix = $pidSuffix
+        IsAdmin = $isAdmin
+    }
+}
+
+function Get-WorkerExecutable {
+    param(
+        [string]$ProjectRoot,
+        [string]$AliasName = ""
+    )
+
+    if ($AliasName) {
+        $aliasExe = Join-Path $ProjectRoot ".venv\Scripts\$AliasName"
+        if (Test-Path $aliasExe) {
+            return $aliasExe
+        }
+    }
+
+    foreach ($candidate in @(".venv\Scripts\python.exe", "venv\Scripts\python.exe")) {
+        $pythonExe = Join-Path $ProjectRoot $candidate
+        if (Test-Path $pythonExe) {
+            return $pythonExe
+        }
+    }
+
+    return $null
+}
+
+# PID 파일 기반 liveness check helper.
+# 주의: 이 함수는 cmdline까지 재검증하지 않는다. PID 재활용 가능성은 호출자가
+# stale pid 제거 또는 cmdline 기반 orphan 정리와 조합해 방어해야 한다.
+function Test-PidFileAlive {
+    param([string]$PidFile)
+
+    if (-not (Test-Path $PidFile)) {
+        return $false
+    }
+
+    $savedPid = Get-Content $PidFile -ErrorAction SilentlyContinue
+    if (-not $savedPid) {
+        return $false
+    }
+
+    try {
+        $targetPid = [int]$savedPid
+    } catch {
+        return $false
+    }
+
+    $process = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
+    return ($null -ne $process)
+}
+
+function Start-WorkerProcess {
+    param(
+        [string]$Label,
+        [string]$Python,
+        [string[]]$ArgList,
+        [string]$WorkingDir,
+        [string]$StdoutLog = "",
+        [string]$StderrLog = "",
+        [string]$NamePattern,
+        [string]$CmdlinePattern,
+        [string]$PidFile,
+        [hashtable]$Env = @{},
+        [string]$RegisterRole = "",
+        [string]$RegisterName = "",
+        [int]$ParentPid = 0
+    )
+
+    Stop-ExistingProcessesByCmdline -Label $Label -CmdlinePattern $CmdlinePattern
+
+    if (-not (Test-Path $Python)) {
+        Write-Log "ERROR: worker executable not found: $Python" "ERROR"
+        return $null
+    }
+
+    $originalEnv = @{}
+    foreach ($key in $Env.Keys) {
+        $originalEnv[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
+        [Environment]::SetEnvironmentVariable($key, [string]$Env[$key], "Process")
+    }
+
+    try {
+        $startParams = @{
+            FilePath = $Python
+            ArgumentList = $ArgList
+            WorkingDirectory = $WorkingDir
+            NoNewWindow = $true
+            PassThru = $true
+        }
+        if ($StdoutLog) {
+            $startParams.RedirectStandardOutput = $StdoutLog
+        }
+        if ($StderrLog) {
+            $startParams.RedirectStandardError = $StderrLog
+        }
+
+        $workerProcess = Start-Process @startParams
+    }
+    finally {
+        foreach ($key in $Env.Keys) {
+            [Environment]::SetEnvironmentVariable($key, $originalEnv[$key], "Process")
+        }
+    }
+
+    $actualPid = Confirm-ProcessPid -ProcessId $workerProcess.Id -NamePattern $NamePattern -CmdlinePattern $CmdlinePattern
+    $actualPid | Out-File $PidFile -Encoding ascii
+
+    if ($RegisterRole) {
+        $registerName = if ($RegisterName) { $RegisterName } else { $Label }
+        $registerScript = Join-Path $WorkingDir "scripts\services\register_process.py"
+        & $Python $registerScript --pid $actualPid --ppid $ParentPid --name $registerName --exe $Python --role $RegisterRole -ErrorAction SilentlyContinue
+    }
+
+    return $actualPid
+}
+
+function Invoke-WatchdogLoop {
+    param(
+        [string]$Label,
+        [ScriptBlock]$StartTarget,
+        [ScriptBlock]$TestRunning,
+        [int]$CheckInterval,
+        [int]$MaxRestarts,
+        [int]$RestartWindow,
+        [ScriptBlock]$OnExit = $null
+    )
+
+    $restartCount = 0
+    $lastRestartTime = Get-Date
+
+    if (-not (& $TestRunning)) {
+        Write-Log "$Label not running, starting..." "WARN"
+        & $StartTarget | Out-Null
+        $restartCount++
+        $lastRestartTime = Get-Date
+    }
+
+    try {
+        while ($true) {
+            Start-Sleep -Seconds $CheckInterval
+
+            $timeSinceLastRestart = ((Get-Date) - $lastRestartTime).TotalSeconds
+            if ($timeSinceLastRestart -gt $RestartWindow) {
+                if ($restartCount -gt 0) {
+                    Write-Log "Restart count reset (no crashes in ${RestartWindow}s)"
+                    $restartCount = 0
+                }
+            }
+
+            if (-not (& $TestRunning)) {
+                Write-Log "$Label process died!" "ERROR"
+
+                if ($restartCount -ge $MaxRestarts) {
+                    Write-Log "Maximum restart limit ($MaxRestarts) reached in ${RestartWindow}s window!" "ERROR"
+                    Write-Log "Please check the watchdog logs for the root cause." "ERROR"
+                    Write-Log "Watchdog stopping to prevent restart loop." "ERROR"
+                    break
+                }
+
+                Write-Log "Restarting $Label (attempt $($restartCount + 1)/$MaxRestarts)..." "WARN"
+                & $StartTarget | Out-Null
+                $restartCount++
+                $lastRestartTime = Get-Date
+            }
+        }
+    }
+    catch {
+        Write-Log "Watchdog error: $_" "ERROR"
+    }
+    finally {
+        Write-Log "Watchdog stopped"
+        if ($OnExit) {
+            & $OnExit
+        }
+    }
+}

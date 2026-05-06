@@ -42,6 +42,20 @@ class TestRestartInfraHttp:
         assert "message" in data
         assert len(data["message"]) > 0
 
+    def test_http_restart_infra_command_listener_success(self, client):
+        """T5: POST /api/v1/system/services/infra/command_listener/restart → 200 + success/message 계약 유지"""
+        with patch(
+            "app.modules.system.services.worker_service.executor_service.restart_listener",
+            return_value={"success": True, "message": "command listener restarted"},
+        ) as mock_restart:
+            resp = client.post("/api/v1/system/services/infra/command_listener/restart")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "message" in data
+        mock_restart.assert_called_once()
+
 
 class TestWorkerStatusTierHttp:
 

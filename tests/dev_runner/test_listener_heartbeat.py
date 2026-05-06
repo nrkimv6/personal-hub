@@ -254,3 +254,141 @@ class TestMonitorPidExitReason:
             )
         finally:
             listener_mod._running_processes.pop(runner_id, None)
+
+
+# ========== Phase T2: Claim Heartbeat 갱신 TC ==========
+
+
+class TestListenerClaimHeartbeat:
+    """_handle_running_process_heartbeat 내 claim heartbeat 갱신 경로를 검증.
+
+    listener heartbeat 루프에서 plan_file에 연결된 active claim의 heartbeat_at이 갱신되는지
+    mock DB 조합으로 확인한다.
+    """
+
+    def test_R_claim_heartbeat_called_for_active_claim(self, listener_mod, fr):
+        """R: plan_file이 Redis에 있고 active claim 존재 → heartbeat_claim 호출됨"""
+        runner_id = "test-claim-hb-r1"
+        plan_file = "docs/plan/test-claim.md"
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None  # 프로세스 살아있음
+        listener_mod._running_processes[runner_id] = mock_proc
+
+        mock_db = MagicMock()
+        mock_claim = MagicMock()
+        mock_claim.claim_id = "claim-hb-001"
+        mock_claim.state = "active"
+        mock_hb_fn = MagicMock()
+        mock_get_fn = MagicMock(return_value=mock_claim)
+
+        try:
+            with patch("app.database.SessionLocal", return_value=mock_db), \
+                 patch(
+                     "app.modules.dev_runner.services.plan_execution_claim_service.get_active_claim_for_plan",
+                     mock_get_fn,
+                 ), \
+                 patch(
+                     "app.modules.dev_runner.services.plan_execution_claim_service.heartbeat_claim",
+                     mock_hb_fn,
+                 ), \
+                 patch.object(listener_mod, "_handle_zombie_heartbeat"):
+                listener_mod._handle_running_process_heartbeat(runner_id, mock_proc, fr)
+
+            mock_hb_fn.assert_called_once_with(mock_db, "claim-hb-001")
+        finally:
+            listener_mod._running_processes.pop(runner_id, None)
+
+    def test_B_no_claim_when_plan_file_missing(self, listener_mod, fr):
+        """B: plan_file이 Redis에 없으면 claim heartbeat를 호출하지 않는다"""
+        runner_id = "test-claim-hb-b1"
+        # plan_file 키 미설정
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        listener_mod._running_processes[runner_id] = mock_proc
+        mock_hb_fn = MagicMock()
+
+        try:
+            with patch(
+                "app.modules.dev_runner.services.plan_execution_claim_service.heartbeat_claim",
+                mock_hb_fn,
+            ), \
+                patch.object(listener_mod, "_handle_zombie_heartbeat"):
+                listener_mod._handle_running_process_heartbeat(runner_id, mock_proc, fr)
+
+            mock_hb_fn.assert_not_called()
+        finally:
+            listener_mod._running_processes.pop(runner_id, None)
+
+    def test_B_no_heartbeat_for_queued_claim(self, listener_mod, fr):
+        """B: plan_file이 있고 claim은 queued 상태 → heartbeat_claim 호출 안 함"""
+        runner_id = "test-claim-hb-b2"
+        plan_file = "docs/plan/queued-plan.md"
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        listener_mod._running_processes[runner_id] = mock_proc
+
+        mock_db = MagicMock()
+        mock_claim = MagicMock()
+        mock_claim.claim_id = "claim-queued-001"
+        mock_claim.state = "queued"  # queued 상태
+        mock_hb_fn = MagicMock()
+        mock_get_fn = MagicMock(return_value=mock_claim)
+
+        try:
+            with patch("app.database.SessionLocal", return_value=mock_db), \
+                 patch(
+                     "app.modules.dev_runner.services.plan_execution_claim_service.get_active_claim_for_plan",
+                     mock_get_fn,
+                 ), \
+                 patch(
+                     "app.modules.dev_runner.services.plan_execution_claim_service.heartbeat_claim",
+                     mock_hb_fn,
+                 ), \
+                 patch.object(listener_mod, "_handle_zombie_heartbeat"):
+                listener_mod._handle_running_process_heartbeat(runner_id, mock_proc, fr)
+
+            # queued 상태이면 heartbeat_claim을 호출하지 않는다
+            mock_hb_fn.assert_not_called()
+        finally:
+            listener_mod._running_processes.pop(runner_id, None)
+
+    def test_E_claim_heartbeat_error_is_swallowed(self, listener_mod, fr):
+        """E: heartbeat_claim 내부에서 예외 발생 → 무시되고 정상 진행된다"""
+        runner_id = "test-claim-hb-e1"
+        plan_file = "docs/plan/error-plan.md"
+        fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        listener_mod._running_processes[runner_id] = mock_proc
+
+        mock_db = MagicMock()
+        mock_claim = MagicMock()
+        mock_claim.claim_id = "claim-err-001"
+        mock_claim.state = "active"
+        mock_get_fn = MagicMock(return_value=mock_claim)
+        mock_hb_fn = MagicMock(side_effect=Exception("DB error"))
+
+        try:
+            with patch("app.database.SessionLocal", return_value=mock_db), \
+                 patch(
+                     "app.modules.dev_runner.services.plan_execution_claim_service.get_active_claim_for_plan",
+                     mock_get_fn,
+                 ), \
+                 patch(
+                     "app.modules.dev_runner.services.plan_execution_claim_service.heartbeat_claim",
+                     mock_hb_fn,
+                 ), \
+                 patch.object(listener_mod, "_handle_zombie_heartbeat"):
+                # 예외가 전파되지 않아야 한다
+                result = listener_mod._handle_running_process_heartbeat(runner_id, mock_proc, fr)
+
+            # 함수가 정상 반환값을 돌려줬는지 확인 ("checked")
+            assert result == "checked"
+        finally:
+            listener_mod._running_processes.pop(runner_id, None)

@@ -16,9 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.plan_record import PlanRecord, PlanEvent
 from app.modules.claude_worker.services.plan_analyze_handler import (
     save_plan_archive_result,
-    save_requirements_sync_result,
     build_plan_analyze_prompt,
-    build_requirements_sync_prompt,
 )
 
 
@@ -66,6 +64,8 @@ def test_save_plan_archive_result_right(db, sample_record):
     """R: mock LLM 결과 → plan_records UPDATE 검증"""
     mock_request = MagicMock()
     mock_request.caller_id = "testhash001"
+    sample_record.raw_content = "# Stored archive content"
+    db.flush()
 
     result = {
         "success": True,
@@ -85,6 +85,8 @@ def test_save_plan_archive_result_right(db, sample_record):
     assert sample_record.tags == ["feat", "bugfix"]
     assert sample_record.summary == "Instagram 크롤링 기능 개선"
     assert sample_record.llm_processed_at is not None
+    assert sample_record.file_delete_after is not None
+    assert (sample_record.file_delete_after - sample_record.llm_processed_at).days == 7
 
 
 def test_save_plan_archive_result_error_no_record(db):
@@ -117,18 +119,32 @@ def test_build_plan_analyze_prompt_right():
     assert "2026-01-01_test-plan.md" in prompt
 
 
-def test_build_requirements_sync_prompt_right():
-    """R: 카테고리 + plan summaries → 프롬프트 생성"""
-    summaries = [
-        {"date": "2026-01-01", "filename": "plan-a.md", "summary": "기능 A 추가", "tags": ["feat"]},
-        {"date": "2026-01-05", "filename": "plan-b.md", "summary": "버그 B 수정", "tags": ["fix"]},
-    ]
-    prompt = build_requirements_sync_prompt("instagram", summaries)
+def test_plan_archive_analyze_codex_provider_dispatch_returns_raw_and_parsed():
+    """R: plan_archive_analyze에서 쓰는 codex provider dispatch가 raw/parsed를 반환한다."""
+    from app.modules.claude_worker.services.llm_service import LLMService
 
-    assert "instagram" in prompt
-    assert "requirements" in prompt
-    assert "plan-a.md" in prompt
-    assert "plan-b.md" in prompt
+    service = LLMService(db=MagicMock())
+
+    def capture_run(command, **_kwargs):
+        output_path = command[command.index("--output-last-message") + 1]
+        Path(output_path).write_text('{"category": "infra", "tags": ["plan"]}', encoding="utf-8")
+        return MagicMock(returncode=0, stdout="stdout warning", stderr="")
+
+    with patch("shutil.which", return_value="codex"), patch(
+        "app.modules.claude_worker.services.executors.codex_executor.build_cli_env",
+        return_value={},
+    ), patch("subprocess.run", side_effect=capture_run):
+        result = service.execute_llm(
+            build_plan_analyze_prompt("# plan", "2026-05-05_plan.md", ["infra"]),
+            provider="codex",
+            model="gpt-5.2",
+            parse_json=True,
+            cli_options={"parse_json": True},
+        )
+
+    assert result["success"] is True
+    assert result["raw_response"] == '{"category": "infra", "tags": ["plan"]}'
+    assert result["parsed"] == {"category": "infra", "tags": ["plan"]}
 
 
 # ── PlanArchiveListener ──────────────────────────────────────
@@ -198,9 +214,7 @@ def test_plan_archive_listener_duplicate_skip(tmp_path, engine):
 
 def test_schedule_unprocessed_plans(engine):
     """R: llm_processed_at IS NULL 레코드 3개 → LLMRequest 생성 검증"""
-    from app.worker.scheduled_worker import ScheduledCrawlWorker
-
-    worker = ScheduledCrawlWorker.__new__(ScheduledCrawlWorker)
+    from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 
     # 미처리 레코드 3개 준비
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -231,7 +245,7 @@ def test_schedule_unprocessed_plans(engine):
         mock_db.add = tracked_add
 
         try:
-            count = worker._process_unprocessed_plans()
+            count = PlanArchiveScheduler._enqueue_unprocessed_plans(lambda: mock_db)
             # commit 없이도 inserted_count로 검증
             assert inserted_count[0] >= 0  # 실행 자체가 성공하면 OK
         except Exception:
@@ -256,8 +270,8 @@ def _make_engine_with_llm():
     return eng
 
 
-def test_save_plan_archive_result_triggers_staleness_flag():
-    """R: 5번째 plan_archive_analyze 완료 → _maybe_flag_guide_staleness 호출 확인"""
+def test_save_plan_archive_result_triggers_staleness_flag_without_requirements_sync_queue():
+    """R: 5번째 plan_archive_analyze 완료 → staleness만 호출되고 requirements_sync 큐는 미생성"""
     from app.modules.claude_worker.models.llm_request import LLMRequest as LLMRequestModel
 
     eng = _make_engine_with_llm()
@@ -318,6 +332,7 @@ def test_save_plan_archive_result_triggers_staleness_flag():
 
         # 검증: _maybe_flag_guide_staleness가 호출됐는지
         assert len(staleness_called) > 0, "5번째 완료 후 _maybe_flag_guide_staleness가 호출되어야 함"
+        assert db.query(LLMRequestModel).filter_by(caller_type="plan_requirements_sync").count() == 0
 
     finally:
         db.close()
@@ -393,9 +408,7 @@ def test_save_plan_archive_result_no_trigger_below_5():
 
 def test_schedule_unprocessed_plans_boundary_all_processed(engine):
     """B: 모든 레코드가 llm_processed_at IS NOT NULL → 0개 생성"""
-    from app.worker.scheduled_worker import ScheduledCrawlWorker
-
-    worker = ScheduledCrawlWorker.__new__(ScheduledCrawlWorker)
+    from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
@@ -413,7 +426,7 @@ def test_schedule_unprocessed_plans_boundary_all_processed(engine):
         mock_db.commit()
 
         try:
-            count = worker._process_unprocessed_plans()
+            count = PlanArchiveScheduler._enqueue_unprocessed_plans(lambda: mock_db)
             assert count == 0
         except Exception:
             pass

@@ -105,7 +105,7 @@ class TestInstagramSchedulerBoundary:
         assert len(schedule) == 1
 
     def test_more_runs_than_windows(self):
-        """실행 횟수가 윈도우 수보다 많을 때."""
+        """실행 횟수가 범위 윈도우 수보다 많아도 요청 횟수만큼 생성."""
         scheduler = InstagramScheduler(
             daily_runs=10,
             time_windows=[
@@ -115,8 +115,27 @@ class TestInstagramSchedulerBoundary:
         )
         schedule = scheduler.generate_daily_schedule()
 
-        # 윈도우 수만큼만 생성됨
-        assert len(schedule) == 2
+        assert len(schedule) == 10
+
+    def test_exact_time_windows_are_fixed_slots(self):
+        """start == end 윈도우는 24시간 랜덤이 아니라 정확한 시각."""
+        run_date = datetime(2026, 5, 3).date()
+        scheduler = InstagramScheduler(
+            daily_runs=3,
+            time_windows=[
+                TimeWindow(start="07:00", end="07:00"),
+                TimeWindow(start="12:00", end="12:00"),
+                TimeWindow(start="18:30", end="18:30"),
+            ],
+        )
+
+        schedule = scheduler.generate_daily_schedule(run_date)
+
+        assert schedule == [
+            datetime(2026, 5, 3, 7, 0),
+            datetime(2026, 5, 3, 12, 0),
+            datetime(2026, 5, 3, 18, 30),
+        ]
 
     def test_default_time_windows(self):
         """기본 시간 윈도우 사용."""
@@ -199,6 +218,32 @@ class TestInstagramSchedulerTime:
             )
 
             assert should_run is False
+
+    def test_should_run_for_previous_day_overnight_slot(self):
+        """자정 이후에 걸친 전날 윈도우 후보도 실행 판정에 포함."""
+        today = datetime.now().date()
+        scheduler = None
+        run_time = None
+        for index in range(20):
+            candidate_scheduler = InstagramScheduler(
+                daily_runs=1,
+                time_windows=[TimeWindow(start="23:59", end="00:01")],
+                seed_prefix=f"overnight_due_test_{index}",
+            )
+            candidates = candidate_scheduler.generate_daily_schedule(today - timedelta(days=1))
+            run_time = next((candidate for candidate in candidates if candidate.date() == today), None)
+            if run_time is not None:
+                scheduler = candidate_scheduler
+                break
+
+        assert scheduler is not None
+        assert run_time is not None
+
+        assert scheduler.should_run_now(
+            last_run=None,
+            now=run_time + timedelta(minutes=1),
+            tolerance_minutes=5,
+        ) is True
 
     def test_get_next_run_time(self):
         """다음 실행 시간 가져오기."""

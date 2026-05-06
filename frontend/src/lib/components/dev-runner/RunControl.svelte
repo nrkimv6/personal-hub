@@ -1,6 +1,7 @@
 <script lang="ts">
 import { X } from 'lucide-svelte';
 import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi, devRunnerSettingsApi } from '$lib/api';
+import { ApiError } from '$lib/api/dev-runner';
 import type {
 	DevRunnerRunStatusResponse,
 	DevRunnerPlanFileResponse,
@@ -15,6 +16,7 @@ import PlanIdentityHeader from '$lib/components/dev-runner/execute-modal/PlanIde
 import ActionBar from '$lib/components/dev-runner/execute-modal/ActionBar.svelte';
 import ExecutionSettingsForm from '$lib/components/dev-runner/execute-modal/ExecutionSettingsForm.svelte';
 import SummaryProgress from '$lib/components/dev-runner/execute-modal/SummaryProgress.svelte';
+import { confirm } from '$lib/stores/confirm';
 
 	interface Props {
 		open?: boolean;
@@ -70,10 +72,21 @@ import SummaryProgress from '$lib/components/dev-runner/execute-modal/SummaryPro
 	let planSummary = $derived(plans.find(p => p.path === selectedPlan)?.summary ?? '');
 	let selectedPlanArchived = $derived(mode === 'single' && selectedPlan ? isArchivedPlanPath(selectedPlan) : false);
 	let anyRunning = $derived(runnerTabs.some(t => t.running));
-	let actionLoading = $state(false);
+	type RunAction = 'start' | 'sync' | 'reset' | 'fullReset' | 'stop' | 'forceStop';
+	let activeAction = $state<RunAction | null>(null);
+	let actionLoading = $derived(activeAction !== null);
 	let actionError = $state<string | null>(null);
 	let syncMessage = $state<string | null>(null);
 	let forceStopNeeded = $state(false);
+	let attachedMessage = $state<string | null>(null);
+	interface ClaimConflictInfo {
+		claim_id: string;
+		claim_state: string;
+		claim_owner_runner_id?: string | null;
+		stale: boolean;
+		lease_expires_at: string | null;
+	}
+	let claimConflict = $state<ClaimConflictInfo | null>(null);
 	let syncMessageTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// 엔진별 fallback 모델 리스트 (engines API 실패/누락 시에만 사용)
@@ -125,6 +138,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	}
 
 	function resetTransientActionState() {
+		activeAction = null;
 		actionError = null;
 		syncMessage = null;
 		forceStopNeeded = false;
@@ -215,7 +229,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	}
 
 	function getEngineThemeClasses(engine: string): string {
-		return ENGINE_THEME_CLASSES[engine] ?? 'text-gray-700 bg-gray-50 border-gray-200';
+		return ENGINE_THEME_CLASSES[engine] ?? 'text-muted-foreground bg-muted border-border';
 	}
 
 	async function fetchEngineConfigs() {
@@ -267,10 +281,11 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	async function updateModel(phase: string, model: string) {
 		if (!selectedEngineConfig || !selectedEngine) return;
 		try {
-			const overwriteAll = confirm(
-				`"${selectedEngine}" 엔진의 모든 phase 모델을 "${model}"로 덮어쓸까요?\n` +
-				"취소하면 현재 phase만 변경됩니다."
-			);
+			const overwriteAll = await confirm({
+				title: 'Phase 모델 덮어쓰기',
+				message: `"${selectedEngine}" 엔진의 모든 phase 모델을 "${model}"로 덮어쓸까요?\n취소하면 현재 phase만 변경됩니다.`,
+				confirmText: '전체 덮어쓰기'
+			});
 			if (overwriteAll) {
 				await devRunnerEngineApi.update(selectedEngine, {
 					default_model: model,
@@ -306,9 +321,11 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				return;
 			}
 		}
-		actionLoading = true;
+		activeAction = 'start';
 		actionError = null;
 		forceStopNeeded = false;
+		attachedMessage = null;
+		claimConflict = null;
 		try {
 			const response = await devRunnerRunnerApi.start({
 				plan_file: mode === 'single' ? selectedPlan : null,
@@ -324,8 +341,22 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				trigger: mode === 'all' ? 'user:all' : 'user',
 			});
 			onStatusChange();
+			if (response.attached) {
+				attachedMessage = response.claim_message ?? '기존 실행에 연결됨';
+			}
 			onStart?.(response);
 		} catch (e) {
+			if (e instanceof ApiError && e.status === 409 && e.detail?.claim_id) {
+				claimConflict = {
+					claim_id: e.detail.claim_id as string,
+					claim_state: e.detail.claim_state as string,
+					claim_owner_runner_id: e.detail.claim_owner_runner_id as string | null,
+					stale: e.detail.stale as boolean,
+					lease_expires_at: e.detail.lease_expires_at as string | null,
+				};
+				actionError = e.message;
+				return;
+			}
 			const msg = e instanceof Error ? e.message : '시작 실패';
 			if (msg.includes('Already running')) {
 				// 실제 실행 중 → 상태 즉시 새로고침 (중지 버튼이 자동으로 표시됨)
@@ -340,12 +371,12 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				actionError = msg;
 			}
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
 	async function handleForceStop() {
-		actionLoading = true;
+		activeAction = 'forceStop';
 		actionError = null;
 		forceStopNeeded = false;
 		try {
@@ -354,13 +385,13 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '강제 중지 실패';
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
 	async function handleStop() {
-		if (!confirm('실행을 중지하시겠습니까?')) return;
-		actionLoading = true;
+		if (!await confirm({ title: '실행 중지', message: '실행을 중지하시겠습니까?', confirmText: '중지' })) return;
+		activeAction = 'stop';
 		actionError = null;
 		try {
 			await devRunnerRunnerApi.stopAll();
@@ -368,12 +399,12 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '중지 실패';
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
 	async function handleSync() {
-		actionLoading = true;
+		activeAction = 'sync';
 		actionError = null;
 		syncMessage = null;
 		if (syncMessageTimer) {
@@ -397,7 +428,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '동기화 실패';
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
@@ -405,8 +436,13 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		const msg = fullReset
 			? '전체 리셋: 모든 작업 기록을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.'
 			: 'RUNNING 상태를 초기화하시겠습니까?\n미완료 작업이 PENDING으로 복구됩니다.';
-		if (!confirm(msg)) return;
-		actionLoading = true;
+		if (!await confirm({
+			title: fullReset ? '전체 리셋' : 'RUNNING 상태 초기화',
+			message: msg,
+			confirmText: fullReset ? '전체 리셋' : '초기화',
+			variant: fullReset ? 'danger' : 'default'
+		})) return;
+		activeAction = fullReset ? 'fullReset' : 'reset';
 		actionError = null;
 		try {
 			const result = await devRunnerRunnerApi.resetState(fullReset);
@@ -415,7 +451,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '초기화 실패';
 		} finally {
-			actionLoading = false;
+			activeAction = null;
 		}
 	}
 
@@ -480,6 +516,37 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 					<div class="bg-success-light px-5 py-2 text-xs text-success">{syncMessage}</div>
 				{/if}
 
+				{#if attachedMessage}
+					<div class="bg-blue-50 px-5 py-2 text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+						{attachedMessage}
+					</div>
+				{/if}
+
+				{#if claimConflict}
+					<div class="flex items-center justify-between gap-2 bg-amber-50 px-5 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+						<span>
+							이미 실행 큐/runner가 점유 중
+							({claimConflict.claim_state}{claimConflict.stale ? ' · 만료' : ''})
+						</span>
+						<div class="flex gap-1">
+							<button
+								type="button"
+								class="shrink-0 rounded-md border border-amber-400/60 px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-amber-100 dark:hover:bg-amber-900"
+								onclick={() => { onStart?.({ running: false, listener_alive: false, redis_connected: false, pid: null, plan_file: null, start_time: null, current_cycle: null, exit_code: null, crashed: false, current_plan_name: null, runner_id: claimConflict?.claim_owner_runner_id ?? null, claim_id: claimConflict?.claim_id, claim_state: claimConflict?.claim_state }); }}
+							>
+								기존 실행으로 이동
+							</button>
+							<button
+								type="button"
+								class="shrink-0 rounded-md border border-amber-400/60 px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-amber-100 dark:hover:bg-amber-900"
+								onclick={() => { claimConflict = null; actionError = null; }}
+							>
+								닫기
+							</button>
+						</div>
+					</div>
+				{/if}
+
 				{#if plan && mode !== 'all'}
 					<SummaryProgress
 						summaryKey={plan.path}
@@ -533,7 +600,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 				<ActionBar
 					status={status}
 					anyRunning={anyRunning}
-					actionLoading={actionLoading}
+					activeAction={activeAction}
 					mode={mode}
 					selectedPlan={selectedPlan}
 					selectedPlanArchived={selectedPlanArchived}

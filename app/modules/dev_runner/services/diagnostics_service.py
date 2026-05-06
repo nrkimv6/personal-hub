@@ -4,12 +4,15 @@ from pathlib import Path
 
 import redis
 
+from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
 from app.shared.redis.client import RedisClient
 
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+RECENT_RUNNERS_KEY = "plan-runner:recent_runners"
 
 
 class DiagnosticsService:
@@ -20,6 +23,7 @@ class DiagnosticsService:
         self.redis_client = sync_client if sync_client is not None else redis.Redis(
             host=REDIS_HOST, port=REDIS_PORT, decode_responses=True, socket_connect_timeout=5,
         )
+        self.resolver = LogFileResolver(config, self.redis_client)
 
     def run_diagnostics(self) -> dict:
         """파이프라인 진단 (1회성) — 5단계 순차 점검"""
@@ -55,9 +59,13 @@ class DiagnosticsService:
         runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
         if runner_ids:
             first_id = next(iter(runner_ids))
-            log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:stream_log_path")
-            if not log_path:
-                log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:log_file_path")
+            resolved = self.resolver.find_current_log(first_id)
+            if resolved:
+                log_path = str(resolved)
+            else:
+                log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:stream_log_path")
+                if not log_path:
+                    log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:log_file_path")
 
         if log_path and Path(log_path).exists():
             size = Path(log_path).stat().st_size
@@ -105,6 +113,45 @@ class DiagnosticsService:
             steps.append({"step": 6, "name": "pmessage 수신 게이지", "ok": pmsg_ok, "detail": detail})
         except Exception as e:
             steps.append({"step": 6, "name": "pmessage 수신 게이지", "ok": False, "detail": f"조회 실패: {e}"})
+
+        # 7. Redis registry에서 빠졌지만 heartbeat/log evidence가 남은 runner
+        try:
+            active_ids = {
+                item.decode("utf-8", errors="replace") if isinstance(item, bytes) else str(item)
+                for item in (runner_ids or set())
+            }
+            recent_ids = {
+                item.decode("utf-8", errors="replace") if isinstance(item, bytes) else str(item)
+                for item in (self.redis_client.zrange(RECENT_RUNNERS_KEY, 0, -1) or [])
+            }
+            orphan_ids = []
+            for raw_key in self.redis_client.scan_iter(f"{RUNNER_KEY_PREFIX}:*:subprocess_heartbeat"):
+                key = raw_key.decode("utf-8", errors="replace") if isinstance(raw_key, bytes) else str(raw_key)
+                prefix = f"{RUNNER_KEY_PREFIX}:"
+                suffix = ":subprocess_heartbeat"
+                if not key.startswith(prefix) or not key.endswith(suffix):
+                    continue
+                runner_id = key[len(prefix):-len(suffix)]
+                if runner_id in active_ids or runner_id in recent_ids:
+                    continue
+                log_path = self.resolver.find_filesystem_log(runner_id)
+                orphan_ids.append(f"{runner_id}:log_file_found={bool(log_path)}")
+            if orphan_ids:
+                steps.append({
+                    "step": 7,
+                    "name": "orphan runner evidence",
+                    "ok": False,
+                    "detail": "redis_missing " + ", ".join(orphan_ids[:5]),
+                })
+            else:
+                steps.append({
+                    "step": 7,
+                    "name": "orphan runner evidence",
+                    "ok": True,
+                    "detail": "redis_missing 없음",
+                })
+        except Exception as e:
+            steps.append({"step": 7, "name": "orphan runner evidence", "ok": False, "detail": f"조회 실패: {e}"})
 
         return {"steps": steps}
 

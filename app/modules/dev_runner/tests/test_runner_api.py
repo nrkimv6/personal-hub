@@ -1,7 +1,7 @@
 """실행 제어 API 테스트 - fakeredis + patch.object 적용"""
 
 import json
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -24,8 +24,11 @@ def mock_executor_redis():
     """executor_service의 async_redis와 redis_client를 fakeredis로 교체"""
     fake_sync = fakeredis.FakeRedis(decode_responses=True)
     fake_async = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    mock_claim = MagicMock()
+    mock_claim.claim_id = "test-claim-id"
     with patch.object(executor_service, 'redis_client', fake_sync), \
-         patch.object(executor_service, 'async_redis', fake_async):
+         patch.object(executor_service, 'async_redis', fake_async), \
+         patch('app.modules.dev_runner.services.plan_execution_claim_service.claim_plan', return_value=mock_claim):
         yield {"async": fake_async, "sync": fake_sync}
 
 
@@ -280,6 +283,28 @@ class TestStartRun:
             "plan_file": "test.md"
         })
         assert response.status_code == 504
+
+    async def test_start_reserved_status_returns_409_not_timeout(self, client, mock_executor_redis):
+        """예약대기 blocked listener 결과는 listener timeout/500이 아니라 409로 노출한다."""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+        brpop_result = (
+            "plan-runner:command_results:abc123",
+            json.dumps({
+                "success": False,
+                "reason": "reserved_status",
+                "status": "예약대기",
+                "message": "예약대기 plan은 실행할 수 없습니다: reserved.md",
+            }, ensure_ascii=False),
+        )
+
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "reserved.md"
+            })
+
+        assert response.status_code == 409
+        assert "예약대기" in response.json()["detail"]
 
     async def test_start_run_fix_engine_stored_in_command(self, client, mock_executor_redis):
         """T4.1: fix_engine 필드가 Redis command에 포함되는지 확인"""
@@ -663,3 +688,98 @@ class TestRunRequestProfileField:
         assert "profile" not in command
         assert "profile_config_dir" not in command
         assert "profile_extra_env" not in command
+
+
+class TestListRunners:
+    """GET /runners — Redis 장애 계약 및 정상 응답 고정"""
+
+    async def test_list_runners_redis_down_503(self, client, mock_executor_redis):
+        """E: Redis ConnectionError → 503 + detail='Redis 연결 실패' (readiness 분리 고정)"""
+        with patch.object(
+            executor_service,
+            "get_all_runners",
+            new=AsyncMock(side_effect=redis.ConnectionError("test")),
+        ):
+            response = await client.get("/api/v1/dev-runner/runners")
+        assert response.status_code == 503
+        assert response.json().get("detail") == "Redis 연결 실패"
+
+    async def test_list_runners_empty_when_no_active(self, client, mock_executor_redis):
+        """B: fakeredis 정상 상태, active runner 없음 → 200 + 빈 리스트 []"""
+        response = await client.get("/api/v1/dev-runner/runners")
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+class TestMergeApprovalPayload:
+    async def test_merge_retry_request_forwards_approve_service_lock(self, client):
+        """R: POST /merge/{runner_id}/retry with approve_service_lock=true → command payload 포함"""
+        rid = "merge-retry-001"
+        mocked = AsyncMock(return_value={"success": True, "message": "ok"})
+        with patch.object(executor_service, "_send_command", new=mocked):
+            response = await client.post(
+                f"/api/v1/dev-runner/merge/{rid}/retry",
+                json={
+                    "worktree_path": "D:/work/project/tools/monitor-page/.worktrees/impl-x",
+                    "plan_file": "docs/plan/test.md",
+                    "branch": "impl/test",
+                    "approve_service_lock": True,
+                },
+            )
+        assert response.status_code == 200
+        sent = mocked.call_args.args[0]
+        assert sent.get("action") == "retry-merge"
+        assert sent.get("runner_id") == rid
+        assert sent.get("approve_service_lock") is True
+        assert sent.get("worktree_path")
+        assert sent.get("plan_file")
+        assert sent.get("branch")
+
+    async def test_legacy_runner_retry_merge_forwards_approve_service_lock(self, client):
+        """B: POST /runners/{runner_id}/retry-merge도 approve_service_lock payload를 전달한다."""
+        rid = "merge-retry-legacy-001"
+        mocked = AsyncMock(return_value={"success": True, "message": "ok"})
+        with patch.object(executor_service, "_send_command", new=mocked):
+            response = await client.post(
+                f"/api/v1/dev-runner/runners/{rid}/retry-merge",
+                json={"approve_service_lock": True},
+            )
+        assert response.status_code == 200
+        sent = mocked.call_args.args[0]
+        assert sent.get("action") == "retry-merge"
+        assert sent.get("runner_id") == rid
+        assert sent.get("approve_service_lock") is True
+
+    async def test_direct_merge_request_forwards_approve_service_lock(self, client):
+        """R: POST /merge/direct with approve_service_lock=true → command payload 포함"""
+        mocked = AsyncMock(return_value={"success": True, "message": "ok"})
+        with patch.object(executor_service, "_send_command", new=mocked):
+            response = await client.post(
+                "/api/v1/dev-runner/merge/direct",
+                json={
+                    "branch": "impl/test",
+                    "worktree_path": "D:/work/project/tools/monitor-page/.worktrees/impl-test",
+                    "plan_file": "docs/plan/test.md",
+                    "approve_service_lock": True,
+                },
+            )
+        assert response.status_code == 200
+        sent = mocked.call_args.args[0]
+        assert sent.get("action") == "direct-merge"
+        assert sent.get("approve_service_lock") is True
+
+    async def test_get_merge_status_returns_reason_and_message_for_approval_required(self, client, mock_executor_redis):
+        """T5-R: GET /merge/{runner_id}는 approval_required + reason/message를 반환한다."""
+        fake_async = mock_executor_redis["async"]
+        rid = "merge-status-approval-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:merge_reason", "service_lock")
+        await fake_async.set(f"{prefix}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]: blocked")
+
+        response = await client.get(f"/api/v1/dev-runner/merge/{rid}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "approval_required"
+        assert data["reason"] == "service_lock"
+        assert "MERGE_PRECHECK_FAILED[service_lock]" in data["message"]

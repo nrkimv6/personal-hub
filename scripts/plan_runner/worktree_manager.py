@@ -101,6 +101,38 @@ def branch_from_plan(plan_file: str) -> str:
     return f"plan/{stem}"
 
 
+def _uses_runner_identity(
+    runner_id: str,
+    plan_file: Optional[str] = None,
+    *,
+    use_runner_identity: bool = False,
+) -> bool:
+    """Return True when a plan-backed run must still use runner/* identity."""
+    return bool(plan_file) and (use_runner_identity or runner_id.startswith("t-"))
+
+
+def _derive_worktree_identity(
+    runner_id: str,
+    base_dir: Path,
+    plan_file: Optional[str] = None,
+    *,
+    branch: Optional[str] = None,
+    use_runner_identity: bool = False,
+) -> tuple[Path, str]:
+    if branch:
+        if branch.startswith("runner/"):
+            return base_dir / branch.split("/", 1)[1], branch
+        return base_dir / branch.replace("/", "_"), branch
+    if _uses_runner_identity(
+        runner_id,
+        plan_file,
+        use_runner_identity=use_runner_identity,
+    ) or not plan_file:
+        return base_dir / runner_id, f"runner/{runner_id}"
+    stem = Path(plan_file).stem
+    return base_dir / stem, f"plan/{stem}"
+
+
 @dataclass
 class MergeResult:
     success: bool
@@ -151,7 +183,13 @@ class WorktreeManager:
         logger.info(f"[WorktreeManager] sparse-checkout ?곸슜: {worktree_path} (docs/plan, docs/archive ?쒖쇅)")
 
     @staticmethod
-    def create(runner_id: str, base_dir: Path, plan_file: Optional[str] = None) -> tuple:
+    def create(
+        runner_id: str,
+        base_dir: Path,
+        plan_file: Optional[str] = None,
+        *,
+        use_runner_identity: bool = False,
+    ) -> tuple:
         """git worktree add ?ㅽ뻾 ??(worktree_path, branch) 諛섑솚
 
         plan_file 吏???? branch='plan/{stem}', path=base_dir/{stem}
@@ -159,13 +197,35 @@ class WorktreeManager:
         """
         if not runner_id:
             raise WorktreeError("runner_id cannot be empty")
-        if plan_file:
-            stem = Path(plan_file).stem
-            worktree_path = base_dir / stem
-            branch = f"plan/{stem}"
-        else:
-            worktree_path = base_dir / runner_id
-            branch = f"runner/{runner_id}"
+        # Phase 2: nested .worktrees guard — 비정상 base_dir는 진입 즉시 거부
+        _bd_parts = list(Path(base_dir).parts)
+        if _bd_parts.count(".worktrees") >= 2:
+            raise WorktreeError(
+                f"비정상 base_dir 거부 (nested .worktrees): base_dir={base_dir}, "
+                f"runner_id={runner_id}, plan_file={plan_file}"
+            )
+        worktree_path, branch = _derive_worktree_identity(
+            runner_id,
+            base_dir,
+            plan_file,
+            use_runner_identity=use_runner_identity,
+        )
+        # Phase 1: 같은 branch가 기존 worktree에 등록되어 있으면 위치 무관 재사용
+        for _w in WorktreeManager.list_worktrees(cwd=str(base_dir.parent)):
+            if _w.get("branch") == branch:
+                _existing = Path(_w["path"])
+                if WorktreeManager.validate(_existing):
+                    logger.info(
+                        f"[WorktreeManager] 같은 branch 기존 worktree 재사용 "
+                        f"(위치 무관): branch={branch}, path={_existing}"
+                    )
+                    WorktreeManager._apply_sparse_checkout(_existing)
+                    return _existing, branch
+                logger.warning(
+                    f"[WorktreeManager] 같은 branch 기존 worktree 발견했으나 validate 실패, "
+                    f"fallback 진행: branch={branch}, path={_existing}"
+                )
+                break
         try:
             base_dir.mkdir(parents=True, exist_ok=True)
             ensure_main_branch(base_dir.parent)
@@ -253,23 +313,35 @@ class WorktreeManager:
             raise WorktreeError(f"worktree ?앹꽦 以??ㅻ쪟: {e}")
 
     @staticmethod
-    def remove(runner_id: str, base_dir: Path, plan_file: Optional[str] = None, branch: Optional[str] = None, delete_branch: bool = True) -> bool:
+    def remove(
+        runner_id: str,
+        base_dir: Path,
+        plan_file: Optional[str] = None,
+        branch: Optional[str] = None,
+        delete_branch: bool = True,
+        *,
+        use_runner_identity: bool = False,
+    ) -> bool:
         """git worktree remove + (?좏깮?? git branch -D
 
         ?곗꽑?쒖쐞: branch ?뚮씪誘명꽣 > plan_file > runner_id 湲곕컲
         delete_branch=False: worktree ?붾젆?좊━留??쒓굅, branch??蹂댁〈 (merge ???ъ쟾 ?쒓굅 ???ъ슜)
         """
-        if branch:
-            # branch ?뚮씪誘명꽣媛 ?덉쑝硫?洹몃?濡??ъ슜, worktree_path??base_dir/{branch_slug}濡?異붾줎
-            branch_slug = branch.replace("/", "_")
-            worktree_path = base_dir / branch_slug
-        elif plan_file:
-            stem = Path(plan_file).stem
-            worktree_path = base_dir / stem
-            branch = f"plan/{stem}"
-        else:
-            worktree_path = base_dir / runner_id
-            branch = f"runner/{runner_id}"
+        worktree_path, branch = _derive_worktree_identity(
+            runner_id,
+            base_dir,
+            plan_file,
+            branch=branch,
+            use_runner_identity=use_runner_identity,
+        )
+        # Phase 2: nested .worktrees guard (멱등성 우선 — raise 대신 False 반환)
+        _bd_parts = list(Path(base_dir).parts)
+        if _bd_parts.count(".worktrees") >= 2:
+            logger.error(
+                f"[WorktreeManager] 비정상 base_dir 거부 (nested .worktrees): "
+                f"base_dir={base_dir}, runner_id={runner_id}"
+            )
+            return False
         try:
             result = _run_git(
                 ["worktree", "remove", str(worktree_path), "--force"],
@@ -289,20 +361,28 @@ class WorktreeManager:
             return True  # 硫깅벑 泥섎━
 
     @staticmethod
-    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None, branch: Optional[str] = None) -> MergeResult:
+    def merge_to_main(
+        runner_id: str,
+        base_dir: Path,
+        project_root: Path,
+        plan_file: Optional[str] = None,
+        branch: Optional[str] = None,
+        *,
+        use_runner_identity: bool = False,
+    ) -> MergeResult:
         """worktree 蹂寃쎌궗??쓣 main 釉뚮옖移섏뿉 癒몄?
 
         ?곗꽑?쒖쐞: branch ?뚮씪誘명꽣 > plan_file > runner_id 湲곕컲
         dirty working tree??merge ??stash, 寃곌낵???곕씪 pop.
         ?덉쇅 諛쒖깮 ?쒖뿉??finally?먯꽌 main 釉뚮옖移?蹂듦? 蹂댁옣.
         """
-        if branch:
-            pass  # 洹몃?濡??ъ슜
-        elif plan_file:
-            stem = Path(plan_file).stem
-            branch = f"plan/{stem}"
-        else:
-            branch = f"runner/{runner_id}"
+        _, branch = _derive_worktree_identity(
+            runner_id,
+            base_dir,
+            plan_file,
+            branch=branch,
+            use_runner_identity=use_runner_identity,
+        )
         stashed = False
         repo_git_path = project_root / ".git"
         try:
@@ -409,11 +489,16 @@ class WorktreeManager:
                     pass
 
     @staticmethod
-    def list_worktrees() -> list:
-        """git worktree list --porcelain ?뚯떛"""
+    def list_worktrees(cwd: Optional[str] = None) -> list:
+        """git worktree list --porcelain ?뚯떛.
+
+        cwd=None?대㈃ subprocess ?꾩옱 ?붾젆?좊━瑜?洹몃?濡??ъ슜?쒕떎.
+        ?ㅽ뻾 ?⑥쐞媛 ?ㅻⅨ git repo濡?諛붾? ??寃쎌슦 ?몄텧痢??쒕챸?쟻 cwd瑜?꽆寃⑥빞 ?쒕떎.
+        """
         try:
             result = _run_git(
                 ["worktree", "list", "--porcelain"],
+                cwd=cwd,
                 capture_output=True, text=True, encoding="utf-8"
             )
             worktrees = []

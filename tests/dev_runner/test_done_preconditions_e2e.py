@@ -98,9 +98,10 @@ async def test_done_e2e_fix_plan_with_phase_r_completes(svc, tmp_path, dev_runne
     """fix plan(Phase R 방어 완료)에 대해 done API 전체 흐름 정상 완료 검증"""
     plan_dir = tmp_path / "docs" / "plan"
     archive_dir = tmp_path / "docs" / "archive"
-    todo_md = tmp_path / "TODO.md"
+    todo_md = tmp_path / ".worktrees" / "plans" / "TODO.md"
+    todo_md.parent.mkdir(parents=True, exist_ok=True)
     todo_md.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
-    done_md = tmp_path / "docs" / "DONE.md"
+    done_md = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
     done_md.parent.mkdir(parents=True, exist_ok=True)
     done_md.write_text("# DONE\n", encoding="utf-8")
 
@@ -125,9 +126,10 @@ async def test_manual_done_ignores_stale_snapshot_without_runner_id_B(svc, tmp_p
     ownership_dir = tmp_path / "logs" / "dev_runner" / "ownership"
     ownership_dir.mkdir(parents=True, exist_ok=True)
 
-    todo_md = tmp_path / "TODO.md"
+    todo_md = tmp_path / ".worktrees" / "plans" / "TODO.md"
+    todo_md.parent.mkdir(parents=True, exist_ok=True)
     todo_md.write_text("# TODO\n\n## In Progress\n\n## Pending\n", encoding="utf-8")
-    done_md = tmp_path / "docs" / "DONE.md"
+    done_md = tmp_path / ".worktrees" / "plans" / "docs" / "DONE.md"
     done_md.parent.mkdir(parents=True, exist_ok=True)
     done_md.write_text("# DONE\n", encoding="utf-8")
 
@@ -138,7 +140,7 @@ async def test_manual_done_ignores_stale_snapshot_without_runner_id_B(svc, tmp_p
                 "runner_id": "stale-runner",
                 "captured_at": "2026-04-21T09:00:00",
                 "project_root": str(tmp_path),
-                "dirty_files": ["TODO.md"],
+                "dirty_files": [".worktrees/plans/TODO.md"],
                 "owned_files": [],
                 "clean_at_start_files": [],
             },

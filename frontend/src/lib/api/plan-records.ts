@@ -32,9 +32,66 @@ export interface PlanRecord {
 	chain_root_hash: string | null;
 	recurrence_suggestion: string | null;
 	llm_processed_at: string | null;
+	file_delete_after: string | null;
+	file_removed_at: string | null;
+	archive_state?: string | null;
+	execution_state?: string | null;
+	latest_attempt?: PlanArchiveExecutionAttempt | null;
+	next_available_at?: string | null;
 	created_at: string;
 	updated_at: string;
 	events?: PlanEvent[];
+}
+
+export interface PlanArchiveSelectedProfile {
+	engine: string;
+	profile_name: string;
+}
+
+export interface PlanArchiveExecutionAttempt {
+	id?: number;
+	record_id?: number;
+	llm_request_id?: number | null;
+	engine?: string | null;
+	profile_name?: string | null;
+	status?: string | null;
+	state?: string | null;
+	started_at?: string | null;
+	completed_at?: string | null;
+	requested_at?: string | null;
+	error_message?: string | null;
+	result?: Record<string, unknown> | null;
+	[key: string]: unknown;
+}
+
+export interface PlanArchiveExecutionRunPayload {
+	record_ids?: number[];
+	selected_profiles?: PlanArchiveSelectedProfile[];
+}
+
+export interface PlanArchiveExecutionRunResponse {
+	queued?: number;
+	skipped?: number;
+	updated?: number;
+	request_ids?: number[];
+	attempts?: PlanArchiveExecutionAttempt[];
+	records?: PlanRecord[];
+	errors?: string[];
+	[key: string]: unknown;
+}
+
+export interface PlanArchiveExecutionSyncResponse {
+	updated?: number;
+	records?: PlanRecord[];
+	errors?: string[];
+	[key: string]: unknown;
+}
+
+export interface PlanArchiveExecutionHistoryResponse {
+	items: PlanArchiveExecutionAttempt[];
+	total?: number;
+	limit?: number;
+	record_id?: number | null;
 }
 
 export interface ImportArchivedResult {
@@ -42,6 +99,265 @@ export interface ImportArchivedResult {
 	updated: number;
 	skipped: number;
 	errors: string[];
+}
+
+export interface PlanArchiveHealth {
+	archived_total: number;
+	llm_processed: number;
+	llm_unprocessed: number;
+	real_unprocessed: number;
+	temp_pytest_total: number;
+	temp_pytest_unprocessed: number;
+	pending_or_processing_requests: number;
+	failed_requests: number;
+	file_retention_due: number;
+	file_retention_scheduled: number;
+	file_removed: number;
+	oldest_file_delete_after: string | null;
+	latest_failed_request: {
+		id: number;
+		caller_id: string;
+		requested_at: string | null;
+		error_message: string | null;
+	} | null;
+	oldest_unprocessed_at: string | null;
+	plan_archive_schedule: {
+		id: number;
+		enabled: boolean;
+		schedule_value: string | null;
+		last_run: string | null;
+		last_success: string | null;
+		last_failure: string | null;
+	} | null;
+	retrieval_db_readiness: {
+		ok: boolean;
+		required_tables: string[];
+		missing_tables: string[];
+	};
+}
+
+export interface PlanArchiveRetrievalQuery {
+	q?: string;
+	date_from?: string;
+	date_to?: string;
+	category?: string;
+	tags?: string[];
+	intent?: string;
+	scope?: string;
+	path?: string;
+	repo_key?: string;
+	relation_type?: string;
+	semantic_cluster_id?: string;
+	limit?: number;
+}
+
+export interface PlanArchiveChunkHit {
+	id: number;
+	section_type?: string;
+	heading?: string;
+	text: string;
+	snippet?: string;
+	score?: number;
+}
+
+export interface PlanArchiveFileRefHit {
+	id: number;
+	path: string;
+	source_type: string;
+	repo_key?: string;
+	module?: string;
+	commit_sha?: string;
+	exists_at_index?: boolean;
+}
+
+export interface PlanArchiveRetrievalResult {
+	plan: PlanRecord | Record<string, unknown>;
+	score: number;
+	score_detail: Record<string, unknown>;
+	chunks: PlanArchiveChunkHit[];
+	file_refs: PlanArchiveFileRefHit[];
+}
+
+export interface PlanArchiveRetrievalResponse {
+	results: PlanArchiveRetrievalResult[];
+	total: number;
+}
+
+export interface PlanArchiveMetricsResponse {
+	total_plans: number;
+	followup_rates: {
+		days_7: number;
+		days_14: number;
+		days_30: number;
+	};
+	top_file_refs: Array<{
+		path: string;
+		count: number;
+		mentioned_count: number;
+		changed_count: number;
+		repo_key?: string | null;
+	}>;
+	missing_file_candidates: Array<{
+		module: string;
+		count: number;
+		paths: string[];
+	}>;
+	relation_counts: Record<string, number>;
+	chain_depth_max: number;
+	repo_counts: Record<string, number>;
+	cross_repo_plan_count: number;
+	multi_repo_plan_count: number;
+	downstream_sync_missing_candidates: Array<{
+		repo_key: string;
+		path: string;
+		count: number;
+	}>;
+}
+
+export interface PlanArchiveIndexRequest {
+	limit?: number;
+	force?: boolean;
+	since?: string;
+	apply?: boolean;
+}
+
+export interface PlanArchiveIndexResponse {
+	dry_run: boolean;
+	indexed: number;
+	failed: number;
+	skipped: number;
+	run_id?: number | null;
+	errors?: string[];
+}
+
+export interface PlanArchiveCrossRepoIndexRequest {
+	record_id: number;
+	max_commits?: number;
+	apply?: boolean;
+}
+
+export interface PlanArchiveCrossRepoIndexResponse {
+	dry_run: boolean;
+	record_id: number;
+	repos: number;
+	indexed: number;
+	failed: number;
+	skipped: number;
+	errors: string[];
+}
+
+export interface PlanArchiveAnalyzePayload {
+	mode?: 'preview' | 'apply';
+	provider?: string | null;
+	model?: string | null;
+	timeout_seconds?: number;
+	include_prompt?: boolean;
+	source?: 'auto' | 'raw_content' | 'file_path';
+}
+
+export interface PlanArchiveAnalyzeResponse {
+	success: boolean;
+	mode: string;
+	result: Record<string, unknown>;
+	raw_response: string;
+	provider: string | null;
+	model: string | null;
+	record_id: number;
+	filename_hash: string | null;
+	file_path: string | null;
+	elapsed_ms: number;
+	prompt_preview: string | null;
+	prompt_policy_id: string | null;
+	prompt_policy_version: string | null;
+	warnings: string[];
+	error: string | null;
+	saved: boolean;
+	record_after: Record<string, unknown> | null;
+	save_error: string | null;
+}
+
+export interface PlanArchiveInsightCandidate {
+	title?: string;
+	reason?: string;
+	evidence_ids?: string[];
+}
+
+export interface PlanArchiveInsightReport {
+	id: number;
+	range_start: string | null;
+	range_end: string | null;
+	grouping: string;
+	metrics_hash: string;
+	provider: string;
+	model: string;
+	status: string;
+	review_status: string;
+	review_note: string | null;
+	promoted_plan_path: string | null;
+	warning: string | null;
+	error_message: string | null;
+	llm_request_id: number | null;
+	created_at: string;
+	completed_at: string | null;
+	summary: string | null;
+	root_causes: string[];
+	recommendations: string[];
+	suggested_plan_candidates: PlanArchiveInsightCandidate[];
+}
+
+export interface PlanArchiveInsightReportDetail extends PlanArchiveInsightReport {
+	metrics: Record<string, unknown>;
+	evidence: Array<Record<string, unknown>>;
+	insight: Record<string, unknown>;
+	raw_response: string | null;
+}
+
+export interface PlanArchiveInsightReportListResponse {
+	items: PlanArchiveInsightReport[];
+	total: number;
+}
+
+export interface PlanArchiveInsightReviewUpdatePayload {
+	review_status: 'unreviewed' | 'reviewing' | 'accepted' | 'rejected' | 'promoted';
+	review_note?: string | null;
+}
+
+export interface PlanArchiveInsightPromotePayload {
+	candidate_index: number;
+	confirm: boolean;
+	title?: string | null;
+}
+
+export interface PlanArchiveInsightPromoteResponse {
+	path: string;
+	report: PlanArchiveInsightReportDetail;
+}
+
+export interface PlanArchiveDocPatchProposal {
+	id: number;
+	plan_record_id: number;
+	insight_report_id: number | null;
+	status: 'draft' | 'previewed' | 'applied' | 'rejected' | 'failed';
+	target_path: string;
+	patch_text: string;
+	preview_text: string | null;
+	changed_lines_summary: Array<Record<string, unknown>>;
+	applied_commit: string | null;
+	error_message: string | null;
+	created_at: string;
+	updated_at: string;
+	applied_at: string | null;
+}
+
+export interface PlanArchiveDocPatchPreviewPayload {
+	record_id: number;
+	patch_text: string;
+	insight_report_id?: number | null;
+	target_path?: string | null;
+}
+
+export interface PlanArchiveDocPatchApplyPayload {
+	confirm: boolean;
 }
 
 // ============================================================
@@ -92,6 +408,9 @@ export const planRecordsApi = {
 		tags?: string;
 		skip?: number;
 		limit?: number;
+		q?: string;
+		deep?: boolean;
+		include_temp?: boolean;
 	}) => {
 		const q = new URLSearchParams();
 		if (params?.project) q.set('project', params.project);
@@ -100,14 +419,124 @@ export const planRecordsApi = {
 		if (params?.tags) q.set('tags', params.tags);
 		if (params?.skip != null) q.set('skip', String(params.skip));
 		if (params?.limit != null) q.set('limit', String(params.limit));
+		if (params?.q) q.set('q', params.q);
+		if (params?.deep !== undefined) q.set('deep', String(params.deep));
+		if (params?.include_temp !== undefined) q.set('include_temp', String(params.include_temp));
 		const qs = q.toString();
 		return planRecordsRequest<PlanRecord[]>(`/records${qs ? '?' + qs : ''}`);
 	},
+
+	getArchiveHealth: (includeTemp = false) =>
+		planRecordsRequest<PlanArchiveHealth>(`/records/archive-health?include_temp=${includeTemp}`),
+
+	searchArchiveRetrieval: (payload: PlanArchiveRetrievalQuery) =>
+		planRecordsRequest<PlanArchiveRetrievalResponse>('/retrieval/search', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	getArchiveRetrievalMetrics: (payload: PlanArchiveRetrievalQuery) =>
+		planRecordsRequest<PlanArchiveMetricsResponse>('/retrieval/metrics', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	indexArchiveRecords: (payload: PlanArchiveIndexRequest) =>
+		planRecordsRequest<PlanArchiveIndexResponse>('/records/index', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	runArchiveExecutions: (payload: PlanArchiveExecutionRunPayload = {}) =>
+		planRecordsRequest<PlanArchiveExecutionRunResponse>('/records/archive-executions/run', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	syncArchiveExecutions: () =>
+		planRecordsRequest<PlanArchiveExecutionSyncResponse>('/records/archive-executions/sync', {
+			method: 'POST'
+		}),
+
+	getArchiveExecutionHistory: (params?: { record_id?: number; limit?: number }) => {
+		const q = new URLSearchParams();
+		if (params?.record_id != null) q.set('record_id', String(params.record_id));
+		if (params?.limit != null) q.set('limit', String(params.limit));
+		const qs = q.toString();
+		return planRecordsRequest<PlanArchiveExecutionHistoryResponse>(`/records/archive-executions/history${qs ? '?' + qs : ''}`);
+	},
+
+	analyzeRecord: (recordId: number, payload: PlanArchiveAnalyzePayload = {}) =>
+		planRecordsRequest<PlanArchiveAnalyzeResponse>(`/records/${recordId}/analyze`, {
+			method: 'POST',
+			body: JSON.stringify({ mode: 'preview', ...payload })
+		}),
+
+	analyzeDryRun: (recordId: number, payload: Omit<PlanArchiveAnalyzePayload, 'mode'> = {}) =>
+		planRecordsRequest<PlanArchiveAnalyzeResponse>(`/records/${recordId}/analyze-dry-run`, {
+			method: 'POST',
+			body: JSON.stringify({ ...payload, mode: 'preview' })
+		}),
+
+	listInsightReports: (params?: {
+		status?: string;
+		review_status?: string;
+		grouping?: string;
+		skip?: number;
+		limit?: number;
+	}) => {
+		const q = new URLSearchParams();
+		if (params?.status) q.set('status', params.status);
+		if (params?.review_status) q.set('review_status', params.review_status);
+		if (params?.grouping) q.set('grouping', params.grouping);
+		if (params?.skip != null) q.set('skip', String(params.skip));
+		if (params?.limit != null) q.set('limit', String(params.limit));
+		const qs = q.toString();
+		return planRecordsRequest<PlanArchiveInsightReportListResponse>(`/insights/reports${qs ? '?' + qs : ''}`);
+	},
+
+	getInsightReport: (id: number) =>
+		planRecordsRequest<PlanArchiveInsightReportDetail>(`/insights/reports/${id}`),
+
+	getInsightEvidence: (reportId: number, sourceType: 'record' | 'chunk' | 'file_ref', sourceId: number) =>
+		planRecordsRequest<Record<string, unknown>>(`/insights/reports/${reportId}/evidence/${sourceType}/${sourceId}`),
+
+	updateInsightReport: (id: number, payload: PlanArchiveInsightReviewUpdatePayload) =>
+		planRecordsRequest<PlanArchiveInsightReportDetail>(`/insights/reports/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify(payload)
+		}),
+
+	promoteInsightPlan: (id: number, payload: PlanArchiveInsightPromotePayload) =>
+		planRecordsRequest<PlanArchiveInsightPromoteResponse>(`/insights/reports/${id}/promote-plan`, {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	previewDocPatch: (payload: PlanArchiveDocPatchPreviewPayload) =>
+		planRecordsRequest<PlanArchiveDocPatchProposal>('/doc-patches/preview', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	applyDocPatch: (id: number, payload: PlanArchiveDocPatchApplyPayload) =>
+		planRecordsRequest<PlanArchiveDocPatchProposal>(`/doc-patches/${id}/apply`, {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	rejectDocPatch: (id: number) =>
+		planRecordsRequest<PlanArchiveDocPatchProposal>(`/doc-patches/${id}/reject`, {
+			method: 'POST'
+		}),
 
 	/**
 	 * 레코드 상세 조회 (events 포함)
 	 */
 	get: (id: number) => planRecordsRequest<PlanRecord>(`/records/${id}`),
+
+	getContent: (id: number) =>
+		planRecordsRequest<{ id: number; raw_content: string | null }>(`/records/${id}/content`),
 
 	/**
 	 * file_path로 레코드 get_or_create

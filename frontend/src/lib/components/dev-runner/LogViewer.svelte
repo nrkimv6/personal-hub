@@ -1,6 +1,8 @@
 ﻿<script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
+	import { apiGate } from '$lib/stores/apiGate.svelte';
+	import { isStartOnlyRecentLog } from '$lib/dev-runner/log-recent-fallback.js';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 	import { shouldShowMergeCompletionBanner } from '$lib/utils/dev-runner-merge-banner';
 
@@ -15,16 +17,17 @@
 		engine?: string | null;
 		worktreePath?: string | null;
 		branch?: string | null;
+		executionCount?: number | null;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 		onMergeCompleted?: (reason?: string, status?: string) => void;
 	}
 
-	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
+	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, executionCount = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
 	let isCodexEngine = $derived((engine ?? '').toLowerCase() === 'codex');
 
 	// 머지 진행 중 상태 판별
 	let isMerging = $derived(
-		mergeStatus === 'merge_pending' || mergeStatus === 'merging' || mergeStatus === 'testing'
+		['merge_pending', 'queued', 'merging', 'testing', 'fixing', 'resolving'].includes(mergeStatus ?? '')
 	);
 
 	// Phase 2: 전체실행 시 Plan 파일 리스트 추적
@@ -45,6 +48,11 @@
 		noiseCount?: number;
 	}
 
+	interface ResultSegment {
+		num: string;
+		text: string;
+	}
+
 	let lines = $state<ParsedLine[]>([]);
 	let expandedNoiseIndices = $state<number[]>([]);
         let showNoiseIndicator = $state(false);
@@ -60,16 +68,29 @@
 	let pendingStale = $state(false);
 	let exitBanner = $state<{ show: boolean; reason: string }>({ show: false, reason: 'completed' }); // runner 종료 배너
 	let failureBanner = $state<{ show: boolean; message: string } | null>(null); // FAILURE 태그 sticky 배너
+	let lastLogLoadError = $state<string | null>(null);
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
 	const PREVIEW_LINE_LIMIT = 3;
+	const PREVIEW_CHAR_LIMIT = 600;
 	const MAX_RENDER_CHARS = 8 * 1024;
 	const PREVIEW_TOGGLE_STORAGE_KEY = 'devRunnerPreviewCollapse';
+	const TAG_FILTER_STORAGE_KEY = 'devRunnerHiddenLogTags';
+	const FILTERABLE_TAGS = ['ERROR', 'STDERR'];
+	const RECENT_RETRY_BASE_DELAY_MS = 600;
+	const MAX_RECENT_RETRY_ATTEMPTS = 4;
 	let previewCollapsedEnabled = $state(true);
+	let hiddenTags = $state<Set<string>>(new Set());
+	let visibleLines = $derived(lines.filter((line) => !hiddenTags.has(line.tag)));
+	let hiddenLogCount = $derived(lines.length - visibleLines.length);
 	let lineSequence = 0;
+	let loadedRecentLogIdentity = $state<string | null>(null);
+	let recentRetryTimer: ReturnType<typeof setTimeout> | null = null;
+	let recentRetryAttempt = 0;
 
 	let copied = $state(false);
 	let expandedLongLines = $state<Set<string>>(new Set());
+	let runMetaExpanded = $state(false);
 
 	const BASE_DELAY = 3000;
 
@@ -104,7 +125,27 @@
 	const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
 	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
 	const MERGE_TAG_PATTERN = /^\[MERGE\]\[(\w+)\]\s*(.*)/;
-	const PR_PREFIX_PATTERN = /^\[PR:[^\]]+\]\s*/;
+	const WRAPPER_PREFIX_PATTERN = /^\[(PR|PS):[^\]]+\]\s*/;
+	const HEADER_ONLY_TAGS = new Set(['DIAG', 'TRIGGER', 'RUN_META', 'ENV', 'START']);
+
+	let planBasename = $derived(
+		planFile ? (planFile.split(/[\\/]/).pop() ?? planFile) : (currentPlanName ?? null)
+	);
+	let runMetaRows = $derived.by(() => [
+		planBasename ? { label: 'Plan', value: planBasename } : null,
+		{ label: 'Runner', value: runnerId },
+		engine ? { label: 'Engine', value: engine } : null,
+		branch ? { label: 'Branch', value: branch } : null,
+		worktreePath ? { label: 'Worktree', value: worktreePath } : null,
+		executionCount != null ? { label: 'Execution #', value: String(executionCount) } : null,
+		trigger ? { label: 'Trigger', value: trigger } : null
+	].filter((row): row is { label: string; value: string } => row !== null));
+	let runMetaSummary = $derived.by(() => {
+		const parts = [`runner ${runnerId}`];
+		if (engine) parts.push(engine);
+		if (trigger) parts.push(trigger);
+		return `Run meta · ${parts.join(' · ')}`;
+	});
 
 	function normalizeLogText(text: string): string {
 		return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -126,7 +167,7 @@
 		const tailText = tail.length > 0 ? `\n${tail.join('\n')}` : '';
 
 		// [PR:name#hash|PID:12345] prefix 제거 후 일반 파싱
-		const strippedHead = head.replace(PR_PREFIX_PATTERN, '');
+		const strippedHead = head.replace(WRAPPER_PREFIX_PATTERN, '');
 		const finalMatch = strippedHead.match(LINE_PATTERN);
 		if (finalMatch) {
 			const message = `${finalMatch[3]}${tailText}`;
@@ -187,10 +228,30 @@
 		return `${normalized.slice(0, MAX_RENDER_CHARS)}\n… ${hiddenChars} chars truncated`;
 	}
 
+	function parseResultSegments(message: string): ResultSegment[] {
+		const normalized = normalizeLogText(message);
+		const markerPattern = /(\d+)→/g;
+		const markers = [...normalized.matchAll(markerPattern)];
+		if (markers.length === 0) return [];
+
+		return markers.map((marker, index) => {
+			const markerIndex = marker.index ?? 0;
+			const nextMarkerIndex = markers[index + 1]?.index ?? normalized.length;
+			const textStart = markerIndex + marker[0].length;
+			let text = normalized.slice(textStart, nextMarkerIndex);
+			if (text.startsWith(' ')) text = text.slice(1);
+			return { num: marker[1], text };
+		});
+	}
+
 	function getPreviewLines(message: string, maxLines: number = PREVIEW_LINE_LIMIT): string {
 		const renderable = getRenderableText(message);
 		const parts = renderable.split('\n');
-		return parts.slice(0, maxLines).join('\n');
+		const linePreview = parts.slice(0, maxLines).join('\n');
+		if (parts.length <= maxLines && linePreview.length > PREVIEW_CHAR_LIMIT) {
+			return `${linePreview.slice(0, PREVIEW_CHAR_LIMIT)}…`;
+		}
+		return linePreview;
 	}
 
 	function getHiddenLineCount(message: string, maxLines: number = PREVIEW_LINE_LIMIT): number {
@@ -201,12 +262,25 @@
 
 	function getHiddenCharCount(message: string): number {
 		const normalized = normalizeLogText(message);
-		return Math.max(0, normalized.length - MAX_RENDER_CHARS);
+		return Math.max(0, normalized.length - PREVIEW_CHAR_LIMIT);
 	}
 
 	function shouldCollapseMessage(message: string): boolean {
 		if (!previewCollapsedEnabled) return false;
 		return getHiddenLineCount(message) > 0 || getHiddenCharCount(message) > 0;
+	}
+
+	function isFailureResultBody(message: string): boolean {
+		const lower = normalizeLogText(message).toLowerCase();
+		return (
+			lower.includes('(empty aggregated_output)') ||
+			lower.includes('positional parameter') ||
+			lower.includes('error parsing glob') ||
+			lower.includes('not recognized') ||
+			lower.includes('os error') ||
+			lower.includes('traceback') ||
+			lower.includes('[error]')
+		);
 	}
 
 	function getExpandLabel(message: string): string {
@@ -227,6 +301,26 @@
 
 	function isExpanded(lineId: string): boolean {
 		return expandedLongLines.has(lineId);
+	}
+
+	function isTagHidden(tag: string): boolean {
+		return hiddenTags.has(tag);
+	}
+
+	function persistHiddenTags(next: Set<string>) {
+		try {
+			window.localStorage.setItem(TAG_FILTER_STORAGE_KEY, JSON.stringify([...next]));
+		} catch {
+			// localStorage unavailable in some environments
+		}
+	}
+
+	function toggleTagHidden(tag: string) {
+		const next = new Set(hiddenTags);
+		if (next.has(tag)) next.delete(tag);
+		else next.add(tag);
+		hiddenTags = next;
+		persistHiddenTags(next);
 	}
 
 	function handleExpandKeydown(event: KeyboardEvent, lineId: string) {
@@ -252,6 +346,7 @@
 		if (engine) headerLines.push(`[Engine] ${engine}`);
 		if (branch) headerLines.push(`[Branch] ${branch}`);
 		if (worktreePath) headerLines.push(`[Worktree] ${worktreePath}`);
+		if (executionCount != null) headerLines.push(`[Execution] ${executionCount}`);
 		if (trigger) headerLines.push(`[Trigger] ${trigger}`);
 		headerLines.push('---');
 
@@ -329,6 +424,56 @@
 		pushLine(parsed);
 	}
 
+	function describeError(error: unknown): string {
+		if (error instanceof Error && error.message) return error.message;
+		if (typeof error === 'string' && error) return error;
+		return 'unknown error';
+	}
+
+	function clearRecentRetryTimer() {
+		if (!recentRetryTimer) return;
+		clearTimeout(recentRetryTimer);
+		recentRetryTimer = null;
+	}
+
+	function hasLoadedLogContent(): boolean {
+		return lines.some((line) => !HEADER_ONLY_TAGS.has(line.tag));
+	}
+
+	let emptyLogMessage = $derived.by(() => {
+		if (lastLogLoadError) return '로그를 다시 불러오는 중입니다';
+		if (mode === 'managed' && recentRetryAttempt > 0) return '로그 catch-up 재시도 중입니다';
+		if (mode === 'managed' && (running || apiGate.state === 'open')) return '로그 파일을 찾는 중입니다';
+		return '표시할 로그가 아직 없습니다';
+	});
+
+	function recordLogLoadError(stage: string, error: unknown) {
+		const message = describeError(error);
+		lastLogLoadError = `${stage}: ${message}`;
+		addLine(`[DIAG] ${stage} 실패: ${message}`, false);
+	}
+
+	function scheduleManagedRecentRetry(reason: string) {
+		if (mode !== 'managed' || hasLoadedLogContent() || recentRetryTimer) return;
+		if (recentRetryAttempt >= MAX_RECENT_RETRY_ATTEMPTS) {
+			if (lastLogLoadError) {
+				addLine(`[DIAG] 로그 catch-up 재시도 중단: ${lastLogLoadError}`, false);
+			}
+			return;
+		}
+		const delay = RECENT_RETRY_BASE_DELAY_MS * Math.pow(2, recentRetryAttempt);
+		recentRetryAttempt += 1;
+		recentRetryTimer = setTimeout(async () => {
+			recentRetryTimer = null;
+			if (mode !== 'managed' || hasLoadedLogContent()) return;
+			addLine(`[DIAG] 로그 catch-up 재시도 #${recentRetryAttempt}: ${reason}`, false);
+			await loadRecent();
+			if (!hasLoadedLogContent() && (running || apiGate.state === 'open')) {
+				scheduleManagedRecentRetry(reason);
+			}
+		}, delay);
+	}
+
 	function pushLine(parsed: ParsedLine) {
 		lines.push(parsed);
 		if (lines.length > MAX_LINES) {
@@ -398,6 +543,12 @@
 		if (eventSource) eventSource.close();
                         if (noiseTimer) clearTimeout(noiseTimer);
 
+		if (apiGate.state !== 'open') {
+			connected = 'disconnected';
+			redisAvailable = false;
+			return;
+		}
+
 		// SSE 연결 전 status API로 실행 상태 + Redis 상태 확인
 		await fetchStatus();
 
@@ -416,8 +567,19 @@
 			addLine(event.data, false);
 		};
 		// Redis 연결 끊김 이벤트 처리
-		eventSource.addEventListener('redis_disconnected', () => {
+		eventSource.addEventListener('redis_disconnected', (event) => {
 			redisAvailable = false;
+			const data = (event as MessageEvent).data;
+			addLine(`[SSE] redis_disconnected: ${data || 'Redis not available'}`, false);
+		});
+		eventSource.addEventListener('fallback_mode', (event) => {
+			const data = (event as MessageEvent).data;
+			addLine(`[SSE] fallback_mode: ${data || 'file polling active'}`, false);
+		});
+		eventSource.addEventListener('stream_error', (event) => {
+			connected = 'disconnected';
+			const data = (event as MessageEvent).data;
+			addLine(`[SSE] stream_error: ${data || 'stream stopped'}`, false);
 		});
 		// Redis 재연결 시 connected 이벤트로 복구
 		eventSource.addEventListener('connected', () => {
@@ -463,19 +625,47 @@
 			if (res.lines.length > 0) {
 				lines = res.lines.map((text: string) => parseLine(text, true));
 				expandedLongLines = new Set();
+				lastLogLoadError = null;
+				recentRetryAttempt = 0;
+				clearRecentRetryTimer();
 			}
-		} catch {
-			// full 로그 없을 수 있음
+		} catch (error) {
+			recordLogLoadError('full 로그 로드', error);
 		}
 	}
 
 	let fromLine = 0;
 
+	function extractLogIdentity(parsed: ParsedLine[]): string | null {
+		for (const line of parsed) {
+			if (line.tag !== 'START') continue;
+			const match = line.message.match(/\blog_path=([^\s]+)/);
+			if (match) return match[1];
+		}
+		return null;
+	}
+
+	function buildSessionSeparator(identity: string): ParsedLine {
+		return parseLine(`${SEPARATOR_PATTERN} new log session: ${identity} ${SEPARATOR_PATTERN}`, false);
+	}
+
 	async function loadRecent() {
 		try {
 			const res = await devRunnerLogApi.recent(runnerId, 500);
 			fromLine = res.from_line ?? 0;
-			const parsed = res.lines.map((text: string) => parseLine(text, true));
+			let sourceLines = res.lines;
+			if (!running && isStartOnlyRecentLog(sourceLines)) {
+				try {
+					const fullRes = await devRunnerLogApi.full(runnerId, 0, 500);
+					if (fullRes.lines.length > 0) {
+						sourceLines = fullRes.lines;
+						fromLine = fullRes.offset ?? 0;
+					}
+				} catch (error) {
+					recordLogLoadError('recent fallback full 로그 로드', error);
+				}
+			}
+			const parsed = sourceLines.map((text: string) => parseLine(text, true));
 
 			if (running) {
 				// running 중이면 마지막 SEPARATOR 이후 구간은 현재 세션 → isStale: false
@@ -493,7 +683,23 @@
 				}
 			}
 
-			lines = parsed;
+			const nextIdentity = extractLogIdentity(parsed);
+			const shouldAppendSession =
+				lines.length > 0 &&
+				nextIdentity !== null &&
+				loadedRecentLogIdentity !== null &&
+				nextIdentity !== loadedRecentLogIdentity;
+
+			if (shouldAppendSession) {
+				const staleExisting = lines.map((line) => ({ ...line, isStale: true }));
+				const currentParsed = parsed.map((line) => ({ ...line, isStale: false }));
+				lines = [...staleExisting, buildSessionSeparator(nextIdentity), ...currentParsed].slice(-MAX_LINES);
+			} else {
+				lines = parsed;
+			}
+			if (nextIdentity !== null) {
+				loadedRecentLogIdentity = nextIdentity;
+			}
 			expandedLongLines = new Set();
 
 			// running 중 500줄 꽉 찼으면 더 오래된 로그가 있음 → loadFull로 전체 재로드
@@ -512,8 +718,14 @@
 			if (parsed.some((l: ParsedLine) => l.raw.includes(SEPARATOR_PATTERN))) {
 				pendingStale = true;
 			}
-		} catch {
-			// 로그 없을 수 있음
+			lastLogLoadError = null;
+			if (hasLoadedLogContent()) {
+				recentRetryAttempt = 0;
+				clearRecentRetryTimer();
+			}
+		} catch (error) {
+			recordLogLoadError('recent 로그 로드', error);
+			scheduleManagedRecentRetry('recent 로그 로드 실패');
 		}
 	}
 
@@ -535,10 +747,17 @@
 			if (stored === 'off') {
 				previewCollapsedEnabled = false;
 			}
+			const storedTags = window.localStorage.getItem(TAG_FILTER_STORAGE_KEY);
+			if (storedTags) {
+				const parsedTags = JSON.parse(storedTags);
+				if (Array.isArray(parsedTags)) {
+					hiddenTags = new Set(parsedTags.filter((tag): tag is string => FILTERABLE_TAGS.includes(tag)));
+				}
+			}
 		} catch {
 			// localStorage unavailable in some environments
 		}
-		await runDiagnostics();
+		void runDiagnostics();
 		await loadRecent();
 		// 초기 로드 후 스크롤을 맨 아래로 이동
 		requestAnimationFrame(() => scrollToBottom());
@@ -547,6 +766,7 @@
 		} else {
 			// managed 모드: SSE 미연결이므로 fetchStatus()로 redisAvailable 초기화
 			await fetchStatus();
+			if (!hasLoadedLogContent()) scheduleManagedRecentRetry('managed mount');
 		}
 	});
 
@@ -556,6 +776,7 @@
                         if (noiseTimer) clearTimeout(noiseTimer);
 			eventSource = null;
 		}
+		clearRecentRetryTimer();
 	});
 
 	function getTagStyle(tag: string) {
@@ -594,9 +815,25 @@
 		prevMerging = cur;
 	});
 
+	let previousManagedRetryKey = '';
+	$effect(() => {
+		const retryKey = `${runnerId}|${running ? 'running' : 'stopped'}|${apiGate.state}`;
+		if (mode !== 'managed') {
+			previousManagedRetryKey = retryKey;
+			return;
+		}
+		if (previousManagedRetryKey === retryKey) return;
+		previousManagedRetryKey = retryKey;
+		recentRetryAttempt = 0;
+		if (!hasLoadedLogContent()) {
+			scheduleManagedRecentRetry('runner/api state changed');
+		}
+	});
+
 	// ── managed 모드 공개 API ───────────────────────────────────────────────────
 
 	let _catchUpInProgress = false;
+	let _catchUpPromise: Promise<void> | null = null;
 	let _pendingInjectBuffer: string[] = [];
 
 	export function injectLine(payload: string | { text: string; meta?: Record<string, unknown> }) {
@@ -610,27 +847,33 @@
 	}
 
 	export async function catchUp(): Promise<void> {
-		if (mode !== 'managed' || _catchUpInProgress) return;
-		_catchUpInProgress = true;
-		try {
-			await loadRecent();
-			// loadRecent 후 파일의 마지막 라인 이후에 도착한 펜딩 라인만 flush
-			if (_pendingInjectBuffer.length > 0) {
-				const lastFileLine = lines.length > 0 ? lines[lines.length - 1].raw : null;
-				let startIdx = 0;
-				if (lastFileLine) {
-					const matchIdx = _pendingInjectBuffer.lastIndexOf(lastFileLine);
-					if (matchIdx >= 0) startIdx = matchIdx + 1;
+		if (mode !== 'managed') return;
+		if (_catchUpPromise) return _catchUpPromise;
+		_catchUpPromise = (async () => {
+			_catchUpInProgress = true;
+			try {
+				await loadRecent();
+				// loadRecent 후 파일의 마지막 라인 이후에 도착한 펜딩 라인만 flush
+				if (_pendingInjectBuffer.length > 0) {
+					const lastFileLine = lines.length > 0 ? lines[lines.length - 1].raw : null;
+					let startIdx = 0;
+					if (lastFileLine) {
+						const matchIdx = _pendingInjectBuffer.lastIndexOf(lastFileLine);
+						if (matchIdx >= 0) startIdx = matchIdx + 1;
+					}
+					for (let i = startIdx; i < _pendingInjectBuffer.length; i++) {
+						addLine(_pendingInjectBuffer[i], false);
+					}
 				}
-				for (let i = startIdx; i < _pendingInjectBuffer.length; i++) {
-					addLine(_pendingInjectBuffer[i], false);
-				}
+				if (!hasLoadedLogContent()) scheduleManagedRecentRetry('managed catch-up');
+			} finally {
+				_pendingInjectBuffer = [];
+				_catchUpInProgress = false;
+				_catchUpPromise = null;
+				requestAnimationFrame(() => scrollToBottom());
 			}
-		} finally {
-			_pendingInjectBuffer = [];
-			_catchUpInProgress = false;
-			requestAnimationFrame(() => scrollToBottom());
-		}
+		})();
+		return _catchUpPromise;
 	}
 
 	export function injectCompleted(reason: string = 'completed') {
@@ -658,7 +901,7 @@
 	<!-- Toolbar -->
 	<div class="flex items-center justify-between px-3 py-2 border-b border-border shrink-0 bg-gray-900">
 		<div class="flex items-center gap-2">
-			<span class="text-xs font-medium uppercase tracking-wider text-gray-300">Live Logs</span>
+			<span class="hidden text-xs font-medium uppercase tracking-wider text-gray-300 sm:inline">Live Logs</span>
 			<!-- trigger 배지 -->
 			{#if trigger}
 				{@const t = trigger}
@@ -683,6 +926,24 @@
 						class="w-2 h-2 rounded-full {redisAvailable ? 'bg-green-500' : 'bg-yellow-500'}"
 						title={redisAvailable ? 'Redis 연결됨' : 'Redis 미연결'}
 					></div>
+				{/if}
+			</div>
+			<div class="hidden items-center gap-1 sm:flex">
+				{#each FILTERABLE_TAGS as tag}
+					<button
+						type="button"
+						class="rounded border px-1.5 py-0.5 text-[9px] font-mono transition-colors {isTagHidden(tag) ? 'border-gray-700 bg-gray-800 text-gray-500' : 'border-red-500/40 bg-red-500/10 text-red-300'}"
+						title={isTagHidden(tag) ? `${tag} 로그 보이기` : `${tag} 로그 숨기기`}
+						aria-pressed={!isTagHidden(tag)}
+						onclick={() => toggleTagHidden(tag)}
+					>
+						{tag}
+					</button>
+				{/each}
+				{#if hiddenLogCount > 0}
+					<span class="rounded bg-gray-800 px-1.5 py-0.5 text-[9px] font-mono text-gray-400" title="필터로 숨겨진 로그 수">
+						hidden {hiddenLogCount}
+					</span>
 				{/if}
 			</div>
 		</div>
@@ -733,6 +994,29 @@
 		</div>
 	</div>
 
+	<div class="shrink-0 border-b border-gray-800 bg-gray-950/80 px-3 py-1 text-[10px] text-gray-400">
+		<button
+			type="button"
+			class="flex w-full min-w-0 items-center gap-1 text-left font-mono text-gray-400 hover:text-gray-200 focus:outline-none focus:ring-1 focus:ring-gray-600"
+			aria-expanded={runMetaExpanded}
+			onclick={() => runMetaExpanded = !runMetaExpanded}
+			title="runner, plan, branch, worktree 메타 정보"
+		>
+			<span class="shrink-0">{runMetaExpanded ? '▾' : '▸'}</span>
+			<span class="min-w-0 truncate">{runMetaSummary}</span>
+		</button>
+		{#if runMetaExpanded}
+			<div class="mt-1 grid gap-x-3 gap-y-1 sm:grid-cols-2">
+				{#each runMetaRows as row}
+					<div class="flex min-w-0 gap-1.5">
+						<span class="shrink-0 text-gray-500">{row.label}</span>
+						<span class="min-w-0 truncate text-gray-300" title={row.value}>{row.value}</span>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
 	{#if !redisAvailable && connected === 'connected'}
 		<div class="px-3 py-1.5 bg-red-900/40 border-b border-red-700/50 text-xs text-red-300 shrink-0 flex items-center gap-2">
 			<span>Redis 연결 불가 — 관리자 도구에서 redis-restart 실행</span>
@@ -759,6 +1043,12 @@
 		</div>
 	{/if}
 
+	{#if lastLogLoadError}
+		<div class="px-3 py-1.5 bg-yellow-950/50 border-b border-yellow-800/60 text-[11px] text-yellow-200 shrink-0 font-mono">
+			[DIAG] {lastLogLoadError}
+		</div>
+	{/if}
+
 	<!-- Log Content (Phase 2: text-sm for body) -->
 	<div
 		bind:this={logContainer}
@@ -766,9 +1056,11 @@
 		class="flex-1 min-h-0 overflow-y-auto font-mono text-xs p-1.5 bg-gray-950 text-gray-300 dr-scrollbar-thin"
 	>
 		{#if lines.length === 0}
-			<span class="text-gray-600">로그가 없습니다</span>
+			<span class="text-gray-600">{emptyLogMessage}</span>
+		{:else if visibleLines.length === 0}
+			<span class="text-gray-600">{hiddenLogCount}개 로그가 필터로 숨겨졌습니다</span>
 		{:else}
-			{#each lines as line, i}
+			{#each visibleLines as line, i}
 				{#if line.tag === 'NOISE'}
 					<div class="dr-log-line dr-log-line-noise flex items-center py-0 leading-5 {line.isStale ? 'opacity-30' : ''}">
 						{#if expandedNoiseIndices.includes(i)}
@@ -862,20 +1154,26 @@
 					</div>
 				{:else if line.tag === 'RESULT'}
 					{@const style = getTagStyle(line.tag)}
-					{@const resultMatch = line.message.match(/^(\d+)→\s?(.*)/)}
-					{@const resultBody = resultMatch ? resultMatch[2] : line.message}
+					{@const resultSegments = parseResultSegments(line.message)}
+					{@const hasMultiResultSegments = resultSegments.length >= 2}
+					{@const resultMatch = resultSegments.length === 1 ? resultSegments[0] : null}
+					{@const resultBody = resultMatch ? resultMatch.text : line.message}
 					{@const resultExpanded = isExpanded(line.id)}
 					{@const resultCollapsed = shouldCollapseMessage(resultBody)}
-					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 opacity-60 {line.isStale ? 'opacity-20' : ''}">
+					{@const resultIsFailure = isFailureResultBody(resultBody)}
+					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 {resultIsFailure ? 'opacity-100 bg-red-950/35 border-l-2 border-red-500 -mx-1 px-1 rounded' : 'opacity-60'} {line.isStale ? 'opacity-20' : ''}">
 						{#if resultMatch}
 							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
 							<span class="shrink-0 w-[42px] text-right {style.text} mr-1">
 								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 							</span>
 							<span class="flex-1 min-w-0 flex items-baseline bg-gray-900/60 rounded px-1 font-mono">
-								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch[1]}</span>
+								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch.num}</span>
 								<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
-								<span class="flex-1 min-w-0 break-all whitespace-pre-wrap text-emerald-300/80 text-[11px]">
+								{#if resultIsFailure}
+									<span class="shrink-0 mr-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">FAIL</span>
+								{/if}
+								<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {resultIsFailure ? 'text-red-200' : 'text-emerald-300/80'} text-[11px]">
 									{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
 								</span>
 								{#if resultCollapsed}
@@ -896,7 +1194,10 @@
 							<span class="shrink-0 w-[42px] text-right {style.text}">
 								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 							</span>
-							<span class="flex-1 min-w-0 break-all whitespace-pre-wrap text-gray-400 text-xs">
+							{#if resultIsFailure}
+								<span class="shrink-0 mx-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">FAIL</span>
+							{/if}
+							<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {resultIsFailure ? 'text-red-200' : 'text-gray-400'} text-xs">
 								{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
 							</span>
 							{#if resultCollapsed}
@@ -917,7 +1218,10 @@
 					{@const style = getTagStyle(line.tag)}
 					{@const lineExpanded = isExpanded(line.id)}
 					{@const lineCollapsed = shouldCollapseMessage(line.message)}
-					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : line.tag === 'FAILURE' ? 'bg-red-950/70 border-l-2 border-red-500 -mx-3 px-3 rounded' : line.tag === 'HOLD' ? 'bg-yellow-950/40 border-l-2 border-yellow-500 -mx-3 px-3 rounded' : ''}">
+					<div
+						class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : line.tag === 'FAILURE' ? 'bg-red-950/70 border-l-2 border-red-500 -mx-3 px-3 rounded' : line.tag === 'HOLD' ? 'bg-yellow-950/40 border-l-2 border-yellow-500 -mx-3 px-3 rounded' : ''}"
+						title={line.tag === 'DONE' ? 'LLM call done; runner completion is reported by the completed event' : undefined}
+					>
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>

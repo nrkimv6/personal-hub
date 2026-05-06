@@ -18,9 +18,13 @@ class TestSchedulerServiceValidation:
     def test_validate_task_name_allowed(self):
         """허용된 작업명은 예외 없이 통과"""
         # 허용된 작업명들
-        for name in ["InstagramWatchdog", "DailyMaintenance", "WeeklyVacuum"]:
+        for name in ["DailyMaintenance", "WeeklyVacuum", "LogCleanup", "APIWatchdog"]:
             # 예외가 발생하지 않아야 함
             self.service._validate_task_name(name)
+
+    def test_validate_task_name_R_apiwatchdog_allowed(self):
+        """R: APIWatchdog는 whitelist에 포함되어야 한다."""
+        self.service._validate_task_name("APIWatchdog")
 
     def test_validate_task_name_not_allowed(self):
         """허용되지 않은 작업명은 ValueError 발생"""
@@ -101,7 +105,7 @@ class TestSchedulerServiceParsing:
     def test_parse_csv_filters_allowed_tasks(self):
         """CSV 파싱 시 허용된 작업만 포함"""
         csv_text = '''TaskName,Status,Scheduled Task State,Last Run Time,Last Result,Next Run Time,Schedule Type
-\\MonitorPage\\InstagramWatchdog,Ready,Enabled,2025-12-21 14:00:00,0,2025-12-21 14:05:00,MINUTE
+\\MonitorPage\\APIWatchdog,Ready,Enabled,2025-12-21 14:00:00,0,2025-12-21 14:05:00,MINUTE
 \\MonitorPage\\MaliciousTask,Ready,Enabled,N/A,N/A,N/A,DAILY
 \\MonitorPage\\DailyMaintenance,Ready,Disabled,N/A,N/A,N/A,DAILY'''
 
@@ -109,7 +113,7 @@ class TestSchedulerServiceParsing:
 
         # 허용된 작업만 포함되어야 함
         task_names = [t["name"] for t in tasks]
-        assert "InstagramWatchdog" in task_names
+        assert "APIWatchdog" in task_names
         assert "DailyMaintenance" in task_names
         assert "MaliciousTask" not in task_names
 
@@ -120,13 +124,13 @@ class TestSchedulerServiceParsing:
     def test_parse_csv_extracts_correct_fields(self):
         """CSV에서 올바른 필드 추출"""
         csv_text = '''TaskName,Status,Scheduled Task State,Last Run Time,Last Result,Next Run Time,Schedule Type
-\\MonitorPage\\InstagramWatchdog,Running,Enabled,2025-12-21 14:00:00,0,2025-12-21 14:05:00,MINUTE'''
+\\MonitorPage\\APIWatchdog,Running,Enabled,2025-12-21 14:00:00,0,2025-12-21 14:05:00,MINUTE'''
 
         tasks = self.service._parse_csv(csv_text)
 
         assert len(tasks) == 1
         task = tasks[0]
-        assert task["name"] == "InstagramWatchdog"
+        assert task["name"] == "APIWatchdog"
         assert task["folder"] == "MonitorPage"
         assert task["status"] == "Running"
         assert task["enabled"] is True
@@ -146,13 +150,13 @@ class TestSchedulerServiceMocked:
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout='''TaskName,Status,Scheduled Task State,Last Run Time,Last Result,Next Run Time,Schedule Type
-\\MonitorPage\\InstagramWatchdog,Ready,Enabled,N/A,N/A,N/A,MINUTE''',
+\\MonitorPage\\APIWatchdog,Ready,Enabled,N/A,N/A,N/A,MINUTE''',
         )
 
         tasks = self.service.get_tasks()
 
         assert len(tasks) == 1
-        assert tasks[0]["name"] == "InstagramWatchdog"
+        assert tasks[0]["name"] == "APIWatchdog"
         mock_run.assert_called_once()
 
     @patch("app.services.scheduler_service.subprocess.run")
@@ -173,14 +177,14 @@ class TestSchedulerServiceMocked:
         """작업 실행 성공"""
         mock_run.return_value = MagicMock(returncode=0)
 
-        result = self.service.run_task("InstagramWatchdog")
+        result = self.service.run_task("APIWatchdog")
 
         assert result is True
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert "schtasks" in call_args
         assert "/run" in call_args
-        assert "\\MonitorPage\\InstagramWatchdog" in call_args
+        assert "\\MonitorPage\\APIWatchdog" in call_args
 
     @patch("app.services.scheduler_service.subprocess.run")
     @patch.object(sys, "platform", "win32")
@@ -188,7 +192,7 @@ class TestSchedulerServiceMocked:
         """작업 실행 실패"""
         mock_run.return_value = MagicMock(returncode=1)
 
-        result = self.service.run_task("InstagramWatchdog")
+        result = self.service.run_task("APIWatchdog")
 
         assert result is False
 

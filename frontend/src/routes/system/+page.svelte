@@ -1,6 +1,5 @@
 <script lang="ts">
-  import PageHeader from '$lib/components/layout/PageHeader.svelte';
-  import TabNav from '$lib/components/layout/TabNav.svelte';
+  import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
   import ServiceStatusTab from './ServiceStatusTab.svelte';
   import ErrorLogTab from './ErrorLogTab.svelte';
   import IntegrityTab from './IntegrityTab.svelte';
@@ -76,15 +75,17 @@
   <title>시스템 / 설정 | Monitor Page</title>
 </svelte:head>
 
-<div class="p-4 lg:p-6 space-y-6">
-  <!-- 헤더 -->
-  <PageHeader title="시스템 / 설정" subtitle="서비스 상태, 부팅 이력, 오류 로그, 시스템 설정을 관리합니다" />
-
-  <!-- 탭 네비게이션 -->
-  <TabNav tabs={systemTabs} bind:activeTab variant="primary" queryParam="tab" replaceState={false} />
-
-  <!-- 탭 컨텐츠 -->
-  <div class="mt-4">
+<TabbedPageLayout
+  title="시스템 / 설정"
+  subtitle="서비스 상태, 부팅 이력, 오류 로그, 시스템 설정을 관리합니다"
+  primaryTabs={systemTabs}
+  bind:activePrimaryTab={activeTab}
+  primaryQueryParam="tab"
+  primaryReplaceState={false}
+  density="compact"
+  containerClass="space-y-3 p-4 lg:p-6"
+>
+  <div class="min-w-0">
     {#if activeTab === 'status'}
       <ServiceStatusTab onStatusChange={handleServiceStatusChange} />
     {:else if activeTab === 'boot-history'}
@@ -105,4 +106,4 @@
       <SleepNowTab />
     {/if}
   </div>
-</div>
+</TabbedPageLayout>

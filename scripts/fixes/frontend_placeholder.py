@@ -104,14 +104,20 @@ class PlaceholderServer:
         if self.server:
             if self.log:
                 self.log.info(f"Stopping placeholder server on port {self.port}...")
-            self.server.shutdown()
-            self.server.server_close()
+            _server = self.server
             self.server = None
-        
+            t = threading.Thread(target=_server.shutdown, daemon=True)
+            t.start()
+            t.join(timeout=3.0)
+            if t.is_alive():
+                if self.log:
+                    self.log.warning("PlaceholderServer.shutdown() timed out — forcing server_close()")
+            _server.server_close()
+
         if self.thread:
             self.thread.join(timeout=5)
             self.thread = None
-        
+
         if self.log:
             self.log.info("Placeholder server stopped")
 

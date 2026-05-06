@@ -14,16 +14,19 @@
 """
 import json
 import logging
+import hashlib
+import math
 import subprocess
 import time
 from collections import Counter, deque
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Awaitable, Callable, TYPE_CHECKING
 
 import psutil
 
 from app.core.config import settings
+from app.shared.redis import RedisClient
 
 if TYPE_CHECKING:
     from app.shared.process.orphan_detector import OrphanDetector
@@ -33,12 +36,86 @@ logger = logging.getLogger(__name__)
 _ALERT_COOLDOWN_SEC = 600  # 10분 쿨다운
 _SCRIPT_EXTENSIONS = {".py", ".ps1", ".bat", ".cmd"}
 _HEAVY_TEST_PROCESS_MB_DEFAULT = 1500.0
+_HEAVY_TEST_PROCESS_MB_MIN = 256.0
+_PRE_FATAL_REPEAT_WINDOW_SEC = 1800
+_PRE_FATAL_REPEAT_ALERT_THRESHOLD = 3
+_PRE_FATAL_KILL_REASON = "memory_pressure_pre_fatal"
+_SINGLE_PROCESS_LIMIT_ACTION = "single_process_memory_limit"
+_SINGLE_PROCESS_LIMIT_REASON = "memory_single_process_limit"
 _MEMORY_PRESSURE_HISTORY_LEVELS = {
     "critical",
     "emergency",
     "fatal",
     "fatal_recovered",
 }
+MEMORY_PRESSURE_STATE_KEY = "monitor:memory-pressure:state"
+_MEMORY_PRESSURE_STATE_TTL_SEC = 120
+MemoryPressureStateWriter = Callable[[dict[str, object]], Awaitable[None]]
+
+
+def get_recommended_action(level: str) -> str:
+    """메모리 압박 단계별 워커 backpressure 권고 동작을 반환한다."""
+    normalized = str(level or "").strip().lower()
+    if normalized == "warning":
+        return "throttle"
+    if normalized == "critical":
+        return "pause_new_work"
+    if normalized in {"emergency", "fatal"}:
+        return "pause_workers"
+    if normalized == "normal":
+        return "resume"
+    return "observe"
+
+
+def build_memory_pressure_state(level: str, available_mb: float) -> dict[str, object]:
+    """워커가 소비할 수 있는 memory pressure state payload를 만든다."""
+    normalized = str(level or "normal").strip().lower()
+    return {
+        "level": normalized,
+        "available_mb": round(float(available_mb), 1),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "recommended_action": get_recommended_action(normalized),
+    }
+
+
+async def write_memory_pressure_state(payload: dict[str, object]) -> None:
+    """현재 memory pressure state를 Redis에 기록한다.
+
+    Redis가 비활성/불능인 경우에는 워커가 fail-open 하도록 경고 로그만 남기고
+    예외를 전파하지 않는다.
+    """
+    try:
+        client = await RedisClient.get_client()
+        if client is None:
+            logger.warning("[memory-pressure] state_write_skipped reason=redis_unavailable")
+            return
+        await client.set(
+            MEMORY_PRESSURE_STATE_KEY,
+            json.dumps(payload, ensure_ascii=False),
+            ex=_MEMORY_PRESSURE_STATE_TTL_SEC,
+        )
+    except Exception as exc:
+        logger.warning("[memory-pressure] state_write_failed reason=%s", exc)
+
+
+async def read_memory_pressure_state() -> dict[str, object] | None:
+    """Redis에 기록된 memory pressure state를 읽는다.
+
+    호출자는 예외 발생 시 fail-open 정책을 적용할 수 있도록 JSON 파싱/Redis
+    예외를 그대로 받는다. 키가 없거나 Redis가 없으면 None을 반환한다.
+    """
+    client = await RedisClient.get_client()
+    if client is None:
+        return None
+    raw = await client.get(MEMORY_PRESSURE_STATE_KEY)
+    if not raw:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    data = json.loads(str(raw))
+    if not isinstance(data, dict):
+        return None
+    return data
 
 
 def _shorten_path(path: str, max_len: int = 80) -> str:
@@ -285,10 +362,18 @@ def read_persisted_history(
 class MemoryPressureResponder:
     """시스템 메모리 압박을 감지하고 단계별 대응을 수행한다."""
 
-    def __init__(self, orphan_detector: "OrphanDetector") -> None:
+    def __init__(
+        self,
+        orphan_detector: "OrphanDetector",
+        *,
+        state_writer: MemoryPressureStateWriter | None = None,
+    ) -> None:
         self.orphan_detector = orphan_detector
         self._last_alert_time: dict[str, float] = {}  # 단계명 → 최종 알림 시각
+        self._last_single_process_alert_time: dict[int, float] = {}
         self._fatal_triggered: bool = False
+        self._pre_fatal_recovery_times: deque[float] = deque()
+        self._state_writer = state_writer or write_memory_pressure_state
 
     async def check(self) -> str:
         """현재 가용 메모리를 확인하고 단계를 판정하여 대응한다.
@@ -300,22 +385,34 @@ class MemoryPressureResponder:
         available_mb = available_bytes / (1024 * 1024)
 
         if available_mb >= settings.MEMORY_CAUTION_MB:
-            return "normal"
+            level = "normal"
         elif available_mb >= settings.MEMORY_WARNING_MB:
             await self._on_caution(available_mb)
-            return "caution"
+            level = "caution"
         elif available_mb >= settings.MEMORY_CRITICAL_MB:
             await self._on_warning(available_mb)
-            return "warning"
+            level = "warning"
         elif available_mb >= settings.MEMORY_EMERGENCY_MB:
             await self._on_critical(available_mb)
-            return "critical"
+            level = "critical"
         elif available_mb >= settings.MEMORY_FATAL_MB:
             await self._on_emergency(available_mb)
-            return "emergency"
+            level = "emergency"
         else:
             await self._on_fatal(available_mb)
-            return "fatal"
+            level = "fatal"
+
+        await self._publish_pressure_state(level, available_mb)
+        self._record_single_process_limit_violations()
+        return level
+
+    async def _publish_pressure_state(self, level: str, available_mb: float) -> None:
+        """워커 backpressure용 상태를 기록한다. 실패해도 메모리 대응은 계속된다."""
+        payload = build_memory_pressure_state(level, available_mb)
+        try:
+            await self._state_writer(payload)
+        except Exception as exc:
+            logger.warning("[memory-pressure] state_writer_failed reason=%s", exc)
 
     def _should_alert(self, level: str) -> bool:
         """해당 단계의 알림을 보낼 수 있는지 확인한다 (쿨다운 적용)."""
@@ -337,15 +434,193 @@ class MemoryPressureResponder:
         """알림 시각을 기록한다."""
         self._last_alert_time[level] = time.time()
 
+    def _resolve_single_process_limit_mb(self) -> float:
+        """단일 프로세스 RSS 경고 임계값을 정규화한다. 0 이하는 비활성."""
+        raw_value = getattr(settings, "MEMORY_SINGLE_PROCESS_LIMIT_MB", 0.0)
+        try:
+            limit_mb = float(raw_value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[memory-pressure] event=single_process_limit_invalid raw=%r disabled=true",
+                raw_value,
+            )
+            return 0.0
+        if not math.isfinite(limit_mb) or limit_mb <= 0:
+            return 0.0
+        return limit_mb
+
+    def _should_record_single_process_limit(self, pid: int) -> bool:
+        cooldown = max(1, int(getattr(settings, "MEMORY_SINGLE_PROCESS_ALERT_COOLDOWN_SEC", 600)))
+        now = time.time()
+        last = self._last_single_process_alert_time.get(pid, 0.0)
+        if now - last < cooldown:
+            return False
+        self._last_single_process_alert_time[pid] = now
+        return True
+
+    def _record_single_process_limit_action(self, proc: dict, threshold_mb: float) -> None:
+        """threshold 초과 단일 프로세스를 process-watch action log에 기록한다."""
+        registry = getattr(self.orphan_detector, "registry", None)
+        if registry is None:
+            return
+        try:
+            from app.shared.process.snapshot_writer import SnapshotWriter
+
+            writer = SnapshotWriter(registry)
+            writer.record_kill_action(
+                action=_SINGLE_PROCESS_LIMIT_ACTION,
+                pid=int(proc["pid"]),
+                cmdline_hash=str(proc.get("cmdline_hash") or ""),
+                reason=_SINGLE_PROCESS_LIMIT_REASON,
+                actor="memory_pressure",
+                result="observed",
+                detail=(
+                    f"memory_mb={float(proc.get('memory_mb', 0.0)):.1f} "
+                    f"threshold_mb={threshold_mb:.1f} "
+                    f"name={proc.get('name') or ''} "
+                    f"script_path={proc.get('script_path') or ''} "
+                    "auto_kill=false"
+                ),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[memory-pressure] event=single_process_limit_action_log_failed pid=%s reason=%s",
+                proc.get("pid"),
+                exc,
+            )
+
+    def _record_single_process_limit_violations(self) -> list[dict]:
+        """단일 프로세스 RSS 임계값 초과를 경고/감사 로그로 남긴다.
+
+        자동 종료는 기본 동작이 아니다. 위험한 운영 프로세스 오탐을 피하기 위해
+        먼저 관측 가능한 process-watch action log만 남긴다.
+        """
+        threshold_mb = self._resolve_single_process_limit_mb()
+        if threshold_mb <= 0:
+            return []
+        violations = [
+            proc
+            for proc in self._get_top_processes(20)
+            if float(proc.get("memory_mb", 0.0)) >= threshold_mb
+        ]
+        for proc in violations:
+            pid = int(proc.get("pid", 0) or 0)
+            if pid <= 0 or not self._should_record_single_process_limit(pid):
+                continue
+            logger.warning(
+                "[memory-pressure] event=single_process_limit_exceeded pid=%s name=%s memory_mb=%.1f threshold_mb=%.1f auto_kill=false",
+                pid,
+                proc.get("name"),
+                float(proc.get("memory_mb", 0.0)),
+                threshold_mb,
+            )
+            self._record_single_process_limit_action(proc, threshold_mb)
+        return violations
+
+    def _resolve_heavy_test_threshold_mb(self) -> float:
+        """pre-fatal 완화 후보 선별 임계값을 정규화한다."""
+        raw_value = settings.MEMORY_HEAVY_TEST_PROCESS_MB
+        try:
+            threshold_mb = float(raw_value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[memory-pressure] event=pre_fatal_threshold_invalid raw=%r fallback=%.1f",
+                raw_value,
+                _HEAVY_TEST_PROCESS_MB_DEFAULT,
+            )
+            return _HEAVY_TEST_PROCESS_MB_DEFAULT
+
+        if not math.isfinite(threshold_mb):
+            logger.warning(
+                "[memory-pressure] event=pre_fatal_threshold_invalid raw=%r fallback=%.1f",
+                raw_value,
+                _HEAVY_TEST_PROCESS_MB_DEFAULT,
+            )
+            return _HEAVY_TEST_PROCESS_MB_DEFAULT
+
+        if threshold_mb < _HEAVY_TEST_PROCESS_MB_MIN:
+            logger.warning(
+                "[memory-pressure] event=pre_fatal_threshold_clamped raw=%.1f clamp=%.1f",
+                threshold_mb,
+                _HEAVY_TEST_PROCESS_MB_MIN,
+            )
+            return _HEAVY_TEST_PROCESS_MB_MIN
+
+        return threshold_mb
+
+    def _record_pre_fatal_action(
+        self,
+        *,
+        target: dict,
+        result: str,
+        available_before_mb: float,
+        available_after_mb: float | None = None,
+        detail: str = "",
+    ) -> None:
+        """pre-fatal 완화 조치를 process-watch action 로그에 남긴다."""
+        registry = getattr(self.orphan_detector, "registry", None)
+        if registry is None:
+            return
+
+        try:
+            from app.shared.process.snapshot_writer import PRE_FATAL_KILL_ACTION, SnapshotWriter
+
+            writer = SnapshotWriter(registry)
+            detail_parts = [
+                f"available_before_mb={available_before_mb:.1f}",
+                f"threshold_mb={float(target.get('threshold_mb', 0.0)):.1f}",
+                f"script_path={target.get('script_path') or ''}",
+            ]
+            if available_after_mb is not None:
+                detail_parts.append(f"available_after_mb={available_after_mb:.1f}")
+            if detail:
+                detail_parts.append(detail)
+            writer.record_kill_action(
+                action=PRE_FATAL_KILL_ACTION,
+                pid=int(target["pid"]),
+                cmdline_hash=str(target.get("cmdline_hash") or ""),
+                reason=_PRE_FATAL_KILL_REASON,
+                actor="memory_pressure",
+                result=result,
+                detail=" ".join(part for part in detail_parts if part),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[memory-pressure] event=pre_fatal_action_log_failed pid=%s reason=%s",
+                target.get("pid"),
+                exc,
+            )
+
+    def _register_pre_fatal_recovery(self) -> dict[str, object]:
+        """짧은 시간 내 반복되는 pre-fatal 복구 상태를 기록한다."""
+        now = time.time()
+        cutoff = now - _PRE_FATAL_REPEAT_WINDOW_SEC
+        while self._pre_fatal_recovery_times and self._pre_fatal_recovery_times[0] < cutoff:
+            self._pre_fatal_recovery_times.popleft()
+        self._pre_fatal_recovery_times.append(now)
+
+        count = len(self._pre_fatal_recovery_times)
+        last_recovered_at = datetime.fromtimestamp(now).isoformat(timespec="seconds")
+        if count > 1:
+            logger.warning(
+                "[memory-pressure] event=pre_fatal_repeat count=%s window_sec=%s last_recovered_at=%s",
+                count,
+                _PRE_FATAL_REPEAT_WINDOW_SEC,
+                last_recovered_at,
+            )
+        return {
+            "repeat_count": count,
+            "last_recovered_at": last_recovered_at,
+            "repeat_active": count >= _PRE_FATAL_REPEAT_ALERT_THRESHOLD,
+        }
+
     def _attempt_pre_fatal_mitigation(self, available_mb: float) -> tuple[bool, float, list[dict]]:
         """fatal 직전 단일 고메모리 test_*.py 프로세스를 선제 종료한다.
 
         Returns:
             (recovered, available_after_mb, killed_processes)
         """
-        heavy_threshold_mb = float(
-            getattr(settings, "MEMORY_HEAVY_TEST_PROCESS_MB", _HEAVY_TEST_PROCESS_MB_DEFAULT)
-        )
+        heavy_threshold_mb = self._resolve_heavy_test_threshold_mb()
         candidates: list[dict] = []
         for proc in psutil.process_iter(["pid", "name", "memory_info", "cmdline"]):
             try:
@@ -363,6 +638,13 @@ class MemoryPressureResponder:
                         "name": proc.info.get("name") or "",
                         "script_path": script_path,
                         "memory_mb": memory_mb,
+                        "cmdline_hash": hashlib.sha256(
+                            " ".join(str(part) for part in cmdline if part).strip().encode(
+                                "utf-8",
+                                errors="ignore",
+                            )
+                        ).hexdigest()[:32],
+                        "threshold_mb": heavy_threshold_mb,
                     }
                 )
             except (psutil.NoSuchProcess, psutil.AccessDenied, TypeError, ValueError):
@@ -384,9 +666,15 @@ class MemoryPressureResponder:
                 process.wait(timeout=2)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired) as exc:
             logger.warning(
-                "[memory-pressure] pre-fatal mitigation 실패: pid=%s reason=%s",
+                "[memory-pressure] event=pre_fatal_mitigation result=failed pid=%s reason=%s",
                 target_pid,
                 exc,
+            )
+            self._record_pre_fatal_action(
+                target=target,
+                result="failed",
+                available_before_mb=available_mb,
+                detail=f"error={exc}",
             )
             return False, available_mb, []
 
@@ -395,14 +683,22 @@ class MemoryPressureResponder:
         available_after_mb = psutil.virtual_memory().available / (1024 * 1024)
         recovered = available_after_mb >= settings.MEMORY_FATAL_MB
         logger.warning(
-            "[memory-pressure] pre-fatal mitigation kill: pid=%s script=%s rss=%.1fMB "
-            "available_before=%.1fMB available_after=%.1fMB recovered=%s",
+            "[memory-pressure] event=pre_fatal_mitigation result=success pid=%s script=%s "
+            "rss=%.1fMB threshold=%.1fMB available_before=%.1fMB available_after=%.1fMB recovered=%s",
             target["pid"],
             target["script_path"],
             target["memory_mb"],
+            heavy_threshold_mb,
             available_mb,
             available_after_mb,
             recovered,
+        )
+        self._record_pre_fatal_action(
+            target=target,
+            result="success",
+            available_before_mb=available_mb,
+            available_after_mb=available_after_mb,
+            detail=f"recovered={recovered}",
         )
         return recovered, available_after_mb, [target]
 
@@ -428,6 +724,12 @@ class MemoryPressureResponder:
                     cmdline = []
 
                 script_path = _extract_script_path(cmdline)
+                cmdline_hash = hashlib.sha256(
+                    " ".join(str(part) for part in cmdline if part).strip().encode(
+                        "utf-8",
+                        errors="ignore",
+                    )
+                ).hexdigest()[:32] if cmdline else ""
 
                 # 부모 프로세스 정보
                 try:
@@ -462,6 +764,7 @@ class MemoryPressureResponder:
                     "name": proc.info["name"],
                     "memory_mb": round(rss / (1024 * 1024), 1),
                     "script_path": script_path,
+                    "cmdline_hash": cmdline_hash,
                     "ppid": ppid,
                     "parent_name": parent_name,
                     "ppid_alive": ppid_alive,
@@ -516,6 +819,7 @@ class MemoryPressureResponder:
         available_mb: float,
         top_procs: list[dict],
         tree_text: str,
+        extra: dict | None = None,
     ) -> None:
         """메모리 압박 스냅샷을 재부팅에도 유실되지 않는 영속 파일에 기록한다.
 
@@ -534,6 +838,8 @@ class MemoryPressureResponder:
                 "top_processes": top_procs,
                 "process_tree": tree_text,
             }
+            if extra:
+                record.update(extra)
             with log_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 f.flush()
@@ -654,14 +960,38 @@ class MemoryPressureResponder:
             top10 = self._get_top_processes(10)
             tree = _collect_process_tree()
             tree_text = _format_process_tree(tree)
-            self._persist_snapshot("fatal_recovered", available_after_mb, top10, tree_text)
+            threshold_mb = self._resolve_heavy_test_threshold_mb()
+            repeat_meta = self._register_pre_fatal_recovery()
+            self._persist_snapshot(
+                "fatal_recovered",
+                available_after_mb,
+                top10,
+                tree_text,
+                extra={
+                    "mitigation": {
+                        "available_before_mb": round(available_mb, 1),
+                        "available_after_mb": round(available_after_mb, 1),
+                        "threshold_mb": round(threshold_mb, 1),
+                        "killed_targets": killed,
+                        "repeat_count": repeat_meta["repeat_count"],
+                        "last_recovered_at": repeat_meta["last_recovered_at"],
+                    }
+                },
+            )
             killed_summary = ", ".join(
                 f"PID={p['pid']} {p['script_path']}({p['memory_mb']}MB)" for p in killed
             )
+            repeat_notice = ""
+            if repeat_meta["repeat_active"]:
+                repeat_notice = (
+                    f"\n반복 완화: {_PRE_FATAL_REPEAT_WINDOW_SEC // 60}분 내 "
+                    f"{repeat_meta['repeat_count']}회 (최근 {repeat_meta['last_recovered_at']})"
+                )
             msg = (
                 f"🟠 재부팅 보류: fatal 직전 고메모리 테스트 프로세스 선제 종료 후 복구 "
                 f"({available_mb:.0f}MB -> {available_after_mb:.0f}MB)\n"
                 f"종료 대상: {killed_summary or '(없음)'}"
+                f"{repeat_notice}"
             )
             logger.critical(msg)
             await self._send_telegram(msg)

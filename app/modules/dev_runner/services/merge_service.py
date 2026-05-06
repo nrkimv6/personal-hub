@@ -156,6 +156,7 @@ class MergeService:
         branch: str,
         worktree_path: Optional[str],
         plan_file: Optional[str],
+        approve_service_lock: bool = False,
     ) -> dict:
         """direct-merge 명령 전송 — runner_id 없이 branch/worktree만으로 머지 실행"""
         try:
@@ -168,6 +169,7 @@ class MergeService:
             "branch": branch,
             "worktree_path": worktree_path,
             "plan_file": plan_file,
+            "approve_service_lock": bool(approve_service_lock),
             "source": "monitor-page-api",
             "timestamp": datetime.now().isoformat(),
         }

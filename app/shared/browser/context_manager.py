@@ -41,6 +41,7 @@ class ContextManager:
         # 계정별 브라우저 생성 Lock (동시 생성 방지)
         self._context_locks: Dict[int, asyncio.Lock] = {}
         self._locks_lock = asyncio.Lock()  # Lock 딕셔너리 접근용 Lock
+        # 팝업 핸들러 중복 등록 방지
         self._popup_handler_registered: Set[int] = set()
 
     def set_proxy_manager(self, proxy_manager: Optional["ProxyManager"]):
@@ -48,12 +49,18 @@ class ContextManager:
         self._proxy_manager = proxy_manager
         logger.info(f"[ContextManager] 프록시 매니저 {'설정됨' if proxy_manager else '해제됨'}")
 
-    def _register_popup_handler(self, service_account_id: int, context: BrowserContext):
-        """팝업/고아 탭 자동 정리 핸들러를 계정별 context에 한 번만 등록한다."""
+    def _register_popup_handler(self, service_account_id: int, context: "BrowserContext"):
+        """팝업 탭 자동 차단 핸들러를 context에 1회만 등록한다.
+
+        pool 등록 탭(_tab_id 속성 보유)은 닫지 않는다.
+        핸들러 등록 이전에 열린 about:blank 고아 탭도 즉시 정리한다.
+        """
         if service_account_id in self._popup_handler_registered:
             return
 
-        async def _close_if_still_orphan(page):
+        async def _close_if_still_orphan(page: "Page"):
+            # 한 이벤트 루프 사이클 양보 — new_page() 반환 직후 tab_pool_manager가
+            # _tab_id = "__pending__" 마커를 동기적으로 설정할 시간을 확보한다.
             await asyncio.sleep(0)
             if hasattr(page, "_tab_id"):
                 return
@@ -68,13 +75,14 @@ class ContextManager:
             except Exception as e:
                 logger.debug(f"[ContextManager] 팝업 close 실패 (무시): {e}")
 
-        def _on_popup(page):
+        def _on_popup(page: "Page"):
             if hasattr(page, "_tab_id"):
                 return
             asyncio.create_task(_close_if_still_orphan(page))
 
         context.on("page", _on_popup)
 
+        # 핸들러 등록 이전에 이미 열린 about:blank 고아 탭 즉시 정리
         try:
             for page in context.pages:
                 if not hasattr(page, "_tab_id") and page.url == "about:blank":
@@ -83,6 +91,7 @@ class ContextManager:
             logger.debug(f"[ContextManager] 기존 고아 탭 정리 중 오류 (무시): {e}")
 
         self._popup_handler_registered.add(service_account_id)
+        logger.debug(f"[ContextManager] 팝업 차단 핸들러 등록: service_account_id={service_account_id}")
 
     def _get_proxy_config(self) -> Optional[Dict]:
         """Playwright용 프록시 설정 반환"""
@@ -204,8 +213,8 @@ class ContextManager:
             if self.playwright_instance:
                 try:
                     await self.playwright_instance.stop()
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"Playwright 정리 실패 (무시): {exc}")
                 self.playwright_instance = None
             self.browser_context = None
             raise
@@ -277,6 +286,7 @@ class ContextManager:
 
                 if context_valid:
                     logger.debug(f"기존 브라우저 컨텍스트 재사용 (service_account_id={service_account_id})")
+                    self._register_popup_handler(service_account_id, context)
                     return context
                 else:
                     # 컨텍스트가 닫혔으면 딕셔너리에서 제거
@@ -296,6 +306,7 @@ class ContextManager:
                 self.browser_context = context
                 logger.info("기본 브라우저 컨텍스트 설정 완료")
 
+            self._register_popup_handler(service_account_id, context)
             return context
 
     async def _create_browser_context(self, service_account_id: int) -> BrowserContext:
@@ -446,7 +457,8 @@ class ContextManager:
                 logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (service_account_id={service_account_id}): {e}")
 
             if context_valid:
-                logger.debug(f"기존 브라우저 컨텍스트 재사용 (service_account_id={service_account_id})")
+                logger.debug(f"기존 브라우저 컨텍스트 재사용 (service_account_id={service_account_id}, popup handler 등록 확인)")
+                self._register_popup_handler(service_account_id, context)
                 return context
             else:
                 logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (service_account_id={service_account_id})")
@@ -502,6 +514,7 @@ class ContextManager:
             # 마지막 사용 시간 업데이트
             service_account_service.update_last_used(db, service_account_id)
 
+            self._register_popup_handler(service_account_id, context)
             return context
 
         finally:
@@ -519,6 +532,7 @@ class ContextManager:
                 context = self.browser_contexts[service_account_id]
                 await context.close()
                 del self.browser_contexts[service_account_id]
+                self._popup_handler_registered.discard(service_account_id)
                 logger.info(f"브라우저 컨텍스트 종료 완료 (service_account_id={service_account_id})")
             except Exception as e:
                 logger.error(f"브라우저 컨텍스트 종료 실패 (service_account_id={service_account_id}): {str(e)}")

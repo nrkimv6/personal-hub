@@ -139,6 +139,32 @@ class TestStartPlanRunner:
         assert result["success"] is False
         assert "Already running" in result["message"]
 
+    def test_start_reserved_plan_blocks_before_thread(self, listener_mod, fr, tmp_path):
+        """R: 예약대기 plan은 accepted/thread/worktree 생성 전에 blocked 결과를 반환."""
+        plan_path = tmp_path / "reserved.md"
+        plan_path.write_text(
+            "# Reserved\n\n"
+            "> 상태: 예약대기\n"
+            "> 진행률: 0/0 (0%)\n",
+            encoding="utf-8",
+        )
+        before = plan_path.read_text(encoding="utf-8")
+        command = {
+            "action": "run",
+            "runner_id": RUNNER_ID,
+            "plan_file": str(plan_path),
+        }
+
+        with patch("_dr_plan_runner.threading.Thread") as mock_thread:
+            result = listener_mod.start_plan_runner(command, fr)
+
+        assert result["success"] is False
+        assert result["reason"] == "reserved_status"
+        assert result["status"] == "예약대기"
+        assert "예약대기" in result["message"]
+        mock_thread.assert_not_called()
+        assert plan_path.read_text(encoding="utf-8") == before
+
 
 class TestLaunchPlanRunnerProcess:
     """_launch_plan_runner_process — Popen 호출 및 Redis 상태 검증"""
@@ -323,6 +349,24 @@ class TestLaunchPlanRunnerProcess:
         assert fr.get(f"{RKP}:{RUNNER_ID}:pid") == "12345"
         assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "test.md"
 
+    def test_launch_stores_process_identity_right(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """R(Right): launch 직후 PID create_time과 cmdline hash를 Redis에 저장한다."""
+        RKP = listener_mod.RUNNER_KEY_PREFIX
+        command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
+
+        with patch("_dr_plan_runner.LOG_DIR", tmp_path), \
+             patch("_dr_plan_runner.threading.Thread") as mock_thread, \
+             patch("_dr_plan_runner.subprocess.Popen", return_value=mock_popen), \
+             patch(
+                 "_dr_plan_runner._get_process_identity",
+                 return_value={"pid_create_time": 123.5, "process_cmdline_hash": "cmd-hash"},
+             ):
+            mock_thread.return_value = MagicMock()
+            listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, "test.md", None)
+
+        assert fr.get(f"{RKP}:{RUNNER_ID}:pid_create_time") == "123.5"
+        assert fr.get(f"{RKP}:{RUNNER_ID}:process_cmdline_hash") == "cmd-hash"
+
     def test_launch_sets_stream_log_path_in_redis(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """T3: stream_log_path가 Redis에 실제 로그 파일 경로로 저장되는지 확인 (nil 아님)
 
@@ -457,6 +501,58 @@ class TestStopPlanRunner:
 
         assert result["success"] is True
         mock_cleanup.assert_called_once_with(RUNNER_ID, fr)
+
+    def test_stop_kills_child_processes(self, listener_mod, fr, mock_popen):
+        """R(Right): stop 전에 runner child process tree를 terminate한다."""
+        child1 = MagicMock()
+        child1.pid = 20001
+        child2 = MagicMock()
+        child2.pid = 20002
+        parent = MagicMock()
+        parent.children.return_value = [child1, child2]
+
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+
+        with patch("_dr_plan_runner.psutil.Process", return_value=parent), \
+             patch("_dr_plan_runner.psutil.wait_procs", return_value=([child1, child2], [])) as mock_wait:
+            result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
+
+        assert result["success"] is True
+        parent.children.assert_called_once_with(recursive=True)
+        child1.terminate.assert_called_once()
+        child2.terminate.assert_called_once()
+        mock_wait.assert_called_once_with([child1, child2], timeout=5)
+
+    def test_stop_child_kill_on_timeout(self, listener_mod, fr, mock_popen):
+        """B(Boundary): terminate timeout child는 kill로 정리한다."""
+        child1 = MagicMock()
+        child1.pid = 20003
+        child2 = MagicMock()
+        child2.pid = 20004
+        parent = MagicMock()
+        parent.children.return_value = [child1, child2]
+
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+
+        with patch("_dr_plan_runner.psutil.Process", return_value=parent), \
+             patch("_dr_plan_runner.psutil.wait_procs", side_effect=[([child1], [child2]), ([child2], [])]):
+            result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
+
+        assert result["success"] is True
+        child1.kill.assert_not_called()
+        child2.kill.assert_called_once()
+
+    def test_stop_child_nosuchprocess_ignored(self, listener_mod, fr, mock_popen):
+        """E(Error): psutil parent 조회 실패는 stop 자체를 막지 않는다."""
+        import psutil
+
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+
+        with patch("_dr_plan_runner.psutil.Process", side_effect=psutil.NoSuchProcess(pid=mock_popen.pid)):
+            result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
+
+        assert result["success"] is True
+        mock_popen.terminate.assert_called_once()
 
     def test_stop_not_running_returns_error(self, listener_mod, fr):
         """미실행 runner_id stop → 실패"""

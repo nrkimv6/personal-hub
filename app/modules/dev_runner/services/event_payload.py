@@ -16,30 +16,71 @@ from app.modules.dev_runner.services.event_routing import (
 )
 from app.modules.dev_runner.services.visibility import is_visible_runner
 
+# 새 필드 추가 시 _status_values() defaults에 키를 추가하면 자동 동기화됨
+STATUS_FIELDS: tuple[str, ...] = (
+    "status",
+    "pid",
+    "current_cycle",
+    "start_time",
+    "plan_file",
+    "engine",
+    "worktree_path",
+    "branch",
+    "trigger",
+    "merge_status",
+    "merge_reason",
+    "merge_message",
+    "exit_reason",
+    "stop_stage",
+    "error",
+    "execution_count",
+    "worktree_exists",
+    "branch_exists",
+    "branch_merged_to_main",
+    "metadata_checked_at",
+)
+
+
+def _decode_text(value):
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _coerce_metadata_state(value):
+    if isinstance(value, bool):
+        return value
+    text = _decode_text(value)
+    if text is None:
+        return "unknown"
+    normalized = str(text).strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    return "unknown"
+
+
+def _coerce_metadata_checked_at(value) -> str:
+    text = _decode_text(value)
+    if text is None or str(text).strip() == "":
+        return "unknown"
+    return str(text)
+
 
 def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
     """특정 runner의 현재 상태를 Redis에서 읽어 dict로 반환"""
     try:
-        fields = [
-            "status",
-            "pid",
-            "current_cycle",
-            "start_time",
-            "plan_file",
-            "engine",
-            "worktree_path",
-            "branch",
-            "trigger",
-            "merge_status",
-            "exit_reason",
-            "stop_stage",
-            "error",
-            "execution_count",
-        ]
-        values = sync_redis.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
-        data = dict(zip(fields, values))
+        values = sync_redis.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in STATUS_FIELDS])
+        data = dict(zip(STATUS_FIELDS, values))
         data["runner_id"] = runner_id
         data["visible"] = is_visible_runner(data.get("trigger"), runner_id)
+        data["worktree_exists"] = _coerce_metadata_state(data.get("worktree_exists"))
+        data["branch_exists"] = _coerce_metadata_state(data.get("branch_exists"))
+        data["branch_merged_to_main"] = _coerce_metadata_state(data.get("branch_merged_to_main"))
+        data["metadata_checked_at"] = _coerce_metadata_checked_at(data.get("metadata_checked_at"))
         # plan_file이 None(Redis 키 미설정)이면 None 반환 — sentinel fallback 제거
         if not data.get("plan_file"):
             data["plan_file"] = None

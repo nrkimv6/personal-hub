@@ -11,6 +11,7 @@ import redis
 from app.modules.dev_runner.services.log_service import LogService
 from app.modules.dev_runner.services.state import RunState
 from app.modules.dev_runner.schemas import LogResponse
+from tests.dev_runner.conftest import attach_default_redis_behaviors, assert_no_magicmock_leak
 
 
 # ========== LogService 테스트 ==========
@@ -25,7 +26,7 @@ class TestLogServiceTailLogFile:
         log_file.write_text("\n".join(f"line {i}" for i in range(200)), encoding="utf-8")
 
         service = LogService.__new__(LogService)
-        service.redis_client = MagicMock()
+        service.redis_client = attach_default_redis_behaviors(MagicMock())
         with patch.object(service, "_find_current_log", return_value=log_file):
             result = service.tail_log_file("test_runner", n_lines=50)
 
@@ -37,7 +38,7 @@ class TestLogServiceTailLogFile:
     def test_file_not_found_returns_empty(self):
         """파일 미존재 시 빈 응답"""
         service = LogService.__new__(LogService)
-        service.redis_client = MagicMock()
+        service.redis_client = attach_default_redis_behaviors(MagicMock())
         with patch.object(service, "_find_current_log", return_value=None):
             result = service.tail_log_file("test_runner")
 
@@ -48,7 +49,7 @@ class TestLogServiceTailLogFile:
         """경로는 반환되지만 파일이 없는 경우"""
         missing = tmp_path / "missing.log"
         service = LogService.__new__(LogService)
-        service.redis_client = MagicMock()
+        service.redis_client = attach_default_redis_behaviors(MagicMock())
         with patch.object(service, "_find_current_log", return_value=missing):
             result = service.tail_log_file("test_runner")
 
@@ -61,7 +62,7 @@ class TestLogServiceTailLogFile:
         log_file.write_text("some content", encoding="utf-8")
 
         service = LogService.__new__(LogService)
-        service.redis_client = MagicMock()
+        service.redis_client = attach_default_redis_behaviors(MagicMock())
         with patch.object(service, "_find_current_log", return_value=log_file), \
              patch("builtins.open", side_effect=PermissionError("Access denied")):
             result = service.tail_log_file("test_runner")
@@ -75,7 +76,7 @@ class TestLogServiceTailLogFile:
         log_file.write_text("\n".join(f"line {i}" for i in range(300)), encoding="utf-8")
 
         service = LogService.__new__(LogService)
-        service.redis_client = MagicMock()
+        service.redis_client = attach_default_redis_behaviors(MagicMock())
         with patch.object(service, "_find_current_log", return_value=log_file):
             result = service.tail_log_file("test_runner")
 
@@ -85,6 +86,20 @@ class TestLogServiceTailLogFile:
 class TestLogServiceFindCurrentLog:
     """_find_current_log() 테스트"""
 
+    def test_log_state_strict_redis_right_read_path(self):
+        """R: strict Redis mock 기본 get은 MagicMock이 아닌 None을 반환한다."""
+        service = LogService.__new__(LogService)
+        mock_redis = attach_default_redis_behaviors(MagicMock())
+        service.redis_client = mock_redis
+
+        result = service._find_current_log("test_runner")
+
+        assert result is None
+        assert_no_magicmock_leak(
+            mock_redis.get("plan-runner:runners:test_runner:stream_log_path"),
+            "redis.get",
+        )
+
     def test_stream_log_path_priority(self, tmp_path):
         """stream_log_path 우선 탐색 (크기 > 200 bytes 조건 충족 필요)"""
         stream_log = tmp_path / "stream.log"
@@ -93,7 +108,7 @@ class TestLogServiceFindCurrentLog:
         fallback_log.write_text("fallback", encoding="utf-8")
 
         service = LogService.__new__(LogService)
-        mock_redis = MagicMock()
+        mock_redis = attach_default_redis_behaviors(MagicMock())
         mock_redis.get.side_effect = lambda key: {
             "plan-runner:runners:test_runner:stream_log_path": str(stream_log),
             "plan-runner:runners:test_runner:log_file_path": str(fallback_log),
@@ -109,7 +124,7 @@ class TestLogServiceFindCurrentLog:
         fallback_log.write_text("data", encoding="utf-8")
 
         service = LogService.__new__(LogService)
-        mock_redis = MagicMock()
+        mock_redis = attach_default_redis_behaviors(MagicMock())
         mock_redis.get.side_effect = lambda key: {
             "plan-runner:runners:test_runner:stream_log_path": None,
             "plan-runner:runners:test_runner:log_file_path": str(fallback_log),
@@ -122,7 +137,7 @@ class TestLogServiceFindCurrentLog:
     def test_redis_connection_error_returns_none(self):
         """Redis 미연결 시 None"""
         service = LogService.__new__(LogService)
-        mock_redis = MagicMock()
+        mock_redis = attach_default_redis_behaviors(MagicMock())
         mock_redis.get.side_effect = redis.ConnectionError("Connection refused")
         service.redis_client = mock_redis
 
@@ -132,7 +147,7 @@ class TestLogServiceFindCurrentLog:
     def test_both_paths_missing_returns_none(self):
         """두 경로 모두 None이면 None 반환"""
         service = LogService.__new__(LogService)
-        mock_redis = MagicMock()
+        mock_redis = attach_default_redis_behaviors(MagicMock())
         mock_redis.get.return_value = None
         service.redis_client = mock_redis
 
@@ -142,7 +157,7 @@ class TestLogServiceFindCurrentLog:
     def test_path_exists_but_file_deleted(self, tmp_path):
         """경로가 반환되지만 실제 파일 없음"""
         service = LogService.__new__(LogService)
-        mock_redis = MagicMock()
+        mock_redis = attach_default_redis_behaviors(MagicMock())
         mock_redis.get.side_effect = lambda key: {
             "plan-runner:runners:test_runner:stream_log_path": str(tmp_path / "gone.log"),
             "plan-runner:runners:test_runner:log_file_path": None,

@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
+from app.core.database import is_connection_error
 from app.core.dependencies import get_db_session
 from app.shared.worker.base_worker import BaseWorker
 from app.models.kakao_monitor import (
@@ -212,7 +213,9 @@ class KakaoMonitorWorker(BaseWorker):
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             mark_error(err)
-            logger.exception("[KAKAO_LOOP] 모니터링 실패: %s", err)
+            if is_connection_error(exc):
+                self._log_worker_error("monitor_chat", exc)
+                return
             raise
 
     def _load_active_state(self) -> tuple[_ConfigSnapshot | None, list[_KeywordSnapshot], int]:

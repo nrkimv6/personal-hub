@@ -1,4 +1,17 @@
 <script lang="ts">
+	import {
+		ChevronDown,
+		ChevronUp,
+		Play,
+		Power,
+		RefreshCw,
+		RotateCcw,
+		Settings,
+		Square,
+		Terminal,
+		Trash2,
+		X
+	} from 'lucide-svelte';
 	import DevRunnerSettingsPanel from './DevRunnerSettingsPanel.svelte';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 
@@ -11,14 +24,55 @@
 		branch?: string | null;
 		exit_reason?: string | null;
 		display_plan_name?: string | null;
+		worktree_exists?: boolean | 'unknown';
+		branch_exists?: boolean | 'unknown';
+		branch_merged_to_main?: boolean | 'unknown';
+		metadata_checked_at?: string | null;
 	}
 
-	function resolveLabel(runner: RunnerTab): string {
+	function resolveFullLabel(runner: RunnerTab): string {
 		if (runner.plan_file) {
 			if (runner.plan_file === '__ALL_PLANS__' || runner.plan_file === 'ALL') return '전체 실행';
 			return runner.plan_file.split(/[/\\]/).pop() ?? runner.plan_file;
 		}
 		return runner.display_plan_name ?? '(알 수 없음)';
+	}
+
+	function resolveRunnerLabel(runner: RunnerTab, index: number): string {
+		const fullLabel = resolveFullLabel(runner);
+		if (fullLabel && fullLabel !== '(알 수 없음)') return fullLabel;
+		return `Runner ${index + 1}`;
+	}
+
+	function resolveRunnerStateTitle(runner: RunnerTab): string {
+		if (runner.running) return 'running';
+		const exitDisplay = getExitReasonDisplay(runner.exit_reason);
+		return runner.exit_reason ? `${exitDisplay.statusIcon} (${runner.exit_reason})` : exitDisplay.statusIcon;
+	}
+
+	function resolveStaleLabel(runner: RunnerTab): string | null {
+		if (runner.worktree_exists === false) return '삭제된 worktree';
+		if (runner.branch_exists === false) return 'branch 없음';
+		if (runner.branch_merged_to_main === true) return 'main 반영됨';
+		if (!runner.running && runner.worktree_exists === 'unknown') return '과거 기록';
+		return null;
+	}
+
+	function resolveMetaTitle(runner: RunnerTab, index: number): string {
+		const rows = [
+			`runner: ${runner.id}`,
+			`index: Runner ${index + 1}`,
+			`label: ${resolveRunnerLabel(runner, index)}`,
+			`state: ${resolveRunnerStateTitle(runner)}`,
+			runner.plan_file ? `file: ${runner.plan_file}` : null,
+			runner.engine ? `engine: ${runner.engine}` : null,
+			runner.branch ? `branch: ${runner.branch}` : null,
+			`worktree_exists: ${runner.worktree_exists ?? 'unknown'}`,
+			`branch_exists: ${runner.branch_exists ?? 'unknown'}`,
+			`branch_merged_to_main: ${runner.branch_merged_to_main ?? 'unknown'}`,
+			`metadata_checked_at: ${runner.metadata_checked_at ?? 'unknown'}`,
+		];
+		return rows.filter(Boolean).join('\n');
 	}
 
 	interface RunStatus {
@@ -68,65 +122,44 @@
 	let runningCount = $derived(runners.filter(r => r.running).length);
 	let anyRunning = $derived(runningCount > 0);
 	let anyCrashed = $derived(!anyRunning && !!runStatus?.crashed);
+	let stoppedCount = $derived(runners.length - runningCount);
+	let activeRunner = $derived(runners.find(r => r.id === activeRunnerId) ?? null);
+	let activeRunnerIndex = $derived(activeRunner ? runners.findIndex(r => r.id === activeRunner.id) : -1);
+	let activeRunnerLabel = $derived(activeRunner && activeRunnerIndex >= 0 ? `Selected ${resolveRunnerLabel(activeRunner, activeRunnerIndex)}` : null);
+	let activeRunnerMetaTitle = $derived(activeRunner && activeRunnerIndex >= 0 ? resolveMetaTitle(activeRunner, activeRunnerIndex) : '');
+	let summaryText = $derived(
+		`${sseConnected ? 'Online' : 'Offline'} · ${runningCount}/${runners.length} active${anyRunning && elapsed ? ` · ${elapsed}` : ''}`
+	);
 	let showSettings = $state(false);
+	let showSecondaryActions = $state(false);
 </script>
 
 <div class="bg-card border border-border rounded-md shrink-0 overflow-hidden">
-	<!-- 상단 바: 연결 상태 + runner 상태 + elapsed + 액션 버튼 -->
-	<div class="flex items-center justify-between px-3 py-1.5">
-		<!-- 좌측: 연결 상태 + runner 상태 + elapsed -->
-		<div class="flex items-center gap-3 min-w-0">
-			<!-- SSE 연결 상태 dot -->
-			<div class="flex items-center gap-1.5 shrink-0">
-				{#if sseConnected}
-					<div class="pulse-dot bg-status-running"></div>
-				{:else}
-					<div class="pulse-dot bg-status-failed animate-pulse"></div>
-				{/if}
-			</div>
-
-			<!-- Runner 상태 dots -->
-			{#if runners.length > 0}
-				<div class="flex items-center gap-1 shrink-0">
-					{#each runners as runner (runner.id)}
-						{#if runner.running}
-							<div class="pulse-dot bg-status-running" title="{resolveLabel(runner)} - 실행 중"></div>
-						{:else}
-							<div class="w-2 h-2 rounded-full bg-muted-foreground/30" title="{resolveLabel(runner)} - 중지"></div>
-						{/if}
-					{/each}
+	<!-- 상단 바: compact summary + primary actions -->
+	<div class="flex min-h-9 items-center justify-between gap-2 px-3 py-1">
+		<div class="flex min-w-0 items-center gap-2">
+			<div
+				class="h-2 w-2 shrink-0 rounded-full {sseConnected ? 'bg-status-running' : 'bg-status-failed animate-pulse'}"
+				title={sseConnected ? 'SSE 연결됨' : 'SSE 연결 끊김'}
+			></div>
+			<div class="min-w-0">
+				<div class="flex min-w-0 items-center gap-2">
+					<span class="truncate text-xs font-semibold text-foreground">{summaryText}</span>
+					{#if stoppedCount > 0}
+						<span class="hidden rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline-flex">
+							{stoppedCount} stopped
+						</span>
+					{/if}
 				</div>
-			{/if}
-
-			{#if runners.some(r => !r.running) && onCloseAllTerminated}
-				<button
-					onclick={onCloseAllTerminated}
-					class="h-5 w-5 flex items-center justify-center rounded hover:bg-secondary transition-colors text-muted-foreground hover:text-destructive"
-					title="종료된 runner 탭 모두 닫기"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
-						<path d="M10 11v6"/><path d="M14 11v6"/>
-					</svg>
-				</button>
-			{/if}
-
-			<!-- Zap 아이콘 + runner count + elapsed -->
-			<div class="flex items-center gap-1.5 shrink-0">
-				<!-- Zap SVG 아이콘 -->
-				<svg class="w-3.5 h-3.5 text-primary" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-				</svg>
-				<span class="font-mono font-semibold text-xs">
-					{runningCount} runner{runningCount !== 1 ? 's' : ''}
-				</span>
-				{#if anyRunning && elapsed}
-					<span class="text-[10px] font-mono text-muted-foreground">{elapsed}</span>
+				{#if activeRunnerLabel}
+					<div class="hidden truncate text-[10px] font-mono text-muted-foreground md:block" title={activeRunnerMetaTitle}>
+						{activeRunnerLabel}
+					</div>
 				{/if}
 			</div>
 		</div>
 
-		<!-- 우측: 액션 버튼들 (아이콘 전용 ghost) -->
+		<!-- 우측: primary actions + secondary overflow -->
 		<div class="flex items-center gap-0.5 shrink-0 relative">
 			{#if anyRunning && onStopAll}
 				<button
@@ -134,88 +167,9 @@
 					class="h-6 w-6 flex items-center justify-center text-destructive rounded-md hover:bg-secondary transition-colors"
 					title="Stop all"
 				>
-					<!-- Square icon -->
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
-						<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-					</svg>
+					<Square size={13} fill="currentColor" />
 				</button>
 			{/if}
-
-			{#if onForceStop}
-				<button
-					onclick={onForceStop}
-					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
-					title="Force stop"
-				>
-					<!-- Power icon -->
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
-						<line x1="12" y1="2" x2="12" y2="12"/>
-					</svg>
-				</button>
-			{/if}
-
-			{#if onSync}
-				<button
-					onclick={onSync}
-					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
-					title="Sync"
-				>
-					<!-- RefreshCw icon -->
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<polyline points="23 4 23 10 17 10"/>
-						<polyline points="1 20 1 14 7 14"/>
-						<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-					</svg>
-				</button>
-			{/if}
-
-			{#if onCleanup}
-				<button
-					onclick={onCleanup}
-					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
-					title="Redis 잔존 상태 정리"
-				>
-					<!-- Trash2 icon -->
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<polyline points="3 6 5 6 21 6"/>
-						<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-						<path d="M10 11v6"/>
-						<path d="M14 11v6"/>
-						<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-					</svg>
-				</button>
-			{/if}
-
-			{#if onReset}
-				<button
-					onclick={onReset}
-					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
-					title="Full reset"
-				>
-					<!-- RotateCcw icon -->
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<polyline points="1 4 1 10 7 10"/>
-						<path d="M3.51 15a9 9 0 1 0 .49-3.51"/>
-					</svg>
-				</button>
-			{/if}
-
-			<!-- 설정 버튼 + 팝오버 -->
-			<div class="relative">
-				<button
-					onclick={() => showSettings = !showSettings}
-					class="px-2 py-1 text-[11px] font-medium text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors {showSettings ? 'bg-gray-100 text-gray-800' : ''}"
-					title="설정"
-				>
-					⚙
-				</button>
-				{#if showSettings}
-					<div class="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg w-64">
-						<DevRunnerSettingsPanel compact />
-					</div>
-				{/if}
-			</div>
 
 			{#if onShowLogs}
 				<button
@@ -223,9 +177,18 @@
 					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors text-muted-foreground"
 					title="통합 로그"
 				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+					<Terminal size={13} />
 				</button>
 			{/if}
+
+			<button
+				onclick={() => { showSecondaryActions = !showSecondaryActions; showSettings = false; }}
+				class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors text-muted-foreground {showSecondaryActions ? 'bg-secondary text-foreground' : ''}"
+				title="보조 작업"
+				aria-expanded={showSecondaryActions}
+			>
+				<Settings size={13} />
+			</button>
 
 			{#if runners.length > 0 && onToggleCollapse}
 				<button
@@ -234,21 +197,80 @@
 					title={collapsed ? '펼치기' : '접기'}
 				>
 					{#if collapsed}
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+						<ChevronDown size={13} />
 					{:else}
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+						<ChevronUp size={13} />
 					{/if}
 				</button>
 			{/if}
 
-		{#if onExecute}
+			{#if onExecute}
 				<button
 					onclick={onExecute}
-					class="px-2.5 py-1 text-[11px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+					class="inline-flex h-7 items-center gap-1 rounded-md bg-blue-600 px-2 text-[11px] font-semibold text-white transition-colors hover:bg-blue-700"
 					title="실행"
 				>
-					Execute
+					<Play size={12} fill="currentColor" />
+					<span class="hidden sm:inline">Run</span>
 				</button>
+			{/if}
+
+			{#if showSecondaryActions}
+				<div class="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-popover p-1.5 text-popover-foreground shadow-lg">
+					<div class="grid grid-cols-2 gap-1">
+						{#if onForceStop}
+							<button
+								onclick={() => { onForceStop?.(); showSecondaryActions = false; }}
+								class="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-xs hover:bg-secondary"
+							>
+								<Power size={13} /> Force stop
+							</button>
+						{/if}
+						{#if onSync}
+							<button
+								onclick={() => { onSync?.(); showSecondaryActions = false; }}
+								class="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-xs hover:bg-secondary"
+							>
+								<RefreshCw size={13} /> Sync
+							</button>
+						{/if}
+						{#if onCleanup}
+							<button
+								onclick={() => { onCleanup?.(); showSecondaryActions = false; }}
+								class="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-xs hover:bg-secondary"
+							>
+								<Trash2 size={13} /> Cleanup
+							</button>
+						{/if}
+						{#if onReset}
+							<button
+								onclick={() => { onReset?.(); showSecondaryActions = false; }}
+								class="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-xs hover:bg-secondary"
+							>
+								<RotateCcw size={13} /> Reset
+							</button>
+						{/if}
+						{#if stoppedCount > 0 && onCloseAllTerminated}
+							<button
+								onclick={() => { onCloseAllTerminated?.(); showSecondaryActions = false; }}
+								class="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-xs text-destructive hover:bg-secondary"
+							>
+								<X size={13} /> Close stopped
+							</button>
+						{/if}
+						<button
+							onclick={() => { showSettings = !showSettings; }}
+							class="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-xs hover:bg-secondary {showSettings ? 'bg-secondary' : ''}"
+						>
+							<Settings size={13} /> Settings
+						</button>
+					</div>
+					{#if showSettings}
+						<div class="mt-1 border-t border-border pt-1">
+							<DevRunnerSettingsPanel compact />
+						</div>
+					{/if}
+				</div>
 			{/if}
 		</div>
 	</div>
@@ -256,25 +278,26 @@
 	<!-- Runner 목록 행 (runner가 1개 이상일 때) -->
 	{#if runners.length > 0 && !collapsed}
 		<div class="divide-y divide-border overflow-y-auto" style="max-height: 5.25rem;">
-			{#each runners as runner (runner.id)}
+			{#each runners as runner, index (runner.id)}
 				<div
 				class="flex items-center gap-2 px-3 py-1.5 text-xs group hover:bg-secondary/50 cursor-pointer {activeRunnerId === runner.id ? 'bg-primary/10' : ''}"
 				onclick={() => onSelectRunner?.(runner.id)}
 				role="button"
 				tabindex="0"
 				onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelectRunner?.(runner.id); }}
+				title={resolveMetaTitle(runner, index)}
 			>
 					<!-- 상태 dot -->
 					{#if runner.running}
-						<div class="pulse-dot bg-status-running shrink-0"></div>
+						<div class="pulse-dot bg-status-running shrink-0" title="running"></div>
 					{:else}
 						{@const exitDisplay = getExitReasonDisplay(runner.exit_reason)}
-						<div class="w-1.5 h-1.5 rounded-full {exitDisplay.dotClass} shrink-0"></div>
+						<div class="w-1.5 h-1.5 rounded-full {exitDisplay.dotClass} shrink-0" title={resolveRunnerStateTitle(runner)}></div>
 					{/if}
 
-					<!-- plan 파일명 (display_plan_name → plan_file → '(알 수 없음)') -->
-					<span class="truncate flex-1 min-w-0 font-mono text-[11px] text-foreground" title={runner.plan_file ?? runner.display_plan_name ?? ''}>
-						{resolveLabel(runner)}
+					<!-- 계획서 파일명 중심 라벨. runner id/index/branch는 title에 보조 노출한다. -->
+					<span class="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+						{resolveRunnerLabel(runner, index)}
 					</span>
 
 					<!-- engine (sm 이상) -->
@@ -282,9 +305,10 @@
 						<span class="hidden sm:block text-[10px] text-muted-foreground shrink-0 font-mono">{runner.engine}</span>
 					{/if}
 
-					<!-- worktree branch (md 이상) -->
-					{#if runner.branch}
-						<span class="hidden md:block text-[10px] text-muted-foreground shrink-0 font-mono truncate max-w-[120px]" title={runner.branch}>{runner.branch}</span>
+					{#if resolveStaleLabel(runner)}
+						<span class="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground md:inline-flex">
+							{resolveStaleLabel(runner)}
+						</span>
 					{/if}
 
 					<!-- Stop/Kill/Close 아이콘 버튼 -->

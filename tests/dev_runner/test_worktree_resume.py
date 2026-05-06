@@ -3,6 +3,8 @@ import subprocess
 import shutil
 import sys
 from pathlib import Path
+from unittest.mock import patch
+import fakeredis
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
@@ -106,17 +108,19 @@ class TestParsePlanWorktreeInfo:
 
 class TestWritePlanWorktreeInfo:
     def test_right_inserts_after_status(self, tmp_path):
-        """R: 상태 줄 다음에 branch/worktree 삽입"""
+        """R: 상태 줄 다음에 branch/worktree/worktree-owner 삽입"""
         p = tmp_path / "plan.md"
         p.write_text("# 제목\n> 상태: 구현중\n\n## 내용\n", encoding="utf-8")
-        _write_plan_worktree_info(str(p), "impl/feat", ".worktrees/impl-feat")
+        assert _write_plan_worktree_info(str(p), "impl/feat", ".worktrees/impl-feat") is True
         content = p.read_text(encoding="utf-8")
         assert "> branch: impl/feat" in content
         assert "> worktree: .worktrees/impl-feat" in content
+        assert f"> worktree-owner: {p.resolve()}" in content
         # 상태 줄 다음에 삽입됐는지 확인
         lines = content.splitlines()
         status_idx = next(i for i, l in enumerate(lines) if "상태:" in l)
         assert "> branch: impl/feat" in lines[status_idx + 1]
+        assert f"> worktree-owner: {p.resolve()}" in lines[status_idx + 3]
 
     def test_right_replaces_existing(self, tmp_path):
         """R: 이미 있으면 교체"""
@@ -125,18 +129,107 @@ class TestWritePlanWorktreeInfo:
             "# 제목\n> 상태: 구현중\n> branch: impl/old\n> worktree: .worktrees/impl-old\n",
             encoding="utf-8"
         )
-        _write_plan_worktree_info(str(p), "impl/new", ".worktrees/impl-new")
+        assert _write_plan_worktree_info(str(p), "impl/new", ".worktrees/impl-new") is True
         content = p.read_text(encoding="utf-8")
         assert "impl/new" in content
         assert "impl/old" not in content
+        assert f"> worktree-owner: {p.resolve()}" in content
 
     def test_boundary_no_status_line(self, tmp_path):
         """B: 상태 줄 없으면 제목(#) 다음에 삽입"""
         p = tmp_path / "plan.md"
         p.write_text("# 제목\n\n## 내용\n", encoding="utf-8")
-        _write_plan_worktree_info(str(p), "impl/feat", ".worktrees/impl-feat")
+        assert _write_plan_worktree_info(str(p), "impl/feat", ".worktrees/impl-feat") is True
         content = p.read_text(encoding="utf-8")
         assert "> branch: impl/feat" in content
+        assert f"> worktree-owner: {p.resolve()}" in content
+
+    def test_right_replaces_empty_worktree_owner(self, tmp_path):
+        """R: 빈 worktree-owner 헤더가 있으면 non-empty owner로 교체"""
+        p = tmp_path / "plan.md"
+        p.write_text(
+            "# 제목\n> 상태: 구현중\n> branch: impl/old\n> worktree: .worktrees/impl-old\n> worktree-owner:\n",
+            encoding="utf-8"
+        )
+        assert _write_plan_worktree_info(str(p), "impl/new", ".worktrees/impl-new", owner=str(p)) is True
+        content = p.read_text(encoding="utf-8")
+        assert "> branch: impl/new" in content
+        assert "> worktree: .worktrees/impl-new" in content
+        assert f"> worktree-owner: {p.resolve()}" in content
+        assert "> worktree-owner:\n" not in content
+
+    def test_right_written_header_satisfies_non_empty_gate_contract(self, tmp_path):
+        """R: writer 출력은 wtools pre-edit gate의 3필드 non-empty 조건을 만족한다."""
+        p = tmp_path / "plan.md"
+        p.write_text("# 제목\n> 상태: 구현중\n", encoding="utf-8")
+        assert _write_plan_worktree_info(str(p), "impl/feat", ".worktrees/impl-feat", owner=str(p)) is True
+
+        header_values = {}
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.startswith("> branch:"):
+                header_values["branch"] = line.split(":", 1)[1].strip()
+            if line.startswith("> worktree:"):
+                header_values["worktree"] = line.split(":", 1)[1].strip()
+            if line.startswith("> worktree-owner:"):
+                header_values["worktree-owner"] = line.split(":", 1)[1].strip()
+
+        assert header_values == {
+            "branch": "impl/feat",
+            "worktree": ".worktrees/impl-feat",
+            "worktree-owner": str(p.resolve()),
+        }
+        assert all(header_values.values())
+
+    def test_error_missing_plan_file_returns_false(self, tmp_path):
+        """E: plan 파일을 쓸 수 없으면 실패를 bool로 반환한다."""
+        missing = tmp_path / "missing.md"
+        assert _write_plan_worktree_info(str(missing), "impl/feat", ".worktrees/impl-feat") is False
+
+    def test_right_remove_header_fields_removes_owner(self, tmp_path):
+        """R: branch/worktree/worktree-owner 3필드 모두 제거"""
+        p = tmp_path / "plan.md"
+        p.write_text(
+            "# 제목\n> 상태: 구현중\n> branch: impl/old\n> worktree: .worktrees/impl-old\n> worktree-owner: owner.md\n\n## 내용\n",
+            encoding="utf-8"
+        )
+        _remove_plan_header_fields(str(p))
+        content = p.read_text(encoding="utf-8")
+        assert "> branch:" not in content
+        assert "> worktree:" not in content
+        assert "> worktree-owner:" not in content
+
+
+class TestPlanRunnerStartHeaderFailure:
+    def test_error_header_write_failure_blocks_launch(self, tmp_path):
+        """E: header 기록 실패 시 launch 전에 Redis error 상태로 중단한다."""
+        import _dr_plan_runner
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan = repo / "docs" / "plan" / "plan.md"
+        plan.parent.mkdir(parents=True)
+        plan.write_text("# 제목\n> 상태: 검토완료\n", encoding="utf-8")
+        worktree_path = repo / ".worktrees" / "impl-plan"
+        worktree_path.mkdir(parents=True)
+        redis_client = fakeredis.FakeRedis(decode_responses=True)
+        command = {"action": "run", "runner_id": "headerfail", "plan_file": str(plan)}
+        import plan_worktree_helpers
+        import worktree_manager
+
+        with patch.object(worktree_manager, "ensure_main_branch"), \
+             patch.object(_dr_plan_runner, "get_target_project_root", return_value=repo), \
+             patch.object(plan_worktree_helpers, "is_plan_archived", return_value=False), \
+             patch.object(plan_worktree_helpers, "is_worktree_active", return_value=(False, None, None)), \
+             patch.object(worktree_manager.WorktreeManager, "create", return_value=(worktree_path, "impl/plan")), \
+             patch.object(plan_worktree_helpers, "write_plan_worktree_info", return_value=False), \
+             patch.object(_dr_plan_runner, "_launch_plan_runner_process") as launch_mock, \
+             patch.object(_dr_plan_runner, "_publish_with_retry", return_value=True), \
+             patch.object(_dr_plan_runner, "get_wf_manager", return_value=None):
+            _dr_plan_runner._do_start_plan_runner(command, redis_client)
+
+        assert redis_client.get("plan-runner:runners:headerfail:status") == "error"
+        assert "header 기록 실패" in redis_client.get("plan-runner:runners:headerfail:error")
+        launch_mock.assert_not_called()
 
 
 # ── E2E 통합 테스트 ───────────────────────────────────────────────────────────

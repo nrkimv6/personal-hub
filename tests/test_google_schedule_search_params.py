@@ -3,7 +3,7 @@ Google 검색 스케줄 실행 시 search_params 전달 검증 테스트.
 
 검증 범위:
 - 스케줄 즉시실행 API(trigger_schedule_run)에서 GoogleSearchQueue에 search_params 전달
-- 스케줄 자동실행 워커(_execute_google_search)에서 GoogleSearchQueue에 search_params 전달
+- GoogleSearchScheduler.execute()에서 GoogleSearchQueue에 search_params 전달
 - Redis push payload에 search_params 포함
 
 패턴: raw SQL fixture (test_google_search_worker.py와 동일 — UUID 컬럼 회피)
@@ -234,15 +234,15 @@ class TestTriggerScheduleRunPassesSearchParams:
 # Phase T1: 자동실행 워커 — search_params 전달 TC
 # ============================================================
 
-class TestExecuteGoogleSearchPassesSearchParams:
-    """_execute_google_search()가 search_params를 GoogleSearchQueue에 전달하는지 검증."""
+class TestGoogleSearchSchedulerPassesSearchParams:
+    """GoogleSearchScheduler.execute()가 search_params를 GoogleSearchQueue에 전달하는지 검증."""
 
-    def test_execute_google_search_passes_search_params(self, db_session):
+    def test_scheduler_execute_passes_search_params(self, db_session):
         """R(Right): 워커 자동실행 시 search_params가 큐에 전달됨."""
         sp_json = json.dumps({"as_sitesearch": "instagram.com"})
         saved = _make_saved_search(db_session, search_params=sp_json)
 
-        # _execute_google_search 로직 직접 재현 (실제 scheduled_worker.py와 동일)
+        # GoogleSearchScheduler.execute()의 queue insert 로직을 직접 재현
         queue_item = GoogleSearchQueue(
             search_id=str(uuid.uuid4()),
             query=saved.query,
@@ -262,7 +262,7 @@ class TestExecuteGoogleSearchPassesSearchParams:
         parsed = json.loads(queue_item.search_params)
         assert parsed["as_sitesearch"] == "instagram.com"
 
-    def test_execute_google_search_no_search_params(self, db_session):
+    def test_scheduler_execute_no_search_params(self, db_session):
         """B(Boundary): search_params=None → 워커 큐도 None."""
         saved = _make_saved_search(db_session, search_params=None)
 

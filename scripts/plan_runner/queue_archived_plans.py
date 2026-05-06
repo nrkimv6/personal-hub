@@ -71,20 +71,26 @@ def main():
             ).all()
         }
 
-        inserted = skipped = 0
+        inserted = skipped = content_skipped = 0
         for record in records:
             if record.filename_hash in existing_pending:
                 skipped += 1
                 continue
 
-            # 파일 내용 읽기 (없으면 파일명만 사용)
-            file_content = ""
-            try:
-                fp = Path(record.file_path)
-                if fp.exists():
-                    file_content = fp.read_text(encoding="utf-8", errors="replace")
-            except Exception as e:
-                print(f"  [경고] 파일 읽기 실패 ({record.file_path}): {e}")
+            # DB-first: raw_content 우선, 없으면 파일 읽기 fallback
+            file_content = record.raw_content or ""
+            if not file_content:
+                try:
+                    fp = Path(record.file_path)
+                    if fp.exists():
+                        file_content = fp.read_text(encoding="utf-8", errors="replace")
+                except Exception as e:
+                    print(f"  [경고] 파일 읽기 실패 ({record.file_path}): {e}")
+
+            if not file_content:
+                content_skipped += 1
+                print(f"  [SKIP] 내용 없음: {record.file_path}")
+                continue
 
             prompt = build_plan_analyze_prompt(
                 file_content=file_content,
@@ -102,7 +108,7 @@ def main():
             inserted += 1
 
         db.commit()
-        print(f"완료 — INSERT: {inserted}개, 중복 스킵: {skipped}개")
+        print(f"완료 — INSERT: {inserted}개, 중복 스킵: {skipped}개, 내용 없음 스킵: {content_skipped}개")
 
     finally:
         db.close()

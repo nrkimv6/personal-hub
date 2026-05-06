@@ -6,12 +6,13 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import app.shared.llm_registry as reg_mod
 import app.modules.claude_worker.services.llm_service as svc_mod
+import app.modules.claude_worker.services.llm_config_service as config_mod
 from app.modules.claude_worker.services.llm_service import LLMService
 from app.shared.llm_registry import NoAvailableModelError
 
@@ -74,7 +75,7 @@ def tmp_env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(reg_mod, "REGISTRY_FILE", registry_file)
     monkeypatch.setattr(reg_mod, "QUOTA_STATE_FILE", state_file)
-    monkeypatch.setattr(svc_mod, "LLM_DEFAULTS_FILE", defaults_file)
+    monkeypatch.setattr(config_mod, "LLM_DEFAULTS_FILE", defaults_file)
 
     return registry_file, state_file, defaults_file
 
@@ -229,7 +230,7 @@ class TestAutoQuotaDetect:
                 "source": source,
             })
 
-        monkeypatch.setattr(svc_mod, "report_quota", fake_report_quota)
+        monkeypatch.setattr(reg_mod, "report_quota", fake_report_quota)
 
         # _handle_quota_error 또는 quota 감지 경로를 직접 호출
         # worker.py의 quota error 처리 로직은 llm_service._parse_quota_retry_ms를 사용
@@ -238,7 +239,7 @@ class TestAutoQuotaDetect:
         assert ms == 300_000
 
         # report_quota가 호출됐는지 확인 (monkeypatched 버전으로 수동 트리거)
-        svc_mod.report_quota(
+        reg_mod.report_quota(
             "claude", "claude-opus-4-6",
             weekly_used_pct=100,
             short_cooldown_minutes=max(1, ms // 60_000),
@@ -250,3 +251,63 @@ class TestAutoQuotaDetect:
         assert call["source"] == "auto_quota_detect"
         assert call["weekly_used_pct"] == 100
         assert call["short_cooldown_minutes"] == 5
+
+
+class TestGeminiDispatchIntegration:
+    def test_execute_gemini_R_uses_direct_stdin_dispatch(self, tmp_env):
+        """execute_gemini()가 GeminiExecutor의 argv + stdin 계약을 유지한다."""
+        service = LLMService(db=MagicMock())
+        captured = {}
+
+        def capture_run(*args, **kwargs):
+            captured["args"] = args[0]
+            captured["kwargs"] = kwargs
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = '{"result":{"ok":true}}'
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=capture_run):
+            result = service.execute_gemini(
+                "한글 prompt",
+                model="gemini-2.5-pro",
+                parse_json=True,
+                cli_options={"image_path": "C:/tmp/from-service.png"},
+            )
+
+        assert result["success"] is True
+        assert result["result"] == {"result": {"ok": True}}
+        assert captured["args"] == ["gemini", "--model", "gemini-2.5-pro", "@C:/tmp/from-service.png"]
+        assert captured["kwargs"]["input"] == "한글 prompt"
+        assert captured["kwargs"]["encoding"] == "utf-8"
+        assert captured["kwargs"]["shell"] is False
+
+    def test_execute_llm_R_gemini_provider_keeps_image_path_cli_options(self, tmp_env):
+        """execute_llm(provider='gemini')도 GeminiExecutor 경로로 direct stdin을 유지한다."""
+        service = LLMService(db=MagicMock())
+        captured = {}
+
+        def capture_run(*args, **kwargs):
+            captured["args"] = args[0]
+            captured["kwargs"] = kwargs
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = '{"ok": true}'
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=capture_run):
+            result = service.execute_llm(
+                "dispatcher prompt",
+                provider="gemini",
+                model="gemini-2.0-flash",
+                parse_json=False,
+                cli_options={"image_path": "D:/fixtures/dispatcher.png"},
+            )
+
+        assert result["success"] is True
+        assert result["raw_response"] == '{"ok": true}'
+        assert captured["args"] == ["gemini", "--model", "gemini-2.0-flash", "@D:/fixtures/dispatcher.png"]
+        assert captured["kwargs"]["input"] == "dispatcher prompt"
+        assert captured["kwargs"]["shell"] is False

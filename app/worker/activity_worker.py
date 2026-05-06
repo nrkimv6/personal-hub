@@ -331,12 +331,21 @@ class ActivityWorker(CrawlWorkerBase):
                 db.close()
 
         finally:
-            # 동적 크롤링 탭 정리
+            # 동적 크롤링 탭 정리: page.close() + release_tab() 둘 다 필요
+            # release_tab: 풀 레벨 in_use 해제 (shield로 cancellation 방지)
             if page:
                 try:
                     await page.close()
                 except Exception as e:
                     logger.warning(f"[ActivityWorker] 페이지 정리 실패: {e}")
+                finally:
+                    if self.browser and self.browser.tab_pool_manager:
+                        try:
+                            await asyncio.shield(
+                                self.browser.tab_pool_manager.release_tab(page)
+                            )
+                        except Exception as e:
+                            logger.warning(f"[ActivityWorker] release_tab 실패: {e}")
 
     def _mark_request_failed(self, request_id: int, error: str):
         """요청 실패 처리."""

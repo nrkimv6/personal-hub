@@ -12,7 +12,7 @@
 	let total = $state(0);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
-	let limit = 30;
+	const limit = 30;
 	let offset = $state(0);
 
 	async function loadHistory() {
@@ -78,7 +78,7 @@
 		{:else if error}
 			<div class="p-3 text-red-400 text-xs">{error}</div>
 		{:else if runs.length === 0}
-			<div class="p-4 text-center text-gray-600 text-xs">실행 이력 없음</div>
+			<div class="p-4 text-center text-muted-foreground text-xs">실행 이력 없음</div>
 		{:else}
 			{#each runs as item (item.runner_id)}
 				<button
@@ -97,11 +97,12 @@
 						{/if}
 					</div>
 					<!-- branch -->
-					<div class="text-[10px] pl-3 truncate {item.branch ? 'text-blue-400' : 'text-gray-600'}">
+					<div class="text-[10px] pl-3 truncate {item.branch ? 'text-blue-400' : 'text-muted-foreground'}">
 						{item.branch ?? 'main'}
 						{#if item.merge_status}
 							<span class="ml-1 px-1 rounded text-[9px] {
 								item.merge_status === 'merged' ? 'bg-green-900 text-green-300' :
+								item.merge_status === 'approval_required' ? 'bg-yellow-900 text-yellow-300' :
 								item.merge_status === 'pending' ? 'bg-yellow-900 text-yellow-300' :
 								'bg-gray-700 text-gray-400'
 							}">{item.merge_status}</span>
@@ -113,7 +114,7 @@
 						</div>
 					{/if}
 					<!-- time + pid + execution_count -->
-					<div class="text-[10px] text-gray-600 pl-3 mt-0.5 flex items-center gap-1.5">
+					<div class="text-[10px] text-muted-foreground pl-3 mt-0.5 flex items-center gap-1.5">
 						{formatTime(item.start_time)}
 						{#if item.pid}
 							<span class="ml-1">PID:{item.pid}</span>

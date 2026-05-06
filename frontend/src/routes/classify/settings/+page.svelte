@@ -18,7 +18,7 @@
 
 <div class="space-y-4">
   <!-- 헤더 -->
-  <PageHeader title="설정" subtitle="이미지 분류기 동작 방식과 태그, 규칙을 관리합니다" />
+  <PageHeader title="설정" />
 
   <!-- 서브탭 -->
   <TabNav tabs={subTabs} bind:activeTab variant="secondary" queryParam="tab" />

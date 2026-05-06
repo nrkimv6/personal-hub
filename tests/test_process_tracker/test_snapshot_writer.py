@@ -134,6 +134,15 @@ class AccessDeniedInfoProc:
         raise psutil.AccessDenied(pid=9999)
 
 
+class RecordingDb:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, sql, params=None):
+        self.calls.append((str(sql), params or {}))
+        return MagicMock()
+
+
 @pytest.mark.asyncio
 async def test_capture_inserts_rows():
     """R: Registry mock (2개 프로세스) → capture() → DB에 2행 INSERT 확인"""
@@ -230,6 +239,42 @@ def test_safe_bool_returns_real_bool():
     assert type(SnapshotWriter._safe_bool(False)) is bool
     assert SnapshotWriter._safe_bool(1) is True
     assert SnapshotWriter._safe_bool(0) is False
+
+
+def test_purge_watch_rows_uses_cutoff_params():
+    """R: purge는 backend별 interval 문법 대신 cutoff 파라미터만 사용한다."""
+    from app.shared.process.snapshot_writer import SnapshotWriter
+
+    writer = SnapshotWriter(MagicMock())
+    db = RecordingDb()
+    writer._purge_watch_rows(db)
+
+    assert len(db.calls) == 2
+    assert all(":window::interval" not in sql for sql, _ in db.calls)
+    assert "process_watch_snapshots" in db.calls[0][0]
+    assert "captured_at < :cutoff" in db.calls[0][0]
+    assert "cutoff" in db.calls[0][1]
+    assert "process_watch_actions" in db.calls[1][0]
+    assert "acted_at < :cutoff" in db.calls[1][0]
+    assert "cutoff" in db.calls[1][1]
+
+
+def test_ensure_watch_tables_pg_advisory_lock_precedes_ddl():
+    """R: PG DDL 생성은 advisory lock을 먼저 잡아 동시 watchdog 시작 경합을 줄인다."""
+    from app.shared.process.snapshot_writer import SnapshotWriter
+
+    writer = SnapshotWriter(MagicMock())
+    db = RecordingDb()
+    SnapshotWriter._watch_tables_ready["pg"] = False
+    try:
+        with patch("app.shared.process.snapshot_writer.is_pg", True):
+            writer._ensure_watch_tables(db)
+    finally:
+        SnapshotWriter._watch_tables_ready["pg"] = False
+
+    assert db.calls
+    assert "pg_advisory_xact_lock" in db.calls[0][0]
+    assert any("CREATE INDEX IF NOT EXISTS idx_pws_captured_at" in sql for sql, _ in db.calls)
 
 
 @pytest.mark.asyncio

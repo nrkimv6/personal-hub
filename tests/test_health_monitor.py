@@ -281,6 +281,82 @@ class TestHealthMonitorService:
         call_args = mock_notification.send_telegram.call_args
         assert "프로세스 장애 감지" in call_args[0][0]
 
+    @pytest.mark.asyncio
+    async def test_send_pid_failure_alert_public_frontend_includes_6100_impact_right(self, health_monitor):
+        """R: public frontend PID alert에 6100 영향 문구 포함."""
+        from app.services.health_monitor_service import ServiceHealth, ServiceStatus
+
+        mock_notification = AsyncMock()
+        mock_notification.send_telegram = AsyncMock()
+        health_monitor.notification_service = mock_notification
+
+        health = ServiceHealth(
+            name="frontend",
+            status=ServiceStatus.UNHEALTHY,
+            last_check=datetime.now(),
+            failure_count=1,
+            error_message="Process not running",
+            pid=12345,
+            expected_port=6100
+        )
+
+        with patch.object(health_monitor, "_runtime_app_mode", return_value="public"):
+            await health_monitor._send_pid_failure_alert(health)
+
+        message = mock_notification.send_telegram.call_args[0][0]
+        assert "PUBLIC 6100 down" in message
+        assert "frontend (PUBLIC 6100 down)" in message
+
+    @pytest.mark.asyncio
+    async def test_send_http_failure_alert_public_frontend_internal_includes_admin_login_impact_right(self, health_monitor):
+        """R: public frontend HTTP alert에 admin login 영향 문구 포함."""
+        from app.services.health_monitor_service import ServiceHealth, ServiceStatus
+
+        mock_notification = AsyncMock()
+        mock_notification.send_telegram = AsyncMock()
+        health_monitor.notification_service = mock_notification
+
+        health = ServiceHealth(
+            name="frontend_internal",
+            status=ServiceStatus.UNHEALTHY,
+            last_check=datetime.now(),
+            failure_count=3,
+            error_message="Connection timeout",
+        )
+
+        with patch.object(health_monitor, "_runtime_app_mode", return_value="public"):
+            await health_monitor._send_http_failure_alert(health)
+
+        message = mock_notification.send_telegram.call_args[0][0]
+        assert "admin OAuth callback 영향 가능" in message
+        assert "frontend_internal (admin OAuth callback 영향 가능)" in message
+
+    @pytest.mark.asyncio
+    async def test_send_pid_failure_alert_admin_frontend_does_not_include_public_impact_error(self, health_monitor):
+        """E: admin/frontend_admin alert에는 public impact 문구가 붙지 않는다."""
+        from app.services.health_monitor_service import ServiceHealth, ServiceStatus
+
+        mock_notification = AsyncMock()
+        mock_notification.send_telegram = AsyncMock()
+        health_monitor.notification_service = mock_notification
+
+        health = ServiceHealth(
+            name="frontend_admin",
+            status=ServiceStatus.UNHEALTHY,
+            last_check=datetime.now(),
+            failure_count=1,
+            error_message="Process not running",
+            pid=12345,
+            expected_port=6101
+        )
+
+        with patch.object(health_monitor, "_runtime_app_mode", return_value="public"):
+            await health_monitor._send_pid_failure_alert(health)
+
+        message = mock_notification.send_telegram.call_args[0][0]
+        assert "PUBLIC 6100 down" not in message
+        assert "admin OAuth callback 영향 가능" not in message
+
 
 class TestHealthRoutes:
     """헬스 API 라우트 테스트"""

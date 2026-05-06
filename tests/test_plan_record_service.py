@@ -1,4 +1,4 @@
-"""
+r"""
 PlanRecordService.list_events() pytest 경로 필터링 TC — RIGHT-BICEP 기반
 
 pytest 통합테스트 실행 시 생성되는 임시 경로(AppData\Local\Temp\pytest-of-Narang\ 등)
@@ -92,6 +92,24 @@ class TestListEventsExcludesPytestPaths:
         events = svc.list_events()
 
         assert evt.id in [event.id for event in events]
+
+    def test_list_events_keeps_legacy_root_and_current_physical_paths_distinct_B(self, test_db_session):
+        """B: legacy root docs/plan과 current physical path를 같은 canonical path로 오인하지 않는다"""
+        db = test_db_session
+        legacy_path = r"D:\work\project\tools\monitor-page\docs\plan\2026-03-02_same.md"
+        current_path = r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\plan\2026-03-02_same.md"
+
+        legacy_evt = _make_event(db, _make_record(db, legacy_path), "created")
+        current_evt = _make_event(db, _make_record(db, current_path), "created")
+
+        svc = PlanRecordService(db)
+        events = svc.list_events(event_type="created")
+        ids = {event.id for event in events}
+        plan_record_ids = {event.plan_record_id for event in events}
+
+        assert legacy_evt.id in ids
+        assert current_evt.id in ids
+        assert len(plan_record_ids) == 2, "legacy/current path가 하나의 canonical record로 합쳐지면 안 된다"
 
     def test_list_events_empty_when_all_pytest(self, test_db_session):
         """E: 전체가 pytest 레코드일 때 빈 리스트 반환"""

@@ -1,5 +1,7 @@
 """로그 스트리밍 API"""
 
+import asyncio
+
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
@@ -16,7 +18,7 @@ async def get_recent_logs(
     lines: int = Query(100, ge=1, le=1000, description="조회할 줄 수"),
 ):
     """최근 로그 조회 (끝에서 N줄)"""
-    return log_service.tail_log_file(runner_id=runner_id, n_lines=lines)
+    return await asyncio.to_thread(log_service.tail_log_file, runner_id=runner_id, n_lines=lines)
 
 
 @router.get("/logs/stream")
@@ -48,7 +50,12 @@ async def get_run_history(
     visible_only: bool = Query(False, description="user runner만 필터링"),
 ):
     """실행 이력 조회 (Redis active_runners + 로그 파일 스캔)"""
-    return log_service.get_run_history(limit=limit, offset=offset, visible_only=visible_only)
+    return await asyncio.to_thread(
+        log_service.get_run_history,
+        limit=limit,
+        offset=offset,
+        visible_only=visible_only,
+    )
 
 
 @router.get("/logs/full", response_model=FullLogResponse)
@@ -58,7 +65,12 @@ async def get_full_log(
     limit: int = Query(500, ge=1, le=5000, description="최대 라인 수"),
 ):
     """종료된 Runner 전체 로그 조회 (offset/limit 청크)"""
-    return log_service.get_full_log(runner_id=runner_id, offset=offset, limit=limit)
+    return await asyncio.to_thread(
+        log_service.get_full_log,
+        runner_id=runner_id,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.get("/merge-log/stream")
@@ -76,7 +88,7 @@ async def get_system_log(
     lines: int = Query(200, ge=1, le=2000, description="tail 줄 수"),
 ):
     """Listener 시스템 로그 조회 (가장 최신 plan-runner-*.log)"""
-    return log_service.get_system_log(lines=lines)
+    return await asyncio.to_thread(log_service.get_system_log, lines=lines)
 
 
 __all__ = ['router']

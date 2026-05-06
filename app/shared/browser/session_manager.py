@@ -7,6 +7,7 @@ BrowserService에서 분리된 독립 모듈입니다.
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Dict, Optional, TYPE_CHECKING
 
@@ -93,6 +94,9 @@ class SessionManager:
 
                 if context_valid and pages:
                     page = pages[0]
+                    # 재사용 경로: sentinel이 없으면 부여 (cleanup이 visible 탭을 건드리지 않게 보호)
+                    if not hasattr(page, '_tab_id'):
+                        page._tab_id = f"visible_{service_account_id}"
                     try:
                         cdp = await page.context.new_cdp_session(page)
                         window_info = await cdp.send("Browser.getWindowForTarget")
@@ -109,7 +113,7 @@ class SessionManager:
                                 }
                             })
                         await page.bring_to_front()
-                        logger.info(f"계정 {service_account_id} 기존 브라우저 창을 포커스했습니다")
+                        logger.info(f"계정 {service_account_id} 기존 브라우저 창을 포커스했습니다 (sentinel={page._tab_id})")
                     except Exception as e:
                         logger.warning(f"창 포커스 실패, 새 탭으로 이동: {e}")
 
@@ -133,7 +137,19 @@ class SessionManager:
 
             # 기존 컨텍스트가 없으면 새로 생성
             context = await self.context_manager._create_browser_context_visible(service_account_id)
-            page = await context.new_page()
+
+            # sentinel 탭 재사용: 같은 account의 기존 visible 탭이 있으면 새 페이지 생성 안 함
+            sentinel_id = f"visible_{service_account_id}"
+            page = None
+            for p in context.pages:
+                if getattr(p, '_tab_id', None) == sentinel_id and not p.is_closed():
+                    page = p
+                    break
+
+            if page is None:
+                page = await context.new_page()
+                # popup handler의 _on_popup 콜백 이전에 sentinel 설정 보장 (asyncio.sleep(0) 이전)
+                page._tab_id = sentinel_id
 
             if url:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -172,6 +188,7 @@ class SessionManager:
 
             context = await self.context_manager._create_browser_context_visible(service_account_id)
             page = await context.new_page()
+            page._tab_id = f"login_check_naver_{service_account_id}_{int(time.time())}"
 
             try:
                 await page.goto("https://www.naver.com", wait_until="domcontentloaded", timeout=15000)
@@ -205,8 +222,8 @@ class SessionManager:
                         if user_elem:
                             is_logged_in = True
                             break
-                except:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"계정 {service_account_id} 로그인 상태 셀렉터 확인 실패: {exc}")
 
                 service_account_service.update_login_status(db, service_account_id, is_logged_in)
 
@@ -221,7 +238,10 @@ class SessionManager:
                 }
 
             finally:
-                await page.close()
+                try:
+                    await asyncio.shield(page.close())
+                except Exception as close_err:
+                    logger.debug(f"[SessionManager] naver login check page close 실패 (무시): {close_err}")
 
         except Exception as e:
             logger.error(f"로그인 상태 확인 실패 (service_account_id={service_account_id}): {str(e)}")
@@ -241,6 +261,7 @@ class SessionManager:
 
             context = await self.context_manager._create_browser_context_visible(service_account_id)
             page = await context.new_page()
+            page._tab_id = f"login_check_ig_{service_account_id}_{int(time.time())}"
 
             try:
                 await page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=15000)
@@ -282,7 +303,10 @@ class SessionManager:
                 }
 
             finally:
-                await page.close()
+                try:
+                    await asyncio.shield(page.close())
+                except Exception as close_err:
+                    logger.debug(f"[SessionManager] instagram login check page close 실패 (무시): {close_err}")
 
         except Exception as e:
             logger.error(f"Instagram 로그인 상태 확인 실패 (service_account_id={service_account_id}): {str(e)}")

@@ -12,6 +12,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.database import is_connection_error
 from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.writing import WritingSource
 from app.models.writing_element import WritingElement
@@ -80,6 +81,8 @@ class TopicExtractWorker:
             return {"total": request_count, "extracted": 0, "failed": 0}
 
         except Exception as e:
+            if is_connection_error(e):
+                raise
             logger.error(f"TopicExtractWorker 실행 실패: {e}", exc_info=True)
             run.mark_failed(str(e))
             self.db.commit()
@@ -182,6 +185,8 @@ class TopicExtractWorker:
             return extracted_count
 
         except Exception as e:
+            if is_connection_error(e):
+                raise
             logger.error(f"배치 처리 중 오류: {e}", exc_info=True)
             llm_request.status = "failed"
             llm_request.error_message = str(e)

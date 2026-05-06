@@ -92,12 +92,12 @@ class Settings(BaseSettings):
     #     return create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
     
     # 알림 설정
-    TELEGRAM_BOT_TOKEN: str = "7912548094:AAGp1Ii05IPFpM3uec75NTzJceYwrq2Lb4g"
-    TELEGRAM_CHAT_ID: str = "7774293093"
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
     ENABLE_DESKTOP_NOTIFICATION: bool = True
-    EMAIL_ADDRESS:str = "g100mkrw1@gmail.com"
-    EMAIL_PASSWORD:str = "Caww@60925"  # Gmail 앱 비밀번호
-    RECIPIENT_EMAIL:str = "orangepie2236@email.com"
+    EMAIL_ADDRESS: str = ""
+    EMAIL_PASSWORD: str = ""  # Gmail 앱 비밀번호
+    RECIPIENT_EMAIL: str = ""
     
     # 중복 메시지 필터링 설정
     MESSAGE_DEDUPLICATION: bool = True  # 중복 메시지 필터링 활성화 여부
@@ -122,9 +122,9 @@ class Settings(BaseSettings):
     # 탭 관리 최적화 설정
     TAB_ROTATION_THRESHOLD: int = 600  # 탭 회전 임계값 (초)
     CACHE_CLEANUP_INTERVAL: int = 300  # 캐시 정리 간격 (초)
-    TAB_REQUEST_TIMEOUT: int = 60  # 탭 요청 시간 초과 (초)
+    TAB_REQUEST_TIMEOUT: int = 60  # 탭 요청 시간 초과 (초) — inner polling gate; BrowserManager outer = +5s
     TAB_WAIT_RETRY_INTERVAL: int = 5  # 탭 요청 재시도 간격 (초)
-    TOTAL_MAX_TABS: int = 5  # 전체 브라우저에서 사용할 최대 탭 수
+    TOTAL_MAX_TABS: int = 5  # 전체 최대 탭 수 — 시간 분할 재사용 전제 (5탭×12스케줄 정상); 상향으로 starvation 우회 금지
 
     # 프로세스 트리 추적 설정
     PROCESS_SCAN_INTERVAL: int = 60  # 프로세스 스캔 주기 (초)
@@ -141,7 +141,10 @@ class Settings(BaseSettings):
     MEMORY_CRITICAL_MB: int = 1024  # 위험 임계값 (MB)
     MEMORY_EMERGENCY_MB: int = 512  # 긴급 임계값 (MB)
     MEMORY_FATAL_MB: int = 256      # 강제 재부팅 임계값 (MB)
+    MEMORY_HEAVY_TEST_PROCESS_MB: float = 1500.0  # pre-fatal 완화에서 선제 종료 후보로 간주할 test_*.py RSS 임계값 (MB)
     MEMORY_PRESSURE_OUTBOUND_ALERT_MAX_MB: int = 500  # 500MB 이상은 history-only, 미만만 outbound 허용
+    MEMORY_SINGLE_PROCESS_LIMIT_MB: float = 0.0  # 단일 프로세스 RSS 경고 임계값(MB). 0이면 비활성, 자동 종료 없음
+    MEMORY_SINGLE_PROCESS_ALERT_COOLDOWN_SEC: int = 600  # 같은 PID 단일 프로세스 RSS 경고 쿨다운(초)
 
     # bizItems API 캐싱 설정 (REQ-MON-006)
     BIZ_ITEMS_CACHE_TTL_NORMAL: int = 300  # 정상 운영 시 캐시 TTL (초) - 5분
@@ -221,8 +224,8 @@ class Settings(BaseSettings):
     # 프론트엔드 URL (OAuth 콜백 후 리디렉트)
     FRONTEND_URL: str = "http://localhost:6100"
 
-    # 백엔드 API URL (OAuth redirect_uri 생성용, Cloudflare Tunnel 사용 시 필수)
-    API_BASE_URL: str = ""  # 예: "https://monitor.woory.day/api/v1"
+    # 백엔드 API URL (OAuth redirect_uri single source, Cloudflare Tunnel 사용 시 필수)
+    API_BASE_URL: str = ""  # 예: "https://monitor.woory.day/api/v1" -> redirect_uri "https://monitor.woory.day/api/v1/auth/callback"
     ADMIN_TOOLS_BASE_URL: str = ""  # 예: "https://admin.woory.day"
 
     # Cloudflare Tunnel 설정 (선택)
@@ -245,10 +248,18 @@ class Settings(BaseSettings):
     MEGABEAUTY_KAKAO_ALERT_DEDUP_TTL_SECONDS: int = 300
     MEGABEAUTY_KAKAO_ALERT_BACKLOG_THRESHOLD: int = 10
     MEGABEAUTY_KAKAO_ALERT_BACKLOG_COOLDOWN_SECONDS: int = 600
+    MEGABEAUTY_KAKAO_INPUT_GUARD_ENABLED: bool = False
+    MEGABEAUTY_KAKAO_INPUT_GUARD_TIMEOUT_SECONDS: int = 60
+    MEGABEAUTY_KAKAO_INPUT_GUARD_ABORT_ON_REMOTE_SESSION: bool = True
+    MEGABEAUTY_KAKAO_INPUT_GUARD_MAX_RETRIES: int = 3
 
     # Activity Hub 동기화 설정
     ACTIVITY_HUB_PUSH_URL: str = "https://activity.woory.day/api/push"  # Activity Hub PUSH API URL
     ACTIVITY_HUB_SYNC_API_KEY: str = ""  # Activity Hub 동기화 API 키
+
+    # MP4 -> GIF 도구 설정
+    MP4_GIF_WORK_ROOT: str = "data/mp4_gif"
+    MP4_GIF_MAX_UPLOAD_MB: int = 100
 
     # Health Monitor 설정
     HEALTH_MONITOR_ENABLED: bool = True  # 헬스 모니터링 활성화 여부

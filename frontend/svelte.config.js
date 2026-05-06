@@ -2,8 +2,10 @@ import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 const frontendMode = process.env.MONITOR_FRONTEND_MODE || '';
+const mergeTestOutDir = process.env.MONITOR_MERGE_TEST_SVELTEKIT_OUTDIR || '';
 const explicitOutDir = process.env.MONITOR_SVELTEKIT_OUTDIR || '';
 const frontendOutDir =
+	mergeTestOutDir ||
 	explicitOutDir ||
 	(frontendMode === 'public'
 		? '.svelte-kit-public'

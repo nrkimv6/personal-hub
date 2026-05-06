@@ -16,6 +16,7 @@ from app.database import SessionLocal
 from app.config import settings, logger
 from app.modules.naver_booking.utils.url_builder import build_naver_booking_url
 from app.services.schedule_service import calculate_default_interval
+from app.schemas.monitor_schedule import coerce_monitoring_mode
 
 
 class ScheduleMonitorService:
@@ -37,7 +38,7 @@ class ScheduleMonitorService:
         """
         db = SessionLocal()
         try:
-            result = db.execute(text("""
+            row = db.execute(text("""
                 SELECT
                     ms.id as schedule_id,
                     ms.date,
@@ -70,57 +71,56 @@ class ScheduleMonitorService:
                 JOIN biz_items bi ON ms.biz_item_id = bi.id
                 JOIN businesses b ON bi.business_id = b.id
                 WHERE ms.id = :schedule_id
-            """), {"schedule_id": schedule_id}).fetchone()
+            """), {"schedule_id": schedule_id}).mappings().first()
 
-            if not result:
+            if not row:
                 return None
 
-            # URL 생성
-            # 컬럼 인덱스: 0-12: schedule 필드, 13-19: biz_item 필드 (19=service_account_id), 20-26: business 필드
+            # URL 생성 — 이름 기반 접근으로 인덱스 드리프트 차단
             url = build_naver_booking_url(
-                business_type_id=result[23],  # business_type_id
-                business_id=result[22],       # naver_business_id
-                biz_item_id=result[14],       # naver_biz_item_id
-                date=result[1]
+                business_type_id=row["business_type_id"] or 13,
+                business_id=row["naver_business_id"],
+                biz_item_id=row["naver_biz_item_id"],
+                date=row["date"]
             )
 
             # interval 계산: custom_interval이면 저장된 값, 아니면 날짜 기반 기본값
-            custom_interval = bool(result[7])
-            if custom_interval and result[6] is not None:
-                effective_interval = result[6]
+            custom_interval = bool(row["custom_interval"])
+            if custom_interval and row["interval"] is not None:
+                effective_interval = row["interval"]
             else:
-                effective_interval = calculate_default_interval(result[1])
+                effective_interval = calculate_default_interval(row["date"])
 
             return {
-                "id": result[0],
-                "date": result[1],
-                "times": json.loads(result[2]) if result[2] else [],
-                "is_enabled": bool(result[3]),
-                "is_active": bool(result[4]),
-                "run_status": result[5],
+                "id": row["schedule_id"],
+                "date": row["date"],
+                "times": json.loads(row["times"]) if row["times"] else [],
+                "is_enabled": bool(row["is_enabled"]),
+                "is_active": bool(row["is_active"]),
+                "run_status": row["run_status"],
                 "interval": effective_interval,
                 "custom_interval": custom_interval,
-                "error_count": result[8] or 0,
-                "last_error": result[9],
-                "booking_count": result[10] or 0,
-                "last_booking_time": result[11],
-                "monitoring_mode": result[12] or "legacy",  # 모니터링 모드 (anonymous/legacy)
-                "biz_item_id": result[13],
-                "naver_biz_item_id": result[14],
-                "item_name": result[15],
-                "time_range": result[16],
-                "auto_booking_enabled": bool(result[17]),
-                "max_bookings_per_schedule": result[18] or 1,
-                "service_account_id": result[19],  # 다중 프로필 지원
-                "business_id": result[20],
-                "naver_business_id": result[21],
-                "business_type_id": result[22],
-                "business_name": result[23],
-                "category": result[24],
-                "service_type": result[25],
-                "booking_options": json.loads(result[26]) if result[26] else None,
+                "error_count": row["error_count"] or 0,
+                "last_error": row["last_error"],
+                "booking_count": row["booking_count"] or 0,
+                "last_booking_time": row["last_booking_time"],
+                "monitoring_mode": coerce_monitoring_mode(row["monitoring_mode"]),
+                "biz_item_id": row["biz_item_id"],
+                "naver_biz_item_id": row["naver_biz_item_id"],
+                "item_name": row["item_name"],
+                "time_range": row["time_range"],
+                "auto_booking_enabled": bool(row["auto_booking_enabled"]),
+                "max_bookings_per_schedule": row["max_bookings_per_schedule"] or 1,
+                "service_account_id": row["service_account_id"],
+                "business_id": row["business_id"],
+                "naver_business_id": row["naver_business_id"],
+                "business_type_id": row["business_type_id"],
+                "business_name": row["business_name"],
+                "category": row["category"],
+                "service_type": row["service_type"],
+                "booking_options": json.loads(row["booking_options"]) if row["booking_options"] else None,
                 "url": url,
-                "label": f"{result[23]} - {result[15]} ({result[1]})"
+                "label": f"{row['business_name']} - {row['item_name']} ({row['date']})"
             }
 
         except Exception as e:

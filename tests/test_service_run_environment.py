@@ -13,6 +13,19 @@ def _info_lines(log: MagicMock) -> list[str]:
     return [str(call.args[0]) for call in log.info.call_args_list if call.args]
 
 
+def _prepare_frontend_workspace(frontend_dir: Path, *, with_build: bool) -> None:
+    vite_bin = frontend_dir / "node_modules" / ".bin" / "vite.cmd"
+    vite_bin.parent.mkdir(parents=True, exist_ok=True)
+    vite_bin.write_text("@echo off\r\n", encoding="utf-8")
+
+    base_tsconfig = frontend_dir / ".svelte-kit" / "tsconfig.json"
+    base_tsconfig.parent.mkdir(parents=True, exist_ok=True)
+    base_tsconfig.write_text("{\"compilerOptions\":{}}", encoding="utf-8")
+
+    if with_build:
+        (frontend_dir / "build").mkdir(parents=True, exist_ok=True)
+
+
 def test_service_runner_log_environment_reports_boot_paths():
     logger = MagicMock()
     fingerprint = {
@@ -109,6 +122,23 @@ def test_service_runner_frontend_runtime_env_separates_admin_and_public_modes():
     assert "VITE_API_PORT" not in public_env
 
 
+def test_public_service_runner_cleanup_uses_public_pid_files_only(tmp_path):
+    runner = service_run.ServiceRunner(dev=False)
+    runner.pid_dir = tmp_path / ".pids"
+    runner.pid_dir.mkdir()
+    for name in ["api.pid", "frontend.pid", "api_admin.pid", "frontend_admin.pid"]:
+        (runner.pid_dir / name).write_text("1234", encoding="utf-8")
+
+    removed: list[str] = []
+
+    with patch("scripts.services.service_run.read_pid_file", return_value=1234), patch(
+        "scripts.services.service_run.is_process_alive", return_value=False
+    ), patch("scripts.services.service_run.remove_pid_file", side_effect=lambda path: removed.append(path.name)):
+        runner._cleanup_stale_pids()
+
+    assert removed == ["api.pid", "frontend.pid"]
+
+
 def test_ensure_frontend_runtime_tsconfigs_copies_base_config_for_both_modes(tmp_path):
     frontend_dir = tmp_path / "frontend"
     base_dir = frontend_dir / ".svelte-kit"
@@ -122,3 +152,124 @@ def test_ensure_frontend_runtime_tsconfigs_copies_base_config_for_both_modes(tmp
     public_tsconfig = frontend_dir / ".svelte-kit-public" / "tsconfig.json"
     assert admin_tsconfig.read_text(encoding="utf-8") == base_tsconfig.read_text(encoding="utf-8")
     assert public_tsconfig.read_text(encoding="utf-8") == base_tsconfig.read_text(encoding="utf-8")
+
+
+def test_public_build_failure_writes_frontend_build_log_right(tmp_path):
+    frontend_dir = tmp_path / "frontend"
+    _prepare_frontend_workspace(frontend_dir, with_build=True)
+    logger = MagicMock()
+    build_result = MagicMock(returncode=15, stdout="vite stdout", stderr="vite stderr")
+    preview_proc = MagicMock(pid=2468)
+
+    with patch.object(service_run, "PROJECT_ROOT", tmp_path), patch.object(
+        service_run, "setup_service_logger", return_value=logger
+    ), patch(
+        "scripts.services.service_run.subprocess.run", return_value=build_result
+    ) as mock_run, patch(
+        "scripts.services.service_run.subprocess.Popen", return_value=preview_proc
+    ), patch(
+        "scripts.services.service_run.write_pid_file"
+    ):
+        runner = service_run.ServiceRunner(dev=False)
+        proc = runner.start_frontend()
+
+    assert proc is preview_proc
+    build_logs = list((tmp_path / "logs").glob("frontend_build_public_*.log"))
+    assert len(build_logs) == 1
+    build_log = build_logs[0]
+    content = build_log.read_text(encoding="utf-8")
+    assert "mode=public" in content
+    assert "outDir=.svelte-kit-public" in content
+    assert "vite stdout" in content
+    assert "vite stderr" in content
+    error_messages = [str(call.args[0]) for call in logger.error.call_args_list if call.args]
+    warning_messages = [str(call.args[0]) for call in logger.warning.call_args_list if call.args]
+    assert any("Frontend build failed (rc=%s, class=%s, log=%s, listener=%s)" in msg for msg in error_messages)
+    assert any("Using previous build for preview (class=other, build_log=" in msg for msg in warning_messages)
+    assert mock_run.call_args.kwargs["env"]["MONITOR_FRONTEND_MODE"] == "public"
+
+
+def test_public_build_failure_empty_streams_boundary(tmp_path):
+    frontend_dir = tmp_path / "frontend"
+    _prepare_frontend_workspace(frontend_dir, with_build=False)
+    logger = MagicMock()
+    build_result = MagicMock(returncode=15, stdout="", stderr="")
+
+    with patch.object(service_run, "PROJECT_ROOT", tmp_path), patch.object(
+        service_run, "setup_service_logger", return_value=logger
+    ), patch(
+        "scripts.services.service_run.subprocess.run", return_value=build_result
+    ), patch(
+        "scripts.services.service_run.subprocess.Popen"
+    ) as mock_popen:
+        runner = service_run.ServiceRunner(dev=False)
+        proc = runner.start_frontend()
+
+    assert proc is None
+    mock_popen.assert_not_called()
+    build_logs = list((tmp_path / "logs").glob("frontend_build_public_*.log"))
+    assert len(build_logs) == 1
+    build_log = build_logs[0]
+    content = build_log.read_text(encoding="utf-8")
+    assert "[stdout]\n(no output)" in content
+    assert "[stderr]\n(no output)" in content
+    assert any(
+        "No previous build found - Frontend unavailable, API-only mode (class=other, build_log="
+        for call in logger.warning.call_args_list
+        if call.args
+    )
+
+
+def test_public_build_failure_logs_permission_classification_right(tmp_path):
+    frontend_dir = tmp_path / "frontend"
+    _prepare_frontend_workspace(frontend_dir, with_build=True)
+    logger = MagicMock()
+    build_result = MagicMock(returncode=1, stdout="", stderr="EPERM: Access denied")
+    preview_proc = MagicMock(pid=1357)
+
+    with patch.object(service_run, "PROJECT_ROOT", tmp_path), patch.object(
+        service_run, "setup_service_logger", return_value=logger
+    ), patch(
+        "scripts.services.service_run.subprocess.run", return_value=build_result
+    ), patch(
+        "scripts.services.service_run.subprocess.Popen", return_value=preview_proc
+    ), patch(
+        "scripts.services.service_run.write_pid_file"
+    ):
+        runner = service_run.ServiceRunner(dev=False)
+        proc = runner.start_frontend()
+
+    assert proc is preview_proc
+    assert any("class=build_lock_permission" in str(call.args[0]) for call in logger.warning.call_args_list if call.args)
+    assert any("Build lock/permission detected" in str(call.args[0]) for call in logger.warning.call_args_list if call.args)
+
+
+def test_public_build_failure_stdout_only_integration(tmp_path):
+    build_log = frontend_mode.write_frontend_build_log(
+        tmp_path / "logs",
+        "20260424_101500",
+        public=True,
+        returncode=15,
+        stdout="stdout only",
+        stderr="",
+    )
+
+    assert build_log.name == "frontend_build_public_20260424_101500.log"
+    content = build_log.read_text(encoding="utf-8")
+    assert "[stdout]\nstdout only" in content
+    assert "[stderr]\n(no output)" in content
+
+
+def test_public_build_failure_stderr_only_integration(tmp_path):
+    build_log = frontend_mode.write_frontend_build_log(
+        tmp_path / "logs",
+        "20260424_101501",
+        public=True,
+        returncode=15,
+        stdout="",
+        stderr="stderr only",
+    )
+
+    content = build_log.read_text(encoding="utf-8")
+    assert "[stdout]\n(no output)" in content
+    assert "[stderr]\nstderr only" in content

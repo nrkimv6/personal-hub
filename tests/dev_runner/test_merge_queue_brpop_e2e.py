@@ -60,11 +60,11 @@ class TestMergeQueueE2EFullFlow:
     """TC-1: fakeredis 기반 _execute_merge_with_lock 정상 흐름"""
 
     def test_merge_queue_e2e_full_flow(self, fr):
-        """acquire → subprocess exit_code=0 → release → merge-results status="done"
+        """acquire → subprocess exit_code=0 → release → merge-results status="merged"
 
         fakeredis는 단일 스레드 동기 클라이언트이므로 LINDEX 0 == me → 즉시 True.
         subprocess.run을 mock하여 exit_code=0 반환.
-        merge-results에 {"status": "done", "success": true} 항목이 push됐는지 확인.
+        merge-results에 {"status": "merged", "success": true} 항목이 push됐는지 확인.
         """
         runner_id = "e2e-runner-full"
         branch = "plan/2026-03-30_test"
@@ -85,10 +85,15 @@ class TestMergeQueueE2EFullFlow:
             "action": "inline-merge",
         }
 
+        def fake_success_handler(*args, **kwargs):
+            fr.set(f"{_RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "done")
+            return merge_success_result
+
         handler_name = _EXIT_CODE_HANDLERS[0].__name__
         with mock_merge_queue_turn(REPO_ID), \
              patch("subprocess.run", return_value=mock_proc), \
-             patch(f"_dr_merge.{handler_name}", return_value=merge_success_result) as mock_handler, \
+             patch("_dr_merge._check_stale_merge_gate", return_value=(None, None)), \
+             patch(f"_dr_merge.{handler_name}", side_effect=fake_success_handler) as mock_handler, \
              patch("_dr_merge._pub_and_log"):
             from _dr_merge import _execute_merge_with_lock
             result = _execute_merge_with_lock(runner_id, fr)
@@ -102,7 +107,7 @@ class TestMergeQueueE2EFullFlow:
         assert raw is not None, "merge-results에 항목이 push됐어야 함"
         pushed = json.loads(raw)
         assert pushed["runner_id"] == runner_id
-        assert pushed["status"] == "done", f"status 불일치: {pushed['status']}"
+        assert pushed["status"] == "merged", f"status 불일치: {pushed['status']}"
         assert pushed["success"] is True
 
 
@@ -136,10 +141,15 @@ class TestMergeQueueE2EConflictPath:
             "action": "inline-merge",
         }
 
+        def fake_conflict_handler(*args, **kwargs):
+            fr.set(f"{_RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "failed")
+            return conflict_result
+
         handler_name = _EXIT_CODE_HANDLERS[3].__name__
         with mock_merge_queue_turn(REPO_ID), \
              patch("subprocess.run", return_value=mock_proc), \
-             patch(f"_dr_merge.{handler_name}", return_value=conflict_result), \
+             patch("_dr_merge._check_stale_merge_gate", return_value=(None, None)), \
+             patch(f"_dr_merge.{handler_name}", side_effect=fake_conflict_handler), \
              patch("_dr_merge._pub_and_log"):
             from _dr_merge import _execute_merge_with_lock
             result = _execute_merge_with_lock(runner_id, fr)
@@ -155,6 +165,29 @@ class TestMergeQueueE2EConflictPath:
         assert pushed["runner_id"] == runner_id
         assert pushed["status"] == "failed", f"status 불일치: {pushed['status']}"
         assert pushed["success"] is False
+
+
+class TestMergeQueueE2ERedisUnavailable:
+    """Redis unavailable 분기에서 lock 없이 merge subprocess로 진행하지 않는지 검증."""
+
+    def test_redis_unavailable_connection_failure_hard_stops(self, fr):
+        runner_id = "e2e-runner-redis-unavailable"
+        fr.set(f"{_RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/redis-unavailable")
+        fr.set(f"{_RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/redis-unavailable.md")
+
+        with patch("merge_queue.acquire_merge_turn", side_effect=ConnectionError("REDIS_UNAVAILABLE")), \
+             patch("merge_queue.release_merge_turn") as mock_release, \
+             patch("subprocess.run") as mock_run, \
+             patch("_dr_merge._pub_and_log"):
+            from _dr_merge import _execute_merge_with_lock
+
+            result = _execute_merge_with_lock(runner_id, fr)
+
+        assert result["success"] is False
+        assert result["merge_status"] == "error"
+        assert "REDIS_UNAVAILABLE" in result["message"]
+        mock_run.assert_not_called()
+        mock_release.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

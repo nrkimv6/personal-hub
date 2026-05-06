@@ -95,13 +95,7 @@
 </script>
 
 <!-- 헤더 -->
-<div class="p-4 border-b border-sidebar-border flex items-center justify-between">
-	{#if !collapsed}
-		<div>
-			<h1 class="text-xl font-bold text-sidebar-primary-foreground">모니터링</h1>
-			<p class="text-sidebar-muted text-sm mt-1">v1.0.0</p>
-		</div>
-	{/if}
+<div class="px-2 py-2 border-b border-sidebar-border flex items-center {collapsed ? 'justify-center' : 'justify-end'}">
 	<!-- 데스크톱 접기 버튼 -->
 	{#if onToggleCollapse}
 		<button

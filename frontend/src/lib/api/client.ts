@@ -3,6 +3,7 @@
  */
 
 import { apiHealth } from '../stores/apiHealth.svelte';
+import { apiGate } from '../stores/apiGate.svelte';
 import { classifyRequestFailure } from './requestFailure.js';
 import { isAbortError } from '../utils/isAbortError.js';
 
@@ -22,7 +23,21 @@ function getApiBase(): string {
 }
 
 export const API_BASE = getApiBase();
+/**
+ * API gate blocking contract.
+ *
+ * The gate owns request blocking during API restart windows. Connection health
+ * stores only describe server reachability; they should not decide whether a
+ * request is allowed once apiGate is active.
+ */
+export const GATE_BLOCK_PATTERN = /^\/api\//;
+export const GATE_BYPASS_PATHS = ['/api/v1/ready'] as const;
+
 const TOKEN_KEY = 'auth_token';
+
+function isGateBypassUrl(url: string): boolean {
+	return GATE_BYPASS_PATHS.some((path) => url.endsWith(path));
+}
 
 /**
  * 저장된 인증 토큰 반환
@@ -56,6 +71,25 @@ export class ApiConnectionError extends Error {
     super(message);
     this.name = 'ApiConnectionError';
   }
+}
+
+/**
+ * API gate policy block.
+ *
+ * This is not a network failure and must not increment apiHealth error counts.
+ */
+export class ApiGateClosedError extends Error {
+  readonly code = 'API_GATE_CLOSED';
+
+  constructor(message = 'API 서버 재시작 중입니다') {
+    super(message);
+    this.name = 'ApiGateClosedError';
+  }
+}
+
+export function isApiGateClosedError(error: unknown): error is ApiGateClosedError {
+  return error instanceof ApiGateClosedError ||
+    (typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'API_GATE_CLOSED');
 }
 
 /**
@@ -164,12 +198,9 @@ export async function request<T>(
     throw new Error('인증이 만료되었습니다');
   }
 
-  // disconnected/reconnecting 상태에서 API 호출 차단 (/ready 엔드포인트는 예외 — 폴링이 차단되지 않도록)
-  if (
-    (apiHealth.state === 'disconnected' || apiHealth.state === 'reconnecting') &&
-    !endpoint.endsWith('/ready')
-  ) {
-    throw new ApiConnectionError('서버 재연결 대기 중');
+  // API gate owns request blocking during restart windows.
+  if (apiGate.state !== 'open' && !isGateBypassUrl(url)) {
+    throw new ApiGateClosedError();
   }
 
   // 인증 헤더 추가

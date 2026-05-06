@@ -1,15 +1,21 @@
 """GeminiExecutor — Gemini CLI subprocess 실행 전담."""
 
-import os
 import subprocess
-import sys
-import tempfile
 
 from app.modules.claude_worker.services.executors.base import LLMExecutorBase
 from app.modules.claude_worker.services.executors.claude_executor import _parse_quota_retry_ms
 from app.modules.claude_worker.services.profile_env import build_cli_env
 
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
+
+
+def _build_gemini_command(*, model: str, image_path: str | None) -> list[str]:
+    command = ["gemini"]
+    if model:
+        command.extend(["--model", model])
+    if image_path:
+        command.append(f"@{image_path}")
+    return command
 
 
 class GeminiExecutor(LLMExecutorBase):
@@ -27,6 +33,7 @@ class GeminiExecutor(LLMExecutorBase):
         parse_json: bool = True,
         enable_tools: bool = False,
         cli_options: dict = None,
+        profile=None,
     ) -> dict:
         """Gemini CLI 실행 (동기).
 
@@ -44,39 +51,22 @@ class GeminiExecutor(LLMExecutorBase):
             {"success": False, "error": "..."}
         """
         try:
-            # 프롬프트를 임시 파일에 저장하여 전달
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(prompt)
-                prompt_file = f.name
-
             # Gemini CLI 실행 env 조립 (profile 기반 config_dir 주입 포함)
-            env = build_cli_env("gemini")
+            env = build_cli_env("gemini", profile=profile)
 
-            try:
-                model_opt = f"--model {model}" if model else ""
-
-                # image_path가 있으면 @경로 이미지 첨부 인수 구성
-                image_path = (cli_options or {}).get("image_path")
-                img_arg = f' @"{image_path}"' if image_path else ""
-
-                if sys.platform == "win32":
-                    cmd = f'type "{prompt_file}" | gemini {model_opt}{img_arg}'
-                else:
-                    cmd = f'cat "{prompt_file}" | gemini {model_opt}{img_arg}'
-
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    encoding="utf-8",
-                    shell=True,
-                    env=env,
-                )
-            finally:
-                os.unlink(prompt_file)
+            image_path = (cli_options or {}).get("image_path")
+            command = _build_gemini_command(model=model, image_path=image_path)
+            result = subprocess.run(
+                command,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                encoding="utf-8",
+                errors="replace",
+                shell=False,
+                env=env,
+            )
 
             if result.returncode != 0:
                 error_details = result.stderr.strip() if result.stderr else ""

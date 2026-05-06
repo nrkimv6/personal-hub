@@ -6,6 +6,8 @@
 	 */
 	import type { EntitySource } from '$lib/types';
 	import { entitySourceApi } from '$lib/api';
+	import { toast } from '$lib/stores/toast';
+	import { confirm } from '$lib/stores/confirm';
 
 	interface Props {
 		entityType: 'events' | 'popups';
@@ -19,6 +21,10 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expanded = $state(false);
+
+	function errorMessage(e: unknown, fallback: string): string {
+		return e instanceof Error ? e.message : fallback;
+	}
 
 	// 출처 목록 로드
 	async function loadSources() {
@@ -45,18 +51,24 @@
 			await entitySourceApi.setPrimary(entityType, entityId, sourceId);
 			await loadSources();
 		} catch (e) {
-			alert(e instanceof Error ? e.message : '대표 출처 설정 실패');
+			toast.error(errorMessage(e, '대표 출처 설정 실패'));
 		}
 	}
 
 	// 출처 삭제
 	async function handleRemove(sourceId: number) {
-		if (!confirm('이 출처를 삭제하시겠습니까?')) return;
+		const confirmed = await confirm({
+			title: '출처 삭제',
+			message: '이 출처를 삭제하시겠습니까?',
+			confirmText: '삭제',
+			variant: 'danger'
+		});
+		if (!confirmed) return;
 		try {
 			await entitySourceApi.remove(entityType, entityId, sourceId);
 			await loadSources();
 		} catch (e) {
-			alert(e instanceof Error ? e.message : '출처 삭제 실패');
+			toast.error(errorMessage(e, '출처 삭제 실패'));
 		}
 	}
 

@@ -6,12 +6,11 @@ import pytest
 import subprocess
 from pathlib import Path
 from fastapi.testclient import TestClient
-from app.main import app
 import redis
 
 import redis.asyncio as aioredis
 from tests.dev_runner.conftest_e2e import (
-    TEST_PLAN_FILE,
+    isolated_plan_file,
     isolated_redis_db15,
     listener_process,
     REDIS_TEST_DB,
@@ -23,6 +22,11 @@ pytestmark = pytest.mark.http
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 BASE_URL = "/api/v1/dev-runner"
+
+
+def _build_test_client(**kwargs) -> TestClient:
+    from app.main import app
+    return TestClient(app, **kwargs)
 
 
 
@@ -58,7 +62,7 @@ class TestHttpE2EChain:
             active = isolated_redis_db15.smembers(ACTIVE_RUNNERS_KEY)
 
             # 2. 각 runner에 stop 요청 (API 레벨)
-            _client = TestClient(app)
+            _client = _build_test_client()
             for runner_id in active:
                 try:
                     _client.post(f"{BASE_URL}/stop/{runner_id}")
@@ -81,9 +85,9 @@ class TestHttpE2EChain:
         except Exception:
             pass
 
-    def test_http_start_and_stop_lifecycle(self, isolated_redis_db15, listener_process):
+    def test_http_start_and_stop_lifecycle(self, isolated_redis_db15, listener_process, isolated_plan_file):
         """E2E: POST /run → running 확인 → POST /stop → active_runners 비어짐 확인"""
-        client = TestClient(app)
+        client = _build_test_client()
         from app.modules.dev_runner.services.executor_service import (
             RUNNER_KEY_PREFIX,
             ACTIVE_RUNNERS_KEY,
@@ -92,7 +96,7 @@ class TestHttpE2EChain:
 
         payload = {
             "engine": "gemini",
-            "plan_file": TEST_PLAN_FILE,
+            "plan_file": isolated_plan_file,
             "dry_run": True,
             "test_source": "test_http_start_and_stop_lifecycle"
         }
@@ -162,3 +166,24 @@ class TestHttpE2EChain:
 
         assert cleaned is True, "active_runners가 10초 내 비워지지 않음"
         print("\n[STOP OK] HTTP E2E Start+Stop Lifecycle Verified")
+
+
+def test_worktree_base_dir_not_nested_T5():
+    """T5: WORKTREE_BASE_DIR이 nested .worktrees를 escape하여 로드됨 (Phase 3 검증).
+
+    _dr_constants._resolve_worktree_root()이 실제 import 시에도 동작하여
+    WORKTREE_BASE_DIR이 .worktrees를 정확히 1회만 포함함을 검증.
+    """
+    import importlib
+    import sys as _sys
+    pr_dir = Path(__file__).parent.parent.parent / "scripts" / "plan_runner"
+    if str(pr_dir) not in _sys.path:
+        _sys.path.insert(0, str(pr_dir))
+    import _dr_constants
+    importlib.reload(_dr_constants)
+
+    worktree_base = _dr_constants.WORKTREE_BASE_DIR
+    parts = list(worktree_base.parts)
+    assert parts.count(".worktrees") == 1, (
+        f"WORKTREE_BASE_DIR에 nested .worktrees 감지 (Phase 3 escape 미동작): {worktree_base}"
+    )

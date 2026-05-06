@@ -11,6 +11,8 @@ import pytest
 import redis
 import requests
 
+pytestmark = pytest.mark.http_live
+
 ADMIN_API = "http://localhost:8001"
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379

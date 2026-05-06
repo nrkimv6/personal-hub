@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch, mock_open
 
 import pytest
 
+from tests.dev_runner.conftest import attach_default_redis_behaviors
+
 # command listener는 스크립트이므로 함수를 직접 import하기 어려움 → 로직 재현 테스트
 
 
@@ -161,7 +163,7 @@ class TestRedisStateSaving:
 
     def test_parallel_mode_saves_sentinel_as_plan_file(self):
         """parallel=True, plan_file=None → Redis에 "__ALL_PLANS__" sentinel 저장"""
-        redis_client = MagicMock()
+        redis_client = attach_default_redis_behaviors(MagicMock())
         state = self._save_state(plan_file=None, redis_client=redis_client)
 
         # state dict 확인
@@ -172,7 +174,7 @@ class TestRedisStateSaving:
 
     def test_single_mode_saves_actual_plan_file(self):
         """plan_file="test.md" → Redis에 "test.md" 저장"""
-        redis_client = MagicMock()
+        redis_client = attach_default_redis_behaviors(MagicMock())
         state = self._save_state(plan_file="test.md", redis_client=redis_client)
 
         assert state["plan_file"] == "test.md"
@@ -180,7 +182,7 @@ class TestRedisStateSaving:
 
     def test_parallel_with_plan_file_saves_plan_file(self):
         """parallel=True + plan_file="test.md" → "test.md" 저장 (plan_file 우선)"""
-        redis_client = MagicMock()
+        redis_client = attach_default_redis_behaviors(MagicMock())
         state = self._save_state(plan_file="test.md", redis_client=redis_client)
 
         assert state["plan_file"] == "test.md"
@@ -191,7 +193,7 @@ class TestRedisStateSaving:
 
         빈 문자열은 Python의 `or` 연산자에서 falsy로 처리되므로 sentinel로 변환되어야 함.
         """
-        redis_client = MagicMock()
+        redis_client = attach_default_redis_behaviors(MagicMock())
         state = self._save_state(plan_file="", redis_client=redis_client)
 
         # state dict 확인

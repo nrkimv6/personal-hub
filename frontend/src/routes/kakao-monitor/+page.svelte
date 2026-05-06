@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { confirm } from '$lib/stores/confirm';
 	import { toast } from '$lib/stores/toast';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
@@ -125,7 +126,14 @@
 	}
 
 	async function handleDeleteConfig(id: number) {
-		if (!confirm('설정과 모든 수집 이력을 삭제합니다. 계속하시겠습니까?')) return;
+		if (
+			!(await confirm({
+				title: '카카오 설정 삭제',
+				message: '설정과 모든 수집 이력을 삭제합니다. 계속하시겠습니까?',
+				confirmText: '삭제',
+				variant: 'danger'
+			}))
+		) return;
 		try {
 			await deleteConfig(id);
 			toast.success('삭제 완료');
@@ -200,7 +208,14 @@
 	}
 
 	async function handleDeletePost(id: number) {
-		if (!confirm('게시물을 삭제하시겠습니까?')) return;
+		if (
+			!(await confirm({
+				title: '게시물 삭제',
+				message: '게시물을 삭제하시겠습니까?',
+				confirmText: '삭제',
+				variant: 'danger'
+			}))
+		) return;
 		try {
 			await deletePost(id);
 			posts = posts.filter(p => p.id !== id);
@@ -242,7 +257,7 @@
 </script>
 
 <div class="p-4 lg:p-6">
-<PageHeader title="카카오 모니터" subtitle="카카오톡 채팅방 자동 감시 및 게시물 수집" />
+<PageHeader title="카카오 모니터" />
 
 <!-- 탭 네비게이션 -->
 <TabNav tabs={tabList} bind:activeTab variant="primary" />

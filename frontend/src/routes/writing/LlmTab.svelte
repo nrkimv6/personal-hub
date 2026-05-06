@@ -2,65 +2,62 @@
 	import { Button } from '$lib/components/ui';
 
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse, type ProviderInfo } from '$lib/api';
+	import { formatLLMBlockReason, llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse, type ProviderInfo, type LLMProfileConfig, type LLMScheduleProfilePolicyItem, type LLMScheduleProfilePolicyWindow } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
 	import { createSelection } from '$lib/utils/selection.svelte';
 	import { toast } from '$lib/stores/toast';
-	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
+	import { confirm } from '$lib/stores/confirm';
+	import { fetchQuotaStatus, fetchProfileQuotaStatus, getQuotaWarning, profileQuotaStatus, summarizeProfileCapacity, type ProfileQuotaStatus } from '$lib/stores/quotaStore';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import { createPagePagination } from '$lib/utils/pagination.svelte';
 
 	// 상태
-	let requests: LLMRequest[] = [];
-	let stats: LLMStats | null = null;
-	let workerStatus: LLMWorkerStatus | null = null;
-	let historyStats: LLMHistoryStats | null = null;
+	let requests = $state<LLMRequest[]>([]);
+	let stats = $state<LLMStats | null>(null);
+	let workerStatus = $state<LLMWorkerStatus | null>(null);
+	let historyStats = $state<LLMHistoryStats | null>(null);
 
 	// 그룹 뷰 상태
-	let callerGroups: LLMCallerGroup[] = [];
-	let groupedResponse: LLMGroupedListResponse | null = null;
-	let viewMode: 'individual' | 'grouped' = 'individual';
-	let onlyWithoutSuccess = false;
+	let callerGroups = $state<LLMCallerGroup[]>([]);
+	let groupedResponse = $state<LLMGroupedListResponse | null>(null);
+	let viewMode = $state<'individual' | 'grouped'>('individual');
+	let onlyWithoutSuccess = $state(false);
 
-	let loading = true;
-	let error: string | null = null;
+	let loading = $state(true);
+	let error = $state<string | null>(null);
 
 	// 페이지네이션
-	let currentPage = 1;
-	let pageSize = 20;
-	let total = 0;
-	let pages = 0;
+	const pager = createPagePagination(20);
 
 	// 그룹 뷰 페이지네이션
-	let groupCurrentPage = 1;
-	let groupPageSize = 50;
-	let groupTotal = 0;
-	let groupPages = 0;
+	const groupPager = createPagePagination(50);
 
 	// 그룹 선택 (multi-재요청용)
-	let selectedGroupKeys: string[] = [];  // "caller_type:caller_id" 형식
-	let groupSelectAll = false;
+	let selectedGroupKeys = $state<string[]>([]);  // "caller_type:caller_id" 형식
+	let groupSelectAll = $state(false);
 
 	// 필터 (탭에 따라 다르게 설정)
-	let filterCallerType = '';
-	let filterRequestedBy = '';
+	let filterCallerType = $state('');
+	let filterRequestedBy = $state('');
 
 	// 선택
 	const selection = createSelection();
 
-	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능)
-	type Tab = 'queue' | 'history' | 'create' | 'performance';
-	let activeTab: Tab = 'queue';
+	// 탭: queue(대기열), history(이력), create(수동생성), profilePolicy(정책), performance(성능)
+	type Tab = 'queue' | 'history' | 'create' | 'profilePolicy' | 'performance';
+	let activeTab = $state<Tab>('queue');
 
 	const llmSubTabs = [
 		{ id: 'queue', label: '대기열 (pending/processing)' },
 		{ id: 'history', label: '이력 (completed/failed)' },
 		{ id: 'create', label: '수동 요청 생성' },
+		{ id: 'profilePolicy', label: 'Profile 정책' },
 		{ id: 'performance', label: '성능 분석' },
 	];
 
 	// 모달
-	let selectedRequest: LLMRequest | null = null;
-	let showModal = false;
+	let selectedRequest = $state<LLMRequest | null>(null);
+	let showModal = $state(false);
 
 	// 수동 요청 생성 폼
 	let createForm = $state({
@@ -72,9 +69,28 @@
 		provider: 'claude',
 		model: ''
 	});
-	let createLoading = false;
-	let createError: string | null = null;
-	let createSuccess = false;
+	let createLoading = $state(false);
+	let createError = $state<string | null>(null);
+	let createSuccess = $state(false);
+
+	let profilePolicies = $state<LLMScheduleProfilePolicyItem[]>([]);
+	let policyProfiles = $state<LLMProfileConfig[]>([]);
+	let policyLoading = $state(false);
+	let policySaving = $state(false);
+	let policyError = $state<string | null>(null);
+	let policyForm = $state({
+		target_type: 'plan_archive_analyze',
+		engine: 'claude',
+		profile_name: '',
+		enabled: true,
+		priority: 0,
+		allowed_windows_text: '',
+		quiet_windows_text: ''
+	});
+
+	function errorMessage(e: unknown): string {
+		return e instanceof Error ? e.message : '알 수 없는 오류';
+	}
 
 	// Provider별 모델 목록
 	// Provider 목록 (API에서 동적 로드)
@@ -88,12 +104,77 @@
 		return ['(기본)'];
 	};
 
+	function parsePolicyWindows(value: string): LLMScheduleProfilePolicyWindow[] {
+		const trimmed = value.trim();
+		if (!trimmed) return [];
+		if (trimmed.startsWith('[')) {
+			return JSON.parse(trimmed) as LLMScheduleProfilePolicyWindow[];
+		}
+		return trimmed.split(/\r?\n/)
+			.map(line => line.trim())
+			.filter(Boolean)
+			.map(line => {
+				const [timeRange, daysPart] = line.split(/\s+/);
+				const [start, end] = timeRange.split('-');
+				if (!start || !end) {
+					throw new Error('window 형식은 HH:MM-HH:MM 입니다');
+				}
+				const window: LLMScheduleProfilePolicyWindow = { start, end };
+				if (daysPart) {
+					window.days = daysPart.split(',').map(day => Number(day.trim()));
+				}
+				return window;
+			});
+	}
+
+	function formatPolicyWindows(windows: LLMScheduleProfilePolicyWindow[]): string {
+		if (!windows.length) return '-';
+		return windows.map(window => {
+			const days = window.days?.length ? ` ${window.days.join(',')}` : '';
+			return `${window.start}-${window.end}${days}`;
+		}).join(', ');
+	}
+
+	function formatPolicyScope(policy: LLMScheduleProfilePolicyItem): string {
+		if (policy.schedule_id) return `schedule #${policy.schedule_id}`;
+		return policy.target_type || 'global';
+	}
+
+	function getPolicyBlockReasonLabel(reason: string): string {
+		return formatLLMBlockReason(reason);
+	}
+
+	function profileOptionsForEngine(engine: string): LLMProfileConfig[] {
+		return policyProfiles.filter(profile => profile.engine === engine);
+	}
+
+	function policyEngines(): string[] {
+		const engines = Array.from(new Set(policyProfiles.map(profile => profile.engine)));
+		return engines.length > 0 ? engines : [policyForm.engine];
+	}
+
+	function ensurePolicyFormProfile() {
+		const options = profileOptionsForEngine(policyForm.engine);
+		if (!policyForm.profile_name && options.length > 0) {
+			policyForm.profile_name = options[0].name;
+		}
+	}
+
 	// Provider 변경 시 model 초기화
-	let prevProvider = createForm.provider;
+	let prevProvider = $state('claude');
 	$effect(() => {
 		if (createForm.provider !== prevProvider) {
 			prevProvider = createForm.provider;
 			createForm.model = '';
+		}
+	});
+
+	let prevPolicyEngine = $state(policyForm.engine);
+	$effect(() => {
+		if (policyForm.engine !== prevPolicyEngine) {
+			prevPolicyEngine = policyForm.engine;
+			policyForm.profile_name = '';
+			ensurePolicyFormProfile();
 		}
 	});
 
@@ -116,8 +197,8 @@
 					status: getStatusFilter(),
 					caller_type: filterCallerType || undefined,
 					requested_by: filterRequestedBy || undefined,
-					page: currentPage,
-					page_size: pageSize
+					page: pager.page,
+					page_size: pager.pageSize
 				}),
 				llmApi.getStats(),
 				llmApi.getWorkerStatus()
@@ -125,8 +206,7 @@
 
 			// 서버에서 이미 status 필터링된 결과 사용
 			requests = listRes.items;
-			total = listRes.total;
-			pages = listRes.pages || 1;
+			pager.total = listRes.total;
 			stats = statsRes;
 			workerStatus = workerRes;
 		} catch (e) {
@@ -152,8 +232,8 @@
 				llmApi.listGroupedByCaller({
 					caller_type: filterCallerType || undefined,
 					only_without_success: onlyWithoutSuccess,
-					page: groupCurrentPage,
-					page_size: groupPageSize
+					page: groupPager.page,
+					page_size: groupPager.pageSize
 				}),
 				llmApi.getStats(),
 				llmApi.getWorkerStatus()
@@ -161,8 +241,7 @@
 
 			callerGroups = res.items;
 			groupedResponse = res;
-			groupTotal = res.total;
-			groupPages = res.pages;
+			groupPager.total = res.total;
 			stats = statsRes;
 			workerStatus = workerRes;
 		} catch (e) {
@@ -173,13 +252,13 @@
 	}
 
 	async function retryAllFailedWithoutSuccess() {
-		if (!confirm(`성공한 적 없는 모든 caller의 실패 요청을 재시도하시겠습니까?`)) return;
+		if (!await confirm({ title: '일괄 재시도', message: '성공한 적 없는 모든 caller의 실패 요청을 재시도하시겠습니까?', confirmText: '재시도' })) return;
 		try {
 			const result = await llmApi.retryFailedCallersWithoutSuccess(filterCallerType || undefined);
-			alert(`재시도 완료: ${result.retried}개 요청 (${result.callers}개 caller)`);
+			toast.success(`재시도 완료: ${result.retried}개 요청 (${result.callers}개 caller)`);
 			await fetchGroupedData();
 		} catch (e) {
-			alert('재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재시도 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -217,20 +296,20 @@
 		}
 
 		if (failedRequestIds.length === 0) {
-			alert('선택된 그룹에 재시도할 실패 요청이 없습니다.');
+			toast.warning('선택된 그룹에 재시도할 실패 요청이 없습니다.');
 			return;
 		}
 
-		if (!confirm(`선택된 ${selectedGroups.length}개 그룹의 ${failedRequestIds.length}개 실패 요청을 재시도하시겠습니까?`)) return;
+		if (!await confirm({ title: '선택 그룹 재시도', message: `선택된 ${selectedGroups.length}개 그룹의 ${failedRequestIds.length}개 실패 요청을 재시도하시겠습니까?`, confirmText: '재시도' })) return;
 
 		try {
 			const result = await llmApi.batchRetry(failedRequestIds);
-			alert(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
+			toast.success(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
 			selectedGroupKeys = [];
 			groupSelectAll = false;
 			await fetchGroupedData();
 		} catch (e) {
-			alert('일괄 재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 재시도 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -243,35 +322,35 @@
 	function toggleViewMode() {
 		viewMode = viewMode === 'individual' ? 'grouped' : 'individual';
 		if (viewMode === 'grouped') {
-			groupCurrentPage = 1;
+			groupPager.reset();
 			fetchGroupedData();
 		} else {
-			currentPage = 1;
+			pager.reset();
 			fetchData();
 		}
 	}
 
 	function handleGroupFilter() {
-		groupCurrentPage = 1;
+		groupPager.reset();
 		fetchGroupedData();
 	}
 
 	function groupPrevPage() {
-		if (groupCurrentPage > 1) {
-			groupCurrentPage--;
+		if (groupPager.page > 1) {
+			groupPager.prev();
 			fetchGroupedData();
 		}
 	}
 
 	function groupNextPage() {
-		if (groupCurrentPage < groupPages) {
-			groupCurrentPage++;
+		if (groupPager.page < groupPager.totalPages) {
+			groupPager.next();
 			fetchGroupedData();
 		}
 	}
 
 	function handleFilter() {
-		currentPage = 1;
+		pager.reset();
 		selection.clear();
 		fetchData();
 	}
@@ -288,15 +367,15 @@
 	}
 
 	function prevPage() {
-		if (currentPage > 1) {
-			currentPage--;
+		if (pager.page > 1) {
+			pager.prev();
 			fetchData();
 		}
 	}
 
 	function nextPage() {
-		if (currentPage < pages) {
-			currentPage++;
+		if (pager.page < pager.totalPages) {
+			pager.next();
 			fetchData();
 		}
 	}
@@ -306,7 +385,7 @@
 			await llmApi.cancel(id);
 			await fetchData();
 		} catch (e) {
-			alert('취소 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('취소 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -315,17 +394,17 @@
 			await llmApi.retry(id);
 			await fetchData();
 		} catch (e) {
-			alert('재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('재시도 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function deleteRequest(id: number) {
-		if (!confirm('이 요청을 삭제하시겠습니까?')) return;
+		if (!await confirm({ title: '요청 삭제', message: '이 요청을 삭제하시겠습니까?', confirmText: '삭제', variant: 'danger' })) return;
 		try {
 			await llmApi.delete(id);
 			await fetchData();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('삭제 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -333,35 +412,35 @@
 		if (selection.count === 0) return;
 		try {
 			const result = await llmApi.batchRetry(selection.toArray());
-			alert(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
+			toast.success(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
 			selection.clear();
 			await fetchData();
 		} catch (e) {
-			alert('일괄 재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 재시도 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function batchDelete() {
 		if (selection.count === 0) return;
-		if (!confirm(`선택한 ${selection.count}개 요청을 삭제하시겠습니까?`)) return;
+		if (!await confirm({ title: '일괄 삭제', message: `선택한 ${selection.count}개 요청을 삭제하시겠습니까?`, confirmText: '삭제', variant: 'danger' })) return;
 		try {
 			const result = await llmApi.batchDelete(selection.toArray());
-			alert(`삭제 완료: ${result.deleted}개`);
+			toast.success(`삭제 완료: ${result.deleted}개`);
 			selection.clear();
 			await fetchData();
 		} catch (e) {
-			alert('일괄 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('일괄 삭제 실패: ' + errorMessage(e));
 		}
 	}
 
 	async function runCleanup() {
-		if (!confirm('Stale 요청 정리 및 오래된 이력 삭제를 실행하시겠습니까?')) return;
+		if (!await confirm({ title: '요청 정리', message: 'Stale 요청 정리 및 오래된 이력 삭제를 실행하시겠습니까?', confirmText: '정리', variant: 'danger' })) return;
 		try {
 			const result = await llmApi.cleanup();
-			alert(`정리 완료: stale ${result.stale_processing}개, 이력 ${result.old_history}개 삭제`);
+			toast.success(`정리 완료: stale ${result.stale_processing}개, 이력 ${result.old_history}개 삭제`);
 			await fetchData();
 		} catch (e) {
-			alert('정리 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			toast.error('정리 실패: ' + errorMessage(e));
 		}
 	}
 
@@ -408,6 +487,83 @@
 		} finally {
 			createLoading = false;
 		}
+	}
+
+	async function fetchPolicyMatrix() {
+		policyLoading = true;
+		policyError = null;
+		try {
+			const [policyRes, profilesRes] = await Promise.all([
+				llmApi.listScheduleProfilePolicies(),
+				llmApi.listProfiles()
+			]);
+			profilePolicies = policyRes.policies;
+			policyProfiles = profilesRes.profiles;
+			if (!policyProfiles.some(profile => profile.engine === policyForm.engine)) {
+				policyForm.engine = profilesRes.supported_engines[0] || policyProfiles[0]?.engine || policyForm.engine;
+			}
+			ensurePolicyFormProfile();
+		} catch (e) {
+			policyError = errorMessage(e);
+		} finally {
+			policyLoading = false;
+		}
+	}
+
+	async function savePolicyMatrix(nextPolicies: LLMScheduleProfilePolicyItem[]) {
+		policySaving = true;
+		policyError = null;
+		try {
+			const saved = await llmApi.updateScheduleProfilePolicies(nextPolicies);
+			profilePolicies = saved.policies;
+			toast.success('Profile 정책 저장 완료');
+		} catch (e) {
+			policyError = errorMessage(e);
+			toast.error('Profile 정책 저장 실패: ' + errorMessage(e));
+		} finally {
+			policySaving = false;
+		}
+	}
+
+	async function addPolicyFromForm() {
+		const targetType = policyForm.target_type.trim();
+		if (!targetType) {
+			policyError = 'target_type을 입력해주세요.';
+			return;
+		}
+		if (!policyForm.profile_name) {
+			policyError = 'profile을 선택해주세요.';
+			return;
+		}
+		try {
+			const policy: LLMScheduleProfilePolicyItem = {
+				target_type: targetType,
+				schedule_id: null,
+				engine: policyForm.engine,
+				profile_name: policyForm.profile_name,
+				enabled: policyForm.enabled,
+				priority: Number(policyForm.priority) || 0,
+				allowed_windows: parsePolicyWindows(policyForm.allowed_windows_text),
+				quiet_windows: parsePolicyWindows(policyForm.quiet_windows_text)
+			};
+			const nextPolicies = [
+				...profilePolicies.filter(existing => !(
+					(existing.schedule_id || null) === null &&
+					(existing.target_type || '') === policy.target_type &&
+					existing.engine === policy.engine &&
+					existing.profile_name === policy.profile_name
+				)),
+				policy
+			];
+			await savePolicyMatrix(nextPolicies);
+		} catch (e) {
+			policyError = errorMessage(e);
+		}
+	}
+
+	async function removePolicy(policy: LLMScheduleProfilePolicyItem) {
+		const nextPolicies = profilePolicies.filter(existing => existing !== policy);
+		await savePolicyMatrix(nextPolicies);
 	}
 
 	function openModal(request: LLMRequest) {
@@ -457,21 +613,31 @@
 		}
 	}
 
+	function getPendingBlockReason(request: LLMRequest, profiles: ProfileQuotaStatus[]): string | null {
+		if (request.status !== 'pending') return null;
+		if (request.pending_block_reason) return formatLLMBlockReason(request.pending_block_reason);
+		return summarizeProfileCapacity(request.provider || 'claude', profiles);
+	}
+
 	function switchTab(tab: Tab) {
 		activeTab = tab;
 		if (tab === 'queue' || tab === 'history') {
-			currentPage = 1;
+			pager.reset();
 			selection.clear();
 			fetchData();
 		}
 		if (tab === 'history') {
 			fetchHistoryStats();
 		}
+		if (tab === 'profilePolicy' && profilePolicies.length === 0) {
+			fetchPolicyMatrix();
+		}
 	}
 
 	onMount(() => {
 		fetchData();
 		fetchQuotaStatus();
+		fetchProfileQuotaStatus();
 		llmApi.getProviders()
 			.then(data => { providers = data; providersLoading = false; })
 			.catch(() => { providersError = 'Provider 목록 로드 실패'; providersLoading = false; });
@@ -536,7 +702,7 @@
 	{/if}
 
 	<!-- 탭 -->
-	<TabNav tabs={llmSubTabs} bind:activeTab variant="secondary" />
+	<TabNav tabs={llmSubTabs} bind:activeTab variant="secondary" onTabChange={(tab) => switchTab(tab as Tab)} />
 
 	{#if activeTab === 'queue' || activeTab === 'history'}
 		<!-- 필터 -->
@@ -711,23 +877,23 @@
 				</div>
 
 				<!-- 그룹 뷰 페이지네이션 -->
-				{#if groupPages > 1}
+				{#if groupPager.totalPages > 1}
 					<div class="flex justify-between items-center">
 						<span class="text-sm text-muted-foreground">
-							전체 {groupTotal}개 중 {(groupCurrentPage - 1) * groupPageSize + 1} - {Math.min(groupCurrentPage * groupPageSize, groupTotal)}
+							전체 {groupPager.total}개 중 {(groupPager.page - 1) * groupPager.pageSize + 1} - {Math.min(groupPager.page * groupPager.pageSize, groupPager.total)}
 						</span>
 						<div class="flex gap-2">
 							<button
 								onclick={groupPrevPage}
-								disabled={groupCurrentPage === 1}
+								disabled={groupPager.page === 1}
 								class="btn btn-secondary btn-sm disabled:opacity-50"
 							>
 								이전
 							</button>
-							<span class="px-3 py-1.5 text-sm">{groupCurrentPage} / {groupPages}</span>
+							<span class="px-3 py-1.5 text-sm">{groupPager.page} / {groupPager.totalPages}</span>
 							<button
 								onclick={groupNextPage}
-								disabled={groupCurrentPage >= groupPages}
+								disabled={groupPager.page >= groupPager.totalPages}
 								class="btn btn-secondary btn-sm disabled:opacity-50"
 							>
 								다음
@@ -789,6 +955,11 @@
 									<span class="px-2 py-1 text-xs rounded-full {getStatusColor(request.status)}">
 										{getStatusLabel(request.status)}
 									</span>
+									{#if getPendingBlockReason(request, $profileQuotaStatus)}
+										<div class="mt-1 text-[11px] text-warning-foreground">
+											{getPendingBlockReason(request, $profileQuotaStatus)}
+										</div>
+									{/if}
 								</td>
 								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(request.requested_at)}</td>
 								<td class="px-4 py-3" onclick={(e) => e.stopPropagation()}>
@@ -824,23 +995,23 @@
 			</div>
 
 			<!-- 페이지네이션 -->
-			{#if pages > 1}
+			{#if pager.totalPages > 1}
 				<div class="flex justify-between items-center">
 					<span class="text-sm text-muted-foreground">
-						전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
+						전체 {pager.total}개 중 {(pager.page - 1) * pager.pageSize + 1} - {Math.min(pager.page * pager.pageSize, pager.total)}
 					</span>
 					<div class="flex gap-2">
 						<button
 							onclick={prevPage}
-							disabled={currentPage === 1}
+							disabled={pager.page === 1}
 							class="btn btn-secondary btn-sm disabled:opacity-50"
 						>
 							이전
 						</button>
-						<span class="px-3 py-1.5 text-sm">{currentPage} / {pages}</span>
+						<span class="px-3 py-1.5 text-sm">{pager.page} / {pager.totalPages}</span>
 						<button
 							onclick={nextPage}
-							disabled={currentPage >= pages}
+							disabled={pager.page >= pager.totalPages}
 							class="btn btn-secondary btn-sm disabled:opacity-50"
 						>
 							다음
@@ -978,6 +1149,141 @@
 						</button>
 					</div>
 				</div>
+			</div>
+		</div>
+	{:else if activeTab === 'profilePolicy'}
+		<div class="space-y-4">
+			<div class="flex items-center justify-between gap-3">
+				<div>
+					<h3 class="text-base font-semibold text-foreground">Schedule x Profile 정책</h3>
+					<p class="text-sm text-muted-foreground">target_type 별로 허용할 profile과 시간대를 지정합니다.</p>
+				</div>
+				<Button variant="secondary" size="sm" onclick={fetchPolicyMatrix} disabled={policyLoading}>
+					{policyLoading ? '로딩 중...' : '새로고침'}
+				</Button>
+			</div>
+
+			{#if policyError}
+				<div class="rounded-lg border border-error/30 bg-error-light px-4 py-3 text-sm text-error">
+					{policyError}
+				</div>
+			{/if}
+
+			<div class="card p-5">
+				<div class="grid gap-4 md:grid-cols-5">
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">target_type</label>
+						<input
+							type="text"
+							bind:value={policyForm.target_type}
+							class="w-full px-3 py-2 border border-border rounded-lg"
+						/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">Engine</label>
+						<select bind:value={policyForm.engine} class="w-full px-3 py-2 border border-border rounded-lg">
+							{#each policyEngines() as engine}
+								<option value={engine}>{engine}</option>
+							{/each}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">Profile</label>
+						<select bind:value={policyForm.profile_name} class="w-full px-3 py-2 border border-border rounded-lg">
+							{#each profileOptionsForEngine(policyForm.engine) as profile}
+								<option value={profile.name}>{profile.name}</option>
+							{/each}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">Priority</label>
+						<input
+							type="number"
+							bind:value={policyForm.priority}
+							class="w-full px-3 py-2 border border-border rounded-lg"
+						/>
+					</div>
+					<div class="flex items-end">
+						<label class="flex items-center gap-2 text-sm text-foreground">
+							<input type="checkbox" bind:checked={policyForm.enabled} class="h-4 w-4" />
+							사용
+						</label>
+					</div>
+				</div>
+
+				<div class="mt-4 grid gap-4 md:grid-cols-2">
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">허용 window</label>
+						<textarea
+							bind:value={policyForm.allowed_windows_text}
+							rows="3"
+							placeholder="09:00-18:00 1,2,3,4,5"
+							class="w-full px-3 py-2 border border-border rounded-lg resize-none"
+						></textarea>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">차단 window</label>
+						<textarea
+							bind:value={policyForm.quiet_windows_text}
+							rows="3"
+							placeholder="00:00-06:00"
+							class="w-full px-3 py-2 border border-border rounded-lg resize-none"
+						></textarea>
+					</div>
+				</div>
+
+				<div class="mt-4 flex justify-end">
+					<Button variant="primary" size="sm" onclick={addPolicyFromForm} disabled={policySaving || policyLoading}>
+						{policySaving ? '저장 중...' : '정책 추가/갱신'}
+					</Button>
+				</div>
+			</div>
+
+			<div class="card overflow-hidden">
+				<table class="w-full text-sm">
+					<thead class="bg-muted/50 text-muted-foreground">
+						<tr>
+							<th class="px-4 py-3 text-left font-medium">Scope</th>
+							<th class="px-4 py-3 text-left font-medium">Engine/Profile</th>
+							<th class="px-4 py-3 text-left font-medium">상태</th>
+							<th class="px-4 py-3 text-left font-medium">Windows</th>
+							<th class="px-4 py-3 text-right font-medium">작업</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-border">
+						{#if policyLoading}
+							<tr>
+								<td colspan="5" class="px-4 py-6 text-center text-muted-foreground">정책 로딩 중...</td>
+							</tr>
+						{:else if profilePolicies.length === 0}
+							<tr>
+								<td colspan="5" class="px-4 py-6 text-center text-muted-foreground">등록된 정책이 없습니다.</td>
+							</tr>
+						{:else}
+							{#each profilePolicies as policy}
+								<tr>
+									<td class="px-4 py-3 font-medium text-foreground">{formatPolicyScope(policy)}</td>
+									<td class="px-4 py-3 text-muted-foreground">{policy.engine}/{policy.profile_name}</td>
+									<td class="px-4 py-3">
+										<span class="rounded-full px-2 py-1 text-xs {policy.enabled ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}">
+											{policy.enabled ? '사용' : getPolicyBlockReasonLabel('schedule_policy_off')}
+										</span>
+										<span class="ml-2 text-xs text-muted-foreground">P{policy.priority}</span>
+									</td>
+									<td class="px-4 py-3 text-muted-foreground">
+										<div>허용: {formatPolicyWindows(policy.allowed_windows)}</div>
+										<div>차단: {formatPolicyWindows(policy.quiet_windows)}</div>
+									</td>
+									<td class="px-4 py-3 text-right">
+										<Button variant="ghost" size="sm" onclick={() => removePolicy(policy)} disabled={policySaving}>
+											삭제
+										</Button>
+									</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
 			</div>
 		</div>
 	{:else if activeTab === 'performance'}

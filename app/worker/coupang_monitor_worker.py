@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -320,6 +321,8 @@ class CoupangMonitorWorker(BaseWorker):
             context = page.context
             if context not in self._popup_contexts:
                 async def _on_popup(popup):
+                    if hasattr(popup, '_tab_id'):
+                        return  # pool 관리 탭 (pending 또는 실제 id) — 닫지 않음
                     await popup.close()
                 context.on("page", _on_popup)
                 self._popup_contexts.add(context)
@@ -339,7 +342,7 @@ class CoupangMonitorWorker(BaseWorker):
             return changes, datetime.now()
         finally:
             if page is not None:
-                await self.browser.tab_pool_manager.release_tab(page)
+                await asyncio.shield(self.browser.tab_pool_manager.release_tab(page))
 
     def _set_schedule_last_check_time(self, schedule_id: int, checked_at: datetime) -> None:
         """스케줄 마지막 확인 시각 저장."""

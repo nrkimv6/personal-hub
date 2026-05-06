@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import re
 import subprocess
 from datetime import date
@@ -11,8 +12,10 @@ from typing import List, Optional
 from app.modules.dev_runner.schemas import PlanFileResponse
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle
+from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
 from app.modules.dev_runner.services.git_utils import check_branch_exists, check_worktree_exists
 from app.modules.dev_runner.services.log_service import publish_log, log_service
+from app.modules.dev_runner.services.plan_path_helpers import resolve_plans_ledger_paths
 from app.modules.dev_runner.services.plan_path_resolver import PathRuleError
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,7 @@ class PlanDoneService:
     - plan_record_service: DB \uae30\ub85d (lazy import)
     """
 
+    COMMIT_PS1 = Path("D:/work/project/tools/common/commit.ps1")
     COMMIT_SH = Path("D:/work/project/tools/common/commit.sh")
 
     # \uc644\ub8cc \uacc4\uc5f4 \uc0c1\ud0dc (batch_done \ud310\ub2e8\uc6a9, PlanScanner._DONE_STATUSES\uc640 \ub3d9\uc77c)
@@ -117,8 +121,9 @@ class PlanDoneService:
         parts = p.parts
         for i, part in enumerate(parts):
             if part == "plan" and i > 0 and parts[i - 1] == "docs":
-                # parts[0..i-2] = project root
-                project_root = Path(*parts[:i - 1])
+                # .worktrees 포함 시 .worktrees 직전 경로를 project root로 사용
+                j = parts.index(".worktrees") if ".worktrees" in parts[:i - 1] else None
+                project_root = Path(*parts[:j]) if j is not None else Path(*parts[:i - 1])
                 if project_root.exists():
                     return project_root
         # fallback: \ud30c\uc77c \uae30\uc900 \uc0c1\uc704 3\ub2e8\uacc4
@@ -143,23 +148,55 @@ class PlanDoneService:
             raise ValueError(str(path_err)) from path_err
 
     @staticmethod
-    def _update_todo_done(project_dir: Path, plan_title: str) -> None:
-        """TODO.md\uc5d0\uc11c plan_title \uad00\ub828 \ud56d\ubaa9 \uc81c\uac70, DONE.md \uc0c1\ub2e8\uc5d0 \ucd94\uac00"""
-        today = date.today().isoformat()
+    def _todo_line_matches_plan(line: str, plan_title: str, plan_path: Path | None = None) -> bool:
+        """Return True only for the TODO checkbox item for this completed plan."""
+        checkbox_match = re.match(r'^\s*[-*]\s*\[[ xX→]\]\s*(.+?)\s*$', line)
+        if not checkbox_match:
+            return False
 
-        # TODO.md: plan_title\uc744 \ud3ec\ud568\ud558\ub294 \uccb4\ud06c\ubc15\uc2a4 \uc904 \uc81c\uac70
-        todo_path = project_dir / "TODO.md"
+        body = checkbox_match.group(1).strip()
+        normalized_body = body.replace("\\", "/")
+
+        if plan_path is not None:
+            plan_path_text = str(plan_path).replace("\\", "/")
+            path_tokens = {
+                plan_path_text,
+                plan_path.as_posix(),
+                plan_path.name,
+            }
+            if any(token and token in normalized_body for token in path_tokens):
+                return True
+            stem_pattern = rf'(?<![A-Za-z0-9_-]){re.escape(plan_path.stem)}(?![A-Za-z0-9_-])'
+            if re.search(stem_pattern, normalized_body):
+                return True
+
+        title_patterns = [
+            rf'^{re.escape(plan_title)}$',
+            rf'^{re.escape(plan_title)}\s+\(',
+            rf'^{re.escape(plan_title)}\s+\[',
+            rf'^\*\*{re.escape(plan_title)}\*\*(?:\s|$)',
+        ]
+        return any(re.search(pattern, body) for pattern in title_patterns)
+
+    @classmethod
+    def _update_todo_done(cls, project_dir: Path, plan_title: str, plan_path: Path | None = None) -> None:
+        """plans ledger TODO에서 해당 plan 항목 제거, plans DONE 상단에 추가"""
+        today = date.today().isoformat()
+        ledger_paths = resolve_plans_ledger_paths(project_dir)
+
+        # TODO.md: completed plan에 해당하는 체크박스 줄만 제거
+        todo_path = ledger_paths.todo_path
         if todo_path.exists():
             lines = todo_path.read_text(encoding="utf-8").splitlines(keepends=True)
             filtered = [
                 l for l in lines
-                if not (plan_title in l and re.search(r'\[[ x→]\]', l))
+                if not cls._todo_line_matches_plan(l, plan_title, plan_path)
             ]
             if len(filtered) < len(lines):
                 todo_path.write_text("".join(filtered), encoding="utf-8")
 
-        # DONE.md \uc0c1\ub2e8\uc5d0 \ucd94\uac00
-        done_path = project_dir / "docs" / "DONE.md"
+        # DONE.md 상단에 추가
+        done_path = ledger_paths.done_path
         done_path.parent.mkdir(parents=True, exist_ok=True)
         new_entry = f"- [x] {today}: {plan_title}\n"
 
@@ -175,17 +212,17 @@ class PlanDoneService:
             done_path.write_text(f"# DONE (\uc5ec\uae30\uc11c 20\uac1c)\n\n{new_entry}", encoding="utf-8")
 
     @staticmethod
-    def _archive_done_if_needed(done_path: Path) -> None:
+    def _archive_done_if_needed(done_path: Path) -> Optional[Path]:
         """DONE.md \ud56d\ubaa9 5\uac1c \ucd08\uacfc \uc2dc \uc6d4\ubcc4 \uc544\uce74\uc774\ube0c"""
         if not done_path.exists():
-            return
+            return None
 
         content = done_path.read_text(encoding="utf-8")
         lines = content.splitlines(keepends=True)
         item_lines = [l for l in lines if re.match(r'^-\s*\[', l)]
 
         if len(item_lines) <= 5:
-            return
+            return None
 
         keep = item_lines[:5]
         overflow = item_lines[5:]
@@ -211,41 +248,58 @@ class PlanDoneService:
         header_match = re.match(r'(#[^\n]+\n\n?)', content)
         header = header_match.group(1) if header_match else "# DONE (\uc5ec\uae30\uc11c 20\uac1c)\n\n"
         done_path.write_text(header + "".join(keep), encoding="utf-8")
+        return archive_path
 
     async def _git_commit(
         self, project_dir: Optional[Path], files_to_add: List[Path], commit_msg: str
     ) -> str:
-        """git add + commit.sh \ud638\ucd9c"""
-        if not self.COMMIT_SH.exists():
-            return f"commit.sh not found: {self.COMMIT_SH}"
+        """git add + commit script \ud638\ucd9c.
 
-        # \uc874\uc7ac\ud558\ub294 \ud30c\uc77c(\uc2e0\uaddc/\uc218\uc815) + \uc0ad\uc81c\ub41c \ud30c\uc77c(git mv\ub85c \uc774\ubbf8 staged\ub41c \uacbd\uc6b0\ub3c4 \ud3ec\ud568)\uc744 \ubaa8\ub450 add
-        existing_files = [str(f) for f in files_to_add if f.exists()]
-        deleted_files = [str(f) for f in files_to_add if not f.exists()]
-        all_files = existing_files + deleted_files
-        if not all_files:
-            return "\ucf54\ubc0b\ud560 \ud30c\uc77c \uc5c6\uc74c"
+        Windows\uc5d0\uc11c\ub294 commit.ps1\uc744 \uc6b0\uc120 \uc0ac\uc6a9\ud558\uace0, \uac01 subprocess\uc758 non-zero
+        \uc885\ub8cc \ucf54\ub4dc\ub294 run_done \uc2e4\ud328\ub85c \uc804\ud30c\ud55c\ub2e4.
+        """
+        commit_command = self._resolve_commit_command(commit_msg)
 
-        cwd = str(project_dir) if project_dir and project_dir.exists() else None
-
-        # git add
-        add_proc = await asyncio.create_subprocess_exec(
-            "git", "-c", "safe.directory=*", "add", *all_files,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        return await commit_files_by_git_root(
+            files_to_add=files_to_add,
+            default_root=project_dir,
+            commit_command=commit_command,
+            decode_output=self._decode_subprocess_output,
         )
-        await add_proc.communicate()
 
-        # commit.sh
-        commit_proc = await asyncio.create_subprocess_exec(
-            "bash", str(self.COMMIT_SH), commit_msg,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await asyncio.wait_for(commit_proc.communicate(), timeout=60)
-        return stdout.decode("utf-8", errors="replace") if stdout else ""
+    @classmethod
+    def _resolve_commit_command(cls, commit_msg: str) -> list[str]:
+        if os.name == "nt" and cls.COMMIT_PS1.exists():
+            return [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(cls.COMMIT_PS1),
+                commit_msg,
+            ]
+        if cls.COMMIT_SH.exists():
+            return ["bash", str(cls.COMMIT_SH), commit_msg]
+        if cls.COMMIT_PS1.exists():
+            return [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(cls.COMMIT_PS1),
+                commit_msg,
+            ]
+        raise FileNotFoundError(f"commit script not found: {cls.COMMIT_PS1} or {cls.COMMIT_SH}")
+
+    @staticmethod
+    def _decode_subprocess_output(output) -> str:
+        if not output:
+            return ""
+        if isinstance(output, bytes):
+            return output.decode("utf-8", errors="replace")
+        return str(output)
 
     async def run_done(self, plan_path: str) -> dict:
         """Python \ub124\uc774\ud2f0\ube0c plan \uc644\ub8cc \ucc98\ub9ac (\uc544\uce74\uc774\ube0c, TODO\u2192DONE, git commit)"""
@@ -283,19 +337,23 @@ class PlanDoneService:
 
             # 4. TODO.md / DONE.md \uc5c5\ub370\uc774\ud2b8
             if project_dir:
-                self._update_todo_done(project_dir, title)
-                done_path = project_dir / "docs" / "DONE.md"
-                self._archive_done_if_needed(done_path)
+                self._update_todo_done(project_dir, title, path)
+                done_path = resolve_plans_ledger_paths(project_dir).done_path
+                done_history_path = self._archive_done_if_needed(done_path)
 
             # 5. git commit
-            files_to_commit: List[Path] = [archive_path]
+            files_to_commit: List[Path] = [path, archive_path]
             if todo_archive_path:
+                files_to_commit.append(path.parent / todo_archive_path.name)
                 files_to_commit.append(todo_archive_path)
             if project_dir:
+                ledger_paths = resolve_plans_ledger_paths(project_dir)
                 files_to_commit += [
-                    project_dir / "TODO.md",
-                    project_dir / "docs" / "DONE.md",
+                    ledger_paths.todo_path,
+                    ledger_paths.done_path,
                 ]
+                if done_history_path:
+                    files_to_commit.append(done_history_path)
                 if has_manual:
                     files_to_commit.append(project_dir / "MANUAL_TASKS.md")
             commit_output = await self._git_commit(

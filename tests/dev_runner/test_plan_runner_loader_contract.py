@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import sys
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 from tests.dev_runner._path_helpers import (
     get_plan_runner_entry_script_path,
@@ -48,3 +50,128 @@ def test_loader_alias_reference_entry_vs_impl_paths():
     assert entry_path != impl_path
     assert entry_path.name == "_dr_plan_runner.py"
     assert impl_path.parent.name == "plan_runner"
+
+
+# ─────────────────────────────────────────────────────────────
+# T5: plans-root plan 실행 시 PLAN_RUNNER_PROJECT_ROOT 계약
+# ─────────────────────────────────────────────────────────────
+
+def test_get_target_project_root_with_plan_runner_project_root_env(tmp_path):
+    """T5/R: PLAN_RUNNER_PROJECT_ROOT 환경변수 설정 시 get_target_project_root()가
+    plans storage root가 아닌 주입된 project root를 반환한다.
+
+    실제 subprocess 실행 시 _make_plan_runner_env()는 PLAN_RUNNER_PROJECT_ROOT=PROJECT_ROOT를
+    주입한다. get_target_project_root()는 이 env를 최우선으로 반환해야 한다.
+    """
+    # plans-root 구조 (plans storage 경로)
+    project_root = tmp_path / "monitor-page"
+    project_root.mkdir()
+    plans_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+    plans_dir.mkdir(parents=True)
+    plan_file = plans_dir / "2026-04-24_test.md"
+    plan_file.write_text("# Test Plan\n")
+
+    # _dr_subprocess.py가 주입하는 PLAN_RUNNER_PROJECT_ROOT (= 실제 target project root)
+    injected_project_root = project_root
+
+    # scripts/plan_runner 경로를 sys.path에 추가
+    scripts_dir = Path(__file__).parent.parent.parent / "scripts" / "plan_runner"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    from _dr_process_utils import get_target_project_root
+
+    # PLAN_RUNNER_PROJECT_ROOT가 주입된 환경에서 실행
+    with patch.dict(os.environ, {"PLAN_RUNNER_PROJECT_ROOT": str(injected_project_root)}):
+        result = get_target_project_root(str(plan_file))
+
+    # plans storage root(.worktrees/plans)가 아닌 주입된 project_root 반환
+    assert result == injected_project_root.resolve() or result == injected_project_root, (
+        f"PLAN_RUNNER_PROJECT_ROOT 주입 시 target project root를 반환해야 함, 실제: {result}"
+    )
+    plans_root = project_root / ".worktrees" / "plans"
+    assert result != plans_root, (
+        f"plans storage root를 반환하면 안 됨: {result}"
+    )
+
+
+def test_get_target_project_root_detects_worktrees_without_env(tmp_path):
+    """T5/R: PLAN_RUNNER_PROJECT_ROOT 없을 때 .worktrees/plans git root에서 .worktrees 직전 경로 반환.
+
+    git rev-parse가 .worktrees/plans를 반환해도 .worktrees 직전(= project root)을 반환해야 함.
+    """
+    project_root = tmp_path / "monitor-page"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()  # project root 판정용
+    plans_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+    plans_dir.mkdir(parents=True)
+    plan_file = plans_dir / "2026-04-24_test.md"
+    plan_file.write_text("# Test Plan\n")
+
+    scripts_dir = Path(__file__).parent.parent.parent / "scripts" / "plan_runner"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    from _dr_process_utils import get_target_project_root
+
+    plans_git_root = project_root / ".worktrees" / "plans"
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = str(plans_git_root) + "\n"
+
+    # PLAN_RUNNER_PROJECT_ROOT 없이, git이 plans root를 반환하는 상황
+    env_without_root = {k: v for k, v in os.environ.items() if k != "PLAN_RUNNER_PROJECT_ROOT"}
+    with patch.dict(os.environ, env_without_root, clear=True), \
+         patch("subprocess.run", return_value=mock_result):
+        result = get_target_project_root(str(plan_file))
+
+    assert result == project_root, (
+        f".worktrees/plans git root 입력 시 project_root({project_root}) 반환해야 함, 실제: {result}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# T3: is_worktree_active plans-root 경로 계약 (재현/통합 TC)
+# ─────────────────────────────────────────────────────────────
+
+def test_is_worktree_active_plans_root_plan_uses_correct_project_root(tmp_path):
+    """T3/R: plans-root plan 입력(project_root=None)에서 is_worktree_active()가
+    .worktrees/plans가 아닌 monitor-page root 기준으로 worktree 경로를 계산함을 검증.
+
+    수정 전 버그 재현 경로:
+      p.parent.parent.parent = .worktrees/plans → worktree_abs 오산출 → active=False
+    수정 후 기대:
+      .worktrees 직전 경로(.git 존재) = monitor-page → worktree_abs 정확 → active=True
+    """
+    scripts_dir = Path(__file__).parent.parent.parent / "scripts" / "plan_runner"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    from plan_worktree_helpers import is_worktree_active
+
+    # plans-root 구조: project_root/.worktrees/plans/docs/plan/test.md
+    project_root = tmp_path / "monitor-page"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+
+    impl_wt = project_root / ".worktrees" / "impl-test"
+    impl_wt.mkdir(parents=True)
+    (impl_wt / ".git").write_text("gitdir: ../../.git/worktrees/impl-test", encoding="utf-8")
+
+    plans_dir = project_root / ".worktrees" / "plans" / "docs" / "plan"
+    plans_dir.mkdir(parents=True)
+    plan_file = plans_dir / "test.md"
+    plan_file.write_text(
+        "# Test\n\n> branch: impl/test\n> worktree: .worktrees/impl-test\n",
+        encoding="utf-8",
+    )
+
+    # project_root 생략 — 버그 재현 경로
+    active, branch, wt_abs = is_worktree_active(str(plan_file))
+
+    assert active is True, (
+        f"plans-root 경로 입력 시 active=True 여야 함. "
+        f"수정 전이면 .worktrees/plans를 root로 오산출해 False가 됨. wt_abs={wt_abs}"
+    )
+    assert branch == "impl/test"
+    assert wt_abs is not None

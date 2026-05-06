@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { History, RotateCcw, RefreshCw, ScanLine, ChevronDown, ChevronRight, ChevronLeft, FileImage, ArrowRight } from 'lucide-svelte';
+	import { confirm } from '$lib/stores/confirm';
 	import { toast } from '$lib/stores/toast';
 	import { createPagePagination } from '$lib/utils/pagination.svelte';
 	import { loadCategoryMap, getCategoryName } from '../lib/categoryUtils';
@@ -84,7 +85,14 @@
 	}
 
 	async function rollback(id: number) {
-		if (!confirm('이 파일을 원래 위치로 복원하시겠습니까?')) return;
+		if (
+			!(await confirm({
+				title: '파일 복원',
+				message: '이 파일을 원래 위치로 복원하시겠습니까?',
+				confirmText: '복원',
+				variant: 'warning'
+			}))
+		) return;
 
 		try {
 			const res = await fetchWithTimeout(`/api/ic/files/${id}/rollback`, { method: 'POST' });

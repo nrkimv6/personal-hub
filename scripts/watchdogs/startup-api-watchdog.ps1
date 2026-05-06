@@ -5,6 +5,7 @@
 # api-watchdog.ps1을 호출하여 API 상태를 모니터링합니다.
 # Note: 관리자 권한으로 실행하면 NSSM 재시작이 가능합니다.
 #
+# startup probe는 liveness 전용 엔드포인트 사용 — /status는 운영 대시보드용. 2026-04-22 plan 참조
 # See: docs/2026-01-04-api-stability-improvements.md
 
 param(
@@ -41,29 +42,34 @@ if ($isAdmin) {
 }
 
 # API 서버가 응답할 때까지 대기 (최대 5분)
-$apiUrl = "http://localhost:8001/api/v1/system/status"
+$apiUrl = "http://localhost:8001/api/v1/system/liveness"
 $maxWait = 300  # 5분
 $waited = 0
 $checkInterval = 5
 
 Write-Log "Waiting for API server ($apiUrl) to be ready..."
 
+$lastProbeStatus = "none"
+
 while ($waited -lt $maxWait) {
     try {
-        $response = Invoke-WebRequest -Uri $apiUrl -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
+        $response = Invoke-WebRequest -Uri $apiUrl -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
         if ($response.StatusCode -eq 200) {
             Write-Log "API server is ready after $waited seconds"
             break
+        } else {
+            $lastProbeStatus = "ERROR: liveness probe returned $($response.StatusCode)"
+            Write-Log $lastProbeStatus
         }
     } catch {
-        # API 아직 안 됨
+        $lastProbeStatus = "EXCEPTION: $($_.Exception.Message)"
     }
 
     Start-Sleep -Seconds $checkInterval
     $waited += $checkInterval
 
     if ($waited % 30 -eq 0) {
-        Write-Log "Still waiting for API server... ($waited seconds elapsed)"
+        Write-Log "Still waiting for API server... ($waited seconds elapsed, last result: $lastProbeStatus)"
     }
 }
 

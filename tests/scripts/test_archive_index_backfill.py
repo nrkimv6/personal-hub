@@ -119,39 +119,15 @@ def test_load_whitelist_E_file_missing(tmp_path):
         m.load_whitelist(tmp_path / "nope.md")
 
 
-# ---------- render / sort ----------
+# ---------- render_row / replace_marker_block ----------
 
 def _row(d, tags=("pipeline",), title="t", one="o", path="docs/archive/x.md"):
     return m.ArchiveRow(date=d, tags=tags, title=title, one_liner=one, path=path)
 
 
-def test_render_index_O_date_desc():
-    """CORRECT/Ordering: 출력 행이 date desc."""
-    rows = [_row("2025-01-01"), _row("2026-03-20"), _row("2025-12-31")]
-    # scan_archive는 이미 정렬하지만, 여기서는 render 자체 검증을 위해 수동 정렬
-    rows_sorted = sorted(rows, key=lambda r: r.date, reverse=True)
-    out = m.render_index(rows_sorted)
-    lines = [l for l in out.splitlines() if l.startswith("|") and "---" not in l and "date" not in l]
-    dates = [l.split("|")[1].strip() for l in lines]
-    assert dates == sorted(dates, reverse=True)
-
-
-def test_render_index_R_marker_replace(tmp_path):
-    idx = _write(
-        tmp_path,
-        "INDEX.md",
-        f"# idx\n\n{m.INDEX_BEGIN}\n| old |\n{m.INDEX_END}\n",
-    )
-    rows = [_row("2026-03-20")]
-    m.write_index(rows, idx)
-    text = idx.read_text()
-    assert "| old |" not in text
-    assert "2026-03-20" in text
-
-
 def test_replace_marker_block_E_missing():
     with pytest.raises(ValueError):
-        m.replace_marker_block("no markers", m.INDEX_BEGIN, m.INDEX_END, "x")
+        m.replace_marker_block("no markers", "<!-- BEGIN -->", "<!-- END -->", "x")
 
 
 # ---------- scan_archive order ----------

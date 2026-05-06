@@ -1,5 +1,6 @@
 """LLMRequestRepository — LLMRequest ORM 쿼리 전담."""
 
+import json
 from datetime import date, datetime
 from typing import List, Optional, Tuple
 
@@ -81,9 +82,35 @@ class LLMRequestRepository:
             LLMRequest.status == "pending",
             LLMRequest.deleted_at.is_(None),
         )
-        if exclude_providers:
-            query = query.filter(LLMRequest.provider.notin_(exclude_providers))
-        return query.order_by(LLMRequest.requested_at.asc()).first()
+        requests = query.order_by(LLMRequest.requested_at.asc()).all()
+        if not exclude_providers:
+            return requests[0] if requests else None
+        excluded = set(exclude_providers)
+        for request in requests:
+            if request.provider not in excluded:
+                return request
+            if request.caller_type == "plan_archive_analyze" and self._has_allowed_candidate_provider(request, excluded):
+                return request
+        return None
+
+    @staticmethod
+    def _has_allowed_candidate_provider(request: LLMRequest, excluded: set[str]) -> bool:
+        raw_options = request.cli_options
+        if not raw_options:
+            return False
+        try:
+            options = json.loads(raw_options)
+        except (TypeError, json.JSONDecodeError):
+            return False
+        candidates = options.get("candidate_profiles") if isinstance(options, dict) else None
+        if not isinstance(candidates, list):
+            return False
+        return any(
+            isinstance(item, dict)
+            and str(item.get("engine") or "").strip()
+            and str(item.get("engine") or "").strip() not in excluded
+            for item in candidates
+        )
 
     # ── 목록 조회 ─────────────────────────────────────────────────────────
 
@@ -148,12 +175,16 @@ class LLMRequestRepository:
         )
 
     def find_stale_processing(self, threshold: datetime) -> List[LLMRequest]:
-        """threshold보다 오래된 processing 요청 조회."""
+        """threshold보다 오래된 processing 요청 조회.
+
+        processing 시작 시각(processed_at)이 있으면 우선 사용하고,
+        legacy row처럼 값이 없으면 requested_at으로 fallback한다.
+        """
         return (
             self.db.query(LLMRequest)
             .filter(
                 LLMRequest.status == "processing",
-                LLMRequest.requested_at < threshold,
+                func.coalesce(LLMRequest.processed_at, LLMRequest.requested_at) < threshold,
                 LLMRequest.deleted_at.is_(None),
             )
             .all()

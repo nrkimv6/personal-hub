@@ -9,10 +9,9 @@ import json
 import time
 import pytest
 from fastapi.testclient import TestClient
-from app.main import app
 import redis.asyncio as aioredis
 from tests.dev_runner.conftest_e2e import (
-    TEST_PLAN_FILE,
+    isolated_plan_file,
     isolated_redis_db15,
     listener_process,
     REDIS_TEST_DB,
@@ -24,6 +23,30 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 BASE_URL = "/api/v1/dev-runner"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
+
+
+def test_recent_meta_source_contract_preserves_display_fields():
+    """cleanup recent-meta는 UI 복원에 필요한 표시명/종료 필드를 보존한다."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "scripts/plan_runner/_dr_process_utils.py").read_text(encoding="utf-8")
+
+    for expected in (
+        '"plan_file"',
+        '"display_plan_name"',
+        '"engine"',
+        '"execution_count"',
+        '"log_file_path"',
+        '"stream_log_path"',
+        '"exit_reason"',
+    ):
+        assert expected in source
+
+
+def _build_test_client() -> TestClient:
+    from app.main import app
+    return TestClient(app)
 
 
 class TestRecentMetaHttp:
@@ -53,12 +76,12 @@ class TestRecentMetaHttp:
         except Exception:
             pass
 
-    def test_accepted_at_set_after_run(self, isolated_redis_db15, listener_process):
+    def test_accepted_at_set_after_run(self, isolated_redis_db15, listener_process, isolated_plan_file):
         """POST /run → accepted_at + accepted_source 키 세팅 확인"""
-        client = TestClient(app)
+        client = _build_test_client()
         payload = {
             "engine": "gemini",
-            "plan_file": TEST_PLAN_FILE,
+            "plan_file": isolated_plan_file,
             "dry_run": True,
             "test_source": "test_accepted_at_set_after_run",
         }
@@ -79,12 +102,12 @@ class TestRecentMetaHttp:
         accepted_source = isolated_redis_db15.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_source")
         assert accepted_source == "listener", f"accepted_source={accepted_source!r}"
 
-    def test_recent_meta_after_cleanup(self, isolated_redis_db15, listener_process):
+    def test_recent_meta_after_cleanup(self, isolated_redis_db15, listener_process, isolated_plan_file):
         """dry_run 완료 후 cleanup 시 recent-meta에 trigger 보존 확인"""
-        client = TestClient(app)
+        client = _build_test_client()
         payload = {
             "engine": "gemini",
-            "plan_file": TEST_PLAN_FILE,
+            "plan_file": isolated_plan_file,
             "dry_run": True,
             "test_source": "test_recent_meta_after_cleanup",
         }

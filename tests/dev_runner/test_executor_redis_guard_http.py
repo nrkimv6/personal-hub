@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
-from app.main import app
+pytestmark = pytest.mark.http
 
 BASE_URL = "/api/v1/dev-runner"
 
@@ -20,6 +20,7 @@ def dev_runner_config_isolation(tmp_path):
 
 @pytest.fixture
 def client():
+    from app.main import app
     return TestClient(app, raise_server_exceptions=True)
 
 

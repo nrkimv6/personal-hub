@@ -10,7 +10,7 @@
     processLoading,
     toggleProcessPolling,
     fetchProcessWatch,
-    handleKillProcess,
+    requestKillProcess,
     getProcessDeltaRate,
     formatProcessDelta,
     processDeltaTextClass,
@@ -119,7 +119,7 @@
                 </td>
                 <td class="px-3 py-1.5 text-center">
                   <button
-                    onclick={() => handleKillProcess(proc)}
+                    onclick={() => requestKillProcess(proc)}
                     class="h-5 w-5 inline-flex items-center justify-center rounded text-muted-foreground hover:text-error hover:bg-error-light transition-colors"
                     title="강제 종료"
                     aria-label="프로세스 강제 종료"
