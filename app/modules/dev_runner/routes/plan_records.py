@@ -84,6 +84,12 @@ from app.modules.dev_runner.schemas import (
     PlanArchiveCandidateQueueRequest,
     PlanArchiveCandidateQueueResponse,
     PlanArchiveCandidatePreviewResponse,
+    ArchiveScheduleDashboardResponse,
+    ArchiveLLMRequestListResponse,
+    ArchiveLLMRequestDetail,
+    ArchiveScheduleRunListResponse,
+    ArchiveExecutionAttemptListResponse,
+    ArchiveSchedulePauseResumeResponse,
 )
 
 
@@ -138,6 +144,438 @@ def get_archive_health(include_temp: bool = False, db: Session = Depends(get_db)
     """Plan Archive scheduler health summary."""
     svc = PlanRecordService(db)
     return svc.get_plan_archive_health(include_temp=include_temp)
+
+
+# ── Phase 4-A: dashboard + list endpoints ────────────────────────────────────
+
+@router.get("/records/archive-schedule-dashboard", response_model=ArchiveScheduleDashboardResponse)
+def get_archive_schedule_dashboard(db: Session = Depends(get_db)):
+    """archive schedule 운영 대시보드 — summary + recent N=20 rows."""
+    from app.modules.dev_runner.services.plan_record_service import PlanRecordService as _PRS
+    from app.modules.dev_runner.services.plan_archive_retrieval_readiness import get_plan_archive_retrieval_readiness
+    from app.modules.claude_worker.models.llm_request import LLMRequest
+    from app.models.plan_archive_execution import PlanArchiveExecutionAttempt, PlanArchiveExecutionJob
+    from app.models.task_schedule import TaskScheduleRun, TaskSchedule
+    from app.modules.dev_runner.schemas import (
+        ArchiveQueueSummary, ArchiveLLMRequestRow, ArchiveScheduleRunRow,
+        ArchiveExecutionAttemptRow, PlanArchiveScheduleSnapshot,
+    )
+    from datetime import timedelta
+    from sqlalchemy import func as sqlfunc
+
+    svc = _PRS(db)
+    health_raw = svc.get_plan_archive_health()
+
+    schedule_snap = health_raw.get("plan_archive_schedule")
+    schedule_obj = None
+    if schedule_snap:
+        schedule_obj = PlanArchiveScheduleSnapshot(**schedule_snap) if isinstance(schedule_snap, dict) else schedule_snap
+
+    readiness = get_plan_archive_retrieval_readiness(db)
+
+    # queue summary
+    now = datetime.utcnow()
+    cutoff_24h = now - timedelta(hours=24)
+    req_q = db.query(LLMRequest).filter(
+        LLMRequest.caller_type == "plan_archive_analyze",
+        LLMRequest.deleted_at.is_(None),
+    )
+    completed_24h = req_q.filter(
+        LLMRequest.status == "completed",
+        LLMRequest.processed_at >= cutoff_24h,
+    ).count()
+    failures_by_cat = dict(
+        db.query(LLMRequest.failure_category, sqlfunc.count(LLMRequest.id))
+        .filter(
+            LLMRequest.caller_type == "plan_archive_analyze",
+            LLMRequest.status == "failed",
+            LLMRequest.failure_category.isnot(None),
+            LLMRequest.deleted_at.is_(None),
+        )
+        .group_by(LLMRequest.failure_category)
+        .all()
+    )
+    queue_summary = ArchiveQueueSummary(
+        pending=health_raw.get("pending_or_processing_requests", 0),
+        processing=0,
+        failed=health_raw.get("failed_requests", 0),
+        completed_24h=completed_24h,
+        recent_failures_by_category=failures_by_cat,
+    )
+
+    # recent requests N=20
+    recent_reqs = (
+        req_q.order_by(LLMRequest.requested_at.desc()).limit(20).all()
+    )
+    recent_request_rows = [
+        ArchiveLLMRequestRow(
+            id=r.id,
+            status=r.status,
+            provider=r.provider or "",
+            model=r.model or "",
+            record_id=r.caller_id,
+            failure_category=r.failure_category,
+            dedupe_key=r.dedupe_key,
+            requested_at=r.requested_at.isoformat() if r.requested_at else None,
+            processed_at=r.processed_at.isoformat() if r.processed_at else None,
+            error_message=r.error_message,
+            retry_count=r.retry_count or 0,
+        )
+        for r in recent_reqs
+    ]
+
+    # recent schedule runs N=20
+    schedule = db.query(TaskSchedule).filter(
+        TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE
+    ).order_by(TaskSchedule.id.asc()).first()
+    recent_run_rows: list = []
+    if schedule:
+        recent_runs = (
+            db.query(TaskScheduleRun)
+            .filter(TaskScheduleRun.schedule_id == schedule.id)
+            .order_by(TaskScheduleRun.started_at.desc())
+            .limit(20)
+            .all()
+        )
+        recent_run_rows = [
+            ArchiveScheduleRunRow(
+                id=r.id,
+                schedule_id=r.schedule_id,
+                status=r.status,
+                started_at=r.started_at.isoformat() if r.started_at else None,
+                finished_at=r.finished_at.isoformat() if r.finished_at else None,
+                error_message=r.error_message,
+                stop_reason=r.stop_reason,
+                retry_count=r.retry_count or 0,
+            )
+            for r in recent_runs
+        ]
+
+    # recent execution attempts N=20
+    recent_attempts = (
+        db.query(PlanArchiveExecutionAttempt)
+        .order_by(PlanArchiveExecutionAttempt.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    recent_attempt_rows = [
+        ArchiveExecutionAttemptRow(
+            id=a.id,
+            job_id=a.job_id,
+            llm_request_id=a.llm_request_id,
+            record_id=a.job.plan_record_id if a.job else None,
+            attempt_index=a.attempt_index,
+            status=a.status,
+            provider=a.provider,
+            model=a.model,
+            engine=a.engine,
+            profile_name=a.profile_name,
+            error_message=a.error_message,
+            requested_at=a.requested_at.isoformat() if a.requested_at else None,
+            finished_at=a.finished_at.isoformat() if a.finished_at else None,
+        )
+        for a in recent_attempts
+    ]
+
+    health_summary = {
+        k: v for k, v in health_raw.items()
+        if k not in ("plan_archive_schedule", "latest_failed_request")
+    }
+
+    return ArchiveScheduleDashboardResponse(
+        schedule=schedule_obj,
+        health=health_summary,
+        retrieval_readiness=readiness,
+        queue_summary=queue_summary,
+        recent_requests=recent_request_rows,
+        recent_schedule_runs=recent_run_rows,
+        recent_execution_attempts=recent_attempt_rows,
+    )
+
+
+@router.get("/records/archive-llm-requests", response_model=ArchiveLLMRequestListResponse)
+def list_archive_llm_requests(
+    status: Optional[str] = None,
+    category: Optional[str] = None,
+    record_id: Optional[str] = None,
+    source_schedule_run_id: Optional[int] = None,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+):
+    """LLMRequest 목록 — status/category/record_id/시간 범위 필터, pagination."""
+    from app.modules.claude_worker.models.llm_request import LLMRequest
+    from app.modules.dev_runner.schemas import ArchiveLLMRequestRow
+
+    if page_size > 200:
+        raise HTTPException(status_code=422, detail="page_size 최대 200")
+    if page < 1:
+        page = 1
+
+    q = db.query(LLMRequest).filter(
+        LLMRequest.caller_type == "plan_archive_analyze",
+        LLMRequest.deleted_at.is_(None),
+    )
+    if status:
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        if statuses:
+            q = q.filter(LLMRequest.status.in_(statuses))
+    if category:
+        q = q.filter(LLMRequest.failure_category == category)
+    if record_id:
+        q = q.filter(LLMRequest.caller_id == str(record_id))
+    if since:
+        q = q.filter(LLMRequest.requested_at >= since)
+    if until:
+        q = q.filter(LLMRequest.requested_at <= until)
+
+    total = q.count()
+    items = q.order_by(LLMRequest.requested_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    return ArchiveLLMRequestListResponse(
+        items=[
+            ArchiveLLMRequestRow(
+                id=r.id,
+                status=r.status,
+                provider=r.provider or "",
+                model=r.model or "",
+                record_id=r.caller_id,
+                failure_category=r.failure_category,
+                dedupe_key=r.dedupe_key,
+                requested_at=r.requested_at.isoformat() if r.requested_at else None,
+                processed_at=r.processed_at.isoformat() if r.processed_at else None,
+                error_message=r.error_message,
+                retry_count=r.retry_count or 0,
+            )
+            for r in items
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+        filters={
+            "status": status,
+            "category": category,
+            "record_id": record_id,
+            "since": since.isoformat() if since else None,
+            "until": until.isoformat() if until else None,
+        },
+    )
+
+
+@router.get("/records/archive-llm-requests/{request_id}", response_model=ArchiveLLMRequestDetail)
+def get_archive_llm_request_detail(request_id: int, db: Session = Depends(get_db)):
+    """LLMRequest 상세 — prompt, result, raw_response, cli_options 포함."""
+    from app.modules.claude_worker.models.llm_request import LLMRequest
+    from app.models.plan_record import PlanEvent
+
+    r = db.query(LLMRequest).filter(
+        LLMRequest.id == request_id,
+        LLMRequest.caller_type == "plan_archive_analyze",
+        LLMRequest.deleted_at.is_(None),
+    ).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="LLMRequest not found")
+
+    # applied_request_id: plan_archive_analysis_saved 이벤트에서 derive
+    applied_request_id = None
+    is_applied = False
+    try:
+        caller_id_int = int(r.caller_id)
+        saved_event = (
+            db.query(PlanEvent)
+            .filter(
+                PlanEvent.plan_record_id == caller_id_int,
+                PlanEvent.event_type == "plan_archive_analysis_saved",
+            )
+            .order_by(PlanEvent.created_at.desc())
+            .first()
+        )
+        if saved_event and saved_event.detail:
+            import json as _json
+            detail = _json.loads(saved_event.detail) if isinstance(saved_event.detail, str) else saved_event.detail
+            applied_request_id = detail.get("request_id")
+            is_applied = (applied_request_id == r.id)
+    except (ValueError, TypeError):
+        pass
+
+    return ArchiveLLMRequestDetail(
+        id=r.id,
+        status=r.status,
+        provider=r.provider or "",
+        model=r.model or "",
+        record_id=r.caller_id,
+        failure_category=r.failure_category,
+        dedupe_key=r.dedupe_key,
+        requested_at=r.requested_at.isoformat() if r.requested_at else None,
+        processed_at=r.processed_at.isoformat() if r.processed_at else None,
+        error_message=r.error_message,
+        retry_count=r.retry_count or 0,
+        prompt=r.prompt,
+        result=r.result,
+        raw_response=r.raw_response,
+        cli_options=r.cli_options,
+        applied_request_id=applied_request_id,
+        is_applied_to_record=is_applied,
+    )
+
+
+@router.get("/records/archive-schedule-runs", response_model=ArchiveScheduleRunListResponse)
+def list_archive_schedule_runs(
+    status: Optional[str] = None,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+):
+    """TaskScheduleRun history — status/시간 범위 필터, pagination."""
+    from app.models.task_schedule import TaskScheduleRun, TaskSchedule
+    from app.modules.dev_runner.schemas import ArchiveScheduleRunRow
+
+    if page_size > 200:
+        raise HTTPException(status_code=422, detail="page_size 최대 200")
+    if page < 1:
+        page = 1
+
+    schedule = db.query(TaskSchedule).filter(
+        TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE
+    ).order_by(TaskSchedule.id.asc()).first()
+    if not schedule:
+        return ArchiveScheduleRunListResponse(total=0)
+
+    q = db.query(TaskScheduleRun).filter(TaskScheduleRun.schedule_id == schedule.id)
+    if status:
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        if statuses:
+            q = q.filter(TaskScheduleRun.status.in_(statuses))
+    if since:
+        q = q.filter(TaskScheduleRun.started_at >= since)
+    if until:
+        q = q.filter(TaskScheduleRun.started_at <= until)
+
+    total = q.count()
+    items = q.order_by(TaskScheduleRun.started_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    return ArchiveScheduleRunListResponse(
+        items=[
+            ArchiveScheduleRunRow(
+                id=r.id,
+                schedule_id=r.schedule_id,
+                status=r.status,
+                started_at=r.started_at.isoformat() if r.started_at else None,
+                finished_at=r.finished_at.isoformat() if r.finished_at else None,
+                error_message=r.error_message,
+                stop_reason=r.stop_reason,
+                retry_count=r.retry_count or 0,
+            )
+            for r in items
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+        filters={
+            "status": status,
+            "since": since.isoformat() if since else None,
+            "until": until.isoformat() if until else None,
+        },
+    )
+
+
+@router.get("/records/archive-execution-attempts", response_model=ArchiveExecutionAttemptListResponse)
+def list_archive_execution_attempts(
+    status: Optional[str] = None,
+    record_id: Optional[int] = None,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+):
+    """PlanArchiveExecutionAttempt history — status/record_id/시간 범위 필터, pagination."""
+    from app.models.plan_archive_execution import PlanArchiveExecutionAttempt, PlanArchiveExecutionJob
+    from app.modules.dev_runner.schemas import ArchiveExecutionAttemptRow
+
+    if page_size > 200:
+        raise HTTPException(status_code=422, detail="page_size 최대 200")
+    if page < 1:
+        page = 1
+
+    q = db.query(PlanArchiveExecutionAttempt)
+    if record_id is not None:
+        q = q.join(PlanArchiveExecutionJob, PlanArchiveExecutionAttempt.job_id == PlanArchiveExecutionJob.id).filter(
+            PlanArchiveExecutionJob.plan_record_id == record_id
+        )
+    if status:
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        if statuses:
+            q = q.filter(PlanArchiveExecutionAttempt.status.in_(statuses))
+    if since:
+        q = q.filter(PlanArchiveExecutionAttempt.created_at >= since)
+    if until:
+        q = q.filter(PlanArchiveExecutionAttempt.created_at <= until)
+
+    total = q.count()
+    items = q.order_by(PlanArchiveExecutionAttempt.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    return ArchiveExecutionAttemptListResponse(
+        items=[
+            ArchiveExecutionAttemptRow(
+                id=a.id,
+                job_id=a.job_id,
+                llm_request_id=a.llm_request_id,
+                record_id=a.job.plan_record_id if a.job else None,
+                attempt_index=a.attempt_index,
+                status=a.status,
+                provider=a.provider,
+                model=a.model,
+                engine=a.engine,
+                profile_name=a.profile_name,
+                error_message=a.error_message,
+                requested_at=a.requested_at.isoformat() if a.requested_at else None,
+                finished_at=a.finished_at.isoformat() if a.finished_at else None,
+            )
+            for a in items
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+        filters={
+            "status": status,
+            "record_id": record_id,
+            "since": since.isoformat() if since else None,
+            "until": until.isoformat() if until else None,
+        },
+    )
+
+
+@router_admin.post("/records/archive-schedule/pause", response_model=ArchiveSchedulePauseResumeResponse)
+def pause_archive_schedule(db: Session = Depends(get_db)):
+    """archive schedule을 pause한다 (enabled=False). admin 전용."""
+    from app.models.task_schedule import TaskSchedule
+    schedule = db.query(TaskSchedule).filter(
+        TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE
+    ).order_by(TaskSchedule.id.asc()).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Plan archive schedule not found")
+    schedule.enabled = False
+    db.commit()
+    return ArchiveSchedulePauseResumeResponse(schedule_id=schedule.id, enabled=False, action="pause")
+
+
+@router_admin.post("/records/archive-schedule/resume", response_model=ArchiveSchedulePauseResumeResponse)
+def resume_archive_schedule(db: Session = Depends(get_db)):
+    """archive schedule을 resume한다 (enabled=True). admin 전용."""
+    from app.models.task_schedule import TaskSchedule
+    schedule = db.query(TaskSchedule).filter(
+        TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE
+    ).order_by(TaskSchedule.id.asc()).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Plan archive schedule not found")
+    schedule.enabled = True
+    db.commit()
+    return ArchiveSchedulePauseResumeResponse(schedule_id=schedule.id, enabled=True, action="resume")
 
 
 def _to_retrieval_query(req: PlanArchiveRetrievalQuery) -> RetrievalQuery:

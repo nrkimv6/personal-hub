@@ -1183,6 +1183,114 @@ class WorktreeListResponse(BaseModel):
     main_dirty: MainDirtyStatus = Field(default_factory=MainDirtyStatus)
 
 
+# ── Phase 4-A: dashboard / list endpoint schemas ─────────────────────────────
+
+class ArchiveQueueSummary(BaseModel):
+    """LLMRequest queue count summary (counts only, no full rows)."""
+    pending: int = 0
+    processing: int = 0
+    failed: int = 0
+    completed_24h: int = 0
+    recent_failures_by_category: dict = Field(default_factory=dict)
+
+
+class ArchiveLLMRequestRow(BaseModel):
+    """One LLMRequest row for archive queue list."""
+    id: int
+    status: str
+    provider: str = ""
+    model: str = ""
+    record_id: Optional[str] = None
+    candidate_key: Optional[str] = None
+    source_schedule_run_id: Optional[int] = None
+    failure_category: Optional[str] = None
+    dedupe_key: Optional[str] = None
+    requested_at: Optional[str] = None
+    processed_at: Optional[str] = None
+    error_message: Optional[str] = None
+    retry_count: int = 0
+    applied_request_id: Optional[int] = None
+    is_applied_to_record: bool = False
+
+
+class ArchiveLLMRequestDetail(ArchiveLLMRequestRow):
+    """Full LLMRequest detail including prompt, result, raw_response, cli_options."""
+    prompt: Optional[str] = None
+    result: Optional[str] = None
+    raw_response: Optional[str] = None
+    cli_options: Optional[str] = None
+
+
+class ArchiveLLMRequestListResponse(BaseModel):
+    items: List[ArchiveLLMRequestRow] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    filters: dict = Field(default_factory=dict)
+
+
+class ArchiveScheduleRunRow(BaseModel):
+    """One TaskScheduleRun row for schedule history list."""
+    id: int
+    schedule_id: int
+    status: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    error_message: Optional[str] = None
+    stop_reason: Optional[str] = None
+    retry_count: int = 0
+
+
+class ArchiveScheduleRunListResponse(BaseModel):
+    items: List[ArchiveScheduleRunRow] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    filters: dict = Field(default_factory=dict)
+
+
+class ArchiveExecutionAttemptRow(BaseModel):
+    """One PlanArchiveExecutionAttempt row for execution attempt history list."""
+    id: int
+    job_id: int
+    llm_request_id: Optional[int] = None
+    record_id: Optional[int] = None
+    attempt_index: int = 1
+    status: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    engine: Optional[str] = None
+    profile_name: Optional[str] = None
+    error_message: Optional[str] = None
+    requested_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class ArchiveExecutionAttemptListResponse(BaseModel):
+    items: List[ArchiveExecutionAttemptRow] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    filters: dict = Field(default_factory=dict)
+
+
+class ArchiveScheduleDashboardResponse(BaseModel):
+    """Archive schedule dashboard summary — all in one, full rows in separate endpoints."""
+    schedule: Optional[PlanArchiveScheduleSnapshot] = None
+    health: Optional[dict] = None
+    retrieval_readiness: Optional[PlanArchiveDbReadinessResponse] = None
+    queue_summary: ArchiveQueueSummary = Field(default_factory=ArchiveQueueSummary)
+    recent_requests: List[ArchiveLLMRequestRow] = Field(default_factory=list)
+    recent_schedule_runs: List[ArchiveScheduleRunRow] = Field(default_factory=list)
+    recent_execution_attempts: List[ArchiveExecutionAttemptRow] = Field(default_factory=list)
+
+
+class ArchiveSchedulePauseResumeResponse(BaseModel):
+    schedule_id: int
+    enabled: bool
+    action: str
+
+
 __all__ = [
     'PlanEventResponse',
     'PlanRecordResponse',
@@ -1268,4 +1376,15 @@ __all__ = [
     'WorktreeCleanupResult',
     'WorktreeCleanupResponse',
     'WorktreeListResponse',
+    # Phase 4-A dashboard / list
+    'ArchiveQueueSummary',
+    'ArchiveLLMRequestRow',
+    'ArchiveLLMRequestDetail',
+    'ArchiveLLMRequestListResponse',
+    'ArchiveScheduleRunRow',
+    'ArchiveScheduleRunListResponse',
+    'ArchiveExecutionAttemptRow',
+    'ArchiveExecutionAttemptListResponse',
+    'ArchiveScheduleDashboardResponse',
+    'ArchiveSchedulePauseResumeResponse',
 ]
