@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { X, Copy, ChevronDown, ChevronRight } from 'lucide-svelte';
 	import type { ArchiveLLMRequestDetail, ArchiveRelatedRecord } from '$lib/api/plan-records';
+	import { actualTargetLabel, effectiveTargetLabel, hasTargetMismatch, requestedTargetLabel } from './planArchiveOperationsState.js';
 
 	interface Props {
 		request: ArchiveLLMRequestDetail | null;
@@ -28,10 +29,7 @@
 	}
 
 	function targetText(req: ArchiveLLMRequestDetail): string {
-		if (req.target_label) return req.target_label;
-		const model = req.model || 'default';
-		if (req.engine && req.profile_name) return `${req.engine}/${req.profile_name}/${model}`;
-		return `${req.provider}/${model}`;
+		return actualTargetLabel(req);
 	}
 
 	const parsedResult = $derived(parseJson(request?.result ?? null));
@@ -56,13 +54,23 @@
 				<!-- Meta -->
 				<div class="grid grid-cols-2 gap-2 rounded bg-muted/40 p-3 text-xs">
 					<div><span class="text-muted-foreground">상태</span> <span class="font-medium">{request.status}</span></div>
-					<div><span class="text-muted-foreground">target</span> <span class="font-medium">{targetText(request)}</span></div>
+					<div><span class="text-muted-foreground">actual target</span> <span class="font-medium">{targetText(request)}</span></div>
+					<div><span class="text-muted-foreground">requested</span> <span>{requestedTargetLabel(request)}</span></div>
+					<div><span class="text-muted-foreground">effective</span> <span>{effectiveTargetLabel(request)}</span></div>
 					<div><span class="text-muted-foreground">retry</span> <span>{request.retry_count}</span></div>
 					{#if request.failure_category}
 						<div><span class="text-muted-foreground">실패 유형</span> <span class="text-destructive">{request.failure_category}</span></div>
 					{/if}
+					{#if request.save_outcome_status}
+						<div><span class="text-muted-foreground">save</span> <span>{request.save_outcome_status}</span></div>
+					{/if}
 					{#if request.record_id}
 						<div><span class="text-muted-foreground">record_id</span> <span>{request.record_id}</span></div>
+					{/if}
+					{#if hasTargetMismatch(request)}
+						<div class="col-span-2">
+							<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">target mismatch</span>
+						</div>
 					{/if}
 					{#if request.applied_request_id}
 						<div class="col-span-2">
