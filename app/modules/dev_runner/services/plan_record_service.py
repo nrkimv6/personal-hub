@@ -45,6 +45,11 @@ def _compute_filename_hash(file_path: str) -> str:
     return hashlib.sha256(filename.encode("utf-8")).hexdigest()
 
 
+def _is_archive_path(file_path: str) -> bool:
+    """경로가 archive 등록 대상인지 보수적으로 판정."""
+    return any(part.lower() == "archive" for part in Path(file_path).parts)
+
+
 def _add_event(db: Session, record: PlanRecord, event_type: str, detail: Optional[dict] = None):
     """이벤트 추가 헬퍼"""
     event = PlanEvent(
@@ -142,6 +147,66 @@ class PlanRecordService:
         if raw_content:
             record.raw_content = raw_content
         _add_event(self.db, record, "archived", {"archive_path": new_path})
+        return record
+
+    @staticmethod
+    def _read_raw_content(file_path: str) -> Optional[str]:
+        try:
+            return Path(file_path).read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return None
+
+    def _apply_archive_metadata(self, record: PlanRecord, file_path: str, now: datetime) -> tuple[bool, bool]:
+        """archive 파일 기준 메타데이터를 DB 레코드에 반영."""
+        changed = False
+        normalized = False
+        if record.status != "archived":
+            record.status = "archived"
+            changed = True
+            normalized = True
+        if record.archived_at is None:
+            record.archived_at = now
+            changed = True
+            normalized = True
+
+        category = self._detect_project_from_path(file_path)
+        if category and record.category != category:
+            record.category = category
+            changed = True
+        if category and record.project is None:
+            record.project = category
+            changed = True
+        if record.title is None:
+            extracted_title = self._extract_title_from_md(file_path)
+            if extracted_title:
+                record.title = extracted_title
+                changed = True
+        if not record.raw_content:
+            raw_content = self._read_raw_content(file_path)
+            if raw_content:
+                record.raw_content = raw_content
+                changed = True
+        if changed:
+            record.updated_at = now
+        return changed, normalized
+
+    def _create_archive_record(self, file_path: str, now: datetime) -> PlanRecord:
+        """archive 파일용 신규 레코드 생성."""
+        category = self._detect_project_from_path(file_path)
+        record = PlanRecord(
+            filename_hash=_compute_filename_hash(file_path),
+            file_path=file_path,
+            title=self._extract_title_from_md(file_path),
+            project=category,
+            category=category,
+            status="archived",
+            archived_at=now,
+            raw_content=self._read_raw_content(file_path),
+        )
+        self.db.add(record)
+        self.db.flush()
+        _add_event(self.db, record, "created", {"file_path": file_path, "source": "sync_archive"})
+        _add_event(self.db, record, "archived", {"archive_path": file_path, "source": "sync"})
         return record
 
     def update_status(self, file_path: str, new_status: str) -> Optional[PlanRecord]:
@@ -460,9 +525,8 @@ class PlanRecordService:
 
                 existing = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
                 if existing:
-                    if existing.category != category:
-                        existing.category = category
-                        existing.updated_at = datetime.now()
+                    changed, _normalized = self._apply_archive_metadata(existing, file_str, datetime.now())
+                    if changed:
                         updated += 1
                     else:
                         skipped += 1
@@ -476,6 +540,7 @@ class PlanRecordService:
                         category=category,
                         archived_at=datetime.now(),
                         status="archived",
+                        raw_content=self._read_raw_content(file_str),
                     )
                     self.db.add(record)
                     self.db.flush()
@@ -573,6 +638,135 @@ class PlanRecordService:
 
         return result
 
+    def list_archive_candidates(
+        self,
+        registered_paths: List[dict],
+        include_temp: bool = False,
+        skip: int = 0,
+        limit: int = 200,
+    ) -> dict:
+        """archive 파일과 DB 레코드를 합쳐 실행/이관 후보를 반환."""
+        archive_entries = [entry for entry in registered_paths if entry.get("type") == "archive"]
+        files_by_hash: Dict[str, List[Path]] = {}
+        registered_by_file: Dict[str, str] = {}
+
+        for entry in archive_entries:
+            folder = Path(entry["path"])
+            if not folder.exists():
+                continue
+            files = list(folder.rglob("*.md")) if folder.is_dir() else [folder]
+            for file_path in files:
+                if not file_path.is_file() or not _is_plan_file(file_path):
+                    continue
+                file_str = str(file_path)
+                if not include_temp and "pytest-" in file_str.lower():
+                    continue
+                filename_hash = _compute_filename_hash(file_str)
+                files_by_hash.setdefault(filename_hash, []).append(file_path)
+                registered_by_file[file_str] = str(folder)
+
+        records = self.db.query(PlanRecord).all()
+        records_by_hash: Dict[str, PlanRecord] = {record.filename_hash: record for record in records}
+        archive_records = [
+            record for record in records
+            if record.archived_at is not None or (record.file_path and _is_archive_path(record.file_path))
+        ]
+        candidate_items: List[dict] = []
+
+        for filename_hash, files in files_by_hash.items():
+            record = records_by_hash.get(filename_hash)
+            all_paths = [str(file_path) for file_path in files]
+            for index, file_path in enumerate(files):
+                file_str = str(file_path)
+                stat = file_path.stat()
+                db_exists = record is not None
+                state = "matched" if db_exists else "file_only"
+                reason = "파일과 DB 레코드가 매칭됐습니다." if db_exists else "DB 레코드가 없어 DB 이관 또는 sync 대상입니다."
+                eligible_for_import = not db_exists
+                eligible_for_analysis = False
+
+                if db_exists:
+                    if record.file_path != file_str:
+                        state = "stale_path"
+                        reason = "DB file_path가 현재 archive 파일 경로와 다릅니다."
+                        eligible_for_import = True
+                    if record.archived_at is None or record.status != "archived":
+                        reason = "DB 레코드가 archive 상태로 정규화되지 않았습니다."
+                        eligible_for_import = True
+                    eligible_for_analysis = record.archived_at is not None and record.llm_processed_at is None
+
+                duplicate_paths = [path for path in all_paths if path != file_str]
+                if duplicate_paths:
+                    state = "duplicate_hash"
+                    reason = "동일 파일명 해시를 가진 archive 파일이 2개 이상입니다."
+
+                candidate_items.append({
+                    "filename_hash": filename_hash,
+                    "file_path": file_str,
+                    "file_exists": True,
+                    "db_exists": db_exists,
+                    "state": state,
+                    "reason": reason,
+                    "eligible_for_import": eligible_for_import,
+                    "eligible_for_analysis": eligible_for_analysis,
+                    "registered_path": registered_by_file.get(file_str),
+                    "duplicate_paths": duplicate_paths,
+                    "file_mtime": datetime.fromtimestamp(stat.st_mtime),
+                    "file_size": stat.st_size,
+                    "record": record,
+                })
+
+        scanned_hashes = set(files_by_hash.keys())
+        for record in archive_records:
+            if record.filename_hash in scanned_hashes:
+                continue
+            file_path = record.file_path or ""
+            if not include_temp and "pytest-" in file_path.lower():
+                continue
+            candidate_items.append({
+                "filename_hash": record.filename_hash,
+                "file_path": file_path,
+                "file_exists": Path(file_path).exists() if file_path else False,
+                "db_exists": True,
+                "state": "db_only",
+                "reason": "DB에는 archive 레코드가 있지만 등록된 archive 경로에서 파일을 찾지 못했습니다.",
+                "eligible_for_import": False,
+                "eligible_for_analysis": record.archived_at is not None and record.llm_processed_at is None,
+                "registered_path": None,
+                "duplicate_paths": [],
+                "file_mtime": None,
+                "file_size": None,
+                "record": record,
+            })
+
+        candidate_items.sort(key=lambda item: (item["state"], item["file_path"]))
+        summary = {
+            "total": len(candidate_items),
+            "returned": 0,
+            "file_only": 0,
+            "db_only": 0,
+            "matched": 0,
+            "needs_archive_normalization": 0,
+            "stale_path": 0,
+            "duplicate_hash": 0,
+            "llm_pending": 0,
+            "candidates": [],
+        }
+        for item in candidate_items:
+            state = item["state"]
+            if state in summary:
+                summary[state] += 1
+            record = item.get("record")
+            if record and (record.archived_at is None or record.status != "archived"):
+                summary["needs_archive_normalization"] += 1
+            if item["eligible_for_analysis"]:
+                summary["llm_pending"] += 1
+
+        page = candidate_items[skip:skip + limit]
+        summary["returned"] = len(page)
+        summary["candidates"] = page
+        return summary
+
     def sync_all(self, registered_paths: List[dict]) -> dict:
         """수동 동기화: 등록된 폴더 전체 스캔 → 신규/이동/missing 감지
 
@@ -580,9 +774,10 @@ class PlanRecordService:
             registered_paths: [{"path": str, "type": str}, ...]
 
         Returns:
-            {"created": int, "updated": int, "missing": int}
+            {"created": int, "updated": int, "missing": int, ...}
         """
         created = updated = missing = 0
+        archive_created = archive_updated = archive_normalized = 0
 
         # DB에 있는 모든 레코드의 hash → record 매핑
         all_records: Dict[str, PlanRecord] = {
@@ -607,35 +802,52 @@ class PlanRecordService:
                     continue
                 if not _is_plan_file(f):
                     continue
-                h = _compute_filename_hash(str(f))
+                file_str = str(f)
+                is_archive_entry = entry.get("type") == "archive"
+                h = _compute_filename_hash(file_str)
                 seen_hashes.add(h)
                 if h not in all_records:
                     # 신규
-                    record = self.get_or_create(str(f))
+                    if is_archive_entry:
+                        record = self._create_archive_record(file_str, datetime.now())
+                        archive_created += 1
+                    else:
+                        record = self.get_or_create(file_str)
+                    all_records[h] = record
                     created += 1
                 else:
                     record = all_records[h]
                     # title/project 백필 (기존 레코드에 없으면 갱신)
                     updated_fields = False
                     if record.title is None:
-                        extracted_title = self._extract_title_from_md(str(f))
+                        extracted_title = self._extract_title_from_md(file_str)
                         if extracted_title:
                             record.title = extracted_title
                             updated_fields = True
                     if record.project is None:
-                        detected_project = self._detect_project_from_path(str(f))
+                        detected_project = self._detect_project_from_path(file_str)
                         if detected_project:
                             record.project = detected_project
                             updated_fields = True
+                    if is_archive_entry:
+                        archive_changed, normalized = self._apply_archive_metadata(record, file_str, datetime.now())
+                        if archive_changed:
+                            updated_fields = True
+                            archive_updated += 1
+                        if normalized:
+                            archive_normalized += 1
+                            _add_event(self.db, record, "archived", {"archive_path": file_str, "source": "sync"})
                     if updated_fields:
                         record.updated_at = datetime.now()
-                    if record.file_path != str(f):
+                        updated += 1
+                    if record.file_path != file_str:
                         # 경로 변경
                         old = record.file_path
-                        record.file_path = str(f)
+                        record.file_path = file_str
                         record.updated_at = datetime.now()
-                        _add_event(self.db, record, "path_changed", {"from": old, "to": str(f)})
-                        updated += 1
+                        _add_event(self.db, record, "path_changed", {"from": old, "to": file_str})
+                        if not updated_fields:
+                            updated += 1
 
         # DB에 있지만 스캔에서 발견 안 된 것 → missing
         for h, record in all_records.items():
@@ -644,4 +856,11 @@ class PlanRecordService:
                 missing += 1
 
         self.db.commit()
-        return {"created": created, "updated": updated, "missing": missing}
+        return {
+            "created": created,
+            "updated": updated,
+            "missing": missing,
+            "archive_created": archive_created,
+            "archive_updated": archive_updated,
+            "archive_normalized": archive_normalized,
+        }

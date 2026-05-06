@@ -25,7 +25,8 @@ from app.modules.dev_runner.services.plan_record_service import PlanRecordServic
 from app.modules.dev_runner.services.plan_service import plan_service as _plan_service
 from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
-    PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse
+    PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse,
+    PlanRecordsSyncResponse, ArchiveCandidateSummaryResponse,
 )
 
 
@@ -80,6 +81,25 @@ def list_records(
         project=project, status=status, category=category, tags=tags_list,
         q=q, date_from=date_from, date_to=date_to,
         skip=skip, limit=limit, deep=deep,
+    )
+
+
+@router.get("/records/archive-candidates", response_model=ArchiveCandidateSummaryResponse)
+def list_archive_candidates(
+    include_temp: bool = False,
+    skip: int = 0,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+):
+    """archive 파일과 DB 레코드를 합친 실행/이관 후보 목록."""
+    registered = _plan_service.list_registered_paths()
+    paths = [{"path": r.path, "type": r.path_type} for r in registered]
+    svc = PlanRecordService(db)
+    return svc.list_archive_candidates(
+        paths,
+        include_temp=include_temp,
+        skip=skip,
+        limit=limit,
     )
 
 
@@ -170,7 +190,7 @@ def import_archived(archive_dir: Optional[str] = None, db: Session = Depends(get
     return total
 
 
-@router.post("/records/sync")
+@router.post("/records/sync", response_model=PlanRecordsSyncResponse)
 def sync_records(db: Session = Depends(get_db)):
     registered = _plan_service.list_registered_paths()
     paths = [{"path": r.path, "type": r.path_type} for r in registered]

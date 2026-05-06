@@ -191,6 +191,27 @@ class TestSyncEndpoint:
         assert "created" in data
         assert "updated" in data
         assert "missing" in data
+        assert "archive_created" in data
+        assert "archive_normalized" in data
+
+    def test_archive_candidates_endpoint(self, client, tmp_path):
+        """archive 후보 엔드포인트 → 파일/DB 후보 요약 반환"""
+        archive_dir = tmp_path / "archive" / "common"
+        archive_dir.mkdir(parents=True)
+        (archive_dir / "2026-05-06_http-archive-candidate.md").write_text("# HTTP Candidate\n", encoding="utf-8")
+
+        registered = [type("RegisteredPath", (), {"path": str(tmp_path / "archive"), "path_type": "archive"})()]
+        with patch(
+            "app.modules.dev_runner.routes.plan_records._plan_service.list_registered_paths",
+            return_value=registered,
+        ):
+            resp = client.get("/api/v1/plans/records/archive-candidates?include_temp=true")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 1
+        assert data["file_only"] >= 1
+        assert len(data["candidates"]) >= 1
 
 
 # ========== /api/v1/plans/events ==========

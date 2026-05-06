@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { planRecordsApi, archiveApi, type PlanRecord, type ImportArchivedResult, type ArchivePreviewItem, type DuplicateItem } from '$lib/api/plan-records';
+  import { planRecordsApi, archiveApi, type PlanRecord, type ImportArchivedResult, type ArchivePreviewItem, type DuplicateItem, type SyncResult, type ArchiveCandidateSummary } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
+  import { llmApi, type LLMRequest, type ProviderInfo } from '$lib/api/system';
   import MemoEditor from './MemoEditor.svelte';
   import PlanViewer from './PlanViewer.svelte';
 
@@ -47,6 +48,13 @@
   // ── DB 이관 ───────────────────────────────────────────────
   let importLoading = false;
   let importResult: ImportArchivedResult | null = null;
+  let syncLoading = false;
+  let syncResult: SyncResult | null = null;
+  let candidatesLoading = false;
+  let candidateSummary: ArchiveCandidateSummary | null = null;
+  let candidateError = '';
+  let providers: ProviderInfo[] = [];
+  let providersError = '';
 
   async function runImportArchived() {
     importLoading = true;
@@ -55,7 +63,7 @@
       const res = await planRecordsApi.importArchived();
       importResult = res;
       showToast(`DB 이관 완료: ${res.created}개 생성, ${res.updated}개 갱신, ${res.skipped}개 스킵`);
-      loadRecords();
+      await Promise.all([loadRecords(), loadLlmStats(), loadCandidates()]);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'DB 이관 실패');
     } finally {
@@ -63,8 +71,51 @@
     }
   }
 
+  async function runSync() {
+    syncLoading = true;
+    syncResult = null;
+    try {
+      const res = await planRecordsApi.sync();
+      syncResult = res;
+      showToast(`Sync 완료: archive 생성 ${res.archive_created}, 정규화 ${res.archive_normalized}`);
+      await Promise.all([loadRecords(), loadLlmStats(), loadCandidates()]);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Sync 실패');
+    } finally {
+      syncLoading = false;
+    }
+  }
+
+  async function loadCandidates() {
+    candidatesLoading = true;
+    candidateError = '';
+    try {
+      candidateSummary = await planRecordsApi.listArchiveCandidates({ limit: 80 });
+    } catch (e) {
+      candidateError = e instanceof Error ? e.message : '후보 목록 로드 실패';
+    } finally {
+      candidatesLoading = false;
+    }
+  }
+
+  async function loadProviders() {
+    providersError = '';
+    try {
+      providers = await llmApi.getProviders();
+    } catch (e) {
+      providersError = e instanceof Error ? e.message : 'provider 로드 실패';
+    }
+  }
+
   // LLM 처리 현황 (DB 레코드 통계)
   let llmStats: { total: number; processed: number; pending: number } | null = null;
+  let llmRequests: LLMRequest[] = [];
+  let llmRequestTotal = 0;
+  let llmLoading = false;
+  let llmError = '';
+  let selectedRequest: LLMRequest | null = null;
+  let requestDetailRecord: PlanRecord | null = null;
+  let requestDetailLoading = false;
 
   async function loadLlmStats() {
     try {
@@ -74,6 +125,38 @@
       llmStats = { total, processed, pending: total - processed };
     } catch (e) {
       // 통계 로드 실패는 무시
+    }
+  }
+
+  async function loadArchiveRequests() {
+    llmLoading = true;
+    llmError = '';
+    try {
+      const res = await llmApi.list({ caller_type: 'plan_archive_analyze', page: 1, page_size: 25 });
+      llmRequests = res.items;
+      llmRequestTotal = res.total;
+    } catch (e) {
+      llmError = e instanceof Error ? e.message : 'LLM 요청 로드 실패';
+    } finally {
+      llmLoading = false;
+    }
+  }
+
+  async function openRequestDetail(req: LLMRequest) {
+    requestDetailLoading = true;
+    selectedRequest = req;
+    requestDetailRecord = records.find((record) => record.filename_hash === req.caller_id) ?? null;
+    try {
+      selectedRequest = await llmApi.get(req.id);
+      requestDetailRecord = records.find((record) => record.filename_hash === selectedRequest?.caller_id) ?? requestDetailRecord;
+      if (!requestDetailRecord && selectedRequest?.caller_id) {
+        const archivedRecords = await planRecordsApi.list({ status: 'archived', limit: 1000 });
+        requestDetailRecord = archivedRecords.find((record) => record.filename_hash === selectedRequest?.caller_id) ?? null;
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '요청 상세 로드 실패');
+    } finally {
+      requestDetailLoading = false;
     }
   }
 
@@ -224,9 +307,40 @@
     return new Date(iso).toLocaleDateString('ko-KR');
   }
 
+  function formatDateTime(iso: string | null | undefined) {
+    if (!iso) return '-';
+    return new Date(iso).toLocaleString('ko-KR');
+  }
+
+  function summarizeResult(value: unknown): string {
+    if (value == null) return '-';
+    if (typeof value === 'string') return value.length > 80 ? `${value.slice(0, 80)}...` : value;
+    try {
+      const text = JSON.stringify(value);
+      return text.length > 80 ? `${text.slice(0, 80)}...` : text;
+    } catch {
+      return String(value);
+    }
+  }
+
+  function toPrettyJson(value: unknown): string {
+    if (value == null) return '-';
+    if (typeof value === 'string') {
+      try {
+        return JSON.stringify(JSON.parse(value), null, 2);
+      } catch {
+        return value;
+      }
+    }
+    return JSON.stringify(value, null, 2);
+  }
+
   onMount(() => {
     loadRecords();
     loadLlmStats();
+    loadCandidates();
+    loadArchiveRequests();
+    loadProviders();
   });
 </script>
 
@@ -265,10 +379,17 @@
           </span>
         {/if}
         <button
+          class="px-3 py-1 text-xs rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-700 dark:bg-emerald-900 dark:hover:bg-emerald-800 dark:text-emerald-200 disabled:opacity-50"
+          onclick={runSync}
+          disabled={syncLoading}
+          title="등록된 경로를 스캔해 파일↔DB를 동기화합니다. archive 경로 파일에 archived_at을 자동 설정합니다."
+        >{syncLoading ? '동기화 중...' : '파일/DB 동기화'}</button>
+        <button
           class="px-3 py-1 text-xs rounded bg-green-100 hover:bg-green-200 text-green-700 dark:bg-green-900 dark:hover:bg-green-800 dark:text-green-200 disabled:opacity-50"
           onclick={runImportArchived}
           disabled={importLoading}
-        >{importLoading ? 'DB 이관 중...' : 'DB 이관'}</button>
+          title="archive 경로의 파일을 DB에 일괄 등록합니다 (DB 이관). 이미 등록된 레코드는 category만 업데이트합니다."
+        >{importLoading ? '이관 중...' : 'DB 이관'}</button>
         <button
           class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
           onclick={openDuplicatesModal}
@@ -279,8 +400,87 @@
         >정리</button>
         <button
           class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-          onclick={() => loadRecords()}
+          onclick={() => { loadRecords(); loadLlmStats(); loadCandidates(); loadArchiveRequests(); }}
         >새로고침</button>
+      </div>
+    </div>
+
+    <!-- archive 후보/실행 대상 상태 -->
+    <div class="mb-3 grid grid-cols-1 xl:grid-cols-2 gap-3">
+      <div class="border border-border rounded p-3">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <h3 class="text-xs font-semibold text-foreground">Archive 후보</h3>
+          {#if syncResult}
+            <span class="text-xs text-muted-foreground">
+              sync: 생성 {syncResult.archive_created}, 갱신 {syncResult.archive_updated}, 정규화 {syncResult.archive_normalized}
+            </span>
+          {/if}
+        </div>
+        {#if candidateError}
+          <p class="text-xs text-red-500">{candidateError}</p>
+        {:else if candidatesLoading && !candidateSummary}
+          <p class="text-xs text-muted-foreground">후보 로드 중...</p>
+        {:else if candidateSummary}
+          <div class="flex flex-wrap gap-1.5 mb-2 text-xs">
+            <span class="px-2 py-0.5 rounded bg-muted text-muted-foreground">전체 {candidateSummary.total}</span>
+            <span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200">파일만 {candidateSummary.file_only}</span>
+            <span class="px-2 py-0.5 rounded bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-200">정규화 {candidateSummary.needs_archive_normalization}</span>
+            <span class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">분석대기 {candidateSummary.llm_pending}</span>
+            <span class="px-2 py-0.5 rounded bg-muted text-muted-foreground">DB만 {candidateSummary.db_only}</span>
+          </div>
+          <div class="max-h-36 overflow-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="text-left text-muted-foreground border-b border-border">
+                  <th class="pb-1 pr-2 font-medium">상태</th>
+                  <th class="pb-1 pr-2 font-medium">파일</th>
+                  <th class="pb-1 font-medium">대상</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each candidateSummary.candidates.filter(c => c.state !== 'matched' || c.eligible_for_analysis).slice(0, 12) as candidate}
+                  <tr class="border-b border-border/50">
+                    <td class="py-1 pr-2 whitespace-nowrap">{candidate.state}</td>
+                    <td class="py-1 pr-2 font-mono truncate max-w-[16rem]" title={candidate.file_path}>
+                      {candidate.file_path.split(/[\\/]/).pop()}
+                    </td>
+                    <td class="py-1">
+                      {#if candidate.eligible_for_analysis}
+                        <span class="text-blue-600 dark:text-blue-300">분석</span>
+                      {:else if candidate.eligible_for_import}
+                        <span class="text-yellow-700 dark:text-yellow-300">sync/이관</span>
+                      {:else}
+                        <span class="text-muted-foreground">-</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+
+      <div class="border border-border rounded p-3">
+        <h3 class="text-xs font-semibold text-foreground mb-2">LLM 실행 대상</h3>
+        {#if providersError}
+          <p class="text-xs text-red-500">{providersError}</p>
+        {:else}
+          <div class="flex flex-wrap gap-2 text-xs">
+            {#each providers as provider}
+              <span class="px-2 py-1 rounded border border-border bg-background">
+                <span class="font-semibold">{provider.key}</span>
+                <span class="text-muted-foreground"> / {provider.default_model || provider.models?.[0] || 'default'}</span>
+                {#if provider.key === 'codex'}
+                  <span class="ml-1 text-emerald-600 dark:text-emerald-300">profile 불필요</span>
+                {/if}
+              </span>
+            {/each}
+            {#if providers.length === 0}
+              <span class="text-muted-foreground">provider 정보 없음</span>
+            {/if}
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -416,6 +616,60 @@
         </button>
       {/if}
     {/if}
+
+    <div class="mt-4 border-t border-border pt-3">
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <h3 class="text-xs font-semibold text-foreground">Archive LLM 요청</h3>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-muted-foreground">총 {llmRequestTotal}</span>
+          <button
+            class="px-2 py-0.5 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
+            onclick={loadArchiveRequests}
+            disabled={llmLoading}
+            title="LLM 실행 이력을 DB에서 다시 불러옵니다. 파일/DB 동기화와 별개입니다."
+          >{llmLoading ? '로드 중...' : '실행 이력 Sync'}</button>
+        </div>
+      </div>
+      {#if llmError}
+        <p class="text-xs text-red-500">{llmError}</p>
+      {:else if llmRequests.length === 0}
+        <p class="text-xs text-muted-foreground">plan_archive_analyze 요청이 없습니다.</p>
+      {:else}
+        <div class="max-h-56 overflow-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-left text-muted-foreground border-b border-border">
+                <th class="pb-1 pr-2 font-medium">ID</th>
+                <th class="pb-1 pr-2 font-medium">상태</th>
+                <th class="pb-1 pr-2 font-medium">요청</th>
+                <th class="pb-1 pr-2 font-medium">provider/model</th>
+                <th class="pb-1 pr-2 font-medium">결과</th>
+                <th class="pb-1 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each llmRequests as req}
+                <tr class="border-b border-border/50">
+                  <td class="py-1 pr-2 font-mono">#{req.id}</td>
+                  <td class="py-1 pr-2">{req.status}</td>
+                  <td class="py-1 pr-2 whitespace-nowrap">{formatDateTime(req.requested_at)}</td>
+                  <td class="py-1 pr-2">{req.provider || '-'} / {req.model || 'default'}</td>
+                  <td class="py-1 pr-2 truncate max-w-[18rem]" title={summarizeResult(req.result)}>
+                    {summarizeResult(req.result)}
+                  </td>
+                  <td class="py-1">
+                    <button
+                      class="px-2 py-0.5 rounded bg-muted hover:bg-secondary text-muted-foreground"
+                      onclick={() => openRequestDetail(req)}
+                    >보기</button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
   </div>
 
   <!-- 상세 패널 -->
@@ -455,6 +709,79 @@
     </div>
   {/if}
 </div>
+
+<!-- LLM 요청/DB 저장값 상세 -->
+{#if selectedRequest}
+  <div
+    class="fixed inset-0 z-40 bg-black/40 flex items-center justify-center"
+    onclick={(e) => { if (e.target === e.currentTarget) { selectedRequest = null; requestDetailRecord = null; } }}
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="bg-background border border-border rounded-lg shadow-xl w-full max-w-5xl max-h-[86vh] flex flex-col p-5">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-sm font-semibold text-foreground">LLM 요청 #{selectedRequest.id}</h2>
+          <p class="text-xs text-muted-foreground font-mono">{selectedRequest.caller_id}</p>
+        </div>
+        <button
+          class="text-muted-foreground hover:text-foreground text-xs"
+          onclick={() => { selectedRequest = null; requestDetailRecord = null; }}
+        >닫기</button>
+      </div>
+
+      {#if requestDetailLoading}
+        <p class="text-xs text-muted-foreground">상세 로드 중...</p>
+      {/if}
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 overflow-auto text-xs">
+        <div class="space-y-3">
+          <div>
+            <h3 class="font-semibold text-foreground mb-1">응답 result</h3>
+            <pre class="max-h-64 overflow-auto rounded border border-border bg-muted p-2 whitespace-pre-wrap">{toPrettyJson(selectedRequest.result)}</pre>
+          </div>
+          <div>
+            <h3 class="font-semibold text-foreground mb-1">raw_response</h3>
+            <pre class="max-h-48 overflow-auto rounded border border-border bg-muted p-2 whitespace-pre-wrap">{selectedRequest.raw_response || '-'}</pre>
+          </div>
+        </div>
+        <div class="space-y-3">
+          <div>
+            <h3 class="font-semibold text-foreground mb-1">요청 메타</h3>
+            <dl class="grid grid-cols-[7rem_1fr] gap-x-2 gap-y-1 rounded border border-border p-2">
+              <dt class="text-muted-foreground">status</dt><dd>{selectedRequest.status}</dd>
+              <dt class="text-muted-foreground">provider/model</dt><dd>{selectedRequest.provider || '-'} / {selectedRequest.model || 'default'}</dd>
+              <dt class="text-muted-foreground">retry_count</dt><dd>{selectedRequest.retry_count ?? 0}</dd>
+              <dt class="text-muted-foreground">error</dt><dd>{selectedRequest.error_message || '-'}</dd>
+              <dt class="text-muted-foreground">cli_options</dt><dd><pre class="whitespace-pre-wrap">{toPrettyJson(selectedRequest.cli_options)}</pre></dd>
+            </dl>
+          </div>
+          <div>
+            <h3 class="font-semibold text-foreground mb-1">DB 저장값</h3>
+            {#if requestDetailRecord}
+              <dl class="grid grid-cols-[7rem_1fr] gap-x-2 gap-y-1 rounded border border-border p-2">
+                <dt class="text-muted-foreground">record_id</dt><dd>{requestDetailRecord.id}</dd>
+                <dt class="text-muted-foreground">category</dt><dd>{requestDetailRecord.category || '-'}</dd>
+                <dt class="text-muted-foreground">tags</dt><dd>{requestDetailRecord.tags?.join(', ') || '-'}</dd>
+                <dt class="text-muted-foreground">summary</dt><dd>{requestDetailRecord.summary || '-'}</dd>
+                <dt class="text-muted-foreground">intent</dt><dd>{requestDetailRecord.intent || '-'}</dd>
+                <dt class="text-muted-foreground">trigger</dt><dd>{requestDetailRecord.trigger || '-'}</dd>
+                <dt class="text-muted-foreground">scope</dt><dd>{requestDetailRecord.scope?.join(', ') || '-'}</dd>
+                <dt class="text-muted-foreground">processed_at</dt><dd>{formatDateTime(requestDetailRecord.llm_processed_at)}</dd>
+              </dl>
+            {:else}
+              <p class="rounded border border-border p-2 text-muted-foreground">현재 페이지 목록에서 매칭되는 DB 레코드를 찾지 못했습니다.</p>
+            {/if}
+          </div>
+          <div>
+            <h3 class="font-semibold text-foreground mb-1">prompt</h3>
+            <pre class="max-h-64 overflow-auto rounded border border-border bg-muted p-2 whitespace-pre-wrap">{selectedRequest.prompt || '-'}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <!-- 정리 미리보기 모달 -->
 {#if showOrganizeModal}

@@ -31,10 +31,24 @@ export interface PlanRecord {
 	recurrence_count: number;
 	chain_root_hash: string | null;
 	recurrence_suggestion: string | null;
+	intent: string | null;
+	trigger: string | null;
+	scope: string[] | null;
+	plan_date: string | null;
+	applied_at: string | null;
 	llm_processed_at: string | null;
 	created_at: string;
 	updated_at: string;
 	events?: PlanEvent[];
+}
+
+export interface SyncResult {
+	created: number;
+	updated: number;
+	missing: number;
+	archive_created: number;
+	archive_updated: number;
+	archive_normalized: number;
 }
 
 export interface ImportArchivedResult {
@@ -42,6 +56,35 @@ export interface ImportArchivedResult {
 	updated: number;
 	skipped: number;
 	errors: string[];
+}
+
+export interface ArchiveCandidate {
+	filename_hash: string;
+	file_path: string;
+	file_exists: boolean;
+	db_exists: boolean;
+	state: string;
+	reason: string;
+	eligible_for_import: boolean;
+	eligible_for_analysis: boolean;
+	registered_path: string | null;
+	duplicate_paths: string[];
+	file_mtime: string | null;
+	file_size: number | null;
+	record: PlanRecord | null;
+}
+
+export interface ArchiveCandidateSummary {
+	total: number;
+	returned: number;
+	file_only: number;
+	db_only: number;
+	matched: number;
+	needs_archive_normalization: number;
+	stale_path: number;
+	duplicate_hash: number;
+	llm_pending: number;
+	candidates: ArchiveCandidate[];
 }
 
 // ============================================================
@@ -129,9 +172,21 @@ export const planRecordsApi = {
 	 * 수동 동기화 (등록된 경로 전체 스캔)
 	 */
 	sync: () =>
-		planRecordsRequest<{ created: number; updated: number; missing: number }>('/records/sync', {
+		planRecordsRequest<SyncResult>('/records/sync', {
 			method: 'POST'
 		}),
+
+	/**
+	 * archive 파일 + DB 실행 후보 목록
+	 */
+	listArchiveCandidates: (params?: { include_temp?: boolean; skip?: number; limit?: number }) => {
+		const q = new URLSearchParams();
+		if (params?.include_temp != null) q.set('include_temp', String(params.include_temp));
+		if (params?.skip != null) q.set('skip', String(params.skip));
+		if (params?.limit != null) q.set('limit', String(params.limit));
+		const qs = q.toString();
+		return planRecordsRequest<ArchiveCandidateSummary>(`/records/archive-candidates${qs ? '?' + qs : ''}`);
+	},
 
 	/**
 	 * archived plan 일괄 DB 이관

@@ -18,6 +18,39 @@ from app.modules.claude_worker.services.llm_service import LLMService
 logger = logging.getLogger(__name__)
 
 
+def _has_newer_plan_archive_result(db: Session, request) -> bool:
+    """동일 archive에 대해 더 최신 completed 요청이 있으면 오래된 저장을 막는다."""
+    try:
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+        from sqlalchemy import and_
+
+        raw_request_id = getattr(request, "id", None)
+        request_id = raw_request_id if isinstance(raw_request_id, int) else 0
+        caller_type = getattr(request, "caller_type", None)
+        if not isinstance(caller_type, str) or not caller_type:
+            caller_type = "plan_archive_analyze"
+        newer = db.query(LLMRequest).filter(
+            and_(
+                LLMRequest.caller_type == caller_type,
+                LLMRequest.caller_id == request.caller_id,
+                LLMRequest.status == "completed",
+                LLMRequest.result.isnot(None),
+                LLMRequest.id > request_id,
+            )
+        ).order_by(LLMRequest.id.desc()).first()
+        return newer is not None
+    except Exception as e:
+        logger.warning(f"_has_newer_plan_archive_result check failed: {e}")
+        return False
+
+
+def _json_safe_request_attr(request, name: str):
+    value = getattr(request, name, None)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return None
+
+
 def save_plan_archive_result(db: Session, request, result: dict) -> bool:
     """plan_archive_analyze caller_type 결과 저장
 
@@ -34,6 +67,13 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         record = db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
         if not record:
             logger.error(f"save_plan_archive_result: record not found for hash={filename_hash}")
+            return False
+        if _has_newer_plan_archive_result(db, request):
+            logger.warning(
+                "save_plan_archive_result: skipped stale request id=%s hash=%s",
+                getattr(request, "id", None),
+                filename_hash,
+            )
             return False
 
         llm_result = result.get("result") or {}
@@ -90,6 +130,29 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         # 반복 감지 트리거
         if record.intent and record.scope:
             detect_recurrence(db, record)
+
+        try:
+            from app.models.plan_record import PlanEvent
+            event = PlanEvent(
+                plan_record_id=record.id,
+                event_type="plan_archive_analysis_saved",
+                detail={
+                    "request_id": _json_safe_request_attr(request, "id"),
+                    "provider": _json_safe_request_attr(request, "provider"),
+                    "model": _json_safe_request_attr(request, "model"),
+                    "category": record.category,
+                    "tags": record.tags,
+                    "summary": record.summary,
+                    "intent": record.intent,
+                    "trigger": record.trigger,
+                    "scope": record.scope,
+                },
+            )
+            db.add(event)
+            db.commit()
+        except Exception as event_error:
+            db.rollback()
+            logger.warning(f"save_plan_archive_result: event snapshot failed: {event_error}")
         
         return True
     except Exception as e:
