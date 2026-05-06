@@ -9,23 +9,26 @@ Phase T3 focuses on the post-migration contract:
 import uuid
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.database import get_db
 from app.models.business import Business
 from app.models.biz_item import BizItem
 from app.models.browser_profile import BrowserProfile
 from app.models.service_account import ServiceAccount
 from app.models.monitor_schedule import MonitorSchedule
+from app.services.schedule_service import ScheduleService
 from app.worker.naver_monitor_worker import NaverMonitorWorker
 
 
 @pytest.fixture
 def client(test_db_session):
+    from app.database import get_db
+    from app.main import app
+
     def override_get_db():
         yield test_db_session
 
@@ -214,6 +217,7 @@ def test_worker_run_group_rotation_selects_same_date_rows_in_round_robin(test_db
             "business_pk": seeded_schedule_context["business"].id,
             "naver_biz_item_id": item.biz_item_id,
             "business_name": seeded_schedule_context["business"].name,
+            "business_type_id": seeded_schedule_context["business"].business_type_id,
             "naver_business_id": seeded_schedule_context["business"].business_id,
         }
     )
@@ -233,6 +237,7 @@ def test_worker_run_group_rotation_selects_same_date_rows_in_round_robin(test_db
             "business_pk": seeded_schedule_context["business"].id,
             "naver_biz_item_id": item.biz_item_id,
             "business_name": seeded_schedule_context["business"].name,
+            "business_type_id": seeded_schedule_context["business"].business_type_id,
             "naver_business_id": seeded_schedule_context["business"].business_id,
         }
     )
@@ -241,6 +246,12 @@ def test_worker_run_group_rotation_selects_same_date_rows_in_round_robin(test_db
     assert list(worker._run_groups.keys()) == [run_group_key]
     assert worker._active_schedules[first.id]["run_group_size"] == 2
     assert worker._active_schedules[second.id]["run_group_size"] == 2
+    assert worker._active_schedules[first.id]["business_type_id"] == seeded_schedule_context["business"].business_type_id
+    assert worker._active_schedules[first.id]["business_id"] == seeded_schedule_context["business"].business_id
+    assert worker._active_schedules[first.id]["item_biz_item_id"] == item.biz_item_id
+    assert worker._active_schedules[second.id]["business_type_id"] == seeded_schedule_context["business"].business_type_id
+    assert worker._active_schedules[second.id]["business_id"] == seeded_schedule_context["business"].business_id
+    assert worker._active_schedules[second.id]["item_biz_item_id"] == item.biz_item_id
 
     selected_ids = [
         worker._select_next_schedule_for_group(run_group_key)["id"]
@@ -251,17 +262,144 @@ def test_worker_run_group_rotation_selects_same_date_rows_in_round_robin(test_db
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_schedule_context_preserves_naver_required_keys_through_worker(
+    test_db_session,
+    seeded_schedule_context,
+):
+    item = seeded_schedule_context["item"]
+    business = seeded_schedule_context["business"]
+
+    schedule = MonitorSchedule(
+        biz_item_id=item.id,
+        service_account_id=None,
+        date="2026-05-06",
+        times="[\"10:00\"]",
+        is_enabled=True,
+        run_status="queued",
+        monitoring_mode="anonymous",
+    )
+    test_db_session.add(schedule)
+    test_db_session.commit()
+    test_db_session.refresh(schedule)
+
+    contexts = ScheduleService().get_all_with_context(
+        test_db_session,
+        is_enabled=True,
+        service_type="naver",
+    )
+    ctx = next(row for row in contexts if row["id"] == schedule.id)
+
+    assert ctx["business_type_id"] == business.business_type_id
+    assert ctx["business_id"] == business.business_id
+    assert ctx["item_biz_item_id"] == item.biz_item_id
+    assert ctx["date"] == schedule.date
+
+    worker = NaverMonitorWorker()
+    worker._schedule_monitor_service = MagicMock()
+    worker._schedule_monitor_service.get_schedule.return_value = dict(ctx)
+    checked_at = datetime(2026, 5, 6, 12, 0, 0)
+    worker._execute_monitoring_cycle = AsyncMock(return_value={
+        "checked_at": checked_at,
+        "next_run_time": checked_at + timedelta(seconds=60),
+        "event_status": "no_slots",
+        "last_slots": [],
+        "last_data_hash": "hash-context",
+        "error_message": None,
+    })
+
+    with patch.object(worker, "_update_schedule_run_state", AsyncMock()):
+        await worker._check_schedule({
+            "id": schedule.id,
+            "biz_item_id": item.id,
+            "date": schedule.date,
+            "naver_business_id": business.business_id,
+            "naver_biz_item_id": item.biz_item_id,
+        })
+
+    runtime_ctx = worker._execute_monitoring_cycle.await_args.args[0]
+    assert runtime_ctx["business_type_id"] == business.business_type_id
+    assert runtime_ctx["business_id"] == business.business_id
+    assert runtime_ctx["item_biz_item_id"] == item.biz_item_id
+    assert runtime_ctx["naver_business_id"] == business.business_id
+    assert runtime_ctx["naver_biz_item_id"] == item.biz_item_id
+    assert runtime_ctx["_missing_context_keys"] == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_schedule_context_missing_fresh_row_is_deferred_without_cycle_repeat(
+    test_db_session,
+    seeded_schedule_context,
+):
+    item = seeded_schedule_context["item"]
+    business = seeded_schedule_context["business"]
+
+    schedule = MonitorSchedule(
+        biz_item_id=item.id,
+        service_account_id=None,
+        date="2026-05-08",
+        times="[\"10:00\"]",
+        is_enabled=True,
+        run_status="queued",
+        next_run_time=datetime.now() - timedelta(seconds=1),
+        error_count=0,
+    )
+    test_db_session.add(schedule)
+    test_db_session.commit()
+    test_db_session.refresh(schedule)
+
+    worker = NaverMonitorWorker()
+    worker._schedule_monitor_service = MagicMock()
+    worker._schedule_monitor_service.get_schedule.return_value = None
+    worker._execute_monitoring_cycle = AsyncMock()
+    worker._store_active_schedule({
+        "id": schedule.id,
+        "biz_item_id": item.id,
+        "service_account_id": None,
+        "date": schedule.date,
+        "time_range": None,
+        "times": schedule.times,
+        "last_check_time": None,
+        "next_run_time": schedule.next_run_time,
+        "interval": None,
+        "is_enabled": True,
+        "run_status": "queued",
+        "business_pk": business.id,
+        "business_type_id": business.business_type_id,
+        "naver_business_id": business.business_id,
+        "naver_biz_item_id": item.biz_item_id,
+    })
+
+    with patch.object(test_db_session, "close", return_value=None), patch(
+        "app.worker.naver_monitor_worker.SessionLocal",
+        return_value=test_db_session,
+    ):
+        await worker._check_schedule(worker._active_schedules[schedule.id])
+
+    worker._execute_monitoring_cycle.assert_not_awaited()
+    test_db_session.refresh(schedule)
+    assert schedule.run_status == "queued"
+    assert schedule.is_active is False
+    assert schedule.error_count == 1
+    assert "fresh schedule context not found" in schedule.last_error
+    assert worker._active_schedules[schedule.id]["next_run_time"] > datetime.now()
+    assert not worker._is_schedule_due(worker._active_schedules[schedule.id], datetime.now())
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_worker_startup_pending_rows_promote_to_queued_and_dispatch_round_robin(
     test_db_session,
     seeded_schedule_context,
 ):
     item = seeded_schedule_context["item"]
     account = seeded_schedule_context["account"]
+    target_date = "2026-05-07"
 
     first = MonitorSchedule(
         biz_item_id=item.id,
         service_account_id=None,
-        date="2026-04-28",
+        date=target_date,
         times="[\"09:00\"]",
         is_enabled=True,
         run_status="pending",
@@ -269,7 +407,7 @@ async def test_worker_startup_pending_rows_promote_to_queued_and_dispatch_round_
     second = MonitorSchedule(
         biz_item_id=item.id,
         service_account_id=account.id,
-        date="2026-04-28",
+        date=target_date,
         times="[\"11:00\"]",
         is_enabled=True,
         run_status="pending",
@@ -293,7 +431,7 @@ async def test_worker_startup_pending_rows_promote_to_queued_and_dispatch_round_
     assert first.next_run_time is not None
     assert second.next_run_time is not None
 
-    target_group_key = f"{item.id}:2026-04-28"
+    target_group_key = f"{item.id}:{target_date}"
     worker._run_groups = {
         target_group_key: worker._run_groups[target_group_key]
     }
