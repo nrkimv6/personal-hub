@@ -70,6 +70,7 @@ function Test-MirrorSurfacePath {
     $p = ConvertTo-RelativeGitPath $PathValue
     return (
         $p -match "^\.agents/" -or
+        $p -match "^\.agent/" -or
         $p -match "^\.claude/" -or
         $p -match "^\.gemini/"
     )
@@ -133,6 +134,18 @@ if ($Mode -eq "Status") {
     exit 0
 }
 
+if ($Mode -eq "Commit") {
+    $staged = Get-StagedPaths
+    $mirrorBlocked = @($staged | Where-Object { Test-MirrorSurfacePath $_ })
+    if ($mirrorBlocked.Count -gt 0) {
+        Write-Error "mirror_surface_direct_edit_blocked: mirror surfaces are generated from wtools sync and must not be committed locally."
+        Write-Error "Use wtools source changes, then receive the remote sync commit with git pull --ff-only."
+        Write-Error "blocked staged files:"
+        $mirrorBlocked | ForEach-Object { Write-Error "  - $_" }
+        exit 1
+    }
+}
+
 if (-not $context.IsRootCheckout) {
     exit 0
 }
@@ -168,13 +181,6 @@ if ($Mode -eq "Commit") {
         exit 1
     }
 
-    # merge commit 허용: MERGE_HEAD가 존재하면 git merge 완료 단계이므로 impl-scope 차단 적용 안 함
-    $mergeHeadPath = git rev-parse --git-path MERGE_HEAD 2>$null
-    if ($mergeHeadPath -and (Test-Path -LiteralPath $mergeHeadPath)) {
-        exit 0
-    }
-
-    $staged = Get-StagedPaths
     $blocked = @($staged | Where-Object { -not (Test-AllowedRootCommitPath $_) })
     if ($blocked.Count -gt 0) {
         Write-Error "root_worktree_impl_scope_blocked: root main worktree cannot commit implementation-scope files directly. Use an impl worktree."
