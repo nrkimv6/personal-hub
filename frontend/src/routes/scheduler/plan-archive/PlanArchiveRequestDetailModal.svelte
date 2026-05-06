@@ -143,16 +143,10 @@
 					</div>
 				{/if}
 
-				<!-- completed record 재분析 deep-link -->
+				<!-- completed record 운영 안내 -->
 				{#if request.record_id}
 					<div class="flex items-center gap-2 rounded bg-muted/30 px-2 py-1.5 text-xs">
-						<span class="text-muted-foreground">record #{request.record_id} 재분석이 필요하면</span>
-						<a
-							href="/plans?id={request.record_id}&tab=archive"
-							target="_blank"
-							rel="noopener"
-							class="text-primary underline hover:no-underline"
-						>Archive 탭에서 재분석</a>
+						<span class="text-muted-foreground">record #{request.record_id} 운영은 이 Plan Archive 화면의 큐/실행 제어에서 처리합니다.</span>
 					</div>
 				{/if}
 

@@ -174,7 +174,7 @@ def test_scheduler_plan_archive_card_uses_compact_alert(
     expect(page.get_by_label("LLM Provider")).to_be_visible()
 
 
-def test_archive_tab_exposes_health_and_queue_surface(
+def test_archive_tab_does_not_expose_health_and_queue_surface(
     page: Page,
     frontend_url: str,
     system_mode: str,
@@ -184,13 +184,14 @@ def test_archive_tab_exposes_health_and_queue_surface(
 
     page.goto(f"{frontend_url}/automation?tab=plans&subtab=archive", wait_until="domcontentloaded")
 
-    expect(page.get_by_text("Plan Archive LLM health")).to_be_visible()
-    expect(page.get_by_text("Real backlog")).to_be_visible()
-    expect(page.get_by_text("12").first).to_be_visible()
-    expect(page.get_by_text("비활성 때문에 backlog가 쌓일 수 있습니다.")).to_be_visible()
-    expect(page.get_by_text("quota reset wait").first).to_be_visible()
-    expect(page.get_by_text("pending_or_processing_requests는 현재 활성 LLMRequest 수입니다.")).to_be_visible()
-    expect(page.get_by_text("Plan Archive LLM 요청")).to_be_visible()
-    expect(page.get_by_text("archive-record-91")).to_be_visible()
-    expect(page.get_by_text("claude / claude-opus-4-6")).to_be_visible()
-    expect(page.get_by_role("cell", name=re.compile(r"claude-work"))).to_be_visible()
+    expect(page.get_by_text("이 화면은 archive 파일/DB 관리 전용입니다.")).to_be_visible()
+    expect(page.get_by_role("link", name="/scheduler/plan-archive")).to_be_visible()
+    expect(page.get_by_text("Plan Archive LLM health")).to_have_count(0)
+    expect(page.get_by_text("Real backlog")).to_have_count(0)
+    expect(page.get_by_text("비활성 때문에 backlog가 쌓일 수 있습니다.")).to_have_count(0)
+    expect(page.get_by_text("quota reset wait")).to_have_count(0)
+    expect(page.get_by_text("pending_or_processing_requests는 현재 활성 LLMRequest 수입니다.")).to_have_count(0)
+    expect(page.get_by_text("Plan Archive LLM 요청")).to_have_count(0)
+    expect(page.get_by_text("archive-record-91")).to_have_count(0)
+    expect(page.get_by_text("claude / claude-opus-4-6")).to_have_count(0)
+    expect(page.get_by_role("cell", name=re.compile(r"claude-work"))).to_have_count(0)

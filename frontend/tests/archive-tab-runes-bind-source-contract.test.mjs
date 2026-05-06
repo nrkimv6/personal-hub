@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const archiveTabPath = 'src/routes/plans/ArchiveTab.svelte';
+const residualStatePath = 'src/routes/plans/archive-tab/planArchiveResidualState.svelte.ts';
 const archiveTabSource = readFileSync(archiveTabPath, 'utf8');
+const residualStateSource = readFileSync(residualStatePath, 'utf8');
 let svelteCompile = null;
 let svelteCompilerLoadError = null;
 
@@ -26,18 +28,10 @@ const retrievalBindTargets = [
 	'retrievalLimit',
 ];
 
-const analyzeBindTargets = [
-	'queueAnalyzeProvider',
-	'queueAnalyzeModel',
-	'manualAnalyzeProvider',
-	'manualAnalyzeModel',
-	'manualAnalyzeTimeout',
-];
-
-const localBindTargets = [...retrievalBindTargets, ...analyzeBindTargets];
+const localBindTargets = [...retrievalBindTargets];
 
 function findLetInitializer(name) {
-	const match = archiveTabSource.match(new RegExp(`^[ \\t]*let[ \\t]+${name}[ \\t]*=([^\\r\\n]*)`, 'm'));
+	const match = residualStateSource.match(new RegExp(`^[ \\t]*${name}[ \\t]*=([^\\r\\n]*)`, 'm'));
 	return match?.[1].trimStart() ?? null;
 }
 
@@ -119,7 +113,7 @@ test('ArchiveTab Svelte markup parses', {
 	}
 });
 
-test('ArchiveTab retrieval bind targets are Svelte runes state', () => {
+test('planArchiveResidualState retrieval bind targets are Svelte runes state', () => {
 	const failures = retrievalBindTargets.filter((name) => {
 		return !hasStateDeclaration(name);
 	});
@@ -127,19 +121,7 @@ test('ArchiveTab retrieval bind targets are Svelte runes state', () => {
 	assert.deepEqual(
 		failures,
 		[],
-		`${archiveTabPath}: Can only bind to state or props. Retrieval bind targets must be declared with $state(...): ${failures.join(', ')}`,
-	);
-});
-
-test('ArchiveTab analyze bind targets are Svelte runes state', () => {
-	const failures = analyzeBindTargets.filter((name) => {
-		return !hasStateDeclaration(name);
-	});
-
-	assert.deepEqual(
-		failures,
-		[],
-		`${archiveTabPath}: Analyze bind targets must be declared with $state(...): ${failures.join(', ')}`,
+		`${residualStatePath}: Retrieval bind targets must be declared with $state(...): ${failures.join(', ')}`,
 	);
 });
 
@@ -180,5 +162,22 @@ test('ArchiveTab local bind targets use runes state', () => {
 		[...new Set(declarationFailures)],
 		[],
 		`${archiveTabPath}: Can only bind to state or props. Local bind targets must use $state(...).`,
+	);
+});
+
+test('planArchiveResidualState does not keep analyze bind targets', () => {
+	const forbidden = [
+		'queueAnalyzeProvider',
+		'queueAnalyzeModel',
+		'manualAnalyzeProvider',
+		'manualAnalyzeModel',
+		'manualAnalyzeTimeout',
+	];
+	const found = forbidden.filter((name) => residualStateSource.includes(name));
+
+	assert.deepEqual(
+		found,
+		[],
+		`${residualStatePath}: Analyze bind state belongs to scheduler page, not ArchiveTab residual state.`,
 	);
 });
