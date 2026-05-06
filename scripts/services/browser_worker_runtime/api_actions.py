@@ -151,7 +151,7 @@ def _fetch_json_with_host_fallback(api_port: int, path: str, timeout: int = 3) -
 
 
 def _service_log_candidates(manager, target: "RestartApiTarget") -> list[Path]:
-    log_dir = Path(getattr(manager, "log_dir", Path("logs") / "admin"))
+    log_dir = _target_log_dir(manager, target)
     candidates = [
         log_dir / f"service_{target.service_name}.log",
         *(log_dir.glob("service_runner_*.log") if log_dir.exists() else []),
@@ -161,6 +161,13 @@ def _service_log_candidates(manager, target: "RestartApiTarget") -> list[Path]:
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
+
+
+def _target_log_dir(manager, target: "RestartApiTarget") -> Path:
+    log_dir = Path(getattr(manager, "log_dir", Path("logs") / "admin"))
+    if target.pid_suffix == "" and log_dir.name.lower() == "admin":
+        return log_dir.parent
+    return log_dir
 
 
 def _tail_text(path: Path, max_bytes: int = 65536) -> str:
