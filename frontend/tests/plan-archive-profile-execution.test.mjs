@@ -5,6 +5,7 @@ import test from 'node:test';
 const apiSource = readFileSync('frontend/src/lib/api/plan-records.ts', 'utf8');
 const systemSource = readFileSync('frontend/src/lib/api/system.ts', 'utf8');
 const archiveTabSource = readFileSync('frontend/src/routes/plans/ArchiveTab.svelte', 'utf8');
+const schedulerSource = readFileSync('frontend/src/routes/scheduler/plan-archive/+page.svelte', 'utf8');
 
 test('plan records API exposes archive execution control contract', () => {
 	assert.match(apiSource, /archive_state\?: string \| null/);
@@ -25,12 +26,18 @@ test('system API exposes schedule profile policy wrappers', () => {
 	assert.match(systemSource, /\/llm\/schedule-profile-policies/);
 });
 
-test('archive tab renders profile controls and execution state badges', () => {
-	assert.match(archiveTabSource, /Archive execution control/);
-	assert.match(archiveTabSource, /selectedArchiveProfileKeys/);
-	assert.match(archiveTabSource, /llmApi\.listScheduleProfilePolicies/);
-	assert.match(archiveTabSource, /planRecordsApi\.runArchiveExecutions/);
-	assert.match(archiveTabSource, /planRecordsApi\.syncArchiveExecutions/);
-	assert.match(archiveTabSource, /getExecutionStateClass\(record\.execution_state\)/);
-	assert.match(archiveTabSource, /record\.archive_state/);
+test('scheduler plan archive page renders profile controls and execution actions', () => {
+	assert.match(schedulerSource, /selectedTargets/);
+	assert.match(schedulerSource, /archiveScheduleApi\.runArchiveExecutions/);
+	assert.match(schedulerSource, /archiveScheduleApi\.syncArchiveExecutions/);
+	assert.match(schedulerSource, /PlanArchiveCandidateTable/);
+});
+
+test('archive tab does not render profile controls or execution state badges', () => {
+	assert.doesNotMatch(archiveTabSource, /Archive execution control/);
+	assert.doesNotMatch(archiveTabSource, /selectedArchiveProfileKeys/);
+	assert.doesNotMatch(archiveTabSource, /llmApi\.listScheduleProfilePolicies/);
+	assert.doesNotMatch(archiveTabSource, /planRecordsApi\.runArchiveExecutions/);
+	assert.doesNotMatch(archiveTabSource, /planRecordsApi\.syncArchiveExecutions/);
+	assert.doesNotMatch(archiveTabSource, /getExecutionStateClass\(record\.execution_state\)/);
 });

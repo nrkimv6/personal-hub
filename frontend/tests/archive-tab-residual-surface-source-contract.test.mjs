@@ -183,12 +183,14 @@ test('ArchiveRetrievalPanel contains archive index affordance', () => {
 	assert.ok(has, `${retrievalPanelPath}: must contain archive index affordance`);
 });
 
-test('ArchiveRecordDetailPanel contains manual reanalyze affordance', () => {
-	const has =
-		detailPanelSource.includes('재분석') ||
-		detailPanelSource.includes('reanalyz') ||
-		detailPanelSource.includes('requestAnalysis');
-	assert.ok(has, `${detailPanelPath}: must contain manual reanalyze affordance`);
+test('ArchiveRecordDetailPanel does not contain manual reanalyze affordance', () => {
+	const forbidden = ['재분석', 'reanalyz', 'requestAnalysis', 'analyzeRecord'];
+	const found = forbidden.filter((token) => detailPanelSource.includes(token));
+	assert.deepEqual(
+		found,
+		[],
+		`${detailPanelPath}: must NOT contain manual reanalyze affordance: ${found.join(', ')}`,
+	);
 });
 
 test('ArchiveRecordDetailPanel contains relation surface affordance', () => {
@@ -199,12 +201,14 @@ test('ArchiveRecordDetailPanel contains relation surface affordance', () => {
 	assert.ok(has, `${detailPanelPath}: must contain relation surface`);
 });
 
-test('ArchiveRecordDetailPanel contains applied request badge affordance', () => {
-	const has =
-		detailPanelSource.includes('appliedRequestId') ||
-		detailPanelSource.includes('applied_request_id') ||
-		detailPanelSource.includes('DB 반영됨');
-	assert.ok(has, `${detailPanelPath}: must contain applied request badge`);
+test('ArchiveRecordDetailPanel does not contain applied request badge affordance', () => {
+	const forbidden = ['appliedRequestId', 'applied_request_id', 'DB 반영됨'];
+	const found = forbidden.filter((token) => detailPanelSource.includes(token));
+	assert.deepEqual(
+		found,
+		[],
+		`${detailPanelPath}: must NOT contain applied request badge: ${found.join(', ')}`,
+	);
 });
 
 test('ArchiveSyncPanel contains DB 이관 affordance', () => {
