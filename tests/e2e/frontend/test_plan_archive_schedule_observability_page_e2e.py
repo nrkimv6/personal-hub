@@ -96,7 +96,75 @@ def _install_plan_archive_routes(page: Page, *, schedule=Ellipsis, on_resume=Non
             _json_response(route, {"items": [], "total": 0, "page": 1, "page_size": 50, "filters": {}})
             return
         if "/api/v1/plans/records/archive-execution-attempts" in url:
-            _json_response(route, {"items": [], "total": 0, "page": 1, "page_size": 50, "filters": {}})
+            _json_response(
+                route,
+                {
+                    "items": [
+                        {
+                            "id": 701,
+                            "record_id": 2381,
+                            "llm_request_id": 15480,
+                            "engine": "claude",
+                            "profile_name": "work",
+                            "status": "failed",
+                            "requested_at": "2026-05-06T23:31:00",
+                            "error_message": "Save result failed for plan_archive_analyze",
+                            "requested_target": {
+                                "provider": "claude",
+                                "model": "claude-opus-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                            "effective_provider_model": {
+                                "provider": "claude",
+                                "model": "claude-opus-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                            "actual_provider_model": {
+                                "provider": "claude",
+                                "model": "claude-opus-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                        },
+                        {
+                            "id": 702,
+                            "record_id": 2382,
+                            "llm_request_id": 15481,
+                            "engine": "claude",
+                            "profile_name": "work",
+                            "status": "completed",
+                            "requested_at": "2026-05-06T23:32:00",
+                            "error_message": None,
+                            "save_outcome_status": "stale_skipped",
+                            "save_outcome_reason": "newer_completed_result_exists",
+                            "requested_target": {
+                                "provider": "claude",
+                                "model": "claude-sonnet-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                            "effective_provider_model": {
+                                "provider": "claude",
+                                "model": "claude-sonnet-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                            "actual_provider_model": {
+                                "provider": "claude",
+                                "model": "claude-sonnet-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                        },
+                    ],
+                    "total": 2,
+                    "page": 1,
+                    "page_size": 50,
+                    "filters": {},
+                },
+            )
             return
         if "/api/v1/plans/records/archive-health" in url:
             _json_response(
@@ -358,6 +426,19 @@ def test_plan_archive_page_hides_mutation_buttons_when_schedule_missing(page: Pa
     expect(page.get_by_text("스케줄 없음")).to_be_visible()
     expect(page.get_by_role("button", name="정지")).to_have_count(0)
     expect(page.get_by_role("button", name="재개")).to_have_count(0)
+
+
+def test_plan_archive_history_distinguishes_failed_from_stale_save_skip(page: Page) -> None:
+    _install_plan_archive_routes(page)
+
+    page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
+    page.get_by_role("button", name="이력").click()
+
+    expect(page.get_by_text("failed", exact=True)).to_be_visible()
+    expect(page.get_by_text("stale_skipped", exact=True)).to_be_visible()
+    expect(page.get_by_text("Save result failed for plan_archive_analyze")).to_be_visible()
+    expect(page.get_by_text("newer_completed_result_exists")).to_be_visible()
+    assert page.locator("tr").filter(has_text="stale_skipped").filter(has_text="failed").count() == 0
 
 
 def test_plan_archive_source_contract_no_candidates_duplication(page: Page) -> None:
