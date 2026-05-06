@@ -45,6 +45,7 @@ from _dr_constants import (
     LOG_CHANNEL_PREFIX,
     get_redis_db, set_redis_db, get_admin_api_base,
 )
+from _dr_merge_persistence import MergePersistence
 from _dr_state import (
     set_wf_manager, get_wf_manager, get_running_processes, get_running_log_files,
     get_stream_threads, get_cleanup_done, get_dead_process_first_seen,
@@ -153,7 +154,11 @@ def _propagate_fallback_done_failure(
     merge_status = "residue_blocked" if reason == "residue_guard" else "error"
     _pub_and_log(runner_id, f"{context} fallback done 실패 전파: {reason}", redis_client, "MERGE-FALLBACK")
     try:
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", merge_status)
+        MergePersistence(redis_client, runner_id).transition(
+            merge_status,
+            message=f"command listener status sync: {merge_status}",
+            action="approved-retry",
+        )
     except Exception:
         pass
 
@@ -540,10 +545,16 @@ def main():
                                         release_merge_turn(r, rid, repo_id=_get_repo_id(PROJECT_ROOT))
                                     except Exception:
                                         pass
-                                    # merge 키 삭제 후 cleanup (머지 가드 자연 통과)
+                                    # merge lifecycle 키는 persistence chokepoint를 통해 정리한다.
                                     try:
-                                        r.delete(f"{RUNNER_KEY_PREFIX}:{rid}:merge_requested")
-                                        r.delete(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
+                                        persistence = MergePersistence(r, rid)
+                                        persistence.clear_request()
+                                        persistence.transition(
+                                            "error",
+                                            reason="heartbeat_stale_merge_timeout",
+                                            message="heartbeat: stale merge flag timeout",
+                                            action="approved-retry",
+                                        )
                                     except Exception:
                                         pass
                                     # heartbeat_stale_merge는 머지 가드 대상 아님 — 직접 호출

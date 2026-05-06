@@ -16,12 +16,22 @@ from _dr_constants import (
     RECENT_RUNNERS_TTL, ACTIVE_RUNNERS_KEY,
 )
 from _dr_merge import _execute_merge_with_lock, _pub_and_log
+from _dr_merge_persistence import MergePersistence
+from _dr_merge_state import CONFLICT, ERROR, MERGED, QUEUED, RESOLVING, TERMINAL_STATUSES, RetryAction
 from _dr_runtime_utils import _publish_with_retry
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process
 from _dr_process_utils import _cleanup_process_state, get_plan_git_root
 from _dr_stream_cleanup import _do_inline_merge
 
 logger = logging.getLogger(__name__)
+
+
+def _transition_merge_status(redis_client: redis.Redis, runner_id: str, status: str, *, action: str, message: str | None = None):
+    return MergePersistence(redis_client, runner_id).transition(
+        status,
+        message=message,
+        action=RetryAction.APPROVED_RETRY.value if action in {"retry-merge", "direct-merge", "resolve-conflict"} else action,
+    )
 
 
 def _redis_text(value) -> str | None:
@@ -154,10 +164,16 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
                     # 3회 모두 실패
                     _pub(f"[RETRY-MERGE] pre_merge_gate 3회 실패 — merge 중단: {gate_msg}")
                     try:
-                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+                        _transition_merge_status(
+                            redis_client,
+                            runner_id,
+                            ERROR,
+                            action="retry-merge",
+                            message=f"pre_merge_gate 3회 실패: {gate_msg}",
+                        )
                     except Exception:
                         pass
-                    result = {"success": False, "message": f"pre_merge_gate 3회 실패: {gate_msg}", "merge_status": "error", "action": "retry-merge"}
+                    result = {"success": False, "message": f"pre_merge_gate 3회 실패: {gate_msg}", "merge_status": ERROR, "action": "retry-merge"}
                     return
             else:
                 # main 브랜치가 아님 등 — gate 실패 그대로 전달하되 진행 (merge_to_main이 자체 처리)
@@ -265,7 +281,7 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", now_iso)
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+        _transition_merge_status(redis_client, runner_id, QUEUED, action="direct-merge")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
         if plan_file:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
@@ -308,9 +324,10 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         # merge_status Redis 키 보장 (스레드 실패 시에도 상태 추적 가능)
         try:
             current_ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-            if current_ms and current_ms not in ("merged", "conflict", "test_failed"):
-                final_ms = "error" if not result.get("success") else current_ms
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", final_ms)
+            current_text = _redis_text(current_ms) or ""
+            if current_text and current_text not in TERMINAL_STATUSES:
+                final_ms = ERROR if not result.get("success") else current_text
+                _transition_merge_status(redis_client, runner_id, final_ms, action="direct-merge")
                 redis_client.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", RECENT_RUNNERS_TTL)
         except Exception:
             pass
@@ -376,7 +393,7 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
         else:
             branch = f"runner/{runner_id}"
 
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")
+        _transition_merge_status(redis_client, runner_id, RESOLVING, action="resolve-conflict")
 
         resolve_result = _launch_conflict_resolver_process(
             runner_id, branch, Path(worktree_path_str), redis_client,
@@ -384,10 +401,10 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
         )
 
         if resolve_result["success"]:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+            _transition_merge_status(redis_client, runner_id, MERGED, action="resolve-conflict", message="충돌 자동 해결 완료")
             result = {"success": True, "message": "충돌 자동 해결 완료", "action": "resolve-conflict"}
         else:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+            _transition_merge_status(redis_client, runner_id, CONFLICT, action="resolve-conflict", message=resolve_result["message"])
             result = {"success": False, "message": resolve_result["message"], "action": "resolve-conflict"}
     except Exception as e:
         logger.error(f"[resolve_conflict] 실패: {e}")

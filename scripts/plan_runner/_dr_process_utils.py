@@ -25,6 +25,8 @@ from _dr_constants import (
     OWNERSHIP_SNAPSHOT_DIR, SUBPROCESS_HEARTBEAT_TTL,
 )
 from _dr_plan_paths import classify_plan_stage, read_plan_status
+from _dr_merge_persistence import MergePersistence
+from _dr_merge_state import ERROR, RESIDUE_BLOCKED, RetryAction
 from _dr_state import (
     get_running_processes, get_running_log_files, get_stream_threads,
     get_cleanup_done, get_dead_process_first_seen, get_wf_manager,
@@ -265,10 +267,15 @@ def _try_v2_merge_fallback(runner_id: str, redis_client: redis.Redis, reason_tag
                 done_result = _hpmd(detect_result["plan_file"], runner_id, _pub, redis_client)
                 if isinstance(done_result, dict) and not done_result.get("success", True):
                     reason = str(done_result.get("reason") or done_result.get("status") or "done_post_merge_failed")
-                    merge_status = "residue_blocked" if reason == "residue_guard" else "error"
+                    merge_status = RESIDUE_BLOCKED if reason == "residue_guard" else ERROR
                     quarantine_diff_path = done_result.get("quarantine_diff_path")
                     try:
-                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", merge_status)
+                        MergePersistence(redis_client, runner_id).transition(
+                            merge_status,
+                            reason=reason,
+                            message=f"{reason_tag} fallback done failed: {reason}",
+                            action=RetryAction.APPROVED_RETRY.value,
+                        )
                         if quarantine_diff_path:
                             redis_client.set(
                                 f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path",
@@ -783,15 +790,20 @@ def _recover_pending_merge(runner_id: str, redis_client: redis.Redis, merge_stat
                 logger.info(f"[recover_merge] runner {runner_id} released stale merge lock (merge_status={merge_status})")
             except Exception as _e:
                 logger.debug(f"[recover_merge] lock release failed (ignoring): {_e}")
-            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            MergePersistence(redis_client, runner_id).transition(
+                "pending_merge",
+                reason="listener_restart_recovery",
+                message="listener restart recovery queued merge retry",
+                action=RetryAction.APPROVED_RETRY.value,
+            )
             _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
             if not _mr:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+                MergePersistence(redis_client, runner_id).request_merge()
 
         elif merge_status in ("queued", "pending_merge") or merge_status is None:
             _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
             if not _mr:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+                MergePersistence(redis_client, runner_id).request_merge()
         else:
             logger.info(f"[recover_merge] runner {runner_id} merge_status={merge_status} -> no recovery needed")
             return

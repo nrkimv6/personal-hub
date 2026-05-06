@@ -24,6 +24,22 @@ from _dr_constants import (
     RUNNER_KEY_PREFIX, PLAN_FILE_ALL, _LEGACY_ALL, LOG_CHANNEL_PREFIX,
     PLAN_RUNNER_PYTHON, PLAN_RUNNER_MODULE_PATH, OWNERSHIP_SNAPSHOT_DIR, get_redis_db, get_admin_api_base,
 )
+from _dr_merge_persistence import MergePersistence
+from _dr_merge_state import (
+    ACTIVE_STATUSES,
+    APPROVAL_REQUIRED,
+    CONFLICT,
+    ERROR,
+    FIXING,
+    MERGED,
+    MERGING,
+    QUEUED,
+    RESIDUE_BLOCKED,
+    RESOLVING,
+    TERMINAL_STATUSES,
+    TEST_FAILED,
+    RetryAction,
+)
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_runtime_utils import _publish_with_retry
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _launch_auto_impl_post_merge_process, _launch_general_merge_resolver_process, PROJECT_ROOT
@@ -31,12 +47,30 @@ from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _
 logger = logging.getLogger(__name__)
 
 DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS = 86400
-_INLINE_MERGE_PRESERVE_STATUSES = {
-    "approval_required",
-    "conflict",
-    "precheck_failed",
-    "test_failed",
-}
+_INLINE_MERGE_PRESERVE_STATUSES = TERMINAL_STATUSES
+
+
+def _transition_action(action_name: str) -> str:
+    if action_name in {"retry-merge", "direct-merge", "resolve-conflict"}:
+        return RetryAction.APPROVED_RETRY.value
+    return action_name or RetryAction.INLINE_MERGE.value
+
+
+def _transition_merge_status(
+    runner_id: str,
+    redis_client: redis.Redis,
+    to_status: str,
+    *,
+    reason: str | None = None,
+    message: str | None = None,
+    action_name: str = "inline-merge",
+):
+    return MergePersistence(redis_client, runner_id).transition(
+        to_status,
+        reason=reason,
+        message=message,
+        action=_transition_action(action_name),
+    )
 
 
 def _get_merge_lock_timeout_seconds() -> int:
@@ -68,42 +102,30 @@ def _preserve_terminal_inline_merge_state(
     if action_name != "inline-merge":
         return None
 
+    persistence = MergePersistence(redis_client, runner_id)
     try:
-        merge_status = _decode_redis_value(
-            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-        ).strip().lower()
+        state = persistence.read()
     except Exception:
-        merge_status = ""
+        state = None
 
-    if merge_status not in _INLINE_MERGE_PRESERVE_STATUSES:
+    if state is None or state.merge_status not in _INLINE_MERGE_PRESERVE_STATUSES:
         return None
 
     try:
-        message = _decode_redis_value(
-            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message")
-        ).strip()
-        reason = _decode_redis_value(
-            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")
-        ).strip()
-    except Exception:
-        message = ""
-        reason = ""
-
-    try:
-        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+        persistence.clear_request()
     except Exception:
         pass
 
     pub_fn(
         "terminal merge_status 보존 → inline merge 차단 "
-        f"(merge_status={merge_status}, reason={reason or merge_status})"
+        f"(merge_status={state.merge_status}, reason={state.merge_reason or state.merge_status})"
     )
     return {
         "success": False,
-        "message": message or merge_status,
-        "merge_status": merge_status,
+        "message": state.merge_message or state.merge_status,
+        "merge_status": state.merge_status,
         "action": action_name,
-        "reason": reason or merge_status,
+        "reason": state.merge_reason or state.merge_status,
     }
 
 
@@ -373,27 +395,7 @@ def _check_post_merge_residue(runner_id: str, pub_fn) -> dict:
 
 
 def _persist_merge_result_metadata(runner_id: str, redis_client: redis.Redis, result: dict) -> None:
-    reason = result.get("reason")
-    if not reason and isinstance(result.get("post_merge_done"), dict):
-        reason = result["post_merge_done"].get("reason")
-    quarantine_diff_path = result.get("quarantine_diff_path")
-    if not quarantine_diff_path and isinstance(result.get("post_merge_done"), dict):
-        quarantine_diff_path = result["post_merge_done"].get("quarantine_diff_path")
-
-    try:
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message", str(result.get("message") or ""))
-        if reason:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", str(reason))
-        else:
-            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")
-        if quarantine_diff_path:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path", str(quarantine_diff_path))
-        else:
-            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path")
-        if result.get("snapshot_path"):
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_snapshot_path", str(result["snapshot_path"]))
-    except Exception:
-        pass
+    MergePersistence(redis_client, runner_id).persist_result_metadata(result)
 
 
 def is_done_completed(runner_id: str, redis_client: redis.Redis) -> bool:
@@ -588,19 +590,12 @@ def _pub_and_log(runner_id: str, msg: str, redis_client: redis.Redis, tag: str =
 
 def _build_merge_completed_sentinel(result: dict) -> str:
     """merge 결과를 merge-log 종료 sentinel payload로 정규화한다."""
-    success = bool(result.get("success", False))
-    merge_status = str(result.get("merge_status") or "").strip().lower()
-    if merge_status == "merged" or (success and not merge_status):
-        return "__MERGE_COMPLETED__"
-    return "__MERGE_COMPLETED::merge_failed__"
+    return MergePersistence.build_completed_sentinel(result)
 
 
 def _publish_merge_completed_sentinel(runner_id: str, redis_client: redis.Redis, result: dict) -> None:
     """terminal merge sentinel만 merge-log 채널에 1회 publish한다."""
-    channel = f"plan-runner:merge-log:{runner_id}"
-    payload = _build_merge_completed_sentinel(result)
-    if not _publish_with_retry(redis_client, channel, payload):
-        logger.debug("[_publish_merge_completed_sentinel] publish retry failed (ignored)")
+    MergePersistence(redis_client, runner_id).publish_completed_sentinel(result)
 
 
 def _extract_post_merge_done_failure(done_result) -> tuple[bool, str]:
@@ -624,12 +619,16 @@ def _compose_merge_result_with_done(
     """merge 성공 결과에 post-merge done 결과를 반영한다."""
     failed, reason = _extract_post_merge_done_failure(done_result)
     if failed:
-        merge_status = "residue_blocked" if reason == "residue_guard" else "error"
+        merge_status = RESIDUE_BLOCKED if reason == "residue_guard" else ERROR
         pub_fn(f"post-merge done 실패 전파: {reason}")
-        try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", merge_status)
-        except Exception:
-            pass
+        _transition_merge_status(
+            runner_id,
+            redis_client,
+            merge_status,
+            reason=reason,
+            message=f"{base_message}; post-merge done failed: {reason}",
+            action_name=action_name,
+        )
         result = {
             "success": False,
             "message": f"{base_message}; post-merge done failed: {reason}",
@@ -641,7 +640,7 @@ def _compose_merge_result_with_done(
         result = {
             "success": True,
             "message": base_message,
-            "merge_status": "merged",
+            "merge_status": MERGED,
             "action": action_name,
         }
 
@@ -680,7 +679,7 @@ def _handle_merge_success(runner_id: str, redis_client: redis.Redis, plan_file, 
             pub_fn=pub_fn,
         )
     try:
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+        _transition_merge_status(runner_id, redis_client, MERGED, message="merged", action_name=action_name)
     except Exception:
         pass
     pub_fn("merge 성공 (exit_code=0)")
@@ -702,14 +701,14 @@ def _handle_test_failed(runner_id: str, redis_client: redis.Redis, plan_file, pu
         if _test_fix_attempt >= 2:
             pub_fn(f"auto-impl-post-merge 재시도 한도(2회) 초과 — test_failed 상태 유지")
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
+            _transition_merge_status(runner_id, redis_client, TEST_FAILED, message="test_failed", action_name=action_name)
         except Exception:
             pass
         pub_fn(f"post-merge 테스트 실패 (exit_code=2)")
-        return {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
+        return {"success": False, "message": "test_failed", "merge_status": TEST_FAILED, "action": action_name}
     else:
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "fixing")
+            _transition_merge_status(runner_id, redis_client, FIXING, action_name=action_name)
         except Exception:
             pass
         pub_fn("post-merge 테스트 실패 — auto-impl-post-merge 자동 실행")
@@ -740,7 +739,7 @@ def _handle_test_failed(runner_id: str, redis_client: redis.Redis, plan_file, pu
                 pub_fn=pub_fn,
             )
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+            _transition_merge_status(runner_id, redis_client, MERGED, message="merged", action_name=action_name)
         except Exception:
             pass
         done_result = _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
@@ -755,15 +754,15 @@ def _handle_test_failed(runner_id: str, redis_client: redis.Redis, plan_file, pu
     else:
         pub_fn(f"auto-impl-post-merge 실패: {_fix_result['message']}")
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
+            _transition_merge_status(runner_id, redis_client, TEST_FAILED, message="test_failed", action_name=action_name)
         except Exception:
             pass
-        return {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
+        return {"success": False, "message": "test_failed", "merge_status": TEST_FAILED, "action": action_name}
 
 
 def _handle_conflict(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn, action_name: str = "inline-merge", branch_str: str = "") -> dict:
     try:
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")
+        _transition_merge_status(runner_id, redis_client, RESOLVING, action_name=action_name)
     except Exception:
         pass
     pub_fn(f"merge 충돌 (exit_code=3) — conflict resolver 자동 실행")
@@ -786,7 +785,7 @@ def _handle_conflict(runner_id: str, redis_client: redis.Redis, plan_file, pub_f
     if _resolve_result["success"] and _resolve_merge_status in ("", "merged"):
         pub_fn(f"conflict resolver 성공 — {_resolve_result['message']}")
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+            _transition_merge_status(runner_id, redis_client, MERGED, message="merged", action_name=action_name)
         except Exception:
             pass
         done_result = _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
@@ -801,33 +800,33 @@ def _handle_conflict(runner_id: str, redis_client: redis.Redis, plan_file, pub_f
     if _resolve_merge_status == "conflict" or _resolve_result.get("conflict"):
         pub_fn(f"conflict resolver 중단: {_resolve_result['message']}")
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+            _transition_merge_status(runner_id, redis_client, CONFLICT, message=_resolve_result["message"], action_name=action_name)
         except Exception:
             pass
         return {
             "success": False,
             "message": _resolve_result["message"],
             "conflict": True,
-            "merge_status": "conflict",
+            "merge_status": CONFLICT,
             "action": action_name,
         }
 
     pub_fn(f"conflict resolver 실패: {_resolve_result['message']}")
     try:
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+        _transition_merge_status(runner_id, redis_client, ERROR, message=_resolve_result["message"], action_name=action_name)
     except Exception:
         pass
     return {
         "success": False,
         "message": _resolve_result["message"],
-        "merge_status": "error",
+        "merge_status": ERROR,
         "action": action_name,
     }
 
 
 def _handle_general_error(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn, action_name: str = "inline-merge", exit_code: int = 1, error_msg: str = "", branch_str: str = "") -> dict:
     try:
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+        _transition_merge_status(runner_id, redis_client, ERROR, message=error_msg or f"exit_code={exit_code}", action_name=action_name)
     except Exception:
         pass
     pub_fn(f"merge 실패 (exit_code={exit_code}) — general resolver 실행")
@@ -843,13 +842,13 @@ def _handle_general_error(runner_id: str, redis_client: redis.Redis, plan_file, 
     if _general_result["success"]:
         pub_fn("general resolver 성공 — merge 완료")
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+            _transition_merge_status(runner_id, redis_client, MERGED, message="general resolver merged", action_name=action_name)
         except Exception:
             pass
-        return {"success": True, "message": "general resolver merged", "merge_status": "merged", "action": action_name}
+        return {"success": True, "message": "general resolver merged", "merge_status": MERGED, "action": action_name}
     else:
         pub_fn(f"general resolver 실패: {_general_result['message']}")
-        return {"success": False, "message": f"exit_code={exit_code}", "merge_status": "error", "action": action_name}
+        return {"success": False, "message": f"exit_code={exit_code}", "merge_status": ERROR, "action": action_name}
 
 
 def _handle_approval_required(
@@ -866,21 +865,28 @@ def _handle_approval_required(
     """
     pub_fn("merge 승인 필요 감지 (approval_required) — 자동 resolver 스킵, worktree 보존")
     try:
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "approval_required")
-    except Exception:
-        pass
-
-    try:
         message = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message")) or "approval_required"
         reason = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")) or "approval_required"
     except Exception:
         message = "approval_required"
         reason = "approval_required"
 
+    try:
+        _transition_merge_status(
+            runner_id,
+            redis_client,
+            APPROVAL_REQUIRED,
+            reason=reason,
+            message=message,
+            action_name=action_name,
+        )
+    except Exception:
+        pass
+
     return {
         "success": False,
         "message": message,
-        "merge_status": "approval_required",
+        "merge_status": APPROVAL_REQUIRED,
         "action": action_name,
         "reason": reason,
     }
@@ -947,6 +953,7 @@ def _check_stale_merge_gate(
     redis_client: redis.Redis,
     branch: str,
     pub_fn,
+    action_name: str = "inline-merge",
 ) -> tuple[Optional[dict], Optional[str]]:
     if not branch:
         pub_fn("merge branch 없음 — stale merge gate/snapshot skip")
@@ -974,17 +981,29 @@ def _check_stale_merge_gate(
     allow_override = os.environ.get("DEV_RUNNER_ALLOW_STALE_MERGE") == "1"
     if risk == "BLOCK" and not allow_override:
         reason = "stale_merge_blocked"
-        try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", reason)
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message", message)
-        except Exception:
-            pass
+        transition = _transition_merge_status(
+            runner_id,
+            redis_client,
+            ERROR,
+            reason=reason,
+            message=message,
+            action_name=action_name,
+        )
+        if not transition.allowed:
+            state = MergePersistence(redis_client, runner_id).read()
+            return {
+                "success": False,
+                "message": state.merge_message or state.merge_status or transition.reason,
+                "merge_status": state.merge_status or transition.from_status,
+                "action": action_name,
+                "reason": state.merge_reason or state.merge_status or transition.reason,
+                "stale_merge": {"risk": risk, "behind": behind, "ahead": ahead, "branch": branch},
+            }, None
         return {
             "success": False,
             "message": message,
-            "merge_status": "error",
-            "action": "inline-merge",
+            "merge_status": ERROR,
+            "action": action_name,
             "reason": reason,
             "stale_merge": {"risk": risk, "behind": behind, "ahead": ahead, "branch": branch},
         }, None
@@ -1005,16 +1024,27 @@ def _check_stale_merge_gate(
         reason = "pre_merge_snapshot_failed"
         snapshot_message = f"{reason}: {exc}"
         pub_fn(snapshot_message)
-        try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", reason)
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message", snapshot_message)
-        except Exception:
-            pass
+        transition = _transition_merge_status(
+            runner_id,
+            redis_client,
+            ERROR,
+            reason=reason,
+            message=snapshot_message,
+            action_name=action_name,
+        )
+        if not transition.allowed:
+            state = MergePersistence(redis_client, runner_id).read()
+            return {
+                "success": False,
+                "message": state.merge_message or state.merge_status or transition.reason,
+                "merge_status": state.merge_status or transition.from_status,
+                "action": action_name,
+                "reason": state.merge_reason or state.merge_status or transition.reason,
+            }, None
         return {
             "success": False,
             "message": snapshot_message,
-            "merge_status": "error",
+            "merge_status": ERROR,
             "action": "inline-merge",
             "reason": reason,
         }, None
@@ -1064,7 +1094,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
     branch_str = None
     plan_file = None
     lock_acquired = False
-    result = {"success": False, "message": "unknown error", "merge_status": "error", "action": action_name}
+    result = {"success": False, "message": "unknown error", "merge_status": ERROR, "action": action_name}
 
     try:
         try:
@@ -1082,7 +1112,18 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
 
         # 1. merge_status = "queued" + lock 대기
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+            transition = _transition_merge_status(runner_id, redis_client, QUEUED, action_name=action_name)
+            if not transition.allowed:
+                state = MergePersistence(redis_client, runner_id).read()
+                _pub(f"{transition.reason} — 기존 merge_status 보존")
+                result = {
+                    "success": False,
+                    "message": state.merge_message or state.merge_status or transition.reason,
+                    "merge_status": state.merge_status or transition.from_status,
+                    "action": action_name,
+                    "reason": state.merge_reason or state.merge_status or transition.reason,
+                }
+                return result
         except Exception:
             pass
         _pub("merge lock 대기 중...")
@@ -1092,14 +1133,14 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
         if not lock_acquired:
             _pub(f"merge lock 획득 실패 (timeout={lock_timeout}s) — merge 중단")
             try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+                _transition_merge_status(runner_id, redis_client, ERROR, message=f"merge lock 획득 실패 (timeout={lock_timeout}s)", action_name=action_name)
             except Exception:
                 pass
             result["message"] = f"merge lock 획득 실패 (timeout={lock_timeout}s)"
-            result["merge_status"] = "error"
+            result["merge_status"] = ERROR
             return result
 
-        gate_result, snapshot_path = _check_stale_merge_gate(runner_id, redis_client, branch_str or "", _pub)
+        gate_result, snapshot_path = _check_stale_merge_gate(runner_id, redis_client, branch_str or "", _pub, action_name=action_name)
         if gate_result is not None:
             gate_result["action"] = action_name
             result = gate_result
@@ -1107,7 +1148,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
 
         # 2. lock 획득 후 merge_status = "merging"
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merging")
+            _transition_merge_status(runner_id, redis_client, MERGING, action_name=action_name)
         except Exception:
             pass
         _pub("merge lock 획득 완료 — plan-runner post-merge 실행 중...")
@@ -1149,10 +1190,10 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
     except Exception as e:
         logger.error(f"[_execute_merge_with_lock] 예외 발생 (runner_id={runner_id}, action={action_name}): {e}")
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+            _transition_merge_status(runner_id, redis_client, ERROR, message=str(e), action_name=action_name)
         except Exception:
             pass
-        result = {"success": False, "message": str(e), "merge_status": "error", "action": action_name}
+        result = {"success": False, "message": str(e), "merge_status": ERROR, "action": action_name}
 
     finally:
         _persist_merge_result_metadata(runner_id, redis_client, result)
@@ -1162,26 +1203,11 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             except Exception:
                 pass
         # merge-results Redis list에 결과 push (merge history API 연동)
-        try:
-            _merge_status_final = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
-            if isinstance(_merge_status_final, bytes):
-                _merge_status_final = _merge_status_final.decode("utf-8", errors="replace")
-            _merge_status_final = str(_merge_status_final)
-            _is_success = result.get("success", False)
-            redis_client.lpush("plan-runner:merge-results", json.dumps({
-                "runner_id": runner_id,
-                "branch": branch_str,
-                "plan_file": plan_file,
-                "timestamp": datetime.now().isoformat(),
-                "status": _merge_status_final,
-                "success": _is_success,
-                "message": result.get("message", f"merge_status={_merge_status_final}"),
-                "reason": result.get("reason"),
-                "quarantine_diff_path": result.get("quarantine_diff_path"),
-            }, ensure_ascii=False))
-            redis_client.expire("plan-runner:merge-results", 86400 * 7)
-        except Exception as _mr_err:
-            logger.debug(f"[_execute_merge_with_lock] merge-results push 실패 (무시): {_mr_err}")
+        MergePersistence(redis_client, runner_id).push_result_history(
+            branch=branch_str,
+            plan_file=plan_file,
+            result=result,
+        )
         # terminal merge sentinel은 normal log와 분리해 merge-log 채널에만 1회 publish한다.
         _publish_merge_completed_sentinel(runner_id, redis_client, result)
 

@@ -8,6 +8,8 @@ del _sys_inject, _Path_inject
 import os
 from pathlib import Path
 
+from _dr_merge_state import ACTIVE_STATUSES
+
 # Redis 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
@@ -73,7 +75,7 @@ HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 
 # merge 활성 상태 — cleanup 보호 가드 및 reconnect 복구 조건에 사용
-MERGE_ACTIVE_STATUSES = ("pre_merge", "queued", "merging", "pending_merge", "resolving", "testing", "fixing")
+MERGE_ACTIVE_STATUSES = tuple(sorted(ACTIVE_STATUSES))
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/plan_runner/ → scripts/ → project root
