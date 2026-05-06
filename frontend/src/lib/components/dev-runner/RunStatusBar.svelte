@@ -22,6 +22,7 @@
 		running: boolean;
 		start_time: string | null;
 		branch?: string | null;
+		merge_status?: string | null;
 		exit_reason?: string | null;
 		display_plan_name?: string | null;
 		worktree_exists?: boolean | 'unknown';
@@ -51,6 +52,7 @@
 	}
 
 	function resolveStaleLabel(runner: RunnerTab): string | null {
+		if (runner.merge_status === 'approval_required') return null;
 		if (runner.worktree_exists === false) return '삭제된 worktree';
 		if (runner.branch_exists === false) return 'branch 없음';
 		if (runner.branch_merged_to_main === true) return 'main 반영됨';

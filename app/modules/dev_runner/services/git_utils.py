@@ -18,10 +18,10 @@ def check_branch_exists(branch: str, cwd: Optional[str] = None) -> bool:
     """
     try:
         result = subprocess.run(
-            ["git", "-c", "safe.directory=*", "branch", "--list", branch],
+            ["git", "-c", "safe.directory=*", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
             cwd=cwd, capture_output=True, text=True, timeout=5
         )
-        return bool(result.stdout.strip())
+        return result.returncode == 0
     except Exception:
         return False
 

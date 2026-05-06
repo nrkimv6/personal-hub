@@ -31,6 +31,12 @@ from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _
 logger = logging.getLogger(__name__)
 
 DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS = 86400
+_INLINE_MERGE_PRESERVE_STATUSES = {
+    "approval_required",
+    "conflict",
+    "precheck_failed",
+    "test_failed",
+}
 
 
 def _get_merge_lock_timeout_seconds() -> int:
@@ -50,6 +56,55 @@ def _decode_redis_value(val) -> str:
         except Exception:
             return str(val)
     return "" if val is None else str(val)
+
+
+def _preserve_terminal_inline_merge_state(
+    runner_id: str,
+    redis_client: redis.Redis,
+    action_name: str,
+    pub_fn,
+) -> Optional[dict]:
+    """Return an existing terminal merge state instead of re-entering inline merge."""
+    if action_name != "inline-merge":
+        return None
+
+    try:
+        merge_status = _decode_redis_value(
+            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        ).strip().lower()
+    except Exception:
+        merge_status = ""
+
+    if merge_status not in _INLINE_MERGE_PRESERVE_STATUSES:
+        return None
+
+    try:
+        message = _decode_redis_value(
+            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message")
+        ).strip()
+        reason = _decode_redis_value(
+            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")
+        ).strip()
+    except Exception:
+        message = ""
+        reason = ""
+
+    try:
+        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+    except Exception:
+        pass
+
+    pub_fn(
+        "terminal merge_status 보존 → inline merge 차단 "
+        f"(merge_status={merge_status}, reason={reason or merge_status})"
+    )
+    return {
+        "success": False,
+        "message": message or merge_status,
+        "merge_status": merge_status,
+        "action": action_name,
+        "reason": reason or merge_status,
+    }
 
 
 def _normalize_ownership_key(path: Path, project_root: Path) -> Optional[str]:
@@ -1009,6 +1064,19 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
     result = {"success": False, "message": "unknown error", "merge_status": "error", "action": action_name}
 
     try:
+        try:
+            branch_str = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")).strip() or None
+            plan_file = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")).strip() or None
+            if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
+                plan_file = None
+        except Exception:
+            pass
+
+        preserved_result = _preserve_terminal_inline_merge_state(runner_id, redis_client, action_name, _pub)
+        if preserved_result is not None:
+            result = preserved_result
+            return result
+
         # 1. merge_status = "queued" + lock 대기
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
@@ -1027,14 +1095,6 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             result["message"] = f"merge lock 획득 실패 (timeout={lock_timeout}s)"
             result["merge_status"] = "error"
             return result
-
-        try:
-            branch_str = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")).strip() or None
-            plan_file = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")).strip() or None
-            if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
-                plan_file = None
-        except Exception:
-            pass
 
         gate_result, snapshot_path = _check_stale_merge_gate(runner_id, redis_client, branch_str or "", _pub)
         if gate_result is not None:

@@ -36,6 +36,12 @@ _COMPLETED_EXIT_REASONS = {"completed"}  # 정상 완료로 처리되는 exit_re
 _DEFAULT_DETECT_MERGED_BUT_NOT_DONE = detect_merged_but_not_done
 _DEFAULT_HANDLE_POST_MERGE_DONE = _handle_post_merge_done
 _DEFAULT_CLEANUP_PROCESS_STATE = _cleanup_process_state
+_INLINE_MERGE_PRESERVE_STATUSES = {
+    "approval_required",
+    "conflict",
+    "precheck_failed",
+    "test_failed",
+}
 _ERROR_DETAIL_NOISE_PREFIXES = (
     "[NOISE]",
     ": heartbeat",
@@ -639,6 +645,57 @@ def _has_worktree_commits(runner_id: str, redis_client) -> bool:
         return False
 
 
+def _get_merge_status(redis_client, runner_id: str) -> str:
+    if not runner_id:
+        return ""
+    try:
+        return _decode_redis_text(
+            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        ).strip().lower()
+    except Exception:
+        return ""
+
+
+def _get_merge_reason(redis_client, runner_id: str) -> str:
+    if not runner_id:
+        return ""
+    try:
+        return _decode_redis_text(
+            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")
+        ).strip()
+    except Exception:
+        return ""
+
+
+def _preserve_terminal_merge_state_if_needed(ctx: _StreamCleanupCtx, *, flag_present: bool) -> bool:
+    """Return True when cleanup must not re-enter inline merge.
+
+    Some merge statuses are terminal user-action states. A leftover
+    merge_requested flag from the completed subprocess is lower priority than
+    those terminal states and must not trigger another stale-gated merge.
+    """
+    merge_status = _get_merge_status(ctx.redis_client, ctx.runner_id)
+    if merge_status not in _INLINE_MERGE_PRESERVE_STATUSES:
+        return False
+    merge_reason = _get_merge_reason(ctx.redis_client, ctx.runner_id)
+
+    if flag_present:
+        try:
+            ctx.redis_client.delete(f"{RUNNER_KEY_PREFIX}:{ctx.runner_id}:merge_requested")
+        except Exception:
+            pass
+
+    _pub_and_log(
+        ctx.runner_id,
+        "[_stream_output] terminal merge_status 보존 → inline merge 차단 "
+        f"(merge_status={merge_status}, merge_reason={merge_reason or '(none)'}, exit_code={ctx.exit_code}, "
+        f"exit_reason={ctx.exit_reason}, stop_stage={ctx.stop_stage})",
+        ctx.redis_client,
+        "CLEANUP",
+    )
+    return True
+
+
 def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
     """merge_requested 여부를 판정"""
     merge_requested = False
@@ -648,6 +705,8 @@ def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
             flag = ctx.redis_client.get(
                 f"{RUNNER_KEY_PREFIX}:{ctx.runner_id}:merge_requested"
             )
+            if _preserve_terminal_merge_state_if_needed(ctx, flag_present=bool(flag)):
+                return False
             if flag:
                 if ctx.exit_code == 0:
                     if ctx.completed_for_flow:
@@ -805,6 +864,10 @@ def _update_workflow_and_execute_cleanup(
             logger.warning(f"[_stream_output] workflow update 실패 (무시): {wf_err}")
 
     # 구역 E: merge 또는 fallback 실행
+    if merge_requested:
+        if _preserve_terminal_merge_state_if_needed(ctx, flag_present=True):
+            merge_requested = False
+
     if merge_requested:
         # merge 흐름 — cleanup은 merge 완료/실패 후 _do_inline_merge 내부에서 호출
         _do_inline_merge(ctx.runner_id, ctx.redis_client)

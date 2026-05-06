@@ -239,6 +239,7 @@
 	}
 
 	function staleBadgeLabel(): string | null {
+		if (mergeStatus === 'approval_required') return null;
 		if (worktreeExists === false) return '삭제된 worktree';
 		if (branchExists === false) return 'branch 없음';
 		if (branchMergedToMain === true) return 'main 반영됨';
@@ -469,11 +470,11 @@
 		</div>
 	{/if}
 
-	{#if !running && worktreeExists === false}
+	{#if !running && mergeStatus !== 'approval_required' && worktreeExists === false}
 		<div class="px-3 py-1.5 text-xs text-muted-foreground bg-muted/50 border-b border-border">
 			삭제된 worktree의 과거 실행 기록입니다. 직접 머지는 새 worktree에서 다시 실행해야 합니다.
 		</div>
-	{:else if !running && branchExists === false}
+	{:else if !running && mergeStatus !== 'approval_required' && branchExists === false}
 		<div class="px-3 py-1.5 text-xs text-muted-foreground bg-muted/50 border-b border-border">
 			branch가 남아 있지 않은 과거 실행 기록입니다.
 		</div>

@@ -710,6 +710,30 @@ class TestListRunners:
         assert response.status_code == 200
         assert response.json() == []
 
+    async def test_list_runners_corrects_stale_branch_exists_for_approval_required(self, client, mock_executor_redis, tmp_path):
+        """T3/T5-R: approval_required runner는 stale branch_exists=false를 실제 branch 조회로 보정한다."""
+        fake_async = mock_executor_redis["async"]
+        rid = "approval-list-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.sadd("plan-runner:active_runners", rid)
+        await fake_async.set(f"{prefix}:status", "stopped")
+        await fake_async.set(f"{prefix}:trigger", "user")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/test.md")
+        await fake_async.set(f"{prefix}:worktree_path", str(tmp_path))
+        await fake_async.set(f"{prefix}:branch", "impl/test")
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:branch_exists", "false")
+        await fake_async.set(f"{prefix}:worktree_exists", "true")
+
+        with patch("app.modules.dev_runner.services.executor_service.check_branch_exists", return_value=True):
+            response = await client.get("/api/v1/dev-runner/runners")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["runner_id"] == rid
+        assert data[0]["branch_exists"] is True
+        assert await fake_async.get(f"{prefix}:branch_exists") == "true"
+
 
 class TestMergeApprovalPayload:
     async def test_merge_retry_request_forwards_approve_service_lock(self, client):

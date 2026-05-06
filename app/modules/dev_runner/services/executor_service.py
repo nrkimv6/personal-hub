@@ -29,6 +29,7 @@ from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_his
 from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.services.visibility import is_visible_runner
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
+from app.modules.dev_runner.services.git_utils import check_branch_exists
 from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
 from app.modules.dev_runner.services.state import get_state
 from app.modules.dev_runner.services.redis_connection import (
@@ -101,6 +102,31 @@ def _coerce_runner_metadata_checked_at(*values: Any) -> str:
         if text and text.lower() != "unknown":
             return text
     return "unknown"
+
+
+def _approval_required_branch_exists_fallback(
+    merge_status: str | None,
+    branch_exists: bool | str,
+    branch: str | None,
+    worktree_path: str | None,
+    metadata_checked_at: str,
+) -> tuple[bool | str, str]:
+    """Correct stale branch_exists=false for approval_required runners only."""
+    if merge_status != "approval_required":
+        return branch_exists, metadata_checked_at
+    if branch_exists is not False or not branch or not worktree_path:
+        return branch_exists, metadata_checked_at
+
+    worktree = Path(str(worktree_path))
+    if not worktree.is_dir():
+        return branch_exists, metadata_checked_at
+
+    try:
+        if check_branch_exists(branch, cwd=str(worktree)):
+            return True, datetime.now().isoformat()
+    except Exception:
+        pass
+    return branch_exists, metadata_checked_at
 
 
 def _resolve_runner_plan_path(plan_file: str | None) -> Path | None:
@@ -1004,8 +1030,24 @@ class ExecutorService:
                         d["metadata_checked_at"],
                         recent_meta.get("metadata_checked_at"),
                     )
+                    branch_for_metadata = branch
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
+                    corrected_branch_exists, corrected_checked_at = _approval_required_branch_exists_fallback(
+                        merge_status,
+                        branch_exists,
+                        branch_for_metadata,
+                        worktree_path,
+                        metadata_checked_at,
+                    )
+                    if corrected_branch_exists != branch_exists:
+                        branch_exists = corrected_branch_exists
+                        metadata_checked_at = corrected_checked_at
+                        try:
+                            await self.async_redis.set(self._runner_key(rid, "branch_exists"), "true")
+                            await self.async_redis.set(self._runner_key(rid, "metadata_checked_at"), metadata_checked_at)
+                        except Exception as exc:
+                            logger.debug(f"[dev-runner] approval branch_exists 보정 Redis 기록 실패: runner={rid}, error={exc}")
                     start_time = None
                     if start_time_str:
                         try:
