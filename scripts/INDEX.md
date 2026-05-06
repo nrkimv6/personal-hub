@@ -22,6 +22,7 @@
 - [fixes/](#fixes)
 - [dumptruck/](#dumptruck)
 - [setup/](#setup)
+- [git-hooks/](#git-hooks)
 - [archive/ (기존)](#archive-기존)
 - [_deprecated/ (기존)](#_deprecated-기존)
 - [루트 유지](#루트-유지)
@@ -355,6 +356,18 @@
 | ✅ | `claude-session-manager.ps1` | Claude Code 세션 관리 헬퍼 |
 | ✅ | `auto-update.ps1` | 자동 업데이트 훅 |
 | ✅ | `Send-TelegramAlert.ps1` | 텔레그램 알림 함수 (watchdog crash-loop 감지 등에서 dot-source) |
+
+---
+
+## git-hooks/
+
+> 현재 위치: `scripts/git-hooks/`
+> 위험도: **🟡 중** — root/plans commit boundary를 강제한다.
+> 운영 원칙: mirror surface sync는 root local resolve가 아니라 literal `git pull --ff-only` 수신과 wtools sync evidence로 닫는다. 자세한 절차는 `docs/dev-guide/root-branch-guard.md`를 따른다.
+
+| 상태 | 파일 | 설명 |
+|:-:|---|---|
+| ✅ | `pre-commit-plans-block.ps1` | main에서 plans/archive ledger 직접 커밋을 차단한다. mirror sync conflict는 root에서 resolve하지 않고 ff-only 수신 또는 wtools source sync evidence로 처리한다. |
 
 ---
 

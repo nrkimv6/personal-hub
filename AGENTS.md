@@ -17,6 +17,14 @@
 - 스킬 원본 수정: monitor-page의 `.claude/skills`, `.claude/agents` 직접 수정 금지  
   `D:\work\project\service\wtools\.claude\`에서 수정 후 동기화
 
+## Receiver Mirror Scope
+
+- monitor-page root의 `.agents/`, `.claude/`, `.gemini/`, `.agent/` mirror surface는 모두 wtools sync 결과로 취급한다.
+- Codex, Claude, Gemini 운영자는 root에서 mirror conflict를 직접 resolve하거나 mirror-only sync merge를 만들지 않는다.
+- mirror sync는 literal `git pull --ff-only` 수신만 허용한다. local `main`이 ahead라서 실패하면 owner가 `git push origin main`으로 origin을 정렬한 뒤 `git pull --ff-only`를 retry한다.
+- push가 거절되거나 권한이 없으면 wtools source owner flow, sync worker, 또는 GitHub Actions `sync-skills.yml` evidence를 확보한 뒤 downstream read-back으로 닫는다.
+- 세부 절차: [`docs/dev-guide/root-branch-guard.md`](docs/dev-guide/root-branch-guard.md)
+
 ## Plans Worktree (활성)
 
 계획서·아카이브는 orphan `plans` 브랜치의 고정 워크트리로 관리됩니다.
