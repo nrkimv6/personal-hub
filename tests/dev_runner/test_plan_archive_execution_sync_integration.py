@@ -126,7 +126,14 @@ def _make_record(db, file_path: str = "/archive/2026-01-01-test.md") -> PlanReco
     return record
 
 
-def _make_request(db, caller_id: str, status: str = "completed", result_json: dict | None = None) -> LLMRequest:
+def _make_request(
+    db,
+    caller_id: str,
+    status: str = "completed",
+    result_json: dict | None = None,
+    request_source: str | None = None,
+    cli_options: dict | None = None,
+) -> LLMRequest:
     req = LLMRequest(
         caller_type="plan_archive_analyze",
         caller_id=caller_id,
@@ -136,6 +143,8 @@ def _make_request(db, caller_id: str, status: str = "completed", result_json: di
         provider="claude",
         model="",
         queue_name="utility",
+        request_source=request_source,
+        cli_options=_json_overwrite.dumps(cli_options) if cli_options else None,
         result=_json_overwrite.dumps(result_json) if result_json else None,
     )
     db.add(req)
@@ -256,6 +265,47 @@ class TestSaveOverwriteGuard:
         assert events[-1].detail is not None
         saved_detail = _json_overwrite.loads(events[-1].detail) if isinstance(events[-1].detail, str) else events[-1].detail
         assert saved_detail.get("request_id") == req.id
+
+    def test_manual_reanalyze_saves_prior_snapshot_event(self, overwrite_db):
+        db = overwrite_db
+        """manual reanalyze 결과 저장 전 기존 PlanRecord 값을 audit event로 보존한다."""
+        record = _make_record(db, "/archive/manual-reanalyze-audit.md")
+        record.category = "old-category"
+        record.tags = ["old-tag"]
+        record.summary = "old summary"
+        record.llm_processed_at = datetime(2026, 5, 6, 10, 0)
+        req = _make_request(
+            db,
+            record.filename_hash,
+            status="completed",
+            request_source="manual_reanalyze",
+            cli_options={"profile_key": "claude-opus"},
+        )
+        db.flush()
+
+        result = {
+            "success": True,
+            "result": {
+                "category": "new-category",
+                "tags": ["new-tag"],
+                "summary": "new summary",
+            },
+        }
+        assert save_plan_archive_result(db, req, result) is True
+
+        events = db.query(PlanEvent).filter_by(
+            plan_record_id=record.id,
+            event_type="plan_archive_analysis_overwritten",
+        ).all()
+        assert len(events) >= 1
+        detail = _json_overwrite.loads(events[-1].detail) if isinstance(events[-1].detail, str) else events[-1].detail
+        assert detail["prior_summary"] == "old summary"
+        assert detail["prior_category"] == "old-category"
+        assert detail["prior_tags"] == ["old-tag"]
+        assert detail["prior_analyzed_at"] == "2026-05-06T10:00:00"
+        assert detail["request_id"] == req.id
+        assert detail["provider"] == "claude"
+        assert detail["profile_key"] == "claude-opus"
 
     def test_empty_result_dict_does_not_fail(self, overwrite_db):
         db = overwrite_db

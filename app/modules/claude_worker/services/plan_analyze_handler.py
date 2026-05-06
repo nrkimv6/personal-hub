@@ -57,6 +57,24 @@ def _json_safe_request_attr(request, name: str):
     return None
 
 
+def _request_cli_options(request) -> dict:
+    raw = getattr(request, "cli_options", None)
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _is_manual_reanalyze_request(request) -> bool:
+    source = getattr(request, "request_source", None)
+    return source in {"manual_reanalyze", "manual:reanalyze"}
+
+
 def save_plan_archive_result(db: Session, request, result: dict) -> bool:
     """plan_archive_analyze caller_type 결과 저장
 
@@ -94,6 +112,21 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         tags = llm_result.get("tags")
         summary = llm_result.get("summary")
         superseded_by = llm_result.get("superseded_by")
+
+        prior_snapshot = None
+        if _is_manual_reanalyze_request(request):
+            prior_snapshot = {
+                "prior_summary": record.summary,
+                "prior_category": record.category,
+                "prior_tags": record.tags,
+                "prior_analyzed_at": record.llm_processed_at.isoformat() if record.llm_processed_at else None,
+                "prior_provider": getattr(record, "analyzed_provider", None),
+                "prior_model": getattr(record, "analyzed_model", None),
+                "request_id": _json_safe_request_attr(request, "id"),
+                "provider": _json_safe_request_attr(request, "provider"),
+                "model": _json_safe_request_attr(request, "model"),
+                "profile_key": _request_cli_options(request).get("profile_key"),
+            }
 
         if category:
             record.category = category
@@ -155,6 +188,14 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
 
         try:
             from app.models.plan_record import PlanEvent
+            if prior_snapshot is not None:
+                db.add(
+                    PlanEvent(
+                        plan_record_id=record.id,
+                        event_type="plan_archive_analysis_overwritten",
+                        detail=prior_snapshot,
+                    )
+                )
             event = PlanEvent(
                 plan_record_id=record.id,
                 event_type="plan_archive_analysis_saved",
