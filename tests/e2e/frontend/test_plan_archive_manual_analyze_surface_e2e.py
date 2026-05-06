@@ -178,11 +178,11 @@ def test_archive_manual_analyze_surface_is_removed(
     _skip_admin_mode_if_public(system_mode)
     calls = _install_archive_routes(page)
 
-    page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
+    page.goto(f"{frontend_url}/automation?tab=plans&subtab=archive", wait_until="domcontentloaded")
     expect(page.get_by_text("2026-05-05_manual-analyze.md")).to_be_visible()
     page.locator("tbody tr").filter(has_text="2026-05-05_manual-analyze.md").evaluate("el => el.click()")
     expect(page.get_by_role("button", name="내용")).to_be_visible()
-    expect(page.get_by_role("button", name="메모")).to_be_visible()
+    expect(page.get_by_role("button", name="메모", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="분석")).to_have_count(0)
     expect(page.get_by_text("Preview는 DB 저장 없음")).to_have_count(0)
     expect(page.get_by_role("button", name="DB 저장")).to_have_count(0)
