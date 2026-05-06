@@ -4,6 +4,7 @@
 	import { llmApi, type LLMProfileConfig, type ProviderInfo } from '$lib/api';
 	import {
 		loadSavedTargets,
+		PLAN_ARCHIVE_BLOCKED_PROVIDERS,
 		saveTargets,
 		targetKey,
 		targetLabel,
@@ -92,7 +93,8 @@
 	}
 
 	function buildTargets(providers: ProviderInfo[], profiles: LLMProfileConfig[]): SelectedTarget[] {
-		const providerByKey = new Map(providers.map((p) => [p.key, p]));
+		const allowedProviders = (providers || []).filter((p) => !PLAN_ARCHIVE_BLOCKED_PROVIDERS.has(p.key));
+		const providerByKey = new Map(allowedProviders.map((p) => [p.key, p]));
 		const enabledProfiles = (profiles || [])
 			.filter((p) => p.enabled !== false)
 			.sort((a, b) =>
@@ -113,7 +115,7 @@
 				kind: 'profile'
 			};
 		});
-		const engineTargets: SelectedTarget[] = (providers || []).map((provider) => ({
+		const engineTargets: SelectedTarget[] = allowedProviders.map((provider) => ({
 			provider: provider.key,
 			model: modelOptions(provider)[0] || '',
 			profile_key: null,
