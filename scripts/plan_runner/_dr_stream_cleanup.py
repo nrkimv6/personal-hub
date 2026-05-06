@@ -704,6 +704,12 @@ def decide_cleanup_action(
     completed_for_flow: bool,
     has_worktree_commits: bool,
 ) -> MergeCleanupDecision:
+    if state.merge_status == "merged":
+        return MergeCleanupDecision(
+            MergeCleanupAction.FALLBACK_DONE,
+            "merged_not_done_check",
+            "merge_status=merged uses post-merge fallback detection",
+        )
     if state.merge_status in TERMINAL_STATUSES:
         return MergeCleanupDecision(
             MergeCleanupAction.BLOCKED_TERMINAL,
