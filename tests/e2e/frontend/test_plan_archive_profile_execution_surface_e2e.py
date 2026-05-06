@@ -257,7 +257,9 @@ def test_archive_profile_execution_controls_and_capacity_state(
 
     expect(page.get_by_text("Archive Schedule 현황")).to_be_visible()
     expect(page.get_by_text("분석 Target:")).to_be_visible()
-    expect(page.get_by_text("claude/work/claude-opus-4-5").first).to_be_visible()
+    expect(page.get_by_text("target을 1개 이상 선택하세요")).to_be_visible()
+    page.get_by_role("button", name="전체").click()
+    expect(page.get_by_text("1개 선택됨")).to_be_visible()
     expect(page.get_by_role("button", name="Backlog 실행")).to_be_enabled()
     expect(page.get_by_text("quota 1")).to_be_visible()
 
