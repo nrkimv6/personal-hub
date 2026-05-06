@@ -16,6 +16,7 @@ def test_plan_archive_target_selector_uses_profile_backed_targets():
     assert "profile_key: `${profile.engine}:${profile.name}`" in source
     assert "label: `${profile.engine}/${profile.name}/" in source
     assert "profiledEngines" not in source
+    assert "PLAN_ARCHIVE_BLOCKED_PROVIDERS.has(p.key)" in source
     assert "전체 선택" in source
     assert "aria-expanded" in source
 
@@ -30,3 +31,5 @@ def test_plan_archive_selected_target_contract_includes_profile_identity():
     assert "profileless:" in source
     assert "formatRunBacklogResult" in source
     assert "formatSyncExecutionsResult" in source
+    assert "PLAN_ARCHIVE_BLOCKED_PROVIDERS" in source
+    assert "cc-codex" in source

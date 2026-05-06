@@ -88,6 +88,30 @@ def test_codex_executor_allows_parse_json_cli_metadata(mock_run, _mock_which, _m
 
 @patch("app.modules.claude_worker.services.executors.codex_executor.build_cli_env", return_value={})
 @patch("shutil.which", return_value="codex")
+@patch("subprocess.run")
+def test_codex_executor_allows_plan_archive_cli_metadata(mock_run, _mock_which, _mock_env):
+    """B: Plan Archive worker metadata is accepted but never emitted as argv."""
+    mock_run.return_value = MagicMock(returncode=0, stdout='{"ok": true}', stderr="")
+    metadata = {
+        "parse_json": True,
+        "plan_archive_execution_job_id": 41,
+        "prompt_policy_id": "plan_archive.codex.default",
+        "prompt_policy_version": "2026-05-06.1",
+        "candidate_profiles": [{"engine": "gemini", "profile_name": "default"}],
+        "target_label": "codex/gpt-5.3-codex",
+    }
+
+    result = CodexExecutor().execute("prompt", cli_options=metadata)
+
+    args, _kwargs = mock_run.call_args
+    command = args[0]
+    assert result["success"] is True
+    for key in metadata:
+        assert key not in command
+
+
+@patch("app.modules.claude_worker.services.executors.codex_executor.build_cli_env", return_value={})
+@patch("shutil.which", return_value="codex")
 @patch("subprocess.run", side_effect=subprocess.TimeoutExpired("codex", 1))
 def test_codex_executor_timeout_is_classified(_mock_run, _mock_which, _mock_env):
     """E: timeout returns CODEX_TIMEOUT."""
