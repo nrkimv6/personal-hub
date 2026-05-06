@@ -1,6 +1,12 @@
 """service_lock approval_required runtime flow tests (listener-side).
 
-T3: exit code 5(approval_required) 보존 + approve_service_lock 1회 플래그 계약 검증.
+6-axis map:
+- creator: exit code 5 creates approval_required/service_lock metadata.
+- preserver: cleanup finally and pre-queue guard preserve approval_required.
+- overwrite-block: stale gate and queued writes cannot replace terminal approval.
+- override: explicit retry with approval flag may proceed from approval_required.
+- display: covered by runner API/display tests.
+- late-writer ordering: covered by persistence/race tests.
 """
 
 from __future__ import annotations
@@ -74,7 +80,7 @@ def _import_stream_cleanup_module():
 
 
 def test_execute_merge_with_lock_exit_5_preserves_approval_required():
-    """T3-R: post-merge exit code 5(service_lock) → approval_required로 보존, general resolver 미호출."""
+    """creator/preserver: exit code 5(service_lock) creates approval_required and skips general resolver."""
     _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
 
     rid = "t-approval-001"
@@ -103,7 +109,7 @@ def test_execute_merge_with_lock_exit_5_preserves_approval_required():
 
 
 def test_retry_merge_sets_and_clears_service_lock_approved_flag():
-    """T3-R: retry-merge approve_service_lock=true → Redis 1회 플래그 세팅 후 시도 종료 시 제거."""
+    """override: retry-merge approve_service_lock=true sets one-shot approval flag and clears it."""
     _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
 
     rid = "t-approval-002"
@@ -130,7 +136,7 @@ def test_retry_merge_sets_and_clears_service_lock_approved_flag():
 
 
 def test_stream_cleanup_preserves_approval_required_even_when_merge_requested_leftover_R():
-    """RIGHT-BICEP/CORRECT: terminal approval_required는 leftover merge_requested보다 우선한다.
+    """preserver/overwrite-block: terminal approval_required outranks leftover merge_requested.
 
     Regression shape:
     handle_merge_stage records approval_required -> subprocess exits completed ->
@@ -183,7 +189,7 @@ def test_stream_cleanup_preserves_approval_required_even_when_merge_requested_le
 
 
 def test_execute_merge_with_lock_preserves_existing_approval_required_before_queueing_R():
-    """CORRECT: inline merge executor must not overwrite an existing terminal approval state."""
+    """overwrite-block: inline merge executor must not queue over an existing terminal approval state."""
     _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
 
     rid = "t-approval-existing-001"
@@ -223,7 +229,7 @@ def test_execute_merge_with_lock_preserves_existing_approval_required_before_que
 
 
 def test_execute_merge_with_lock_retry_merge_bypasses_existing_approval_required_guard_R():
-    """RIGHT-BICEP/CORRECT: explicit retry-merge may proceed from approval_required."""
+    """override: explicit retry-merge may proceed from approval_required."""
     _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
 
     rid = "t-approval-retry-001"
@@ -253,7 +259,7 @@ def test_execute_merge_with_lock_retry_merge_bypasses_existing_approval_required
 
 
 def test_stale_gate_block_preserves_existing_terminal_approval_required_R():
-    """CORRECT: stale gate BLOCK must not report error when approval_required is already terminal."""
+    """overwrite-block: stale gate BLOCK must not report error when approval_required is already terminal."""
     _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
 
     rid = "t-approval-stale-gate-001"

@@ -712,7 +712,7 @@ class TestListRunners:
         assert response.json() == []
 
     async def test_list_runners_corrects_stale_branch_exists_for_approval_required(self, client, mock_executor_redis, tmp_path):
-        """T3/T5-R: approval_required runner는 stale branch_exists=false를 실제 branch 조회로 보정한다."""
+        """display: approval_required runner corrects stale branch_exists=false before API display."""
         fake_async = mock_executor_redis["async"]
         rid = "approval-list-001"
         prefix = f"plan-runner:runners:{rid}"
@@ -832,7 +832,7 @@ class TestGetRunnerStatus:
 
 class TestMergeApprovalPayload:
     async def test_merge_retry_request_forwards_approve_service_lock(self, client):
-        """R: POST /merge/{runner_id}/retry with approve_service_lock=true → command payload 포함"""
+        """override: POST /merge/{runner_id}/retry forwards approve_service_lock command payload."""
         rid = "merge-retry-001"
         mocked = AsyncMock(return_value={"success": True, "message": "ok"})
         with patch.object(executor_service, "_send_command", new=mocked):
@@ -855,7 +855,7 @@ class TestMergeApprovalPayload:
         assert sent.get("branch")
 
     async def test_legacy_runner_retry_merge_forwards_approve_service_lock(self, client):
-        """B: POST /runners/{runner_id}/retry-merge도 approve_service_lock payload를 전달한다."""
+        """override/boundary: legacy retry-merge endpoint also forwards approve_service_lock."""
         rid = "merge-retry-legacy-001"
         mocked = AsyncMock(return_value={"success": True, "message": "ok"})
         with patch.object(executor_service, "_send_command", new=mocked):
@@ -870,7 +870,7 @@ class TestMergeApprovalPayload:
         assert sent.get("approve_service_lock") is True
 
     async def test_direct_merge_request_forwards_approve_service_lock(self, client):
-        """R: POST /merge/direct with approve_service_lock=true → command payload 포함"""
+        """override: POST /merge/direct forwards approve_service_lock for listener policy normalization."""
         mocked = AsyncMock(return_value={"success": True, "message": "ok"})
         with patch.object(executor_service, "_send_command", new=mocked):
             response = await client.post(
@@ -888,7 +888,7 @@ class TestMergeApprovalPayload:
         assert sent.get("approve_service_lock") is True
 
     async def test_get_merge_status_returns_reason_and_message_for_approval_required(self, client, mock_executor_redis):
-        """T5-R: GET /merge/{runner_id}는 approval_required + reason/message를 반환한다."""
+        """display: GET /merge/{runner_id} returns approval_required reason/message surface."""
         fake_async = mock_executor_redis["async"]
         rid = "merge-status-approval-001"
         prefix = f"plan-runner:runners:{rid}"

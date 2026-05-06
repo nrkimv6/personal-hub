@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from _dr_constants import LOG_CHANNEL_PREFIX, RUNNER_KEY_PREFIX
-from _dr_merge_state import is_transition_allowed, normalize_status
+from _dr_merge_state import TERMINAL_STATUSES, is_transition_allowed, normalize_status
 from _dr_runtime_utils import _publish_with_retry
 
 logger = logging.getLogger(__name__)
@@ -103,11 +103,21 @@ class MergePersistence:
             quarantine_diff_path = result["post_merge_done"].get("quarantine_diff_path")
 
         try:
-            self.redis_client.set(self._key("merge_message"), str(result.get("message") or ""))
-            if reason:
-                self.redis_client.set(self._key("merge_reason"), str(reason))
-            else:
-                self.redis_client.delete(self._key("merge_reason"))
+            current = self.read()
+            preserve_terminal_metadata = (
+                current.merge_status in TERMINAL_STATUSES
+                and bool(current.merge_reason or current.merge_message)
+                and (
+                    normalize_status(reason) != normalize_status(current.merge_reason)
+                    or str(result.get("message") or "") != current.merge_message
+                )
+            )
+            if not preserve_terminal_metadata:
+                self.redis_client.set(self._key("merge_message"), str(result.get("message") or ""))
+                if reason:
+                    self.redis_client.set(self._key("merge_reason"), str(reason))
+                else:
+                    self.redis_client.delete(self._key("merge_reason"))
             if quarantine_diff_path:
                 self.redis_client.set(self._key("quarantine_diff_path"), str(quarantine_diff_path))
             else:

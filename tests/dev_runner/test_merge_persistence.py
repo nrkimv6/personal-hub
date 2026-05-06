@@ -1,5 +1,15 @@
+"""Merge persistence 6-axis tests.
+
+Axis map:
+- preserver: queued/error writes preserve an existing approval_required state.
+- overwrite-block: stale gate error is rejected after terminal approval state.
+- override: approved retry may intentionally leave approval_required.
+- late-writer ordering: tests call terminal writer before later stale writer.
+"""
+
 from pathlib import Path
 import sys
+import json
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +31,14 @@ class FakeRedis:
 
     def delete(self, key):
         self.store.pop(key, None)
+        return True
+
+    def lpush(self, key, value):
+        self.store.setdefault(key, [])
+        self.store[key].insert(0, value)
+        return True
+
+    def expire(self, key, ttl):
         return True
 
 
@@ -69,3 +87,41 @@ def test_approved_retry_can_leave_approval_required():
 
     assert result.allowed is True
     assert redis.get(f"{prefix}:merge_status") == MERGING
+
+
+def test_result_metadata_preserves_terminal_approval_after_rejected_late_writer():
+    from _dr_merge_persistence import MergePersistence
+    from _dr_merge_state import APPROVAL_REQUIRED, ERROR, RetryAction
+
+    rid = "runner-d"
+    prefix = f"plan-runner:runners:{rid}"
+    redis = FakeRedis(
+        {
+            f"{prefix}:merge_status": APPROVAL_REQUIRED,
+            f"{prefix}:merge_reason": "service_lock",
+            f"{prefix}:merge_message": "MERGE_PRECHECK_FAILED[service_lock]: blocked",
+        }
+    )
+    persistence = MergePersistence(redis, rid)
+
+    rejected = persistence.transition(
+        ERROR,
+        reason="stale_merge_blocked",
+        message="stale branch",
+        action=RetryAction.INLINE_MERGE,
+    )
+    persistence.persist_result_metadata(
+        {"success": False, "reason": "stale_merge_blocked", "message": "stale branch"}
+    )
+    persistence.push_result_history(
+        branch="impl/test",
+        plan_file="docs/plan/test.md",
+        result={"success": False, "reason": "stale_merge_blocked", "message": "stale branch"},
+    )
+
+    assert rejected.allowed is False
+    assert redis.get(f"{prefix}:merge_status") == APPROVAL_REQUIRED
+    assert redis.get(f"{prefix}:merge_reason") == "service_lock"
+    assert redis.get(f"{prefix}:merge_message") == "MERGE_PRECHECK_FAILED[service_lock]: blocked"
+    history = json.loads(redis.get("plan-runner:merge-results")[0])
+    assert history["status"] == APPROVAL_REQUIRED

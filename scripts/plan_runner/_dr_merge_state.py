@@ -72,7 +72,9 @@ class MergeCleanupAction(str, Enum):
 OVERRIDE_MATRIX = {
     RetryAction.INLINE_MERGE: frozenset(),
     RetryAction.RETRY_MERGE: frozenset(),
-    RetryAction.DIRECT_MERGE: TERMINAL_STATUSES,
+    # Current listener call-sites normalize direct-merge to APPROVED_RETRY.
+    # Keep the enum no wider than approved retry for any direct callers.
+    RetryAction.DIRECT_MERGE: RETRYABLE_STATUSES,
     RetryAction.APPROVED_RETRY: RETRYABLE_STATUSES,
 }
 
