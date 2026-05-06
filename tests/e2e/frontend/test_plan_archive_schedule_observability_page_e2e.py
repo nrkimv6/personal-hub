@@ -20,7 +20,49 @@ def _json_response(route, payload):
     route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
 
 
-def _install_plan_archive_routes(page: Page) -> None:
+def _dashboard_payload(schedule=None):
+    if schedule is Ellipsis:
+        schedule = {
+            "id": 1,
+            "enabled": True,
+            "cron_expr": "0 2 * * *",
+            "next_run_at": "2026-05-07T02:00:00",
+            "last_run_at": None,
+            "max_per_run": 10,
+            "provider": "codex",
+            "model": "gpt-5.5",
+        }
+    return {
+        "schedule": schedule,
+        "health": {
+            "archived_total": 30,
+            "llm_processed": 25,
+            "llm_unprocessed": 5,
+            "real_unprocessed": 3,
+            "temp_pytest_total": 0,
+            "temp_pytest_unprocessed": 0,
+            "pending_or_processing_requests": 2,
+            "failed_requests": 0,
+        },
+        "retrieval_readiness": {
+            "ready": True,
+            "required_tables": [],
+            "missing_tables": [],
+        },
+        "queue_summary": {
+            "pending": 2,
+            "processing": 0,
+            "failed": 0,
+            "completed_24h": 25,
+            "recent_failures_by_category": {},
+        },
+        "recent_requests": [],
+        "recent_schedule_runs": [],
+        "recent_execution_attempts": [],
+    }
+
+
+def _install_plan_archive_routes(page: Page, *, schedule=Ellipsis, on_resume=None) -> None:
     # T3 mock contract: this file validates isolated UI rendering with mocked API payloads.
     def handle(route):
         url = route.request.url
@@ -35,6 +77,94 @@ def _install_plan_archive_routes(page: Page) -> None:
             return
         if "/api/v1/dev-runner/plans/paths" in url:
             _json_response(route, [])
+            return
+        if "/api/v1/plans/records/archive-schedule-dashboard" in url:
+            _json_response(route, _dashboard_payload(schedule))
+            return
+        if "/api/v1/plans/records/archive-schedule/resume" in url and route.request.method == "POST":
+            if on_resume:
+                on_resume()
+            _json_response(route, {"schedule_id": 1, "enabled": True, "action": "resume"})
+            return
+        if "/api/v1/plans/records/archive-schedule/pause" in url and route.request.method == "POST":
+            _json_response(route, {"schedule_id": 1, "enabled": False, "action": "pause"})
+            return
+        if "/api/v1/plans/records/archive-llm-requests" in url:
+            _json_response(route, {"items": [], "total": 0, "page": 1, "page_size": 50, "filters": {}})
+            return
+        if "/api/v1/plans/records/archive-schedule-runs" in url:
+            _json_response(route, {"items": [], "total": 0, "page": 1, "page_size": 50, "filters": {}})
+            return
+        if "/api/v1/plans/records/archive-execution-attempts" in url:
+            _json_response(
+                route,
+                {
+                    "items": [
+                        {
+                            "id": 701,
+                            "record_id": 2381,
+                            "llm_request_id": 15480,
+                            "engine": "claude",
+                            "profile_name": "work",
+                            "status": "failed",
+                            "requested_at": "2026-05-06T23:31:00",
+                            "error_message": "Save result failed for plan_archive_analyze",
+                            "requested_target": {
+                                "provider": "claude",
+                                "model": "claude-opus-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                            "effective_provider_model": {
+                                "provider": "claude",
+                                "model": "claude-opus-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                            "actual_provider_model": {
+                                "provider": "claude",
+                                "model": "claude-opus-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                        },
+                        {
+                            "id": 702,
+                            "record_id": 2382,
+                            "llm_request_id": 15481,
+                            "engine": "claude",
+                            "profile_name": "work",
+                            "status": "completed",
+                            "requested_at": "2026-05-06T23:32:00",
+                            "error_message": None,
+                            "save_outcome_status": "stale_skipped",
+                            "save_outcome_reason": "newer_completed_result_exists",
+                            "requested_target": {
+                                "provider": "claude",
+                                "model": "claude-sonnet-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                            "effective_provider_model": {
+                                "provider": "claude",
+                                "model": "claude-sonnet-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                            "actual_provider_model": {
+                                "provider": "claude",
+                                "model": "claude-sonnet-4-5",
+                                "engine": "claude",
+                                "profile_name": "work",
+                            },
+                        },
+                    ],
+                    "total": 2,
+                    "page": 1,
+                    "page_size": 50,
+                    "filters": {},
+                },
+            )
             return
         if "/api/v1/plans/records/archive-health" in url:
             _json_response(
@@ -96,21 +226,101 @@ def _install_plan_archive_routes(page: Page) -> None:
             ]
             _json_response(route, {"candidates": candidates, "total": len(candidates)})
             return
-        if "/api/v1/plans/archive-execution-targets" in url:
+        if "/api/v1/llm/providers" in url:
+            _json_response(
+                route,
+                [
+                    {
+                        "key": "claude",
+                        "display_name": "Claude",
+                        "default_model": "claude-opus-4-6",
+                        "models": ["claude-opus-4-6"],
+                        "supports_chat": True,
+                        "supports_quota_pause": False,
+                        "enabled": True,
+                        "executor_key": "claude",
+                    },
+                    {
+                        "key": "gemini",
+                        "display_name": "Gemini",
+                        "default_model": "gemini-3.1-pro",
+                        "models": ["gemini-3.1-pro"],
+                        "supports_chat": True,
+                        "supports_quota_pause": False,
+                        "enabled": True,
+                        "executor_key": "gemini",
+                    },
+                    {
+                        "key": "codex",
+                        "display_name": "Codex",
+                        "default_model": "gpt-5.5",
+                        "models": ["gpt-5.5"],
+                        "supports_chat": True,
+                        "supports_quota_pause": False,
+                        "enabled": True,
+                        "executor_key": "codex",
+                    },
+                    {
+                        "key": "cc-codex",
+                        "display_name": "CC Codex",
+                        "default_model": "gpt-5.3-codex",
+                        "models": ["gpt-5.3-codex"],
+                        "supports_chat": True,
+                        "supports_quota_pause": False,
+                        "enabled": True,
+                        "executor_key": "codex",
+                    },
+                ],
+            )
+            return
+        if "/api/v1/llm/profiles" in url and "/status" not in url:
             _json_response(
                 route,
                 {
-                    "targets": [
-                        {
-                            "id": 1,
-                            "name": "monitor-page",
-                            "enabled": True,
-                            "priority": 1,
-                            "provider": "codex",
-                            "model": "gpt-5.5",
-                        }
+                    "selected": {},
+                    "profiles": [
+                        {"engine": "claude", "name": "personal", "config_dir": None, "extra_env": {}, "enabled": True, "priority": 1},
+                        {"engine": "claude", "name": "work", "config_dir": None, "extra_env": {}, "enabled": True, "priority": 2},
+                        {"engine": "gemini", "name": "default", "config_dir": None, "extra_env": {}, "enabled": True, "priority": 1},
                     ],
-                    "total": 1,
+                    "supported_engines": ["claude", "gemini", "codex", "cc-codex"],
+                },
+            )
+            return
+        if "/api/v1/plans/records/archive-schedule-dashboard" in url:
+            _json_response(
+                route,
+                {
+                    "schedule": {
+                        "id": 1,
+                        "enabled": True,
+                        "cron_expr": "0 2 * * *",
+                        "next_run_at": "2026-05-07T02:00:00",
+                        "max_per_run": 10,
+                        "provider": "codex",
+                        "model": "gpt-5.5",
+                    },
+                    "health": {
+                        "archived_total": 30,
+                        "llm_processed": 25,
+                        "llm_unprocessed": 5,
+                        "real_unprocessed": 3,
+                        "temp_pytest_total": 0,
+                        "temp_pytest_unprocessed": 0,
+                        "pending_or_processing_requests": 2,
+                        "failed_requests": 0,
+                    },
+                    "retrieval_readiness": {"ok": True, "required_tables": [], "missing_tables": []},
+                    "queue_summary": {
+                        "pending": 2,
+                        "processing": 0,
+                        "failed": 0,
+                        "completed_24h": 0,
+                        "recent_failures_by_category": {},
+                    },
+                    "recent_requests": [],
+                    "recent_schedule_runs": [],
+                    "recent_execution_attempts": [],
                 },
             )
             return
@@ -161,6 +371,8 @@ def test_plan_archive_page_codex_provider_visible(page: Page) -> None:
     _install_plan_archive_routes(page)
     page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
     page.wait_for_timeout(800)
+    page.get_by_role("button", name="0개 선택됨").click()
+    page.wait_for_timeout(200)
     body_text = _wait_for_body_text(page)
     assert (
         "codex" in body_text.lower()
@@ -182,6 +394,51 @@ def test_plan_archive_page_schedule_enabled_state_visible(page: Page) -> None:
         or "2026-05-07" in body_text
         or "02:00" in body_text
     ), f"schedule section not visible; body: {body_text[:300]}"
+
+
+def test_plan_archive_page_resume_button_posts_when_schedule_disabled(page: Page) -> None:
+    resume_calls = []
+    schedule = {
+        "id": 1,
+        "enabled": False,
+        "cron_expr": "0 2 * * *",
+        "next_run_at": "2026-05-07T02:00:00",
+        "last_run_at": None,
+        "max_per_run": 10,
+        "provider": "codex",
+        "model": "gpt-5.5",
+    }
+    _install_plan_archive_routes(page, schedule=schedule, on_resume=lambda: resume_calls.append(True))
+
+    page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
+    resume_button = page.get_by_role("button", name="재개")
+    expect(resume_button).to_be_visible()
+    resume_button.click()
+
+    expect(page.get_by_text("Schedule 재개됨")).to_be_visible()
+    assert resume_calls == [True]
+
+
+def test_plan_archive_page_hides_mutation_buttons_when_schedule_missing(page: Page) -> None:
+    _install_plan_archive_routes(page, schedule=None)
+
+    page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
+    expect(page.get_by_text("스케줄 없음")).to_be_visible()
+    expect(page.get_by_role("button", name="정지")).to_have_count(0)
+    expect(page.get_by_role("button", name="재개")).to_have_count(0)
+
+
+def test_plan_archive_history_distinguishes_failed_from_stale_save_skip(page: Page) -> None:
+    _install_plan_archive_routes(page)
+
+    page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
+    page.get_by_role("button", name="이력").click()
+
+    expect(page.get_by_text("failed", exact=True)).to_be_visible()
+    expect(page.get_by_text("stale_skipped", exact=True)).to_be_visible()
+    expect(page.get_by_text("Save result failed for plan_archive_analyze")).to_be_visible()
+    expect(page.get_by_text("newer_completed_result_exists")).to_be_visible()
+    assert page.locator("tr").filter(has_text="stale_skipped").filter(has_text="failed").count() == 0
 
 
 def test_plan_archive_source_contract_no_candidates_duplication(page: Page) -> None:

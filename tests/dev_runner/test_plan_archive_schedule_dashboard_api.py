@@ -330,6 +330,26 @@ def test_archive_schedule_pause_returns_404_if_no_schedule(admin_client, db):
     """archive schedule이 없을 때 pause가 404를 반환한다."""
     resp = admin_client.post("/api/v1/plans/records/archive-schedule/pause")
     assert resp.status_code == 404
+    assert resp.json()["detail"] == "Plan archive schedule not found"
+
+
+def test_archive_schedule_resume_returns_domain_404_detail_if_no_schedule(admin_client, db):
+    """admin route는 존재하지만 schedule seed가 없으면 JSON detail로 domain 404를 반환한다."""
+    resp = admin_client.post("/api/v1/plans/records/archive-schedule/resume")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Plan archive schedule not found"
+
+
+def test_archive_schedule_admin_route_open_public_route_closed(public_client, admin_client, db):
+    """admin app은 pause/resume을 처리하고 public app은 같은 mutation path를 노출하지 않는다."""
+    _add_schedule(db, enabled=False)
+
+    admin_resp = admin_client.post("/api/v1/plans/records/archive-schedule/resume")
+    assert admin_resp.status_code == 200
+    assert admin_resp.json()["enabled"] is True
+
+    public_resp = public_client.post("/api/v1/plans/records/archive-schedule/resume")
+    assert public_resp.status_code in (404, 405)
 
 
 # ── R: drill-down ids in request row ─────────────────────────────────────────
