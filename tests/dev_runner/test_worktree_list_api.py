@@ -59,6 +59,15 @@ class TestListWorktrees:
 
         assert result[0]["locked"] is True
 
+    def test_runner_metadata_correction_is_not_in_worktree_list_surface(self):
+        """worktree list는 git worktree primitive만 다루고 runner stale metadata 보정은 read model이 담당한다."""
+        service_source = (Path(__file__).resolve().parents[2] / "app/modules/dev_runner/services/worktree_service.py").read_text(encoding="utf-8")
+        read_model_source = (Path(__file__).resolve().parents[2] / "app/modules/dev_runner/services/runner_read_model.py").read_text(encoding="utf-8")
+
+        assert "build_runner_git_metadata(" not in service_source
+        assert "branch_exists" not in service_source
+        assert "build_runner_git_metadata(" in read_model_source
+
     @pytest.mark.asyncio
     async def test_right_excludes_detached(self):
         """detached HEAD 워크트리 제외"""
