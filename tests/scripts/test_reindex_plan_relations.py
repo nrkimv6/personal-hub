@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "plan_runner"))
 
 import reindex_plan_relations as reindex  # noqa: E402
+from app.models.plan_archive_execution import PlanArchiveExecutionJob  # noqa: E402,F401
 from app.models.plan_record import PlanRecord, PlanRecordRelation  # noqa: E402
 from app.modules.dev_runner.services.plan_archive_relation_service import compute_plan_filename_hash  # noqa: E402
 
