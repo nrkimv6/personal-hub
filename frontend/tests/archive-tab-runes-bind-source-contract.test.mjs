@@ -4,6 +4,14 @@ import test from 'node:test';
 
 const archiveTabPath = 'src/routes/plans/ArchiveTab.svelte';
 const archiveTabSource = readFileSync(archiveTabPath, 'utf8');
+let svelteCompile = null;
+let svelteCompilerLoadError = null;
+
+try {
+	({ compile: svelteCompile } = await import('svelte/compiler'));
+} catch (error) {
+	svelteCompilerLoadError = error;
+}
 
 const retrievalBindTargets = [
 	'retrievalQ',
@@ -86,6 +94,30 @@ function duplicates(values) {
 	}
 	return [...duplicateValues];
 }
+
+function formatSvelteCompileError(error) {
+	const details = [
+		error?.message,
+		error?.code ? `code: ${error.code}` : null,
+		error?.start ? `start: ${error.start.line}:${error.start.column}` : null,
+		error?.end ? `end: ${error.end.line}:${error.end.column}` : null,
+		error?.frame,
+	].filter(Boolean);
+	return details.join('\n');
+}
+
+test('ArchiveTab Svelte markup parses', {
+	skip: svelteCompile ? false : `svelte/compiler unavailable: ${svelteCompilerLoadError?.code ?? svelteCompilerLoadError?.message ?? 'unknown'}`,
+}, () => {
+	try {
+		svelteCompile(archiveTabSource, {
+			filename: archiveTabPath,
+			generate: false,
+		});
+	} catch (error) {
+		assert.fail(`${archiveTabPath}: Svelte markup must parse cleanly.\n${formatSvelteCompileError(error)}`);
+	}
+});
 
 test('ArchiveTab retrieval bind targets are Svelte runes state', () => {
 	const failures = retrievalBindTargets.filter((name) => {
