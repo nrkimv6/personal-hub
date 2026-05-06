@@ -15,7 +15,19 @@ from app.modules.claude_worker.services.profile_env import build_cli_env
 CODEX_SAFE_DEFAULT_MODEL = "gpt-5.5"
 CODEX_DEFAULT_SANDBOX = "read-only"
 MODEL_INCOMPATIBLE_SNIPPET = "requires a newer version of Codex"
-ALLOWED_CLI_OPTION_KEYS = {"cwd", "parse_json", "sandbox"}
+ALLOWED_CLI_OPTION_KEYS = {
+    "candidate_key",
+    "candidate_profiles",
+    "cwd",
+    "parse_json",
+    "plan_archive_execution_job_id",
+    "profile_key",
+    "prompt_policy_id",
+    "prompt_policy_version",
+    "sandbox",
+    "source_schedule_run_id",
+    "target_label",
+}
 
 
 def _project_root() -> Path:
