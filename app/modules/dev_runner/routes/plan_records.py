@@ -610,12 +610,7 @@ def list_archive_execution_attempts(
 @router_admin.post("/records/archive-schedule/pause", response_model=ArchiveSchedulePauseResumeResponse)
 def pause_archive_schedule(db: Session = Depends(get_db)):
     """archive schedule을 pause한다 (enabled=False). admin 전용."""
-    from app.models.task_schedule import TaskSchedule
-    schedule = db.query(TaskSchedule).filter(
-        TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE
-    ).order_by(TaskSchedule.id.asc()).first()
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Plan archive schedule not found")
+    schedule = _get_plan_archive_schedule_or_404(db)
     schedule.enabled = False
     db.commit()
     return ArchiveSchedulePauseResumeResponse(schedule_id=schedule.id, enabled=False, action="pause")
@@ -624,15 +619,22 @@ def pause_archive_schedule(db: Session = Depends(get_db)):
 @router_admin.post("/records/archive-schedule/resume", response_model=ArchiveSchedulePauseResumeResponse)
 def resume_archive_schedule(db: Session = Depends(get_db)):
     """archive schedule을 resume한다 (enabled=True). admin 전용."""
+    schedule = _get_plan_archive_schedule_or_404(db)
+    schedule.enabled = True
+    db.commit()
+    return ArchiveSchedulePauseResumeResponse(schedule_id=schedule.id, enabled=True, action="resume")
+
+
+def _get_plan_archive_schedule_or_404(db: Session):
+    """6101 admin frontend must call this through the admin API proxy, not the public router."""
     from app.models.task_schedule import TaskSchedule
+
     schedule = db.query(TaskSchedule).filter(
         TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE
     ).order_by(TaskSchedule.id.asc()).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Plan archive schedule not found")
-    schedule.enabled = True
-    db.commit()
-    return ArchiveSchedulePauseResumeResponse(schedule_id=schedule.id, enabled=True, action="resume")
+    return schedule
 
 
 def _to_retrieval_query(req: PlanArchiveRetrievalQuery) -> RetrievalQuery:

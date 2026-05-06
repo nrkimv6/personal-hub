@@ -25,14 +25,18 @@ from browser_workers import BrowserWorkerManager
 
 
 class _Response:
-    def __init__(self, status: int = 200):
+    def __init__(self, status: int = 200, body: bytes = b"{}"):
         self.status = status
+        self._body = body
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+    def read(self):
+        return self._body
 
 
 def _make_manager(tmp_path: Path) -> BrowserWorkerManager:
@@ -117,6 +121,14 @@ class TestFixWmi:
 
 
 class TestRestartFrontendCliArgs:
+    @pytest.fixture(autouse=True)
+    def _allow_cli_dispatch_from_test_worktree(self, monkeypatch):
+        """CLI dispatch unit tests mock the root-check so focused worktree tests can exercise parsing."""
+        monkeypatch.setattr(
+            "scripts.services.browser_worker_runtime.cli.assert_repo_root_checkout",
+            lambda: None,
+        )
+
     def test_restart_api_mode_right_default_admin(self, monkeypatch):
         """R: restart-api 기본 호출은 admin API."""
         mgr = MagicMock()
@@ -264,6 +276,9 @@ class TestRestartFrontendBehavior:
             "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
             return_value=(True, None),
         ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._verify_frontend_runtime_readback",
+            return_value=(True, "mode=admin outDir=.svelte-kit-admin apiPort=8001"),
+        ), patch(
             "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
             "scripts.services.browser_worker_runtime.manager.write_pid_file"
@@ -296,6 +311,9 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
             return_value=(True, None),
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._verify_frontend_runtime_readback",
+            return_value=(True, "mode=admin outDir=.svelte-kit-admin apiPort=8001"),
         ), patch(
             "scripts.services.browser_worker_runtime.manager.write_pid_file"
         ):
@@ -334,6 +352,9 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
             return_value=(True, None),
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._verify_frontend_runtime_readback",
+            return_value=(True, "mode=public outDir=.svelte-kit-public apiPort=8000"),
         ), patch(
             "scripts.services.browser_worker_runtime.manager.write_pid_file"
         ):
@@ -481,6 +502,9 @@ class TestRestartFrontendBehavior:
         ), patch(
             "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
             return_value=(True, None),
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._verify_frontend_runtime_readback",
+            return_value=(True, "mode=admin outDir=.svelte-kit-admin apiPort=8001"),
         ) as mock_urlopen:
             ok = mgr.restart_frontend(public=False)
 
@@ -545,6 +569,9 @@ class TestRestartFrontendBehavior:
             "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
             return_value=(True, None),
         ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._verify_frontend_runtime_readback",
+            return_value=(True, "mode=admin outDir=.svelte-kit-admin apiPort=8001"),
+        ), patch(
             "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
         ), patch(
             "scripts.services.browser_worker_runtime.manager.write_pid_file"
@@ -557,6 +584,75 @@ class TestRestartFrontendBehavior:
         mock_write.assert_called_once()
         rendered = [str(call.args[0]) for call in mock_cprint.call_args_list if call.args]
         assert any("Listener PID unchanged after restart" in line and "frontend is healthy" in line for line in rendered)
+
+    def test_read_frontend_mode_payload_parses_runtime_contract_response(self):
+        """R: /__local/frontend-mode read-back payload를 실제 HTTP 응답 형태로 파싱한다."""
+        body = b'{"mode":"admin","outDir":".svelte-kit-admin","apiPort":"8001"}'
+        with patch(
+            "scripts.services.browser_worker_runtime.frontend_actions.urllib.request.urlopen",
+            return_value=_Response(status=200, body=body),
+        ) as mock_urlopen:
+            payload = frontend_actions._read_frontend_mode_payload(6101)
+
+        assert payload == {"mode": "admin", "outDir": ".svelte-kit-admin", "apiPort": "8001"}
+        mock_urlopen.assert_called_once()
+
+    def test_frontend_runtime_readback_admin_error_api_port_mismatch(self):
+        """E: admin 6101이 public API 8000으로 뜨면 restart 실패 사유가 된다."""
+        with patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._read_frontend_mode_payload",
+            return_value={"mode": "admin", "outDir": ".svelte-kit-admin", "apiPort": "8000"},
+        ):
+            ok, detail = frontend_actions._verify_frontend_runtime_readback(6101, public=False, api_port=8001)
+
+        assert ok is False
+        assert "apiPort" in detail
+        assert "'8001'" in detail
+        assert "'8000'" in detail
+
+    def test_frontend_runtime_readback_public_error_mode_mismatch(self):
+        """E: public preview read-back도 mode/apiPort 계약 불일치를 실패로 분류한다."""
+        with patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._read_frontend_mode_payload",
+            return_value={"mode": "admin", "outDir": ".svelte-kit-public", "apiPort": "8000"},
+        ):
+            ok, detail = frontend_actions._verify_frontend_runtime_readback(6100, public=True, api_port=8000)
+
+        assert ok is False
+        assert "mode" in detail
+
+    def test_restart_frontend_admin_error_runtime_readback_mismatch_returns_false(self, tmp_path):
+        """E: HTTP health가 200이어도 /__local/frontend-mode mismatch면 restart 실패."""
+        mgr = _make_manager(tmp_path)
+        mock_proc = MagicMock()
+        mock_proc.pid = 6060
+
+        with patch.object(mgr, "_acquire_frontend_restart_lock", return_value=107), patch.object(
+            mgr, "_release_frontend_restart_lock"
+        ), patch.object(mgr, "_cleanup_frontend_runtime"), patch.object(mgr, "_prepare_frontend_env"), patch.object(
+            mgr, "_run_frontend_build_if_needed", return_value=True
+        ), patch.object(
+            mgr, "_has_port_collision_error", return_value=False
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.tracked_popen_sync", return_value=mock_proc
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.pick_listener_pid", return_value=6061
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_listener", return_value=6061
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._wait_for_frontend_http_ready",
+            return_value=(True, None),
+        ), patch(
+            "scripts.services.browser_worker_runtime.frontend_actions._verify_frontend_runtime_readback",
+            return_value=(False, "apiPort: expected '8001', got '8000'"),
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.time.sleep", return_value=None
+        ), patch(
+            "scripts.services.browser_worker_runtime.manager.write_pid_file"
+        ):
+            ok = mgr.restart_frontend(public=False)
+
+        assert ok is False
 
     def test_restart_frontend_error_listener_pid_unchanged_and_unhealthy_fails(self, tmp_path):
         """E: listener PID가 유지되고 health도 복구되지 않으면 실패해야 한다."""
