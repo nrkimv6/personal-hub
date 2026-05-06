@@ -29,6 +29,9 @@
 		branch_exists?: boolean | 'unknown';
 		branch_merged_to_main?: boolean | 'unknown';
 		metadata_checked_at?: string | null;
+		display_label?: string | null;
+		display_secondary?: string | null;
+		hide_stale_branch_badge?: boolean;
 	}
 
 	function resolveFullLabel(runner: RunnerTab): string {
@@ -46,6 +49,7 @@
 	}
 
 	function resolveRunnerStateTitle(runner: RunnerTab): string {
+		if (runner.display_label) return runner.display_label;
 		if (runner.running) return 'running';
 		if (runner.merge_status === 'error') return '머지 오류';
 		if (runner.merge_status === 'conflict') return '충돌';
@@ -55,12 +59,8 @@
 	}
 
 	function resolveStaleLabel(runner: RunnerTab): string | null {
-		if (runner.merge_status === 'approval_required') return null;
-		if (runner.worktree_exists === false) return '삭제된 worktree';
-		if (runner.branch_exists === false) return 'branch 없음';
-		if (runner.branch_merged_to_main === true) return 'main 반영됨';
-		if (!runner.running && runner.worktree_exists === 'unknown') return '과거 기록';
-		return null;
+		if (runner.hide_stale_branch_badge) return null;
+		return runner.display_secondary ?? null;
 	}
 
 	function resolveMetaTitle(runner: RunnerTab, index: number): string {

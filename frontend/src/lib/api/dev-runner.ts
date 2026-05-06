@@ -58,6 +58,13 @@ export interface RunStatusResponse {
 	branch_exists?: boolean | 'unknown';
 	branch_merged_to_main?: boolean | 'unknown';
 	metadata_checked_at?: string;
+	exit_reason?: string | null;
+	error?: string | null;
+	display_state?: string;
+	display_label?: string;
+	display_severity?: 'info' | 'warn' | 'error' | 'approval' | 'success' | 'muted';
+	display_secondary?: string | null;
+	hide_stale_branch_badge?: boolean;
 	claim_id?: string | null;
 	claim_state?: string | null;
 	claim_owner_runner_id?: string | null;
@@ -92,6 +99,11 @@ export interface RunnerListItem {
 	branch_exists?: boolean | 'unknown';
 	branch_merged_to_main?: boolean | 'unknown';
 	metadata_checked_at?: string;
+	display_state?: string;
+	display_label?: string;
+	display_severity?: 'info' | 'warn' | 'error' | 'approval' | 'success' | 'muted';
+	display_secondary?: string | null;
+	hide_stale_branch_badge?: boolean;
 }
 
 export interface PlanProgressResponse {

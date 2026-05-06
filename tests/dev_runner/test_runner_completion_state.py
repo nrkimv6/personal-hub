@@ -106,6 +106,7 @@ def test_approval_required_stale_branch_label_is_suppressed_in_ui():
     instance_source = (ROOT / "frontend/src/lib/components/dev-runner/RunnerInstanceTab.svelte").read_text(encoding="utf-8")
     status_source = (ROOT / "frontend/src/lib/components/dev-runner/RunStatusBar.svelte").read_text(encoding="utf-8")
 
-    assert "if (mergeStatus === 'approval_required') return null;" in instance_source
-    assert "mergeStatus !== 'approval_required' && branchExists === false" in instance_source
-    assert "if (runner.merge_status === 'approval_required') return null;" in status_source
+    assert "if (hideStaleBranchBadge) return null;" in instance_source
+    assert "return displaySecondary;" in instance_source
+    assert "if (runner.hide_stale_branch_badge) return null;" in status_source
+    assert "return runner.display_secondary ?? null;" in status_source
