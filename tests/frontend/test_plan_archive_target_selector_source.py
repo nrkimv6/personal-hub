@@ -79,6 +79,8 @@ def test_plan_archive_queue_detail_history_show_requested_effective_actual_targe
     assert "effective_provider_model?: ArchiveProviderModelProfile | null;" in api
     assert "actual_provider_model?: ArchiveProviderModelProfile | null;" in api
     assert "assigned_profile?: ArchiveProviderModelProfile | null;" in api
+    assert "save_outcome_status?: string | null;" in api
+    assert "save_outcome_reason?: string | null;" in api
     assert "requestedTargetLabel(request)" in detail
     assert "effectiveTargetLabel(request)" in detail
     assert "actualTargetLabel(req)" in detail
@@ -89,6 +91,8 @@ def test_plan_archive_queue_detail_history_show_requested_effective_actual_targe
     assert "requestedTargetLabel(a)" in history
     assert "effectiveTargetLabel(a)" in history
     assert "actualTargetLabel(a)" in history
+    assert "function attemptDisplayStatus" in history
+    assert "a.save_outcome_status === 'stale_skipped'" in history
     assert "stale_skipped" in history
 
 

@@ -1374,6 +1374,8 @@ class ArchiveExecutionAttemptRow(BaseModel):
     actual_provider_model: Optional[dict] = None
     assigned_profile: Optional[dict] = None
     error_message: Optional[str] = None
+    save_outcome_status: Optional[str] = None
+    save_outcome_reason: Optional[str] = None
     requested_at: Optional[str] = None
     finished_at: Optional[str] = None
 

@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -53,6 +54,57 @@ def test_history_contains_failed_and_completed_attempt_statuses(db):
 
     statuses = {item["status"] for item in service.history(limit=10)}
     assert statuses == {"completed", "failed"}
+
+
+def test_execution_attempt_history_distinguishes_save_failure_and_stale_skip(client, test_db_session):
+    records = [
+        PlanRecord(filename_hash="hash-stale", file_path="/archive/stale.md", raw_content="# stale", archived_at=datetime(2026, 5, 6)),
+        PlanRecord(filename_hash="hash-save-failed", file_path="/archive/save-failed.md", raw_content="# fail", archived_at=datetime(2026, 5, 6)),
+    ]
+    test_db_session.add_all(records)
+    test_db_session.commit()
+    fake_llm = MagicMock()
+    fake_llm.resolve_provider_model.return_value = ("claude", "sonnet")
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
+        return_value=fake_llm,
+    ):
+        PlanArchiveExecutionService(test_db_session).enqueue_records(records, trigger_source="manual:plan_archive_analyze")
+        test_db_session.commit()
+
+    requests = test_db_session.query(LLMRequest).order_by(LLMRequest.id.asc()).all()[-2:]
+    requests[0].status = "completed"
+    requests[0].processed_at = datetime(2026, 5, 6, 12, 0)
+    requests[0].cli_options = json.dumps(
+        {
+            "plan_archive_save_outcome": {
+                "saved": False,
+                "status": "stale_skipped",
+                "reason": "newer_completed_result_exists",
+            }
+        }
+    )
+    requests[1].status = "failed"
+    requests[1].error_message = "Save result failed for plan_archive_analyze: db_error"
+    requests[1].processed_at = datetime(2026, 5, 6, 12, 1)
+    test_db_session.commit()
+
+    service = PlanArchiveExecutionService(test_db_session)
+    for request in requests:
+        service.sync_attempt_for_request_id(request.id)
+
+    resp = client.get("/api/v1/plans/records/archive-execution-attempts?page_size=20")
+    assert resp.status_code == 200
+    rows = {row["llm_request_id"]: row for row in resp.json()["items"] if row["llm_request_id"] in {r.id for r in requests}}
+
+    stale = rows[requests[0].id]
+    failed = rows[requests[1].id]
+    assert stale["status"] == "completed"
+    assert stale["save_outcome_status"] == "stale_skipped"
+    assert stale["save_outcome_reason"] == "newer_completed_result_exists"
+    assert failed["status"] == "failed"
+    assert failed["error_message"].startswith("Save result failed")
+    assert failed["save_outcome_status"] is None
 
 
 # ===== applied_request_id field tests =====

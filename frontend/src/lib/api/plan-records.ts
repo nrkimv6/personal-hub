@@ -1011,6 +1011,8 @@ export interface ArchiveExecutionAttemptRow {
 	actual_provider_model?: ArchiveProviderModelProfile | null;
 	assigned_profile?: ArchiveProviderModelProfile | null;
 	error_message: string | null;
+	save_outcome_status?: string | null;
+	save_outcome_reason?: string | null;
 	requested_at: string | null;
 	finished_at: string | null;
 }
