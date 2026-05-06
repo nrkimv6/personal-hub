@@ -1,6 +1,6 @@
 """Plan Archive retrieval DB readiness contracts."""
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -61,6 +61,23 @@ def test_plan_archive_retrieval_tables_error_missing_file_refs():
         readiness = get_plan_archive_retrieval_readiness(session)
         assert readiness["ok"] is False
         assert readiness["missing_tables"] == ["plan_record_file_refs"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_plan_archive_retrieval_tables_right_does_not_create_schema():
+    engine, session = _session_with_tables([])
+    try:
+        missing = check_plan_archive_retrieval_tables(session)
+
+        assert sorted(missing) == sorted([
+            "plan_record_chunks",
+            "plan_record_file_refs",
+            "plan_record_relations",
+            "plan_record_search_runs",
+        ])
+        assert inspect(engine).get_table_names() == []
     finally:
         session.close()
         engine.dispose()

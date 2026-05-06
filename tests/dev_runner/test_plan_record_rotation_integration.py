@@ -11,12 +11,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.plan_record import PlanRecord, PlanEvent
+from app.models.task_schedule import TaskSchedule, TaskScheduleRun
+from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.services.plan_record_service import PlanRecordService, _compute_filename_hash
 
 
 def _create_plan_tables(eng):
     PlanRecord.__table__.create(bind=eng, checkfirst=True)
     PlanEvent.__table__.create(bind=eng, checkfirst=True)
+    LLMRequest.__table__.create(bind=eng, checkfirst=True)
+    TaskSchedule.__table__.create(bind=eng, checkfirst=True)
+    TaskScheduleRun.__table__.create(bind=eng, checkfirst=True)
 
 
 @pytest.fixture(scope="module")
@@ -164,3 +169,20 @@ class TestRotationRoundtripIntegration:
 
         results_shallow = int_svc.list_records(q=unique_kw, deep=False, exclude_temp=False)
         assert not any(r.id == record.id for r in results_shallow), "deep=False → raw_content 미스캔"
+
+    def test_archive_health_reports_readiness_without_blocking_rotation_counts(self, int_svc, int_db, tmp_path):
+        """T3: retrieval readiness warning coexists with archive rotation health counts."""
+        fp = tmp_path / "2026-05-06-health-rotation.md"
+        content = "# Rotation Health\n\ncontent"
+        fp.write_text(content, encoding="utf-8")
+
+        record = int_svc.mark_archived(str(fp), str(fp), raw_content=content)
+        record.llm_processed_at = datetime.now() - timedelta(days=8)
+        record.file_delete_after = datetime.now() - timedelta(days=1)
+        int_db.commit()
+
+        health = int_svc.get_plan_archive_health()
+
+        assert health["file_retention_due"] >= 1
+        assert health["retrieval_db_readiness"]["ok"] is False
+        assert "plan_record_file_refs" in health["retrieval_db_readiness"]["missing_tables"]

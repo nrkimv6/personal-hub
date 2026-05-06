@@ -63,6 +63,32 @@ def test_preview_uses_raw_content_and_does_not_mutate_record(test_db_session):
     mock_save.assert_not_called()
 
 
+def test_preview_does_not_require_retrieval_readiness_tables(test_db_session):
+    """R: manual analyze preview is independent from retrieval DB readiness."""
+    record = _add_record(test_db_session, raw_content="# Manual\ncontent")
+
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.LLMService.resolve_provider_model",
+        return_value=("codex", "gpt-5.2"),
+    ), patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.LLMService.execute_llm",
+        return_value={
+            "success": True,
+            "parsed": {
+                "category": "infra",
+                "tags": ["feat"],
+                "summary": "manual preview",
+                "superseded_by": None,
+            },
+            "raw_response": '{"category":"infra"}',
+        },
+    ):
+        result = PlanArchiveManualAnalyzeService(test_db_session).analyze(record.id, mode="preview")
+
+    assert result["success"] is True
+    assert result["mode"] == "preview"
+
+
 def test_preview_falls_back_to_file_content(test_db_session, tmp_path):
     """R: file_path source is used when raw_content is empty."""
     archive_file = tmp_path / "2026-05-05_file-fallback.md"
