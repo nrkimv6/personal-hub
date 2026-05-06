@@ -33,8 +33,9 @@ test('scheduler does not render the full plan archive health row directly', () =
 	assert.doesNotMatch(schedulerSource, /마지막 실패/);
 });
 
-test('scheduler keeps only a compact backlog alert and archive detail link', () => {
+test('scheduler keeps only a compact backlog alert and archive operations link', () => {
 	assert.match(schedulerSource, /planArchiveHealth\.real_unprocessed > 0 && !schedule\.enabled/);
-	assert.match(schedulerSource, /Plan Archive 상세/);
-	assert.match(schedulerSource, /\/plans\?tab=archive/);
+	assert.match(schedulerSource, /Plan Archive 운영/);
+	assert.match(schedulerSource, /\/scheduler\/plan-archive/);
+	assert.doesNotMatch(schedulerSource, /href="\/plans\?tab=archive"/);
 });

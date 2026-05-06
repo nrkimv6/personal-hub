@@ -87,16 +87,26 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         result: {"success": bool, "result": dict, "raw_response": str}
     """
     try:
-        filename_hash = request.caller_id
-        record = db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
+        caller_id = request.caller_id
+        # New contract: caller_id = str(record.id); legacy: caller_id = filename_hash
+        record = None
+        try:
+            record_id_int = int(caller_id)
+            record = db.query(PlanRecord).filter_by(id=record_id_int).first()
+        except (ValueError, TypeError):
+            pass
+        if record is None:
+            # legacy fallback: caller_id is filename_hash
+            record = db.query(PlanRecord).filter_by(filename_hash=caller_id).first()
+        filename_hash = record.filename_hash if record else caller_id
         if not record:
-            logger.error(f"save_plan_archive_result: record not found for hash={filename_hash}")
+            logger.error(f"save_plan_archive_result: record not found for caller_id={caller_id}")
             return False
         if _has_newer_plan_archive_result(db, request):
             logger.warning(
-                "save_plan_archive_result: skipped stale request id=%s hash=%s",
+                "save_plan_archive_result: skipped stale request id=%s caller_id=%s",
                 getattr(request, "id", None),
-                filename_hash,
+                caller_id,
             )
             return False
 

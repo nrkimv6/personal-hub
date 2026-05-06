@@ -869,10 +869,10 @@
 										{planArchiveAlert.text}
 									</span>
 									<a
-										href="/plans?tab=archive"
+										href="/scheduler/plan-archive"
 										class="ml-auto text-primary hover:text-primary-hover"
 									>
-										Plan Archive 상세
+										Plan Archive 운영
 									</a>
 								</div>
 							{:else}
