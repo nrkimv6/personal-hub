@@ -4,6 +4,14 @@
 #
 # --no-verify 사용 절대 금지
 
+$rootBranchGuard = Join-Path $PSScriptRoot "root-branch-guard.ps1"
+if (Test-Path -LiteralPath $rootBranchGuard) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $rootBranchGuard -Mode Commit
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
 $staged = @(git diff --cached --name-only 2>$null)
 $branch = git rev-parse --abbrev-ref HEAD 2>$null
 
@@ -18,6 +26,7 @@ if ($planFiles.Count -eq 0) {
 }
 
 Write-Warning "⚠️  [pre-commit hook] docs/plan 또는 docs/archive staged 변경은 plans 브랜치에서만 허용됩니다."
+Write-Warning "    차단 사유: disallowed_worktree"
 Write-Warning "    현재 브랜치: $branch"
 Write-Warning "    staged plan/archive files:"
 $planFiles | ForEach-Object { Write-Warning "      - $_" }
