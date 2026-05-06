@@ -303,6 +303,8 @@ def test_plan_archive_page_codex_provider_visible(page: Page) -> None:
     _install_plan_archive_routes(page)
     page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
     page.wait_for_timeout(800)
+    page.get_by_role("button", name="0개 선택됨").click()
+    page.wait_for_timeout(200)
     body_text = _wait_for_body_text(page)
     assert (
         "codex" in body_text.lower()
