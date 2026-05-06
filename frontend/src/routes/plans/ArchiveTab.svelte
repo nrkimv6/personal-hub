@@ -9,20 +9,16 @@
     type ImportArchivedResult,
     type ArchivePreviewItem,
     type DuplicateItem,
-    type PlanArchiveRetrievalQuery,
-    type PlanArchiveRetrievalResult,
-    type PlanArchiveMetricsResponse,
-    type PlanArchiveIndexResponse,
-    type PlanArchiveCrossRepoIndexResponse,
-    type PlanArchiveAnalyzeResponse,
     type PlanArchiveExecutionAttempt,
     type SyncResult,
     type PlanRecordRelation
   } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
   import { type ProviderInfo } from '$lib/api/system';
-  import MemoEditor from './MemoEditor.svelte';
-  import PlanViewer from './PlanViewer.svelte';
+  import { createArchiveResidualState } from './archive-tab/planArchiveResidualState.svelte';
+  import ArchiveRetrievalPanel from './archive-tab/ArchiveRetrievalPanel.svelte';
+  import ArchiveRecordDetailPanel from './archive-tab/ArchiveRecordDetailPanel.svelte';
+  import ArchiveSyncPanel from './archive-tab/ArchiveSyncPanel.svelte';
 
   let {
     focusPath = null,
@@ -31,6 +27,8 @@
     focusPath?: string | null;
     onFocusConsumed?: (() => void) | null;
   } = $props();
+
+  const residual = createArchiveResidualState();
 
   // ── 목록 상태 ──────────────────────────────────────────────
   let records: PlanRecord[] = $state([]);
@@ -81,19 +79,6 @@
 
   // ── 분석 요청 ─────────────────────────────────────────────
   let providers: ProviderInfo[] = $state([]);
-  let queueAnalyzeProvider = $state('');
-  let queueAnalyzeModel = $state('');
-  let queueAnalyzeLoading = $state(false);
-  let appliedRequestId: number | null = $state(null);
-
-  async function loadAppliedRequestId(record: PlanRecord) {
-    try {
-      const detail = await planRecordsApi.get(record.id);
-      appliedRequestId = detail.applied_request_id ?? null;
-    } catch {
-      appliedRequestId = null;
-    }
-  }
 
   async function loadSelectedRelations(recordId: number) {
     selectedRelationsLoading = true;
@@ -103,24 +88,6 @@
       selectedRelations = [];
     } finally {
       selectedRelationsLoading = false;
-    }
-  }
-
-  async function requestAnalysis(record: PlanRecord) {
-    if (!queueAnalyzeProvider) { showToast('provider를 선택하세요'); return; }
-    queueAnalyzeLoading = true;
-    try {
-      const res = await planRecordsApi.reanalyze(record.id, { provider: queueAnalyzeProvider, model: queueAnalyzeModel || undefined });
-      if (res.queued) {
-        showToast(`분석 요청 등록 (id=${res.request_id}, ${res.provider}/${res.model || 'default'})`);
-      } else {
-        showToast(`이미 pending 요청 있음 (id=${res.request_id})`);
-      }
-      await loadAppliedRequestId(record);
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : '분석 요청 실패');
-    } finally {
-      queueAnalyzeLoading = false;
     }
   }
 
@@ -167,43 +134,6 @@
     }
   }
 
-  // ── Retrieval MVP 표면 ───────────────────────────────────
-  let retrievalQ = $state('');
-  let retrievalPath = $state('');
-  let retrievalRepoKey = $state('');
-  let retrievalCategory = $state('');
-  let retrievalTags = $state('');
-  let retrievalIntent = $state('');
-  let retrievalScope = $state('');
-  let retrievalDateFrom = $state('');
-  let retrievalDateTo = $state('');
-  let retrievalRelationType = $state('');
-  let retrievalLimit = $state(10);
-  let retrievalLoading = $state(false);
-  let retrievalError = $state('');
-  let retrievalResults: PlanArchiveRetrievalResult[] = $state([]);
-  let retrievalTotal = $state(0);
-  let metricsLoading = $state(false);
-  let metricsError = $state('');
-  let retrievalMetrics: PlanArchiveMetricsResponse | null = $state(null);
-  let indexLimit = $state(100);
-  let indexForce = $state(false);
-  let indexSince = $state('');
-  let indexLoading = $state(false);
-  let indexError = $state('');
-  let indexResult: PlanArchiveIndexResponse | null = $state(null);
-  let crossRepoIndexLoading = $state(false);
-  let crossRepoIndexResult: PlanArchiveCrossRepoIndexResponse | null = $state(null);
-
-  // ── 수동 분석 preview/apply ───────────────────────────────
-  let manualAnalyzeProvider = $state('codex');
-  let manualAnalyzeModel = $state('gpt-5.5');
-  let manualAnalyzeTimeout = $state(120);
-  let manualAnalyzeLoading = $state(false);
-  let manualAnalyzeResult: PlanArchiveAnalyzeResponse | null = $state(null);
-  let manualAnalyzeError = $state('');
-  let manualConfirmingApply = $state(false);
-
   async function loadSelectedExecutionHistory(recordId: number) {
     selectedExecutionHistoryLoading = true;
     selectedExecutionHistoryError = '';
@@ -218,117 +148,10 @@
     }
   }
 
-  function openSelectedExecutionHistory() {
-    const record = selectedRecord;
-    if (!record) return;
-    detailTab = 'history';
-    void loadSelectedExecutionHistory(record.id);
-  }
-
   function refreshSelectedExecutionHistory() {
     const record = selectedRecord;
     if (!record) return;
     void loadSelectedExecutionHistory(record.id);
-  }
-
-  function buildRetrievalFilters(includeLimit = true): PlanArchiveRetrievalQuery {
-    const tags = retrievalTags
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean);
-    const payload: PlanArchiveRetrievalQuery = {};
-    if (retrievalQ.trim()) payload.q = retrievalQ.trim();
-    if (retrievalDateFrom) payload.date_from = retrievalDateFrom;
-    if (retrievalDateTo) payload.date_to = retrievalDateTo;
-    if (retrievalCategory.trim()) payload.category = retrievalCategory.trim();
-    if (tags.length > 0) payload.tags = tags;
-    if (retrievalIntent.trim()) payload.intent = retrievalIntent.trim();
-    if (retrievalScope.trim()) payload.scope = retrievalScope.trim();
-    if (retrievalPath.trim()) payload.path = retrievalPath.trim();
-    if (retrievalRepoKey.trim()) payload.repo_key = retrievalRepoKey.trim();
-    if (retrievalRelationType.trim()) payload.relation_type = retrievalRelationType.trim();
-    if (includeLimit) {
-      const limitValue = Number(retrievalLimit);
-      payload.limit = Number.isFinite(limitValue) ? limitValue : 10;
-    }
-    return payload;
-  }
-
-  async function runRetrievalSearch() {
-    retrievalLoading = true;
-    retrievalError = '';
-    try {
-      const res = await planRecordsApi.searchArchiveRetrieval(buildRetrievalFilters());
-      retrievalResults = res.results ?? [];
-      retrievalTotal = res.total ?? retrievalResults.length;
-      void loadRetrievalMetrics();
-    } catch (e) {
-      retrievalResults = [];
-      retrievalTotal = 0;
-      retrievalError = e instanceof Error ? e.message : 'retrieval 검색 실패';
-    } finally {
-      retrievalLoading = false;
-    }
-  }
-
-  async function loadRetrievalMetrics() {
-    metricsLoading = true;
-    metricsError = '';
-    try {
-      retrievalMetrics = await planRecordsApi.getArchiveRetrievalMetrics(buildRetrievalFilters(false));
-    } catch (e) {
-      retrievalMetrics = null;
-      metricsError = e instanceof Error ? e.message : 'retrieval metrics 로드 실패';
-    } finally {
-      metricsLoading = false;
-    }
-  }
-
-  async function runArchiveIndex(apply = false) {
-    if (apply && indexResult?.dry_run !== true) {
-      showToast('dry-run 결과 확인 후 apply를 실행할 수 있습니다.');
-      return;
-    }
-    indexLoading = true;
-    indexError = '';
-    try {
-      indexResult = await planRecordsApi.indexArchiveRecords({
-        limit: Number(indexLimit),
-        force: indexForce,
-        since: indexSince || undefined,
-        apply,
-      });
-      showToast(
-        `${indexResult.dry_run ? 'Index dry-run' : 'Index apply'}: indexed ${indexResult.indexed}, failed ${indexResult.failed}, skipped ${indexResult.skipped}`
-      );
-      if (!indexResult.dry_run) {
-        await loadRetrievalMetrics();
-      }
-    } catch (e) {
-      indexError = e instanceof Error ? e.message : 'archive index 실행 실패';
-    } finally {
-      indexLoading = false;
-    }
-  }
-
-  async function runCrossRepoIndex(apply = false) {
-    if (!selectedRecord) return;
-    crossRepoIndexLoading = true;
-    try {
-      crossRepoIndexResult = await planRecordsApi.indexCrossRepoArchive({
-        record_id: selectedRecord.id,
-        max_commits: 30,
-        apply,
-      });
-      showToast(
-        `Cross-repo ${crossRepoIndexResult.dry_run ? 'dry-run' : 'apply'}: repos ${crossRepoIndexResult.repos}, indexed ${crossRepoIndexResult.indexed}`
-      );
-      if (apply) await loadRetrievalMetrics();
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'cross-repo index 실패');
-    } finally {
-      crossRepoIndexLoading = false;
-    }
   }
 
   // ── 중복 감지 ─────────────────────────────────────────────
@@ -471,18 +294,13 @@
   function selectRecord(record: PlanRecord) {
     if (selectedRecord?.id === record.id) {
       selectedRecord = null;
-      appliedRequestId = null;
       selectedRelations = [];
     } else {
       selectedRecord = record;
-      appliedRequestId = null;
-      loadAppliedRequestId(record);
       loadSelectedRelations(record.id);
     }
     detailTab = 'content';
-    manualAnalyzeResult = null;
-    manualAnalyzeError = '';
-    manualConfirmingApply = false;
+    residual.resetForRecord();
     selectedExecutionHistory = [];
     selectedExecutionHistoryError = '';
     if (selectedRecord) {
@@ -490,52 +308,10 @@
     }
   }
 
-  function relationLabel(type: string) {
-    const labels: Record<string, string> = {
-      predecessor: '선행',
-      successor: '후속',
-      unresolved_followup: '미해결 후속',
-      cause: '원인',
-      guard: '방어',
-      supersedes: '대체',
-      mentions: '언급'
-    };
-    return labels[type] ?? type;
-  }
-
-  function relationPeer(relation: PlanRecordRelation) {
-    return relation.direction === 'incoming' ? relation.source : relation.target;
-  }
-
-  async function runManualAnalyze(mode: 'preview' | 'apply') {
-    if (!selectedRecord) return;
-    manualAnalyzeLoading = true;
-    manualAnalyzeError = '';
-    manualConfirmingApply = false;
-    try {
-      const result = await planRecordsApi.analyzeRecord(selectedRecord.id, {
-        mode,
-        provider: manualAnalyzeProvider || undefined,
-        model: manualAnalyzeModel || undefined,
-        timeout_seconds: Number(manualAnalyzeTimeout),
-      });
-      manualAnalyzeResult = result;
-      if (result.saved) {
-        await loadRecords();
-        selectedRecord = records.find((record) => record.id === result.record_id) ?? selectedRecord;
-      }
-      showToast(result.saved ? 'DB 저장 완료' : result.success ? '분석 완료' : (result.error || '분석 실패'));
-    } catch (e) {
-      manualAnalyzeError = e instanceof Error ? e.message : '분석 요청 실패';
-    } finally {
-      manualAnalyzeLoading = false;
-    }
-  }
-
-  async function copyAnalyzeResult() {
-    if (!manualAnalyzeResult) return;
-    await navigator.clipboard.writeText(JSON.stringify(manualAnalyzeResult.result, null, 2));
-    showToast('분석 결과를 복사했습니다.');
+  async function handleRecordSaved(recordId: number) {
+    await loadRecords();
+    const updated = records.find((r) => r.id === recordId);
+    if (updated) selectedRecord = updated;
   }
 
   // 외부 quick search 포커싱: file_path로 record get_or_create 후 자동 선택
@@ -575,44 +351,8 @@
     });
   }
 
-  function formatScore(score: number | undefined) {
-    return typeof score === 'number' && Number.isFinite(score) ? score.toFixed(2) : '-';
-  }
-
-  function formatRate(rate: number | undefined) {
-    const value = typeof rate === 'number' && Number.isFinite(rate) ? rate : 0;
-    return `${(value <= 1 ? value * 100 : value).toFixed(0)}%`;
-  }
-
-  function getPlanValue(plan: PlanArchiveRetrievalResult['plan'], key: string) {
-    if (!plan || typeof plan !== 'object') return undefined;
-    return (plan as Record<string, unknown>)[key];
-  }
-
-  function getResultPlanTitle(result: PlanArchiveRetrievalResult) {
-    const title = getPlanValue(result.plan, 'title');
-    if (typeof title === 'string' && title.trim()) return title;
-    const path = getPlanValue(result.plan, 'file_path');
-    if (typeof path === 'string' && path.trim()) {
-      return path.split(/[\\/]/).pop() ?? path;
-    }
-    const id = getPlanValue(result.plan, 'id');
-    return typeof id === 'number' ? `Plan #${id}` : 'Untitled plan';
-  }
-
-  function getResultPlanPath(result: PlanArchiveRetrievalResult) {
-    const path = getPlanValue(result.plan, 'file_path');
-    return typeof path === 'string' ? path : '';
-  }
-
-  function getScoreDetails(result: PlanArchiveRetrievalResult) {
-    return Object.entries(result.score_detail ?? {})
-      .slice(0, 4)
-      .map(([key, value]) => `${key} ${typeof value === 'number' ? formatScore(value) : String(value)}`);
-  }
-
-  function getExecutionStateClass(state: string | null | undefined) {
-    switch (state) {
+  function getExecutionStateClass(executionState: string | null | undefined) {
+    switch (executionState) {
       case 'queued':
       case 'pending':
         return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200';
@@ -629,8 +369,8 @@
     }
   }
 
-  function getArchiveStateClass(state: string | null | undefined) {
-    switch (state) {
+  function getArchiveStateClass(archiveState: string | null | undefined) {
+    switch (archiveState) {
       case 'ready':
       case 'indexed':
         return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200';
@@ -661,20 +401,8 @@
     return '-';
   }
 
-  function summarizeResult(value: unknown): string {
-    if (value == null) return '-';
-    if (typeof value === 'string') return value.length > 80 ? `${value.slice(0, 80)}...` : value;
-    try {
-      const text = JSON.stringify(value);
-      return text.length > 80 ? `${text.slice(0, 80)}...` : text;
-    } catch {
-      return String(value);
-    }
-  }
-
   onMount(() => {
     loadRecords();
-    loadRetrievalMetrics();
     loadProviders();
   });
 </script>
@@ -724,18 +452,6 @@
       </div>
       <div class="flex items-center gap-2 flex-wrap">
         <button
-          class="px-3 py-1 text-xs rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-700 dark:bg-emerald-900 dark:hover:bg-emerald-800 dark:text-emerald-200 disabled:opacity-50"
-          onclick={runSync}
-          disabled={syncLoading}
-          title="등록된 경로를 스캔해 파일↔DB를 동기화합니다. archive 경로 파일에 archived_at을 자동 설정합니다."
-        >{syncLoading ? '동기화 중...' : '파일/DB 동기화'}</button>
-        <button
-          class="px-3 py-1 text-xs rounded bg-green-100 hover:bg-green-200 text-green-700 dark:bg-green-900 dark:hover:bg-green-800 dark:text-green-200 disabled:opacity-50"
-          onclick={runImportArchived}
-          disabled={importLoading}
-          title="archive 경로의 파일을 DB에 일괄 등록합니다 (DB 이관). 이미 등록된 레코드는 category만 업데이트합니다."
-        >{importLoading ? '이관 중...' : 'DB 이관'}</button>
-        <button
           class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
           onclick={openDuplicatesModal}
         >중복 감지</button>
@@ -754,373 +470,26 @@
       </div>
     </div>
 
+    <ArchiveSyncPanel
+      {importLoading}
+      {importResult}
+      {syncLoading}
+      {syncResult}
+      onImport={runImportArchived}
+      onSync={runSync}
+    />
+
     <!-- schedule 운영 이전 링크 -->
     <div class="mb-3 flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-xs">
       <span class="text-muted-foreground">schedule 운영·LLM 요청 큐·실행 제어·후보 관리 →</span>
       <a href="/scheduler/plan-archive" class="text-primary underline hover:no-underline">/scheduler/plan-archive</a>
     </div>
 
-    <!-- Plan Archive retrieval MVP -->
-    <div class="mb-3 rounded border border-border bg-background p-3 text-xs">
-      <div class="mb-3 flex items-center justify-between gap-2 flex-wrap">
-        <h3 class="font-semibold text-foreground">Plan Archive retrieval</h3>
-        <div class="flex items-center gap-2">
-          {#if retrievalLoading || metricsLoading}
-            <span class="text-muted-foreground">조회 중...</span>
-          {/if}
-          <button
-            class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
-            onclick={loadRetrievalMetrics}
-            disabled={metricsLoading}
-          >metrics 갱신</button>
-        </div>
-      </div>
-
-      <form
-        class="grid gap-2 lg:grid-cols-[1.2fr_1fr_0.7fr_0.7fr_0.7fr_auto]"
-        onsubmit={(e) => { e.preventDefault(); runRetrievalSearch(); }}
-      >
-        <input
-          class="border border-border rounded px-2 py-1 bg-background text-foreground"
-          placeholder="키워드, 파일명, 함수명"
-          bind:value={retrievalQ}
-        />
-        <input
-          class="border border-border rounded px-2 py-1 bg-background text-foreground font-mono"
-          placeholder="파일 경로 filter"
-          bind:value={retrievalPath}
-        />
-        <input
-          class="border border-border rounded px-2 py-1 bg-background text-foreground font-mono"
-          placeholder="repo_key"
-          bind:value={retrievalRepoKey}
-        />
-        <input
-          class="border border-border rounded px-2 py-1 bg-background text-foreground"
-          placeholder="category"
-          bind:value={retrievalCategory}
-        />
-        <input
-          class="border border-border rounded px-2 py-1 bg-background text-foreground"
-          placeholder="tags comma"
-          bind:value={retrievalTags}
-        />
-        <button
-          type="submit"
-          class="px-3 py-1 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
-          disabled={retrievalLoading}
-        >{retrievalLoading ? '검색 중...' : 'retrieval 검색'}</button>
-        <input
-          class="border border-border rounded px-2 py-1 bg-background text-foreground"
-          placeholder="intent"
-          bind:value={retrievalIntent}
-        />
-        <input
-          class="border border-border rounded px-2 py-1 bg-background text-foreground"
-          placeholder="scope"
-          bind:value={retrievalScope}
-        />
-        <input
-          class="border border-border rounded px-2 py-1 bg-background text-foreground"
-          placeholder="relation_type"
-          bind:value={retrievalRelationType}
-        />
-        <div class="grid grid-cols-2 gap-2">
-          <input
-            class="border border-border rounded px-2 py-1 bg-background text-foreground"
-            type="date"
-            aria-label="retrieval date from"
-            bind:value={retrievalDateFrom}
-          />
-          <input
-            class="border border-border rounded px-2 py-1 bg-background text-foreground"
-            type="date"
-            aria-label="retrieval date to"
-            bind:value={retrievalDateTo}
-          />
-        </div>
-        <input
-          class="border border-border rounded px-2 py-1 bg-background text-foreground"
-          type="number"
-          min="1"
-          max="100"
-          aria-label="retrieval result limit"
-          bind:value={retrievalLimit}
-        />
-      </form>
-
-      <div class="mt-3 grid gap-3 xl:grid-cols-[1fr_1fr]">
-        <div class="rounded border border-border p-2">
-          <div class="mb-2 flex items-center justify-between gap-2">
-            <h4 class="font-semibold text-foreground">검색 결과</h4>
-            <span class="text-muted-foreground">total {retrievalTotal}</span>
-          </div>
-          {#if retrievalError}
-            <p class="text-red-500">{retrievalError}</p>
-          {:else if retrievalResults.length === 0}
-            <p class="text-muted-foreground">검색 실행 후 evidence chunk와 source id가 표시됩니다.</p>
-          {:else}
-            <div class="space-y-3">
-              {#each retrievalResults as result, i}
-                <div class="border-b border-border/60 pb-3 last:border-0 last:pb-0">
-                  <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                      <div class="font-medium text-foreground truncate" title={getResultPlanTitle(result)}>
-                        {i + 1}. {getResultPlanTitle(result)}
-                      </div>
-                      {#if getResultPlanPath(result)}
-                        <div class="font-mono text-muted-foreground truncate" title={getResultPlanPath(result)}>
-                          {getResultPlanPath(result)}
-                        </div>
-                      {/if}
-                    </div>
-                    <span class="rounded bg-muted px-2 py-1 font-mono text-muted-foreground">score {formatScore(result.score)}</span>
-                  </div>
-                  {#if getScoreDetails(result).length > 0}
-                    <div class="mt-1 flex flex-wrap gap-1 text-muted-foreground">
-                      {#each getScoreDetails(result) as detail}
-                        <span class="rounded bg-muted px-1.5 py-0.5">{detail}</span>
-                      {/each}
-                    </div>
-                  {/if}
-                  {#if result.chunks?.length > 0}
-                    <div class="mt-2 space-y-1">
-                      {#each result.chunks.slice(0, 2) as chunk}
-                        <div class="rounded bg-muted px-2 py-1">
-                          <div class="mb-1 flex items-center gap-2 text-muted-foreground">
-                            <span class="font-mono">chunk #{chunk.id}</span>
-                            {#if chunk.section_type}<span>{chunk.section_type}</span>{/if}
-                            {#if chunk.heading}<span class="truncate">{chunk.heading}</span>{/if}
-                            {#if chunk.score != null}<span class="ml-auto font-mono">{formatScore(chunk.score)}</span>{/if}
-                          </div>
-                          <p class="line-clamp-2 text-foreground">{chunk.snippet || chunk.text}</p>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                  {#if result.file_refs?.length > 0}
-                    <div class="mt-2 flex flex-wrap gap-1">
-                      {#each result.file_refs.slice(0, 4) as ref}
-                        <span
-                          class="rounded px-1.5 py-0.5 font-mono {ref.source_type === 'git_changed' || ref.source_type === 'downstream_sync' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'}"
-                          title={ref.commit_sha ? `${ref.path} @ ${ref.commit_sha}` : ref.path}
-                        >#{ref.id} {ref.repo_key || 'monitor-page'} · {ref.source_type}: {ref.path}</span>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-
-        <div class="grid gap-3">
-          <div class="rounded border border-border p-2">
-            <div class="mb-2 flex items-center justify-between gap-2">
-              <h4 class="font-semibold text-foreground">후속 통계</h4>
-              {#if retrievalMetrics}
-                <span class="text-muted-foreground">plans {retrievalMetrics.total_plans ?? 0}</span>
-              {/if}
-            </div>
-            {#if metricsError}
-              <p class="text-red-500">{metricsError}</p>
-            {:else if !retrievalMetrics}
-              <p class="text-muted-foreground">metrics API 결과를 기다리는 중입니다.</p>
-            {:else}
-              <div class="grid gap-2 sm:grid-cols-5">
-                <div class="rounded bg-muted px-2 py-2">
-                  <div class="text-muted-foreground">7d follow-up</div>
-                  <div class="font-semibold text-foreground">{formatRate(retrievalMetrics.followup_rates?.days_7)}</div>
-                </div>
-                <div class="rounded bg-muted px-2 py-2">
-                  <div class="text-muted-foreground">14d follow-up</div>
-                  <div class="font-semibold text-foreground">{formatRate(retrievalMetrics.followup_rates?.days_14)}</div>
-                </div>
-                <div class="rounded bg-muted px-2 py-2">
-                  <div class="text-muted-foreground">30d follow-up</div>
-                  <div class="font-semibold text-foreground">{formatRate(retrievalMetrics.followup_rates?.days_30)}</div>
-                </div>
-                <div class="rounded bg-muted px-2 py-2">
-                  <div class="text-muted-foreground">chain max</div>
-                  <div class="font-semibold text-foreground">{retrievalMetrics.chain_depth_max ?? 0}</div>
-                </div>
-                <div class="rounded bg-muted px-2 py-2">
-                  <div class="text-muted-foreground">cross-repo plans</div>
-                  <div class="font-semibold text-foreground">{retrievalMetrics.cross_repo_plan_count ?? 0}</div>
-                </div>
-              </div>
-
-              <div class="mt-3 grid gap-3 lg:grid-cols-2">
-                <div>
-                  <div class="mb-1 font-medium text-foreground">Top file refs</div>
-                  {#if (retrievalMetrics.top_file_refs ?? []).length === 0}
-                    <p class="text-muted-foreground">file ref 집계가 없습니다.</p>
-                  {:else}
-                    <div class="space-y-1">
-                      {#each (retrievalMetrics.top_file_refs ?? []).slice(0, 5) as ref}
-                        <div class="rounded bg-muted px-2 py-1">
-                          <div class="font-mono truncate" title={ref.path}>{ref.repo_key || 'monitor-page'} · {ref.path}</div>
-                          <div class="text-muted-foreground">total {ref.count} / mentioned {ref.mentioned_count} / changed {ref.changed_count}</div>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-                <div>
-                  <div class="mb-1 font-medium text-foreground">누락 후보 파일군</div>
-                  {#if (retrievalMetrics.missing_file_candidates ?? []).length === 0}
-                    <p class="text-muted-foreground">누락 후보가 없습니다.</p>
-                  {:else}
-                    <div class="space-y-1">
-                      {#each (retrievalMetrics.missing_file_candidates ?? []).slice(0, 5) as candidate}
-                        <div class="rounded bg-muted px-2 py-1">
-                          <div class="font-medium">{candidate.module || 'unknown'} <span class="text-muted-foreground">({candidate.count})</span></div>
-                          <div class="font-mono text-muted-foreground truncate" title={(candidate.paths ?? []).join(', ')}>
-                            {(candidate.paths ?? []).slice(0, 3).join(', ')}
-                          </div>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-              </div>
-
-              {#if Object.keys(retrievalMetrics.relation_counts ?? {}).length > 0}
-                <div class="mt-3 flex flex-wrap gap-1">
-                  {#each Object.entries(retrievalMetrics.relation_counts ?? {}) as [type, count]}
-                    <span class="rounded bg-muted px-1.5 py-0.5">{type} {count}</span>
-                  {/each}
-                </div>
-              {/if}
-              {#if Object.keys(retrievalMetrics.repo_counts ?? {}).length > 0}
-                <div class="mt-3">
-                  <div class="mb-1 font-medium text-foreground">Repo evidence</div>
-                  <div class="flex flex-wrap gap-1">
-                    {#each Object.entries(retrievalMetrics.repo_counts ?? {}) as [repoKey, count]}
-                      <span class="rounded bg-muted px-1.5 py-0.5 font-mono">{repoKey} {count}</span>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
-              {#if (retrievalMetrics.downstream_sync_missing_candidates ?? []).length > 0}
-                <div class="mt-3 rounded border border-yellow-300 bg-yellow-50 px-2 py-2 text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950 dark:text-yellow-200">
-                  <div class="mb-1 font-medium">Downstream sync evidence 후보</div>
-                  <div class="space-y-1">
-                    {#each (retrievalMetrics.downstream_sync_missing_candidates ?? []).slice(0, 4) as candidate}
-                      <div class="font-mono truncate" title={candidate.path}>
-                        {candidate.repo_key} · {candidate.path} ({candidate.count})
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
-            {/if}
-          </div>
-
-          <div class="rounded border border-border p-2">
-            <div class="mb-2 flex items-center justify-between gap-2">
-              <h4 class="font-semibold text-foreground">Archive index</h4>
-              {#if indexResult}
-                <span class="text-muted-foreground">{indexResult.dry_run ? 'dry-run' : 'applied'}</span>
-              {/if}
-            </div>
-            <div class="grid gap-2 sm:grid-cols-[0.8fr_0.8fr_auto_auto]">
-              <input
-                class="border border-border rounded px-2 py-1 bg-background text-foreground"
-                type="number"
-                min="1"
-                aria-label="archive index limit"
-                bind:value={indexLimit}
-              />
-              <input
-                class="border border-border rounded px-2 py-1 bg-background text-foreground"
-                type="date"
-                aria-label="archive index since"
-                bind:value={indexSince}
-              />
-              <label class="flex items-center gap-1 text-muted-foreground">
-                <input type="checkbox" bind:checked={indexForce} />
-                force
-              </label>
-              <div class="flex gap-2">
-                <button
-                  class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
-                  onclick={() => runArchiveIndex(false)}
-                  disabled={indexLoading}
-                >dry-run</button>
-                <button
-                  class="px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
-                  onclick={() => runArchiveIndex(true)}
-                  disabled={indexLoading || indexResult?.dry_run !== true}
-                >apply index</button>
-              </div>
-            </div>
-            {#if indexError}
-              <p class="mt-2 text-red-500">{indexError}</p>
-            {/if}
-            {#if indexResult}
-              <div class="mt-2 flex flex-wrap gap-2 text-muted-foreground">
-                <span class="rounded bg-muted px-2 py-1">indexed {indexResult.indexed}</span>
-                <span class="rounded bg-muted px-2 py-1">failed {indexResult.failed}</span>
-                <span class="rounded bg-muted px-2 py-1">skipped {indexResult.skipped}</span>
-                {#if indexResult.run_id != null}
-                  <span class="rounded bg-muted px-2 py-1">run #{indexResult.run_id}</span>
-                {/if}
-              </div>
-              {#if (indexResult.errors ?? []).length > 0}
-                <div class="mt-2 text-red-500">
-                  {#each (indexResult.errors ?? []).slice(0, 3) as item}
-                    <div>{item}</div>
-                  {/each}
-                </div>
-              {/if}
-            {/if}
-            <div class="mt-3 border-t border-border pt-3">
-              <div class="mb-2 flex items-center justify-between gap-2">
-                <div>
-                  <div class="font-medium text-foreground">Cross-repo index</div>
-                  <div class="text-muted-foreground">
-                    {#if selectedRecord}
-                      #{selectedRecord.id} {selectedRecord.title || selectedRecord.file_path}
-                    {:else}
-                      레코드를 선택하면 repo evidence를 색인할 수 있습니다.
-                    {/if}
-                  </div>
-                </div>
-                <div class="flex gap-2">
-                  <button
-                    class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
-                    onclick={() => runCrossRepoIndex(false)}
-                    disabled={crossRepoIndexLoading || !selectedRecord}
-                  >cross dry-run</button>
-                  <button
-                    class="px-2 py-1 rounded bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
-                    onclick={() => runCrossRepoIndex(true)}
-                    disabled={crossRepoIndexLoading || !selectedRecord || crossRepoIndexResult?.dry_run !== true}
-                  >apply cross</button>
-                </div>
-              </div>
-              {#if crossRepoIndexResult}
-                <div class="flex flex-wrap gap-2 text-muted-foreground">
-                  <span class="rounded bg-muted px-2 py-1">{crossRepoIndexResult.dry_run ? 'dry-run' : 'applied'}</span>
-                  <span class="rounded bg-muted px-2 py-1">repos {crossRepoIndexResult.repos}</span>
-                  <span class="rounded bg-muted px-2 py-1">indexed {crossRepoIndexResult.indexed}</span>
-                  <span class="rounded bg-muted px-2 py-1">failed {crossRepoIndexResult.failed}</span>
-                  <span class="rounded bg-muted px-2 py-1">skipped {crossRepoIndexResult.skipped}</span>
-                </div>
-                {#if (crossRepoIndexResult.errors ?? []).length > 0}
-                  <div class="mt-2 text-red-500">
-                    {#each (crossRepoIndexResult.errors ?? []).slice(0, 3) as item}
-                      <div>{item}</div>
-                    {/each}
-                  </div>
-                {/if}
-              {/if}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ArchiveRetrievalPanel
+      state={residual}
+      {selectedRecord}
+      {showToast}
+    />
 
     <!-- 벌크 액션 바 -->
     {#if selectedIds.size > 0}
@@ -1283,267 +652,22 @@
 
   <!-- 상세 패널 -->
   {#if selectedRecord}
-    <div class="w-80 flex-shrink-0 border-l border-border pl-4 flex flex-col gap-2">
-      <div class="flex items-center justify-between">
-        <h3 class="text-xs font-semibold text-foreground truncate">
-          {selectedRecord.file_path.split(/[\\/]/).pop()}
-        </h3>
-        <button
-          class="text-muted-foreground hover:text-foreground text-xs"
-          onclick={() => { selectedRecord = null; }}
-        >닫기</button>
-      </div>
-      <p class="text-xs text-muted-foreground">완료일: {formatDate(selectedRecord.archived_at)}</p>
-      <p class="text-xs text-muted-foreground">
-        카테고리: <span class="font-medium">{getCategoryFromPath(selectedRecord.file_path)}</span>
-      </p>
-      <div class="rounded border border-border p-2 text-xs">
-        <div class="mb-1 flex items-center justify-between">
-          <span class="font-semibold text-foreground">계획 관계</span>
-          {#if selectedRelations.some((relation) => relation.relation_type === 'unresolved_followup')}
-            <span class="rounded bg-red-100 px-1.5 py-0.5 text-red-700 dark:bg-red-900 dark:text-red-200">미해결 후속</span>
-          {/if}
-        </div>
-        {#if selectedRelationsLoading}
-          <p class="text-muted-foreground">불러오는 중...</p>
-        {:else if selectedRelations.length === 0}
-          <p class="text-muted-foreground">관계 없음</p>
-        {:else}
-          <div class="space-y-1">
-            {#each selectedRelations.slice(0, 5) as relation}
-              <div class="flex min-w-0 items-center gap-1">
-                <span class="shrink-0 rounded bg-muted px-1 py-0.5 text-muted-foreground">{relation.direction === 'incoming' ? 'in' : 'out'}</span>
-                <span class="shrink-0 rounded px-1 py-0.5 {relation.relation_type === 'unresolved_followup' ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'}">
-                  {relationLabel(relation.relation_type)}
-                </span>
-                <span class="truncate text-muted-foreground" title={relationPeer(relation).file_path}>
-                  {relationPeer(relation).title || relationPeer(relation).file_path.split(/[\\/]/).pop()}
-                </span>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      <!-- 탭 버튼 -->
-      <div class="flex gap-1 border-b border-border pb-1">
-        <button
-          class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'content' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-          onclick={() => { detailTab = 'content'; }}
-        >내용</button>
-        <button
-          class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'memo' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-          onclick={() => { detailTab = 'memo'; }}
-        >메모</button>
-        <button
-          class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'analyze' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-          onclick={() => { detailTab = 'analyze'; }}
-        >분석</button>
-        <button
-          class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'history' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
-          onclick={openSelectedExecutionHistory}
-        >실행</button>
-      </div>
-      <!-- 분석 요청 -->
-      <div class="border-t border-border pt-2">
-        <div class="flex items-center gap-2 mb-1">
-          <p class="text-xs font-semibold text-foreground">LLM 분석 요청</p>
-          {#if appliedRequestId}
-            <span class="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">DB 반영됨 #{appliedRequestId}</span>
-          {/if}
-        </div>
-        <div class="flex gap-1 mb-1">
-          <select
-            class="flex-1 border border-border rounded px-1.5 py-0.5 text-xs bg-background text-foreground"
-            bind:value={queueAnalyzeProvider}
-          >
-            <option value="">provider 선택</option>
-            {#each providers as p}
-              <option value={p.key}>{p.key}{p.key === 'codex' ? ' (profile 불필요)' : ''}</option>
-            {/each}
-          </select>
-          <input
-            class="w-28 border border-border rounded px-1.5 py-0.5 text-xs bg-background text-foreground"
-            placeholder="model (선택)"
-            bind:value={queueAnalyzeModel}
-          />
-        </div>
-        <button
-          class="w-full px-2 py-1 text-xs rounded bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-900 dark:hover:bg-blue-800 dark:text-blue-200 disabled:opacity-50"
-          onclick={() => selectedRecord && requestAnalysis(selectedRecord)}
-          disabled={queueAnalyzeLoading || !queueAnalyzeProvider}
-        >{queueAnalyzeLoading ? '요청 중...' : '분석 요청'}</button>
-      </div>
-
-      <div class="flex-1 overflow-auto">
-        {#if detailTab === 'content'}
-          <PlanViewer filePath={selectedRecord.file_path} recordId={selectedRecord.id} />
-        {:else if detailTab === 'memo'}
-          <MemoEditor filePath={selectedRecord.file_path} />
-        {:else if detailTab === 'analyze'}
-          <div class="space-y-3 text-xs">
-            <div class="rounded border border-border p-3">
-              <div class="grid gap-2">
-                <label class="grid gap-1">
-                  <span class="text-muted-foreground">provider</span>
-                  <select class="rounded border border-border bg-background px-2 py-1" bind:value={manualAnalyzeProvider}>
-                    <option value="codex">codex</option>
-                    <option value="claude">claude</option>
-                    <option value="gemini">gemini</option>
-                  </select>
-                </label>
-                <label class="grid gap-1">
-                  <span class="text-muted-foreground">model</span>
-                  <input
-                    class="rounded border border-border bg-background px-2 py-1"
-                    list="plan-archive-analyze-models"
-                    placeholder="gpt-5.5 / gemini-3.1-pro-preview / claude-opus-4-6"
-                    bind:value={manualAnalyzeModel}
-                  />
-                  <datalist id="plan-archive-analyze-models">
-                    <option value="gpt-5.5"></option>
-                    <option value="gpt-5.2"></option>
-                    <option value="gemini-3.1-pro-preview"></option>
-                    <option value="gemini-3-flash-preview"></option>
-                    <option value="claude-opus-4-6"></option>
-                  </datalist>
-                </label>
-                <label class="grid gap-1">
-                  <span class="text-muted-foreground">timeout</span>
-                  <input class="rounded border border-border bg-background px-2 py-1" type="number" min="1" max="3600" bind:value={manualAnalyzeTimeout} />
-                </label>
-              </div>
-              <div class="mt-3 flex flex-wrap gap-2">
-                <button
-                  class="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50"
-                  disabled={manualAnalyzeLoading}
-                  onclick={() => runManualAnalyze('preview')}
-                >{manualAnalyzeLoading ? '실행 중...' : 'Preview'}</button>
-                <button
-                  class="rounded bg-muted px-3 py-1 text-muted-foreground hover:bg-secondary disabled:opacity-50"
-                  disabled={manualAnalyzeLoading || !manualAnalyzeResult?.success}
-                  onclick={() => { manualConfirmingApply = true; }}
-                >DB 저장</button>
-              </div>
-              <p class="mt-2 text-muted-foreground">Preview는 DB 저장 없음. Apply만 category/tags/summary를 저장합니다.</p>
-            </div>
-
-            {#if manualConfirmingApply}
-              <div class="rounded border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-                <p>현재 preview 결과를 DB에 저장합니다.</p>
-                <div class="mt-2 flex gap-2">
-                  <button class="rounded bg-amber-600 px-3 py-1 text-white" onclick={() => runManualAnalyze('apply')}>확인</button>
-                  <button class="rounded bg-background px-3 py-1 text-muted-foreground" onclick={() => { manualConfirmingApply = false; }}>취소</button>
-                </div>
-              </div>
-            {/if}
-
-            {#if manualAnalyzeError}
-              <p class="rounded border border-red-300 bg-red-50 p-2 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{manualAnalyzeError}</p>
-            {/if}
-
-            {#if manualAnalyzeResult}
-              <div class="rounded border border-border p-3">
-                <div class="mb-2 flex items-center justify-between gap-2">
-                  <div>
-                    <span class="font-semibold">{manualAnalyzeResult.success ? '성공' : '실패'}</span>
-                    <span class="text-muted-foreground"> · {manualAnalyzeResult.provider}/{manualAnalyzeResult.model} · {manualAnalyzeResult.elapsed_ms}ms</span>
-                    {#if manualAnalyzeResult.prompt_policy_id}
-                      <span class="text-muted-foreground"> · {manualAnalyzeResult.prompt_policy_id}/{manualAnalyzeResult.prompt_policy_version}</span>
-                    {/if}
-                  </div>
-                  <button class="rounded bg-muted px-2 py-1 text-muted-foreground hover:bg-secondary" onclick={copyAnalyzeResult}>복사</button>
-                </div>
-                {#if manualAnalyzeResult.error}
-                  <p class="mb-2 text-red-600 dark:text-red-300">{manualAnalyzeResult.error}</p>
-                {/if}
-                {#if manualAnalyzeResult.warnings.length > 0}
-                  <div class="mb-2 text-amber-700 dark:text-amber-300">{manualAnalyzeResult.warnings.join(', ')}</div>
-                {/if}
-                <div class="grid gap-2">
-                  <div class="rounded bg-muted p-2">
-                    <div class="text-muted-foreground">category</div>
-                    <div class="font-medium">{String(manualAnalyzeResult.result.category ?? '-')}</div>
-                  </div>
-                  <div class="rounded bg-muted p-2">
-                    <div class="text-muted-foreground">tags</div>
-                    <div>{Array.isArray(manualAnalyzeResult.result.tags) ? manualAnalyzeResult.result.tags.join(', ') : String(manualAnalyzeResult.result.tags ?? '-')}</div>
-                  </div>
-                  <div class="rounded bg-muted p-2">
-                    <div class="text-muted-foreground">summary</div>
-                    <div>{String(manualAnalyzeResult.result.summary ?? '-')}</div>
-                  </div>
-                  <div class="rounded bg-muted p-2">
-                    <div class="text-muted-foreground">intent / scope</div>
-                    <div>{String(manualAnalyzeResult.result.intent ?? '-')}</div>
-                    <div class="mt-2 flex flex-wrap gap-1">
-                      <span class="rounded border border-border bg-background px-2 py-0.5 text-foreground">
-                        trigger: {String(manualAnalyzeResult.result.trigger ?? '-')}
-                      </span>
-                      {#if Array.isArray(manualAnalyzeResult.result.scope)}
-                        {#each manualAnalyzeResult.result.scope as item}
-                          <span class="rounded border border-border bg-background px-2 py-0.5 text-muted-foreground">{String(item)}</span>
-                        {/each}
-                      {:else}
-                        <span class="rounded border border-border bg-background px-2 py-0.5 text-muted-foreground">{String(manualAnalyzeResult.result.scope ?? '-')}</span>
-                      {/if}
-                    </div>
-                  </div>
-                </div>
-                <pre class="mt-3 max-h-56 overflow-auto rounded bg-muted p-2 text-[11px]">{JSON.stringify(manualAnalyzeResult.result, null, 2)}</pre>
-              </div>
-            {/if}
-          </div>
-        {:else}
-          <div class="space-y-2 text-xs">
-            <div class="rounded border border-border p-3">
-              <div class="mb-2 flex items-center justify-between gap-2">
-                <div>
-                  <div class="font-semibold text-foreground">Archive execution</div>
-                  <div class="mt-1 flex flex-wrap gap-1">
-                    <span class="rounded px-2 py-0.5 {getArchiveStateClass(selectedRecord.archive_state)}">archive {selectedRecord.archive_state ?? '-'}</span>
-                    <span class="rounded px-2 py-0.5 {getExecutionStateClass(selectedRecord.execution_state)}">execution {selectedRecord.execution_state ?? '-'}</span>
-                  </div>
-                </div>
-                <button
-                  class="rounded bg-muted px-2 py-1 text-muted-foreground hover:bg-secondary disabled:opacity-50"
-                  onclick={refreshSelectedExecutionHistory}
-                  disabled={selectedExecutionHistoryLoading}
-                >갱신</button>
-              </div>
-              {#if selectedRecord.next_available_at}
-                <p class="text-muted-foreground">next available {formatDateTime(selectedRecord.next_available_at)}</p>
-              {/if}
-            </div>
-
-            {#if selectedExecutionHistoryError}
-              <p class="rounded border border-red-300 bg-red-50 p-2 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{selectedExecutionHistoryError}</p>
-            {:else if selectedExecutionHistoryLoading}
-              <p class="text-muted-foreground">실행 이력 로드 중...</p>
-            {:else if selectedExecutionHistory.length === 0}
-              <p class="text-muted-foreground">실행 이력이 없습니다.</p>
-            {:else}
-              <div class="space-y-2">
-                {#each selectedExecutionHistory as attempt, index (attempt.id ?? `${attempt.llm_request_id ?? 'attempt'}-${index}`)}
-                  <div class="rounded border border-border p-2">
-                    <div class="flex items-center justify-between gap-2">
-                      <span class="rounded px-2 py-0.5 {getExecutionStateClass(getAttemptStatus(attempt))}">{getAttemptStatus(attempt)}</span>
-                      <span class="text-muted-foreground">{formatDateTime(getAttemptTime(attempt))}</span>
-                    </div>
-                    <div class="mt-1 font-mono text-muted-foreground">{getAttemptProfile(attempt)}</div>
-                    {#if attempt.llm_request_id}
-                      <div class="mt-1 text-muted-foreground">LLM request #{attempt.llm_request_id}</div>
-                    {/if}
-                    {#if attempt.error_message}
-                      <div class="mt-1 truncate text-red-600 dark:text-red-300" title={attempt.error_message}>{attempt.error_message}</div>
-                    {/if}
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
-    </div>
+    <ArchiveRecordDetailPanel
+      record={selectedRecord}
+      relations={selectedRelations}
+      relationsLoading={selectedRelationsLoading}
+      executionHistory={selectedExecutionHistory}
+      executionHistoryLoading={selectedExecutionHistoryLoading}
+      executionHistoryError={selectedExecutionHistoryError}
+      {detailTab}
+      {providers}
+      state={residual}
+      {showToast}
+      onClose={() => { selectedRecord = null; }}
+      onTabChange={(tab) => { detailTab = tab; }}
+      onRefreshHistory={refreshSelectedExecutionHistory}
+      onSaved={handleRecordSaved}
+    />
   {/if}
 </div>
 
