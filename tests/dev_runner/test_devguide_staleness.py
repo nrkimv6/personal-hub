@@ -30,6 +30,7 @@ from app.modules.claude_worker.services.plan_analyze_handler import (
     build_devguide_staleness_report,
     save_devguide_staleness_result,
     save_plan_archive_result,
+    save_plan_archive_result_outcome,
 )
 
 
@@ -270,6 +271,57 @@ class TestFlagGuideStalenessTrigger:
             result = _maybe_flag_guide_staleness(db, "docs/archive/2026-01-01_test.md")
 
         assert result is False
+
+    def test_save_plan_archive_result_outcome_still_flags_guide_staleness(self, db):
+        """R: outcome API 경유 저장 후에도 devguide staleness 후속 트리거가 유지된다."""
+        meta = {
+            "pipeline-overview": {
+                "owns_archive_tags": ["pipeline"],
+                "last_archive_scan": "2026-01-01",
+            },
+        }
+        whitelist = _make_whitelist("pipeline")
+        last_scan = datetime(2026, 1, 1)
+
+        for i in range(2):
+            db.add(PlanRecord(
+                filename_hash=f"outcome_pending_{i}",
+                file_path=f"docs/archive/2026-01-{i+2:02d}_pipeline-fix.md",
+                archived_at=last_scan + timedelta(days=1),
+            ))
+        current = PlanRecord(
+            filename_hash="outcome_current",
+            file_path="docs/archive/2026-01-10_pipeline-new.md",
+            archived_at=last_scan + timedelta(days=1),
+        )
+        db.add(current)
+        db.commit()
+
+        request = MagicMock()
+        request.caller_id = "outcome_current"
+        request.caller_type = "plan_archive_analyze"
+        request.id = 7001
+        result = {
+            "success": True,
+            "result": {
+                "category": "pipeline",
+                "tags": ["fix"],
+                "summary": "pipeline outcome",
+            },
+            "raw_response": "",
+        }
+
+        with patch("app.shared.wiki_tags.load_meta_yaml", return_value=meta), \
+             patch("app.shared.wiki_tags.load_whitelist", return_value=whitelist), \
+             patch("app.shared.wiki_tags.extract_wiki_tags",
+                   side_effect=lambda fn, wl: ["pipeline"] if "pipeline" in fn else ["untagged"]):
+            outcome = save_plan_archive_result_outcome(db, request, result)
+
+        assert outcome.saved is True
+        assert outcome.status == "saved"
+        event = db.query(PlanEvent).filter_by(event_type="devguide_staleness").one()
+        assert event.detail["guide"] == "pipeline-overview"
+        assert event.detail["pending_count"] == 3
 
 
 # ──────────────────────────────────────────
