@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import subprocess
 import time
@@ -15,6 +16,8 @@ from scripts.services.frontend_mode import (
     build_frontend_env,
     ensure_frontend_runtime_tsconfigs,
     describe_frontend_runtime,
+    get_frontend_api_port,
+    get_frontend_mode,
     get_frontend_outdir,
     write_frontend_build_log,
 )
@@ -308,6 +311,43 @@ def _wait_for_frontend_http_ready(url: str, launcher_pid: int, timeout_seconds: 
     return False, last_error
 
 
+def _read_frontend_mode_payload(frontend_port: int, timeout_seconds: float = 3.0) -> dict[str, object]:
+    url = f"http://localhost:{frontend_port}/__local/frontend-mode"
+    with urllib.request.urlopen(url, timeout=timeout_seconds) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"unexpected status: {resp.status}")
+        raw = resp.read().decode("utf-8", errors="replace")
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise RuntimeError("frontend-mode payload is not an object")
+    return payload
+
+
+def _verify_frontend_runtime_readback(frontend_port: int, public: bool, api_port: int) -> tuple[bool, str]:
+    expected = {
+        "mode": get_frontend_mode(public),
+        "outDir": get_frontend_outdir(public),
+        "apiPort": get_frontend_api_port(public, api_port),
+    }
+    try:
+        payload = _read_frontend_mode_payload(frontend_port)
+    except Exception as exc:
+        return False, f"read-back failed: {exc}"
+
+    mismatches = [
+        f"{key}: expected {value!r}, got {payload.get(key)!r}"
+        for key, value in expected.items()
+        if str(payload.get(key)) != value
+    ]
+    if mismatches:
+        return False, "; ".join(mismatches)
+    return True, (
+        f"mode={payload.get('mode')} "
+        f"outDir={payload.get('outDir')} "
+        f"apiPort={payload.get('apiPort')}"
+    )
+
+
 def restart_frontend(manager, public: bool = False) -> bool:
     mgr = _manager()
     mode_label, api_port, frontend_port, pid_file, log_dir = _frontend_mode(manager, public)
@@ -316,7 +356,7 @@ def restart_frontend(manager, public: bool = False) -> bool:
     print(f"  Restarting {mode_label} Frontend")
     print(f"  (port {frontend_port}){RESET}")
     print(f"{YELLOW}{'=' * 40}{RESET}\n")
-    cprint(f"Frontend runtime contract: {describe_frontend_runtime(public)}", YELLOW)
+    cprint(f"Frontend runtime contract: {describe_frontend_runtime(public, api_port=api_port)}", YELLOW)
     ensure_frontend_runtime_tsconfigs(manager.frontend_dir)
 
     lock_fd = manager._acquire_frontend_restart_lock(wait_seconds=10)
@@ -391,13 +431,17 @@ def restart_frontend(manager, public: bool = False) -> bool:
         url = f"http://localhost:{frontend_port}"
         healthy, last_error = _wait_for_frontend_http_ready(url, proc.pid)
         if healthy:
+            runtime_ok, runtime_detail = _verify_frontend_runtime_readback(frontend_port, public, api_port)
+            if not runtime_ok:
+                cprint(f"Frontend runtime read-back mismatch: {runtime_detail}", RED)
+                return False
             if old_listener_pid is not None and new_listener_pid == old_listener_pid:
                 cprint(
                     f"Listener PID unchanged after restart (PID: {new_listener_pid}) but frontend is healthy",
                     YELLOW,
                 )
             cprint(
-                f"Frontend healthy (mode={mode_label}, listener_pid={new_listener_pid}, url={url})",
+                f"Frontend healthy (mode={mode_label}, listener_pid={new_listener_pid}, url={url}, {runtime_detail})",
                 GREEN,
             )
             return True
@@ -418,7 +462,7 @@ def restart_frontend(manager, public: bool = False) -> bool:
 def _print_frontend_status(manager, public: bool = False):
     mgr = _manager()
     mode_label, _api_port, frontend_port, frontend_pid_file, _log_dir = _frontend_mode(manager, public)
-    contract = describe_frontend_runtime(public)
+    contract = describe_frontend_runtime(public, api_port=_api_port)
     pid = mgr.read_pid_file(frontend_pid_file)
     port_up = mgr.is_port_listening(frontend_port)
     if pid and mgr.is_process_alive(pid) and port_up:

@@ -30,13 +30,6 @@ from app.modules.dev_runner.services.plan_archive_embedding_service import (
     PlanArchiveEmbeddingService,
 )
 from app.modules.dev_runner.services.plan_archive_metrics_service import PlanArchiveMetricsService
-from app.modules.dev_runner.services.plan_archive_retrieval_service import (
-    PlanArchiveRetrievalService,
-    RetrievalQuery,
-)
-from app.modules.dev_runner.services.plan_archive_retrieval_readiness import (
-    get_plan_archive_retrieval_readiness,
-)
 from app.modules.dev_runner.services.plan_archive_insight_service import (
     PlanArchiveInsightBatchQuery,
     PlanArchiveInsightService,
@@ -46,6 +39,16 @@ from app.modules.dev_runner.services.plan_archive_insight_review_service import 
 )
 from app.modules.dev_runner.services.plan_archive_doc_patch_service import (
     PlanArchiveDocPatchService,
+)
+from app.modules.dev_runner.services.plan_archive_retrieval_service import (
+    PlanArchiveRetrievalService,
+    RetrievalQuery,
+)
+from app.modules.dev_runner.services.plan_archive_retrieval_readiness import (
+    get_plan_archive_retrieval_readiness,
+)
+from app.modules.dev_runner.services.plan_archive_execution_readiness import (
+    check_plan_archive_execution_readiness,
 )
 from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
@@ -668,12 +671,7 @@ def list_archive_execution_attempts(
 @router_admin.post("/records/archive-schedule/pause", response_model=ArchiveSchedulePauseResumeResponse)
 def pause_archive_schedule(db: Session = Depends(get_db)):
     """archive schedule을 pause한다 (enabled=False). admin 전용."""
-    from app.models.task_schedule import TaskSchedule
-    schedule = db.query(TaskSchedule).filter(
-        TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE
-    ).order_by(TaskSchedule.id.asc()).first()
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Plan archive schedule not found")
+    schedule = _get_plan_archive_schedule_or_404(db)
     schedule.enabled = False
     db.commit()
     return ArchiveSchedulePauseResumeResponse(schedule_id=schedule.id, enabled=False, action="pause")
@@ -682,15 +680,22 @@ def pause_archive_schedule(db: Session = Depends(get_db)):
 @router_admin.post("/records/archive-schedule/resume", response_model=ArchiveSchedulePauseResumeResponse)
 def resume_archive_schedule(db: Session = Depends(get_db)):
     """archive schedule을 resume한다 (enabled=True). admin 전용."""
+    schedule = _get_plan_archive_schedule_or_404(db)
+    schedule.enabled = True
+    db.commit()
+    return ArchiveSchedulePauseResumeResponse(schedule_id=schedule.id, enabled=True, action="resume")
+
+
+def _get_plan_archive_schedule_or_404(db: Session):
+    """6101 admin frontend must call this through the admin API proxy, not the public router."""
     from app.models.task_schedule import TaskSchedule
+
     schedule = db.query(TaskSchedule).filter(
         TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE
     ).order_by(TaskSchedule.id.asc()).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Plan archive schedule not found")
-    schedule.enabled = True
-    db.commit()
-    return ArchiveSchedulePauseResumeResponse(schedule_id=schedule.id, enabled=True, action="resume")
+    return schedule
 
 
 def _to_retrieval_query(req: PlanArchiveRetrievalQuery) -> RetrievalQuery:
@@ -747,6 +752,20 @@ def _ensure_retrieval_db_ready(db: Session) -> None:
         detail={
             "message": "Plan Archive retrieval DB is not ready",
             "retrieval_db_readiness": readiness,
+        },
+    )
+
+
+def _ensure_execution_db_ready(db: Session) -> dict:
+    readiness = check_plan_archive_execution_readiness(db)
+    if readiness["ok"]:
+        return readiness
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "message": "Plan Archive execution DB is not ready",
+            "execution_db_readiness": readiness,
+            "missing_tables": readiness["missing_tables"],
         },
     )
 
@@ -1019,6 +1038,7 @@ def run_archive_executions(req: PlanArchiveExecutionRunRequest, db: Session = De
         PlanArchiveExecutionService,
     )
 
+    _ensure_execution_db_ready(db)
     svc = PlanArchiveExecutionService(db)
     if req.record_ids:
         records = db.query(PlanRecord).filter(PlanRecord.id.in_(req.record_ids)).all()
@@ -1053,6 +1073,21 @@ def sync_archive_executions(db: Session = Depends(get_db)):
     registered = _plan_service.list_registered_paths()
     paths = [{"path": r.path, "type": r.path_type} for r in registered]
     record_sync = PlanRecordService(db).sync_all(paths)
+    readiness = check_plan_archive_execution_readiness(db)
+    if not readiness["ok"]:
+        errors = list(record_sync.get("errors") or [])
+        errors.append(
+            "Plan Archive execution DB is not ready: missing_tables="
+            + ",".join(readiness["missing_tables"])
+        )
+        return {
+            "updated": 0,
+            "checked": 0,
+            "created": record_sync.get("created", 0),
+            "record_updated": record_sync.get("updated", 0),
+            "missing": record_sync.get("missing", 0),
+            "errors": errors,
+        }
     result = PlanArchiveExecutionService(db).sync()
     result["created"] = record_sync.get("created", 0)
     result["record_updated"] = record_sync.get("updated", 0)

@@ -43,8 +43,18 @@ def build_frontend_env(
     return env
 
 
-def describe_frontend_runtime(public: bool) -> str:
-    return f"mode={get_frontend_mode(public)} outDir={get_frontend_outdir(public)}"
+def get_frontend_api_port(public: bool, api_port: int | None = None) -> str:
+    if public:
+        return "8000"
+    return str(api_port or 8001)
+
+
+def describe_frontend_runtime(public: bool, api_port: int | None = None) -> str:
+    return (
+        f"mode={get_frontend_mode(public)} "
+        f"outDir={get_frontend_outdir(public)} "
+        f"apiPort={get_frontend_api_port(public, api_port)}"
+    )
 
 
 def build_frontend_build_log_path(log_dir: Path, timestamp: str, public: bool) -> Path:

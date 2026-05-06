@@ -9,6 +9,7 @@ NSSM 서비스로 등록되어 실행된다:
 """
 import argparse
 import atexit
+import importlib.util
 import json
 import os
 import shutil
@@ -150,6 +151,22 @@ class ServiceRunner:
         api_port = None if public else self.api_port
         return build_frontend_env(os.environ, public=public, api_port=api_port)
 
+    def _preflight_api_import_contract(self):
+        missing_modules = []
+        for module_name in ("app.main", "app.lifespan"):
+            try:
+                spec = importlib.util.find_spec(module_name)
+            except ModuleNotFoundError:
+                spec = None
+            if spec is None:
+                missing_modules.append(module_name)
+
+        if missing_modules:
+            joined = ", ".join(missing_modules)
+            raise RuntimeError(f"API import preflight failed before frontend start: missing modules: {joined}")
+
+        self.log.info("API import preflight passed: app.main, app.lifespan")
+
     # ── 메인 실행 흐름 ──────────────────────────────────────────
     def run(self):
         bootstrap_service_environment(["--admin"] if self.dev else [])
@@ -169,6 +186,7 @@ class ServiceRunner:
 
         try:
             self.cleanup_before_start()
+            self._preflight_api_import_contract()
             self._frontend_proc = self.start_frontend()
             self.log.info("Redis will be started via startup program (requires user session)")
             self.run_api()

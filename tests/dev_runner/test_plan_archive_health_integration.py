@@ -18,6 +18,9 @@ from app.models.plan_record import (
 )
 from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.modules.claude_worker.models.llm_request import LLMRequest
+from app.modules.dev_runner.services.plan_archive_execution_readiness import (
+    REQUIRED_PLAN_ARCHIVE_EXECUTION_TABLES,
+)
 from app.modules.dev_runner.routes.plan_records import get_archive_health, get_guide_status
 from app.modules.dev_runner.services.plan_record_service import PlanRecordService
 
@@ -131,6 +134,8 @@ def test_get_archive_health_route_right_counts(db):
     assert health["plan_archive_schedule"]["last_success"] == datetime(2026, 5, 4, 2, 12).isoformat()
     assert health["retrieval_db_readiness"]["ok"] is False
     assert "plan_record_file_refs" in health["retrieval_db_readiness"]["missing_tables"]
+    assert health["execution_db_readiness"]["ok"] is False
+    assert "plan_archive_execution_jobs" in health["execution_db_readiness"]["missing_tables"]
 
 
 def test_get_archive_health_route_right_readiness_ok(db):
@@ -149,6 +154,20 @@ def test_get_archive_health_route_right_readiness_ok(db):
 
     assert health["retrieval_db_readiness"]["ok"] is True
     assert health["retrieval_db_readiness"]["missing_tables"] == []
+
+
+def test_get_archive_health_route_reports_execution_readiness_ok(db):
+    """T3: route-level health exposes execution DB readiness separately."""
+    for table_name in REQUIRED_PLAN_ARCHIVE_EXECUTION_TABLES:
+        from app.models.base import Base
+
+        Base.metadata.tables[table_name].create(bind=db.get_bind(), checkfirst=True)
+    _seed_archive_health(db)
+
+    health = get_archive_health(db=db)
+
+    assert health["execution_db_readiness"]["ok"] is True
+    assert health["execution_db_readiness"]["missing_tables"] == []
 
 
 def test_get_guide_status_route_excludes_temp_archive(db, monkeypatch):
