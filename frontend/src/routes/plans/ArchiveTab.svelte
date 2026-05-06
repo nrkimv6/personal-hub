@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { formatLLMBlockReason, llmApi, type LLMProfileConfig, type LLMRequest, type LLMScheduleProfilePolicyItem } from '$lib/api';
+  import { llmApi } from '$lib/api';
   import {
     planRecordsApi,
     archiveApi,
@@ -8,7 +8,6 @@
     type ImportArchivedResult,
     type ArchivePreviewItem,
     type DuplicateItem,
-    type PlanArchiveHealth,
     type PlanArchiveRetrievalQuery,
     type PlanArchiveRetrievalResult,
     type PlanArchiveMetricsResponse,
@@ -16,10 +15,7 @@
     type PlanArchiveCrossRepoIndexResponse,
     type PlanArchiveAnalyzeResponse,
     type PlanArchiveExecutionAttempt,
-    type PlanArchiveSelectedProfile,
     type SyncResult,
-    type ArchiveCandidateSummary,
-    type ArchiveCandidate,
     type PlanRecordRelation
   } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
@@ -81,16 +77,9 @@
   let importResult: ImportArchivedResult | null = $state(null);
   let syncLoading = $state(false);
   let syncResult: SyncResult | null = $state(null);
-  let candidatesLoading = $state(false);
-  let candidateSummary: ArchiveCandidateSummary | null = $state(null);
-  let candidateError = $state('');
-  let providers: ProviderInfo[] = $state([]);
-  let providersError = $state('');
-  let selectedProvider = $state('');
-  let selectedModel = $state('');
-  let queueingRecordId: number | null = $state(null);
 
-  // ── 분석 요청 (Phase 3/5) ─────────────────────────────────
+  // ── 분석 요청 ─────────────────────────────────────────────
+  let providers: ProviderInfo[] = $state([]);
   let queueAnalyzeProvider = $state('');
   let queueAnalyzeModel = $state('');
   let queueAnalyzeLoading = $state(false);
@@ -126,7 +115,6 @@
       } else {
         showToast(`이미 pending 요청 있음 (id=${res.request_id})`);
       }
-      await loadArchiveRequests();
       await loadAppliedRequestId(record);
     } catch (e) {
       showToast(e instanceof Error ? e.message : '분석 요청 실패');
@@ -142,7 +130,7 @@
       const res = await planRecordsApi.importArchived();
       importResult = res;
       showToast(`DB 이관 완료: ${res.created}개 생성, ${res.updated}개 갱신, ${res.skipped}개 스킵`);
-      await Promise.all([loadRecords(), refreshArchiveSurfaces(), loadArchiveRequests(), loadCandidates()]);
+      await loadRecords();
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'DB 이관 실패');
     } finally {
@@ -150,24 +138,7 @@
     }
   }
 
-  // LLM 처리 현황 (서버 health + Plan Archive 요청 목록)
-  let archiveHealth: PlanArchiveHealth | null = $state(null);
-  let archiveHealthLoading = $state(false);
-  let archiveQueueLoading = $state(false);
-  let archiveQueueError = $state('');
-  let archiveRequests: LLMRequest[] = $state([]);
-  let archiveQueuePage = $state(1);
-  let archiveQueueTotal = $state(0);
-  let archiveQueuePages = $state(1);
-  const archiveQueuePageSize = 50;
-  let archiveQueueStatus = $state('pending,processing,failed');
-  let archiveQueueProvider = $state('');
-  let archiveProfiles: LLMProfileConfig[] = $state([]);
-  let archiveProfilePolicies: LLMScheduleProfilePolicyItem[] = $state([]);
-  let selectedArchiveProfileKeys = $state(new Set<string>());
-  let archiveExecutionLoading = $state(false);
-  let archiveExecutionError = $state('');
-  let archiveExecutionResult = $state('');
+  // LLM 처리 현황 (per-record 실행 이력)
   let selectedExecutionHistory: PlanArchiveExecutionAttempt[] = $state([]);
   let selectedExecutionHistoryLoading = $state(false);
   let selectedExecutionHistoryError = $state('');
@@ -179,7 +150,7 @@
       const res = await planRecordsApi.sync();
       syncResult = res;
       showToast(`Sync 완료: archive 생성 ${res.archive_created}, 정규화 ${res.archive_normalized}`);
-      await Promise.all([loadRecords(), refreshArchiveSurfaces(), loadArchiveRequests(), loadCandidates()]);
+      await loadRecords();
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Sync 실패');
     } finally {
@@ -187,76 +158,13 @@
     }
   }
 
-  async function loadCandidates() {
-    candidatesLoading = true;
-    candidateError = '';
-    try {
-      candidateSummary = await planRecordsApi.listArchiveCandidates({ limit: 80 });
-    } catch (e) {
-      candidateError = e instanceof Error ? e.message : '후보 목록 로드 실패';
-    } finally {
-      candidatesLoading = false;
-    }
-  }
-
   async function loadProviders() {
-    providersError = '';
     try {
       providers = await llmApi.getProviders();
-      const codex = providers.find((provider) => provider.key === 'codex');
-      const first = codex ?? providers[0];
-      if (first) {
-        selectedProvider = first.key;
-        selectedModel = first.default_model || first.models?.[0] || '';
-      }
-    } catch (e) {
-      providersError = e instanceof Error ? e.message : 'provider 로드 실패';
+    } catch {
+      providers = [];
     }
   }
-
-  function currentProvider(): ProviderInfo | undefined {
-    return providers.find((provider) => provider.key === selectedProvider);
-  }
-
-  function availableModels(): string[] {
-    const provider = currentProvider();
-    if (!provider) return [];
-    const models = provider.models?.length ? provider.models : [];
-    return Array.from(new Set([provider.default_model, ...models].filter(Boolean)));
-  }
-
-  function handleProviderChange() {
-    const provider = currentProvider();
-    selectedModel = provider?.default_model || provider?.models?.[0] || '';
-  }
-
-  async function queueArchiveAnalyze(candidate: ArchiveCandidate) {
-    if (!candidate.record?.id) return;
-    queueingRecordId = candidate.record.id;
-    try {
-      const res = await planRecordsApi.queueArchiveAnalyze(candidate.record.id, {
-        provider: selectedProvider || null,
-        model: selectedModel || null,
-        profile_key: null
-      });
-      showToast(`분석 큐 등록: #${res.request_id} ${res.provider}/${res.model || 'default'}`);
-      await Promise.all([loadArchiveRequests(), loadCandidates()]);
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : '분석 큐 등록 실패');
-    } finally {
-      queueingRecordId = null;
-    }
-  }
-
-  // LLM 처리 현황 (DB 레코드 통계)
-  let llmStats: { total: number; processed: number; pending: number } | null = $state(null);
-  let llmRequests: LLMRequest[] = $state([]);
-  let llmRequestTotal = $state(0);
-  let llmLoading = $state(false);
-  let llmError = $state('');
-  let selectedRequest: LLMRequest | null = $state(null);
-  let requestDetailRecord: PlanRecord | null = $state(null);
-  let requestDetailLoading = $state(false);
 
   // ── Retrieval MVP 표면 ───────────────────────────────────
   let retrievalQ = $state('');
@@ -294,144 +202,6 @@
   let manualAnalyzeResult: PlanArchiveAnalyzeResponse | null = $state(null);
   let manualAnalyzeError = $state('');
   let manualConfirmingApply = $state(false);
-
-  async function loadArchiveHealth() {
-    archiveHealthLoading = true;
-    try {
-      archiveHealth = await planRecordsApi.getArchiveHealth();
-    } catch (e) {
-      archiveHealth = null;
-    } finally {
-      archiveHealthLoading = false;
-    }
-  }
-
-  async function loadArchiveQueue(page = archiveQueuePage) {
-    archiveQueueLoading = true;
-    archiveQueueError = '';
-    try {
-      const res = await llmApi.list({
-        caller_type: 'plan_archive_analyze',
-        status: archiveQueueStatus || undefined,
-        page,
-        page_size: archiveQueuePageSize,
-      });
-      archiveRequests = archiveQueueProvider
-        ? res.items.filter((request) => (request.provider || 'claude') === archiveQueueProvider)
-        : res.items;
-      archiveQueuePage = res.page;
-      archiveQueueTotal = archiveQueueProvider ? archiveRequests.length : res.total;
-      archiveQueuePages = archiveQueueProvider ? 1 : res.pages;
-    } catch (e) {
-      archiveQueueError = e instanceof Error ? e.message : 'LLM 요청 목록 로드 실패';
-    } finally {
-      archiveQueueLoading = false;
-    }
-  }
-
-  async function refreshArchiveSurfaces() {
-    await Promise.all([loadArchiveHealth(), loadArchiveQueue(1)]);
-  }
-
-  function profileKey(profile: PlanArchiveSelectedProfile) {
-    return `${profile.engine}:${profile.profile_name}`;
-  }
-
-  function parseProfileKey(key: string): PlanArchiveSelectedProfile {
-    const [engine, ...rest] = key.split(':');
-    return { engine, profile_name: rest.join(':') };
-  }
-
-  function getArchiveProfileChoices(): PlanArchiveSelectedProfile[] {
-    const policyChoices = archiveProfilePolicies
-      .filter((policy) => policy.enabled && (!policy.target_type || policy.target_type === 'plan_archive_analyze'))
-      .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
-      .map((policy) => ({ engine: policy.engine, profile_name: policy.profile_name }));
-    const profileChoices = archiveProfiles
-      .filter((profile) => profile.enabled !== false)
-      .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
-      .map((profile) => ({ engine: profile.engine, profile_name: profile.name }));
-    const seen = new Set<string>();
-    const choices: PlanArchiveSelectedProfile[] = [];
-    for (const choice of [...policyChoices, ...profileChoices]) {
-      const key = profileKey(choice);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      choices.push(choice);
-    }
-    return choices;
-  }
-
-  async function loadArchiveExecutionProfiles() {
-    try {
-      const [profilesResponse, policyResponse] = await Promise.all([
-        llmApi.listProfiles(),
-        llmApi.listScheduleProfilePolicies()
-      ]);
-      archiveProfiles = profilesResponse.profiles ?? [];
-      archiveProfilePolicies = policyResponse.policies ?? [];
-      if (selectedArchiveProfileKeys.size === 0) {
-        selectedArchiveProfileKeys = new Set(getArchiveProfileChoices().map(profileKey));
-      }
-    } catch {
-      archiveProfiles = [];
-      archiveProfilePolicies = [];
-    }
-  }
-
-  function toggleArchiveProfile(profile: PlanArchiveSelectedProfile) {
-    const key = profileKey(profile);
-    if (selectedArchiveProfileKeys.has(key)) {
-      selectedArchiveProfileKeys.delete(key);
-    } else {
-      selectedArchiveProfileKeys.add(key);
-    }
-    selectedArchiveProfileKeys = new Set(selectedArchiveProfileKeys);
-  }
-
-  function getSelectedArchiveProfiles(): PlanArchiveSelectedProfile[] {
-    return [...selectedArchiveProfileKeys].map(parseProfileKey).filter((profile) => profile.engine && profile.profile_name);
-  }
-
-  async function runArchiveExecutions() {
-    archiveExecutionLoading = true;
-    archiveExecutionError = '';
-    archiveExecutionResult = '';
-    try {
-      const selectedProfiles = getSelectedArchiveProfiles();
-      const result = await planRecordsApi.runArchiveExecutions({
-        record_ids: selectedIds.size > 0 ? [...selectedIds] : undefined,
-        selected_profiles: selectedProfiles.length > 0 ? selectedProfiles : undefined
-      });
-      const queued = Number(result.queued ?? result.updated ?? result.request_ids?.length ?? result.attempts?.length ?? 0);
-      const skipped = Number(result.skipped ?? 0);
-      archiveExecutionResult = `queued ${queued}${skipped ? `, skipped ${skipped}` : ''}`;
-      showToast(`Archive 실행 요청: ${archiveExecutionResult}`);
-      await Promise.all([loadRecords(), refreshArchiveSurfaces()]);
-      if (selectedRecord) await loadSelectedExecutionHistory(selectedRecord.id);
-    } catch (e) {
-      archiveExecutionError = e instanceof Error ? e.message : 'archive 실행 요청 실패';
-    } finally {
-      archiveExecutionLoading = false;
-    }
-  }
-
-  async function syncArchiveExecutions() {
-    archiveExecutionLoading = true;
-    archiveExecutionError = '';
-    archiveExecutionResult = '';
-    try {
-      const result = await planRecordsApi.syncArchiveExecutions();
-      archiveExecutionResult = `sync updated ${Number(result.updated ?? result.records?.length ?? 0)}`;
-      showToast(`Archive 실행 동기화: ${archiveExecutionResult}`);
-      await Promise.all([loadRecords(), refreshArchiveSurfaces()]);
-      if (selectedRecord) await loadSelectedExecutionHistory(selectedRecord.id);
-    } catch (e) {
-      archiveExecutionError = e instanceof Error ? e.message : 'archive 실행 동기화 실패';
-    } finally {
-      archiveExecutionLoading = false;
-    }
-  }
 
   async function loadSelectedExecutionHistory(recordId: number) {
     selectedExecutionHistoryLoading = true;
@@ -557,41 +327,6 @@
       showToast(e instanceof Error ? e.message : 'cross-repo index 실패');
     } finally {
       crossRepoIndexLoading = false;
-    }
-  }
-
-  async function loadArchiveRequests() {
-    llmLoading = true;
-    llmError = '';
-    try {
-      const res = await llmApi.list({ caller_type: 'plan_archive_analyze', page: 1, page_size: 25 });
-      llmRequests = res.items;
-      llmRequestTotal = res.total;
-    } catch (e) {
-      llmError = e instanceof Error ? e.message : 'LLM 요청 로드 실패';
-    } finally {
-      llmLoading = false;
-    }
-  }
-
-  async function openRequestDetail(req: LLMRequest) {
-    requestDetailLoading = true;
-    selectedRequest = req;
-    requestDetailRecord = records.find((record) => record.filename_hash === req.caller_id) ?? null;
-    try {
-      selectedRequest = await llmApi.get(req.id);
-      requestDetailRecord = records.find((record) => record.filename_hash === selectedRequest?.caller_id) ?? requestDetailRecord;
-      if (!requestDetailRecord && selectedRequest?.caller_id) {
-        const archivedRecords = await planRecordsApi.list({ status: 'archived', limit: 1000 });
-        requestDetailRecord = archivedRecords.find((record) => record.filename_hash === selectedRequest?.caller_id) ?? null;
-      }
-      if (requestDetailRecord?.id) {
-        requestDetailRecord = await planRecordsApi.get(requestDetailRecord.id);
-      }
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : '요청 상세 로드 실패');
-    } finally {
-      requestDetailLoading = false;
     }
   }
 
@@ -875,21 +610,6 @@
       .map(([key, value]) => `${key} ${typeof value === 'number' ? formatScore(value) : String(value)}`);
   }
 
-  function getStatusClass(status: string) {
-    switch (status) {
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200';
-      case 'processing':
-        return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200';
-      case 'failed':
-        return 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200';
-      case 'completed':
-        return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200';
-      default:
-        return 'bg-muted text-muted-foreground';
-    }
-  }
-
   function getExecutionStateClass(state: string | null | undefined) {
     switch (state) {
       case 'queued':
@@ -940,23 +660,6 @@
     return '-';
   }
 
-  function getRequestProfile(request: LLMRequest) {
-    const cliOptions = request.cli_options as Record<string, unknown> | undefined;
-    const profile = cliOptions?.profile ?? cliOptions?.engine_profile ?? cliOptions?.profile_name;
-    return typeof profile === 'string' && profile.trim() ? profile : 'inherit';
-  }
-
-  function getErrorSummary(message: string | null | undefined) {
-    if (!message) return '-';
-    return message.length > 80 ? `${message.slice(0, 80)}...` : message;
-  }
-
-  function getRequestReason(request: LLMRequest) {
-    return request.pending_block_reason
-      ? formatLLMBlockReason(request.pending_block_reason)
-      : getErrorSummary(request.error_message);
-  }
-
   function summarizeResult(value: unknown): string {
     if (value == null) return '-';
     if (typeof value === 'string') return value.length > 80 ? `${value.slice(0, 80)}...` : value;
@@ -968,110 +671,9 @@
     }
   }
 
-  function toPrettyJson(value: unknown): string {
-    if (value == null) return '-';
-    if (typeof value === 'string') {
-      try {
-        return JSON.stringify(JSON.parse(value), null, 2);
-      } catch {
-        return value;
-      }
-    }
-    return JSON.stringify(value, null, 2);
-  }
-
-  function parseResultValue(): Record<string, unknown> | null {
-    const value = selectedRequest?.result as unknown;
-    if (!value) return null;
-    if (typeof value === 'string') {
-      try {
-        return JSON.parse(value) as Record<string, unknown>;
-      } catch {
-        return null;
-      }
-    }
-    return value as Record<string, unknown>;
-  }
-
-  function normalizedFieldValue(value: unknown): string {
-    if (Array.isArray(value)) return value.join(', ');
-    if (value == null) return '';
-    return String(value);
-  }
-
-  function fieldDiff(field: 'category' | 'tags' | 'summary' | 'intent' | 'trigger' | 'scope'): boolean {
-    if (!requestDetailRecord) return false;
-    const parsed = parseResultValue();
-    if (!parsed || !(field in parsed)) return false;
-    const resultValue = normalizedFieldValue(parsed[field]);
-    const dbValue = normalizedFieldValue(requestDetailRecord[field]);
-    return resultValue !== dbValue;
-  }
-
-  function auditEvents() {
-    return (requestDetailRecord?.events ?? []).filter((event) => {
-      const detail = event.detail ?? {};
-      return event.event_type.includes('archive') || 'prior_summary' in detail || 'prior_category' in detail || 'prior_tags' in detail;
-    });
-  }
-
-  async function copyText(text: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast(`${label} 복사됨`);
-    } catch {
-      showToast('복사 실패');
-    }
-  }
-
-  // ── Phase 4: truncate/expand / copy ───────────────────────
-  let expandedFields = $state(new Set<string>());
-
-  function toggleExpand(field: string) {
-    if (expandedFields.has(field)) {
-      expandedFields.delete(field);
-    } else {
-      expandedFields.add(field);
-    }
-    expandedFields = new Set(expandedFields);
-  }
-
-  async function copyToClipboard(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast('클립보드에 복사됨');
-    } catch {
-      showToast('복사 실패');
-    }
-  }
-
-  // result JSON에서 특정 키 추출 (DB 저장값과 비교용)
-  function extractResultField(result: unknown, key: string): string | null {
-    if (!result) return null;
-    try {
-      const parsed = typeof result === 'string' ? JSON.parse(result) : result;
-      if (parsed && typeof parsed === 'object' && key in parsed) {
-        const val = (parsed as Record<string, unknown>)[key];
-        if (val == null) return null;
-        if (Array.isArray(val)) return val.join(', ');
-        return String(val);
-      }
-    } catch {}
-    return null;
-  }
-
-  function isDifferent(a: string | null | undefined, b: string | null | undefined): boolean {
-    const na = a ?? '';
-    const nb = b ?? '';
-    return na.trim() !== nb.trim();
-  }
-
   onMount(() => {
     loadRecords();
-    refreshArchiveSurfaces();
-    loadArchiveExecutionProfiles();
     loadRetrievalMetrics();
-    loadCandidates();
     loadProviders();
   });
 </script>
@@ -1086,6 +688,14 @@
 <div class="flex gap-4 h-full">
   <!-- 목록 패널 -->
   <div class="flex-1 flex flex-col min-w-0">
+    <!-- schedule 운영 안내 placeholder (query와 무관하게 항상 노출) -->
+    <div class="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs dark:border-amber-800 dark:bg-amber-950">
+      <span class="font-medium text-amber-800 dark:text-amber-200">이 화면은 archive 파일/DB 관리 전용입니다.</span>
+      <span class="text-amber-700 dark:text-amber-300"> schedule 운영(LLM 요청 큐·실행 제어·후보 관리)은 </span>
+      <a href="/scheduler/plan-archive" class="font-medium text-amber-800 underline hover:no-underline dark:text-amber-200">/scheduler/plan-archive</a>
+      <span class="text-amber-700 dark:text-amber-300">로 이동했습니다.</span>
+    </div>
+
     <!-- 헤더 -->
     <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
       <div class="flex items-center gap-2">
@@ -1102,14 +712,6 @@
         </select>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
-        {#if archiveHealth}
-          <span class="text-xs text-muted-foreground">
-            LLM: {archiveHealth.llm_processed}/{archiveHealth.archived_total}
-            {#if archiveHealth.real_unprocessed > 0}
-              <span class="text-yellow-600 dark:text-yellow-400">(실제 미처리 {archiveHealth.real_unprocessed})</span>
-            {/if}
-          </span>
-        {/if}
         <button
           class="px-3 py-1 text-xs rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-700 dark:bg-emerald-900 dark:hover:bg-emerald-800 dark:text-emerald-200 disabled:opacity-50"
           onclick={runSync}
@@ -1136,246 +738,15 @@
         >인사이트</a>
         <button
           class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-          onclick={() => { loadRecords(); refreshArchiveSurfaces(); loadCandidates(); }}
+          onclick={() => { loadRecords(); }}
         >새로고침</button>
       </div>
     </div>
 
-    <!-- Plan Archive health 패널 -->
-    <div class="mb-3 grid gap-3 rounded border border-border bg-background p-3 text-xs lg:grid-cols-[1.3fr_1fr]">
-      <div>
-        <div class="mb-2 flex items-center justify-between gap-2">
-          <h3 class="font-semibold text-foreground">Plan Archive LLM health</h3>
-          {#if archiveHealthLoading}
-            <span class="text-muted-foreground">갱신 중...</span>
-          {/if}
-        </div>
-        {#if archiveHealth}
-          <div class="grid gap-2 sm:grid-cols-4">
-            <div class="rounded bg-muted px-2 py-2">
-              <div class="text-muted-foreground">Archived</div>
-              <div class="font-semibold text-foreground">{archiveHealth.archived_total}</div>
-            </div>
-            <div class="rounded bg-muted px-2 py-2">
-              <div class="text-muted-foreground">Processed</div>
-              <div class="font-semibold text-foreground">{archiveHealth.llm_processed}</div>
-            </div>
-            <div class="rounded bg-muted px-2 py-2">
-              <div class="text-muted-foreground">Unprocessed</div>
-              <div class="font-semibold text-foreground">{archiveHealth.llm_unprocessed}</div>
-            </div>
-            <div class="rounded bg-muted px-2 py-2">
-              <div class="text-muted-foreground">Real backlog</div>
-              <div class="font-semibold text-foreground">{archiveHealth.real_unprocessed}</div>
-            </div>
-          </div>
-          <div class="mt-3 grid gap-2 md:grid-cols-3">
-            <div class="rounded border border-border p-2">
-              <div class="text-muted-foreground">Retrieval DB</div>
-              <div class="mt-1 font-medium {archiveHealth.retrieval_db_readiness.ok ? 'text-green-700' : 'text-red-700'}">
-                {archiveHealth.retrieval_db_readiness.ok ? 'ready' : 'missing tables'}
-              </div>
-              {#if !archiveHealth.retrieval_db_readiness.ok}
-                <div class="mt-1 break-words text-red-700">
-                  {archiveHealth.retrieval_db_readiness.missing_tables.join(', ')}
-                </div>
-              {/if}
-            </div>
-            <div class="rounded border border-border p-2">
-              <div class="text-muted-foreground">스케줄</div>
-              <div class="mt-1 font-medium {archiveHealth.plan_archive_schedule?.enabled ? 'text-green-700' : 'text-amber-700'}">
-                {archiveHealth.plan_archive_schedule?.enabled ? '활성' : '비활성'}
-              </div>
-              {#if !archiveHealth.plan_archive_schedule?.enabled && archiveHealth.real_unprocessed > 0}
-                <p class="mt-1 text-amber-700">비활성 때문에 backlog가 쌓일 수 있습니다.</p>
-              {/if}
-            </div>
-            <div class="rounded border border-border p-2">
-              <div class="text-muted-foreground">마지막 실행</div>
-              <div class="mt-1">성공 {formatDateTime(archiveHealth.plan_archive_schedule?.last_success)}</div>
-              <div>실패 {formatDateTime(archiveHealth.plan_archive_schedule?.last_failure)}</div>
-              {#if !archiveHealth.plan_archive_schedule?.last_success && !archiveHealth.plan_archive_schedule?.last_failure}
-                <div class="text-muted-foreground">실행 이력이 없습니다.</div>
-              {/if}
-            </div>
-            <div class="rounded border border-border p-2">
-              <div class="text-muted-foreground">노후/실패</div>
-              <div class="mt-1">Oldest {formatDateTime(archiveHealth.oldest_unprocessed_at)}</div>
-              <div>Failed request {archiveHealth.failed_requests}</div>
-              {#if archiveHealth.latest_failed_request}
-                <div class="mt-1 truncate" title={archiveHealth.latest_failed_request.error_message ?? ''}>
-                  #{archiveHealth.latest_failed_request.id} {formatDateTime(archiveHealth.latest_failed_request.requested_at)}
-                  {getErrorSummary(archiveHealth.latest_failed_request.error_message)}
-                </div>
-              {/if}
-            </div>
-          </div>
-        {:else}
-          <p class="text-muted-foreground">Health API 결과를 불러오지 못했습니다.</p>
-        {/if}
-      </div>
-      <div class="rounded border border-border p-2">
-        <div class="font-semibold text-foreground">큐 신뢰 경계</div>
-        <p class="mt-1 text-muted-foreground">
-          pending_or_processing_requests는 현재 활성 LLMRequest 수입니다. archive 미처리 수나 전체 Plan Archive backlog 수와 다릅니다.
-        </p>
-        {#if archiveHealth}
-          <div class="mt-2 flex flex-wrap gap-2">
-            <span class="rounded bg-muted px-2 py-1">active {archiveHealth.pending_or_processing_requests}</span>
-            <span class="rounded {archiveHealth.failed_requests > 0 ? 'bg-red-100 text-red-700' : 'bg-muted text-muted-foreground'} px-2 py-1">failed {archiveHealth.failed_requests}</span>
-            <span class="rounded bg-muted px-2 py-1">temp excluded {archiveHealth.temp_pytest_unprocessed}/{archiveHealth.temp_pytest_total}</span>
-            <span class="rounded {archiveHealth.file_retention_due > 0 ? 'bg-amber-100 text-amber-700' : 'bg-muted text-muted-foreground'} px-2 py-1">delete due {archiveHealth.file_retention_due}</span>
-            <span class="rounded bg-muted px-2 py-1">scheduled {archiveHealth.file_retention_scheduled}</span>
-            <span class="rounded bg-muted px-2 py-1">removed {archiveHealth.file_removed}</span>
-          </div>
-          <div class="mt-2 text-muted-foreground">oldest delete {formatDateTime(archiveHealth.oldest_file_delete_after)}</div>
-        {/if}
-      </div>
-    </div>
-
-    <!-- Plan Archive 실행 제어 -->
-    <div class="mb-3 rounded border border-border bg-background p-3 text-xs">
-      <div class="mb-2 flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <h3 class="font-semibold text-foreground">Archive execution control</h3>
-          <p class="mt-0.5 text-muted-foreground">선택 항목이 있으면 선택 레코드만 실행하고, 없으면 서버 정책 대상에 맡깁니다.</p>
-        </div>
-        <div class="flex items-center gap-2">
-          <button
-            class="rounded bg-muted px-2 py-1 text-muted-foreground hover:bg-secondary disabled:opacity-50"
-            onclick={syncArchiveExecutions}
-            disabled={archiveExecutionLoading}
-          >Sync</button>
-          <button
-            class="rounded bg-primary px-3 py-1 text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            onclick={runArchiveExecutions}
-            disabled={archiveExecutionLoading || getArchiveProfileChoices().length === 0 || selectedArchiveProfileKeys.size === 0}
-          >{archiveExecutionLoading ? 'Running...' : selectedIds.size > 0 ? `Run ${selectedIds.size}` : 'Run backlog'}</button>
-        </div>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        {#each getArchiveProfileChoices() as profile (profileKey(profile))}
-          <label class="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-1 text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={selectedArchiveProfileKeys.has(profileKey(profile))}
-              onchange={() => toggleArchiveProfile(profile)}
-            />
-            <span class="font-mono">{profile.engine}/{profile.profile_name}</span>
-          </label>
-        {/each}
-        {#if getArchiveProfileChoices().length === 0}
-          <span class="rounded bg-muted px-2 py-1 text-muted-foreground">사용 가능한 profile policy가 없습니다.</span>
-        {:else if selectedArchiveProfileKeys.size === 0}
-          <span class="rounded bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-900 dark:text-amber-200">profile을 하나 이상 선택하세요.</span>
-        {/if}
-      </div>
-      {#if archiveExecutionError}
-        <p class="mt-2 rounded border border-red-300 bg-red-50 px-2 py-1 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{archiveExecutionError}</p>
-      {:else if archiveExecutionResult}
-        <p class="mt-2 text-muted-foreground">{archiveExecutionResult}</p>
-      {/if}
-    </div>
-
-    <!-- Plan Archive LLM 요청 목록 -->
-    <div class="mb-3 rounded border border-border bg-background p-3 text-xs">
-      <div class="mb-2 flex items-center justify-between gap-2 flex-wrap">
-        <h3 class="font-semibold text-foreground">Plan Archive LLM 요청</h3>
-        <a class="text-primary hover:text-primary-hover" href="/llm?caller_type=plan_archive_analyze">전체 LLM 큐 보기</a>
-      </div>
-      <div class="mb-2 flex items-center gap-2 flex-wrap">
-        <select
-          class="border border-border rounded px-2 py-1 bg-background text-foreground"
-          bind:value={archiveQueueStatus}
-          onchange={() => loadArchiveQueue(1)}
-        >
-          <option value="pending,processing,failed">대기/처리중/실패</option>
-          <option value="pending">대기</option>
-          <option value="processing">처리중</option>
-          <option value="failed">실패</option>
-          <option value="completed">완료</option>
-        </select>
-        <select
-          class="border border-border rounded px-2 py-1 bg-background text-foreground"
-          bind:value={archiveQueueProvider}
-          onchange={() => loadArchiveQueue(1)}
-        >
-          <option value="">provider 전체</option>
-          <option value="claude">Claude</option>
-          <option value="gemini">Gemini</option>
-          <option value="codex">Codex</option>
-        </select>
-        <button
-          class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground"
-          onclick={() => loadArchiveQueue(archiveQueuePage)}
-          disabled={archiveQueueLoading}
-        >{archiveQueueLoading ? '갱신 중...' : '요청 갱신'}</button>
-      </div>
-      {#if archiveQueueError}
-        <p class="text-red-500 mb-2">{archiveQueueError}</p>
-      {:else if archiveRequests.length === 0}
-        <p class="text-muted-foreground">표시할 Plan Archive LLM 요청이 없습니다.</p>
-      {:else}
-        <div class="overflow-auto">
-          <table class="w-full min-w-[780px]">
-            <thead>
-              <tr class="text-left text-muted-foreground border-b border-border">
-                <th class="pb-2 pr-3 font-medium">ID</th>
-                <th class="pb-2 pr-3 font-medium">caller</th>
-                <th class="pb-2 pr-3 font-medium">상태</th>
-                <th class="pb-2 pr-3 font-medium">요청</th>
-                <th class="pb-2 pr-3 font-medium">provider/model</th>
-                <th class="pb-2 pr-3 font-medium">profile</th>
-                <th class="pb-2 font-medium">error/retry</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each archiveRequests as request (request.id)}
-                <tr class="border-b border-border/60">
-                  <td class="py-2 pr-3 font-mono">#{request.id}</td>
-                  <td class="py-2 pr-3">
-                    <div class="font-mono max-w-[12rem] truncate" title={request.caller_id}>{request.caller_id}</div>
-                    <div class="text-muted-foreground">{request.caller_type}</div>
-                  </td>
-                  <td class="py-2 pr-3">
-                    <span class="rounded px-2 py-1 {getStatusClass(request.status)}">{request.status}</span>
-                  </td>
-                  <td class="py-2 pr-3 whitespace-nowrap">{formatDateTime(request.requested_at)}</td>
-                  <td class="py-2 pr-3">{request.provider || 'claude'} / {request.model || 'inherit'}</td>
-                  <td class="py-2 pr-3">
-                    {getRequestProfile(request)}
-                    <div class="text-muted-foreground">policy detail: /llm</div>
-                  </td>
-                  <td class="py-2" title={request.pending_block_reason ? formatLLMBlockReason(request.pending_block_reason) : (request.error_message ?? '')}>
-                    <div>{getRequestReason(request)}</div>
-                    {#if request.status === 'failed'}
-                      <button
-                        class="mt-1 text-primary hover:text-primary-hover"
-                        onclick={async () => { await llmApi.retry(request.id); await refreshArchiveSurfaces(); }}
-                      >재시도</button>
-                    {/if}
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-        <div class="mt-2 flex items-center justify-between">
-          <span class="text-muted-foreground">전체 {archiveQueueTotal}개, {archiveQueuePage}/{archiveQueuePages}</span>
-          <div class="flex gap-2">
-            <button
-              class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
-              disabled={archiveQueuePage <= 1 || archiveQueueLoading}
-              onclick={() => loadArchiveQueue(archiveQueuePage - 1)}
-            >이전</button>
-            <button
-              class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
-              disabled={archiveQueuePage >= archiveQueuePages || archiveQueueLoading}
-              onclick={() => loadArchiveQueue(archiveQueuePage + 1)}
-            >다음</button>
-          </div>
-        </div>
-      {/if}
+    <!-- schedule 운영 이전 링크 -->
+    <div class="mb-3 flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-xs">
+      <span class="text-muted-foreground">schedule 운영·LLM 요청 큐·실행 제어·후보 관리 →</span>
+      <a href="/scheduler/plan-archive" class="text-primary underline hover:no-underline">/scheduler/plan-archive</a>
     </div>
 
     <!-- Plan Archive retrieval MVP -->
@@ -1740,117 +1111,6 @@
       </div>
     </div>
 
-    <!-- archive 후보/실행 대상 상태 -->
-    <div class="mb-3 grid grid-cols-1 xl:grid-cols-2 gap-3">
-      <div class="border border-border rounded p-3">
-        <div class="flex items-center justify-between gap-2 mb-2">
-          <h3 class="text-xs font-semibold text-foreground">Archive 후보</h3>
-          {#if syncResult}
-            <span class="text-xs text-muted-foreground">
-              sync: 생성 {syncResult.archive_created}, 갱신 {syncResult.archive_updated}, 정규화 {syncResult.archive_normalized}
-            </span>
-          {/if}
-        </div>
-        {#if candidateError}
-          <p class="text-xs text-red-500">{candidateError}</p>
-        {:else if candidatesLoading && !candidateSummary}
-          <p class="text-xs text-muted-foreground">후보 로드 중...</p>
-        {:else if candidateSummary}
-          <div class="flex flex-wrap gap-1.5 mb-2 text-xs">
-            <span class="px-2 py-0.5 rounded bg-muted text-muted-foreground">전체 {candidateSummary.total}</span>
-            <span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200">파일만 {candidateSummary.file_only}</span>
-            <span class="px-2 py-0.5 rounded bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-200">정규화 {candidateSummary.needs_archive_normalization}</span>
-            <span class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">분석대기 {candidateSummary.llm_pending}</span>
-            <span class="px-2 py-0.5 rounded bg-muted text-muted-foreground">DB만 {candidateSummary.db_only}</span>
-          </div>
-          <div class="max-h-36 overflow-auto">
-            <table class="w-full text-xs">
-              <thead>
-                <tr class="text-left text-muted-foreground border-b border-border">
-                  <th class="pb-1 pr-2 font-medium">상태</th>
-                  <th class="pb-1 pr-2 font-medium">파일</th>
-                  <th class="pb-1 font-medium">대상</th>
-                  <th class="pb-1 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each candidateSummary.candidates.filter(c => c.state !== 'matched' || c.eligible_for_analysis).slice(0, 12) as candidate}
-                  <tr class="border-b border-border/50">
-                    <td class="py-1 pr-2 whitespace-nowrap">{candidate.state}</td>
-                    <td class="py-1 pr-2 font-mono truncate max-w-[16rem]" title={candidate.file_path}>
-                      {candidate.file_path.split(/[\\/]/).pop()}
-                    </td>
-                    <td class="py-1">
-                      {#if candidate.eligible_for_analysis}
-                        <span class="text-blue-600 dark:text-blue-300">분석</span>
-                      {:else if candidate.eligible_for_import}
-                        <span class="text-yellow-700 dark:text-yellow-300">sync/이관</span>
-                      {:else}
-                        <span class="text-muted-foreground">-</span>
-                      {/if}
-                    </td>
-                    <td class="py-1 text-right">
-                      <button
-                        class="px-2 py-0.5 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                        disabled={!candidate.eligible_for_analysis || !candidate.record?.id || !selectedProvider || !selectedModel || queueingRecordId === candidate.record?.id}
-                        title={candidate.reason}
-                        onclick={() => queueArchiveAnalyze(candidate)}
-                      >{queueingRecordId === candidate.record?.id ? '큐잉...' : '분석 큐'}</button>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
-      </div>
-
-      <div class="border border-border rounded p-3">
-        <h3 class="text-xs font-semibold text-foreground mb-2">LLM 실행 대상</h3>
-        {#if providersError}
-          <p class="text-xs text-red-500">{providersError}</p>
-        {:else}
-          <div class="flex flex-wrap items-center gap-2 mb-2 text-xs">
-            <select
-              class="border border-border rounded px-2 py-1 bg-background text-foreground"
-              bind:value={selectedProvider}
-              onchange={handleProviderChange}
-            >
-              {#each providers as provider}
-                <option value={provider.key}>{provider.display_name || provider.key}</option>
-              {/each}
-            </select>
-            <select
-              class="border border-border rounded px-2 py-1 bg-background text-foreground"
-              bind:value={selectedModel}
-              disabled={!selectedProvider}
-            >
-              {#each availableModels() as model}
-                <option value={model}>{model}</option>
-              {/each}
-            </select>
-            {#if selectedProvider === 'codex'}
-              <span class="text-emerald-600 dark:text-emerald-300">profile 없이 큐잉</span>
-            {/if}
-          </div>
-          <div class="flex flex-wrap gap-2 text-xs">
-            {#each providers as provider}
-              <span class="px-2 py-1 rounded border border-border bg-background">
-                <span class="font-semibold">{provider.key}</span>
-                <span class="text-muted-foreground"> / {provider.default_model || provider.models?.[0] || 'default'}</span>
-                {#if provider.key === 'codex'}
-                  <span class="ml-1 text-emerald-600 dark:text-emerald-300">profile 불필요</span>
-                {/if}
-              </span>
-            {/each}
-            {#if providers.length === 0}
-              <span class="text-muted-foreground">provider 정보 없음</span>
-            {/if}
-          </div>
-        {/if}
-      </div>
-    </div>
-
     <!-- 벌크 액션 바 -->
     {#if selectedIds.size > 0}
       <div class="flex items-center gap-2 mb-2 p-2 bg-muted rounded text-xs">
@@ -2008,64 +1268,6 @@
       {/if}
     {/if}
 
-    <div class="mt-4 border-t border-border pt-3">
-      <div class="flex items-center justify-between gap-2 mb-2">
-        <h3 class="text-xs font-semibold text-foreground">Archive LLM 요청</h3>
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-muted-foreground">총 {llmRequestTotal}</span>
-          <button
-            class="px-2 py-0.5 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-            onclick={loadArchiveRequests}
-            disabled={llmLoading}
-            title="LLM 실행 이력을 DB에서 다시 불러옵니다. 파일/DB 동기화와 별개입니다."
-          >{llmLoading ? '로드 중...' : '실행 이력 Sync'}</button>
-        </div>
-      </div>
-      {#if llmError}
-        <p class="text-xs text-red-500">{llmError}</p>
-      {:else if llmRequests.length === 0}
-        <p class="text-xs text-muted-foreground">plan_archive_analyze 요청이 없습니다.</p>
-      {:else}
-        <div class="max-h-56 overflow-auto">
-          <table class="w-full text-xs">
-            <thead>
-              <tr class="text-left text-muted-foreground border-b border-border">
-                <th class="pb-1 pr-2 font-medium">ID</th>
-                <th class="pb-1 pr-2 font-medium">상태</th>
-                <th class="pb-1 pr-2 font-medium">요청</th>
-                <th class="pb-1 pr-2 font-medium">provider/model</th>
-                <th class="pb-1 pr-2 font-medium">결과</th>
-                <th class="pb-1 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each llmRequests as req}
-                <tr class="border-b border-border/50 {appliedRequestId === req.id ? 'bg-green-50 dark:bg-green-950/30' : ''}">
-                  <td class="py-1 pr-2 font-mono">
-                    #{req.id}
-                    {#if appliedRequestId === req.id}
-                      <span class="ml-1 text-xs px-1 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200">DB반영</span>
-                    {/if}
-                  </td>
-                  <td class="py-1 pr-2">{req.status}</td>
-                  <td class="py-1 pr-2 whitespace-nowrap">{formatDateTime(req.requested_at)}</td>
-                  <td class="py-1 pr-2">{req.provider || '-'} / {req.model || 'default'}</td>
-                  <td class="py-1 pr-2 truncate max-w-[18rem]" title={summarizeResult(req.result)}>
-                    {summarizeResult(req.result)}
-                  </td>
-                  <td class="py-1">
-                    <button
-                      class="px-2 py-0.5 rounded bg-muted hover:bg-secondary text-muted-foreground"
-                      onclick={() => openRequestDetail(req)}
-                    >보기</button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    </div>
   </div>
 
   <!-- 상세 패널 -->
@@ -2334,115 +1536,6 @@
   {/if}
 </div>
 
-<!-- LLM 요청/DB 저장값 상세 -->
-{#if selectedRequest}
-  <div
-    class="fixed inset-0 z-40 bg-black/40 flex items-center justify-center"
-    onclick={(e) => { if (e.target === e.currentTarget) { selectedRequest = null; requestDetailRecord = null; expandedFields = new Set(); } }}
-    role="dialog"
-    aria-modal="true"
-  >
-    <div class="bg-background border border-border rounded-lg shadow-xl w-full max-w-5xl max-h-[86vh] flex flex-col p-5">
-      <div class="flex items-center justify-between mb-4">
-        <div>
-          <h2 class="text-sm font-semibold text-foreground">LLM 요청 #{selectedRequest.id}</h2>
-          <p class="text-xs text-muted-foreground font-mono">{selectedRequest.caller_id}</p>
-        </div>
-        <button
-          class="text-muted-foreground hover:text-foreground text-xs"
-          onclick={() => { selectedRequest = null; requestDetailRecord = null; expandedFields = new Set(); }}
-        >닫기</button>
-      </div>
-
-      {#if requestDetailLoading}
-        <p class="text-xs text-muted-foreground">상세 로드 중...</p>
-      {/if}
-
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 overflow-auto text-xs">
-        <div class="space-y-3">
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <h3 class="font-semibold text-foreground">응답 result</h3>
-              <button class="px-1.5 py-0.5 rounded bg-muted hover:bg-secondary text-muted-foreground" onclick={() => copyToClipboard(toPrettyJson(selectedRequest?.result))}>복사</button>
-            </div>
-            <pre class="{expandedFields.has('result') ? '' : 'max-h-64'} overflow-auto rounded border border-border bg-muted p-2 whitespace-pre-wrap">{toPrettyJson(selectedRequest.result)}</pre>
-            <button class="text-xs text-muted-foreground mt-0.5" onclick={() => toggleExpand('result')}>{expandedFields.has('result') ? '접기' : '펼치기'}</button>
-          </div>
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <h3 class="font-semibold text-foreground">raw_response</h3>
-              {#if selectedRequest.raw_response}
-                <button class="px-1.5 py-0.5 rounded bg-muted hover:bg-secondary text-muted-foreground" onclick={() => copyToClipboard(selectedRequest?.raw_response ?? '')}>복사</button>
-              {/if}
-            </div>
-            <pre class="{expandedFields.has('raw') ? '' : 'max-h-48'} overflow-auto rounded border border-border bg-muted p-2 whitespace-pre-wrap">{selectedRequest.raw_response || '-'}</pre>
-            {#if selectedRequest.raw_response}
-              <button class="text-xs text-muted-foreground mt-0.5" onclick={() => toggleExpand('raw')}>{expandedFields.has('raw') ? '접기' : '펼치기'}</button>
-            {/if}
-          </div>
-        </div>
-        <div class="space-y-3">
-          <div>
-            <h3 class="font-semibold text-foreground mb-1">요청 메타</h3>
-            <dl class="grid grid-cols-[7rem_1fr] gap-x-2 gap-y-1 rounded border border-border p-2">
-              <dt class="text-muted-foreground">status</dt><dd>{selectedRequest.status}</dd>
-              <dt class="text-muted-foreground">provider/model</dt><dd>{selectedRequest.provider || '-'} / {selectedRequest.model || 'default'}</dd>
-              <dt class="text-muted-foreground">retry_count</dt><dd>{selectedRequest.retry_count ?? 0}</dd>
-              <dt class="text-muted-foreground">error</dt><dd class="{selectedRequest.error_message ? 'text-red-600 dark:text-red-400' : ''}">{selectedRequest.error_message || '-'}</dd>
-              <dt class="text-muted-foreground">cli_options</dt><dd><pre class="whitespace-pre-wrap">{toPrettyJson(selectedRequest.cli_options)}</pre></dd>
-            </dl>
-          </div>
-          <div>
-            <h3 class="font-semibold text-foreground mb-1">DB 저장값 <span class="font-normal text-muted-foreground">(result와 차이 시 강조)</span></h3>
-            {#if requestDetailRecord}
-              {@const rCategory = extractResultField(selectedRequest.result, 'category')}
-              {@const rTags = extractResultField(selectedRequest.result, 'tags')}
-              {@const rSummary = extractResultField(selectedRequest.result, 'summary')}
-              {@const rIntent = extractResultField(selectedRequest.result, 'intent')}
-              {@const rTrigger = extractResultField(selectedRequest.result, 'trigger')}
-              <dl class="grid grid-cols-[7rem_1fr] gap-x-2 gap-y-1 rounded border border-border p-2">
-                <dt class="text-muted-foreground">record_id</dt><dd>{requestDetailRecord.id}</dd>
-                <dt class="text-muted-foreground">category</dt>
-                <dd class="{isDifferent(requestDetailRecord.category, rCategory) ? 'text-yellow-600 dark:text-yellow-400 font-semibold' : ''}">{requestDetailRecord.category || '-'}{isDifferent(requestDetailRecord.category, rCategory) && rCategory ? ` ← result: ${rCategory}` : ''}</dd>
-                <dt class="text-muted-foreground">tags</dt>
-                <dd class="{isDifferent(requestDetailRecord.tags?.join(', '), rTags) ? 'text-yellow-600 dark:text-yellow-400 font-semibold' : ''}">{requestDetailRecord.tags?.join(', ') || '-'}{isDifferent(requestDetailRecord.tags?.join(', '), rTags) && rTags ? ` ← result: ${rTags}` : ''}</dd>
-                <dt class="text-muted-foreground">summary</dt>
-                <dd class="{isDifferent(requestDetailRecord.summary, rSummary) ? 'text-yellow-600 dark:text-yellow-400' : ''}">
-                  {#if expandedFields.has('summary_db')}
-                    {requestDetailRecord.summary || '-'}
-                  {:else}
-                      {requestDetailRecord.summary ? `${requestDetailRecord.summary.slice(0, 80)}${requestDetailRecord.summary.length > 80 ? '…' : ''}` : '-'}
-                  {/if}
-                  {#if (requestDetailRecord.summary?.length ?? 0) > 80}<button class="text-muted-foreground ml-1" onclick={() => toggleExpand('summary_db')}>{expandedFields.has('summary_db') ? '접기' : '더보기'}</button>{/if}
-                </dd>
-                <dt class="text-muted-foreground">intent</dt>
-                <dd class="{isDifferent(requestDetailRecord.intent, rIntent) ? 'text-yellow-600 dark:text-yellow-400 font-semibold' : ''}">{requestDetailRecord.intent || '-'}</dd>
-                <dt class="text-muted-foreground">trigger</dt>
-                <dd class="{isDifferent(requestDetailRecord.trigger, rTrigger) ? 'text-yellow-600 dark:text-yellow-400 font-semibold' : ''}">{requestDetailRecord.trigger || '-'}</dd>
-                <dt class="text-muted-foreground">scope</dt><dd>{requestDetailRecord.scope?.join(', ') || '-'}</dd>
-                <dt class="text-muted-foreground">processed_at</dt><dd>{formatDateTime(requestDetailRecord.llm_processed_at)}</dd>
-              </dl>
-            {:else}
-              <p class="rounded border border-border p-2 text-muted-foreground">현재 페이지 목록에서 매칭되는 DB 레코드를 찾지 못했습니다.</p>
-            {/if}
-          </div>
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <h3 class="font-semibold text-foreground">prompt</h3>
-              {#if selectedRequest.prompt}
-                <button class="px-1.5 py-0.5 rounded bg-muted hover:bg-secondary text-muted-foreground" onclick={() => copyToClipboard(selectedRequest?.prompt ?? '')}>복사</button>
-              {/if}
-            </div>
-            <pre class="{expandedFields.has('prompt') ? '' : 'max-h-64'} overflow-auto rounded border border-border bg-muted p-2 whitespace-pre-wrap">{selectedRequest.prompt || '-'}</pre>
-            {#if selectedRequest.prompt}
-              <button class="text-xs text-muted-foreground mt-0.5" onclick={() => toggleExpand('prompt')}>{expandedFields.has('prompt') ? '접기' : '펼치기'}</button>
-            {/if}
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-{/if}
 
 <!-- 정리 미리보기 모달 -->
 {#if showOrganizeModal}
