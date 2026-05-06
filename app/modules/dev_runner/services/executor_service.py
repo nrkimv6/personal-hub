@@ -592,6 +592,7 @@ class ExecutorService:
                         runner_id=runner_id,
                     )
                     _new_claim_id = _new_claim.claim_id
+                    command["claim_id"] = _new_claim_id
                     logger.info(
                         f"[claim] queued claim created: claim_id={_new_claim_id} plan={request.plan_file}"
                     )

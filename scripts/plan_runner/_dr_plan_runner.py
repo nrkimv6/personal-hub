@@ -1139,6 +1139,7 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", command.get("engine", "claude"))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine", command.get("fix_engine", "claude"))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:claim_id", command.get("claim_id", ""))
         # profile 정보 Redis에 저장 — merge/fix 후속 단계에서 복원용
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile", command.get("profile", ""))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_env_key", command.get("profile_env_key") or "")
@@ -1169,11 +1170,12 @@ def _launch_plan_runner_process(
                 )
                 _claim_db = _ClaimSession()
                 try:
-                    _claim = _get_active_claim(_claim_db, plan_file)
-                    if _claim and _claim.state == "queued":
-                        _activate_claim(
+                    _claim_id = command.get("claim_id")
+                    _claim = None
+                    if _claim_id:
+                        _claim = _activate_claim(
                             _claim_db,
-                            _claim.claim_id,
+                            _claim_id,
                             runner_id=runner_id,
                             pid=process.pid,
                             branch=branch or f"runner/{runner_id}",
@@ -1183,6 +1185,21 @@ def _launch_plan_runner_process(
                             f"[claim] activated: claim_id={_claim.claim_id} "
                             f"runner_id={runner_id} pid={process.pid}"
                         )
+                    else:
+                        _claim = _get_active_claim(_claim_db, plan_file)
+                        if _claim and _claim.state == "queued":
+                            _activate_claim(
+                                _claim_db,
+                                _claim.claim_id,
+                                runner_id=runner_id,
+                                pid=process.pid,
+                                branch=branch or f"runner/{runner_id}",
+                                worktree_path=str(worktree_path),
+                            )
+                            logger.info(
+                                f"[claim] activated: claim_id={_claim.claim_id} "
+                                f"runner_id={runner_id} pid={process.pid}"
+                            )
                 finally:
                     _claim_db.close()
             except Exception as _claim_err:

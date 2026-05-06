@@ -279,6 +279,7 @@
 		if (mergeStatusValue === 'merged') return '머지됨';
 		if (mergeStatusValue === 'test_failed') return '테스트 실패';
 		if (mergeStatusValue === 'conflict') return '충돌';
+		if (mergeStatusValue === 'error') return '머지 오류';
 		return getExitReasonDisplay(exitReasonValue).statusIcon;
 	}
 

@@ -447,6 +447,11 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     # Capture state before possible key deletion
     try:
         merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        claim_id_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:claim_id")
+        if isinstance(claim_id_val, bytes):
+            claim_id_val = claim_id_val.decode("utf-8", errors="replace")
+        if claim_id_val == "":
+            claim_id_val = None
         plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file_val = None
@@ -471,6 +476,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     except Exception as e:
         logger.warning(f"[cleanup] state capture failed (runner_id={runner_id}): {e}")
         merge_status = None
+        claim_id_val = None
         plan_file_val = None
         _trigger_val = None
         merge_requested = None
@@ -594,27 +600,37 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     _cleanup_runner_ownership_snapshot(runner_id)
 
     # ── Claim release (active/queued → released) ──────────────────────
-    if plan_file_val:
+    try:
+        if str(PROJECT_ROOT) not in sys.path:
+            sys.path.insert(0, str(PROJECT_ROOT))
+        from app.database import SessionLocal as _ClaimSession
+        from app.modules.dev_runner.services.plan_execution_claim_service import (
+            get_active_claim_for_plan as _get_active_claim,
+            get_active_claim_for_runner as _get_runner_claim,
+            release_claim as _release_claim,
+        )
+        _claim_db = _ClaimSession()
         try:
-            if str(PROJECT_ROOT) not in sys.path:
-                sys.path.insert(0, str(PROJECT_ROOT))
-            from app.database import SessionLocal as _ClaimSession
-            from app.modules.dev_runner.services.plan_execution_claim_service import (
-                get_active_claim_for_plan as _get_active_claim,
-                release_claim as _release_claim,
-            )
-            _claim_db = _ClaimSession()
-            try:
+            _claim = None
+            if claim_id_val:
+                _claim = type("_ClaimRef", (), {"claim_id": claim_id_val})()
+            if _claim is None and plan_file_val:
                 _claim = _get_active_claim(_claim_db, plan_file_val)
-                if _claim:
-                    _release_claim(_claim_db, _claim.claim_id)
-                    logger.info(
-                        f"[claim] released: claim_id={_claim.claim_id} runner_id={runner_id} reason={reason}"
-                    )
-            finally:
-                _claim_db.close()
-        except Exception as _claim_err:
-            logger.warning(f"[claim] release 실패 (무시, runner_id={runner_id}): {_claim_err}")
+            if _claim is None:
+                _claim = _get_runner_claim(_claim_db, runner_id)
+            if _claim:
+                _release_claim(_claim_db, _claim.claim_id)
+                logger.info(
+                    f"[claim] released: claim_id={_claim.claim_id} runner_id={runner_id} "
+                    f"plan_file={plan_file_val or '(none)'} merge_status={merge_status or '(none)'} reason={reason}"
+                )
+        finally:
+            _claim_db.close()
+    except Exception as _claim_err:
+        logger.warning(
+            f"[claim] release 실패 (무시, runner_id={runner_id}, plan_file={plan_file_val or '(none)'}, "
+            f"claim_id={claim_id_val or '(none)'}, merge_status={merge_status or '(none)'}, reason={reason}): {_claim_err}"
+        )
     # ────────────────────────────────────────────────────────────────
 
     logger.info(f"[cleanup] _cleanup_process_state completed: {runner_id} (reason={reason})")

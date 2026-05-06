@@ -134,22 +134,23 @@ def release_claim(
 
 
 def mark_stale_claims(db: Session, threshold_seconds: int = STALE_THRESHOLD_SECONDS) -> list[PlanExecutionClaim]:
-    """heartbeat_at 또는 lease_expires_at 기준으로 만료된 active claim을 stale로 전환한다.
+    """heartbeat_at 또는 lease_expires_at 기준으로 만료된 active/queued claim을 stale로 전환한다.
 
     stale claim은 자동 탈취하지 않는다. UI/API에서 명시 release/reclaim 절차를 거친다.
     """
     cutoff = datetime.now() - timedelta(seconds=threshold_seconds)
+    now = datetime.now()
     candidates = (
         db.query(PlanExecutionClaim)
         .filter(
-            PlanExecutionClaim.state == "active",
-            PlanExecutionClaim.lease_expires_at < datetime.now(),
+            PlanExecutionClaim.state.in_(["queued", "active"]),
+            PlanExecutionClaim.lease_expires_at < now,
         )
         .all()
     )
     stale = []
     for claim in candidates:
-        if claim.heartbeat_at is None or claim.heartbeat_at < cutoff:
+        if claim.state == "queued" or claim.heartbeat_at is None or claim.heartbeat_at < cutoff:
             claim.state = "stale"
             stale.append(claim)
     if stale:
@@ -173,6 +174,21 @@ def get_active_claim_for_plan(db: Session, plan_path: str) -> Optional[PlanExecu
         db.query(PlanExecutionClaim)
         .filter(
             PlanExecutionClaim.plan_path == plan_path,
+            PlanExecutionClaim.state.in_(["queued", "active"]),
+        )
+        .order_by(PlanExecutionClaim.claimed_at.desc())
+        .first()
+    )
+
+
+def get_active_claim_for_runner(db: Session, runner_id: str) -> Optional[PlanExecutionClaim]:
+    """runner_id의 active 또는 queued claim을 반환."""
+    if not runner_id:
+        return None
+    return (
+        db.query(PlanExecutionClaim)
+        .filter(
+            PlanExecutionClaim.runner_id == runner_id,
             PlanExecutionClaim.state.in_(["queued", "active"]),
         )
         .order_by(PlanExecutionClaim.claimed_at.desc())

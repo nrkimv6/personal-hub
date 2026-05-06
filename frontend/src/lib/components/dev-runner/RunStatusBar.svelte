@@ -47,6 +47,9 @@
 
 	function resolveRunnerStateTitle(runner: RunnerTab): string {
 		if (runner.running) return 'running';
+		if (runner.merge_status === 'error') return '머지 오류';
+		if (runner.merge_status === 'conflict') return '충돌';
+		if (runner.merge_status === 'test_failed') return '테스트 실패';
 		const exitDisplay = getExitReasonDisplay(runner.exit_reason);
 		return runner.exit_reason ? `${exitDisplay.statusIcon} (${runner.exit_reason})` : exitDisplay.statusIcon;
 	}
@@ -292,6 +295,10 @@
 					<!-- 상태 dot -->
 					{#if runner.running}
 						<div class="pulse-dot bg-status-running shrink-0" title="running"></div>
+					{:else if runner.merge_status === 'error'}
+						<div class="w-1.5 h-1.5 rounded-full bg-status-failed shrink-0" title={resolveRunnerStateTitle(runner)}></div>
+					{:else if runner.merge_status === 'conflict' || runner.merge_status === 'test_failed'}
+						<div class="w-1.5 h-1.5 rounded-full bg-status-failed shrink-0" title={resolveRunnerStateTitle(runner)}></div>
 					{:else}
 						{@const exitDisplay = getExitReasonDisplay(runner.exit_reason)}
 						<div class="w-1.5 h-1.5 rounded-full {exitDisplay.dotClass} shrink-0" title={resolveRunnerStateTitle(runner)}></div>

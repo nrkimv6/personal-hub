@@ -956,7 +956,10 @@ def _check_stale_merge_gate(
 
     behind, ahead = get_branch_divergence(branch, PROJECT_ROOT)
     risk = classify_merge_risk(behind, ahead)
-    message = f"stale merge gate: risk={risk}, behind={behind}, ahead={ahead}, branch={branch}"
+    message = (
+        f"stale merge gate: risk={risk}, behind={behind}, ahead={ahead}, branch={branch}; "
+        "cause=branch divergence/mirror diff risk, not Redis state loss; rebuild a clean branch before retry"
+    )
     pub_fn(message)
     try:
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stale_merge_risk", risk)

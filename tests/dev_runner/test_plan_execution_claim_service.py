@@ -20,6 +20,7 @@ from app.modules.dev_runner.services.plan_execution_claim_service import (
     release_claim,
     mark_stale_claims,
     get_active_claim_for_plan,
+    get_active_claim_for_runner,
     get_active_claims_map,
     ClaimConflictError,
     DEFAULT_LEASE_SECONDS,
@@ -293,8 +294,8 @@ class TestMarkStaleClaims:
         stale = mark_stale_claims(db, threshold_seconds=600)
         assert not any(s.claim_id == claim.claim_id for s in stale)
 
-    def test_mark_stale_skips_queued(self, db):
-        """B: queued 상태 claim은 stale 대상이 아니다"""
+    def test_mark_stale_marks_expired_queued_claim(self, db):
+        """B: queued 상태 claim도 lease가 만료되면 stale 처리한다."""
         claim = claim_plan(db, PLAN_PATH + "_queued_skip")
         # queued 상태 유지, lease_expires를 과거로 설정
         db_claim = db.query(PlanExecutionClaim).filter_by(claim_id=claim.claim_id).one()
@@ -303,7 +304,9 @@ class TestMarkStaleClaims:
         db.commit()
 
         stale = mark_stale_claims(db, threshold_seconds=600)
-        assert not any(s.claim_id == claim.claim_id for s in stale)
+        assert any(s.claim_id == claim.claim_id for s in stale)
+        refreshed = db.query(PlanExecutionClaim).filter_by(claim_id=claim.claim_id).one()
+        assert refreshed.state == "stale"
 
     def test_mark_stale_returns_empty_when_none(self, db):
         """B: 만료된 active claim 없으면 빈 리스트 반환"""
@@ -357,3 +360,22 @@ class TestGetActiveClaimsMap:
 
         result = get_active_claims_map(db, [path])
         assert result[path].claim_id == second.claim_id
+
+
+class TestGetActiveClaimForRunner:
+
+    def test_returns_queued_or_active_claim_for_runner(self, db):
+        """R: runner_id 기준으로 queued/active claim을 조회한다."""
+        claim = claim_plan(db, PLAN_PATH + "_runner_lookup", runner_id="runner-lookup-1")
+
+        result = get_active_claim_for_runner(db, "runner-lookup-1")
+
+        assert result is not None
+        assert result.claim_id == claim.claim_id
+
+    def test_excludes_released_claim_for_runner(self, db):
+        """B: released claim은 runner_id 조회 대상이 아니다."""
+        claim = claim_plan(db, PLAN_PATH + "_runner_released", runner_id="runner-lookup-2")
+        release_claim(db, claim.claim_id)
+
+        assert get_active_claim_for_runner(db, "runner-lookup-2") is None

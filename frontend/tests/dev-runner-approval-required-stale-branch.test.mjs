@@ -34,3 +34,20 @@ test("service lock approval button sends one-shot approve_service_lock retry pay
     assert.match(instance, /approve_service_lock:\s*true/);
     assert.match(instance, /경고 확인 후 머지/);
 });
+
+test("merge_status error takes precedence over completed lifecycle labels", () => {
+    const instance = readSource("src/lib/components/dev-runner/RunnerInstanceTab.svelte");
+    const statusBar = readSource("src/lib/components/dev-runner/RunStatusBar.svelte");
+
+    const instanceError = instance.indexOf("if (mergeStatusValue === 'error') return '머지 오류';");
+    const instanceFallback = instance.indexOf("return getExitReasonDisplay(exitReasonValue).statusIcon;");
+    const statusError = statusBar.indexOf("if (runner.merge_status === 'error') return '머지 오류';");
+    const statusFallback = statusBar.indexOf("const exitDisplay = getExitReasonDisplay(runner.exit_reason);");
+
+    assert.ok(instanceError >= 0);
+    assert.ok(instanceFallback >= 0);
+    assert.ok(instanceError < instanceFallback);
+    assert.ok(statusError >= 0);
+    assert.ok(statusFallback >= 0);
+    assert.ok(statusError < statusFallback);
+});

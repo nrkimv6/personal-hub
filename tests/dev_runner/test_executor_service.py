@@ -6,7 +6,7 @@ Mock 대상: redis.Redis → fakeredis, redis.asyncio → fakeredis.aioredis
 
 import json
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock, AsyncMock
 import fakeredis
 import fakeredis.aioredis
@@ -81,9 +81,29 @@ def _make_capture_lpush(fake_async_redis, captured, result_data=None):
     return capture_lpush
 
 
+@pytest.fixture
+def mock_claim_plan_for_command_tests():
+    """Command 구성 검증용 TC에서는 실제 claim DB 상태에 의존하지 않는다."""
+    claim = MagicMock()
+    claim.claim_id = "test-claim-id-command"
+    claim.state = "queued"
+    claim.runner_id = None
+    claim.lease_expires_at = datetime.now() + timedelta(seconds=300)
+
+    with patch(
+        "app.modules.dev_runner.services.plan_execution_claim_service.claim_plan",
+        return_value=claim,
+    ):
+        yield claim
+
+
 # ========== TestStartDevRunner ==========
 
 class TestStartDevRunner:
+
+    @pytest.fixture(autouse=True)
+    def _mock_claims(self, mock_claim_plan_for_command_tests):
+        yield
 
     async def test_start_single_plan_command(self, executor, run_request_single, fake_async_redis):
         """Right - plan_file 포함된 command 전송"""
@@ -388,6 +408,10 @@ class TestIsPidAlive:
 
 class TestCORRECTConformance:
 
+    @pytest.fixture(autouse=True)
+    def _mock_claims(self, mock_claim_plan_for_command_tests):
+        yield
+
     def test_run_request_invalid_schema(self):
         """RunRequest 필드 타입 오류 → Pydantic 에러"""
         with pytest.raises(Exception):
@@ -471,6 +495,10 @@ class TestMaxCyclesZeroBugFix:
     버그: if request.max_cycles and request.max_cycles > 0 → 0은 falsy → 누락
     픽스: if request.max_cycles is not None → 0 포함
     """
+
+    @pytest.fixture(autouse=True)
+    def _mock_claims(self, mock_claim_plan_for_command_tests):
+        yield
 
     async def test_max_cycles_zero_included_in_command(self, executor, fake_async_redis):
         """max_cycles=0 (무제한)이 Redis command에 포함되어야 함"""
@@ -676,6 +704,8 @@ class TestStartDevRunnerClaimIntegration:
             )
 
         mock_cp.assert_called_once()
+        command = json.loads(captured[0])
+        assert command["claim_id"] == fake_claim.claim_id
         assert result.claim_id == fake_claim.claim_id
         assert result.claim_state == "queued"
 
