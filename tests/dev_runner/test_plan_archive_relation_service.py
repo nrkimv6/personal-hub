@@ -165,6 +165,77 @@ def test_refresh_relations_deduplicates_repeated_mentions_for_same_relation():
         engine.dispose()
 
 
+def test_refresh_relations_repeated_run_is_idempotent():
+    db, engine = _make_session()
+    try:
+        source = _record(
+            db,
+            "2026-05-06_fix-source.md",
+            raw_content="\n".join(
+                [
+                    "직접 선행: 2026-05-06_fix-target.md",
+                    "",
+                    "관련 계획: 2026-05-06_fix-target.md",
+                    "",
+                    "다시 언급: 2026-05-06_fix-target.md",
+                ]
+            ),
+        )
+        target = _record(db, "2026-05-06_fix-target.md")
+        db.commit()
+
+        first = PlanArchiveRelationService(db).refresh_relations_for_record(source.id)
+        db.commit()
+        second = PlanArchiveRelationService(db).refresh_relations_for_record(source.id)
+        db.commit()
+
+        assert first.created == 2
+        assert second.created == 0
+        assert second.updated == 2
+        assert (
+            db.query(PlanRecordRelation)
+            .filter_by(source_plan_record_id=source.id, target_plan_record_id=target.id)
+            .count()
+            == 2
+        )
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_refresh_relations_preserves_distinct_relation_types_for_same_target():
+    db, engine = _make_session()
+    try:
+        source = _record(
+            db,
+            "2026-05-06_fix-source.md",
+            raw_content="\n".join(
+                [
+                    "직접 선행: 2026-05-06_fix-target.md",
+                    "",
+                    "관련 계획: 2026-05-06_fix-target.md",
+                ]
+            ),
+        )
+        target = _record(db, "2026-05-06_fix-target.md")
+        db.commit()
+
+        result = PlanArchiveRelationService(db).refresh_relations_for_record(source.id)
+        db.commit()
+
+        assert result.created == 2
+        relation_types = {
+            row.relation_type
+            for row in db.query(PlanRecordRelation)
+            .filter_by(source_plan_record_id=source.id, target_plan_record_id=target.id)
+            .all()
+        }
+        assert relation_types == {"mentions", "predecessor"}
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_fixture_ingest_creates_predecessor_guard_unresolved_followup():
     db, engine = _make_session()
     try:
