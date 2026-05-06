@@ -1033,8 +1033,9 @@ class PlanRecordService:
                 _add_event(self.db, record, "missing", {"file_path": record.file_path})
                 missing += 1
 
+        self.db.flush()
         relation_results = self._refresh_plan_body_relations(relation_refresh_records)
-        self.db.commit()
+        self.db.flush()
         return {
             "created": created,
             "updated": updated,

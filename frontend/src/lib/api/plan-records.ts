@@ -440,13 +440,10 @@ export interface ArchiveAnalyzeRequest {
 }
 
 export interface ArchiveAnalyzeResponse {
-	id: number;
-	caller_type: string;
-	caller_id: string;
-	status: string;
+	queued: boolean;
+	request_id: number;
 	provider: string;
 	model: string;
-	profile_key: string | null;
 }
 
 // ============================================================
@@ -675,12 +672,12 @@ export const planRecordsApi = {
 	},
 
 	/**
-	 * archived record를 plan_archive_analyze LLM 큐에 등록
+	 * archived record를 PlanArchiveExecutionService 기반 LLM 큐에 등록
 	 */
 	queueArchiveAnalyze: (recordId: number, data: ArchiveAnalyzeRequest) =>
-		planRecordsRequest<ArchiveAnalyzeResponse>(`/records/archive-analyze/${recordId}`, {
+		planRecordsRequest<ArchiveAnalyzeResponse>(`/records/${recordId}/reanalyze`, {
 			method: 'POST',
-			body: JSON.stringify(data)
+			body: JSON.stringify({ provider: data.provider, model: data.model ?? '', profile_key: data.profile_key ?? null })
 		}),
 
 	/**

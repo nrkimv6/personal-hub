@@ -12,7 +12,7 @@ from pathlib import Path
 from app.modules.claude_worker.services.executors.base import LLMExecutorBase
 from app.modules.claude_worker.services.profile_env import build_cli_env
 
-CODEX_SAFE_DEFAULT_MODEL = "gpt-5.2"
+CODEX_SAFE_DEFAULT_MODEL = "gpt-5.5"
 CODEX_DEFAULT_SANDBOX = "read-only"
 MODEL_INCOMPATIBLE_SNIPPET = "requires a newer version of Codex"
 ALLOWED_CLI_OPTION_KEYS = {"cwd", "parse_json", "sandbox"}

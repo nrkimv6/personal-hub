@@ -89,9 +89,9 @@
   let queueingRecordId: number | null = $state(null);
 
   // ── 분석 요청 (Phase 3/5) ─────────────────────────────────
-  let analyzeProvider = $state('');
-  let analyzeModel = $state('');
-  let analyzeLoading = $state(false);
+  let queueAnalyzeProvider = $state('');
+  let queueAnalyzeModel = $state('');
+  let queueAnalyzeLoading = $state(false);
   let appliedRequestId: number | null = $state(null);
 
   async function loadAppliedRequestId(record: PlanRecord) {
@@ -115,10 +115,10 @@
   }
 
   async function requestAnalysis(record: PlanRecord) {
-    if (!analyzeProvider) { showToast('provider를 선택하세요'); return; }
-    analyzeLoading = true;
+    if (!queueAnalyzeProvider) { showToast('provider를 선택하세요'); return; }
+    queueAnalyzeLoading = true;
     try {
-      const res = await planRecordsApi.reanalyze(record.id, { provider: analyzeProvider, model: analyzeModel || undefined });
+      const res = await planRecordsApi.reanalyze(record.id, { provider: queueAnalyzeProvider, model: queueAnalyzeModel || undefined });
       if (res.queued) {
         showToast(`분석 요청 등록 (id=${res.request_id}, ${res.provider}/${res.model || 'default'})`);
       } else {
@@ -129,7 +129,7 @@
     } catch (e) {
       showToast(e instanceof Error ? e.message : '분석 요청 실패');
     } finally {
-      analyzeLoading = false;
+      queueAnalyzeLoading = false;
     }
   }
 
@@ -237,7 +237,7 @@
         model: selectedModel || null,
         profile_key: null
       });
-      showToast(`분석 큐 등록: #${res.id} ${res.provider}/${res.model}`);
+      showToast(`분석 큐 등록: #${res.request_id} ${res.provider}/${res.model || 'default'}`);
       await Promise.all([loadArchiveRequests(), loadCandidates()]);
     } catch (e) {
       showToast(e instanceof Error ? e.message : '분석 큐 등록 실패');
@@ -285,13 +285,13 @@
   let crossRepoIndexResult: PlanArchiveCrossRepoIndexResponse | null = $state(null);
 
   // ── 수동 분석 preview/apply ───────────────────────────────
-  let analyzeProvider = $state('codex');
-  let analyzeModel = $state('gpt-5.2');
-  let analyzeTimeout = $state(120);
-  let analyzeLoading = $state(false);
-  let analyzeResult: PlanArchiveAnalyzeResponse | null = $state(null);
-  let analyzeError = $state('');
-  let confirmingApply = $state(false);
+  let manualAnalyzeProvider = $state('codex');
+  let manualAnalyzeModel = $state('gpt-5.5');
+  let manualAnalyzeTimeout = $state(120);
+  let manualAnalyzeLoading = $state(false);
+  let manualAnalyzeResult: PlanArchiveAnalyzeResponse | null = $state(null);
+  let manualAnalyzeError = $state('');
+  let manualConfirmingApply = $state(false);
 
   async function loadArchiveHealth() {
     archiveHealthLoading = true;
@@ -742,9 +742,9 @@
       loadSelectedRelations(record.id);
     }
     detailTab = 'content';
-    analyzeResult = null;
-    analyzeError = '';
-    confirmingApply = false;
+    manualAnalyzeResult = null;
+    manualAnalyzeError = '';
+    manualConfirmingApply = false;
     selectedExecutionHistory = [];
     selectedExecutionHistoryError = '';
     if (selectedRecord) {
@@ -771,32 +771,32 @@
 
   async function runManualAnalyze(mode: 'preview' | 'apply') {
     if (!selectedRecord) return;
-    analyzeLoading = true;
-    analyzeError = '';
-    confirmingApply = false;
+    manualAnalyzeLoading = true;
+    manualAnalyzeError = '';
+    manualConfirmingApply = false;
     try {
       const result = await planRecordsApi.analyzeRecord(selectedRecord.id, {
         mode,
-        provider: analyzeProvider || undefined,
-        model: analyzeModel || undefined,
-        timeout_seconds: Number(analyzeTimeout),
+        provider: manualAnalyzeProvider || undefined,
+        model: manualAnalyzeModel || undefined,
+        timeout_seconds: Number(manualAnalyzeTimeout),
       });
-      analyzeResult = result;
+      manualAnalyzeResult = result;
       if (result.saved) {
         await loadRecords();
         selectedRecord = records.find((record) => record.id === result.record_id) ?? selectedRecord;
       }
       showToast(result.saved ? 'DB 저장 완료' : result.success ? '분석 완료' : (result.error || '분석 실패'));
     } catch (e) {
-      analyzeError = e instanceof Error ? e.message : '분석 요청 실패';
+      manualAnalyzeError = e instanceof Error ? e.message : '분석 요청 실패';
     } finally {
-      analyzeLoading = false;
+      manualAnalyzeLoading = false;
     }
   }
 
   async function copyAnalyzeResult() {
-    if (!analyzeResult) return;
-    await navigator.clipboard.writeText(JSON.stringify(analyzeResult.result, null, 2));
+    if (!manualAnalyzeResult) return;
+    await navigator.clipboard.writeText(JSON.stringify(manualAnalyzeResult.result, null, 2));
     showToast('분석 결과를 복사했습니다.');
   }
 
@@ -2137,7 +2137,7 @@
         <div class="flex gap-1 mb-1">
           <select
             class="flex-1 border border-border rounded px-1.5 py-0.5 text-xs bg-background text-foreground"
-            bind:value={analyzeProvider}
+            bind:value={queueAnalyzeProvider}
           >
             <option value="">provider 선택</option>
             {#each providers as p}
@@ -2147,14 +2147,14 @@
           <input
             class="w-28 border border-border rounded px-1.5 py-0.5 text-xs bg-background text-foreground"
             placeholder="model (선택)"
-            bind:value={analyzeModel}
+            bind:value={queueAnalyzeModel}
           />
         </div>
         <button
           class="w-full px-2 py-1 text-xs rounded bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-900 dark:hover:bg-blue-800 dark:text-blue-200 disabled:opacity-50"
           onclick={() => selectedRecord && requestAnalysis(selectedRecord)}
-          disabled={analyzeLoading || !analyzeProvider}
-        >{analyzeLoading ? '요청 중...' : '분석 요청'}</button>
+          disabled={queueAnalyzeLoading || !queueAnalyzeProvider}
+        >{queueAnalyzeLoading ? '요청 중...' : '분석 요청'}</button>
       </div>
 
       <div class="flex-1 overflow-auto">
@@ -2168,7 +2168,7 @@
               <div class="grid gap-2">
                 <label class="grid gap-1">
                   <span class="text-muted-foreground">provider</span>
-                  <select class="rounded border border-border bg-background px-2 py-1" bind:value={analyzeProvider}>
+                  <select class="rounded border border-border bg-background px-2 py-1" bind:value={manualAnalyzeProvider}>
                     <option value="codex">codex</option>
                     <option value="claude">claude</option>
                     <option value="gemini">gemini</option>
@@ -2180,7 +2180,7 @@
                     class="rounded border border-border bg-background px-2 py-1"
                     list="plan-archive-analyze-models"
                     placeholder="gpt-5.5 / gemini-3.1-pro-preview / claude-opus-4-6"
-                    bind:value={analyzeModel}
+                    bind:value={manualAnalyzeModel}
                   />
                   <datalist id="plan-archive-analyze-models">
                     <option value="gpt-5.5"></option>
@@ -2192,87 +2192,87 @@
                 </label>
                 <label class="grid gap-1">
                   <span class="text-muted-foreground">timeout</span>
-                  <input class="rounded border border-border bg-background px-2 py-1" type="number" min="1" max="3600" bind:value={analyzeTimeout} />
+                  <input class="rounded border border-border bg-background px-2 py-1" type="number" min="1" max="3600" bind:value={manualAnalyzeTimeout} />
                 </label>
               </div>
               <div class="mt-3 flex flex-wrap gap-2">
                 <button
                   class="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50"
-                  disabled={analyzeLoading}
+                  disabled={manualAnalyzeLoading}
                   onclick={() => runManualAnalyze('preview')}
-                >{analyzeLoading ? '실행 중...' : 'Preview'}</button>
+                >{manualAnalyzeLoading ? '실행 중...' : 'Preview'}</button>
                 <button
                   class="rounded bg-muted px-3 py-1 text-muted-foreground hover:bg-secondary disabled:opacity-50"
-                  disabled={analyzeLoading || !analyzeResult?.success}
-                  onclick={() => { confirmingApply = true; }}
+                  disabled={manualAnalyzeLoading || !manualAnalyzeResult?.success}
+                  onclick={() => { manualConfirmingApply = true; }}
                 >DB 저장</button>
               </div>
               <p class="mt-2 text-muted-foreground">Preview는 DB 저장 없음. Apply만 category/tags/summary를 저장합니다.</p>
             </div>
 
-            {#if confirmingApply}
+            {#if manualConfirmingApply}
               <div class="rounded border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
                 <p>현재 preview 결과를 DB에 저장합니다.</p>
                 <div class="mt-2 flex gap-2">
                   <button class="rounded bg-amber-600 px-3 py-1 text-white" onclick={() => runManualAnalyze('apply')}>확인</button>
-                  <button class="rounded bg-background px-3 py-1 text-muted-foreground" onclick={() => { confirmingApply = false; }}>취소</button>
+                  <button class="rounded bg-background px-3 py-1 text-muted-foreground" onclick={() => { manualConfirmingApply = false; }}>취소</button>
                 </div>
               </div>
             {/if}
 
-            {#if analyzeError}
-              <p class="rounded border border-red-300 bg-red-50 p-2 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{analyzeError}</p>
+            {#if manualAnalyzeError}
+              <p class="rounded border border-red-300 bg-red-50 p-2 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{manualAnalyzeError}</p>
             {/if}
 
-            {#if analyzeResult}
+            {#if manualAnalyzeResult}
               <div class="rounded border border-border p-3">
                 <div class="mb-2 flex items-center justify-between gap-2">
                   <div>
-                    <span class="font-semibold">{analyzeResult.success ? '성공' : '실패'}</span>
-                    <span class="text-muted-foreground"> · {analyzeResult.provider}/{analyzeResult.model} · {analyzeResult.elapsed_ms}ms</span>
-                    {#if analyzeResult.prompt_policy_id}
-                      <span class="text-muted-foreground"> · {analyzeResult.prompt_policy_id}/{analyzeResult.prompt_policy_version}</span>
+                    <span class="font-semibold">{manualAnalyzeResult.success ? '성공' : '실패'}</span>
+                    <span class="text-muted-foreground"> · {manualAnalyzeResult.provider}/{manualAnalyzeResult.model} · {manualAnalyzeResult.elapsed_ms}ms</span>
+                    {#if manualAnalyzeResult.prompt_policy_id}
+                      <span class="text-muted-foreground"> · {manualAnalyzeResult.prompt_policy_id}/{manualAnalyzeResult.prompt_policy_version}</span>
                     {/if}
                   </div>
                   <button class="rounded bg-muted px-2 py-1 text-muted-foreground hover:bg-secondary" onclick={copyAnalyzeResult}>복사</button>
                 </div>
-                {#if analyzeResult.error}
-                  <p class="mb-2 text-red-600 dark:text-red-300">{analyzeResult.error}</p>
+                {#if manualAnalyzeResult.error}
+                  <p class="mb-2 text-red-600 dark:text-red-300">{manualAnalyzeResult.error}</p>
                 {/if}
-                {#if analyzeResult.warnings.length > 0}
-                  <div class="mb-2 text-amber-700 dark:text-amber-300">{analyzeResult.warnings.join(', ')}</div>
+                {#if manualAnalyzeResult.warnings.length > 0}
+                  <div class="mb-2 text-amber-700 dark:text-amber-300">{manualAnalyzeResult.warnings.join(', ')}</div>
                 {/if}
                 <div class="grid gap-2">
                   <div class="rounded bg-muted p-2">
                     <div class="text-muted-foreground">category</div>
-                    <div class="font-medium">{String(analyzeResult.result.category ?? '-')}</div>
+                    <div class="font-medium">{String(manualAnalyzeResult.result.category ?? '-')}</div>
                   </div>
                   <div class="rounded bg-muted p-2">
                     <div class="text-muted-foreground">tags</div>
-                    <div>{Array.isArray(analyzeResult.result.tags) ? analyzeResult.result.tags.join(', ') : String(analyzeResult.result.tags ?? '-')}</div>
+                    <div>{Array.isArray(manualAnalyzeResult.result.tags) ? manualAnalyzeResult.result.tags.join(', ') : String(manualAnalyzeResult.result.tags ?? '-')}</div>
                   </div>
                   <div class="rounded bg-muted p-2">
                     <div class="text-muted-foreground">summary</div>
-                    <div>{String(analyzeResult.result.summary ?? '-')}</div>
+                    <div>{String(manualAnalyzeResult.result.summary ?? '-')}</div>
                   </div>
                   <div class="rounded bg-muted p-2">
                     <div class="text-muted-foreground">intent / scope</div>
-                    <div>{String(analyzeResult.result.intent ?? '-')}</div>
+                    <div>{String(manualAnalyzeResult.result.intent ?? '-')}</div>
                     <div class="mt-2 flex flex-wrap gap-1">
                       <span class="rounded border border-border bg-background px-2 py-0.5 text-foreground">
-                        trigger: {String(analyzeResult.result.trigger ?? '-')}
+                        trigger: {String(manualAnalyzeResult.result.trigger ?? '-')}
                       </span>
-                      {#if Array.isArray(analyzeResult.result.scope)}
-                        {#each analyzeResult.result.scope as item}
+                      {#if Array.isArray(manualAnalyzeResult.result.scope)}
+                        {#each manualAnalyzeResult.result.scope as item}
                           <span class="rounded border border-border bg-background px-2 py-0.5 text-muted-foreground">{String(item)}</span>
                         {/each}
                       {:else}
-                        <span class="rounded border border-border bg-background px-2 py-0.5 text-muted-foreground">{String(analyzeResult.result.scope ?? '-')}</span>
+                        <span class="rounded border border-border bg-background px-2 py-0.5 text-muted-foreground">{String(manualAnalyzeResult.result.scope ?? '-')}</span>
                       {/if}
                     </div>
                   </div>
                 </div>
-                <pre class="mt-3 max-h-56 overflow-auto rounded bg-muted p-2 text-[11px]">{JSON.stringify(analyzeResult.result, null, 2)}</pre>
+                <pre class="mt-3 max-h-56 overflow-auto rounded bg-muted p-2 text-[11px]">{JSON.stringify(manualAnalyzeResult.result, null, 2)}</pre>
               </div>
             {/if}
           </div>

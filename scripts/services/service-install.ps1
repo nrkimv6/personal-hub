@@ -31,14 +31,14 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)  # scripts/ser
 . "$ProjectRoot\scripts\cleanup\port-utils.ps1"
 
 # Service configuration
-# Python service runner: service_run.py (service-run.ps1에서 마이그레이션됨)
+# Python service runner: stable scripts\service_run.py bootstrap (service-run.ps1에서 마이그레이션됨)
 # See: .worktrees/plans/docs/plan/2026-02-18_service-runner-python-migration.md
 $PostgresServiceName = "postgresql-scoop"
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
     $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
 }
-$ServiceScript = Join-Path $ScriptDir "service_run.py"
+$ServiceScript = Join-Path $ProjectRoot "scripts\service_run.py"
 
 $services = @(
     @{
@@ -110,7 +110,7 @@ function Install-MonitorService {
         $null = nssm remove $svc.Name confirm 2>&1
     }
 
-    # Install service - Python service runner
+    # Install service - stable Python bootstrap; the heavier runner lives in scripts\services\service_run.py.
     nssm install $svc.Name $svc.Application
     nssm set $svc.Name AppParameters $svc.AppArgs
     nssm set $svc.Name AppDirectory $ProjectRoot
@@ -300,6 +300,22 @@ function Show-ServiceStatus {
     }
 
     Write-Host "  Status: $($service.Status)" -ForegroundColor $statusColor
+    Write-Host "  Expected AppParameters: $($svc.AppArgs)" -ForegroundColor Gray
+    $nssm = Get-Command nssm -ErrorAction SilentlyContinue
+    if ($nssm) {
+        try {
+            $appParameters = (& nssm get $svc.Name AppParameters 2>$null | Out-String).Trim()
+            if ($appParameters) {
+                Write-Host "  Current AppParameters: $appParameters" -ForegroundColor Gray
+                if ($appParameters -like "*scripts\services\service_run.py*") {
+                    Write-Host "  [!] Direct runner AppParameters detected; switch to the stable bootstrap:" -ForegroundColor Yellow
+                    Write-Host "      nssm set $($svc.Name) AppParameters $($svc.AppArgs)" -ForegroundColor Yellow
+                }
+            }
+        } catch {
+            Write-Host "  AppParameters: unavailable ($($_.Exception.Message))" -ForegroundColor Yellow
+        }
+    }
 
     # Check if log files exist
     $stdoutLog = Join-Path $svc.LogDir "service_$($svc.Name).log"
@@ -403,11 +419,13 @@ switch ($Action) {
                 Name = "MonitorPage-Public"
                 DisplayName = "Monitor Page (Public)"
                 LogDir = Join-Path $ProjectRoot "logs"
+                AppArgs = "`"$ServiceScript`""
             },
             @{
                 Name = "MonitorPage-Admin"
                 DisplayName = "Monitor Page (Admin)"
                 LogDir = Join-Path $ProjectRoot "logs\admin"
+                AppArgs = "`"$ServiceScript`" --admin"
             }
         )
         foreach ($svc in $allServices) {
