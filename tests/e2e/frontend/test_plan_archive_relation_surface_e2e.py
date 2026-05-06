@@ -9,11 +9,15 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_archive_tab_relation_surface_source_contract():
-    source = (ROOT / "frontend/src/routes/plans/ArchiveTab.svelte").read_text(encoding="utf-8")
+    tab_source = (ROOT / "frontend/src/routes/plans/ArchiveTab.svelte").read_text(encoding="utf-8")
+    detail_source = (
+        ROOT / "frontend/src/routes/plans/archive-tab/ArchiveRecordDetailPanel.svelte"
+    ).read_text(encoding="utf-8")
 
-    assert "selectedRelations" in source
-    assert "미해결 후속" in source
-    assert "관계 없음" in source
+    assert "selectedRelations" in tab_source
+    assert "relations={selectedRelations}" in tab_source
+    assert "미해결 후속" in detail_source
+    assert "관계 없음" in detail_source
 
 
 def test_plan_viewer_relation_surface_source_contract():
