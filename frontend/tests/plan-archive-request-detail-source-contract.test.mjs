@@ -63,8 +63,8 @@ test('request detail modal collapses prompt and raw_response by default', () => 
 });
 
 // ─── provider/model/status meta
-test('request detail modal shows status, provider, model metadata', () => {
+test('request detail modal shows status and target metadata', () => {
 	assert.match(modalSource, /request\.status/);
-	assert.match(modalSource, /request\.provider/);
-	assert.match(modalSource, /request\.model/);
+	assert.match(modalSource, /targetText/);
+	assert.match(modalSource, /req\.model/);
 });
