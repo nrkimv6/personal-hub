@@ -1099,6 +1099,19 @@ export const archiveScheduleApi = {
 		return planRecordsRequest<ArchiveExecutionAttemptListResponse>(`/records/archive-execution-attempts${qs ? '?' + qs : ''}`);
 	},
 
+	/** admin: archive backlog 실행 */
+	runArchiveExecutions: (payload: PlanArchiveExecutionRunPayload = {}) =>
+		planRecordsRequest<PlanArchiveExecutionRunResponse>('/records/archive-executions/run', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	/** admin: archive execution 상태 동기화 */
+	syncArchiveExecutions: () =>
+		planRecordsRequest<PlanArchiveExecutionSyncResponse>('/records/archive-executions/sync', {
+			method: 'POST'
+		}),
+
 	/** admin: schedule 일시정지 */
 	pause: () =>
 		planRecordsRequest<ArchiveSchedulePauseResumeResponse>('/records/archive-schedule/pause', { method: 'POST' }),
