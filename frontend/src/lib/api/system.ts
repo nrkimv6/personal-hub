@@ -729,6 +729,7 @@ export interface LLMProfileConfig {
   extra_env: Record<string, string>;
   enabled?: boolean;
   priority?: number;
+  capacity?: number;
   last_quota_pause_until?: string | null;
   last_reset_at?: string | null;
   last_state?: string | null;
@@ -754,6 +755,7 @@ export interface LLMProfileStatusItem {
   next_allowed_at?: string | null;
   blocked_request_count: number;
   processing_count: number;
+  capacity?: number;
   last_error_summary?: string | null;
   priority: number;
 }
@@ -1015,6 +1017,16 @@ export const llmApi = {
       `/llm/profiles/${engine}/${name}/launch-cli`,
       { method: 'POST' }
     ),
+};
+
+export const scheduleProfilePolicyApi = {
+  list: () => request<LLMScheduleProfilePoliciesResponse>('/llm/schedule-profile-policies'),
+
+  update: (policies: LLMScheduleProfilePolicyItem[]) =>
+    request<LLMScheduleProfilePoliciesResponse>('/llm/schedule-profile-policies', {
+      method: 'PUT',
+      body: JSON.stringify({ policies })
+    })
 };
 
 // ============================================================

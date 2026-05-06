@@ -22,6 +22,7 @@ class LLMProfileConfig(BaseModel):
     extra_env: dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
     priority: int = 0
+    capacity: int = 1
     last_quota_pause_until: Optional[datetime] = None
     last_reset_at: Optional[datetime] = None
     last_state: Optional[str] = None
@@ -56,6 +57,7 @@ class LLMProfileStatusItem(BaseModel):
     next_allowed_at: Optional[datetime] = None
     blocked_request_count: int = 0
     processing_count: int = 0
+    capacity: int = 1
     last_error_summary: Optional[str] = None
     priority: int = 0
 
@@ -125,20 +127,25 @@ def get_llm_profile_status(db: Session = Depends(get_db)):
     from app.modules.claude_worker.services.execution_window_service import LLMExecutionWindowService
     from app.modules.claude_worker.services.llm_quota_service import LLMQuotaService
     from app.modules.claude_worker.services.profile_store import list_profiles
+    from app.modules.claude_worker.services.profile_claim_service import ProfileClaimService
     from app.modules.claude_worker.services.repositories import LLMRequestRepository, LLMWorkerRepository
 
     quota = LLMQuotaService(LLMRequestRepository(db), LLMWorkerRepository(db), db)
+    claims = ProfileClaimService(db)
     window = LLMExecutionWindowService().decide()
     rows: list[LLMProfileStatusItem] = []
     for profile in list_profiles():
         state = "available"
         quota_reset_at = quota.get_profile_quota_pause(profile.engine, profile.name)
+        processing_count = claims.active_count(profile.engine, profile.name)
         if not profile.enabled:
             state = "disabled"
         elif not window.allowed:
             state = "paused_by_window"
         elif quota.get_provider_quota_pause(profile.engine) or quota_reset_at:
             state = "paused_by_quota"
+        elif processing_count >= max(1, int(profile.capacity or 1)):
+            state = "processing"
         rows.append(
             LLMProfileStatusItem(
                 engine=profile.engine,
@@ -147,7 +154,8 @@ def get_llm_profile_status(db: Session = Depends(get_db)):
                 quota_reset_at=quota_reset_at,
                 next_allowed_at=window.next_allowed_at if state == "paused_by_window" else None,
                 blocked_request_count=quota.get_blocked_pending_count(profile.engine) if state == "paused_by_quota" else 0,
-                processing_count=0,
+                processing_count=processing_count,
+                capacity=max(1, int(profile.capacity or 1)),
                 last_error_summary=profile.last_error_summary,
                 priority=profile.priority,
             )

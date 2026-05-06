@@ -48,6 +48,7 @@ def test_profile_store_backfills_pool_fields_and_removes_secret_env(profile_file
     profile = saved["profiles"][0]
     assert profile["enabled"] is True
     assert profile["priority"] == 0
+    assert profile["capacity"] == 1
     assert profile["last_quota_pause_until"] is None
     assert profile["extra_env"] == {"SAFE_FLAG": "1"}
 
@@ -137,3 +138,42 @@ def test_profile_claim_is_single_flight(db):
     third = service.claim(req.id, "claude", "personal")
 
     assert third is not None
+
+
+def test_profile_router_skips_profile_at_capacity(profile_file, db):
+    from app.modules.claude_worker.services.profile_claim_service import ProfileClaimService
+    from app.modules.claude_worker.services.profile_router import LLMProfileRouter
+    from app.modules.claude_worker.services.profile_store import save_profiles
+
+    save_profiles(
+        {
+            "selected": {"claude": "busy"},
+            "profiles": [
+                {
+                    "engine": "claude",
+                    "name": "busy",
+                    "config_dir": None,
+                    "extra_env": {},
+                    "priority": 100,
+                    "capacity": 1,
+                },
+                {
+                    "engine": "claude",
+                    "name": "open",
+                    "config_dir": None,
+                    "extra_env": {},
+                    "priority": 1,
+                    "capacity": 1,
+                },
+            ],
+        }
+    )
+    req = LLMRequest(caller_type="test", caller_id="claim", prompt="p", provider="claude")
+    db.add(req)
+    db.commit()
+    assert ProfileClaimService(db).claim(req.id, "claude", "busy") is not None
+
+    decision = LLMProfileRouter(db).select_profile("claude")
+
+    assert decision.profile is not None
+    assert decision.profile.name == "open"

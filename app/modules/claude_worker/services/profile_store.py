@@ -63,6 +63,7 @@ class LLMProfile:
     extra_env: Dict[str, str] = field(default_factory=dict)
     enabled: bool = True
     priority: int = 0
+    capacity: int = 1
     last_quota_pause_until: Optional[datetime] = None
     last_reset_at: Optional[datetime] = None
     last_state: Optional[str] = None
@@ -76,6 +77,7 @@ class LLMProfile:
             "extra_env": self.extra_env,
             "enabled": self.enabled,
             "priority": self.priority,
+            "capacity": self.capacity,
             "last_quota_pause_until": _dt_to_str(self.last_quota_pause_until),
             "last_reset_at": _dt_to_str(self.last_reset_at),
             "last_state": self.last_state,
@@ -94,6 +96,7 @@ class LLMProfile:
             extra_env=dict(d.get("extra_env") or {}),
             enabled=bool(d.get("enabled", True)),
             priority=int(d.get("priority") or 0),
+            capacity=max(1, int(d.get("capacity") or 1)),
             last_quota_pause_until=_parse_dt(d.get("last_quota_pause_until")),
             last_reset_at=_parse_dt(d.get("last_reset_at")),
             last_state=state,

@@ -2,22 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import and_
-
 from app.models import TaskSchedule
-from app.models.plan_record import PlanRecord
-from app.modules.claude_worker.models.llm_request import LLMRequest
-from app.modules.claude_worker.services.llm_service import LLMService
-from app.modules.claude_worker.services.plan_analyze_handler import build_plan_analyze_prompt
-from app.modules.claude_worker.services.plan_archive_prompt_policy import (
-    DEFAULT_CATEGORIES,
-    PromptPolicyContext,
-    build_plan_archive_prompt,
-)
-from app.modules.dev_runner.services.plan_record_service import _is_temp_pytest_path
+from app.modules.dev_runner.services.plan_archive_execution_service import PlanArchiveExecutionService
 from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
@@ -111,102 +99,15 @@ class PlanArchiveScheduler(ScheduleHandler):
             "remaining_real_unprocessed": 0,
         }
         try:
-            base_query = db.query(PlanRecord).filter(
-                and_(
-                    PlanRecord.llm_processed_at.is_(None),
-                    PlanRecord.archived_at.isnot(None),
+            stats.update(
+                PlanArchiveExecutionService(db).enqueue_unprocessed(
+                    include_temp_records=include_temp_records,
+                    max_backfill_per_run=max_backfill_per_run,
+                    trigger_source="schedule:plan_archive_analyze",
                 )
             )
-            all_unprocessed = base_query.order_by(PlanRecord.archived_at.asc()).all()
-            if not all_unprocessed:
-                return stats
-
-            real_candidates = [
-                record
-                for record in all_unprocessed
-                if include_temp_records or not _is_temp_pytest_path(record.file_path)
-            ]
-            stats["skipped_temp"] = 0 if include_temp_records else len(all_unprocessed) - len(real_candidates)
-            stats["remaining_real_unprocessed"] = len(real_candidates)
-            records = real_candidates[:max_backfill_per_run]
-            if not records:
-                return stats
-
-            existing_active = {
-                row[0]
-                for row in db.query(LLMRequest.caller_id)
-                .filter(
-                    and_(
-                        LLMRequest.caller_type == "plan_archive_analyze",
-                        LLMRequest.status.in_(["pending", "processing"]),
-                        LLMRequest.deleted_at.is_(None),
-                    )
-                )
-                .all()
-            }
-
-            inserted = 0
-            llm_service = LLMService(db)
-            provider, model = llm_service.resolve_provider_model(
-                caller_type="plan_archive_analyze",
-                provider=None,
-                model=None,
-            )
-
-            for record in records:
-                if record.filename_hash in existing_active:
-                    stats["skipped_active_request"] += 1
-                    continue
-
-                file_content = record.raw_content or ""
-                if not file_content.strip():
-                    try:
-                        file_path = Path(record.file_path)
-                        if file_path.exists():
-                            file_content = file_path.read_text(encoding="utf-8", errors="replace")
-                    except Exception:
-                        pass
-
-                if not file_content.strip():
-                    stats["skipped_empty"] += 1
-                    logger.warning("[scheduler] plan 내용 없음 — LLMRequest 생성 스킵: %s", record.file_path)
-                    continue
-
-                prompt, policy_id, policy_version = build_plan_archive_prompt(
-                    PromptPolicyContext(
-                        caller_type="plan_archive_analyze",
-                        provider=provider,
-                        model=model,
-                        filename=Path(record.file_path).name,
-                        existing_categories=DEFAULT_CATEGORIES,
-                    ),
-                    file_content,
-                )
-                llm_request = LLMRequest(
-                    caller_type="plan_archive_analyze",
-                    caller_id=record.filename_hash,
-                    prompt=prompt,
-                    queue_name="utility",
-                    requested_by="scheduler",
-                    provider=provider,
-                    model=model,
-                )
-                db.add(llm_request)
-                inserted += 1
-                logger.info(
-                    "[scheduler] LLMRequest 등록 준비: record_id=%s policy_id=%s policy_version=%s",
-                    record.id,
-                    policy_id,
-                    policy_version,
-                )
-
-            if inserted > 0:
+            if stats["queued"] > 0 or stats["skipped_empty"] > 0 or stats["skipped_active_job"] > 0:
                 db.commit()
-            stats["queued"] = inserted
-            stats["remaining_real_unprocessed"] = max(
-                stats["remaining_real_unprocessed"] - inserted - stats["skipped_active_request"],
-                0,
-            )
             return stats
         except Exception:
             db.rollback()

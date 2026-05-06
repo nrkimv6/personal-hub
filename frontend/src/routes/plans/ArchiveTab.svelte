@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { formatLLMBlockReason, llmApi, type LLMRequest } from '$lib/api';
+  import { formatLLMBlockReason, llmApi, type LLMProfileConfig, type LLMRequest, type LLMScheduleProfilePolicyItem } from '$lib/api';
   import {
     planRecordsApi,
     archiveApi,
@@ -13,7 +13,8 @@
     type PlanArchiveRetrievalResult,
     type PlanArchiveMetricsResponse,
     type PlanArchiveIndexResponse,
-    type PlanArchiveCrossRepoIndexResponse
+    type PlanArchiveExecutionAttempt,
+    type PlanArchiveSelectedProfile
   } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
   import MemoEditor from './MemoEditor.svelte';
@@ -31,7 +32,7 @@
   let records: PlanRecord[] = $state([]);
   let loading = $state(true);
   let selectedRecord: PlanRecord | null = $state(null);
-  let detailTab: 'content' | 'memo' | 'analyze' = $state('content');
+  let detailTab: 'content' | 'memo' | 'analyze' | 'history' = $state('content');
   let editingStatusId: number | null = $state(null);
 
   const EDITABLE_STATUSES = ['초안', '검토대기', '구현중', '보류'];
@@ -97,6 +98,15 @@
   const archiveQueuePageSize = 50;
   let archiveQueueStatus = $state('pending,processing,failed');
   let archiveQueueProvider = $state('');
+  let archiveProfiles: LLMProfileConfig[] = $state([]);
+  let archiveProfilePolicies: LLMScheduleProfilePolicyItem[] = $state([]);
+  let selectedArchiveProfileKeys = $state(new Set<string>());
+  let archiveExecutionLoading = $state(false);
+  let archiveExecutionError = $state('');
+  let archiveExecutionResult = $state('');
+  let selectedExecutionHistory: PlanArchiveExecutionAttempt[] = $state([]);
+  let selectedExecutionHistoryLoading = $state(false);
+  let selectedExecutionHistoryError = $state('');
 
   // ── Retrieval MVP 표면 ───────────────────────────────────
   let retrievalQ = $state('');
@@ -171,6 +181,120 @@
 
   async function refreshArchiveSurfaces() {
     await Promise.all([loadArchiveHealth(), loadArchiveQueue(1)]);
+  }
+
+  function profileKey(profile: PlanArchiveSelectedProfile) {
+    return `${profile.engine}:${profile.profile_name}`;
+  }
+
+  function parseProfileKey(key: string): PlanArchiveSelectedProfile {
+    const [engine, ...rest] = key.split(':');
+    return { engine, profile_name: rest.join(':') };
+  }
+
+  function getArchiveProfileChoices(): PlanArchiveSelectedProfile[] {
+    const policyChoices = archiveProfilePolicies
+      .filter((policy) => policy.enabled && (!policy.target_type || policy.target_type === 'plan_archive_analyze'))
+      .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
+      .map((policy) => ({ engine: policy.engine, profile_name: policy.profile_name }));
+    const profileChoices = archiveProfiles
+      .filter((profile) => profile.enabled !== false)
+      .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))
+      .map((profile) => ({ engine: profile.engine, profile_name: profile.name }));
+    const seen = new Set<string>();
+    const choices: PlanArchiveSelectedProfile[] = [];
+    for (const choice of [...policyChoices, ...profileChoices]) {
+      const key = profileKey(choice);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      choices.push(choice);
+    }
+    return choices;
+  }
+
+  async function loadArchiveExecutionProfiles() {
+    try {
+      const [profilesResponse, policyResponse] = await Promise.all([
+        llmApi.listProfiles(),
+        llmApi.listScheduleProfilePolicies()
+      ]);
+      archiveProfiles = profilesResponse.profiles ?? [];
+      archiveProfilePolicies = policyResponse.policies ?? [];
+      if (selectedArchiveProfileKeys.size === 0) {
+        selectedArchiveProfileKeys = new Set(getArchiveProfileChoices().map(profileKey));
+      }
+    } catch {
+      archiveProfiles = [];
+      archiveProfilePolicies = [];
+    }
+  }
+
+  function toggleArchiveProfile(profile: PlanArchiveSelectedProfile) {
+    const key = profileKey(profile);
+    if (selectedArchiveProfileKeys.has(key)) {
+      selectedArchiveProfileKeys.delete(key);
+    } else {
+      selectedArchiveProfileKeys.add(key);
+    }
+    selectedArchiveProfileKeys = new Set(selectedArchiveProfileKeys);
+  }
+
+  function getSelectedArchiveProfiles(): PlanArchiveSelectedProfile[] {
+    return [...selectedArchiveProfileKeys].map(parseProfileKey).filter((profile) => profile.engine && profile.profile_name);
+  }
+
+  async function runArchiveExecutions() {
+    archiveExecutionLoading = true;
+    archiveExecutionError = '';
+    archiveExecutionResult = '';
+    try {
+      const selectedProfiles = getSelectedArchiveProfiles();
+      const result = await planRecordsApi.runArchiveExecutions({
+        record_ids: selectedIds.size > 0 ? [...selectedIds] : undefined,
+        selected_profiles: selectedProfiles.length > 0 ? selectedProfiles : undefined
+      });
+      const queued = Number(result.queued ?? result.updated ?? result.request_ids?.length ?? result.attempts?.length ?? 0);
+      const skipped = Number(result.skipped ?? 0);
+      archiveExecutionResult = `queued ${queued}${skipped ? `, skipped ${skipped}` : ''}`;
+      showToast(`Archive 실행 요청: ${archiveExecutionResult}`);
+      await Promise.all([loadRecords(), refreshArchiveSurfaces()]);
+      if (selectedRecord) await loadSelectedExecutionHistory(selectedRecord.id);
+    } catch (e) {
+      archiveExecutionError = e instanceof Error ? e.message : 'archive 실행 요청 실패';
+    } finally {
+      archiveExecutionLoading = false;
+    }
+  }
+
+  async function syncArchiveExecutions() {
+    archiveExecutionLoading = true;
+    archiveExecutionError = '';
+    archiveExecutionResult = '';
+    try {
+      const result = await planRecordsApi.syncArchiveExecutions();
+      archiveExecutionResult = `sync updated ${Number(result.updated ?? result.records?.length ?? 0)}`;
+      showToast(`Archive 실행 동기화: ${archiveExecutionResult}`);
+      await Promise.all([loadRecords(), refreshArchiveSurfaces()]);
+      if (selectedRecord) await loadSelectedExecutionHistory(selectedRecord.id);
+    } catch (e) {
+      archiveExecutionError = e instanceof Error ? e.message : 'archive 실행 동기화 실패';
+    } finally {
+      archiveExecutionLoading = false;
+    }
+  }
+
+  async function loadSelectedExecutionHistory(recordId: number) {
+    selectedExecutionHistoryLoading = true;
+    selectedExecutionHistoryError = '';
+    try {
+      const result = await planRecordsApi.getArchiveExecutionHistory({ record_id: recordId, limit: 20 });
+      selectedExecutionHistory = result.items ?? [];
+    } catch (e) {
+      selectedExecutionHistory = [];
+      selectedExecutionHistoryError = e instanceof Error ? e.message : '실행 이력 로드 실패';
+    } finally {
+      selectedExecutionHistoryLoading = false;
+    }
   }
 
   function buildRetrievalFilters(includeLimit = true): PlanArchiveRetrievalQuery {
@@ -416,6 +540,11 @@
     analyzeResult = null;
     analyzeError = '';
     confirmingApply = false;
+    selectedExecutionHistory = [];
+    selectedExecutionHistoryError = '';
+    if (selectedRecord) {
+      void loadSelectedExecutionHistory(record.id);
+    }
   }
 
   async function runManualAnalyze(mode: 'preview' | 'apply') {
@@ -536,6 +665,56 @@
     }
   }
 
+  function getExecutionStateClass(state: string | null | undefined) {
+    switch (state) {
+      case 'queued':
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200';
+      case 'running':
+      case 'processing':
+        return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200';
+      case 'failed':
+        return 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200';
+      case 'completed':
+      case 'success':
+        return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200';
+      default:
+        return 'bg-muted text-muted-foreground';
+    }
+  }
+
+  function getArchiveStateClass(state: string | null | undefined) {
+    switch (state) {
+      case 'ready':
+      case 'indexed':
+        return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200';
+      case 'blocked':
+      case 'stale':
+        return 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200';
+      case 'removed':
+        return 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200';
+      default:
+        return 'bg-muted text-muted-foreground';
+    }
+  }
+
+  function getAttemptStatus(attempt: PlanArchiveExecutionAttempt | null | undefined) {
+    return attempt?.status ?? attempt?.state ?? '-';
+  }
+
+  function getAttemptTime(attempt: PlanArchiveExecutionAttempt | null | undefined) {
+    return attempt?.completed_at ?? attempt?.started_at ?? attempt?.requested_at ?? null;
+  }
+
+  function getAttemptProfile(attempt: PlanArchiveExecutionAttempt | null | undefined) {
+    const engine = attempt?.engine;
+    const profile = attempt?.profile_name;
+    if (engine && profile) return `${engine}/${profile}`;
+    if (engine) return engine;
+    if (profile) return profile;
+    return '-';
+  }
+
   function getRequestProfile(request: LLMRequest) {
     const cliOptions = request.cli_options as Record<string, unknown> | undefined;
     const profile = cliOptions?.profile ?? cliOptions?.engine_profile ?? cliOptions?.profile_name;
@@ -556,6 +735,7 @@
   onMount(() => {
     loadRecords();
     refreshArchiveSurfaces();
+    loadArchiveExecutionProfiles();
     loadRetrievalMetrics();
   });
 </script>
@@ -708,6 +888,50 @@
           <div class="mt-2 text-muted-foreground">oldest delete {formatDateTime(archiveHealth.oldest_file_delete_after)}</div>
         {/if}
       </div>
+    </div>
+
+    <!-- Plan Archive 실행 제어 -->
+    <div class="mb-3 rounded border border-border bg-background p-3 text-xs">
+      <div class="mb-2 flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h3 class="font-semibold text-foreground">Archive execution control</h3>
+          <p class="mt-0.5 text-muted-foreground">선택 항목이 있으면 선택 레코드만 실행하고, 없으면 서버 정책 대상에 맡깁니다.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            class="rounded bg-muted px-2 py-1 text-muted-foreground hover:bg-secondary disabled:opacity-50"
+            onclick={syncArchiveExecutions}
+            disabled={archiveExecutionLoading}
+          >Sync</button>
+          <button
+            class="rounded bg-primary px-3 py-1 text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            onclick={runArchiveExecutions}
+            disabled={archiveExecutionLoading || getArchiveProfileChoices().length === 0 || selectedArchiveProfileKeys.size === 0}
+          >{archiveExecutionLoading ? 'Running...' : selectedIds.size > 0 ? `Run ${selectedIds.size}` : 'Run backlog'}</button>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        {#each getArchiveProfileChoices() as profile (profileKey(profile))}
+          <label class="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-1 text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={selectedArchiveProfileKeys.has(profileKey(profile))}
+              onchange={() => toggleArchiveProfile(profile)}
+            />
+            <span class="font-mono">{profile.engine}/{profile.profile_name}</span>
+          </label>
+        {/each}
+        {#if getArchiveProfileChoices().length === 0}
+          <span class="rounded bg-muted px-2 py-1 text-muted-foreground">사용 가능한 profile policy가 없습니다.</span>
+        {:else if selectedArchiveProfileKeys.size === 0}
+          <span class="rounded bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-900 dark:text-amber-200">profile을 하나 이상 선택하세요.</span>
+        {/if}
+      </div>
+      {#if archiveExecutionError}
+        <p class="mt-2 rounded border border-red-300 bg-red-50 px-2 py-1 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{archiveExecutionError}</p>
+      {:else if archiveExecutionResult}
+        <p class="mt-2 text-muted-foreground">{archiveExecutionResult}</p>
+      {/if}
     </div>
 
     <!-- Plan Archive LLM 요청 목록 -->
@@ -1221,6 +1445,8 @@
               </th>
               <th class="pb-2 pr-4 font-medium">파일명</th>
               <th class="pb-2 pr-3 font-medium whitespace-nowrap">카테고리</th>
+              <th class="pb-2 pr-3 font-medium whitespace-nowrap">Archive</th>
+              <th class="pb-2 pr-3 font-medium whitespace-nowrap">Execution</th>
               <th class="pb-2 pr-4 font-medium whitespace-nowrap">완료일</th>
               <th class="pb-2 pr-4 font-medium whitespace-nowrap">상태</th>
               <th class="pb-2 font-medium">메모</th>
@@ -1254,6 +1480,23 @@
                     <span class="inline-block ml-1 px-1 py-0.5 text-xs rounded bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200" title="archive 파일 제거됨">파일 제거됨</span>
                   {:else if record.file_delete_after}
                     <span class="inline-block ml-1 px-1 py-0.5 text-xs rounded bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-200" title={`삭제 예정: ${formatDateTime(record.file_delete_after)}`}>삭제 예정</span>
+                  {/if}
+                </td>
+                <td class="py-2 pr-3">
+                  <span class="inline-block rounded px-1.5 py-0.5 text-xs {getArchiveStateClass(record.archive_state)}">
+                    {record.archive_state ?? '-'}
+                  </span>
+                </td>
+                <td class="py-2 pr-3 text-xs">
+                  <span class="inline-block rounded px-1.5 py-0.5 {getExecutionStateClass(record.execution_state)}">
+                    {record.execution_state ?? getAttemptStatus(record.latest_attempt)}
+                  </span>
+                  {#if record.latest_attempt}
+                    <div class="mt-0.5 text-muted-foreground">
+                      {getAttemptProfile(record.latest_attempt)} · {formatDateTime(getAttemptTime(record.latest_attempt))}
+                    </div>
+                  {:else if record.next_available_at}
+                    <div class="mt-0.5 text-muted-foreground">next {formatDateTime(record.next_available_at)}</div>
                   {/if}
                 </td>
                 <td class="py-2 pr-4 text-muted-foreground text-xs whitespace-nowrap">
@@ -1342,13 +1585,17 @@
           class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'analyze' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
           onclick={() => { detailTab = 'analyze'; }}
         >분석</button>
+        <button
+          class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'history' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+          onclick={() => { detailTab = 'history'; void loadSelectedExecutionHistory(selectedRecord.id); }}
+        >실행</button>
       </div>
       <div class="flex-1 overflow-auto">
         {#if detailTab === 'content'}
           <PlanViewer filePath={selectedRecord.file_path} recordId={selectedRecord.id} />
         {:else if detailTab === 'memo'}
           <MemoEditor filePath={selectedRecord.file_path} />
-        {:else}
+        {:else if detailTab === 'analyze'}
           <div class="space-y-3 text-xs">
             <div class="rounded border border-border p-3">
               <div class="grid gap-2">
@@ -1459,6 +1706,54 @@
                   </div>
                 </div>
                 <pre class="mt-3 max-h-56 overflow-auto rounded bg-muted p-2 text-[11px]">{JSON.stringify(analyzeResult.result, null, 2)}</pre>
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <div class="space-y-2 text-xs">
+            <div class="rounded border border-border p-3">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <div>
+                  <div class="font-semibold text-foreground">Archive execution</div>
+                  <div class="mt-1 flex flex-wrap gap-1">
+                    <span class="rounded px-2 py-0.5 {getArchiveStateClass(selectedRecord.archive_state)}">archive {selectedRecord.archive_state ?? '-'}</span>
+                    <span class="rounded px-2 py-0.5 {getExecutionStateClass(selectedRecord.execution_state)}">execution {selectedRecord.execution_state ?? '-'}</span>
+                  </div>
+                </div>
+                <button
+                  class="rounded bg-muted px-2 py-1 text-muted-foreground hover:bg-secondary disabled:opacity-50"
+                  onclick={() => loadSelectedExecutionHistory(selectedRecord.id)}
+                  disabled={selectedExecutionHistoryLoading}
+                >갱신</button>
+              </div>
+              {#if selectedRecord.next_available_at}
+                <p class="text-muted-foreground">next available {formatDateTime(selectedRecord.next_available_at)}</p>
+              {/if}
+            </div>
+
+            {#if selectedExecutionHistoryError}
+              <p class="rounded border border-red-300 bg-red-50 p-2 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{selectedExecutionHistoryError}</p>
+            {:else if selectedExecutionHistoryLoading}
+              <p class="text-muted-foreground">실행 이력 로드 중...</p>
+            {:else if selectedExecutionHistory.length === 0}
+              <p class="text-muted-foreground">실행 이력이 없습니다.</p>
+            {:else}
+              <div class="space-y-2">
+                {#each selectedExecutionHistory as attempt, index (attempt.id ?? `${attempt.llm_request_id ?? 'attempt'}-${index}`)}
+                  <div class="rounded border border-border p-2">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="rounded px-2 py-0.5 {getExecutionStateClass(getAttemptStatus(attempt))}">{getAttemptStatus(attempt)}</span>
+                      <span class="text-muted-foreground">{formatDateTime(getAttemptTime(attempt))}</span>
+                    </div>
+                    <div class="mt-1 font-mono text-muted-foreground">{getAttemptProfile(attempt)}</div>
+                    {#if attempt.llm_request_id}
+                      <div class="mt-1 text-muted-foreground">LLM request #{attempt.llm_request_id}</div>
+                    {/if}
+                    {#if attempt.error_message}
+                      <div class="mt-1 truncate text-red-600 dark:text-red-300" title={attempt.error_message}>{attempt.error_message}</div>
+                    {/if}
+                  </div>
+                {/each}
               </div>
             {/if}
           </div>

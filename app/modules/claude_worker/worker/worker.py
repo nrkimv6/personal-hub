@@ -1861,7 +1861,30 @@ class LLMWorker:
                 from app.modules.claude_worker.services.profile_claim_service import ProfileClaimService
                 from app.modules.claude_worker.services.profile_router import LLMProfileRouter
 
-                decision = LLMProfileRouter(db).select_profile(provider, model, request)
+                router = LLMProfileRouter(db)
+                route_providers = [provider]
+                if caller_type == "plan_archive_analyze" and isinstance(cli_options, dict):
+                    raw_candidates = cli_options.get("candidate_profiles")
+                    if isinstance(raw_candidates, list):
+                        candidate_engines = [
+                            str(item.get("engine") or "").strip()
+                            for item in raw_candidates
+                            if isinstance(item, dict)
+                        ]
+                        route_providers = [
+                            engine
+                            for engine in dict.fromkeys(candidate_engines)
+                            if engine in provider_registry.get_quota_providers()
+                        ] or route_providers
+
+                decision = None
+                for route_provider in route_providers:
+                    candidate_decision = router.select_profile(route_provider, model, request)
+                    if candidate_decision.profile is not None:
+                        provider = route_provider
+                        decision = candidate_decision
+                        break
+                    decision = candidate_decision
                 if decision.profile is None:
                     logger.info(
                         "[PROFILE-ROUTER] request %s pending 유지: provider=%s reason=%s next=%s blocked=%s",
@@ -1872,6 +1895,19 @@ class LLMWorker:
                         decision.blocked_counts,
                     )
                     service.reset_to_pending(request_id, decision.reason)
+                    if caller_type == "plan_archive_analyze":
+                        try:
+                            from app.modules.dev_runner.services.plan_archive_execution_service import (
+                                PlanArchiveExecutionService,
+                            )
+
+                            PlanArchiveExecutionService(db).mark_request_blocked(
+                                request_id,
+                                decision.reason,
+                                next_available_at=decision.next_available_at,
+                            )
+                        except Exception as exc:
+                            logger.warning("[PLAN-ARCHIVE-EXEC] blocked sync 실패: request=%s error=%s", request_id, exc)
                     self._update_worker_state(
                         "paused_by_quota" if "quota" in decision.reason else "idle",
                         None,
@@ -1880,7 +1916,12 @@ class LLMWorker:
 
                 selected_profile = decision.profile
                 claim_service = ProfileClaimService(db)
-                claim = claim_service.claim(request_id, provider, selected_profile.name)
+                claim = claim_service.claim(
+                    request_id,
+                    provider,
+                    selected_profile.name,
+                    capacity=selected_profile.capacity,
+                )
                 if claim is None:
                     logger.warning(
                         "[PROFILE-CLAIM] request %s claim 충돌: provider=%s profile=%s",
@@ -1889,9 +1930,34 @@ class LLMWorker:
                         selected_profile.name,
                     )
                     service.reset_to_pending(request_id, "profile_claim_conflict")
+                    if caller_type == "plan_archive_analyze":
+                        try:
+                            from app.modules.dev_runner.services.plan_archive_execution_service import (
+                                PlanArchiveExecutionService,
+                            )
+
+                            PlanArchiveExecutionService(db).mark_request_blocked(
+                                request_id,
+                                "profile_claim_conflict",
+                            )
+                        except Exception as exc:
+                            logger.warning("[PLAN-ARCHIVE-EXEC] claim conflict sync 실패: request=%s error=%s", request_id, exc)
                     self._update_worker_state("idle", None)
                     return
                 claim_acquired = True
+                if caller_type == "plan_archive_analyze":
+                    try:
+                        from app.modules.dev_runner.services.plan_archive_execution_service import (
+                            PlanArchiveExecutionService,
+                        )
+
+                        PlanArchiveExecutionService(db).mark_request_profile(
+                            request_id,
+                            provider,
+                            selected_profile.name,
+                        )
+                    except Exception as exc:
+                        logger.warning("[PLAN-ARCHIVE-EXEC] profile sync 실패: request=%s error=%s", request_id, exc)
                 logger.info(
                     "[PROFILE-ROUTER] request %s → %s/%s",
                     request_id,
@@ -2221,6 +2287,15 @@ class LLMWorker:
                     )
                 except Exception as e:
                     logger.warning("[PROFILE-CLAIM] release 실패: request=%s error=%s", request_id, e)
+            if caller_type == "plan_archive_analyze":
+                try:
+                    from app.modules.dev_runner.services.plan_archive_execution_service import (
+                        PlanArchiveExecutionService,
+                    )
+
+                    PlanArchiveExecutionService(db).sync_attempt_for_request_id(request_id)
+                except Exception as e:
+                    logger.warning("[PLAN-ARCHIVE-EXEC] final sync 실패: request=%s error=%s", request_id, e)
             self._update_worker_state("idle")
             # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
             self.continue_event.set()

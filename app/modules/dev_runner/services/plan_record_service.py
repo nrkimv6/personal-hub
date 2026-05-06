@@ -366,7 +366,16 @@ class PlanRecordService:
         if date_to:
             query = query.filter(PlanRecord.archived_at <= date_to)
         query = query.order_by(PlanRecord.updated_at.desc())
-        return query.offset(skip).limit(limit).all()
+        records = query.offset(skip).limit(limit).all()
+        try:
+            from app.modules.dev_runner.services.plan_archive_execution_service import (
+                PlanArchiveExecutionService,
+            )
+
+            PlanArchiveExecutionService(self.db).attach_latest_summaries(records)
+        except Exception as exc:
+            logger.warning("[plan-archive] execution summary attach failed: %s", exc)
+        return records
 
     def get_plan_archive_health(self, include_temp: bool = False) -> dict:
         """Return scheduler-facing Plan Archive health without exposing DB details."""

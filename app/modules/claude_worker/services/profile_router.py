@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import json
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.modules.claude_worker.models.llm_request import LLMRequestProfileClaim
 from app.modules.claude_worker.services.execution_window_service import LLMExecutionWindowService
 from app.modules.claude_worker.services.llm_quota_service import LLMQuotaService
 from app.modules.claude_worker.services.profile_store import LLMProfile, get_selected, list_profiles
@@ -54,6 +56,9 @@ class LLMProfileRouter:
             return ProfileRouteDecision(get_selected(engine), "fallback_selected")
 
         enabled = [p for p in profiles if p.enabled]
+        candidates = self._candidate_profile_names(request, engine)
+        if candidates is not None:
+            enabled = [p for p in enabled if p.name in candidates]
         if not enabled:
             return ProfileRouteDecision(None, "no_enabled_profile", None, {"disabled": len(profiles)})
 
@@ -64,6 +69,9 @@ class LLMProfileRouter:
         for profile in enabled:
             if self.quota.get_profile_quota_pause(engine, profile.name):
                 paused_count += 1
+                continue
+            if self._active_count(engine, profile.name) >= max(1, int(profile.capacity or 1)):
+                policy_count += 1
                 continue
             policy_decision = self.policy.decide_for_request(
                 request=request,
@@ -94,8 +102,38 @@ class LLMProfileRouter:
             key=lambda p: (
                 -self.policy.policy_priority(request, engine, p.name),
                 -p.priority,
+                p.capacity,
                 p.last_reset_at or datetime.min,
                 p.name,
             )
         )
         return ProfileRouteDecision(available[0], "selected")
+
+    def _active_count(self, engine: str, profile_name: str) -> int:
+        return (
+            self.db.query(LLMRequestProfileClaim)
+            .filter(
+                LLMRequestProfileClaim.engine == engine,
+                LLMRequestProfileClaim.profile_name == profile_name,
+            )
+            .count()
+        )
+
+    @staticmethod
+    def _candidate_profile_names(request, engine: str) -> set[str] | None:
+        raw_options = getattr(request, "cli_options", None)
+        if not raw_options:
+            return None
+        try:
+            options = json.loads(raw_options) if isinstance(raw_options, str) else raw_options
+        except (TypeError, json.JSONDecodeError):
+            return None
+        raw_candidates = options.get("candidate_profiles") if isinstance(options, dict) else None
+        if not isinstance(raw_candidates, list):
+            return None
+        names = {
+            str(item.get("profile_name") or item.get("name") or "").strip()
+            for item in raw_candidates
+            if isinstance(item, dict) and str(item.get("engine") or "").strip() == engine
+        }
+        return {name for name in names if name}

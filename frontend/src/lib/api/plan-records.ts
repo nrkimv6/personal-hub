@@ -34,9 +34,64 @@ export interface PlanRecord {
 	llm_processed_at: string | null;
 	file_delete_after: string | null;
 	file_removed_at: string | null;
+	archive_state?: string | null;
+	execution_state?: string | null;
+	latest_attempt?: PlanArchiveExecutionAttempt | null;
+	next_available_at?: string | null;
 	created_at: string;
 	updated_at: string;
 	events?: PlanEvent[];
+}
+
+export interface PlanArchiveSelectedProfile {
+	engine: string;
+	profile_name: string;
+}
+
+export interface PlanArchiveExecutionAttempt {
+	id?: number;
+	record_id?: number;
+	llm_request_id?: number | null;
+	engine?: string | null;
+	profile_name?: string | null;
+	status?: string | null;
+	state?: string | null;
+	started_at?: string | null;
+	completed_at?: string | null;
+	requested_at?: string | null;
+	error_message?: string | null;
+	result?: Record<string, unknown> | null;
+	[key: string]: unknown;
+}
+
+export interface PlanArchiveExecutionRunPayload {
+	record_ids?: number[];
+	selected_profiles?: PlanArchiveSelectedProfile[];
+}
+
+export interface PlanArchiveExecutionRunResponse {
+	queued?: number;
+	skipped?: number;
+	updated?: number;
+	request_ids?: number[];
+	attempts?: PlanArchiveExecutionAttempt[];
+	records?: PlanRecord[];
+	errors?: string[];
+	[key: string]: unknown;
+}
+
+export interface PlanArchiveExecutionSyncResponse {
+	updated?: number;
+	records?: PlanRecord[];
+	errors?: string[];
+	[key: string]: unknown;
+}
+
+export interface PlanArchiveExecutionHistoryResponse {
+	items: PlanArchiveExecutionAttempt[];
+	total?: number;
+	limit?: number;
+	record_id?: number | null;
 }
 
 export interface ImportArchivedResult {
@@ -392,11 +447,24 @@ export const planRecordsApi = {
 			body: JSON.stringify(payload)
 		}),
 
-	indexCrossRepoArchive: (payload: PlanArchiveCrossRepoIndexRequest) =>
-		planRecordsRequest<PlanArchiveCrossRepoIndexResponse>('/retrieval/cross-repo/index', {
+	runArchiveExecutions: (payload: PlanArchiveExecutionRunPayload = {}) =>
+		planRecordsRequest<PlanArchiveExecutionRunResponse>('/records/archive-executions/run', {
 			method: 'POST',
 			body: JSON.stringify(payload)
 		}),
+
+	syncArchiveExecutions: () =>
+		planRecordsRequest<PlanArchiveExecutionSyncResponse>('/records/archive-executions/sync', {
+			method: 'POST'
+		}),
+
+	getArchiveExecutionHistory: (params?: { record_id?: number; limit?: number }) => {
+		const q = new URLSearchParams();
+		if (params?.record_id != null) q.set('record_id', String(params.record_id));
+		if (params?.limit != null) q.set('limit', String(params.limit));
+		const qs = q.toString();
+		return planRecordsRequest<PlanArchiveExecutionHistoryResponse>(`/records/archive-executions/history${qs ? '?' + qs : ''}`);
+	},
 
 	analyzeRecord: (recordId: number, payload: PlanArchiveAnalyzePayload = {}) =>
 		planRecordsRequest<PlanArchiveAnalyzeResponse>(`/records/${recordId}/analyze`, {

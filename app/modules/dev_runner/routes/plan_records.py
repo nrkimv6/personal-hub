@@ -41,6 +41,10 @@ from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
     PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse,
     PlanArchiveAnalyzeRequest, PlanArchiveAnalyzeResponse,
+    PlanArchiveExecutionHistoryResponse,
+    PlanArchiveExecutionRunRequest,
+    PlanArchiveExecutionRunResponse,
+    PlanArchiveExecutionSyncResponse,
     PlanArchiveHealthResponse,
     PlanArchiveContextRequest,
     PlanArchiveIndexRequest,
@@ -417,6 +421,73 @@ def list_records(
         q=q, date_from=date_from, date_to=date_to,
         skip=skip, limit=limit, deep=deep, exclude_temp=not include_temp,
     )
+
+
+@router.post("/records/archive-executions/run", response_model=PlanArchiveExecutionRunResponse)
+def run_archive_executions(req: PlanArchiveExecutionRunRequest, db: Session = Depends(get_db)):
+    """Queue Plan Archive analysis jobs for selected records or current backlog."""
+    from app.models.plan_record import PlanRecord
+    from app.modules.dev_runner.services.plan_archive_execution_service import (
+        PlanArchiveExecutionService,
+    )
+
+    svc = PlanArchiveExecutionService(db)
+    if req.record_ids:
+        records = db.query(PlanRecord).filter(PlanRecord.id.in_(req.record_ids)).all()
+    else:
+        records = (
+            db.query(PlanRecord)
+            .filter(PlanRecord.archived_at.isnot(None), PlanRecord.llm_processed_at.is_(None))
+            .order_by(PlanRecord.archived_at.asc())
+            .limit(50)
+            .all()
+        )
+    result = svc.enqueue_records(
+        records,
+        trigger_source="manual:plan_archive_analyze",
+        selected_profiles=[item.model_dump() for item in req.selected_profiles],
+        requested_by="api",
+    )
+    db.commit()
+    return result
+
+
+@router.post("/records/archive-executions/sync", response_model=PlanArchiveExecutionSyncResponse)
+def sync_archive_executions(db: Session = Depends(get_db)):
+    """Reconcile execution job/attempt rows from current LLMRequest state."""
+    from app.modules.dev_runner.services.plan_archive_execution_service import (
+        PlanArchiveExecutionService,
+    )
+
+    registered = _plan_service.list_registered_paths()
+    paths = [{"path": r.path, "type": r.path_type} for r in registered]
+    record_sync = PlanRecordService(db).sync_all(paths)
+    result = PlanArchiveExecutionService(db).sync()
+    result["created"] = record_sync.get("created", 0)
+    result["record_updated"] = record_sync.get("updated", 0)
+    result["missing"] = record_sync.get("missing", 0)
+    result["errors"] = list(result.get("errors") or []) + list(record_sync.get("errors") or [])
+    db.commit()
+    return result
+
+
+@router.get("/records/archive-executions/history", response_model=PlanArchiveExecutionHistoryResponse)
+def list_archive_execution_history(
+    record_id: Optional[int] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    from app.modules.dev_runner.services.plan_archive_execution_service import (
+        PlanArchiveExecutionService,
+    )
+
+    items = PlanArchiveExecutionService(db).history(record_id=record_id, limit=limit)
+    return {
+        "items": items,
+        "total": len(items),
+        "limit": max(1, min(limit, 200)),
+        "record_id": record_id,
+    }
 
 
 @router.get("/records/{record_id}", response_model=PlanRecordWithEventsResponse)

@@ -620,6 +620,77 @@ class PlanArchiveAnalyzeResponse(BaseModel):
     save_error: Optional[str] = None
 
 
+class PlanArchiveSelectedProfile(BaseModel):
+    engine: str
+    profile_name: str
+
+
+class PlanArchiveExecutionRunRequest(BaseModel):
+    record_ids: List[int] = Field(default_factory=list)
+    selected_profiles: List[PlanArchiveSelectedProfile] = Field(default_factory=list)
+
+
+class PlanArchiveExecutionRunResponse(BaseModel):
+    queued: int = 0
+    skipped_empty: int = 0
+    skipped_active_request: int = 0
+    skipped_active_job: int = 0
+    skipped_temp: int = 0
+    profile_count: int = 0
+    job_ids: List[int] = Field(default_factory=list)
+    request_ids: List[int] = Field(default_factory=list)
+
+
+class PlanArchiveExecutionAttemptResponse(BaseModel):
+    id: Optional[int] = None
+    llm_request_id: Optional[int] = None
+    status: Optional[str] = None
+    engine: Optional[str] = None
+    profile_name: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    retryable: bool = False
+    error_message: Optional[str] = None
+    requested_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class PlanArchiveExecutionHistoryItem(BaseModel):
+    id: int
+    plan_record_id: int
+    plan_title: Optional[str] = None
+    file_path: Optional[str] = None
+    trigger_source: str
+    status: str
+    selected_profiles: List[dict] = Field(default_factory=list)
+    profile_count: int = 0
+    latest_request_id: Optional[int] = None
+    next_available_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    queued_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    latest_attempt: Optional[PlanArchiveExecutionAttemptResponse] = None
+
+
+class PlanArchiveExecutionHistoryResponse(BaseModel):
+    items: List[dict] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 50
+    record_id: Optional[int] = None
+
+
+class PlanArchiveExecutionSyncResponse(BaseModel):
+    updated: int = 0
+    checked: int = 0
+    created: int = 0
+    record_updated: int = 0
+    missing: int = 0
+    errors: List[str] = Field(default_factory=list)
+
+
 class PlanRecordResponse(BaseModel):
     """계획서 레코드 응답"""
     model_config = ConfigDict(from_attributes=True)
@@ -648,6 +719,10 @@ class PlanRecordResponse(BaseModel):
     llm_processed_at: Optional[datetime] = None
     file_delete_after: Optional[datetime] = None
     file_removed_at: Optional[datetime] = None
+    archive_state: Optional[str] = None
+    execution_state: Optional[str] = None
+    latest_attempt: Optional[PlanArchiveExecutionAttemptResponse] = None
+    next_available_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

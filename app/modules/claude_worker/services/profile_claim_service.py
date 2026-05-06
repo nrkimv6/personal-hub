@@ -18,7 +18,26 @@ class ProfileClaimService:
     def __init__(self, db: Session):
         self.db = db
 
-    def claim(self, request_id: int, engine: str, profile_name: str) -> Optional[LLMRequestProfileClaim]:
+    def active_count(self, engine: str, profile_name: str) -> int:
+        return (
+            self.db.query(LLMRequestProfileClaim)
+            .filter(
+                LLMRequestProfileClaim.engine == engine,
+                LLMRequestProfileClaim.profile_name == profile_name,
+            )
+            .count()
+        )
+
+    def claim(
+        self,
+        request_id: int,
+        engine: str,
+        profile_name: str,
+        *,
+        capacity: int = 1,
+    ) -> Optional[LLMRequestProfileClaim]:
+        if self.active_count(engine, profile_name) >= max(1, int(capacity or 1)):
+            return None
         claim = LLMRequestProfileClaim(
             request_id=request_id,
             engine=engine,

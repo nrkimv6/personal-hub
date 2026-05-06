@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.models.plan_record import PlanRecord
+from app.models.plan_archive_execution import PlanArchiveExecutionAttempt, PlanArchiveExecutionJob
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 from app.worker.schedule_handler_base import WorkerContext
@@ -23,6 +24,8 @@ def session_factory():
     )
     PlanRecord.__table__.create(bind=engine, checkfirst=True)
     LLMRequest.__table__.create(bind=engine, checkfirst=True)
+    PlanArchiveExecutionJob.__table__.create(bind=engine, checkfirst=True)
+    PlanArchiveExecutionAttempt.__table__.create(bind=engine, checkfirst=True)
     Session = sessionmaker(bind=engine)
     yield Session
     engine.dispose()
@@ -100,11 +103,8 @@ class TestPlanArchiveProcessHelper:
         fake_llm.resolve_provider_model.return_value = ("claude", "sonnet")
 
         with patch(
-            "app.modules.dev_runner.schedulers.plan_archive_schedule.LLMService",
+            "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
             return_value=fake_llm,
-        ), patch(
-            "app.modules.dev_runner.schedulers.plan_archive_schedule.build_plan_analyze_prompt",
-            side_effect=lambda file_content, filename: f"{filename}::{file_content}",
         ):
             stats = PlanArchiveScheduler._enqueue_unprocessed_plans(session_factory)
 
@@ -132,7 +132,7 @@ class TestPlanArchiveProcessHelper:
         fake_llm.resolve_provider_model.return_value = ("claude", "sonnet")
 
         with patch(
-            "app.modules.dev_runner.schedulers.plan_archive_schedule.LLMService",
+            "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
             return_value=fake_llm,
         ):
             stats = PlanArchiveScheduler._enqueue_unprocessed_plans(session_factory)
@@ -165,11 +165,8 @@ class TestPlanArchiveProcessHelper:
         fake_llm = MagicMock()
         fake_llm.resolve_provider_model.return_value = ("claude", "sonnet")
         with patch(
-            "app.modules.dev_runner.schedulers.plan_archive_schedule.LLMService",
+            "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
             return_value=fake_llm,
-        ), patch(
-            "app.modules.dev_runner.schedulers.plan_archive_schedule.build_plan_analyze_prompt",
-            side_effect=lambda file_content, filename: f"{filename}::{file_content}",
         ):
             stats = PlanArchiveScheduler._enqueue_unprocessed_plans(session_factory)
 
@@ -196,7 +193,7 @@ class TestPlanArchiveProcessHelper:
         fake_llm = MagicMock()
         fake_llm.resolve_provider_model.return_value = ("claude", "sonnet")
         with patch(
-            "app.modules.dev_runner.schedulers.plan_archive_schedule.LLMService",
+            "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
             return_value=fake_llm,
         ):
             stats = PlanArchiveScheduler._enqueue_unprocessed_plans(
@@ -233,7 +230,7 @@ class TestPlanArchiveProcessHelper:
         fake_llm = MagicMock()
         fake_llm.resolve_provider_model.return_value = ("claude", "sonnet")
         with patch(
-            "app.modules.dev_runner.schedulers.plan_archive_schedule.LLMService",
+            "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
             return_value=fake_llm,
         ):
             stats = PlanArchiveScheduler._enqueue_unprocessed_plans(session_factory)
@@ -267,6 +264,11 @@ class TestPlanArchiveExecute:
         assert outcome.collected_count == 3
         assert outcome.saved_count == 3
         assert outcome.stop_reason == "completed"
+        assert outcome.config_snapshot_patch["queued"] == 3
+        assert outcome.config_snapshot_patch["skipped_temp"] == 0
+        assert outcome.config_snapshot_patch["skipped_empty"] == 0
+        assert outcome.config_snapshot_patch["skipped_active_request"] == 0
+        assert outcome.config_snapshot_patch["remaining_real_unprocessed"] == 0
         assert outcome.config_snapshot_patch == {
             "queued": 3,
             "skipped_temp": 0,
