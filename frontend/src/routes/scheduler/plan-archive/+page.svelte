@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { RefreshCw } from 'lucide-svelte';
-	import { archiveScheduleApi, type ArchiveScheduleDashboardResponse, type ArchiveLLMRequestDetail } from '$lib/api/plan-records';
+	import {
+		PlanRecordsRequestError,
+		archiveScheduleApi,
+		type ArchiveScheduleDashboardResponse,
+		type ArchiveLLMRequestDetail
+	} from '$lib/api/plan-records';
 	import PlanArchiveSummaryPanel from './PlanArchiveSummaryPanel.svelte';
 	import PlanArchiveTargetSelector from './PlanArchiveTargetSelector.svelte';
 	import PlanArchiveCandidateTable from './PlanArchiveCandidateTable.svelte';
@@ -64,6 +69,18 @@
 		}
 	}
 
+	const SCHEDULE_NOT_FOUND_DETAIL = 'Plan archive schedule not found';
+
+	function describeScheduleMutationError(error: unknown, actionLabel: string) {
+		if (error instanceof PlanRecordsRequestError && error.status === 404) {
+			if (error.detail === SCHEDULE_NOT_FOUND_DETAIL || error.message === SCHEDULE_NOT_FOUND_DETAIL || dashboard?.schedule === null) {
+				return `${actionLabel} 실패: Plan Archive schedule seed 또는 DB 상태를 확인하세요.`;
+			}
+			return `${actionLabel} 실패: admin API proxy 또는 admin route mismatch 가능성이 있습니다.`;
+		}
+		return error instanceof Error ? error.message : `${actionLabel} 실패`;
+	}
+
 	onMount(() => {
 		fetchDashboard();
 		schedulePoll();
@@ -83,7 +100,8 @@
 			await fetchDashboard();
 			showToast('Schedule 정지됨');
 		} catch (e) {
-			showToast(e instanceof Error ? e.message : '정지 실패', true);
+			await fetchDashboard();
+			showToast(describeScheduleMutationError(e, '정지'), true);
 		} finally {
 			pausing = false;
 		}
@@ -96,7 +114,8 @@
 			await fetchDashboard();
 			showToast('Schedule 재개됨');
 		} catch (e) {
-			showToast(e instanceof Error ? e.message : '재개 실패', true);
+			await fetchDashboard();
+			showToast(describeScheduleMutationError(e, '재개'), true);
 		} finally {
 			pausing = false;
 		}

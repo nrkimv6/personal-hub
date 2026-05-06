@@ -450,6 +450,18 @@ export interface ArchiveAnalyzeResponse {
 // Internal helper
 // ============================================================
 
+export class PlanRecordsRequestError extends Error {
+	status: number;
+	detail: unknown;
+
+	constructor(message: string, status: number, detail: unknown) {
+		super(message);
+		this.name = 'PlanRecordsRequestError';
+		this.status = status;
+		this.detail = detail;
+	}
+}
+
 async function planRecordsRequest<T>(
 	endpoint: string,
 	options: RequestInit = {}
@@ -469,7 +481,7 @@ async function planRecordsRequest<T>(
 		const error = await response.json().catch(() => ({ detail: response.statusText }));
 		const detail = error.detail;
 		const message = typeof detail === 'string' ? detail : detail?.message || '요청 실패';
-		throw new Error(message);
+		throw new PlanRecordsRequestError(message, response.status, detail);
 	}
 
 	if (response.status === 204) {

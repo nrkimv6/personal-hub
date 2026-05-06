@@ -75,6 +75,10 @@
 				<span class="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
 					<Pause class="h-3 w-3" />일시정지
 				</span>
+			{:else if sched === null}
+				<span class="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+					<AlertTriangle class="h-3 w-3" />스케줄 없음
+				</span>
 			{/if}
 			{#if sched}
 				{#if sched['next_run_at']}
@@ -87,7 +91,7 @@
 				{/if}
 			{/if}
 			<div class="ml-auto flex gap-1">
-				{#if enabled !== false}
+				{#if sched && enabled === true}
 					<button
 						class="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50"
 						onclick={onPause}
@@ -95,7 +99,7 @@
 					>
 						<Pause class="h-3 w-3" />정지
 					</button>
-				{:else}
+				{:else if sched && enabled === false}
 					<button
 						class="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50"
 						onclick={onResume}
