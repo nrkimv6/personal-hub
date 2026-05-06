@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 
 from app.modules.dev_runner.services.runner_git_metadata import build_runner_git_metadata
+from app.modules.dev_runner.services.runner_read_model import build_runner_read_model
 
 
 def _run_git(cwd: Path, *args: str) -> str:
@@ -79,3 +80,24 @@ def test_missing_worktree_returns_git_missing_confidence(tmp_path):
     assert metadata.worktree_exists is False
     assert metadata.current_head is None
     assert metadata.confidence == "git_missing"
+
+
+def test_runner_read_model_corrects_stale_redis_branch_hint(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _run_git(repo, "checkout", "-b", "impl/read-model-stale")
+
+    model = build_runner_read_model(
+        runner_id="runner-read-model-1",
+        running=False,
+        merge_status="approval_required",
+        exit_reason="completed",
+        branch="impl/read-model-stale",
+        worktree_path=str(repo),
+        redis_branch_exists=False,
+        redis_worktree_exists=True,
+    )
+
+    assert model.branch_exists is True
+    assert model.worktree_exists is True
+    assert model.git is not None
+    assert model.git.confidence == "git_verified"
