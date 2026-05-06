@@ -1735,6 +1735,8 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
 
     <!-- archive 후보/실행 대상 상태 -->
     <div class="mb-3 grid grid-cols-1 xl:grid-cols-2 gap-3">
