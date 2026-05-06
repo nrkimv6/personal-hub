@@ -230,6 +230,8 @@
 		error?: string | null;
 		display_plan_name?: string | null;
 		execution_count?: number | null;
+		remaining_post_merge_tasks?: number | null;
+		merge_evidence_missing?: boolean | null;
 		worktree_exists?: boolean | 'unknown';
 		branch_exists?: boolean | 'unknown';
 		branch_merged_to_main?: boolean | 'unknown';
@@ -261,6 +263,8 @@
 		visible?: boolean;
 		display_plan_name?: string | null;
 		execution_count?: number | null;
+		remaining_post_merge_tasks?: number | null;
+		merge_evidence_missing?: boolean | null;
 		worktree_exists?: boolean | 'unknown';
 		branch_exists?: boolean | 'unknown';
 		branch_merged_to_main?: boolean | 'unknown';
@@ -289,6 +293,8 @@
 			error: runner.error ?? undefined,
 			display_plan_name: runner.display_plan_name ?? null,
 			execution_count: runner.execution_count ?? null,
+			remaining_post_merge_tasks: runner.remaining_post_merge_tasks ?? null,
+			merge_evidence_missing: runner.merge_evidence_missing ?? null,
 			worktree_exists: runner.worktree_exists ?? 'unknown',
 			branch_exists: runner.branch_exists ?? 'unknown',
 			branch_merged_to_main: runner.branch_merged_to_main ?? 'unknown',
