@@ -1,6 +1,7 @@
 """
-T1: PlanArchiveExecutionTarget fan-out 계약 테스트.
-profile-less Codex/GPT target, fan-out N requests, 개별/일괄 통합 계약.
+T1+T3: PlanArchiveExecutionTarget fan-out 계약 테스트.
+profile-less Codex/GPT target, fan-out N requests, 개별/일괄 통합 계약,
+applied_request_id ordering guard (T3-line145), worker fan-out mock (T3-line96).
 """
 import json
 from datetime import datetime
@@ -180,3 +181,148 @@ def test_candidate_queue_and_bulk_run_use_same_selected_targets_contract(db):
         assert req.provider == "codex"
         assert req.model == "gpt-5.5"
         assert req.dedupe_key == "profileless"
+
+
+# ── T3: applied_request_id ordering guard (line 145) ─────────────────────────
+
+def test_applied_request_id_guard_skips_stale_result_when_newer_completed(db):
+    """fan-out N 요청 중 나중에 완료된 것(higher id)이 먼저 저장되면,
+    이전(lower id) 결과 저장 시 _has_newer_plan_archive_result가 True를 반환해 저장을 막는다."""
+    from app.modules.claude_worker.services.plan_analyze_handler import (
+        save_plan_archive_result,
+        _has_newer_plan_archive_result,
+    )
+
+    rec = _record(db, filename_hash="hash-ordering-test")
+    db.commit()
+
+    # 두 개의 LLMRequest를 순서대로 생성 (id 작은 것 = 먼저 큐잉)
+    req_old = LLMRequest(
+        caller_type="plan_archive_analyze",
+        caller_id=str(rec.id),
+        prompt="p",
+        provider="claude",
+        model="sonnet",
+        status="completed",
+        result='{"category":"fix","tags":[],"summary":"old result"}',
+    )
+    db.add(req_old)
+    db.flush()
+    old_id = req_old.id
+
+    req_new = LLMRequest(
+        caller_type="plan_archive_analyze",
+        caller_id=str(rec.id),
+        prompt="p",
+        provider="codex",
+        model="gpt-5.5",
+        status="completed",
+        result='{"category":"feat","tags":["x"],"summary":"new result"}',
+    )
+    db.add(req_new)
+    db.flush()
+    new_id = req_new.id
+    db.commit()
+
+    assert new_id > old_id  # 순서 전제
+
+    # 더 최신 요청(new)이 먼저 DB 반영됐다고 가정 → save_plan_archive_result(new) 먼저 호출
+    new_result = {"success": True, "result": {"category": "feat", "tags": ["x"], "summary": "new result"}}
+    saved_new = save_plan_archive_result(db, req_new, new_result)
+    assert saved_new is True
+    db.refresh(rec)
+    assert rec.category == "feat"
+    assert rec.summary == "new result"
+
+    # 이제 오래된 요청(old) 결과 저장 시도 → guard가 차단해야 함
+    old_result = {"success": True, "result": {"category": "fix", "tags": [], "summary": "old result"}}
+    saved_old = save_plan_archive_result(db, req_old, old_result)
+    assert saved_old is False  # guard가 차단
+
+    # record 값은 new result 그대로 유지
+    db.refresh(rec)
+    assert rec.category == "feat"
+    assert rec.summary == "new result"
+
+
+def test_applied_request_id_guard_allows_result_when_no_newer_request(db):
+    """newer request가 없으면 guard가 False를 반환해 정상 저장이 허용된다."""
+    from app.modules.claude_worker.services.plan_analyze_handler import save_plan_archive_result
+
+    rec = _record(db, filename_hash="hash-no-newer")
+    db.commit()
+
+    req = LLMRequest(
+        caller_type="plan_archive_analyze",
+        caller_id=str(rec.id),
+        prompt="p",
+        provider="claude",
+        model="sonnet",
+        status="completed",
+        result='{"category":"fix","tags":[],"summary":"only result"}',
+    )
+    db.add(req)
+    db.commit()
+
+    result = {"success": True, "result": {"category": "fix", "tags": [], "summary": "only result"}}
+    saved = save_plan_archive_result(db, req, result)
+    assert saved is True
+    db.refresh(rec)
+    assert rec.category == "fix"
+    assert rec.summary == "only result"
+
+
+# ── T3: worker fan-out mock validation (line 96) ─────────────────────────────
+
+def test_worker_fanout_N_requests_only_newest_applied_to_record(db):
+    """fan-out N개 요청이 완료 순서가 뒤섞여도 가장 최신(highest id) 결과만 record에 반영된다.
+    결정: mock-based unit 검증 (실제 worker 기동 불필요)."""
+    from app.modules.claude_worker.services.plan_analyze_handler import save_plan_archive_result
+
+    rec = _record(db, filename_hash="hash-fanout-mixed-order")
+    db.commit()
+
+    targets = [
+        {"provider": "claude", "model": "sonnet", "dedupe_key": "profile:claude:default"},
+        {"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless"},
+        {"provider": "gemini", "model": "flash", "dedupe_key": "profile:gemini:default"},
+    ]
+    fake = _fake_llm()
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
+        return_value=fake,
+    ):
+        result = PlanArchiveExecutionService(db).enqueue_record(
+            rec,
+            trigger_source="test-fanout",
+            selected_targets=targets,
+        )
+
+    assert result["status_key"] == "queued"
+    request_ids = sorted(result["request_ids"])  # id 오름차순 = 큐잉 순서
+    assert len(request_ids) == 3
+
+    # 순서를 섞어 처리: 중간(request_ids[1]) 먼저, 마지막(request_ids[2]) 다음, 처음(request_ids[0]) 마지막
+    processing_order = [request_ids[1], request_ids[2], request_ids[0]]
+    categories_by_id = {
+        request_ids[0]: "first-queued",
+        request_ids[1]: "second-queued",
+        request_ids[2]: "third-queued-newest",
+    }
+
+    for req_id in processing_order:
+        req = db.query(LLMRequest).filter_by(id=req_id).first()
+        req.status = "completed"
+        req.result = f'{{"category":"{categories_by_id[req_id]}","tags":[],"summary":"summary-{req_id}"}}'
+        db.commit()
+        save_plan_archive_result(
+            db, req,
+            {"success": True, "result": {"category": categories_by_id[req_id], "tags": [], "summary": f"summary-{req_id}"}}
+        )
+
+    # 최신(highest id = request_ids[2])의 결과만 record에 반영돼야 함
+    db.refresh(rec)
+    assert rec.category == "third-queued-newest", (
+        f"Expected 'third-queued-newest', got '{rec.category}'. "
+        "Guard should have prevented older requests from overwriting newer result."
+    )
