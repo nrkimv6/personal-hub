@@ -144,6 +144,7 @@ def test_apply_success_saves_record_without_creating_request(test_db_session):
     from app.modules.claude_worker.models.llm_request import LLMRequest
 
     record = _add_record(test_db_session, raw_content="# Manual\ncontent")
+    before_requests = test_db_session.query(LLMRequest).filter_by(caller_type="plan_archive_analyze").count()
 
     with patch(
         "app.modules.dev_runner.services.plan_archive_manual_analyze_service.LLMService.resolve_provider_model",
@@ -171,7 +172,7 @@ def test_apply_success_saves_record_without_creating_request(test_db_session):
     assert result["record_after"]["category"] == "infra"
     assert record.category == "infra"
     assert record.llm_processed_at is not None
-    assert test_db_session.query(LLMRequest).filter_by(caller_type="plan_archive_analyze").count() == 0
+    assert test_db_session.query(LLMRequest).filter_by(caller_type="plan_archive_analyze").count() == before_requests
 
 
 def test_apply_parse_error_does_not_save(test_db_session):
