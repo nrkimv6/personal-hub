@@ -274,6 +274,7 @@ class TestDirectMergeConflictResolverCrashSafe:
         mock_merge_lock._get_repo_id = MagicMock(return_value="monitor-page")
 
         with patch.dict(sys.modules, {"merge_queue": mock_merge_lock}), \
+             patch("_dr_merge._check_stale_merge_gate", return_value=(None, None)), \
              patch("subprocess.run", return_value=MagicMock(returncode=3)), \
              patch("_dr_merge._launch_conflict_resolver_process",
                          return_value={"success": False, "message": "resolve 실패 시뮬레이션", "merge_status": "conflict", "conflict": True}), \
@@ -321,6 +322,7 @@ class TestDirectMergeConflictResolverCrashSafe:
         mock_merge_lock._get_repo_id = MagicMock(return_value="monitor-page")
 
         with patch.dict(sys.modules, {"merge_queue": mock_merge_lock}), \
+             patch("_dr_merge._check_stale_merge_gate", return_value=(None, None)), \
              patch("subprocess.run", return_value=MagicMock(returncode=3)), \
              patch(
                  "_dr_merge._launch_conflict_resolver_process",
