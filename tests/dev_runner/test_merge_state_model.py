@@ -44,3 +44,55 @@ def test_decide_cleanup_action_blocks_terminal_state():
     )
 
     assert decision.action == MergeCleanupAction.BLOCKED_TERMINAL
+
+
+def test_decide_cleanup_action_enters_inline_merge_for_completed_request():
+    from _dr_merge_persistence import MergeState
+    from _dr_merge_state import MergeCleanupAction
+    from _dr_stream_cleanup import decide_cleanup_action
+
+    decision = decide_cleanup_action(
+        MergeState(merge_status="", merge_requested=True),
+        exit_code=0,
+        exit_reason="completed",
+        stop_stage=None,
+        completed_for_flow=True,
+        has_worktree_commits=False,
+    )
+
+    assert decision.action == MergeCleanupAction.INLINE_MERGE
+
+
+def test_decide_cleanup_action_routes_merged_state_to_fallback_done():
+    from _dr_merge_persistence import MergeState
+    from _dr_merge_state import MERGED, MergeCleanupAction
+    from _dr_stream_cleanup import decide_cleanup_action
+
+    decision = decide_cleanup_action(
+        MergeState(merge_status=MERGED, merge_requested=False),
+        exit_code=0,
+        exit_reason="completed",
+        stop_stage=None,
+        completed_for_flow=True,
+        has_worktree_commits=False,
+    )
+
+    assert decision.action == MergeCleanupAction.FALLBACK_DONE
+
+
+def test_decide_cleanup_action_skips_pre_review():
+    from _dr_merge_persistence import MergeState
+    from _dr_merge_state import MergeCleanupAction
+    from _dr_stream_cleanup import decide_cleanup_action
+
+    decision = decide_cleanup_action(
+        MergeState(merge_status="", merge_requested=True),
+        exit_code=0,
+        exit_reason="completed",
+        stop_stage="pre_review",
+        completed_for_flow=True,
+        has_worktree_commits=True,
+    )
+
+    assert decision.action == MergeCleanupAction.SKIP
+    assert decision.reason == "pre_review"
