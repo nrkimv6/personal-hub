@@ -59,6 +59,8 @@ from app.modules.dev_runner.schemas import (
     PlanArchiveExecutionRunResponse,
     PlanArchiveExecutionSyncResponse,
     PlanArchiveHealthResponse,
+    PlanArchiveCategoryRepairRequest,
+    PlanArchiveCategoryRepairResponse,
     PlanArchiveContextRequest,
     PlanArchiveIndexRequest,
     PlanArchiveIndexResponse,
@@ -283,6 +285,21 @@ def get_archive_health(include_temp: bool = False, db: Session = Depends(get_db)
     """Plan Archive scheduler health summary."""
     svc = PlanRecordService(db)
     return svc.get_plan_archive_health(include_temp=include_temp)
+
+
+@router_admin.post("/records/archive-category-repair", response_model=PlanArchiveCategoryRepairResponse)
+def repair_archive_category_pollution(
+    req: PlanArchiveCategoryRepairRequest,
+    db: Session = Depends(get_db),
+):
+    """Audit or repair filename/path-like Plan Archive categories. Admin only."""
+    result = PlanRecordService(db).repair_plan_archive_category_pollution(
+        apply=req.apply,
+        limit=req.limit,
+    )
+    if req.apply:
+        db.commit()
+    return result
 
 
 # ── Phase 4-A: dashboard + list endpoints ────────────────────────────────────

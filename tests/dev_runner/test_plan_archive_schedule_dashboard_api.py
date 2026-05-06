@@ -406,6 +406,40 @@ def test_archive_schedule_resume_returns_domain_404_detail_if_no_schedule(admin_
     assert resp.json()["detail"] == "Plan archive schedule not found"
 
 
+def test_archive_category_repair_R_dry_run_and_apply(admin_client, db):
+    """admin category repair endpoint는 dry-run 기본, apply=true에서만 DB를 수정한다."""
+    rec = PlanRecord(
+        filename_hash="polluted-http",
+        file_path="/repo/docs/archive/common/2026-04-12_polluted-http.md",
+        archived_at=datetime.utcnow(),
+        status="archived",
+        category="2026-04-12_fix-test-fix-engine-propagation-merge-precheck-unmocked.md",
+    )
+    db.add(rec)
+    db.commit()
+
+    dry = admin_client.post("/api/v1/plans/records/archive-category-repair", json={"limit": 10})
+    assert dry.status_code == 200
+    dry_data = dry.json()
+    assert dry_data["apply"] is False
+    assert dry_data["matched"] == 1
+    assert dry_data["repaired"] == 0
+    db.refresh(rec)
+    assert rec.category.endswith(".md")
+
+    applied = admin_client.post(
+        "/api/v1/plans/records/archive-category-repair",
+        json={"apply": True, "limit": 10},
+    )
+    assert applied.status_code == 200
+    applied_data = applied.json()
+    assert applied_data["apply"] is True
+    assert applied_data["matched"] == 1
+    assert applied_data["repaired"] == 1
+    db.refresh(rec)
+    assert rec.category == "common"
+
+
 def test_archive_schedule_admin_route_open_public_route_closed(public_client, admin_client, db):
     """admin app은 pause/resume을 처리하고 public app은 같은 mutation path를 노출하지 않는다."""
     _add_schedule(db, enabled=False)

@@ -8,12 +8,13 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.plan_record import PlanRecord, PlanEvent
+from app.models.plan_record import PlanRecord, PlanEvent, PlanRecordRelation
 from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.services.plan_record_service import (
     PlanRecordService,
     _compute_filename_hash,
+    _is_plan_archive_category_polluted,
     _is_temp_pytest_path,
     PLAN_FILE_PATTERN,
     EXCLUDE_FILES,
@@ -24,6 +25,7 @@ def _create_plan_tables(eng):
     """PlanRecord, PlanEvent 테이블만 생성 (전체 Base 사용 불가 — FK 해결 문제)"""
     PlanRecord.__table__.create(bind=eng, checkfirst=True)
     PlanEvent.__table__.create(bind=eng, checkfirst=True)
+    PlanRecordRelation.__table__.create(bind=eng, checkfirst=True)
     TaskSchedule.__table__.create(bind=eng, checkfirst=True)
     TaskScheduleRun.__table__.create(bind=eng, checkfirst=True)
     LLMRequest.__table__.create(bind=eng, checkfirst=True)
@@ -595,9 +597,42 @@ class TestPlanArchiveHealth:
         assert health["temp_pytest_unprocessed"] == 1
         assert health["pending_or_processing_requests"] == 1
         assert health["failed_requests"] == 1
+        assert health["category_pollution_candidates"] == 0
         assert health["latest_failed_request"]["error_message"] == "boom"
         assert health["plan_archive_schedule"]["enabled"] is False
         assert health["plan_archive_schedule"]["last_success"] == "2026-05-04T02:11:00"
+
+    def test_category_pollution_repair_dry_run_and_apply(self, svc, db):
+        """R: filename/path-like category를 dry-run으로 찾고 apply=true에서 보정한다."""
+        record = svc.ingest_single(
+            file_path="/repo/docs/archive/common/2026-04-12_polluted-category.md",
+            raw_content="# polluted",
+        )
+        record.category = "2026-04-12_fix-test-fix-engine-propagation-merge-precheck-unmocked.md"
+        db.flush()
+
+        dry_run = svc.repair_plan_archive_category_pollution(apply=False)
+
+        assert _is_plan_archive_category_polluted(record.category) is True
+        assert dry_run["matched"] == 1
+        assert dry_run["repaired"] == 0
+        assert dry_run["items"][0]["suggested_category"] == "common"
+        assert record.category.endswith(".md")
+        assert svc.count_plan_archive_category_pollution() == 1
+
+        applied = svc.repair_plan_archive_category_pollution(apply=True)
+        db.flush()
+
+        assert applied["matched"] == 1
+        assert applied["repaired"] == 1
+        assert record.category == "common"
+        event = db.query(PlanEvent).filter_by(
+            plan_record_id=record.id,
+            event_type="plan_archive_category_repaired",
+        ).one()
+        assert event.detail["old_category"].endswith(".md")
+        assert event.detail["new_category"] == "common"
+        assert svc.get_plan_archive_health()["category_pollution_candidates"] == 0
 
     def test_get_guide_status_excludes_temp_pytest_records(self, svc, db, monkeypatch):
         """R: guide-status pending archive 후보도 temp PlanRecord를 제외한다."""
