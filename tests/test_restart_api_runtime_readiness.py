@@ -746,6 +746,44 @@ def test_restart_api_old_failure_in_older_log_file_is_ignored_B(tmp_path: Path):
     assert "old failure" not in result.service_log_window
 
 
+def test_restart_api_public_target_uses_public_service_log_window(tmp_path: Path):
+    manager = _manager_with_log_dir(tmp_path)
+    admin_log = manager.log_dir / "service_runner_20260504_113328.log"
+    admin_log.write_text(
+        "\n".join(
+            [
+                "[2026-05-04 11:33:28] Monitor Page Service Starting",
+                "[2026-05-04 11:33:35] API Server starting on port 8001",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    public_log = manager.log_dir.parent / "service_MonitorPage-Public.log"
+    public_log.write_text(
+        "\n".join(
+            [
+                "[2026-05-04 11:40:28] Monitor Page Service Starting",
+                "[2026-05-04 11:40:35] API Server starting on port 8000",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    target = api_actions.RestartApiTarget(
+        api_port=8000,
+        app_mode="public",
+        pid_suffix="",
+        pid_file=tmp_path / ".pids" / "api.pid",
+        service_name="MonitorPage-Public",
+    )
+
+    result = api_actions._scan_restart_window_failures(manager, target)
+
+    assert result.service_log_window
+    assert "service_MonitorPage-Public.log" in result.service_log_window
+    assert "8000" in result.service_log_window
+    assert "8001" not in result.service_log_window
+
+
 def test_restart_api_filesystem_log_fixture_integration_T3(tmp_path: Path):
     manager = _manager_with_log_dir(tmp_path)
     target = _restart_target(tmp_path)
