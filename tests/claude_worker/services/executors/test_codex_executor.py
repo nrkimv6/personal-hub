@@ -67,8 +67,8 @@ def test_codex_executor_uses_safe_default_model(mock_run, _mock_which, _mock_env
 
     args, _kwargs = mock_run.call_args
     command = args[0]
-    assert command[command.index("--model") + 1] == "gpt-5.2"
-    assert result["model"] == "gpt-5.2"
+    assert command[command.index("--model") + 1] == "gpt-5.5"
+    assert result["model"] == "gpt-5.5"
 
 
 @patch("app.modules.claude_worker.services.executors.codex_executor.build_cli_env", return_value={})

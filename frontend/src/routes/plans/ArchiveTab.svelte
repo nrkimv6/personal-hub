@@ -86,9 +86,6 @@
   let queueingRecordId: number | null = $state(null);
 
   // ── 분석 요청 (Phase 3/5) ─────────────────────────────────
-  let analyzeProvider = $state('');
-  let analyzeModel = $state('');
-  let analyzeLoading = $state(false);
   let appliedRequestId: number | null = $state(null);
 
   async function loadAppliedRequestId(record: PlanRecord) {
@@ -223,7 +220,7 @@
         model: selectedModel || null,
         profile_key: null
       });
-      showToast(`분석 큐 등록: #${res.id} ${res.provider}/${res.model}`);
+      showToast(`분석 큐 등록: #${res.request_id} ${res.provider}/${res.model || 'default'}`);
       await Promise.all([loadArchiveRequests(), loadCandidates()]);
     } catch (e) {
       showToast(e instanceof Error ? e.message : '분석 큐 등록 실패');
@@ -272,7 +269,7 @@
 
   // ── 수동 분석 preview/apply ───────────────────────────────
   let analyzeProvider = $state('codex');
-  let analyzeModel = $state('gpt-5.2');
+  let analyzeModel = $state('gpt-5.5');
   let analyzeTimeout = $state(120);
   let analyzeLoading = $state(false);
   let analyzeResult: PlanArchiveAnalyzeResponse | null = $state(null);
