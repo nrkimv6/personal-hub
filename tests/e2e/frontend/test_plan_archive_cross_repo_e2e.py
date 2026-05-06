@@ -4,8 +4,15 @@ import pytest
 from playwright.sync_api import Page, Route, expect
 
 
+def _skip_admin_mode_if_public(system_mode: str):
+    if system_mode == "public":
+        pytest.skip("admin-only archive UI is not mounted in public mode")
+
+
 @pytest.fixture
-def archive_cross_repo_page(page: Page, frontend_url: str):
+def archive_cross_repo_page(page: Page, frontend_url: str, system_mode: str):
+    _skip_admin_mode_if_public(system_mode)
+
     def route_api(route: Route):
         url = route.request.url
         if "/api/v1/plans/records/archive-health" in url:
@@ -155,7 +162,9 @@ def archive_cross_repo_page(page: Page, frontend_url: str):
 
     page.route(re.compile(r".*/api/v1/plans/.*"), route_api)
     page.route(re.compile(r".*/api/v1/llm/requests.*"), lambda route: route.fulfill(status=200, json={"items": [], "page": 1, "pages": 1, "total": 0}))
+    page.route(re.compile(r".*/api/v1/dev-runner/plans.*"), lambda route: route.fulfill(status=200, json=[]))
     page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
+    expect(page.get_by_text("Plan Archive retrieval")).to_be_visible()
     return page
 
 
