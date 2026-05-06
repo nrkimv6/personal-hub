@@ -103,6 +103,43 @@ def _coerce_runner_metadata_checked_at(*values: Any) -> str:
     return "unknown"
 
 
+def _resolve_runner_plan_path(plan_file: str | None) -> Path | None:
+    if not plan_file or plan_file in ("__ALL_PLANS__", "ALL"):
+        return None
+    path = Path(str(plan_file))
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+def _is_post_merge_phase_header(header: str) -> bool:
+    return bool(re.search(r"\b(?:phase\s+)?(?:t4|t5|z)\b", header.strip(), re.IGNORECASE))
+
+
+def _remaining_leaf_summary_for_plan(plan_file: str | None) -> dict[str, int]:
+    summary = {"impl": 0, "post_merge": 0, "total": 0}
+    plan_path = _resolve_runner_plan_path(plan_file)
+    if not plan_path or not plan_path.exists():
+        return summary
+    current_phase = ""
+    checkbox_re = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(?:[-*]\s+)?\[\s\]")
+    phase_re = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
+    try:
+        for line in plan_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            phase_match = phase_re.match(line)
+            if phase_match:
+                current_phase = phase_match.group(1)
+                continue
+            if not checkbox_re.match(line):
+                continue
+            key = "post_merge" if _is_post_merge_phase_header(current_phase) else "impl"
+            summary[key] += 1
+            summary["total"] += 1
+    except Exception as exc:
+        logger.debug(f"[dev-runner] remaining leaf summary 실패: plan={plan_file}, error={exc}")
+    return summary
+
+
 class ExecutorService:
     """plan-runner CLI 실행 서비스 - Redis 기반 크로스 세션"""
 
@@ -1025,6 +1062,17 @@ class ExecutorService:
                             display_plan_name = branch.split("/")[-1] if "/" in branch else branch
                     elif display_plan_name_from_log:
                         display_plan_name = display_plan_name_from_log
+                    diagnostic_plan_file = plan_file or recent_meta.get("plan_file")
+                    remaining_summary = _remaining_leaf_summary_for_plan(diagnostic_plan_file)
+                    remaining_post_merge_tasks = remaining_summary["post_merge"]
+                    merge_evidence_missing = bool(
+                        exit_reason == "completed"
+                        and remaining_summary["impl"] == 0
+                        and remaining_post_merge_tasks > 0
+                        and not branch
+                        and not worktree_path
+                        and merge_status not in {"merge_pending", "queued", "merging", "merged"}
+                    )
                     result.append(RunnerListItem(
                         runner_id=rid,
                         running=running,
@@ -1048,6 +1096,8 @@ class ExecutorService:
                         stop_stage=stop_stage,
                         error=error,
                         display_plan_name=display_plan_name,
+                        remaining_post_merge_tasks=remaining_post_merge_tasks,
+                        merge_evidence_missing=merge_evidence_missing,
                         worktree_exists=worktree_exists,
                         branch_exists=branch_exists,
                         branch_merged_to_main=branch_merged_to_main,

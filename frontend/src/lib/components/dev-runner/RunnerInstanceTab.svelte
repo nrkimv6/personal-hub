@@ -32,6 +32,8 @@
 		exitReason?: string | null;
 		error?: string | null;
 		displayPlanName?: string | null;
+		remainingPostMergeTasks?: number | null;
+		mergeEvidenceMissing?: boolean | null;
 		executionCount?: number | null;
 		worktreeExists?: boolean | 'unknown';
 		branchExists?: boolean | 'unknown';
@@ -44,7 +46,7 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -244,6 +246,10 @@
 		return null;
 	}
 
+	let needsPostMergeFollowup = $derived(
+		!running && (remainingPostMergeTasks ?? 0) > 0 && (exitReason === 'completed' || mergeEvidenceMissing === true)
+	);
+
 	let metaTitle = $derived.by(() => {
 		const rows = [
 			displayPlanName ? `plan: ${displayPlanName}` : null,
@@ -259,6 +265,8 @@
 			`orphan_alive: ${orphanAlive}`,
 			`redis_missing: ${redisMissing}`,
 			`log_file_found: ${logFileFound}`,
+			`remaining_post_merge_tasks: ${remainingPostMergeTasks ?? 0}`,
+			`merge_evidence_missing: ${mergeEvidenceMissing ?? false}`,
 			`metadata_checked_at: ${metadataCheckedAt ?? 'unknown'}`
 		];
 		return rows.filter(Boolean).join('\n');
@@ -312,6 +320,12 @@
 				</span>
 			{/if}
 
+			{#if needsPostMergeFollowup}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800" title={metaTitle}>
+					후처리 필요
+				</span>
+			{/if}
+
 			{#if orphanAlive}
 				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700" title={metaTitle}>
 					Redis 상태 소실
@@ -360,6 +374,12 @@
 	{#if !running && error}
 		<div class="px-3 py-1.5 text-xs text-red-700 bg-red-50 border-b border-red-100 truncate" title={error}>
 			{error}
+		</div>
+	{/if}
+
+	{#if needsPostMergeFollowup}
+		<div class="px-3 py-1.5 text-xs text-amber-800 bg-amber-50 border-b border-amber-200">
+			후처리 필요: T4/T5 잔여 {remainingPostMergeTasks ?? 0}개가 남아 있습니다.
 		</div>
 	{/if}
 

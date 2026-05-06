@@ -88,3 +88,26 @@ def test_run_endpoint_accepts_post(client):
     # 200(OK) 또는 422(validation) 모두 허용 — 엔드포인트 존재 확인
     assert resp.status_code in (200, 201, 422), \
         f"POST /run 예상치 못한 응답: {resp.status_code}"
+
+
+def test_skip_only_post_merge_residual_not_completed(client):
+    """R: post-merge-only 잔여 runner는 completed만으로 노출하지 않고 후처리 진단 필드를 포함한다."""
+    runners = [
+        _make_runner("r-post", exit_reason="completed") | {
+            "remaining_post_merge_tasks": 7,
+            "merge_evidence_missing": True,
+            "merge_status": "merge_pending",
+        }
+    ]
+    with patch(
+        "app.modules.dev_runner.services.executor_service.executor_service.get_all_runners",
+        new_callable=AsyncMock,
+        return_value=runners,
+    ):
+        resp = client.get(f"{BASE_URL}/runners")
+
+    assert resp.status_code == 200
+    item = resp.json()[0]
+    assert item["merge_status"] == "merge_pending"
+    assert item["remaining_post_merge_tasks"] == 7
+    assert item["merge_evidence_missing"] is True

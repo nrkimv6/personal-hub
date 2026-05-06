@@ -1161,6 +1161,8 @@
 										exitReason={tab.exit_reason}
 										error={tab.error}
 										displayPlanName={tab.display_plan_name}
+										remainingPostMergeTasks={tab.remaining_post_merge_tasks}
+										mergeEvidenceMissing={tab.merge_evidence_missing}
 										executionCount={tab.execution_count}
 										worktreeExists={tab.worktree_exists}
 										branchExists={tab.branch_exists}

@@ -110,6 +110,8 @@ class RunnerListItem(BaseModel):
     stop_stage: Optional[str] = None  # stopped 세부 단계 (pre_review|post_review|unknown)
     error: Optional[str] = None  # 종료 에러 요약
     display_plan_name: Optional[str] = None  # UI fallback 표시명 (plan_file 소실 시 recent-meta/log/branch에서 복원)
+    remaining_post_merge_tasks: Optional[int] = None  # completed 오분류 진단: T4/T5/Phase Z 잔여 수
+    merge_evidence_missing: Optional[bool] = None  # completed 오분류 진단: branch/worktree evidence 없음
     worktree_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
     branch_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
     branch_merged_to_main: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")

@@ -16,6 +16,7 @@ import requests
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.modules.dev_runner.routes.plans import router as plans_router
+from app.modules.dev_runner.routes.runner import router as runner_router
 from tests.dev_runner.live_done_http_helpers import isolated_live_done_project
 
 BASE_URL = os.environ.get("ADMIN_API_BASE", "http://localhost:8001/api/v1/dev-runner")
@@ -130,6 +131,41 @@ def test_v2_merge_fallback_dirty_cleanup_success_allows_done_response_R(client, 
     assert body["success"] is True
     assert "dirty guard" not in body["message"].lower()
     assert "Traceback" not in resp.text
+
+
+@pytest.mark.http
+def test_branch_missing_plan_header_fallback_triggers_merge_pending():
+    """HTTP: branch Redis key가 없어도 fallback 후 merge_pending 상태가 runner 목록에 노출된다."""
+    app = FastAPI()
+    app.include_router(runner_router, prefix="/api/v1/dev-runner")
+    client = TestClient(app, raise_server_exceptions=True)
+    runner = {
+        "runner_id": "runner-branch-fallback",
+        "running": False,
+        "plan_file": "docs/plan/post-merge-only.md",
+        "engine": "claude",
+        "start_time": "2026-05-06T00:00:00",
+        "pid": None,
+        "worktree_path": ".worktrees/impl-post-merge-only",
+        "branch": "impl/post-merge-only",
+        "merge_status": "merge_pending",
+        "exit_reason": "completed",
+        "remaining_post_merge_tasks": 7,
+        "merge_evidence_missing": False,
+    }
+
+    with patch(
+        "app.modules.dev_runner.services.executor_service.executor_service.get_all_runners",
+        new_callable=AsyncMock,
+        return_value=[runner],
+    ):
+        resp = client.get("/api/v1/dev-runner/runners")
+
+    assert resp.status_code == 200
+    item = resp.json()[0]
+    assert item["merge_status"] == "merge_pending"
+    assert item["branch"] == "impl/post-merge-only"
+    assert item["remaining_post_merge_tasks"] == 7
 
 
 @pytest.mark.http_live

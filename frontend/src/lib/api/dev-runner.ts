@@ -86,6 +86,8 @@ export interface RunnerListItem {
 	error?: string | null;
 	execution_count?: number | null;
 	display_plan_name?: string | null;
+	remaining_post_merge_tasks?: number | null;
+	merge_evidence_missing?: boolean | null;
 	worktree_exists?: boolean | 'unknown';
 	branch_exists?: boolean | 'unknown';
 	branch_merged_to_main?: boolean | 'unknown';
