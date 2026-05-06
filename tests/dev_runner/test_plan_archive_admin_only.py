@@ -3,6 +3,11 @@ T1: admin-only mutation endpoint 권한 테스트.
 Phase 3B: archive-candidates/queue, archive-candidates/preview 는 admin 전용.
 public app(:8000) 에서 호출 시 404/405 응답 확인.
 """
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 
@@ -53,3 +58,30 @@ def test_admin_app_exposes_queue_endpoint():
     )
     # DB 없어 500이 나도 괜찮음 — 중요한 건 404 가 아니어야 함
     assert resp.status_code != 404, f"admin app 의 queue endpoint 가 404 반환"
+
+
+def _route_presence_for_main_app(app_mode: str, path: str) -> bool:
+    code = (
+        "from app.main import app\n"
+        f"print(any(route.path == {path!r} and 'POST' in getattr(route, 'methods', set()) for route in app.routes))\n"
+    )
+    env = {**os.environ, "APP_MODE": app_mode, "PYTHONIOENCODING": "utf-8"}
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+    return result.stdout.strip().splitlines()[-1] == "True"
+
+
+def test_main_app_admin_mode_exposes_schedule_mutations_but_public_does_not():
+    """운영 서비스가 쓰는 app.main도 APP_MODE=admin에서 admin-only schedule mutation을 등록한다."""
+    path = "/api/v1/plans/records/archive-schedule/resume"
+    assert _route_presence_for_main_app("admin", path) is True
+    assert _route_presence_for_main_app("public", path) is False
