@@ -41,6 +41,84 @@ def _profiles_to_snapshot(selected_profiles: list[dict[str, str]] | None) -> lis
     return snapshot
 
 
+def _target_dedupe_key(
+    *,
+    provider: str,
+    model: str | None = None,
+    profile_key: str | None = None,
+    engine: str | None = None,
+    profile_name: str | None = None,
+) -> str:
+    model_key = (model or "").strip() or "default"
+    if profile_key:
+        return f"profile:{profile_key}:{model_key}"
+    if engine and profile_name:
+        return f"profile:{engine}:{profile_name}:{model_key}"
+    provider_key = (provider or "").strip() or "unknown"
+    return f"profileless:{provider_key}:{model_key}"
+
+
+def _target_label(target: dict[str, Any]) -> str | None:
+    raw = target.get("label")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    model = str(target.get("model") or "").strip()
+    engine = str(target.get("engine") or "").strip()
+    profile_name = str(target.get("profile_name") or "").strip()
+    provider = str(target.get("provider") or "").strip()
+    if engine and profile_name:
+        return f"{engine}/{profile_name}/{model or 'default'}"
+    if provider:
+        return f"{provider}/{model or 'default'}"
+    return None
+
+
+def _target_cli_snapshot(target: dict[str, Any], *, provider: str | None = None, model: str | None = None) -> dict[str, Any]:
+    resolved_provider = provider if provider is not None else target.get("provider")
+    resolved_model = model if model is not None else target.get("model")
+    return {
+        "provider": resolved_provider,
+        "model": resolved_model,
+        "profile_key": target.get("profile_key"),
+        "engine": target.get("engine"),
+        "profile_name": target.get("profile_name"),
+        "label": target.get("label"),
+        "dedupe_key": target.get("dedupe_key"),
+    }
+
+
+def _request_cli_options(request: LLMRequest | None) -> dict[str, Any]:
+    if request is None or not request.cli_options:
+        return {}
+    try:
+        parsed = json.loads(request.cli_options)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _requested_target_from_cli(cli: dict[str, Any]) -> dict[str, Any]:
+    raw = cli.get("requested_target")
+    if isinstance(raw, dict):
+        return raw
+    profile_key = cli.get("profile_key") if isinstance(cli.get("profile_key"), str) else None
+    target_label = cli.get("target_label") if isinstance(cli.get("target_label"), str) else None
+    engine = None
+    profile_name = None
+    cps = cli.get("candidate_profiles")
+    if isinstance(cps, list) and cps:
+        first = cps[0] if isinstance(cps[0], dict) else None
+        if first:
+            engine = str(first.get("engine") or "").strip() or None
+            profile_name = str(first.get("profile_name") or "").strip() or None
+    return {
+        "profile_key": profile_key,
+        "engine": engine,
+        "profile_name": profile_name,
+        "label": target_label,
+    }
+
+
 def _targets_to_snapshot(
     selected_targets: list | None,
     selected_profiles: list[dict[str, str]] | None = None,
@@ -65,17 +143,17 @@ def _targets_to_snapshot(
             if not provider:
                 continue
             model = str(d.get("model") or "").strip()
-            profile_key = d.get("profile_key") or None
+            profile_key = str(d.get("profile_key") or "").strip() or None
             engine = str(d.get("engine") or "").strip() or None
             profile_name = str(d.get("profile_name") or "").strip() or None
-            if profile_key:
-                dk = f"profile:{profile_key}"
-            elif engine and profile_name:
-                dk = f"profile:{engine}:{profile_name}"
-            else:
-                # Allow multiple profile-less targets (e.g. codex + cc-codex) without dedupe collision.
-                dk = f"profileless:{provider}:{model or 'default'}"
-            result.append({
+            dk = _target_dedupe_key(
+                provider=provider,
+                model=model,
+                profile_key=profile_key,
+                engine=engine,
+                profile_name=profile_name,
+            )
+            item = {
                 "provider": provider,
                 "model": model,
                 "profile_key": profile_key,
@@ -83,7 +161,9 @@ def _targets_to_snapshot(
                 "profile_name": profile_name,
                 "label": d.get("label"),
                 "dedupe_key": dk,
-            })
+            }
+            item["label"] = _target_label(item)
+            result.append(item)
         return result
     # legacy: profiles → target-like dicts
     result = []
@@ -91,15 +171,17 @@ def _targets_to_snapshot(
         engine = str(item.get("engine") or "").strip()
         profile_name = str(item.get("profile_name") or item.get("name") or "").strip()
         if engine and profile_name:
-            result.append({
+            item = {
                 "provider": engine,
                 "model": "",
                 "profile_key": None,
                 "engine": engine,
                 "profile_name": profile_name,
                 "label": None,
-                "dedupe_key": f"profile:{engine}:{profile_name}",
-            })
+                "dedupe_key": _target_dedupe_key(provider=engine, model="", engine=engine, profile_name=profile_name),
+            }
+            item["label"] = _target_label(item)
+            result.append(item)
     return result
 
 
@@ -184,6 +266,8 @@ class PlanArchiveExecutionService:
             return {"status_key": "skipped_temp"}
         if self._has_active_job(record.id):
             return {"status_key": "skipped_active_job"}
+        if self._has_active_request(record):
+            return {"status_key": "skipped_active_request"}
 
         content = _read_record_content(record)
         if not content.strip():
@@ -192,6 +276,7 @@ class PlanArchiveExecutionService:
                 trigger_source=trigger_source,
                 status="blocked",
                 selected_profiles=legacy_profiles,
+                profile_count=len(target_snapshot),
                 error_message="EMPTY_PLAN_CONTENT",
             )
             self.db.flush()
@@ -226,6 +311,7 @@ class PlanArchiveExecutionService:
             trigger_source=trigger_source,
             status="queued",
             selected_profiles=legacy_profiles,
+            profile_count=len(target_snapshot),
         )
         self.db.flush()
 
@@ -257,6 +343,8 @@ class PlanArchiveExecutionService:
                 "plan_archive_execution_job_id": job.id,
                 "prompt_policy_id": policy_id,
                 "prompt_policy_version": policy_version,
+                "requested_target": _target_cli_snapshot(target),
+                "effective_target": _target_cli_snapshot(target, provider=t_provider, model=t_model),
             }
             if candidate_key:
                 cli_options["candidate_key"] = candidate_key
@@ -272,8 +360,7 @@ class PlanArchiveExecutionService:
             # Preserve selection identity for observability (UI may render this without parsing raw cli_options).
             if target.get("profile_key") is not None:
                 cli_options["profile_key"] = target.get("profile_key")
-            if target.get("label"):
-                cli_options["target_label"] = target.get("label")
+            cli_options["target_label"] = target.get("label")
 
             request = LLMRequest(
                 caller_type="plan_archive_analyze",
@@ -479,6 +566,7 @@ class PlanArchiveExecutionService:
         trigger_source: str,
         status: str,
         selected_profiles: list[dict[str, str]],
+        profile_count: int | None = None,
         error_message: str | None = None,
     ) -> PlanArchiveExecutionJob:
         now = datetime.now()
@@ -487,7 +575,7 @@ class PlanArchiveExecutionService:
             trigger_source=trigger_source,
             status=status,
             selected_profiles=selected_profiles or None,
-            profile_count=len(selected_profiles),
+            profile_count=len(selected_profiles) if profile_count is None else profile_count,
             error_message=error_message,
             created_at=now,
             updated_at=now,
@@ -507,15 +595,21 @@ class PlanArchiveExecutionService:
             is not None
         )
 
-    def _has_active_request(self, record_id: int, dedupe_key: str | None = None) -> bool:
-        """record_id 기준으로 활성 LLMRequest 존재 여부를 확인한다.
+    def _has_active_request(self, record: PlanRecord | int, dedupe_key: str | None = None) -> bool:
+        """record_id 및 legacy filename_hash 기준으로 활성 LLMRequest 존재 여부를 확인한다.
 
         dedupe_key 가 주어지면 해당 target 에 한정해서 체크한다.
         caller_id 계약: plan_archive_analyze → str(record.id)
         """
+        if isinstance(record, PlanRecord):
+            caller_ids = [str(record.id)]
+            if record.filename_hash:
+                caller_ids.append(record.filename_hash)
+        else:
+            caller_ids = [str(record)]
         q = self.db.query(LLMRequest.id).filter(
             LLMRequest.caller_type == "plan_archive_analyze",
-            LLMRequest.caller_id == str(record_id),
+            LLMRequest.caller_id.in_(caller_ids),
             LLMRequest.status.in_(["pending", "processing"]),
             LLMRequest.deleted_at.is_(None),
         )
@@ -619,6 +713,8 @@ class PlanArchiveExecutionService:
     def _attempt_to_dict(self, attempt: PlanArchiveExecutionAttempt | None) -> dict[str, Any] | None:
         if attempt is None:
             return None
+        cli = _request_cli_options(attempt.request)
+        requested = _requested_target_from_cli(cli)
         return {
             "id": attempt.id,
             "llm_request_id": attempt.llm_request_id,
@@ -627,6 +723,12 @@ class PlanArchiveExecutionService:
             "profile_name": attempt.profile_name,
             "provider": attempt.provider,
             "model": attempt.model,
+            "requested_provider": requested.get("provider") or attempt.provider,
+            "requested_model": requested.get("model") if requested.get("model") is not None else attempt.model,
+            "requested_engine": requested.get("engine"),
+            "requested_profile_name": requested.get("profile_name"),
+            "requested_profile_key": requested.get("profile_key"),
+            "target_label": requested.get("label"),
             "retryable": bool(attempt.retryable),
             "error_message": attempt.error_message,
             "requested_at": attempt.requested_at,
@@ -639,6 +741,12 @@ class PlanArchiveExecutionService:
         job: PlanArchiveExecutionJob,
         attempt: PlanArchiveExecutionAttempt | None,
     ) -> dict[str, Any]:
+        selected_targets = []
+        for item in job.attempts or []:
+            cli = _request_cli_options(item.request)
+            requested = _requested_target_from_cli(cli)
+            if requested:
+                selected_targets.append(requested)
         return {
             "id": job.id,
             "record_id": job.plan_record_id,
@@ -648,6 +756,7 @@ class PlanArchiveExecutionService:
             "trigger_source": job.trigger_source,
             "status": job.status,
             "selected_profiles": job.selected_profiles or [],
+            "selected_targets": selected_targets,
             "profile_count": job.profile_count,
             "latest_request_id": job.latest_request_id,
             "next_available_at": job.next_available_at,

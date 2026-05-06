@@ -12,7 +12,7 @@ GET    /api/v1/plans/events         - 이벤트 목록 (타임라인용)
 GET    /api/v1/plans/records/by-path - file_path로 get_or_create
 """
 import logging
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -132,6 +132,128 @@ def _extract_profile_fields(cli: dict) -> tuple[Optional[str], Optional[str], Op
     return profile_key, engine, profile_name, target_label
 
 
+def _parse_cli_options_text(text: str | None) -> dict[str, Any]:
+    import json as _json_cli
+
+    try:
+        parsed = _json_cli.loads(text) if text else {}
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _archive_target_fields(
+    cli: dict[str, Any],
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    actual_engine: str | None = None,
+    actual_profile_name: str | None = None,
+) -> dict[str, Any]:
+    """Return requested/effective/actual target read-back fields.
+
+    Older requests only have candidate_profiles/profile_key/target_label. Newer
+    requests carry requested_target/effective_target snapshots.
+    """
+    legacy_profile_key, legacy_engine, legacy_profile_name, legacy_target_label = _extract_profile_fields(cli)
+    requested = _dict_or_empty(cli.get("requested_target"))
+    effective = _dict_or_empty(cli.get("effective_target"))
+
+    requested_provider = requested.get("provider") or provider
+    requested_model = requested.get("model") if requested.get("model") is not None else model
+    requested_engine = requested.get("engine") or legacy_engine
+    requested_profile_name = requested.get("profile_name") or legacy_profile_name
+    requested_profile_key = requested.get("profile_key") or legacy_profile_key
+    target_label = requested.get("label") or legacy_target_label
+    effective_provider = effective.get("provider") or provider
+    effective_model = effective.get("model") if effective.get("model") is not None else model
+    requested_target = {
+        "provider": requested_provider,
+        "model": requested_model,
+        "profile_key": requested_profile_key,
+        "engine": requested_engine,
+        "profile_name": requested_profile_name,
+        "label": target_label,
+        "target_label": target_label,
+    }
+    effective_target = {
+        "provider": effective_provider,
+        "model": effective_model,
+        "profile_key": effective.get("profile_key") or requested_profile_key,
+        "engine": effective.get("engine") or requested_engine,
+        "profile_name": effective.get("profile_name") or requested_profile_name,
+        "label": effective.get("label") or target_label,
+        "target_label": effective.get("label") or target_label,
+    }
+    actual_target = {
+        "provider": provider,
+        "model": model,
+        "profile_key": requested_profile_key,
+        "engine": actual_engine or requested_engine,
+        "profile_name": actual_profile_name or requested_profile_name,
+        "label": target_label,
+        "target_label": target_label,
+    }
+    assigned_profile = None
+    if actual_engine or actual_profile_name:
+        assigned_profile = {
+            "provider": actual_engine,
+            "model": model,
+            "profile_key": requested_profile_key,
+            "engine": actual_engine,
+            "profile_name": actual_profile_name,
+        }
+    save_outcome = _dict_or_empty(cli.get("plan_archive_save_outcome"))
+
+    return {
+        "profile_key": requested_profile_key,
+        "engine": requested_engine,
+        "profile_name": requested_profile_name,
+        "target_label": target_label,
+        "requested_provider": requested_provider,
+        "requested_model": requested_model,
+        "requested_engine": requested_engine,
+        "requested_profile_name": requested_profile_name,
+        "requested_profile_key": requested_profile_key,
+        "effective_provider": effective_provider,
+        "effective_model": effective_model,
+        "actual_provider": provider,
+        "actual_model": model,
+        "actual_engine": actual_engine,
+        "actual_profile_name": actual_profile_name,
+        "requested_target": requested_target,
+        "effective_target": effective_target,
+        "actual_target": actual_target,
+        "effective_provider_model": effective_target,
+        "actual_provider_model": actual_target,
+        "assigned_profile": assigned_profile,
+        "save_outcome_status": save_outcome.get("status"),
+        "save_outcome_reason": save_outcome.get("reason"),
+    }
+
+
+def _latest_profile_assignment(db: Session, request_id: int) -> tuple[str | None, str | None]:
+    try:
+        from app.modules.claude_worker.models.llm_request import LLMProfileAssignment
+
+        assignment = (
+            db.query(LLMProfileAssignment)
+            .filter(LLMProfileAssignment.request_id == request_id)
+            .order_by(LLMProfileAssignment.selected_at.desc())
+            .first()
+        )
+        if assignment:
+            return assignment.engine, assignment.profile_name
+    except Exception:
+        db.rollback()
+        return None, None
+    return None, None
+
+
 @router.get("/records/by-path")
 def get_record_by_path(file_path: str, include_claim: bool = False, db: Session = Depends(get_db)):
     """file_path로 레코드 get_or_create (메모 편집 시 진입점).
@@ -224,28 +346,23 @@ def get_archive_schedule_dashboard(db: Session = Depends(get_db)):
     recent_reqs = (
         req_q.order_by(LLMRequest.requested_at.desc()).limit(20).all()
     )
-    import json as _json_recent
-
-    def _parse_cli_opt_recent(r):
-        try:
-            return _json_recent.loads(r.cli_options) if r.cli_options else {}
-        except Exception:
-            return {}
-
     recent_request_rows: list[ArchiveLLMRequestRow] = []
     for r in recent_reqs:
-        cli = _parse_cli_opt_recent(r)
-        pk, eng, pn, tl = _extract_profile_fields(cli)
+        cli = _parse_cli_options_text(r.cli_options)
+        actual_engine, actual_profile_name = _latest_profile_assignment(db, r.id)
         recent_request_rows.append(
             ArchiveLLMRequestRow(
                 id=r.id,
                 status=r.status,
                 provider=r.provider or "",
                 model=r.model or "",
-                profile_key=pk,
-                engine=eng,
-                profile_name=pn,
-                target_label=tl,
+                **_archive_target_fields(
+                    cli,
+                    provider=r.provider,
+                    model=r.model,
+                    actual_engine=actual_engine,
+                    actual_profile_name=actual_profile_name,
+                ),
                 record_id=r.caller_id,
                 failure_category=r.failure_category,
                 dedupe_key=r.dedupe_key,
@@ -290,24 +407,35 @@ def get_archive_schedule_dashboard(db: Session = Depends(get_db)):
         .limit(20)
         .all()
     )
-    recent_attempt_rows = [
-        ArchiveExecutionAttemptRow(
-            id=a.id,
-            job_id=a.job_id,
-            llm_request_id=a.llm_request_id,
-            record_id=a.job.plan_record_id if a.job else None,
-            attempt_index=a.attempt_index,
-            status=a.status,
+    recent_attempt_rows = []
+    for a in recent_attempts:
+        target_fields = _archive_target_fields(
+            _parse_cli_options_text(a.request.cli_options if a.request else None),
             provider=a.provider,
             model=a.model,
-            engine=a.engine,
-            profile_name=a.profile_name,
-            error_message=a.error_message,
-            requested_at=a.requested_at.isoformat() if a.requested_at else None,
-            finished_at=a.finished_at.isoformat() if a.finished_at else None,
+            actual_engine=a.engine,
+            actual_profile_name=a.profile_name,
         )
-        for a in recent_attempts
-    ]
+        target_fields.pop("engine", None)
+        target_fields.pop("profile_name", None)
+        recent_attempt_rows.append(
+            ArchiveExecutionAttemptRow(
+                id=a.id,
+                job_id=a.job_id,
+                llm_request_id=a.llm_request_id,
+                record_id=a.job.plan_record_id if a.job else None,
+                attempt_index=a.attempt_index,
+                status=a.status,
+                provider=a.provider,
+                model=a.model,
+                engine=a.engine,
+                profile_name=a.profile_name,
+                **target_fields,
+                error_message=a.error_message,
+                requested_at=a.requested_at.isoformat() if a.requested_at else None,
+                finished_at=a.finished_at.isoformat() if a.finished_at else None,
+            )
+        )
 
     health_summary = {
         k: v for k, v in health_raw.items()
@@ -366,28 +494,23 @@ def list_archive_llm_requests(
     total = q.count()
     items = q.order_by(LLMRequest.requested_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
-    import json as _json_list
-
-    def _parse_cli_opt(r):
-        try:
-            return _json_list.loads(r.cli_options) if r.cli_options else {}
-        except Exception:
-            return {}
-
     rows: list[ArchiveLLMRequestRow] = []
     for r in items:
-        cli = _parse_cli_opt(r)
-        pk, eng, pn, tl = _extract_profile_fields(cli)
+        cli = _parse_cli_options_text(r.cli_options)
+        actual_engine, actual_profile_name = _latest_profile_assignment(db, r.id)
         rows.append(
             ArchiveLLMRequestRow(
                 id=r.id,
                 status=r.status,
                 provider=r.provider or "",
                 model=r.model or "",
-                profile_key=pk,
-                engine=eng,
-                profile_name=pn,
-                target_label=tl,
+                **_archive_target_fields(
+                    cli,
+                    provider=r.provider,
+                    model=r.model,
+                    actual_engine=actual_engine,
+                    actual_profile_name=actual_profile_name,
+                ),
                 record_id=r.caller_id,
                 candidate_key=cli.get("candidate_key"),
                 source_schedule_run_id=cli.get("source_schedule_run_id"),
@@ -451,22 +574,8 @@ def get_archive_llm_request_detail(request_id: int, db: Session = Depends(get_db
     except (ValueError, TypeError):
         pass
 
-    # profile identity from cli_options (best-effort)
-    import json as _json_cli
-    try:
-        cli = _json_cli.loads(r.cli_options) if r.cli_options else {}
-    except Exception:
-        cli = {}
-    profile_key = cli.get("profile_key") if isinstance(cli.get("profile_key"), str) else None
-    target_label = cli.get("target_label") if isinstance(cli.get("target_label"), str) else None
-    engine = None
-    profile_name = None
-    cps = cli.get("candidate_profiles")
-    if isinstance(cps, list) and cps:
-        first = cps[0] if isinstance(cps[0], dict) else None
-        if first:
-            engine = str(first.get("engine") or "").strip() or None
-            profile_name = str(first.get("profile_name") or "").strip() or None
+    cli = _parse_cli_options_text(r.cli_options)
+    actual_engine, actual_profile_name = _latest_profile_assignment(db, r.id)
 
     # related_record: current DB stored values from PlanRecord
     from app.models.plan_record import PlanRecord as PlanRecordModel, PlanEvent as PlanEventModel
@@ -518,10 +627,13 @@ def get_archive_llm_request_detail(request_id: int, db: Session = Depends(get_db
         status=r.status,
         provider=r.provider or "",
         model=r.model or "",
-        profile_key=profile_key,
-        engine=engine,
-        profile_name=profile_name,
-        target_label=target_label,
+        **_archive_target_fields(
+            cli,
+            provider=r.provider,
+            model=r.model,
+            actual_engine=actual_engine,
+            actual_profile_name=actual_profile_name,
+        ),
         record_id=r.caller_id,
         failure_category=r.failure_category,
         dedupe_key=r.dedupe_key,
@@ -638,8 +750,18 @@ def list_archive_execution_attempts(
     total = q.count()
     items = q.order_by(PlanArchiveExecutionAttempt.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
-    return ArchiveExecutionAttemptListResponse(
-        items=[
+    rows = []
+    for a in items:
+        target_fields = _archive_target_fields(
+            _parse_cli_options_text(a.request.cli_options if a.request else None),
+            provider=a.provider,
+            model=a.model,
+            actual_engine=a.engine,
+            actual_profile_name=a.profile_name,
+        )
+        target_fields.pop("engine", None)
+        target_fields.pop("profile_name", None)
+        rows.append(
             ArchiveExecutionAttemptRow(
                 id=a.id,
                 job_id=a.job_id,
@@ -651,12 +773,15 @@ def list_archive_execution_attempts(
                 model=a.model,
                 engine=a.engine,
                 profile_name=a.profile_name,
+                **target_fields,
                 error_message=a.error_message,
                 requested_at=a.requested_at.isoformat() if a.requested_at else None,
                 finished_at=a.finished_at.isoformat() if a.finished_at else None,
             )
-            for a in items
-        ],
+        )
+
+    return ArchiveExecutionAttemptListResponse(
+        items=rows,
         total=total,
         page=page,
         page_size=page_size,

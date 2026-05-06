@@ -102,10 +102,12 @@ class _IdExpiresAfterCaptureRequest(_FakeRequest):
 
 
 class _ExecuteService:
-    def __init__(self, *, execute_error=None):
+    def __init__(self, *, execute_error=None, execute_result=None):
         self.execute_error = execute_error
+        self.execute_result = execute_result
         self.status_by_id = {}
         self.failed = []
+        self.completed = []
 
     def mark_processing(self, request_id):
         self.status_by_id[request_id] = "processing"
@@ -116,7 +118,13 @@ class _ExecuteService:
     def execute_llm(self, **kwargs):
         if self.execute_error:
             raise self.execute_error
+        if self.execute_result is not None:
+            return self.execute_result
         return {"success": False, "error": "executor failed"}
+
+    def mark_completed(self, request_id, result, raw_response, claude_session_id=None):
+        self.status_by_id[request_id] = "completed"
+        self.completed.append((request_id, result, raw_response, claude_session_id))
 
     def mark_failed(self, request_id, error_message, raw_response=""):
         self.status_by_id[request_id] = "failed"
@@ -164,7 +172,7 @@ async def test_execute_request_profile_claim_db_error_E_marks_failed(monkeypatch
 
         def select_profile(self, provider, model, request):
             return SimpleNamespace(
-                profile=SimpleNamespace(name="profile-a"),
+                profile=SimpleNamespace(name="profile-a", capacity=1),
                 reason=None,
                 next_available_at=None,
                 blocked_counts={},
@@ -174,7 +182,7 @@ async def test_execute_request_profile_claim_db_error_E_marks_failed(monkeypatch
         def __init__(self, session):
             pass
 
-        def claim(self, request_id, engine, profile_name):
+        def claim(self, request_id, engine, profile_name, **kwargs):
             raise RuntimeError("relation llm_profile_assignments does not exist")
 
     import app.modules.claude_worker.services.profile_router as profile_router
@@ -187,6 +195,39 @@ async def test_execute_request_profile_claim_db_error_E_marks_failed(monkeypatch
 
     assert service.status_by_id[15435] == "failed"
     assert "llm_profile_assignments" in service.failed[0][1]
+
+
+@pytest.mark.asyncio
+async def test_plan_archive_stale_save_outcome_R_keeps_request_completed(monkeypatch):
+    monkeypatch.setattr(worker_mod.provider_registry, "get_quota_providers", lambda: [])
+    monkeypatch.setattr(
+        worker_mod,
+        "save_plan_archive_result_outcome",
+        lambda db, request, result: SimpleNamespace(
+            saved=False,
+            status="stale_skipped",
+            reason="newer_completed_result_exists",
+            record_id=42,
+        ),
+    )
+    service = _ExecuteService(
+        execute_result={
+            "success": True,
+            "result": {"category": "old"},
+            "raw_response": '{"category": "old"}',
+            "claude_session_id": "session-stale",
+        }
+    )
+    db = _RollbackTrackingDb()
+    worker = worker_mod.LLMWorker()
+
+    await worker._execute_request(_FakeRequest(caller_type="plan_archive_analyze"), db, service)
+
+    assert service.status_by_id[15435] == "completed"
+    assert service.completed == [
+        (15435, {"category": "old"}, '{"category": "old"}', "session-stale")
+    ]
+    assert service.failed == []
 
 
 def test_execute_request_real_session_rollback_E_marks_failed():

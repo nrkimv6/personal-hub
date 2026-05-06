@@ -12,6 +12,25 @@ export interface SelectedTarget {
 	kind?: 'profile' | 'engine';
 }
 
+export interface ProviderModelProfileReadback {
+	provider?: string | null;
+	model?: string | null;
+	profile_key?: string | null;
+	engine?: string | null;
+	profile_name?: string | null;
+	label?: string | null;
+	target_label?: string | null;
+}
+
+export interface TargetReadbackSource extends ProviderModelProfileReadback {
+	requested_target?: ProviderModelProfileReadback | null;
+	effective_target?: ProviderModelProfileReadback | null;
+	actual_target?: ProviderModelProfileReadback | null;
+	effective_provider_model?: ProviderModelProfileReadback | null;
+	actual_provider_model?: ProviderModelProfileReadback | null;
+	assigned_profile?: ProviderModelProfileReadback | null;
+}
+
 export interface QueueResultToast {
 	queued: number;
 	imported: number;
@@ -57,14 +76,67 @@ export function targetKey(t: SelectedTarget): string {
 	return `profileless:${provider}:${model}`;
 }
 
+export function targetSelectionKey(t: SelectedTarget): string {
+	if (t.profile_key) return `profile:${t.profile_key}`;
+	const engine = (t.engine || t.provider || '').trim();
+	const profileName = (t.profile_name || '').trim();
+	if (engine && profileName) return `profile:${engine}:${profileName}`;
+	const provider = (t.provider || 'unknown').trim() || 'unknown';
+	return `profileless:${provider}`;
+}
+
 export function targetLabel(t: SelectedTarget): string {
+	const structured = providerModelProfileLabel(t);
+	if (structured !== '—') return structured;
 	if (t.label) return t.label;
+	return '—';
+}
+
+export function providerModelProfileLabel(t: ProviderModelProfileReadback | null | undefined): string {
+	if (!t) return '—';
 	const model = (t.model || '').trim() || 'default';
 	if (t.profile_name) {
 		const engine = (t.engine || t.provider || '').trim();
 		return `${engine}/${t.profile_name}/${model}`;
 	}
-	return `${t.provider}/${model}`;
+	if (t.provider) return `${t.provider}/${model}`;
+	return t.label || t.target_label || '—';
+}
+
+function mergeAssignedProfile(
+	base: ProviderModelProfileReadback | null | undefined,
+	assigned: ProviderModelProfileReadback | null | undefined
+): ProviderModelProfileReadback | null {
+	if (!base && !assigned) return null;
+	return {
+		...(base ?? {}),
+		engine: base?.engine ?? assigned?.engine ?? null,
+		profile_name: base?.profile_name ?? assigned?.profile_name ?? null,
+		profile_key: base?.profile_key ?? assigned?.profile_key ?? null,
+	};
+}
+
+export function requestedTargetLabel(source: TargetReadbackSource): string {
+	return providerModelProfileLabel(source.requested_target ?? source);
+}
+
+export function effectiveTargetLabel(source: TargetReadbackSource): string {
+	return providerModelProfileLabel(
+		mergeAssignedProfile(source.effective_provider_model ?? source.effective_target ?? source, source.assigned_profile)
+	);
+}
+
+export function actualTargetLabel(source: TargetReadbackSource): string {
+	return providerModelProfileLabel(
+		mergeAssignedProfile(source.actual_provider_model ?? source.actual_target ?? source, source.assigned_profile)
+	);
+}
+
+export function hasTargetMismatch(source: TargetReadbackSource): boolean {
+	const requested = requestedTargetLabel(source);
+	const effective = effectiveTargetLabel(source);
+	const actual = actualTargetLabel(source);
+	return requested !== '—' && ((effective !== '—' && requested !== effective) || (actual !== '—' && requested !== actual));
 }
 
 function normalizeTarget(raw: unknown): SelectedTarget | null {

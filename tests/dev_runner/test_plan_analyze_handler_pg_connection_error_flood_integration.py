@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import app.modules.claude_worker.services.plan_analyze_handler as _module
 from app.modules.claude_worker.services.plan_analyze_handler import (
     save_plan_archive_result,
+    save_plan_archive_result_outcome,
     _get_scope_overlap_candidates,
     detect_recurrence,
 )
@@ -103,8 +104,12 @@ def test_save_plan_archive_result_pg_error_real_handler_no_traceback():
     handler = _attach_handler(_module.logger)
     try:
         db = _make_db_commit_pg_error()
+        outcome = save_plan_archive_result_outcome(db, _make_request(), {"result": {}, "success": True})
         result = save_plan_archive_result(db, _make_request(), {"result": {}, "success": True})
 
+        assert outcome.saved is False
+        assert outcome.status == "db_error"
+        assert outcome.reason == "connection_error"
         assert result is False
         pg_warnings = [r for r in handler.records
                        if r.levelno == logging.WARNING and "connection error" in r.getMessage()]

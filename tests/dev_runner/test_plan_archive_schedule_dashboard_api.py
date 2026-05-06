@@ -263,6 +263,72 @@ def test_archive_llm_request_detail_R_returns_prompt_result_raw_response_cli_opt
     assert data["retry_count"] == 2
 
 
+def test_archive_llm_request_detail_R_returns_requested_effective_actual_target_readback(
+    public_client, db
+):
+    """detail은 target_label 파싱이 아니라 requested/effective/actual target 구조를 반환한다."""
+    from app.modules.claude_worker.models.llm_request import LLMProfileAssignment, LLMRequest
+    cli_options = {
+        "requested_target": {
+            "provider": "claude",
+            "model": "claude-sonnet-4-5",
+            "profile_key": "claude:work",
+            "engine": "claude",
+            "profile_name": "work",
+            "label": "claude/work/claude-sonnet-4-5",
+        },
+        "effective_target": {
+            "provider": "claude",
+            "model": "claude-sonnet-4-5",
+            "profile_key": "claude:work",
+            "engine": "claude",
+            "profile_name": "work",
+            "label": "claude/work/claude-sonnet-4-5",
+        },
+        "candidate_profiles": [{"engine": "claude", "profile_name": "work"}],
+        "target_label": "claude/work/claude-sonnet-4-5",
+        "plan_archive_save_outcome": {
+            "saved": False,
+            "status": "stale_skipped",
+            "reason": "newer_completed_result_exists",
+        },
+    }
+    req = LLMRequest(
+        caller_type="plan_archive_analyze",
+        caller_id="42",
+        status="completed",
+        provider="claude",
+        model="claude-sonnet-4-5",
+        requested_at=datetime.utcnow(),
+        processed_at=datetime.utcnow(),
+        prompt="test prompt",
+        cli_options=json.dumps(cli_options),
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    db.add(
+        LLMProfileAssignment(
+            request_id=req.id,
+            engine="claude",
+            profile_name="work",
+            selected_at=datetime.utcnow(),
+        )
+    )
+    db.commit()
+
+    resp = public_client.get(f"/api/v1/plans/records/archive-llm-requests/{req.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["requested_target"]["model"] == "claude-sonnet-4-5"
+    assert data["effective_target"]["profile_name"] == "work"
+    assert data["actual_target"]["provider"] == "claude"
+    assert data["actual_target"]["profile_name"] == "work"
+    assert data["assigned_profile"]["profile_name"] == "work"
+    assert data["save_outcome_status"] == "stale_skipped"
+    assert data["save_outcome_reason"] == "newer_completed_result_exists"
+
+
 def test_archive_llm_request_detail_returns_404_for_unknown_id(public_client, db):
     """존재하지 않는 request_id에 대해 404를 반환한다."""
     resp = public_client.get("/api/v1/plans/records/archive-llm-requests/9999999")

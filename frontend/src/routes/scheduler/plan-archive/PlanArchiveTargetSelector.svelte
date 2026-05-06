@@ -7,6 +7,7 @@
 		saveTargets,
 		targetKey,
 		targetLabel,
+		targetSelectionKey,
 		type SelectedTarget,
 	} from './planArchiveOperationsState.js';
 
@@ -27,6 +28,7 @@
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let open = $state(false);
+	let providerModels = $state<Record<string, string[]>>({});
 
 	onMount(() => {
 		const saved = loadSavedTargets();
@@ -44,11 +46,17 @@
 				llmApi.getProviders(),
 				llmApi.listProfiles()
 			]);
+			providerModels = Object.fromEntries(providers.map((p) => [p.key, modelOptions(p)]));
 			const nextTargets = buildTargets(providers, profiles.profiles);
 			if (nextTargets.length > 0) {
-				targets = nextTargets;
-				const selectableKeys = new Set(nextTargets.map((t) => targetKey(t)));
-				const nextSelected = selectedTargets.filter((t) => selectableKeys.has(targetKey(t)));
+				const selectedByKey = new Map(selectedTargets.map((t) => [targetSelectionKey(t), t]));
+				const mergedTargets = nextTargets.map((t) => {
+					const selected = selectedByKey.get(targetSelectionKey(t));
+					return selected?.model ? withModel(t, selected.model) : t;
+				});
+				targets = mergedTargets;
+				const selectableKeys = new Set(mergedTargets.map((t) => targetSelectionKey(t)));
+				const nextSelected = selectedTargets.filter((t) => selectableKeys.has(targetSelectionKey(t)));
 				if (nextSelected.length !== selectedTargets.length) {
 					selectedTargets = nextSelected;
 					saveTargets(nextSelected);
@@ -62,6 +70,27 @@
 		}
 	}
 
+	function modelOptions(provider: ProviderInfo): string[] {
+		const values = [provider.default_model, ...(provider.models || [])]
+			.map((m) => (m || '').trim())
+			.filter(Boolean);
+		return Array.from(new Set(values));
+	}
+
+	function targetModelOptions(t: SelectedTarget): string[] {
+		const options = providerModels[t.provider] ?? [];
+		if (t.model && !options.includes(t.model)) return [t.model, ...options];
+		return options;
+	}
+
+	function withModel(t: SelectedTarget, model: string): SelectedTarget {
+		const next = { ...t, model: model || '' };
+		return {
+			...next,
+			label: targetLabel(next)
+		};
+	}
+
 	function buildTargets(providers: ProviderInfo[], profiles: LLMProfileConfig[]): SelectedTarget[] {
 		const providerByKey = new Map(providers.map((p) => [p.key, p]));
 		const enabledProfiles = (profiles || [])
@@ -70,10 +99,10 @@
 				a.engine.localeCompare(b.engine) ||
 				(a.priority ?? 0) - (b.priority ?? 0) ||
 				a.name.localeCompare(b.name)
-			);
+		);
 		const profileTargets: SelectedTarget[] = enabledProfiles.map((profile) => {
 			const provider = providerByKey.get(profile.engine);
-			const model = provider?.default_model || provider?.models?.[0] || '';
+			const model = provider ? (modelOptions(provider)[0] || '') : '';
 			return {
 				provider: profile.engine,
 				model,
@@ -86,11 +115,11 @@
 		});
 		const engineTargets: SelectedTarget[] = (providers || []).map((provider) => ({
 			provider: provider.key,
-			model: provider.default_model || provider.models?.[0] || '',
+			model: modelOptions(provider)[0] || '',
 			profile_key: null,
 			engine: null,
 			profile_name: null,
-			label: `${provider.key}/${provider.default_model || provider.models?.[0] || 'default'}`,
+			label: `${provider.key}/${modelOptions(provider)[0] || 'default'}`,
 			kind: 'engine'
 		}));
 		const all = [...profileTargets, ...engineTargets];
@@ -107,13 +136,13 @@
 	}
 
 	function isSelected(t: SelectedTarget): boolean {
-		return selectedTargets.some((s) => targetKey(s) === targetKey(t));
+		return selectedTargets.some((s) => targetSelectionKey(s) === targetSelectionKey(t));
 	}
 
 	function toggle(t: SelectedTarget) {
 		let next: SelectedTarget[];
 		if (isSelected(t)) {
-			next = selectedTargets.filter((s) => targetKey(s) !== targetKey(t));
+			next = selectedTargets.filter((s) => targetSelectionKey(s) !== targetSelectionKey(t));
 		} else {
 			next = [...selectedTargets, t];
 		}
@@ -122,8 +151,18 @@
 		onchange?.(next);
 	}
 
+	function changeTargetModel(t: SelectedTarget, model: string) {
+		const nextTarget = withModel(t, model);
+		targets = targets.map((row) => targetSelectionKey(row) === targetSelectionKey(t) ? nextTarget : row);
+		if (isSelected(t)) {
+			selectedTargets = selectedTargets.map((row) => targetSelectionKey(row) === targetSelectionKey(t) ? withModel(row, model) : row);
+			saveTargets(selectedTargets);
+			onchange?.(selectedTargets);
+		}
+	}
+
 	function removeTarget(t: SelectedTarget) {
-		selectedTargets = selectedTargets.filter((s) => targetKey(s) !== targetKey(t));
+		selectedTargets = selectedTargets.filter((s) => targetSelectionKey(s) !== targetSelectionKey(t));
 		saveTargets(selectedTargets);
 		onchange?.(selectedTargets);
 	}
@@ -226,15 +265,31 @@
 						<div class="flex flex-wrap gap-1">
 							{#each groupTargets(k) as t}
 								{@const checked = isSelected(t)}
-								<button
-									type="button"
-									class="rounded border px-2 py-1 text-xs hover:bg-muted {checked ? 'border-primary bg-primary/10' : 'border-border'}"
-									aria-pressed={checked}
-									title={targetLabel(t)}
-									onclick={() => toggle(t)}
-								>
-									{targetLabel(t)}
-								</button>
+								{@const modelChoices = targetModelOptions(t)}
+								<div class="inline-flex items-center overflow-hidden rounded border text-xs {checked ? 'border-primary bg-primary/10' : 'border-border'}">
+									<button
+										type="button"
+										class="px-2 py-1 hover:bg-muted"
+										aria-pressed={checked}
+										title={targetLabel(t)}
+										onclick={() => toggle(t)}
+									>
+										{targetLabel(t)}
+									</button>
+									{#if modelChoices.length > 1}
+										<select
+											class="border-l border-border bg-background px-1 py-1 text-xs"
+											aria-label="{targetLabel(t)} model"
+											value={t.model}
+											onclick={(event) => event.stopPropagation()}
+											onchange={(event) => changeTargetModel(t, (event.currentTarget as HTMLSelectElement).value)}
+										>
+											{#each modelChoices as model}
+												<option value={model}>{model}</option>
+											{/each}
+										</select>
+									{/if}
+								</div>
 							{/each}
 						</div>
 					</div>
