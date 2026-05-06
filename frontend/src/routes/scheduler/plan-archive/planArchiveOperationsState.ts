@@ -6,6 +6,9 @@ export interface SelectedTarget {
 	provider: string;
 	model: string;
 	profile_key?: string | null;
+	engine?: string | null;
+	profile_name?: string | null;
+	label?: string | null;
 }
 
 export interface QueueResultToast {
