@@ -655,9 +655,70 @@ class PlanArchiveSelectedProfile(BaseModel):
     profile_name: str
 
 
+class PlanArchiveExecutionTarget(BaseModel):
+    """provider/model 기반 실행 대상. profile 없는 Codex/GPT도 지원."""
+    provider: str
+    model: str
+    profile_key: Optional[str] = None
+    engine: Optional[str] = None
+    profile_name: Optional[str] = None
+    label: Optional[str] = None
+
+    def dedupe_key(self) -> str:
+        """중복 방지 키. profile-backed: 'profile:{profile_key}', 나머지: 'profileless'."""
+        if self.profile_key:
+            return f"profile:{self.profile_key}"
+        if self.engine and self.profile_name:
+            return f"profile:{self.engine}:{self.profile_name}"
+        return "profileless"
+
+
 class PlanArchiveExecutionRunRequest(BaseModel):
     record_ids: List[int] = Field(default_factory=list)
     selected_profiles: List[PlanArchiveSelectedProfile] = Field(default_factory=list)
+    selected_targets: List[PlanArchiveExecutionTarget] = Field(default_factory=list)
+
+
+class PlanArchiveCandidateQueueRequest(BaseModel):
+    """archive 후보 큐잉 요청. file_only → import 후 큐잉, matched/db_only → 기존 record로 큐잉."""
+    candidate_keys: List[str] = Field(default_factory=list, description="파일 경로 기반 후보 키 목록")
+    record_ids: List[int] = Field(default_factory=list, description="기존 PlanRecord id 목록")
+    selected_targets: List[PlanArchiveExecutionTarget] = Field(default_factory=list)
+    import_file_only: bool = Field(True, description="file_only 후보를 DB로 import한 뒤 큐잉")
+
+
+class PlanArchiveCandidateQueueSkipItem(BaseModel):
+    candidate_key: Optional[str] = None
+    record_id: Optional[int] = None
+    reason: str
+
+
+class PlanArchiveCandidateQueueErrorItem(BaseModel):
+    candidate_key: Optional[str] = None
+    record_id: Optional[int] = None
+    error: str
+
+
+class PlanArchiveCandidateQueueResponse(BaseModel):
+    """archive 후보 큐잉 응답. 4구간 분류: queued / imported / skipped / errors."""
+    queued: int = 0
+    imported: int = 0
+    skipped: List[PlanArchiveCandidateQueueSkipItem] = Field(default_factory=list)
+    errors: List[PlanArchiveCandidateQueueErrorItem] = Field(default_factory=list)
+    job_ids: List[int] = Field(default_factory=list)
+    request_ids: List[int] = Field(default_factory=list)
+
+
+class PlanArchiveCandidatePreviewResponse(BaseModel):
+    """file_only candidate dry-run preview. DB write 없음."""
+    candidate_key: str
+    resolved_path: str
+    filename_hash: str
+    total_bytes: int
+    total_lines: int
+    is_binary: bool
+    raw_content_preview: str  # 앞 8KB
+    not_queueable: Optional[str] = None  # 큐잉 불가 사유 (있으면 preview만 가능)
 
 
 class PlanArchiveExecutionRunResponse(BaseModel):
@@ -837,10 +898,14 @@ class ArchiveCandidateResponse(BaseModel):
     reason: str
     eligible_for_import: bool
     eligible_for_analysis: bool
+    needs_archive_normalization: bool = False
     registered_path: Optional[str] = None
     duplicate_paths: List[str] = []
     file_mtime: Optional[datetime] = None
     file_size: Optional[int] = None
+    attempt_count: int = 0
+    last_attempt_status: Optional[str] = None
+    last_attempt_at: Optional[datetime] = None
     record: Optional[ArchiveCandidateRecordResponse] = None
 
 
@@ -1157,6 +1222,13 @@ __all__ = [
     'ArchiveCandidateSummaryResponse',
     'ArchiveAnalyzeRequest',
     'ArchiveAnalyzeResponse',
+    'PlanArchiveCandidateQueueRequest',
+    'PlanArchiveCandidateQueueResponse',
+    'PlanArchiveCandidateQueueSkipItem',
+    'PlanArchiveCandidateQueueErrorItem',
+    'PlanArchiveCandidatePreviewResponse',
+    'PlanArchiveExecutionTarget',
+    'PlanArchiveExecutionRunRequest',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',

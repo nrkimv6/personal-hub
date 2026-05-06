@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple
 
 from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import IntegrityError as SAIntegrityError
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,67 @@ def _profiles_to_snapshot(selected_profiles: list[dict[str, str]] | None) -> lis
     return snapshot
 
 
+def _targets_to_snapshot(
+    selected_targets: list | None,
+    selected_profiles: list[dict[str, str]] | None = None,
+) -> list[dict]:
+    """selected_targets 와 legacy selected_profiles 를 단일 target snapshot 으로 정규화.
+
+    selected_targets 가 있으면 우선 사용, 없으면 legacy profiles 를 변환한다.
+    각 항목에 dedupe_key 가 계산되어 포함된다.
+    """
+    if selected_targets:
+        result = []
+        for t in selected_targets:
+            if hasattr(t, "model_dump"):
+                d = t.model_dump()
+            elif hasattr(t, "dict"):
+                d = t.dict()
+            elif isinstance(t, dict):
+                d = dict(t)
+            else:
+                continue
+            provider = str(d.get("provider") or "").strip()
+            if not provider:
+                continue
+            model = str(d.get("model") or "").strip()
+            profile_key = d.get("profile_key") or None
+            engine = str(d.get("engine") or "").strip() or None
+            profile_name = str(d.get("profile_name") or "").strip() or None
+            if profile_key:
+                dk = f"profile:{profile_key}"
+            elif engine and profile_name:
+                dk = f"profile:{engine}:{profile_name}"
+            else:
+                dk = "profileless"
+            result.append({
+                "provider": provider,
+                "model": model,
+                "profile_key": profile_key,
+                "engine": engine,
+                "profile_name": profile_name,
+                "label": d.get("label"),
+                "dedupe_key": dk,
+            })
+        return result
+    # legacy: profiles → target-like dicts
+    result = []
+    for item in selected_profiles or []:
+        engine = str(item.get("engine") or "").strip()
+        profile_name = str(item.get("profile_name") or item.get("name") or "").strip()
+        if engine and profile_name:
+            result.append({
+                "provider": engine,
+                "model": "",
+                "profile_key": None,
+                "engine": engine,
+                "profile_name": profile_name,
+                "label": None,
+                "dedupe_key": f"profile:{engine}:{profile_name}",
+            })
+    return result
+
+
 def _read_record_content(record: PlanRecord) -> str:
     if record.raw_content and record.raw_content.strip():
         return record.raw_content
@@ -63,17 +125,18 @@ class PlanArchiveExecutionService:
         records: list[PlanRecord],
         *,
         trigger_source: str,
+        selected_targets: list | None = None,
         selected_profiles: list[dict[str, str]] | None = None,
         requested_by: str = "api",
     ) -> dict[str, Any]:
-        profile_snapshot = _profiles_to_snapshot(selected_profiles)
+        target_snapshot = _targets_to_snapshot(selected_targets, selected_profiles)
         stats = {
             "queued": 0,
             "skipped_empty": 0,
             "skipped_active_request": 0,
             "skipped_active_job": 0,
             "skipped_temp": 0,
-            "profile_count": len(profile_snapshot),
+            "profile_count": len(target_snapshot),
             "job_ids": [],
             "request_ids": [],
         }
@@ -82,7 +145,7 @@ class PlanArchiveExecutionService:
             result = self.enqueue_record(
                 record,
                 trigger_source=trigger_source,
-                selected_profiles=profile_snapshot,
+                selected_targets=target_snapshot,
                 requested_by=requested_by,
                 llm_service=llm_service,
             )
@@ -91,8 +154,8 @@ class PlanArchiveExecutionService:
                 stats[key] += 1
             if result.get("job_id"):
                 stats["job_ids"].append(result["job_id"])
-            if result.get("request_id"):
-                stats["request_ids"].append(result["request_id"])
+            for rid in result.get("request_ids") or ([result["request_id"]] if result.get("request_id") else []):
+                stats["request_ids"].append(rid)
         return stats
 
     def enqueue_record(
@@ -100,17 +163,24 @@ class PlanArchiveExecutionService:
         record: PlanRecord,
         *,
         trigger_source: str,
+        selected_targets: list | None = None,
         selected_profiles: list[dict[str, str]] | None = None,
         requested_by: str = "api",
         llm_service: LLMService | None = None,
     ) -> dict[str, Any]:
-        selected_profiles = _profiles_to_snapshot(selected_profiles)
+        # Normalize: selected_targets takes priority over legacy selected_profiles
+        target_snapshot = _targets_to_snapshot(selected_targets, selected_profiles)
+        # Build legacy profile list for _create_job backward compat
+        legacy_profiles = [
+            {"engine": t["engine"] or t["provider"], "profile_name": t["profile_name"] or ""}
+            for t in target_snapshot
+            if t.get("engine") or t.get("profile_name")
+        ]
+
         if _is_temp_pytest_path(record.file_path):
             return {"status_key": "skipped_temp"}
         if self._has_active_job(record.id):
             return {"status_key": "skipped_active_job"}
-        if self._has_active_request(record.filename_hash):
-            return {"status_key": "skipped_active_request"}
 
         content = _read_record_content(record)
         if not content.strip():
@@ -118,70 +188,130 @@ class PlanArchiveExecutionService:
                 record,
                 trigger_source=trigger_source,
                 status="blocked",
-                selected_profiles=selected_profiles,
+                selected_profiles=legacy_profiles,
                 error_message="EMPTY_PLAN_CONTENT",
             )
             self.db.flush()
             return {"status_key": "skipped_empty", "job_id": job.id}
 
         llm_service = llm_service or LLMService(self.db)
-        provider_hint = selected_profiles[0]["engine"] if selected_profiles else None
-        provider, model = llm_service.resolve_provider_model(
+
+        # Resolve default provider/model from first target (or global default)
+        first_target = target_snapshot[0] if target_snapshot else None
+        provider_hint = (first_target["provider"] if first_target else None) or (
+            legacy_profiles[0]["engine"] if legacy_profiles else None
+        )
+        default_provider, default_model = llm_service.resolve_provider_model(
             caller_type="plan_archive_analyze",
             provider=provider_hint,
-            model=None,
+            model=(first_target["model"] or None) if first_target else None,
         )
+
         prompt, policy_id, policy_version = build_plan_archive_prompt(
             PromptPolicyContext(
                 caller_type="plan_archive_analyze",
-                provider=provider,
-                model=model,
+                provider=default_provider,
+                model=default_model,
                 filename=Path(record.file_path).name,
                 existing_categories=DEFAULT_CATEGORIES,
             ),
             content,
         )
+
         job = self._create_job(
             record,
             trigger_source=trigger_source,
             status="queued",
-            selected_profiles=selected_profiles,
+            selected_profiles=legacy_profiles,
         )
         self.db.flush()
-        cli_options = {
-            "parse_json": True,
-            "plan_archive_execution_job_id": job.id,
-            "prompt_policy_id": policy_id,
-            "prompt_policy_version": policy_version,
+
+        # Determine effective targets for fan-out
+        effective_targets: list[dict] = target_snapshot or [{
+            "provider": default_provider,
+            "model": default_model,
+            "profile_key": None,
+            "engine": None,
+            "profile_name": None,
+            "label": None,
+            "dedupe_key": "profileless",
+        }]
+
+        # contract: caller_id = str(record.id) for plan_archive_analyze
+        caller_id = str(record.id)
+        request_ids: list[int] = []
+        already_queued_count = 0
+
+        for target in effective_targets:
+            dedupe_key = target["dedupe_key"]
+            t_provider, t_model = llm_service.resolve_provider_model(
+                caller_type="plan_archive_analyze",
+                provider=target["provider"] or None,
+                model=target["model"] or None,
+            )
+            cli_options: dict = {
+                "parse_json": True,
+                "plan_archive_execution_job_id": job.id,
+                "prompt_policy_id": policy_id,
+                "prompt_policy_version": policy_version,
+            }
+            candidate_profiles: list = []
+            if target.get("engine") and target.get("profile_name"):
+                candidate_profiles = [{"engine": target["engine"], "profile_name": target["profile_name"]}]
+            elif legacy_profiles:
+                candidate_profiles = legacy_profiles
+            if candidate_profiles:
+                cli_options["candidate_profiles"] = candidate_profiles
+
+            request = LLMRequest(
+                caller_type="plan_archive_analyze",
+                caller_id=caller_id,
+                prompt=prompt,
+                queue_name="utility",
+                requested_by=requested_by,
+                request_source=trigger_source,
+                provider=t_provider,
+                model=t_model,
+                dedupe_key=dedupe_key,
+                cli_options=json.dumps(cli_options, ensure_ascii=False),
+            )
+            self.db.add(request)
+            # Use savepoint so IntegrityError on dedupe doesn't abort the whole transaction
+            sp = self.db.begin_nested()
+            try:
+                self.db.flush()
+                sp.commit()
+            except SAIntegrityError:
+                sp.rollback()
+                already_queued_count += 1
+                continue
+
+            request_ids.append(request.id)
+            if not job.queued_at:
+                job.queued_at = request.requested_at or datetime.now()
+            job.latest_request_id = request.id
+
+            attempt = PlanArchiveExecutionAttempt(
+                job_id=job.id,
+                llm_request_id=request.id,
+                attempt_index=self._next_attempt_index(job.id),
+                status="queued",
+                provider=t_provider,
+                model=t_model,
+                requested_at=request.requested_at,
+            )
+            self.db.add(attempt)
+            self.db.flush()
+
+        if not request_ids:
+            return {"status_key": "skipped_active_request", "job_id": job.id}
+
+        return {
+            "status_key": "queued",
+            "job_id": job.id,
+            "request_id": request_ids[0],
+            "request_ids": request_ids,
         }
-        if selected_profiles:
-            cli_options["candidate_profiles"] = selected_profiles
-        request = LLMRequest(
-            caller_type="plan_archive_analyze",
-            caller_id=record.filename_hash,
-            prompt=prompt,
-            queue_name="utility",
-            requested_by=requested_by,
-            request_source=trigger_source,
-            provider=provider,
-            model=model,
-            cli_options=json.dumps(cli_options, ensure_ascii=False),
-        )
-        self.db.add(request)
-        self.db.flush()
-        job.latest_request_id = request.id
-        job.queued_at = request.requested_at or datetime.now()
-        attempt = PlanArchiveExecutionAttempt(
-            job_id=job.id,
-            llm_request_id=request.id,
-            attempt_index=self._next_attempt_index(job.id),
-            status="queued",
-            provider=provider,
-            model=model,
-            requested_at=request.requested_at,
-        )
-        self.db.add(attempt)
-        return {"status_key": "queued", "job_id": job.id, "request_id": request.id}
 
     def enqueue_unprocessed(
         self,
@@ -363,18 +493,21 @@ class PlanArchiveExecutionService:
             is not None
         )
 
-    def _has_active_request(self, filename_hash: str) -> bool:
-        return (
-            self.db.query(LLMRequest.id)
-            .filter(
-                LLMRequest.caller_type == "plan_archive_analyze",
-                LLMRequest.caller_id == filename_hash,
-                LLMRequest.status.in_(["pending", "processing"]),
-                LLMRequest.deleted_at.is_(None),
-            )
-            .first()
-            is not None
+    def _has_active_request(self, record_id: int, dedupe_key: str | None = None) -> bool:
+        """record_id 기준으로 활성 LLMRequest 존재 여부를 확인한다.
+
+        dedupe_key 가 주어지면 해당 target 에 한정해서 체크한다.
+        caller_id 계약: plan_archive_analyze → str(record.id)
+        """
+        q = self.db.query(LLMRequest.id).filter(
+            LLMRequest.caller_type == "plan_archive_analyze",
+            LLMRequest.caller_id == str(record_id),
+            LLMRequest.status.in_(["pending", "processing"]),
+            LLMRequest.deleted_at.is_(None),
         )
+        if dedupe_key is not None:
+            q = q.filter(LLMRequest.dedupe_key == dedupe_key)
+        return q.first() is not None
 
     def _next_attempt_index(self, job_id: int) -> int:
         value = (

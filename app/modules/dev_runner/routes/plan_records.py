@@ -81,6 +81,9 @@ from app.modules.dev_runner.schemas import (
     ArchiveAnalyzeRequest, ArchiveAnalyzeResponse,
     PlanRecordRelationResponse,
     PlanRecordRelationStatisticsResponse,
+    PlanArchiveCandidateQueueRequest,
+    PlanArchiveCandidateQueueResponse,
+    PlanArchiveCandidatePreviewResponse,
 )
 
 
@@ -102,6 +105,7 @@ class ReanalyzeRequest(BaseModel):
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/plans", tags=["plan-records"])
+router_admin = APIRouter(prefix="/api/v1/plans", tags=["plan-records-admin"])
 _DEFAULT_PLANS_ARCHIVE_DIR = PROJECT_ROOT / ".worktrees" / "plans" / "docs" / "archive"
 
 
@@ -473,10 +477,13 @@ def run_archive_executions(req: PlanArchiveExecutionRunRequest, db: Session = De
             .limit(50)
             .all()
         )
+    selected_targets = [t.model_dump() for t in req.selected_targets] if req.selected_targets else None
+    selected_profiles = [item.model_dump() for item in req.selected_profiles] if req.selected_profiles else None
     result = svc.enqueue_records(
         records,
         trigger_source="manual:plan_archive_analyze",
-        selected_profiles=[item.model_dump() for item in req.selected_profiles],
+        selected_targets=selected_targets,
+        selected_profiles=selected_profiles,
         requested_by="api",
     )
     db.commit()
@@ -525,10 +532,35 @@ def list_archive_execution_history(
 def list_archive_candidates(
     include_temp: bool = False,
     skip: int = 0,
-    limit: int = 200,
+    limit: int = 50,
+    state: Optional[str] = None,
+    q: Optional[str] = None,
+    eligible: Optional[bool] = None,
+    archived_after: Optional[str] = None,
+    archived_before: Optional[str] = None,
+    last_attempt_after: Optional[str] = None,
+    last_attempt_before: Optional[str] = None,
+    attempt_state: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """archive 파일과 DB 레코드를 합친 실행/이관 후보 목록."""
+    """archive 파일과 DB 레코드를 합친 실행/이관 후보 목록.
+
+    limit 기본값 50, 최대 200. 초과 시 422.
+    attempt_state: never_attempted / in_progress / last_failed / last_succeeded
+    """
+    from datetime import datetime as dt
+    if limit > 200:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="limit must be <= 200")
+
+    def _parse_dt(s: Optional[str]):
+        if not s:
+            return None
+        try:
+            return dt.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
     registered = _plan_service.list_registered_paths()
     paths = [{"path": r.path, "type": r.path_type} for r in registered]
     svc = PlanRecordService(db)
@@ -537,6 +569,215 @@ def list_archive_candidates(
         include_temp=include_temp,
         skip=skip,
         limit=limit,
+        state=state,
+        q=q,
+        eligible=eligible,
+        archived_after=_parse_dt(archived_after),
+        archived_before=_parse_dt(archived_before),
+        last_attempt_after=_parse_dt(last_attempt_after),
+        last_attempt_before=_parse_dt(last_attempt_before),
+        attempt_state=attempt_state,
+    )
+
+
+@router_admin.post("/records/archive-candidates/queue", response_model=PlanArchiveCandidateQueueResponse)
+def queue_archive_candidates(
+    req: PlanArchiveCandidateQueueRequest,
+    db: Session = Depends(get_db),
+):
+    """archive 후보를 큐에 등록한다.
+
+    - file_only candidate (candidate_keys): import 후 큐잉
+    - 기존 record (record_ids): 바로 큐잉
+    - db_only: 파일 내용이 없으면 not_queueable 반환
+    admin(:8001) 전용 mutation.
+    """
+    from app.modules.dev_runner.services.plan_archive_execution_service import (
+        PlanArchiveExecutionService,
+    )
+    registered = _plan_service.list_registered_paths()
+    paths = [{"path": r.path, "type": r.path_type} for r in registered]
+    svc = PlanRecordService(db)
+    exec_svc = PlanArchiveExecutionService(db)
+    selected_targets = [t.model_dump() for t in req.selected_targets]
+
+    response = PlanArchiveCandidateQueueResponse()
+
+    # 1. candidate_keys (file_only import → queue)
+    for key in req.candidate_keys:
+        try:
+            import_result = svc.import_archive_candidate(key, paths)
+        except Exception as exc:
+            response.errors.append({"candidate_key": key, "error": str(exc)})
+            continue
+        if import_result.get("not_queueable"):
+            response.skipped.append({
+                "candidate_key": key,
+                "reason": import_result["not_queueable"],
+            })
+            continue
+        record = import_result["record"]
+        if import_result.get("created"):
+            response.imported += 1
+        try:
+            result = exec_svc.enqueue_record(
+                record,
+                trigger_source="api:archive-candidates/queue",
+                selected_targets=selected_targets,
+                requested_by="api",
+            )
+        except Exception as exc:
+            response.errors.append({"candidate_key": key, "error": str(exc)})
+            continue
+        status_key = result.get("status_key")
+        if status_key == "queued":
+            response.queued += 1
+            if result.get("job_id"):
+                response.job_ids.append(result["job_id"])
+            for rid in result.get("request_ids") or ([result["request_id"]] if result.get("request_id") else []):
+                response.request_ids.append(rid)
+        elif status_key in ("skipped_active_request", "skipped_active_job"):
+            response.skipped.append({"candidate_key": key, "reason": status_key})
+        elif status_key == "skipped_empty":
+            response.skipped.append({"candidate_key": key, "reason": "empty_content"})
+        else:
+            response.skipped.append({"candidate_key": key, "reason": status_key or "unknown"})
+
+    # 2. record_ids (기존 record → queue)
+    if req.record_ids:
+        from app.models.plan_record import PlanRecord
+        records = db.query(PlanRecord).filter(PlanRecord.id.in_(req.record_ids)).all()
+        found_ids = {r.id for r in records}
+        for rid in req.record_ids:
+            if rid not in found_ids:
+                response.errors.append({"record_id": rid, "error": "record not found"})
+        for record in records:
+            if not record.raw_content and not record.file_path:
+                response.skipped.append({"record_id": record.id, "reason": "db_only_no_content"})
+                continue
+            try:
+                result = exec_svc.enqueue_record(
+                    record,
+                    trigger_source="api:archive-candidates/queue",
+                    selected_targets=selected_targets,
+                    requested_by="api",
+                )
+            except Exception as exc:
+                response.errors.append({"record_id": record.id, "error": str(exc)})
+                continue
+            status_key = result.get("status_key")
+            if status_key == "queued":
+                response.queued += 1
+                if result.get("job_id"):
+                    response.job_ids.append(result["job_id"])
+                for req_id in result.get("request_ids") or ([result["request_id"]] if result.get("request_id") else []):
+                    response.request_ids.append(req_id)
+            elif status_key in ("skipped_active_request", "skipped_active_job"):
+                response.skipped.append({"record_id": record.id, "reason": status_key})
+            elif status_key == "skipped_empty":
+                response.skipped.append({"record_id": record.id, "reason": "empty_content"})
+            else:
+                response.skipped.append({"record_id": record.id, "reason": status_key or "unknown"})
+
+    db.commit()
+    return response
+
+
+@router_admin.post("/records/archive-candidates/preview", response_model=PlanArchiveCandidatePreviewResponse)
+def preview_archive_candidate(
+    candidate_key: str,
+    db: Session = Depends(get_db),
+):
+    """file_only candidate 의 dry-run preview. DB write 없음.
+
+    앞 8KB raw_content, total_bytes, total_lines, filename_hash, resolved_path, is_binary 반환.
+    admin(:8001) 전용.
+    """
+    from pathlib import Path as _Path
+    import hashlib as _hashlib
+
+    registered = _plan_service.list_registered_paths()
+    paths = [{"path": r.path, "type": r.path_type} for r in registered]
+    svc = PlanRecordService(db)
+
+    try:
+        resolved_info = svc.resolve_archive_candidate_key(candidate_key, paths)
+    except ValueError as exc:
+        return PlanArchiveCandidatePreviewResponse(
+            candidate_key=candidate_key,
+            resolved_path="",
+            filename_hash="",
+            total_bytes=0,
+            total_lines=0,
+            is_binary=False,
+            raw_content_preview="",
+            not_queueable=str(exc),
+        )
+
+    resolved_path = resolved_info["resolved_path"]
+    path = _Path(resolved_path)
+    filename_hash = _hashlib.sha256(path.name.encode("utf-8")).hexdigest()
+
+    try:
+        raw_bytes = path.read_bytes()
+    except OSError as exc:
+        return PlanArchiveCandidatePreviewResponse(
+            candidate_key=candidate_key,
+            resolved_path=resolved_path,
+            filename_hash=filename_hash,
+            total_bytes=0,
+            total_lines=0,
+            is_binary=False,
+            raw_content_preview="",
+            not_queueable=f"파일 읽기 오류: {exc}",
+        )
+
+    total_bytes = len(raw_bytes)
+    # 이진 파일 감지 (앞 8KB에 null byte 존재)
+    sample = raw_bytes[:8192]
+    is_binary = b"\x00" in sample
+
+    if is_binary:
+        return PlanArchiveCandidatePreviewResponse(
+            candidate_key=candidate_key,
+            resolved_path=resolved_path,
+            filename_hash=filename_hash,
+            total_bytes=total_bytes,
+            total_lines=0,
+            is_binary=True,
+            raw_content_preview="",
+            not_queueable="이진 파일은 import/queue 불가",
+        )
+
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return PlanArchiveCandidatePreviewResponse(
+            candidate_key=candidate_key,
+            resolved_path=resolved_path,
+            filename_hash=filename_hash,
+            total_bytes=total_bytes,
+            total_lines=0,
+            is_binary=True,
+            raw_content_preview="",
+            not_queueable="UTF-8 디코딩 실패",
+        )
+
+    total_lines = text.count("\n") + 1
+    preview = text[:8192]
+    not_queueable: Optional[str] = None
+    if total_bytes > PlanRecordService.MAX_IMPORT_BYTES:
+        not_queueable = f"파일 크기 초과 (최대 10MB): {total_bytes} bytes"
+
+    return PlanArchiveCandidatePreviewResponse(
+        candidate_key=candidate_key,
+        resolved_path=resolved_path,
+        filename_hash=filename_hash,
+        total_bytes=total_bytes,
+        total_lines=total_lines,
+        is_binary=False,
+        raw_content_preview=preview,
+        not_queueable=not_queueable,
     )
 
 

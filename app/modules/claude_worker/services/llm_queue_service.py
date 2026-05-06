@@ -18,6 +18,25 @@ logger = logging.getLogger("claude_worker.llm_queue_service")
 # 큐 우선순위 — 앞에 있을수록 먼저 처리
 QUEUE_PRIORITY = ["system", "utility"]
 
+# failure_category 분류 키워드 맵 (순서 중요: 먼저 매칭되는 것 사용)
+_FAILURE_CATEGORY_PATTERNS: list[tuple[str, list[str]]] = [
+    ("quota", ["quota", "rate_limit", "rate limit", "overloaded", "resource_exhausted", "too many requests"]),
+    ("timeout", ["timeout", "timed out", "deadline exceeded", "read timeout"]),
+    ("parse", ["parse", "invalid json", "json decode", "unexpected token", "malformed"]),
+    ("network", ["connection", "network", "refused", "unreachable", "ssl", "eof", "broken pipe"]),
+]
+
+
+def _classify_failure_category(error_message: str | None) -> str:
+    """에러 메시지에서 failure_category 를 분류한다."""
+    if not error_message:
+        return "other"
+    lower = error_message.lower()
+    for category, keywords in _FAILURE_CATEGORY_PATTERNS:
+        if any(kw in lower for kw in keywords):
+            return category
+    return "other"
+
 
 class LLMQueueService:
     """큐 enqueue/dequeue + 상태 변경."""
@@ -216,6 +235,7 @@ class LLMQueueService:
             request.status = "failed"
             request.processed_at = datetime.now()
             request.error_message = error_message
+            request.failure_category = _classify_failure_category(error_message)
             if raw_response:
                 request.raw_response = raw_response
             request.retry_count = (request.retry_count or 0) + 1

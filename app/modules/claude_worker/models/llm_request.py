@@ -73,6 +73,13 @@ class LLMRequest(Base):
     # Soft delete
     deleted_at = Column(DateTime)
 
+    # 실패 분류 (worker가 분류 후 저장) — timeout/quota/parse/network/other
+    failure_category = Column(String(30), nullable=True)
+
+    # 중복 큐잉 방지 키 (plan_archive_analyze에서 사용)
+    # profile-backed: 'profile:{profile_key}', profile-less: 'profileless', 나머지: NULL
+    dedupe_key = Column(String(200), nullable=True)
+
     # 글쓰기 배치 관련
     writing_batch_id = Column(Integer, ForeignKey("writing_batches.id", ondelete="SET NULL"))
     writing_metadata = Column(Text)  # JSON: task_type, source_ids, selected_elements 등
