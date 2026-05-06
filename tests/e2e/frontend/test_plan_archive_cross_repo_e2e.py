@@ -185,9 +185,10 @@ def test_archive_cross_repo_surface_renders_repo_filter_badge_and_warning(archiv
 def test_archive_cross_repo_surface_runs_dry_run_for_selected_record(archive_cross_repo_page: Page):
     page = archive_cross_repo_page
 
-    record_row = page.locator("tbody tr").filter(has_text="2026-05-05-cross.md").first
-    expect(record_row).to_be_visible()
-    record_row.click(force=True)
+    record_cell = page.locator('td[title="docs/archive/2026-05-05-cross.md"]').first
+    expect(record_cell).to_be_visible()
+    record_cell.click()
     expect(page.get_by_text("Cross-repo index")).to_be_visible()
+    expect(page.get_by_text("#42 Plan Archive cross repo")).to_be_visible()
     page.get_by_role("button", name="cross dry-run").click()
     expect(page.get_by_text("repos 2")).to_be_visible()
