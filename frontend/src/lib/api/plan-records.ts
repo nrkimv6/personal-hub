@@ -179,6 +179,8 @@ export interface PlanArchiveAnalyzeResponse {
 	file_path: string | null;
 	elapsed_ms: number;
 	prompt_preview: string | null;
+	prompt_policy_id: string | null;
+	prompt_policy_version: string | null;
 	warnings: string[];
 	error: string | null;
 	saved: boolean;

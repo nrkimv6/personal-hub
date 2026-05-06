@@ -1253,7 +1253,19 @@
                 </label>
                 <label class="grid gap-1">
                   <span class="text-muted-foreground">model</span>
-                  <input class="rounded border border-border bg-background px-2 py-1" bind:value={analyzeModel} />
+                  <input
+                    class="rounded border border-border bg-background px-2 py-1"
+                    list="plan-archive-analyze-models"
+                    placeholder="gpt-5.5 / gemini-3.1-pro-preview / claude-opus-4-6"
+                    bind:value={analyzeModel}
+                  />
+                  <datalist id="plan-archive-analyze-models">
+                    <option value="gpt-5.5"></option>
+                    <option value="gpt-5.2"></option>
+                    <option value="gemini-3.1-pro-preview"></option>
+                    <option value="gemini-3-flash-preview"></option>
+                    <option value="claude-opus-4-6"></option>
+                  </datalist>
                 </label>
                 <label class="grid gap-1">
                   <span class="text-muted-foreground">timeout</span>
@@ -1295,6 +1307,9 @@
                   <div>
                     <span class="font-semibold">{analyzeResult.success ? '성공' : '실패'}</span>
                     <span class="text-muted-foreground"> · {analyzeResult.provider}/{analyzeResult.model} · {analyzeResult.elapsed_ms}ms</span>
+                    {#if analyzeResult.prompt_policy_id}
+                      <span class="text-muted-foreground"> · {analyzeResult.prompt_policy_id}/{analyzeResult.prompt_policy_version}</span>
+                    {/if}
                   </div>
                   <button class="rounded bg-muted px-2 py-1 text-muted-foreground hover:bg-secondary" onclick={copyAnalyzeResult}>복사</button>
                 </div>
@@ -1320,7 +1335,18 @@
                   <div class="rounded bg-muted p-2">
                     <div class="text-muted-foreground">intent / scope</div>
                     <div>{String(analyzeResult.result.intent ?? '-')}</div>
-                    <div class="mt-1 text-muted-foreground">{Array.isArray(analyzeResult.result.scope) ? analyzeResult.result.scope.join(', ') : String(analyzeResult.result.scope ?? '-')}</div>
+                    <div class="mt-2 flex flex-wrap gap-1">
+                      <span class="rounded border border-border bg-background px-2 py-0.5 text-foreground">
+                        trigger: {String(analyzeResult.result.trigger ?? '-')}
+                      </span>
+                      {#if Array.isArray(analyzeResult.result.scope)}
+                        {#each analyzeResult.result.scope as item}
+                          <span class="rounded border border-border bg-background px-2 py-0.5 text-muted-foreground">{String(item)}</span>
+                        {/each}
+                      {:else}
+                        <span class="rounded border border-border bg-background px-2 py-0.5 text-muted-foreground">{String(analyzeResult.result.scope ?? '-')}</span>
+                      {/if}
+                    </div>
                   </div>
                 </div>
                 <pre class="mt-3 max-h-56 overflow-auto rounded bg-muted p-2 text-[11px]">{JSON.stringify(analyzeResult.result, null, 2)}</pre>

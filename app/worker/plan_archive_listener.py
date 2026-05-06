@@ -30,6 +30,11 @@ from app.modules.dev_runner.services.plan_record_service import (
 )
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services.plan_archive_prompt_policy import (
+    DEFAULT_CATEGORIES,
+    PromptPolicyContext,
+    build_plan_archive_prompt,
+)
 from app.modules.dev_runner.services.log_service import REDIS_HOST, REDIS_PORT
 from app.modules.dev_runner.services.sse_helpers import safe_close_pubsub
 
@@ -271,12 +276,17 @@ class PlanArchiveListener(BaseWorker):
                 return
 
             # LLMRequest INSERT
-            prompt = self._build_prompt(filename, file_content=file_content)
             llm_service = LLMService(db)
             provider, model = llm_service.resolve_provider_model(
                 caller_type="plan_archive_analyze",
                 provider=None,
                 model=None,
+            )
+            prompt, policy_id, policy_version = self._build_prompt_with_policy(
+                filename,
+                file_content=file_content,
+                provider=provider,
+                model=model,
             )
             req = LLMRequest(
                 caller_type="plan_archive_analyze",
@@ -293,19 +303,37 @@ class PlanArchiveListener(BaseWorker):
             db.commit()
             logger.info(
                 f"[{self.name}] LLMRequest 등록 완료 "
-                f"(id={req.id}, file={filename})"
+                f"(id={req.id}, file={filename}, policy_id={policy_id}, "
+                f"policy_version={policy_version})"
             )
 
-    def _build_prompt(self, filename: str, file_content: str = "") -> str:
+    def _build_prompt(
+        self,
+        filename: str,
+        file_content: str = "",
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> str:
         """LLM 분석 프롬프트 생성.
 
         Args:
             filename: archive 파일 경로
             file_content: 이미 로드된 파일 내용 (없으면 파일에서 읽기)
+            provider: provider-aware policy를 적용할 때 전달
+            model: model-aware policy를 적용할 때 전달
 
         Returns:
             str: LLM 프롬프트
         """
+        if provider is not None or model is not None:
+            prompt, _policy_id, _policy_version = self._build_prompt_with_policy(
+                filename,
+                file_content=file_content,
+                provider=provider or "claude",
+                model=model or "",
+            )
+            return prompt
+
         from pathlib import Path
         if file_content:
             filename_only = Path(filename).name
@@ -323,6 +351,37 @@ class PlanArchiveListener(BaseWorker):
             build_plan_analyze_prompt,
         )
         return build_plan_analyze_prompt(file_content=file_content, filename=filename_only)
+
+    def _build_prompt_with_policy(
+        self,
+        filename: str,
+        file_content: str = "",
+        provider: str = "claude",
+        model: str = "",
+    ) -> tuple[str, str, str]:
+        """LLM 분석 프롬프트와 policy metadata를 생성."""
+        if file_content:
+            filename_only = Path(filename).name
+        else:
+            try:
+                path = Path(filename)
+                file_content = path.read_text(encoding="utf-8", errors="replace")
+                filename_only = path.name
+            except Exception as e:
+                file_content = ""
+                filename_only = Path(filename).name
+                logger.error(f"[{self.name}] plan 파일 읽기 실패: {filename} ({e})")
+
+        return build_plan_archive_prompt(
+            PromptPolicyContext(
+                caller_type="plan_archive_analyze",
+                provider=provider,
+                model=model,
+                filename=filename_only,
+                existing_categories=DEFAULT_CATEGORIES,
+            ),
+            file_content,
+        )
 
     async def _cleanup(self):
         """종료 시 Redis 연결 해제."""

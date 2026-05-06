@@ -15,6 +15,11 @@ from sqlalchemy.orm import Session
 from app.core.database import is_connection_error
 from app.models.plan_record import PlanRecord
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services.plan_archive_prompt_policy import (
+    DEFAULT_CATEGORIES,
+    PromptPolicyContext,
+    build_plan_archive_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +172,9 @@ def build_plan_analyze_prompt(
     filename: str,
     existing_categories: Optional[List[str]] = None
 ) -> str:
-    """plan archive 분석 프롬프트 생성
+    """plan archive 분석 프롬프트 생성.
+
+    Legacy wrapper for callers that do not yet pass provider/model context.
 
     Args:
         file_content: plan 파일 내용
@@ -177,33 +184,14 @@ def build_plan_analyze_prompt(
     Returns:
         LLM에 전달할 프롬프트 문자열
     """
-    if existing_categories is None:
-        existing_categories = [
-            "naver-booking", "instagram", "google-search", "activity",
-            "claude-worker", "video", "infra", "writing", "common"
-        ]
-
-    categories_str = ", ".join(existing_categories)
-
-    prompt = f"""다음은 개발 프로젝트의 plan 파일입니다. 파일명: {filename}
-
-아래 내용을 분석하여 JSON 형식으로 결과를 반환해주세요.
-
-**파일 내용:**
-{file_content[:3000]}
-
-**출력 JSON 스키마:**
-{{
-  "category": "모듈 카테고리 (다음 중 하나: {categories_str}, 또는 적절한 새 카테고리)",
-  "tags": ["feat", "fix", "refactor", "chore", "docs", "test"] 중 해당하는 것들,
-  "summary": "이 plan의 핵심 내용을 2-3문장으로 요약",
-  "superseded_by": "이 plan을 대체하는 더 최신 plan 파일명 (없으면 null)",
-  "intent": "이 plan이 해결하려는 핵심 문제 (1-2문장)",
-  "trigger": "bug_recurrence|new_feature|refactor|ux_improvement|infra|unknown 중 하나",
-  "scope": ["영향받는 모듈/파일/기능을 배열로 추출, 예: \"naver-booking\", \"plan_service.py\""]
-}}
-
-JSON만 출력하세요. 다른 설명은 불필요합니다."""
+    ctx = PromptPolicyContext(
+        caller_type="plan_archive_analyze",
+        provider="claude",
+        model="",
+        filename=filename,
+        existing_categories=existing_categories or DEFAULT_CATEGORIES,
+    )
+    prompt, _policy_id, _policy_version = build_plan_archive_prompt(ctx, file_content)
     return prompt
 
 def _maybe_flag_guide_staleness(db: Session, file_path: str) -> bool:

@@ -13,8 +13,11 @@ from sqlalchemy.orm import Session
 from app.core.config import PROJECT_ROOT
 from app.models.plan_record import PlanRecord
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services.plan_archive_prompt_policy import (
+    PromptPolicyContext,
+    build_plan_archive_prompt,
+)
 from app.modules.claude_worker.services.plan_analyze_handler import (
-    build_plan_analyze_prompt,
     save_plan_archive_result,
 )
 
@@ -125,6 +128,8 @@ class PlanArchiveManualAnalyzeService:
                 "file_path": record.file_path,
                 "warnings": [input_error],
                 "elapsed_ms": int((time.monotonic() - started) * 1000),
+                "prompt_policy_id": None,
+                "prompt_policy_version": None,
             }
 
         llm_service = LLMService(self.db)
@@ -133,10 +138,15 @@ class PlanArchiveManualAnalyzeService:
             provider=provider,
             model=model,
         )
-        prompt = build_plan_analyze_prompt(
+        prompt, prompt_policy_id, prompt_policy_version = build_plan_archive_prompt(
+            PromptPolicyContext(
+                caller_type="plan_archive_analyze",
+                provider=resolved_provider,
+                model=resolved_model,
+                filename=Path(record.file_path).name,
+                existing_categories=self._existing_categories(),
+            ),
             content,
-            Path(record.file_path).name,
-            self._existing_categories(),
         )
         executor_result = llm_service.execute_llm(
             prompt,
@@ -161,6 +171,8 @@ class PlanArchiveManualAnalyzeService:
             "file_path": record.file_path,
             "elapsed_ms": int((time.monotonic() - started) * 1000),
             "prompt_preview": prompt if include_prompt else None,
+            "prompt_policy_id": prompt_policy_id,
+            "prompt_policy_version": prompt_policy_version,
             "warnings": warnings,
             "saved": False,
             "record_after": None,

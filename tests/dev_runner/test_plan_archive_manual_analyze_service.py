@@ -7,6 +7,7 @@ from uuid import uuid4
 from unittest.mock import patch
 
 from app.models.plan_record import PlanRecord
+from app.modules.claude_worker.services.plan_archive_prompt_policy import PromptPolicyContext
 from app.modules.dev_runner.services.plan_archive_manual_analyze_service import (
     PlanArchiveManualAnalyzeService,
 )
@@ -193,3 +194,73 @@ def test_apply_save_exception_returns_save_error(test_db_session):
     assert result["success"] is True
     assert result["saved"] is False
     assert "save failed" in result["save_error"]
+
+
+def test_analyze_passes_resolved_provider_model_to_policy_builder(test_db_session):
+    """R: resolved provider/model are passed into PromptPolicyContext."""
+    record = _add_record(test_db_session, raw_content="# Manual\ncontent")
+    captured: dict[str, PromptPolicyContext] = {}
+
+    def fake_build_prompt(ctx: PromptPolicyContext, file_content: str):
+        captured["ctx"] = ctx
+        captured["file_content"] = file_content
+        return "PROMPT", "plan_archive.gemini.pro_preview", "test-version"
+
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.LLMService.resolve_provider_model",
+        return_value=("gemini", "gemini-3.1-pro-preview"),
+    ), patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.build_plan_archive_prompt",
+        side_effect=fake_build_prompt,
+    ), patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.LLMService.execute_llm",
+        return_value={
+            "success": True,
+            "parsed": {
+                "category": "infra",
+                "tags": ["fix"],
+                "summary": "summary",
+                "superseded_by": None,
+                "intent": "intent",
+                "trigger": "bug_recurrence",
+                "scope": ["app/example.py"],
+            },
+            "raw_response": "{}",
+        },
+    ):
+        result = PlanArchiveManualAnalyzeService(test_db_session).analyze(record.id, mode="preview")
+
+    assert result["success"] is True
+    assert captured["ctx"].provider == "gemini"
+    assert captured["ctx"].model == "gemini-3.1-pro-preview"
+    assert captured["file_content"] == "# Manual\ncontent"
+
+
+def test_analyze_response_includes_prompt_policy_metadata(test_db_session):
+    """R: manual preview response exposes prompt policy metadata."""
+    record = _add_record(test_db_session, raw_content="# Manual\ncontent")
+
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.LLMService.resolve_provider_model",
+        return_value=("codex", "gpt-5.5"),
+    ), patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.LLMService.execute_llm",
+        return_value={
+            "success": True,
+            "parsed": {
+                "category": "infra",
+                "tags": ["fix"],
+                "summary": "summary",
+                "superseded_by": None,
+                "intent": "intent",
+                "trigger": "bug_recurrence",
+                "scope": ["app/example.py"],
+            },
+            "raw_response": "{}",
+        },
+    ):
+        result = PlanArchiveManualAnalyzeService(test_db_session).analyze(record.id, mode="preview")
+
+    assert result["success"] is True
+    assert result["prompt_policy_id"] == "plan_archive.codex.default"
+    assert result["prompt_policy_version"]

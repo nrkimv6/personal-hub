@@ -11,7 +11,11 @@ from app.models import TaskSchedule
 from app.models.plan_record import PlanRecord
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.llm_service import LLMService
-from app.modules.claude_worker.services.plan_analyze_handler import build_plan_analyze_prompt
+from app.modules.claude_worker.services.plan_archive_prompt_policy import (
+    DEFAULT_CATEGORIES,
+    PromptPolicyContext,
+    build_plan_archive_prompt,
+)
 from app.modules.dev_runner.services.plan_record_service import _is_temp_pytest_path
 from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
@@ -166,9 +170,15 @@ class PlanArchiveScheduler(ScheduleHandler):
                     logger.warning("[scheduler] plan 내용 없음 — LLMRequest 생성 스킵: %s", record.file_path)
                     continue
 
-                prompt = build_plan_analyze_prompt(
-                    file_content=file_content,
-                    filename=Path(record.file_path).name,
+                prompt, policy_id, policy_version = build_plan_archive_prompt(
+                    PromptPolicyContext(
+                        caller_type="plan_archive_analyze",
+                        provider=provider,
+                        model=model,
+                        filename=Path(record.file_path).name,
+                        existing_categories=DEFAULT_CATEGORIES,
+                    ),
+                    file_content,
                 )
                 llm_request = LLMRequest(
                     caller_type="plan_archive_analyze",
@@ -181,6 +191,12 @@ class PlanArchiveScheduler(ScheduleHandler):
                 )
                 db.add(llm_request)
                 inserted += 1
+                logger.info(
+                    "[scheduler] LLMRequest 등록 준비: record_id=%s policy_id=%s policy_version=%s",
+                    record.id,
+                    policy_id,
+                    policy_version,
+                )
 
             if inserted > 0:
                 db.commit()

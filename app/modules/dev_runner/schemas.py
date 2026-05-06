@@ -572,6 +572,8 @@ class PlanArchiveAnalyzeResponse(BaseModel):
     file_path: Optional[str] = None
     elapsed_ms: int = 0
     prompt_preview: Optional[str] = None
+    prompt_policy_id: Optional[str] = None
+    prompt_policy_version: Optional[str] = None
     warnings: list[str] = Field(default_factory=list)
     error: Optional[str] = None
     saved: bool = False
