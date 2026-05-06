@@ -435,8 +435,8 @@ def test_plan_archive_history_distinguishes_failed_from_stale_save_skip(page: Pa
     page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
     page.get_by_role("button", name="이력").click()
 
-    expect(page.get_by_text("failed", exact=True)).to_be_visible()
-    expect(page.get_by_text("stale_skipped", exact=True)).to_be_visible()
+    expect(page.get_by_role("cell", name="failed", exact=True)).to_be_visible()
+    expect(page.get_by_role("cell", name="stale_skipped", exact=True)).to_be_visible()
     expect(page.get_by_text("Save result failed for plan_archive_analyze")).to_be_visible()
     expect(page.get_by_text("newer_completed_result_exists")).to_be_visible()
     assert page.locator("tr").filter(has_text="stale_skipped").filter(has_text="failed").count() == 0
