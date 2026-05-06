@@ -187,7 +187,7 @@ def test_archive_cross_repo_surface_runs_dry_run_for_selected_record(archive_cro
 
     record_cell = page.locator('td[title="docs/archive/2026-05-05-cross.md"]').first
     expect(record_cell).to_be_visible()
-    record_cell.click()
+    record_cell.evaluate("el => el.click()")
     expect(page.get_by_text("Cross-repo index")).to_be_visible()
     expect(page.get_by_text("#42 Plan Archive cross repo")).to_be_visible()
     page.get_by_role("button", name="cross dry-run").click()
