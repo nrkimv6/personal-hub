@@ -15,6 +15,9 @@ def test_plan_archive_target_selector_uses_profile_backed_targets():
     assert "profile_name: profile.name" in source
     assert "profile_key: `${profile.engine}:${profile.name}`" in source
     assert "label: `${profile.engine}/${profile.name}/" in source
+    assert "profiledEngines" not in source
+    assert "전체 선택" in source
+    assert "aria-expanded" in source
 
 
 def test_plan_archive_selected_target_contract_includes_profile_identity():
@@ -23,3 +26,7 @@ def test_plan_archive_selected_target_contract_includes_profile_identity():
     assert "engine?: string | null;" in source
     assert "profile_name?: string | null;" in source
     assert "label?: string | null;" in source
+    assert "function targetKey" in source
+    assert "profileless:" in source
+    assert "formatRunBacklogResult" in source
+    assert "formatSyncExecutionsResult" in source
