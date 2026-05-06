@@ -160,6 +160,11 @@ export interface PlanArchiveHealth {
 		required_tables: string[];
 		missing_tables: string[];
 	};
+	execution_db_readiness?: {
+		ok: boolean;
+		required_tables: string[];
+		missing_tables: string[];
+	};
 }
 
 export interface PlanArchiveRetrievalQuery {
