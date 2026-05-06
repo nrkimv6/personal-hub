@@ -677,12 +677,18 @@ class PlanArchiveExecutionTarget(BaseModel):
     label: Optional[str] = None
 
     def dedupe_key(self) -> str:
-        """중복 방지 키. profile-backed: 'profile:{profile_key}', 나머지: 'profileless'."""
+        """중복 방지 키.
+
+        - profile-backed: 'profile:{profile_key}' 또는 'profile:{engine}:{profile_name}'
+        - profile-less: 'profileless:{provider}:{model|default}'
+        """
         if self.profile_key:
             return f"profile:{self.profile_key}"
         if self.engine and self.profile_name:
             return f"profile:{self.engine}:{self.profile_name}"
-        return "profileless"
+        provider = (self.provider or "").strip() or "unknown"
+        model = (self.model or "").strip() or "default"
+        return f"profileless:{provider}:{model}"
 
 
 class PlanArchiveExecutionRunRequest(BaseModel):
@@ -1212,6 +1218,10 @@ class ArchiveLLMRequestRow(BaseModel):
     status: str
     provider: str = ""
     model: str = ""
+    profile_key: Optional[str] = None
+    engine: Optional[str] = None
+    profile_name: Optional[str] = None
+    target_label: Optional[str] = None
     record_id: Optional[str] = None
     candidate_key: Optional[str] = None
     source_schedule_run_id: Optional[int] = None

@@ -16,6 +16,13 @@
 	const schedulePager = createPagePagination(20);
 	const attemptPager = createPagePagination(20);
 
+	function attemptTargetText(a: ArchiveExecutionAttemptRow): string {
+		const model = a.model ?? 'default';
+		if (a.engine && a.profile_name) return `${a.engine}/${a.profile_name}/${model}`;
+		if (a.provider) return `${a.provider}/${model}`;
+		return '—';
+	}
+
 	async function loadScheduleRuns() {
 		loadingSchedule = true;
 		errorSchedule = null;
@@ -151,7 +158,7 @@
 					<tr class="border-b border-border text-left text-muted-foreground">
 						<th class="px-2 py-1">ID</th>
 						<th class="px-2 py-1">상태</th>
-						<th class="px-2 py-1">provider/model</th>
+						<th class="px-2 py-1">target</th>
 						<th class="px-2 py-1">record</th>
 						<th class="px-2 py-1">시작</th>
 						<th class="px-2 py-1">오류</th>
@@ -164,7 +171,7 @@
 							<td class="px-2 py-1">
 								<span class="rounded-full px-1.5 py-0.5 {a.status === 'completed' ? 'bg-green-100 text-green-700' : a.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-muted'}">{a.status}</span>
 							</td>
-							<td class="px-2 py-1">{a.provider ?? '—'}/{a.model ?? '—'}</td>
+							<td class="px-2 py-1" title={attemptTargetText(a)}>{attemptTargetText(a)}</td>
 							<td class="px-2 py-1">{a.record_id ?? '—'}</td>
 							<td class="px-2 py-1 whitespace-nowrap">{a.requested_at?.slice(0, 16) ?? '—'}</td>
 							<td class="px-2 py-1">{a.error_message?.slice(0, 40) ?? '—'}</td>

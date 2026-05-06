@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { RefreshCw } from 'lucide-svelte';
+	import { RefreshCw, Play, RotateCw } from 'lucide-svelte';
 	import {
 		PlanRecordsRequestError,
 		archiveScheduleApi,
@@ -14,7 +14,7 @@
 	import PlanArchiveHistoryTable from './PlanArchiveHistoryTable.svelte';
 	import PlanArchiveRequestDetailModal from './PlanArchiveRequestDetailModal.svelte';
 	import type { SelectedTarget } from './planArchiveOperationsState.js';
-	import { formatQueueResult } from './planArchiveOperationsState.js';
+	import { formatQueueResult, formatRunBacklogResult, formatSyncExecutionsResult } from './planArchiveOperationsState.js';
 
 	type TabId = 'candidates' | 'queue' | 'history';
 
@@ -27,6 +27,8 @@
 	let selectedRequest = $state<ArchiveLLMRequestDetail | null>(null);
 	let toastMessage = $state<string | null>(null);
 	let pausing = $state(false);
+	let runningBacklog = $state(false);
+	let syncingExecutions = $state(false);
 
 	// polling state
 	let pollFailCount = $state(0);
@@ -121,6 +123,34 @@
 		}
 	}
 
+	async function handleRunBacklog() {
+		if (runningBacklog || selectedTargets.length === 0) return;
+		runningBacklog = true;
+		try {
+			const result = await archiveScheduleApi.runArchiveExecutions({ selected_targets: selectedTargets });
+			showToast(formatRunBacklogResult(result));
+			await fetchDashboard();
+		} catch (e) {
+			showToast(e instanceof Error ? e.message : 'backlog 실행 실패', true);
+		} finally {
+			runningBacklog = false;
+		}
+	}
+
+	async function handleSyncExecutions() {
+		if (syncingExecutions) return;
+		syncingExecutions = true;
+		try {
+			const result = await archiveScheduleApi.syncArchiveExecutions();
+			showToast(formatSyncExecutionsResult(result));
+			await fetchDashboard();
+		} catch (e) {
+			showToast(e instanceof Error ? e.message : 'sync 실패', true);
+		} finally {
+			syncingExecutions = false;
+		}
+	}
+
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
 	function showToast(msg: string, _isError = false) {
 		toastMessage = msg;
@@ -164,7 +194,27 @@
 	/>
 
 	<!-- Target selector -->
-	<PlanArchiveTargetSelector bind:selectedTargets />
+	<div class="flex flex-col gap-2">
+		<PlanArchiveTargetSelector bind:selectedTargets />
+		<div class="flex flex-wrap items-center gap-2">
+			<button
+				class="inline-flex items-center gap-1 rounded border border-border px-3 py-1 text-xs hover:bg-muted disabled:opacity-50"
+				onclick={handleRunBacklog}
+				disabled={runningBacklog || selectedTargets.length === 0}
+				title={selectedTargets.length === 0 ? '분석 target을 1개 이상 선택하세요' : 'Backlog 실행'}
+			>
+				<Play class="h-3 w-3 {runningBacklog ? 'animate-pulse' : ''}" />Backlog 실행
+			</button>
+			<button
+				class="inline-flex items-center gap-1 rounded border border-border px-3 py-1 text-xs hover:bg-muted disabled:opacity-50"
+				onclick={handleSyncExecutions}
+				disabled={syncingExecutions}
+				title="실행 상태 동기화"
+			>
+				<RotateCw class="h-3 w-3 {syncingExecutions ? 'animate-spin' : ''}" />Sync
+			</button>
+		</div>
+	</div>
 
 	<!-- Tabs -->
 	<div class="flex border-b border-border">

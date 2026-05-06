@@ -27,6 +27,13 @@
 		try { return JSON.parse(s); } catch { return null; }
 	}
 
+	function targetText(req: ArchiveLLMRequestDetail): string {
+		if (req.target_label) return req.target_label;
+		const model = req.model || 'default';
+		if (req.engine && req.profile_name) return `${req.engine}/${req.profile_name}/${model}`;
+		return `${req.provider}/${model}`;
+	}
+
 	const parsedResult = $derived(parseJson(request?.result ?? null));
 </script>
 
@@ -49,7 +56,7 @@
 				<!-- Meta -->
 				<div class="grid grid-cols-2 gap-2 rounded bg-muted/40 p-3 text-xs">
 					<div><span class="text-muted-foreground">상태</span> <span class="font-medium">{request.status}</span></div>
-					<div><span class="text-muted-foreground">provider</span> <span class="font-medium">{request.provider}/{request.model}</span></div>
+					<div><span class="text-muted-foreground">target</span> <span class="font-medium">{targetText(request)}</span></div>
 					<div><span class="text-muted-foreground">retry</span> <span>{request.retry_count}</span></div>
 					{#if request.failure_category}
 						<div><span class="text-muted-foreground">실패 유형</span> <span class="text-destructive">{request.failure_category}</span></div>
@@ -145,7 +152,7 @@
 							target="_blank"
 							rel="noopener"
 							class="text-primary underline hover:no-underline"
-						>Archive 탭에서 재분析</a>
+						>Archive 탭에서 재분석</a>
 					</div>
 				{/if}
 
