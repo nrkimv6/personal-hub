@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import json
+import logging
 from typing import Optional
 
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.modules.claude_worker.models.llm_request import LLMRequestProfileClaim
@@ -16,6 +18,8 @@ from app.modules.claude_worker.services.profile_store import LLMProfile, get_sel
 from app.modules.claude_worker.services.repositories import LLMRequestRepository, LLMWorkerRepository
 from app.modules.claude_worker.services.provider_registry import get_provider
 from app.modules.claude_worker.services.schedule_profile_policy_service import ScheduleProfilePolicyService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,17 +71,37 @@ class LLMProfileRouter:
         policy_count = 0
         policy_next_times: list[datetime] = []
         for profile in enabled:
-            if self.quota.get_profile_quota_pause(engine, profile.name):
-                paused_count += 1
-                continue
-            if self._active_count(engine, profile.name) >= max(1, int(profile.capacity or 1)):
-                policy_count += 1
-                continue
-            policy_decision = self.policy.decide_for_request(
-                request=request,
-                engine=engine,
-                profile_name=profile.name,
-            )
+            try:
+                if self.quota.get_profile_quota_pause(engine, profile.name):
+                    paused_count += 1
+                    continue
+                if self._active_count(engine, profile.name) >= max(1, int(profile.capacity or 1)):
+                    policy_count += 1
+                    continue
+                policy_decision = self.policy.decide_for_request(
+                    request=request,
+                    engine=engine,
+                    profile_name=profile.name,
+                )
+            except (OperationalError, ProgrammingError) as exc:
+                self.db.rollback()
+                missing_table = _extract_missing_table_name(exc)
+                caller_type = getattr(request, "caller_type", None)
+                logger.error(
+                    "[PROFILE-ROUTER-READINESS] profile routing table access failed: "
+                    "caller_type=%s engine=%s profile=%s missing_table=%s error=%s",
+                    caller_type,
+                    engine,
+                    profile.name,
+                    missing_table,
+                    exc,
+                )
+                return ProfileRouteDecision(
+                    None,
+                    "profile_readiness_table_missing",
+                    None,
+                    {"readiness": 1},
+                )
             if not policy_decision.allowed:
                 policy_count += 1
                 if policy_decision.next_available_at is not None:
@@ -137,3 +161,15 @@ class LLMProfileRouter:
             if isinstance(item, dict) and str(item.get("engine") or "").strip() == engine
         }
         return {name for name in names if name}
+
+
+def _extract_missing_table_name(exc: Exception) -> str | None:
+    message = str(getattr(exc, "orig", exc))
+    for marker in ('relation "', 'no such table: '):
+        if marker not in message:
+            continue
+        tail = message.split(marker, 1)[1]
+        if marker == 'relation "':
+            return tail.split('"', 1)[0]
+        return tail.split()[0].strip('"')
+    return None

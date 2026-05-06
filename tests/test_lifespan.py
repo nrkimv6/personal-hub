@@ -6,6 +6,7 @@ TESTING=1 환경변수 설정 시 lifespan 초기화가 스킵되는지 검증.
 import os
 import asyncio
 import pytest
+from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 
@@ -78,6 +79,38 @@ class TestCleanupApiStaleResources:
             await lifespan_module.cleanup_api_stale_resources()
 
         assert calls == [None]
+
+
+class TestStartupReadiness:
+
+    @pytest.mark.asyncio
+    async def test_non_testing_startup_calls_execution_readiness(self, monkeypatch):
+        """startup은 TESTING이 아닐 때 ORM bootstrap/readiness gate를 먼저 호출한다."""
+        import app.lifespan as lifespan_module
+
+        app = SimpleNamespace(state=SimpleNamespace())
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.setattr(lifespan_module.settings, "HEALTH_MONITOR_ENABLED", False)
+
+        with patch("app.lifespan.ensure_bootstrap_schema_ready", return_value={"ok": True, "required_tables": []}) as readiness, \
+             patch("app.lifespan.init_extra_tables") as init_extra, \
+             patch("app.lifespan.check_schema_drift", return_value=0), \
+             patch("app.lifespan.sync_serial_sequences", return_value=0), \
+             patch("app.lifespan.cleanup_api_stale_resources", new_callable=AsyncMock), \
+             patch("app.core.death_log.record_start"), \
+             patch("app.modules.system.services.system_cache_collector.SystemCacheCollector") as system_collector, \
+             patch("app.shared.redis.cleanup_scheduler.RedisCleanupScheduler") as redis_cleanup, \
+             patch("redis.Redis") as redis_client:
+            system_collector.return_value.run_collector_loop = AsyncMock()
+            redis_cleanup.return_value.run_cleanup_loop = AsyncMock()
+            redis_client.return_value.ping.return_value = True
+            redis_client.return_value.client_list.return_value = []
+
+            async with lifespan_module.lifespan(app):
+                pass
+
+        readiness.assert_called_once()
+        init_extra.assert_called_once()
 
 
 class TestClientNoPoolExhaustion:

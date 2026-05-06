@@ -22,6 +22,11 @@ BOOTSTRAP_TABLES = [
     "writing_batches",
     "llm_requests",
     "llm_worker_status",
+    "llm_request_profile_claims",
+    "llm_profile_assignments",
+    "llm_schedule_profile_policies",
+    "plan_archive_execution_jobs",
+    "plan_archive_execution_attempts",
 ]
 
 
@@ -51,7 +56,15 @@ def test_reopen_same_sqlite_file_repeats_bootstrap_without_setup_error(tmp_path)
         session.commit()
 
         tables = set(inspect(engine).get_table_names())
-        assert {"notes", "git_repos", "git_operation_logs", "llm_requests", "writing_batches"}.issubset(tables), (
+        assert {
+            "notes",
+            "git_repos",
+            "git_operation_logs",
+            "llm_requests",
+            "writing_batches",
+            "llm_schedule_profile_policies",
+            "plan_archive_execution_jobs",
+        }.issubset(tables), (
             "notes only fix regression: repeated bootstrap must still create git_repos/git_operation_logs and llm tables"
         )
     finally:
