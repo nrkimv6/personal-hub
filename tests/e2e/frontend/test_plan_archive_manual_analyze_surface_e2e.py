@@ -111,6 +111,16 @@ def _install_archive_routes(page: Page) -> dict[str, int]:
                     "latest_failed_request": None,
                     "oldest_unprocessed_at": None,
                     "plan_archive_schedule": None,
+                    "retrieval_db_readiness": {
+                        "ok": True,
+                        "required_tables": [
+                            "plan_record_chunks",
+                            "plan_record_file_refs",
+                            "plan_record_relations",
+                            "plan_record_search_runs",
+                        ],
+                        "missing_tables": [],
+                    },
                 },
             )
             return
