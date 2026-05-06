@@ -106,3 +106,49 @@ def test_metrics_semantic_cluster_filter_right():
     finally:
         db.close()
         engine.dispose()
+
+
+def test_cross_repo_metrics_right_counts_repo_filter_and_missing_sync():
+    db, engine = _make_session()
+    try:
+        record = PlanRecord(
+            filename_hash="hash-xrepo",
+            file_path="docs/archive/2026-01-01-xrepo.md",
+            category="infra",
+            archived_at=datetime(2026, 1, 1),
+            status="archived",
+        )
+        db.add(record)
+        db.flush()
+        db.add_all(
+            [
+                PlanRecordFileRef(
+                    plan_record_id=record.id,
+                    source_type="mentioned_in_plan",
+                    repo_key="monitor-page",
+                    path="app/a.py",
+                    module="app",
+                ),
+                PlanRecordFileRef(
+                    plan_record_id=record.id,
+                    source_type="git_changed",
+                    repo_key="wtools",
+                    path="common/skills/demo/SKILL.md",
+                    module="common/skills",
+                ),
+            ]
+        )
+        db.flush()
+
+        all_result = PlanArchiveMetricsService(db).calculate(RetrievalQuery(category="infra"))
+        assert all_result["repo_counts"] == {"monitor-page": 1, "wtools": 1}
+        assert all_result["cross_repo_plan_count"] == 1
+        assert all_result["multi_repo_plan_count"] == 1
+        assert all_result["downstream_sync_missing_candidates"][0]["repo_key"] == "wtools"
+
+        wtools_result = PlanArchiveMetricsService(db).calculate(RetrievalQuery(category="infra", repo_key="wtools"))
+        assert wtools_result["repo_counts"] == {"wtools": 1}
+        assert wtools_result["top_file_refs"][0]["repo_key"] == "wtools"
+    finally:
+        db.close()
+        engine.dispose()

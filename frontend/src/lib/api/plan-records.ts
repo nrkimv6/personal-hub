@@ -90,7 +90,9 @@ export interface PlanArchiveRetrievalQuery {
 	intent?: string;
 	scope?: string;
 	path?: string;
+	repo_key?: string;
 	relation_type?: string;
+	semantic_cluster_id?: string;
 	limit?: number;
 }
 
@@ -107,6 +109,7 @@ export interface PlanArchiveFileRefHit {
 	id: number;
 	path: string;
 	source_type: string;
+	repo_key?: string;
 	module?: string;
 	commit_sha?: string;
 	exists_at_index?: boolean;
@@ -137,6 +140,7 @@ export interface PlanArchiveMetricsResponse {
 		count: number;
 		mentioned_count: number;
 		changed_count: number;
+		repo_key?: string | null;
 	}>;
 	missing_file_candidates: Array<{
 		module: string;
@@ -145,6 +149,14 @@ export interface PlanArchiveMetricsResponse {
 	}>;
 	relation_counts: Record<string, number>;
 	chain_depth_max: number;
+	repo_counts: Record<string, number>;
+	cross_repo_plan_count: number;
+	multi_repo_plan_count: number;
+	downstream_sync_missing_candidates: Array<{
+		repo_key: string;
+		path: string;
+		count: number;
+	}>;
 }
 
 export interface PlanArchiveIndexRequest {
@@ -161,6 +173,22 @@ export interface PlanArchiveIndexResponse {
 	skipped: number;
 	run_id?: number | null;
 	errors?: string[];
+}
+
+export interface PlanArchiveCrossRepoIndexRequest {
+	record_id: number;
+	max_commits?: number;
+	apply?: boolean;
+}
+
+export interface PlanArchiveCrossRepoIndexResponse {
+	dry_run: boolean;
+	record_id: number;
+	repos: number;
+	indexed: number;
+	failed: number;
+	skipped: number;
+	errors: string[];
 }
 
 export interface PlanArchiveAnalyzePayload {
@@ -360,6 +388,12 @@ export const planRecordsApi = {
 
 	indexArchiveRecords: (payload: PlanArchiveIndexRequest) =>
 		planRecordsRequest<PlanArchiveIndexResponse>('/records/index', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
+	indexCrossRepoArchive: (payload: PlanArchiveCrossRepoIndexRequest) =>
+		planRecordsRequest<PlanArchiveCrossRepoIndexResponse>('/retrieval/cross-repo/index', {
 			method: 'POST',
 			body: JSON.stringify(payload)
 		}),

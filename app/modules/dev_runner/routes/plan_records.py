@@ -25,6 +25,7 @@ from app.modules.dev_runner.services.plan_record_service import PlanRecordServic
 from app.modules.dev_runner.services.plan_service import plan_service as _plan_service
 from app.modules.dev_runner.services.plan_archive_context_service import PlanArchiveContextService
 from app.modules.dev_runner.services.plan_archive_index_service import PlanArchiveIndexService
+from app.modules.dev_runner.services.plan_archive_cross_repo_index_service import PlanArchiveCrossRepoIndexWriter
 from app.modules.dev_runner.services.plan_archive_embedding_service import (
     PlanArchiveEmbeddingService,
 )
@@ -44,6 +45,8 @@ from app.modules.dev_runner.schemas import (
     PlanArchiveContextRequest,
     PlanArchiveIndexRequest,
     PlanArchiveIndexResponse,
+    PlanArchiveCrossRepoIndexRequest,
+    PlanArchiveCrossRepoIndexResponse,
     PlanArchiveEmbeddingIndexRequest,
     PlanArchiveEmbeddingIndexResponse,
     PlanArchiveMetricsQuery,
@@ -108,6 +111,7 @@ def _to_retrieval_query(req: PlanArchiveRetrievalQuery) -> RetrievalQuery:
         intent=req.intent,
         scope=req.scope,
         path=req.path,
+        repo_key=req.repo_key,
         relation_type=req.relation_type,
         semantic_cluster_id=req.semantic_cluster_id,
         limit=req.limit,
@@ -343,6 +347,26 @@ def index_archive_records(req: PlanArchiveIndexRequest, db: Session = Depends(ge
     if not dry_run:
         db.commit()
     return {"run_id": None, **result}
+
+
+@router.post("/retrieval/cross-repo/index", response_model=PlanArchiveCrossRepoIndexResponse)
+def index_cross_repo_archive(req: PlanArchiveCrossRepoIndexRequest, db: Session = Depends(get_db)):
+    """Collect cross-repo git evidence for one archive record."""
+    _ensure_retrieval_db_ready(db)
+    dry_run = not req.apply
+    try:
+        result = PlanArchiveCrossRepoIndexWriter(db).index_record(
+            req.record_id,
+            max_commits=req.max_commits,
+            dry_run=dry_run,
+        )
+        if not dry_run:
+            db.commit()
+        return result
+    except Exception as exc:
+        if not dry_run:
+            db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/retrieval/embeddings/index", response_model=PlanArchiveEmbeddingIndexResponse)

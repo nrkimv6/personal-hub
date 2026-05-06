@@ -24,6 +24,7 @@ class RetrievalQuery:
     intent: str | None = None
     scope: str | None = None
     path: str | None = None
+    repo_key: str | None = None
     relation_type: str | None = None
     semantic_cluster_id: str | None = None
     limit: int = 20
@@ -135,6 +136,8 @@ class PlanArchiveRetrievalService:
         if effective_path:
             normalized_path = effective_path.replace("\\", "/")
             file_query = file_query.filter(PlanRecordFileRef.path.ilike(f"%{normalized_path}%"))
+        if query.repo_key:
+            file_query = file_query.filter(PlanRecordFileRef.repo_key == query.repo_key)
         for ref in file_query.order_by(PlanRecordFileRef.plan_record_id, PlanRecordFileRef.path).all():
             file_refs_by_record.setdefault(ref.plan_record_id, []).append(ref)
 
@@ -195,6 +198,7 @@ class PlanArchiveRetrievalService:
                             "id": ref.id,
                             "path": ref.path,
                             "source_type": ref.source_type,
+                            "repo_key": ref.repo_key,
                             "module": ref.module,
                             "commit_sha": ref.commit_sha,
                             "exists_at_index": ref.exists_at_index,

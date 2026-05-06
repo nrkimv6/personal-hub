@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.plan_record import (
     PlanRecordChunk,
     PlanRecordFileRef,
+    PlanRecordRepoRef,
     PlanRecordRelation,
     PlanRecordSearchRun,
 )
@@ -16,6 +17,7 @@ from app.models.plan_record import (
 REQUIRED_RETRIEVAL_TABLES = (
     PlanRecordChunk.__tablename__,
     PlanRecordFileRef.__tablename__,
+    PlanRecordRepoRef.__tablename__,
     PlanRecordRelation.__tablename__,
     PlanRecordSearchRun.__tablename__,
 )

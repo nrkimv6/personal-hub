@@ -12,6 +12,7 @@ from app.models.plan_record import (
     PlanEvent,
     PlanRecordChunk,
     PlanRecordFileRef,
+    PlanRecordRepoRef,
     PlanRecordRelation,
     PlanRecordSearchRun,
 )
@@ -137,6 +138,7 @@ def test_get_archive_health_route_right_readiness_ok(db):
     for table in [
         PlanRecordChunk.__table__,
         PlanRecordFileRef.__table__,
+        PlanRecordRepoRef.__table__,
         PlanRecordRelation.__table__,
         PlanRecordSearchRun.__table__,
     ]:

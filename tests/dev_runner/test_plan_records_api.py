@@ -202,6 +202,7 @@ class TestListRecords:
                 "required_tables": [
                     "plan_record_chunks",
                     "plan_record_file_refs",
+                    "plan_record_repo_refs",
                     "plan_record_relations",
                     "plan_record_search_runs",
                 ],
@@ -249,6 +250,7 @@ class TestListRecords:
                 "required_tables": [
                     "plan_record_chunks",
                     "plan_record_file_refs",
+                    "plan_record_repo_refs",
                     "plan_record_relations",
                     "plan_record_search_runs",
                 ],

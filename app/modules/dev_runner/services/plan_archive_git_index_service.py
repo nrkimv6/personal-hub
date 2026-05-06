@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 class GitChangedFileRef:
     path: str
     source_type: str = "git_changed"
+    repo_key: str = "monitor-page"
+    repo_root: str | None = None
+    repo_commit_sha: str | None = None
     module: str | None = None
     change_type: str | None = None
     commit_sha: str | None = None
@@ -35,8 +38,9 @@ class PlanArchiveGitIndexService:
     of truth; DB rows are only a searchable cache.
     """
 
-    def __init__(self, repo_root: str | Path):
+    def __init__(self, repo_root: str | Path, repo_key: str = "monitor-page"):
         self.repo_root = Path(repo_root)
+        self.repo_key = repo_key
 
     def collect_changed_refs(self, record, max_commits: int = 30) -> list[GitChangedFileRef]:
         since_until: list[str] = []
@@ -94,6 +98,9 @@ class PlanArchiveGitIndexService:
             key = (path, commit_sha)
             refs[key] = GitChangedFileRef(
                 path=path,
+                repo_key=self.repo_key,
+                repo_root=str(self.repo_root),
+                repo_commit_sha=commit_sha,
                 module=module_from_path(path),
                 change_type=change_type[:20],
                 commit_sha=commit_sha,

@@ -5,6 +5,7 @@ from app.models.plan_record import (
     PlanRecord,
     PlanRecordChunk,
     PlanRecordFileRef,
+    PlanRecordRepoRef,
     PlanRecordRelation,
     PlanRecordSearchRun,
 )
@@ -16,6 +17,7 @@ def _make_session():
         PlanRecord.__table__,
         PlanRecordChunk.__table__,
         PlanRecordFileRef.__table__,
+        PlanRecordRepoRef.__table__,
         PlanRecordRelation.__table__,
         PlanRecordSearchRun.__table__,
     ):
@@ -29,6 +31,7 @@ def test_retrieval_tables_exist_right():
         names = set(engine.dialect.get_table_names(engine.connect()))
         assert "plan_record_chunks" in names
         assert "plan_record_file_refs" in names
+        assert "plan_record_repo_refs" in names
         assert "plan_record_relations" in names
         assert "plan_record_search_runs" in names
     finally:

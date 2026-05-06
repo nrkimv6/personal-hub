@@ -6,8 +6,12 @@ from pathlib import Path
 
 from app.modules.dev_runner.services.plan_archive_cross_repo_index_service import (
     PlanArchiveCrossRepoIndexService,
+    PlanArchiveCrossRepoIndexWriter,
 )
+from app.models.plan_record import PlanRecord, PlanRecordFileRef, PlanRecordRepoRef
 from app.modules.dev_runner.services.plan_archive_repo_registry import RepoRegistryEntry
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 
 @dataclass
@@ -85,3 +89,38 @@ def test_skipped_repo_is_returned_without_git_call(tmp_path):
     assert candidates[0].repo_key == "missing"
     assert candidates[0].status == "skipped"
     assert candidates[0].error == "missing"
+
+
+def test_cross_repo_writer_right_persists_repo_refs_and_downstream_sync(tmp_path):
+    repo = tmp_path / "wtools"
+    _make_repo(repo, "common/skills/example/SKILL.md")
+    registry = _Registry([RepoRegistryEntry("wtools", repo, "test")])
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    for table in (PlanRecord.__table__, PlanRecordFileRef.__table__, PlanRecordRepoRef.__table__):
+        table.create(bind=engine, checkfirst=True)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        record = PlanRecord(
+            filename_hash="hash-cross-writer",
+            file_path="docs/archive/2026-05-05-cross.md",
+            title="cross repo",
+            status="archived",
+        )
+        db.add(record)
+        db.flush()
+
+        result = PlanArchiveCrossRepoIndexWriter(db, registry).index_record(record.id, dry_run=False)
+        db.commit()
+
+        assert result["indexed"] >= 1
+        repo_ref = db.query(PlanRecordRepoRef).one()
+        file_ref = db.query(PlanRecordFileRef).one()
+        assert repo_ref.repo_key == "wtools"
+        assert repo_ref.status == "ready"
+        assert file_ref.repo_key == "wtools"
+        assert file_ref.source_type == "downstream_sync"
+        assert file_ref.path == "common/skills/example/SKILL.md"
+    finally:
+        db.close()
+        engine.dispose()

@@ -323,6 +323,7 @@ class PlanArchiveRetrievalQuery(BaseModel):
     intent: Optional[str] = None
     scope: Optional[str] = None
     path: Optional[str] = None
+    repo_key: Optional[str] = None
     relation_type: Optional[str] = None
     semantic_cluster_id: Optional[str] = None
     limit: int = Field(default=20, ge=1, le=100)
@@ -343,6 +344,22 @@ class PlanArchiveIndexResponse(BaseModel):
     failed: int = 0
     skipped: int = 0
     run_id: Optional[int] = None
+    errors: List[str] = []
+
+
+class PlanArchiveCrossRepoIndexRequest(BaseModel):
+    record_id: int
+    max_commits: int = Field(default=30, ge=1, le=200)
+    apply: bool = False
+
+
+class PlanArchiveCrossRepoIndexResponse(BaseModel):
+    dry_run: bool
+    record_id: int
+    repos: int = 0
+    indexed: int = 0
+    failed: int = 0
+    skipped: int = 0
     errors: List[str] = []
 
 
@@ -381,6 +398,7 @@ class PlanArchiveFileRefHit(BaseModel):
     id: int
     path: str
     source_type: str
+    repo_key: str = "monitor-page"
     module: Optional[str] = None
     commit_sha: Optional[str] = None
     exists_at_index: Optional[bool] = None
@@ -433,12 +451,19 @@ class PlanArchiveTopFileRef(BaseModel):
     count: int
     mentioned_count: int = 0
     changed_count: int = 0
+    repo_key: Optional[str] = None
 
 
 class PlanArchiveMissingFileCandidate(BaseModel):
     module: str
     count: int
     paths: List[str] = []
+
+
+class PlanArchiveDownstreamSyncMissingCandidate(BaseModel):
+    repo_key: str
+    path: str
+    count: int = 0
 
 
 class PlanArchiveMetricsResponse(BaseModel):
@@ -448,6 +473,10 @@ class PlanArchiveMetricsResponse(BaseModel):
     missing_file_candidates: List[PlanArchiveMissingFileCandidate] = []
     relation_counts: dict = {}
     chain_depth_max: int = 0
+    repo_counts: dict = {}
+    cross_repo_plan_count: int = 0
+    multi_repo_plan_count: int = 0
+    downstream_sync_missing_candidates: List[PlanArchiveDownstreamSyncMissingCandidate] = []
 
 
 class PlanArchiveInsightBatchRequest(BaseModel):
@@ -898,6 +927,8 @@ __all__ = [
     'PlanArchiveFileRefHit',
     'PlanArchiveIndexRequest',
     'PlanArchiveIndexResponse',
+    'PlanArchiveCrossRepoIndexRequest',
+    'PlanArchiveCrossRepoIndexResponse',
     'PlanArchiveEmbeddingIndexRequest',
     'PlanArchiveEmbeddingIndexResponse',
     'PlanArchiveContextRequest',

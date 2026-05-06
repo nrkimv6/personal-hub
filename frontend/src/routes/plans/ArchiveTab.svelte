@@ -12,7 +12,8 @@
     type PlanArchiveRetrievalQuery,
     type PlanArchiveRetrievalResult,
     type PlanArchiveMetricsResponse,
-    type PlanArchiveIndexResponse
+    type PlanArchiveIndexResponse,
+    type PlanArchiveCrossRepoIndexResponse
   } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
   import MemoEditor from './MemoEditor.svelte';
@@ -100,6 +101,7 @@
   // ── Retrieval MVP 표면 ───────────────────────────────────
   let retrievalQ = $state('');
   let retrievalPath = $state('');
+  let retrievalRepoKey = $state('');
   let retrievalCategory = $state('');
   let retrievalTags = $state('');
   let retrievalIntent = $state('');
@@ -121,6 +123,8 @@
   let indexLoading = $state(false);
   let indexError = $state('');
   let indexResult: PlanArchiveIndexResponse | null = $state(null);
+  let crossRepoIndexLoading = $state(false);
+  let crossRepoIndexResult: PlanArchiveCrossRepoIndexResponse | null = $state(null);
 
   // ── 수동 분석 preview/apply ───────────────────────────────
   let analyzeProvider = $state('codex');
@@ -183,6 +187,7 @@
     if (retrievalIntent.trim()) payload.intent = retrievalIntent.trim();
     if (retrievalScope.trim()) payload.scope = retrievalScope.trim();
     if (retrievalPath.trim()) payload.path = retrievalPath.trim();
+    if (retrievalRepoKey.trim()) payload.repo_key = retrievalRepoKey.trim();
     if (retrievalRelationType.trim()) payload.relation_type = retrievalRelationType.trim();
     if (includeLimit) {
       const limitValue = Number(retrievalLimit);
@@ -245,6 +250,26 @@
       indexError = e instanceof Error ? e.message : 'archive index 실행 실패';
     } finally {
       indexLoading = false;
+    }
+  }
+
+  async function runCrossRepoIndex(apply = false) {
+    if (!selectedRecord) return;
+    crossRepoIndexLoading = true;
+    try {
+      crossRepoIndexResult = await planRecordsApi.indexCrossRepoArchive({
+        record_id: selectedRecord.id,
+        max_commits: 30,
+        apply,
+      });
+      showToast(
+        `Cross-repo ${crossRepoIndexResult.dry_run ? 'dry-run' : 'apply'}: repos ${crossRepoIndexResult.repos}, indexed ${crossRepoIndexResult.indexed}`
+      );
+      if (apply) await loadRetrievalMetrics();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'cross-repo index 실패');
+    } finally {
+      crossRepoIndexLoading = false;
     }
   }
 
@@ -803,7 +828,7 @@
       </div>
 
       <form
-        class="grid gap-2 lg:grid-cols-[1.2fr_1fr_0.7fr_0.7fr_auto]"
+        class="grid gap-2 lg:grid-cols-[1.2fr_1fr_0.7fr_0.7fr_0.7fr_auto]"
         onsubmit={(e) => { e.preventDefault(); runRetrievalSearch(); }}
       >
         <input
@@ -815,6 +840,11 @@
           class="border border-border rounded px-2 py-1 bg-background text-foreground font-mono"
           placeholder="파일 경로 filter"
           bind:value={retrievalPath}
+        />
+        <input
+          class="border border-border rounded px-2 py-1 bg-background text-foreground font-mono"
+          placeholder="repo_key"
+          bind:value={retrievalRepoKey}
         />
         <input
           class="border border-border rounded px-2 py-1 bg-background text-foreground"
@@ -923,9 +953,9 @@
                     <div class="mt-2 flex flex-wrap gap-1">
                       {#each result.file_refs.slice(0, 4) as ref}
                         <span
-                          class="rounded px-1.5 py-0.5 font-mono {ref.source_type === 'git_changed' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'}"
+                          class="rounded px-1.5 py-0.5 font-mono {ref.source_type === 'git_changed' || ref.source_type === 'downstream_sync' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'}"
                           title={ref.commit_sha ? `${ref.path} @ ${ref.commit_sha}` : ref.path}
-                        >#{ref.id} {ref.source_type}: {ref.path}</span>
+                        >#{ref.id} {ref.repo_key || 'monitor-page'} · {ref.source_type}: {ref.path}</span>
                       {/each}
                     </div>
                   {/if}
@@ -948,7 +978,7 @@
             {:else if !retrievalMetrics}
               <p class="text-muted-foreground">metrics API 결과를 기다리는 중입니다.</p>
             {:else}
-              <div class="grid gap-2 sm:grid-cols-4">
+              <div class="grid gap-2 sm:grid-cols-5">
                 <div class="rounded bg-muted px-2 py-2">
                   <div class="text-muted-foreground">7d follow-up</div>
                   <div class="font-semibold text-foreground">{formatRate(retrievalMetrics.followup_rates?.days_7)}</div>
@@ -965,6 +995,10 @@
                   <div class="text-muted-foreground">chain max</div>
                   <div class="font-semibold text-foreground">{retrievalMetrics.chain_depth_max ?? 0}</div>
                 </div>
+                <div class="rounded bg-muted px-2 py-2">
+                  <div class="text-muted-foreground">cross-repo plans</div>
+                  <div class="font-semibold text-foreground">{retrievalMetrics.cross_repo_plan_count ?? 0}</div>
+                </div>
               </div>
 
               <div class="mt-3 grid gap-3 lg:grid-cols-2">
@@ -976,7 +1010,7 @@
                     <div class="space-y-1">
                       {#each (retrievalMetrics.top_file_refs ?? []).slice(0, 5) as ref}
                         <div class="rounded bg-muted px-2 py-1">
-                          <div class="font-mono truncate" title={ref.path}>{ref.path}</div>
+                          <div class="font-mono truncate" title={ref.path}>{ref.repo_key || 'monitor-page'} · {ref.path}</div>
                           <div class="text-muted-foreground">total {ref.count} / mentioned {ref.mentioned_count} / changed {ref.changed_count}</div>
                         </div>
                       {/each}
@@ -1007,6 +1041,28 @@
                   {#each Object.entries(retrievalMetrics.relation_counts ?? {}) as [type, count]}
                     <span class="rounded bg-muted px-1.5 py-0.5">{type} {count}</span>
                   {/each}
+                </div>
+              {/if}
+              {#if Object.keys(retrievalMetrics.repo_counts ?? {}).length > 0}
+                <div class="mt-3">
+                  <div class="mb-1 font-medium text-foreground">Repo evidence</div>
+                  <div class="flex flex-wrap gap-1">
+                    {#each Object.entries(retrievalMetrics.repo_counts ?? {}) as [repoKey, count]}
+                      <span class="rounded bg-muted px-1.5 py-0.5 font-mono">{repoKey} {count}</span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              {#if (retrievalMetrics.downstream_sync_missing_candidates ?? []).length > 0}
+                <div class="mt-3 rounded border border-yellow-300 bg-yellow-50 px-2 py-2 text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950 dark:text-yellow-200">
+                  <div class="mb-1 font-medium">Downstream sync evidence 후보</div>
+                  <div class="space-y-1">
+                    {#each (retrievalMetrics.downstream_sync_missing_candidates ?? []).slice(0, 4) as candidate}
+                      <div class="font-mono truncate" title={candidate.path}>
+                        {candidate.repo_key} · {candidate.path} ({candidate.count})
+                      </div>
+                    {/each}
+                  </div>
                 </div>
               {/if}
             {/if}
@@ -1070,6 +1126,48 @@
                 </div>
               {/if}
             {/if}
+            <div class="mt-3 border-t border-border pt-3">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <div>
+                  <div class="font-medium text-foreground">Cross-repo index</div>
+                  <div class="text-muted-foreground">
+                    {#if selectedRecord}
+                      #{selectedRecord.id} {selectedRecord.title || selectedRecord.file_path}
+                    {:else}
+                      레코드를 선택하면 repo evidence를 색인할 수 있습니다.
+                    {/if}
+                  </div>
+                </div>
+                <div class="flex gap-2">
+                  <button
+                    class="px-2 py-1 rounded bg-muted hover:bg-secondary text-muted-foreground disabled:opacity-50"
+                    onclick={() => runCrossRepoIndex(false)}
+                    disabled={crossRepoIndexLoading || !selectedRecord}
+                  >cross dry-run</button>
+                  <button
+                    class="px-2 py-1 rounded bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+                    onclick={() => runCrossRepoIndex(true)}
+                    disabled={crossRepoIndexLoading || !selectedRecord || crossRepoIndexResult?.dry_run !== true}
+                  >apply cross</button>
+                </div>
+              </div>
+              {#if crossRepoIndexResult}
+                <div class="flex flex-wrap gap-2 text-muted-foreground">
+                  <span class="rounded bg-muted px-2 py-1">{crossRepoIndexResult.dry_run ? 'dry-run' : 'applied'}</span>
+                  <span class="rounded bg-muted px-2 py-1">repos {crossRepoIndexResult.repos}</span>
+                  <span class="rounded bg-muted px-2 py-1">indexed {crossRepoIndexResult.indexed}</span>
+                  <span class="rounded bg-muted px-2 py-1">failed {crossRepoIndexResult.failed}</span>
+                  <span class="rounded bg-muted px-2 py-1">skipped {crossRepoIndexResult.skipped}</span>
+                </div>
+                {#if (crossRepoIndexResult.errors ?? []).length > 0}
+                  <div class="mt-2 text-red-500">
+                    {#each (crossRepoIndexResult.errors ?? []).slice(0, 3) as item}
+                      <div>{item}</div>
+                    {/each}
+                  </div>
+                {/if}
+              {/if}
+            </div>
           </div>
         </div>
       </div>

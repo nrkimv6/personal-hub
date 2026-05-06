@@ -46,6 +46,7 @@ class PlanRecord(Base):
     tracking_links = relationship("TrackingItemPlanLink", back_populates="plan_record", lazy="select", cascade="all, delete-orphan")
     chunks = relationship("PlanRecordChunk", back_populates="record", cascade="all, delete-orphan")
     file_refs = relationship("PlanRecordFileRef", back_populates="record", cascade="all, delete-orphan")
+    repo_refs = relationship("PlanRecordRepoRef", back_populates="record", cascade="all, delete-orphan")
     outgoing_relations = relationship(
         "PlanRecordRelation",
         foreign_keys="PlanRecordRelation.source_plan_record_id",
@@ -168,6 +169,9 @@ class PlanRecordFileRef(Base):
     module = Column(String(200), nullable=True)
     change_type = Column(String(20), nullable=True)
     commit_sha = Column(String(64), nullable=True)
+    repo_key = Column(String(100), nullable=False, default="monitor-page")
+    repo_root = Column(String(1000), nullable=True)
+    repo_commit_sha = Column(String(64), nullable=True)
     commit_date = Column(DateTime, nullable=True)
     lines_added = Column(Integer, nullable=True)
     lines_deleted = Column(Integer, nullable=True)
@@ -182,11 +186,45 @@ class PlanRecordFileRef(Base):
     chunk = relationship("PlanRecordChunk")
 
     __table_args__ = (
-        UniqueConstraint("plan_record_id", "source_type", "path", "commit_sha", name="uq_plan_record_file_ref_source"),
+        UniqueConstraint(
+            "plan_record_id",
+            "repo_key",
+            "source_type",
+            "path",
+            "commit_sha",
+            name="uq_plan_record_file_ref_source",
+        ),
         Index("ix_plan_record_file_refs_record", "plan_record_id"),
+        Index("ix_plan_record_file_refs_repo", "repo_key"),
         Index("ix_plan_record_file_refs_path", "path"),
         Index("ix_plan_record_file_refs_source", "source_type"),
         Index("ix_plan_record_file_refs_module", "module"),
+    )
+
+
+class PlanRecordRepoRef(Base):
+    """Repository touched by, or indexed for, an archived plan."""
+
+    __tablename__ = "plan_record_repo_refs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_record_id = Column(Integer, ForeignKey("plan_records.id", ondelete="CASCADE"), nullable=False)
+    repo_key = Column(String(100), nullable=False)
+    repo_root = Column(String(1000), nullable=True)
+    repo_commit_sha = Column(String(64), nullable=True)
+    source_type = Column(String(50), nullable=False, default="git_changed")
+    status = Column(String(30), nullable=False, default="ready")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    record = relationship("PlanRecord", back_populates="repo_refs")
+
+    __table_args__ = (
+        UniqueConstraint("plan_record_id", "repo_key", "source_type", name="uq_plan_record_repo_ref_source"),
+        Index("ix_plan_record_repo_refs_record", "plan_record_id"),
+        Index("ix_plan_record_repo_refs_repo", "repo_key"),
+        Index("ix_plan_record_repo_refs_status", "status"),
     )
 
 

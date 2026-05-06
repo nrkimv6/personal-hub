@@ -11,6 +11,7 @@ from app.models.plan_record import (
     PlanRecord,
     PlanRecordChunk,
     PlanRecordFileRef,
+    PlanRecordRepoRef,
     PlanRecordRelation,
     PlanRecordSearchRun,
 )
@@ -27,6 +28,7 @@ def _make_client():
         PlanRecord.__table__,
         PlanRecordChunk.__table__,
         PlanRecordFileRef.__table__,
+        PlanRecordRepoRef.__table__,
         PlanRecordRelation.__table__,
         PlanRecordSearchRun.__table__,
     ):

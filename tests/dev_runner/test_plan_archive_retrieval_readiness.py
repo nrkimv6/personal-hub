@@ -8,6 +8,7 @@ from app.models.plan_record import (
     PlanRecord,
     PlanRecordChunk,
     PlanRecordFileRef,
+    PlanRecordRepoRef,
     PlanRecordRelation,
     PlanRecordSearchRun,
 )
@@ -35,6 +36,7 @@ def test_plan_archive_retrieval_tables_right_all_present():
         PlanRecord.__table__,
         PlanRecordChunk.__table__,
         PlanRecordFileRef.__table__,
+        PlanRecordRepoRef.__table__,
         PlanRecordRelation.__table__,
         PlanRecordSearchRun.__table__,
     ])
@@ -52,6 +54,7 @@ def test_plan_archive_retrieval_tables_error_missing_file_refs():
     engine, session = _session_with_tables([
         PlanRecord.__table__,
         PlanRecordChunk.__table__,
+        PlanRecordRepoRef.__table__,
         PlanRecordRelation.__table__,
         PlanRecordSearchRun.__table__,
     ])
@@ -74,6 +77,7 @@ def test_plan_archive_retrieval_tables_right_does_not_create_schema():
         assert sorted(missing) == sorted([
             "plan_record_chunks",
             "plan_record_file_refs",
+            "plan_record_repo_refs",
             "plan_record_relations",
             "plan_record_search_runs",
         ])

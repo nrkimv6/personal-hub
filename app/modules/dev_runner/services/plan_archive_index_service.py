@@ -195,6 +195,8 @@ class PlanArchiveIndexService:
                         plan_record_id=record.id,
                         chunk_id=chunk_by_index.get(ref.chunk_index).id if ref.chunk_index in chunk_by_index else None,
                         source_type=ref.source_type,
+                        repo_key="monitor-page",
+                        repo_root=str(self.repo_root),
                         path=ref.path,
                         module=ref.module,
                         evidence=ref.evidence,
@@ -208,6 +210,9 @@ class PlanArchiveIndexService:
                     PlanRecordFileRef(
                         plan_record_id=record.id,
                         source_type=ref.source_type,
+                        repo_key=ref.repo_key,
+                        repo_root=ref.repo_root,
+                        repo_commit_sha=ref.repo_commit_sha,
                         path=ref.path,
                         module=ref.module,
                         change_type=ref.change_type,
